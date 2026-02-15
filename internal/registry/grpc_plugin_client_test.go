@@ -16,6 +16,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/schema"
 	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	"github.com/zero-day-ai/sdk/registry"
 )
 
@@ -348,20 +349,20 @@ func TestGRPCPluginClient_Methods(t *testing.T) {
 						{
 							Name:        "search",
 							Description: "Search for items",
-							InputSchema: &proto.JSONSchema{
+							InputSchema: &commonpb.JSONSchema{
 								Json: string(searchInputSchema),
 							},
-							OutputSchema: &proto.JSONSchema{
+							OutputSchema: &commonpb.JSONSchema{
 								Json: string(searchOutputSchema),
 							},
 						},
 						{
 							Name:        "get",
 							Description: "Get an item by ID",
-							InputSchema: &proto.JSONSchema{
+							InputSchema: &commonpb.JSONSchema{
 								Json: string(getInputSchema),
 							},
-							OutputSchema: &proto.JSONSchema{
+							OutputSchema: &commonpb.JSONSchema{
 								Json: string(getOutputSchema),
 							},
 						},
@@ -671,10 +672,10 @@ func TestGRPCPluginClient_SchemaConversion(t *testing.T) {
 				{
 					Name:        "complex_method",
 					Description: "A method with complex schemas",
-					InputSchema: &proto.JSONSchema{
+					InputSchema: &commonpb.JSONSchema{
 						Json: string(inputSchema),
 					},
-					OutputSchema: &proto.JSONSchema{
+					OutputSchema: &commonpb.JSONSchema{
 						Json: string(outputSchema),
 					},
 				},
@@ -748,7 +749,7 @@ func TestConvertJSONSchema(t *testing.T) {
 	})
 
 	t.Run("empty schema", func(t *testing.T) {
-		result := convertJSONSchema(&proto.JSONSchema{})
+		result := convertJSONSchema(&commonpb.JSONSchema{})
 		assert.Equal(t, schema.JSONSchema{}, result)
 	})
 
@@ -763,7 +764,7 @@ func TestConvertJSONSchema(t *testing.T) {
 			"required": []string{"name"},
 		})
 
-		protoSchema := &proto.JSONSchema{
+		protoSchema := &commonpb.JSONSchema{
 			Json: string(schemaJSON),
 		}
 
@@ -774,7 +775,7 @@ func TestConvertJSONSchema(t *testing.T) {
 	})
 
 	t.Run("invalid JSON returns empty schema", func(t *testing.T) {
-		protoSchema := &proto.JSONSchema{
+		protoSchema := &commonpb.JSONSchema{
 			Json: "invalid-json",
 		}
 

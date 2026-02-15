@@ -1,0 +1,61 @@
+# Git and version control
+.git
+.gitignore
+.github
+
+# Build artifacts and binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Test files and coverage
+*_test.go
+*.coverprofile
+coverage.txt
+coverage.html
+
+# Temporary and cache files
+tmp/
+.tmp/
+*.tmp
+.cache/
+
+# Local development files
+.env
+.env.local
+build/.env
+
+# Spec workflow (development artifacts)
+.spec-workflow/
+
+# Local Gibson data directories
+.gibson/
+*.db
+*.db-shm
+*.db-wal
+
+# Dependency directories (will be downloaded in builder)
+vendor/
+
+# Scripts (not needed in container)
+scripts/
+
+# Makefile (build tool, not runtime)
+Makefile

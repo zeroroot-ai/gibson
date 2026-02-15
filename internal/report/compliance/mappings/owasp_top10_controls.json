@@ -1,0 +1,94 @@
+{
+  "controls": [
+    {
+      "id": "A01:2021",
+      "name": "Broken Access Control",
+      "description": "Moving up from the fifth position, 94% of applications were tested for some form of broken access control. Access control enforces policy such that users cannot act outside of their intended permissions.",
+      "category": "Access Control",
+      "priority": "Critical",
+      "cwes": ["CWE-200", "CWE-201", "CWE-352", "CWE-639"],
+      "references": ["OWASP ASVS V4 Access Control"]
+    },
+    {
+      "id": "A02:2021",
+      "name": "Cryptographic Failures",
+      "description": "Previously known as Sensitive Data Exposure. Failures related to cryptography which often lead to exposure of sensitive data.",
+      "category": "Cryptography",
+      "priority": "Critical",
+      "cwes": ["CWE-259", "CWE-327", "CWE-331"],
+      "references": ["OWASP ASVS V6 Cryptography", "NIST FIPS 140-2"]
+    },
+    {
+      "id": "A03:2021",
+      "name": "Injection",
+      "description": "Injection flaws occur when untrusted data is sent to an interpreter as part of a command or query. Common injection types include SQL, NoSQL, OS command, LDAP, and expression language.",
+      "category": "Injection",
+      "priority": "Critical",
+      "cwes": ["CWE-79", "CWE-89", "CWE-73", "CWE-77", "CWE-94"],
+      "references": ["OWASP ASVS V5 Input Validation"]
+    },
+    {
+      "id": "A04:2021",
+      "name": "Insecure Design",
+      "description": "New category for 2021 focusing on risks related to design and architectural flaws. Calls for more use of threat modeling, secure design patterns, and reference architectures.",
+      "category": "Design",
+      "priority": "High",
+      "cwes": ["CWE-209", "CWE-256", "CWE-501", "CWE-522"],
+      "references": ["OWASP SAMM", "Threat Modeling"]
+    },
+    {
+      "id": "A05:2021",
+      "name": "Security Misconfiguration",
+      "description": "Moving up from #6 in the previous edition, 90% of applications were tested for some form of misconfiguration. Includes insecure default configurations, incomplete configurations, open cloud storage, verbose error messages.",
+      "category": "Configuration",
+      "priority": "High",
+      "cwes": ["CWE-16", "CWE-209"],
+      "references": ["OWASP ASVS V14 Configuration"]
+    },
+    {
+      "id": "A06:2021",
+      "name": "Vulnerable and Outdated Components",
+      "description": "Previously titled Using Components with Known Vulnerabilities. You are likely vulnerable if you do not know the versions of all components you use or if the software is vulnerable, unsupported, or out of date.",
+      "category": "Supply Chain",
+      "priority": "High",
+      "cwes": ["CWE-1104"],
+      "references": ["OWASP Dependency Check", "NIST NVD"]
+    },
+    {
+      "id": "A07:2021",
+      "name": "Identification and Authentication Failures",
+      "description": "Previously known as Broken Authentication. Confirmation of user's identity, authentication, and session management is critical to protect against authentication-related attacks.",
+      "category": "Authentication",
+      "priority": "Critical",
+      "cwes": ["CWE-287", "CWE-297", "CWE-384"],
+      "references": ["OWASP ASVS V2 Authentication", "OWASP ASVS V3 Session Management"]
+    },
+    {
+      "id": "A08:2021",
+      "name": "Software and Data Integrity Failures",
+      "description": "New category for 2021 focuses on making assumptions related to software updates, critical data, and CI/CD pipelines without verifying integrity.",
+      "category": "Integrity",
+      "priority": "High",
+      "cwes": ["CWE-502", "CWE-829"],
+      "references": ["SLSA Framework", "OWASP ASVS V14"]
+    },
+    {
+      "id": "A09:2021",
+      "name": "Security Logging and Monitoring Failures",
+      "description": "Previously known as Insufficient Logging & Monitoring. Without logging and monitoring, breaches cannot be detected. Insufficient logging, detection, monitoring and active response occurs any time.",
+      "category": "Monitoring",
+      "priority": "Medium",
+      "cwes": ["CWE-778", "CWE-117", "CWE-223"],
+      "references": ["OWASP ASVS V7 Error Handling and Logging"]
+    },
+    {
+      "id": "A10:2021",
+      "name": "Server-Side Request Forgery (SSRF)",
+      "description": "New category for 2021. SSRF flaws occur whenever a web application is fetching a remote resource without validating the user-supplied URL.",
+      "category": "SSRF",
+      "priority": "High",
+      "cwes": ["CWE-918"],
+      "references": ["OWASP ASVS V12.6"]
+    }
+  ]
+}

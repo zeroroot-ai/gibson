@@ -224,7 +224,7 @@ func (c *GRPCToolClient) Health(ctx context.Context) types.HealthStatus {
 
 	// Convert proto health status to internal type
 	// The proto HealthStatus has a "state" field with values: "healthy", "degraded", "unhealthy"
-	switch resp.State {
+	switch resp.Status {
 	case "healthy":
 		return types.Healthy(resp.Message)
 	case "degraded":

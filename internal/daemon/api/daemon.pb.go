@@ -7,9 +7,10 @@
 package api
 
 import (
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	_ "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -604,7 +605,7 @@ type MissionEvent struct {
 	// message is a human-readable event message
 	Message string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
 	// data contains event-specific data (typed map)
-	Data *proto.TypedMap `protobuf:"bytes,6,opt,name=data,proto3" json:"data,omitempty"`
+	Data *commonpb.TypedMap `protobuf:"bytes,6,opt,name=data,proto3" json:"data,omitempty"`
 	// error contains error information if the event represents an error
 	Error string `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
 	// result contains typed operation metrics (for mission.completed events)
@@ -678,7 +679,7 @@ func (x *MissionEvent) GetMessage() string {
 	return ""
 }
 
-func (x *MissionEvent) GetData() *proto.TypedMap {
+func (x *MissionEvent) GetData() *commonpb.TypedMap {
 	if x != nil {
 		return x.Data
 	}
@@ -1840,7 +1841,7 @@ type QueryPluginRequest struct {
 	// method is the method name to execute
 	Method string `protobuf:"bytes,2,opt,name=method,proto3" json:"method,omitempty"`
 	// params is the typed parameters for the method
-	Params *proto.TypedMap `protobuf:"bytes,3,opt,name=params,proto3" json:"params,omitempty"`
+	Params *commonpb.TypedMap `protobuf:"bytes,3,opt,name=params,proto3" json:"params,omitempty"`
 	// timeout_ms is the optional timeout in milliseconds (0 = default)
 	TimeoutMs     int64 `protobuf:"varint,4,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1891,7 +1892,7 @@ func (x *QueryPluginRequest) GetMethod() string {
 	return ""
 }
 
-func (x *QueryPluginRequest) GetParams() *proto.TypedMap {
+func (x *QueryPluginRequest) GetParams() *commonpb.TypedMap {
 	if x != nil {
 		return x.Params
 	}
@@ -1909,7 +1910,7 @@ func (x *QueryPluginRequest) GetTimeoutMs() int64 {
 type QueryPluginResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// result is the typed result from the plugin method
-	Result *proto.TypedValue `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Result *commonpb.TypedValue `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
 	// error is set if the query failed
 	Error string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
 	// duration_ms is how long the query took in milliseconds
@@ -1948,7 +1949,7 @@ func (*QueryPluginResponse) Descriptor() ([]byte, []int) {
 	return file_daemon_proto_rawDescGZIP(), []int{26}
 }
 
-func (x *QueryPluginResponse) GetResult() *proto.TypedValue {
+func (x *QueryPluginResponse) GetResult() *commonpb.TypedValue {
 	if x != nil {
 		return x.Result
 	}
@@ -2072,7 +2073,7 @@ type AttackEvent struct {
 	// message is a human-readable event message
 	Message string `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
 	// data contains event-specific data (typed map)
-	Data *proto.TypedMap `protobuf:"bytes,5,opt,name=data,proto3" json:"data,omitempty"`
+	Data *commonpb.TypedMap `protobuf:"bytes,5,opt,name=data,proto3" json:"data,omitempty"`
 	// error contains error information if the event represents an error
 	Error string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
 	// finding describes a discovered finding (if applicable)
@@ -2141,7 +2142,7 @@ func (x *AttackEvent) GetMessage() string {
 	return ""
 }
 
-func (x *AttackEvent) GetData() *proto.TypedMap {
+func (x *AttackEvent) GetData() *commonpb.TypedMap {
 	if x != nil {
 		return x.Data
 	}
@@ -2343,7 +2344,7 @@ type Event struct {
 	// source is the event source (mission, agent, daemon, etc.)
 	Source string `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
 	// data contains event-specific data (typed map)
-	Data *proto.TypedMap `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	Data *commonpb.TypedMap `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
 	// Specific event types (only one will be set)
 	//
 	// Types that are valid to be assigned to Event:
@@ -2408,7 +2409,7 @@ func (x *Event) GetSource() string {
 	return ""
 }
 
-func (x *Event) GetData() *proto.TypedMap {
+func (x *Event) GetData() *commonpb.TypedMap {
 	if x != nil {
 		return x.Data
 	}
@@ -2500,7 +2501,7 @@ type AgentEvent struct {
 	// message is a human-readable message
 	Message string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
 	// data contains event-specific data (typed map)
-	Data          *proto.TypedMap `protobuf:"bytes,6,opt,name=data,proto3" json:"data,omitempty"`
+	Data          *commonpb.TypedMap `protobuf:"bytes,6,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2570,7 +2571,7 @@ func (x *AgentEvent) GetMessage() string {
 	return ""
 }
 
-func (x *AgentEvent) GetData() *proto.TypedMap {
+func (x *AgentEvent) GetData() *commonpb.TypedMap {
 	if x != nil {
 		return x.Data
 	}
@@ -4996,7 +4997,7 @@ type LogEntry struct {
 	// message is the log message
 	Message string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	// fields contains additional structured log fields (typed map)
-	Fields        *proto.TypedMap `protobuf:"bytes,4,opt,name=fields,proto3" json:"fields,omitempty"`
+	Fields        *commonpb.TypedMap `protobuf:"bytes,4,opt,name=fields,proto3" json:"fields,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5052,7 +5053,7 @@ func (x *LogEntry) GetMessage() string {
 	return ""
 }
 
-func (x *LogEntry) GetFields() *proto.TypedMap {
+func (x *LogEntry) GetFields() *commonpb.TypedMap {
 	if x != nil {
 		return x.Fields
 	}
@@ -7131,7 +7132,7 @@ var File_daemon_proto protoreflect.FileDescriptor
 
 const file_daemon_proto_rawDesc = "" +
 	"\n" +
-	"\fdaemon.proto\x12\x10gibson.daemon.v1\x1a\fcommon.proto\"T\n" +
+	"\fdaemon.proto\x12\x10gibson.daemon.v1\x1a\fcommon.proto\x1a\x1bgoogle/protobuf/empty.proto\"T\n" +
 	"\x0eConnectRequest\x12%\n" +
 	"\x0eclient_version\x18\x01 \x01(\tR\rclientVersion\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\"z\n" +
@@ -7898,8 +7899,8 @@ var file_daemon_proto_goTypes = []any{
 	nil,                                         // 93: gibson.daemon.v1.Capabilities.ArgAlternativesEntry
 	nil,                                         // 94: gibson.daemon.v1.RunAttackRequest.OptionsEntry
 	nil,                                         // 95: gibson.daemon.v1.DependencyTree.NodesEntry
-	(*proto.TypedMap)(nil),                      // 96: gibson.common.TypedMap
-	(*proto.TypedValue)(nil),                    // 97: gibson.common.TypedValue
+	(*commonpb.TypedMap)(nil),                   // 96: gibson.common.TypedMap
+	(*commonpb.TypedValue)(nil),                 // 97: gibson.common.TypedValue
 }
 var file_daemon_proto_depIdxs = []int32{
 	91, // 0: gibson.daemon.v1.RunMissionRequest.variables:type_name -> gibson.daemon.v1.RunMissionRequest.VariablesEntry

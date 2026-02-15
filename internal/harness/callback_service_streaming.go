@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	pb "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	"google.golang.org/grpc"
 )
 
@@ -44,7 +45,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *pb.CallToolProtoStream
 			Payload: &pb.CallToolProtoStreamResponse_Error{
 				Error: &pb.ToolErrorEvent{
 					Error: &pb.HarnessError{
-						Code:    pb.ErrorCode_ERROR_CODE_TOOL_NOT_FOUND,
+						Code:    commonpb.ErrorCode_ERROR_CODE_TOOL_NOT_FOUND,
 						Message: fmt.Sprintf("tool not found: %s", req.Name),
 					},
 					Fatal: true,
@@ -84,7 +85,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *pb.CallToolProtoStream
 			Payload: &pb.CallToolProtoStreamResponse_Error{
 				Error: &pb.ToolErrorEvent{
 					Error: &pb.HarnessError{
-						Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+						Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 						Message: fmt.Sprintf("failed to resolve tool endpoint: %v", err),
 					},
 					Fatal: true,
@@ -120,7 +121,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *pb.CallToolProtoStream
 			Payload: &pb.CallToolProtoStreamResponse_Error{
 				Error: &pb.ToolErrorEvent{
 					Error: &pb.HarnessError{
-						Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+						Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 						Message: "streaming not yet supported for local tools",
 					},
 					Fatal: true,
@@ -151,7 +152,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *pb.CallToolProtoStream
 			Payload: &pb.CallToolProtoStreamResponse_Error{
 				Error: &pb.ToolErrorEvent{
 					Error: &pb.HarnessError{
-						Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+						Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 						Message: fmt.Sprintf("failed to connect to tool: %v", err),
 					},
 					Fatal: true,
@@ -189,7 +190,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *pb.CallToolProtoStream
 			Payload: &pb.CallToolProtoStreamResponse_Error{
 				Error: &pb.ToolErrorEvent{
 					Error: &pb.HarnessError{
-						Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+						Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 						Message: fmt.Sprintf("failed to start tool execution: %v", err),
 					},
 					Fatal: true,
@@ -278,7 +279,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *pb.CallToolProtoStream
 				Payload: &pb.CallToolProtoStreamResponse_Error{
 					Error: &pb.ToolErrorEvent{
 						Error: &pb.HarnessError{
-							Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+							Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 							Message: fmt.Sprintf("tool stream error: %v", err),
 						},
 						Fatal: true,
@@ -420,17 +421,17 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *pb.CallToolProtoStream
 		case *pb.ToolMessage_Error:
 			// Map error code string to ErrorCode enum
 			// Default to INTERNAL if code is not recognized
-			errorCode := pb.ErrorCode_ERROR_CODE_INTERNAL
+			errorCode := commonpb.ErrorCode_ERROR_CODE_INTERNAL
 			if payload.Error.Error != nil {
 				switch payload.Error.Error.Code {
 				case "invalid_input":
-					errorCode = pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT
+					errorCode = commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT
 				case "timeout":
-					errorCode = pb.ErrorCode_ERROR_CODE_TIMEOUT
+					errorCode = commonpb.ErrorCode_ERROR_CODE_TIMEOUT
 				case "permission_denied":
-					errorCode = pb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
+					errorCode = commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
 				default:
-					errorCode = pb.ErrorCode_ERROR_CODE_INTERNAL
+					errorCode = commonpb.ErrorCode_ERROR_CODE_INTERNAL
 				}
 			}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/schema"
 	"github.com/zero-day-ai/gibson/internal/types"
 	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	sdkregistry "github.com/zero-day-ai/sdk/registry"
 )
 
@@ -141,10 +142,10 @@ func TestGRPCToolClient_InputSchema(t *testing.T) {
 				Description: "Test tool",
 				Version:     "1.0.0",
 				Tags:        []string{"test"},
-				InputSchema: &proto.JSONSchema{
+				InputSchema: &commonpb.JSONSchema{
 					Json: inputSchemaJSON,
 				},
-				OutputSchema: &proto.JSONSchema{
+				OutputSchema: &commonpb.JSONSchema{
 					Json: `{"type": "object"}`,
 				},
 			}, nil
@@ -177,10 +178,10 @@ func TestGRPCToolClient_OutputSchema(t *testing.T) {
 				Description: "Test tool",
 				Version:     "1.0.0",
 				Tags:        []string{"test"},
-				InputSchema: &proto.JSONSchema{
+				InputSchema: &commonpb.JSONSchema{
 					Json: `{"type": "object"}`,
 				},
-				OutputSchema: &proto.JSONSchema{
+				OutputSchema: &commonpb.JSONSchema{
 					Json: outputSchemaJSON,
 				},
 			}, nil
@@ -421,10 +422,10 @@ func TestGRPCToolClient_FetchDescriptor_Caching(t *testing.T) {
 				Description: "Test tool",
 				Version:     "1.0.0",
 				Tags:        []string{"test"},
-				InputSchema: &proto.JSONSchema{
+				InputSchema: &commonpb.JSONSchema{
 					Json: `{"type": "object"}`,
 				},
-				OutputSchema: &proto.JSONSchema{
+				OutputSchema: &commonpb.JSONSchema{
 					Json: `{"type": "object"}`,
 				},
 			}, nil
@@ -472,7 +473,7 @@ func TestGRPCToolClient_FetchDescriptor_Error(t *testing.T) {
 func TestProtoSchemaToInternal(t *testing.T) {
 	tests := []struct {
 		name        string
-		protoSchema *proto.JSONSchema
+		protoSchema *commonpb.JSONSchema
 		expectError bool
 		validate    func(t *testing.T, schema schema.JSONSchema)
 	}{
@@ -486,7 +487,7 @@ func TestProtoSchemaToInternal(t *testing.T) {
 		},
 		{
 			name:        "empty JSON",
-			protoSchema: &proto.JSONSchema{Json: ""},
+			protoSchema: &commonpb.JSONSchema{Json: ""},
 			expectError: false,
 			validate: func(t *testing.T, s schema.JSONSchema) {
 				assert.Equal(t, schema.JSONSchema{}, s)
@@ -494,7 +495,7 @@ func TestProtoSchemaToInternal(t *testing.T) {
 		},
 		{
 			name: "valid object schema",
-			protoSchema: &proto.JSONSchema{
+			protoSchema: &commonpb.JSONSchema{
 				Json: `{
 					"type": "object",
 					"properties": {
@@ -515,7 +516,7 @@ func TestProtoSchemaToInternal(t *testing.T) {
 		},
 		{
 			name: "invalid JSON",
-			protoSchema: &proto.JSONSchema{
+			protoSchema: &commonpb.JSONSchema{
 				Json: `{invalid`,
 			},
 			expectError: true,

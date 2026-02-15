@@ -136,6 +136,13 @@ func getMigrations() []migration {
 			up:      getMissionRunsTableSchema(),
 			down:    getDownMigration14(),
 		},
+		// Note: Migration 15 (reports_table) will be added in task 1.2
+		// {
+		// 	version: 15,
+		// 	name:    "reports_table",
+		// 	up:      getReportsTableSchema(),
+		// 	down:    getDownMigration15(),
+		// },
 		// Future migrations will be added here
 	}
 
@@ -1709,5 +1716,86 @@ DROP INDEX IF EXISTS idx_mission_runs_mission_id;
 
 -- Drop table
 DROP TABLE IF EXISTS mission_runs;
+`
+}
+
+// getReportsTableSchema returns the schema for reports table
+func getReportsTableSchema() string {
+	return `
+-- Migration 15: Reports Table
+-- Creates table for storing generated security reports
+
+-- ============================================================================
+-- Reports Table: Store report metadata
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS reports (
+    id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL,
+    type TEXT NOT NULL,                      -- 'executive', 'technical', 'compliance', etc.
+    format TEXT NOT NULL,                    -- 'pdf', 'html', 'markdown', 'json', 'sarif', 'csv', 'docx'
+    title TEXT NOT NULL,
+    summary TEXT,
+
+    -- Generation metadata
+    generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    generated_by TEXT NOT NULL,              -- User or system identifier
+    template_used TEXT,                      -- Template name used for generation
+
+    -- Configuration and metadata (JSON stored as TEXT)
+    options TEXT NOT NULL,                   -- JSON ReportOptions object
+    metadata TEXT NOT NULL,                  -- JSON ReportMetadata object (finding counts, metrics, etc.)
+
+    -- File storage information
+    file_path TEXT NOT NULL,                 -- Path to report file on filesystem
+    file_size INTEGER NOT NULL,              -- File size in bytes
+    checksum TEXT NOT NULL,                  -- SHA256 checksum of file content
+
+    -- Foreign key constraint
+    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- Indexes for Reports
+-- ============================================================================
+
+-- Index for querying reports by mission
+CREATE INDEX IF NOT EXISTS idx_reports_mission_id ON reports(mission_id);
+
+-- Index for report type filtering
+CREATE INDEX IF NOT EXISTS idx_reports_type ON reports(type);
+
+-- Index for format filtering
+CREATE INDEX IF NOT EXISTS idx_reports_format ON reports(format);
+
+-- Index for time-based queries (most recent first)
+CREATE INDEX IF NOT EXISTS idx_reports_generated_at ON reports(generated_at DESC);
+
+-- Composite index for mission + type queries
+CREATE INDEX IF NOT EXISTS idx_reports_mission_type ON reports(mission_id, type);
+
+-- Composite index for mission + type + format (for GetLatest queries)
+CREATE INDEX IF NOT EXISTS idx_reports_mission_type_format ON reports(mission_id, type, format, generated_at DESC);
+
+-- Index for generated_by (track who generated reports)
+CREATE INDEX IF NOT EXISTS idx_reports_generated_by ON reports(generated_by);
+`
+}
+
+// getDownMigration15 returns the rollback SQL for migration 15
+func getDownMigration15() string {
+	return `
+-- Rollback Migration 15: Reports Table
+
+-- Drop indexes
+DROP INDEX IF EXISTS idx_reports_generated_by;
+DROP INDEX IF EXISTS idx_reports_mission_type_format;
+DROP INDEX IF EXISTS idx_reports_mission_type;
+DROP INDEX IF EXISTS idx_reports_generated_at;
+DROP INDEX IF EXISTS idx_reports_format;
+DROP INDEX IF EXISTS idx_reports_type;
+DROP INDEX IF EXISTS idx_reports_mission_id;
+
+-- Drop table
+DROP TABLE IF EXISTS reports;
 `
 }

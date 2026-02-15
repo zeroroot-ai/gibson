@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 )
 
@@ -23,19 +24,19 @@ func TaskToProto(task Task) *proto.Task {
 	// Add optional fields to metadata if present
 	if task.MissionID != nil {
 		if protoTask.Metadata == nil {
-			protoTask.Metadata = make(map[string]*proto.TypedValue)
+			protoTask.Metadata = make(map[string]*commonpb.TypedValue)
 		}
 		protoTask.Metadata["mission_id"] = stringToTypedValue(task.MissionID.String())
 	}
 	if task.ParentTaskID != nil {
 		if protoTask.Metadata == nil {
-			protoTask.Metadata = make(map[string]*proto.TypedValue)
+			protoTask.Metadata = make(map[string]*commonpb.TypedValue)
 		}
 		protoTask.Metadata["parent_task_id"] = stringToTypedValue(task.ParentTaskID.String())
 	}
 	if task.TargetID != nil {
 		if protoTask.Metadata == nil {
-			protoTask.Metadata = make(map[string]*proto.TypedValue)
+			protoTask.Metadata = make(map[string]*commonpb.TypedValue)
 		}
 		protoTask.Metadata["target_id"] = stringToTypedValue(task.TargetID.String())
 	}
@@ -58,7 +59,7 @@ func ResultToProto(r Result) *proto.Result {
 		}
 		protoResult.Error = &proto.ResultError{
 			Message: r.Error.Message,
-			Code:    proto.ErrorCode(proto.ErrorCode_value[r.Error.Code]),
+			Code:    commonpb.ErrorCode(commonpb.ErrorCode_value[r.Error.Code]),
 			Details: details,
 		}
 	}
@@ -141,12 +142,12 @@ func protoStatusToResultStatus(status proto.ResultStatus) ResultStatus {
 }
 
 // mapToTypedValueMap converts a map[string]any to map[string]*TypedValue.
-func mapToTypedValueMap(m map[string]any) map[string]*proto.TypedValue {
+func mapToTypedValueMap(m map[string]any) map[string]*commonpb.TypedValue {
 	if m == nil {
 		return nil
 	}
 
-	result := make(map[string]*proto.TypedValue)
+	result := make(map[string]*commonpb.TypedValue)
 	for k, v := range m {
 		result[k] = anyToTypedValue(v)
 	}
@@ -154,7 +155,7 @@ func mapToTypedValueMap(m map[string]any) map[string]*proto.TypedValue {
 }
 
 // typedValueMapToMap converts map[string]*TypedValue to map[string]any.
-func typedValueMapToMap(m map[string]*proto.TypedValue) map[string]any {
+func typedValueMapToMap(m map[string]*commonpb.TypedValue) map[string]any {
 	if m == nil {
 		return nil
 	}
@@ -169,18 +170,18 @@ func typedValueMapToMap(m map[string]*proto.TypedValue) map[string]any {
 // typedValueToMap converts a TypedValue to map[string]any if it's a map, otherwise returns empty map.
 // It also handles the case where the TypedValue is a JSON string that represents a map/struct.
 // This is needed because the SDK serializes proto messages (like DiscoveryResult) to JSON strings.
-func typedValueToMap(tv *proto.TypedValue) map[string]any {
+func typedValueToMap(tv *commonpb.TypedValue) map[string]any {
 	if tv == nil {
 		return make(map[string]any)
 	}
 
-	if mapVal, ok := tv.Kind.(*proto.TypedValue_MapValue); ok && mapVal.MapValue != nil {
+	if mapVal, ok := tv.Kind.(*commonpb.TypedValue_MapValue); ok && mapVal.MapValue != nil {
 		return typedValueMapToMap(mapVal.MapValue.Entries)
 	}
 
 	// If it's a string, try to parse it as JSON - this handles the case where
 	// the SDK serialized a proto message (like DiscoveryResult) to JSON
-	if strVal, ok := tv.Kind.(*proto.TypedValue_StringValue); ok && strVal.StringValue != "" {
+	if strVal, ok := tv.Kind.(*commonpb.TypedValue_StringValue); ok && strVal.StringValue != "" {
 		// Check if it looks like JSON (starts with { or [)
 		str := strVal.StringValue
 		if len(str) > 0 && (str[0] == '{' || str[0] == '[') {
@@ -196,11 +197,11 @@ func typedValueToMap(tv *proto.TypedValue) map[string]any {
 }
 
 // anyToTypedValue converts any Go value to a proto TypedValue.
-func anyToTypedValue(v any) *proto.TypedValue {
+func anyToTypedValue(v any) *commonpb.TypedValue {
 	if v == nil {
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_NullValue{
-				NullValue: proto.NullValue_NULL_VALUE,
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_NullValue{
+				NullValue: commonpb.NullValue_NULL_VALUE,
 			},
 		}
 	}
@@ -209,51 +210,51 @@ func anyToTypedValue(v any) *proto.TypedValue {
 	case string:
 		return stringToTypedValue(val)
 	case int:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_IntValue{IntValue: int64(val)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_IntValue{IntValue: int64(val)},
 		}
 	case int32:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_IntValue{IntValue: int64(val)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_IntValue{IntValue: int64(val)},
 		}
 	case int64:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_IntValue{IntValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_IntValue{IntValue: val},
 		}
 	case float32:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_DoubleValue{DoubleValue: float64(val)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_DoubleValue{DoubleValue: float64(val)},
 		}
 	case float64:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_DoubleValue{DoubleValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_DoubleValue{DoubleValue: val},
 		}
 	case bool:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_BoolValue{BoolValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_BoolValue{BoolValue: val},
 		}
 	case []byte:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_BytesValue{BytesValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_BytesValue{BytesValue: val},
 		}
 	case []any:
-		items := make([]*proto.TypedValue, len(val))
+		items := make([]*commonpb.TypedValue, len(val))
 		for i, item := range val {
 			items[i] = anyToTypedValue(item)
 		}
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_ArrayValue{
-				ArrayValue: &proto.TypedArray{Items: items},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_ArrayValue{
+				ArrayValue: &commonpb.TypedArray{Items: items},
 			},
 		}
 	case map[string]any:
-		entries := make(map[string]*proto.TypedValue)
+		entries := make(map[string]*commonpb.TypedValue)
 		for k, v := range val {
 			entries[k] = anyToTypedValue(v)
 		}
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_MapValue{
-				MapValue: &proto.TypedMap{Entries: entries},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_MapValue{
+				MapValue: &commonpb.TypedMap{Entries: entries},
 			},
 		}
 	default:
@@ -263,32 +264,32 @@ func anyToTypedValue(v any) *proto.TypedValue {
 }
 
 // stringToTypedValue creates a TypedValue with a string value.
-func stringToTypedValue(s string) *proto.TypedValue {
-	return &proto.TypedValue{
-		Kind: &proto.TypedValue_StringValue{StringValue: s},
+func stringToTypedValue(s string) *commonpb.TypedValue {
+	return &commonpb.TypedValue{
+		Kind: &commonpb.TypedValue_StringValue{StringValue: s},
 	}
 }
 
 // typedValueToAny converts a proto TypedValue to a Go any value.
-func typedValueToAny(tv *proto.TypedValue) any {
+func typedValueToAny(tv *commonpb.TypedValue) any {
 	if tv == nil {
 		return nil
 	}
 
 	switch kind := tv.Kind.(type) {
-	case *proto.TypedValue_NullValue:
+	case *commonpb.TypedValue_NullValue:
 		return nil
-	case *proto.TypedValue_StringValue:
+	case *commonpb.TypedValue_StringValue:
 		return kind.StringValue
-	case *proto.TypedValue_IntValue:
+	case *commonpb.TypedValue_IntValue:
 		return kind.IntValue
-	case *proto.TypedValue_DoubleValue:
+	case *commonpb.TypedValue_DoubleValue:
 		return kind.DoubleValue
-	case *proto.TypedValue_BoolValue:
+	case *commonpb.TypedValue_BoolValue:
 		return kind.BoolValue
-	case *proto.TypedValue_BytesValue:
+	case *commonpb.TypedValue_BytesValue:
 		return kind.BytesValue
-	case *proto.TypedValue_ArrayValue:
+	case *commonpb.TypedValue_ArrayValue:
 		if kind.ArrayValue == nil {
 			return []any{}
 		}
@@ -297,7 +298,7 @@ func typedValueToAny(tv *proto.TypedValue) any {
 			result[i] = typedValueToAny(item)
 		}
 		return result
-	case *proto.TypedValue_MapValue:
+	case *commonpb.TypedValue_MapValue:
 		if kind.MapValue == nil {
 			return map[string]any{}
 		}

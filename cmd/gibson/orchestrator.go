@@ -195,9 +195,8 @@ func createOrchestratorWithOptions(ctx context.Context, opts *OrchestratorOption
 	// Step 8: Create mission orchestrator if GraphRAG is available
 	var orch mission.MissionOrchestrator
 	if graphRAGClient != nil {
-		// Use orchestrator
-		// TODO: Create MissionGraphLoader adapter
-		// graphLoader := workflow.NewGraphLoader(graphRAGClient)
+		// Create GraphLoader for storing mission definitions in Neo4j
+		graphLoader := orchestrator.NewGraphLoader(graphRAGClient, slog.Default())
 
 		cfg := orchestrator.Config{
 			GraphRAGClient:     graphRAGClient,
@@ -208,7 +207,7 @@ func createOrchestratorWithOptions(ctx context.Context, opts *OrchestratorOption
 			MaxConcurrent:      10,
 			ThinkerMaxRetries:  3,
 			ThinkerTemperature: 0.2,
-			GraphLoader:        nil, // TODO: Implement MissionGraphLoader adapter
+			GraphLoader:        graphLoader,
 		}
 
 		orch, err = orchestrator.NewMissionAdapter(cfg)

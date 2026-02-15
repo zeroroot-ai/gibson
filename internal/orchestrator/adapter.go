@@ -12,6 +12,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	pb "github.com/zero-day-ai/sdk/api/gen/proto"
 	"github.com/zero-day-ai/sdk/api/gen/workflowpb"
 )
@@ -770,23 +771,23 @@ func protoTaskToAgentTask(protoTask *pb.Task) *agent.Task {
 }
 
 // typedValueToAny converts a proto TypedValue to any.
-func typedValueToAny(tv *pb.TypedValue) any {
+func typedValueToAny(tv *commonpb.TypedValue) any {
 	if tv == nil {
 		return nil
 	}
 
 	switch v := tv.GetKind().(type) {
-	case *pb.TypedValue_StringValue:
+	case *commonpb.TypedValue_StringValue:
 		return v.StringValue
-	case *pb.TypedValue_IntValue:
+	case *commonpb.TypedValue_IntValue:
 		return v.IntValue
-	case *pb.TypedValue_DoubleValue:
+	case *commonpb.TypedValue_DoubleValue:
 		return v.DoubleValue
-	case *pb.TypedValue_BoolValue:
+	case *commonpb.TypedValue_BoolValue:
 		return v.BoolValue
-	case *pb.TypedValue_BytesValue:
+	case *commonpb.TypedValue_BytesValue:
 		return v.BytesValue
-	case *pb.TypedValue_ArrayValue:
+	case *commonpb.TypedValue_ArrayValue:
 		if v.ArrayValue == nil {
 			return nil
 		}
@@ -795,7 +796,7 @@ func typedValueToAny(tv *pb.TypedValue) any {
 			list[i] = typedValueToAny(item)
 		}
 		return list
-	case *pb.TypedValue_MapValue:
+	case *commonpb.TypedValue_MapValue:
 		if v.MapValue == nil {
 			return nil
 		}

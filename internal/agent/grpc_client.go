@@ -249,7 +249,7 @@ func (c *GRPCAgentClient) Health(ctx context.Context) types.HealthStatus {
 	}
 
 	// Convert proto health status to internal type
-	switch resp.State {
+	switch resp.Status {
 	case "healthy":
 		return types.Healthy(resp.Message)
 	case "degraded":

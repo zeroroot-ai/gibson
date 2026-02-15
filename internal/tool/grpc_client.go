@@ -184,7 +184,7 @@ func (c *GRPCToolClient) Health(ctx context.Context) types.HealthStatus {
 
 	// Convert proto HealthStatus to internal type
 	return types.HealthStatus{
-		State:     types.HealthState(resp.GetState()),
+		State:     types.HealthState(resp.GetStatus()),
 		Message:   resp.GetMessage(),
 		CheckedAt: time.UnixMilli(resp.GetCheckedAt()),
 	}

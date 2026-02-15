@@ -10,6 +10,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/types"
 	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	"github.com/zero-day-ai/sdk/registry"
 	"github.com/zero-day-ai/sdk/schema"
 )
@@ -238,7 +239,7 @@ func (c *GRPCPluginClient) Health(ctx context.Context) types.HealthStatus {
 
 	// Convert proto health status to internal type
 	// The proto HealthStatus has a "state" field with values: "healthy", "degraded", "unhealthy"
-	switch resp.State {
+	switch resp.Status {
 	case "healthy":
 		return types.Healthy(resp.Message)
 	case "degraded":
@@ -289,7 +290,7 @@ func convertMethodDescriptors(protoMethods []*proto.PluginMethodDescriptor) []pl
 }
 
 // convertJSONSchema converts proto JSONSchema to SDK schema.JSON
-func convertJSONSchema(protoSchema *proto.JSONSchema) schema.JSON {
+func convertJSONSchema(protoSchema *commonpb.JSONSchema) schema.JSON {
 	if protoSchema == nil {
 		return schema.JSON{}
 	}

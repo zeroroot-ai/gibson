@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/llm"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	"github.com/zero-day-ai/sdk/api/gen/proto"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -201,7 +202,7 @@ func buildToolCallEvent(toolName, inputJSON, callID, traceID, spanID string) *pr
 	}
 
 	// Convert to TypedValue map
-	inputTypedMap := make(map[string]*proto.TypedValue)
+	inputTypedMap := make(map[string]*commonpb.TypedValue)
 	for k, v := range inputMap {
 		inputTypedMap[k] = anyToTypedValue(v)
 	}
@@ -337,73 +338,73 @@ func (a *gRPCStreamAdapter) SendFinding(finding *proto.FindingEvent) error {
 }
 
 // anyToTypedValue converts a Go any value to a proto TypedValue.
-func anyToTypedValue(v any) *proto.TypedValue {
+func anyToTypedValue(v any) *commonpb.TypedValue {
 	if v == nil {
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_NullValue{
-				NullValue: proto.NullValue_NULL_VALUE,
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_NullValue{
+				NullValue: commonpb.NullValue_NULL_VALUE,
 			},
 		}
 	}
 
 	switch val := v.(type) {
 	case string:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_StringValue{StringValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_StringValue{StringValue: val},
 		}
 	case int:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_IntValue{IntValue: int64(val)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_IntValue{IntValue: int64(val)},
 		}
 	case int32:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_IntValue{IntValue: int64(val)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_IntValue{IntValue: int64(val)},
 		}
 	case int64:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_IntValue{IntValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_IntValue{IntValue: val},
 		}
 	case float32:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_DoubleValue{DoubleValue: float64(val)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_DoubleValue{DoubleValue: float64(val)},
 		}
 	case float64:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_DoubleValue{DoubleValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_DoubleValue{DoubleValue: val},
 		}
 	case bool:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_BoolValue{BoolValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_BoolValue{BoolValue: val},
 		}
 	case []byte:
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_BytesValue{BytesValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_BytesValue{BytesValue: val},
 		}
 	case []any:
-		items := make([]*proto.TypedValue, len(val))
+		items := make([]*commonpb.TypedValue, len(val))
 		for i, item := range val {
 			items[i] = anyToTypedValue(item)
 		}
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_ArrayValue{
-				ArrayValue: &proto.TypedArray{Items: items},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_ArrayValue{
+				ArrayValue: &commonpb.TypedArray{Items: items},
 			},
 		}
 	case map[string]any:
-		entries := make(map[string]*proto.TypedValue)
+		entries := make(map[string]*commonpb.TypedValue)
 		for k, v := range val {
 			entries[k] = anyToTypedValue(v)
 		}
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_MapValue{
-				MapValue: &proto.TypedMap{Entries: entries},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_MapValue{
+				MapValue: &commonpb.TypedMap{Entries: entries},
 			},
 		}
 	default:
 		// For unknown types, convert to string representation
 		jsonBytes, _ := json.Marshal(v)
-		return &proto.TypedValue{
-			Kind: &proto.TypedValue_StringValue{StringValue: string(jsonBytes)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_StringValue{StringValue: string(jsonBytes)},
 		}
 	}
 }

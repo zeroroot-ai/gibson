@@ -442,9 +442,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Create mission orchestrator if GraphRAG is available
 	var orch mission.MissionOrchestrator
 	if d.infrastructure.graphRAGClient != nil {
-		// Use mission orchestrator
-		// TODO: Create MissionGraphLoader adapter for workflow.GraphLoader
-		// For now, set to nil as it's optional
+		// Create GraphLoader for storing mission definitions in Neo4j
+		missionGraphLoader := orchestrator.NewGraphLoader(d.infrastructure.graphRAGClient, d.logger)
 
 		// Get tracer from tracer provider
 		var tracer trace.Tracer
@@ -492,7 +491,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			MaxConcurrent:      10,
 			ThinkerMaxRetries:  3,
 			ThinkerTemperature: 0.2,
-			GraphLoader:        nil,                            // TODO: Implement MissionGraphLoader adapter
+			GraphLoader:        missionGraphLoader,
 			Registry:           d.registryAdapter,              // For component discovery and validation
 			DecisionLogWriter:  nil,                            // Cannot create without mission context - see comment above
 			MissionTracer:      d.infrastructure.missionTracer, // Pass for future per-mission adapter creation

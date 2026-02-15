@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	"github.com/zero-day-ai/sdk/api/gen/proto"
 )
 
@@ -203,16 +204,16 @@ func TestToolCallInputSerialization(t *testing.T) {
 	tests := []struct {
 		name          string
 		input         map[string]any
-		validateInput func(*testing.T, map[string]*proto.TypedValue)
+		validateInput func(*testing.T, map[string]*commonpb.TypedValue)
 	}{
 		{
 			name: "string input",
 			input: map[string]any{
 				"query": "test query",
 			},
-			validateInput: func(t *testing.T, input map[string]*proto.TypedValue) {
+			validateInput: func(t *testing.T, input map[string]*commonpb.TypedValue) {
 				require.Contains(t, input, "query")
-				stringVal, ok := input["query"].Kind.(*proto.TypedValue_StringValue)
+				stringVal, ok := input["query"].Kind.(*commonpb.TypedValue_StringValue)
 				require.True(t, ok, "Expected string value")
 				assert.Equal(t, "test query", stringVal.StringValue)
 			},
@@ -222,13 +223,13 @@ func TestToolCallInputSerialization(t *testing.T) {
 			input: map[string]any{
 				"count": 42,
 			},
-			validateInput: func(t *testing.T, input map[string]*proto.TypedValue) {
+			validateInput: func(t *testing.T, input map[string]*commonpb.TypedValue) {
 				require.Contains(t, input, "count")
 				// JSON unmarshal converts numbers to float64 by default
 				switch v := input["count"].Kind.(type) {
-				case *proto.TypedValue_IntValue:
+				case *commonpb.TypedValue_IntValue:
 					assert.Equal(t, int64(42), v.IntValue)
-				case *proto.TypedValue_DoubleValue:
+				case *commonpb.TypedValue_DoubleValue:
 					assert.InDelta(t, 42.0, v.DoubleValue, 0.001)
 				default:
 					t.Fatalf("Expected numeric value, got %T", v)
@@ -240,9 +241,9 @@ func TestToolCallInputSerialization(t *testing.T) {
 			input: map[string]any{
 				"enabled": true,
 			},
-			validateInput: func(t *testing.T, input map[string]*proto.TypedValue) {
+			validateInput: func(t *testing.T, input map[string]*commonpb.TypedValue) {
 				require.Contains(t, input, "enabled")
-				boolVal, ok := input["enabled"].Kind.(*proto.TypedValue_BoolValue)
+				boolVal, ok := input["enabled"].Kind.(*commonpb.TypedValue_BoolValue)
 				require.True(t, ok, "Expected bool value")
 				assert.True(t, boolVal.BoolValue)
 			},
@@ -255,9 +256,9 @@ func TestToolCallInputSerialization(t *testing.T) {
 					"port": 443,
 				},
 			},
-			validateInput: func(t *testing.T, input map[string]*proto.TypedValue) {
+			validateInput: func(t *testing.T, input map[string]*commonpb.TypedValue) {
 				require.Contains(t, input, "config")
-				mapVal, ok := input["config"].Kind.(*proto.TypedValue_MapValue)
+				mapVal, ok := input["config"].Kind.(*commonpb.TypedValue_MapValue)
 				require.True(t, ok, "Expected map value")
 				require.Contains(t, mapVal.MapValue.Entries, "host")
 				require.Contains(t, mapVal.MapValue.Entries, "port")
@@ -302,7 +303,7 @@ func TestToolResultOutputSerialization(t *testing.T) {
 	tests := []struct {
 		name           string
 		output         any
-		validateOutput func(*testing.T, *proto.TypedValue)
+		validateOutput func(*testing.T, *commonpb.TypedValue)
 	}{
 		{
 			name: "map output",
@@ -310,8 +311,8 @@ func TestToolResultOutputSerialization(t *testing.T) {
 				"status": "success",
 				"count":  5,
 			},
-			validateOutput: func(t *testing.T, output *proto.TypedValue) {
-				mapVal, ok := output.Kind.(*proto.TypedValue_MapValue)
+			validateOutput: func(t *testing.T, output *commonpb.TypedValue) {
+				mapVal, ok := output.Kind.(*commonpb.TypedValue_MapValue)
 				require.True(t, ok, "Expected map value")
 				require.Contains(t, mapVal.MapValue.Entries, "status")
 				require.Contains(t, mapVal.MapValue.Entries, "count")
@@ -320,9 +321,9 @@ func TestToolResultOutputSerialization(t *testing.T) {
 		{
 			name:   "string output",
 			output: "result string",
-			validateOutput: func(t *testing.T, output *proto.TypedValue) {
+			validateOutput: func(t *testing.T, output *commonpb.TypedValue) {
 				// String outputs get wrapped in a map
-				mapVal, ok := output.Kind.(*proto.TypedValue_MapValue)
+				mapVal, ok := output.Kind.(*commonpb.TypedValue_MapValue)
 				require.True(t, ok, "Expected wrapped map value")
 				require.Contains(t, mapVal.MapValue.Entries, "result")
 			},
@@ -332,12 +333,12 @@ func TestToolResultOutputSerialization(t *testing.T) {
 			output: map[string]any{
 				"items": []any{"item1", "item2", "item3"},
 			},
-			validateOutput: func(t *testing.T, output *proto.TypedValue) {
-				mapVal, ok := output.Kind.(*proto.TypedValue_MapValue)
+			validateOutput: func(t *testing.T, output *commonpb.TypedValue) {
+				mapVal, ok := output.Kind.(*commonpb.TypedValue_MapValue)
 				require.True(t, ok, "Expected map value")
 				require.Contains(t, mapVal.MapValue.Entries, "items")
 
-				arrayVal, ok := mapVal.MapValue.Entries["items"].Kind.(*proto.TypedValue_ArrayValue)
+				arrayVal, ok := mapVal.MapValue.Entries["items"].Kind.(*commonpb.TypedValue_ArrayValue)
 				require.True(t, ok, "Expected array value")
 				assert.Len(t, arrayVal.ArrayValue.Items, 3)
 			},
@@ -512,21 +513,21 @@ func TestAnyToTypedValue(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    any
-		validate func(*testing.T, *proto.TypedValue)
+		validate func(*testing.T, *commonpb.TypedValue)
 	}{
 		{
 			name:  "nil value",
 			input: nil,
-			validate: func(t *testing.T, tv *proto.TypedValue) {
-				_, ok := tv.Kind.(*proto.TypedValue_NullValue)
+			validate: func(t *testing.T, tv *commonpb.TypedValue) {
+				_, ok := tv.Kind.(*commonpb.TypedValue_NullValue)
 				assert.True(t, ok, "Expected null value")
 			},
 		},
 		{
 			name:  "string value",
 			input: "test string",
-			validate: func(t *testing.T, tv *proto.TypedValue) {
-				sv, ok := tv.Kind.(*proto.TypedValue_StringValue)
+			validate: func(t *testing.T, tv *commonpb.TypedValue) {
+				sv, ok := tv.Kind.(*commonpb.TypedValue_StringValue)
 				assert.True(t, ok, "Expected string value")
 				assert.Equal(t, "test string", sv.StringValue)
 			},
@@ -534,8 +535,8 @@ func TestAnyToTypedValue(t *testing.T) {
 		{
 			name:  "int value",
 			input: 42,
-			validate: func(t *testing.T, tv *proto.TypedValue) {
-				iv, ok := tv.Kind.(*proto.TypedValue_IntValue)
+			validate: func(t *testing.T, tv *commonpb.TypedValue) {
+				iv, ok := tv.Kind.(*commonpb.TypedValue_IntValue)
 				assert.True(t, ok, "Expected int value")
 				assert.Equal(t, int64(42), iv.IntValue)
 			},
@@ -543,8 +544,8 @@ func TestAnyToTypedValue(t *testing.T) {
 		{
 			name:  "bool value",
 			input: true,
-			validate: func(t *testing.T, tv *proto.TypedValue) {
-				bv, ok := tv.Kind.(*proto.TypedValue_BoolValue)
+			validate: func(t *testing.T, tv *commonpb.TypedValue) {
+				bv, ok := tv.Kind.(*commonpb.TypedValue_BoolValue)
 				assert.True(t, ok, "Expected bool value")
 				assert.True(t, bv.BoolValue)
 			},
@@ -552,8 +553,8 @@ func TestAnyToTypedValue(t *testing.T) {
 		{
 			name:  "float value",
 			input: 3.14,
-			validate: func(t *testing.T, tv *proto.TypedValue) {
-				fv, ok := tv.Kind.(*proto.TypedValue_DoubleValue)
+			validate: func(t *testing.T, tv *commonpb.TypedValue) {
+				fv, ok := tv.Kind.(*commonpb.TypedValue_DoubleValue)
 				assert.True(t, ok, "Expected double value")
 				assert.InDelta(t, 3.14, fv.DoubleValue, 0.001)
 			},
@@ -561,8 +562,8 @@ func TestAnyToTypedValue(t *testing.T) {
 		{
 			name:  "array value",
 			input: []any{1, "two", true},
-			validate: func(t *testing.T, tv *proto.TypedValue) {
-				av, ok := tv.Kind.(*proto.TypedValue_ArrayValue)
+			validate: func(t *testing.T, tv *commonpb.TypedValue) {
+				av, ok := tv.Kind.(*commonpb.TypedValue_ArrayValue)
 				assert.True(t, ok, "Expected array value")
 				assert.Len(t, av.ArrayValue.Items, 3)
 			},
@@ -573,8 +574,8 @@ func TestAnyToTypedValue(t *testing.T) {
 				"key1": "value1",
 				"key2": 123,
 			},
-			validate: func(t *testing.T, tv *proto.TypedValue) {
-				mv, ok := tv.Kind.(*proto.TypedValue_MapValue)
+			validate: func(t *testing.T, tv *commonpb.TypedValue) {
+				mv, ok := tv.Kind.(*commonpb.TypedValue_MapValue)
 				assert.True(t, ok, "Expected map value")
 				assert.Contains(t, mv.MapValue.Entries, "key1")
 				assert.Contains(t, mv.MapValue.Entries, "key2")

@@ -18,6 +18,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
 	pb "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	// Import toolspb to register proto message types for CallToolProto reflection
 	_ "github.com/zero-day-ai/sdk/api/gen/toolspb"
 	sdkfinding "github.com/zero-day-ai/sdk/finding"
@@ -375,7 +376,7 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *pb.LLMCom
 
 		return &pb.LLMCompleteResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -424,7 +425,7 @@ func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *
 		s.logger.Error("LLM completion with tools failed", "error", err, "task_id", req.Context.TaskId)
 		return &pb.LLMCompleteResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -481,7 +482,7 @@ func (s *HarnessCallbackService) LLMStream(req *pb.LLMStreamRequest, stream pb.H
 		if chunk.Error != nil {
 			protoChunk := &pb.LLMStreamChunk{
 				Error: &pb.HarnessError{
-					Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: chunk.Error.Error(),
 				},
 			}
@@ -521,7 +522,7 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 		s.logger.Error("failed to parse schema JSON", "error", err, "task_id", req.Context.TaskId)
 		return &pb.LLMCompleteStructuredResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("invalid schema JSON: %v", err),
 			},
 		}, nil
@@ -535,7 +536,7 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 		s.logger.Error("LLM structured completion failed", "error", err, "task_id", req.Context.TaskId)
 		return &pb.LLMCompleteStructuredResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -547,7 +548,7 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 		s.logger.Error("failed to serialize structured result", "error", err, "task_id", req.Context.TaskId)
 		return &pb.LLMCompleteStructuredResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to serialize result: %v", err),
 			},
 		}, nil
@@ -558,7 +559,7 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 	if err := json.Unmarshal(resultJSON, &resultData); err != nil {
 		return &pb.LLMCompleteStructuredResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to unmarshal result: %v", err),
 			},
 		}, nil
@@ -600,7 +601,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		s.logger.Error("tool not found", "error", err, "tool", req.Name)
 		return &pb.CallToolProtoResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_NOT_FOUND,
+				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
 				Message: fmt.Sprintf("tool not found: %s", req.Name),
 			},
 		}, nil
@@ -612,7 +613,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		s.logger.Error("failed to find input message type", "error", err, "type", req.InputType)
 		return &pb.CallToolProtoResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to find input message type %s: %v", req.InputType, err),
 			},
 		}, nil
@@ -623,7 +624,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		s.logger.Error("failed to find output message type", "error", err, "type", req.OutputType)
 		return &pb.CallToolProtoResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to find output message type %s: %v", req.OutputType, err),
 			},
 		}, nil
@@ -638,7 +639,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		s.logger.Error("failed to unmarshal JSON to proto request", "error", err, "tool", req.Name)
 		return &pb.CallToolProtoResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("failed to unmarshal input: %v", err),
 			},
 		}, nil
@@ -660,7 +661,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 
 		return &pb.CallToolProtoResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -712,7 +713,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		s.logger.Error("failed to marshal proto response to JSON", "error", err, "tool", req.Name)
 		return &pb.CallToolProtoResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to marshal response: %v", err),
 			},
 		}, nil
@@ -769,7 +770,7 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 		s.logger.Error("queue manager not configured", "tool", req.ToolName)
 		return &pb.QueueToolWorkResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: "queue-based tool execution not available (Redis not configured)",
 			},
 		}, nil
@@ -799,7 +800,7 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 		s.logger.Error("failed to list available tools", "error", err)
 		return &pb.QueueToolWorkResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to check tool availability: %v", err),
 			},
 		}, nil
@@ -818,7 +819,7 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 		s.logger.Warn("tool not found in queue", "tool", req.ToolName, "available", len(availableTools))
 		return &pb.QueueToolWorkResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_NOT_FOUND,
+				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
 				Message: fmt.Sprintf("tool %s not available in queue (no workers registered)", req.ToolName),
 			},
 		}, nil
@@ -859,7 +860,7 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 			s.logger.Error("invalid work item", "error", err, "index", i)
 			return &pb.QueueToolWorkResponse{
 				Error: &pb.HarnessError{
-					Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 					Message: fmt.Sprintf("invalid work item at index %d: %v", i, err),
 				},
 			}, nil
@@ -875,7 +876,7 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 			)
 			return &pb.QueueToolWorkResponse{
 				Error: &pb.HarnessError{
-					Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to queue work item %d: %v", i, err),
 				},
 			}, nil
@@ -948,7 +949,7 @@ func (s *HarnessCallbackService) ToolResults(req *pb.ToolResultsRequest, stream 
 
 		if result.Error != "" {
 			protoResult.Error = &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: result.Error,
 			}
 		} else {
@@ -1000,7 +1001,7 @@ func (s *HarnessCallbackService) QueryPlugin(ctx context.Context, req *pb.QueryP
 		s.logger.Error("plugin query failed", "error", err, "plugin", req.Name, "method", req.Method)
 		return &pb.QueryPluginResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1101,7 +1102,7 @@ func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *pb.De
 
 		return &pb.DelegateToAgentResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1167,7 +1168,7 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *pb.Subm
 		s.logger.Error("finding submission failed", "error", err)
 		return &pb.SubmitFindingResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1192,7 +1193,7 @@ func (s *HarnessCallbackService) GetFindings(ctx context.Context, req *pb.GetFin
 		s.logger.Error("get findings failed", "error", err)
 		return &pb.GetFindingsResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1253,7 +1254,7 @@ func (s *HarnessCallbackService) MemoryGet(ctx context.Context, req *pb.MemoryGe
 			}
 			return &pb.MemoryGetResponse{
 				Error: &pb.HarnessError{
-					Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to retrieve from mission memory: %v", err),
 				},
 			}, nil
@@ -1271,7 +1272,7 @@ func (s *HarnessCallbackService) MemoryGet(ctx context.Context, req *pb.MemoryGe
 		// Long-term memory does not support Get by key
 		return &pb.MemoryGetResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "Long-term memory does not support Get by key. Use LongTermMemorySearch instead.",
 			},
 		}, nil
@@ -1279,7 +1280,7 @@ func (s *HarnessCallbackService) MemoryGet(ctx context.Context, req *pb.MemoryGe
 	default:
 		return &pb.MemoryGetResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("unknown memory tier: %v", tier),
 			},
 		}, nil
@@ -1308,7 +1309,7 @@ func (s *HarnessCallbackService) MemorySet(ctx context.Context, req *pb.MemorySe
 		if err := harness.Memory().Working().Set(req.Key, value); err != nil {
 			return &pb.MemorySetResponse{
 				Error: &pb.HarnessError{
-					Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to set value: %v", err),
 				},
 			}, nil
@@ -1323,7 +1324,7 @@ func (s *HarnessCallbackService) MemorySet(ctx context.Context, req *pb.MemorySe
 		if err := harness.Memory().Mission().Store(ctx, req.Key, value, metadata); err != nil {
 			return &pb.MemorySetResponse{
 				Error: &pb.HarnessError{
-					Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to store in mission memory: %v", err),
 				},
 			}, nil
@@ -1334,7 +1335,7 @@ func (s *HarnessCallbackService) MemorySet(ctx context.Context, req *pb.MemorySe
 		// Long-term memory does not support Set by key
 		return &pb.MemorySetResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "Long-term memory does not support Set by key. Use LongTermMemoryStore instead.",
 			},
 		}, nil
@@ -1342,7 +1343,7 @@ func (s *HarnessCallbackService) MemorySet(ctx context.Context, req *pb.MemorySe
 	default:
 		return &pb.MemorySetResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("unknown memory tier: %v", tier),
 			},
 		}, nil
@@ -1373,7 +1374,7 @@ func (s *HarnessCallbackService) MemoryDelete(ctx context.Context, req *pb.Memor
 		if err := harness.Memory().Mission().Delete(ctx, req.Key); err != nil {
 			return &pb.MemoryDeleteResponse{
 				Error: &pb.HarnessError{
-					Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to delete from mission memory: %v", err),
 				},
 			}, nil
@@ -1384,7 +1385,7 @@ func (s *HarnessCallbackService) MemoryDelete(ctx context.Context, req *pb.Memor
 		// Long-term memory does not support Delete by key
 		return &pb.MemoryDeleteResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "Long-term memory does not support Delete by key. Use LongTermMemoryDelete instead.",
 			},
 		}, nil
@@ -1392,7 +1393,7 @@ func (s *HarnessCallbackService) MemoryDelete(ctx context.Context, req *pb.Memor
 	default:
 		return &pb.MemoryDeleteResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("unknown memory tier: %v", tier),
 			},
 		}, nil
@@ -1441,7 +1442,7 @@ func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *pb.MemoryL
 		if err != nil {
 			return &pb.MemoryListResponse{
 				Error: &pb.HarnessError{
-					Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to list keys from mission memory: %v", err),
 				},
 			}, nil
@@ -1467,7 +1468,7 @@ func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *pb.MemoryL
 		// Long-term memory does not support listing keys
 		return &pb.MemoryListResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "Long-term memory does not support listing keys.",
 			},
 		}, nil
@@ -1475,7 +1476,7 @@ func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *pb.MemoryL
 	default:
 		return &pb.MemoryListResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("unknown memory tier: %v", tier),
 			},
 		}, nil
@@ -1499,7 +1500,7 @@ func (s *HarnessCallbackService) LongTermMemoryStore(ctx context.Context, req *p
 	err = harness.Memory().LongTerm().Store(ctx, id, req.Content, metadata)
 	if err != nil {
 		return &pb.LongTermMemoryStoreResponse{
-			Error: &pb.HarnessError{Code: pb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
@@ -1519,7 +1520,7 @@ func (s *HarnessCallbackService) LongTermMemorySearch(ctx context.Context, req *
 	results, err := harness.Memory().LongTerm().Search(ctx, req.Query, int(req.TopK), filters)
 	if err != nil {
 		return &pb.LongTermMemorySearchResponse{
-			Error: &pb.HarnessError{Code: pb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
@@ -1548,7 +1549,7 @@ func (s *HarnessCallbackService) LongTermMemoryDelete(ctx context.Context, req *
 	err = harness.Memory().LongTerm().Delete(ctx, req.Id)
 	if err != nil {
 		return &pb.LongTermMemoryDeleteResponse{
-			Error: &pb.HarnessError{Code: pb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
@@ -1565,7 +1566,7 @@ func (s *HarnessCallbackService) MissionMemorySearch(ctx context.Context, req *p
 	results, err := harness.Memory().Mission().Search(ctx, req.Query, int(req.Limit))
 	if err != nil {
 		return &pb.MissionMemorySearchResponse{
-			Error: &pb.HarnessError{Code: pb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
@@ -1595,7 +1596,7 @@ func (s *HarnessCallbackService) MissionMemoryHistory(ctx context.Context, req *
 	items, err := harness.Memory().Mission().History(ctx, int(req.Limit))
 	if err != nil {
 		return &pb.MissionMemoryHistoryResponse{
-			Error: &pb.HarnessError{Code: pb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
@@ -1627,7 +1628,7 @@ func (s *HarnessCallbackService) MissionMemoryGetPreviousRunValue(ctx context.Co
 		errMsg := err.Error()
 		return &pb.MissionMemoryGetPreviousRunValueResponse{
 			Found: false,
-			Error: &pb.HarnessError{Code: pb.ErrorCode_ERROR_CODE_NOT_FOUND, Message: errMsg},
+			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, Message: errMsg},
 		}, nil
 	}
 
@@ -1647,7 +1648,7 @@ func (s *HarnessCallbackService) MissionMemoryGetValueHistory(ctx context.Contex
 	history, err := harness.Memory().Mission().GetValueHistory(ctx, req.Key)
 	if err != nil {
 		return &pb.MissionMemoryGetValueHistoryResponse{
-			Error: &pb.HarnessError{Code: pb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
@@ -1708,7 +1709,7 @@ func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *pb.Grap
 	if !ok {
 		return &pb.GraphRAGQueryResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: "GraphRAG not supported by this harness",
 			},
 		}, nil
@@ -1740,7 +1741,7 @@ func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *pb.Grap
 	if query.Text == "" && len(query.NodeTypes) == 0 {
 		return &pb.GraphRAGQueryResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "query must have Text or NodeTypes",
 			},
 		}, nil
@@ -1752,7 +1753,7 @@ func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *pb.Grap
 		s.logger.Error("GraphRAG query failed", "error", err)
 		return &pb.GraphRAGQueryResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1782,7 +1783,7 @@ func (s *HarnessCallbackService) FindSimilarAttacks(ctx context.Context, req *pb
 	if err != nil {
 		return &pb.FindSimilarAttacksResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1794,7 +1795,7 @@ func (s *HarnessCallbackService) FindSimilarAttacks(ctx context.Context, req *pb
 		s.logger.Error("find similar attacks failed", "error", err)
 		return &pb.FindSimilarAttacksResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1824,7 +1825,7 @@ func (s *HarnessCallbackService) FindSimilarFindings(ctx context.Context, req *p
 	if err != nil {
 		return &pb.FindSimilarFindingsResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1836,7 +1837,7 @@ func (s *HarnessCallbackService) FindSimilarFindings(ctx context.Context, req *p
 		s.logger.Error("find similar findings failed", "error", err)
 		return &pb.FindSimilarFindingsResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1867,7 +1868,7 @@ func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *pb.Ge
 	if err != nil {
 		return &pb.GetAttackChainsResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1879,7 +1880,7 @@ func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *pb.Ge
 		s.logger.Error("get attack chains failed", "error", err)
 		return &pb.GetAttackChainsResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1918,7 +1919,7 @@ func (s *HarnessCallbackService) GetRelatedFindings(ctx context.Context, req *pb
 	if err != nil {
 		return &pb.GetRelatedFindingsResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1930,7 +1931,7 @@ func (s *HarnessCallbackService) GetRelatedFindings(ctx context.Context, req *pb
 		s.logger.Error("get related findings failed", "error", err)
 		return &pb.GetRelatedFindingsResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -1965,7 +1966,7 @@ func (s *HarnessCallbackService) StoreGraphNode(ctx context.Context, req *pb.Sto
 	if err != nil {
 		return &pb.StoreGraphNodeResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -2006,7 +2007,7 @@ func (s *HarnessCallbackService) StoreGraphNode(ctx context.Context, req *pb.Sto
 		s.logger.Error("metadata injection failed", "error", err, "node_type", req.Node.Type)
 		return &pb.StoreGraphNodeResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("metadata injection failed: %v", err),
 			},
 		}, nil
@@ -2018,7 +2019,7 @@ func (s *HarnessCallbackService) StoreGraphNode(ctx context.Context, req *pb.Sto
 		s.logger.Error("store graph node failed", "error", err)
 		return &pb.StoreGraphNodeResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -2035,7 +2036,7 @@ func (s *HarnessCallbackService) CreateGraphRelationship(ctx context.Context, re
 	if err != nil {
 		return &pb.CreateGraphRelationshipResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -2049,7 +2050,7 @@ func (s *HarnessCallbackService) CreateGraphRelationship(ctx context.Context, re
 		s.logger.Error("create graph relationship failed", "error", err)
 		return &pb.CreateGraphRelationshipResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -2064,7 +2065,7 @@ func (s *HarnessCallbackService) StoreGraphBatch(ctx context.Context, req *pb.St
 	if err != nil {
 		return &pb.StoreGraphBatchResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -2110,7 +2111,7 @@ func (s *HarnessCallbackService) StoreGraphBatch(ctx context.Context, req *pb.St
 				"node_index", i)
 			return &pb.StoreGraphBatchResponse{
 				Error: &pb.HarnessError{
-					Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 					Message: fmt.Sprintf("metadata injection failed for node %d: %v", i, err),
 				},
 			}, nil
@@ -2129,7 +2130,7 @@ func (s *HarnessCallbackService) StoreGraphBatch(ctx context.Context, req *pb.St
 		s.logger.Error("store graph batch failed", "error", err)
 		return &pb.StoreGraphBatchResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -2146,7 +2147,7 @@ func (s *HarnessCallbackService) TraverseGraph(ctx context.Context, req *pb.Trav
 	if err != nil {
 		return &pb.TraverseGraphResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -2166,7 +2167,7 @@ func (s *HarnessCallbackService) TraverseGraph(ctx context.Context, req *pb.Trav
 		s.logger.Error("traverse graph failed", "error", err)
 		return &pb.TraverseGraphResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -2568,7 +2569,7 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *pb.GetC
 	if req.Context == nil {
 		return &pb.GetCredentialResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "missing context info in request",
 			},
 		}, nil
@@ -2586,7 +2587,7 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *pb.GetC
 		s.logger.Warn("GetCredential called but credential store not configured")
 		return &pb.GetCredentialResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
 				Message: "credential store not available",
 			},
 		}, nil
@@ -2598,7 +2599,7 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *pb.GetC
 		s.logger.Warn("GetCredential failed", "name", req.Name, "error", err)
 		return &pb.GetCredentialResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_NOT_FOUND,
+				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
 				Message: fmt.Sprintf("credential %q not found: %v", req.Name, err),
 			},
 		}, nil
@@ -2759,7 +2760,7 @@ func (s *HarnessCallbackService) GenerateNodeID(ctx context.Context, req *pb.Gen
 	s.logger.Debug("GenerateNodeID called (taxonomy removed)")
 	return &pb.GenerateNodeIDResponse{
 		Error: &pb.HarnessError{
-			Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 			Message: "taxonomy has been removed; use domain types which generate their own IDs",
 		},
 	}, nil
@@ -2779,7 +2780,7 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *pb.Va
 	if finding == nil {
 		return &pb.ValidationResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "finding cannot be nil",
 			},
 		}, nil
@@ -2841,97 +2842,97 @@ func (s *HarnessCallbackService) ValidateRelationship(ctx context.Context, req *
 }
 
 // anyToTypedValue converts a Go any value to a proto TypedValue.
-func anyToTypedValue(v any) *pb.TypedValue {
+func anyToTypedValue(v any) *commonpb.TypedValue {
 	if v == nil {
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_NullValue{
-				NullValue: pb.NullValue_NULL_VALUE,
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_NullValue{
+				NullValue: commonpb.NullValue_NULL_VALUE,
 			},
 		}
 	}
 
 	switch val := v.(type) {
 	case string:
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_StringValue{StringValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_StringValue{StringValue: val},
 		}
 	case int:
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_IntValue{IntValue: int64(val)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_IntValue{IntValue: int64(val)},
 		}
 	case int32:
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_IntValue{IntValue: int64(val)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_IntValue{IntValue: int64(val)},
 		}
 	case int64:
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_IntValue{IntValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_IntValue{IntValue: val},
 		}
 	case float32:
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_DoubleValue{DoubleValue: float64(val)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_DoubleValue{DoubleValue: float64(val)},
 		}
 	case float64:
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_DoubleValue{DoubleValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_DoubleValue{DoubleValue: val},
 		}
 	case bool:
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_BoolValue{BoolValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_BoolValue{BoolValue: val},
 		}
 	case []byte:
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_BytesValue{BytesValue: val},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_BytesValue{BytesValue: val},
 		}
 	case []any:
-		items := make([]*pb.TypedValue, len(val))
+		items := make([]*commonpb.TypedValue, len(val))
 		for i, item := range val {
 			items[i] = anyToTypedValue(item)
 		}
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_ArrayValue{
-				ArrayValue: &pb.TypedArray{Items: items},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_ArrayValue{
+				ArrayValue: &commonpb.TypedArray{Items: items},
 			},
 		}
 	case map[string]any:
-		entries := make(map[string]*pb.TypedValue)
+		entries := make(map[string]*commonpb.TypedValue)
 		for k, v := range val {
 			entries[k] = anyToTypedValue(v)
 		}
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_MapValue{
-				MapValue: &pb.TypedMap{Entries: entries},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_MapValue{
+				MapValue: &commonpb.TypedMap{Entries: entries},
 			},
 		}
 	default:
 		// For unknown types, convert to string representation
 		jsonBytes, _ := json.Marshal(v)
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_StringValue{StringValue: string(jsonBytes)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_StringValue{StringValue: string(jsonBytes)},
 		}
 	}
 }
 
 // typedValueToAny converts a proto TypedValue to a Go any value.
-func typedValueToAny(tv *pb.TypedValue) any {
+func typedValueToAny(tv *commonpb.TypedValue) any {
 	if tv == nil {
 		return nil
 	}
 
 	switch kind := tv.Kind.(type) {
-	case *pb.TypedValue_NullValue:
+	case *commonpb.TypedValue_NullValue:
 		return nil
-	case *pb.TypedValue_StringValue:
+	case *commonpb.TypedValue_StringValue:
 		return kind.StringValue
-	case *pb.TypedValue_IntValue:
+	case *commonpb.TypedValue_IntValue:
 		return kind.IntValue
-	case *pb.TypedValue_DoubleValue:
+	case *commonpb.TypedValue_DoubleValue:
 		return kind.DoubleValue
-	case *pb.TypedValue_BoolValue:
+	case *commonpb.TypedValue_BoolValue:
 		return kind.BoolValue
-	case *pb.TypedValue_BytesValue:
+	case *commonpb.TypedValue_BytesValue:
 		return kind.BytesValue
-	case *pb.TypedValue_ArrayValue:
+	case *commonpb.TypedValue_ArrayValue:
 		if kind.ArrayValue == nil {
 			return []any{}
 		}
@@ -2940,7 +2941,7 @@ func typedValueToAny(tv *pb.TypedValue) any {
 			result[i] = typedValueToAny(item)
 		}
 		return result
-	case *pb.TypedValue_MapValue:
+	case *commonpb.TypedValue_MapValue:
 		if kind.MapValue == nil {
 			return map[string]any{}
 		}
@@ -2959,7 +2960,7 @@ func typedValueToAny(tv *pb.TypedValue) any {
 // ============================================================================
 
 // typedValueMapToMap converts map[string]*TypedValue to map[string]any.
-func typedValueMapToMap(m map[string]*pb.TypedValue) map[string]any {
+func typedValueMapToMap(m map[string]*commonpb.TypedValue) map[string]any {
 	if m == nil {
 		return make(map[string]any)
 	}
@@ -3044,9 +3045,9 @@ func resultToProtoResult(r agent.Result) *pb.Result {
 
 	if r.Error != nil {
 		// Convert error code string to ErrorCode enum
-		errCode := pb.ErrorCode_ERROR_CODE_INTERNAL
-		if codeVal, ok := pb.ErrorCode_value["ERROR_CODE_"+r.Error.Code]; ok {
-			errCode = pb.ErrorCode(codeVal)
+		errCode := commonpb.ErrorCode_ERROR_CODE_INTERNAL
+		if codeVal, ok := commonpb.ErrorCode_value["ERROR_CODE_"+r.Error.Code]; ok {
+			errCode = commonpb.ErrorCode(codeVal)
 		}
 		result.Error = &pb.ResultError{
 			Message:   r.Error.Message,
@@ -3076,23 +3077,23 @@ func resultStatusToProtoStatus(status agent.ResultStatus) pb.ResultStatus {
 }
 
 // mapToTypedValue converts a map[string]any to a proto TypedValue containing a TypedMap.
-func mapToTypedValue(m map[string]any) *pb.TypedValue {
+func mapToTypedValue(m map[string]any) *commonpb.TypedValue {
 	if m == nil {
-		return &pb.TypedValue{
-			Kind: &pb.TypedValue_MapValue{
-				MapValue: &pb.TypedMap{Entries: make(map[string]*pb.TypedValue)},
+		return &commonpb.TypedValue{
+			Kind: &commonpb.TypedValue_MapValue{
+				MapValue: &commonpb.TypedMap{Entries: make(map[string]*commonpb.TypedValue)},
 			},
 		}
 	}
 
-	entries := make(map[string]*pb.TypedValue)
+	entries := make(map[string]*commonpb.TypedValue)
 	for k, v := range m {
 		entries[k] = anyToTypedValue(v)
 	}
 
-	return &pb.TypedValue{
-		Kind: &pb.TypedValue_MapValue{
-			MapValue: &pb.TypedMap{Entries: entries},
+	return &commonpb.TypedValue{
+		Kind: &commonpb.TypedValue_MapValue{
+			MapValue: &commonpb.TypedMap{Entries: entries},
 		},
 	}
 }
@@ -3113,13 +3114,13 @@ func convertMapStringAnyToMapStringString(m map[string]any) map[string]string {
 	return result
 }
 
-// mapToTypedValueMap converts a map[string]any to a map[string]*pb.TypedValue.
-func mapToTypedValueMap(m map[string]any) map[string]*pb.TypedValue {
+// mapToTypedValueMap converts a map[string]any to a map[string]*commonpb.TypedValue.
+func mapToTypedValueMap(m map[string]any) map[string]*commonpb.TypedValue {
 	if m == nil {
-		return make(map[string]*pb.TypedValue)
+		return make(map[string]*commonpb.TypedValue)
 	}
 
-	result := make(map[string]*pb.TypedValue)
+	result := make(map[string]*commonpb.TypedValue)
 	for k, v := range m {
 		result[k] = anyToTypedValue(v)
 	}
@@ -3399,16 +3400,16 @@ func findingToProtoFinding(f agent.Finding) *pb.Finding {
 	return finding
 }
 
-// mapToTypedMap converts map[string]any to *pb.TypedMap.
-func mapToTypedMap(m map[string]any) *pb.TypedMap {
+// mapToTypedMap converts map[string]any to *commonpb.TypedMap.
+func mapToTypedMap(m map[string]any) *commonpb.TypedMap {
 	if m == nil {
 		return nil
 	}
-	entries := make(map[string]*pb.TypedValue)
+	entries := make(map[string]*commonpb.TypedValue)
 	for k, v := range m {
 		entries[k] = anyToTypedValue(v)
 	}
-	return &pb.TypedMap{Entries: entries}
+	return &commonpb.TypedMap{Entries: entries}
 }
 
 // protoSeverityToAgentSeverity converts proto FindingSeverity to agent.FindingSeverity.
@@ -3512,7 +3513,7 @@ func (s *HarnessCallbackService) StoreNode(ctx context.Context, req *pb.StoreNod
 	if err != nil {
 		return &pb.StoreNodeResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -3553,7 +3554,7 @@ func (s *HarnessCallbackService) StoreNode(ctx context.Context, req *pb.StoreNod
 		s.logger.Error("metadata injection failed", "error", err, "node_type", req.Node.Type)
 		return &pb.StoreNodeResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("metadata injection failed: %v", err),
 			},
 		}, nil
@@ -3565,7 +3566,7 @@ func (s *HarnessCallbackService) StoreNode(ctx context.Context, req *pb.StoreNod
 		s.logger.Error("store graph node failed", "error", err)
 		return &pb.StoreNodeResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -3583,7 +3584,7 @@ func (s *HarnessCallbackService) QueryNodes(ctx context.Context, req *pb.QueryNo
 	if err != nil {
 		return &pb.QueryNodesResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
@@ -3603,7 +3604,7 @@ func (s *HarnessCallbackService) QueryNodes(ctx context.Context, req *pb.QueryNo
 		s.logger.Error("query graph nodes failed", "error", err)
 		return &pb.QueryNodesResponse{
 			Error: &pb.HarnessError{
-				Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
