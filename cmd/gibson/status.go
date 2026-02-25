@@ -184,6 +184,26 @@ func showDaemonStatus(cmd *cobra.Command, client *daemonclient.Client, formatter
 func showDaemonFileStatus(cmd *cobra.Command, formatter internal.Formatter, format internal.OutputFormat, homeDir string) error {
 	ctx := cmd.Context()
 
+	// Check if we're in remote daemon mode
+	if remoteAddr := os.Getenv(daemonclient.EnvDaemonAddress); remoteAddr != "" {
+		// In remote mode, we shouldn't be checking local files
+		status := SystemStatus{
+			CheckedAt:     time.Now(),
+			OverallHealth: types.Degraded("remote daemon mode - local status unavailable"),
+			Registry: RegistryStatus{
+				Healthy: false,
+				Error:   fmt.Sprintf("using remote daemon at %s", remoteAddr),
+			},
+			Database:     DatabaseStatus{Connected: false, Error: "remote daemon mode"},
+			LLMProviders: []LLMProviderStatus{},
+		}
+
+		if format == internal.FormatJSON {
+			return formatter.PrintJSON(status)
+		}
+		return printTextStatus(formatter, status)
+	}
+
 	// Read daemon info from file
 	infoPath := filepath.Join(homeDir, "daemon.json")
 	info, err := daemon.ReadDaemonInfo(infoPath)
@@ -265,6 +285,14 @@ func collectSystemStatus(ctx context.Context, homeDir string) SystemStatus {
 func checkRegistryStatus(ctx context.Context, homeDir string) RegistryStatus {
 	regStatus := RegistryStatus{
 		Healthy: false,
+	}
+
+	// Check if we're in remote daemon mode
+	if remoteAddr := os.Getenv(daemonclient.EnvDaemonAddress); remoteAddr != "" {
+		regStatus.Type = "remote-daemon"
+		regStatus.Endpoint = remoteAddr
+		regStatus.Error = "remote daemon - status not available locally"
+		return regStatus
 	}
 
 	// In daemon mode, registry is managed by daemon

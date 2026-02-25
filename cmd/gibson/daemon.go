@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon"
+	daemonclient "github.com/zero-day-ai/gibson/internal/daemon/client"
 )
 
 var daemonCmd = &cobra.Command{
@@ -222,6 +223,22 @@ func init() {
 
 // runDaemonStart starts the Gibson daemon
 func runDaemonStart(cmd *cobra.Command, args []string) error {
+	// Check if GIBSON_DAEMON_ADDRESS is set
+	if remoteAddr := os.Getenv(daemonclient.EnvDaemonAddress); remoteAddr != "" {
+		return fmt.Errorf("cannot start daemon when %s is set to %q\n\n"+
+			"You are configured to use a remote daemon at that address.\n\n"+
+			"Options:\n"+
+			"  1. Unset %s to start a local daemon:\n"+
+			"     unset %s\n"+
+			"     gibson daemon start\n\n"+
+			"  2. The remote daemon should already be running at %s\n"+
+			"     Check status with: gibson daemon status",
+			daemonclient.EnvDaemonAddress, remoteAddr,
+			daemonclient.EnvDaemonAddress,
+			daemonclient.EnvDaemonAddress,
+			remoteAddr)
+	}
+
 	// Parse global flags
 	flags, err := ParseGlobalFlags(cmd)
 	if err != nil {
@@ -298,6 +315,22 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 
 // runDaemonStop stops the Gibson daemon
 func runDaemonStop(cmd *cobra.Command, args []string) error {
+	// Check if GIBSON_DAEMON_ADDRESS is set
+	if remoteAddr := os.Getenv(daemonclient.EnvDaemonAddress); remoteAddr != "" {
+		return fmt.Errorf("cannot stop remote daemon at %q\n\n"+
+			"The remote daemon must be stopped on the remote host.\n\n"+
+			"Options:\n"+
+			"  1. Stop the daemon on the remote host:\n"+
+			"     SSH to the remote host and run: gibson daemon stop\n\n"+
+			"  2. If running in Kubernetes/container:\n"+
+			"     kubectl delete pod <pod-name>\n\n"+
+			"  3. To manage a local daemon instead:\n"+
+			"     unset %s\n"+
+			"     gibson daemon stop",
+			remoteAddr,
+			daemonclient.EnvDaemonAddress)
+	}
+
 	// Parse global flags
 	flags, err := ParseGlobalFlags(cmd)
 	if err != nil {
@@ -395,6 +428,87 @@ func runDaemonStop(cmd *cobra.Command, args []string) error {
 
 // runDaemonStatus shows the daemon status
 func runDaemonStatus(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
+	// Check if GIBSON_DAEMON_ADDRESS is set (remote daemon mode)
+	if remoteAddr := os.Getenv(daemonclient.EnvDaemonAddress); remoteAddr != "" {
+		// Connect to remote daemon
+		client, err := daemonclient.ConnectOrFail(ctx)
+		if err != nil {
+			// Connection failed - return the detailed error from ConnectOrFail
+			if daemonStatusJSON {
+				status := map[string]interface{}{
+					"running":        false,
+					"remote_address": remoteAddr,
+					"error":          err.Error(),
+				}
+				encoder := json.NewEncoder(cmd.OutOrStdout())
+				encoder.SetIndent("", "  ")
+				encoder.Encode(status)
+				return nil
+			}
+			return err
+		}
+		defer client.Close()
+
+		// Get status from remote daemon
+		daemonStatus, err := client.Status(ctx)
+		if err != nil {
+			if daemonStatusJSON {
+				status := map[string]interface{}{
+					"running":        false,
+					"remote_address": remoteAddr,
+					"error":          fmt.Sprintf("failed to get daemon status: %v", err),
+				}
+				encoder := json.NewEncoder(cmd.OutOrStdout())
+				encoder.SetIndent("", "  ")
+				encoder.Encode(status)
+				return nil
+			}
+			return fmt.Errorf("failed to get daemon status from %s: %w", remoteAddr, err)
+		}
+
+		// Display remote daemon status
+		if daemonStatusJSON {
+			status := map[string]interface{}{
+				"running":        true,
+				"remote":         true,
+				"remote_address": remoteAddr,
+				"pid":            daemonStatus.PID,
+				"uptime":         daemonStatus.Uptime,
+				"grpc_address":   daemonStatus.GRPCAddress,
+				"registry_type":  daemonStatus.RegistryType,
+				"registry_addr":  daemonStatus.RegistryAddr,
+				"agent_count":    daemonStatus.AgentCount,
+			}
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(status)
+		}
+
+		// Text format for remote daemon
+		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+		defer tw.Flush()
+
+		fmt.Fprintln(tw, "GIBSON DAEMON STATUS (REMOTE)")
+		fmt.Fprintln(tw, "")
+		fmt.Fprintf(tw, "Remote Address:\t%s\n", remoteAddr)
+		fmt.Fprintf(tw, "Running:\ttrue\n")
+		fmt.Fprintf(tw, "PID:\t%d\n", daemonStatus.PID)
+		fmt.Fprintf(tw, "Uptime:\t%s\n", daemonStatus.Uptime)
+		fmt.Fprintln(tw, "")
+		fmt.Fprintln(tw, "ENDPOINTS")
+		fmt.Fprintf(tw, "gRPC Address:\t%s\n", daemonStatus.GRPCAddress)
+		fmt.Fprintln(tw, "")
+		fmt.Fprintln(tw, "REGISTRY")
+		fmt.Fprintf(tw, "Type:\t%s\n", daemonStatus.RegistryType)
+		fmt.Fprintf(tw, "Address:\t%s\n", daemonStatus.RegistryAddr)
+		fmt.Fprintf(tw, "Agents:\t%d\n", daemonStatus.AgentCount)
+
+		return nil
+	}
+
+	// Local daemon mode - use existing file-based status check
 	// Parse global flags
 	flags, err := ParseGlobalFlags(cmd)
 	if err != nil {
