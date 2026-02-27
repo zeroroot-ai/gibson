@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
+
+	"github.com/zero-day-ai/gibson/internal/mission"
 )
 
 // DaemonServer implements the DaemonServiceServer interface.
@@ -547,12 +550,81 @@ func (s *DaemonServer) Status(ctx context.Context, req *StatusRequest) (*StatusR
 func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStreamingServer[MissionEvent]) error {
 	s.logger.Info("mission run request received",
 		"workflow_path", req.WorkflowPath,
+		"workflow_yaml_size", len(req.WorkflowYaml),
 		"mission_id", req.MissionId,
 		"memory_continuity", req.MemoryContinuity,
 	)
 
+	// Determine workflow path to use
+	var workflowPath string
+	var cleanupTempFile func()
+
+	if req.WorkflowYaml != "" {
+		// Inline YAML provided - validate size (max 10MB)
+		const maxYamlSize = 10 * 1024 * 1024 // 10MB
+		if len(req.WorkflowYaml) > maxYamlSize {
+			s.logger.Error("workflow YAML exceeds size limit",
+				"size", len(req.WorkflowYaml),
+				"max_size", maxYamlSize,
+			)
+			return status_grpc.Errorf(codes.InvalidArgument,
+				"workflow YAML size (%d bytes) exceeds maximum allowed size (%d bytes)",
+				len(req.WorkflowYaml), maxYamlSize)
+		}
+
+		// Validate YAML by parsing it
+		if _, err := mission.ParseYAML([]byte(req.WorkflowYaml)); err != nil {
+			s.logger.Error("failed to parse workflow YAML", "error", err)
+			return status_grpc.Errorf(codes.InvalidArgument, "invalid workflow YAML: %v", err)
+		}
+
+		// Write to temporary file
+		tmpFile, err := os.CreateTemp("", "gibson-mission-*.yaml")
+		if err != nil {
+			s.logger.Error("failed to create temporary file", "error", err)
+			return status_grpc.Errorf(codes.Internal, "failed to create temporary file: %v", err)
+		}
+		workflowPath = tmpFile.Name()
+
+		// Write YAML content
+		if _, err := tmpFile.WriteString(req.WorkflowYaml); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
+			s.logger.Error("failed to write workflow YAML to temporary file", "error", err)
+			return status_grpc.Errorf(codes.Internal, "failed to write workflow YAML: %v", err)
+		}
+		if err := tmpFile.Close(); err != nil {
+			os.Remove(tmpFile.Name())
+			s.logger.Error("failed to close temporary file", "error", err)
+			return status_grpc.Errorf(codes.Internal, "failed to close temporary file: %v", err)
+		}
+
+		// Setup cleanup function to remove temp file when done
+		cleanupTempFile = func() {
+			if err := os.Remove(workflowPath); err != nil {
+				s.logger.Warn("failed to remove temporary workflow file",
+					"path", workflowPath,
+					"error", err,
+				)
+			} else {
+				s.logger.Debug("removed temporary workflow file", "path", workflowPath)
+			}
+		}
+		defer cleanupTempFile()
+
+		s.logger.Debug("wrote workflow YAML to temporary file", "path", workflowPath)
+	} else if req.WorkflowPath != "" {
+		// Use provided workflow path
+		workflowPath = req.WorkflowPath
+	} else {
+		// Neither provided - return error
+		s.logger.Error("neither workflow_path nor workflow_yaml provided")
+		return status_grpc.Errorf(codes.InvalidArgument,
+			"either workflow_path or workflow_yaml must be provided")
+	}
+
 	// Start mission and get event channel
-	eventChan, err := s.daemon.RunMission(stream.Context(), req.WorkflowPath, req.MissionId, req.Variables, req.MemoryContinuity)
+	eventChan, err := s.daemon.RunMission(stream.Context(), workflowPath, req.MissionId, req.Variables, req.MemoryContinuity)
 	if err != nil {
 		s.logger.Error("failed to start mission", "error", err)
 		return status_grpc.Errorf(codes.Internal, "failed to start mission: %v", err)

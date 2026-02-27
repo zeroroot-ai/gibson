@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -523,6 +524,54 @@ type MissionEvent struct {
 	Data      map[string]interface{}
 }
 
+// isRemoteDaemon checks if the client is connecting to a remote daemon.
+//
+// A daemon is considered remote if GIBSON_DAEMON_ADDRESS is set to a value
+// that is NOT:
+//   - Empty string
+//   - localhost (any port)
+//   - 127.0.0.1 (any port)
+//   - Unix socket (starts with unix:// or /)
+//
+// This function is used to determine whether to send workflow files inline
+// (remote daemon) or as file paths (local daemon with shared filesystem).
+//
+// Returns:
+//   - true: Connecting to a remote daemon, files should be sent inline
+//   - false: Connecting to local daemon or no env var set, use file paths
+//
+// Example:
+//
+//	if isRemoteDaemon() {
+//	    // Read local file and send content inline
+//	} else {
+//	    // Send file path (daemon has filesystem access)
+//	}
+func isRemoteDaemon() bool {
+	address := os.Getenv(EnvDaemonAddress)
+
+	// No env var set = local daemon
+	if address == "" {
+		return false
+	}
+
+	// Unix socket = local daemon (shared filesystem)
+	if strings.HasPrefix(address, "unix://") || strings.HasPrefix(address, "/") {
+		return false
+	}
+
+	// Check for localhost/127.0.0.1
+	if strings.HasPrefix(address, "localhost:") ||
+	   strings.HasPrefix(address, "127.0.0.1:") ||
+	   address == "localhost" ||
+	   address == "127.0.0.1" {
+		return false
+	}
+
+	// Everything else is considered remote
+	return true
+}
+
 // RunMission executes a mission workflow via the daemon and streams events.
 //
 // This method starts a mission execution on the daemon and returns a channel
@@ -531,6 +580,10 @@ type MissionEvent struct {
 //
 // The returned channel is closed when the mission completes or encounters an error.
 // Callers should read from the channel until it closes to get all mission events.
+//
+// When connecting to a remote daemon (detected via GIBSON_DAEMON_ADDRESS), this method
+// automatically reads the local workflow file and transmits its content inline. For
+// local daemon connections, it passes the file path directly.
 //
 // Parameters:
 //   - ctx: Context for the mission execution (cancellation stops the mission)
@@ -552,11 +605,33 @@ type MissionEvent struct {
 //	    fmt.Printf("[%s] %s: %s\n", event.Timestamp, event.Type, event.Message)
 //	}
 func (c *Client) RunMission(ctx context.Context, workflowPath string, memoryContinuity string) (<-chan MissionEvent, error) {
-	// Start streaming RPC
-	stream, err := c.daemon.RunMission(ctx, &api.RunMissionRequest{
-		WorkflowPath:     workflowPath,
+	// Build the request based on whether we're connecting to a remote daemon
+	req := &api.RunMissionRequest{
 		MemoryContinuity: memoryContinuity,
-	})
+	}
+
+	if isRemoteDaemon() {
+		// Remote daemon: read local file and send content inline
+		workflowContent, err := os.ReadFile(workflowPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read workflow file %s: %w", workflowPath, err)
+		}
+
+		// Validate file size (10MB limit as per proto spec)
+		const maxFileSize = 10 * 1024 * 1024 // 10MB
+		if len(workflowContent) > maxFileSize {
+			return nil, fmt.Errorf("workflow file %s is too large (%d bytes, max %d bytes)",
+				workflowPath, len(workflowContent), maxFileSize)
+		}
+
+		req.WorkflowYaml = string(workflowContent)
+	} else {
+		// Local daemon: send file path (shared filesystem)
+		req.WorkflowPath = workflowPath
+	}
+
+	// Start streaming RPC
+	stream, err := c.daemon.RunMission(ctx, req)
 	if err != nil {
 		// Wrap error with user-friendly message
 		if st, ok := status.FromError(err); ok {

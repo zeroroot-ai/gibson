@@ -137,6 +137,284 @@ gibson mission run recon.yaml --target my-app
 gibson finding list
 ```
 
+## Remote Mission Execution
+
+Gibson supports running missions on remote daemons, enabling CI/CD integration and distributed deployments. When connecting to a remote daemon, the CLI automatically transmits local mission files inline without requiring filesystem access on the remote host.
+
+### How It Works
+
+The CLI automatically detects whether you're connecting to a local or remote daemon based on the `GIBSON_DAEMON_ADDRESS` environment variable:
+
+- **Local Mode** (default): Mission file path is sent to the daemon, which reads the file from its local filesystem
+- **Remote Mode**: Mission file content is read locally and transmitted inline via gRPC (up to 10MB)
+
+### Usage
+
+Set the `GIBSON_DAEMON_ADDRESS` environment variable to point to a remote daemon:
+
+```bash
+# Connect to remote daemon
+export GIBSON_DAEMON_ADDRESS="remote-host.example.com:50002"
+
+# Run a local mission file on the remote daemon
+gibson mission run ./missions/recon.yaml --target my-app
+
+# The CLI automatically reads the local file and sends it to the remote daemon
+```
+
+### Local vs Remote Detection
+
+The daemon is considered **remote** when `GIBSON_DAEMON_ADDRESS` is set to any value that is NOT:
+- Empty (unset)
+- `localhost`
+- `127.0.0.1`
+- `::1`
+- `localhost:*` (any port)
+- `127.0.0.1:*` (any port)
+- `::1:*` (any port)
+
+All other addresses (hostnames, IPs, FQDNs) trigger remote mode with inline YAML transmission.
+
+### CI/CD Pipeline Integration
+
+#### GitLab CI Example
+
+```yaml
+# .gitlab-ci.yml
+stages:
+  - security-test
+
+gibson-scan:
+  stage: security-test
+  image: ghcr.io/zero-day-ai/gibson:latest
+  variables:
+    GIBSON_DAEMON_ADDRESS: "gibson.internal.example.com:50002"
+    # Optional: Set LLM provider keys
+    ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+  script:
+    # Verify daemon connectivity
+    - gibson daemon status
+
+    # Add target (or use pre-configured target)
+    - gibson target add ${CI_PROJECT_NAME} --type http_api --url ${CI_ENVIRONMENT_URL}
+
+    # Run security mission
+    - gibson mission run ./gibson/security-scan.yaml --target ${CI_PROJECT_NAME}
+
+    # Export findings
+    - gibson finding export --format json > findings.json
+
+    # Fail pipeline if critical findings exist
+    - |
+      CRITICAL_COUNT=$(jq '[.[] | select(.severity == "critical")] | length' findings.json)
+      if [ "$CRITICAL_COUNT" -gt 0 ]; then
+        echo "Found $CRITICAL_COUNT critical findings!"
+        exit 1
+      fi
+  artifacts:
+    reports:
+      # Export findings as test report
+      junit: findings.json
+    paths:
+      - findings.json
+    expire_in: 30 days
+  only:
+    - main
+    - merge_requests
+```
+
+#### GitHub Actions Example
+
+```yaml
+# .github/workflows/security-scan.yml
+name: Gibson Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run daily security scans
+    - cron: '0 2 * * *'
+
+jobs:
+  security-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Gibson security scan
+        env:
+          GIBSON_DAEMON_ADDRESS: gibson.internal.example.com:50002
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Install Gibson CLI (if not in container)
+          # curl -L https://github.com/zero-day-ai/gibson/releases/latest/download/gibson-linux-amd64 -o gibson
+          # chmod +x gibson
+
+          # Or use pre-built container
+          docker run --rm \
+            -v $(pwd)/missions:/missions \
+            -e GIBSON_DAEMON_ADDRESS="${GIBSON_DAEMON_ADDRESS}" \
+            -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
+            ghcr.io/zero-day-ai/gibson:latest \
+            mission run /missions/security-scan.yaml
+
+      - name: Upload findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-findings
+          path: findings.json
+
+      - name: Check for critical findings
+        run: |
+          CRITICAL_COUNT=$(jq '[.[] | select(.severity == "critical")] | length' findings.json || echo 0)
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "::error::Found $CRITICAL_COUNT critical security findings"
+            exit 1
+          fi
+```
+
+#### Jenkins Pipeline Example
+
+```groovy
+// Jenkinsfile
+pipeline {
+    agent any
+
+    environment {
+        GIBSON_DAEMON_ADDRESS = 'gibson.internal.example.com:50002'
+        ANTHROPIC_API_KEY = credentials('anthropic-api-key')
+    }
+
+    stages {
+        stage('Security Scan') {
+            steps {
+                script {
+                    // Run Gibson mission
+                    sh '''
+                        gibson mission run ./missions/api-security.yaml \
+                          --target ${JOB_NAME} \
+                          --var "base_url=${BUILD_URL}"
+                    '''
+
+                    // Export and analyze findings
+                    sh 'gibson finding export --format json > findings.json'
+
+                    def findings = readJSON file: 'findings.json'
+                    def criticalCount = findings.count { it.severity == 'critical' }
+
+                    if (criticalCount > 0) {
+                        error("Found ${criticalCount} critical security findings!")
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'findings.json', fingerprint: true
+            publishHTML([
+                reportDir: '.',
+                reportFiles: 'findings.json',
+                reportName: 'Security Findings'
+            ])
+        }
+    }
+}
+```
+
+### Troubleshooting
+
+#### Connection Refused
+
+```bash
+Error: failed to connect to remote daemon at remote-host:50002
+```
+
+**Solutions:**
+1. Verify the daemon is running: `ssh user@remote-host 'gibson daemon status'`
+2. Check network connectivity: `telnet remote-host 50002` or `nc -zv remote-host 50002`
+3. Verify firewall rules allow traffic on port 50002
+4. Ensure the daemon gRPC address is configured correctly in `~/.gibson/config.yaml`:
+   ```yaml
+   daemon:
+     grpc_address: 0.0.0.0:50002  # Listen on all interfaces for remote connections
+   ```
+
+#### Mission File Size Limit
+
+```bash
+Error: mission file exceeds 10MB limit
+```
+
+**Solutions:**
+1. Reduce mission file size by splitting into smaller missions
+2. Remove unnecessary comments or documentation from YAML
+3. Extract large data structures into separate configuration files
+4. For very large missions, deploy the mission file directly on the remote daemon filesystem
+
+#### File Not Found
+
+```bash
+Error: failed to read mission file: no such file or directory
+```
+
+**Solutions:**
+1. Verify the file path is correct: `ls -l ./missions/my-mission.yaml`
+2. Use absolute paths if running from different working directories
+3. Check file permissions: `chmod 644 missions/my-mission.yaml`
+
+#### Invalid YAML
+
+```bash
+Error: mission YAML parse error: yaml: line 45: could not find expected ':'
+```
+
+**Solutions:**
+1. Validate YAML syntax: `gibson mission validate ./missions/my-mission.yaml`
+2. Use a YAML linter: `yamllint missions/my-mission.yaml`
+3. Check for tabs vs spaces (YAML requires spaces)
+4. Ensure proper indentation (2 spaces recommended)
+
+#### Daemon Version Mismatch
+
+If connecting to an older daemon that doesn't support inline YAML transmission:
+
+```bash
+Warning: Remote daemon may not support inline YAML transmission
+Error: workflow file not found on daemon filesystem
+```
+
+**Solutions:**
+1. Update the remote daemon to the latest version
+2. Manually copy the mission file to the remote daemon: `scp mission.yaml user@remote:/tmp/`
+3. Use the file path on the remote filesystem: `gibson mission run /tmp/mission.yaml`
+
+### Security Considerations
+
+1. **TLS Encryption**: Enable TLS for remote connections to protect mission content in transit:
+   ```yaml
+   # config.yaml
+   daemon:
+     grpc_address: 0.0.0.0:50002
+     tls:
+       enabled: true
+       cert_file: /path/to/cert.pem
+       key_file: /path/to/key.pem
+   ```
+
+2. **Authentication**: Use network-level authentication (VPN, private networks, mTLS) for remote daemon access
+
+3. **Size Limits**: The 10MB limit prevents excessive memory usage and potential DoS attacks
+
+4. **Input Validation**: Mission YAML is validated before execution to prevent injection attacks
+
 ## CLI Reference
 
 ### Daemon

@@ -10,7 +10,6 @@ import (
 	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	_ "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -529,8 +528,12 @@ type RunMissionRequest struct {
 	// memory_continuity defines how agent memory is shared across mission runs
 	// Valid values: "isolated" (default), "inherit", "shared"
 	MemoryContinuity string `protobuf:"bytes,4,opt,name=memory_continuity,json=memoryContinuity,proto3" json:"memory_continuity,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// workflow_yaml contains the inline workflow YAML content.
+	// When present, this takes precedence over workflow_path.
+	// Maximum size is 10MB.
+	WorkflowYaml  string `protobuf:"bytes,5,opt,name=workflow_yaml,json=workflowYaml,proto3" json:"workflow_yaml,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunMissionRequest) Reset() {
@@ -587,6 +590,13 @@ func (x *RunMissionRequest) GetVariables() map[string]string {
 func (x *RunMissionRequest) GetMemoryContinuity() string {
 	if x != nil {
 		return x.MemoryContinuity
+	}
+	return ""
+}
+
+func (x *RunMissionRequest) GetWorkflowYaml() string {
+	if x != nil {
+		return x.WorkflowYaml
 	}
 	return ""
 }
@@ -7132,7 +7142,7 @@ var File_daemon_proto protoreflect.FileDescriptor
 
 const file_daemon_proto_rawDesc = "" +
 	"\n" +
-	"\fdaemon.proto\x12\x10gibson.daemon.v1\x1a\fcommon.proto\x1a\x1bgoogle/protobuf/empty.proto\"T\n" +
+	"\fdaemon.proto\x12\x10gibson.daemon.v1\x1a\fcommon.proto\"T\n" +
 	"\x0eConnectRequest\x12%\n" +
 	"\x0eclient_version\x18\x01 \x01(\tR\rclientVersion\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\"z\n" +
@@ -7159,13 +7169,14 @@ const file_daemon_proto_rawDesc = "" +
 	"agentCount\x12#\n" +
 	"\rmission_count\x18\n" +
 	" \x01(\x05R\fmissionCount\x120\n" +
-	"\x14active_mission_count\x18\v \x01(\x05R\x12activeMissionCount\"\x94\x02\n" +
+	"\x14active_mission_count\x18\v \x01(\x05R\x12activeMissionCount\"\xb9\x02\n" +
 	"\x11RunMissionRequest\x12#\n" +
 	"\rworkflow_path\x18\x01 \x01(\tR\fworkflowPath\x12\x1d\n" +
 	"\n" +
 	"mission_id\x18\x02 \x01(\tR\tmissionId\x12P\n" +
 	"\tvariables\x18\x03 \x03(\v22.gibson.daemon.v1.RunMissionRequest.VariablesEntryR\tvariables\x12+\n" +
-	"\x11memory_continuity\x18\x04 \x01(\tR\x10memoryContinuity\x1a<\n" +
+	"\x11memory_continuity\x18\x04 \x01(\tR\x10memoryContinuity\x12#\n" +
+	"\rworkflow_yaml\x18\x05 \x01(\tR\fworkflowYaml\x1a<\n" +
 	"\x0eVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9b\x02\n" +

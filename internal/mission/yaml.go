@@ -121,6 +121,37 @@ func LoadFromReader(reader io.Reader) (*MissionConfig, error) {
 		return nil, fmt.Errorf("failed to read content: %w", err)
 	}
 
+	// Use ParseYAML to parse the bytes
+	return ParseYAML(data)
+}
+
+// ParseYAML parses a mission configuration from raw YAML bytes.
+// This function is useful for parsing mission YAML from sources other than files,
+// such as network requests or embedded data.
+//
+// The parser performs:
+// - Environment variable expansion using ${VAR} syntax
+// - Strict YAML parsing (fails on unknown fields)
+// - Comprehensive validation of required fields and constraints
+//
+// Parameters:
+//   - data: Raw YAML bytes containing the mission configuration
+//
+// Returns:
+//   - *MissionConfig: The parsed and validated mission configuration
+//   - error: Detailed error with validation messages, or nil on success
+//
+// Example usage:
+//
+//	yamlData := []byte(`
+//	name: Example Mission
+//	target:
+//	  reference: my-target
+//	workflow:
+//	  reference: my-workflow
+//	`)
+//	config, err := ParseYAML(yamlData)
+func ParseYAML(data []byte) (*MissionConfig, error) {
 	// Expand environment variables
 	content := expandEnvVars(string(data))
 

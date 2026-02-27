@@ -231,6 +231,11 @@ message RunMissionRequest {
   // memory_continuity defines how agent memory is shared across mission runs
   // Valid values: "isolated" (default), "inherit", "shared"
   string memory_continuity = 4;
+
+  // workflow_yaml contains the inline workflow YAML content.
+  // When present, this takes precedence over workflow_path.
+  // Maximum size is 10MB.
+  string workflow_yaml = 5;
 }
 
 // MissionEvent represents a mission execution event.
