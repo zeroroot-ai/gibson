@@ -874,6 +874,42 @@ Gibson automatically detects LLM providers from environment variables:
 | `GOOGLE_API_KEY` | Gemini models |
 | `OLLAMA_URL` | Local Ollama (also tries localhost:11434) |
 
+## Orchestrator Decision Actions
+
+The mission orchestrator uses an LLM-powered Observe → Think → Act loop to make intelligent decisions about workflow execution. The following actions are available:
+
+| Action | Description | When to Use |
+|--------|-------------|-------------|
+| `execute_agent` | Run the specified workflow node | Node is ready, dependencies satisfied |
+| `skip_agent` | Skip execution of a workflow node | Node no longer needed based on findings |
+| `modify_params` | Change parameters for a target node | Discoveries suggest different configuration |
+| `retry` | Retry a failed node | Transient failure that can be overcome |
+| `spawn_agent` | Dynamically add a new node | Unexpected attack surface discovered |
+| `complete` | Mark workflow as complete | Mission objective achieved |
+| `request_approval` | Pause for human approval | Before exploits, credential testing, data extraction |
+| `abort` | Emergency stop the mission | Scope violation, safety concern detected |
+| `escalate` | Escalate to human or specialist | Zero-day discovery, unclear authorization |
+| `rollback` | Revert to previous checkpoint | Strategy triggered defenses, need alternative |
+| `reflect` | Self-evaluate current strategy | Multiple failures, mid-mission assessment |
+| `recall` | Query memory for context | Leverage prior findings for similar targets |
+
+### Safety Actions
+
+The orchestrator includes built-in safety mechanisms:
+
+- **request_approval**: Blocks execution until human approves sensitive operations (exploits, injection tests)
+- **abort**: Immediately terminates mission on scope violations or unintended access
+- **escalate**: Routes critical findings (potential zero-days) to security team
+
+### Memory Actions
+
+The orchestrator can leverage the three-tier memory system:
+
+- **reflect**: Triggers a separate LLM evaluation of strategy effectiveness
+- **recall**: Queries mission memory (SQLite FTS5) or long-term memory (Qdrant vectors) for relevant context
+
+See `internal/orchestrator/prompts.go` for the full system prompt and decision schema.
+
 ## Event System
 
 Comprehensive event types for observability with OpenTelemetry trace correlation:
