@@ -119,6 +119,51 @@ const (
 	EventAttackFailed    EventType = "attack.failed"
 )
 
+// Approval Events
+// These events track human approval requests for sensitive operations.
+const (
+	EventApprovalRequested EventType = "approval.requested"
+	EventApprovalGranted   EventType = "approval.granted"
+	EventApprovalRejected  EventType = "approval.rejected"
+	EventApprovalTimeout   EventType = "approval.timeout"
+)
+
+// Abort Events
+// These events track mission abort and cleanup operations.
+const (
+	EventMissionAborted  EventType = "mission.aborted"
+	EventCleanupRequired EventType = "mission.cleanup_required"
+)
+
+// Escalation Events
+// These events track escalations to humans or specialist agents.
+const (
+	EventEscalationCreated      EventType = "escalation.created"
+	EventEscalationAcknowledged EventType = "escalation.acknowledged"
+)
+
+// Rollback Events
+// These events track checkpoint creation and workflow rollback.
+const (
+	EventCheckpointCreated EventType = "checkpoint.created"
+	EventRollbackStarted   EventType = "rollback.started"
+	EventRollbackCompleted EventType = "rollback.completed"
+)
+
+// Reflection Events
+// These events track self-evaluation LLM calls.
+const (
+	EventReflectionStarted   EventType = "reflection.started"
+	EventReflectionCompleted EventType = "reflection.completed"
+)
+
+// Recall Events
+// These events track memory query operations.
+const (
+	EventRecallStarted   EventType = "recall.started"
+	EventRecallCompleted EventType = "recall.completed"
+)
+
 // String returns the string representation of the event type.
 func (t EventType) String() string {
 	return string(t)

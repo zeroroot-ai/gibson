@@ -18,7 +18,9 @@ import (
 type Observer struct {
 	missionQueries   *queries.MissionQueries
 	executionQueries *queries.ExecutionQueries
-	inventoryBuilder *InventoryBuilder // Optional - provides component awareness
+	inventoryBuilder *InventoryBuilder  // Optional - provides component awareness
+	approvalManager  ApprovalManager    // Optional - provides pending approvals
+	reflectionEngine ReflectionEngine   // Optional - provides reflection insights
 }
 
 // ObserverOption is a functional option for configuring Observer.
@@ -32,6 +34,26 @@ type ObserverOption func(*Observer)
 func WithInventoryBuilder(builder *InventoryBuilder) ObserverOption {
 	return func(o *Observer) {
 		o.inventoryBuilder = builder
+	}
+}
+
+// WithObserverApprovalManager configures the Observer to include pending approvals
+// in observations. This alerts the orchestrator to operations awaiting human review.
+//
+// If not provided, observations will not include pending approvals.
+func WithObserverApprovalManager(am ApprovalManager) ObserverOption {
+	return func(o *Observer) {
+		o.approvalManager = am
+	}
+}
+
+// WithObserverReflectionEngine configures the Observer to include recent reflection
+// insights in observations. This helps the orchestrator learn from past self-evaluations.
+//
+// If not provided, observations will not include reflection insights.
+func WithObserverReflectionEngine(re ReflectionEngine) ObserverOption {
+	return func(o *Observer) {
+		o.reflectionEngine = re
 	}
 }
 
@@ -57,6 +79,24 @@ func NewObserver(missionQueries *queries.MissionQueries, executionQueries *queri
 	}
 
 	return o
+}
+
+// ReflectionInsightSummary is a concise representation of a reflection insight
+// for inclusion in observations. This provides recent self-evaluation context.
+type ReflectionInsightSummary struct {
+	CreatedAt  time.Time `json:"created_at"`
+	Scope      string    `json:"scope"`
+	Assessment string    `json:"assessment"`
+	Confidence float64   `json:"confidence"`
+}
+
+// ApprovalSummary is a concise representation of a pending approval request
+// for inclusion in observations. This alerts the orchestrator to pending approvals.
+type ApprovalSummary struct {
+	ID          string    `json:"id"`
+	NodeID      string    `json:"node_id"`
+	Context     string    `json:"context"`
+	RequestedAt time.Time `json:"requested_at"`
 }
 
 // ObservationState contains all context needed for the LLM to make a decision.
@@ -97,6 +137,18 @@ type ObservationState struct {
 	// This provides agents with awareness of available attack payloads
 	// Optional - only populated when payload store is configured
 	PayloadContext string `json:"payload_context,omitempty"`
+
+	// RecalledContext contains formatted memory query results from recall action
+	// This is injected by the recall handler when inject_into_context is true
+	RecalledContext string `json:"recalled_context,omitempty"`
+
+	// ReflectionInsights contains recent reflection insights for decision context
+	// This helps the orchestrator learn from past self-evaluations
+	ReflectionInsights []ReflectionInsightSummary `json:"reflection_insights,omitempty"`
+
+	// PendingApprovals contains pending approval requests for this mission
+	// This alerts the orchestrator to operations awaiting human review
+	PendingApprovals []ApprovalSummary `json:"pending_approvals,omitempty"`
 
 	// Timestamp when this observation was captured
 	ObservedAt time.Time `json:"observed_at"`
@@ -330,6 +382,52 @@ func (o *Observer) Observe(ctx context.Context, missionID string) (*ObservationS
 			state.ComponentInventory = inv
 		}
 	}
+
+	// 7. Query pending approvals if approval manager is configured
+	if o.approvalManager != nil {
+		approvals, err := o.approvalManager.GetPendingApprovals(ctx, missionID)
+		if err != nil {
+			// Log warning but continue - approvals are optional
+			slog.Warn("failed to query pending approvals, continuing without them",
+				"error", err,
+				"mission_id", missionID)
+		} else if len(approvals) > 0 {
+			// Convert to summary format
+			state.PendingApprovals = make([]ApprovalSummary, 0, len(approvals))
+			for _, approval := range approvals {
+				state.PendingApprovals = append(state.PendingApprovals, ApprovalSummary{
+					ID:          approval.ID,
+					NodeID:      approval.NodeID,
+					Context:     approval.Context,
+					RequestedAt: approval.RequestedAt,
+				})
+			}
+		}
+	}
+
+	// 8. Query recent reflection insights if reflection engine is configured
+	if o.reflectionEngine != nil {
+		insights, err := o.reflectionEngine.GetRecentInsights(ctx, missionID, 3)
+		if err != nil {
+			// Log warning but continue - reflection insights are optional
+			slog.Warn("failed to query reflection insights, continuing without them",
+				"error", err,
+				"mission_id", missionID)
+		} else if len(insights) > 0 {
+			// Convert to summary format
+			state.ReflectionInsights = make([]ReflectionInsightSummary, 0, len(insights))
+			for _, insight := range insights {
+				state.ReflectionInsights = append(state.ReflectionInsights, ReflectionInsightSummary{
+					CreatedAt:  insight.CreatedAt,
+					Scope:      string(insight.Scope),
+					Assessment: insight.Assessment,
+					Confidence: 0.0, // ReflectionInsight doesn't have confidence, default to 0.0
+				})
+			}
+		}
+	}
+
+	// Note: RecalledContext is injected by the recall handler via ActionResult metadata, not queried here
 
 	return state, nil
 }

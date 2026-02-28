@@ -516,6 +516,12 @@ func TestBuildDecisionSchema(t *testing.T) {
 			"retry",
 			"spawn_agent",
 			"complete",
+			"request_approval",
+			"abort",
+			"escalate",
+			"rollback",
+			"reflect",
+			"recall",
 		}
 
 		if len(enums) != len(expectedActions) {

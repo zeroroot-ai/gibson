@@ -29,6 +29,24 @@ const (
 
 	// ActionComplete marks the workflow as complete and stops orchestration
 	ActionComplete DecisionAction = "complete"
+
+	// ActionRequestApproval pauses workflow for human approval before sensitive operations
+	ActionRequestApproval DecisionAction = "request_approval"
+
+	// ActionAbort immediately stops execution due to safety violation
+	ActionAbort DecisionAction = "abort"
+
+	// ActionEscalate formally escalates to humans or specialist agents
+	ActionEscalate DecisionAction = "escalate"
+
+	// ActionRollback reverts workflow state to a previous checkpoint
+	ActionRollback DecisionAction = "rollback"
+
+	// ActionReflect pauses for self-evaluation of current strategy
+	ActionReflect DecisionAction = "reflect"
+
+	// ActionRecall queries memory for relevant prior context
+	ActionRecall DecisionAction = "recall"
 )
 
 // String returns the string representation of a DecisionAction
@@ -40,7 +58,9 @@ func (d DecisionAction) String() string {
 func (d DecisionAction) IsValid() bool {
 	switch d {
 	case ActionExecuteAgent, ActionSkipAgent, ActionModifyParams,
-		ActionRetry, ActionSpawnAgent, ActionComplete:
+		ActionRetry, ActionSpawnAgent, ActionComplete,
+		ActionRequestApproval, ActionAbort, ActionEscalate,
+		ActionRollback, ActionReflect, ActionRecall:
 		return true
 	default:
 		return false
@@ -49,7 +69,7 @@ func (d DecisionAction) IsValid() bool {
 
 // IsTerminal returns true if this action ends the orchestration loop
 func (d DecisionAction) IsTerminal() bool {
-	return d == ActionComplete
+	return d == ActionComplete || d == ActionAbort
 }
 
 // Decision represents the orchestrator's reasoning output from the LLM.
@@ -80,6 +100,74 @@ type Decision struct {
 	// StopReason explains why the workflow is complete
 	// Required for: complete action
 	StopReason string `json:"stop_reason,omitempty"`
+
+	// ApprovalContext describes what needs approval
+	// Required for: request_approval action
+	ApprovalContext string `json:"approval_context,omitempty"`
+
+	// ApprovalTimeout is the duration string for approval timeout (e.g., "24h", "1h30m")
+	// Used with: request_approval action
+	ApprovalTimeout string `json:"approval_timeout,omitempty"`
+
+	// TimeoutAction specifies what happens on approval timeout: "reject" or "skip"
+	// Used with: request_approval action
+	TimeoutAction string `json:"timeout_action,omitempty"`
+
+	// AbortReason explains why the mission is being aborted
+	// Required for: abort action
+	AbortReason string `json:"abort_reason,omitempty"`
+
+	// AbortSeverity indicates the severity level: "critical", "high", or "medium"
+	// Required for: abort action
+	AbortSeverity string `json:"abort_severity,omitempty"`
+
+	// CleanupRequired indicates if cleanup is needed after abort
+	// Used with: abort action
+	CleanupRequired bool `json:"cleanup_required,omitempty"`
+
+	// EscalationLevel specifies the escalation target: "human", "senior_agent", or "specialist"
+	// Required for: escalate action
+	EscalationLevel string `json:"escalation_level,omitempty"`
+
+	// EscalationUrgency indicates urgency: "critical", "high", or "normal"
+	// Required for: escalate action
+	EscalationUrgency string `json:"escalation_urgency,omitempty"`
+
+	// EscalationContext provides context for the escalation
+	// Required for: escalate action
+	EscalationContext string `json:"escalation_context,omitempty"`
+
+	// CheckpointID is the ID of an explicit checkpoint to restore
+	// Used with: rollback action (either this or RollbackToNode required)
+	CheckpointID string `json:"checkpoint_id,omitempty"`
+
+	// RollbackToNode specifies a node to rollback to (reverts to before this node executed)
+	// Used with: rollback action (either this or CheckpointID required)
+	RollbackToNode string `json:"rollback_to_node,omitempty"`
+
+	// ReflectionScope specifies the scope: "mission", "recent_decisions", or "specific_node"
+	// Required for: reflect action
+	ReflectionScope string `json:"reflection_scope,omitempty"`
+
+	// ReflectionPrompt provides guidance for the reflection
+	// Used with: reflect action
+	ReflectionPrompt string `json:"reflection_prompt,omitempty"`
+
+	// RecallQuery is the query string for memory search
+	// Required for: recall action
+	RecallQuery string `json:"recall_query,omitempty"`
+
+	// RecallMemoryTier specifies which tier to query: "mission", "long_term", or "both"
+	// Required for: recall action
+	RecallMemoryTier string `json:"recall_memory_tier,omitempty"`
+
+	// RecallFilters provides additional filters for memory search (e.g., target_ip, time_range)
+	// Used with: recall action
+	RecallFilters map[string]string `json:"recall_filters,omitempty"`
+
+	// InjectIntoContext indicates if recalled information should persist in subsequent observations
+	// Used with: recall action
+	InjectIntoContext bool `json:"inject_into_context,omitempty"`
 }
 
 // SpawnNodeConfig contains configuration for dynamically spawning a new workflow node
@@ -145,6 +233,77 @@ func (d *Decision) Validate() error {
 	case ActionComplete:
 		if strings.TrimSpace(d.StopReason) == "" {
 			return fmt.Errorf("stop_reason is required for complete action")
+		}
+
+	case ActionRequestApproval:
+		if strings.TrimSpace(d.TargetNodeID) == "" {
+			return fmt.Errorf("target_node_id is required for request_approval action")
+		}
+		if strings.TrimSpace(d.ApprovalContext) == "" {
+			return fmt.Errorf("approval_context is required for request_approval action")
+		}
+
+	case ActionAbort:
+		if strings.TrimSpace(d.AbortReason) == "" {
+			return fmt.Errorf("abort_reason is required for abort action")
+		}
+		if strings.TrimSpace(d.AbortSeverity) == "" {
+			return fmt.Errorf("abort_severity is required for abort action")
+		}
+		// Validate abort_severity enum values
+		validAbortSeverities := map[string]bool{"critical": true, "high": true, "medium": true}
+		if !validAbortSeverities[d.AbortSeverity] {
+			return fmt.Errorf("abort_severity must be one of: critical, high, medium; got: %s", d.AbortSeverity)
+		}
+
+	case ActionEscalate:
+		if strings.TrimSpace(d.EscalationLevel) == "" {
+			return fmt.Errorf("escalation_level is required for escalate action")
+		}
+		if strings.TrimSpace(d.EscalationUrgency) == "" {
+			return fmt.Errorf("escalation_urgency is required for escalate action")
+		}
+		if strings.TrimSpace(d.EscalationContext) == "" {
+			return fmt.Errorf("escalation_context is required for escalate action")
+		}
+		// Validate escalation_level enum values
+		validEscalationLevels := map[string]bool{"human": true, "senior_agent": true, "specialist": true}
+		if !validEscalationLevels[d.EscalationLevel] {
+			return fmt.Errorf("escalation_level must be one of: human, senior_agent, specialist; got: %s", d.EscalationLevel)
+		}
+		// Validate escalation_urgency enum values
+		validEscalationUrgencies := map[string]bool{"critical": true, "high": true, "normal": true}
+		if !validEscalationUrgencies[d.EscalationUrgency] {
+			return fmt.Errorf("escalation_urgency must be one of: critical, high, normal; got: %s", d.EscalationUrgency)
+		}
+
+	case ActionRollback:
+		// Require at least one of checkpoint_id or rollback_to_node
+		if strings.TrimSpace(d.CheckpointID) == "" && strings.TrimSpace(d.RollbackToNode) == "" {
+			return fmt.Errorf("either checkpoint_id or rollback_to_node is required for rollback action")
+		}
+
+	case ActionReflect:
+		if strings.TrimSpace(d.ReflectionScope) == "" {
+			return fmt.Errorf("reflection_scope is required for reflect action")
+		}
+		// Validate reflection_scope enum values
+		validReflectionScopes := map[string]bool{"mission": true, "recent_decisions": true, "specific_node": true}
+		if !validReflectionScopes[d.ReflectionScope] {
+			return fmt.Errorf("reflection_scope must be one of: mission, recent_decisions, specific_node; got: %s", d.ReflectionScope)
+		}
+
+	case ActionRecall:
+		if strings.TrimSpace(d.RecallQuery) == "" {
+			return fmt.Errorf("recall_query is required for recall action")
+		}
+		if strings.TrimSpace(d.RecallMemoryTier) == "" {
+			return fmt.Errorf("recall_memory_tier is required for recall action")
+		}
+		// Validate recall_memory_tier enum values
+		validRecallMemoryTiers := map[string]bool{"mission": true, "long_term": true, "both": true}
+		if !validRecallMemoryTiers[d.RecallMemoryTier] {
+			return fmt.Errorf("recall_memory_tier must be one of: mission, long_term, both; got: %s", d.RecallMemoryTier)
 		}
 	}
 

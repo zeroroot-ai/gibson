@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // SystemPrompt establishes the orchestrator's role and capabilities.
@@ -61,6 +62,59 @@ Respond with a JSON Decision object. Always include reasoning.
    - Use when the mission objective is achieved
    - Requires: stop_reason
    - Consider: Are all critical paths explored?
+
+7. **request_approval** - Pause and request human approval before sensitive operations
+   - Use before destructive actions (exploits, injection tests)
+   - Requires: target_node_id, approval_context
+   - Optional: approval_timeout (default 24h), timeout_action ("reject" or "skip")
+   - BLOCKING: Orchestrator pauses until approval received
+   - Example: Request approval before SQL injection on production database
+
+8. **abort** - Emergency stop the mission due to safety violation
+   - Use when scope violation detected or unintended access occurs
+   - Requires: abort_reason, abort_severity (critical/high/medium)
+   - Optional: cleanup_required (triggers cleanup event)
+   - TERMINAL: Immediately stops orchestration
+   - Example: Abort when detecting out-of-scope system access
+
+9. **escalate** - Formally escalate to human or specialist agent
+   - Use when discovery exceeds agent capability or requires expert review
+   - Requires: escalation_level (human/senior_agent/specialist), escalation_urgency (critical/high/normal), escalation_context
+   - If level=human and urgency=critical: BLOCKING until acknowledged
+   - If level=senior_agent/specialist: Spawns agent with escalation metadata
+   - Example: Escalate potential zero-day to security team
+
+10. **rollback** - Revert workflow to a previous checkpoint
+    - Use when current approach triggered defenses or failed
+    - Requires: checkpoint_id OR rollback_to_node (revert to before that node)
+    - Resets rolled-back nodes to "pending" status
+    - NON-TERMINAL: Continues orchestration from checkpoint state
+    - Example: Rollback after aggressive scan triggered IDS
+
+11. **reflect** - Pause for self-evaluation of current strategy
+    - Use periodically or after failures to assess approach
+    - Requires: reflection_scope (mission/recent_decisions/specific_node)
+    - Optional: reflection_prompt (guidance for evaluation)
+    - DOES NOT count against iteration limit
+    - Insights injected into subsequent observation prompts
+    - Example: Reflect after 3 consecutive failures
+
+12. **recall** - Query memory for relevant prior context
+    - Use before major decisions to leverage prior discoveries
+    - Requires: recall_query, recall_memory_tier (mission/long_term/both)
+    - Optional: recall_filters (target_ip, time_range), inject_into_context
+    - DOES NOT count against iteration limit
+    - Results added to observation under "## Recalled Context"
+    - Example: Recall previous findings for target 192.168.1.0/24
+
+## Safety Guidelines
+
+- **Always request_approval** before: exploit attempts, credential testing, data extraction
+- **Always abort** when: out-of-scope access detected, unintended system modification
+- **Consider escalate** when: potential zero-day, unusual findings, unclear authorization
+- **Consider rollback** when: approach triggered defenses, need to try alternative strategy
+- **Consider reflect** when: multiple failures, strategy seems ineffective, mid-mission checkpoint
+- **Consider recall** when: targeting previously scanned systems, similar mission patterns
 
 ## Available Components Guidelines
 
@@ -144,6 +198,41 @@ func BuildObservationPrompt(state *ObservationState) string {
 	// Payload context (if available) - show available attack payloads
 	if state.PayloadContext != "" {
 		sb.WriteString(state.PayloadContext)
+		sb.WriteString("\n")
+	}
+
+	// Recalled context (if available) - show memory query results
+	if state.RecalledContext != "" {
+		sb.WriteString("## Recalled Context\n")
+		sb.WriteString(state.RecalledContext)
+		sb.WriteString("\n")
+	}
+
+	// Reflection insights (if available) - show recent self-evaluations
+	if len(state.ReflectionInsights) > 0 {
+		sb.WriteString("## Recent Reflection Insights\n")
+		sb.WriteString("Recent self-evaluations to inform current decisions:\n\n")
+		for _, insight := range state.ReflectionInsights {
+			sb.WriteString(fmt.Sprintf("- **%s** (scope: %s, confidence: %.2f)\n",
+				insight.CreatedAt.Format(time.RFC3339),
+				insight.Scope,
+				insight.Confidence))
+			sb.WriteString(fmt.Sprintf("  Assessment: %s\n", insight.Assessment))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Pending approvals (if any) - show operations awaiting human approval
+	if len(state.PendingApprovals) > 0 {
+		sb.WriteString("## Pending Approvals\n")
+		sb.WriteString("The following operations are awaiting human approval:\n\n")
+		for _, approval := range state.PendingApprovals {
+			sb.WriteString(fmt.Sprintf("- **%s** (requested: %s)\n",
+				approval.ID,
+				approval.RequestedAt.Format(time.RFC3339)))
+			sb.WriteString(fmt.Sprintf("  Node: %s\n", approval.NodeID))
+			sb.WriteString(fmt.Sprintf("  Context: %s\n", approval.Context))
+		}
 		sb.WriteString("\n")
 	}
 
@@ -423,6 +512,12 @@ func BuildDecisionSchema() string {
 					"retry",
 					"spawn_agent",
 					"complete",
+					"request_approval",
+					"abort",
+					"escalate",
+					"rollback",
+					"reflect",
+					"recall",
 				},
 				"description": "The action to take. Must be one of the predefined actions.",
 			},
@@ -480,6 +575,102 @@ func BuildDecisionSchema() string {
 					"Should explain that the objective was achieved.",
 				"minLength": 20,
 			},
+			"approval_context": map[string]interface{}{
+				"type": "string",
+				"description": "Human-readable description of what needs approval and why. " +
+					"Required for: request_approval action.",
+				"minLength": 20,
+			},
+			"approval_timeout": map[string]interface{}{
+				"type": "string",
+				"description": "Timeout duration for approval (e.g., '24h', '1h'). " +
+					"Optional for: request_approval action. Defaults to 24h.",
+			},
+			"timeout_action": map[string]interface{}{
+				"type": "string",
+				"enum": []string{"reject", "skip"},
+				"description": "Action to take when approval times out. " +
+					"Optional for: request_approval action. Must be 'reject' or 'skip'.",
+			},
+			"abort_reason": map[string]interface{}{
+				"type": "string",
+				"description": "Explanation of why the mission is being aborted. " +
+					"Required for: abort action.",
+				"minLength": 20,
+			},
+			"abort_severity": map[string]interface{}{
+				"type": "string",
+				"enum": []string{"critical", "high", "medium"},
+				"description": "Severity level of the abort condition. " +
+					"Required for: abort action. Must be 'critical', 'high', or 'medium'.",
+			},
+			"cleanup_required": map[string]interface{}{
+				"type": "boolean",
+				"description": "Whether cleanup operations are needed after abort. " +
+					"Optional for: abort action.",
+			},
+			"escalation_level": map[string]interface{}{
+				"type": "string",
+				"enum": []string{"human", "senior_agent", "specialist"},
+				"description": "Who to escalate to. " +
+					"Required for: escalate action. Must be 'human', 'senior_agent', or 'specialist'.",
+			},
+			"escalation_urgency": map[string]interface{}{
+				"type": "string",
+				"enum": []string{"critical", "high", "normal"},
+				"description": "Urgency level of the escalation. " +
+					"Required for: escalate action. Must be 'critical', 'high', or 'normal'.",
+			},
+			"escalation_context": map[string]interface{}{
+				"type": "string",
+				"description": "Context about what is being escalated and why. " +
+					"Required for: escalate action.",
+				"minLength": 20,
+			},
+			"checkpoint_id": map[string]interface{}{
+				"type": "string",
+				"description": "ID of the checkpoint to restore. " +
+					"Required for: rollback action (if rollback_to_node not provided).",
+			},
+			"rollback_to_node": map[string]interface{}{
+				"type": "string",
+				"description": "Node ID to rollback to (reverts to state before this node). " +
+					"Required for: rollback action (if checkpoint_id not provided).",
+			},
+			"reflection_scope": map[string]interface{}{
+				"type": "string",
+				"enum": []string{"mission", "recent_decisions", "specific_node"},
+				"description": "Scope of reflection evaluation. " +
+					"Required for: reflect action. Must be 'mission', 'recent_decisions', or 'specific_node'.",
+			},
+			"reflection_prompt": map[string]interface{}{
+				"type": "string",
+				"description": "Optional guidance for the reflection evaluation. " +
+					"Optional for: reflect action.",
+			},
+			"recall_query": map[string]interface{}{
+				"type": "string",
+				"description": "Query string for memory search. " +
+					"Required for: recall action.",
+				"minLength": 5,
+			},
+			"recall_memory_tier": map[string]interface{}{
+				"type": "string",
+				"enum": []string{"mission", "long_term", "both"},
+				"description": "Which memory tier(s) to query. " +
+					"Required for: recall action. Must be 'mission', 'long_term', or 'both'.",
+			},
+			"recall_filters": map[string]interface{}{
+				"type": "object",
+				"description": "Optional filters for recall query (e.g., target_ip, time_range). " +
+					"Optional for: recall action.",
+				"additionalProperties": true,
+			},
+			"inject_into_context": map[string]interface{}{
+				"type": "boolean",
+				"description": "Whether to inject recalled context into next observation. " +
+					"Optional for: recall action.",
+			},
 		},
 		"allOf": []interface{}{
 			// Conditional validation: execute_agent, skip_agent, retry require target_node_id
@@ -532,6 +723,91 @@ func BuildDecisionSchema() string {
 				},
 				"then": map[string]interface{}{
 					"required": []string{"stop_reason"},
+				},
+			},
+			// Conditional validation: request_approval requires target_node_id and approval_context
+			map[string]interface{}{
+				"if": map[string]interface{}{
+					"properties": map[string]interface{}{
+						"action": map[string]interface{}{
+							"const": "request_approval",
+						},
+					},
+				},
+				"then": map[string]interface{}{
+					"required": []string{"target_node_id", "approval_context"},
+				},
+			},
+			// Conditional validation: abort requires abort_reason and abort_severity
+			map[string]interface{}{
+				"if": map[string]interface{}{
+					"properties": map[string]interface{}{
+						"action": map[string]interface{}{
+							"const": "abort",
+						},
+					},
+				},
+				"then": map[string]interface{}{
+					"required": []string{"abort_reason", "abort_severity"},
+				},
+			},
+			// Conditional validation: escalate requires escalation_level, escalation_urgency, and escalation_context
+			map[string]interface{}{
+				"if": map[string]interface{}{
+					"properties": map[string]interface{}{
+						"action": map[string]interface{}{
+							"const": "escalate",
+						},
+					},
+				},
+				"then": map[string]interface{}{
+					"required": []string{"escalation_level", "escalation_urgency", "escalation_context"},
+				},
+			},
+			// Conditional validation: rollback requires checkpoint_id OR rollback_to_node
+			map[string]interface{}{
+				"if": map[string]interface{}{
+					"properties": map[string]interface{}{
+						"action": map[string]interface{}{
+							"const": "rollback",
+						},
+					},
+				},
+				"then": map[string]interface{}{
+					"anyOf": []interface{}{
+						map[string]interface{}{
+							"required": []string{"checkpoint_id"},
+						},
+						map[string]interface{}{
+							"required": []string{"rollback_to_node"},
+						},
+					},
+				},
+			},
+			// Conditional validation: reflect requires reflection_scope
+			map[string]interface{}{
+				"if": map[string]interface{}{
+					"properties": map[string]interface{}{
+						"action": map[string]interface{}{
+							"const": "reflect",
+						},
+					},
+				},
+				"then": map[string]interface{}{
+					"required": []string{"reflection_scope"},
+				},
+			},
+			// Conditional validation: recall requires recall_query and recall_memory_tier
+			map[string]interface{}{
+				"if": map[string]interface{}{
+					"properties": map[string]interface{}{
+						"action": map[string]interface{}{
+							"const": "recall",
+						},
+					},
+				},
+				"then": map[string]interface{}{
+					"required": []string{"recall_query", "recall_memory_tier"},
 				},
 			},
 		},
@@ -604,6 +880,109 @@ func FormatSpawnExample() string {
 	return string(exampleJSON)
 }
 
+// FormatRequestApprovalExample returns an example of a request_approval decision.
+func FormatRequestApprovalExample() string {
+	example := map[string]interface{}{
+		"reasoning": "The sql-injection-scanner node is ready and has identified a potential SQL injection point. " +
+			"Before executing exploit payloads against the production database, human approval is required. " +
+			"This is a destructive operation that could impact data integrity.",
+		"action":           "request_approval",
+		"target_node_id":   "sql-injection-exploit",
+		"approval_context": "Ready to execute SQL injection payloads against production database endpoint /api/v2/users. Target has confirmed SQLi vulnerability. Requesting approval before running exploitation payloads that may modify database state.",
+		"approval_timeout": "4h",
+		"timeout_action":   "skip",
+		"confidence":       0.90,
+	}
+
+	exampleJSON, _ := json.MarshalIndent(example, "", "  ")
+	return string(exampleJSON)
+}
+
+// FormatAbortExample returns an example of an abort decision.
+func FormatAbortExample() string {
+	example := map[string]interface{}{
+		"reasoning": "During reconnaissance, the agent discovered access to systems outside the authorized scope. " +
+			"The target 10.0.0.50 responded but is not in the approved target list (10.0.0.1-10.0.0.25). " +
+			"This constitutes a scope violation and the mission must be immediately terminated.",
+		"action":           "abort",
+		"abort_reason":     "Scope violation detected: gained unintended access to out-of-scope system 10.0.0.50. Target is outside authorized range 10.0.0.1-10.0.0.25. Immediate mission termination required.",
+		"abort_severity":   "critical",
+		"cleanup_required": true,
+		"confidence":       0.99,
+	}
+
+	exampleJSON, _ := json.MarshalIndent(example, "", "  ")
+	return string(exampleJSON)
+}
+
+// FormatEscalateExample returns an example of an escalate decision.
+func FormatEscalateExample() string {
+	example := map[string]interface{}{
+		"reasoning": "The vulnerability scanner discovered what appears to be a zero-day vulnerability in the authentication system. " +
+			"The pattern doesn't match any known CVE and could have significant impact. " +
+			"This requires expert human analysis before proceeding.",
+		"action":             "escalate",
+		"escalation_level":   "human",
+		"escalation_urgency": "critical",
+		"escalation_context": "Discovered potential zero-day authentication bypass in /api/auth/token endpoint. Novel attack vector not matching known CVEs. Allows unauthenticated access to admin functions. Requires security team review before disclosure or further testing.",
+		"confidence":         0.85,
+	}
+
+	exampleJSON, _ := json.MarshalIndent(example, "", "  ")
+	return string(exampleJSON)
+}
+
+// FormatRollbackExample returns an example of a rollback decision.
+func FormatRollbackExample() string {
+	example := map[string]interface{}{
+		"reasoning": "The aggressive port scan triggered the target's IDS and we're now being rate-limited. " +
+			"Multiple subsequent operations have failed with connection timeouts. " +
+			"Rolling back to checkpoint before the scan to try a stealthier approach.",
+		"action":           "rollback",
+		"rollback_to_node": "recon-passive",
+		"confidence":       0.75,
+	}
+
+	exampleJSON, _ := json.MarshalIndent(example, "", "  ")
+	return string(exampleJSON)
+}
+
+// FormatReflectExample returns an example of a reflect decision.
+func FormatReflectExample() string {
+	example := map[string]interface{}{
+		"reasoning": "We've had 3 consecutive node failures across different attack vectors. " +
+			"The current strategy of direct enumeration isn't working. " +
+			"Taking a step back to evaluate the overall approach before proceeding.",
+		"action":           "reflect",
+		"reflection_scope": "recent_decisions",
+		"reflection_prompt": "Analyze the last 5 decisions and their outcomes. Why are attacks failing? " +
+			"Are we missing reconnaissance data? Should we pivot to a different attack surface?",
+		"confidence": 0.70,
+	}
+
+	exampleJSON, _ := json.MarshalIndent(example, "", "  ")
+	return string(exampleJSON)
+}
+
+// FormatRecallExample returns an example of a recall decision.
+func FormatRecallExample() string {
+	example := map[string]interface{}{
+		"reasoning": "We're targeting a system in the 192.168.1.0/24 network that was scanned in a previous mission. " +
+			"Before running reconnaissance again, let's check if we have relevant prior findings.",
+		"action":             "recall",
+		"recall_query":       "findings vulnerabilities 192.168.1.0/24 web application authentication",
+		"recall_memory_tier": "both",
+		"recall_filters": map[string]string{
+			"target_ip": "192.168.1.0/24",
+		},
+		"inject_into_context": true,
+		"confidence":          0.80,
+	}
+
+	exampleJSON, _ := json.MarshalIndent(example, "", "  ")
+	return string(exampleJSON)
+}
+
 // BuildFullPrompt combines the system prompt, observation prompt, and examples
 // into a complete prompt ready to send to the LLM.
 //
@@ -632,6 +1011,24 @@ func BuildFullPrompt(state *ObservationState, includeExamples bool) string {
 		sb.WriteString("\n```\n\n")
 		sb.WriteString("### Example 3: Spawn Agent\n```json\n")
 		sb.WriteString(FormatSpawnExample())
+		sb.WriteString("\n```\n\n")
+		sb.WriteString("### Example 4: Request Approval (Human-in-the-Loop)\n```json\n")
+		sb.WriteString(FormatRequestApprovalExample())
+		sb.WriteString("\n```\n\n")
+		sb.WriteString("### Example 5: Abort Mission (Safety Violation)\n```json\n")
+		sb.WriteString(FormatAbortExample())
+		sb.WriteString("\n```\n\n")
+		sb.WriteString("### Example 6: Escalate to Human\n```json\n")
+		sb.WriteString(FormatEscalateExample())
+		sb.WriteString("\n```\n\n")
+		sb.WriteString("### Example 7: Rollback to Checkpoint\n```json\n")
+		sb.WriteString(FormatRollbackExample())
+		sb.WriteString("\n```\n\n")
+		sb.WriteString("### Example 8: Reflect on Strategy\n```json\n")
+		sb.WriteString(FormatReflectExample())
+		sb.WriteString("\n```\n\n")
+		sb.WriteString("### Example 9: Recall from Memory\n```json\n")
+		sb.WriteString(FormatRecallExample())
 		sb.WriteString("\n```\n\n")
 	}
 

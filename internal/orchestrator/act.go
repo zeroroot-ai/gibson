@@ -49,7 +49,50 @@ type Actor struct {
 	missionTracer      interface{}         // *observability.MissionTracer for Langfuse tracing (optional, can be nil)
 	policyChecker      PolicyChecker       // Policy checker for data reuse enforcement (optional, can be nil)
 	discoveryProcessor DiscoveryProcessor  // Processes DiscoveryResult from agent outputs (optional, can be nil)
+	approvalManager    ApprovalManager     // Manages approval request lifecycle (optional, can be nil)
+	escalationManager  EscalationManager   // Manages escalation lifecycle (optional, can be nil)
+	checkpointManager  CheckpointManager   // Manages workflow checkpoints and rollback (optional, can be nil)
+	reflectionEngine   ReflectionEngine    // Performs self-evaluation of strategy (optional, can be nil)
+	memoryRecaller     MemoryRecaller      // Queries memory tiers for context (optional, can be nil)
 	logger             *slog.Logger        // Logger for Actor operations
+}
+
+// ActorOption is a functional option for configuring Actor.
+type ActorOption func(*Actor)
+
+// WithApprovalManager sets the approval manager for human-in-the-loop approvals
+func WithApprovalManager(am ApprovalManager) ActorOption {
+	return func(a *Actor) {
+		a.approvalManager = am
+	}
+}
+
+// WithEscalationManager sets the escalation manager for formal escalations
+func WithEscalationManager(em EscalationManager) ActorOption {
+	return func(a *Actor) {
+		a.escalationManager = em
+	}
+}
+
+// WithCheckpointManager sets the checkpoint manager for rollback support
+func WithCheckpointManager(cm CheckpointManager) ActorOption {
+	return func(a *Actor) {
+		a.checkpointManager = cm
+	}
+}
+
+// WithReflectionEngine sets the reflection engine for self-evaluation
+func WithReflectionEngine(re ReflectionEngine) ActorOption {
+	return func(a *Actor) {
+		a.reflectionEngine = re
+	}
+}
+
+// WithMemoryRecaller sets the memory recaller for context queries
+func WithMemoryRecaller(mr MemoryRecaller) ActorOption {
+	return func(a *Actor) {
+		a.memoryRecaller = mr
+	}
 }
 
 // NewActor creates a new Actor with the given dependencies.
@@ -59,7 +102,12 @@ type Actor struct {
 // The missionTracer parameter is optional and enables Langfuse observability when provided.
 // The policyChecker parameter is optional and enables data reuse policy enforcement when provided.
 // The discoveryProcessor parameter is optional and enables automatic storage of DiscoveryResult from agent outputs.
-func NewActor(harness Harness, execQueries *queries.ExecutionQueries, missionQueries *queries.MissionQueries, graphClient graph.GraphClient, inventory *ComponentInventory, missionTracer interface{}, policyChecker PolicyChecker, discoveryProcessor DiscoveryProcessor, logger *slog.Logger) *Actor {
+// The approvalManager parameter is optional and enables approval request handling when provided.
+// The escalationManager parameter is optional and enables escalation handling when provided.
+// The checkpointManager parameter is optional and enables checkpoint/rollback functionality when provided.
+// The reflectionEngine parameter is optional and enables reflection capability when provided.
+// The memoryRecaller parameter is optional and enables memory recall functionality when provided.
+func NewActor(harness Harness, execQueries *queries.ExecutionQueries, missionQueries *queries.MissionQueries, graphClient graph.GraphClient, inventory *ComponentInventory, missionTracer interface{}, policyChecker PolicyChecker, discoveryProcessor DiscoveryProcessor, approvalManager ApprovalManager, escalationManager EscalationManager, checkpointManager CheckpointManager, reflectionEngine ReflectionEngine, memoryRecaller MemoryRecaller, logger *slog.Logger) *Actor {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -72,6 +120,11 @@ func NewActor(harness Harness, execQueries *queries.ExecutionQueries, missionQue
 		missionTracer:      missionTracer,
 		policyChecker:      policyChecker,
 		discoveryProcessor: discoveryProcessor,
+		approvalManager:    approvalManager,
+		escalationManager:  escalationManager,
+		checkpointManager:  checkpointManager,
+		reflectionEngine:   reflectionEngine,
+		memoryRecaller:     memoryRecaller,
 		logger:             logger.With("component", "actor"),
 	}
 }
@@ -141,6 +194,24 @@ func (a *Actor) Act(ctx context.Context, decision *Decision, missionID string) (
 	case ActionComplete:
 		return a.completeMission(ctx, decision, parsedMissionID)
 
+	case ActionRequestApproval:
+		return a.requestApproval(ctx, decision, parsedMissionID)
+
+	case ActionAbort:
+		return a.abort(ctx, decision, parsedMissionID)
+
+	case ActionEscalate:
+		return a.escalate(ctx, decision, parsedMissionID)
+
+	case ActionRollback:
+		return a.rollback(ctx, decision, parsedMissionID)
+
+	case ActionReflect:
+		return a.reflect(ctx, decision, parsedMissionID)
+
+	case ActionRecall:
+		return a.recall(ctx, decision, parsedMissionID)
+
 	default:
 		return nil, fmt.Errorf("unknown decision action: %s", decision.Action)
 	}
@@ -189,6 +260,16 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 					"policy_check": true,
 				},
 			}, nil
+		}
+	}
+
+	// Create implicit checkpoint before execution (if checkpoint manager configured)
+	if a.checkpointManager != nil {
+		if err := a.checkpointManager.CreateImplicitCheckpoint(ctx, missionID.String(), node.ID.String()); err != nil {
+			// Log but don't fail - checkpoint is optional
+			a.logger.Warn("failed to create implicit checkpoint",
+				"node_id", node.ID.String(),
+				"error", err)
 		}
 	}
 
@@ -958,6 +1039,475 @@ func (a *Actor) parseWorkflowNode(data map[string]interface{}) (*schema.Workflow
 	}
 
 	return node, nil
+}
+
+// requestApproval pauses execution and waits for human approval before executing the target node.
+// This implements human-in-the-loop workflows for sensitive operations.
+func (a *Actor) requestApproval(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
+	// Check if approval manager is configured
+	if a.approvalManager == nil {
+		return nil, fmt.Errorf("approval manager not configured, cannot process request_approval action")
+	}
+
+	// Parse approval timeout duration (default to 24h if not specified)
+	timeout := 24 * time.Hour
+	if decision.ApprovalTimeout != "" {
+		parsedTimeout, err := time.ParseDuration(decision.ApprovalTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("invalid approval_timeout format: %w", err)
+		}
+		timeout = parsedTimeout
+	}
+
+	// Default timeout action to "reject" if not specified
+	timeoutAction := decision.TimeoutAction
+	if timeoutAction == "" {
+		timeoutAction = "reject"
+	}
+
+	// Create approval request
+	approvalReq := ApprovalRequest{
+		MissionID:     missionID.String(),
+		NodeID:        decision.TargetNodeID,
+		Context:       decision.ApprovalContext,
+		Timeout:       timeout,
+		TimeoutAction: timeoutAction,
+	}
+
+	approvalID, err := a.approvalManager.CreateRequest(ctx, approvalReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create approval request: %w", err)
+	}
+
+	a.logger.Info("approval request created, waiting for response",
+		"approval_id", approvalID,
+		"node_id", decision.TargetNodeID,
+		"timeout", timeout.String(),
+		"timeout_action", timeoutAction,
+	)
+
+	// Wait for approval response
+	response, err := a.approvalManager.WaitForApproval(ctx, approvalID, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed waiting for approval: %w", err)
+	}
+
+	a.logger.Info("approval response received",
+		"approval_id", approvalID,
+		"approved", response.Approved,
+		"responded_by", response.RespondedBy,
+	)
+
+	// Handle approval response
+	if response.Approved {
+		// Approval granted - execute the target node
+		execDecision := &Decision{
+			Reasoning:    fmt.Sprintf("Executing approved node: %s", decision.Reasoning),
+			Action:       ActionExecuteAgent,
+			TargetNodeID: decision.TargetNodeID,
+			Confidence:   decision.Confidence,
+		}
+		return a.executeAgent(ctx, execDecision, missionID)
+	}
+
+	// Approval rejected or timed out - skip the node
+	node, err := a.getWorkflowNode(ctx, decision.TargetNodeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow node: %w", err)
+	}
+
+	skipReason := "approval_rejected"
+	if response.RespondedBy == "timeout" {
+		skipReason = fmt.Sprintf("approval_timeout_%s", timeoutAction)
+	}
+
+	if err := a.updateNodeStatus(ctx, node.ID, schema.WorkflowNodeStatusSkipped); err != nil {
+		return nil, fmt.Errorf("failed to update node status to skipped: %w", err)
+	}
+
+	return &ActionResult{
+		Action:       ActionRequestApproval,
+		Error:        nil,
+		IsTerminal:   false,
+		TargetNodeID: decision.TargetNodeID,
+		Metadata: map[string]interface{}{
+			"approval_id":   approvalID,
+			"approved":      false,
+			"skip_reason":   skipReason,
+			"responded_by":  response.RespondedBy,
+			"comment":       response.Comment,
+		},
+	}, nil
+}
+
+// abort immediately stops the mission due to a safety violation or critical error.
+// This is a terminal action that marks the mission as aborted and optionally triggers cleanup.
+func (a *Actor) abort(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
+	a.logger.Warn("aborting mission",
+		"mission_id", missionID.String(),
+		"reason", decision.AbortReason,
+		"severity", decision.AbortSeverity,
+		"cleanup_required", decision.CleanupRequired,
+	)
+
+	// Update mission status to aborted in Neo4j
+	cypher := `
+		MATCH (m:Mission {id: $mission_id})
+		SET m.status = 'aborted',
+		    m.aborted_at = datetime(),
+		    m.abort_reason = $abort_reason,
+		    m.abort_severity = $abort_severity
+		RETURN m.id as id, m.status as status
+	`
+
+	params := map[string]interface{}{
+		"mission_id":      missionID.String(),
+		"abort_reason":    decision.AbortReason,
+		"abort_severity":  decision.AbortSeverity,
+	}
+
+	result, err := a.graphClient.Query(ctx, cypher, params)
+	if err != nil {
+		// Log error but don't fail - abort should be fail-safe
+		a.logger.Error("failed to update mission status to aborted",
+			"error", err,
+			"mission_id", missionID.String(),
+		)
+	} else if len(result.Records) == 0 {
+		a.logger.Error("mission not found during abort",
+			"mission_id", missionID.String(),
+		)
+	}
+
+	// Emit cleanup required event if requested
+	if decision.CleanupRequired {
+		// EventCleanupRequired should be defined in events package
+		// For now, we'll emit a custom event
+		a.logger.Info("cleanup required after mission abort",
+			"mission_id", missionID.String(),
+		)
+	}
+
+	// Emit mission aborted event
+	// EventMissionAborted should be defined in events package
+	a.logger.Info("mission aborted",
+		"mission_id", missionID.String(),
+		"reason", decision.AbortReason,
+		"severity", decision.AbortSeverity,
+	)
+
+	return &ActionResult{
+		Action:     ActionAbort,
+		Error:      nil,
+		IsTerminal: true,
+		Metadata: map[string]interface{}{
+			"abort_reason":      decision.AbortReason,
+			"abort_severity":    decision.AbortSeverity,
+			"cleanup_required":  decision.CleanupRequired,
+		},
+	}, nil
+}
+
+// escalate formally escalates to a human or specialist agent.
+// For critical escalations to humans, this blocks until acknowledged.
+// For senior_agent or specialist escalations, it spawns the appropriate agent.
+func (a *Actor) escalate(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
+	// Check if escalation manager is configured
+	if a.escalationManager == nil {
+		return nil, fmt.Errorf("escalation manager not configured, cannot process escalate action")
+	}
+
+	// Create escalation
+	escalation := Escalation{
+		MissionID: missionID.String(),
+		NodeID:    decision.TargetNodeID,
+		Level:     decision.EscalationLevel,
+		Urgency:   decision.EscalationUrgency,
+		Context:   decision.EscalationContext,
+	}
+
+	escalationID, err := a.escalationManager.CreateEscalation(ctx, escalation)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create escalation: %w", err)
+	}
+
+	a.logger.Info("escalation created",
+		"escalation_id", escalationID,
+		"level", decision.EscalationLevel,
+		"urgency", decision.EscalationUrgency,
+		"node_id", decision.TargetNodeID,
+	)
+
+	// Handle different escalation levels
+	if decision.EscalationLevel == "human" && decision.EscalationUrgency == "critical" {
+		// Block and wait for acknowledgment for critical human escalations
+		a.logger.Info("waiting for critical escalation acknowledgment",
+			"escalation_id", escalationID,
+		)
+
+		// Wait with a reasonable timeout (e.g., 1 hour for critical)
+		waitTimeout := 1 * time.Hour
+		if err := a.escalationManager.WaitForAcknowledgment(ctx, escalationID, waitTimeout); err != nil {
+			a.logger.Warn("escalation acknowledgment timed out or failed",
+				"escalation_id", escalationID,
+				"error", err,
+			)
+			// Don't fail the escalation, just log the timeout
+		} else {
+			a.logger.Info("critical escalation acknowledged",
+				"escalation_id", escalationID,
+			)
+		}
+	} else if decision.EscalationLevel == "senior_agent" || decision.EscalationLevel == "specialist" {
+		// For agent-level escalations, consider spawning an agent
+		// This is similar to spawn_agent but with escalation metadata
+		a.logger.Info("escalation to agent level - consider spawning specialist",
+			"escalation_id", escalationID,
+			"level", decision.EscalationLevel,
+		)
+
+		// TODO: Implement agent spawning with escalation metadata
+		// For now, we just log this - actual agent spawning would require
+		// determining which agent to spawn based on the escalation context
+	}
+
+	return &ActionResult{
+		Action:       ActionEscalate,
+		Error:        nil,
+		IsTerminal:   false,
+		TargetNodeID: decision.TargetNodeID,
+		Metadata: map[string]interface{}{
+			"escalation_id": escalationID,
+			"level":         decision.EscalationLevel,
+			"urgency":       decision.EscalationUrgency,
+		},
+	}, nil
+}
+
+// rollback reverts the workflow to a previously captured checkpoint state.
+// This resets node statuses and marks rolled-back executions as "rolled_back".
+func (a *Actor) rollback(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
+	// Validate that checkpoint manager is configured
+	if a.checkpointManager == nil {
+		return nil, fmt.Errorf("checkpoint manager not configured, cannot process rollback action")
+	}
+
+	var checkpointID string
+	var err error
+
+	// Determine which checkpoint to restore
+	if decision.CheckpointID != "" {
+		// Explicit checkpoint ID provided
+		checkpointID = decision.CheckpointID
+		a.logger.Info("rolling back to explicit checkpoint",
+			"checkpoint_id", checkpointID,
+			"mission_id", missionID.String(),
+		)
+	} else if decision.RollbackToNode != "" {
+		// Find the implicit checkpoint before the specified node
+		a.logger.Info("rolling back to before node",
+			"node_id", decision.RollbackToNode,
+			"mission_id", missionID.String(),
+		)
+
+		// Query for the implicit checkpoint that was created BEFORE this node
+		cypher := `
+			MATCH (c:Checkpoint)-[:BEFORE_NODE]->(n:WorkflowNode {id: $node_id})
+			WHERE c.mission_id = $mission_id AND c.is_implicit = true
+			RETURN c.id as checkpoint_id
+			ORDER BY c.created_at DESC
+			LIMIT 1
+		`
+
+		params := map[string]interface{}{
+			"node_id":    decision.RollbackToNode,
+			"mission_id": missionID.String(),
+		}
+
+		result, err := a.graphClient.Query(ctx, cypher, params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find implicit checkpoint for node: %w", err)
+		}
+
+		if len(result.Records) == 0 {
+			return nil, fmt.Errorf("no implicit checkpoint found before node %s", decision.RollbackToNode)
+		}
+
+		checkpointID, _ = result.Records[0]["checkpoint_id"].(string)
+		a.logger.Info("found implicit checkpoint",
+			"checkpoint_id", checkpointID,
+			"node_id", decision.RollbackToNode,
+		)
+	} else {
+		return nil, fmt.Errorf("either checkpoint_id or rollback_to_node must be specified for rollback action")
+	}
+
+	// Emit rollback started event
+	// Note: EventRollbackStarted should be emitted here if eventBus is available
+	a.logger.Info("starting rollback",
+		"checkpoint_id", checkpointID,
+		"mission_id", missionID.String(),
+	)
+
+	// Restore the checkpoint
+	if err = a.checkpointManager.RestoreCheckpoint(ctx, checkpointID); err != nil {
+		return nil, fmt.Errorf("failed to restore checkpoint: %w", err)
+	}
+
+	// Note: EventRollbackCompleted is emitted by CheckpointManager.RestoreCheckpoint
+
+	return &ActionResult{
+		Action:     ActionRollback,
+		Error:      nil,
+		IsTerminal: false,
+		Metadata: map[string]interface{}{
+			"checkpoint_id":      checkpointID,
+			"rollback_to_node":   decision.RollbackToNode,
+			"checkpoint_restored": true,
+		},
+	}, nil
+}
+
+// reflect performs a self-evaluation of the current mission strategy using the reflection engine.
+// This does not count against the iteration limit and provides insights for future decisions.
+func (a *Actor) reflect(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
+	// Validate that reflection engine is configured
+	if a.reflectionEngine == nil {
+		return nil, fmt.Errorf("reflection engine not configured, cannot process reflect action")
+	}
+
+	a.logger.Info("initiating reflection",
+		"scope", decision.ReflectionScope,
+		"mission_id", missionID.String(),
+		"has_prompt", decision.ReflectionPrompt != "",
+	)
+
+	// Build observation state for context
+	// For now, we pass nil and let the engine handle it
+	// In a full implementation, we would build an ObservationState here
+	// This is a simplified approach that matches the spec's suggestion:
+	// "Build ObservationState for context (or use a simpler approach - just pass nil and let the engine handle it)"
+	var state *ObservationState
+	// TODO: Build actual observation state if needed for better reflection context
+
+	// Parse reflection scope
+	scope := ReflectionScope(decision.ReflectionScope)
+	if decision.ReflectionScope == "" {
+		scope = ReflectionScopeMission // Default to mission scope
+	}
+
+	// Call reflection engine
+	result, err := a.reflectionEngine.Reflect(ctx, scope, decision.ReflectionPrompt, state)
+	if err != nil {
+		a.logger.Error("reflection failed",
+			"error", err,
+			"scope", decision.ReflectionScope,
+			"mission_id", missionID.String(),
+		)
+		return nil, fmt.Errorf("reflection failed: %w", err)
+	}
+
+	a.logger.Info("reflection completed",
+		"scope", decision.ReflectionScope,
+		"issues_count", len(result.IssuesIdentified),
+		"suggestions_count", len(result.SuggestedChanges),
+		"confidence", result.ConfidenceInApproach,
+		"tokens_used", result.TokensUsed,
+	)
+
+	// Note: Reflection events are emitted by the ReflectionEngine itself
+
+	return &ActionResult{
+		Action:     ActionReflect,
+		Error:      nil,
+		IsTerminal: false,
+		Metadata: map[string]interface{}{
+			"scope":                  decision.ReflectionScope,
+			"assessment":             result.Assessment,
+			"issues_count":           len(result.IssuesIdentified),
+			"suggestions_count":      len(result.SuggestedChanges),
+			"confidence_in_approach": result.ConfidenceInApproach,
+			"tokens_used":            result.TokensUsed,
+			"does_not_count_against_iteration_limit": true,
+		},
+	}, nil
+}
+
+// recall queries memory tiers for relevant context and optionally injects it into future observations.
+// This does not count against the iteration limit.
+func (a *Actor) recall(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
+	// Validate that memory recaller is configured
+	if a.memoryRecaller == nil {
+		return nil, fmt.Errorf("memory recaller not configured, cannot process recall action")
+	}
+
+	a.logger.Info("initiating memory recall",
+		"query", decision.RecallQuery,
+		"memory_tier", decision.RecallMemoryTier,
+		"mission_id", missionID.String(),
+		"inject_into_context", decision.InjectIntoContext,
+	)
+
+	// Build RecallQuery from decision fields
+	query := RecallQuery{
+		Query:      decision.RecallQuery,
+		MemoryTier: decision.RecallMemoryTier,
+		MissionID:  missionID.String(),
+		Filters:    decision.RecallFilters,
+		MaxResults: 10, // Default max results
+	}
+
+	// Call memory recaller
+	result, err := a.memoryRecaller.Recall(ctx, query)
+	if err != nil {
+		a.logger.Error("memory recall failed",
+			"error", err,
+			"query", decision.RecallQuery,
+			"mission_id", missionID.String(),
+		)
+		return nil, fmt.Errorf("memory recall failed: %w", err)
+	}
+
+	totalResults := len(result.MissionResults) + len(result.LongTermResults)
+
+	a.logger.Info("memory recall completed",
+		"query", decision.RecallQuery,
+		"memory_tier", decision.RecallMemoryTier,
+		"mission_results", len(result.MissionResults),
+		"long_term_results", len(result.LongTermResults),
+		"total_results", totalResults,
+		"query_time_ms", result.QueryTimeMs,
+	)
+
+	// Note: Recall events are emitted by the MemoryRecaller itself
+
+	// If InjectIntoContext is true, store the formatted context for the next observation
+	// For now, we return it in metadata. In a full implementation, we would store it
+	// in the Actor or in a shared context that the Observer can access.
+	// This is a simplified approach - the spec suggests:
+	// "If InjectIntoContext is true, store the FormattedContext somewhere for the next observation
+	//  (could add a field to Actor or return in ActionResult metadata)"
+	metadata := map[string]interface{}{
+		"query":                                  decision.RecallQuery,
+		"memory_tier":                            decision.RecallMemoryTier,
+		"mission_results_count":                  len(result.MissionResults),
+		"long_term_results_count":                len(result.LongTermResults),
+		"total_results":                          totalResults,
+		"query_time_ms":                          result.QueryTimeMs,
+		"inject_into_context":                    decision.InjectIntoContext,
+		"does_not_count_against_iteration_limit": true,
+	}
+
+	if decision.InjectIntoContext {
+		metadata["formatted_context"] = result.FormattedContext
+	}
+
+	return &ActionResult{
+		Action:     ActionRecall,
+		Error:      nil,
+		IsTerminal: false,
+		Metadata:   metadata,
+	}, nil
 }
 
 // processAgentDiscovery processes DiscoveryResult from an agent's output and stores it in Neo4j.

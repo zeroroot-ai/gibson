@@ -45,6 +45,43 @@ Think of it as Kubernetes for security testing - you bring the agents, Gibson ha
 
 ## Core Concepts
 
+### Component Hierarchy
+
+Gibson has three types of executable components with distinct roles and invocation patterns:
+
+| Aspect | Tool | Plugin | Agent |
+|--------|------|--------|-------|
+| **Purpose** | Atomic security operations | External service integrations | Autonomous LLM-driven testing |
+| **State** | Stateless | Stateful (connections, caches) | Stateful (memory, context) |
+| **I/O Format** | Protocol Buffers | JSON maps | Harness interface |
+| **Invoked By** | Agents only | Agents only | **Orchestrator directly** |
+| **LLM Access** | No | No | Yes (multi-slot) |
+| **Memory Access** | No | No | Yes (3-tier) |
+| **Sub-delegation** | No | No | Yes (to other agents) |
+| **Graph Population** | Automatic (Field 100) | Manual | Agent decides |
+| **Examples** | nmap, httpx, nuclei | shodan, scope-ingestion | network-recon, web-fuzzer |
+
+**Key Architectural Point:** The mission orchestrator's Observe → Think → Act loop **only manages agents**. Tools and plugins are resources that agents invoke through their harness - they are not directly orchestrated.
+
+```
+MISSION ORCHESTRATOR (LLM decides which agent to run)
+    │
+    └─→ Executes AGENT (e.g., network-recon)
+            │
+            AGENT has Harness providing:
+            ├─→ CallToolProto("nmap", request)     ← Agent decides when
+            ├─→ QueryPlugin("shodan", "search")    ← Agent decides when
+            ├─→ DelegateToAgent("subdomain-enum")  ← Agent decides when
+            ├─→ Complete("primary", messages)      ← LLM reasoning
+            └─→ Memory().Mission().Set(...)        ← State persistence
+```
+
+This design means:
+- **Agents are autonomous** - they decide which tools/plugins to use based on LLM reasoning
+- **Tools are simple** - stateless operations that don't need orchestrator decisions
+- **Plugins are resources** - stateful services that agents query as needed
+- **Orchestrator focuses on strategy** - which agent runs when, not low-level tool calls
+
 ### Agents
 
 Autonomous units that perform security testing. An agent can be anything:

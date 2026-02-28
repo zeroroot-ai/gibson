@@ -8,6 +8,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
+	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/trace"
@@ -72,6 +73,7 @@ type Orchestrator struct {
 	logWriter        DecisionLogWriter
 	debugWriter      *DebugLogWriter   // Debug output writer for raw logging to stdout
 	inventoryBuilder *InventoryBuilder // Component discovery for validation
+	metrics          harness.MetricsRecorder // Metrics recorder for observability
 
 	// Configuration options
 	maxIterations int
@@ -195,6 +197,16 @@ func WithDebugLogging() OrchestratorOption {
 	}
 }
 
+// WithMetricsRecorder sets the metrics recorder for mission observability.
+// Metrics include mission status, duration, node counts, and iteration counts.
+func WithMetricsRecorder(recorder harness.MetricsRecorder) OrchestratorOption {
+	return func(o *Orchestrator) {
+		if recorder != nil {
+			o.metrics = recorder
+		}
+	}
+}
+
 // NewOrchestrator creates a new Orchestrator with the specified components and options.
 //
 // Required components:
@@ -225,6 +237,7 @@ func NewOrchestrator(observer OrchestratorObserver, thinker OrchestratorThinker,
 		logger:        slog.Default(),
 		tracer:        trace.NewNoopTracerProvider().Tracer("orchestrator"),
 		debugWriter:   NewDebugLogWriter(), // Always-on debug logging to stdout
+		metrics:       harness.NewNoOpMetricsRecorder(), // Default to no-op
 	}
 
 	// Apply functional options (can override environment variable)
@@ -332,6 +345,9 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 		"budget", o.budget,
 	)
 
+	// Record mission started metric
+	o.recordMissionStarted(missionID)
+
 	// Initialize result
 	result := &OrchestratorResult{
 		MissionID: missionID,
@@ -350,6 +366,8 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			result.Status = StatusCancelled
 			result.Error = ctx.Err()
 			result.Duration = time.Since(startTime)
+			result.TotalIterations = iteration
+			o.recordMissionCompleted(result)
 			return result, nil
 		default:
 		}
@@ -364,6 +382,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			result.Error = fmt.Errorf("observation failed: %w", err)
 			result.TotalIterations = iteration
 			result.Duration = time.Since(startTime)
+			o.recordMissionCompleted(result)
 			return result, err
 		}
 
@@ -394,6 +413,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			result.Duration = time.Since(startTime)
 			result.TotalTokensUsed = totalTokens
 			result.StopReason = "all workflow nodes completed or no more work available"
+			o.recordMissionCompleted(result)
 			return result, nil
 		}
 
@@ -420,6 +440,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			result.TotalIterations = iteration + 1
 			result.TotalTokensUsed = totalTokens
 			result.Duration = time.Since(startTime)
+			o.recordMissionCompleted(result)
 			return result, nil
 		}
 
@@ -432,6 +453,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			result.TotalIterations = iteration + 1
 			result.TotalTokensUsed = totalTokens
 			result.Duration = time.Since(startTime)
+			o.recordMissionCompleted(result)
 			return result, err
 		}
 
@@ -490,6 +512,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			result.TotalIterations = iteration + 1
 			result.TotalTokensUsed = totalTokens
 			result.Duration = time.Since(startTime)
+			o.recordMissionCompleted(result)
 			return result, err
 		}
 
@@ -530,6 +553,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			result.TotalTokensUsed = totalTokens
 			result.Duration = time.Since(startTime)
 			result.StopReason = thinkResult.Decision.StopReason
+			o.recordMissionCompleted(result)
 			return result, nil
 		}
 
@@ -556,6 +580,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 		result.FailedNodes = len(result.FinalState.FailedNodes)
 	}
 
+	o.recordMissionCompleted(result)
 	return result, nil
 }
 
@@ -707,4 +732,81 @@ func (r *OrchestratorResult) String() string {
 // This can be used to conditionally adjust behavior based on the mode.
 func (o *Orchestrator) RunMode() RunMode {
 	return o.runMode
+}
+
+// recordMissionStarted records metrics when a mission starts.
+func (o *Orchestrator) recordMissionStarted(missionID string) {
+	if o.metrics == nil {
+		return
+	}
+
+	labels := map[string]string{
+		"mission_id": missionID,
+		"status":     "running",
+	}
+
+	// Set mission status to running (1)
+	o.metrics.RecordGauge("gibson.mission.status", 1, labels)
+
+	// Increment total missions counter
+	o.metrics.RecordCounter("gibson.missions.total", 1, map[string]string{})
+}
+
+// recordMissionCompleted records metrics when a mission completes.
+func (o *Orchestrator) recordMissionCompleted(result *OrchestratorResult) {
+	if o.metrics == nil || result == nil {
+		return
+	}
+
+	statusStr := result.Status.String()
+	labels := map[string]string{
+		"mission_id": result.MissionID,
+		"status":     statusStr,
+	}
+
+	// Determine gauge value based on status
+	// 0 = completed, 1 = running, 2 = failed/other
+	var statusValue float64
+	switch result.Status {
+	case StatusCompleted:
+		statusValue = 0
+	case StatusFailed, StatusTimeout, StatusCancelled, StatusBudgetExceeded, StatusMaxIterations:
+		statusValue = 2
+	default:
+		statusValue = 2
+	}
+
+	// Set mission status gauge
+	o.metrics.RecordGauge("gibson.mission.status", statusValue, labels)
+
+	// Record duration histogram
+	o.metrics.RecordHistogram("gibson.mission.duration", result.Duration.Seconds(), labels)
+
+	// Record node counts
+	if result.CompletedNodes > 0 {
+		o.metrics.RecordCounter("gibson.mission.nodes", int64(result.CompletedNodes), map[string]string{
+			"mission_id": result.MissionID,
+			"status":     "completed",
+		})
+	}
+	if result.FailedNodes > 0 {
+		o.metrics.RecordCounter("gibson.mission.nodes", int64(result.FailedNodes), map[string]string{
+			"mission_id": result.MissionID,
+			"status":     "failed",
+		})
+	}
+
+	// Record iterations
+	if result.TotalIterations > 0 {
+		o.metrics.RecordCounter("gibson.mission.iterations", int64(result.TotalIterations), map[string]string{
+			"mission_id": result.MissionID,
+		})
+	}
+
+	// Record tokens used
+	if result.TotalTokensUsed > 0 {
+		o.metrics.RecordCounter("gibson.mission.tokens", int64(result.TotalTokensUsed), map[string]string{
+			"mission_id": result.MissionID,
+		})
+	}
 }
