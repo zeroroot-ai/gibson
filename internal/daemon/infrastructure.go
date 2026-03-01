@@ -77,6 +77,9 @@ type Infrastructure struct {
 	// This enables downstream agents to query discovered hosts, ports, services, etc.
 	discoveryProcessor *discoveryProcessorAdapter
 
+	// activityLogger for logging activity events (daemon-level)
+	activityLogger observability.ActivityLogger
+
 	// redisClient for tool execution queue management
 	redisClient queue.Client
 }
@@ -160,10 +163,33 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	}
 	d.logger.Info("initialized GraphRAG bridges with full store support")
 
+	// Create daemon-level activity logger for infrastructure components
+	// This is separate from mission-level activity loggers and always enabled
+	var daemonActivityLogger observability.ActivityLogger
+	if d.config != nil && d.config.ActivityLogging.Enabled {
+		cfg := observability.ActivityLoggerConfig{
+			Level:            observability.ParseActivityLevel(d.config.ActivityLogging.Level),
+			MaxContentLength: d.config.ActivityLogging.MaxContentLength,
+			BufferSize:       d.config.ActivityLogging.BufferSize,
+		}
+		logger, err := observability.NewActivityLogger(cfg)
+		if err != nil {
+			d.logger.Warn("failed to create daemon activity logger, using noop", "error", err)
+			daemonActivityLogger = observability.NewNoopActivityLogger()
+		} else {
+			daemonActivityLogger = logger
+			d.logger.Info("daemon activity logger enabled for infrastructure components",
+				"level", d.config.ActivityLogging.Level)
+		}
+	} else {
+		daemonActivityLogger = observability.NewNoopActivityLogger()
+		d.logger.Debug("daemon activity logger disabled (using noop)")
+	}
+
 	// Create DiscoveryProcessor for processing agent output discoveries to Neo4j
 	// This enables downstream agents to query discovered hosts, ports, services, etc.
 	graphLoader := loader.NewGraphLoader(graphRAGClient)
-	discoveryProc := processor.NewDiscoveryProcessor(graphLoader, graphRAGClient, d.logger)
+	discoveryProc := processor.NewDiscoveryProcessor(graphLoader, graphRAGClient, d.logger, daemonActivityLogger)
 	discoveryProcessorAdapter := &discoveryProcessorAdapter{processor: discoveryProc}
 	d.logger.Info("initialized DiscoveryProcessor for automatic discovery storage")
 
@@ -212,6 +238,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		missionTracer:        missionTracer,
 		taxonomyRegistry:     taxonomyRegistry,
 		discoveryProcessor:   discoveryProcessorAdapter,
+		activityLogger:       daemonActivityLogger,
 		redisClient:          redisClient,
 	}
 	d.infrastructure = infra

@@ -167,7 +167,8 @@ type HarnessConfig struct {
 	AgentExecLog any
 
 	// ActivityLogger provides structured activity stream logging for LLM interactions,
-	// tool executions, and findings. Used for real-time observability in Grafana/Loki.
+	// tool executions, findings, memory operations, and agent delegation.
+	// Used for real-time observability in Grafana/Loki.
 	// When nil, a NoopActivityLogger is used (no activity logging).
 	// Expected type: observability.ActivityLogger
 	// Optional: defaults to nil (activity logging disabled).
@@ -178,6 +179,9 @@ type HarnessConfig struct {
 		EmitToolResult(ctx context.Context, toolName string, result interface{}, durationMs int64, err error)
 		EmitFinding(ctx context.Context, finding interface{})
 		EmitError(ctx context.Context, operation string, err error)
+		EmitMemoryStore(ctx context.Context, tier string, key string, dataSize int)
+		EmitMemoryRecall(ctx context.Context, tier string, key string, found bool)
+		EmitDelegation(ctx context.Context, parentAgent string, childAgent string, taskDescription string)
 	}
 }
 

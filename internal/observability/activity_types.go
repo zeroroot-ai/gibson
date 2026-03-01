@@ -151,6 +151,18 @@ type ActivityLogger interface {
 	// EmitError logs an error event.
 	EmitError(ctx context.Context, operation string, err error)
 
+	// EmitMemoryStore logs a memory storage operation.
+	EmitMemoryStore(ctx context.Context, tier string, key string, dataSize int)
+
+	// EmitMemoryRecall logs a memory recall operation.
+	EmitMemoryRecall(ctx context.Context, tier string, key string, found bool)
+
+	// EmitGraphRAGStore logs a GraphRAG entity storage operation.
+	EmitGraphRAGStore(ctx context.Context, entityType string, count int)
+
+	// EmitDelegation logs an agent delegation operation.
+	EmitDelegation(ctx context.Context, parentAgent string, childAgent string, taskDescription string)
+
 	// Level returns the current activity logging level.
 	Level() ActivityLevel
 

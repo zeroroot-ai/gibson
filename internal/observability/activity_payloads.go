@@ -85,3 +85,30 @@ type ErrorPayload struct {
 	Error     string `json:"error"`
 	ErrorType string `json:"error_type,omitempty"`
 }
+
+// MemoryStorePayload contains data for MEMORY_STORE events.
+type MemoryStorePayload struct {
+	Tier     string `json:"tier"`      // "working", "mission", "longterm"
+	Key      string `json:"key"`
+	DataSize int    `json:"data_size"`
+}
+
+// MemoryRecallPayload contains data for MEMORY_RECALL events.
+type MemoryRecallPayload struct {
+	Tier  string `json:"tier"`
+	Key   string `json:"key"`
+	Found bool   `json:"found"`
+}
+
+// GraphRAGStorePayload contains data for GRAPHRAG_STORE events.
+type GraphRAGStorePayload struct {
+	EntityType string `json:"entity_type"` // "Host", "Port", "Service", etc.
+	Count      int    `json:"count"`
+}
+
+// DelegationPayload contains data for DELEGATION events.
+type DelegationPayload struct {
+	ParentAgent     string `json:"parent_agent"`
+	ChildAgent      string `json:"child_agent"`
+	TaskDescription string `json:"task_description"`
+}

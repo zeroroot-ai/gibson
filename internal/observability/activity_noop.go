@@ -54,6 +54,22 @@ func (n *NoopActivityLogger) EmitDecision(ctx context.Context, action string, ta
 // EmitError does nothing.
 func (n *NoopActivityLogger) EmitError(ctx context.Context, operation string, err error) {}
 
+// EmitMemoryStore does nothing.
+func (n *NoopActivityLogger) EmitMemoryStore(ctx context.Context, tier string, key string, dataSize int) {
+}
+
+// EmitMemoryRecall does nothing.
+func (n *NoopActivityLogger) EmitMemoryRecall(ctx context.Context, tier string, key string, found bool) {
+}
+
+// EmitGraphRAGStore does nothing.
+func (n *NoopActivityLogger) EmitGraphRAGStore(ctx context.Context, entityType string, count int) {
+}
+
+// EmitDelegation does nothing.
+func (n *NoopActivityLogger) EmitDelegation(ctx context.Context, parentAgent string, childAgent string, taskDescription string) {
+}
+
 // Level returns ActivityLevelQuiet.
 func (n *NoopActivityLogger) Level() ActivityLevel {
 	return ActivityLevelQuiet

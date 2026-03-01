@@ -474,6 +474,69 @@ func (l *DefaultActivityLogger) EmitError(ctx context.Context, operation string,
 	l.Emit(ctx, event)
 }
 
+// EmitMemoryStore logs a memory storage operation.
+func (l *DefaultActivityLogger) EmitMemoryStore(ctx context.Context, tier string, key string, dataSize int) {
+	payload := MemoryStorePayload{
+		Tier:     tier,
+		Key:      key,
+		DataSize: dataSize,
+	}
+
+	event := ActivityEvent{
+		EventType: EventMemoryStore,
+		Payload:   l.structToMap(payload),
+	}
+
+	l.Emit(ctx, event)
+}
+
+// EmitMemoryRecall logs a memory recall operation.
+func (l *DefaultActivityLogger) EmitMemoryRecall(ctx context.Context, tier string, key string, found bool) {
+	payload := MemoryRecallPayload{
+		Tier:  tier,
+		Key:   key,
+		Found: found,
+	}
+
+	event := ActivityEvent{
+		EventType: EventMemoryRecall,
+		Payload:   l.structToMap(payload),
+	}
+
+	l.Emit(ctx, event)
+}
+
+// EmitGraphRAGStore logs a GraphRAG entity storage operation.
+func (l *DefaultActivityLogger) EmitGraphRAGStore(ctx context.Context, entityType string, count int) {
+	payload := GraphRAGStorePayload{
+		EntityType: entityType,
+		Count:      count,
+	}
+
+	event := ActivityEvent{
+		EventType: EventGraphRAGStore,
+		Payload:   l.structToMap(payload),
+	}
+
+	l.Emit(ctx, event)
+}
+
+// EmitDelegation logs an agent delegation operation.
+func (l *DefaultActivityLogger) EmitDelegation(ctx context.Context, parentAgent string, childAgent string, taskDescription string) {
+	payload := DelegationPayload{
+		ParentAgent:     parentAgent,
+		ChildAgent:      childAgent,
+		TaskDescription: taskDescription,
+	}
+
+	event := ActivityEvent{
+		EventType: EventDelegation,
+		Payload:   l.structToMap(payload),
+	}
+
+	l.Emit(ctx, event)
+}
+
 // structToMap converts a struct to map[string]interface{} using JSON marshaling
 func (l *DefaultActivityLogger) structToMap(v interface{}) map[string]interface{} {
 	result := make(map[string]interface{})

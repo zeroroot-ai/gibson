@@ -82,6 +82,9 @@ type DefaultAgentHarness struct {
 		EmitToolResult(ctx context.Context, toolName string, result interface{}, durationMs int64, err error)
 		EmitFinding(ctx context.Context, finding interface{})
 		EmitError(ctx context.Context, operation string, err error)
+		EmitMemoryStore(ctx context.Context, tier string, key string, dataSize int)
+		EmitMemoryRecall(ctx context.Context, tier string, key string, found bool)
+		EmitDelegation(ctx context.Context, parentAgent string, childAgent string, taskDescription string)
 	}
 
 	// Knowledge graph integration
@@ -414,9 +417,24 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 		}, req.Messages...)
 	}
 
+	// Emit LLM prompt before streaming starts
+	if h.activityLogger != nil {
+		// Convert []llm.Message to []interface{} for the logger
+		msgInterfaces := make([]interface{}, len(req.Messages))
+		for i, msg := range req.Messages {
+			msgInterfaces[i] = msg
+		}
+		h.activityLogger.EmitLLMPrompt(ctx, slot, msgInterfaces)
+	}
+
 	// Execute streaming completion
 	chunks, err := provider.Stream(ctx, req)
 	if err != nil {
+		// Emit error event
+		if h.activityLogger != nil {
+			h.activityLogger.EmitError(ctx, "llm_streaming", err)
+		}
+
 		h.logger.Error("LLM stream failed",
 			"slot", slot,
 			"provider", provider.Name(),
@@ -442,18 +460,29 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 		"provider", provider.Name(),
 		"model", modelInfo.Name)
 
-	// Wrap channel to record stream completion
+	// Wrap channel to record stream completion and aggregate response
 	wrappedChan := make(chan llm.StreamChunk)
 	go func() {
 		defer close(wrappedChan)
 
+		// Aggregate streaming response for activity logging
+		var aggregatedContent string
+		var finishReason llm.FinishReason
+		var hasFinished bool
+
 		for chunk := range chunks {
 			wrappedChan <- chunk
+
+			// Aggregate content from chunks (Delta.Content, not Content)
+			aggregatedContent += chunk.Delta.Content
 
 			// If this is the final chunk, record completion metrics
 			// Note: Token usage tracking for streaming requires provider-specific support
 			// and is typically only available after the stream completes
 			if chunk.FinishReason != "" {
+				finishReason = chunk.FinishReason
+				hasFinished = true
+
 				// Record completion metrics
 				h.metrics.RecordCounter("llm.streams.completed", 1, map[string]string{
 					"slot":     slot,
@@ -467,6 +496,29 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 					"model", modelInfo.Name,
 					"finish_reason", string(chunk.FinishReason))
 			}
+		}
+
+		// Emit LLM response after stream completes
+		if h.activityLogger != nil && hasFinished {
+			// Create a CompletionResponse from aggregated chunks
+			// Note: Streaming doesn't provide token usage info in most cases,
+			// so we create a minimal response with just the content
+			aggregatedResponse := &llm.CompletionResponse{
+				Message: llm.Message{
+					Role:    llm.RoleAssistant,
+					Content: aggregatedContent,
+				},
+				Model:        modelInfo.Name,
+				FinishReason: finishReason,
+				Usage: llm.CompletionTokenUsage{
+					// Token counts are typically not available for streaming
+					// They would need to be tracked by the provider
+					PromptTokens:     0,
+					CompletionTokens: 0,
+					TotalTokens:      0,
+				},
+			}
+			h.activityLogger.EmitLLMResponse(ctx, slot, aggregatedResponse)
 		}
 	}()
 
@@ -1298,6 +1350,11 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		"agent", name,
 		"task_id", task.ID.String(),
 		"task_name", task.Name)
+
+	// Emit delegation event before delegation happens
+	if h.activityLogger != nil {
+		h.activityLogger.EmitDelegation(ctx, h.missionCtx.CurrentAgent, name, task.Description)
+	}
 
 	// Update mission context for child agent
 	childMissionCtx := h.missionCtx

@@ -160,11 +160,21 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		EmitToolResult(ctx context.Context, toolName string, result interface{}, durationMs int64, err error)
 		EmitFinding(ctx context.Context, finding interface{})
 		EmitError(ctx context.Context, operation string, err error)
+		EmitMemoryStore(ctx context.Context, tier string, key string, dataSize int)
+		EmitMemoryRecall(ctx context.Context, tier string, key string, found bool)
+		EmitDelegation(ctx context.Context, parentAgent string, childAgent string, taskDescription string)
 	}
 	activityLogger = f.config.ActivityLogger
 	if activityLogger == nil {
 		// Use noop logger when activity logging is disabled
 		activityLogger = &noopActivityLogger{}
+	}
+
+	// Wrap memory with activity logging if activity logger is configured
+	if memoryStore != nil && activityLogger != nil {
+		if typedLogger, ok := activityLogger.(activityLoggerMemory); ok {
+			memoryStore = NewActivityLoggedMemoryManager(memoryStore, typedLogger)
+		}
 	}
 
 	// Create and return DefaultAgentHarness
@@ -339,3 +349,7 @@ func (n *noopActivityLogger) EmitToolResult(ctx context.Context, toolName string
 }
 func (n *noopActivityLogger) EmitFinding(ctx context.Context, finding interface{})            {}
 func (n *noopActivityLogger) EmitError(ctx context.Context, operation string, err error)      {}
+func (n *noopActivityLogger) EmitMemoryStore(ctx context.Context, tier string, key string, dataSize int) {}
+func (n *noopActivityLogger) EmitMemoryRecall(ctx context.Context, tier string, key string, found bool) {}
+func (n *noopActivityLogger) EmitDelegation(ctx context.Context, parentAgent string, childAgent string, taskDescription string) {
+}

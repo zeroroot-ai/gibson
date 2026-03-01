@@ -478,7 +478,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 		// Create DiscoveryProcessor for processing agent output discoveries
 		graphLoader := loader.NewGraphLoader(d.infrastructure.graphRAGClient)
-		discoveryProc := processor.NewDiscoveryProcessor(graphLoader, d.infrastructure.graphRAGClient, d.logger)
+		discoveryProc := processor.NewDiscoveryProcessor(graphLoader, d.infrastructure.graphRAGClient, d.logger, d.infrastructure.activityLogger)
 		discoveryProcessorAdapter := &discoveryProcessorAdapter{processor: discoveryProc}
 
 		cfg := orchestrator.Config{
