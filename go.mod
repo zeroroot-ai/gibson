@@ -20,7 +20,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/tmc/langchaingo v0.1.10
-	github.com/zero-day-ai/sdk v0.40.1
+	github.com/zero-day-ai/sdk v0.41.0
 	go.etcd.io/etcd/client/v3 v3.5.18
 	go.etcd.io/etcd/server/v3 v3.5.18
 	go.opentelemetry.io/otel v1.39.0
@@ -180,5 +180,3 @@ require (
 	k8s.io/klog/v2 v2.130.1 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-replace github.com/zero-day-ai/sdk => ../sdk
