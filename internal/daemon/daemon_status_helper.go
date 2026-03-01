@@ -12,14 +12,14 @@ func (d *daemonImpl) queryMissionCounts(ctx context.Context) (total int, active 
 	// Query total missions
 	totalMissions, err := d.missionStore.Count(ctx, mission.NewMissionFilter())
 	if err != nil {
-		d.logger.Warn("failed to get total mission count", "error", err)
+		d.logger.Warn(ctx, "failed to get total mission count", "error", err)
 		totalMissions = 0
 	}
 
 	// Query active missions
 	activeMissions, err := d.missionStore.GetActive(ctx)
 	if err != nil {
-		d.logger.Warn("failed to get active mission count", "error", err)
+		d.logger.Warn(ctx, "failed to get active mission count", "error", err)
 		activeMissions = nil
 	}
 

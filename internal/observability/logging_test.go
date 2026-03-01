@@ -76,7 +76,7 @@ func TestNewTracedLogger(t *testing.T) {
 	require.NotNil(t, logger)
 	assert.Equal(t, "mission-123", logger.missionID)
 	assert.Equal(t, "test-agent", logger.agentName)
-	assert.True(t, logger.redactSensitive)
+	assert.True(t, logger.config.RedactSensitive)
 }
 
 func TestTracedLogger_Debug(t *testing.T) {

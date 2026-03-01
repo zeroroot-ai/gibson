@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -71,21 +70,10 @@ type DefaultAgentHarness struct {
 	contextProvider MissionContextProvider
 
 	// Observability
-	tracer         trace.Tracer
-	logger         *slog.Logger
-	metrics        MetricsRecorder
-	tokenUsage     llm.TokenTracker
-	activityLogger interface {
-		EmitLLMPrompt(ctx context.Context, slot string, messages []interface{})
-		EmitLLMResponse(ctx context.Context, slot string, response interface{})
-		EmitToolCall(ctx context.Context, toolName string, params interface{})
-		EmitToolResult(ctx context.Context, toolName string, result interface{}, durationMs int64, err error)
-		EmitFinding(ctx context.Context, finding interface{})
-		EmitError(ctx context.Context, operation string, err error)
-		EmitMemoryStore(ctx context.Context, tier string, key string, dataSize int)
-		EmitMemoryRecall(ctx context.Context, tier string, key string, found bool)
-		EmitDelegation(ctx context.Context, parentAgent string, childAgent string, taskDescription string)
-	}
+	tracer     trace.Tracer
+	logger     *slog.Logger
+	metrics    MetricsRecorder
+	tokenUsage llm.TokenTracker
 
 	// Knowledge graph integration
 	graphRAGBridge      GraphRAGBridge
@@ -94,6 +82,9 @@ type DefaultAgentHarness struct {
 	// Mission management (optional, nil = mission methods return error)
 	missionClient MissionOperator
 	spawnLimits   SpawnLimits
+
+	// Event logging for structured observability
+	eventLogger EventLogger
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -157,24 +148,18 @@ func (h *DefaultAgentHarness) Complete(ctx context.Context, slot string, message
 		}, req.Messages...)
 	}
 
-	// Emit LLM prompt before execution
-	if h.activityLogger != nil {
-		// Convert []llm.Message to []interface{} for the logger
-		msgInterfaces := make([]interface{}, len(req.Messages))
-		for i, msg := range req.Messages {
-			msgInterfaces[i] = msg
-		}
-		h.activityLogger.EmitLLMPrompt(ctx, slot, msgInterfaces)
+	// Emit LLM request event
+	if h.eventLogger != nil {
+		h.eventLogger.Event(ctx, EventLLMRequest, "llm request", LLMRequestEventData{
+			Model:        modelInfo.Name,
+			MessageCount: len(req.Messages),
+			Slot:         slot,
+		})
 	}
 
 	// Execute completion
 	resp, err := provider.Complete(ctx, req)
 	if err != nil {
-		// Emit error event
-		if h.activityLogger != nil {
-			h.activityLogger.EmitError(ctx, "llm_completion", err)
-		}
-
 		h.logger.Error("LLM completion failed",
 			"slot", slot,
 			"provider", provider.Name(),
@@ -185,11 +170,6 @@ func (h *DefaultAgentHarness) Complete(ctx context.Context, slot string, message
 			"LLM completion failed",
 			err,
 		)
-	}
-
-	// Emit LLM response after successful completion
-	if h.activityLogger != nil {
-		h.activityLogger.EmitLLMResponse(ctx, slot, resp)
 	}
 
 	// Track token usage
@@ -233,6 +213,17 @@ func (h *DefaultAgentHarness) Complete(ctx context.Context, slot string, message
 		"model", resp.Model,
 		"input_tokens", resp.Usage.PromptTokens,
 		"output_tokens", resp.Usage.CompletionTokens)
+
+	// Emit LLM response event
+	if h.eventLogger != nil {
+		h.eventLogger.Event(ctx, EventLLMResponse, "llm response", LLMResponseEventData{
+			Model:            resp.Model,
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
+			Slot:             slot,
+		})
+	}
 
 	return resp, nil
 }
@@ -287,24 +278,18 @@ func (h *DefaultAgentHarness) CompleteWithTools(ctx context.Context, slot string
 		}, req.Messages...)
 	}
 
-	// Emit LLM prompt before execution
-	if h.activityLogger != nil {
-		// Convert []llm.Message to []interface{} for the logger
-		msgInterfaces := make([]interface{}, len(req.Messages))
-		for i, msg := range req.Messages {
-			msgInterfaces[i] = msg
-		}
-		h.activityLogger.EmitLLMPrompt(ctx, slot, msgInterfaces)
+	// Emit LLM request event
+	if h.eventLogger != nil {
+		h.eventLogger.Event(ctx, EventLLMRequest, "llm request with tools", LLMRequestEventData{
+			Model:        modelInfo.Name,
+			MessageCount: len(req.Messages),
+			Slot:         slot,
+		})
 	}
 
 	// Execute completion with tools
 	resp, err := provider.CompleteWithTools(ctx, req, tools)
 	if err != nil {
-		// Emit error event
-		if h.activityLogger != nil {
-			h.activityLogger.EmitError(ctx, "llm_completion_with_tools", err)
-		}
-
 		h.logger.Error("LLM completion with tools failed",
 			"slot", slot,
 			"provider", provider.Name(),
@@ -315,11 +300,6 @@ func (h *DefaultAgentHarness) CompleteWithTools(ctx context.Context, slot string
 			"LLM completion with tools failed",
 			err,
 		)
-	}
-
-	// Emit LLM response after successful completion
-	if h.activityLogger != nil {
-		h.activityLogger.EmitLLMResponse(ctx, slot, resp)
 	}
 
 	// Track token usage
@@ -363,6 +343,17 @@ func (h *DefaultAgentHarness) CompleteWithTools(ctx context.Context, slot string
 		"tool_calls", len(resp.Message.ToolCalls),
 		"input_tokens", resp.Usage.PromptTokens,
 		"output_tokens", resp.Usage.CompletionTokens)
+
+	// Emit LLM response event
+	if h.eventLogger != nil {
+		h.eventLogger.Event(ctx, EventLLMResponse, "llm response with tools", LLMResponseEventData{
+			Model:            resp.Model,
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
+			Slot:             slot,
+		})
+	}
 
 	return resp, nil
 }
@@ -417,24 +408,9 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 		}, req.Messages...)
 	}
 
-	// Emit LLM prompt before streaming starts
-	if h.activityLogger != nil {
-		// Convert []llm.Message to []interface{} for the logger
-		msgInterfaces := make([]interface{}, len(req.Messages))
-		for i, msg := range req.Messages {
-			msgInterfaces[i] = msg
-		}
-		h.activityLogger.EmitLLMPrompt(ctx, slot, msgInterfaces)
-	}
-
 	// Execute streaming completion
 	chunks, err := provider.Stream(ctx, req)
 	if err != nil {
-		// Emit error event
-		if h.activityLogger != nil {
-			h.activityLogger.EmitError(ctx, "llm_streaming", err)
-		}
-
 		h.logger.Error("LLM stream failed",
 			"slot", slot,
 			"provider", provider.Name(),
@@ -465,24 +441,13 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 	go func() {
 		defer close(wrappedChan)
 
-		// Aggregate streaming response for activity logging
-		var aggregatedContent string
-		var finishReason llm.FinishReason
-		var hasFinished bool
-
 		for chunk := range chunks {
 			wrappedChan <- chunk
-
-			// Aggregate content from chunks (Delta.Content, not Content)
-			aggregatedContent += chunk.Delta.Content
 
 			// If this is the final chunk, record completion metrics
 			// Note: Token usage tracking for streaming requires provider-specific support
 			// and is typically only available after the stream completes
 			if chunk.FinishReason != "" {
-				finishReason = chunk.FinishReason
-				hasFinished = true
-
 				// Record completion metrics
 				h.metrics.RecordCounter("llm.streams.completed", 1, map[string]string{
 					"slot":     slot,
@@ -496,29 +461,6 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 					"model", modelInfo.Name,
 					"finish_reason", string(chunk.FinishReason))
 			}
-		}
-
-		// Emit LLM response after stream completes
-		if h.activityLogger != nil && hasFinished {
-			// Create a CompletionResponse from aggregated chunks
-			// Note: Streaming doesn't provide token usage info in most cases,
-			// so we create a minimal response with just the content
-			aggregatedResponse := &llm.CompletionResponse{
-				Message: llm.Message{
-					Role:    llm.RoleAssistant,
-					Content: aggregatedContent,
-				},
-				Model:        modelInfo.Name,
-				FinishReason: finishReason,
-				Usage: llm.CompletionTokenUsage{
-					// Token counts are typically not available for streaming
-					// They would need to be tracked by the provider
-					PromptTokens:     0,
-					CompletionTokens: 0,
-					TotalTokens:      0,
-				},
-			}
-			h.activityLogger.EmitLLMResponse(ctx, slot, aggregatedResponse)
 		}
 	}()
 
@@ -636,11 +578,14 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 				"target_type", inputType)
 
 			// Get the tool's file descriptor set from metadata
+			// Support both GRPCToolClient and RedisToolProxy
 			var fileDescSet string
 			if grpcClient, ok := t.(*registry.GRPCToolClient); ok {
 				if md := grpcClient.Metadata(); md != nil {
 					fileDescSet = md["file_descriptor_set"]
 				}
+			} else if redisProxy, ok := t.(*RedisToolProxy); ok {
+				fileDescSet = redisProxy.FileDescriptorSet()
 			}
 
 			if fileDescSet == "" {
@@ -792,26 +737,17 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		}
 	}
 
-	// Emit tool call before execution
-	if h.activityLogger != nil {
-		h.activityLogger.EmitToolCall(ctx, name, actualRequest)
+	// Emit tool call event
+	if h.eventLogger != nil {
+		h.eventLogger.Event(ctx, EventToolCall, "tool call", ToolCallEventData{
+			ToolName: name,
+		})
 	}
-
-	// Track timing for tool execution
-	startTime := time.Now()
 
 	// Execute tool with proto messages (using actualRequest which may be converted)
 	outputMsg, err := protoT.ExecuteProto(ctx, actualRequest)
 
-	// Calculate duration in milliseconds
-	durationMs := time.Since(startTime).Milliseconds()
-
 	if err != nil {
-		// Emit tool result with error
-		if h.activityLogger != nil {
-			h.activityLogger.EmitToolResult(ctx, name, nil, durationMs, err)
-		}
-
 		h.logger.Error("tool execution failed",
 			"tool", name,
 			"remote", isRemote,
@@ -825,16 +761,20 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 			"mode":   "proto",
 		})
 
+		// Emit tool result event (failure)
+		if h.eventLogger != nil {
+			h.eventLogger.Event(ctx, EventToolResult, "tool result", ToolResultEventData{
+				ToolName: name,
+				Success:  false,
+				Error:    err.Error(),
+			})
+		}
+
 		return types.WrapError(
 			ErrHarnessToolExecutionFailed,
 			fmt.Sprintf("tool execution failed: %s", name),
 			err,
 		)
-	}
-
-	// Emit successful tool result
-	if h.activityLogger != nil {
-		h.activityLogger.EmitToolResult(ctx, name, outputMsg, durationMs, nil)
 	}
 
 	// Verify output type matches - or convert if necessary
@@ -911,6 +851,14 @@ metricsSuccess:
 	h.logger.Debug("tool execution successful with proto",
 		"tool", name,
 		"remote", isRemote)
+
+	// Emit tool result event (success)
+	if h.eventLogger != nil {
+		h.eventLogger.Event(ctx, EventToolResult, "tool result", ToolResultEventData{
+			ToolName: name,
+			Success:  true,
+		})
+	}
 
 	return nil
 }
@@ -1351,11 +1299,6 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		"task_id", task.ID.String(),
 		"task_name", task.Name)
 
-	// Emit delegation event before delegation happens
-	if h.activityLogger != nil {
-		h.activityLogger.EmitDelegation(ctx, h.missionCtx.CurrentAgent, name, task.Description)
-	}
-
 	// Update mission context for child agent
 	childMissionCtx := h.missionCtx
 	childMissionCtx.CurrentAgent = name
@@ -1494,11 +1437,6 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 		"severity", finding.Severity,
 		"confidence", finding.Confidence)
 
-	// Emit finding event
-	if h.activityLogger != nil {
-		h.activityLogger.EmitFinding(ctx, &finding)
-	}
-
 	// Store finding
 	err := h.findingStore.Store(ctx, h.missionCtx.ID, finding)
 	if err != nil {
@@ -1531,6 +1469,20 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 	h.logger.Debug("finding submitted successfully",
 		"finding_id", finding.ID.String(),
 		"title", finding.Title)
+
+	// Emit finding event
+	if h.eventLogger != nil {
+		targetAsset := ""
+		if finding.TargetID != nil {
+			targetAsset = finding.TargetID.String()
+		}
+		h.eventLogger.Event(ctx, EventFinding, "finding submitted", FindingEventData{
+			Severity:    string(finding.Severity),
+			Title:       finding.Title,
+			Confidence:  fmt.Sprintf("%.2f", finding.Confidence),
+			TargetAsset: targetAsset,
+		})
+	}
 
 	// Async store to GraphRAG knowledge graph (non-blocking)
 	// This happens after local store succeeds to ensure findings are never lost

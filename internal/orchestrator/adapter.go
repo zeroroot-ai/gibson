@@ -99,13 +99,13 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 		graphMissionID, err := m.config.GraphLoader.LoadMission(ctx, def)
 		if err != nil {
 			// Log warning but continue - graph storage is optional
-			m.config.Logger.Warn("failed to store mission definition in GraphRAG",
+			m.config.Logger.Warn(ctx, "failed to store mission definition in GraphRAG",
 				"error", err,
 				"mission_id", mis.ID,
 				"definition_name", def.Name,
 			)
 		} else {
-			m.config.Logger.Info("mission definition stored in GraphRAG",
+			m.config.Logger.Info(ctx, "mission definition stored in GraphRAG",
 				"graph_mission_id", graphMissionID,
 				"mission_id", mis.ID,
 				"definition_name", def.Name,
@@ -119,14 +119,14 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 		// Ensure Mission node exists (or get existing one)
 		graphMissionID, err := m.config.MissionGraphManager.EnsureMissionNode(ctx, mis.Name, mis.TargetID.String())
 		if err != nil {
-			m.config.Logger.Warn("failed to ensure mission node in GraphRAG",
+			m.config.Logger.Warn(ctx, "failed to ensure mission node in GraphRAG",
 				"error", err,
 				"mission_id", mis.ID,
 				"mission_name", mis.Name,
 				"target_id", mis.TargetID,
 			)
 		} else {
-			m.config.Logger.Debug("mission node ensured in GraphRAG",
+			m.config.Logger.Debug(ctx, "mission node ensured in GraphRAG",
 				"graph_mission_id", graphMissionID,
 				"mission_id", mis.ID,
 				"mission_name", mis.Name,
@@ -145,14 +145,14 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 
 			missionRunID, err = m.config.MissionGraphManager.CreateMissionRunNode(ctx, graphMissionID, runNumber)
 			if err != nil {
-				m.config.Logger.Warn("failed to create mission run node in GraphRAG",
+				m.config.Logger.Warn(ctx, "failed to create mission run node in GraphRAG",
 					"error", err,
 					"mission_id", mis.ID,
 					"graph_mission_id", graphMissionID,
 					"run_number", runNumber,
 				)
 			} else {
-				m.config.Logger.Info("mission run node created in GraphRAG",
+				m.config.Logger.Info(ctx, "mission run node created in GraphRAG",
 					"mission_run_id", missionRunID,
 					"graph_mission_id", graphMissionID,
 					"mission_id", mis.ID,
@@ -204,13 +204,13 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 
 		updateErr := m.config.MissionGraphManager.UpdateMissionRunStatus(ctx, missionRunID, status)
 		if updateErr != nil {
-			m.config.Logger.Warn("failed to update mission run status in GraphRAG",
+			m.config.Logger.Warn(ctx, "failed to update mission run status in GraphRAG",
 				"error", updateErr,
 				"mission_run_id", missionRunID,
 				"status", status,
 			)
 		} else {
-			m.config.Logger.Info("mission run status updated in GraphRAG",
+			m.config.Logger.Info(ctx, "mission run status updated in GraphRAG",
 				"mission_run_id", missionRunID,
 				"status", status,
 			)
@@ -298,7 +298,7 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 		var err error
 		inventory, err = inventoryBuilder.Build(inventoryCtx)
 		if err != nil {
-			m.config.Logger.Warn("failed to build component inventory, validation will be skipped",
+			m.config.Logger.Warn(ctx, "failed to build component inventory, validation will be skipped",
 				"mission_id", mis.ID,
 				"error", err)
 			inventory = nil // Continue without inventory
@@ -310,20 +310,12 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 	if def != nil {
 		policySource := NewMissionPolicySource(def)
 		nodeStore := NewGraphNodeStore(m.config.GraphRAGClient, missionRunID)
-		policyChecker = NewPolicyChecker(policySource, nodeStore, m.config.Logger.With("component", "policy_checker"))
-	}
-
-	// Convert ActivityLogger from interface{} to ActivityLogger type
-	var activityLogger ActivityLogger
-	if m.config.ActivityLogger != nil {
-		if al, ok := m.config.ActivityLogger.(ActivityLogger); ok {
-			activityLogger = al
-		}
+		policyChecker = NewPolicyChecker(policySource, nodeStore, m.config.Logger.Slog().With("component", "policy_checker"))
 	}
 
 	// Create Actor with DiscoveryProcessor for storing agent output discoveries
 	// ApprovalManager, EscalationManager, CheckpointManager, ReflectionEngine, and MemoryRecaller are nil for now - they will be configured later
-	actor := NewActor(harnessAdapter, executionQueries, missionQueries, m.config.GraphRAGClient, inventory, m.config.MissionTracer, policyChecker, m.config.DiscoveryProcessor, nil, nil, nil, nil, nil, m.config.Logger, activityLogger)
+	actor := NewActor(harnessAdapter, executionQueries, missionQueries, m.config.GraphRAGClient, inventory, m.config.MissionTracer, policyChecker, m.config.DiscoveryProcessor, nil, nil, nil, nil, nil, m.config.Logger.Slog())
 
 	// Create the orchestrator
 	orchOptions := []OrchestratorOption{
@@ -331,11 +323,10 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 		WithMaxConcurrent(m.config.MaxConcurrent),
 		WithBudget(m.config.Budget),
 		WithTimeout(m.config.Timeout),
-		WithLogger(m.config.Logger.With("component", "orchestrator", "mission_id", mis.ID)),
+		WithLogger(&slogAdapter{slog: m.config.Logger.Slog().With("component", "orchestrator", "mission_id", mis.ID)}),
 		WithTracer(m.config.Tracer),
 		WithEventBus(m.config.EventBus),
 		WithDecisionLogWriter(m.config.DecisionLogWriter),
-		WithActivityLogger(activityLogger),
 	}
 
 	orchestrator := NewOrchestrator(observer, thinker, actor, orchOptions...)

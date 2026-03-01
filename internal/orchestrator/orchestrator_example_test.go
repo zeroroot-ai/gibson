@@ -26,7 +26,7 @@ func ExampleOrchestrator() {
 		orchestrator.WithBudget(100000),   // 100k token budget
 		orchestrator.WithMaxConcurrent(5), // Max 5 parallel executions
 		orchestrator.WithTimeout(30*time.Minute), // 30 minute timeout
-		orchestrator.WithLogger(slog.Default()),
+		orchestrator.WithLogger(orchestrator.WrapSlogLogger(slog.Default())),
 	)
 
 	// Run orchestration for a mission

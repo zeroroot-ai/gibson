@@ -24,7 +24,8 @@ type Config struct {
 	HarnessFactory harness.HarnessFactoryInterface
 
 	// Logger for orchestrator operations (optional, defaults to slog.Default())
-	Logger *slog.Logger
+	// Accepts either orchestrator.Logger interface or *slog.Logger
+	Logger Logger
 
 	// Tracer for distributed tracing (optional, defaults to noop tracer)
 	Tracer trace.Tracer
@@ -75,11 +76,6 @@ type Config struct {
 	// When set, enables automatic storage of discovered hosts, ports, services, etc.
 	// from agent outputs to Neo4j for use by downstream agents.
 	DiscoveryProcessor DiscoveryProcessor
-
-	// ActivityLogger for activity stream logging (optional)
-	// When set, enables activity stream logging of decisions and agent execution events.
-	// Type: ActivityLogger interface (stored as interface{} to avoid import cycles)
-	ActivityLogger interface{}
 }
 
 // NewMissionAdapter creates a new mission orchestrator adapter.
@@ -96,7 +92,7 @@ func NewMissionAdapter(cfg Config) (*MissionAdapter, error) {
 
 	// Set defaults
 	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
+		cfg.Logger = &slogAdapter{slog: slog.Default()}
 	}
 	if cfg.Tracer == nil {
 		cfg.Tracer = trace.NewNoopTracerProvider().Tracer("orchestrator")

@@ -82,16 +82,9 @@ func (r *ProcessResult) AddError(err error) *ProcessResult {
 
 // discoveryProcessor is the default implementation of DiscoveryProcessor.
 type discoveryProcessor struct {
-	loader         *loader.GraphLoader
-	client         graph.GraphClient
-	logger         *slog.Logger
-	activityLogger ActivityLogger
-}
-
-// ActivityLogger defines the interface for logging GraphRAG storage operations.
-// This is a minimal interface to avoid import cycles with the observability package.
-type ActivityLogger interface {
-	EmitGraphRAGStore(ctx context.Context, entityType string, count int)
+	loader *loader.GraphLoader
+	client graph.GraphClient
+	logger *slog.Logger
 }
 
 // NewDiscoveryProcessor creates a new DiscoveryProcessor with the given dependencies.
@@ -100,19 +93,17 @@ type ActivityLogger interface {
 //   - loader: GraphLoader for persisting nodes and relationships
 //   - client: GraphClient for direct graph queries (used for explicit relationships)
 //   - logger: Structured logger for diagnostic output
-//   - activityLogger: Activity logger for emitting GraphRAG store events (optional, can be nil)
 //
 // Returns:
 //   - DiscoveryProcessor instance ready to process discoveries
-func NewDiscoveryProcessor(loader *loader.GraphLoader, client graph.GraphClient, logger *slog.Logger, activityLogger ActivityLogger) DiscoveryProcessor {
+func NewDiscoveryProcessor(loader *loader.GraphLoader, client graph.GraphClient, logger *slog.Logger) DiscoveryProcessor {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &discoveryProcessor{
-		loader:         loader,
-		client:         client,
-		logger:         logger,
-		activityLogger: activityLogger,
+		loader: loader,
+		client: client,
+		logger: logger,
 	}
 }
 
@@ -166,43 +157,6 @@ func (p *discoveryProcessor) Process(ctx context.Context, execCtx loader.ExecCon
 		if loadResult.HasErrors() {
 			for _, loadErr := range loadResult.Errors {
 				result.AddError(loadErr)
-			}
-		}
-
-		// Emit GraphRAG store events for each entity type
-		if p.activityLogger != nil {
-			if len(discovery.Hosts) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Host", len(discovery.Hosts))
-			}
-			if len(discovery.Ports) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Port", len(discovery.Ports))
-			}
-			if len(discovery.Services) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Service", len(discovery.Services))
-			}
-			if len(discovery.Endpoints) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Endpoint", len(discovery.Endpoints))
-			}
-			if len(discovery.Domains) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Domain", len(discovery.Domains))
-			}
-			if len(discovery.Subdomains) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Subdomain", len(discovery.Subdomains))
-			}
-			if len(discovery.Technologies) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Technology", len(discovery.Technologies))
-			}
-			if len(discovery.Certificates) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Certificate", len(discovery.Certificates))
-			}
-			if len(discovery.Findings) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Finding", len(discovery.Findings))
-			}
-			if len(discovery.Evidence) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "Evidence", len(discovery.Evidence))
-			}
-			if len(discovery.CustomNodes) > 0 {
-				p.activityLogger.EmitGraphRAGStore(ctx, "CustomNode", len(discovery.CustomNodes))
 			}
 		}
 

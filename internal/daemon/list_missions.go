@@ -31,7 +31,7 @@ import (
 //   - int: Total count of missions (for pagination, not affected by limit/offset)
 //   - error: Non-nil if query fails
 func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFilter, namePattern string, limit, offset int) ([]api.MissionData, int, error) {
-	d.logger.Debug("ListMissions called",
+	d.logger.Debug(ctx, "ListMissions called",
 		"active_only", activeOnly,
 		"status_filter", statusFilter,
 		"name_pattern", namePattern,
@@ -53,7 +53,7 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 		// Query only running or paused missions
 		missions, err = d.missionStore.GetActive(ctx)
 		if err != nil {
-			d.logger.Error("failed to get active missions", "error", err)
+			d.logger.Error(ctx, "failed to get active missions", "error", err)
 			return nil, 0, fmt.Errorf("failed to get active missions: %w", err)
 		}
 
@@ -93,7 +93,7 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 
 		missions, err = d.missionStore.List(ctx, filter)
 		if err != nil {
-			d.logger.Error("failed to list missions", "error", err)
+			d.logger.Error(ctx, "failed to list missions", "error", err)
 			return nil, 0, fmt.Errorf("failed to list missions: %w", err)
 		}
 
@@ -109,7 +109,7 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 
 		total, err = d.missionStore.Count(ctx, totalFilter)
 		if err != nil {
-			d.logger.Error("failed to count missions", "error", err)
+			d.logger.Error(ctx, "failed to count missions", "error", err)
 			return nil, 0, fmt.Errorf("failed to count missions: %w", err)
 		}
 	}
@@ -120,7 +120,7 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 		result[i] = convertMissionToData(m)
 	}
 
-	d.logger.Debug("listed missions", "count", len(result), "total", total, "active_only", activeOnly)
+	d.logger.Debug(ctx, "listed missions", "count", len(result), "total", total, "active_only", activeOnly)
 	return result, total, nil
 }
 

@@ -83,6 +83,19 @@ func (p *RedisToolProxy) OutputMessageType() string {
 	return p.meta.OutputMessageType
 }
 
+// FileDescriptorSet returns the base64-encoded FileDescriptorSet for schema introspection.
+// This is used by the harness to convert structpb.Struct inputs to typed proto messages.
+func (p *RedisToolProxy) FileDescriptorSet() string {
+	return p.meta.FileDescriptorSet
+}
+
+// Metadata returns tool metadata as a map, matching the interface used by GRPCToolClient.
+func (p *RedisToolProxy) Metadata() map[string]string {
+	return map[string]string{
+		"file_descriptor_set": p.meta.FileDescriptorSet,
+	}
+}
+
 // ExecuteProto executes the tool by pushing to Redis queue and waiting for result.
 func (p *RedisToolProxy) ExecuteProto(ctx context.Context, input proto.Message) (proto.Message, error) {
 	// Generate job ID

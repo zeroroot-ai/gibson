@@ -36,14 +36,14 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	d.grpcServer = srv
 
 	// Create and register daemon service
-	daemonSvc := api.NewDaemonServer(d, d.logger)
+	daemonSvc := api.NewDaemonServer(d, d.logger.Slog())
 	api.RegisterDaemonServiceServer(srv, daemonSvc)
 
 	// Start serving in goroutine
 	go func() {
-		d.logger.Info("gRPC server listening", "address", d.grpcAddr)
+		d.logger.Info(ctx, "gRPC server listening", "address", d.grpcAddr)
 		if err := srv.Serve(listener); err != nil {
-			d.logger.Error("gRPC server error", "error", err)
+			d.logger.Error(ctx, "gRPC server error", "error", err)
 		}
 	}()
 
@@ -82,7 +82,7 @@ func (d *daemonImpl) Status() (api.DaemonStatus, error) {
 // This includes agents installed via CLI and agents running in Kubernetes/containers
 // that registered directly with the registry.
 func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentInfoInternal, error) {
-	d.logger.Debug("ListAgents called", "kind", kind)
+	d.logger.Debug(ctx, "ListAgents called", "kind", kind)
 
 	// Track agents by name to avoid duplicates
 	agentMap := make(map[string]api.AgentInfoInternal)
@@ -91,7 +91,7 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 	if d.componentStore != nil {
 		agents, err := d.componentStore.List(ctx, component.ComponentKindAgent)
 		if err != nil {
-			d.logger.Warn("failed to list agents from component store", "error", err)
+			d.logger.Warn(ctx, "failed to list agents from component store", "error", err)
 			// Continue - we can still list agents from registry
 		} else {
 			for _, agent := range agents {
@@ -111,7 +111,7 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 	if d.registryAdapter != nil {
 		running, err := d.registryAdapter.ListAgents(ctx)
 		if err != nil {
-			d.logger.Warn("failed to list agents from registry", "error", err)
+			d.logger.Warn(ctx, "failed to list agents from registry", "error", err)
 		} else {
 			for _, r := range running {
 				endpoint := ""
@@ -149,18 +149,18 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 		result = append(result, agent)
 	}
 
-	d.logger.Debug("listed agents", "count", len(result))
+	d.logger.Debug(ctx, "listed agents", "count", len(result))
 	return result, nil
 }
 
 // GetAgentStatus returns status for a specific agent.
 func (d *daemonImpl) GetAgentStatus(ctx context.Context, agentID string) (api.AgentStatusInternal, error) {
-	d.logger.Debug("GetAgentStatus called", "agent_id", agentID)
+	d.logger.Debug(ctx, "GetAgentStatus called", "agent_id", agentID)
 
 	// Query registry for all agents
 	agents, err := d.registryAdapter.ListAgents(ctx)
 	if err != nil {
-		d.logger.Error("failed to query registry for agent status", "error", err, "agent_id", agentID)
+		d.logger.Error(ctx, "failed to query registry for agent status", "error", err, "agent_id", agentID)
 		return api.AgentStatusInternal{}, fmt.Errorf("failed to query registry: %w", err)
 	}
 
@@ -199,19 +199,19 @@ func (d *daemonImpl) GetAgentStatus(ctx context.Context, agentID string) (api.Ag
 				TaskStartTime: time.Time{},
 			}
 
-			d.logger.Debug("found agent status", "agent_id", agentID, "instances", agent.Instances)
+			d.logger.Debug(ctx, "found agent status", "agent_id", agentID, "instances", agent.Instances)
 			return status, nil
 		}
 	}
 
 	// Agent not found
-	d.logger.Debug("agent not found in registry", "agent_id", agentID)
+	d.logger.Debug(ctx, "agent not found in registry", "agent_id", agentID)
 	return api.AgentStatusInternal{}, fmt.Errorf("agent not found: %s", agentID)
 }
 
 // ListTools returns all installed tools from the component store.
 func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, error) {
-	d.logger.Debug("ListTools called")
+	d.logger.Debug(ctx, "ListTools called")
 
 	if d.componentStore == nil {
 		return nil, fmt.Errorf("component store not available")
@@ -220,7 +220,7 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 	// Query component store for installed tools
 	tools, err := d.componentStore.List(ctx, component.ComponentKindTool)
 	if err != nil {
-		d.logger.Error("failed to list tools from component store", "error", err)
+		d.logger.Error(ctx, "failed to list tools from component store", "error", err)
 		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
 
@@ -280,13 +280,13 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 		}
 	}
 
-	d.logger.Debug("listed installed tools", "count", len(result))
+	d.logger.Debug(ctx, "listed installed tools", "count", len(result))
 	return result, nil
 }
 
 // ListPlugins returns all installed plugins from the component store.
 func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal, error) {
-	d.logger.Debug("ListPlugins called")
+	d.logger.Debug(ctx, "ListPlugins called")
 
 	if d.componentStore == nil {
 		return nil, fmt.Errorf("component store not available")
@@ -295,7 +295,7 @@ func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal,
 	// Query component store for installed plugins
 	plugins, err := d.componentStore.List(ctx, component.ComponentKindPlugin)
 	if err != nil {
-		d.logger.Error("failed to list plugins from component store", "error", err)
+		d.logger.Error(ctx, "failed to list plugins from component store", "error", err)
 		return nil, fmt.Errorf("failed to list plugins: %w", err)
 	}
 
@@ -342,29 +342,29 @@ func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal,
 		}
 	}
 
-	d.logger.Debug("listed installed plugins", "count", len(result))
+	d.logger.Debug(ctx, "listed installed plugins", "count", len(result))
 	return result, nil
 }
 
 // QueryPlugin executes a method on a plugin via the registry adapter.
 func (d *daemonImpl) QueryPlugin(ctx context.Context, name, method string, params map[string]any) (any, error) {
-	d.logger.Debug("QueryPlugin called", "plugin", name, "method", method)
+	d.logger.Debug(ctx, "QueryPlugin called", "plugin", name, "method", method)
 
 	// Discover and connect to plugin via registry adapter
 	pluginClient, err := d.registryAdapter.DiscoverPlugin(ctx, name)
 	if err != nil {
-		d.logger.Error("failed to discover plugin", "plugin", name, "error", err)
+		d.logger.Error(ctx, "failed to discover plugin", "plugin", name, "error", err)
 		return nil, fmt.Errorf("failed to discover plugin %s: %w", name, err)
 	}
 
 	// Execute query via gRPC
 	result, err := pluginClient.Query(ctx, method, params)
 	if err != nil {
-		d.logger.Error("plugin query failed", "plugin", name, "method", method, "error", err)
+		d.logger.Error(ctx, "plugin query failed", "plugin", name, "method", method, "error", err)
 		return nil, fmt.Errorf("plugin query failed: %w", err)
 	}
 
-	d.logger.Debug("plugin query completed", "plugin", name, "method", method)
+	d.logger.Debug(ctx, "plugin query completed", "plugin", name, "method", method)
 	return result, nil
 }
 
@@ -375,7 +375,7 @@ func (d *daemonImpl) RunMission(ctx context.Context, workflowPath string, missio
 
 // StopMission stops a running mission.
 func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bool) error {
-	d.logger.Info("StopMission called", "mission_id", missionID, "force", force)
+	d.logger.Info(ctx, "StopMission called", "mission_id", missionID, "force", force)
 
 	// Validate mission ID
 	if missionID == "" {
@@ -391,14 +391,14 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 		missionObj, err := d.missionStore.Get(ctx, types.ID(missionID))
 		if err != nil {
 			// Mission not found in store either
-			d.logger.Warn("mission not found", "mission_id", missionID)
+			d.logger.Warn(ctx, "mission not found", "mission_id", missionID)
 			return fmt.Errorf("mission not found: %s", missionID)
 		}
 
 		// If mission is paused (orphaned), mark it as failed to unblock future runs
 		// This preserves memory for inheritance while allowing new runs to proceed
 		if missionObj.Status == mission.MissionStatusPaused {
-			d.logger.Info("marking orphaned paused mission as failed", "mission_id", missionID)
+			d.logger.Info(ctx, "marking orphaned paused mission as failed", "mission_id", missionID)
 			missionObj.Status = mission.MissionStatusFailed
 			completedAt := time.Now()
 			missionObj.CompletedAt = &completedAt
@@ -408,7 +408,7 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 			missionObj.Metadata["failure_reason"] = "Orphaned paused mission - failed to resume"
 
 			if err := d.missionStore.Update(ctx, missionObj); err != nil {
-				d.logger.Error("failed to update orphaned mission status", "error", err, "mission_id", missionID)
+				d.logger.Error(ctx, "failed to update orphaned mission status", "error", err, "mission_id", missionID)
 				return fmt.Errorf("failed to mark orphaned mission as failed: %w", err)
 			}
 
@@ -426,16 +426,16 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 					},
 				}
 				if err := d.eventBus.Publish(ctx, event); err != nil {
-					d.logger.Warn("failed to publish mission failed event", "error", err)
+					d.logger.Warn(ctx, "failed to publish mission failed event", "error", err)
 				}
 			}
 
-			d.logger.Info("orphaned paused mission marked as failed", "mission_id", missionID)
+			d.logger.Info(ctx, "orphaned paused mission marked as failed", "mission_id", missionID)
 			return nil
 		}
 
 		// Mission exists but is not running and not paused (already terminal)
-		d.logger.Info("mission is not currently running", "mission_id", missionID)
+		d.logger.Info(ctx, "mission is not currently running", "mission_id", missionID)
 		return fmt.Errorf("mission is not currently running: %s", missionID)
 	}
 
@@ -444,13 +444,13 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 	d.missionsMu.Unlock()
 
 	// Cancel the mission context to trigger graceful shutdown
-	d.logger.Info("cancelling mission execution", "mission_id", missionID, "force", force)
+	d.logger.Info(ctx, "cancelling mission execution", "mission_id", missionID, "force", force)
 	cancelFunc()
 
 	// Update mission status in the store
 	missionObj, err := d.missionStore.Get(ctx, types.ID(missionID))
 	if err != nil {
-		d.logger.Error("failed to get mission for status update", "error", err, "mission_id", missionID)
+		d.logger.Error(ctx, "failed to get mission for status update", "error", err, "mission_id", missionID)
 		// Continue anyway - the cancellation was successful
 	} else {
 		// Update mission status to cancelled
@@ -462,7 +462,7 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 		}
 
 		if err := d.missionStore.Update(ctx, missionObj); err != nil {
-			d.logger.Error("failed to update mission status", "error", err, "mission_id", missionID)
+			d.logger.Error(ctx, "failed to update mission status", "error", err, "mission_id", missionID)
 		}
 	}
 
@@ -480,11 +480,11 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 			},
 		}
 		if err := d.eventBus.Publish(ctx, event); err != nil {
-			d.logger.Warn("failed to publish mission stopped event", "error", err)
+			d.logger.Warn(ctx, "failed to publish mission stopped event", "error", err)
 		}
 	}
 
-	d.logger.Info("mission stopped successfully", "mission_id", missionID)
+	d.logger.Info(ctx, "mission stopped successfully", "mission_id", missionID)
 	return nil
 }
 
@@ -492,27 +492,27 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 
 // RunAttack executes an attack and returns an event channel.
 func (d *daemonImpl) RunAttack(ctx context.Context, req api.AttackRequest) (<-chan api.AttackEventData, error) {
-	d.logger.Info("RunAttack called",
+	d.logger.Info(ctx, "RunAttack called",
 		"target", req.Target,
 		"attack_type", req.AttackType,
 		"agent_id", req.AgentID)
 
 	// Validate request
 	if err := d.validateAttackRequest(req); err != nil {
-		d.logger.Error("invalid attack request", "error", err)
+		d.logger.Error(ctx, "invalid attack request", "error", err)
 		return nil, fmt.Errorf("invalid attack request: %w", err)
 	}
 
 	// Check if attack runner is available
 	if d.attackRunner == nil {
-		d.logger.Error("attack runner not initialized")
+		d.logger.Error(ctx, "attack runner not initialized")
 		return nil, fmt.Errorf("attack execution not available: runner not initialized")
 	}
 
 	// Convert API request to attack options
 	attackOpts, err := d.buildAttackOptions(req)
 	if err != nil {
-		d.logger.Error("failed to build attack options", "error", err)
+		d.logger.Error(ctx, "failed to build attack options", "error", err)
 		return nil, fmt.Errorf("failed to build attack options: %w", err)
 	}
 
@@ -534,7 +534,7 @@ func (d *daemonImpl) RunAttack(ctx context.Context, req api.AttackRequest) (<-ch
 			Message:   fmt.Sprintf("Starting attack on %s with agent %s", attackOpts.TargetURL, req.AgentID),
 		}
 
-		d.logger.Info("executing attack",
+		d.logger.Info(ctx, "executing attack",
 			"attack_id", attackID,
 			"target_url", attackOpts.TargetURL,
 			"target_name", attackOpts.TargetName,
@@ -543,7 +543,7 @@ func (d *daemonImpl) RunAttack(ctx context.Context, req api.AttackRequest) (<-ch
 		// Execute attack through runner
 		result, err := d.attackRunner.Run(ctx, attackOpts)
 		if err != nil {
-			d.logger.Error("attack execution failed", "error", err, "attack_id", attackID)
+			d.logger.Error(ctx, "attack execution failed", "error", err, "attack_id", attackID)
 			eventChan <- api.AttackEventData{
 				EventType: "attack.failed",
 				Timestamp: time.Now(),
@@ -617,7 +617,7 @@ func (d *daemonImpl) RunAttack(ctx context.Context, req api.AttackRequest) (<-ch
 			Result:    operationResult,
 		}
 
-		d.logger.Info("attack completed",
+		d.logger.Info(ctx, "attack completed",
 			"attack_id", attackID,
 			"status", result.Status,
 			"findings", len(result.Findings),
@@ -712,7 +712,7 @@ func (d *daemonImpl) buildAttackOptions(req api.AttackRequest) (*attack.AttackOp
 
 // Subscribe establishes an event stream.
 func (d *daemonImpl) Subscribe(ctx context.Context, eventTypes []string, missionID string) (<-chan api.EventData, error) {
-	d.logger.Info("Subscribe called", "event_types", eventTypes, "mission_id", missionID)
+	d.logger.Info(ctx, "Subscribe called", "event_types", eventTypes, "mission_id", missionID)
 
 	// Subscribe to events from the event bus
 	eventChan, cleanup := d.eventBus.Subscribe(ctx, eventTypes, missionID)
@@ -721,7 +721,7 @@ func (d *daemonImpl) Subscribe(ctx context.Context, eventTypes []string, mission
 	go func() {
 		<-ctx.Done()
 		cleanup()
-		d.logger.Info("subscription cleanup completed", "mission_id", missionID)
+		d.logger.Info(ctx, "subscription cleanup completed", "mission_id", missionID)
 	}()
 
 	return eventChan, nil
@@ -741,7 +741,7 @@ func formatEvidence(evidence []agent.Evidence) string {
 
 // StartComponent starts a component by kind and name.
 func (d *daemonImpl) StartComponent(ctx context.Context, kind string, name string) (api.StartComponentResult, error) {
-	d.logger.Info("StartComponent called", "kind", kind, "name", name)
+	d.logger.Info(ctx, "StartComponent called", "kind", kind, "name", name)
 
 	// Validate kind
 	var componentKind component.ComponentKind
@@ -758,34 +758,34 @@ func (d *daemonImpl) StartComponent(ctx context.Context, kind string, name strin
 
 	// Get component from store
 	if d.componentStore == nil {
-		d.logger.Error("component store not available")
+		d.logger.Error(ctx, "component store not available")
 		return api.StartComponentResult{}, fmt.Errorf("component store not available")
 	}
 	comp, err := d.componentStore.GetByName(ctx, componentKind, name)
 	if err != nil {
-		d.logger.Error("failed to get component from store", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to get component from store", "error", err, "kind", kind, "name", name)
 		return api.StartComponentResult{}, fmt.Errorf("failed to get component: %w", err)
 	}
 	if comp == nil {
-		d.logger.Warn("component not found in store", "kind", kind, "name", name)
+		d.logger.Warn(ctx, "component not found in store", "kind", kind, "name", name)
 		return api.StartComponentResult{}, fmt.Errorf("component '%s' not found", name)
 	}
 
 	// Get registry from registry manager
 	reg := d.registry.Registry()
 	if reg == nil {
-		d.logger.Error("registry not available")
+		d.logger.Error(ctx, "registry not available")
 		return api.StartComponentResult{}, fmt.Errorf("registry not started")
 	}
 
 	// Check if already running by querying registry
 	instances, err := reg.Discover(ctx, string(componentKind), name)
 	if err != nil {
-		d.logger.Error("failed to query registry", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to query registry", "error", err, "kind", kind, "name", name)
 		return api.StartComponentResult{}, fmt.Errorf("failed to query registry: %w", err)
 	}
 	if len(instances) > 0 {
-		d.logger.Warn("component already running", "kind", kind, "name", name, "instances", len(instances))
+		d.logger.Warn(ctx, "component already running", "kind", kind, "name", name, "instances", len(instances))
 		return api.StartComponentResult{}, fmt.Errorf("component '%s' is already running (%d instance(s) found in registry)", name, len(instances))
 	}
 
@@ -804,11 +804,11 @@ func (d *daemonImpl) StartComponent(ctx context.Context, kind string, name strin
 	// Start component process
 	port, pid, logPath, err := startComponentProcess(ctx, comp, reg, registryEndpoint, homeDir, pluginConfig)
 	if err != nil {
-		d.logger.Error("failed to start component process", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to start component process", "error", err, "kind", kind, "name", name)
 		return api.StartComponentResult{}, fmt.Errorf("failed to start component: %w", err)
 	}
 
-	d.logger.Info("component started successfully", "kind", kind, "name", name, "pid", pid, "port", port)
+	d.logger.Info(ctx, "component started successfully", "kind", kind, "name", name, "pid", pid, "port", port)
 
 	return api.StartComponentResult{
 		PID:     pid,
@@ -819,7 +819,7 @@ func (d *daemonImpl) StartComponent(ctx context.Context, kind string, name strin
 
 // StopComponent stops a component by kind and name.
 func (d *daemonImpl) StopComponent(ctx context.Context, kind string, name string, force bool) (api.StopComponentResult, error) {
-	d.logger.Info("StopComponent called", "kind", kind, "name", name, "force", force)
+	d.logger.Info(ctx, "StopComponent called", "kind", kind, "name", name, "force", force)
 
 	// Validate kind
 	var componentKind component.ComponentKind
@@ -836,34 +836,34 @@ func (d *daemonImpl) StopComponent(ctx context.Context, kind string, name string
 
 	// Get component from store
 	if d.componentStore == nil {
-		d.logger.Error("component store not available")
+		d.logger.Error(ctx, "component store not available")
 		return api.StopComponentResult{}, fmt.Errorf("component store not available")
 	}
 	comp, err := d.componentStore.GetByName(ctx, componentKind, name)
 	if err != nil {
-		d.logger.Error("failed to get component from store", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to get component from store", "error", err, "kind", kind, "name", name)
 		return api.StopComponentResult{}, fmt.Errorf("failed to get component: %w", err)
 	}
 	if comp == nil {
-		d.logger.Warn("component not found in store", "kind", kind, "name", name)
+		d.logger.Warn(ctx, "component not found in store", "kind", kind, "name", name)
 		return api.StopComponentResult{}, fmt.Errorf("component '%s' not found", name)
 	}
 
 	// Get registry from registry manager
 	reg := d.registry.Registry()
 	if reg == nil {
-		d.logger.Error("registry not available")
+		d.logger.Error(ctx, "registry not available")
 		return api.StopComponentResult{}, fmt.Errorf("registry not started")
 	}
 
 	// Query registry for running instances
 	instances, err := reg.Discover(ctx, string(componentKind), name)
 	if err != nil {
-		d.logger.Error("failed to query registry", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to query registry", "error", err, "kind", kind, "name", name)
 		return api.StopComponentResult{}, fmt.Errorf("failed to query registry: %w", err)
 	}
 	if len(instances) == 0 {
-		d.logger.Warn("component not running", "kind", kind, "name", name)
+		d.logger.Warn(ctx, "component not running", "kind", kind, "name", name)
 		return api.StopComponentResult{}, fmt.Errorf("component '%s' is not running (no instances found in registry)", name)
 	}
 
@@ -872,7 +872,7 @@ func (d *daemonImpl) StopComponent(ctx context.Context, kind string, name string
 	stoppedCount := 0
 	for _, instance := range instances {
 		if err := stopComponentProcess(ctx, instance, reg, force); err != nil {
-			d.logger.Warn("failed to stop instance", "error", err, "instance_id", instance.InstanceID)
+			d.logger.Warn(ctx, "failed to stop instance", "error", err, "instance_id", instance.InstanceID)
 			lastErr = err
 		} else {
 			stoppedCount++
@@ -880,11 +880,11 @@ func (d *daemonImpl) StopComponent(ctx context.Context, kind string, name string
 	}
 
 	if stoppedCount == 0 && lastErr != nil {
-		d.logger.Error("failed to stop any instances", "error", lastErr, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to stop any instances", "error", lastErr, "kind", kind, "name", name)
 		return api.StopComponentResult{}, fmt.Errorf("failed to stop any instances: %w", lastErr)
 	}
 
-	d.logger.Info("component stopped successfully", "kind", kind, "name", name, "stopped", stoppedCount, "total", len(instances))
+	d.logger.Info(ctx, "component stopped successfully", "kind", kind, "name", name, "stopped", stoppedCount, "total", len(instances))
 
 	return api.StopComponentResult{
 		StoppedCount: stoppedCount,
@@ -894,7 +894,7 @@ func (d *daemonImpl) StopComponent(ctx context.Context, kind string, name string
 
 // PauseMission pauses a running mission at the next clean checkpoint boundary.
 func (d *daemonImpl) PauseMission(ctx context.Context, missionID string, force bool) error {
-	d.logger.Info("PauseMission called", "mission_id", missionID, "force", force)
+	d.logger.Info(ctx, "PauseMission called", "mission_id", missionID, "force", force)
 
 	// Validate mission ID
 	if missionID == "" {
@@ -903,23 +903,23 @@ func (d *daemonImpl) PauseMission(ctx context.Context, missionID string, force b
 
 	// Initialize mission manager if not already done
 	if err := d.ensureMissionManager(); err != nil {
-		d.logger.Error("failed to initialize mission manager", "error", err)
+		d.logger.Error(ctx, "failed to initialize mission manager", "error", err)
 		return fmt.Errorf("failed to initialize mission manager: %w", err)
 	}
 
 	// Call mission manager's pause method
 	if err := d.missionManager.Pause(ctx, missionID, force); err != nil {
-		d.logger.Error("failed to pause mission", "error", err, "mission_id", missionID)
+		d.logger.Error(ctx, "failed to pause mission", "error", err, "mission_id", missionID)
 		return fmt.Errorf("failed to pause mission: %w", err)
 	}
 
-	d.logger.Info("mission paused successfully", "mission_id", missionID)
+	d.logger.Info(ctx, "mission paused successfully", "mission_id", missionID)
 	return nil
 }
 
 // ResumeMission resumes a paused mission from its last checkpoint.
 func (d *daemonImpl) ResumeMission(ctx context.Context, missionID string) (<-chan api.MissionEventData, error) {
-	d.logger.Info("ResumeMission called", "mission_id", missionID)
+	d.logger.Info(ctx, "ResumeMission called", "mission_id", missionID)
 
 	// Validate mission ID
 	if missionID == "" {
@@ -928,24 +928,24 @@ func (d *daemonImpl) ResumeMission(ctx context.Context, missionID string) (<-cha
 
 	// Initialize mission manager if not already done
 	if err := d.ensureMissionManager(); err != nil {
-		d.logger.Error("failed to initialize mission manager", "error", err)
+		d.logger.Error(ctx, "failed to initialize mission manager", "error", err)
 		return nil, fmt.Errorf("failed to initialize mission manager: %w", err)
 	}
 
 	// Call mission manager's resume method
 	eventChan, err := d.missionManager.Resume(ctx, missionID)
 	if err != nil {
-		d.logger.Error("failed to resume mission", "error", err, "mission_id", missionID)
+		d.logger.Error(ctx, "failed to resume mission", "error", err, "mission_id", missionID)
 		return nil, fmt.Errorf("failed to resume mission: %w", err)
 	}
 
-	d.logger.Info("mission resume started", "mission_id", missionID)
+	d.logger.Info(ctx, "mission resume started", "mission_id", missionID)
 	return eventChan, nil
 }
 
 // GetMissionHistory returns all runs for a mission name.
 func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit int, offset int) ([]api.MissionRunData, int, error) {
-	d.logger.Debug("GetMissionHistory called", "name", name, "limit", limit, "offset", offset)
+	d.logger.Debug(ctx, "GetMissionHistory called", "name", name, "limit", limit, "offset", offset)
 
 	// Validate name
 	if name == "" {
@@ -984,13 +984,13 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 		}
 	}
 
-	d.logger.Debug("mission history retrieved", "name", name, "count", len(runs), "total", total)
+	d.logger.Debug(ctx, "mission history retrieved", "name", name, "count", len(runs), "total", total)
 	return runs, total, nil
 }
 
 // GetMissionCheckpoints returns all checkpoints for a mission.
 func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string) ([]api.CheckpointData, error) {
-	d.logger.Debug("GetMissionCheckpoints called", "mission_id", missionID)
+	d.logger.Debug(ctx, "GetMissionCheckpoints called", "mission_id", missionID)
 
 	// Validate mission ID
 	if missionID == "" {
@@ -1000,13 +1000,13 @@ func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string
 	// Get the mission from the store
 	m, err := d.missionStore.Get(ctx, types.ID(missionID))
 	if err != nil {
-		d.logger.Error("failed to get mission", "error", err, "mission_id", missionID)
+		d.logger.Error(ctx, "failed to get mission", "error", err, "mission_id", missionID)
 		return nil, fmt.Errorf("failed to get mission: %w", err)
 	}
 
 	// Check if mission has a checkpoint
 	if m.Checkpoint == nil {
-		d.logger.Debug("no checkpoints found for mission", "mission_id", missionID)
+		d.logger.Debug(ctx, "no checkpoints found for mission", "mission_id", missionID)
 		return []api.CheckpointData{}, nil
 	}
 
@@ -1028,13 +1028,13 @@ func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string
 		Version:        m.Checkpoint.Version,
 	}
 
-	d.logger.Debug("mission checkpoints retrieved", "mission_id", missionID, "count", 1)
+	d.logger.Debug(ctx, "mission checkpoints retrieved", "mission_id", missionID, "count", 1)
 	return []api.CheckpointData{checkpoint}, nil
 }
 
 // InstallComponent installs a component from a git repository.
 func (d *daemonImpl) InstallComponent(ctx context.Context, kind string, url string, branch string, tag string, force bool, skipBuild bool, verbose bool) (api.InstallComponentResult, error) {
-	d.logger.Info("InstallComponent called", "kind", kind, "url", url, "force", force)
+	d.logger.Info(ctx, "InstallComponent called", "kind", kind, "url", url, "force", force)
 
 	// Validate kind
 	var componentKind component.ComponentKind
@@ -1051,7 +1051,7 @@ func (d *daemonImpl) InstallComponent(ctx context.Context, kind string, url stri
 
 	// Check if installer is available
 	if d.componentInstaller == nil {
-		d.logger.Error("component installer not available")
+		d.logger.Error(ctx, "component installer not available")
 		return api.InstallComponentResult{}, fmt.Errorf("component installer not available")
 	}
 
@@ -1067,11 +1067,11 @@ func (d *daemonImpl) InstallComponent(ctx context.Context, kind string, url stri
 	// Execute installation
 	result, err := d.componentInstaller.Install(ctx, url, componentKind, opts)
 	if err != nil {
-		d.logger.Error("failed to install component", "error", err, "kind", kind, "url", url)
+		d.logger.Error(ctx, "failed to install component", "error", err, "kind", kind, "url", url)
 		return api.InstallComponentResult{}, fmt.Errorf("failed to install component: %w", err)
 	}
 
-	d.logger.Info("component installed successfully", "kind", kind, "name", result.Component.Name, "version", result.Component.Version)
+	d.logger.Info(ctx, "component installed successfully", "kind", kind, "name", result.Component.Name, "version", result.Component.Version)
 
 	return api.InstallComponentResult{
 		Name:        result.Component.Name,
@@ -1085,7 +1085,7 @@ func (d *daemonImpl) InstallComponent(ctx context.Context, kind string, url stri
 
 // InstallAllComponent installs all components from a mono-repo.
 func (d *daemonImpl) InstallAllComponent(ctx context.Context, kind string, url string, branch string, tag string, force bool, skipBuild bool, verbose bool) (api.InstallAllComponentResult, error) {
-	d.logger.Info("InstallAllComponent called", "kind", kind, "url", url, "force", force)
+	d.logger.Info(ctx, "InstallAllComponent called", "kind", kind, "url", url, "force", force)
 
 	// Validate kind
 	var componentKind component.ComponentKind
@@ -1102,7 +1102,7 @@ func (d *daemonImpl) InstallAllComponent(ctx context.Context, kind string, url s
 
 	// Check if installer is available
 	if d.componentInstaller == nil {
-		d.logger.Error("component installer not available")
+		d.logger.Error(ctx, "component installer not available")
 		return api.InstallAllComponentResult{}, fmt.Errorf("component installer not available")
 	}
 
@@ -1119,12 +1119,12 @@ func (d *daemonImpl) InstallAllComponent(ctx context.Context, kind string, url s
 	start := time.Now()
 	result, err := d.componentInstaller.InstallAll(ctx, url, componentKind, opts)
 	if err != nil {
-		d.logger.Error("failed to install all components", "error", err, "kind", kind, "url", url)
+		d.logger.Error(ctx, "failed to install all components", "error", err, "kind", kind, "url", url)
 		return api.InstallAllComponentResult{}, fmt.Errorf("failed to install components: %w", err)
 	}
 
 	duration := time.Since(start)
-	d.logger.Info("install all completed",
+	d.logger.Info(ctx, "install all completed",
 		"kind", kind,
 		"found", result.ComponentsFound,
 		"successful", len(result.Successful),
@@ -1184,7 +1184,7 @@ func (d *daemonImpl) InstallAllComponent(ctx context.Context, kind string, url s
 
 // UninstallComponent uninstalls a component by kind and name.
 func (d *daemonImpl) UninstallComponent(ctx context.Context, kind string, name string, force bool) error {
-	d.logger.Info("UninstallComponent called", "kind", kind, "name", name, "force", force)
+	d.logger.Info(ctx, "UninstallComponent called", "kind", kind, "name", name, "force", force)
 
 	// Validate kind
 	var componentKind component.ComponentKind
@@ -1203,41 +1203,41 @@ func (d *daemonImpl) UninstallComponent(ctx context.Context, kind string, name s
 	if !force && d.componentStore != nil {
 		comp, err := d.componentStore.GetByName(ctx, componentKind, name)
 		if err != nil {
-			d.logger.Error("failed to get component", "error", err, "kind", kind, "name", name)
+			d.logger.Error(ctx, "failed to get component", "error", err, "kind", kind, "name", name)
 			return fmt.Errorf("failed to get component: %w", err)
 		}
 		if comp == nil {
-			d.logger.Warn("component not found", "kind", kind, "name", name)
+			d.logger.Warn(ctx, "component not found", "kind", kind, "name", name)
 			return fmt.Errorf("component '%s' not found", name)
 		}
 
 		// Check if running
 		if comp.IsRunning() {
-			d.logger.Warn("component is running", "kind", kind, "name", name)
+			d.logger.Warn(ctx, "component is running", "kind", kind, "name", name)
 			return fmt.Errorf("component '%s' is running. Stop it first or use --force", name)
 		}
 	}
 
 	// Check if installer is available
 	if d.componentInstaller == nil {
-		d.logger.Error("component installer not available")
+		d.logger.Error(ctx, "component installer not available")
 		return fmt.Errorf("component installer not available")
 	}
 
 	// Execute uninstallation
 	_, err := d.componentInstaller.Uninstall(ctx, componentKind, name)
 	if err != nil {
-		d.logger.Error("failed to uninstall component", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to uninstall component", "error", err, "kind", kind, "name", name)
 		return fmt.Errorf("failed to uninstall component: %w", err)
 	}
 
-	d.logger.Info("component uninstalled successfully", "kind", kind, "name", name)
+	d.logger.Info(ctx, "component uninstalled successfully", "kind", kind, "name", name)
 	return nil
 }
 
 // UpdateComponent updates a component to the latest version.
 func (d *daemonImpl) UpdateComponent(ctx context.Context, kind string, name string, restart bool, skipBuild bool, verbose bool) (api.UpdateComponentResult, error) {
-	d.logger.Info("UpdateComponent called", "kind", kind, "name", name, "restart", restart)
+	d.logger.Info(ctx, "UpdateComponent called", "kind", kind, "name", name, "restart", restart)
 
 	// Validate kind
 	var componentKind component.ComponentKind
@@ -1254,7 +1254,7 @@ func (d *daemonImpl) UpdateComponent(ctx context.Context, kind string, name stri
 
 	// Check if installer is available
 	if d.componentInstaller == nil {
-		d.logger.Error("component installer not available")
+		d.logger.Error(ctx, "component installer not available")
 		return api.UpdateComponentResult{}, fmt.Errorf("component installer not available")
 	}
 
@@ -1268,14 +1268,14 @@ func (d *daemonImpl) UpdateComponent(ctx context.Context, kind string, name stri
 	// Execute update
 	result, err := d.componentInstaller.Update(ctx, componentKind, name, opts)
 	if err != nil {
-		d.logger.Error("failed to update component", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to update component", "error", err, "kind", kind, "name", name)
 		return api.UpdateComponentResult{}, fmt.Errorf("failed to update component: %w", err)
 	}
 
 	// TODO: Handle restart if requested and component was running
 	// This requires the lifecycle manager to be integrated
 
-	d.logger.Info("component updated successfully", "kind", kind, "name", name, "updated", result.Updated)
+	d.logger.Info(ctx, "component updated successfully", "kind", kind, "name", name, "updated", result.Updated)
 
 	return api.UpdateComponentResult{
 		Updated:     result.Updated,
@@ -1288,7 +1288,7 @@ func (d *daemonImpl) UpdateComponent(ctx context.Context, kind string, name stri
 
 // BuildComponent rebuilds a component from source.
 func (d *daemonImpl) BuildComponent(ctx context.Context, kind string, name string) (api.BuildComponentResult, error) {
-	d.logger.Info("BuildComponent called", "kind", kind, "name", name)
+	d.logger.Info(ctx, "BuildComponent called", "kind", kind, "name", name)
 
 	// Validate kind
 	var componentKind component.ComponentKind
@@ -1305,29 +1305,29 @@ func (d *daemonImpl) BuildComponent(ctx context.Context, kind string, name strin
 
 	// Get component from store
 	if d.componentStore == nil {
-		d.logger.Error("component store not available")
+		d.logger.Error(ctx, "component store not available")
 		return api.BuildComponentResult{}, fmt.Errorf("component store not available")
 	}
 
 	comp, err := d.componentStore.GetByName(ctx, componentKind, name)
 	if err != nil {
-		d.logger.Error("failed to get component", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to get component", "error", err, "kind", kind, "name", name)
 		return api.BuildComponentResult{}, fmt.Errorf("failed to get component: %w", err)
 	}
 	if comp == nil {
-		d.logger.Warn("component not found", "kind", kind, "name", name)
+		d.logger.Warn(ctx, "component not found", "kind", kind, "name", name)
 		return api.BuildComponentResult{}, fmt.Errorf("component '%s' not found", name)
 	}
 
 	// Check if build executor is available
 	if d.componentBuildExecutor == nil {
-		d.logger.Error("build executor not available")
+		d.logger.Error(ctx, "build executor not available")
 		return api.BuildComponentResult{}, fmt.Errorf("build executor not available")
 	}
 
 	// Prepare build configuration from manifest
 	if comp.Manifest == nil || comp.Manifest.Build == nil {
-		d.logger.Warn("component has no build configuration", "kind", kind, "name", name)
+		d.logger.Warn(ctx, "component has no build configuration", "kind", kind, "name", name)
 		return api.BuildComponentResult{}, fmt.Errorf("component '%s' has no build configuration", name)
 	}
 
@@ -1373,7 +1373,7 @@ func (d *daemonImpl) BuildComponent(ctx context.Context, kind string, name strin
 	duration := time.Since(startTime)
 
 	if err != nil {
-		d.logger.Error("build failed", "error", err, "kind", kind, "name", name, "duration_ms", duration.Milliseconds())
+		d.logger.Error(ctx, "build failed", "error", err, "kind", kind, "name", name, "duration_ms", duration.Milliseconds())
 		errorMsg := fmt.Sprintf("build failed: %v", err)
 		if buildResult != nil {
 			return api.BuildComponentResult{
@@ -1391,7 +1391,7 @@ func (d *daemonImpl) BuildComponent(ctx context.Context, kind string, name strin
 		}, nil
 	}
 
-	d.logger.Info("component built successfully", "kind", kind, "name", name, "duration_ms", duration.Milliseconds())
+	d.logger.Info(ctx, "component built successfully", "kind", kind, "name", name, "duration_ms", duration.Milliseconds())
 
 	return api.BuildComponentResult{
 		Success:    true,
@@ -1403,7 +1403,7 @@ func (d *daemonImpl) BuildComponent(ctx context.Context, kind string, name strin
 
 // ShowComponent returns detailed information about a component.
 func (d *daemonImpl) ShowComponent(ctx context.Context, kind string, name string) (api.ComponentInfoInternal, error) {
-	d.logger.Debug("ShowComponent called", "kind", kind, "name", name)
+	d.logger.Debug(ctx, "ShowComponent called", "kind", kind, "name", name)
 
 	// Validate kind
 	var componentKind component.ComponentKind
@@ -1420,21 +1420,21 @@ func (d *daemonImpl) ShowComponent(ctx context.Context, kind string, name string
 
 	// Get component from store
 	if d.componentStore == nil {
-		d.logger.Error("component store not available")
+		d.logger.Error(ctx, "component store not available")
 		return api.ComponentInfoInternal{}, fmt.Errorf("component store not available")
 	}
 
 	comp, err := d.componentStore.GetByName(ctx, componentKind, name)
 	if err != nil {
-		d.logger.Error("failed to get component", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to get component", "error", err, "kind", kind, "name", name)
 		return api.ComponentInfoInternal{}, fmt.Errorf("failed to get component: %w", err)
 	}
 	if comp == nil {
-		d.logger.Warn("component not found", "kind", kind, "name", name)
+		d.logger.Warn(ctx, "component not found", "kind", kind, "name", name)
 		return api.ComponentInfoInternal{}, fmt.Errorf("component '%s' not found", name)
 	}
 
-	d.logger.Debug("component details retrieved", "kind", kind, "name", name, "version", comp.Version)
+	d.logger.Debug(ctx, "component details retrieved", "kind", kind, "name", name, "version", comp.Version)
 
 	// Convert to API format
 	return api.ComponentInfoInternal{
@@ -1454,7 +1454,7 @@ func (d *daemonImpl) ShowComponent(ctx context.Context, kind string, name string
 
 // GetComponentLogs streams log entries for a component.
 func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan api.LogEntryData, error) {
-	d.logger.Debug("GetComponentLogs called", "kind", kind, "name", name, "follow", follow, "lines", lines)
+	d.logger.Debug(ctx, "GetComponentLogs called", "kind", kind, "name", name, "follow", follow, "lines", lines)
 
 	// Validate kind
 	var componentKind component.ComponentKind
@@ -1471,17 +1471,17 @@ func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name str
 
 	// Get component from store to verify it exists
 	if d.componentStore == nil {
-		d.logger.Error("component store not available")
+		d.logger.Error(ctx, "component store not available")
 		return nil, fmt.Errorf("component store not available")
 	}
 
 	comp, err := d.componentStore.GetByName(ctx, componentKind, name)
 	if err != nil {
-		d.logger.Error("failed to get component", "error", err, "kind", kind, "name", name)
+		d.logger.Error(ctx, "failed to get component", "error", err, "kind", kind, "name", name)
 		return nil, fmt.Errorf("failed to get component: %w", err)
 	}
 	if comp == nil {
-		d.logger.Warn("component not found", "kind", kind, "name", name)
+		d.logger.Warn(ctx, "component not found", "kind", kind, "name", name)
 		return nil, fmt.Errorf("component '%s' not found", name)
 	}
 
@@ -1492,7 +1492,7 @@ func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name str
 
 	// Check if log file exists
 	if _, err := os.Stat(logFilePath); os.IsNotExist(err) {
-		d.logger.Warn("log file does not exist", "path", logFilePath)
+		d.logger.Warn(ctx, "log file does not exist", "path", logFilePath)
 		return nil, fmt.Errorf("log file not found for component '%s'", name)
 	}
 
@@ -1506,7 +1506,7 @@ func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name str
 		// Open log file
 		file, err := os.Open(logFilePath)
 		if err != nil {
-			d.logger.Error("failed to open log file", "error", err, "path", logFilePath)
+			d.logger.Error(ctx, "failed to open log file", "error", err, "path", logFilePath)
 			return
 		}
 		defer file.Close()
@@ -1522,7 +1522,7 @@ func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name str
 		}
 
 		if err := scanner.Err(); err != nil {
-			d.logger.Error("error reading log file", "error", err, "path", logFilePath)
+			d.logger.Error(ctx, "error reading log file", "error", err, "path", logFilePath)
 			return
 		}
 
@@ -1566,7 +1566,7 @@ func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name str
 					// Check if file has grown
 					fileInfo, err := os.Stat(logFilePath)
 					if err != nil {
-						d.logger.Error("error checking log file", "error", err)
+						d.logger.Error(ctx, "error checking log file", "error", err)
 						return
 					}
 
@@ -1598,11 +1598,11 @@ func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name str
 
 // InstallMission installs a mission from a git repository.
 func (d *daemonImpl) InstallMission(ctx context.Context, url string, branch string, tag string, force bool, yes bool, timeoutMs int64) (api.InstallMissionResult, error) {
-	d.logger.Info("InstallMission called", "url", url, "force", force)
+	d.logger.Info(ctx, "InstallMission called", "url", url, "force", force)
 
 	// Check if mission installer is available
 	if d.missionInstaller == nil {
-		d.logger.Error("mission installer not available")
+		d.logger.Error(ctx, "mission installer not available")
 		return api.InstallMissionResult{}, fmt.Errorf("mission installer not available")
 	}
 
@@ -1623,11 +1623,11 @@ func (d *daemonImpl) InstallMission(ctx context.Context, url string, branch stri
 	// Execute installation
 	result, err := d.missionInstaller.Install(ctx, url, opts)
 	if err != nil {
-		d.logger.Error("failed to install mission", "error", err, "url", url)
+		d.logger.Error(ctx, "failed to install mission", "error", err, "url", url)
 		return api.InstallMissionResult{}, fmt.Errorf("failed to install mission: %w", err)
 	}
 
-	d.logger.Info("mission installed successfully", "name", result.Name, "version", result.Version)
+	d.logger.Info(ctx, "mission installed successfully", "name", result.Name, "version", result.Version)
 
 	// Convert dependencies to API format
 	apiDeps := make([]api.InstalledDependencyData, len(result.Dependencies))
@@ -1650,11 +1650,11 @@ func (d *daemonImpl) InstallMission(ctx context.Context, url string, branch stri
 
 // UninstallMission removes an installed mission.
 func (d *daemonImpl) UninstallMission(ctx context.Context, name string, force bool) error {
-	d.logger.Info("UninstallMission called", "name", name, "force", force)
+	d.logger.Info(ctx, "UninstallMission called", "name", name, "force", force)
 
 	// Check if mission installer is available
 	if d.missionInstaller == nil {
-		d.logger.Error("mission installer not available")
+		d.logger.Error(ctx, "mission installer not available")
 		return fmt.Errorf("mission installer not available")
 	}
 
@@ -1666,33 +1666,33 @@ func (d *daemonImpl) UninstallMission(ctx context.Context, name string, force bo
 	// Execute uninstallation
 	err := d.missionInstaller.Uninstall(ctx, name, opts)
 	if err != nil {
-		d.logger.Error("failed to uninstall mission", "error", err, "name", name)
+		d.logger.Error(ctx, "failed to uninstall mission", "error", err, "name", name)
 		return fmt.Errorf("failed to uninstall mission: %w", err)
 	}
 
-	d.logger.Info("mission uninstalled successfully", "name", name)
+	d.logger.Info(ctx, "mission uninstalled successfully", "name", name)
 	return nil
 }
 
 // ListMissionDefinitions returns all installed mission definitions.
 func (d *daemonImpl) ListMissionDefinitions(ctx context.Context, limit int, offset int) ([]api.MissionDefinitionData, int, error) {
-	d.logger.Debug("ListMissionDefinitions called", "limit", limit, "offset", offset)
+	d.logger.Debug(ctx, "ListMissionDefinitions called", "limit", limit, "offset", offset)
 
 	// For now, return empty list as the MissionStore doesn't have ListDefinitions yet
 	// This will be implemented in task 3.1/3.2 when the store is extended
 	// TODO: Implement once MissionStore has ListDefinitions method
 
-	d.logger.Debug("listed mission definitions", "count", 0, "total", 0)
+	d.logger.Debug(ctx, "listed mission definitions", "count", 0, "total", 0)
 	return []api.MissionDefinitionData{}, 0, nil
 }
 
 // UpdateMission updates an installed mission to the latest version.
 func (d *daemonImpl) UpdateMission(ctx context.Context, name string, timeoutMs int64) (api.UpdateMissionResult, error) {
-	d.logger.Info("UpdateMission called", "name", name)
+	d.logger.Info(ctx, "UpdateMission called", "name", name)
 
 	// Check if mission installer is available
 	if d.missionInstaller == nil {
-		d.logger.Error("mission installer not available")
+		d.logger.Error(ctx, "mission installer not available")
 		return api.UpdateMissionResult{}, fmt.Errorf("mission installer not available")
 	}
 
@@ -1709,11 +1709,11 @@ func (d *daemonImpl) UpdateMission(ctx context.Context, name string, timeoutMs i
 	// Execute update
 	result, err := d.missionInstaller.Update(ctx, name, opts)
 	if err != nil {
-		d.logger.Error("failed to update mission", "error", err, "name", name)
+		d.logger.Error(ctx, "failed to update mission", "error", err, "name", name)
 		return api.UpdateMissionResult{}, fmt.Errorf("failed to update mission: %w", err)
 	}
 
-	d.logger.Info("mission updated successfully", "name", name, "updated", result.Updated)
+	d.logger.Info(ctx, "mission updated successfully", "name", name, "updated", result.Updated)
 
 	return api.UpdateMissionResult{
 		Updated:    result.Updated,
@@ -1725,18 +1725,18 @@ func (d *daemonImpl) UpdateMission(ctx context.Context, name string, timeoutMs i
 
 // ResolveMissionDependencies resolves and returns the dependency tree for a mission workflow.
 func (d *daemonImpl) ResolveMissionDependencies(ctx context.Context, missionPath string) (api.DependencyTreeData, error) {
-	d.logger.Debug("ResolveMissionDependencies called", "mission_path", missionPath)
+	d.logger.Debug(ctx, "ResolveMissionDependencies called", "mission_path", missionPath)
 
 	// Check if dependency resolver is available
 	if d.dependencyResolver == nil {
-		d.logger.Error("dependency resolver not available")
+		d.logger.Error(ctx, "dependency resolver not available")
 		return api.DependencyTreeData{}, fmt.Errorf("dependency resolver not initialized")
 	}
 
 	// Resolve dependencies from workflow file
 	tree, err := d.dependencyResolver.ResolveFromWorkflow(ctx, missionPath)
 	if err != nil {
-		d.logger.Error("failed to resolve mission dependencies", "error", err, "mission_path", missionPath)
+		d.logger.Error(ctx, "failed to resolve mission dependencies", "error", err, "mission_path", missionPath)
 		return api.DependencyTreeData{}, fmt.Errorf("failed to resolve dependencies: %w", err)
 	}
 
@@ -1766,7 +1766,7 @@ func (d *daemonImpl) ResolveMissionDependencies(ctx context.Context, missionPath
 		Nodes:       nodes,
 	}
 
-	d.logger.Debug("mission dependencies resolved",
+	d.logger.Debug(ctx, "mission dependencies resolved",
 		"mission_path", missionPath,
 		"total_nodes", result.TotalNodes,
 		"agents", result.AgentCount,
@@ -1779,25 +1779,25 @@ func (d *daemonImpl) ResolveMissionDependencies(ctx context.Context, missionPath
 
 // ValidateMissionDependencies validates the state of all dependencies for a mission workflow.
 func (d *daemonImpl) ValidateMissionDependencies(ctx context.Context, missionPath string) (api.ValidationResultData, error) {
-	d.logger.Debug("ValidateMissionDependencies called", "mission_path", missionPath)
+	d.logger.Debug(ctx, "ValidateMissionDependencies called", "mission_path", missionPath)
 
 	// Check if dependency resolver is available
 	if d.dependencyResolver == nil {
-		d.logger.Error("dependency resolver not available")
+		d.logger.Error(ctx, "dependency resolver not available")
 		return api.ValidationResultData{}, fmt.Errorf("dependency resolver not initialized")
 	}
 
 	// First resolve the dependency tree
 	tree, err := d.dependencyResolver.ResolveFromWorkflow(ctx, missionPath)
 	if err != nil {
-		d.logger.Error("failed to resolve mission dependencies", "error", err, "mission_path", missionPath)
+		d.logger.Error(ctx, "failed to resolve mission dependencies", "error", err, "mission_path", missionPath)
 		return api.ValidationResultData{}, fmt.Errorf("failed to resolve dependencies: %w", err)
 	}
 
 	// Validate the state of all components in the tree
 	validationResult, err := d.dependencyResolver.ValidateState(ctx, tree)
 	if err != nil {
-		d.logger.Error("failed to validate mission dependencies", "error", err, "mission_path", missionPath)
+		d.logger.Error(ctx, "failed to validate mission dependencies", "error", err, "mission_path", missionPath)
 		return api.ValidationResultData{}, fmt.Errorf("failed to validate dependencies: %w", err)
 	}
 
@@ -1876,7 +1876,7 @@ func (d *daemonImpl) ValidateMissionDependencies(ctx context.Context, missionPat
 		VersionMismatch:      versionMismatch,
 	}
 
-	d.logger.Debug("mission dependencies validated",
+	d.logger.Debug(ctx, "mission dependencies validated",
 		"mission_path", missionPath,
 		"valid", result.Valid,
 		"total", result.TotalComponents,
@@ -1890,29 +1890,29 @@ func (d *daemonImpl) ValidateMissionDependencies(ctx context.Context, missionPat
 
 // EnsureMissionDependencies ensures all dependencies for a mission workflow are running.
 func (d *daemonImpl) EnsureMissionDependencies(ctx context.Context, missionPath string) error {
-	d.logger.Info("EnsureMissionDependencies called", "mission_path", missionPath)
+	d.logger.Info(ctx, "EnsureMissionDependencies called", "mission_path", missionPath)
 
 	// Check if dependency resolver is available
 	if d.dependencyResolver == nil {
-		d.logger.Error("dependency resolver not available")
+		d.logger.Error(ctx, "dependency resolver not available")
 		return fmt.Errorf("dependency resolver not initialized")
 	}
 
 	// First resolve the dependency tree
 	tree, err := d.dependencyResolver.ResolveFromWorkflow(ctx, missionPath)
 	if err != nil {
-		d.logger.Error("failed to resolve mission dependencies", "error", err, "mission_path", missionPath)
+		d.logger.Error(ctx, "failed to resolve mission dependencies", "error", err, "mission_path", missionPath)
 		return fmt.Errorf("failed to resolve dependencies: %w", err)
 	}
 
 	// Ensure all components are running
 	err = d.dependencyResolver.EnsureRunning(ctx, tree)
 	if err != nil {
-		d.logger.Error("failed to ensure mission dependencies are running", "error", err, "mission_path", missionPath)
+		d.logger.Error(ctx, "failed to ensure mission dependencies are running", "error", err, "mission_path", missionPath)
 		return fmt.Errorf("failed to start dependencies: %w", err)
 	}
 
-	d.logger.Info("mission dependencies are running", "mission_path", missionPath, "total_nodes", len(tree.Nodes))
+	d.logger.Info(ctx, "mission dependencies are running", "mission_path", missionPath, "total_nodes", len(tree.Nodes))
 
 	return nil
 }

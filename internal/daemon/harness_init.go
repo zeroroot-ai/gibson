@@ -22,7 +22,7 @@ import (
 //   - harness.HarnessFactoryInterface: Configured factory ready to create harnesses
 //   - error: Non-nil if factory creation fails
 func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFactoryInterface, error) {
-	d.logger.Debug("creating harness factory")
+	d.logger.Debug(ctx, "creating harness factory")
 
 	// Get tracer from provider if available
 	var tracer trace.Tracer
@@ -56,13 +56,13 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// Create Redis tool registry
 		redisClient, ok := d.infrastructure.RedisClient().(*queue.RedisClient)
 		if !ok {
-			d.logger.Warn("Redis client type assertion failed, skipping Redis tool registry population")
+			d.logger.Warn(ctx, "Redis client type assertion failed, skipping Redis tool registry population")
 		} else {
-			redisToolRegistry := harness.NewRedisToolRegistry(redisClient, d.logger)
+			redisToolRegistry := harness.NewRedisToolRegistry(redisClient, d.logger.Slog())
 
 			// Refresh to discover available tools from Redis
 			if err := redisToolRegistry.Refresh(ctx); err != nil {
-				d.logger.Warn("failed to refresh Redis tool registry",
+				d.logger.Warn(ctx, "failed to refresh Redis tool registry",
 					"error", err.Error(),
 				)
 			}
@@ -72,7 +72,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			for _, toolName := range redisToolRegistry.List() {
 				if proxy, ok := redisToolRegistry.Get(toolName); ok {
 					if err := toolRegistry.RegisterInternal(proxy); err != nil {
-						d.logger.Warn("failed to register Redis tool",
+						d.logger.Warn(ctx, "failed to register Redis tool",
 							"tool", toolName,
 							"error", err.Error(),
 						)
@@ -83,15 +83,15 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			}
 
 			if registered > 0 {
-				d.logger.Info("populated tool registry with Redis tools",
+				d.logger.Info(ctx, "populated tool registry with Redis tools",
 					"tools_registered", registered,
 				)
 			} else {
-				d.logger.Info("no Redis tools available yet (workers may not be registered)")
+				d.logger.Info(ctx, "no Redis tools available yet (workers may not be registered)")
 			}
 		}
 	} else {
-		d.logger.Info("Redis client not available, skipping Redis tool registry population")
+		d.logger.Info(ctx, "Redis client not available, skipping Redis tool registry population")
 	}
 
 	// Register builtin tools - Phase 8
@@ -103,10 +103,10 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 	// The knowledge store will be wired in future phases
 	knowledgeTool := builtins.NewKnowledgeSearchTool(nil)
 	if err := toolRegistry.RegisterInternal(knowledgeTool); err != nil {
-		d.logger.Warn("failed to register knowledge_search tool", "error", err.Error())
+		d.logger.Warn(ctx, "failed to register knowledge_search tool", "error", err.Error())
 	} else {
 		builtinCount++
-		d.logger.Debug("registered builtin tool", "name", "knowledge_search", "status", "stub")
+		d.logger.Debug(ctx, "registered builtin tool", "name", "knowledge_search", "status", "stub")
 	}
 
 	// Register payload_search tool
@@ -114,10 +114,10 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 	// The payload registry will be wired in future phases
 	payloadSearchTool := builtins.NewPayloadSearchTool(nil)
 	if err := toolRegistry.RegisterInternal(payloadSearchTool); err != nil {
-		d.logger.Warn("failed to register payload_search tool", "error", err.Error())
+		d.logger.Warn(ctx, "failed to register payload_search tool", "error", err.Error())
 	} else {
 		builtinCount++
-		d.logger.Debug("registered builtin tool", "name", "payload_search", "status", "stub")
+		d.logger.Debug(ctx, "registered builtin tool", "name", "payload_search", "status", "stub")
 	}
 
 	// Register payload_execute tool
@@ -125,14 +125,14 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 	// The payload executor will be wired in future phases
 	payloadExecuteTool := builtins.NewPayloadExecuteTool(nil)
 	if err := toolRegistry.RegisterInternal(payloadExecuteTool); err != nil {
-		d.logger.Warn("failed to register payload_execute tool", "error", err.Error())
+		d.logger.Warn(ctx, "failed to register payload_execute tool", "error", err.Error())
 	} else {
 		builtinCount++
-		d.logger.Debug("registered builtin tool", "name", "payload_execute", "status", "stub")
+		d.logger.Debug(ctx, "registered builtin tool", "name", "payload_execute", "status", "stub")
 	}
 
 	if builtinCount > 0 {
-		d.logger.Info("registered builtin tools", "count", builtinCount)
+		d.logger.Info(ctx, "registered builtin tools", "count", builtinCount)
 	}
 
 	// Build HarnessConfig with all required dependencies
@@ -158,7 +158,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		},
 
 		// Observability
-		Logger:  d.logger.With("component", "harness"),
+		Logger:  d.logger.WithComponent("harness").Slog(),
 		Tracer:  tracer,
 		Metrics: nil, // Defaulted to no-op
 
@@ -179,6 +179,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		return nil, err
 	}
 
-	d.logger.Info("harness factory created successfully")
+	d.logger.Info(ctx, "harness factory created successfully")
 	return factory, nil
 }

@@ -2,6 +2,9 @@ package observability
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
+	"os"
 	"strings"
 )
 
@@ -170,4 +173,84 @@ func (c *LoggingConfig) Validate() error {
 	}
 
 	return nil
+}
+
+// Config configures the unified logger.
+// This is used for runtime logger configuration, separate from the YAML-based
+// LoggingConfig which is used for daemon configuration.
+type Config struct {
+	// Level is the minimum log level (debug, info, warn, error)
+	Level slog.Level
+
+	// Output is where logs are written (default: os.Stdout)
+	Output io.Writer
+
+	// RedactSensitive enables automatic redaction of sensitive fields
+	RedactSensitive bool
+
+	// MaxContentLength truncates large string values (0 = no limit)
+	MaxContentLength int
+
+	// Component is the default component name
+	Component string
+}
+
+// DefaultConfig returns the default logger configuration.
+// This provides sensible defaults for production use:
+//   - Info level logging (balances verbosity and noise)
+//   - Output to stdout (Kubernetes-friendly)
+//   - Redaction enabled (protects sensitive data)
+//   - Content truncated at 500 chars (prevents log bloat)
+//   - Component set to "gibson" (can be overridden with WithComponent)
+func DefaultConfig() Config {
+	return Config{
+		Level:            slog.LevelInfo,
+		Output:           os.Stdout,
+		RedactSensitive:  true,
+		MaxContentLength: 500,
+		Component:        "gibson",
+	}
+}
+
+// ConfigFromEnv returns a logger configuration initialized from environment variables.
+// It starts with DefaultConfig() and applies environment-based overrides.
+//
+// Environment variables:
+//   - GIBSON_LOG_LEVEL: Set log level (debug, info, warn, error)
+//     - Case-insensitive
+//     - Invalid values default to Info
+//     - Example: export GIBSON_LOG_LEVEL=debug
+//
+// Example:
+//
+//	// With GIBSON_LOG_LEVEL=debug
+//	cfg := ConfigFromEnv()
+//	// cfg.Level will be slog.LevelDebug
+//
+//	// With GIBSON_LOG_LEVEL=invalid
+//	cfg := ConfigFromEnv()
+//	// cfg.Level will be slog.LevelInfo (default)
+func ConfigFromEnv() Config {
+	cfg := DefaultConfig()
+
+	// Read GIBSON_LOG_LEVEL environment variable
+	if levelStr := os.Getenv("GIBSON_LOG_LEVEL"); levelStr != "" {
+		// Parse level (case-insensitive)
+		switch strings.ToLower(levelStr) {
+		case "debug":
+			cfg.Level = slog.LevelDebug
+		case "info":
+			cfg.Level = slog.LevelInfo
+		case "warn":
+			cfg.Level = slog.LevelWarn
+		case "error":
+			cfg.Level = slog.LevelError
+		default:
+			// Invalid value - keep default (Info)
+			// Note: We can't log this error since we're configuring the logger
+			cfg.Level = slog.LevelInfo
+		}
+	}
+
+	return cfg
 }

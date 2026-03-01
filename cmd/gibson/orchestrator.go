@@ -201,7 +201,7 @@ func createOrchestratorWithOptions(ctx context.Context, opts *OrchestratorOption
 		cfg := orchestrator.Config{
 			GraphRAGClient:     graphRAGClient,
 			HarnessFactory:     harnessFactory,
-			Logger:             slog.Default(),
+			Logger:             orchestrator.WrapSlogLogger(slog.Default()),
 			Tracer:             tracer,
 			MaxIterations:      100,
 			MaxConcurrent:      10,

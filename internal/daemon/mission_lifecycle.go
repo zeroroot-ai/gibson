@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/observability"
 )
 
 // missionManagerHolder holds the mission manager instance and ensures thread-safe initialization
@@ -28,7 +27,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 
 	// Use sync.Once to ensure thread-safe initialization
 	missionManagerInstance.mu.Do(func() {
-		d.logger.Debug("initializing mission manager")
+		d.logger.Debug(context.Background(), "initializing mission manager")
 
 		// Ensure infrastructure is initialized
 		if d.infrastructure == nil {
@@ -64,35 +63,10 @@ func (d *daemonImpl) ensureMissionManager() error {
 			return
 		}
 
-		// Create activity logger based on config
-		var activityLogger observability.ActivityLogger
-		if d.config.ActivityLogging.Enabled {
-			cfg := observability.ActivityLoggerConfig{
-				Level:            observability.ParseActivityLevel(d.config.ActivityLogging.Level),
-				MaxContentLength: d.config.ActivityLogging.MaxContentLength,
-				BufferSize:       d.config.ActivityLogging.BufferSize,
-				// Output defaults to os.Stdout in NewActivityLogger if nil
-			}
-			logger, err := observability.NewActivityLogger(cfg)
-			if err != nil {
-				d.logger.Warn("failed to create activity logger, using noop", "error", err)
-				activityLogger = observability.NewNoopActivityLogger()
-			} else {
-				activityLogger = logger
-				d.logger.Info("activity stream logging enabled",
-					"level", d.config.ActivityLogging.Level,
-					"output", d.config.ActivityLogging.Output,
-				)
-			}
-		} else {
-			activityLogger = observability.NewNoopActivityLogger()
-			d.logger.Debug("activity stream logging disabled")
-		}
-
 		// Create mission manager
 		missionManagerInstance.mgr = newMissionManager(
 			d.config,
-			d.logger,
+			d.logger.Slog(),
 			d.registryAdapter,
 			d.missionStore,
 			d.missionRunStore,
@@ -104,10 +78,9 @@ func (d *daemonImpl) ensureMissionManager() error {
 			runLinker,
 			d.infrastructure,
 			d.infrastructure.missionTracer,
-			activityLogger,
 		)
 
-		d.logger.Info("mission manager initialized")
+		d.logger.Info(context.Background(), "mission manager initialized")
 	})
 
 	if missionManagerInstance.initErr != nil {
@@ -122,65 +95,65 @@ func (d *daemonImpl) ensureMissionManager() error {
 // RunMissionWithManager starts a mission using the mission manager.
 // This is the implementation for the DaemonInterface.RunMission method.
 func (d *daemonImpl) RunMissionWithManager(ctx context.Context, workflowPath string, missionID string, variables map[string]string, memoryContinuity string) (<-chan api.MissionEventData, error) {
-	d.logger.Info("RunMission called", "workflow_path", workflowPath, "mission_id", missionID, "memory_continuity", memoryContinuity)
+	d.logger.Info(ctx, "RunMission called", "workflow_path", workflowPath, "mission_id", missionID, "memory_continuity", memoryContinuity)
 
 	// Initialize mission manager if not already done
 	if err := d.ensureMissionManager(); err != nil {
-		d.logger.Error("failed to initialize mission manager", "error", err)
+		d.logger.Error(ctx, "failed to initialize mission manager", "error", err)
 		return nil, fmt.Errorf("failed to initialize mission manager: %w", err)
 	}
 
 	// Delegate to mission manager
 	eventChan, err := d.missionManager.Run(ctx, workflowPath, missionID, variables, memoryContinuity)
 	if err != nil {
-		d.logger.Error("failed to start mission", "error", err, "workflow_path", workflowPath)
+		d.logger.Error(ctx, "failed to start mission", "error", err, "workflow_path", workflowPath)
 		return nil, err
 	}
 
-	d.logger.Info("mission started successfully", "mission_id", missionID)
+	d.logger.Info(ctx, "mission started successfully", "mission_id", missionID)
 	return eventChan, nil
 }
 
 // StopMissionWithManager stops a running mission using the mission manager.
 // This is the implementation for the DaemonInterface.StopMission method.
 func (d *daemonImpl) StopMissionWithManager(ctx context.Context, missionID string, force bool) error {
-	d.logger.Info("StopMission called via manager", "mission_id", missionID, "force", force)
+	d.logger.Info(ctx, "StopMission called via manager", "mission_id", missionID, "force", force)
 
 	// Initialize mission manager if not already done
 	if err := d.ensureMissionManager(); err != nil {
-		d.logger.Error("failed to initialize mission manager", "error", err)
+		d.logger.Error(ctx, "failed to initialize mission manager", "error", err)
 		return fmt.Errorf("failed to initialize mission manager: %w", err)
 	}
 
 	// Delegate to mission manager
 	if err := d.missionManager.Stop(ctx, missionID, force); err != nil {
-		d.logger.Error("failed to stop mission", "error", err, "mission_id", missionID)
+		d.logger.Error(ctx, "failed to stop mission", "error", err, "mission_id", missionID)
 		return err
 	}
 
-	d.logger.Info("mission stopped successfully", "mission_id", missionID)
+	d.logger.Info(ctx, "mission stopped successfully", "mission_id", missionID)
 	return nil
 }
 
 // ListMissionsWithManager lists missions using the mission manager.
 // This is the implementation for the DaemonInterface.ListMissions method.
 func (d *daemonImpl) ListMissionsWithManager(ctx context.Context, activeOnly bool, limit, offset int) ([]api.MissionData, int, error) {
-	d.logger.Debug("ListMissions called via manager", "active_only", activeOnly, "limit", limit, "offset", offset)
+	d.logger.Debug(ctx, "ListMissions called via manager", "active_only", activeOnly, "limit", limit, "offset", offset)
 
 	// Initialize mission manager if not already done
 	if err := d.ensureMissionManager(); err != nil {
-		d.logger.Error("failed to initialize mission manager", "error", err)
+		d.logger.Error(ctx, "failed to initialize mission manager", "error", err)
 		return nil, 0, fmt.Errorf("failed to initialize mission manager: %w", err)
 	}
 
 	// Delegate to mission manager
 	missions, total, err := d.missionManager.List(ctx, activeOnly, limit, offset)
 	if err != nil {
-		d.logger.Error("failed to list missions", "error", err)
+		d.logger.Error(ctx, "failed to list missions", "error", err)
 		return nil, 0, err
 	}
 
-	d.logger.Debug("listed missions", "total", total, "returned", len(missions))
+	d.logger.Debug(ctx, "listed missions", "total", total, "returned", len(missions))
 	return missions, total, nil
 }
 

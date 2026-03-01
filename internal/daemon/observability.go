@@ -27,7 +27,7 @@ func (d *daemonImpl) initLangfuseTracing(ctx context.Context, neo4jClient *graph
 		return nil, nil, fmt.Errorf("langfuse.secret_key is required when langfuse.enabled = true")
 	}
 
-	d.logger.Info("langfuse observability enabled",
+	d.logger.Info(ctx, "langfuse observability enabled",
 		"host", cfg.Host,
 		"public_key_configured", cfg.PublicKey != "",
 	)

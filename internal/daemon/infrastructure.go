@@ -77,9 +77,6 @@ type Infrastructure struct {
 	// This enables downstream agents to query discovered hosts, ports, services, etc.
 	discoveryProcessor *discoveryProcessorAdapter
 
-	// activityLogger for logging activity events (daemon-level)
-	activityLogger observability.ActivityLogger
-
 	// redisClient for tool execution queue management
 	redisClient queue.Client
 }
@@ -94,14 +91,14 @@ type Infrastructure struct {
 //
 // Returns an error if any component fails to initialize.
 func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, error) {
-	d.logger.Info("initializing infrastructure components")
+	d.logger.Info(ctx, "initializing infrastructure components")
 
 	// Create finding store with caching and tracing
 	findingStore := finding.NewDBFindingStore(
 		d.db,
 		finding.WithCacheSize(1000), // Cache last 1000 findings
 	)
-	d.logger.Info("initialized finding store")
+	d.logger.Info(ctx, "initialized finding store")
 
 	// Create LLM registry
 	llmRegistry := llm.NewLLMRegistry()
@@ -110,11 +107,11 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	if err := d.registerLLMProviders(ctx, llmRegistry); err != nil {
 		return nil, fmt.Errorf("failed to register LLM providers: %w", err)
 	}
-	d.logger.Info("initialized LLM registry")
+	d.logger.Info(ctx, "initialized LLM registry")
 
 	// Create slot manager with the LLM registry
-	slotManager := NewDaemonSlotManager(llmRegistry, d.logger.With("component", "slot-manager"))
-	d.logger.Info("initialized slot manager")
+	slotManager := NewDaemonSlotManager(llmRegistry, d.logger.WithComponent("slot-manager").Slog())
+	d.logger.Info(ctx, "initialized slot manager")
 
 	// Create memory manager factory with database and config
 	// Use memory config from daemon config, or nil to use defaults
@@ -127,14 +124,14 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to create memory manager factory: %w", err)
 	}
-	d.logger.Info("initialized memory manager factory")
+	d.logger.Info(ctx, "initialized memory manager factory")
 
 	// Initialize TaxonomyRegistry with core taxonomy
 	// This provides the canonical node/relationship types and parent relationship rules
 	// Must be initialized before GraphRAG so relationship builders can use it
 	coreTaxonomy := sdkgraphrag.NewSimpleTaxonomy()
 	taxonomyRegistry := sdkgraphrag.NewTaxonomyRegistry(coreTaxonomy)
-	d.logger.Info("initialized taxonomy registry",
+	d.logger.Info(ctx, "initialized taxonomy registry",
 		"taxonomy_version", coreTaxonomy.Version())
 
 	// Initialize Redis client for tool execution
@@ -143,7 +140,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize Redis client (required): %w", err)
 	}
-	d.logger.Info("initialized Redis client",
+	d.logger.Info(ctx, "initialized Redis client",
 		"url", d.config.Redis.URL,
 		"database", d.config.Redis.Database)
 
@@ -153,7 +150,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize Neo4j GraphRAG (required): %w", err)
 	}
-	d.logger.Info("initialized Neo4j GraphRAG",
+	d.logger.Info(ctx, "initialized Neo4j GraphRAG",
 		"uri", d.config.GraphRAG.Neo4j.URI)
 
 	// Create the full GraphRAG stack: Provider -> Store -> BridgeAdapter
@@ -161,37 +158,14 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize GraphRAG bridges (required): %w", err)
 	}
-	d.logger.Info("initialized GraphRAG bridges with full store support")
-
-	// Create daemon-level activity logger for infrastructure components
-	// This is separate from mission-level activity loggers and always enabled
-	var daemonActivityLogger observability.ActivityLogger
-	if d.config != nil && d.config.ActivityLogging.Enabled {
-		cfg := observability.ActivityLoggerConfig{
-			Level:            observability.ParseActivityLevel(d.config.ActivityLogging.Level),
-			MaxContentLength: d.config.ActivityLogging.MaxContentLength,
-			BufferSize:       d.config.ActivityLogging.BufferSize,
-		}
-		logger, err := observability.NewActivityLogger(cfg)
-		if err != nil {
-			d.logger.Warn("failed to create daemon activity logger, using noop", "error", err)
-			daemonActivityLogger = observability.NewNoopActivityLogger()
-		} else {
-			daemonActivityLogger = logger
-			d.logger.Info("daemon activity logger enabled for infrastructure components",
-				"level", d.config.ActivityLogging.Level)
-		}
-	} else {
-		daemonActivityLogger = observability.NewNoopActivityLogger()
-		d.logger.Debug("daemon activity logger disabled (using noop)")
-	}
+	d.logger.Info(ctx, "initialized GraphRAG bridges with full store support")
 
 	// Create DiscoveryProcessor for processing agent output discoveries to Neo4j
 	// This enables downstream agents to query discovered hosts, ports, services, etc.
 	graphLoader := loader.NewGraphLoader(graphRAGClient)
-	discoveryProc := processor.NewDiscoveryProcessor(graphLoader, graphRAGClient, d.logger, daemonActivityLogger)
+	discoveryProc := processor.NewDiscoveryProcessor(graphLoader, graphRAGClient, d.logger.Slog())
 	discoveryProcessorAdapter := &discoveryProcessorAdapter{processor: discoveryProc}
-	d.logger.Info("initialized DiscoveryProcessor for automatic discovery storage")
+	d.logger.Info(ctx, "initialized DiscoveryProcessor for automatic discovery storage")
 
 	// Initialize Langfuse tracing if enabled
 	// Pass Neo4j client to enable dual export (Langfuse + Neo4j graph recording)
@@ -201,13 +175,13 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		var err error
 		tracerProvider, spanProcessors, err = d.initLangfuseTracing(ctx, graphRAGClient)
 		if err != nil {
-			d.logger.Warn("failed to initialize Langfuse tracing, continuing without tracing",
+			d.logger.Warn(ctx, "failed to initialize Langfuse tracing, continuing without tracing",
 				"error", err)
 		} else {
-			d.logger.Info("initialized Langfuse tracing",
+			d.logger.Info(ctx, "initialized Langfuse tracing",
 				"host", d.config.Langfuse.Host)
 			if graphRAGClient != nil {
-				d.logger.Info("Langfuse tracing configured with Neo4j graph span recording")
+				d.logger.Info(ctx, "Langfuse tracing configured with Neo4j graph span recording")
 			}
 		}
 	}
@@ -219,9 +193,9 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	// Create plan executor with dependencies
 	// TODO: Add executor config to Config struct when implementing
 	planExecutor := plan.NewPlanExecutor(
-		plan.WithExecutorLogger(d.logger.With("component", "plan-executor")),
+		plan.WithExecutorLogger(d.logger.WithComponent("plan-executor").Slog()),
 	)
-	d.logger.Info("initialized plan executor")
+	d.logger.Info(ctx, "initialized plan executor")
 
 	// Store infrastructure components temporarily so newHarnessFactory can access them
 	infra := &Infrastructure{
@@ -238,7 +212,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		missionTracer:        missionTracer,
 		taxonomyRegistry:     taxonomyRegistry,
 		discoveryProcessor:   discoveryProcessorAdapter,
-		activityLogger:       daemonActivityLogger,
 		redisClient:          redisClient,
 	}
 	d.infrastructure = infra
@@ -248,7 +221,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to create harness factory: %w", err)
 	}
-	d.logger.Info("initialized harness factory")
+	d.logger.Info(ctx, "initialized harness factory")
 
 	// Update infrastructure with harness factory
 	infra.harnessFactory = harnessFactory
@@ -256,7 +229,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	// Create mission run linker
 	runLinker := mission.NewMissionRunLinker(d.missionStore)
 	infra.runLinker = runLinker
-	d.logger.Info("initialized mission run linker")
+	d.logger.Info(ctx, "initialized mission run linker")
 
 	return infra, nil
 }
@@ -269,7 +242,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 //
 // Returns an error if any provider fails to initialize or register.
 func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMRegistry) error {
-	d.logger.Debug("registering LLM providers from configuration")
+	d.logger.Debug(ctx, "registering LLM providers from configuration")
 
 	// TODO: Expand LLMConfig structure to support provider-specific configurations.
 	// Currently using environment variables for API keys.
@@ -282,12 +255,12 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 	})
 	if err == nil {
 		if regErr := registry.RegisterProvider(provider); regErr != nil {
-			d.logger.Warn("failed to register Anthropic provider", "error", regErr)
+			d.logger.Warn(ctx, "failed to register Anthropic provider", "error", regErr)
 		} else {
-			d.logger.Info("registered Anthropic provider")
+			d.logger.Info(ctx, "registered Anthropic provider")
 		}
 	} else {
-		d.logger.Debug("Anthropic provider not available", "error", err)
+		d.logger.Debug(ctx, "Anthropic provider not available", "error", err)
 	}
 
 	// Try to register OpenAI provider from environment
@@ -298,19 +271,19 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 	})
 	if err == nil {
 		if regErr := registry.RegisterProvider(openaiProvider); regErr != nil {
-			d.logger.Warn("failed to register OpenAI provider", "error", regErr)
+			d.logger.Warn(ctx, "failed to register OpenAI provider", "error", regErr)
 		} else {
-			d.logger.Info("registered OpenAI provider")
+			d.logger.Info(ctx, "registered OpenAI provider")
 		}
 	} else {
-		d.logger.Debug("OpenAI provider not available", "error", err)
+		d.logger.Debug(ctx, "OpenAI provider not available", "error", err)
 	}
 
 	// TODO: Add Google and Ollama provider registration when config structure is expanded
 
 	// Verify at least one provider is registered
 	if len(registry.ListProviders()) == 0 {
-		d.logger.Warn("no LLM providers registered - missions may fail if they require LLM access")
+		d.logger.Warn(ctx, "no LLM providers registered - missions may fail if they require LLM access")
 	}
 
 	return nil
@@ -377,7 +350,7 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create embedder: %w", err)
 	}
-	d.logger.Info("created embedder for GraphRAG",
+	d.logger.Info(ctx, "created embedder for GraphRAG",
 		"provider", d.config.Embedder.Provider,
 		"dimensions", emb.Dimensions(),
 		"model", emb.Model())
@@ -385,7 +358,7 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph
 	// Create vector store for semantic similarity search
 	// Use dimensions from the embedder to ensure compatibility
 	vectorStore := vector.NewEmbeddedVectorStore(emb.Dimensions())
-	d.logger.Info("created vector store for GraphRAG",
+	d.logger.Info(ctx, "created vector store for GraphRAG",
 		"dimensions", emb.Dimensions(),
 		"type", "embedded")
 
@@ -413,14 +386,14 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create GraphRAG provider: %w", err)
 	}
-	d.logger.Info("created GraphRAG provider",
+	d.logger.Info(ctx, "created GraphRAG provider",
 		"type", graphRAGConfig.Provider)
 
 	// Inject vector store into the provider BEFORE initialization
 	// The LocalGraphRAGProvider requires the vector store to be set before Initialize() is called
 	if localProv, ok := prov.(*provider.LocalGraphRAGProvider); ok {
 		localProv.SetVectorStore(vectorStore)
-		d.logger.Info("injected vector store into GraphRAG provider")
+		d.logger.Info(ctx, "injected vector store into GraphRAG provider")
 	}
 
 	// Initialize the provider (after vector store is set)
@@ -433,13 +406,13 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create GraphRAG store: %w", err)
 	}
-	d.logger.Info("created GraphRAG store")
+	d.logger.Info(ctx, "created GraphRAG store")
 
 	// Create bridge adapter with the store
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
 		Neo4jClient:   neo4jClient,
 		GraphRAGStore: store,
-		Logger:        d.logger.With("component", "graphrag-bridge"),
+		Logger:        d.logger.WithComponent("graphrag-bridge").Slog(),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create GraphRAG bridge adapter: %w", err)
@@ -454,11 +427,11 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph
 func (d *daemonImpl) initMissionTracer(ctx context.Context) *observability.MissionTracer {
 	// Check if Langfuse is enabled in configuration
 	if d.config == nil || !d.config.Langfuse.Enabled {
-		d.logger.Debug("Langfuse MissionTracer disabled in configuration")
+		d.logger.Debug(ctx, "Langfuse MissionTracer disabled in configuration")
 		return nil
 	}
 
-	d.logger.Info("initializing Langfuse MissionTracer",
+	d.logger.Info(ctx, "initializing Langfuse MissionTracer",
 		"host", d.config.Langfuse.Host)
 
 	// Create LangfuseConfig for the MissionTracer
@@ -471,25 +444,25 @@ func (d *daemonImpl) initMissionTracer(ctx context.Context) *observability.Missi
 	// Create the MissionTracer
 	tracer, err := observability.NewMissionTracer(langfuseCfg)
 	if err != nil {
-		d.logger.Warn("failed to initialize MissionTracer, continuing without mission tracing",
+		d.logger.Warn(ctx, "failed to initialize MissionTracer, continuing without mission tracing",
 			"error", err)
 		return nil
 	}
 
 	// Verify connectivity on startup
 	if err := tracer.CheckConnectivity(ctx); err != nil {
-		d.logger.Warn("Langfuse connectivity check failed - traces may not be recorded",
+		d.logger.Warn(ctx, "Langfuse connectivity check failed - traces may not be recorded",
 			"host", d.config.Langfuse.Host,
 			"error", err,
 		)
 		// Continue anyway - fail open for observability
 	} else {
-		d.logger.Info("Langfuse connectivity verified",
+		d.logger.Info(ctx, "Langfuse connectivity verified",
 			"host", d.config.Langfuse.Host,
 		)
 	}
 
-	d.logger.Info("MissionTracer initialized successfully",
+	d.logger.Info(ctx, "MissionTracer initialized successfully",
 		"host", d.config.Langfuse.Host)
 
 	return tracer
@@ -498,7 +471,7 @@ func (d *daemonImpl) initMissionTracer(ctx context.Context) *observability.Missi
 // initRedis initializes the Redis client for tool execution.
 // Returns the client or an error if initialization fails.
 func (d *daemonImpl) initRedis(ctx context.Context) (queue.Client, error) {
-	d.logger.Info("initializing Redis client",
+	d.logger.Info(ctx, "initializing Redis client",
 		"url", d.config.Redis.URL,
 		"database", d.config.Redis.Database)
 
@@ -512,7 +485,7 @@ func (d *daemonImpl) initRedis(ctx context.Context) (queue.Client, error) {
 		return nil, fmt.Errorf("failed to create Redis client: %w", err)
 	}
 
-	d.logger.Info("Redis client initialized successfully")
+	d.logger.Info(ctx, "Redis client initialized successfully")
 	return client, nil
 }
 

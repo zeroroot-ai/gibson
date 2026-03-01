@@ -529,7 +529,7 @@ func createAttackRunner(ctx context.Context) (attack.AttackRunner, error) {
 		cfg := orchestrator.Config{
 			GraphRAGClient:     graphRAGClient,
 			HarnessFactory:     harnessFactory,
-			Logger:             slog.Default(),
+			Logger:             orchestrator.WrapSlogLogger(slog.Default()),
 			Tracer:             trace.NewNoopTracerProvider().Tracer("orchestrator"),
 			MaxIterations:      100,
 			MaxConcurrent:      10,

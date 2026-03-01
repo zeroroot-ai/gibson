@@ -45,6 +45,72 @@ func (s OrchestratorStatus) String() string {
 	return string(s)
 }
 
+// Event type constants matching observability.EventType
+const (
+	// EventTypeDecision represents orchestrator decision events
+	EventTypeDecision = "decision"
+)
+
+// DecisionEventData captures orchestrator decision-making information.
+// This matches observability.DecisionEventData to avoid circular dependencies.
+type DecisionEventData struct {
+	Action       string  `json:"action"`
+	TargetNodeID string  `json:"target_node_id,omitempty"`
+	Confidence   float64 `json:"confidence"`
+	Reasoning    string  `json:"reasoning"`
+}
+
+// Logger defines the interface for structured logging with event support.
+// This interface is implemented by observability.Logger to avoid circular dependencies.
+type Logger interface {
+	Debug(ctx context.Context, msg string, args ...any)
+	Info(ctx context.Context, msg string, args ...any)
+	Warn(ctx context.Context, msg string, args ...any)
+	Error(ctx context.Context, msg string, args ...any)
+	Event(ctx context.Context, eventType string, msg string, data any)
+	Slog() *slog.Logger // Returns the underlying slog.Logger for advanced usage
+}
+
+// slogAdapter adapts slog.Logger to the Logger interface for backward compatibility.
+// This provides a default logger when observability.Logger is not available.
+type slogAdapter struct {
+	slog *slog.Logger
+}
+
+func (s *slogAdapter) Debug(ctx context.Context, msg string, args ...any) {
+	s.slog.DebugContext(ctx, msg, args...)
+}
+
+func (s *slogAdapter) Info(ctx context.Context, msg string, args ...any) {
+	s.slog.InfoContext(ctx, msg, args...)
+}
+
+func (s *slogAdapter) Warn(ctx context.Context, msg string, args ...any) {
+	s.slog.WarnContext(ctx, msg, args...)
+}
+
+func (s *slogAdapter) Error(ctx context.Context, msg string, args ...any) {
+	s.slog.ErrorContext(ctx, msg, args...)
+}
+
+func (s *slogAdapter) Event(ctx context.Context, eventType string, msg string, data any) {
+	// For slog adapter, just log as info with event_type and event_data
+	s.slog.InfoContext(ctx, msg, "event_type", eventType, "event_data", data)
+}
+
+func (s *slogAdapter) Slog() *slog.Logger {
+	return s.slog
+}
+
+// WrapSlogLogger wraps a *slog.Logger to implement the Logger interface.
+// Use this when you have a slog.Logger but need to pass it to orchestrator components.
+func WrapSlogLogger(logger *slog.Logger) Logger {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &slogAdapter{slog: logger}
+}
+
 // OrchestratorObserver defines the interface for observing mission state.
 type OrchestratorObserver interface {
 	Observe(ctx context.Context, missionID string) (*ObservationState, error)
@@ -60,21 +126,6 @@ type OrchestratorActor interface {
 	Act(ctx context.Context, decision *Decision, missionID string) (*ActionResult, error)
 }
 
-// ActivityLogger defines the minimal interface needed by the orchestrator for activity logging.
-// This interface avoids import cycles with the observability package.
-type ActivityLogger interface {
-	EmitAgentStart(ctx context.Context, agentName string, taskDescription string)
-	EmitAgentEnd(ctx context.Context, agentName string, status string, durationMs int64)
-	EmitDecision(ctx context.Context, action string, target string, reasoning string, confidence float64)
-}
-
-// noopActivityLogger is a minimal no-op implementation used when activity logging is disabled.
-type noopActivityLogger struct{}
-
-func (n *noopActivityLogger) EmitAgentStart(ctx context.Context, agentName string, taskDescription string) {}
-func (n *noopActivityLogger) EmitAgentEnd(ctx context.Context, agentName string, status string, durationMs int64) {}
-func (n *noopActivityLogger) EmitDecision(ctx context.Context, action string, target string, reasoning string, confidence float64) {}
-
 // Orchestrator implements the main Observe → Think → Act control loop.
 // It coordinates the observer, thinker, and actor components to autonomously
 // execute mission workflows based on LLM reasoning.
@@ -83,13 +134,11 @@ type Orchestrator struct {
 	thinker          OrchestratorThinker
 	actor            OrchestratorActor
 	eventBus         EventBus
-	logger           *slog.Logger
+	logger           Logger
 	tracer           trace.Tracer
 	logWriter        DecisionLogWriter
-	debugWriter      *DebugLogWriter     // Debug output writer for raw logging to stdout
-	inventoryBuilder *InventoryBuilder   // Component discovery for validation
+	inventoryBuilder *InventoryBuilder       // Component discovery for validation
 	metrics          harness.MetricsRecorder // Metrics recorder for observability
-	activityLogger   ActivityLogger      // Activity stream logger for decision events
 
 	// Configuration options
 	maxIterations int
@@ -159,7 +208,7 @@ func WithTimeout(d time.Duration) OrchestratorOption {
 }
 
 // WithLogger sets the logger for orchestrator operations.
-func WithLogger(logger *slog.Logger) OrchestratorOption {
+func WithLogger(logger Logger) OrchestratorOption {
 	return func(o *Orchestrator) {
 		if logger != nil {
 			o.logger = logger
@@ -204,31 +253,12 @@ func WithComponentDiscovery(discovery registry.ComponentDiscovery) OrchestratorO
 	}
 }
 
-// WithDebugLogging enables raw debug logging to stdout.
-// This prints all observation state, LLM prompts/responses, decisions, and actions
-// in plain text format for debugging purposes.
-func WithDebugLogging() OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.debugWriter = NewDebugLogWriter()
-	}
-}
-
 // WithMetricsRecorder sets the metrics recorder for mission observability.
 // Metrics include mission status, duration, node counts, and iteration counts.
 func WithMetricsRecorder(recorder harness.MetricsRecorder) OrchestratorOption {
 	return func(o *Orchestrator) {
 		if recorder != nil {
 			o.metrics = recorder
-		}
-	}
-}
-
-// WithActivityLogger sets the activity logger for decision and agent execution events.
-// If not provided, a no-op logger is used.
-func WithActivityLogger(logger ActivityLogger) OrchestratorOption {
-	return func(o *Orchestrator) {
-		if logger != nil {
-			o.activityLogger = logger
 		}
 	}
 }
@@ -252,19 +282,17 @@ func NewOrchestrator(observer OrchestratorObserver, thinker OrchestratorThinker,
 	envRunMode := GetRunModeFromEnv()
 
 	o := &Orchestrator{
-		observer:       observer,
-		thinker:        thinker,
-		actor:          actor,
-		maxIterations:  100,        // Reasonable default to prevent infinite loops
-		maxConcurrent:  10,         // Default concurrency limit
-		budget:         0,          // Unlimited by default
-		timeout:        0,          // No timeout by default
-		runMode:        envRunMode, // Default from environment or production
-		logger:         slog.Default(),
-		tracer:         trace.NewNoopTracerProvider().Tracer("orchestrator"),
-		debugWriter:    NewDebugLogWriter(), // Always-on debug logging to stdout
-		metrics:        harness.NewNoOpMetricsRecorder(), // Default to no-op
-		activityLogger: &noopActivityLogger{}, // Default to no-op
+		observer:      observer,
+		thinker:       thinker,
+		actor:         actor,
+		maxIterations: 100,                              // Reasonable default to prevent infinite loops
+		maxConcurrent: 10,                               // Default concurrency limit
+		budget:        0,                                // Unlimited by default
+		timeout:       0,                                // No timeout by default
+		runMode:       envRunMode,                       // Default from environment or production
+		logger:        &slogAdapter{slog: slog.Default()},
+		tracer:        trace.NewNoopTracerProvider().Tracer("orchestrator"),
+		metrics:       harness.NewNoOpMetricsRecorder(), // Default to no-op
 	}
 
 	// Apply functional options (can override environment variable)
@@ -365,7 +393,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 		})
 	}
 
-	o.logger.Info("orchestrator starting",
+	o.logger.Info(ctx, "orchestrator starting",
 		"mission_id", missionID,
 		"max_iterations", o.maxIterations,
 		"max_concurrent", o.maxConcurrent,
@@ -389,7 +417,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
-			o.logger.Warn("orchestrator cancelled", "iteration", iteration, "error", ctx.Err())
+			o.logger.Warn(ctx, "orchestrator cancelled", "iteration", iteration, "error", ctx.Err())
 			result.Status = StatusCancelled
 			result.Error = ctx.Err()
 			result.Duration = time.Since(startTime)
@@ -399,12 +427,12 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 		default:
 		}
 
-		o.logger.Debug("orchestration iteration starting", "iteration", iteration)
+		o.logger.Debug(ctx, "orchestration iteration starting", "iteration", iteration)
 
 		// 1. OBSERVE - Gather current state
 		state, err := o.observer.Observe(ctx, missionID)
 		if err != nil {
-			o.logger.Error("observation failed", "iteration", iteration, "error", err)
+			o.logger.Error(ctx, "observation failed", "iteration", iteration, "error", err)
 			result.Status = StatusFailed
 			result.Error = fmt.Errorf("observation failed: %w", err)
 			result.TotalIterations = iteration
@@ -415,7 +443,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 		result.FinalState = state
 
-		o.logger.Debug("observation complete",
+		o.logger.Debug(ctx, "observation complete",
 			"iteration", iteration,
 			"ready_nodes", len(state.ReadyNodes),
 			"running_nodes", len(state.RunningNodes),
@@ -423,16 +451,11 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			"failed_nodes", len(state.FailedNodes),
 		)
 
-		// Debug logging: print observation state
-		if o.debugWriter != nil {
-			o.debugWriter.LogObservation(iteration, missionID, state)
-		}
-
 		// 2. CHECK TERMINATION CONDITIONS
 
 		// Check if workflow is naturally complete (no work left)
 		if len(state.ReadyNodes) == 0 && len(state.RunningNodes) == 0 {
-			o.logger.Info("workflow naturally complete", "iteration", iteration)
+			o.logger.Info(ctx, "workflow naturally complete", "iteration", iteration)
 			result.Status = StatusCompleted
 			result.TotalIterations = iteration + 1
 			result.CompletedNodes = len(state.CompletedNodes)
@@ -446,7 +469,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 		// Check concurrency limit
 		if len(state.RunningNodes) >= o.maxConcurrent {
-			o.logger.Debug("concurrency limit reached, skipping iteration",
+			o.logger.Debug(ctx, "concurrency limit reached, skipping iteration",
 				"iteration", iteration,
 				"running", len(state.RunningNodes),
 				"limit", o.maxConcurrent,
@@ -458,7 +481,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 		// Check token budget
 		if o.budget > 0 && totalTokens >= o.budget {
-			o.logger.Warn("token budget exceeded",
+			o.logger.Warn(ctx, "token budget exceeded",
 				"iteration", iteration,
 				"used", totalTokens,
 				"budget", o.budget,
@@ -474,7 +497,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 		// 3. THINK - LLM decides what to do next
 		thinkResult, err := o.thinker.Think(ctx, state)
 		if err != nil {
-			o.logger.Error("thinking failed", "iteration", iteration, "error", err)
+			o.logger.Error(ctx, "thinking failed", "iteration", iteration, "error", err)
 			result.Status = StatusFailed
 			result.Error = fmt.Errorf("thinking failed: %w", err)
 			result.TotalIterations = iteration + 1
@@ -488,7 +511,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 		totalTokens += thinkResult.TotalTokens
 		result.TotalDecisions++
 
-		o.logger.Info("decision made",
+		o.logger.Info(ctx, "decision made",
 			"iteration", iteration,
 			"action", thinkResult.Decision.Action,
 			"target", thinkResult.Decision.TargetNodeID,
@@ -499,7 +522,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 		// 4. LOG DECISION - Write to graph and external systems
 		if err := o.logDecision(ctx, thinkResult, iteration, missionID); err != nil {
-			o.logger.Warn("failed to log decision", "iteration", iteration, "error", err)
+			o.logger.Warn(ctx, "failed to log decision", "iteration", iteration, "error", err)
 			// Non-fatal error, continue
 		}
 
@@ -533,7 +556,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 		actionResult, err := o.actor.Act(ctx, thinkResult.Decision, missionID)
 		if err != nil {
-			o.logger.Error("action failed", "iteration", iteration, "error", err)
+			o.logger.Error(ctx, "action failed", "iteration", iteration, "error", err)
 			result.Status = StatusFailed
 			result.Error = fmt.Errorf("action failed: %w", err)
 			result.TotalIterations = iteration + 1
@@ -545,11 +568,11 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 		// Log action result
 		if err := o.logAction(ctx, actionResult, iteration, missionID); err != nil {
-			o.logger.Warn("failed to log action", "iteration", iteration, "error", err)
+			o.logger.Warn(ctx, "failed to log action", "iteration", iteration, "error", err)
 			// Non-fatal error, continue
 		}
 
-		o.logger.Debug("action completed",
+		o.logger.Debug(ctx, "action completed",
 			"iteration", iteration,
 			"action", actionResult.Action,
 			"terminal", actionResult.IsTerminal,
@@ -572,7 +595,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 		// 6. CHECK TERMINAL - Did this action end the workflow?
 		if actionResult.IsTerminal {
-			o.logger.Info("terminal action executed", "iteration", iteration+1)
+			o.logger.Info(ctx, "terminal action executed", "iteration", iteration+1)
 			result.Status = StatusCompleted
 			result.TotalIterations = iteration + 1
 			result.CompletedNodes = len(state.CompletedNodes)
@@ -588,7 +611,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 		if actionResult.Error != nil {
 			// Non-terminal error - log and continue
 			// The failed node is tracked in the graph
-			o.logger.Warn("action error (non-terminal)",
+			o.logger.Warn(ctx, "action error (non-terminal)",
 				"iteration", iteration,
 				"error", actionResult.Error,
 			)
@@ -596,7 +619,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 	}
 
 	// Max iterations reached
-	o.logger.Warn("max iterations reached", "iterations", o.maxIterations)
+	o.logger.Warn(ctx, "max iterations reached", "iterations", o.maxIterations)
 	result.Status = StatusMaxIterations
 	result.TotalIterations = o.maxIterations
 	result.TotalTokensUsed = totalTokens
@@ -613,27 +636,19 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 // logDecision writes the decision to the graph and external log systems.
 func (o *Orchestrator) logDecision(ctx context.Context, result *ThinkResult, iteration int, missionID string) error {
-	// Debug logging: print think/decide phases
-	if o.debugWriter != nil {
-		_ = o.debugWriter.LogDecision(ctx, result.Decision, result, iteration, missionID)
-	}
+	// Emit structured decision event
+	o.logger.Event(ctx, EventTypeDecision, "orchestrator decision", DecisionEventData{
+		Action:       result.Decision.Action.String(),
+		TargetNodeID: result.Decision.TargetNodeID,
+		Confidence:   result.Decision.Confidence,
+		Reasoning:    result.Decision.Reasoning, // Will be truncated by logger
+	})
 
 	// Log to external system (Langfuse, etc.) if configured
 	if o.logWriter != nil {
 		if err := o.logWriter.LogDecision(ctx, result.Decision, result, iteration, missionID); err != nil {
 			return fmt.Errorf("failed to write decision log: %w", err)
 		}
-	}
-
-	// Emit activity stream DECISION event
-	if o.activityLogger != nil {
-		o.activityLogger.EmitDecision(
-			ctx,
-			result.Decision.Action.String(),
-			result.Decision.TargetNodeID,
-			result.Decision.Reasoning,
-			result.Decision.Confidence,
-		)
 	}
 
 	// Emit decision event
@@ -660,11 +675,6 @@ func (o *Orchestrator) logDecision(ctx context.Context, result *ThinkResult, ite
 
 // logAction writes the action result to external log systems.
 func (o *Orchestrator) logAction(ctx context.Context, action *ActionResult, iteration int, missionID string) error {
-	// Debug logging: print act phase
-	if o.debugWriter != nil {
-		_ = o.debugWriter.LogAction(ctx, action, iteration, missionID)
-	}
-
 	// Log to external system (Langfuse, etc.) if configured
 	if o.logWriter != nil {
 		if err := o.logWriter.LogAction(ctx, action, iteration, missionID); err != nil {

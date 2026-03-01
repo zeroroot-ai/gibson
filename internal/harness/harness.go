@@ -13,6 +13,64 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// EventLogger provides structured event logging with trace correlation.
+// This interface allows the harness to emit typed events without creating
+// a circular dependency on the observability package.
+//
+// The interface matches the subset of observability.Logger methods needed
+// for event emission in the harness.
+type EventLogger interface {
+	// Event logs a structured event with type and data.
+	// Events are logged at Info level and include event_type and event_data fields.
+	Event(ctx context.Context, eventType string, msg string, data any)
+}
+
+// Event type constants for harness operations
+// These match the constants in observability.EventType
+const (
+	EventLLMRequest  = "llm_request"
+	EventLLMResponse = "llm_response"
+	EventToolCall    = "tool_call"
+	EventToolResult  = "tool_result"
+	EventFinding     = "finding"
+)
+
+// LLMRequestEventData captures LLM request metadata (no sensitive content)
+type LLMRequestEventData struct {
+	Model        string `json:"model"`
+	MessageCount int    `json:"message_count"`
+	Slot         string `json:"slot"`
+}
+
+// LLMResponseEventData captures LLM response metadata and token usage
+type LLMResponseEventData struct {
+	Model            string `json:"model"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	Slot             string `json:"slot"`
+}
+
+// ToolCallEventData captures tool invocation information
+type ToolCallEventData struct {
+	ToolName string `json:"tool_name"`
+}
+
+// ToolResultEventData captures tool execution results
+type ToolResultEventData struct {
+	ToolName string `json:"tool_name"`
+	Success  bool   `json:"success"`
+	Error    string `json:"error,omitempty"`
+}
+
+// FindingEventData captures security finding information
+type FindingEventData struct {
+	Severity    string `json:"severity"`
+	Title       string `json:"title"`
+	Confidence  string `json:"confidence"`
+	TargetAsset string `json:"target_asset,omitempty"`
+}
+
 // StructuredCompletionResult contains the result of a structured completion
 // along with token usage information for observability and cost tracking.
 type StructuredCompletionResult struct {

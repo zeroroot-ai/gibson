@@ -852,7 +852,7 @@ func TestBuildPromptString(t *testing.T) {
 			messages: []llm.Message{
 				{Role: llm.RoleUser, Content: "Hello"},
 			},
-			expected: "[user]: Hello",
+			expected: "[USER]:\nHello",
 		},
 		{
 			name: "multiple messages",
@@ -861,7 +861,7 @@ func TestBuildPromptString(t *testing.T) {
 				{Role: llm.RoleAssistant, Content: "Hi there"},
 				{Role: llm.RoleUser, Content: "How are you?"},
 			},
-			expected: "[user]: Hello\n---\n[assistant]: Hi there\n---\n[user]: How are you?",
+			expected: "[USER]:\nHello\n\n---\n\n[ASSISTANT]:\nHi there\n\n---\n\n[USER]:\nHow are you?",
 		},
 	}
 
