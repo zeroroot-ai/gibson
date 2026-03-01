@@ -92,6 +92,13 @@ tracing:
 metrics:
   enabled: true
   port: 8080
+
+activity_logging:
+  enabled: true
+  level: normal
+  max_content_length: 500
+  output: stdout
+  buffer_size: 10000
 `
 
 	err := os.WriteFile(configPath, []byte(configContent), 0644)
@@ -178,6 +185,13 @@ llm:
 logging:
   level: info
   format: json
+
+activity_logging:
+  enabled: true
+  level: normal
+  max_content_length: 500
+  output: stdout
+  buffer_size: 10000
 `
 
 	err := os.WriteFile(configPath, []byte(configContent), 0644)
@@ -224,6 +238,13 @@ security:
   key_derivation: scrypt
   ssl_validation: true
   audit_logging: true
+
+activity_logging:
+  enabled: true
+  level: normal
+  max_content_length: 500
+  output: stdout
+  buffer_size: 10000
 `
 
 	err := os.WriteFile(configPath, []byte(configContent), 0644)

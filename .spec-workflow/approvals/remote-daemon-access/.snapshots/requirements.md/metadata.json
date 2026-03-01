@@ -1,0 +1,14 @@
+{
+  "filePath": ".spec-workflow/specs/remote-daemon-access/requirements.md",
+  "currentVersion": 1,
+  "snapshots": [
+    {
+      "version": 1,
+      "filename": "snapshot-001.json",
+      "timestamp": "2026-02-25T20:53:20.780Z",
+      "trigger": "initial",
+      "approvalId": "approval_1772052800771_bu03ii37z",
+      "approvalTitle": "Requirements: Remote Daemon Access via GIBSON_DAEMON_ADDRESS"
+    }
+  ]
+}

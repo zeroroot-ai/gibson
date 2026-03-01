@@ -35,6 +35,14 @@ const (
 
 	// Agent delegation metrics
 	MetricAgentDelegations = "gibson.agent.delegations"
+
+	// Mission metrics
+	MetricMissionStatus    = "gibson.mission.status"
+	MetricMissionDuration  = "gibson.mission.duration"
+	MetricMissionNodes     = "gibson.mission.nodes"
+	MetricMissionsActive   = "gibson.missions.active"
+	MetricMissionsTotal    = "gibson.missions.total"
+	MetricMissionIterations = "gibson.mission.iterations"
 )
 
 // InitMetrics initializes and returns a metrics provider based on the configuration.
@@ -401,6 +409,132 @@ func (r *OpenTelemetryMetricsRecorder) RecordAgentDelegation(sourceAgent, target
 	}
 
 	r.RecordCounter(MetricAgentDelegations, 1, labels)
+}
+
+// RecordMissionStarted records metrics when a mission starts.
+// Sets the mission status gauge to 1 (running) and increments mission counters.
+//
+// Recorded metrics:
+//   - gibson.mission.status (gauge): Current mission status (1=running)
+//   - gibson.missions.total (counter): Total missions started
+//   - gibson.missions.active (gauge): Currently active missions
+//
+// Parameters:
+//   - missionID: The unique mission identifier
+//
+// Example:
+//
+//	recorder.RecordMissionStarted("mission-abc-123")
+func (r *OpenTelemetryMetricsRecorder) RecordMissionStarted(missionID string) {
+	labels := map[string]string{
+		"mission_id": missionID,
+		"status":     "running",
+	}
+
+	// Set mission status to running (1)
+	r.RecordGauge(MetricMissionStatus, 1, labels)
+
+	// Increment total missions counter
+	r.RecordCounter(MetricMissionsTotal, 1, map[string]string{})
+
+	// Track active missions (simplified - in production use atomic counter)
+	r.RecordGauge(MetricMissionsActive, 1, map[string]string{})
+}
+
+// RecordMissionCompleted records metrics when a mission completes successfully.
+// Updates the mission status gauge and records completion metrics.
+//
+// Recorded metrics:
+//   - gibson.mission.status (gauge): Mission status (0=completed successfully)
+//   - gibson.mission.duration (histogram): Total mission duration in seconds
+//   - gibson.mission.nodes (counter): Nodes completed/failed during mission
+//   - gibson.mission.iterations (counter): Total orchestration iterations
+//
+// Parameters:
+//   - missionID: The unique mission identifier
+//   - durationSecs: Total duration in seconds
+//   - completedNodes: Number of workflow nodes completed
+//   - failedNodes: Number of workflow nodes failed
+//   - iterations: Total orchestration loop iterations
+//
+// Example:
+//
+//	recorder.RecordMissionCompleted("mission-abc-123", 120.5, 15, 2, 25)
+func (r *OpenTelemetryMetricsRecorder) RecordMissionCompleted(
+	missionID string,
+	durationSecs float64,
+	completedNodes, failedNodes, iterations int,
+) {
+	labels := map[string]string{
+		"mission_id": missionID,
+		"status":     "completed",
+	}
+
+	// Set mission status to completed (0 = success)
+	r.RecordGauge(MetricMissionStatus, 0, labels)
+
+	// Record duration
+	r.RecordHistogram(MetricMissionDuration, durationSecs, map[string]string{
+		"mission_id": missionID,
+		"status":     "completed",
+	})
+
+	// Record node counts
+	r.RecordCounter(MetricMissionNodes, int64(completedNodes), map[string]string{
+		"mission_id": missionID,
+		"status":     "completed",
+	})
+	r.RecordCounter(MetricMissionNodes, int64(failedNodes), map[string]string{
+		"mission_id": missionID,
+		"status":     "failed",
+	})
+
+	// Record iterations
+	r.RecordCounter(MetricMissionIterations, int64(iterations), map[string]string{
+		"mission_id": missionID,
+	})
+}
+
+// RecordMissionFailed records metrics when a mission fails.
+// Updates the mission status gauge to indicate failure.
+//
+// Recorded metrics:
+//   - gibson.mission.status (gauge): Mission status (2=failed)
+//   - gibson.mission.duration (histogram): Total mission duration in seconds
+//   - gibson.mission.iterations (counter): Total orchestration iterations
+//
+// Parameters:
+//   - missionID: The unique mission identifier
+//   - reason: The failure reason (e.g., "error", "timeout", "cancelled", "budget_exceeded")
+//   - durationSecs: Total duration in seconds
+//   - iterations: Total orchestration loop iterations
+//
+// Example:
+//
+//	recorder.RecordMissionFailed("mission-abc-123", "timeout", 300.0, 50)
+func (r *OpenTelemetryMetricsRecorder) RecordMissionFailed(
+	missionID, reason string,
+	durationSecs float64,
+	iterations int,
+) {
+	labels := map[string]string{
+		"mission_id": missionID,
+		"status":     reason,
+	}
+
+	// Set mission status to failed (2)
+	r.RecordGauge(MetricMissionStatus, 2, labels)
+
+	// Record duration
+	r.RecordHistogram(MetricMissionDuration, durationSecs, map[string]string{
+		"mission_id": missionID,
+		"status":     reason,
+	})
+
+	// Record iterations
+	r.RecordCounter(MetricMissionIterations, int64(iterations), map[string]string{
+		"mission_id": missionID,
+	})
 }
 
 // getOrCreateCounter retrieves or creates a counter metric instrument.

@@ -55,6 +55,12 @@ security:
   audit_logging: true
 daemon:
   grpc_address: localhost:7777
+activity_logging:
+  enabled: true
+  level: normal
+  max_content_length: 500
+  output: stdout
+  buffer_size: 10000
 `
 
 	if _, err := tmpfile.Write([]byte(configContent)); err != nil {
@@ -110,6 +116,12 @@ security:
   audit_logging: true
 daemon:
   grpc_address: localhost:${DAEMON_PORT}
+activity_logging:
+  enabled: true
+  level: normal
+  max_content_length: 500
+  output: stdout
+  buffer_size: 10000
 `
 
 	if _, err := tmpfile.Write([]byte(configContent)); err != nil {

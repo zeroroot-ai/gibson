@@ -32,8 +32,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // CredentialStore provides access to stored credentials.
@@ -607,42 +609,62 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		}, nil
 	}
 
-	// Create proto message instances dynamically using proto registry
-	inputMsgType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(req.InputType))
-	if err != nil {
-		s.logger.Error("failed to find input message type", "error", err, "type", req.InputType)
-		return &pb.CallToolProtoResponse{
-			Error: &pb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: fmt.Sprintf("failed to find input message type %s: %v", req.InputType, err),
-			},
-		}, nil
-	}
+	// Create proto message instances dynamically using proto registry.
+	// If the specific type is not found (tool protos not imported), fall back to
+	// google.protobuf.Struct which can carry arbitrary JSON data. The tool execution
+	// will still work because the harness converts to JSON for the gRPC call.
+	var requestMsg proto.Message
+	var responseMsg proto.Message
 
-	outputMsgType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(req.OutputType))
-	if err != nil {
-		s.logger.Error("failed to find output message type", "error", err, "type", req.OutputType)
-		return &pb.CallToolProtoResponse{
-			Error: &pb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-				Message: fmt.Sprintf("failed to find output message type %s: %v", req.OutputType, err),
-			},
-		}, nil
-	}
+	inputMsgType, inputErr := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(req.InputType))
+	outputMsgType, outputErr := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(req.OutputType))
 
-	// Create new instances of the proto messages
-	requestMsg := inputMsgType.New().Interface()
-	responseMsg := outputMsgType.New().Interface()
+	if inputErr != nil || outputErr != nil {
+		// Use google.protobuf.Struct fallback - parse JSON to Struct
+		s.logger.Debug("using google.protobuf.Struct fallback for tool call",
+			"tool", req.Name,
+			"input_type", req.InputType,
+			"output_type", req.OutputType,
+			"input_err", inputErr,
+			"output_err", outputErr)
 
-	// Unmarshal JSON to proto request using protojson
-	if err := protojson.Unmarshal(req.InputJson, requestMsg); err != nil {
-		s.logger.Error("failed to unmarshal JSON to proto request", "error", err, "tool", req.Name)
-		return &pb.CallToolProtoResponse{
-			Error: &pb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-				Message: fmt.Sprintf("failed to unmarshal input: %v", err),
-			},
-		}, nil
+		var inputMap map[string]any
+		if err := json.Unmarshal(req.InputJson, &inputMap); err != nil {
+			s.logger.Error("failed to unmarshal JSON input", "error", err, "tool", req.Name)
+			return &pb.CallToolProtoResponse{
+				Error: &pb.HarnessError{
+					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+					Message: fmt.Sprintf("failed to unmarshal input JSON: %v", err),
+				},
+			}, nil
+		}
+		inputStruct, err := structpb.NewStruct(inputMap)
+		if err != nil {
+			s.logger.Error("failed to create Struct from input", "error", err, "tool", req.Name)
+			return &pb.CallToolProtoResponse{
+				Error: &pb.HarnessError{
+					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+					Message: fmt.Sprintf("failed to create Struct from input: %v", err),
+				},
+			}, nil
+		}
+		requestMsg = inputStruct
+		responseMsg = &structpb.Struct{}
+	} else {
+		// Create new instances of the typed proto messages
+		requestMsg = inputMsgType.New().Interface()
+		responseMsg = outputMsgType.New().Interface()
+
+		// Unmarshal JSON to proto request using protojson
+		if err := protojson.Unmarshal(req.InputJson, requestMsg); err != nil {
+			s.logger.Error("failed to unmarshal JSON to proto request", "error", err, "tool", req.Name)
+			return &pb.CallToolProtoResponse{
+				Error: &pb.HarnessError{
+					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+					Message: fmt.Sprintf("failed to unmarshal input: %v", err),
+				},
+			}, nil
+		}
 	}
 
 	// Execute tool using CallToolProto

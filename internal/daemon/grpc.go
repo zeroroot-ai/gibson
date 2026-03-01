@@ -78,63 +78,78 @@ func (d *daemonImpl) Status() (api.DaemonStatus, error) {
 	}, nil
 }
 
-// ListAgents returns all installed agents from the component store.
+// ListAgents returns all agents from both the component store and the registry.
+// This includes agents installed via CLI and agents running in Kubernetes/containers
+// that registered directly with the registry.
 func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentInfoInternal, error) {
 	d.logger.Debug("ListAgents called", "kind", kind)
 
-	if d.componentStore == nil {
-		return nil, fmt.Errorf("component store not available")
-	}
+	// Track agents by name to avoid duplicates
+	agentMap := make(map[string]api.AgentInfoInternal)
 
-	// Query component store for installed agents
-	agents, err := d.componentStore.List(ctx, component.ComponentKindAgent)
-	if err != nil {
-		d.logger.Error("failed to list agents from component store", "error", err)
-		return nil, fmt.Errorf("failed to list agents: %w", err)
-	}
-
-	// Query registry to check which agents are running
-	runningAgents := make(map[string]bool)
-	runningEndpoints := make(map[string]string)
-	if d.registryAdapter != nil {
-		running, err := d.registryAdapter.ListAgents(ctx)
-		if err == nil {
-			for _, r := range running {
-				runningAgents[r.Name] = true
-				if len(r.Endpoints) > 0 {
-					runningEndpoints[r.Name] = r.Endpoints[0]
+	// Query component store for installed agents (if available)
+	if d.componentStore != nil {
+		agents, err := d.componentStore.List(ctx, component.ComponentKindAgent)
+		if err != nil {
+			d.logger.Warn("failed to list agents from component store", "error", err)
+			// Continue - we can still list agents from registry
+		} else {
+			for _, agent := range agents {
+				agentMap[agent.Name] = api.AgentInfoInternal{
+					ID:       agent.Name,
+					Name:     agent.Name,
+					Kind:     "agent",
+					Version:  agent.Version,
+					Health:   "stopped", // Will be updated if running
+					LastSeen: agent.UpdatedAt,
 				}
 			}
 		}
 	}
 
-	// Convert component.Component to api.AgentInfoInternal
-	result := make([]api.AgentInfoInternal, len(agents))
-	for i, agent := range agents {
-		// Determine health status based on whether agent is running
-		health := "stopped"
-		endpoint := ""
-		if runningAgents[agent.Name] {
-			health = "running"
-			endpoint = runningEndpoints[agent.Name]
-		}
+	// Query registry for running agents
+	if d.registryAdapter != nil {
+		running, err := d.registryAdapter.ListAgents(ctx)
+		if err != nil {
+			d.logger.Warn("failed to list agents from registry", "error", err)
+		} else {
+			for _, r := range running {
+				endpoint := ""
+				if len(r.Endpoints) > 0 {
+					endpoint = r.Endpoints[0]
+				}
 
-		// TODO: Extract capabilities from manifest when Capabilities field is added
-		var capabilities []string
-
-		result[i] = api.AgentInfoInternal{
-			ID:           agent.Name,
-			Name:         agent.Name,
-			Kind:         "agent",
-			Version:      agent.Version,
-			Endpoint:     endpoint,
-			Capabilities: capabilities,
-			Health:       health,
-			LastSeen:     agent.UpdatedAt,
+				if existing, ok := agentMap[r.Name]; ok {
+					// Update existing agent with running info
+					existing.Health = "running"
+					existing.Endpoint = endpoint
+					if r.Version != "" {
+						existing.Version = r.Version
+					}
+					agentMap[r.Name] = existing
+				} else {
+					// Add agent that's only in registry (e.g., K8s deployed agent)
+					agentMap[r.Name] = api.AgentInfoInternal{
+						ID:           r.Name,
+						Name:         r.Name,
+						Kind:         "agent",
+						Version:      r.Version,
+						Endpoint:     endpoint,
+						Capabilities: r.Capabilities,
+						Health:       "running",
+					}
+				}
+			}
 		}
 	}
 
-	d.logger.Debug("listed installed agents", "count", len(result))
+	// Convert map to slice
+	result := make([]api.AgentInfoInternal, 0, len(agentMap))
+	for _, agent := range agentMap {
+		result = append(result, agent)
+	}
+
+	d.logger.Debug("listed agents", "count", len(result))
 	return result, nil
 }
 

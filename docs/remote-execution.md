@@ -61,6 +61,26 @@ gibson.example.com:50002
 10.0.0.5:50002
 ```
 
+### Force Inline Mode (Port-Forward Support)
+
+When using `kubectl port-forward` to access a remote daemon, the address appears as `localhost:50002` but the daemon is actually remote and doesn't have filesystem access. Use the `GIBSON_FORCE_INLINE_YAML` environment variable to force inline mode:
+
+```bash
+# Port-forward to remote daemon
+kubectl port-forward svc/gibson 50002:50002 -n gibson &
+
+# Force inline YAML mode even though address is localhost
+export GIBSON_DAEMON_ADDRESS="localhost:50002"
+export GIBSON_FORCE_INLINE_YAML="true"
+
+# Now mission files are sent inline to the remote daemon
+gibson mission run ./missions/recon.yaml
+```
+
+| Environment Variable | Values | Description |
+|---------------------|--------|-------------|
+| `GIBSON_FORCE_INLINE_YAML` | `true`, `1` | Force inline YAML mode regardless of address |
+
 ### Architecture
 
 ```

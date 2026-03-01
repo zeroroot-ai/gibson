@@ -524,11 +524,20 @@ type MissionEvent struct {
 	Data      map[string]interface{}
 }
 
+// EnvForceInlineYAML is the environment variable to force inline YAML mode.
+// When set to "true" or "1", the client will always send workflow files as
+// inline YAML content, regardless of the daemon address. This is useful for
+// port-forwarding scenarios where localhost:port routes to a remote daemon.
+const EnvForceInlineYAML = "GIBSON_FORCE_INLINE_YAML"
+
 // isRemoteDaemon checks if the client is connecting to a remote daemon.
 //
-// A daemon is considered remote if GIBSON_DAEMON_ADDRESS is set to a value
-// that is NOT:
-//   - Empty string
+// A daemon is considered remote if:
+//   - GIBSON_FORCE_INLINE_YAML is set to "true" or "1" (explicit override)
+//   - OR GIBSON_DAEMON_ADDRESS is set to a non-local address
+//
+// Local addresses include:
+//   - Empty string (no env var set)
 //   - localhost (any port)
 //   - 127.0.0.1 (any port)
 //   - Unix socket (starts with unix:// or /)
@@ -548,6 +557,12 @@ type MissionEvent struct {
 //	    // Send file path (daemon has filesystem access)
 //	}
 func isRemoteDaemon() bool {
+	// Check explicit force inline flag first (for port-forward scenarios)
+	forceInline := os.Getenv(EnvForceInlineYAML)
+	if forceInline == "true" || forceInline == "1" {
+		return true
+	}
+
 	address := os.Getenv(EnvDaemonAddress)
 
 	// No env var set = local daemon
@@ -562,9 +577,9 @@ func isRemoteDaemon() bool {
 
 	// Check for localhost/127.0.0.1
 	if strings.HasPrefix(address, "localhost:") ||
-	   strings.HasPrefix(address, "127.0.0.1:") ||
-	   address == "localhost" ||
-	   address == "127.0.0.1" {
+		strings.HasPrefix(address, "127.0.0.1:") ||
+		address == "localhost" ||
+		address == "127.0.0.1" {
 		return false
 	}
 

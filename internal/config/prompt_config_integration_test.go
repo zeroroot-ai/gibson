@@ -51,6 +51,13 @@ tracing:
 metrics:
   enabled: false
   port: 9090
+
+activity_logging:
+  enabled: true
+  level: normal
+  max_content_length: 500
+  output: stdout
+  buffer_size: 10000
 `
 
 	err := os.WriteFile(configPath, []byte(configContent), 0644)
@@ -105,6 +112,13 @@ tracing:
 metrics:
   enabled: false
   port: 9090
+
+activity_logging:
+  enabled: true
+  level: normal
+  max_content_length: 500
+  output: stdout
+  buffer_size: 10000
 `
 
 	err := os.WriteFile(configPath, []byte(configContent), 0644)

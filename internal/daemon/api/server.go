@@ -572,8 +572,8 @@ func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStre
 				len(req.WorkflowYaml), maxYamlSize)
 		}
 
-		// Validate YAML by parsing it
-		if _, err := mission.ParseYAML([]byte(req.WorkflowYaml)); err != nil {
+		// Validate YAML by parsing it using the mission definition parser
+		if _, err := mission.ParseDefinitionFromBytes([]byte(req.WorkflowYaml)); err != nil {
 			s.logger.Error("failed to parse workflow YAML", "error", err)
 			return status_grpc.Errorf(codes.InvalidArgument, "invalid workflow YAML: %v", err)
 		}

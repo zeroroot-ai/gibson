@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	"github.com/zero-day-ai/gibson/internal/observability"
 )
 
 // missionManagerHolder holds the mission manager instance and ensures thread-safe initialization
@@ -63,6 +64,31 @@ func (d *daemonImpl) ensureMissionManager() error {
 			return
 		}
 
+		// Create activity logger based on config
+		var activityLogger observability.ActivityLogger
+		if d.config.ActivityLogging.Enabled {
+			cfg := observability.ActivityLoggerConfig{
+				Level:            observability.ParseActivityLevel(d.config.ActivityLogging.Level),
+				MaxContentLength: d.config.ActivityLogging.MaxContentLength,
+				BufferSize:       d.config.ActivityLogging.BufferSize,
+				// Output defaults to os.Stdout in NewActivityLogger if nil
+			}
+			logger, err := observability.NewActivityLogger(cfg)
+			if err != nil {
+				d.logger.Warn("failed to create activity logger, using noop", "error", err)
+				activityLogger = observability.NewNoopActivityLogger()
+			} else {
+				activityLogger = logger
+				d.logger.Info("activity stream logging enabled",
+					"level", d.config.ActivityLogging.Level,
+					"output", d.config.ActivityLogging.Output,
+				)
+			}
+		} else {
+			activityLogger = observability.NewNoopActivityLogger()
+			d.logger.Debug("activity stream logging disabled")
+		}
+
 		// Create mission manager
 		missionManagerInstance.mgr = newMissionManager(
 			d.config,
@@ -78,6 +104,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			runLinker,
 			d.infrastructure,
 			d.infrastructure.missionTracer,
+			activityLogger,
 		)
 
 		d.logger.Info("mission manager initialized")

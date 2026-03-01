@@ -47,7 +47,8 @@ type missionManager struct {
 	targetStore     targetStoreLookup
 	runLinker       mission.MissionRunLinker
 	infrastructure  *Infrastructure
-	missionTracer   *observability.MissionTracer // nil when tracing is disabled
+	missionTracer   *observability.MissionTracer   // nil when tracing is disabled
+	activityLogger  observability.ActivityLogger   // Activity stream logger (nil uses noop)
 	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
 	// graphLoader will store mission definitions in Neo4j for cross-mission analysis
 	// Currently disabled during workflow -> mission migration
@@ -85,6 +86,7 @@ func newMissionManager(
 	runLinker mission.MissionRunLinker,
 	infrastructure *Infrastructure,
 	missionTracer *observability.MissionTracer,
+	activityLogger observability.ActivityLogger,
 ) *missionManager {
 	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
 	// GraphLoader initialization disabled during workflow -> mission migration
@@ -108,6 +110,7 @@ func newMissionManager(
 		runLinker:       runLinker,
 		infrastructure:  infrastructure,
 		missionTracer:   missionTracer,
+		activityLogger:  activityLogger,
 		activeMissions:  make(map[string]*activeMission),
 	}
 }
@@ -519,7 +522,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Pass DiscoveryProcessor from infrastructure to enable automatic storage of discovered
 	// hosts, ports, services, etc. from agent outputs to Neo4j for use by downstream agents.
 	// ApprovalManager, EscalationManager, CheckpointManager, ReflectionEngine, and MemoryRecaller are nil for now - they will be configured later
-	actor := orchestrator.NewActor(harnessAdapter, executionQueries, missionQueries, graphClient, inventory, m.infrastructure.missionTracer, policyChecker, m.infrastructure.discoveryProcessor, nil, nil, nil, nil, nil, m.logger, nil)
+	actor := orchestrator.NewActor(harnessAdapter, executionQueries, missionQueries, graphClient, inventory, m.infrastructure.missionTracer, policyChecker, m.infrastructure.discoveryProcessor, nil, nil, nil, nil, nil, m.logger, m.activityLogger)
 
 	// Create DecisionLogWriterAdapter for Langfuse tracing if tracer is available
 	var decisionLogWriter orchestrator.DecisionLogWriter

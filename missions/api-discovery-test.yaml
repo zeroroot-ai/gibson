@@ -1,0 +1,11 @@
+name: API Discovery Test
+description: Test mission for API discovery agent
+version: 1.0.0
+
+nodes:
+  - id: discover
+    type: agent
+    agent: api-discovery
+    task:
+      action: discover_apis
+      target: http://crapi.local:8888
