@@ -313,9 +313,17 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 		policyChecker = NewPolicyChecker(policySource, nodeStore, m.config.Logger.With("component", "policy_checker"))
 	}
 
+	// Convert ActivityLogger from interface{} to ActivityLogger type
+	var activityLogger ActivityLogger
+	if m.config.ActivityLogger != nil {
+		if al, ok := m.config.ActivityLogger.(ActivityLogger); ok {
+			activityLogger = al
+		}
+	}
+
 	// Create Actor with DiscoveryProcessor for storing agent output discoveries
 	// ApprovalManager, EscalationManager, CheckpointManager, ReflectionEngine, and MemoryRecaller are nil for now - they will be configured later
-	actor := NewActor(harnessAdapter, executionQueries, missionQueries, m.config.GraphRAGClient, inventory, m.config.MissionTracer, policyChecker, m.config.DiscoveryProcessor, nil, nil, nil, nil, nil, m.config.Logger)
+	actor := NewActor(harnessAdapter, executionQueries, missionQueries, m.config.GraphRAGClient, inventory, m.config.MissionTracer, policyChecker, m.config.DiscoveryProcessor, nil, nil, nil, nil, nil, m.config.Logger, activityLogger)
 
 	// Create the orchestrator
 	orchOptions := []OrchestratorOption{
@@ -327,6 +335,7 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 		WithTracer(m.config.Tracer),
 		WithEventBus(m.config.EventBus),
 		WithDecisionLogWriter(m.config.DecisionLogWriter),
+		WithActivityLogger(activityLogger),
 	}
 
 	orchestrator := NewOrchestrator(observer, thinker, actor, orchOptions...)

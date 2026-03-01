@@ -152,6 +152,21 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		return f.Create(childAgentName, childMissionCtx, childTarget)
 	}
 
+	// Create activity logger - use provided or default to noop
+	var activityLogger interface {
+		EmitLLMPrompt(ctx context.Context, slot string, messages []interface{})
+		EmitLLMResponse(ctx context.Context, slot string, response interface{})
+		EmitToolCall(ctx context.Context, toolName string, params interface{})
+		EmitToolResult(ctx context.Context, toolName string, result interface{}, durationMs int64, err error)
+		EmitFinding(ctx context.Context, finding interface{})
+		EmitError(ctx context.Context, operation string, err error)
+	}
+	activityLogger = f.config.ActivityLogger
+	if activityLogger == nil {
+		// Use noop logger when activity logging is disabled
+		activityLogger = &noopActivityLogger{}
+	}
+
 	// Create and return DefaultAgentHarness
 	var harness AgentHarness = &DefaultAgentHarness{
 		slotManager:         f.config.SlotManager,
@@ -168,6 +183,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		logger:              logger,
 		metrics:             f.config.Metrics,
 		tokenUsage:          tokenTracker,
+		activityLogger:      activityLogger,
 		graphRAGBridge:      f.config.GraphRAGBridge,
 		graphRAGQueryBridge: f.config.GraphRAGQueryBridge,
 		missionClient:       f.config.MissionClient,
@@ -307,3 +323,19 @@ type HarnessFactoryConfig = HarnessConfig
 func NewDefaultHarnessFactory(config HarnessFactoryConfig) (*DefaultHarnessFactory, error) {
 	return NewHarnessFactory(config)
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Noop Activity Logger
+// ────────────────────────────────────────────────────────────────────────────
+
+// noopActivityLogger is a minimal no-op implementation of the activity logger interface.
+// It satisfies the interface contract without performing any operations or allocations.
+type noopActivityLogger struct{}
+
+func (n *noopActivityLogger) EmitLLMPrompt(ctx context.Context, slot string, messages []interface{})   {}
+func (n *noopActivityLogger) EmitLLMResponse(ctx context.Context, slot string, response interface{})   {}
+func (n *noopActivityLogger) EmitToolCall(ctx context.Context, toolName string, params interface{})    {}
+func (n *noopActivityLogger) EmitToolResult(ctx context.Context, toolName string, result interface{}, durationMs int64, err error) {
+}
+func (n *noopActivityLogger) EmitFinding(ctx context.Context, finding interface{})            {}
+func (n *noopActivityLogger) EmitError(ctx context.Context, operation string, err error)      {}

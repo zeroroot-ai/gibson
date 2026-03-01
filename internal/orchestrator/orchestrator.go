@@ -60,6 +60,21 @@ type OrchestratorActor interface {
 	Act(ctx context.Context, decision *Decision, missionID string) (*ActionResult, error)
 }
 
+// ActivityLogger defines the minimal interface needed by the orchestrator for activity logging.
+// This interface avoids import cycles with the observability package.
+type ActivityLogger interface {
+	EmitAgentStart(ctx context.Context, agentName string, taskDescription string)
+	EmitAgentEnd(ctx context.Context, agentName string, status string, durationMs int64)
+	EmitDecision(ctx context.Context, action string, target string, reasoning string, confidence float64)
+}
+
+// noopActivityLogger is a minimal no-op implementation used when activity logging is disabled.
+type noopActivityLogger struct{}
+
+func (n *noopActivityLogger) EmitAgentStart(ctx context.Context, agentName string, taskDescription string) {}
+func (n *noopActivityLogger) EmitAgentEnd(ctx context.Context, agentName string, status string, durationMs int64) {}
+func (n *noopActivityLogger) EmitDecision(ctx context.Context, action string, target string, reasoning string, confidence float64) {}
+
 // Orchestrator implements the main Observe → Think → Act control loop.
 // It coordinates the observer, thinker, and actor components to autonomously
 // execute mission workflows based on LLM reasoning.
@@ -71,9 +86,10 @@ type Orchestrator struct {
 	logger           *slog.Logger
 	tracer           trace.Tracer
 	logWriter        DecisionLogWriter
-	debugWriter      *DebugLogWriter   // Debug output writer for raw logging to stdout
-	inventoryBuilder *InventoryBuilder // Component discovery for validation
+	debugWriter      *DebugLogWriter     // Debug output writer for raw logging to stdout
+	inventoryBuilder *InventoryBuilder   // Component discovery for validation
 	metrics          harness.MetricsRecorder // Metrics recorder for observability
+	activityLogger   ActivityLogger      // Activity stream logger for decision events
 
 	// Configuration options
 	maxIterations int
@@ -207,6 +223,16 @@ func WithMetricsRecorder(recorder harness.MetricsRecorder) OrchestratorOption {
 	}
 }
 
+// WithActivityLogger sets the activity logger for decision and agent execution events.
+// If not provided, a no-op logger is used.
+func WithActivityLogger(logger ActivityLogger) OrchestratorOption {
+	return func(o *Orchestrator) {
+		if logger != nil {
+			o.activityLogger = logger
+		}
+	}
+}
+
 // NewOrchestrator creates a new Orchestrator with the specified components and options.
 //
 // Required components:
@@ -226,18 +252,19 @@ func NewOrchestrator(observer OrchestratorObserver, thinker OrchestratorThinker,
 	envRunMode := GetRunModeFromEnv()
 
 	o := &Orchestrator{
-		observer:      observer,
-		thinker:       thinker,
-		actor:         actor,
-		maxIterations: 100,        // Reasonable default to prevent infinite loops
-		maxConcurrent: 10,         // Default concurrency limit
-		budget:        0,          // Unlimited by default
-		timeout:       0,          // No timeout by default
-		runMode:       envRunMode, // Default from environment or production
-		logger:        slog.Default(),
-		tracer:        trace.NewNoopTracerProvider().Tracer("orchestrator"),
-		debugWriter:   NewDebugLogWriter(), // Always-on debug logging to stdout
-		metrics:       harness.NewNoOpMetricsRecorder(), // Default to no-op
+		observer:       observer,
+		thinker:        thinker,
+		actor:          actor,
+		maxIterations:  100,        // Reasonable default to prevent infinite loops
+		maxConcurrent:  10,         // Default concurrency limit
+		budget:         0,          // Unlimited by default
+		timeout:        0,          // No timeout by default
+		runMode:        envRunMode, // Default from environment or production
+		logger:         slog.Default(),
+		tracer:         trace.NewNoopTracerProvider().Tracer("orchestrator"),
+		debugWriter:    NewDebugLogWriter(), // Always-on debug logging to stdout
+		metrics:        harness.NewNoOpMetricsRecorder(), // Default to no-op
+		activityLogger: &noopActivityLogger{}, // Default to no-op
 	}
 
 	// Apply functional options (can override environment variable)
@@ -596,6 +623,17 @@ func (o *Orchestrator) logDecision(ctx context.Context, result *ThinkResult, ite
 		if err := o.logWriter.LogDecision(ctx, result.Decision, result, iteration, missionID); err != nil {
 			return fmt.Errorf("failed to write decision log: %w", err)
 		}
+	}
+
+	// Emit activity stream DECISION event
+	if o.activityLogger != nil {
+		o.activityLogger.EmitDecision(
+			ctx,
+			result.Decision.Action.String(),
+			result.Decision.TargetNodeID,
+			result.Decision.Reasoning,
+			result.Decision.Confidence,
+		)
 	}
 
 	// Emit decision event

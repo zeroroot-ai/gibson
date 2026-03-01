@@ -247,5 +247,18 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
+	// Apply ActivityLogging config interpolation
+	if activityLogging, ok := interpolated["activity_logging"].(map[string]interface{}); ok {
+		if level, ok := activityLogging["level"].(string); ok {
+			cfg.ActivityLogging.Level = interpolateString(level)
+		}
+		if output, ok := activityLogging["output"].(string); ok {
+			cfg.ActivityLogging.Output = interpolateString(output)
+		}
+		if filePath, ok := activityLogging["file_path"].(string); ok {
+			cfg.ActivityLogging.FilePath = interpolateString(filePath)
+		}
+	}
+
 	return nil
 }

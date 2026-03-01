@@ -519,7 +519,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Pass DiscoveryProcessor from infrastructure to enable automatic storage of discovered
 	// hosts, ports, services, etc. from agent outputs to Neo4j for use by downstream agents.
 	// ApprovalManager, EscalationManager, CheckpointManager, ReflectionEngine, and MemoryRecaller are nil for now - they will be configured later
-	actor := orchestrator.NewActor(harnessAdapter, executionQueries, missionQueries, graphClient, inventory, m.infrastructure.missionTracer, policyChecker, m.infrastructure.discoveryProcessor, nil, nil, nil, nil, nil, m.logger)
+	actor := orchestrator.NewActor(harnessAdapter, executionQueries, missionQueries, graphClient, inventory, m.infrastructure.missionTracer, policyChecker, m.infrastructure.discoveryProcessor, nil, nil, nil, nil, nil, m.logger, nil)
 
 	// Create DecisionLogWriterAdapter for Langfuse tracing if tracer is available
 	var decisionLogWriter orchestrator.DecisionLogWriter

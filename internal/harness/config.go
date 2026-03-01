@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
@@ -164,6 +165,20 @@ type HarnessConfig struct {
 	// Expected type: *observability.AgentExecutionLog
 	// Optional: defaults to nil (no parent span context).
 	AgentExecLog any
+
+	// ActivityLogger provides structured activity stream logging for LLM interactions,
+	// tool executions, and findings. Used for real-time observability in Grafana/Loki.
+	// When nil, a NoopActivityLogger is used (no activity logging).
+	// Expected type: observability.ActivityLogger
+	// Optional: defaults to nil (activity logging disabled).
+	ActivityLogger interface {
+		EmitLLMPrompt(ctx context.Context, slot string, messages []interface{})
+		EmitLLMResponse(ctx context.Context, slot string, response interface{})
+		EmitToolCall(ctx context.Context, toolName string, params interface{})
+		EmitToolResult(ctx context.Context, toolName string, result interface{}, durationMs int64, err error)
+		EmitFinding(ctx context.Context, finding interface{})
+		EmitError(ctx context.Context, operation string, err error)
+	}
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.

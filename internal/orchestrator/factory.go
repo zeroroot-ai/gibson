@@ -75,6 +75,11 @@ type Config struct {
 	// When set, enables automatic storage of discovered hosts, ports, services, etc.
 	// from agent outputs to Neo4j for use by downstream agents.
 	DiscoveryProcessor DiscoveryProcessor
+
+	// ActivityLogger for activity stream logging (optional)
+	// When set, enables activity stream logging of decisions and agent execution events.
+	// Type: ActivityLogger interface (stored as interface{} to avoid import cycles)
+	ActivityLogger interface{}
 }
 
 // NewMissionAdapter creates a new mission orchestrator adapter.

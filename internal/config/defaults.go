@@ -84,6 +84,15 @@ func DefaultConfig() *Config {
 			ConnectTimeout: 5 * time.Second,
 			ReadTimeout:    30 * time.Second,
 		},
+		ActivityLogging: ActivityLoggingConfig{
+			Enabled:             true,
+			Level:               "normal",
+			MaxContentLength:    500,
+			Output:              "stdout",
+			FilePath:            "",
+			BufferSize:          10000,
+			IncludeLangfuseURLs: true,
+		},
 	}
 }
 

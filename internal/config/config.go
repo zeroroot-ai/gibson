@@ -23,11 +23,12 @@ type Config struct {
 	Registry     RegistryConfig          `mapstructure:"registry" yaml:"registry"`
 	Callback     CallbackConfig          `mapstructure:"callback" yaml:"callback,omitempty"`
 	Daemon       DaemonConfig            `mapstructure:"daemon" yaml:"daemon,omitempty"`
-	Embedder     embedder.EmbedderConfig `mapstructure:"embedder" yaml:"embedder"`
-	Langfuse     LangfuseConfig          `mapstructure:"langfuse" yaml:"langfuse"`
-	GraphRAG     GraphRAGConfig          `mapstructure:"graphrag" yaml:"graphrag"`
-	Redis        RedisConfig             `mapstructure:"redis" yaml:"redis"`
-	Plugins      PluginsConfig           `mapstructure:"plugins" yaml:"plugins,omitempty"`
+	Embedder        embedder.EmbedderConfig `mapstructure:"embedder" yaml:"embedder"`
+	Langfuse        LangfuseConfig          `mapstructure:"langfuse" yaml:"langfuse"`
+	GraphRAG        GraphRAGConfig          `mapstructure:"graphrag" yaml:"graphrag"`
+	Redis           RedisConfig             `mapstructure:"redis" yaml:"redis"`
+	Plugins         PluginsConfig           `mapstructure:"plugins" yaml:"plugins,omitempty"`
+	ActivityLogging ActivityLoggingConfig   `mapstructure:"activity_logging" yaml:"activity_logging"`
 }
 
 // PluginsConfig contains configuration for all plugins.

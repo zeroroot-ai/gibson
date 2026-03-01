@@ -55,6 +55,7 @@ type Actor struct {
 	reflectionEngine   ReflectionEngine    // Performs self-evaluation of strategy (optional, can be nil)
 	memoryRecaller     MemoryRecaller      // Queries memory tiers for context (optional, can be nil)
 	logger             *slog.Logger        // Logger for Actor operations
+	activityLogger     ActivityLogger      // Activity stream logger for agent execution events
 }
 
 // ActorOption is a functional option for configuring Actor.
@@ -107,9 +108,12 @@ func WithMemoryRecaller(mr MemoryRecaller) ActorOption {
 // The checkpointManager parameter is optional and enables checkpoint/rollback functionality when provided.
 // The reflectionEngine parameter is optional and enables reflection capability when provided.
 // The memoryRecaller parameter is optional and enables memory recall functionality when provided.
-func NewActor(harness Harness, execQueries *queries.ExecutionQueries, missionQueries *queries.MissionQueries, graphClient graph.GraphClient, inventory *ComponentInventory, missionTracer interface{}, policyChecker PolicyChecker, discoveryProcessor DiscoveryProcessor, approvalManager ApprovalManager, escalationManager EscalationManager, checkpointManager CheckpointManager, reflectionEngine ReflectionEngine, memoryRecaller MemoryRecaller, logger *slog.Logger) *Actor {
+func NewActor(harness Harness, execQueries *queries.ExecutionQueries, missionQueries *queries.MissionQueries, graphClient graph.GraphClient, inventory *ComponentInventory, missionTracer interface{}, policyChecker PolicyChecker, discoveryProcessor DiscoveryProcessor, approvalManager ApprovalManager, escalationManager EscalationManager, checkpointManager CheckpointManager, reflectionEngine ReflectionEngine, memoryRecaller MemoryRecaller, logger *slog.Logger, activityLogger ActivityLogger) *Actor {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if activityLogger == nil {
+		activityLogger = &noopActivityLogger{}
 	}
 	return &Actor{
 		harness:            harness,
@@ -126,6 +130,7 @@ func NewActor(harness Harness, execQueries *queries.ExecutionQueries, missionQue
 		reflectionEngine:   reflectionEngine,
 		memoryRecaller:     memoryRecaller,
 		logger:             logger.With("component", "actor"),
+		activityLogger:     activityLogger,
 	}
 }
 
@@ -364,11 +369,31 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 	// The execution.ID is used for provenance tracking (DISCOVERED relationships)
 	ctx = harness.ContextWithAgentRunID(ctx, execution.ID.String())
 
+	// Emit AGENT_START activity event
+	if a.activityLogger != nil {
+		taskDesc := task.Goal
+		if taskDesc == "" {
+			taskDesc = task.Description
+		}
+		a.activityLogger.EmitAgentStart(ctx, node.AgentName, taskDesc)
+	}
+
+	// Track start time for duration calculation
+	startTime := time.Now()
+
 	// Delegate to agent
 	result, err := a.harness.DelegateToAgent(ctx, node.AgentName, task)
 
+	// Calculate duration
+	durationMs := time.Since(startTime).Milliseconds()
+
 	// Update execution based on result
 	if err != nil {
+		// Emit AGENT_END activity event with failed status
+		if a.activityLogger != nil {
+			a.activityLogger.EmitAgentEnd(ctx, node.AgentName, "failed", durationMs)
+		}
+
 		// Extract structured error if available
 		var toolErr *toolerr.Error
 		if errors.As(err, &toolErr) {
@@ -407,6 +432,11 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 
 	// Check if agent execution failed
 	if result.Status == agent.ResultStatusFailed {
+		// Emit AGENT_END activity event with failed status
+		if a.activityLogger != nil {
+			a.activityLogger.EmitAgentEnd(ctx, node.AgentName, "failed", durationMs)
+		}
+
 		errMsg := "agent execution failed"
 		var errCode string
 
@@ -453,6 +483,11 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 			return nil, fmt.Errorf("failed to update node status: %w", updateErr)
 		}
 	} else {
+		// Emit AGENT_END activity event with completed status
+		if a.activityLogger != nil {
+			a.activityLogger.EmitAgentEnd(ctx, node.AgentName, "completed", durationMs)
+		}
+
 		// Execution succeeded
 		execution.MarkCompleted()
 		execution.WithResult(result.Output)

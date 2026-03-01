@@ -2,8 +2,10 @@ package harness
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -18,6 +20,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -65,10 +71,18 @@ type DefaultAgentHarness struct {
 	contextProvider MissionContextProvider
 
 	// Observability
-	tracer     trace.Tracer
-	logger     *slog.Logger
-	metrics    MetricsRecorder
-	tokenUsage llm.TokenTracker
+	tracer         trace.Tracer
+	logger         *slog.Logger
+	metrics        MetricsRecorder
+	tokenUsage     llm.TokenTracker
+	activityLogger interface {
+		EmitLLMPrompt(ctx context.Context, slot string, messages []interface{})
+		EmitLLMResponse(ctx context.Context, slot string, response interface{})
+		EmitToolCall(ctx context.Context, toolName string, params interface{})
+		EmitToolResult(ctx context.Context, toolName string, result interface{}, durationMs int64, err error)
+		EmitFinding(ctx context.Context, finding interface{})
+		EmitError(ctx context.Context, operation string, err error)
+	}
 
 	// Knowledge graph integration
 	graphRAGBridge      GraphRAGBridge
@@ -140,9 +154,24 @@ func (h *DefaultAgentHarness) Complete(ctx context.Context, slot string, message
 		}, req.Messages...)
 	}
 
+	// Emit LLM prompt before execution
+	if h.activityLogger != nil {
+		// Convert []llm.Message to []interface{} for the logger
+		msgInterfaces := make([]interface{}, len(req.Messages))
+		for i, msg := range req.Messages {
+			msgInterfaces[i] = msg
+		}
+		h.activityLogger.EmitLLMPrompt(ctx, slot, msgInterfaces)
+	}
+
 	// Execute completion
 	resp, err := provider.Complete(ctx, req)
 	if err != nil {
+		// Emit error event
+		if h.activityLogger != nil {
+			h.activityLogger.EmitError(ctx, "llm_completion", err)
+		}
+
 		h.logger.Error("LLM completion failed",
 			"slot", slot,
 			"provider", provider.Name(),
@@ -153,6 +182,11 @@ func (h *DefaultAgentHarness) Complete(ctx context.Context, slot string, message
 			"LLM completion failed",
 			err,
 		)
+	}
+
+	// Emit LLM response after successful completion
+	if h.activityLogger != nil {
+		h.activityLogger.EmitLLMResponse(ctx, slot, resp)
 	}
 
 	// Track token usage
@@ -250,9 +284,24 @@ func (h *DefaultAgentHarness) CompleteWithTools(ctx context.Context, slot string
 		}, req.Messages...)
 	}
 
+	// Emit LLM prompt before execution
+	if h.activityLogger != nil {
+		// Convert []llm.Message to []interface{} for the logger
+		msgInterfaces := make([]interface{}, len(req.Messages))
+		for i, msg := range req.Messages {
+			msgInterfaces[i] = msg
+		}
+		h.activityLogger.EmitLLMPrompt(ctx, slot, msgInterfaces)
+	}
+
 	// Execute completion with tools
 	resp, err := provider.CompleteWithTools(ctx, req, tools)
 	if err != nil {
+		// Emit error event
+		if h.activityLogger != nil {
+			h.activityLogger.EmitError(ctx, "llm_completion_with_tools", err)
+		}
+
 		h.logger.Error("LLM completion with tools failed",
 			"slot", slot,
 			"provider", provider.Name(),
@@ -263,6 +312,11 @@ func (h *DefaultAgentHarness) CompleteWithTools(ctx context.Context, slot string
 			"LLM completion with tools failed",
 			err,
 		)
+	}
+
+	// Emit LLM response after successful completion
+	if h.activityLogger != nil {
+		h.activityLogger.EmitLLMResponse(ctx, slot, resp)
 	}
 
 	// Track token usage
@@ -517,16 +571,164 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 
 	// Note: inputType and outputType from tool might be in format "package.Message"
 	// while proto reflection gives "package.Message" - they should match
+	//
+	// However, agents using the SDK structpb fallback will send google.protobuf.Struct
+	// when the tool expects a specific proto type. In this case, we need to convert
+	// the Struct to the tool's expected type using the tool's file descriptor set.
+	actualRequest := request
 	if inputType != expectedInputType {
-		h.logger.Error("input message type mismatch",
-			"tool", name,
-			"expected", inputType,
-			"provided", expectedInputType)
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("input message type mismatch: tool expects %s, got %s", inputType, expectedInputType),
-			nil,
-		)
+		// Check if the request is a structpb.Struct that needs conversion
+		if structInput, ok := request.(*structpb.Struct); ok && expectedInputType == "google.protobuf.Struct" {
+			h.logger.Debug("converting structpb.Struct input to typed message",
+				"tool", name,
+				"target_type", inputType)
+
+			// Get the tool's file descriptor set from metadata
+			var fileDescSet string
+			if grpcClient, ok := t.(*registry.GRPCToolClient); ok {
+				if md := grpcClient.Metadata(); md != nil {
+					fileDescSet = md["file_descriptor_set"]
+				}
+			}
+
+			if fileDescSet == "" {
+				h.logger.Error("tool has no file_descriptor_set for input conversion",
+					"tool", name,
+					"expected", inputType)
+				return types.WrapError(
+					ErrHarnessToolExecutionFailed,
+					fmt.Sprintf("cannot convert input: tool %s has no file_descriptor_set", name),
+					nil,
+				)
+			}
+
+			// Decode base64 file descriptor set
+			fdsBytes, err := base64.StdEncoding.DecodeString(fileDescSet)
+			if err != nil {
+				h.logger.Error("failed to decode file_descriptor_set",
+					"tool", name,
+					"error", err)
+				return types.WrapError(
+					ErrHarnessToolExecutionFailed,
+					fmt.Sprintf("failed to decode file_descriptor_set: %v", err),
+					err,
+				)
+			}
+
+			// Parse the FileDescriptorSet proto
+			var fds descriptorpb.FileDescriptorSet
+			if err := proto.Unmarshal(fdsBytes, &fds); err != nil {
+				h.logger.Error("failed to unmarshal file_descriptor_set",
+					"tool", name,
+					"error", err)
+				return types.WrapError(
+					ErrHarnessToolExecutionFailed,
+					fmt.Sprintf("failed to unmarshal file_descriptor_set: %v", err),
+					err,
+				)
+			}
+
+			// Create a file registry from the descriptor set
+			files, err := protodesc.NewFiles(&fds)
+			if err != nil {
+				h.logger.Error("failed to create file registry",
+					"tool", name,
+					"error", err)
+				return types.WrapError(
+					ErrHarnessToolExecutionFailed,
+					fmt.Sprintf("failed to create file registry: %v", err),
+					err,
+				)
+			}
+
+			// Find the input message descriptor
+			// inputType is like "gibson.tools.httpx.HttpxRequest"
+			msgDesc, err := files.FindDescriptorByName(protoreflect.FullName(inputType))
+			if err != nil {
+				h.logger.Error("failed to find message descriptor",
+					"tool", name,
+					"message_type", inputType,
+					"error", err)
+				return types.WrapError(
+					ErrHarnessToolExecutionFailed,
+					fmt.Sprintf("failed to find message descriptor for %s: %v", inputType, err),
+					err,
+				)
+			}
+
+			// Assert it's a message descriptor
+			md, ok := msgDesc.(protoreflect.MessageDescriptor)
+			if !ok {
+				h.logger.Error("descriptor is not a message",
+					"tool", name,
+					"message_type", inputType)
+				return types.WrapError(
+					ErrHarnessToolExecutionFailed,
+					fmt.Sprintf("%s is not a message descriptor", inputType),
+					nil,
+				)
+			}
+
+			// Create a dynamic message of the correct type
+			dynamicMsg := dynamicpb.NewMessage(md)
+
+			// Convert Struct to JSON
+			marshaler := protojson.MarshalOptions{
+				UseProtoNames:   true,
+				EmitUnpopulated: false,
+			}
+			jsonBytes, err := marshaler.Marshal(structInput)
+			if err != nil {
+				h.logger.Error("failed to marshal struct input",
+					"tool", name,
+					"error", err)
+				return types.WrapError(
+					ErrHarnessToolExecutionFailed,
+					fmt.Sprintf("failed to convert input: %v", err),
+					err,
+				)
+			}
+
+			// Log the JSON being converted (INFO level for debugging)
+			h.logger.Info("converting structpb.Struct to typed message",
+				"tool", name,
+				"target_type", inputType,
+				"json", string(jsonBytes))
+
+			// Unmarshal JSON into the dynamic message
+			unmarshaler := protojson.UnmarshalOptions{
+				DiscardUnknown: true,
+			}
+			if err := unmarshaler.Unmarshal(jsonBytes, dynamicMsg); err != nil {
+				h.logger.Error("failed to unmarshal input to typed message",
+					"tool", name,
+					"target_type", inputType,
+					"json", string(jsonBytes),
+					"error", err)
+				return types.WrapError(
+					ErrHarnessToolExecutionFailed,
+					fmt.Sprintf("failed to convert input to %s: %v", inputType, err),
+					err,
+				)
+			}
+
+			h.logger.Debug("successfully converted structpb.Struct to typed message",
+				"tool", name,
+				"target_type", inputType)
+
+			// Use the converted message
+			actualRequest = dynamicMsg
+		} else {
+			h.logger.Error("input message type mismatch",
+				"tool", name,
+				"expected", inputType,
+				"provided", expectedInputType)
+			return types.WrapError(
+				ErrHarnessToolExecutionFailed,
+				fmt.Sprintf("input message type mismatch: tool expects %s, got %s", inputType, expectedInputType),
+				nil,
+			)
+		}
 	}
 
 	// Determine if tool is local or remote for logging
@@ -538,9 +740,26 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		}
 	}
 
-	// Execute tool with proto messages
-	outputMsg, err := protoT.ExecuteProto(ctx, request)
+	// Emit tool call before execution
+	if h.activityLogger != nil {
+		h.activityLogger.EmitToolCall(ctx, name, actualRequest)
+	}
+
+	// Track timing for tool execution
+	startTime := time.Now()
+
+	// Execute tool with proto messages (using actualRequest which may be converted)
+	outputMsg, err := protoT.ExecuteProto(ctx, actualRequest)
+
+	// Calculate duration in milliseconds
+	durationMs := time.Since(startTime).Milliseconds()
+
 	if err != nil {
+		// Emit tool result with error
+		if h.activityLogger != nil {
+			h.activityLogger.EmitToolResult(ctx, name, nil, durationMs, err)
+		}
+
 		h.logger.Error("tool execution failed",
 			"tool", name,
 			"remote", isRemote,
@@ -559,6 +778,11 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 			fmt.Sprintf("tool execution failed: %s", name),
 			err,
 		)
+	}
+
+	// Emit successful tool result
+	if h.activityLogger != nil {
+		h.activityLogger.EmitToolResult(ctx, name, outputMsg, durationMs, nil)
 	}
 
 	// Verify output type matches - or convert if necessary
@@ -1212,6 +1436,11 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 		"title", finding.Title,
 		"severity", finding.Severity,
 		"confidence", finding.Confidence)
+
+	// Emit finding event
+	if h.activityLogger != nil {
+		h.activityLogger.EmitFinding(ctx, &finding)
+	}
 
 	// Store finding
 	err := h.findingStore.Store(ctx, h.missionCtx.ID, finding)

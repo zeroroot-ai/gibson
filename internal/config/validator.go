@@ -61,6 +61,58 @@ func (v *validatorImpl) Validate(cfg *Config) error {
 		}
 	}
 
+	// Custom validation for ActivityLoggingConfig
+	if err := validateActivityLogging(&cfg.ActivityLogging); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateActivityLogging validates the activity logging configuration.
+func validateActivityLogging(cfg *ActivityLoggingConfig) error {
+	var errors []string
+
+	// Validate level is valid
+	validLevels := map[string]bool{
+		"quiet":   true,
+		"normal":  true,
+		"verbose": true,
+		"debug":   true,
+	}
+	if !validLevels[cfg.Level] {
+		errors = append(errors, fmt.Sprintf("activity_logging.level must be one of [quiet, normal, verbose, debug] (got: %s)", cfg.Level))
+	}
+
+	// Validate max_content_length is positive
+	if cfg.MaxContentLength <= 0 {
+		errors = append(errors, fmt.Sprintf("activity_logging.max_content_length must be positive (got: %d)", cfg.MaxContentLength))
+	}
+
+	// Validate output is valid
+	validOutputs := map[string]bool{
+		"stdout": true,
+		"file":   true,
+		"both":   true,
+	}
+	if !validOutputs[cfg.Output] {
+		errors = append(errors, fmt.Sprintf("activity_logging.output must be one of [stdout, file, both] (got: %s)", cfg.Output))
+	}
+
+	// Validate file_path is set when output includes file
+	if (cfg.Output == "file" || cfg.Output == "both") && cfg.FilePath == "" {
+		errors = append(errors, "activity_logging.file_path must be set when output is 'file' or 'both'")
+	}
+
+	// Validate buffer_size is positive
+	if cfg.BufferSize <= 0 {
+		errors = append(errors, fmt.Sprintf("activity_logging.buffer_size must be positive (got: %d)", cfg.BufferSize))
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("configuration validation failed:\n  - %s", strings.Join(errors, "\n  - "))
+	}
+
 	return nil
 }
 
