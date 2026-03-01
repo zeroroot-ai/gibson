@@ -103,8 +103,8 @@ func (d *DebugLogWriter) LogDecision(ctx context.Context, decision *Decision, re
 	}
 	fmt.Fprintln(d.w)
 
-	// Raw LLM response
-	fmt.Fprintf(d.w, "--- RAW RESPONSE ---\n%s\n--- END RESPONSE ---\n\n", result.RawResponse)
+	// Raw LLM response - prefix with space to prevent log collectors from parsing as JSON
+	fmt.Fprintf(d.w, "--- RAW RESPONSE ---\n %s\n--- END RESPONSE ---\n\n", result.RawResponse)
 
 	// Parsed decision
 	d.printSection("DECIDE")
