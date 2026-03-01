@@ -48,8 +48,16 @@ WORKDIR /build
 # Copy go mod files first for better layer caching
 COPY go.mod go.sum ./
 
-# Download dependencies (SDK comes from GitHub, not local)
-RUN go mod download
+# Configure Git for private repo access and download dependencies
+# Uses GITHUB_TOKEN secret passed via --mount=type=secret
+# Set GOPRIVATE to skip Go proxy for private repos
+ENV GOPRIVATE=github.com/zero-day-ai
+
+RUN --mount=type=secret,id=GITHUB_TOKEN \
+    if [ -f /run/secrets/GITHUB_TOKEN ]; then \
+        git config --global url."https://x-access-token:$(cat /run/secrets/GITHUB_TOKEN)@github.com/".insteadOf "https://github.com/"; \
+    fi && \
+    go mod download
 
 # Copy source code
 COPY . .

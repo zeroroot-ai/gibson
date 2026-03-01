@@ -98,6 +98,9 @@ jobs:
             VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
             GIT_COMMIT=${{ github.sha }}
             BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          # Pass GitHub token as secret for private repo access
+          secrets: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           provenance: true
           sbom: true
 
