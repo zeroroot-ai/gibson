@@ -440,10 +440,13 @@ func (l *DefaultActivityLogger) EmitFinding(ctx context.Context, finding *agent.
 
 // EmitDecision logs an orchestrator decision.
 func (l *DefaultActivityLogger) EmitDecision(ctx context.Context, action string, target string, reasoning string, confidence float64) {
+	// Truncate reasoning to prevent JSON output from being cut off by log collectors
+	truncatedReasoning, _ := l.truncateContent(reasoning)
+
 	payload := DecisionPayload{
 		Action:     action,
 		Target:     target,
-		Reasoning:  reasoning,
+		Reasoning:  truncatedReasoning,
 		Confidence: confidence,
 	}
 
