@@ -33,13 +33,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
-          # Public repos
-          git ls-remote --tags https://github.com/zero-day-ai/sdk.git | grep -q "refs/tags/${{ steps.versions.outputs.sdk }}" || (echo "SDK tag not found" && exit 1)
-          git ls-remote --tags https://github.com/zero-day-ai/gibson.git | grep -q "refs/tags/${{ steps.versions.outputs.gibson }}" || (echo "Gibson tag not found" && exit 1)
-          git ls-remote --tags https://github.com/zero-day-ai/gibson-tools-official.git | grep -q "refs/tags/${{ steps.versions.outputs.tools }}" || (echo "Tools tag not found" && exit 1)
-          # Private repos - use gh api with PAT
-          gh api repos/zero-day-ai/gibson-agents-official/git/refs/tags/${{ steps.versions.outputs.agents }} > /dev/null || (echo "Agents tag not found" && exit 1)
-          gh api repos/zero-day-ai/gibson-plugins-official/git/refs/tags/${{ steps.versions.outputs.plugins }} > /dev/null || (echo "Plugins tag not found" && exit 1)
+          # All repos are private - use gh api with PAT for authentication
+          gh api repos/zero-day-ai/sdk/git/refs/tags/${{ steps.versions.outputs.sdk }} > /dev/null || (echo "SDK tag ${{ steps.versions.outputs.sdk }} not found" && exit 1)
+          gh api repos/zero-day-ai/gibson/git/refs/tags/${{ steps.versions.outputs.gibson }} > /dev/null || (echo "Gibson tag ${{ steps.versions.outputs.gibson }} not found" && exit 1)
+          gh api repos/zero-day-ai/gibson-tools-official/git/refs/tags/${{ steps.versions.outputs.tools }} > /dev/null || (echo "Tools tag ${{ steps.versions.outputs.tools }} not found" && exit 1)
+          gh api repos/zero-day-ai/gibson-agents-official/git/refs/tags/${{ steps.versions.outputs.agents }} > /dev/null || (echo "Agents tag ${{ steps.versions.outputs.agents }} not found" && exit 1)
+          gh api repos/zero-day-ai/gibson-plugins-official/git/refs/tags/${{ steps.versions.outputs.plugins }} > /dev/null || (echo "Plugins tag ${{ steps.versions.outputs.plugins }} not found" && exit 1)
           echo "All tags validated successfully"
 
   build-oss:
