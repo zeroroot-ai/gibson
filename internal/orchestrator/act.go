@@ -345,11 +345,28 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 	}
 
 	// Set Context from TaskConfig (contains merged context + task config from YAML)
-	if ctx, ok := node.TaskConfig["context"].(map[string]any); ok {
-		task.Context = ctx
+	if ctxMap, ok := node.TaskConfig["context"].(map[string]any); ok {
+		task.Context = ctxMap
 	} else {
 		// If no context, use entire TaskConfig as context for backwards compatibility
 		task.Context = node.TaskConfig
+	}
+
+	// Inject mission target into task context if not already set
+	// This ensures agents receive the target from mission configuration
+	if task.Context == nil {
+		task.Context = make(map[string]any)
+	}
+	if _, hasTarget := task.Context["target"]; !hasTarget {
+		// Fetch mission to get target reference
+		if a.missionQueries != nil {
+			if m, err := a.missionQueries.GetMission(ctx, missionID); err == nil && m.TargetRef != "" {
+				task.Context["target"] = m.TargetRef
+				a.logger.Debug("injected mission target into agent task context",
+					"agent_name", node.AgentName,
+					"target", m.TargetRef)
+			}
+		}
 	}
 
 	// Keep Input for backwards compatibility (deprecated)
