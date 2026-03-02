@@ -17,6 +17,7 @@ import (
 	dclient "github.com/zero-day-ai/gibson/internal/daemon/client"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"gopkg.in/yaml.v3"
 )
 
 var missionCmd = &cobra.Command{
@@ -742,8 +743,23 @@ func runMissionRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// If target flag is provided, inject it into the workflow YAML
+	workflowSource := source
+	if missionTargetFlag != "" {
+		if verbose {
+			fmt.Printf("Injecting target: %s\n", missionTargetFlag)
+		}
+		// Create a temporary file with the target injected
+		injectedPath, err := injectTargetIntoWorkflow(source, missionTargetFlag)
+		if err != nil {
+			return internal.WrapError(internal.ExitError, "failed to inject target into workflow", err)
+		}
+		defer os.Remove(injectedPath) // Clean up temp file
+		workflowSource = injectedPath
+	}
+
 	// Start mission execution via daemon
-	eventChan, err := client.RunMission(ctx, source, missionMemoryContinuity)
+	eventChan, err := client.RunMission(ctx, workflowSource, missionMemoryContinuity)
 	if err != nil {
 		return internal.WrapError(internal.ExitError, "failed to start mission", err)
 	}
@@ -812,6 +828,45 @@ func getMissionNameFromWorkflow(workflowPath string) string {
 		return ""
 	}
 	return def.Name
+}
+
+// injectTargetIntoWorkflow reads a workflow YAML file, sets/overrides the target field,
+// and writes to a temporary file. Returns the path to the temporary file.
+func injectTargetIntoWorkflow(workflowPath, target string) (string, error) {
+	// Read the original workflow
+	content, err := os.ReadFile(workflowPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read workflow file: %w", err)
+	}
+
+	// Parse as YAML to inject target
+	var workflow map[string]interface{}
+	if err := yaml.Unmarshal(content, &workflow); err != nil {
+		return "", fmt.Errorf("failed to parse workflow YAML: %w", err)
+	}
+
+	// Set/override the target field
+	workflow["target"] = target
+
+	// Marshal back to YAML
+	modifiedContent, err := yaml.Marshal(workflow)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal modified workflow: %w", err)
+	}
+
+	// Write to a temporary file
+	tmpFile, err := os.CreateTemp("", "gibson-mission-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer tmpFile.Close()
+
+	if _, err := tmpFile.Write(modifiedContent); err != nil {
+		os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	return tmpFile.Name(), nil
 }
 
 // detectMissionSourceType determines if a source string is a URL, file path, or mission name
