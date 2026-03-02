@@ -54,9 +54,15 @@ func convertToSchemaMission(m *mission.Mission, def *mission.MissionDefinition) 
 		objective = strings.TrimSpace(def.Description[:idx+1])
 	}
 
-	// Convert target ID to string reference
+	// Get target reference - prefer metadata value (URL) over TargetID
 	targetRef := ""
-	if !m.TargetID.IsZero() {
+	if m.Metadata != nil {
+		if ref, ok := m.Metadata["target_ref"].(string); ok && ref != "" {
+			targetRef = ref
+		}
+	}
+	// Fallback to TargetID as string if no metadata target_ref
+	if targetRef == "" && !m.TargetID.IsZero() {
 		targetRef = string(m.TargetID)
 	}
 

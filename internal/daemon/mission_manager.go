@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,20 +185,41 @@ func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID
 
 	// Resolve target from mission definition
 	var targetID types.ID
+	var targetRef string // Store original target ref (URL or name) for injection into agent context
 	if def.TargetRef != "" {
-		if m.targetStore == nil {
-			return nil, fmt.Errorf("target '%s' specified but target store not available", def.TargetRef)
+		// Check if target is a direct URL (ad-hoc target without pre-registration)
+		isURL := strings.HasPrefix(def.TargetRef, "http://") || strings.HasPrefix(def.TargetRef, "https://")
+
+		if isURL {
+			// Direct URL target - use a synthetic ID and preserve the URL for injection
+			// Generate a deterministic ID from the URL for consistency
+			targetID = types.ID("00000000-0000-0000-0000-u17006d15c0") // Marker for URL-based targets
+			targetRef = def.TargetRef                                  // Preserve URL for agent context injection
+			m.logger.Debug("using direct URL target", "target_url", def.TargetRef, "target_id", targetID)
+		} else {
+			// Named target - look up in target store
+			if m.targetStore == nil {
+				return nil, fmt.Errorf("target '%s' specified but target store not available", def.TargetRef)
+			}
+			target, err := m.targetStore.GetByName(ctx, def.TargetRef)
+			if err != nil {
+				m.logger.Error("failed to lookup target", "error", err, "target_ref", def.TargetRef)
+				return nil, fmt.Errorf("failed to lookup target '%s': %w", def.TargetRef, err)
+			}
+			if target == nil {
+				return nil, fmt.Errorf("target '%s' not found", def.TargetRef)
+			}
+			targetID = target.ID
+			// Use target URL or name as the ref for agent context
+			if target.URL != "" {
+				targetRef = target.URL
+			} else if conn, ok := target.Connection["url"].(string); ok {
+				targetRef = conn
+			} else {
+				targetRef = def.TargetRef
+			}
+			m.logger.Debug("resolved target", "target_ref", def.TargetRef, "target_id", targetID, "target_url", targetRef)
 		}
-		target, err := m.targetStore.GetByName(ctx, def.TargetRef)
-		if err != nil {
-			m.logger.Error("failed to lookup target", "error", err, "target_ref", def.TargetRef)
-			return nil, fmt.Errorf("failed to lookup target '%s': %w", def.TargetRef, err)
-		}
-		if target == nil {
-			return nil, fmt.Errorf("target '%s' not found", def.TargetRef)
-		}
-		targetID = target.ID
-		m.logger.Debug("resolved target", "target_ref", def.TargetRef, "target_id", targetID)
 	} else {
 		// No target specified - use a synthetic "discovery" target ID
 		// This allows orchestration/discovery missions that don't target a specific system
@@ -237,6 +259,12 @@ func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID
 	// Store variables in metadata
 	if len(variables) > 0 {
 		missionTemplate.Metadata["variables"] = variables
+	}
+
+	// Store target URL/reference in metadata for agent context injection
+	// This preserves the original target reference (URL or name) separate from TargetID
+	if targetRef != "" {
+		missionTemplate.Metadata["target_ref"] = targetRef
 	}
 
 	// Use FindOrCreateByName to get stable mission ID
