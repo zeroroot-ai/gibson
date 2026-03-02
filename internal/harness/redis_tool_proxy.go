@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"time"
@@ -13,8 +14,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 // Tool execution error codes for RedisToolProxy
@@ -234,22 +238,72 @@ func (p *RedisToolProxy) ExecuteProto(ctx context.Context, input proto.Message) 
 }
 
 // deserializeOutput deserializes a JSON string into a proto message using dynamic type lookup.
+// It first tries the global proto registry, then falls back to using the FileDescriptorSet
+// from the tool metadata for dynamic proto message creation.
 func (p *RedisToolProxy) deserializeOutput(outputJSON string) (proto.Message, error) {
-	// Look up the output message type
-	msgType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(p.meta.OutputMessageType))
+	outputType := p.meta.OutputMessageType
+
+	// First, try GlobalTypes registry (for compiled-in types)
+	msgType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(outputType))
+	if err == nil {
+		// Found in GlobalTypes - use compiled type
+		msg := msgType.New().Interface()
+		if err := protojson.Unmarshal([]byte(outputJSON), msg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal output: %w", err)
+		}
+		return msg, nil
+	}
+
+	// GlobalTypes lookup failed - try dynamic type from FileDescriptorSet
+	if p.meta.FileDescriptorSet == "" {
+		return nil, fmt.Errorf("failed to find output message type %s: not in GlobalTypes and no file_descriptor_set available", outputType)
+	}
+
+	// Decode base64 file descriptor set
+	fdsBytes, err := base64.StdEncoding.DecodeString(p.meta.FileDescriptorSet)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find output message type %s: %w", p.meta.OutputMessageType, err)
+		return nil, fmt.Errorf("failed to decode file_descriptor_set: %w", err)
 	}
 
-	// Create a new instance of the message
-	msg := msgType.New().Interface()
-
-	// Unmarshal JSON into the message
-	if err := protojson.Unmarshal([]byte(outputJSON), msg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal output: %w", err)
+	// Parse the FileDescriptorSet proto
+	var fds descriptorpb.FileDescriptorSet
+	if err := proto.Unmarshal(fdsBytes, &fds); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal file_descriptor_set: %w", err)
 	}
 
-	return msg, nil
+	// Create a file registry from the descriptor set
+	files, err := protodesc.NewFiles(&fds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file registry: %w", err)
+	}
+
+	// Find the output message descriptor
+	msgDesc, err := files.FindDescriptorByName(protoreflect.FullName(outputType))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find message descriptor for %s: %w", outputType, err)
+	}
+
+	// Assert it's a message descriptor
+	md, ok := msgDesc.(protoreflect.MessageDescriptor)
+	if !ok {
+		return nil, fmt.Errorf("%s is not a message descriptor", outputType)
+	}
+
+	// Create a dynamic message of the correct type
+	dynamicMsg := dynamicpb.NewMessage(md)
+
+	// Unmarshal JSON into the dynamic message
+	unmarshaler := protojson.UnmarshalOptions{
+		DiscardUnknown: true,
+	}
+	if err := unmarshaler.Unmarshal([]byte(outputJSON), dynamicMsg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal output into dynamic message: %w", err)
+	}
+
+	p.logger.Debug("deserialized output using dynamic proto from FileDescriptorSet",
+		"output_type", outputType)
+
+	return dynamicMsg, nil
 }
 
 // Health checks the health of the tool by checking worker count.

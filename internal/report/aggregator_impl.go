@@ -221,7 +221,7 @@ func (a *DefaultAggregator) aggregateMission(ctx context.Context, missionID type
 		ParentMissionID: m.ParentMissionID,
 		Constraints: MissionConstraints{
 			TimeLimit:    durationPtr(m.Constraints.MaxDuration),
-			CostLimit:    m.Constraints.MaxCost,
+			CostLimit:    float64Ptr(m.Constraints.MaxCost),
 			FindingLimit: intPtr(m.Constraints.MaxFindings),
 		},
 	}
@@ -389,16 +389,30 @@ func (a *DefaultAggregator) aggregatePayloads(ctx context.Context, missionID typ
 			continue
 		}
 
+		// Get primary category (first one, or empty)
+		var category string
+		if len(p.Categories) > 0 {
+			category = string(p.Categories[0])
+		}
+
+		// Convert MITRE technique strings to SimpleMitreMapping
+		mitreMappings := make([]finding.SimpleMitreMapping, 0, len(p.MitreTechniques))
+		for _, technique := range p.MitreTechniques {
+			mitreMappings = append(mitreMappings, finding.SimpleMitreMapping{
+				TechniqueID: technique,
+			})
+		}
+
 		payloadData := PayloadExecutionData{
 			ID:               exec.ID,
-			Category:         p.Category,
+			Category:         category,
 			Name:             p.Name,
 			Description:      p.Description,
 			Severity:         p.Severity,
 			ExecutedAt:       exec.CreatedAt,
 			Status:           string(exec.Status),
 			ResultingFinding: exec.FindingID,
-			MitreMappings:    p.MitreMappings,
+			MitreMappings:    mitreMappings,
 			Metadata:         exec.Metadata,
 		}
 		reportData.PayloadExecutions = append(reportData.PayloadExecutions, payloadData)
@@ -485,15 +499,15 @@ func (a *DefaultAggregator) calculateDerivedMetrics(reportData *ReportData) {
 
 	for _, f := range reportData.Findings {
 		switch f.Severity {
-		case agent.FindingSeverityCritical:
+		case agent.SeverityCritical:
 			totalRisk += criticalWeight
-		case agent.FindingSeverityHigh:
+		case agent.SeverityHigh:
 			totalRisk += highWeight
-		case agent.FindingSeverityMedium:
+		case agent.SeverityMedium:
 			totalRisk += mediumWeight
-		case agent.FindingSeverityLow:
+		case agent.SeverityLow:
 			totalRisk += lowWeight
-		case agent.FindingSeverityInfo:
+		case agent.SeverityInfo:
 			totalRisk += infoWeight
 		}
 	}
@@ -518,7 +532,7 @@ func (a *DefaultAggregator) buildExecutiveSummary(reportData *ReportData) Execut
 	// Extract top 5 critical findings
 	criticalCount := 0
 	for _, f := range reportData.Findings {
-		if f.Severity == agent.FindingSeverityCritical && criticalCount < 5 {
+		if f.Severity == agent.SeverityCritical && criticalCount < 5 {
 			summary.KeyFindings = append(summary.KeyFindings, KeyFinding{
 				FindingID:      f.ID,
 				Title:          f.Title,
@@ -539,15 +553,15 @@ func (a *DefaultAggregator) buildExecutiveSummary(reportData *ReportData) Execut
 	// Count by severity
 	for _, f := range reportData.Findings {
 		switch f.Severity {
-		case agent.FindingSeverityCritical:
+		case agent.SeverityCritical:
 			summary.RiskSummary.CriticalFindings++
-		case agent.FindingSeverityHigh:
+		case agent.SeverityHigh:
 			summary.RiskSummary.HighFindings++
-		case agent.FindingSeverityMedium:
+		case agent.SeverityMedium:
 			summary.RiskSummary.MediumFindings++
-		case agent.FindingSeverityLow:
+		case agent.SeverityLow:
 			summary.RiskSummary.LowFindings++
-		case agent.FindingSeverityInfo:
+		case agent.SeverityInfo:
 			summary.RiskSummary.InfoFindings++
 		}
 	}
@@ -586,6 +600,13 @@ func intPtr(i int) *int {
 		return nil
 	}
 	return &i
+}
+
+func float64Ptr(f float64) *float64 {
+	if f == 0 {
+		return nil
+	}
+	return &f
 }
 
 // Ensure DefaultAggregator implements DataAggregator

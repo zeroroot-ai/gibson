@@ -286,10 +286,11 @@ func (g *Generator) summarizeFindings(data *ReportData) []map[string]any {
 			finding["evidence"] = evidenceSummary
 		}
 
-		// Include MITRE mappings
-		if len(f.MitreMappings) > 0 {
-			mitre := make([]string, 0, len(f.MitreMappings))
-			for _, m := range f.MitreMappings {
+		// Include MITRE mappings (combine ATT&CK and ATLAS)
+		allMitre := append(f.MitreAttack, f.MitreAtlas...)
+		if len(allMitre) > 0 {
+			mitre := make([]string, 0, len(allMitre))
+			for _, m := range allMitre {
 				mitre = append(mitre, m.TechniqueID)
 			}
 			finding["mitre"] = mitre
@@ -301,11 +302,11 @@ func (g *Generator) summarizeFindings(data *ReportData) []map[string]any {
 		}
 
 		// Include CWE/CVSS if available
-		if f.CweID != "" {
-			finding["cwe"] = f.CweID
+		if len(f.CWE) > 0 {
+			finding["cwe"] = f.CWE
 		}
-		if f.CvssScore > 0 {
-			finding["cvss"] = f.CvssScore
+		if f.CVSS != nil && f.CVSS.Score > 0 {
+			finding["cvss"] = f.CVSS.Score
 		}
 
 		findings = append(findings, finding)
@@ -392,10 +393,13 @@ func (g *Generator) buildMetadata(data *ReportData) ReportMetadata {
 		meta.AgentsUsed = append(meta.AgentsUsed, agent)
 	}
 
-	// Collect MITRE coverage
+	// Collect MITRE coverage (combine ATT&CK and ATLAS)
 	mitre := make(map[string]bool)
 	for _, f := range data.Findings {
-		for _, m := range f.MitreMappings {
+		for _, m := range f.MitreAttack {
+			mitre[m.TechniqueID] = true
+		}
+		for _, m := range f.MitreAtlas {
 			mitre[m.TechniqueID] = true
 		}
 	}
