@@ -72,6 +72,7 @@ func (mq *MissionQueries) CreateMission(ctx context.Context, m *schema.Mission) 
 			m.started_at = CASE WHEN $started_at IS NOT NULL THEN datetime($started_at) ELSE NULL END
 		ON MATCH SET
 			m.status = $status,
+			m.target_ref = $target_ref,
 			m.started_at = CASE WHEN $started_at IS NOT NULL THEN datetime($started_at) ELSE m.started_at END
 		RETURN m.id as id
 	`
