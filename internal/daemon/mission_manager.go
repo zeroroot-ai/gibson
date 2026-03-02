@@ -281,6 +281,26 @@ func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID
 			"mission_name", missionRecord.Name,
 			"is_new", isNewMission,
 		)
+
+		// For existing missions, ensure metadata is updated with current run's values
+		// The metadata from missionTemplate contains run-specific data like target_ref
+		if !isNewMission {
+			if missionRecord.Metadata == nil {
+				missionRecord.Metadata = make(map[string]any)
+			}
+			// Copy target_ref from template to record (run-specific target)
+			if targetRef != "" {
+				missionRecord.Metadata["target_ref"] = targetRef
+				m.logger.Debug("updated mission metadata with target_ref",
+					"mission_id", missionRecord.ID,
+					"target_ref", targetRef,
+				)
+			}
+			// Copy variables from template to record (run-specific variables)
+			if vars, ok := missionTemplate.Metadata["variables"]; ok {
+				missionRecord.Metadata["variables"] = vars
+			}
+		}
 	} else {
 		// No store available, use template directly
 		missionRecord = missionTemplate
