@@ -2,19 +2,16 @@ package registry
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
 	"google.golang.org/grpc"
-	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/reflect/protoregistry"
-	"google.golang.org/protobuf/types/known/structpb"
+	protobuf "google.golang.org/protobuf/proto"
 
 	"github.com/zero-day-ai/gibson/internal/types"
 	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	"github.com/zero-day-ai/sdk/protoresolver"
 	"github.com/zero-day-ai/sdk/registry"
 )
 
@@ -31,9 +28,10 @@ import (
 // - Handles descriptor caching and health checks
 // - Proto-based execution using ExecuteProto
 type GRPCToolClient struct {
-	conn   *grpc.ClientConn
-	client proto.ToolServiceClient
-	info   registry.ServiceInfo
+	conn     *grpc.ClientConn
+	client   proto.ToolServiceClient
+	info     registry.ServiceInfo
+	resolver protoresolver.ProtoResolver
 
 	// Cached descriptor from GetDescriptor RPC
 	// This avoids repeated gRPC calls for static metadata
@@ -60,13 +58,15 @@ type toolDescriptor struct {
 // Parameters:
 //   - conn: Established gRPC connection to the tool
 //   - info: ServiceInfo from etcd registry with tool metadata
+//   - resolver: ProtoResolver for resolving proto message types
 //
 // Returns a GRPCToolClient that implements the tool.Tool interface.
-func NewGRPCToolClient(conn *grpc.ClientConn, info registry.ServiceInfo) *GRPCToolClient {
+func NewGRPCToolClient(conn *grpc.ClientConn, info registry.ServiceInfo, resolver protoresolver.ProtoResolver) *GRPCToolClient {
 	return &GRPCToolClient{
-		conn:   conn,
-		client: proto.NewToolServiceClient(conn),
-		info:   info,
+		conn:     conn,
+		client:   proto.NewToolServiceClient(conn),
+		info:     info,
+		resolver: resolver,
 	}
 }
 
@@ -126,7 +126,12 @@ func (c *GRPCToolClient) InputMessageType() string {
 		slog.Info("fetchDescriptor result",
 			"tool", c.info.Name,
 			"desc_nil", desc == nil,
-			"input_type", func() string { if desc != nil { return desc.InputMessageType }; return "" }())
+			"input_type", func() string {
+				if desc != nil {
+					return desc.InputMessageType
+				}
+				return ""
+			}())
 	}
 
 	if c.descriptor != nil {
@@ -193,39 +198,23 @@ func (c *GRPCToolClient) ExecuteProto(ctx context.Context, input protobuf.Messag
 		return nil, fmt.Errorf("output message type not available")
 	}
 
-	// Create output proto message dynamically
-	// Try to find the specific message type first. If not found, use google.protobuf.Struct
-	// as a fallback. The HarnessCallbackService will convert it back to JSON for the agent,
-	// which can then unmarshal to the proper type since it has the proto definitions.
-	var output protobuf.Message
-	msgType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(outputType))
+	// Initialize resolver if nil (backward compatibility)
+	if c.resolver == nil {
+		c.resolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
+	}
+
+	// Use ProtoResolver to resolve output type
+	output, err := c.resolver.ResolveOutputType(ctx, outputType, c.Metadata())
 	if err != nil {
-		// Fallback to google.protobuf.Struct for unregistered types
-		// This allows the daemon to work without importing tool-specific proto packages
-		slog.Debug("proto type not found, using google.protobuf.Struct fallback",
-			"output_type", outputType,
-			"error", err)
+		return nil, fmt.Errorf("failed to resolve output type: %w", err)
+	}
 
-		// Parse JSON into a map and convert to Struct
-		var jsonMap map[string]any
-		if err := json.Unmarshal([]byte(resp.OutputJson), &jsonMap); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal output JSON: %w", err)
-		}
-		structMsg, err := structpb.NewStruct(jsonMap)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create Struct from output: %w", err)
-		}
-		output = structMsg
-	} else {
-		output = msgType.New().Interface()
-
-		// Unmarshal JSON to proto
-		unmarshaler := protojson.UnmarshalOptions{
-			DiscardUnknown: true,
-		}
-		if err := unmarshaler.Unmarshal([]byte(resp.OutputJson), output); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal output: %w", err)
-		}
+	// Unmarshal JSON to proto
+	unmarshaler := protojson.UnmarshalOptions{
+		DiscardUnknown: true,
+	}
+	if err := unmarshaler.Unmarshal([]byte(resp.OutputJson), output); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal output: %w", err)
 	}
 
 	return output, nil

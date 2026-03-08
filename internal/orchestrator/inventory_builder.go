@@ -302,12 +302,20 @@ func (b *InventoryBuilder) convertAgentInfo(info registry.AgentInfo) AgentSummar
 		Capabilities:   info.Capabilities,
 		TargetTypes:    info.TargetTypes,
 		TechniqueTypes: info.TechniqueTypes,
-		Slots:          []SlotSummary{}, // TODO: Fetch from descriptor when available
+		Slots:          b.extractSlots(info),
 		Instances:      info.Instances,
 		HealthStatus:   healthStatus,
 		Endpoints:      info.Endpoints,
 		IsExternal:     len(info.Endpoints) > 0, // External if gRPC endpoints exist
 	}
+}
+
+// extractSlots extracts slot summaries from agent info.
+// Currently returns empty as descriptor integration is not yet available.
+func (b *InventoryBuilder) extractSlots(info registry.AgentInfo) []SlotSummary {
+	// TODO: Fetch from agent descriptor when available
+	// For now, return empty slice as manifests don't yet include slot data
+	return []SlotSummary{}
 }
 
 // convertToolInfo converts registry.ToolInfo to ToolSummary.
@@ -338,14 +346,35 @@ func (b *InventoryBuilder) convertToolInfo(info registry.ToolInfo) ToolSummary {
 		Name:          info.Name,
 		Version:       info.Version,
 		Description:   info.Description,
-		Tags:          []string{}, // TODO: Fetch from descriptor when available
-		InputSummary:  "",         // TODO: Generate from schema
-		OutputSummary: "",         // TODO: Generate from schema
+		Tags:          b.extractTags(info),
+		InputSummary:  b.generateToolInputSummary(info),
+		OutputSummary: b.generateToolOutputSummary(info),
 		Capabilities:  capabilities,
 		Instances:     info.Instances,
 		HealthStatus:  healthStatus,
 		IsExternal:    len(info.Endpoints) > 0,
 	}
+}
+
+// extractTags extracts tags from tool info.
+// Currently returns empty as descriptor integration is not yet available.
+func (b *InventoryBuilder) extractTags(info registry.ToolInfo) []string {
+	// TODO: Fetch from tool descriptor when available
+	return []string{}
+}
+
+// generateToolInputSummary generates a human-readable summary of tool input schema.
+// Currently returns empty as schema information is not yet available from registry.
+func (b *InventoryBuilder) generateToolInputSummary(info registry.ToolInfo) string {
+	// TODO: Generate from input schema when available in descriptor
+	return ""
+}
+
+// generateToolOutputSummary generates a human-readable summary of tool output schema.
+// Currently returns empty as schema information is not yet available from registry.
+func (b *InventoryBuilder) generateToolOutputSummary(info registry.ToolInfo) string {
+	// TODO: Generate from output schema when available in descriptor
+	return ""
 }
 
 // convertPluginInfo converts registry.PluginInfo to PluginSummary.
@@ -363,11 +392,19 @@ func (b *InventoryBuilder) convertPluginInfo(info registry.PluginInfo) PluginSum
 		Name:         info.Name,
 		Version:      info.Version,
 		Description:  info.Description,
-		Methods:      []MethodSummary{}, // TODO: Fetch from descriptor when available
+		Methods:      b.extractMethods(info),
 		Instances:    info.Instances,
 		HealthStatus: healthStatus,
 		IsExternal:   len(info.Endpoints) > 0,
 	}
+}
+
+// extractMethods extracts method summaries from plugin info.
+// Currently returns empty as descriptor integration is not yet available.
+func (b *InventoryBuilder) extractMethods(info registry.PluginInfo) []MethodSummary {
+	// TODO: Fetch from plugin descriptor when available
+	// For now, return empty slice as plugin method metadata is not yet exposed
+	return []MethodSummary{}
 }
 
 // summarizeSchema converts a JSON schema map to a human-readable summary string.

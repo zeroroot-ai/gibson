@@ -471,15 +471,18 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 		// Display remote daemon status
 		if daemonStatusJSON {
 			status := map[string]interface{}{
-				"running":        true,
-				"remote":         true,
-				"remote_address": remoteAddr,
-				"pid":            daemonStatus.PID,
-				"uptime":         daemonStatus.Uptime,
-				"grpc_address":   daemonStatus.GRPCAddress,
-				"registry_type":  daemonStatus.RegistryType,
-				"registry_addr":  daemonStatus.RegistryAddr,
-				"agent_count":    daemonStatus.AgentCount,
+				"running":              true,
+				"remote":               true,
+				"remote_address":       remoteAddr,
+				"pid":                  daemonStatus.PID,
+				"uptime":               daemonStatus.Uptime,
+				"grpc_address":         daemonStatus.GRPCAddress,
+				"callback_address":     daemonStatus.CallbackAddr,
+				"registry_type":        daemonStatus.RegistryType,
+				"registry_addr":        daemonStatus.RegistryAddr,
+				"agent_count":          daemonStatus.AgentCount,
+				"mission_count":        daemonStatus.MissionCount,
+				"active_mission_count": daemonStatus.ActiveCount,
 			}
 			encoder := json.NewEncoder(cmd.OutOrStdout())
 			encoder.SetIndent("", "  ")
@@ -499,11 +502,20 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(tw, "")
 		fmt.Fprintln(tw, "ENDPOINTS")
 		fmt.Fprintf(tw, "gRPC Address:\t%s\n", daemonStatus.GRPCAddress)
+		if daemonStatus.CallbackAddr != "" {
+			fmt.Fprintf(tw, "Callback Address:\t%s\n", daemonStatus.CallbackAddr)
+		}
 		fmt.Fprintln(tw, "")
 		fmt.Fprintln(tw, "REGISTRY")
 		fmt.Fprintf(tw, "Type:\t%s\n", daemonStatus.RegistryType)
 		fmt.Fprintf(tw, "Address:\t%s\n", daemonStatus.RegistryAddr)
+		fmt.Fprintln(tw, "")
+		fmt.Fprintln(tw, "COMPONENTS")
 		fmt.Fprintf(tw, "Agents:\t%d\n", daemonStatus.AgentCount)
+		fmt.Fprintln(tw, "")
+		fmt.Fprintln(tw, "MISSIONS")
+		fmt.Fprintf(tw, "Active:\t%d\n", daemonStatus.ActiveCount)
+		fmt.Fprintf(tw, "Total:\t%d\n", daemonStatus.MissionCount)
 
 		return nil
 	}
@@ -589,9 +601,9 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 	uptime := time.Since(info.StartTime)
 	uptimeStr := formatUptime(uptime)
 
-	// Try to get full status from daemon if we can connect
-	// For now, we'll just show basic info from files
-	// TODO: Connect via gRPC in future phases to get full status
+	// Note: For local daemons, we show basic file-based status.
+	// Remote daemons (via GIBSON_DAEMON_ADDRESS) show full status via gRPC above.
+	// Full gRPC status for local daemons could be added in the future if needed.
 
 	// Build status output
 	if daemonStatusJSON {

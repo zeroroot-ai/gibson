@@ -8,6 +8,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/state"
 )
 
 // CommandContext holds all dependencies and context needed for command execution.
@@ -16,15 +17,14 @@ type CommandContext struct {
 	// Ctx is the context for cancellation and timeouts
 	Ctx context.Context
 
-	// DB is the database connection for data persistence operations
-	// Note: Components are stored in etcd, not SQLite. DB is used for other data types.
-	DB *database.DB
+	// StateClient provides access to Redis for data persistence
+	StateClient *state.StateClient
 
 	// ComponentStore provides access to component data from etcd
 	ComponentStore component.ComponentStore
 
-	// TargetDAO provides access to target data from SQLite
-	TargetDAO *database.TargetDAO
+	// TargetDAO provides access to target data from Redis
+	TargetDAO database.TargetDAO
 
 	// HomeDir is the Gibson home directory path (e.g., ~/.gibson)
 	HomeDir string
@@ -48,8 +48,8 @@ type CommandContext struct {
 // Close cleans up resources held by the CommandContext.
 // It should be called when the context is no longer needed.
 func (cc *CommandContext) Close() error {
-	if cc.DB != nil {
-		return cc.DB.Close()
+	if cc.StateClient != nil {
+		return cc.StateClient.Close()
 	}
 	return nil
 }

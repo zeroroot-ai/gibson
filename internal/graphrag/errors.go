@@ -222,18 +222,6 @@ func NewInvalidQueryError(message string) *GraphRAGError {
 	}
 }
 
-// NewIndexError creates a vector index operation error.
-// This may be retryable depending on the cause.
-func NewIndexError(message string, cause error, retryable bool) *GraphRAGError {
-	return &GraphRAGError{
-		Code:      ErrCodeIndexFailed,
-		Message:   message,
-		Cause:     cause,
-		Context:   make(map[string]any),
-		Retryable: retryable,
-	}
-}
-
 // NewTransactionError creates a transaction failure error.
 // This is typically retryable as transactions may fail due to conflicts.
 func NewTransactionError(message string, cause error) *GraphRAGError {

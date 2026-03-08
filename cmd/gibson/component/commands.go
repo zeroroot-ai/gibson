@@ -46,8 +46,10 @@ type StatusFlags struct {
 
 // LogsFlags holds flags for logs commands.
 type LogsFlags struct {
-	Follow bool // Follow log output (like tail -f)
-	Lines  int  // Number of lines to show (default 50)
+	Follow     bool     // Follow log output (like tail -f)
+	Lines      int      // Number of lines to show (default 50)
+	All        bool     // View logs from all components
+	Components []string // View logs from specific components
 }
 
 // ListFlags holds flags for list commands.

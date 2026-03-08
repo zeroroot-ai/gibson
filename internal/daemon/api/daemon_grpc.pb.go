@@ -24,6 +24,7 @@ const (
 	DaemonService_Status_FullMethodName                      = "/gibson.daemon.v1.DaemonService/Status"
 	DaemonService_RunMission_FullMethodName                  = "/gibson.daemon.v1.DaemonService/RunMission"
 	DaemonService_StopMission_FullMethodName                 = "/gibson.daemon.v1.DaemonService/StopMission"
+	DaemonService_CreateMission_FullMethodName               = "/gibson.daemon.v1.DaemonService/CreateMission"
 	DaemonService_ListMissions_FullMethodName                = "/gibson.daemon.v1.DaemonService/ListMissions"
 	DaemonService_ListAgents_FullMethodName                  = "/gibson.daemon.v1.DaemonService/ListAgents"
 	DaemonService_GetAgentStatus_FullMethodName              = "/gibson.daemon.v1.DaemonService/GetAgentStatus"
@@ -77,6 +78,9 @@ type DaemonServiceClient interface {
 	RunMission(ctx context.Context, in *RunMissionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[MissionEvent], error)
 	// StopMission gracefully stops a running mission.
 	StopMission(ctx context.Context, in *StopMissionRequest, opts ...grpc.CallOption) (*StopMissionResponse, error)
+	// CreateMission creates a new mission with target and workflow configuration.
+	// Supports both referenced and inline configurations.
+	CreateMission(ctx context.Context, in *CreateMissionRequest, opts ...grpc.CallOption) (*CreateMissionResponse, error)
 	// ListMissions returns all missions (past and active).
 	ListMissions(ctx context.Context, in *ListMissionsRequest, opts ...grpc.CallOption) (*ListMissionsResponse, error)
 	// ListAgents returns all registered agents from the etcd registry.
@@ -217,6 +221,16 @@ func (c *daemonServiceClient) StopMission(ctx context.Context, in *StopMissionRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StopMissionResponse)
 	err := c.cc.Invoke(ctx, DaemonService_StopMission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) CreateMission(ctx context.Context, in *CreateMissionRequest, opts ...grpc.CallOption) (*CreateMissionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateMissionResponse)
+	err := c.cc.Invoke(ctx, DaemonService_CreateMission_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -562,6 +576,9 @@ type DaemonServiceServer interface {
 	RunMission(*RunMissionRequest, grpc.ServerStreamingServer[MissionEvent]) error
 	// StopMission gracefully stops a running mission.
 	StopMission(context.Context, *StopMissionRequest) (*StopMissionResponse, error)
+	// CreateMission creates a new mission with target and workflow configuration.
+	// Supports both referenced and inline configurations.
+	CreateMission(context.Context, *CreateMissionRequest) (*CreateMissionResponse, error)
 	// ListMissions returns all missions (past and active).
 	ListMissions(context.Context, *ListMissionsRequest) (*ListMissionsResponse, error)
 	// ListAgents returns all registered agents from the etcd registry.
@@ -663,6 +680,9 @@ func (UnimplementedDaemonServiceServer) RunMission(*RunMissionRequest, grpc.Serv
 }
 func (UnimplementedDaemonServiceServer) StopMission(context.Context, *StopMissionRequest) (*StopMissionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StopMission not implemented")
+}
+func (UnimplementedDaemonServiceServer) CreateMission(context.Context, *CreateMissionRequest) (*CreateMissionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateMission not implemented")
 }
 func (UnimplementedDaemonServiceServer) ListMissions(context.Context, *ListMissionsRequest) (*ListMissionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListMissions not implemented")
@@ -848,6 +868,24 @@ func _DaemonService_StopMission_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServiceServer).StopMission(ctx, req.(*StopMissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_CreateMission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateMissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).CreateMission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_CreateMission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).CreateMission(ctx, req.(*CreateMissionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1350,6 +1388,10 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StopMission",
 			Handler:    _DaemonService_StopMission_Handler,
+		},
+		{
+			MethodName: "CreateMission",
+			Handler:    _DaemonService_CreateMission_Handler,
 		},
 		{
 			MethodName: "ListMissions",

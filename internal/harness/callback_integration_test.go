@@ -19,6 +19,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/api/gen/proto"
 	"github.com/zero-day-ai/sdk/serve"
+	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	protobuf "google.golang.org/protobuf/proto"
@@ -135,6 +136,14 @@ func (m *mockIntegrationHarness) MissionExecutionContext() MissionExecutionConte
 	return MissionExecutionContextSDK{}
 }
 
+func (m *mockIntegrationHarness) GetAllToolCapabilities(ctx context.Context) (map[string]*sdktypes.Capabilities, error) {
+	return make(map[string]*sdktypes.Capabilities), nil
+}
+
+func (m *mockIntegrationHarness) GetToolCapabilities(ctx context.Context, toolName string) (*sdktypes.Capabilities, error) {
+	return nil, fmt.Errorf("GetToolCapabilities not implemented in mock harness")
+}
+
 func (m *mockIntegrationHarness) Target() TargetInfo {
 	return TargetInfo{}
 }
@@ -230,7 +239,13 @@ func TestCallbackIntegration(t *testing.T) {
 	defer client.Close()
 
 	// Step 5: Set task context on the callback client (including mission ID)
-	client.SetTaskContext(taskID, agentName, missionID, "trace-123", "span-456")
+	client.SetFullContext(serve.TaskContextParams{
+		TaskID:    taskID,
+		AgentName: agentName,
+		MissionID: missionID,
+		TraceID:   "trace-123",
+		SpanID:    "span-456",
+	})
 
 	// Step 6: Test MemorySet callback
 	testKey := "test-key"
@@ -240,8 +255,8 @@ func TestCallbackIntegration(t *testing.T) {
 	defer setCancel()
 
 	setReq := &proto.MemorySetRequest{
-		Key:       testKey,
-		ValueJson: fmt.Sprintf(`"%s"`, testValue), // JSON-encode the string
+		Key:   testKey,
+		Value: serve.ToTypedValue(testValue),
 	}
 
 	setResp, err := client.MemorySet(setCtx, setReq)
@@ -303,4 +318,154 @@ func (m *mockMemoryStore) Mission() memory.MissionMemory {
 
 func (m *mockMemoryStore) LongTerm() memory.LongTermMemory {
 	return m.longTerm
+}
+
+// TestMissionManagementCallbackIntegration tests the mission management callbacks.
+// This verifies that mission-related RPC calls flow correctly through the callback system,
+// even when they return "not yet implemented" errors.
+func TestMissionManagementCallbackIntegration(t *testing.T) {
+	// Skip if we can't bind to loopback
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("Cannot bind to loopback address: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	// Create registry and start CallbackServer
+	registry := NewCallbackHarnessRegistry()
+	server := NewCallbackServerWithRegistry(logger, port, registry)
+	require.NotNil(t, server, "CallbackServer should be created")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverErrCh := make(chan error, 1)
+	go func() {
+		serverErrCh <- server.Start(ctx)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	defer func() {
+		cancel()
+		server.Stop()
+		select {
+		case <-serverErrCh:
+		case <-time.After(2 * time.Second):
+			t.Log("Server didn't stop gracefully within timeout")
+		}
+	}()
+
+	// Create mock harness
+	workingMem := memory.NewWorkingMemory(10000)
+	mockMem := &mockMemoryStore{working: workingMem}
+	harness := &mockIntegrationHarness{
+		memory:           mockMem,
+		logger:           logger,
+		tracer:           noop.NewTracerProvider().Tracer("test"),
+		toolProtoOutputs: make(map[string]protobuf.Message),
+	}
+
+	// Register harness
+	missionID := "mission-test-123"
+	agentName := "test-agent"
+	registryKey := registry.Register(missionID, agentName, harness)
+	defer registry.Unregister(registryKey)
+
+	// Create SDK CallbackClient and connect
+	endpoint := fmt.Sprintf("127.0.0.1:%d", port)
+	client, err := serve.NewCallbackClient(endpoint)
+	require.NoError(t, err)
+
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer connectCancel()
+
+	err = client.Connect(connectCtx)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Set task context
+	client.SetFullContext(serve.TaskContextParams{
+		TaskID:    "task-123",
+		AgentName: agentName,
+		MissionID: missionID,
+		TraceID:   "trace-123",
+		SpanID:    "span-456",
+	})
+
+	// Test CreateMission callback
+	t.Run("CreateMission callback flows correctly", func(t *testing.T) {
+		createCtx, createCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer createCancel()
+
+		createReq := &proto.CreateMissionRequest{
+			TargetId:     "target-456",
+			Name:         "sub-mission-test",
+			WorkflowJson: []byte(`{"name": "test-workflow"}`),
+		}
+
+		createResp, err := client.CreateMission(createCtx, createReq)
+		require.NoError(t, err, "CreateMission RPC should complete without transport error")
+		require.NotNil(t, createResp, "CreateMission response should not be nil")
+		// Currently returns "not yet implemented" error
+		if createResp.Error != nil {
+			assert.Contains(t, createResp.Error.Message, "not yet implemented")
+		}
+	})
+
+	// Test GetMissionStatus callback
+	t.Run("GetMissionStatus callback flows correctly", func(t *testing.T) {
+		statusCtx, statusCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer statusCancel()
+
+		statusReq := &proto.GetMissionStatusRequest{
+			MissionId: "target-mission-789",
+		}
+
+		statusResp, err := client.GetMissionStatus(statusCtx, statusReq)
+		require.NoError(t, err, "GetMissionStatus RPC should complete without transport error")
+		require.NotNil(t, statusResp, "GetMissionStatus response should not be nil")
+		if statusResp.Error != nil {
+			assert.Contains(t, statusResp.Error.Message, "not yet implemented")
+		}
+	})
+
+	// Test ListMissions callback
+	t.Run("ListMissions callback flows correctly", func(t *testing.T) {
+		listCtx, listCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer listCancel()
+
+		listReq := &proto.ListMissionsRequest{}
+
+		listResp, err := client.ListMissions(listCtx, listReq)
+		require.NoError(t, err, "ListMissions RPC should complete without transport error")
+		require.NotNil(t, listResp, "ListMissions response should not be nil")
+		if listResp.Error != nil {
+			assert.Contains(t, listResp.Error.Message, "not yet implemented")
+		}
+	})
+
+	// Test CancelMission callback
+	t.Run("CancelMission callback flows correctly", func(t *testing.T) {
+		cancelCtx, cancelOpCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancelOpCancel()
+
+		cancelReq := &proto.CancelMissionRequest{
+			MissionId: "mission-to-cancel",
+		}
+
+		cancelResp, err := client.CancelMission(cancelCtx, cancelReq)
+		require.NoError(t, err, "CancelMission RPC should complete without transport error")
+		require.NotNil(t, cancelResp, "CancelMission response should not be nil")
+		if cancelResp.Error != nil {
+			assert.Contains(t, cancelResp.Error.Message, "not yet implemented")
+		}
+	})
+
+	t.Log("Mission management integration test completed successfully")
 }

@@ -8,7 +8,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/database"
 )
 
 // InitOptions configures the initialization process
@@ -40,9 +39,6 @@ type InitResult struct {
 	// KeyCreated indicates whether a new encryption key was created
 	KeyCreated bool
 
-	// DatabaseCreated indicates whether a new database was created
-	DatabaseCreated bool
-
 	// Errors contains any non-fatal errors encountered
 	Errors []error
 
@@ -63,19 +59,16 @@ type Initializer interface {
 type DefaultInitializer struct {
 	configLoader config.ConfigLoader
 	keyManager   crypto.KeyManagerInterface
-	dbOpener     func(path string) (*database.DB, error)
 }
 
 // NewInitializer creates a new DefaultInitializer with the provided dependencies
 func NewInitializer(
 	configLoader config.ConfigLoader,
 	keyManager crypto.KeyManagerInterface,
-	dbOpener func(path string) (*database.DB, error),
 ) *DefaultInitializer {
 	return &DefaultInitializer{
 		configLoader: configLoader,
 		keyManager:   keyManager,
-		dbOpener:     dbOpener,
 	}
 }
 
@@ -84,7 +77,6 @@ func NewDefaultInitializer() *DefaultInitializer {
 	return NewInitializer(
 		config.NewConfigLoader(config.NewValidator()),
 		crypto.NewFileKeyManager(),
-		database.Open,
 	)
 }
 
@@ -95,11 +87,12 @@ func NewDefaultInitializer() *DefaultInitializer {
 //  2. Create standard directory structure
 //  3. Generate or load configuration
 //  4. Generate or load encryption key
-//  5. Initialize database and schema
-//  6. Validate the complete setup
+//  5. Validate the complete setup
 //
 // The function is designed to be idempotent when Force=false - running it multiple
 // times on the same directory will not create duplicate resources or fail.
+//
+// Note: Database initialization is handled by Redis StateClient during daemon startup.
 func (i *DefaultInitializer) Initialize(ctx context.Context, opts InitOptions) (*InitResult, error) {
 	result := &InitResult{
 		DirsCreated: []string{},
@@ -138,13 +131,7 @@ func (i *DefaultInitializer) Initialize(ctx context.Context, opts InitOptions) (
 		return nil, fmt.Errorf("failed to initialize encryption key: %w", err)
 	}
 
-	// Step 5: Initialize database
-	dbPath := filepath.Join(homeDir, "gibson.db")
-	if err := i.initializeDatabase(dbPath, result, opts.Force); err != nil {
-		return nil, fmt.Errorf("failed to initialize database: %w", err)
-	}
-
-	// Step 6: Validate the complete setup
+	// Step 5: Validate the complete setup
 	validation, err := i.Validate(ctx, homeDir)
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Errorf("post-initialization validation failed: %w", err))
@@ -214,10 +201,8 @@ func (i *DefaultInitializer) initializeConfig(
 	cfg.Core.HomeDir = homeDir
 	cfg.Core.DataDir = filepath.Join(homeDir, "data")
 	cfg.Core.CacheDir = filepath.Join(homeDir, "cache")
-	cfg.Database.Path = filepath.Join(homeDir, "gibson.db")
 
 	// Write config to file
-	// We need to use viper to write YAML
 	if err := writeConfigFile(configPath, cfg); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
@@ -267,49 +252,12 @@ func (i *DefaultInitializer) initializeKey(
 	return nil
 }
 
-// initializeDatabase creates and initializes the database
-func (i *DefaultInitializer) initializeDatabase(
-	dbPath string,
-	result *InitResult,
-	force bool,
-) error {
-	// Check if database already exists
-	_, err := os.Stat(dbPath)
-	dbExists := err == nil
-
-	if dbExists && force {
-		// Remove existing database
-		if err := os.Remove(dbPath); err != nil {
-			return fmt.Errorf("failed to remove existing database: %w", err)
-		}
-		result.Warnings = append(result.Warnings, "removed existing database (--force mode)")
-	}
-
-	// Open or create database
-	db, err := i.dbOpener(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Initialize schema
-	if err := db.InitSchema(); err != nil {
-		return fmt.Errorf("failed to initialize database schema: %w", err)
-	}
-
-	if !dbExists {
-		result.DatabaseCreated = true
-	}
-
-	return nil
-}
-
 // Validate checks if an existing Gibson installation is valid
 func (i *DefaultInitializer) Validate(ctx context.Context, homeDir string) (*ValidationResult, error) {
 	return ValidateSetup(homeDir)
 }
 
-// writeConfigFile writes a Config to a YAML file using viper
+// writeConfigFile writes a Config to a YAML file
 func writeConfigFile(path string, cfg *config.Config) error {
 	// Ensure directory exists
 	dir := filepath.Dir(path)
@@ -318,14 +266,13 @@ func writeConfigFile(path string, cfg *config.Config) error {
 	}
 
 	// Convert config to YAML using gopkg.in/yaml.v3
-	// This is simpler than using viper for writing
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %w", err)
 	}
 	defer file.Close()
 
-	// Write YAML manually with the config structure
+	// Write YAML with the config structure
 	content := fmt.Sprintf(`core:
   home_dir: %s
   data_dir: %s
@@ -334,12 +281,10 @@ func writeConfigFile(path string, cfg *config.Config) error {
   timeout: %s
   debug: %t
 
-database:
-  path: %s
-  max_connections: %d
-  timeout: %s
-  wal_mode: %t
-  auto_vacuum: %t
+redis:
+  url: %s
+  password: ""
+  database: %d
 
 security:
   encryption_algorithm: %s
@@ -377,11 +322,8 @@ registry:
 		cfg.Core.ParallelLimit,
 		cfg.Core.Timeout,
 		cfg.Core.Debug,
-		cfg.Database.Path,
-		cfg.Database.MaxConnections,
-		cfg.Database.Timeout,
-		cfg.Database.WALMode,
-		cfg.Database.AutoVacuum,
+		cfg.Redis.URL,
+		cfg.Redis.Database,
 		cfg.Security.EncryptionAlgorithm,
 		cfg.Security.KeyDerivation,
 		cfg.Security.SSLValidation,

@@ -35,11 +35,11 @@ const (
 // It pushes work items to a Redis queue and subscribes to a result channel.
 //
 // Architecture:
-//   1. Proxy generates UUID job ID and serializes proto input to JSON
-//   2. WorkItem is pushed to tool-specific Redis queue: "tool:<name>:queue"
-//   3. Proxy subscribes to job-specific results channel: "results:<jobID>"
-//   4. Worker polls queue, executes tool, publishes Result to results channel
-//   5. Proxy receives result, deserializes proto output, returns to caller
+//  1. Proxy generates UUID job ID and serializes proto input to JSON
+//  2. WorkItem is pushed to tool-specific Redis queue: "tool:<name>:queue"
+//  3. Proxy subscribes to job-specific results channel: "results:<jobID>"
+//  4. Worker polls queue, executes tool, publishes Result to results channel
+//  5. Proxy receives result, deserializes proto output, returns to caller
 type RedisToolProxy struct {
 	client  *queue.RedisClient
 	meta    queue.ToolMeta

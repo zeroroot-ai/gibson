@@ -25,23 +25,11 @@ type Embedder interface {
 	Health(ctx context.Context) types.HealthStatus
 }
 
-// EmbedderConfig holds configuration for embedding providers.
+// EmbedderConfig holds configuration for the native embedding provider.
 type EmbedderConfig struct {
 	// Provider specifies which embedder implementation to use.
-	// Options: "openai", "llm", "mock"
+	// Only "native" is supported for offline embedding generation.
 	Provider string `yaml:"provider" json:"provider" mapstructure:"provider"`
-
-	// Model is the specific embedding model to use.
-	// For OpenAI: "text-embedding-3-small" (1536 dims) or "text-embedding-3-large" (3072 dims)
-	Model string `yaml:"model" json:"model" mapstructure:"model"`
-
-	// APIKey is the API key for the embedding provider.
-	// Can also be provided via environment variable (e.g., OPENAI_API_KEY)
-	APIKey string `yaml:"api_key" json:"api_key" mapstructure:"api_key"`
-
-	// BaseURL is the base URL for the embedding API.
-	// For OpenAI, this defaults to "https://api.openai.com/v1"
-	BaseURL string `yaml:"base_url" json:"base_url" mapstructure:"base_url"`
 
 	// MaxRetries is the maximum number of retry attempts for transient failures.
 	MaxRetries int `yaml:"max_retries" json:"max_retries" mapstructure:"max_retries"`
@@ -52,18 +40,9 @@ type EmbedderConfig struct {
 
 // Validate checks if the EmbedderConfig is valid.
 func (c *EmbedderConfig) Validate() error {
-	if c.Provider == "" {
-		return types.NewError(ErrCodeInvalidConfig, "embedder provider cannot be empty")
-	}
-
-	if c.Model == "" {
-		return types.NewError(ErrCodeInvalidConfig, "embedder model cannot be empty")
-	}
-
-	// OpenAI provider requires API key
-	if c.Provider == "openai" && c.APIKey == "" {
-		return types.NewError(ErrCodeInvalidConfig,
-			"OpenAI embedder requires api_key (or OPENAI_API_KEY environment variable)")
+	// Provider must be "native" or empty (defaults to native)
+	if c.Provider != "" && c.Provider != "native" {
+		return types.NewError(ErrCodeInvalidConfig, "only 'native' provider is supported")
 	}
 
 	if c.MaxRetries < 0 {
@@ -78,14 +57,11 @@ func (c *EmbedderConfig) Validate() error {
 }
 
 // DefaultEmbedderConfig returns a default configuration for the native embedder.
-// The native embedder (all-MiniLM-L6-v2) is preferred because it runs offline
-// without requiring API keys and has predictable latency.
+// The native embedder (all-MiniLM-L6-v2) runs offline without requiring API keys
+// and provides predictable latency.
 func DefaultEmbedderConfig() EmbedderConfig {
 	return EmbedderConfig{
-		Provider:   "native", // Use offline native embedder by default
-		Model:      "",       // Not needed for native embedder
-		APIKey:     "",       // Not needed for native embedder
-		BaseURL:    "",       // Not needed for native embedder
+		Provider:   "native",
 		MaxRetries: 3,
 		Timeout:    30,
 	}

@@ -13,14 +13,11 @@ BINARY_NAME=gibson
 BINARY_DIR=bin
 MAIN_PACKAGE=./cmd/gibson
 
-# CGO is required for SQLite FTS5
-export CGO_ENABLED=1
+# Pure Go build - no CGO required
+export CGO_ENABLED=0
 
-# CGO flags to enable SQLite FTS5 module in mattn/go-sqlite3
-export CGO_CFLAGS=-DSQLITE_ENABLE_FTS5
-
-# Build tags for FTS5 support (always enabled)
-BUILD_TAGS=-tags "fts5"
+# No build tags required (SQLite removed)
+BUILD_TAGS=
 
 # Version information (can be overridden at build time)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")

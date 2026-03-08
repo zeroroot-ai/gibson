@@ -177,8 +177,10 @@ func MissionRun(cc *CommandContext, workflowFile string, targetFlag string) (*Co
 		}, nil
 	}
 
-	// TODO: Actually execute the mission with orchestrator
-	// The orchestrator should receive the run.ID (not mission.ID) for tracking this execution
+	// Note: Actual mission execution is handled by the daemon via gRPC.
+	// The CLI's `gibson mission run` command calls the daemon's RunMission RPC,
+	// which delegates to the mission manager for orchestration.
+	// This core library function only creates the mission record.
 
 	return &CommandResult{
 		Data: &MissionRunResult{
@@ -365,8 +367,9 @@ func lookupTarget(cc *CommandContext, nameOrID string) (types.ID, error) {
 		return "", fmt.Errorf("target not found: %s", nameOrID)
 	}
 
-	exists, err := cc.TargetDAO.Exists(cc.Ctx, id)
-	if err != nil || !exists {
+	// Verify the ID exists by fetching the target
+	target, err = cc.TargetDAO.Get(cc.Ctx, id)
+	if err != nil || target == nil {
 		return "", fmt.Errorf("target not found: %s", nameOrID)
 	}
 

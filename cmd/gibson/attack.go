@@ -16,7 +16,7 @@ import (
 	"github.com/zero-day-ai/gibson/cmd/gibson/internal"
 	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/daemon/client"
-	"github.com/zero-day-ai/gibson/internal/database"
+	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/harness"
@@ -27,6 +27,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/payload"
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -428,22 +429,49 @@ func buildAttackOptions() (*attack.AttackOptions, error) {
 
 // createAttackRunner creates an AttackRunner with all dependencies (Task 4.1, 4.2)
 func createAttackRunner(ctx context.Context) (attack.AttackRunner, error) {
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get Gibson home: %w", err)
+	// Get default EventBus for plugin events
+	eventBus := events.Default()
+
+	// Subscribe to plugin events if verbose mode is enabled
+	if attackVerbose {
+		eventChan, cleanup := eventBus.Subscribe(ctx, events.Filter{
+			Types: []events.EventType{events.EventPluginInitialized, events.EventPluginInitializationFailed},
+		}, 10)
+		defer cleanup()
+
+		// Start goroutine to log plugin events
+		go func() {
+			for event := range eventChan {
+				slog.Info("Plugin event", "type", event.Type, "payload", event.Payload)
+			}
+		}()
 	}
 
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Step 1: Create stores
-	missionStore := mission.NewDBMissionStore(db)
-	findingStore := finding.NewDBFindingStore(db)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
+	}
+	stateCfg.ApplyDefaults()
+
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create state client: %w", err)
+	}
+
+	// Step 1: Create stores with Redis backend
+	missionStore := mission.NewRedisMissionStore(stateClient)
+	findingStore := finding.NewRedisFindingStore(stateClient)
 
 	// Step 2: Get registry manager from context and create adapter
 	regManager := component.GetRegistryManager(ctx)
@@ -456,8 +484,14 @@ func createAttackRunner(ctx context.Context) (attack.AttackRunner, error) {
 
 	// Step 2.5: Create registries (tools and plugins still use legacy registries for now)
 	toolRegistry := tool.NewToolRegistry()
-	pluginRegistry := plugin.NewPluginRegistry(nil) // TODO: Pass EventBus when available
-	payloadRegistry := payload.NewPayloadRegistryWithDefaults(db)
+
+	// Get default EventBus and pass to PluginRegistry
+	pluginEventBus := events.Default()
+	pluginRegistry := plugin.NewPluginRegistry(pluginEventBus)
+
+	// Create Redis-backed payload registry
+	payloadStore := payload.NewRedisPayloadStore(stateClient)
+	payloadRegistry := payload.NewPayloadRegistryWithStore(payloadStore, payload.RegistryConfig{})
 
 	// Step 3: Create LLM components
 	llmRegistry, slotManager, err := initializeLLMComponents()
@@ -987,21 +1021,3 @@ func initializeLLMComponents() (llm.LLMRegistry, llm.SlotManager, error) {
 	return registry, slotManager, nil
 }
 
-// slogAdapter adapts slog.Logger to the component.Logger interface
-type slogAdapter struct{}
-
-func (s *slogAdapter) Infof(format string, args ...interface{}) {
-	slog.Info(fmt.Sprintf(format, args...))
-}
-
-func (s *slogAdapter) Warnf(format string, args ...interface{}) {
-	slog.Warn(fmt.Sprintf(format, args...))
-}
-
-func (s *slogAdapter) Errorf(format string, args ...interface{}) {
-	slog.Error(fmt.Sprintf(format, args...))
-}
-
-func (s *slogAdapter) Debugf(format string, args ...interface{}) {
-	slog.Debug(fmt.Sprintf(format, args...))
-}

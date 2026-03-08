@@ -15,8 +15,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon"
 	daemonclient "github.com/zero-day-ai/gibson/internal/daemon/client"
-	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -344,47 +344,49 @@ func checkComponentsStatus(homeDir string) ComponentsStatus {
 	return componentStatus
 }
 
-// checkDatabaseStatus checks database connectivity and status
+// checkDatabaseStatus checks Redis connectivity and status
 func checkDatabaseStatus(ctx context.Context, homeDir string) DatabaseStatus {
 	dbStatus := DatabaseStatus{
 		Connected: false,
+		Path:      "Redis (state backend)",
 	}
 
-	// Determine database path
-	dbPath := filepath.Join(homeDir, "gibson.db")
-	dbStatus.Path = dbPath
-
-	// Check if database file exists
-	info, err := os.Stat(dbPath)
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
 	if err != nil {
-		if os.IsNotExist(err) {
-			dbStatus.Error = "database file not found (run 'gibson init' to initialize)"
-		} else {
-			dbStatus.Error = fmt.Sprintf("failed to stat database: %v", err)
-		}
+		dbStatus.Error = fmt.Sprintf("failed to load config: %v", err)
 		return dbStatus
 	}
 
-	dbStatus.Size = info.Size()
+	// Create StateClient for Redis health check
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
+	}
+	stateCfg.ApplyDefaults()
 
-	// Try to connect to database
-	db, err := database.Open(dbPath)
+	stateClient, err := state.NewStateClient(stateCfg)
 	if err != nil {
-		dbStatus.Error = fmt.Sprintf("failed to open database: %v", err)
+		dbStatus.Error = fmt.Sprintf("failed to connect to Redis: %v", err)
 		return dbStatus
 	}
-	defer db.Close()
+	defer stateClient.Close()
 
 	// Test connection with health check
 	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	if err := db.Health(healthCtx); err != nil {
-		dbStatus.Error = fmt.Sprintf("health check failed: %v", err)
+	if err := stateClient.Health(healthCtx); err != nil {
+		dbStatus.Error = fmt.Sprintf("Redis health check failed: %v", err)
 		return dbStatus
 	}
 
 	dbStatus.Connected = true
+	dbStatus.Size = 0 // Redis doesn't expose size through state client
 	return dbStatus
 }
 

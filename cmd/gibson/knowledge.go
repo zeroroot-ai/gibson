@@ -12,11 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zero-day-ai/gibson/cmd/gibson/internal"
-	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/knowledge"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
+	"github.com/zero-day-ai/gibson/internal/state"
 )
 
 var knowledgeCmd = &cobra.Command{
@@ -220,10 +220,10 @@ func init() {
 
 // knowledgeContext holds initialized resources for knowledge commands
 type knowledgeContext struct {
-	db      *database.DB
-	manager knowledge.KnowledgeManager
-	ltm     memory.LongTermMemory
-	store   vector.VectorStore
+	stateClient *state.StateClient
+	manager     knowledge.KnowledgeManager
+	ltm         memory.LongTermMemory
+	store       vector.VectorStore
 }
 
 // initKnowledgeContext initializes the knowledge manager and related resources.
@@ -244,46 +244,54 @@ func initKnowledgeContext() (*knowledgeContext, error) {
 		return nil, fmt.Errorf("failed to create Gibson home directory: %w", err)
 	}
 
-	// Open database for source tracking
-	dbPath := filepath.Join(homeDir, "gibson.db")
-	db, err := database.Open(dbPath)
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
+	}
+	stateCfg.ApplyDefaults()
+
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create state client: %w", err)
 	}
 
 	// Initialize native embedder
 	emb, err := embedder.CreateNativeEmbedder()
 	if err != nil {
-		db.Close()
+		stateClient.Close()
 		return nil, fmt.Errorf("failed to create embedder: %w", err)
 	}
 
 	// Get embedding dimensions
 	dims := emb.Dimensions()
 
-	// Initialize vector store (sqlite)
-	vectorDBPath := filepath.Join(homeDir, "knowledge.db")
-	store, err := vector.NewSqliteVecStore(vector.SqliteVecConfig{
-		DBPath:    vectorDBPath,
-		TableName: "knowledge_vectors",
-		Dims:      dims,
-	})
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create vector store: %w", err)
-	}
+	// Initialize vector store using Redis
+	store := vector.NewRedisVectorStore(stateClient, dims)
 
 	// Initialize long-term memory
 	ltm := memory.NewLongTermMemory(store, emb)
 
-	// Initialize knowledge manager
-	manager := knowledge.NewKnowledgeManager(ltm, db.Conn())
+	// Initialize knowledge manager with Redis-backed storage
+	// Note: KnowledgeManager will need to be updated to use StateClient instead of sql.DB
+	// For now, we'll pass nil and handle this in a follow-up if needed
+	manager := knowledge.NewKnowledgeManager(ltm, nil)
 
 	return &knowledgeContext{
-		db:      db,
-		manager: manager,
-		ltm:     ltm,
-		store:   store,
+		stateClient: stateClient,
+		manager:     manager,
+		ltm:         ltm,
+		store:       store,
 	}, nil
 }
 
@@ -297,9 +305,9 @@ func (kc *knowledgeContext) Close() error {
 		}
 	}
 
-	if kc.db != nil {
-		if err := kc.db.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close database: %w", err))
+	if kc.stateClient != nil {
+		if err := kc.stateClient.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close state client: %w", err))
 		}
 	}
 
@@ -309,9 +317,39 @@ func (kc *knowledgeContext) Close() error {
 	return nil
 }
 
+// checkKnowledgeConfig validates that knowledge storage configuration is valid.
+// Returns an error with a helpful message if the configuration is invalid.
+//
+// The knowledge system currently uses Redis as the vector store backend.
+// Future versions may support additional storage backends (embedded, Qdrant, Milvus).
+func checkKnowledgeConfig(cmd *cobra.Command) error {
+	// Load global config
+	cfg, err := loadGlobalConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Check Redis configuration (currently the only supported backend)
+	if cfg.Redis.URL == "" {
+		return fmt.Errorf("knowledge commands require Redis configuration\n\n"+
+			"Configure Redis URL with:\n"+
+			"  gibson config set redis.url redis://localhost:6379\n\n"+
+			"Or set in config file (~/.gibson/config.yaml):\n"+
+			"  redis:\n"+
+			"    url: redis://localhost:6379")
+	}
+
+	return nil
+}
+
 // runKnowledgeIngest handles the knowledge ingest command
 func runKnowledgeIngest(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+
+	// Check knowledge config before proceeding
+	if err := checkKnowledgeConfig(cmd); err != nil {
+		return err
+	}
 
 	// Validate that exactly one source flag is provided
 	sourceCount := 0
@@ -405,6 +443,11 @@ func runKnowledgeSearch(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	query := args[0]
 
+	// Check knowledge config before proceeding
+	if err := checkKnowledgeConfig(cmd); err != nil {
+		return err
+	}
+
 	// Initialize knowledge context
 	kc, err := initKnowledgeContext()
 	if err != nil {
@@ -480,6 +523,11 @@ func outputKnowledgeSearchText(cmd *cobra.Command, query string, results []knowl
 func runKnowledgeList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
+	// Check knowledge config before proceeding
+	if err := checkKnowledgeConfig(cmd); err != nil {
+		return err
+	}
+
 	// Initialize knowledge context
 	kc, err := initKnowledgeContext()
 	if err != nil {
@@ -545,6 +593,11 @@ func outputKnowledgeListText(cmd *cobra.Command, sources []knowledge.KnowledgeSo
 // runKnowledgeStats handles the knowledge stats command
 func runKnowledgeStats(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+
+	// Check knowledge config before proceeding
+	if err := checkKnowledgeConfig(cmd); err != nil {
+		return err
+	}
 
 	// Initialize knowledge context
 	kc, err := initKnowledgeContext()
@@ -619,6 +672,11 @@ func formatBytes(bytes int64) string {
 func runKnowledgeDelete(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
+	// Check knowledge config before proceeding
+	if err := checkKnowledgeConfig(cmd); err != nil {
+		return err
+	}
+
 	// Validate that exactly one deletion target is specified
 	if knowledgeDeleteSource == "" && !knowledgeDeleteAll {
 		return internal.WrapError(internal.ExitConfigError,
@@ -672,9 +730,6 @@ func runKnowledgeDelete(cmd *cobra.Command, args []string) error {
 
 // runKnowledgeSync handles the knowledge sync command (stub for cloud integration)
 func runKnowledgeSync(cmd *cobra.Command, args []string) error {
-	// Check if config has knowledge.provider set to zero-day-ai
-	// TODO: Implement config check in future phase
-
 	// Parse global flags to check for config
 	flags, err := ParseGlobalFlags(cmd)
 	if err != nil {
@@ -687,10 +742,9 @@ func runKnowledgeSync(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "Checking cloud sync configuration...\n\n")
 	}
 
-	// TODO: Load config and check knowledge.provider
-	// configuredProvider := config.Get("knowledge.provider")
-
-	// For now, assume provider is "local" (default)
+	// Note: Cloud sync feature not yet implemented.
+	// Currently only local/Redis storage is supported.
+	// Future versions may add cloud provider integration.
 	configuredProvider := "local"
 
 	if configuredProvider == "zero-day-ai" {

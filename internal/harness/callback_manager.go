@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
+	"github.com/zero-day-ai/sdk/protoresolver"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -491,5 +492,24 @@ func (m *CallbackManager) SetQueueManager(queueMgr *QueueManager) {
 	if m.server != nil {
 		m.server.SetQueueManager(queueMgr)
 		m.logger.Debug("set queue manager on callback service")
+	}
+}
+
+// SetProtoResolver sets the ProtoResolver on the callback service.
+// This enables dynamic proto type resolution for CallToolProto requests,
+// allowing the callback service to resolve proto message types at runtime.
+//
+// This method should be called after NewCallbackManager but before Start().
+//
+// Parameters:
+//   - resolver: ProtoResolver instance for dynamic type resolution
+//
+// Thread-safe: Can be called from multiple goroutines.
+func (m *CallbackManager) SetProtoResolver(resolver protoresolver.ProtoResolver) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		m.server.service.resolver = resolver
+		m.logger.Debug("set proto resolver on callback service")
 	}
 }

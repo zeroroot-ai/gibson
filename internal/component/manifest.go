@@ -233,6 +233,7 @@ type Manifest struct {
 	Author       string                 `json:"author,omitempty" yaml:"author,omitempty"`             // Author name or organization
 	License      string                 `json:"license,omitempty" yaml:"license,omitempty"`           // License identifier (e.g., MIT, Apache-2.0)
 	Repository   string                 `json:"repository,omitempty" yaml:"repository,omitempty"`     // Source repository URL
+	Capabilities []string               `json:"capabilities,omitempty" yaml:"capabilities,omitempty"` // Component capabilities (features, supported operations)
 	Build        *BuildConfig           `json:"build,omitempty" yaml:"build,omitempty"`               // Build configuration
 	Runtime      *RuntimeConfig         `json:"runtime,omitempty" yaml:"runtime,omitempty"`           // Runtime configuration (optional for repositories)
 	Dependencies *ComponentDependencies `json:"dependencies,omitempty" yaml:"dependencies,omitempty"` // Component dependencies
@@ -336,6 +337,11 @@ func (m *Manifest) Validate() error {
 	}
 	if !isValidSemanticVersion(m.Version) {
 		return fmt.Errorf("invalid version format: %s (must be semantic version like 1.0.0)", m.Version)
+	}
+
+	// Ensure capabilities is initialized to empty slice if nil
+	if m.Capabilities == nil {
+		m.Capabilities = []string{}
 	}
 
 	// Validate runtime config if present (optional for repository manifests)

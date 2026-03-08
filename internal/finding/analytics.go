@@ -2,9 +2,8 @@ package finding
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
@@ -13,7 +12,7 @@ import (
 
 // FindingAnalytics provides analytics and statistics for findings
 type FindingAnalytics struct {
-	store *DBFindingStore
+	store FindingStore
 }
 
 // FindingStats represents aggregated statistics for findings
@@ -49,12 +48,18 @@ type VulnerabilityPattern struct {
 }
 
 // NewFindingAnalytics creates a new analytics instance
-func NewFindingAnalytics(store *DBFindingStore) *FindingAnalytics {
+func NewFindingAnalytics(store FindingStore) *FindingAnalytics {
 	return &FindingAnalytics{store: store}
 }
 
 // GetStatistics returns aggregated statistics for a mission's findings
 func (a *FindingAnalytics) GetStatistics(ctx context.Context, missionID types.ID) (*FindingStats, error) {
+	// Basic implementation using FindingStore interface
+	findings, err := a.store.List(ctx, missionID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list findings: %w", err)
+	}
+
 	stats := &FindingStats{
 		BySeverity:         make(map[agent.FindingSeverity]int),
 		ByCategory:         make(map[FindingCategory]int),
@@ -62,360 +67,286 @@ func (a *FindingAnalytics) GetStatistics(ctx context.Context, missionID types.ID
 		TopMitreTechniques: []TechniqueCount{},
 	}
 
-	// Collect MITRE techniques
+	// Track MITRE techniques
 	techniqueMap := make(map[string]*TechniqueCount)
 
-	// Get counts by severity, category, and status
-	severityQuery := `
-		SELECT severity, COUNT(*) as count
-		FROM findings
-		WHERE mission_id = ?
-		GROUP BY severity
-	`
-	rows, err := a.store.db.QueryContext(ctx, severityQuery, missionID.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to query severity stats: %w", err)
-	}
-	defer rows.Close()
+	var totalRisk float64
+	for _, f := range findings {
+		stats.Total++
+		stats.BySeverity[f.Severity]++
+		stats.ByCategory[FindingCategory(f.Category)]++
+		stats.ByStatus[f.Status]++
+		totalRisk += f.RiskScore
 
-	for rows.Next() {
-		var severity agent.FindingSeverity
-		var count int
-		if err := rows.Scan(&severity, &count); err != nil {
-			return nil, fmt.Errorf("failed to scan severity: %w", err)
-		}
-		stats.BySeverity[severity] = count
-		stats.Total += count
-	}
-
-	// Get counts by category
-	categoryQuery := `
-		SELECT category, COUNT(*) as count
-		FROM findings
-		WHERE mission_id = ?
-		GROUP BY category
-	`
-	rows2, err := a.store.db.QueryContext(ctx, categoryQuery, missionID.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to query category stats: %w", err)
-	}
-	defer rows2.Close()
-
-	for rows2.Next() {
-		var category FindingCategory
-		var count int
-		if err := rows2.Scan(&category, &count); err != nil {
-			return nil, fmt.Errorf("failed to scan category: %w", err)
-		}
-		stats.ByCategory[category] = count
-	}
-
-	// Get counts by status
-	statusQuery := `
-		SELECT status, COUNT(*) as count
-		FROM findings
-		WHERE mission_id = ?
-		GROUP BY status
-	`
-	rows3, err := a.store.db.QueryContext(ctx, statusQuery, missionID.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to query status stats: %w", err)
-	}
-	defer rows3.Close()
-
-	for rows3.Next() {
-		var status FindingStatus
-		var count int
-		if err := rows3.Scan(&status, &count); err != nil {
-			return nil, fmt.Errorf("failed to scan status: %w", err)
-		}
-		stats.ByStatus[status] = count
-	}
-
-	// Get average risk score
-	riskQuery := `
-		SELECT COALESCE(AVG(risk_score), 0.0) as avg_risk
-		FROM findings
-		WHERE mission_id = ?
-	`
-	err = a.store.db.QueryRowContext(ctx, riskQuery, missionID.String()).Scan(&stats.AverageRiskScore)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query average risk: %w", err)
-	}
-
-	// Extract and count MITRE techniques
-	techniqueQuery := `
-		SELECT mitre_attack, mitre_atlas
-		FROM findings
-		WHERE mission_id = ?
-	`
-	rows4, err := a.store.db.QueryContext(ctx, techniqueQuery, missionID.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to query MITRE techniques: %w", err)
-	}
-	defer rows4.Close()
-
-	for rows4.Next() {
-		var mitreAttackJSON, mitreAtlasJSON string
-		if err := rows4.Scan(&mitreAttackJSON, &mitreAtlasJSON); err != nil {
-			return nil, fmt.Errorf("failed to scan MITRE data: %w", err)
-		}
-
-		// Parse MITRE ATT&CK techniques
-		if mitreAttackJSON != "" && mitreAttackJSON != "null" {
-			var techniques []MitreMapping
-			if err := json.Unmarshal([]byte(mitreAttackJSON), &techniques); err == nil {
-				for _, tech := range techniques {
-					if existing, ok := techniqueMap[tech.TechniqueID]; ok {
-						existing.Count++
-					} else {
-						techniqueMap[tech.TechniqueID] = &TechniqueCount{
-							TechniqueID:   tech.TechniqueID,
-							TechniqueName: tech.TechniqueName,
-							Count:         1,
-						}
-					}
+		// Aggregate MITRE ATT&CK techniques
+		for _, tech := range f.MitreAttack {
+			if existing, ok := techniqueMap[tech.TechniqueID]; ok {
+				existing.Count++
+			} else {
+				techniqueMap[tech.TechniqueID] = &TechniqueCount{
+					TechniqueID:   tech.TechniqueID,
+					TechniqueName: tech.TechniqueName,
+					Count:         1,
 				}
 			}
 		}
 
-		// Parse MITRE ATLAS techniques
-		if mitreAtlasJSON != "" && mitreAtlasJSON != "null" {
-			var techniques []MitreMapping
-			if err := json.Unmarshal([]byte(mitreAtlasJSON), &techniques); err == nil {
-				for _, tech := range techniques {
-					if existing, ok := techniqueMap[tech.TechniqueID]; ok {
-						existing.Count++
-					} else {
-						techniqueMap[tech.TechniqueID] = &TechniqueCount{
-							TechniqueID:   tech.TechniqueID,
-							TechniqueName: tech.TechniqueName,
-							Count:         1,
-						}
-					}
+		// Aggregate MITRE ATLAS techniques
+		for _, tech := range f.MitreAtlas {
+			if existing, ok := techniqueMap[tech.TechniqueID]; ok {
+				existing.Count++
+			} else {
+				techniqueMap[tech.TechniqueID] = &TechniqueCount{
+					TechniqueID:   tech.TechniqueID,
+					TechniqueName: tech.TechniqueName,
+					Count:         1,
 				}
 			}
 		}
 	}
 
-	// Convert map to sorted slice (top techniques)
+	if stats.Total > 0 {
+		stats.AverageRiskScore = totalRisk / float64(stats.Total)
+	}
+
+	// Convert technique map to sorted slice
+	techniques := make([]TechniqueCount, 0, len(techniqueMap))
 	for _, tc := range techniqueMap {
-		stats.TopMitreTechniques = append(stats.TopMitreTechniques, *tc)
+		techniques = append(techniques, *tc)
 	}
 
-	// Sort by count (descending)
-	for i := 0; i < len(stats.TopMitreTechniques); i++ {
-		for j := i + 1; j < len(stats.TopMitreTechniques); j++ {
-			if stats.TopMitreTechniques[j].Count > stats.TopMitreTechniques[i].Count {
-				stats.TopMitreTechniques[i], stats.TopMitreTechniques[j] = stats.TopMitreTechniques[j], stats.TopMitreTechniques[i]
-			}
-		}
-	}
+	// Sort by count descending
+	sort.Slice(techniques, func(i, j int) bool {
+		return techniques[i].Count > techniques[j].Count
+	})
 
 	// Limit to top 10
-	if len(stats.TopMitreTechniques) > 10 {
-		stats.TopMitreTechniques = stats.TopMitreTechniques[:10]
+	if len(techniques) > 10 {
+		techniques = techniques[:10]
 	}
+
+	stats.TopMitreTechniques = techniques
 
 	return stats, nil
 }
 
+// trendBucket represents a time bucket for aggregating findings
+type trendBucket struct {
+	timestamp time.Time
+	count     int
+	totalRisk float64
+}
+
+// determineBucketSize returns appropriate bucket size for the period
+func determineBucketSize(period time.Duration) time.Duration {
+	switch {
+	case period <= 24*time.Hour:
+		return time.Hour // Hourly buckets for day view
+	case period <= 7*24*time.Hour:
+		return 6 * time.Hour // 6-hour buckets for week view
+	case period <= 30*24*time.Hour:
+		return 24 * time.Hour // Daily buckets for month view
+	default:
+		return 7 * 24 * time.Hour // Weekly buckets for longer periods
+	}
+}
+
 // GetTrends returns time-series data showing finding trends over a period
 func (a *FindingAnalytics) GetTrends(ctx context.Context, missionID types.ID, period time.Duration) ([]TrendPoint, error) {
-	// Calculate the start time based on period
-	startTime := time.Now().Add(-period)
-
-	// Query findings grouped by time buckets
-	query := `
-		SELECT
-			strftime('%Y-%m-%d %H:00:00', created_at) as bucket,
-			COUNT(*) as count,
-			AVG(risk_score) as avg_risk
-		FROM findings
-		WHERE mission_id = ? AND created_at >= ?
-		GROUP BY bucket
-		ORDER BY bucket ASC
-	`
-
-	rows, err := a.store.db.QueryContext(ctx, query, missionID.String(), startTime)
+	// Get all findings for mission
+	findings, err := a.store.List(ctx, missionID, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query trends: %w", err)
+		return nil, fmt.Errorf("failed to list findings: %w", err)
 	}
-	defer rows.Close()
 
-	var trends []TrendPoint
-	for rows.Next() {
-		var (
-			bucketStr string
-			count     int
-			avgRisk   sql.NullFloat64
-		)
-		if err := rows.Scan(&bucketStr, &count, &avgRisk); err != nil {
-			return nil, fmt.Errorf("failed to scan trend: %w", err)
+	if len(findings) == 0 {
+		return []TrendPoint{}, nil
+	}
+
+	// Determine bucket size based on period
+	bucketSize := determineBucketSize(period)
+
+	// Group findings by time bucket
+	buckets := make(map[time.Time]*trendBucket)
+
+	for _, f := range findings {
+		// Truncate to bucket
+		bucketTime := f.CreatedAt.Truncate(bucketSize)
+
+		if _, ok := buckets[bucketTime]; !ok {
+			buckets[bucketTime] = &trendBucket{
+				timestamp: bucketTime,
+				count:     0,
+				totalRisk: 0,
+			}
 		}
 
-		timestamp, err := time.Parse("2006-01-02 15:04:05", bucketStr)
-		if err != nil {
-			// Skip invalid timestamps
-			continue
+		buckets[bucketTime].count++
+		buckets[bucketTime].totalRisk += f.RiskScore
+	}
+
+	// Convert to TrendPoints and calculate averages
+	result := make([]TrendPoint, 0, len(buckets))
+	for _, bucket := range buckets {
+		avgRisk := 0.0
+		if bucket.count > 0 {
+			avgRisk = bucket.totalRisk / float64(bucket.count)
 		}
 
-		riskScore := 0.0
-		if avgRisk.Valid {
-			riskScore = avgRisk.Float64
-		}
-
-		trends = append(trends, TrendPoint{
-			Timestamp: timestamp,
-			Count:     count,
-			RiskScore: riskScore,
+		result = append(result, TrendPoint{
+			Timestamp: bucket.timestamp,
+			Count:     bucket.count,
+			RiskScore: avgRisk,
 		})
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating trends: %w", err)
-	}
+	// Sort by timestamp ascending
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Timestamp.Before(result[j].Timestamp)
+	})
 
-	return trends, nil
+	return result, nil
 }
 
 // GetRiskScore calculates a weighted aggregate risk score for a mission
 // Uses severity-based weighting: critical=10, high=7, medium=4, low=1
 func (a *FindingAnalytics) GetRiskScore(ctx context.Context, missionID types.ID) (float64, error) {
-	query := `
-		SELECT severity, COUNT(*) as count
-		FROM findings
-		WHERE mission_id = ? AND status != ?
-		GROUP BY severity
-	`
-
-	rows, err := a.store.db.QueryContext(ctx, query, missionID.String(), StatusResolved)
+	findings, err := a.store.List(ctx, missionID, nil)
 	if err != nil {
-		return 0, fmt.Errorf("failed to query risk score: %w", err)
+		return 0, fmt.Errorf("failed to list findings: %w", err)
 	}
-	defer rows.Close()
 
 	var totalScore float64
 	var totalCount int
 
-	for rows.Next() {
-		var severity agent.FindingSeverity
-		var count int
-		if err := rows.Scan(&severity, &count); err != nil {
-			return 0, fmt.Errorf("failed to scan severity: %w", err)
+	for _, f := range findings {
+		if f.Status != StatusResolved {
+			weight := getSeverityWeight(f.Severity)
+			totalScore += weight
+			totalCount++
 		}
-
-		weight := getSeverityWeight(severity)
-		totalScore += weight * float64(count)
-		totalCount += count
-	}
-
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("error iterating risk scores: %w", err)
 	}
 
 	if totalCount == 0 {
 		return 0, nil
 	}
 
-	// Return average weighted score
 	return totalScore / float64(totalCount), nil
+}
+
+// vulnAccumulator accumulates vulnerability pattern data
+type vulnAccumulator struct {
+	category    FindingCategory
+	subcategory string
+	count       int
+	totalSev    float64
+}
+
+// AllFindingsLister is an optional interface for stores that support listing all findings
+type AllFindingsLister interface {
+	ScanAll(ctx context.Context) ([]EnhancedFinding, error)
+}
+
+// getAllFindings retrieves all findings across all missions
+func (a *FindingAnalytics) getAllFindings(ctx context.Context) ([]EnhancedFinding, error) {
+	// Try to use ScanAll if store supports it
+	if lister, ok := a.store.(AllFindingsLister); ok {
+		return lister.ScanAll(ctx)
+	}
+
+	// Fallback: return error if no method available
+	return nil, fmt.Errorf("store does not support listing all findings")
 }
 
 // GetTopVulnerabilities returns the most common vulnerability patterns
 func (a *FindingAnalytics) GetTopVulnerabilities(ctx context.Context, limit int) ([]VulnerabilityPattern, error) {
-	query := `
-		SELECT
-			category,
-			subcategory,
-			COUNT(*) as count,
-			AVG(CASE severity
-				WHEN 'critical' THEN 5
-				WHEN 'high' THEN 4
-				WHEN 'medium' THEN 3
-				WHEN 'low' THEN 2
-				WHEN 'info' THEN 1
-				ELSE 0
-			END) as avg_severity
-		FROM findings
-		GROUP BY category, subcategory
-		ORDER BY count DESC
-		LIMIT ?
-	`
-
-	rows, err := a.store.db.QueryContext(ctx, query, limit)
+	// Get all findings - this could be optimized with Redis aggregation
+	findings, err := a.getAllFindings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query top vulnerabilities: %w", err)
+		return nil, fmt.Errorf("failed to get findings: %w", err)
 	}
-	defer rows.Close()
 
-	var patterns []VulnerabilityPattern
-	for rows.Next() {
-		var pattern VulnerabilityPattern
-		var subcategory sql.NullString
-		if err := rows.Scan(&pattern.Category, &subcategory, &pattern.Count, &pattern.AvgSeverity); err != nil {
-			return nil, fmt.Errorf("failed to scan vulnerability pattern: %w", err)
+	if len(findings) == 0 {
+		return []VulnerabilityPattern{}, nil
+	}
+
+	// Aggregate by category + subcategory
+	patterns := make(map[string]*vulnAccumulator)
+
+	for _, f := range findings {
+		key := fmt.Sprintf("%s:%s", f.Category, f.Subcategory)
+
+		if _, ok := patterns[key]; !ok {
+			patterns[key] = &vulnAccumulator{
+				category:    FindingCategory(f.Category),
+				subcategory: f.Subcategory,
+				count:       0,
+				totalSev:    0,
+			}
 		}
-		if subcategory.Valid {
-			pattern.Subcategory = subcategory.String
+
+		patterns[key].count++
+		patterns[key].totalSev += getSeverityWeight(f.Severity)
+	}
+
+	// Convert to VulnerabilityPattern slice
+	result := make([]VulnerabilityPattern, 0, len(patterns))
+	for _, acc := range patterns {
+		avgSev := 0.0
+		if acc.count > 0 {
+			avgSev = acc.totalSev / float64(acc.count)
 		}
-		patterns = append(patterns, pattern)
+
+		result = append(result, VulnerabilityPattern{
+			Category:    acc.category,
+			Subcategory: acc.subcategory,
+			Count:       acc.count,
+			AvgSeverity: avgSev,
+		})
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating patterns: %w", err)
+	// Sort by count descending
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Count > result[j].Count
+	})
+
+	// Apply limit
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
 	}
 
-	return patterns, nil
+	return result, nil
 }
 
 // GetRemediationProgress returns the count of open vs resolved findings
 func (a *FindingAnalytics) GetRemediationProgress(ctx context.Context, missionID types.ID) (open, resolved int, err error) {
-	query := `
-		SELECT status, COUNT(*) as count
-		FROM findings
-		WHERE mission_id = ?
-		GROUP BY status
-	`
-
-	rows, err := a.store.db.QueryContext(ctx, query, missionID.String())
+	findings, err := a.store.List(ctx, missionID, nil)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to query remediation progress: %w", err)
+		return 0, 0, fmt.Errorf("failed to list findings: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var status FindingStatus
-		var count int
-		if err := rows.Scan(&status, &count); err != nil {
-			return 0, 0, fmt.Errorf("failed to scan status: %w", err)
-		}
-
-		switch status {
+	for _, f := range findings {
+		switch f.Status {
 		case StatusResolved:
-			resolved += count
+			resolved++
 		case StatusOpen, StatusConfirmed:
-			open += count
-			// StatusFalsePositive not counted in either
+			open++
 		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return 0, 0, fmt.Errorf("error iterating remediation progress: %w", err)
 	}
 
 	return open, resolved, nil
 }
 
 // getSeverityWeight returns the numeric weight for a severity level
+// Used for both risk scoring and vulnerability pattern aggregation
 func getSeverityWeight(severity agent.FindingSeverity) float64 {
 	switch severity {
 	case agent.SeverityCritical:
-		return 10.0
-	case agent.SeverityHigh:
-		return 7.0
-	case agent.SeverityMedium:
 		return 4.0
+	case agent.SeverityHigh:
+		return 3.0
+	case agent.SeverityMedium:
+		return 2.0
 	case agent.SeverityLow:
 		return 1.0
 	case agent.SeverityInfo:

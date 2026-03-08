@@ -11,10 +11,10 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/finding/export"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -95,28 +95,31 @@ func init() {
 func runFindingList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	// Parse global flags
-	flags, err := ParseGlobalFlags(cmd)
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
 	if err != nil {
-		return fmt.Errorf("failed to parse flags: %w", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Get Gibson home directory
-	homeDir, err := getHomeDirFromFlags(flags)
-	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
 	}
+	stateCfg.ApplyDefaults()
 
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
+	stateClient, err := state.NewStateClient(stateCfg)
 	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
+		return fmt.Errorf("failed to create state client: %w", err)
 	}
-	defer db.Close()
+	defer stateClient.Close()
 
-	// Create finding store
-	store := finding.NewDBFindingStore(db)
+	// Create finding store with Redis backend
+	store := finding.NewRedisFindingStore(stateClient)
 
 	// Build filter
 	filter := finding.NewFindingFilter()
@@ -159,7 +162,7 @@ func runFindingList(cmd *cobra.Command, args []string) error {
 		missionIDs = []types.ID{missionID}
 	} else if scope != "all" {
 		// Determine mission IDs based on scope
-		missionIDs, err = resolveMissionIDsForScope(ctx, db, scope)
+		missionIDs, err = resolveMissionIDsForScope(ctx, stateClient, scope)
 		if err != nil {
 			return fmt.Errorf("failed to resolve mission IDs for scope %s: %w", scope, err)
 		}
@@ -225,28 +228,31 @@ func runFindingShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid finding ID: %w", err)
 	}
 
-	// Parse global flags
-	flags, err := ParseGlobalFlags(cmd)
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
 	if err != nil {
-		return fmt.Errorf("failed to parse flags: %w", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Get Gibson home directory
-	homeDir, err := getHomeDirFromFlags(flags)
-	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
 	}
+	stateCfg.ApplyDefaults()
 
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
+	stateClient, err := state.NewStateClient(stateCfg)
 	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
+		return fmt.Errorf("failed to create state client: %w", err)
 	}
-	defer db.Close()
+	defer stateClient.Close()
 
-	// Create finding store
-	store := finding.NewDBFindingStore(db)
+	// Create finding store with Redis backend
+	store := finding.NewRedisFindingStore(stateClient)
 
 	// Get finding
 	f, err := store.Get(ctx, findingID)
@@ -264,28 +270,31 @@ func runFindingShow(cmd *cobra.Command, args []string) error {
 func runFindingExport(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	// Parse global flags
-	flags, err := ParseGlobalFlags(cmd)
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
 	if err != nil {
-		return fmt.Errorf("failed to parse flags: %w", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Get Gibson home directory
-	homeDir, err := getHomeDirFromFlags(flags)
-	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
 	}
+	stateCfg.ApplyDefaults()
 
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
+	stateClient, err := state.NewStateClient(stateCfg)
 	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
+		return fmt.Errorf("failed to create state client: %w", err)
 	}
-	defer db.Close()
+	defer stateClient.Close()
 
-	// Create finding store
-	store := finding.NewDBFindingStore(db)
+	// Create finding store with Redis backend
+	store := finding.NewRedisFindingStore(stateClient)
 
 	// Build filter
 	filter := finding.NewFindingFilter()
@@ -588,7 +597,7 @@ func wrapText(text string, width int) string {
 }
 
 // listAllFindings lists findings across all missions with filtering
-func listAllFindings(ctx context.Context, store *finding.DBFindingStore, filter *finding.FindingFilter) ([]finding.EnhancedFinding, error) {
+func listAllFindings(ctx context.Context, store *finding.RedisFindingStore, filter *finding.FindingFilter) ([]finding.EnhancedFinding, error) {
 	// This is a placeholder - in a real implementation, we'd need to either:
 	// 1. Add a ListAll method to the store that doesn't require a mission ID
 	// 2. Query all missions and aggregate their findings
@@ -600,8 +609,8 @@ func listAllFindings(ctx context.Context, store *finding.DBFindingStore, filter 
 // - "current_run": returns the current running mission ID (or most recent if none running)
 // - "same_mission": returns all mission IDs with the same name as the current/most recent mission
 // - "all": returns empty slice (caller should handle all missions)
-func resolveMissionIDsForScope(ctx context.Context, db *database.DB, scope string) ([]types.ID, error) {
-	missionStore := mission.NewDBMissionStore(db)
+func resolveMissionIDsForScope(ctx context.Context, stateClient *state.StateClient, scope string) ([]types.ID, error) {
+	missionStore := mission.NewRedisMissionStore(stateClient)
 
 	switch scope {
 	case "current_run":

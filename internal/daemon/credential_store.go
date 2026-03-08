@@ -15,8 +15,9 @@ import (
 
 // DaemonCredentialStore implements harness.CredentialStore using the
 // daemon's database and master key for secure credential retrieval.
+// It supports both SQLite and Redis credential DAOs via the CredentialDAO interface.
 type DaemonCredentialStore struct {
-	dao       *database.CredentialDAO
+	dao       database.CredentialDAO
 	encryptor *crypto.AESGCMEncryptor
 	masterKey []byte
 	homeDir   string
@@ -24,7 +25,8 @@ type DaemonCredentialStore struct {
 
 // NewDaemonCredentialStore creates a new credential store for the daemon.
 // It loads the master key from the Gibson home directory.
-func NewDaemonCredentialStore(dao *database.CredentialDAO, homeDir string) (*DaemonCredentialStore, error) {
+// The dao parameter accepts any CredentialDAO implementation (SQLite or Redis).
+func NewDaemonCredentialStore(dao database.CredentialDAO, homeDir string) (*DaemonCredentialStore, error) {
 	if homeDir == "" {
 		homeDir = os.Getenv("GIBSON_HOME")
 	}

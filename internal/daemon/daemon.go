@@ -23,7 +23,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/payload"
 	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/gibson/internal/version"
+	healthhttp "github.com/zero-day-ai/sdk/health/http"
+	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -38,6 +42,20 @@ type (
 type targetStore interface {
 	Get(ctx context.Context, id types.ID) (*types.Target, error)
 	GetByName(ctx context.Context, name string) (*types.Target, error)
+	Create(ctx context.Context, target *types.Target) error
+}
+
+// AgentRuntimeState tracks runtime state for a single agent.
+// This includes last heartbeat time and current task information.
+type AgentRuntimeState struct {
+	// LastHeartbeat is the last time the agent communicated with the daemon
+	LastHeartbeat time.Time
+
+	// CurrentTask is the ID of the task the agent is currently working on
+	CurrentTask string
+
+	// TaskStartTime is when the current task was assigned
+	TaskStartTime time.Time
 }
 
 // daemonImpl is the concrete implementation of the Daemon interface.
@@ -72,8 +90,9 @@ type daemonImpl struct {
 	// eventBus manages event distribution to subscribers
 	eventBus *EventBus
 
-	// db is the database connection
-	db *database.DB
+	// stateClient provides unified Redis client for state stores
+	// This is initialized when GIBSON_USE_REDIS_STORES=true
+	stateClient *state.StateClient
 
 	// componentStore provides access to component metadata in etcd
 	componentStore component.ComponentStore
@@ -96,8 +115,14 @@ type daemonImpl struct {
 	// missionRunStore provides access to mission run persistence
 	missionRunStore mission.MissionRunStore
 
+	// checkpointStore provides checkpoint persistence for pause/resume
+	checkpointStore mission.CheckpointStore
+
 	// missionInstaller handles mission installation, updates, and uninstallation
 	missionInstaller mission.MissionInstaller
+
+	// missionService provides mission business logic operations
+	missionService mission.MissionService
 
 	// targetStore provides access to target persistence
 	targetStore targetStore
@@ -115,6 +140,13 @@ type daemonImpl struct {
 	// The value is a context.CancelFunc that can be called to stop the mission
 	activeMissions map[string]context.CancelFunc
 
+	// agentStateMu protects access to agentState map
+	agentStateMu sync.RWMutex
+
+	// agentState tracks runtime state for each agent (last heartbeat, current task)
+	// Key is agent name, value is AgentRuntimeState
+	agentState map[string]*AgentRuntimeState
+
 	// grpcServer is the gRPC server for client connections (added in Phase 3)
 	grpcServer interface{}
 
@@ -127,11 +159,23 @@ type daemonImpl struct {
 	// dependencyResolver manages mission dependency resolution and validation
 	dependencyResolver dependencyResolver
 
-	// pidFile is the path to the PID file (~/.gibson/daemon.pid)
-	pidFile string
+	// etcdDaemonInfo provides etcd-based daemon discovery (required - no fallback)
+	etcdDaemonInfo *EtcdDaemonInfo
 
-	// infoFile is the path to the daemon info file (~/.gibson/daemon.json)
-	infoFile string
+	// healthServer provides HTTP health endpoints for Kubernetes probes
+	healthServer *healthhttp.Server
+
+	// healthState tracks shutdown state for health endpoints
+	healthState *healthStateManager
+
+	// signalHandler manages OS signal handling for graceful shutdown
+	signalHandler *SignalHandler
+
+	// checkpointer manages mission checkpointing during graceful shutdown
+	checkpointer *DaemonMissionCheckpointer
+
+	// logTailer manages component log tailing with fsnotify
+	logTailer *LogTailer
 
 	// startTime tracks when the daemon started
 	startTime time.Time
@@ -189,20 +233,17 @@ func New(cfg *config.Config, homeDir string) (Daemon, error) {
 		Enabled:          cfg.Callback.Enabled,
 	}, logger.Slog())
 
-	// Open database connection
-	db, err := database.Open(cfg.Database.Path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
+	// Initialize Redis state stores (default and required)
+	// StateClient will be initialized in Start() after logging is set up
+	var stateClient *state.StateClient
+	var missionStore mission.MissionStore
+	var missionRunStore mission.MissionRunStore
+	var targetStore targetStore
 
-	// Initialize mission store
-	missionStore := mission.NewDBMissionStore(db)
-
-	// Initialize mission run store
-	missionRunStore := mission.NewDBMissionRunStore(db)
-
-	// Initialize target store
-	targetStore := database.NewTargetDAO(db)
+	// Stores will be initialized in Start() after StateClient is created
+	// For now, keep them nil - they will be set up with Redis backends
+	logger.Info(nil, "Redis stores will be initialized on startup",
+		"note", "Gibson requires Redis for state persistence")
 
 	// Initialize event bus
 	eventBus := NewEventBus(logger.Slog(), WithEventBufferSize(100))
@@ -217,6 +258,9 @@ func New(cfg *config.Config, homeDir string) (Daemon, error) {
 		grpcAddr = envAddr
 	}
 
+	// Initialize health state manager
+	healthState := newHealthStateManager()
+
 	return &daemonImpl{
 		config:          cfg,
 		logger:          logger,
@@ -224,16 +268,16 @@ func New(cfg *config.Config, homeDir string) (Daemon, error) {
 		registryAdapter: nil, // Created in Start() after registry is available
 		callback:        callbackMgr,
 		eventBus:        eventBus,
-		db:              db,
-		missionStore:    missionStore,
-		missionRunStore: missionRunStore,
-		targetStore:     targetStore,
+		stateClient:     stateClient,     // Will be initialized in Start()
+		missionStore:    missionStore,    // Will be initialized in Start()
+		missionRunStore: missionRunStore, // Will be initialized in Start()
+		targetStore:     targetStore,     // Will be initialized in Start()
 		activeMissions:  make(map[string]context.CancelFunc),
-		grpcServer:      nil,      // Created in Start()
-		grpcAddr:        grpcAddr, // Configurable via config file or environment variable
-		attackRunner:    nil,      // Created in Start() after registry is available
-		pidFile:         filepath.Join(homeDir, "daemon.pid"),
-		infoFile:        filepath.Join(homeDir, "daemon.json"),
+		agentState:      make(map[string]*AgentRuntimeState),
+		grpcServer:      nil,         // Created in Start()
+		grpcAddr:        grpcAddr,    // Configurable via config file or environment variable
+		attackRunner:    nil,         // Created in Start() after registry is available
+		healthState:     healthState, // Health state manager for shutdown coordination
 		startTime:       time.Time{}, // Set when Start() is called
 	}, nil
 }
@@ -266,25 +310,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		"callback_enabled", d.config.Callback.Enabled,
 	)
 
-	// Check if daemon is already running
-	running, pid, err := CheckPIDFile(d.pidFile)
-	if err != nil {
-		return fmt.Errorf("failed to check for existing daemon: %w", err)
-	}
-	if running {
-		return fmt.Errorf("daemon already running (PID %d)", pid)
-	}
-
-	// Clean up stale PID file if present
-	if pid > 0 && !running {
-		d.logger.Warn(ctx, "removing stale PID file", "stale_pid", pid)
-		if err := RemovePIDFile(d.pidFile); err != nil {
-			return fmt.Errorf("failed to remove stale PID file: %w", err)
-		}
-	}
-
 	// Record start time
 	d.startTime = time.Now()
+
+	// Create an internal context that can be cancelled by signal handler
+	internalCtx, internalCancel := context.WithCancel(ctx)
+	defer internalCancel()
 
 	// Start registry manager
 	d.logger.Info(ctx, "starting registry manager")
@@ -305,6 +336,34 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	regAdapter.SetCallbackManager(d.callback)
 	d.logger.Info(ctx, "wired callback manager to registry adapter")
 
+	// Share proto resolver between registry adapter and callback manager for unified caching
+	d.callback.SetProtoResolver(regAdapter.GetResolver())
+	d.logger.Info(ctx, "shared proto resolver with callback manager")
+
+	// Initialize StateClient and Redis stores (required for Gibson)
+	d.logger.Info(ctx, "initializing Redis stores")
+
+	// Initialize StateClient with retry logic (3 attempts with exponential backoff)
+	stateClient, err := d.initStateClient(ctx)
+	if err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to initialize StateClient (required): %w", err)
+	}
+	d.stateClient = stateClient
+
+	// Initialize Redis stores
+	d.missionStore = mission.NewRedisMissionStore(stateClient)
+	d.missionRunStore = mission.NewRedisMissionRunStore(stateClient)
+	d.checkpointStore = mission.NewRedisCheckpointStore(stateClient)
+	d.targetStore = database.NewRedisTargetDAO(stateClient)
+
+	d.logger.Info(ctx, "Redis stores initialized successfully",
+		"mission_store", "RedisMissionStore",
+		"mission_run_store", "RedisMissionRunStore",
+		"checkpoint_store", "RedisCheckpointStore",
+		"target_store", "RedisTargetDAO",
+	)
+
 	// Initialize component store with etcd client from registry
 	if etcdClient := d.registry.Client(); etcdClient != nil {
 		d.componentStore = component.EtcdComponentStore(etcdClient, "gibson")
@@ -324,6 +383,22 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			d.componentBuildExecutor = buildExecutor
 			d.componentLogWriter = logWriter
 			d.logger.Info(ctx, "initialized component installer")
+
+			// Initialize log tailer for component log streaming
+			d.logTailer = NewLogTailer(ctx, 10000, *d.logger)
+			d.logger.Info(ctx, "initialized log tailer")
+
+			// Initialize mission service with inline config processor support
+			// Note: MissionStore implements WorkflowCreator (has CreateDefinition method)
+			// and targetStore implements TargetCreator (has Create method)
+			missionService := mission.NewMissionService(d.missionStore, nil, nil) // No workflow/finding stores for now
+			missionService.SetTargetStore(d.targetStore)
+
+			// Create inline config processor using the target store and mission store
+			inlineProcessor := mission.NewInlineConfigProcessor(d.targetStore, d.missionStore)
+			missionService.SetInlineProcessor(inlineProcessor)
+			d.missionService = missionService
+			d.logger.Info(ctx, "initialized mission service with inline config processor")
 
 			// Initialize mission installer with same git operations and mission store
 			// Create adapters to bridge component package types to mission interfaces
@@ -393,7 +468,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	}
 
 	// Configure callback service with credential store for secure credential retrieval
-	credentialDAO := database.NewCredentialDAO(d.db)
+	// Use Redis DAO (required)
+	credentialDAO := database.NewRedisCredentialDAO(d.stateClient)
+	d.logger.Info(ctx, "using Redis credential DAO")
+
 	credentialStore, err := NewDaemonCredentialStore(credentialDAO, d.config.Core.HomeDir)
 	if err != nil {
 		d.logger.Warn(ctx, "failed to initialize credential store (credentials will not be available)",
@@ -415,11 +493,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.callback.SetGraphLoader(graphLoader)
 		d.logger.Info(ctx, "configured callback service with GraphLoader for domain node persistence")
 
-		// TODO: Re-enable DiscoveryProcessor once SDK proto_converter.go compilation issues are fixed
 		// Create DiscoveryProcessor for automatic discovery storage
-		// discoveryProcessor := processor.NewDiscoveryProcessor(graphLoader, d.infrastructure.graphRAGClient, d.logger)
-		// d.callback.SetDiscoveryProcessor(discoveryProcessor)
-		// d.logger.Info("configured callback service with DiscoveryProcessor for automatic discovery storage")
+		// Note: Discovery processor is already initialized in infrastructure and set via adapter
+		// See infrastructure.go where discoveryProcessorAdapter is created
+		d.logger.Info(ctx, "DiscoveryProcessor configured via infrastructure")
 	}
 
 	// Configure callback service with QueueManager for Redis-based tool execution
@@ -435,6 +512,31 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	if err := d.recoverRunningMissions(ctx); err != nil {
 		d.logger.Warn(ctx, "failed to recover running missions", "error", err)
 		// Don't fail startup on recovery error - continue with normal operation
+	}
+
+	// Initialize mission checkpointer for graceful shutdown
+	if d.stateClient != nil && d.stateClient.Client() != nil {
+		d.checkpointer = NewDaemonMissionCheckpointer(
+			d.stateClient.Client(),
+			func() map[string]context.CancelFunc {
+				d.missionsMu.RLock()
+				defer d.missionsMu.RUnlock()
+				// Return a copy to avoid holding the lock
+				missions := make(map[string]context.CancelFunc)
+				for k, v := range d.activeMissions {
+					missions[k] = v
+				}
+				return missions
+			},
+			d.missionStore,
+			d.logger,
+		)
+		d.logger.Info(ctx, "mission checkpointer initialized")
+
+		// Discover checkpoints from previous shutdown
+		d.discoverCheckpoints(ctx)
+	} else {
+		d.logger.Warn(ctx, "mission checkpointer not initialized - state client not available")
 	}
 
 	// Initialize attack runner with required dependencies
@@ -511,7 +613,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		return fmt.Errorf("GraphRAG (Neo4j) is required for attack runner but not configured")
 	}
 
-	payloadRegistry := payload.NewPayloadRegistryWithDefaults(d.db)
+	// Create payload registry with Redis store (required)
+	redisStore := payload.NewRedisPayloadStore(d.stateClient)
+	payloadRegistry := payload.NewPayloadRegistryWithStore(redisStore, payload.DefaultRegistryConfig())
+	d.logger.Info(ctx, "using Redis payload store")
 
 	d.attackRunner = attack.NewAttackRunner(
 		orch,
@@ -541,41 +646,124 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start gRPC server: %w", err)
 	}
 
-	// Write PID file
-	pid = os.Getpid()
-	d.logger.Info(ctx, "writing PID file", "pid", pid, "path", d.pidFile)
-	if err := WritePIDFile(d.pidFile, pid); err != nil {
-		// Stop services on PID file write failure
-		d.stopServices(ctx)
-		return fmt.Errorf("failed to write PID file: %w", err)
+	// Start health server
+	// Health port defaults to 8080, can be overridden via config or GIBSON_HEALTH_PORT env var
+	healthPort := d.config.Health.Port
+	if healthPort == 0 {
+		healthPort = 8080
+	}
+	// Override with environment variable if set
+	if envPort := os.Getenv("GIBSON_HEALTH_PORT"); envPort != "" {
+		if port, err := fmt.Sscanf(envPort, "%d", &healthPort); err == nil && port == 1 {
+			// Successfully parsed environment variable
+		}
 	}
 
-	// Write daemon info file for client discovery
+	d.logger.Info(ctx, "starting health server", "port", healthPort)
+	d.healthServer = healthhttp.NewServer(&healthhttp.Config{
+		Port: healthPort,
+	})
+
+	// Register readiness checks for all dependencies
+	// Redis check - use function wrapper to avoid interface type mismatch
+	if d.stateClient != nil && d.stateClient.Client() != nil {
+		redisClient := d.stateClient.Client()
+		d.healthServer.RegisterReadinessCheck("redis", healthhttp.RedisPingFunc(func(ctx context.Context) (string, error) {
+			return redisClient.Ping(ctx).Result()
+		}))
+		d.logger.Debug(ctx, "registered redis readiness check")
+	}
+
+	// Neo4j check - use the Health method on the graphRAG client
+	if d.infrastructure != nil && d.infrastructure.graphRAGClient != nil {
+		graphRAGClient := d.infrastructure.graphRAGClient
+		d.healthServer.RegisterReadinessCheck("neo4j", func(ctx context.Context) sdktypes.HealthStatus {
+			status := graphRAGClient.Health(ctx)
+			// Convert internal types.HealthStatus to SDK types.HealthStatus
+			if status.IsHealthy() {
+				return sdktypes.NewHealthyStatus(status.Message)
+			} else if status.IsDegraded() {
+				return sdktypes.NewDegradedStatus(status.Message, nil)
+			}
+			return sdktypes.NewUnhealthyStatus(status.Message, nil)
+		})
+		d.logger.Debug(ctx, "registered neo4j readiness check")
+	}
+
+	// etcd gRPC check - use connection-based check
+	if d.registry.Client() != nil {
+		// etcd exposes a health check endpoint via the gRPC health protocol
+		etcdConn := d.registry.Client().ActiveConnection()
+		if etcdConn != nil {
+			d.healthServer.RegisterReadinessCheck("etcd", healthhttp.GRPCConnCheck(etcdConn))
+			d.logger.Debug(ctx, "registered etcd readiness check")
+		}
+	}
+
+	// Register shutdown state check - this signals Kubernetes to stop routing traffic during shutdown
+	d.healthServer.RegisterReadinessCheck("shutdown", d.healthState.CheckFunc())
+	d.logger.Debug(ctx, "registered shutdown state readiness check")
+
+	// Start the health server (non-blocking)
+	if err := d.healthServer.Start(); err != nil {
+		// Log error but don't fail daemon startup - health endpoints are not critical
+		d.logger.Warn(ctx, "failed to start health server", "error", err)
+	} else {
+		d.logger.Info(ctx, "health server started successfully")
+	}
+
+	// Prepare daemon info for registration
+	pid := os.Getpid()
 	regStatus := d.registry.Status()
 	info := &DaemonInfo{
 		PID:         pid,
 		StartTime:   d.startTime,
 		GRPCAddress: d.grpcAddr,
-		Version:     "0.1.0", // TODO: Get from version package
+		Version:     version.Version,
 	}
-	d.logger.Info(ctx, "writing daemon info file", "path", d.infoFile)
-	if err := WriteDaemonInfo(d.infoFile, info); err != nil {
-		// Stop services and remove PID file on info file write failure
-		RemovePIDFile(d.pidFile)
+
+	// Register daemon info in etcd (required - no filesystem fallback)
+	etcdClient := d.registry.Client()
+	if etcdClient == nil {
 		d.stopServices(ctx)
-		return fmt.Errorf("failed to write daemon info file: %w", err)
+		return fmt.Errorf("etcd client not available - external etcd required for daemon coordination")
+	}
+
+	d.etcdDaemonInfo = NewEtcdDaemonInfo(etcdClient, d.logger)
+	if err := d.etcdDaemonInfo.Register(ctx, info); err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to register daemon info in etcd: %w", err)
 	}
 
 	d.logger.Info(ctx, "daemon started successfully",
 		"pid", pid,
+		"instance_id", d.etcdDaemonInfo.InstanceID(),
 		"registry_endpoint", regStatus.Endpoint,
 		"callback_endpoint", d.callback.CallbackEndpoint(),
 	)
 
+	// Setup signal handler for graceful shutdown
+	d.logger.Info(ctx, "setting up signal handler for graceful shutdown")
+	d.signalHandler = NewSignalHandler(SignalHandlerConfig{
+		ShutdownCallback: func() {
+			d.logger.Info(context.Background(), "signal handler triggered shutdown")
+			// Cancel the internal context to trigger shutdown
+			internalCancel()
+		},
+		ForceExitCode: 1,
+	}, d.logger)
+	d.signalHandler.Start(internalCtx)
+
 	// Block until context cancellation or shutdown signal
 	d.logger.Info(ctx, "daemon running (press Ctrl+C to stop)")
-	<-ctx.Done()
+	<-internalCtx.Done()
 	d.logger.Info(ctx, "shutdown signal received, stopping daemon")
+
+	// Stop signal handler to prevent further signals during shutdown
+	if d.signalHandler != nil {
+		d.signalHandler.Stop()
+	}
+
 	return d.Stop(context.Background())
 }
 
@@ -608,25 +796,33 @@ func (d *daemonImpl) Stop(ctx context.Context) error {
 	// Stop services
 	d.stopServices(shutdownCtx)
 
-	// Clean up state files
-	d.logger.Info(ctx, "removing daemon state files")
-	if err := RemovePIDFile(d.pidFile); err != nil {
-		d.logger.Warn(ctx, "failed to remove PID file", "error", err)
-	}
-	if err := RemoveDaemonInfo(d.infoFile); err != nil {
-		d.logger.Warn(ctx, "failed to remove daemon info file", "error", err)
+	// Deregister from etcd
+	if d.etcdDaemonInfo != nil {
+		d.logger.Info(ctx, "deregistering daemon from etcd")
+		if err := d.etcdDaemonInfo.Deregister(shutdownCtx); err != nil {
+			d.logger.Warn(ctx, "failed to deregister from etcd", "error", err)
+		}
+	} else {
+		d.logger.Warn(ctx, "etcd daemon info not initialized, cannot deregister")
 	}
 
 	d.logger.Info(ctx, "daemon stopped successfully")
 	return nil
 }
 
-// stopServices stops all daemon services.
+// stopServices stops all daemon services using the ShutdownCoordinator.
 //
 // This is a helper method used by Stop() and error cleanup paths.
-// It stops services in reverse order of startup to ensure clean shutdown.
+// It executes shutdown phases in order through the coordinator to ensure clean shutdown.
 func (d *daemonImpl) stopServices(ctx context.Context) {
-	// Stop all running missions first
+	// Stop signal handler first (no new signals during shutdown)
+	if d.signalHandler != nil {
+		d.logger.Debug(ctx, "stopping signal handler")
+		d.signalHandler.Stop()
+		d.signalHandler = nil
+	}
+
+	// Stop all running missions before coordinator
 	d.missionsMu.Lock()
 	if len(d.activeMissions) > 0 {
 		d.logger.Info(ctx, "stopping active missions", "count", len(d.activeMissions))
@@ -639,73 +835,71 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 	}
 	d.missionsMu.Unlock()
 
-	// Stop gRPC server (no new client connections)
+	// Close log tailer before coordinator
+	if d.logTailer != nil {
+		d.logger.Info(ctx, "closing log tailer")
+		if err := d.logTailer.Close(); err != nil {
+			d.logger.Warn(ctx, "error closing log tailer", "error", err)
+		}
+		d.logTailer = nil
+	}
+
+	// Create and execute shutdown coordinator with all phases
+	coordinator := NewShutdownCoordinator(d.config.Shutdown, d.logger)
+
+	// Register shutdown phases in execution order
+
+	// Phase 1: Set health endpoint to unhealthy
+	if d.healthState != nil {
+		coordinator.RegisterPhase(NewHealthPhase(d.healthState, d.logger))
+	}
+
+	// Phase 2: Drain in-flight requests
 	if d.grpcServer != nil {
-		d.logger.Info(ctx, "stopping gRPC server")
-		// Type assert to *grpc.Server and call GracefulStop
 		if srv, ok := d.grpcServer.(interface{ GracefulStop() }); ok {
-			srv.GracefulStop()
-		}
-		d.grpcServer = nil
-	}
-
-	// Stop callback server (no new callbacks)
-	if d.config.Callback.Enabled && d.callback.IsRunning() {
-		d.logger.Info(ctx, "stopping callback server")
-		d.callback.Stop()
-	}
-
-	// Close event bus (no more event subscriptions)
-	if d.eventBus != nil {
-		d.logger.Info(ctx, "closing event bus")
-		if err := d.eventBus.Close(); err != nil {
-			d.logger.Warn(ctx, "error closing event bus", "error", err)
+			coordinator.RegisterPhase(NewDrainPhase(srv, d.config.Shutdown.DrainTimeout, d.logger))
 		}
 	}
 
-	// Shutdown tracing - flushes pending spans to Langfuse
-	if d.infrastructure != nil && d.infrastructure.tracerProvider != nil {
-		d.logger.Info(ctx, "shutting down tracing")
-		if err := observability.ShutdownTracing(ctx, d.infrastructure.tracerProvider); err != nil {
-			d.logger.Warn(ctx, "failed to shutdown tracing", "error", err)
-		} else {
-			d.logger.Debug(ctx, "tracing shutdown complete")
-		}
+	// Phase 3: Checkpoint running missions (already stopped above, but maintain phase)
+	if d.checkpointer != nil {
+		coordinator.RegisterPhase(NewCheckpointPhase(d.checkpointer, d.config.Shutdown.CheckpointTimeout, d.logger, coordinator.metrics))
 	}
 
-	// Close Neo4j connection
-	if d.infrastructure != nil && d.infrastructure.graphRAGClient != nil {
-		d.logger.Info(ctx, "closing Neo4j connection")
-		if err := d.infrastructure.graphRAGClient.Close(ctx); err != nil {
-			d.logger.Warn(ctx, "failed to close Neo4j connection", "error", err)
-		} else {
-			d.logger.Debug(ctx, "Neo4j connection closed")
-		}
+	// Phase 4: Notify and disconnect agents
+	if d.callback != nil {
+		agentNotifier := NewDaemonAgentNotifier(d.callback, d.config.Shutdown.AgentTimeout, d.logger)
+		coordinator.RegisterPhase(NewAgentPhase(agentNotifier, d.config.Shutdown.AgentTimeout, d.logger, coordinator.metrics))
 	}
 
-	// Close Redis connection
-	if d.infrastructure != nil && d.infrastructure.redisClient != nil {
-		d.logger.Info(ctx, "closing Redis connection")
-		if err := d.infrastructure.redisClient.Close(); err != nil {
-			d.logger.Warn(ctx, "failed to close Redis connection", "error", err)
-		} else {
-			d.logger.Debug(ctx, "Redis connection closed")
-		}
+	// Phase 5: Close all connections
+	coordinator.RegisterPhase(NewConnectionPhase(
+		d.infrastructure,
+		d.stateClient,
+		d.callback,
+		d.eventBus,
+		d.registry,
+		d.logger,
+	))
+
+	// Execute shutdown phases
+	if err := coordinator.Shutdown(ctx); err != nil {
+		d.logger.Warn(ctx, "shutdown coordinator encountered errors", "error", err)
 	}
 
-	// Stop registry last (agents may still be deregistering)
-	d.logger.Info(ctx, "stopping registry manager")
-	if err := d.registry.Stop(ctx); err != nil {
-		d.logger.Warn(ctx, "error stopping registry", "error", err)
+	// Stop health server separately (already drained)
+	if d.healthServer != nil {
+		d.logger.Info(ctx, "stopping health server")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := d.healthServer.Stop(shutdownCtx); err != nil {
+			d.logger.Warn(ctx, "error stopping health server", "error", err)
+		}
+		d.healthServer = nil
 	}
 
-	// Close database connection
-	if d.db != nil {
-		d.logger.Info(ctx, "closing database connection")
-		if err := d.db.Close(); err != nil {
-			d.logger.Warn(ctx, "error closing database", "error", err)
-		}
-	}
+	// Clear gRPC server reference (already stopped by DrainPhase)
+	d.grpcServer = nil
 }
 
 // status returns the current daemon status and health information.
@@ -717,11 +911,9 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 //   - *DaemonStatus: Complete daemon status information
 //   - error: Non-nil if status check fails
 func (d *daemonImpl) status() (*DaemonStatus, error) {
-	// Read PID file to check if daemon is running
-	running, pid, err := CheckPIDFile(d.pidFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check daemon status: %w", err)
-	}
+	// Check if daemon is running by checking etcd registration
+	running := d.etcdDaemonInfo != nil
+	pid := os.Getpid()
 
 	// Calculate uptime
 	var uptime string
@@ -828,4 +1020,59 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm %ds", m, s)
 	}
 	return fmt.Sprintf("%ds", s)
+}
+
+// discoverCheckpoints scans Redis for mission checkpoints from a previous shutdown.
+// It logs discovered checkpoints but does not automatically resume them.
+// This allows operators to inspect and manually resume missions as needed.
+func (d *daemonImpl) discoverCheckpoints(ctx context.Context) {
+	if d.checkpointer == nil {
+		d.logger.Debug(ctx, "checkpointer not available, skipping checkpoint discovery")
+		return
+	}
+
+	checkpoints, err := d.checkpointer.ListCheckpoints(ctx)
+	if err != nil {
+		d.logger.Warn(ctx, "failed to discover checkpoints", "error", err)
+		return
+	}
+
+	if len(checkpoints) == 0 {
+		d.logger.Info(ctx, "no suspended missions found")
+		return
+	}
+
+	d.logger.Info(ctx, "discovered suspended missions from previous shutdown",
+		"count", len(checkpoints))
+
+	// Log each checkpoint for operator visibility
+	for _, missionID := range checkpoints {
+		checkpoint, err := d.checkpointer.GetCheckpoint(ctx, missionID)
+		if err != nil {
+			d.logger.Warn(ctx, "failed to load checkpoint details",
+				"mission_id", missionID,
+				"error", err)
+			continue
+		}
+
+		d.logger.Info(ctx, "suspended mission available for resumption",
+			"mission_id", missionID,
+			"checkpoint_id", checkpoint.ID,
+			"created_at", checkpoint.CreatedAt,
+			"label", checkpoint.Label)
+	}
+}
+
+// GetSuspendedMissions returns a list of mission IDs that have checkpoints from a previous shutdown.
+// These missions can be resumed using the appropriate API or CLI commands.
+//
+// Returns:
+//   - []types.ID: List of mission IDs with available checkpoints
+//   - error: Non-nil if checkpoint discovery fails
+func (d *daemonImpl) GetSuspendedMissions(ctx context.Context) ([]types.ID, error) {
+	if d.checkpointer == nil {
+		return nil, fmt.Errorf("checkpointer not available")
+	}
+
+	return d.checkpointer.ListCheckpoints(ctx)
 }

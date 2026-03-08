@@ -47,11 +47,48 @@ type MissionTargetConfig struct {
 
 // InlineTargetConfig defines an inline target configuration.
 type InlineTargetConfig struct {
-	Type     string            `yaml:"type"`
-	Provider string            `yaml:"provider"`
-	Model    string            `yaml:"model"`
-	Endpoint string            `yaml:"endpoint,omitempty"`
-	Config   map[string]string `yaml:"config,omitempty"`
+	Seeds    []*TargetSeedConfig `yaml:"seeds"`
+	Profile  string              `yaml:"profile"`
+	Depth    int32               `yaml:"depth"`
+	Excluded []string            `yaml:"excluded,omitempty"`
+	Metadata map[string]string   `yaml:"metadata,omitempty"`
+}
+
+// TargetSeedConfig defines a target seed for inline targets.
+type TargetSeedConfig struct {
+	Value string `yaml:"value"`
+	Type  string `yaml:"type"`
+	Scope string `yaml:"scope,omitempty"`
+}
+
+// ToInlineTarget converts InlineTargetConfig to InlineTarget.
+func (c *InlineTargetConfig) ToInlineTarget() *InlineTarget {
+	if c == nil {
+		return nil
+	}
+	seeds := make([]*TargetSeed, len(c.Seeds))
+	for i, s := range c.Seeds {
+		seeds[i] = &TargetSeed{
+			Value: s.Value,
+			Type:  s.Type,
+			Scope: s.Scope,
+		}
+	}
+	// Convert string map to any map for Metadata
+	var metadata map[string]any
+	if len(c.Metadata) > 0 {
+		metadata = make(map[string]any, len(c.Metadata))
+		for k, v := range c.Metadata {
+			metadata[k] = v
+		}
+	}
+	return &InlineTarget{
+		Seeds:    seeds,
+		Profile:  c.Profile,
+		Depth:    c.Depth,
+		Excluded: c.Excluded,
+		Metadata: metadata,
+	}
 }
 
 // MissionWorkflowConfig specifies workflow configuration.
@@ -66,11 +103,73 @@ type MissionWorkflowConfig struct {
 
 // InlineWorkflowConfig defines an inline workflow configuration.
 type InlineWorkflowConfig struct {
-	Agents []string `yaml:"agents"`
-	Phases []struct {
-		Name   string   `yaml:"name"`
-		Agents []string `yaml:"agents"`
-	} `yaml:"phases,omitempty"`
+	Name     string                `yaml:"name,omitempty"`
+	Nodes    []*WorkflowNodeConfig `yaml:"nodes"`
+	Edges    []*WorkflowEdgeConfig `yaml:"edges,omitempty"`
+	Metadata map[string]string     `yaml:"metadata,omitempty"`
+}
+
+// WorkflowNodeConfig defines a workflow node for inline workflows.
+type WorkflowNodeConfig struct {
+	ID        string            `yaml:"id"`
+	Type      string            `yaml:"type"`
+	Name      string            `yaml:"name"`
+	DependsOn []string          `yaml:"depends_on,omitempty"`
+	Config    map[string]string `yaml:"config,omitempty"`
+}
+
+// WorkflowEdgeConfig defines a workflow edge for inline workflows.
+type WorkflowEdgeConfig struct {
+	From      string `yaml:"from"`
+	To        string `yaml:"to"`
+	Condition string `yaml:"condition,omitempty"`
+}
+
+// ToInlineWorkflow converts InlineWorkflowConfig to InlineWorkflow.
+func (c *InlineWorkflowConfig) ToInlineWorkflow() *InlineWorkflow {
+	if c == nil {
+		return nil
+	}
+	nodes := make([]*WorkflowNode, len(c.Nodes))
+	for i, n := range c.Nodes {
+		// Convert string map to any map for Config
+		var config map[string]any
+		if len(n.Config) > 0 {
+			config = make(map[string]any, len(n.Config))
+			for k, v := range n.Config {
+				config[k] = v
+			}
+		}
+		nodes[i] = &WorkflowNode{
+			ID:        n.ID,
+			Type:      n.Type,
+			Name:      n.Name,
+			DependsOn: n.DependsOn,
+			Config:    config,
+		}
+	}
+	edges := make([]*WorkflowEdge, len(c.Edges))
+	for i, e := range c.Edges {
+		edges[i] = &WorkflowEdge{
+			From:      e.From,
+			To:        e.To,
+			Condition: e.Condition,
+		}
+	}
+	// Convert string map to any map for Metadata
+	var metadata map[string]any
+	if len(c.Metadata) > 0 {
+		metadata = make(map[string]any, len(c.Metadata))
+		for k, v := range c.Metadata {
+			metadata[k] = v
+		}
+	}
+	return &InlineWorkflow{
+		Name:     c.Name,
+		Nodes:    nodes,
+		Edges:    edges,
+		Metadata: metadata,
+	}
 }
 
 // MissionConstraintsConfig defines execution constraints.
@@ -194,11 +293,11 @@ func validateConfig(config *MissionConfig) error {
 
 	// Validate inline target if specified
 	if config.Target.Inline != nil {
-		if config.Target.Inline.Type == "" {
-			return NewValidationError("inline target must specify 'type'")
+		if len(config.Target.Inline.Seeds) == 0 {
+			return NewValidationError("inline target must specify at least one seed")
 		}
-		if config.Target.Inline.Provider == "" {
-			return NewValidationError("inline target must specify 'provider'")
+		if config.Target.Inline.Profile == "" {
+			return NewValidationError("inline target must specify 'profile'")
 		}
 	}
 
@@ -213,8 +312,8 @@ func validateConfig(config *MissionConfig) error {
 
 	// Validate inline workflow if specified
 	if config.Workflow.Inline != nil {
-		if len(config.Workflow.Inline.Agents) == 0 && len(config.Workflow.Inline.Phases) == 0 {
-			return NewValidationError("inline workflow must specify either 'agents' or 'phases'")
+		if len(config.Workflow.Inline.Nodes) == 0 {
+			return NewValidationError("inline workflow must specify at least one node")
 		}
 	}
 

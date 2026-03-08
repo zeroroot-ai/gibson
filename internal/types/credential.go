@@ -147,6 +147,20 @@ func (c *Credential) Validate() error {
 		return NewError(CREDENTIAL_INVALID, fmt.Sprintf("invalid credential status: %s", c.Status))
 	}
 
+	// Validate that encrypted fields are present
+	// These should be set by the encryption layer before storage
+	if len(c.EncryptedValue) == 0 {
+		return NewError(CREDENTIAL_INVALID, "encrypted value cannot be empty - credential must be encrypted before storage")
+	}
+
+	if len(c.EncryptionIV) == 0 {
+		return NewError(CREDENTIAL_INVALID, "encryption IV cannot be empty - credential must be encrypted before storage")
+	}
+
+	if len(c.KeyDerivationSalt) == 0 {
+		return NewError(CREDENTIAL_INVALID, "key derivation salt cannot be empty - credential must be encrypted before storage")
+	}
+
 	return nil
 }
 

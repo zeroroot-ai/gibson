@@ -12,6 +12,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
+	"github.com/zero-day-ai/sdk/protoresolver"
 	sdkregistry "github.com/zero-day-ai/sdk/registry"
 	"github.com/zero-day-ai/sdk/types"
 )
@@ -94,15 +95,15 @@ type ComponentDiscovery interface {
 	// DiscoverTool finds a tool by name and returns a gRPC client implementing tool.Tool.
 	//
 	// This method follows the same pattern as DiscoverAgent but for tools.
-	// Note: Tool gRPC client implementation is not yet complete, so this currently
-	// returns an error indicating the feature is not implemented.
+	// It queries the registry, selects an instance via load balancing, and returns
+	// a GRPCToolClient wrapping the connection.
 	DiscoverTool(ctx context.Context, name string) (tool.Tool, error)
 
 	// DiscoverPlugin finds a plugin by name and returns a gRPC client implementing plugin.Plugin.
 	//
 	// This method follows the same pattern as DiscoverAgent but for plugins.
-	// Note: Plugin gRPC client implementation is not yet complete, so this currently
-	// returns an error indicating the feature is not implemented.
+	// It queries the registry, selects an instance via load balancing, and returns
+	// a GRPCPluginClient wrapping the connection.
 	DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error)
 
 	// ListAgents returns information about all registered agents.
@@ -252,6 +253,13 @@ type RegistryAdapter struct {
 	// callbackManager provides callback server for external agents (optional)
 	// When set, enables external gRPC agents to access harness operations
 	callbackManager CallbackManager
+
+	// authConfig provides authentication configuration for callback connections (optional)
+	// When set, tokens are included in callback info for external agents
+	authConfig *AuthConfig
+
+	// resolver provides proto type resolution for dynamically typed tool responses
+	resolver protoresolver.ProtoResolver
 }
 
 // NewRegistryAdapter creates a new adapter wrapping an etcd registry.
@@ -262,6 +270,10 @@ type RegistryAdapter struct {
 // The adapter creates a new GRPCPool with default settings (insecure credentials).
 // For custom connection options (TLS, keepalive, etc.), create a pool separately
 // and use the WithPool option (when available).
+//
+// A DefaultProtoResolver is created for resolving proto message types during
+// tool execution. This enables proper typing of tool responses even when types
+// are not in the global proto registry.
 //
 // The caller is responsible for closing the registry when done. The adapter
 // will close the connection pool when Close() is called.
@@ -275,11 +287,16 @@ func NewRegistryAdapter(reg sdkregistry.Registry) *RegistryAdapter {
 		registry:     reg,
 		loadBalancer: NewLoadBalancer(reg, StrategyRoundRobin),
 		pool:         NewGRPCPool(),
+		resolver:     protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig()),
 	}
 }
 
 // NewRegistryAdapterWithPool creates a new adapter with a custom GRPCPool.
 // This is useful for testing when you need to inject a mock or test pool.
+//
+// A DefaultProtoResolver is created for resolving proto message types during
+// tool execution. This enables proper typing of tool responses even when types
+// are not in the global proto registry.
 //
 // Parameters:
 //   - reg: An active registry connection
@@ -291,6 +308,7 @@ func NewRegistryAdapterWithPool(reg sdkregistry.Registry, pool *GRPCPool) *Regis
 		registry:     reg,
 		loadBalancer: NewLoadBalancer(reg, StrategyRoundRobin),
 		pool:         pool,
+		resolver:     protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig()),
 	}
 }
 
@@ -305,6 +323,41 @@ func NewRegistryAdapterWithPool(reg sdkregistry.Registry, pool *GRPCPool) *Regis
 //   - cm: The callback manager providing harness callback functionality
 func (a *RegistryAdapter) SetCallbackManager(cm CallbackManager) {
 	a.callbackManager = cm
+}
+
+// SetAuthConfig configures authentication for callback connections.
+// When set, tokens from the auth config are included in callback info
+// for external agents to authenticate their callback requests.
+//
+// This should be called during Gibson initialization if authentication
+// is required for callback connections.
+//
+// Parameters:
+//   - cfg: The authentication configuration
+func (a *RegistryAdapter) SetAuthConfig(cfg *AuthConfig) {
+	a.authConfig = cfg
+}
+
+// SetResolver configures a custom ProtoResolver for this adapter.
+// This is primarily useful for testing when you need to inject a mock resolver.
+//
+// In normal operation, the default resolver created by NewRegistryAdapter
+// should be sufficient.
+//
+// Parameters:
+//   - r: The ProtoResolver to use for type resolution
+func (a *RegistryAdapter) SetResolver(r protoresolver.ProtoResolver) {
+	a.resolver = r
+}
+
+// GetResolver returns the ProtoResolver used by this adapter.
+// This allows sharing the resolver with other components (e.g., CallbackManager)
+// to maintain a unified cache of FileDescriptorSets.
+//
+// Returns:
+//   - protoresolver.ProtoResolver: The resolver instance used by this adapter
+func (a *RegistryAdapter) GetResolver() protoresolver.ProtoResolver {
+	return a.resolver
 }
 
 // DiscoverAgent discovers and connects to an agent by name.
@@ -429,7 +482,7 @@ func (a *RegistryAdapter) DiscoverTool(ctx context.Context, name string) (tool.T
 	}
 
 	// Create and return GRPCToolClient
-	client := NewGRPCToolClient(conn, *selected)
+	client := NewGRPCToolClient(conn, *selected, a.resolver)
 	return client, nil
 }
 
@@ -778,10 +831,20 @@ func (a *RegistryAdapter) DelegateToAgent(ctx context.Context, name string, task
 		// Ensure unregistration happens even on failure
 		defer a.callbackManager.UnregisterHarness(registrationKey)
 
+		// Get authentication token if configured
+		var token string
+		if a.authConfig != nil {
+			var err error
+			token, err = a.authConfig.GetToken()
+			if err != nil {
+				return agent.Result{}, fmt.Errorf("failed to get auth token: %w", err)
+			}
+		}
+
 		// Create callback info with endpoint and context
 		callbackInfo := &CallbackInfo{
 			Endpoint:     a.callbackManager.CallbackEndpoint(),
-			Token:        "", // TODO: Add token support when authentication is implemented
+			Token:        token,
 			Mission:      mission,
 			Target:       target,
 			MissionRunID: missionRunID,

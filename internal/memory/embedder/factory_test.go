@@ -23,18 +23,19 @@ func TestCreateEmbedder_Native(t *testing.T) {
 	assert.Equal(t, 384, emb.Dimensions())
 }
 
-func TestCreateEmbedder_OpenAI(t *testing.T) {
+func TestCreateEmbedder_EmptyProvider(t *testing.T) {
 	config := EmbedderConfig{
-		Provider: "openai",
-		Model:    "text-embedding-3-small",
-		APIKey:   "test-key",
+		Provider: "",
 	}
 
 	emb, err := CreateEmbedder(config)
-	// OpenAI embedder is not yet implemented
-	assert.Error(t, err)
-	assert.Nil(t, emb)
-	assert.Contains(t, err.Error(), "not yet implemented")
+	if err != nil && strings.Contains(err.Error(), "unknown tokenizer class") {
+		t.Skip("BertTokenizer not yet supported by go-huggingface/tokenizers")
+	}
+	require.NoError(t, err, "empty provider should default to native")
+	require.NotNil(t, emb)
+	assert.Equal(t, "all-MiniLM-L6-v2", emb.Model())
+	assert.Equal(t, 384, emb.Dimensions())
 }
 
 func TestCreateEmbedder_InvalidProvider(t *testing.T) {
@@ -46,6 +47,7 @@ func TestCreateEmbedder_InvalidProvider(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, emb)
 	assert.Contains(t, err.Error(), "unknown embedder provider")
+	assert.Contains(t, err.Error(), "must be 'native'")
 }
 
 func TestValidateEmbedderConfig_Native(t *testing.T) {
@@ -57,49 +59,13 @@ func TestValidateEmbedderConfig_Native(t *testing.T) {
 	assert.NoError(t, err, "native embedder config should be valid")
 }
 
-func TestValidateEmbedderConfig_OpenAI_Valid(t *testing.T) {
-	config := EmbedderConfig{
-		Provider: "openai",
-		Model:    "text-embedding-3-small",
-		APIKey:   "sk-test-key",
-	}
-
-	err := ValidateEmbedderConfig(config)
-	assert.NoError(t, err, "valid OpenAI config should pass validation")
-}
-
-func TestValidateEmbedderConfig_OpenAI_MissingAPIKey(t *testing.T) {
-	config := EmbedderConfig{
-		Provider: "openai",
-		Model:    "text-embedding-3-small",
-		APIKey:   "",
-	}
-
-	err := ValidateEmbedderConfig(config)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "api_key")
-}
-
-func TestValidateEmbedderConfig_OpenAI_MissingModel(t *testing.T) {
-	config := EmbedderConfig{
-		Provider: "openai",
-		Model:    "",
-		APIKey:   "sk-test-key",
-	}
-
-	err := ValidateEmbedderConfig(config)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "model")
-}
-
 func TestValidateEmbedderConfig_EmptyProvider(t *testing.T) {
 	config := EmbedderConfig{
 		Provider: "",
 	}
 
 	err := ValidateEmbedderConfig(config)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "provider cannot be empty")
+	assert.NoError(t, err, "empty provider should default to native")
 }
 
 func TestValidateEmbedderConfig_UnknownProvider(t *testing.T) {
@@ -110,6 +76,7 @@ func TestValidateEmbedderConfig_UnknownProvider(t *testing.T) {
 	err := ValidateEmbedderConfig(config)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown embedder provider")
+	assert.Contains(t, err.Error(), "must be 'native'")
 }
 
 func TestDefaultEmbedderConfig(t *testing.T) {
@@ -123,5 +90,4 @@ func TestDefaultEmbedderConfig(t *testing.T) {
 func TestEmbedderType_Constants(t *testing.T) {
 	// Verify embedder type constants
 	assert.Equal(t, EmbedderType("native"), EmbedderTypeNative)
-	assert.Equal(t, EmbedderType("openai"), EmbedderTypeOpenAI)
 }

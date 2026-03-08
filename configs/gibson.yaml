@@ -11,14 +11,6 @@ core:
   timeout: 5m                      # Global operation timeout
   debug: false                     # Enable debug mode
 
-# Database configuration (SQLite with FTS5)
-database:
-  path: ~/.gibson/gibson.db        # Path to SQLite database
-  max_connections: 10              # Maximum concurrent connections
-  timeout: 30s                     # Connection timeout
-  wal_mode: true                   # Enable Write-Ahead Logging for better concurrency
-  auto_vacuum: true                # Enable automatic database vacuuming
-
 # Security settings
 security:
   encryption_algorithm: aes-256-gcm  # Encryption algorithm for secrets
@@ -41,8 +33,8 @@ logging:
 
 # Distributed tracing (OpenTelemetry)
 tracing:
-  enabled: false                   # Enable distributed tracing
-  endpoint: ""                     # OTLP collector endpoint (e.g., localhost:4317)
+  enabled: "${OTEL_TRACING_ENABLED:-false}"          # Enable distributed tracing
+  endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"         # OTLP collector endpoint
 
 # Metrics export (Prometheus)
 metrics:
@@ -51,11 +43,11 @@ metrics:
 
 # Service registry (etcd-based service discovery)
 registry:
-  type: embedded                   # Registry type: embedded or etcd
-  data_dir: ~/.gibson/etcd-data    # Directory for embedded etcd data
-  listen_address: localhost:2379   # Listen address for embedded etcd
-  namespace: gibson                # Service namespace prefix
-  ttl: 30s                         # Service registration TTL
+  type: embedded                                      # Registry type: embedded or etcd
+  data_dir: ~/.gibson/etcd-data                       # Directory for embedded etcd data
+  listen_address: "${GIBSON_ETCD_ADDRESS:-0.0.0.0:2379}"  # Listen address for embedded etcd
+  namespace: gibson                                   # Service namespace prefix
+  ttl: 30s                                            # Service registration TTL
   tls:
     enabled: false                 # Enable TLS for etcd connections
     cert_file: ""                  # Client certificate file
@@ -64,14 +56,161 @@ registry:
 
 # Daemon configuration
 daemon:
-  grpc_address: localhost:50002    # gRPC API server address
+  grpc_address: "${GIBSON_GRPC_ADDRESS:-0.0.0.0:50002}"   # gRPC API server address
 
-# Redis configuration (for tool execution)
+# Health endpoint configuration
+health:
+  port: ${GIBSON_HEALTH_PORT:-8080}   # HTTP port for /healthz and /readyz endpoints
+
+# Graceful shutdown configuration
+shutdown:
+  timeout: ${GIBSON_SHUTDOWN_TIMEOUT:-30s}                    # Total shutdown timeout
+  drain_timeout: ${GIBSON_SHUTDOWN_DRAIN_TIMEOUT:-10s}        # Request drain timeout
+  checkpoint_timeout: ${GIBSON_SHUTDOWN_CHECKPOINT_TIMEOUT:-5s}  # Per-mission checkpoint timeout
+  agent_timeout: ${GIBSON_SHUTDOWN_AGENT_TIMEOUT:-15s}        # Agent disconnect timeout
+
+# ============================================================================
+# Redis Configuration (State Storage & Tool Execution)
+# ============================================================================
+# Redis is the primary state storage backend for Gibson, replacing SQLite.
+# Supports standalone, cluster, and sentinel deployment modes with comprehensive
+# timeout, pooling, and TLS configuration options.
+#
+# Deployment Modes:
+#   - Standalone: Single Redis instance (default, simplest setup)
+#   - Cluster: Redis Cluster for horizontal scalability and high availability
+#   - Sentinel: Redis Sentinel for automatic failover and monitoring
+#
+# Configuration Options:
 redis:
-  url: redis://localhost:6379      # Redis connection URL
-  database: 0                      # Redis database number
-  connect_timeout: 5s              # Connection timeout
-  read_timeout: 30s                # Read timeout for tool execution
+  # ──────────────────────────────────────────────────────────────────────────
+  # Basic Connection Settings (Standalone Mode)
+  # ──────────────────────────────────────────────────────────────────────────
+  url: "${REDIS_URL:-redis://redis:6379}"    # Redis connection URL (K8s service name)
+  password: "${REDIS_PASSWORD}"              # Redis password from environment
+  database: 0                      # Redis database number (0-15, cluster mode ignores this)
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Connection Pooling
+  # ──────────────────────────────────────────────────────────────────────────
+  pool_size: 10                    # Maximum number of connections in the pool
+                                   # Default: 10 (recommended: 10 * number of CPUs)
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Timeouts
+  # ──────────────────────────────────────────────────────────────────────────
+  connect_timeout: 5s              # Timeout for establishing new connections
+  read_timeout: 3s                 # Timeout for read operations
+  write_timeout: 3s                # Timeout for write operations
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Retry Settings
+  # ──────────────────────────────────────────────────────────────────────────
+  max_retries: 3                   # Maximum number of retries before giving up
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Cluster Mode Configuration
+  # ──────────────────────────────────────────────────────────────────────────
+  # Enable this for Redis Cluster deployments (horizontal scalability)
+  cluster_mode: false              # Set to true to enable cluster mode
+  # cluster_addrs:                 # List of cluster node addresses (required when cluster_mode: true)
+  #   - "node1:6379"
+  #   - "node2:6379"
+  #   - "node3:6379"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Sentinel Mode Configuration
+  # ──────────────────────────────────────────────────────────────────────────
+  # Enable this for Redis Sentinel deployments (automatic failover)
+  sentinel_master: ""              # Name of the master instance (e.g., "mymaster")
+  # sentinel_addrs:                # List of Sentinel addresses (required when sentinel_master is set)
+  #   - "sentinel1:26379"
+  #   - "sentinel2:26379"
+  #   - "sentinel3:26379"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # TLS/SSL Configuration
+  # ──────────────────────────────────────────────────────────────────────────
+  # Enable this for encrypted Redis connections (recommended for production)
+  tls_enabled: false               # Set to true to enable TLS
+  # tls_cert_file: ""              # Path to client certificate file
+  # tls_key_file: ""               # Path to client private key file
+  # tls_ca_file: ""                # Path to certificate authority file
+
+# ──────────────────────────────────────────────────────────────────────────
+# Example Configurations
+# ──────────────────────────────────────────────────────────────────────────
+
+# Example 1: Standalone Redis with Authentication
+# redis:
+#   url: redis://localhost:6379
+#   password: "${REDIS_PASSWORD}"    # Use environment variable for security
+#   database: 0
+#   pool_size: 20
+#   connect_timeout: 5s
+#   read_timeout: 3s
+#   write_timeout: 3s
+#   max_retries: 3
+
+# Example 2: Redis Cluster
+# redis:
+#   cluster_mode: true
+#   cluster_addrs:
+#     - "redis-node1:6379"
+#     - "redis-node2:6379"
+#     - "redis-node3:6379"
+#   password: "${REDIS_PASSWORD}"
+#   pool_size: 20
+#   connect_timeout: 5s
+#   read_timeout: 3s
+#   write_timeout: 3s
+#   max_retries: 3
+
+# Example 3: Redis Sentinel with TLS
+# redis:
+#   sentinel_master: "mymaster"
+#   sentinel_addrs:
+#     - "sentinel1:26379"
+#     - "sentinel2:26379"
+#     - "sentinel3:26379"
+#   password: "${REDIS_PASSWORD}"
+#   tls_enabled: true
+#   tls_cert_file: "/path/to/client-cert.pem"
+#   tls_key_file: "/path/to/client-key.pem"
+#   tls_ca_file: "/path/to/ca-cert.pem"
+#   pool_size: 20
+#   connect_timeout: 5s
+#   read_timeout: 3s
+#   write_timeout: 3s
+#   max_retries: 3
+
+# Example 4: AWS ElastiCache (Cluster Mode Disabled)
+# redis:
+#   url: "redis://your-elasticache-endpoint.cache.amazonaws.com:6379"
+#   password: "${REDIS_PASSWORD}"
+#   tls_enabled: true              # ElastiCache supports TLS
+#   pool_size: 20
+#   connect_timeout: 5s
+#   read_timeout: 3s
+#   write_timeout: 3s
+#   max_retries: 3
+
+# Example 5: AWS ElastiCache (Cluster Mode Enabled)
+# redis:
+#   cluster_mode: true
+#   cluster_addrs:
+#     - "your-cluster.cache.amazonaws.com:6379"
+#   password: "${REDIS_PASSWORD}"
+#   tls_enabled: true
+#   pool_size: 20
+#   connect_timeout: 5s
+#   read_timeout: 3s
+#   write_timeout: 3s
+#   max_retries: 3
+
+# ============================================================================
+# End of Redis Configuration
+# ============================================================================
 
 # Embedder configuration (for semantic search and GraphRAG)
 embedder:
@@ -86,11 +225,11 @@ embedder:
 graphrag:
   enabled: true                    # Enable GraphRAG knowledge graph
   neo4j:
-    uri: bolt://localhost:7687     # Neo4j connection URI
-    username: neo4j                # Neo4j username
-    password: password             # Neo4j password (use environment variable in production)
-    max_connections: 10            # Maximum connection pool size
-    connection_timeout: 30s        # Connection timeout
+    uri: "${NEO4J_URI:-bolt://neo4j:7687}"       # Neo4j connection URI (K8s service name)
+    username: "${NEO4J_USERNAME:-neo4j}"         # Neo4j username from environment
+    password: "${NEO4J_PASSWORD}"                # Neo4j password from environment
+    max_connections: 10                          # Maximum connection pool size
+    connection_timeout: 30s                      # Connection timeout
 
 # ============================================================================
 # Langfuse Observability Integration
@@ -136,28 +275,27 @@ langfuse:
   # enabled controls whether Langfuse tracing is active
   # Default: false
   # When disabled, no traces are sent and there is zero performance overhead
-  enabled: true
+  enabled: "${LANGFUSE_ENABLED:-false}"
 
   # host is the Langfuse API URL (cloud or self-hosted)
   # Cloud: https://cloud.langfuse.com
   # Self-hosted: https://your-langfuse-instance.com
   # Default: ""
   # Environment variable: LANGFUSE_HOST
-  host: "http://localhost:3000"
+  host: "${LANGFUSE_HOST}"
 
   # public_key is your Langfuse project public key (starts with pk-lf-)
   # Get this from the Langfuse project settings
   # Default: ""
   # Environment variable: LANGFUSE_PUBLIC_KEY
-  # IMPORTANT: This is NOT a secret and can be committed to version control
-  public_key: "pk-lf-babee552-373b-43d1-b145-19d60bc681e3"
+  public_key: "${LANGFUSE_PUBLIC_KEY}"
 
   # secret_key is your Langfuse project secret key (starts with sk-lf-)
   # Get this from the Langfuse project settings
   # Default: ""
   # Environment variable: LANGFUSE_SECRET_KEY
   # IMPORTANT: Never commit this to version control - use environment variables
-  secret_key: "sk-lf-50fe9827-e667-480d-b926-ff3ddd5c73fa"
+  secret_key: "${LANGFUSE_SECRET_KEY}"
 
   # Optional: Advanced Configuration
   # These settings have sensible defaults and rarely need to be changed

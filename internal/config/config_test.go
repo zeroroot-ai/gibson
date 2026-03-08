@@ -22,12 +22,17 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, cfg.Core.Timeout)
 	assert.False(t, cfg.Core.Debug)
 
-	// Test Database defaults
-	assert.Equal(t, filepath.Join(cfg.Core.HomeDir, "gibson.db"), cfg.Database.Path)
-	assert.Equal(t, 10, cfg.Database.MaxConnections)
-	assert.Equal(t, 30*time.Second, cfg.Database.Timeout)
-	assert.True(t, cfg.Database.WALMode)
-	assert.True(t, cfg.Database.AutoVacuum)
+	// Test Redis defaults
+	assert.Equal(t, "redis://localhost:6379", cfg.Redis.URL)
+	assert.Equal(t, "", cfg.Redis.Password)
+	assert.Equal(t, 0, cfg.Redis.Database)
+	assert.Equal(t, 10, cfg.Redis.PoolSize)
+	assert.Equal(t, 5*time.Second, cfg.Redis.ConnectTimeout)
+	assert.Equal(t, 3*time.Second, cfg.Redis.ReadTimeout)
+	assert.Equal(t, 3*time.Second, cfg.Redis.WriteTimeout)
+	assert.Equal(t, 3, cfg.Redis.MaxRetries)
+	assert.False(t, cfg.Redis.ClusterMode)
+	assert.False(t, cfg.Redis.TLSEnabled)
 
 	// Test Security defaults
 	assert.Equal(t, "aes-256-gcm", cfg.Security.EncryptionAlgorithm)
@@ -65,12 +70,15 @@ core:
   timeout: 10m
   debug: true
 
-database:
-  path: /tmp/gibson-test/gibson.db
-  max_connections: 20
-  timeout: 1m
-  wal_mode: true
-  auto_vacuum: false
+redis:
+  url: redis://localhost:6379
+  password: ""
+  database: 0
+  pool_size: 20
+  connect_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+  max_retries: 3
 
 security:
   encryption_algorithm: aes-256-gcm
@@ -119,11 +127,9 @@ activity_logging:
 	assert.Equal(t, 10*time.Minute, cfg.Core.Timeout)
 	assert.True(t, cfg.Core.Debug)
 
-	assert.Equal(t, "/tmp/gibson-test/gibson.db", cfg.Database.Path)
-	assert.Equal(t, 20, cfg.Database.MaxConnections)
-	assert.Equal(t, 1*time.Minute, cfg.Database.Timeout)
-	assert.True(t, cfg.Database.WALMode)
-	assert.False(t, cfg.Database.AutoVacuum)
+	assert.Equal(t, "redis://localhost:6379", cfg.Redis.URL)
+	assert.Equal(t, 20, cfg.Redis.PoolSize)
+	assert.Equal(t, 5*time.Second, cfg.Redis.ConnectTimeout)
 
 	assert.Equal(t, "aes-256-gcm", cfg.Security.EncryptionAlgorithm)
 	assert.Equal(t, "scrypt", cfg.Security.KeyDerivation)
@@ -166,12 +172,14 @@ core:
   timeout: 5m
   debug: false
 
-database:
-  path: ${GIBSON_DB_PATH}
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
+redis:
+  url: redis://localhost:6379
+  password: ""
+  database: 0
+  pool_size: 10
+  connect_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
 
 security:
   encryption_algorithm: aes-256-gcm
@@ -208,7 +216,6 @@ activity_logging:
 	assert.Equal(t, "/custom/gibson", cfg.Core.HomeDir)
 	assert.Equal(t, "/custom/gibson/data", cfg.Core.DataDir)
 	assert.Equal(t, "/custom/gibson/cache", cfg.Core.CacheDir)
-	assert.Equal(t, "/custom/gibson/db.sqlite", cfg.Database.Path)
 	assert.Equal(t, "anthropic", cfg.LLM.DefaultProvider)
 }
 
@@ -226,12 +233,14 @@ core:
   timeout: 5m
   debug: false
 
-database:
-  path: /tmp/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
+redis:
+  url: redis://localhost:6379
+  password: ""
+  database: 0
+  pool_size: 10
+  connect_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
 
 security:
   encryption_algorithm: aes-256-gcm
@@ -273,7 +282,7 @@ func TestLoadWithDefaults_FileNotFound(t *testing.T) {
 	// Should return default configuration
 	defaultCfg := DefaultConfig()
 	assert.Equal(t, defaultCfg.Core.ParallelLimit, cfg.Core.ParallelLimit)
-	assert.Equal(t, defaultCfg.Database.MaxConnections, cfg.Database.MaxConnections)
+	assert.Equal(t, defaultCfg.Redis.PoolSize, cfg.Redis.PoolSize)
 	assert.Equal(t, defaultCfg.Security.EncryptionAlgorithm, cfg.Security.EncryptionAlgorithm)
 }
 
@@ -291,12 +300,14 @@ core:
   timeout: 15m
   debug: true
 
-database:
-  path: /tmp/gibson-custom/gibson.db
-  max_connections: 50
-  timeout: 2m
-  wal_mode: false
-  auto_vacuum: false
+redis:
+  url: redis://localhost:6379
+  password: ""
+  database: 0
+  pool_size: 50
+  connect_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
 
 security:
   encryption_algorithm: aes-256-gcm
@@ -317,7 +328,7 @@ security:
 
 	// Should load from file, not defaults
 	assert.Equal(t, 50, cfg.Core.ParallelLimit)
-	assert.Equal(t, 50, cfg.Database.MaxConnections)
+	assert.Equal(t, 50, cfg.Redis.PoolSize)
 	assert.True(t, cfg.Core.Debug)
 }
 
@@ -359,27 +370,6 @@ func TestValidation_ParallelLimitTooHigh(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be at most 100")
 }
 
-func TestValidation_MaxConnectionsTooLow(t *testing.T) {
-	validator := NewValidator()
-	cfg := DefaultConfig()
-	cfg.Database.MaxConnections = 0
-
-	err := validator.Validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "max_connections")
-	assert.Contains(t, err.Error(), "must be at least 1")
-}
-
-func TestValidation_MaxConnectionsTooHigh(t *testing.T) {
-	validator := NewValidator()
-	cfg := DefaultConfig()
-	cfg.Database.MaxConnections = 101
-
-	err := validator.Validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "max_connections")
-	assert.Contains(t, err.Error(), "must be at most 100")
-}
 
 func TestValidation_CoreTimeoutTooLow(t *testing.T) {
 	validator := NewValidator()
@@ -392,22 +382,11 @@ func TestValidation_CoreTimeoutTooLow(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be at least 1s")
 }
 
-func TestValidation_DatabaseTimeoutTooLow(t *testing.T) {
-	validator := NewValidator()
-	cfg := DefaultConfig()
-	cfg.Database.Timeout = 500 * time.Millisecond
-
-	err := validator.Validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "timeout")
-	assert.Contains(t, err.Error(), "must be at least 1s")
-}
 
 func TestValidation_MultipleErrors(t *testing.T) {
 	validator := NewValidator()
 	cfg := DefaultConfig()
 	cfg.Core.ParallelLimit = 0
-	cfg.Database.MaxConnections = 0
 	cfg.Core.Timeout = 0
 
 	err := validator.Validate(cfg)
@@ -415,7 +394,6 @@ func TestValidation_MultipleErrors(t *testing.T) {
 
 	// Should contain all validation errors
 	assert.Contains(t, err.Error(), "parallel_limit")
-	assert.Contains(t, err.Error(), "max_connections")
 	assert.Contains(t, err.Error(), "timeout")
 }
 
@@ -649,12 +627,14 @@ core:
   timeout: 5m
   debug: false
 
-database:
-  path: /tmp/test/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
+redis:
+  url: redis://localhost:6379
+  password: ""
+  database: 0
+  pool_size: 10
+  connect_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
 
 security:
   encryption_algorithm: aes-256-gcm
@@ -687,12 +667,14 @@ core:
   timeout: 5m
   debug: false
 
-database:
-  path: /tmp/test/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
+redis:
+  url: redis://localhost:6379
+  password: ""
+  database: 0
+  pool_size: 10
+  connect_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
 
 security:
   encryption_algorithm: aes-256-gcm
@@ -724,12 +706,14 @@ core:
   timeout: 5m
   debug: false
 
-database:
-  path: /tmp/test/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
+redis:
+  url: redis://localhost:6379
+  password: ""
+  database: 0
+  pool_size: 10
+  connect_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
 
 security:
   encryption_algorithm: aes-256-gcm

@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 
@@ -15,14 +14,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zero-day-ai/sdk/protoresolver"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protodesc"
-	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/types/descriptorpb"
-	"google.golang.org/protobuf/types/dynamicpb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -85,6 +81,9 @@ type DefaultAgentHarness struct {
 
 	// Event logging for structured observability
 	eventLogger EventLogger
+
+	// resolver provides dynamic proto type resolution for tool execution
+	resolver protoresolver.ProtoResolver
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -471,6 +470,25 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 // Tool Execution Methods
 // ────────────────────────────────────────────────────────────────────────────
 
+// getToolMetadata extracts metadata (including FileDescriptorSet) from a tool.
+// Supports GRPCToolClient and RedisToolProxy.
+func getToolMetadata(t tool.Tool) map[string]string {
+	// Check if tool is GRPCToolClient
+	if grpcClient, ok := t.(*registry.GRPCToolClient); ok {
+		if md := grpcClient.Metadata(); md != nil {
+			return md
+		}
+	}
+
+	// Check if tool is RedisToolProxy
+	if redisProxy, ok := t.(*RedisToolProxy); ok {
+		return redisProxy.Metadata()
+	}
+
+	// No metadata available
+	return nil
+}
+
 // CallToolProto executes a registered tool using proto message input/output.
 // This is the preferred method for tools with proto schemas, providing type safety
 // and schema validation at the protocol level.
@@ -568,7 +586,7 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 	//
 	// However, agents using the SDK structpb fallback will send google.protobuf.Struct
 	// when the tool expects a specific proto type. In this case, we need to convert
-	// the Struct to the tool's expected type using the tool's file descriptor set.
+	// the Struct to the tool's expected type using the ProtoResolver.
 	actualRequest := request
 	if inputType != expectedInputType {
 		// Check if the request is a structpb.Struct that needs conversion
@@ -577,97 +595,18 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 				"tool", name,
 				"target_type", inputType)
 
-			// Get the tool's file descriptor set from metadata
-			// Support both GRPCToolClient and RedisToolProxy
-			var fileDescSet string
-			if grpcClient, ok := t.(*registry.GRPCToolClient); ok {
-				if md := grpcClient.Metadata(); md != nil {
-					fileDescSet = md["file_descriptor_set"]
-				}
-			} else if redisProxy, ok := t.(*RedisToolProxy); ok {
-				fileDescSet = redisProxy.FileDescriptorSet()
-			}
-
-			if fileDescSet == "" {
-				h.logger.Error("tool has no file_descriptor_set for input conversion",
+			// Get tool metadata for resolver
+			toolMetadata := getToolMetadata(t)
+			if toolMetadata == nil {
+				h.logger.Error("tool has no metadata for input conversion",
 					"tool", name,
 					"expected", inputType)
 				return types.WrapError(
 					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("cannot convert input: tool %s has no file_descriptor_set", name),
+					fmt.Sprintf("cannot convert input: tool %s has no metadata", name),
 					nil,
 				)
 			}
-
-			// Decode base64 file descriptor set
-			fdsBytes, err := base64.StdEncoding.DecodeString(fileDescSet)
-			if err != nil {
-				h.logger.Error("failed to decode file_descriptor_set",
-					"tool", name,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to decode file_descriptor_set: %v", err),
-					err,
-				)
-			}
-
-			// Parse the FileDescriptorSet proto
-			var fds descriptorpb.FileDescriptorSet
-			if err := proto.Unmarshal(fdsBytes, &fds); err != nil {
-				h.logger.Error("failed to unmarshal file_descriptor_set",
-					"tool", name,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to unmarshal file_descriptor_set: %v", err),
-					err,
-				)
-			}
-
-			// Create a file registry from the descriptor set
-			files, err := protodesc.NewFiles(&fds)
-			if err != nil {
-				h.logger.Error("failed to create file registry",
-					"tool", name,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to create file registry: %v", err),
-					err,
-				)
-			}
-
-			// Find the input message descriptor
-			// inputType is like "gibson.tools.httpx.HttpxRequest"
-			msgDesc, err := files.FindDescriptorByName(protoreflect.FullName(inputType))
-			if err != nil {
-				h.logger.Error("failed to find message descriptor",
-					"tool", name,
-					"message_type", inputType,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to find message descriptor for %s: %v", inputType, err),
-					err,
-				)
-			}
-
-			// Assert it's a message descriptor
-			md, ok := msgDesc.(protoreflect.MessageDescriptor)
-			if !ok {
-				h.logger.Error("descriptor is not a message",
-					"tool", name,
-					"message_type", inputType)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("%s is not a message descriptor", inputType),
-					nil,
-				)
-			}
-
-			// Create a dynamic message of the correct type
-			dynamicMsg := dynamicpb.NewMessage(md)
 
 			// Convert Struct to JSON
 			marshaler := protojson.MarshalOptions{
@@ -687,17 +626,15 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 			}
 
 			// Log the JSON being converted (INFO level for debugging)
-			h.logger.Info("converting structpb.Struct to typed message",
+			h.logger.Info("converting structpb.Struct to typed message via resolver",
 				"tool", name,
 				"target_type", inputType,
 				"json", string(jsonBytes))
 
-			// Unmarshal JSON into the dynamic message
-			unmarshaler := protojson.UnmarshalOptions{
-				DiscardUnknown: true,
-			}
-			if err := unmarshaler.Unmarshal(jsonBytes, dynamicMsg); err != nil {
-				h.logger.Error("failed to unmarshal input to typed message",
+			// Use resolver to unmarshal JSON into typed proto message
+			dynamicMsg, err := h.resolver.UnmarshalJSON(ctx, inputType, jsonBytes, toolMetadata)
+			if err != nil {
+				h.logger.Error("failed to unmarshal input to typed message via resolver",
 					"tool", name,
 					"target_type", inputType,
 					"json", string(jsonBytes),
@@ -709,7 +646,7 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 				)
 			}
 
-			h.logger.Debug("successfully converted structpb.Struct to typed message",
+			h.logger.Debug("successfully converted structpb.Struct to typed message via resolver",
 				"tool", name,
 				"target_type", inputType)
 
@@ -2201,6 +2138,19 @@ func (h *DefaultAgentHarness) GetAllRunFindings(ctx context.Context, filter Find
 	return allFindings, nil
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Proto Resolution Methods
+// ────────────────────────────────────────────────────────────────────────────
+
+// Resolver returns the ProtoResolver used by this harness for dynamic type resolution.
+// This resolver is used to convert between structpb.Struct and strongly-typed proto messages
+// when tools use proto schemas not available in the global registry.
+//
+// Returns:
+//   - protoresolver.ProtoResolver: The resolver instance, or nil if not configured
+func (h *DefaultAgentHarness) Resolver() protoresolver.ProtoResolver {
+	return h.resolver
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Lifecycle Methods

@@ -5,6 +5,7 @@ package registry
 
 import (
 	"path/filepath"
+	"strings"
 	"time"
 
 	sdkregistry "github.com/zero-day-ai/sdk/registry"
@@ -98,4 +99,26 @@ func GetLastHealthCheck(info sdkregistry.ServiceInfo) time.Time {
 		return time.Time{}
 	}
 	return timestamp
+}
+
+// parseCommaSeparated parses a comma-separated string into a slice of trimmed strings.
+//
+// Empty strings and whitespace-only entries are filtered out.
+// For example: "a, b, c" -> ["a", "b", "c"]
+func parseCommaSeparated(value string) []string {
+	if value == "" {
+		return []string{}
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+
+	return result
 }

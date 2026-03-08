@@ -40,7 +40,8 @@ type missionManager struct {
 	logger          *slog.Logger
 	registry        registry.ComponentDiscovery
 	missionStore    mission.MissionStore
-	missionRunStore mission.MissionRunStore // Stores individual run records
+	missionRunStore mission.MissionRunStore   // Stores individual run records
+	checkpointStore mission.CheckpointStore   // Stores mission checkpoints for pause/resume
 	findingStore    finding.FindingStore
 	llmRegistry     llm.LLMRegistry
 	callbackManager *harness.CallbackManager
@@ -78,6 +79,7 @@ func newMissionManager(
 	reg registry.ComponentDiscovery,
 	missionStore mission.MissionStore,
 	missionRunStore mission.MissionRunStore,
+	checkpointStore mission.CheckpointStore,
 	findingStore finding.FindingStore,
 	llmRegistry llm.LLMRegistry,
 	callbackMgr *harness.CallbackManager,
@@ -101,6 +103,7 @@ func newMissionManager(
 		registry:        reg,
 		missionStore:    missionStore,
 		missionRunStore: missionRunStore,
+		checkpointStore: checkpointStore,
 		findingStore:    findingStore,
 		llmRegistry:     llmRegistry,
 		callbackManager: callbackMgr,
@@ -152,28 +155,14 @@ func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID
 	}
 	def.ID = missionIDTyped
 
-	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
-	// GraphRAG storage is currently disabled during the workflow -> mission migration
-	// This will be re-enabled once MissionGraphLoader is implemented
-	// The GraphRAG storage is optional for mission execution, so this is safe to skip
-	// if m.graphLoader != nil {
-	//     graphMissionID, err := m.graphLoader.LoadMission(ctx, def)
-	//     if err != nil {
-	//         m.logger.Warn("failed to store mission in GraphRAG, continuing without graph persistence",
-	//             "error", err,
-	//             "mission_id", missionID,
-	//             "mission_name", def.Name,
-	//         )
-	//     } else {
-	//         m.logger.Info("mission stored in GraphRAG",
-	//             "graph_mission_id", graphMissionID,
-	//             "mission_id", missionID,
-	//             "mission_name", def.Name,
-	//             "node_count", len(def.Nodes),
-	//             "edge_count", len(def.Edges),
-	//         )
-	//     }
-	// }
+	// Store mission definition in GraphRAG for cross-mission analysis
+	if err := m.storeMissionInGraphRAG(ctx, def); err != nil {
+		m.logger.Warn("failed to store mission in GraphRAG, continuing without graph persistence",
+			"error", err,
+			"mission_id", missionID,
+			"mission_name", def.Name,
+		)
+	}
 
 	// Check if mission ID already exists
 	m.mu.RLock()
@@ -1299,4 +1288,170 @@ func buildMissionTraceSummary(result *orchestrator.OrchestratorResult, status mi
 	}
 
 	return summary
+}
+
+// storeMissionInGraphRAG stores a mission definition in the Neo4j knowledge graph.
+// This allows for cross-mission analysis and relationship discovery.
+func (m *missionManager) storeMissionInGraphRAG(ctx context.Context, def *mission.MissionDefinition) error {
+	// Check if GraphRAG is configured
+	if m.infrastructure == nil || m.infrastructure.graphRAGClient == nil {
+		m.logger.Debug("GraphRAG not configured, skipping mission storage")
+		return nil // GraphRAG not configured, skip storage
+	}
+
+	m.logger.Info("storing mission in GraphRAG",
+		"mission_id", def.ID,
+		"mission_name", def.Name,
+		"node_count", len(def.Nodes),
+		"edge_count", len(def.Edges))
+
+	// Convert mission definition to graph nodes
+	nodes := m.convertToGraphNodes(def)
+
+	// Store nodes in GraphRAG
+	for _, node := range nodes {
+		_, err := m.infrastructure.graphRAGClient.CreateNode(ctx, []string{node.Label}, node.Properties)
+		if err != nil {
+			m.logger.Warn("failed to add node to graph",
+				"error", err,
+				"node_label", node.Label,
+				"node_id", node.Properties["id"])
+			// Continue with other nodes even if one fails
+		}
+	}
+
+	// Convert mission definition to graph edges
+	edges := m.convertToGraphEdges(def)
+
+	// Store edges in GraphRAG
+	for _, edge := range edges {
+		if err := m.infrastructure.graphRAGClient.CreateRelationship(ctx,
+			edge.FromNode, edge.ToNode, edge.RelType, edge.Properties); err != nil {
+			m.logger.Warn("failed to add edge to graph",
+				"error", err,
+				"edge_type", edge.RelType,
+				"from", edge.FromNode,
+				"to", edge.ToNode)
+			// Continue with other edges even if one fails
+		}
+	}
+
+	m.logger.Info("mission stored in GraphRAG successfully",
+		"mission_id", def.ID,
+		"mission_name", def.Name,
+		"nodes_created", len(nodes),
+		"edges_created", len(edges))
+
+	return nil
+}
+
+// graphNode represents a node to be stored in Neo4j
+type graphNode struct {
+	Label      string
+	Properties map[string]any
+}
+
+// graphEdge represents an edge to be stored in Neo4j
+type graphEdge struct {
+	FromNode   string
+	ToNode     string
+	RelType    string
+	Properties map[string]any
+}
+
+// convertToGraphNodes converts a mission definition to graph nodes.
+// This creates nodes for the mission itself, steps, agents, and tools.
+func (m *missionManager) convertToGraphNodes(def *mission.MissionDefinition) []graphNode {
+	var nodes []graphNode
+
+	// Create mission node
+	missionNode := graphNode{
+		Label: "Mission",
+		Properties: map[string]any{
+			"id":          def.ID.String(),
+			"name":        def.Name,
+			"description": def.Description,
+			"version":     def.Version,
+			"target_ref":  def.TargetRef,
+			"created_at":  def.CreatedAt.Unix(),
+		},
+	}
+	nodes = append(nodes, missionNode)
+
+	// Create nodes for each mission node (steps)
+	for nodeID, node := range def.Nodes {
+		stepNode := graphNode{
+			Label: "MissionStep",
+			Properties: map[string]any{
+				"id":          nodeID,
+				"mission_id":  def.ID.String(),
+				"type":        string(node.Type),
+				"description": node.Description,
+			},
+		}
+
+		// Add agent-specific properties
+		if node.Type == mission.NodeTypeAgent && node.AgentName != "" {
+			stepNode.Properties["agent_name"] = node.AgentName
+			if node.AgentTask != nil {
+				stepNode.Properties["agent_goal"] = node.AgentTask.Goal
+				stepNode.Properties["agent_description"] = node.AgentTask.Description
+			}
+		}
+
+		// Add tool-specific properties
+		if node.Type == mission.NodeTypeTool && node.ToolName != "" {
+			stepNode.Properties["tool_name"] = node.ToolName
+			if node.ToolInput != nil {
+				// Store tool input as JSON string
+				if inputJSON, err := json.Marshal(node.ToolInput); err == nil {
+					stepNode.Properties["tool_input"] = string(inputJSON)
+				}
+			}
+		}
+
+		nodes = append(nodes, stepNode)
+	}
+
+	return nodes
+}
+
+// convertToGraphEdges converts a mission definition to graph edges.
+// This creates relationships for dependencies and usage patterns.
+func (m *missionManager) convertToGraphEdges(def *mission.MissionDefinition) []graphEdge {
+	var edges []graphEdge
+
+	// Create edges for mission -> step relationships
+	for nodeID := range def.Nodes {
+		edge := graphEdge{
+			FromNode: def.ID.String(),
+			ToNode:   nodeID,
+			RelType:  "HAS_STEP",
+			Properties: map[string]any{
+				"mission_id": def.ID.String(),
+			},
+		}
+		edges = append(edges, edge)
+	}
+
+	// Create edges for step dependencies (mission edges)
+	for _, missionEdge := range def.Edges {
+		edge := graphEdge{
+			FromNode: missionEdge.From,
+			ToNode:   missionEdge.To,
+			RelType:  "DEPENDS_ON",
+			Properties: map[string]any{
+				"mission_id": def.ID.String(),
+			},
+		}
+
+		// Add condition if present
+		if missionEdge.Condition != "" {
+			edge.Properties["condition"] = missionEdge.Condition
+		}
+
+		edges = append(edges, edge)
+	}
+
+	return edges
 }

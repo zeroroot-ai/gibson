@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag"
@@ -20,6 +21,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/plan"
+	"github.com/zero-day-ai/gibson/internal/state"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/queue"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -93,12 +95,12 @@ type Infrastructure struct {
 func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, error) {
 	d.logger.Info(ctx, "initializing infrastructure components")
 
-	// Create finding store with caching and tracing
-	findingStore := finding.NewDBFindingStore(
-		d.db,
-		finding.WithCacheSize(1000), // Cache last 1000 findings
-	)
-	d.logger.Info(ctx, "initialized finding store")
+	// Create finding store with Redis (required)
+	if d.stateClient == nil {
+		return nil, fmt.Errorf("StateClient not initialized - cannot create finding store")
+	}
+	findingStore := finding.NewRedisFindingStore(d.stateClient)
+	d.logger.Info(ctx, "initialized Redis finding store")
 
 	// Create LLM registry
 	llmRegistry := llm.NewLLMRegistry()
@@ -113,18 +115,21 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	slotManager := NewDaemonSlotManager(llmRegistry, d.logger.WithComponent("slot-manager").Slog())
 	d.logger.Info(ctx, "initialized slot manager")
 
-	// Create memory manager factory with database and config
+	// Create memory manager factory with StateClient and config
 	// Use memory config from daemon config, or nil to use defaults
 	var memConfig *memory.MemoryConfig
 	if d.config != nil {
 		// Config.Memory is a struct, not a pointer, so take its address
 		memConfig = &d.config.Memory
 	}
-	memoryFactory, err := NewMemoryManagerFactory(d.db, memConfig)
+
+	// Pass StateClient for Redis-backed memory (required)
+	memoryFactory, err := NewMemoryManagerFactory(d.stateClient, memConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create memory manager factory: %w", err)
 	}
-	d.logger.Info(ctx, "initialized memory manager factory")
+
+	d.logger.Info(ctx, "initialized memory manager factory with Redis support")
 
 	// Initialize TaxonomyRegistry with core taxonomy
 	// This provides the canonical node/relationship types and parent relationship rules
@@ -244,42 +249,130 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMRegistry) error {
 	d.logger.Debug(ctx, "registering LLM providers from configuration")
 
-	// TODO: Expand LLMConfig structure to support provider-specific configurations.
-	// Currently using environment variables for API keys.
+	// Check if config has provider-specific configurations
+	if d.config != nil && d.config.LLM.Providers != nil && len(d.config.LLM.Providers) > 0 {
+		// Register providers from configuration
+		for name, providerCfg := range d.config.LLM.Providers {
+			// Resolve API key from environment variable if specified
+			apiKey := providerCfg.APIKey
+			if providerCfg.APIKeyEnv != "" {
+				if envKey := os.Getenv(providerCfg.APIKeyEnv); envKey != "" {
+					apiKey = envKey
+				}
+			}
 
-	// Try to register Anthropic provider from environment
-	provider, err := providers.NewAnthropicProvider(llm.ProviderConfig{
-		Type:         llm.ProviderAnthropic,
-		DefaultModel: os.Getenv("ANTHROPIC_MODEL"), // Use env var, provider will use its default if empty
-		// APIKey will be read from ANTHROPIC_API_KEY environment variable
-	})
-	if err == nil {
-		if regErr := registry.RegisterProvider(provider); regErr != nil {
-			d.logger.Warn(ctx, "failed to register Anthropic provider", "error", regErr)
-		} else {
-			d.logger.Info(ctx, "registered Anthropic provider")
+			// Convert config.ProviderConfig type string to llm.ProviderType
+			var providerType llm.ProviderType
+			switch providerCfg.Type {
+			case "anthropic":
+				providerType = llm.ProviderAnthropic
+			case "openai":
+				providerType = llm.ProviderOpenAI
+			case "google":
+				providerType = llm.ProviderGoogle
+			default:
+				providerType = llm.ProviderCustom
+			}
+
+			// Convert config.ProviderConfig to llm.ProviderConfig
+			llmCfg := llm.ProviderConfig{
+				Type:         providerType,
+				APIKey:       apiKey,
+				BaseURL:      providerCfg.BaseURL,
+				DefaultModel: providerCfg.Model,
+			}
+
+			// Create provider using factory
+			provider, err := providers.NewProvider(llmCfg)
+			if err != nil {
+				d.logger.Warn(ctx, "failed to create provider",
+					"name", name,
+					"type", providerCfg.Type,
+					"error", err)
+				continue
+			}
+
+			// Register provider
+			if regErr := registry.RegisterProvider(provider); regErr != nil {
+				d.logger.Warn(ctx, "failed to register provider",
+					"name", name,
+					"type", providerCfg.Type,
+					"error", regErr)
+			} else {
+				d.logger.Info(ctx, "registered LLM provider",
+					"name", name,
+					"type", providerCfg.Type,
+					"model", providerCfg.Model)
+			}
 		}
 	} else {
-		d.logger.Debug(ctx, "Anthropic provider not available", "error", err)
-	}
+		// Fallback to environment-based registration for backward compatibility
+		d.logger.Debug(ctx, "no provider configuration found, using environment-based registration")
 
-	// Try to register OpenAI provider from environment
-	openaiProvider, err := providers.NewOpenAIProvider(llm.ProviderConfig{
-		Type:         llm.ProviderOpenAI,
-		DefaultModel: os.Getenv("OPENAI_MODEL"), // Use env var, provider will use its default if empty
-		// APIKey will be read from OPENAI_API_KEY environment variable
-	})
-	if err == nil {
-		if regErr := registry.RegisterProvider(openaiProvider); regErr != nil {
-			d.logger.Warn(ctx, "failed to register OpenAI provider", "error", regErr)
+		// Try to register Anthropic provider from environment
+		provider, err := providers.NewAnthropicProvider(llm.ProviderConfig{
+			Type:         llm.ProviderAnthropic,
+			DefaultModel: os.Getenv("ANTHROPIC_MODEL"), // Use env var, provider will use its default if empty
+			// APIKey will be read from ANTHROPIC_API_KEY environment variable
+		})
+		if err == nil {
+			if regErr := registry.RegisterProvider(provider); regErr != nil {
+				d.logger.Warn(ctx, "failed to register Anthropic provider", "error", regErr)
+			} else {
+				d.logger.Info(ctx, "registered Anthropic provider")
+			}
 		} else {
-			d.logger.Info(ctx, "registered OpenAI provider")
+			d.logger.Debug(ctx, "Anthropic provider not available", "error", err)
 		}
-	} else {
-		d.logger.Debug(ctx, "OpenAI provider not available", "error", err)
-	}
 
-	// TODO: Add Google and Ollama provider registration when config structure is expanded
+		// Try to register OpenAI provider from environment
+		openaiProvider, err := providers.NewOpenAIProvider(llm.ProviderConfig{
+			Type:         llm.ProviderOpenAI,
+			DefaultModel: os.Getenv("OPENAI_MODEL"), // Use env var, provider will use its default if empty
+			// APIKey will be read from OPENAI_API_KEY environment variable
+		})
+		if err == nil {
+			if regErr := registry.RegisterProvider(openaiProvider); regErr != nil {
+				d.logger.Warn(ctx, "failed to register OpenAI provider", "error", regErr)
+			} else {
+				d.logger.Info(ctx, "registered OpenAI provider")
+			}
+		} else {
+			d.logger.Debug(ctx, "OpenAI provider not available", "error", err)
+		}
+
+		// Try to register Google provider from environment
+		googleProvider, err := providers.NewGoogleProvider(llm.ProviderConfig{
+			Type:         llm.ProviderGoogle,
+			DefaultModel: os.Getenv("GOOGLE_MODEL"), // Use env var, provider will use its default if empty
+			// APIKey will be read from GOOGLE_API_KEY environment variable
+		})
+		if err == nil {
+			if regErr := registry.RegisterProvider(googleProvider); regErr != nil {
+				d.logger.Warn(ctx, "failed to register Google provider", "error", regErr)
+			} else {
+				d.logger.Info(ctx, "registered Google provider")
+			}
+		} else {
+			d.logger.Debug(ctx, "Google provider not available", "error", err)
+		}
+
+		// Try to register Ollama provider from environment
+		ollamaProvider, err := providers.NewOllamaProvider(llm.ProviderConfig{
+			Type:         "ollama",
+			BaseURL:      os.Getenv("OLLAMA_BASE_URL"), // Use env var, provider will use default if empty
+			DefaultModel: os.Getenv("OLLAMA_MODEL"),    // Use env var, provider will use its default if empty
+		})
+		if err == nil {
+			if regErr := registry.RegisterProvider(ollamaProvider); regErr != nil {
+				d.logger.Warn(ctx, "failed to register Ollama provider", "error", regErr)
+			} else {
+				d.logger.Info(ctx, "registered Ollama provider")
+			}
+		} else {
+			d.logger.Debug(ctx, "Ollama provider not available", "error", err)
+		}
+	}
 
 	// Verify at least one provider is registered
 	if len(registry.ListProviders()) == 0 {
@@ -296,6 +389,7 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 //  1. Database connectivity (via finding store)
 //  2. LLM provider health
 //  3. Registry health
+//  4. Redis/StateClient health (if enabled)
 //
 // Returns a map of component names to health status strings.
 func (d *daemonImpl) checkInfrastructureHealth(ctx context.Context, infra *Infrastructure) map[string]string {
@@ -329,6 +423,17 @@ func (d *daemonImpl) checkInfrastructureHealth(ctx context.Context, infra *Infra
 		}
 	} else {
 		health["component_registry"] = "not initialized"
+	}
+
+	// Check Redis StateClient health (required for Gibson operation)
+	if d.stateClient != nil {
+		if err := d.stateClient.Health(ctx); err != nil {
+			health["redis_state_client"] = fmt.Sprintf("unhealthy: %v", err)
+		} else {
+			health["redis_state_client"] = "healthy"
+		}
+	} else {
+		health["redis_state_client"] = "not initialized (critical error)"
 	}
 
 	return health
@@ -493,4 +598,98 @@ func (d *daemonImpl) initRedis(ctx context.Context) (queue.Client, error) {
 // Returns nil if Redis is not initialized.
 func (i *Infrastructure) RedisClient() queue.Client {
 	return i.redisClient
+}
+
+// initStateClient creates and initializes a StateClient for Redis state stores.
+// This provides unified Redis client access for mission stores, finding stores, and DAOs.
+// The method ensures RediSearch indexes are created during initialization.
+//
+// Implements retry logic with exponential backoff (3 attempts) for resilience during startup.
+//
+// Returns the initialized StateClient or an error if connection/initialization fails after all retries.
+func (d *daemonImpl) initStateClient(ctx context.Context) (*state.StateClient, error) {
+	d.logger.Info(ctx, "initializing StateClient for Redis state stores",
+		"url", d.config.Redis.URL,
+		"database", d.config.Redis.Database)
+
+	// Create StateClient config from daemon config
+	cfg := &state.Config{
+		URL:         d.config.Redis.URL,
+		Database:    d.config.Redis.Database,
+		DialTimeout: d.config.Redis.ConnectTimeout,
+		ReadTimeout: d.config.Redis.ReadTimeout,
+	}
+	cfg.ApplyDefaults()
+
+	// Retry configuration: 3 attempts with exponential backoff
+	const maxAttempts = 3
+	var client *state.StateClient
+	var err error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			// Calculate exponential backoff delay: 1s, 2s, 4s
+			backoffDelay := time.Duration(1<<uint(attempt-2)) * time.Second
+			d.logger.Warn(ctx, "retrying StateClient initialization after backoff",
+				"attempt", attempt,
+				"max_attempts", maxAttempts,
+				"backoff_delay", backoffDelay,
+				"previous_error", err)
+
+			// Sleep with context cancellation support
+			select {
+			case <-time.After(backoffDelay):
+				// Continue to retry
+			case <-ctx.Done():
+				return nil, fmt.Errorf("context cancelled during StateClient initialization retry: %w", ctx.Err())
+			}
+		}
+
+		d.logger.Debug(ctx, "attempting to create StateClient",
+			"attempt", attempt,
+			"max_attempts", maxAttempts)
+
+		// Create the StateClient (establishes connection and validates modules)
+		client, err = state.NewStateClient(cfg)
+		if err != nil {
+			d.logger.Warn(ctx, "failed to create StateClient",
+				"attempt", attempt,
+				"max_attempts", maxAttempts,
+				"error", err)
+
+			if attempt == maxAttempts {
+				return nil, fmt.Errorf("failed to create StateClient after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+
+		// Ensure RediSearch indexes are created for all Gibson entities
+		// This is idempotent - existing indexes are not recreated
+		d.logger.Info(ctx, "ensuring RediSearch indexes",
+			"attempt", attempt)
+
+		if err = client.EnsureIndexes(ctx); err != nil {
+			d.logger.Warn(ctx, "failed to ensure RediSearch indexes",
+				"attempt", attempt,
+				"max_attempts", maxAttempts,
+				"error", err)
+
+			client.Close()
+
+			if attempt == maxAttempts {
+				return nil, fmt.Errorf("failed to ensure RediSearch indexes after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+
+		// Success!
+		d.logger.Info(ctx, "StateClient initialized successfully",
+			"attempt", attempt,
+			"indexes_ensured", true)
+
+		return client, nil
+	}
+
+	// Should never reach here, but handle it gracefully
+	return nil, fmt.Errorf("failed to initialize StateClient after %d attempts: %w", maxAttempts, err)
 }

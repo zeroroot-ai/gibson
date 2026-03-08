@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -52,6 +53,72 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 
 // Implementation of api.DaemonInterface for delegation from gRPC server.
 // These methods delegate to the daemon's internal services.
+
+// updateAgentHeartbeat updates the last heartbeat time for an agent.
+// This should be called whenever an agent communicates with the daemon.
+//
+// Integration points (to be implemented in future):
+//   - During mission execution when agents send task results
+//   - During attack execution when agents report findings
+//   - When agents register or re-register with the registry
+//   - When agents respond to health checks
+func (d *daemonImpl) updateAgentHeartbeat(agentName string) {
+	d.agentStateMu.Lock()
+	defer d.agentStateMu.Unlock()
+
+	state, exists := d.agentState[agentName]
+	if !exists {
+		state = &AgentRuntimeState{}
+		d.agentState[agentName] = state
+	}
+	state.LastHeartbeat = time.Now()
+}
+
+// setAgentCurrentTask updates the current task for an agent.
+// This should be called when a task is assigned to or completed by an agent.
+//
+// Integration points (to be implemented in future):
+//   - In orchestrator when assigning workflow nodes to agents
+//   - In attack runner when starting agent operations
+//   - When tasks complete (set to empty string to clear)
+func (d *daemonImpl) setAgentCurrentTask(agentName string, taskID string) {
+	d.agentStateMu.Lock()
+	defer d.agentStateMu.Unlock()
+
+	state, exists := d.agentState[agentName]
+	if !exists {
+		state = &AgentRuntimeState{
+			LastHeartbeat: time.Now(),
+		}
+		d.agentState[agentName] = state
+	}
+
+	// If setting a new task (non-empty), update start time
+	if taskID != "" {
+		state.CurrentTask = taskID
+		state.TaskStartTime = time.Now()
+	} else {
+		// Clearing the task
+		state.CurrentTask = ""
+		state.TaskStartTime = time.Time{}
+	}
+}
+
+// getAgentState retrieves the runtime state for an agent.
+// Returns nil if no state exists for the agent.
+func (d *daemonImpl) getAgentState(agentName string) *AgentRuntimeState {
+	d.agentStateMu.RLock()
+	defer d.agentStateMu.RUnlock()
+
+	state, exists := d.agentState[agentName]
+	if !exists {
+		return nil
+	}
+
+	// Return a copy to avoid race conditions
+	stateCopy := *state
+	return &stateCopy
+}
 
 // Status implements the api.DaemonInterface.Status method.
 // It returns the daemon status in the format expected by the gRPC API.
@@ -119,10 +186,18 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 					endpoint = r.Endpoints[0]
 				}
 
+				// Get runtime state for last seen time
+				runtimeState := d.getAgentState(r.Name)
+				lastSeen := time.Now()
+				if runtimeState != nil && !runtimeState.LastHeartbeat.IsZero() {
+					lastSeen = runtimeState.LastHeartbeat
+				}
+
 				if existing, ok := agentMap[r.Name]; ok {
 					// Update existing agent with running info
 					existing.Health = "running"
 					existing.Endpoint = endpoint
+					existing.LastSeen = lastSeen
 					if r.Version != "" {
 						existing.Version = r.Version
 					}
@@ -137,6 +212,7 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 						Endpoint:     endpoint,
 						Capabilities: r.Capabilities,
 						Health:       "running",
+						LastSeen:     lastSeen,
 					}
 				}
 			}
@@ -179,6 +255,13 @@ func (d *daemonImpl) GetAgentStatus(ctx context.Context, agentID string) (api.Ag
 				health = "unknown"
 			}
 
+			// Get runtime state for the agent (last heartbeat, current task)
+			runtimeState := d.getAgentState(agent.Name)
+			lastSeen := time.Now()
+			if runtimeState != nil && !runtimeState.LastHeartbeat.IsZero() {
+				lastSeen = runtimeState.LastHeartbeat
+			}
+
 			// Build agent info
 			agentInfo := api.AgentInfoInternal{
 				ID:           agent.Name,
@@ -188,15 +271,23 @@ func (d *daemonImpl) GetAgentStatus(ctx context.Context, agentID string) (api.Ag
 				Endpoint:     endpoint,
 				Capabilities: agent.Capabilities,
 				Health:       health,
-				LastSeen:     time.Now(), // TODO: Track actual last seen time
+				LastSeen:     lastSeen,
+			}
+
+			// Get current task from runtime state
+			currentTask := ""
+			taskStartTime := time.Time{}
+			if runtimeState != nil {
+				currentTask = runtimeState.CurrentTask
+				taskStartTime = runtimeState.TaskStartTime
 			}
 
 			// Build agent status
 			status := api.AgentStatusInternal{
 				Agent:         agentInfo,
 				Active:        agent.Instances > 0,
-				CurrentTask:   "", // TODO: Track current task when mission execution is implemented
-				TaskStartTime: time.Time{},
+				CurrentTask:   currentTask,
+				TaskStartTime: taskStartTime,
 			}
 
 			d.logger.Debug(ctx, "found agent status", "agent_id", agentID, "instances", agent.Instances)
@@ -952,35 +1043,70 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 		return nil, 0, fmt.Errorf("mission name cannot be empty")
 	}
 
-	// TODO: Implement when mission run linker is added (Task 13)
-	// This will query the mission store for all missions with the given name
-	// For now, return empty results as the store doesn't support name filtering
-	// This will be properly implemented once the run linker is integrated
-	missions := []*mission.Mission{}
-	total := 0
+	// Check if run store is available
+	if d.missionRunStore == nil {
+		d.logger.Warn(ctx, "mission run store not initialized")
+		return []api.MissionRunData{}, 0, nil
+	}
 
-	// TODO: Once run linker is properly wired, use:
-	// missions, err := d.infrastructure.runLinker.GetRunHistory(ctx, name)
-	// if err != nil {
-	//     return nil, 0, err
-	// }
+	// Get the mission by name to find its ID
+	m, err := d.missionStore.GetByName(ctx, name)
+	if err != nil {
+		if mission.IsNotFoundError(err) {
+			d.logger.Debug(ctx, "mission not found", "name", name)
+			return []api.MissionRunData{}, 0, nil
+		}
+		d.logger.Error(ctx, "failed to get mission", "error", err, "name", name)
+		return nil, 0, fmt.Errorf("failed to get mission: %w", err)
+	}
 
-	// Convert missions to MissionRunData
-	runs := make([]api.MissionRunData, len(missions))
-	for i, m := range missions {
+	// Get all runs for this mission
+	missionRuns, err := d.missionRunStore.ListByMission(ctx, m.ID)
+	if err != nil {
+		d.logger.Error(ctx, "failed to list mission runs", "error", err, "mission_id", m.ID)
+		return nil, 0, fmt.Errorf("failed to list mission runs: %w", err)
+	}
+
+	// Apply pagination
+	total := len(missionRuns)
+	if offset >= total {
+		return []api.MissionRunData{}, total, nil
+	}
+
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	if limit == 0 {
+		end = total
+	}
+
+	pagedRuns := missionRuns[offset:end]
+
+	// Convert to API format
+	runs := make([]api.MissionRunData, len(pagedRuns))
+	for i, r := range pagedRuns {
 		completedAt := int64(0)
-		if m.CompletedAt != nil {
-			completedAt = m.CompletedAt.Unix()
+		if r.CompletedAt != nil {
+			completedAt = r.CompletedAt.Unix()
+		}
+
+		startedAt := int64(0)
+		if r.StartedAt != nil {
+			startedAt = r.StartedAt.Unix()
 		}
 
 		runs[i] = api.MissionRunData{
-			MissionID:     m.ID.String(),
-			RunNumber:     1, // TODO: Will be populated when run_number field is added
-			Status:        string(m.Status),
-			CreatedAt:     m.CreatedAt.Unix(),
+			RunID:         r.ID.String(),
+			MissionID:     r.MissionID.String(),
+			RunNumber:     r.RunNumber,
+			Status:        string(r.Status),
+			Progress:      r.Progress,
+			CreatedAt:     r.CreatedAt.Unix(),
+			StartedAt:     startedAt,
 			CompletedAt:   completedAt,
-			FindingsCount: m.FindingsCount,
-			PreviousRunID: "", // TODO: Will be populated when previous_run_id field is added
+			FindingsCount: r.FindingsCount,
+			Error:         r.Error,
 		}
 	}
 
@@ -1452,7 +1578,7 @@ func (d *daemonImpl) ShowComponent(ctx context.Context, kind string, name string
 	}, nil
 }
 
-// GetComponentLogs streams log entries for a component.
+// GetComponentLogs streams log entries for a component using fsnotify-based log tailer.
 func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan api.LogEntryData, error) {
 	d.logger.Debug(ctx, "GetComponentLogs called", "kind", kind, "name", name, "follow", follow, "lines", lines)
 
@@ -1496,6 +1622,72 @@ func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name str
 		return nil, fmt.Errorf("log file not found for component '%s'", name)
 	}
 
+	// Use LogTailer if available, otherwise fall back to simple implementation
+	if d.logTailer != nil {
+		return d.getComponentLogsWithTailer(ctx, name, logFilePath, follow, lines)
+	}
+
+	// Fallback: simple file reading (for backward compatibility)
+	return d.getComponentLogsSimple(ctx, name, logFilePath, follow, lines)
+}
+
+// getComponentLogsWithTailer uses the LogTailer for efficient log streaming with fsnotify.
+func (d *daemonImpl) getComponentLogsWithTailer(ctx context.Context, componentName string, logFilePath string, follow bool, lines int) (<-chan api.LogEntryData, error) {
+	// Start watching this component if not already watching
+	if !d.logTailer.IsWatching(componentName) {
+		if err := d.logTailer.StartWatching(componentName, logFilePath); err != nil {
+			d.logger.Error(ctx, "failed to start watching component logs", "error", err, "component", componentName)
+			return nil, fmt.Errorf("failed to start watching logs: %w", err)
+		}
+	}
+
+	// Create subscription options
+	opts := SubscribeOptions{
+		ComponentIDs: []string{componentName},
+		Follow:       follow,
+		TailLines:    lines,
+	}
+
+	// Subscribe to log entries
+	sub, err := d.logTailer.Subscribe(ctx, opts)
+	if err != nil {
+		d.logger.Error(ctx, "failed to subscribe to component logs", "error", err, "component", componentName)
+		return nil, fmt.Errorf("failed to subscribe to logs: %w", err)
+	}
+
+	// Create output channel
+	logChan := make(chan api.LogEntryData, 100)
+
+	// Start goroutine to convert LogEntry to api.LogEntryData
+	go func() {
+		defer close(logChan)
+		defer d.logTailer.Unsubscribe(sub)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case entry, ok := <-sub.Output:
+				if !ok {
+					// Subscription closed
+					return
+				}
+
+				// Convert LogEntry to api.LogEntryData
+				logChan <- api.LogEntryData{
+					Timestamp: entry.Timestamp.Unix(),
+					Level:     entry.Level,
+					Message:   entry.Message,
+				}
+			}
+		}
+	}()
+
+	return logChan, nil
+}
+
+// getComponentLogsSimple provides a simple fallback implementation without LogTailer.
+func (d *daemonImpl) getComponentLogsSimple(ctx context.Context, componentName string, logFilePath string, follow bool, lines int) (<-chan api.LogEntryData, error) {
 	// Create channel for streaming logs
 	logChan := make(chan api.LogEntryData, 100)
 
@@ -1511,12 +1703,9 @@ func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name str
 		}
 		defer file.Close()
 
-		// If lines limit is specified, seek to the end and read last N lines
-		// For simplicity, we'll read the entire file and send the last N lines
+		// Read all lines
 		scanner := bufio.NewScanner(file)
 		var logLines []string
-
-		// Read all lines
 		for scanner.Scan() {
 			logLines = append(logLines, scanner.Text())
 		}
@@ -1545,49 +1734,46 @@ func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name str
 			}
 		}
 
-		// If follow mode, tail the file
-		if follow {
-			// TODO: Implement file tailing using fsnotify or similar
-			// For now, poll the file periodically
-			ticker := time.NewTicker(500 * time.Millisecond)
-			defer ticker.Stop()
+		// If follow mode not requested, we're done
+		if !follow {
+			return
+		}
 
-			lastSize := int64(0)
-			fileInfo, err := os.Stat(logFilePath)
-			if err == nil {
-				lastSize = fileInfo.Size()
-			}
+		// Simple polling for follow mode
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
 
-			for {
-				select {
-				case <-ctx.Done():
+		lastSize, _ := file.Seek(0, io.SeekCurrent)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Check if file has grown
+				fileInfo, err := os.Stat(logFilePath)
+				if err != nil {
+					d.logger.Error(ctx, "error checking log file", "error", err)
 					return
-				case <-ticker.C:
-					// Check if file has grown
-					fileInfo, err := os.Stat(logFilePath)
-					if err != nil {
-						d.logger.Error(ctx, "error checking log file", "error", err)
-						return
-					}
+				}
 
-					currentSize := fileInfo.Size()
-					if currentSize > lastSize {
-						// Read new content
-						file.Seek(lastSize, 0)
-						scanner := bufio.NewScanner(file)
-						for scanner.Scan() {
-							select {
-							case <-ctx.Done():
-								return
-							case logChan <- api.LogEntryData{
-								Timestamp: time.Now().Unix(),
-								Level:     "info",
-								Message:   scanner.Text(),
-							}:
-							}
+				currentSize := fileInfo.Size()
+				if currentSize > lastSize {
+					// Read new content
+					file.Seek(lastSize, 0)
+					scanner := bufio.NewScanner(file)
+					for scanner.Scan() {
+						select {
+						case <-ctx.Done():
+							return
+						case logChan <- api.LogEntryData{
+							Timestamp: time.Now().Unix(),
+							Level:     "info",
+							Message:   scanner.Text(),
+						}:
 						}
-						lastSize = currentSize
 					}
+					lastSize = currentSize
 				}
 			}
 		}
@@ -1915,4 +2101,122 @@ func (d *daemonImpl) EnsureMissionDependencies(ctx context.Context, missionPath 
 	d.logger.Info(ctx, "mission dependencies are running", "mission_path", missionPath, "total_nodes", len(tree.Nodes))
 
 	return nil
+}
+
+// CreateMission creates a new mission with target and workflow configuration.
+// Supports both referenced and inline target/workflow configurations.
+func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionData) (api.CreateMissionResultData, error) {
+	d.logger.Info(ctx, "CreateMission called",
+		"name", req.Name,
+		"has_target_id", req.TargetID != "",
+		"has_inline_target", req.InlineTarget != nil,
+		"has_workflow_id", req.WorkflowID != "",
+		"has_inline_workflow", req.InlineWorkflow != nil,
+	)
+
+	// Build MissionConfig from API request
+	missionConfig := &mission.MissionConfig{
+		Name:        req.Name,
+		Description: req.Description,
+	}
+
+	// Handle target configuration
+	if req.TargetID != "" {
+		missionConfig.Target.Reference = req.TargetID
+	} else if req.InlineTarget != nil {
+		// Convert API inline target to mission inline target config
+		seeds := make([]*mission.TargetSeedConfig, len(req.InlineTarget.Seeds))
+		for i, s := range req.InlineTarget.Seeds {
+			seeds[i] = &mission.TargetSeedConfig{
+				Value: s.Value,
+				Type:  s.Type,
+				Scope: s.Scope,
+			}
+		}
+		missionConfig.Target.Inline = &mission.InlineTargetConfig{
+			Seeds:    seeds,
+			Profile:  req.InlineTarget.Profile,
+			Depth:    req.InlineTarget.Depth,
+			Excluded: req.InlineTarget.Excluded,
+			Metadata: req.InlineTarget.Metadata,
+		}
+	} else {
+		d.logger.Error(ctx, "no target configuration provided")
+		return api.CreateMissionResultData{}, fmt.Errorf("target configuration is required (target_id or inline_target)")
+	}
+
+	// Handle workflow configuration
+	if req.WorkflowID != "" {
+		missionConfig.Workflow.Reference = req.WorkflowID
+	} else if req.InlineWorkflow != nil {
+		// Convert API inline workflow to mission inline workflow config
+		nodes := make([]*mission.WorkflowNodeConfig, len(req.InlineWorkflow.Nodes))
+		for i, n := range req.InlineWorkflow.Nodes {
+			// Convert map[string]any to map[string]string for config
+			var config map[string]string
+			if n.Config != nil {
+				config = make(map[string]string, len(n.Config))
+				for k, v := range n.Config {
+					if str, ok := v.(string); ok {
+						config[k] = str
+					} else {
+						config[k] = fmt.Sprintf("%v", v)
+					}
+				}
+			}
+			nodes[i] = &mission.WorkflowNodeConfig{
+				ID:        n.ID,
+				Type:      n.Type,
+				Name:      n.Name,
+				DependsOn: n.DependsOn,
+				Config:    config,
+			}
+		}
+		edges := make([]*mission.WorkflowEdgeConfig, len(req.InlineWorkflow.Edges))
+		for i, e := range req.InlineWorkflow.Edges {
+			edges[i] = &mission.WorkflowEdgeConfig{
+				From:      e.From,
+				To:        e.To,
+				Condition: e.Condition,
+			}
+		}
+		missionConfig.Workflow.Inline = &mission.InlineWorkflowConfig{
+			Name:     req.InlineWorkflow.Name,
+			Nodes:    nodes,
+			Edges:    edges,
+			Metadata: req.InlineWorkflow.Metadata,
+		}
+	} else {
+		d.logger.Error(ctx, "no workflow configuration provided")
+		return api.CreateMissionResultData{}, fmt.Errorf("workflow configuration is required (workflow_id or inline_workflow)")
+	}
+
+	// Initialize mission service if needed
+	if d.missionService == nil {
+		d.logger.Error(ctx, "mission service not available")
+		return api.CreateMissionResultData{}, fmt.Errorf("mission service not initialized")
+	}
+
+	// Create mission using the service
+	m, err := d.missionService.CreateFromConfig(ctx, missionConfig)
+	if err != nil {
+		d.logger.Error(ctx, "failed to create mission", "error", err, "name", req.Name)
+		return api.CreateMissionResultData{}, fmt.Errorf("failed to create mission: %w", err)
+	}
+
+	d.logger.Info(ctx, "mission created successfully",
+		"mission_id", m.ID.String(),
+		"target_id", m.TargetID.String(),
+		"workflow_id", m.WorkflowID.String(),
+	)
+
+	return api.CreateMissionResultData{
+		MissionID:   m.ID.String(),
+		TargetID:    m.TargetID.String(),
+		WorkflowID:  m.WorkflowID.String(),
+		Name:        m.Name,
+		Description: m.Description,
+		Status:      string(m.Status),
+		CreatedAt:   m.CreatedAt,
+	}, nil
 }

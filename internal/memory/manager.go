@@ -1,12 +1,8 @@
 package memory
 
 import (
-	"os"
-	"path/filepath"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/database"
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -35,86 +31,32 @@ type DefaultMemoryManager struct {
 	closed    bool
 }
 
-// NewMemoryManager creates a new MemoryManager with the specified configuration.
-// It initializes all three memory tiers: working, mission, and long-term.
+// NewMemoryManagerWithComponents creates a new MemoryManager with pre-initialized components.
+// This is used by the factory when creating Redis-backed memory managers.
 //
 // Parameters:
 //   - missionID: The mission ID to scope this memory manager to
-//   - db: The database connection for mission memory persistence
-//   - config: Memory configuration (uses defaults if nil)
+//   - working: Pre-initialized working memory instance
+//   - mission: Pre-initialized mission memory instance
+//   - longTerm: Pre-initialized long-term memory instance
+//   - store: Pre-initialized vector store instance
 //
-// Returns a MemoryManager ready for use, or an error if initialization fails.
-func NewMemoryManager(missionID types.ID, db *database.DB, config *MemoryConfig) (MemoryManager, error) {
-	// Apply defaults if config is nil
-	if config == nil {
-		config = NewDefaultMemoryConfig()
-	} else {
-		config.ApplyDefaults()
-	}
-
-	// Validate configuration
-	if err := config.Validate(); err != nil {
-		return nil, NewInvalidConfigError("memory configuration validation failed: " + err.Error())
-	}
-
-	// Initialize working memory
-	workingMem := NewWorkingMemory(config.Working.MaxTokens)
-
-	// Initialize mission memory
-	missionMem := NewMissionMemory(db, missionID, config.Mission.CacheSize)
-
-	// Initialize embedder based on config
-	var emb embedder.Embedder
-	var embErr error
-	switch config.LongTerm.Embedder.Provider {
-	case "native", "":
-		// Use native MiniLM embedder (default)
-		emb, embErr = embedder.CreateNativeEmbedder()
-		if embErr != nil {
-			return nil, NewEmbedderUnavailableError("failed to create native embedder: " + embErr.Error())
-		}
-	case "openai":
-		// OpenAI embedder not yet implemented
-		return nil, NewInvalidConfigError("OpenAI embedder not yet implemented - use 'native' provider")
-	default:
-		return nil, NewInvalidConfigError("unknown embedder provider: " + config.LongTerm.Embedder.Provider)
-	}
-
-	// Get embedding dimensions from embedder
-	dims := emb.Dimensions()
-
-	// Determine storage path for sqlite backend
-	storagePath := config.LongTerm.StoragePath
-	if storagePath == "" && config.LongTerm.Backend == "sqlite" {
-		// Default: use mission-scoped database in ~/.gibson/vectors/
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, NewInvalidConfigError("failed to determine home directory: " + err.Error())
-		}
-		storagePath = filepath.Join(homeDir, ".gibson", "vectors", string(missionID)+".db")
-	}
-
-	// Initialize vector store using factory
-	vectorStore, err := vector.NewVectorStore(vector.VectorStoreConfig{
-		Backend:     config.LongTerm.Backend,
-		StoragePath: storagePath,
-		Dimensions:  dims,
-	})
-	if err != nil {
-		return nil, NewVectorStoreError("failed to create vector store", err)
-	}
-
-	// Initialize long-term memory
-	longTermMem := NewLongTermMemory(vectorStore, emb)
-
+// Returns a MemoryManager ready for use.
+func NewMemoryManagerWithComponents(
+	missionID types.ID,
+	working WorkingMemory,
+	mission MissionMemory,
+	longTerm LongTermMemory,
+	store vector.VectorStore,
+) MemoryManager {
 	return &DefaultMemoryManager{
 		missionID: missionID,
-		working:   workingMem,
-		mission:   missionMem,
-		longTerm:  longTermMem,
-		store:     vectorStore,
+		working:   working,
+		mission:   mission,
+		longTerm:  longTerm,
+		store:     store,
 		closed:    false,
-	}, nil
+	}
 }
 
 // Working returns the working memory instance.

@@ -45,6 +45,7 @@ type mockDaemon struct {
 	resolveMissionDependenciesFn  func(ctx context.Context, missionPath string) (DependencyTreeData, error)
 	validateMissionDependenciesFn func(ctx context.Context, missionPath string) (ValidationResultData, error)
 	ensureMissionDependenciesFn   func(ctx context.Context, missionPath string) error
+	createMissionFn               func(ctx context.Context, req CreateMissionData) (CreateMissionResultData, error)
 }
 
 func (m *mockDaemon) Status() (DaemonStatus, error) {
@@ -262,6 +263,13 @@ func (m *mockDaemon) EnsureMissionDependencies(ctx context.Context, missionPath 
 		return m.ensureMissionDependenciesFn(ctx, missionPath)
 	}
 	return nil
+}
+
+func (m *mockDaemon) CreateMission(ctx context.Context, req CreateMissionData) (CreateMissionResultData, error) {
+	if m.createMissionFn != nil {
+		return m.createMissionFn(ctx, req)
+	}
+	return CreateMissionResultData{}, nil
 }
 
 // mockServerStream implements grpc.ServerStreamingServer[MissionEvent] for testing

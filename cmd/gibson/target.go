@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zero-day-ai/gibson/cmd/gibson/internal"
 	"github.com/zero-day-ai/gibson/internal/database"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -135,6 +136,80 @@ func init() {
 	targetCmd.AddCommand(targetDeleteCmd)
 }
 
+// createTargetDAO creates a Redis-backed target DAO using the global configuration
+func createTargetDAO() (database.TargetDAO, func(), error) {
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
+	}
+	stateCfg.ApplyDefaults()
+
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create state client: %w", err)
+	}
+
+	// Create Redis target DAO
+	dao := database.NewRedisTargetDAO(stateClient)
+
+	// Return DAO and cleanup function
+	cleanup := func() {
+		if err := stateClient.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close state client: %v\n", err)
+		}
+	}
+
+	return dao, cleanup, nil
+}
+
+// createCredentialDAO creates a Redis-backed credential DAO using the global configuration
+func createCredentialDAO() (database.CredentialDAO, func(), error) {
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
+	}
+	stateCfg.ApplyDefaults()
+
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create state client: %w", err)
+	}
+
+	// Create Redis credential DAO
+	dao := database.NewRedisCredentialDAO(stateClient)
+
+	// Return DAO and cleanup function
+	cleanup := func() {
+		if err := stateClient.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close state client: %v\n", err)
+		}
+	}
+
+	return dao, cleanup, nil
+}
+
 // runTargetList executes the target list command
 func runTargetList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
@@ -144,19 +219,12 @@ func runTargetList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid output format: %s (must be 'table' or 'json')", listOutputFormat)
 	}
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create target DAO using Redis
+	dao, cleanup, err := createTargetDAO()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create target DAO: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
+	defer cleanup()
 
 	// Create filter
 	filter := types.NewTargetFilter()
@@ -178,7 +246,6 @@ func runTargetList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Query targets
-	dao := database.NewTargetDAO(db)
 	targets, err := dao.List(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to list targets: %w", err)
@@ -273,24 +340,15 @@ func runTargetAdd(cmd *cobra.Command, args []string) error {
 		cmd.Printf("Warning: %v\n", err)
 	}
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create target DAO using Redis
+	dao, cleanup, err := createTargetDAO()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create target DAO: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	dao := database.NewTargetDAO(db)
+	defer cleanup()
 
 	// Check if target name already exists
-	exists, err := dao.ExistsByName(ctx, targetName)
+	exists, err := dao.Exists(ctx, targetName)
 	if err != nil {
 		return fmt.Errorf("failed to check target name: %w", err)
 	}
@@ -324,7 +382,12 @@ func runTargetAdd(cmd *cobra.Command, args []string) error {
 
 	// Handle credential if specified
 	if addCredential != "" {
-		credDAO := database.NewCredentialDAO(db)
+		credDAO, credCleanup, err := createCredentialDAO()
+		if err != nil {
+			return fmt.Errorf("failed to create credential DAO: %w", err)
+		}
+		defer credCleanup()
+
 		cred, err := credDAO.GetByName(ctx, addCredential)
 		if err != nil {
 			return fmt.Errorf("failed to find credential '%s': %w", addCredential, err)
@@ -491,22 +554,14 @@ func runTargetShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid output format: %s (must be 'text' or 'json')", showOutputFormat)
 	}
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create target DAO using Redis
+	dao, cleanup, err := createTargetDAO()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create target DAO: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
+	defer cleanup()
 
 	// Get target
-	dao := database.NewTargetDAO(db)
 	target, err := dao.GetByName(ctx, targetName)
 	if err != nil {
 		return fmt.Errorf("failed to get target: %w", err)
@@ -665,22 +720,14 @@ func runTargetTest(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	targetName := args[0]
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create target DAO using Redis
+	dao, cleanup, err := createTargetDAO()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create target DAO: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
+	defer cleanup()
 
 	// Get target
-	dao := database.NewTargetDAO(db)
 	target, err := dao.GetByName(ctx, targetName)
 	if err != nil {
 		return fmt.Errorf("failed to get target: %w", err)
@@ -742,22 +789,14 @@ func runTargetDelete(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	targetName := args[0]
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create target DAO using Redis
+	dao, cleanup, err := createTargetDAO()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create target DAO: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
+	defer cleanup()
 
 	// Get target
-	dao := database.NewTargetDAO(db)
 	target, err := dao.GetByName(ctx, targetName)
 	if err != nil {
 		return fmt.Errorf("failed to get target: %w", err)

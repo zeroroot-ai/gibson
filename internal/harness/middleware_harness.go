@@ -232,8 +232,11 @@ func (h *MiddlewareHarness) Log(level, message string, fields map[string]any) {
 }
 
 var _ AgentHarness = (*MiddlewareHarness)(nil)
-// TODO(gibson-calltool-removal): Re-enable after task 7.1 removes ExecuteTool from agent.AgentHarness
-// var _ agent.AgentHarness = (*MiddlewareHarness)(nil)
+
+// TODO: Re-enable SDK Harness interface check once CallToolProtoStream is implemented
+// The SDK agent.Harness interface now requires CallToolProtoStream which needs to be
+// implemented in MiddlewareHarness as a pass-through to the inner harness.
+// var _ sdkagent.Harness = (*MiddlewareHarness)(nil)
 
 // GraphRAGSupport interface implementation - pass through to inner harness
 // These methods enable GraphRAG operations for external agents using callback RPCs.

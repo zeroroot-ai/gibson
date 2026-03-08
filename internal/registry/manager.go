@@ -66,17 +66,14 @@ func NewManager(cfg config.RegistryConfig) *Manager {
 
 // Start initializes and starts the registry.
 //
-// This method selects the appropriate registry implementation based on the
-// configuration and starts it. For embedded mode, this launches an in-process
-// etcd server. For external mode, this establishes a connection to the external
-// etcd cluster.
+// This method creates an external etcd registry and establishes a connection
+// to the external etcd cluster.
 //
 // Start() is idempotent - if the registry is already started, this is a no-op.
 //
 // Returns an error if:
-//   - The registry fails to start (embedded etcd startup failure)
 //   - Cannot connect to external etcd cluster
-//   - Invalid configuration (e.g., Type="etcd" but no endpoints)
+//   - Invalid configuration (e.g., no endpoints configured)
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -89,31 +86,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Convert Gibson config to SDK registry config
 	sdkCfg := m.toSDKConfig()
 
-	var reg registry.Registry
-	var err error
-
-	// Default to embedded if Type not set or explicitly "embedded"
-	registryType := m.config.Type
-	if registryType == "" {
-		registryType = "embedded"
-	}
-
-	// Create appropriate registry implementation
-	switch registryType {
-	case "embedded":
-		reg, err = NewEmbeddedRegistry(sdkCfg)
-		if err != nil {
-			return fmt.Errorf("failed to create embedded registry: %w", err)
-		}
-
-	case "etcd":
-		reg, err = NewExternalRegistry(sdkCfg)
-		if err != nil {
-			return fmt.Errorf("failed to create external registry: %w", err)
-		}
-
-	default:
-		return fmt.Errorf("unsupported registry type: %s (must be 'embedded' or 'etcd')", registryType)
+	// Create external registry (etcd is now the only supported backend)
+	reg, err := NewExternalRegistry(sdkCfg)
+	if err != nil {
+		return fmt.Errorf("failed to create external registry: %w", err)
 	}
 
 	m.registry = reg
@@ -270,34 +246,20 @@ func (m *Manager) toSDKConfig() registry.Config {
 	return cfg
 }
 
-// getEffectiveType returns the registry type, defaulting to "embedded" if not set.
+// getEffectiveType returns the registry type.
 func (m *Manager) getEffectiveType() string {
 	if m.config.Type == "" {
-		return "embedded"
+		return "etcd"
 	}
 	return m.config.Type
 }
 
-// getEndpoint returns the appropriate endpoint based on registry type.
+// getEndpoint returns the etcd endpoint.
 func (m *Manager) getEndpoint() string {
-	registryType := m.getEffectiveType()
-
-	switch registryType {
-	case "embedded":
-		if m.config.ListenAddress != "" {
-			return m.config.ListenAddress
-		}
-		return "localhost:2379" // default
-
-	case "etcd":
-		if len(m.config.Endpoints) > 0 {
-			return m.config.Endpoints[0] // return first endpoint
-		}
-		return "unknown"
-
-	default:
-		return "unknown"
+	if len(m.config.Endpoints) > 0 {
+		return m.config.Endpoints[0] // return first endpoint
 	}
+	return "unknown"
 }
 
 // ClientAccessor defines an interface for types that can provide an etcd client.

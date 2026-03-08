@@ -15,16 +15,16 @@ import (
 
 // mockEventBus is a mock implementation of events.EventBus for testing
 type mockEventBus struct {
-	mu               sync.Mutex
-	published        []events.Event
-	subscribers      map[string]chan events.Event
+	mu                sync.Mutex
+	published         []events.Event
+	subscribers       map[string]chan events.Event
 	subscriberFilters map[string]events.Filter
 }
 
 func newMockEventBus() *mockEventBus {
 	return &mockEventBus{
-		published:        make([]events.Event, 0),
-		subscribers:      make(map[string]chan events.Event),
+		published:         make([]events.Event, 0),
+		subscribers:       make(map[string]chan events.Event),
 		subscriberFilters: make(map[string]events.Filter),
 	}
 }
@@ -116,17 +116,17 @@ func (m *mockEventBus) Reset() {
 // TestAgentStartedEvent tests that agent.started events are emitted correctly
 func TestAgentStartedEvent(t *testing.T) {
 	tests := []struct {
-		name           string
-		agentName      string
+		name            string
+		agentName       string
 		taskDescription string
-		missionID      types.ID
+		missionID       types.ID
 		validatePayload func(*testing.T, events.Event)
 	}{
 		{
-			name:           "basic agent started event",
-			agentName:      "scanner",
+			name:            "basic agent started event",
+			agentName:       "scanner",
 			taskDescription: "Scan target for vulnerabilities",
-			missionID:      types.NewID(),
+			missionID:       types.NewID(),
 			validatePayload: func(t *testing.T, event events.Event) {
 				assert.Equal(t, events.EventAgentStarted, event.Type)
 				assert.NotZero(t, event.Timestamp)
@@ -139,10 +139,10 @@ func TestAgentStartedEvent(t *testing.T) {
 			},
 		},
 		{
-			name:           "agent with empty task description",
-			agentName:      "analyzer",
+			name:            "agent with empty task description",
+			agentName:       "analyzer",
 			taskDescription: "",
-			missionID:      types.NewID(),
+			missionID:       types.NewID(),
 			validatePayload: func(t *testing.T, event events.Event) {
 				payload, ok := event.Payload.(events.AgentStartedPayload)
 				require.True(t, ok)
@@ -183,11 +183,11 @@ func TestAgentStartedEvent(t *testing.T) {
 // TestAgentCompletedEvent tests that agent.completed events are emitted correctly
 func TestAgentCompletedEvent(t *testing.T) {
 	tests := []struct {
-		name           string
-		agentName      string
-		duration       time.Duration
-		findingCount   int
-		success        bool
+		name            string
+		agentName       string
+		duration        time.Duration
+		findingCount    int
+		success         bool
 		validatePayload func(*testing.T, events.Event)
 	}{
 		{
@@ -257,11 +257,11 @@ func TestAgentCompletedEvent(t *testing.T) {
 // TestAgentFailedEvent tests that agent.failed events are emitted correctly
 func TestAgentFailedEvent(t *testing.T) {
 	tests := []struct {
-		name           string
-		agentName      string
-		error          string
-		duration       time.Duration
-		findingCount   int
+		name            string
+		agentName       string
+		error           string
+		duration        time.Duration
+		findingCount    int
 		validatePayload func(*testing.T, events.Event)
 	}{
 		{
@@ -331,10 +331,10 @@ func TestAgentFailedEvent(t *testing.T) {
 // TestAgentCancelledEvent tests that agent.cancelled events are emitted correctly
 func TestAgentCancelledEvent(t *testing.T) {
 	tests := []struct {
-		name           string
-		agentName      string
-		cancelReason   string
-		duration       time.Duration
+		name            string
+		agentName       string
+		cancelReason    string
+		duration        time.Duration
 		validatePayload func(*testing.T, events.Event)
 	}{
 		{

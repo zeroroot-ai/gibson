@@ -17,30 +17,30 @@ import (
 // MockGraphRAGStore implements graphrag.GraphRAGStore for testing
 type MockGraphRAGStore struct {
 	// Control flags
-	ShouldFailQuery                   bool
-	ShouldFailFindSimilarAttacks      bool
-	ShouldFailFindSimilarFindings     bool
-	ShouldFailGetAttackChains         bool
-	ShouldFailGetRelatedFindings      bool
-	ShouldFailStore                   bool
-	ShouldFailStoreWithoutEmbedding   bool
-	ShouldFailStoreBatch              bool
-	ShouldFailStoreRelationshipOnly   bool
-	IsHealthy                         bool
-	HealthMessage                     string
+	ShouldFailQuery                 bool
+	ShouldFailFindSimilarAttacks    bool
+	ShouldFailFindSimilarFindings   bool
+	ShouldFailGetAttackChains       bool
+	ShouldFailGetRelatedFindings    bool
+	ShouldFailStore                 bool
+	ShouldFailStoreWithoutEmbedding bool
+	ShouldFailStoreBatch            bool
+	ShouldFailStoreRelationshipOnly bool
+	IsHealthy                       bool
+	HealthMessage                   string
 
 	// Capture method calls
-	QueryCalled                   bool
-	FindSimilarAttacksCalled      bool
-	FindSimilarFindingsCalled     bool
-	GetAttackChainsCalled         bool
-	GetRelatedFindingsCalled      bool
-	StoreCalled                   bool
-	StoreWithoutEmbeddingCalled   bool
-	StoreBatchCalled              bool
-	StoreRelationshipOnlyCalled   bool
-	HealthCalled                  bool
-	CloseCalled                   bool
+	QueryCalled                 bool
+	FindSimilarAttacksCalled    bool
+	FindSimilarFindingsCalled   bool
+	GetAttackChainsCalled       bool
+	GetRelatedFindingsCalled    bool
+	StoreCalled                 bool
+	StoreWithoutEmbeddingCalled bool
+	StoreBatchCalled            bool
+	StoreRelationshipOnlyCalled bool
+	HealthCalled                bool
+	CloseCalled                 bool
 
 	// Captured arguments
 	LastQuery              *graphrag.GraphRAGQuery
@@ -180,6 +180,11 @@ func (m *MockGraphRAGStore) StoreAttackPattern(ctx context.Context, pattern grap
 
 // StoreFinding stores a security finding (not used by bridge)
 func (m *MockGraphRAGStore) StoreFinding(ctx context.Context, finding graphrag.FindingNode) error {
+	return nil
+}
+
+// StoreFindingWithRun stores a finding with run association
+func (m *MockGraphRAGStore) StoreFindingWithRun(ctx context.Context, finding graphrag.FindingNode, runID types.ID) error {
 	return nil
 }
 

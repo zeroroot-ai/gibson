@@ -26,20 +26,6 @@ type CallbackServer struct {
 	port    int
 }
 
-// NewCallbackServer creates a new callback server with the given logger.
-// This creates a server with task-based harness registration (legacy mode).
-func NewCallbackServer(logger *slog.Logger, port int) *CallbackServer {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
-	return &CallbackServer{
-		service: NewHarnessCallbackService(logger),
-		logger:  logger.With("component", "callback_server"),
-		port:    port,
-	}
-}
-
 // NewCallbackServerWithRegistry creates a new callback server with the given
 // logger and harness registry.
 //

@@ -304,6 +304,19 @@ func (t *Target) Validate() error {
 	return nil
 }
 
+// HasCapability checks if the target has a specific capability.
+func (t *Target) HasCapability(capability string) bool {
+	if t.Capabilities == nil {
+		return false
+	}
+	for _, cap := range t.Capabilities {
+		if cap == capability {
+			return true
+		}
+	}
+	return false
+}
+
 // TargetFilter represents query filters for retrieving targets
 type TargetFilter struct {
 	Provider *Provider

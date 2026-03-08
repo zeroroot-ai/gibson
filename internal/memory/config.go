@@ -116,18 +116,18 @@ func (c *LongTermMemoryConfig) Validate() error {
 	// Validate backend type
 	validBackends := map[string]bool{
 		"embedded": true, // In-memory vector store (non-persistent)
-		"sqlite":   true, // SQLite-backed vector store (persistent)
+		"redis":    true, // Redis vector database
 		"qdrant":   true, // Qdrant vector database
 		"milvus":   true, // Milvus vector database (future support)
 	}
 
 	if c.Backend != "" && !validBackends[c.Backend] {
 		return types.NewError(types.CONFIG_VALIDATION_FAILED,
-			fmt.Sprintf("invalid backend '%s', must be one of: embedded, sqlite, qdrant, milvus", c.Backend))
+			fmt.Sprintf("invalid backend '%s', must be one of: embedded, redis, qdrant, milvus", c.Backend))
 	}
 
 	// If using external backend, ConnectionURL is required
-	if c.Backend != "" && c.Backend != "embedded" && c.Backend != "sqlite" {
+	if c.Backend != "" && c.Backend != "embedded" {
 		if c.ConnectionURL == "" {
 			return types.NewError(types.CONFIG_VALIDATION_FAILED,
 				fmt.Sprintf("connection_url is required for backend '%s'", c.Backend))
@@ -154,8 +154,6 @@ func (c *LongTermMemoryConfig) ApplyDefaults() {
 // Embeddings are used for semantic similarity search in long-term memory.
 type EmbedderConfig struct {
 	Provider string `mapstructure:"provider" yaml:"provider" json:"provider"`
-	Model    string `mapstructure:"model" yaml:"model" json:"model"`
-	APIKey   string `mapstructure:"api_key" yaml:"api_key" json:"api_key"`
 }
 
 // Validate performs validation on the EmbedderConfig.
@@ -163,26 +161,12 @@ func (c *EmbedderConfig) Validate() error {
 	// Validate provider type
 	validProviders := map[string]bool{
 		"native": true, // Native ONNX embedder (all-MiniLM-L6-v2, runs offline)
-		"openai": true, // OpenAI embeddings (text-embedding-3-small, text-embedding-3-large)
-		"llm":    true, // Generic LLM provider embeddings
-		"mock":   true, // Mock embedder for testing
 	}
 
 	if c.Provider != "" && !validProviders[c.Provider] {
 		return types.NewError(types.CONFIG_VALIDATION_FAILED,
-			fmt.Sprintf("invalid embedder provider '%s', must be one of: native, openai, llm, mock", c.Provider))
+			fmt.Sprintf("invalid embedder provider '%s', must be: native", c.Provider))
 	}
-
-	// Model is required for non-native and non-mock providers
-	if c.Provider != "" && c.Provider != "mock" && c.Provider != "native" {
-		if c.Model == "" {
-			return types.NewError(types.CONFIG_VALIDATION_FAILED,
-				fmt.Sprintf("embedder model is required for provider '%s'", c.Provider))
-		}
-	}
-
-	// APIKey is required for OpenAI provider (can also be set via env var)
-	// We don't validate APIKey here as it may be set via environment variable
 
 	return nil
 }
@@ -191,9 +175,6 @@ func (c *EmbedderConfig) Validate() error {
 func (c *EmbedderConfig) ApplyDefaults() {
 	if c.Provider == "" {
 		c.Provider = "native" // Default: native ONNX embedder (runs offline, no API key needed)
-	}
-	if c.Model == "" && c.Provider == "openai" {
-		c.Model = "text-embedding-3-small" // Default: smaller, cheaper model
 	}
 }
 

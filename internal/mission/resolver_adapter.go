@@ -1,6 +1,8 @@
 package mission
 
 import (
+	"strings"
+
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/component/resolver"
 )
@@ -39,28 +41,31 @@ func (m *missionDefinitionAdapter) Dependencies() []resolver.MissionDependency {
 
 	// Add agent dependencies
 	for _, agent := range m.def.Dependencies.Agents {
+		name, version := parseComponentRef(agent)
 		deps = append(deps, &missionDependencyAdapter{
 			kind:    component.ComponentKindAgent,
-			name:    agent,
-			version: "", // TODO: Parse version from agent string if present
+			name:    name,
+			version: version,
 		})
 	}
 
 	// Add tool dependencies
 	for _, tool := range m.def.Dependencies.Tools {
+		name, version := parseComponentRef(tool)
 		deps = append(deps, &missionDependencyAdapter{
 			kind:    component.ComponentKindTool,
-			name:    tool,
-			version: "", // TODO: Parse version from tool string if present
+			name:    name,
+			version: version,
 		})
 	}
 
 	// Add plugin dependencies
 	for _, plugin := range m.def.Dependencies.Plugins {
+		name, version := parseComponentRef(plugin)
 		deps = append(deps, &missionDependencyAdapter{
 			kind:    component.ComponentKindPlugin,
-			name:    plugin,
-			version: "", // TODO: Parse version from plugin string if present
+			name:    name,
+			version: version,
 		})
 	}
 
@@ -118,4 +123,49 @@ func (m *missionDependencyAdapter) Name() string {
 // Returns empty string if no version constraint is specified.
 func (m *missionDependencyAdapter) Version() string {
 	return m.version
+}
+
+// parseComponentRef parses a component reference in "name" or "name@version" format.
+// Returns the component name and version separately.
+// If no version is specified or the version part doesn't look valid, returns empty version.
+func parseComponentRef(ref string) (name, version string) {
+	// Handle empty ref
+	if ref == "" {
+		return "", ""
+	}
+
+	// Look for @ separator (last occurrence to handle names with @)
+	idx := strings.LastIndex(ref, "@")
+	if idx == -1 {
+		// No version specified
+		return ref, ""
+	}
+
+	// Split at @
+	name = ref[:idx]
+	version = ref[idx+1:]
+
+	// Validate version looks like a version
+	if !isValidVersion(version) {
+		// Treat entire string as name if version doesn't look valid
+		return ref, ""
+	}
+
+	return name, version
+}
+
+// isValidVersion checks if a string looks like a semantic version.
+// A valid version should start with a digit or 'v' followed by a digit.
+func isValidVersion(v string) bool {
+	if v == "" {
+		return false
+	}
+	// Simple check: starts with digit or 'v'
+	if v[0] == 'v' {
+		v = v[1:]
+	}
+	if len(v) == 0 {
+		return false
+	}
+	return v[0] >= '0' && v[0] <= '9'
 }

@@ -16,7 +16,7 @@ func TestMemoryFactoryIntegration(t *testing.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		factory, err := NewMemoryManagerFactory(db, nil)
+		factory, err := NewMemoryManagerFactory(db, nil, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -47,7 +47,7 @@ func TestMemoryFactoryIntegration(t *testing.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		factory, err := NewMemoryManagerFactory(db, nil)
+		factory, err := NewMemoryManagerFactory(db, nil, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()

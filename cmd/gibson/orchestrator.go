@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/zero-day-ai/gibson/cmd/gibson/component"
-	"github.com/zero-day-ai/gibson/internal/database"
+	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/harness"
@@ -17,6 +17,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -71,24 +72,34 @@ func createOrchestratorWithOptions(ctx context.Context, opts *OrchestratorOption
 	if opts == nil {
 		opts = &OrchestratorOptions{}
 	}
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get Gibson home: %w", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
+	}
+	stateCfg.ApplyDefaults()
+
+	stateClient, err := state.NewStateClient(stateCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("failed to create state client: %w", err)
 	}
 
 	// Track resources for cleanup
 	cleanupFuncs := []func(){
 		func() {
-			if err := db.Close(); err != nil {
-				slog.Warn("failed to close database", "error", err)
+			if err := stateClient.Close(); err != nil {
+				slog.Warn("failed to close state client", "error", err)
 			}
 		},
 	}
@@ -100,9 +111,9 @@ func createOrchestratorWithOptions(ctx context.Context, opts *OrchestratorOption
 		}
 	}
 
-	// Step 1: Create stores
-	missionStore := mission.NewDBMissionStore(db)
-	findingStore := finding.NewDBFindingStore(db)
+	// Step 1: Create stores with Redis backend
+	missionStore := mission.NewRedisMissionStore(stateClient)
+	findingStore := finding.NewRedisFindingStore(stateClient)
 
 	// Step 2: Get registry manager from context and create adapter
 	regManager := component.GetRegistryManager(ctx)
@@ -116,7 +127,10 @@ func createOrchestratorWithOptions(ctx context.Context, opts *OrchestratorOption
 
 	// Step 3: Create legacy registries (tools and plugins still use legacy registries for now)
 	toolRegistry := tool.NewToolRegistry()
-	pluginRegistry := plugin.NewPluginRegistry(nil) // TODO: Pass EventBus when available
+
+	// Get default EventBus and pass to PluginRegistry
+	eventBus := events.Default()
+	pluginRegistry := plugin.NewPluginRegistry(eventBus)
 
 	// Step 4: Create LLM components
 	llmRegistry, slotManager, err := createLLMComponents()

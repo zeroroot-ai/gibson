@@ -50,6 +50,7 @@ type chainRunner struct {
 	executor       PayloadExecutor
 	registry       PayloadRegistry
 	executionStore ExecutionStore
+	store          PayloadStore // For retrieving chain definitions
 
 	// Track active executions for pause/resume
 	activeMu     sync.RWMutex
@@ -74,6 +75,7 @@ func NewChainRunner(
 	executor PayloadExecutor,
 	registry PayloadRegistry,
 	executionStore ExecutionStore,
+	store PayloadStore,
 	config ChainRunnerConfig,
 ) ChainRunner {
 	return &chainRunner{
@@ -81,6 +83,7 @@ func NewChainRunner(
 		executor:       executor,
 		registry:       registry,
 		executionStore: executionStore,
+		store:          store,
 		activeChains:   make(map[types.ID]*activeChain),
 	}
 }
@@ -90,8 +93,9 @@ func NewChainRunnerWithDefaults(
 	executor PayloadExecutor,
 	registry PayloadRegistry,
 	executionStore ExecutionStore,
+	store PayloadStore,
 ) ChainRunner {
-	return NewChainRunner(executor, registry, executionStore, DefaultChainRunnerConfig())
+	return NewChainRunner(executor, registry, executionStore, store, DefaultChainRunnerConfig())
 }
 
 // Execute runs an attack chain
@@ -721,10 +725,69 @@ func (cr *chainRunner) checkPause(active *activeChain) error {
 	}
 }
 
-// getChain retrieves a chain (stub implementation - would need ChainStore)
+// getChain retrieves a chain from the store and converts it to AttackChain
 func (cr *chainRunner) getChain(ctx context.Context, chainID types.ID) (*AttackChain, error) {
-	// This is a stub implementation
-	// In a real implementation, this would query a ChainStore
-	// For now, return an error indicating this needs to be implemented
-	return nil, fmt.Errorf("chain store not implemented - cannot retrieve chain %s", chainID)
+	if cr.store == nil {
+		return nil, fmt.Errorf("chain store not configured - cannot retrieve chain %s", chainID)
+	}
+
+	// Get the PayloadChain from the store
+	payloadChain, err := cr.store.GetChain(ctx, chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chain %s: %w", chainID, err)
+	}
+
+	// Convert PayloadChain to AttackChain
+	chain := &AttackChain{
+		ID:          payloadChain.ID,
+		Name:        payloadChain.Name,
+		Description: payloadChain.Description,
+		Stages:      make(map[string]*ChainStage),
+		EntryStages: []string{},
+		Metadata: ChainMetadata{
+			Author:     payloadChain.Metadata.Author,
+			References: payloadChain.Metadata.References,
+		},
+		CreatedAt: payloadChain.CreatedAt,
+		UpdatedAt: payloadChain.UpdatedAt,
+	}
+
+	// Convert steps to stages
+	stageOrder := make([]string, 0, len(payloadChain.Steps))
+	for _, step := range payloadChain.Steps {
+		// Convert OnFailure string to FailureAction
+		var failureAction FailureAction
+		switch step.OnFailure {
+		case "stop":
+			failureAction = FailureActionStop
+		case "continue":
+			failureAction = FailureActionContinue
+		case "skip":
+			failureAction = FailureActionSkip
+		default:
+			failureAction = FailureActionStop // default to stop
+		}
+
+		stage := &ChainStage{
+			ID:           step.ID,
+			PayloadID:    step.PayloadID,
+			Parameters:   step.Params,
+			Dependencies: step.Requires,
+			OnFailure:    failureAction,
+		}
+		chain.Stages[step.ID] = stage
+		stageOrder = append(stageOrder, step.ID)
+
+		// Identify entry stages (those with no dependencies)
+		if len(step.Requires) == 0 {
+			chain.EntryStages = append(chain.EntryStages, step.ID)
+		}
+	}
+
+	// If no entry stages identified, use the first step
+	if len(chain.EntryStages) == 0 && len(stageOrder) > 0 {
+		chain.EntryStages = []string{stageOrder[0]}
+	}
+
+	return chain, nil
 }

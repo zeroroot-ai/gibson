@@ -17,6 +17,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"golang.org/x/term"
 )
@@ -155,15 +156,25 @@ func runCredentialList(cmd *cobra.Command, args []string) error {
 		return internal.WrapError(internal.ExitConfigError, "failed to load config", err)
 	}
 
-	// Open database
-	db, err := database.Open(cfg.Database.Path)
-	if err != nil {
-		return internal.WrapError(internal.ExitDatabaseError, "failed to open database", err)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
 	}
-	defer db.Close()
+	stateCfg.ApplyDefaults()
 
-	// List credentials
-	dao := database.NewCredentialDAO(db)
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return internal.WrapError(internal.ExitDatabaseError, "failed to create state client", err)
+	}
+	defer stateClient.Close()
+
+	// List credentials with Redis backend
+	dao := database.NewRedisCredentialDAO(stateClient)
 	credentials, err := dao.List(ctx, nil)
 	if err != nil {
 		return internal.WrapError(internal.ExitDatabaseError, "failed to list credentials", err)
@@ -272,15 +283,25 @@ func runCredentialAdd(cmd *cobra.Command, args []string) error {
 		return internal.WrapError(internal.ExitConfigError, "failed to load config", err)
 	}
 
-	// Open database
-	db, err := database.Open(cfg.Database.Path)
-	if err != nil {
-		return internal.WrapError(internal.ExitDatabaseError, "failed to open database", err)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
 	}
-	defer db.Close()
+	stateCfg.ApplyDefaults()
 
-	// Check if credential already exists
-	dao := database.NewCredentialDAO(db)
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return internal.WrapError(internal.ExitDatabaseError, "failed to create state client", err)
+	}
+	defer stateClient.Close()
+
+	// Check if credential already exists with Redis backend
+	dao := database.NewRedisCredentialDAO(stateClient)
 	exists, err := dao.Exists(ctx, credName)
 	if err != nil {
 		return internal.WrapError(internal.ExitDatabaseError, "failed to check credential existence", err)
@@ -348,15 +369,25 @@ func runCredentialShow(cmd *cobra.Command, args []string) error {
 		return internal.WrapError(internal.ExitConfigError, "failed to load config", err)
 	}
 
-	// Open database
-	db, err := database.Open(cfg.Database.Path)
-	if err != nil {
-		return internal.WrapError(internal.ExitDatabaseError, "failed to open database", err)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
 	}
-	defer db.Close()
+	stateCfg.ApplyDefaults()
 
-	// Get credential
-	dao := database.NewCredentialDAO(db)
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return internal.WrapError(internal.ExitDatabaseError, "failed to create state client", err)
+	}
+	defer stateClient.Close()
+
+	// Get credential with Redis backend
+	dao := database.NewRedisCredentialDAO(stateClient)
 	cred, err := dao.GetByName(ctx, credName)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
@@ -457,15 +488,25 @@ func runCredentialTest(cmd *cobra.Command, args []string) error {
 		return internal.WrapError(internal.ExitConfigError, "failed to load config", err)
 	}
 
-	// Open database
-	db, err := database.Open(cfg.Database.Path)
-	if err != nil {
-		return internal.WrapError(internal.ExitDatabaseError, "failed to open database", err)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
 	}
-	defer db.Close()
+	stateCfg.ApplyDefaults()
 
-	// Get credential
-	dao := database.NewCredentialDAO(db)
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return internal.WrapError(internal.ExitDatabaseError, "failed to create state client", err)
+	}
+	defer stateClient.Close()
+
+	// Get credential with Redis backend
+	dao := database.NewRedisCredentialDAO(stateClient)
 	cred, err := dao.GetByName(ctx, credName)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
@@ -662,15 +703,25 @@ func runCredentialRotate(cmd *cobra.Command, args []string) error {
 		return internal.WrapError(internal.ExitConfigError, "failed to load config", err)
 	}
 
-	// Open database
-	db, err := database.Open(cfg.Database.Path)
-	if err != nil {
-		return internal.WrapError(internal.ExitDatabaseError, "failed to open database", err)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
 	}
-	defer db.Close()
+	stateCfg.ApplyDefaults()
 
-	// Get existing credential
-	dao := database.NewCredentialDAO(db)
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return internal.WrapError(internal.ExitDatabaseError, "failed to create state client", err)
+	}
+	defer stateClient.Close()
+
+	// Get existing credential with Redis backend
+	dao := database.NewRedisCredentialDAO(stateClient)
 	cred, err := dao.GetByName(ctx, credName)
 	if err != nil {
 		return internal.WrapError(internal.ExitDatabaseError, "failed to get credential", err)
@@ -747,15 +798,25 @@ func runCredentialDelete(cmd *cobra.Command, args []string) error {
 		return internal.WrapError(internal.ExitConfigError, "failed to load config", err)
 	}
 
-	// Open database
-	db, err := database.Open(cfg.Database.Path)
-	if err != nil {
-		return internal.WrapError(internal.ExitDatabaseError, "failed to open database", err)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
 	}
-	defer db.Close()
+	stateCfg.ApplyDefaults()
 
-	// Delete credential
-	dao := database.NewCredentialDAO(db)
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return internal.WrapError(internal.ExitDatabaseError, "failed to create state client", err)
+	}
+	defer stateClient.Close()
+
+	// Delete credential with Redis backend
+	dao := database.NewRedisCredentialDAO(stateClient)
 	if err := dao.DeleteByName(ctx, credName); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return internal.NewCLIError(internal.ExitNotFound, fmt.Sprintf("credential not found: %s", credName))

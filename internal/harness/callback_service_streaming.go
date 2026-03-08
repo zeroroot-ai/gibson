@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	pb "github.com/zero-day-ai/sdk/api/gen/proto"
 	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
+	pb "github.com/zero-day-ai/sdk/api/gen/proto"
 	"google.golang.org/grpc"
 )
 

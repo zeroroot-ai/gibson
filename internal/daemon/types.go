@@ -9,6 +9,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -173,3 +174,11 @@ type Daemon interface {
 	// The daemon implements api.DaemonInterface.Status() which returns api.DaemonStatus.
 	// For internal status queries, use the daemon's status() private method.
 }
+
+// ReadDaemonInfo reads daemon info from the specified path.
+// NOTE: This function is deprecated. Daemon info is now stored in etcd.
+// Use EtcdDaemonInfo.Get() instead.
+func ReadDaemonInfo(infoPath string) (*DaemonInfo, error) {
+	return nil, fmt.Errorf("ReadDaemonInfo is deprecated - daemon info is now stored in etcd")
+}
+

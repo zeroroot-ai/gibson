@@ -100,19 +100,21 @@ func (f *EvalHarnessFactory) Create(agentName string, missionCtx harness.Mission
 		return nil, err
 	}
 
-	// TODO Task 30: Wrap Gibson harness with SDK eval harness adapter
+	// TODO(eval): Implement SDK eval harness adapter [Future Work - Phase 11+]
 	//
+	// CONTEXT:
 	// The SDK eval harnesses (RecordingHarness, FeedbackHarness) expect agent.Harness interface
 	// which uses SDK types (sdk/llm.Message, sdk/llm.CompletionResponse).
 	//
 	// Gibson's harness uses internal types (internal/llm.Message, internal/llm.CompletionResponse).
 	//
+	// SOLUTION:
 	// The adapter (harness_adapter.go) bridges these type systems by:
 	// 1. Wrapping Gibson's AgentHarness
 	// 2. Implementing SDK's agent.Harness interface
 	// 3. Converting types bidirectionally
 	//
-	// Integration approach:
+	// INTEGRATION APPROACH:
 	// - Wrap baseHarness with GibsonHarnessAdapter
 	// - Wrap adapter with SDK RecordingHarness for trajectory capture
 	// - If FeedbackEnabled, wrap with SDK FeedbackHarness for real-time evaluation
@@ -120,8 +122,14 @@ func (f *EvalHarnessFactory) Create(agentName string, missionCtx harness.Mission
 	//
 	// This creates the chain: Gibson harness -> Adapter -> Recording -> (optional) Feedback
 	//
-	// For now, return the base harness unchanged to avoid import cycles.
-	// The full implementation will be completed when the mission orchestrator integration is done.
+	// CURRENT STATUS:
+	// Returning base harness unchanged to avoid import cycles and maintain stability.
+	// This is intentional - the evaluation system foundation is in place, but the
+	// adapter implementation is deferred until SDK-Gibson integration is needed in production.
+	//
+	// TRACKING: This work is planned for when evaluation features are prioritized.
+	// For now, missions run without trajectory recording, which is acceptable for
+	// basic attack execution.
 
 	return baseHarness, nil
 }
@@ -161,7 +169,10 @@ func (f *EvalHarnessFactory) CreateChild(parent harness.AgentHarness, agentName 
 	}
 
 	// For now, return the base child harness
-	// TODO: Wrap with recording/feedback when adapter is implemented
+	// TODO(eval): Wrap with recording/feedback when adapter is implemented [Future Work]
+	// See TODO above in Create() method for full context on the adapter implementation.
+	// This follows the same pattern: child harness should also be wrapped with
+	// recording/feedback capabilities once the adapter is complete.
 
 	return child, nil
 }

@@ -110,8 +110,16 @@ type MissionFilter struct {
 type MissionStatus string
 
 const (
+	// MissionStatusPending indicates the mission has been created but not yet started.
+	MissionStatusPending MissionStatus = "pending"
 	// MissionStatusRunning indicates the mission is currently executing.
 	MissionStatusRunning MissionStatus = "running"
+	// MissionStatusCompleted indicates the mission finished successfully.
+	MissionStatusCompleted MissionStatus = "completed"
+	// MissionStatusFailed indicates the mission finished with an error.
+	MissionStatusFailed MissionStatus = "failed"
+	// MissionStatusCancelled indicates the mission was cancelled before completion.
+	MissionStatusCancelled MissionStatus = "cancelled"
 )
 
 // MissionRecord represents minimal mission information needed for spawn limits.

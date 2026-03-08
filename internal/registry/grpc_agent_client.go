@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -12,8 +11,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
+	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 	"github.com/zero-day-ai/sdk/registry"
 	"github.com/zero-day-ai/sdk/schema"
 )
@@ -486,27 +485,7 @@ func (c *GRPCAgentClient) fetchSlots(ctx context.Context) error {
 	return nil
 }
 
-// parseCommaSeparated parses a comma-separated string into a slice of trimmed strings.
-//
-// Empty strings and whitespace-only entries are filtered out.
-// For example: "a, b, c" -> ["a", "b", "c"]
-func parseCommaSeparated(value string) []string {
-	if value == "" {
-		return []string{}
-	}
-
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-
-	return result
-}
+// parseCommaSeparated is defined in common.go
 
 // convertTargetTypes converts proto target types to internal component.TargetType
 func convertTargetTypes(protoTypes []string) []component.TargetType {

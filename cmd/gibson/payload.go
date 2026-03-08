@@ -11,8 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zero-day-ai/gibson/cmd/gibson/internal"
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/payload"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"gopkg.in/yaml.v3"
 )
@@ -162,39 +162,79 @@ func init() {
 	payloadExecuteCmd.Flags().StringSliceVar(&executePayloadParams, "params", []string{}, "Parameter overrides in key=value format")
 	payloadExecuteCmd.MarkFlagRequired("target")
 
+	// Export command flags
+	payloadExportCmd.Flags().StringVar(&exportPayloadOutput, "output", "", "Output file path (required)")
+	payloadExportCmd.MarkFlagRequired("output")
+
+	// Search command flags
+	payloadSearchCmd.Flags().StringVar(&searchPayloadCategory, "category", "", "Filter by category")
+	payloadSearchCmd.Flags().StringVar(&searchPayloadTags, "tags", "", "Filter by tags (comma-separated)")
+	payloadSearchCmd.Flags().StringVar(&searchPayloadTargetType, "target-type", "", "Filter by target type")
+	payloadSearchCmd.Flags().StringVar(&searchPayloadSeverity, "severity", "", "Filter by severity")
+	payloadSearchCmd.Flags().IntVar(&searchPayloadLimit, "limit", 50, "Maximum number of results")
+	payloadSearchCmd.Flags().StringVar(&searchPayloadOutput, "output", "text", "Output format (text, json)")
+
 	// Add subcommands
 	payloadCmd.AddCommand(payloadListCmd)
 	payloadCmd.AddCommand(payloadShowCmd)
 	payloadCmd.AddCommand(payloadCreateCmd)
 	payloadCmd.AddCommand(payloadExecuteCmd)
-	payloadCmd.AddCommand(payloadChainCmd)
-	payloadCmd.AddCommand(payloadStatsCmd)
+	// TODO: Re-add these commands when they're migrated to Redis
+	// payloadCmd.AddCommand(payloadChainCmd)
+	// payloadCmd.AddCommand(payloadStatsCmd)
 	payloadCmd.AddCommand(payloadImportCmd)
 	payloadCmd.AddCommand(payloadExportCmd)
 	payloadCmd.AddCommand(payloadSearchCmd)
 	payloadCmd.AddCommand(payloadSyncCmd)
 }
 
+// createPayloadStore creates a Redis-backed payload store using the global configuration
+func createPayloadStore() (payload.PayloadStore, func(), error) {
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
+	}
+	stateCfg.ApplyDefaults()
+
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create state client: %w", err)
+	}
+
+	// Create Redis payload store
+	store := payload.NewRedisPayloadStore(stateClient)
+
+	// Return store and cleanup function
+	cleanup := func() {
+		if err := stateClient.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close state client: %v\n", err)
+		}
+	}
+
+	return store, cleanup, nil
+}
+
 // runPayloadList executes the payload list command
 func runPayloadList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create payload store using Redis
+	store, cleanup, err := createPayloadStore()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create payload store: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Create payload store
-	store := payload.NewPayloadStore(db)
+	defer cleanup()
 
 	// Build filter
 	filter := &payload.PayloadFilter{}
@@ -353,22 +393,12 @@ func runPayloadShow(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	payloadID := args[0]
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create payload store using Redis
+	store, cleanup, err := createPayloadStore()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create payload store: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Create payload store
-	store := payload.NewPayloadStore(db)
+	defer cleanup()
 
 	// Parse payload ID
 	id, err := types.ParseID(payloadID)
@@ -575,22 +605,12 @@ func runPayloadCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("payload validation failed: %w", err)
 	}
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create payload store using Redis
+	store, cleanup, err := createPayloadStore()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create payload store: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Create payload store
-	store := payload.NewPayloadStore(db)
+	defer cleanup()
 
 	// Check if payload already exists by name
 	existsByName, err := store.ExistsByName(ctx, p.Name)
@@ -730,20 +750,12 @@ func runInteractivePayloadCreation(ctx context.Context, cmd *cobra.Command) erro
 		},
 	}
 
-	// Save the payload
-	homeDir, err := getGibsonHome()
+	// Save the payload using Redis
+	store, cleanup, err := createPayloadStore()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create payload store: %w", err)
 	}
-
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	store := payload.NewPayloadStore(db)
+	defer cleanup()
 
 	// Generate ID and timestamps
 	p.ID = types.NewID()
@@ -892,1018 +904,16 @@ func validatePayload(p *payload.Payload) error {
 
 // runPayloadExecute executes the payload execute command
 func runPayloadExecute(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	payloadID := args[0]
-
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
-	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
-	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Parse payload ID
-	id, err := types.ParseID(payloadID)
-	if err != nil {
-		return fmt.Errorf("invalid payload ID: %w", err)
-	}
-
-	// Get payload
-	payloadStore := payload.NewPayloadStore(db)
-	p, err := payloadStore.Get(ctx, id)
-	if err != nil {
-		return fmt.Errorf("failed to get payload: %w", err)
-	}
-	if p == nil {
-		return fmt.Errorf("payload not found: %s", payloadID)
-	}
-
-	// Parse parameters from flags
-	params, err := parseParameters(executePayloadParams)
-	if err != nil {
-		return fmt.Errorf("failed to parse parameters: %w", err)
-	}
-
-	// Get target
-	targetDAO := database.NewTargetDAO(db)
-	target, err := getTargetByNameOrID(ctx, targetDAO, executePayloadTarget)
-	if err != nil {
-		return fmt.Errorf("failed to get target: %w", err)
-	}
-	if target == nil {
-		return fmt.Errorf("target not found: %s", executePayloadTarget)
-	}
-
-	// Create execution request
-	req := &payload.ExecutionRequest{
-		PayloadID:  p.ID,
-		TargetID:   target.ID,
-		Parameters: params,
-	}
-
-	// Set agent ID if specified
-	if executePayloadAgent != "" {
-		agentID, err := types.ParseID(executePayloadAgent)
-		if err != nil {
-			return fmt.Errorf("invalid agent ID: %w", err)
-		}
-		req.AgentID = agentID
-	}
-
-	// Set timeout if specified
-	if executePayloadTimeout > 0 {
-		req.Timeout = time.Duration(executePayloadTimeout) * time.Second
-	}
-
-	// Create executor
-	executionStore := payload.NewExecutionStore(db)
-
-	// Create payload registry
-	registry := payload.NewPayloadRegistry(db, payload.DefaultRegistryConfig())
-
-	// For now, we'll use nil for finding store and agent registry
-	// In production, these would be properly initialized
-	executor := payload.NewPayloadExecutorWithDefaults(
-		registry,
-		executionStore,
-		nil, // finding store - would need to be initialized
-		nil, // agent registry - would need to be initialized
-	)
-
-	// Handle dry-run mode
-	if executePayloadDryRun {
-		return runPayloadExecuteDryRun(cmd, executor, req, p, target)
-	}
-
-	// Execute payload
-	fmt.Fprintf(cmd.OutOrStdout(), "Executing payload: %s\n", p.Name)
-	fmt.Fprintf(cmd.OutOrStdout(), "Target: %s (%s)\n", target.Name, target.URL)
-	fmt.Fprintf(cmd.OutOrStdout(), "\n")
-
-	result, err := executor.Execute(ctx, req)
-	if err != nil {
-		return fmt.Errorf("execution failed: %w", err)
-	}
-
-	// Display results
-	return displayExecutionResult(cmd, result, p)
-}
-
-// runPayloadExecuteDryRun handles dry-run execution
-func runPayloadExecuteDryRun(
-	cmd *cobra.Command,
-	executor payload.PayloadExecutor,
-	req *payload.ExecutionRequest,
-	p *payload.Payload,
-	target *types.Target,
-) error {
-	ctx := cmd.Context()
-
-	fmt.Fprintf(cmd.OutOrStdout(), "DRY RUN MODE - Validation Only\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "=====================================\n\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "Payload: %s\n", p.Name)
-	fmt.Fprintf(cmd.OutOrStdout(), "Target: %s (%s)\n", target.Name, target.URL)
-	fmt.Fprintf(cmd.OutOrStdout(), "\n")
-
-	// Execute dry run
-	dryRunResult, err := executor.ExecuteDryRun(ctx, req)
-	if err != nil {
-		return fmt.Errorf("dry run failed: %w", err)
-	}
-
-	// Display validation results
-	if len(dryRunResult.ValidationErrors) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "VALIDATION ERRORS:\n")
-		for _, errMsg := range dryRunResult.ValidationErrors {
-			fmt.Fprintf(cmd.OutOrStdout(), "  - %s\n", errMsg)
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "\n")
-		return fmt.Errorf("validation failed")
-	}
-
-	// Display warnings
-	if len(dryRunResult.Warnings) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "WARNINGS:\n")
-		for _, warning := range dryRunResult.Warnings {
-			fmt.Fprintf(cmd.OutOrStdout(), "  - %s\n", warning)
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "\n")
-	}
-
-	// Display instantiated text
-	fmt.Fprintf(cmd.OutOrStdout(), "INSTANTIATED PAYLOAD:\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "-------------------------------------\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "%s\n", dryRunResult.InstantiatedText)
-	fmt.Fprintf(cmd.OutOrStdout(), "-------------------------------------\n\n")
-
-	// Display estimates
-	fmt.Fprintf(cmd.OutOrStdout(), "ESTIMATES:\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  Estimated tokens: ~%d\n", dryRunResult.EstimatedTokens)
-	fmt.Fprintf(cmd.OutOrStdout(), "  Payload length: %d characters\n\n", len(dryRunResult.InstantiatedText))
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Validation passed! Ready for execution.\n")
-
-	return nil
-}
-
-// displayExecutionResult displays the execution result
-func displayExecutionResult(
-	cmd *cobra.Command,
-	result *payload.ExecutionResult,
-	p *payload.Payload,
-) error {
-	out := cmd.OutOrStdout()
-
-	// Display status
-	fmt.Fprintf(out, "EXECUTION RESULT\n")
-	fmt.Fprintf(out, "=====================================\n\n")
-
-	// Status
-	fmt.Fprintf(out, "Status: %s\n", result.Status)
-
-	// Success indicator
-	if result.Success {
-		fmt.Fprintf(out, "Success: YES (Confidence: %.2f%%)\n", result.ConfidenceScore*100)
-	} else {
-		fmt.Fprintf(out, "Success: NO\n")
-	}
-
-	// Error message if any
-	if result.ErrorMessage != "" {
-		fmt.Fprintf(out, "Error: %s\n", result.ErrorMessage)
-	}
-
-	fmt.Fprintf(out, "\n")
-
-	// Execution details
-	fmt.Fprintf(out, "EXECUTION DETAILS\n")
-	fmt.Fprintf(out, "-------------------------------------\n")
-	if !result.StartedAt.IsZero() {
-		fmt.Fprintf(out, "Started: %s\n", result.StartedAt.Format("2006-01-02 15:04:05"))
-	}
-	if !result.CompletedAt.IsZero() {
-		fmt.Fprintf(out, "Completed: %s\n", result.CompletedAt.Format("2006-01-02 15:04:05"))
-	}
-	if result.Duration > 0 {
-		fmt.Fprintf(out, "Duration: %s\n", result.Duration)
-	}
-	if result.ResponseTime > 0 {
-		fmt.Fprintf(out, "Response Time: %s\n", result.ResponseTime)
-	}
-	if result.TokensUsed > 0 {
-		fmt.Fprintf(out, "Tokens Used: %d\n", result.TokensUsed)
-	}
-	if result.Cost > 0 {
-		fmt.Fprintf(out, "Cost: $%.4f\n", result.Cost)
-	}
-	fmt.Fprintf(out, "\n")
-
-	// Display instantiated text
-	if result.InstantiatedText != "" {
-		fmt.Fprintf(out, "PAYLOAD SENT\n")
-		fmt.Fprintf(out, "-------------------------------------\n")
-		fmt.Fprintf(out, "%s\n", truncateForDisplay(result.InstantiatedText, 500))
-		fmt.Fprintf(out, "-------------------------------------\n\n")
-	}
-
-	// Display response
-	if result.Response != "" {
-		fmt.Fprintf(out, "RESPONSE RECEIVED\n")
-		fmt.Fprintf(out, "-------------------------------------\n")
-		fmt.Fprintf(out, "%s\n", truncateForDisplay(result.Response, 1000))
-		fmt.Fprintf(out, "-------------------------------------\n\n")
-	}
-
-	// Display matched indicators
-	if result.Success && len(result.IndicatorsMatched) > 0 {
-		fmt.Fprintf(out, "MATCHED INDICATORS\n")
-		fmt.Fprintf(out, "-------------------------------------\n")
-		for i := range result.IndicatorsMatched {
-			// Find the indicator in the payload
-			var indicatorDesc string
-			if i < len(p.SuccessIndicators) {
-				indicatorDesc = p.SuccessIndicators[i].Description
-				if indicatorDesc == "" {
-					indicatorDesc = fmt.Sprintf("%s: %s", p.SuccessIndicators[i].Type, p.SuccessIndicators[i].Value)
-				}
-			}
-			fmt.Fprintf(out, "  %d. %s\n", i+1, indicatorDesc)
-		}
-		fmt.Fprintf(out, "\n")
-	}
-
-	// Display match details
-	if len(result.MatchDetails) > 0 {
-		fmt.Fprintf(out, "MATCH DETAILS\n")
-		fmt.Fprintf(out, "-------------------------------------\n")
-		for key, value := range result.MatchDetails {
-			fmt.Fprintf(out, "  %s: %v\n", key, value)
-		}
-		fmt.Fprintf(out, "\n")
-	}
-
-	// Final summary
-	if result.Success {
-		fmt.Fprintf(out, "\nATTACK SUCCESSFUL!\n")
-		fmt.Fprintf(out, "The payload successfully exploited the target.\n")
-		if result.FindingCreated {
-			fmt.Fprintf(out, "A finding has been created for this successful attack.\n")
-		}
-	} else if result.Status == payload.ExecutionStatusCompleted {
-		fmt.Fprintf(out, "\nAttack did not succeed.\n")
-		fmt.Fprintf(out, "The target's response did not match the success indicators.\n")
-	}
-
-	return nil
-}
-
-// parseParameters parses parameter key=value pairs
-func parseParameters(params []string) (map[string]interface{}, error) {
-	result := make(map[string]interface{})
-
-	for _, param := range params {
-		parts := strings.SplitN(param, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid parameter format: %s (expected key=value)", param)
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		if key == "" {
-			return nil, fmt.Errorf("parameter key cannot be empty")
-		}
-
-		result[key] = value
-	}
-
-	return result, nil
-}
-
-// getTargetByNameOrID retrieves a target by name or ID
-func getTargetByNameOrID(ctx context.Context, dao *database.TargetDAO, nameOrID string) (*types.Target, error) {
-	// Try to parse as ID first
-	id, err := types.ParseID(nameOrID)
-	if err == nil {
-		// Valid ID, try to get by ID
-		target, err := dao.Get(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if target != nil {
-			return target, nil
-		}
-	}
-
-	// Not a valid ID or not found, try to get by name
-	targets, err := dao.List(ctx, types.NewTargetFilter())
-	if err != nil {
-		return nil, err
-	}
-
-	for _, target := range targets {
-		if target.Name == nameOrID {
-			return target, nil
-		}
-	}
-
-	return nil, nil
-}
-
-// truncateForDisplay truncates text for display
-func truncateForDisplay(text string, maxLen int) string {
-	if len(text) <= maxLen {
-		return text
-	}
-	return text[:maxLen] + "\n... (truncated, " + fmt.Sprintf("%d", len(text)-maxLen) + " more characters)"
-}
-
-// Chain commands
-
-var payloadChainCmd = &cobra.Command{
-	Use:   "chain",
-	Short: "Manage attack chains",
-	Long:  `Manage multi-stage attack chains for orchestrated testing`,
-}
-
-var payloadChainListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List attack chains",
-	Long: `List all attack chains with optional filtering.
-
-Examples:
-  # List all chains
-  gibson payload chain list
-
-  # Output as JSON
-  gibson payload chain list --output json`,
-	RunE: runPayloadChainList,
-}
-
-var payloadChainShowCmd = &cobra.Command{
-	Use:   "show ID",
-	Short: "Show detailed attack chain information",
-	Long: `Display full details for a specific attack chain including all stages.
-
-Examples:
-  # Show chain details
-  gibson payload chain show chain_abc123
-
-  # Show chain details as JSON
-  gibson payload chain show chain_abc123 --output json`,
-	Args: cobra.ExactArgs(1),
-	RunE: runPayloadChainShow,
-}
-
-var payloadChainCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new attack chain",
-	Long: `Create a new attack chain from a file.
-
-Examples:
-  # Create chain from YAML file
-  gibson payload chain create --from-file chain.yaml
-
-  # Create chain from JSON file
-  gibson payload chain create --from-file chain.json`,
-	RunE: runPayloadChainCreate,
-}
-
-var payloadChainExecuteCmd = &cobra.Command{
-	Use:   "execute ID",
-	Short: "Execute an attack chain against a target",
-	Long: `Execute a multi-stage attack chain against a specified target.
-
-Examples:
-  # Execute chain against a target
-  gibson payload chain execute chain_abc123 --target target-api
-
-  # Execute with parameter overrides
-  gibson payload chain execute chain_abc123 --target target-api --params key=value
-
-  # Execute with custom timeout
-  gibson payload chain execute chain_abc123 --target target-api --timeout 600`,
-	Args: cobra.ExactArgs(1),
-	RunE: runPayloadChainExecute,
-}
-
-// Flags for chain commands
-var (
-	chainListOutput     string
-	chainShowOutput     string
-	chainCreateFromFile string
-	chainExecuteTarget  string
-	chainExecuteParams  []string
-	chainExecuteTimeout int
-)
-
-func init() {
-	// Chain list flags
-	payloadChainListCmd.Flags().StringVar(&chainListOutput, "output", "text", "Output format (text, json)")
-
-	// Chain show flags
-	payloadChainShowCmd.Flags().StringVar(&chainShowOutput, "output", "text", "Output format (text, json)")
-
-	// Chain create flags
-	payloadChainCreateCmd.Flags().StringVar(&chainCreateFromFile, "from-file", "", "Create chain from YAML or JSON file (required)")
-	payloadChainCreateCmd.MarkFlagRequired("from-file")
-
-	// Chain execute flags
-	payloadChainExecuteCmd.Flags().StringVar(&chainExecuteTarget, "target", "", "Target name or ID (required)")
-	payloadChainExecuteCmd.Flags().StringSliceVar(&chainExecuteParams, "params", []string{}, "Parameter overrides in key=value format")
-	payloadChainExecuteCmd.Flags().IntVar(&chainExecuteTimeout, "timeout", 0, "Execution timeout in seconds (0 = use default)")
-	payloadChainExecuteCmd.MarkFlagRequired("target")
-
-	// Add chain subcommands to chain command
-	payloadChainCmd.AddCommand(payloadChainListCmd)
-	payloadChainCmd.AddCommand(payloadChainShowCmd)
-	payloadChainCmd.AddCommand(payloadChainCreateCmd)
-	payloadChainCmd.AddCommand(payloadChainExecuteCmd)
-}
-
-// runPayloadChainList executes the payload chain list command
-func runPayloadChainList(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
-	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
-	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Query chains from database
-	query := "SELECT id, name, description, version, enabled, built_in, created_at FROM attack_chains ORDER BY created_at DESC"
-	queryRows, err := db.Conn().QueryContext(ctx, query)
-	if err != nil {
-		return fmt.Errorf("failed to query chains: %w", err)
-	}
-	defer queryRows.Close()
-
-	// Collect chains
-	type chainSummary struct {
-		ID          string    `json:"id"`
-		Name        string    `json:"name"`
-		Description string    `json:"description"`
-		Version     string    `json:"version"`
-		Enabled     bool      `json:"enabled"`
-		BuiltIn     bool      `json:"built_in"`
-		CreatedAt   time.Time `json:"created_at"`
-	}
-
-	chains := []chainSummary{}
-	for queryRows.Next() {
-		var chain chainSummary
-		if err := queryRows.Scan(&chain.ID, &chain.Name, &chain.Description, &chain.Version, &chain.Enabled, &chain.BuiltIn, &chain.CreatedAt); err != nil {
-			return fmt.Errorf("failed to scan chain: %w", err)
-		}
-		chains = append(chains, chain)
-	}
-
-	if err := queryRows.Err(); err != nil {
-		return fmt.Errorf("error iterating chains: %w", err)
-	}
-
-	// Determine output format
-	outputFormat := internal.FormatText
-	if chainListOutput == "json" {
-		outputFormat = internal.FormatJSON
-	}
-
-	formatter := internal.NewFormatter(outputFormat, cmd.OutOrStdout())
-
-	// Handle JSON output
-	if outputFormat == internal.FormatJSON {
-		output := map[string]interface{}{
-			"count":  len(chains),
-			"chains": chains,
-		}
-		return formatter.PrintJSON(output)
-	}
-
-	// Text output
-	if len(chains) == 0 {
-		return formatter.PrintError("No attack chains found")
-	}
-
-	// Print summary
-	fmt.Fprintf(cmd.OutOrStdout(), "Found %d attack chain(s)\n\n", len(chains))
-
-	// Build table
-	headers := []string{"ID", "Name", "Description", "Version", "Built-In", "Enabled"}
-	tableRows := make([][]string, 0, len(chains))
-
-	for _, chain := range chains {
-		builtInStr := ""
-		if chain.BuiltIn {
-			builtInStr = "yes"
-		}
-		enabledStr := ""
-		if chain.Enabled {
-			enabledStr = "yes"
-		}
-
-		tableRows = append(tableRows, []string{
-			chain.ID,
-			truncateString(chain.Name, 30),
-			truncateString(chain.Description, 40),
-			chain.Version,
-			builtInStr,
-			enabledStr,
-		})
-	}
-
-	// Print table
-	if err := formatter.PrintTable(headers, tableRows); err != nil {
-		return fmt.Errorf("failed to print table: %w", err)
-	}
-
-	return nil
-}
-
-// runPayloadChainShow executes the payload chain show command
-func runPayloadChainShow(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	chainID := args[0]
-
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
-	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
-	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Query chain from database
-	query := `SELECT id, name, description, version, stages, metadata, enabled, built_in, created_at, updated_at
-	          FROM attack_chains WHERE id = ?`
-
-	var chain payload.AttackChain
-	var stagesJSON, metadataJSON, version string
-
-	err = db.Conn().QueryRowContext(ctx, query, chainID).Scan(
-		&chain.ID, &chain.Name, &chain.Description, &version,
-		&stagesJSON, &metadataJSON, &chain.Enabled, &chain.BuiltIn,
-		&chain.CreatedAt, &chain.UpdatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to get chain: %w", err)
-	}
-
-	// Parse stages JSON
-	if err := json.Unmarshal([]byte(stagesJSON), &chain.Stages); err != nil {
-		return fmt.Errorf("failed to parse stages: %w", err)
-	}
-
-	// Parse metadata JSON
-	if metadataJSON != "" {
-		if err := json.Unmarshal([]byte(metadataJSON), &chain.Metadata); err != nil {
-			return fmt.Errorf("failed to parse metadata: %w", err)
-		}
-	}
-
-	// Set version from the scanned value
-	chain.Metadata.Version = version
-
-	// Determine output format
-	outputFormat := internal.FormatText
-	if chainShowOutput == "json" {
-		outputFormat = internal.FormatJSON
-	}
-
-	formatter := internal.NewFormatter(outputFormat, cmd.OutOrStdout())
-
-	// Handle JSON output
-	if outputFormat == internal.FormatJSON {
-		return formatter.PrintJSON(chain)
-	}
-
-	// Text output
-	out := cmd.OutOrStdout()
-
-	// Header
-	fmt.Fprintf(out, "Attack Chain: %s\n", chain.Name)
-	fmt.Fprintf(out, "ID: %s\n", chain.ID)
-	fmt.Fprintf(out, "Version: %s\n", version)
-	fmt.Fprintf(out, "\n")
-
-	// Description
-	if chain.Description != "" {
-		fmt.Fprintf(out, "Description:\n  %s\n\n", chain.Description)
-	}
-
-	// Stage count
-	fmt.Fprintf(out, "Stages: %d\n", len(chain.Stages))
-	if len(chain.Stages) > 0 {
-		fmt.Fprintf(out, "\n")
-		for stageID, stage := range chain.Stages {
-			fmt.Fprintf(out, "  Stage: %s\n", stageID)
-			fmt.Fprintf(out, "    Name: %s\n", stage.Name)
-			if stage.Description != "" {
-				fmt.Fprintf(out, "    Description: %s\n", stage.Description)
-			}
-			fmt.Fprintf(out, "    Payload ID: %s\n", stage.PayloadID)
-			if len(stage.Dependencies) > 0 {
-				fmt.Fprintf(out, "    Dependencies: %s\n", strings.Join(stage.Dependencies, ", "))
-			}
-			if stage.Parallel {
-				fmt.Fprintf(out, "    Parallel: yes\n")
-			}
-			fmt.Fprintf(out, "\n")
-		}
-	}
-
-	// Metadata
-	if chain.Metadata.Author != "" || chain.Metadata.Difficulty != "" || len(chain.Metadata.Tags) > 0 {
-		fmt.Fprintf(out, "Metadata:\n")
-		if chain.Metadata.Author != "" {
-			fmt.Fprintf(out, "  Author: %s\n", chain.Metadata.Author)
-		}
-		if chain.Metadata.Difficulty != "" {
-			fmt.Fprintf(out, "  Difficulty: %s\n", chain.Metadata.Difficulty)
-		}
-		if len(chain.Metadata.Tags) > 0 {
-			fmt.Fprintf(out, "  Tags: %s\n", strings.Join(chain.Metadata.Tags, ", "))
-		}
-		if chain.Metadata.EstimatedDuration > 0 {
-			fmt.Fprintf(out, "  Estimated Duration: %s\n", chain.Metadata.EstimatedDuration)
-		}
-		fmt.Fprintf(out, "\n")
-	}
-
-	// Status
-	fmt.Fprintf(out, "Status:\n")
-	fmt.Fprintf(out, "  Built-in: %v\n", chain.BuiltIn)
-	fmt.Fprintf(out, "  Enabled: %v\n", chain.Enabled)
-	fmt.Fprintf(out, "  Created: %s\n", chain.CreatedAt.Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(out, "  Updated: %s\n", chain.UpdatedAt.Format("2006-01-02 15:04:05"))
-
-	return nil
-}
-
-// runPayloadChainCreate executes the payload chain create command
-func runPayloadChainCreate(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-
-	// Load chain from file
-	chain, err := loadChainFromFile(chainCreateFromFile)
-	if err != nil {
-		return fmt.Errorf("failed to load chain from file: %w", err)
-	}
-
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
-	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
-	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Generate ID if not provided
-	if chain.ID.IsZero() {
-		chain.ID = types.NewID()
-	}
-
-	// Set timestamps
-	now := time.Now()
-	chain.CreatedAt = now
-	chain.UpdatedAt = now
-	chain.BuiltIn = false
-	if !chain.Enabled {
-		chain.Enabled = true
-	}
-
-	// Marshal stages and metadata
-	stagesJSON, err := json.Marshal(chain.Stages)
-	if err != nil {
-		return fmt.Errorf("failed to marshal stages: %w", err)
-	}
-
-	metadataJSON, err := json.Marshal(chain.Metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	// Insert into database
-	query := `INSERT INTO attack_chains (id, name, description, version, stages, metadata, enabled, built_in, created_at, updated_at)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-
-	_, err = db.Conn().ExecContext(ctx, query,
-		chain.ID, chain.Name, chain.Description, chain.Metadata.Version,
-		string(stagesJSON), string(metadataJSON),
-		chain.Enabled, chain.BuiltIn, chain.CreatedAt, chain.UpdatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to save chain: %w", err)
-	}
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Successfully created attack chain: %s (ID: %s)\n", chain.Name, chain.ID.String())
-
-	return nil
-}
-
-// runPayloadChainExecute executes the payload chain execute command
-func runPayloadChainExecute(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	chainID := args[0]
-
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
-	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
-	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Parse chain ID
-	id, err := types.ParseID(chainID)
-	if err != nil {
-		return fmt.Errorf("invalid chain ID: %w", err)
-	}
-
-	// Get chain from database
-	query := `SELECT id, name, description, version, stages, metadata, enabled, built_in, created_at, updated_at
-	          FROM attack_chains WHERE id = ?`
-
-	var chain payload.AttackChain
-	var stagesJSON, metadataJSON, version string
-
-	err = db.Conn().QueryRowContext(ctx, query, id).Scan(
-		&chain.ID, &chain.Name, &chain.Description, &version,
-		&stagesJSON, &metadataJSON, &chain.Enabled, &chain.BuiltIn,
-		&chain.CreatedAt, &chain.UpdatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to get chain: %w", err)
-	}
-
-	// Set version
-	chain.Metadata.Version = version
-
-	// Parse stages JSON
-	if err := json.Unmarshal([]byte(stagesJSON), &chain.Stages); err != nil {
-		return fmt.Errorf("failed to parse stages: %w", err)
-	}
-
-	// Get target
-	targetDAO := database.NewTargetDAO(db)
-	target, err := getTargetByNameOrID(ctx, targetDAO, chainExecuteTarget)
-	if err != nil {
-		return fmt.Errorf("failed to get target: %w", err)
-	}
-	if target == nil {
-		return fmt.Errorf("target not found: %s", chainExecuteTarget)
-	}
-
-	// Parse parameters
-	params, err := parseParameters(chainExecuteParams)
-	if err != nil {
-		return fmt.Errorf("failed to parse parameters: %w", err)
-	}
-
-	// Create execution request
-	req := &payload.ChainExecutionRequest{
-		ChainID:    chain.ID,
-		TargetID:   target.ID,
-		Parameters: params,
-	}
-
-	// Set timeout if specified
-	if chainExecuteTimeout > 0 {
-		req.Timeout = time.Duration(chainExecuteTimeout) * time.Second
-	}
-
-	// Create executor and chain runner
-	executionStore := payload.NewExecutionStore(db)
-	registry := payload.NewPayloadRegistry(db, payload.DefaultRegistryConfig())
-	executor := payload.NewPayloadExecutorWithDefaults(registry, executionStore, nil, nil)
-	chainRunner := payload.NewChainRunnerWithDefaults(executor, registry, executionStore)
-
-	// Execute chain
-	fmt.Fprintf(cmd.OutOrStdout(), "Executing attack chain: %s\n", chain.Name)
-	fmt.Fprintf(cmd.OutOrStdout(), "Target: %s (%s)\n", target.Name, target.URL)
-	fmt.Fprintf(cmd.OutOrStdout(), "Stages: %d\n\n", len(chain.Stages))
-
-	result, err := chainRunner.Execute(ctx, req)
-	if err != nil {
-		return fmt.Errorf("chain execution failed: %w", err)
-	}
-
-	// Display results
-	return displayChainExecutionResult(cmd, result, &chain)
-}
-
-// displayChainExecutionResult displays the chain execution result
-func displayChainExecutionResult(
-	cmd *cobra.Command,
-	result *payload.ChainResult,
-	chain *payload.AttackChain,
-) error {
-	out := cmd.OutOrStdout()
-
-	// Display status
-	fmt.Fprintf(out, "CHAIN EXECUTION RESULT\n")
-	fmt.Fprintf(out, "=====================================\n\n")
-
-	// Status
-	fmt.Fprintf(out, "Status: %s\n", result.Status)
-	fmt.Fprintf(out, "Success: %v\n", result.Success)
-	fmt.Fprintf(out, "Stages Executed: %d\n", result.StagesExecuted)
-	fmt.Fprintf(out, "Successful Stages: %d\n", result.SuccessfulStages)
-	fmt.Fprintf(out, "Failed Stages: %d\n", result.FailedStages)
-	fmt.Fprintf(out, "\n")
-
-	// Execution details
-	if !result.StartedAt.IsZero() {
-		fmt.Fprintf(out, "Started: %s\n", result.StartedAt.Format("2006-01-02 15:04:05"))
-	}
-	if !result.CompletedAt.IsZero() {
-		fmt.Fprintf(out, "Completed: %s\n", result.CompletedAt.Format("2006-01-02 15:04:05"))
-	}
-	if result.TotalDuration > 0 {
-		fmt.Fprintf(out, "Duration: %s\n", result.TotalDuration)
-	}
-	if result.TotalTokensUsed > 0 {
-		fmt.Fprintf(out, "Total Tokens Used: %d\n", result.TotalTokensUsed)
-	}
-	if result.TotalCost > 0 {
-		fmt.Fprintf(out, "Total Cost: $%.4f\n", result.TotalCost)
-	}
-	fmt.Fprintf(out, "\n")
-
-	// Stage results
-	if len(result.StageResults) > 0 {
-		fmt.Fprintf(out, "STAGE RESULTS\n")
-		fmt.Fprintf(out, "-------------------------------------\n")
-		for _, stageResult := range result.StageResults {
-			fmt.Fprintf(out, "Stage: %s\n", stageResult.StageID)
-			fmt.Fprintf(out, "  Status: %s\n", stageResult.Status)
-			fmt.Fprintf(out, "  Success: %v\n", stageResult.Success)
-			if stageResult.ErrorMessage != "" {
-				fmt.Fprintf(out, "  Error: %s\n", stageResult.ErrorMessage)
-			}
-			if stageResult.Duration > 0 {
-				fmt.Fprintf(out, "  Duration: %s\n", stageResult.Duration)
-			}
-			fmt.Fprintf(out, "\n")
-		}
-	}
-
-	// Final summary
-	if result.Success {
-		fmt.Fprintf(out, "CHAIN EXECUTION SUCCESSFUL!\n")
-		fmt.Fprintf(out, "All stages completed successfully.\n")
-	} else {
-		fmt.Fprintf(out, "Chain execution completed with failures.\n")
-		if result.ErrorMessage != "" {
-			fmt.Fprintf(out, "Error: %s\n", result.ErrorMessage)
-		}
-	}
-
-	return nil
-}
-
-// loadChainFromFile loads a chain from a YAML or JSON file
-func loadChainFromFile(filePath string) (*payload.AttackChain, error) {
-	// Read file
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
-	}
-
-	chain := &payload.AttackChain{}
-
-	// Try YAML first, then JSON
-	if strings.HasSuffix(filePath, ".yaml") || strings.HasSuffix(filePath, ".yml") {
-		if err := yaml.Unmarshal(data, chain); err != nil {
-			return nil, fmt.Errorf("failed to parse YAML: %w", err)
-		}
-	} else if strings.HasSuffix(filePath, ".json") {
-		if err := json.Unmarshal(data, chain); err != nil {
-			return nil, fmt.Errorf("failed to parse JSON: %w", err)
-		}
-	} else {
-		// Try JSON first, then YAML
-		if err := json.Unmarshal(data, chain); err != nil {
-			if err := yaml.Unmarshal(data, chain); err != nil {
-				return nil, fmt.Errorf("failed to parse file as JSON or YAML")
-			}
-		}
-	}
-
-	return chain, nil
-}
-
-// Stats command
-
-var payloadStatsCmd = &cobra.Command{
-	Use:   "stats [ID]",
-	Short: "Show payload execution statistics",
-	Long: `Display execution statistics for a specific payload or category.
-
-Examples:
-  # Show stats for a specific payload
-  gibson payload stats payload_abc123
-
-  # Show stats for a category
-  gibson payload stats --category jailbreak
-
-  # Output as JSON
-  gibson payload stats payload_abc123 --output json
-
-  # Show category stats as JSON
-  gibson payload stats --category prompt_injection --output json`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runPayloadStats,
-}
-
-// Flags for stats command
-var (
-	statsPayloadCategory string
-	statsPayloadOutput   string
-)
-
-func init() {
-	// Stats command flags
-	payloadStatsCmd.Flags().StringVar(&statsPayloadCategory, "category", "", "Show statistics for a category instead of a specific payload")
-	payloadStatsCmd.Flags().StringVar(&statsPayloadOutput, "output", "text", "Output format (text, json)")
-}
-
-// runPayloadStats executes the payload stats command
-func runPayloadStats(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
-	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
-	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Create analytics tracker
-	payloadStore := payload.NewPayloadStore(db)
-	executionStore := payload.NewExecutionStore(db)
-	tracker := payload.NewEffectivenessTracker(executionStore, payloadStore)
-
-	// Determine output format
-	outputFormat := internal.FormatText
-	if statsPayloadOutput == "json" {
-		outputFormat = internal.FormatJSON
-	}
-
-	formatter := internal.NewFormatter(outputFormat, cmd.OutOrStdout())
-
-	// Check if we're showing category stats or payload stats
-	if statsPayloadCategory != "" {
-		// Show category stats
-		return runCategoryStats(cmd, ctx, tracker, formatter, outputFormat)
-	}
-
-	// Show payload stats
-	if len(args) == 0 {
-		return fmt.Errorf("payload ID is required unless --category is specified")
-	}
-
-	return runSinglePayloadStats(cmd, ctx, tracker, formatter, outputFormat, args[0])
+	_ = cmd.Context()
+	_ = args[0]
+
+	// TODO: Implement payload execution logic with Redis backend
+	// This requires:
+	// 1. Loading the payload from Redis store
+	// 2. Creating an execution context
+	// 3. Running the payload against the specified target
+	// 4. Recording execution results
+	return fmt.Errorf("payload execution not yet implemented with Redis backend")
 }
 
 // runSinglePayloadStats shows statistics for a single payload
@@ -2040,86 +1050,104 @@ func runCategoryStats(
 	formatter internal.Formatter,
 	outputFormat internal.OutputFormat,
 ) error {
+	// TODO: Re-enable when stats commands are fully migrated
 	// Parse category
-	category := payload.PayloadCategory(statsPayloadCategory)
-	if !category.IsValid() {
-		return fmt.Errorf("invalid category: %s (valid: %s)", statsPayloadCategory, getValidCategories())
-	}
-
-	// Get category stats
-	stats, err := tracker.GetCategoryStats(ctx, category)
-	if err != nil {
-		return fmt.Errorf("failed to get category stats: %w", err)
-	}
-
-	// Handle JSON output
-	if outputFormat == internal.FormatJSON {
-		return formatter.PrintJSON(stats)
-	}
-
-	// Text output
-	out := cmd.OutOrStdout()
-
-	fmt.Fprintf(out, "Category Statistics: %s\n", stats.Category)
-	fmt.Fprintf(out, "\n")
-
-	// Payload counts
-	fmt.Fprintf(out, "PAYLOAD SUMMARY\n")
-	fmt.Fprintf(out, "-------------------------------------\n")
-	fmt.Fprintf(out, "Total Payloads:       %d\n", stats.TotalPayloads)
-	fmt.Fprintf(out, "Enabled Payloads:     %d\n", stats.EnabledPayloads)
-	fmt.Fprintf(out, "\n")
-
-	// Execution counts
-	fmt.Fprintf(out, "EXECUTION SUMMARY\n")
-	fmt.Fprintf(out, "-------------------------------------\n")
-	fmt.Fprintf(out, "Total Executions:     %d\n", stats.TotalExecutions)
-	fmt.Fprintf(out, "Successful Attacks:   %d\n", stats.SuccessfulAttacks)
-	fmt.Fprintf(out, "Failed Executions:    %d\n", stats.FailedExecutions)
-	fmt.Fprintf(out, "\n")
-
-	// Aggregate metrics
-	if stats.TotalExecutions > 0 {
-		fmt.Fprintf(out, "AGGREGATE METRICS\n")
-		fmt.Fprintf(out, "-------------------------------------\n")
-		fmt.Fprintf(out, "Success Rate:         %.2f%%\n", stats.SuccessRate*100)
-		fmt.Fprintf(out, "Average Duration:     %s\n", stats.AverageDuration)
-		if stats.AverageConfidence > 0 {
-			fmt.Fprintf(out, "Average Confidence:   %.2f%%\n", stats.AverageConfidence*100)
-		}
-		if stats.TotalCost > 0 {
-			fmt.Fprintf(out, "Total Cost:           $%.4f\n", stats.TotalCost)
-		}
-		fmt.Fprintf(out, "\n")
-	}
-
-	// Finding metrics
-	if stats.FindingsCreated > 0 {
-		fmt.Fprintf(out, "FINDING METRICS\n")
-		fmt.Fprintf(out, "-------------------------------------\n")
-		fmt.Fprintf(out, "Findings Created:     %d\n", stats.FindingsCreated)
-		fmt.Fprintf(out, "Finding Rate:         %.2f%%\n", stats.FindingRate*100)
-		fmt.Fprintf(out, "\n")
-	}
-
-	// Top performing payloads
-	if len(stats.TopPayloads) > 0 {
-		fmt.Fprintf(out, "TOP PERFORMING PAYLOADS\n")
-		fmt.Fprintf(out, "-------------------------------------\n")
-		for i, ps := range stats.TopPayloads {
-			fmt.Fprintf(out, "%d. %s\n", i+1, ps.PayloadName)
-			fmt.Fprintf(out, "   Success Rate: %.2f%% (%d executions)\n", ps.SuccessRate*100, ps.TotalExecutions)
-			fmt.Fprintf(out, "   Confidence:   %.2f%%\n", ps.ConfidenceLevel*100)
-		}
-		fmt.Fprintf(out, "\n")
-	}
-
-	if stats.TotalExecutions == 0 {
-		fmt.Fprintf(out, "No execution data available for this category.\n")
-	}
-
-	return nil
+	// category := payload.PayloadCategory(statsPayloadCategory)
+	// if !category.IsValid() {
+	// 	return fmt.Errorf("invalid category: %s (valid: %s)", statsPayloadCategory, getValidCategories())
+	// }
+	_ = ctx
+	_ = tracker
+	_ = formatter
+	_ = outputFormat
+	return fmt.Errorf("category stats not yet implemented with Redis backend")
 }
+
+// TODO: Re-enable when stats are migrated - all code below is commented out
+/*
+// runCategoryStats shows statistics for a category (DISABLED - needs Redis migration)
+func runCategoryStatsDisabled(
+	cmd *cobra.Command,
+	ctx context.Context,
+	tracker payload.EffectivenessTracker,
+	formatter internal.Formatter,
+	outputFormat internal.OutputFormat,
+) error {
+	// Get category stats
+	// stats, err := tracker.GetCategoryStats(ctx, category)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get category stats: %w", err)
+// 	}
+// 
+// 	// Handle JSON output
+// 	if outputFormat == internal.FormatJSON {
+// 		return formatter.PrintJSON(stats)
+// 	}
+// 
+// 	// Text output
+// 	out := cmd.OutOrStdout()
+// 
+// 	fmt.Fprintf(out, "Category Statistics: %s\n", stats.Category)
+// 	fmt.Fprintf(out, "\n")
+// 
+// 	// Payload counts
+// 	fmt.Fprintf(out, "PAYLOAD SUMMARY\n")
+// 	fmt.Fprintf(out, "-------------------------------------\n")
+// 	fmt.Fprintf(out, "Total Payloads:       %d\n", stats.TotalPayloads)
+// 	fmt.Fprintf(out, "Enabled Payloads:     %d\n", stats.EnabledPayloads)
+// 	fmt.Fprintf(out, "\n")
+// 
+// 	// Execution counts
+// 	fmt.Fprintf(out, "EXECUTION SUMMARY\n")
+// 	fmt.Fprintf(out, "-------------------------------------\n")
+// 	fmt.Fprintf(out, "Total Executions:     %d\n", stats.TotalExecutions)
+// 	fmt.Fprintf(out, "Successful Attacks:   %d\n", stats.SuccessfulAttacks)
+// 	fmt.Fprintf(out, "Failed Executions:    %d\n", stats.FailedExecutions)
+// 	fmt.Fprintf(out, "\n")
+// 
+// 	// Aggregate metrics
+// 	if stats.TotalExecutions > 0 {
+// 		fmt.Fprintf(out, "AGGREGATE METRICS\n")
+// 		fmt.Fprintf(out, "-------------------------------------\n")
+// 		fmt.Fprintf(out, "Success Rate:         %.2f%%\n", stats.SuccessRate*100)
+// 		fmt.Fprintf(out, "Average Duration:     %s\n", stats.AverageDuration)
+// 		if stats.AverageConfidence > 0 {
+// 			fmt.Fprintf(out, "Average Confidence:   %.2f%%\n", stats.AverageConfidence*100)
+// 		}
+// 		if stats.TotalCost > 0 {
+// 			fmt.Fprintf(out, "Total Cost:           $%.4f\n", stats.TotalCost)
+// 		}
+// 		fmt.Fprintf(out, "\n")
+// 	}
+// 
+// 	// Finding metrics
+// 	if stats.FindingsCreated > 0 {
+// 		fmt.Fprintf(out, "FINDING METRICS\n")
+// 		fmt.Fprintf(out, "-------------------------------------\n")
+// 		fmt.Fprintf(out, "Findings Created:     %d\n", stats.FindingsCreated)
+// 		fmt.Fprintf(out, "Finding Rate:         %.2f%%\n", stats.FindingRate*100)
+// 		fmt.Fprintf(out, "\n")
+// 	}
+// 
+// 	// Top performing payloads
+// 	if len(stats.TopPayloads) > 0 {
+// 		fmt.Fprintf(out, "TOP PERFORMING PAYLOADS\n")
+// 		fmt.Fprintf(out, "-------------------------------------\n")
+// 		for i, ps := range stats.TopPayloads {
+// 			fmt.Fprintf(out, "%d. %s\n", i+1, ps.PayloadName)
+// 			fmt.Fprintf(out, "   Success Rate: %.2f%% (%d executions)\n", ps.SuccessRate*100, ps.TotalExecutions)
+// 			fmt.Fprintf(out, "   Confidence:   %.2f%%\n", ps.ConfidenceLevel*100)
+// 		}
+// 		fmt.Fprintf(out, "\n")
+// 	}
+// 
+// 	if stats.TotalExecutions == 0 {
+// 		fmt.Fprintf(out, "No execution data available for this category.\n")
+// 	}
+// 
+// 	return nil
+// }
+*/
 
 // Import/Export commands
 
@@ -2160,11 +1188,12 @@ var (
 	exportPayloadOutput string
 )
 
-func init() {
-	// Export command flags
-	payloadExportCmd.Flags().StringVar(&exportPayloadOutput, "output", "", "Output file path (required)")
-	payloadExportCmd.MarkFlagRequired("output")
-}
+// Duplicate init() function - merged into main init() above
+// func init() {
+// 	// Export command flags
+// 	payloadExportCmd.Flags().StringVar(&exportPayloadOutput, "output", "", "Output file path (required)")
+// 	payloadExportCmd.MarkFlagRequired("output")
+// }
 
 // runPayloadImport executes the payload import command
 func runPayloadImport(cmd *cobra.Command, args []string) error {
@@ -2177,22 +1206,12 @@ func runPayloadImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create payload store using Redis
+	store, cleanup, err := createPayloadStore()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create payload store: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Create payload store
-	store := payload.NewPayloadStore(db)
+	defer cleanup()
 
 	// Try to parse as array first, then as single payload
 	var payloads []*payload.Payload
@@ -2319,22 +1338,12 @@ func runPayloadExport(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	payloadID := args[0]
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create payload store using Redis
+	store, cleanup, err := createPayloadStore()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create payload store: %w", err)
 	}
-
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Create payload store
-	store := payload.NewPayloadStore(db)
+	defer cleanup()
 
 	// Parse payload ID
 	id, err := types.ParseID(payloadID)
@@ -2420,37 +1429,31 @@ var (
 	searchPayloadOutput     string
 )
 
-func init() {
-	// Search command flags
-	payloadSearchCmd.Flags().StringVar(&searchPayloadCategory, "category", "", "Filter by category")
-	payloadSearchCmd.Flags().StringVar(&searchPayloadTags, "tags", "", "Filter by tags (comma-separated)")
-	payloadSearchCmd.Flags().StringVar(&searchPayloadTargetType, "target-type", "", "Filter by target type")
-	payloadSearchCmd.Flags().StringVar(&searchPayloadSeverity, "severity", "", "Filter by severity")
-	payloadSearchCmd.Flags().IntVar(&searchPayloadLimit, "limit", 50, "Maximum number of results")
-	payloadSearchCmd.Flags().StringVar(&searchPayloadOutput, "output", "text", "Output format (text, json)")
-}
+// Duplicate init() function - merged into main init() above
+// func init() {
+// 	// Search command flags
+// 	payloadSearchCmd.Flags().StringVar(&searchPayloadCategory, "category", "", "Filter by category")
+// 	payloadSearchCmd.Flags().StringVar(&searchPayloadTags, "tags", "", "Filter by tags (comma-separated)")
+// 	payloadSearchCmd.Flags().StringVar(&searchPayloadTargetType, "target-type", "", "Filter by target type")
+// 	payloadSearchCmd.Flags().StringVar(&searchPayloadSeverity, "severity", "", "Filter by severity")
+// 	payloadSearchCmd.Flags().IntVar(&searchPayloadLimit, "limit", 50, "Maximum number of results")
+// 	payloadSearchCmd.Flags().StringVar(&searchPayloadOutput, "output", "text", "Output format (text, json)")
+// }
 
 // runPayloadSearch executes the payload search command
 func runPayloadSearch(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	query := args[0]
 
-	// Get Gibson home directory
-	homeDir, err := getGibsonHome()
+	// Create payload store using Redis
+	store, cleanup, err := createPayloadStore()
 	if err != nil {
-		return fmt.Errorf("failed to get Gibson home: %w", err)
+		return fmt.Errorf("failed to create payload store: %w", err)
 	}
+	defer cleanup()
 
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Create payload registry
-	registry := payload.NewPayloadRegistry(db, payload.DefaultRegistryConfig())
+	// Create payload registry with Redis store
+	registry := payload.NewPayloadRegistryWithStore(store, payload.DefaultRegistryConfig())
 
 	// Build filter
 	filter := &payload.PayloadFilter{}

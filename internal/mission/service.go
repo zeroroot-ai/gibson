@@ -37,7 +37,19 @@ type MissionSummary struct {
 // WorkflowStore provides access to workflow definitions.
 type WorkflowStore interface {
 	// Get retrieves a workflow by ID
-	Get(ctx context.Context, id types.ID) (interface{}, error)
+	Get(ctx context.Context, id types.ID) (*MissionDefinition, error)
+
+	// GetByName retrieves a workflow by name
+	GetByName(ctx context.Context, name string) (*MissionDefinition, error)
+}
+
+// TargetStoreInterface provides access to target entities.
+type TargetStoreInterface interface {
+	// Get retrieves a target by ID
+	Get(ctx context.Context, id types.ID) (*types.Target, error)
+
+	// GetByName retrieves a target by name
+	GetByName(ctx context.Context, name string) (*types.Target, error)
 }
 
 // FindingStore provides access to findings.
@@ -51,9 +63,11 @@ type FindingStore interface {
 
 // DefaultMissionService implements MissionService.
 type DefaultMissionService struct {
-	store         MissionStore
-	workflowStore WorkflowStore
-	findingStore  FindingStore
+	store           MissionStore
+	workflowStore   WorkflowStore
+	findingStore    FindingStore
+	targetStore     TargetStoreInterface
+	inlineProcessor *InlineConfigProcessor
 }
 
 // NewMissionService creates a new mission service.
@@ -65,17 +79,90 @@ func NewMissionService(store MissionStore, workflowStore WorkflowStore, findingS
 	}
 }
 
+// SetTargetStore sets the target store for the service.
+func (s *DefaultMissionService) SetTargetStore(targetStore TargetStoreInterface) {
+	s.targetStore = targetStore
+}
+
+// SetInlineProcessor sets the inline configuration processor for the service.
+func (s *DefaultMissionService) SetInlineProcessor(processor *InlineConfigProcessor) {
+	s.inlineProcessor = processor
+}
+
 // CreateFromConfig creates a mission from a YAML configuration.
 func (s *DefaultMissionService) CreateFromConfig(ctx context.Context, config *MissionConfig) (*Mission, error) {
-	// TODO: Implement full logic to resolve target and workflow references
-	// For now, create a basic mission structure
+	// Validate mutual exclusivity of reference and inline configs
+	if config.Target.Reference != "" && config.Target.Inline != nil {
+		return nil, fmt.Errorf("cannot specify both target reference and inline target")
+	}
+	if config.Workflow.Reference != "" && config.Workflow.Inline != nil {
+		return nil, fmt.Errorf("cannot specify both workflow reference and inline workflow")
+	}
 
+	// Resolve target reference or process inline target
+	var targetID types.ID
+	if config.Target.Reference != "" {
+		target, err := s.resolveTarget(ctx, config.Target.Reference)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve target '%s': %w", config.Target.Reference, err)
+		}
+		targetID = target.ID
+	} else if config.Target.Inline != nil {
+		// Process inline target configuration
+		if s.inlineProcessor == nil {
+			return nil, fmt.Errorf("inline target configuration requires inline processor to be configured")
+		}
+		inlineTarget := config.Target.Inline.ToInlineTarget()
+		id, err := s.inlineProcessor.ProcessInlineTarget(ctx, inlineTarget)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process inline target: %w", err)
+		}
+		targetID = id
+	} else {
+		return nil, fmt.Errorf("target must be specified (reference or inline)")
+	}
+
+	// Resolve workflow reference or process inline workflow
+	var workflowID types.ID
+	if config.Workflow.Reference != "" {
+		workflow, err := s.resolveWorkflow(ctx, config.Workflow.Reference)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve workflow '%s': %w", config.Workflow.Reference, err)
+		}
+		workflowID = workflow.ID
+
+		// Validate target/workflow compatibility (only for referenced configs)
+		if config.Target.Reference != "" {
+			target, _ := s.resolveTarget(ctx, config.Target.Reference)
+			if err := s.validateTargetWorkflowCompatibility(target, workflow); err != nil {
+				return nil, fmt.Errorf("target/workflow incompatible: %w", err)
+			}
+		}
+	} else if config.Workflow.Inline != nil {
+		// Process inline workflow configuration
+		if s.inlineProcessor == nil {
+			return nil, fmt.Errorf("inline workflow configuration requires inline processor to be configured")
+		}
+		inlineWorkflow := config.Workflow.Inline.ToInlineWorkflow()
+		id, err := s.inlineProcessor.ProcessInlineWorkflow(ctx, inlineWorkflow)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process inline workflow: %w", err)
+		}
+		workflowID = id
+	} else {
+		return nil, fmt.Errorf("workflow must be specified (reference or inline)")
+	}
+
+	// Create mission
 	mission := &Mission{
 		ID:          types.NewID(),
 		Name:        config.Name,
 		Description: config.Description,
 		Status:      MissionStatusPending,
-		// TargetID and WorkflowID would be resolved from config
+		TargetID:    targetID,
+		WorkflowID:  workflowID,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	// Convert constraints if specified
@@ -135,6 +222,90 @@ func (s *DefaultMissionService) ValidateMission(ctx context.Context, mission *Mi
 
 		if mission.Constraints.MaxTokens > 0 && mission.Constraints.MaxTokens < 1000 {
 			return fmt.Errorf("max_tokens too low: minimum 1000 tokens required")
+		}
+	}
+
+	return nil
+}
+
+// resolveTarget resolves a target reference (name or ID) to a Target.
+func (s *DefaultMissionService) resolveTarget(ctx context.Context, ref string) (*types.Target, error) {
+	if ref == "" {
+		return nil, fmt.Errorf("target reference is empty")
+	}
+
+	if s.targetStore == nil {
+		return nil, fmt.Errorf("target store not configured")
+	}
+
+	// Try as ID first
+	if id, err := types.ParseID(ref); err == nil {
+		target, err := s.targetStore.Get(ctx, id)
+		if err == nil {
+			return target, nil
+		}
+	}
+
+	// Try as name
+	target, err := s.targetStore.GetByName(ctx, ref)
+	if err != nil {
+		return nil, fmt.Errorf("target not found: %s", ref)
+	}
+
+	return target, nil
+}
+
+// resolveWorkflow resolves a workflow reference to a MissionDefinition.
+func (s *DefaultMissionService) resolveWorkflow(ctx context.Context, ref string) (*MissionDefinition, error) {
+	if ref == "" {
+		return nil, fmt.Errorf("workflow reference is empty")
+	}
+
+	if s.workflowStore == nil {
+		return nil, fmt.Errorf("workflow store not configured")
+	}
+
+	// Try as ID first
+	if id, err := types.ParseID(ref); err == nil {
+		workflow, err := s.workflowStore.Get(ctx, id)
+		if err == nil {
+			return workflow, nil
+		}
+	}
+
+	// Try as name
+	workflow, err := s.workflowStore.GetByName(ctx, ref)
+	if err != nil {
+		return nil, fmt.Errorf("workflow not found: %s", ref)
+	}
+
+	return workflow, nil
+}
+
+// validateTargetWorkflowCompatibility checks if target and workflow are compatible.
+func (s *DefaultMissionService) validateTargetWorkflowCompatibility(target *types.Target, workflow *MissionDefinition) error {
+	if target == nil || workflow == nil {
+		return fmt.Errorf("target and workflow cannot be nil")
+	}
+
+	// Check target type matches workflow requirements (if specified in metadata)
+	if requiredType, ok := workflow.Metadata["required_target_type"].(string); ok {
+		if requiredType != "" && target.Type != requiredType {
+			return fmt.Errorf("workflow requires target type '%s', got '%s'",
+				requiredType, target.Type)
+		}
+	}
+
+	// Check target has required capabilities (if specified in metadata)
+	if requiredCaps, ok := workflow.Metadata["required_capabilities"].([]interface{}); ok {
+		for _, cap := range requiredCaps {
+			capStr, ok := cap.(string)
+			if !ok {
+				continue
+			}
+			if !target.HasCapability(capStr) {
+				return fmt.Errorf("target missing required capability: %s", capStr)
+			}
 		}
 	}
 

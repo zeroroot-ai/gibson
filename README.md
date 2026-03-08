@@ -28,13 +28,13 @@ Think of it as Kubernetes for security testing - you bring the agents, Gibson ha
                          ┌─────────────────────────────────────────────────────────────┐
                          │                  Daemon (gRPC Server)                       │
                          │     Orchestration · Registry · Callbacks · Persistence      │
-                         └────┬──────────────┬──────────────┬──────────────┬───────────┘
-                              │              │              │              │
-                              ▼              ▼              ▼              ▼
-                         ┌─────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐
-                         │  etcd   │  │  Redis   │  │ Database │  │  GraphRAG    │
-                         │Registry │  │  Queue   │  │ (SQLite) │  │  (Neo4j)     │
-                         └─────────┘  └──────────┘  └──────────┘  └──────────────┘
+                         └────┬──────────────┬──────────────┬──────────────────────────┘
+                              │              │              │
+                              ▼              ▼              ▼
+                         ┌─────────┐  ┌──────────────┐  ┌──────────────┐
+                         │  etcd   │  │ Redis Stack  │  │  GraphRAG    │
+                         │Registry │  │State & Queue │  │  (Neo4j)     │
+                         └─────────┘  └──────────────┘  └──────────────┘
                                            │
                                            ▼
                          ┌─────────────────────────────────────────────────────────────┐
@@ -146,15 +146,29 @@ Stateful service integrations with methods and lifecycle management:
 ### Prerequisites
 
 - Go 1.24+
-- Redis 6.0+
+- Redis Stack 7.0+ (includes RedisJSON, RediSearch, and Redis Streams)
 - Neo4j 5.0+ (optional, for GraphRAG)
+- etcd 3.5+ (for service discovery and coordination)
+
+**Note:** Gibson now uses Redis Stack as its primary state storage backend, replacing SQLite. If you're upgrading from a previous version, see the [Migration Guide](#migration-guide) below.
 
 ### Installation
 
 ```bash
+# Clone the repository
 git clone https://github.com/zero-day-ai/gibson.git
 cd gibson
 make build
+
+# Start Redis Stack for local development
+docker run -d --name redis-stack -p 6379:6379 redis/redis-stack-server:latest
+
+# Start etcd for service discovery
+docker run -d --name etcd -p 2379:2379 -p 2380:2380 \
+  -e ALLOW_NONE_AUTHENTICATION=yes \
+  bitnami/etcd:latest
+
+# Initialize Gibson
 ./bin/gibson init
 ```
 
@@ -534,17 +548,21 @@ core:
   parallel_limit: 10
   timeout: 5m
 
-database:
-  path: ~/.gibson/gibson.db
-
 daemon:
   grpc_address: localhost:50002
 
+# Redis Stack is the primary state storage backend
 redis:
   url: redis://localhost:6379
+  password: ""
+  database: 0
+  pool_size: 10
+  connect_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
 
 registry:
-  type: embedded
+  type: etcd
   listen_address: localhost:2379
 
 graphrag:
@@ -831,7 +849,7 @@ func main() {
 harness.Memory().Working().Set(ctx, "key", value)
 harness.Memory().Working().Get(ctx, "key")
 
-// Mission Memory - persistent, mission-scoped (SQLite with FTS5 search)
+// Mission Memory - persistent, mission-scoped (Redis with RediSearch FTS)
 harness.Memory().Mission().Set(ctx, "key", value)
 harness.Memory().Mission().Search(ctx, "query", opts)
 
@@ -906,7 +924,7 @@ The orchestrator includes built-in safety mechanisms:
 The orchestrator can leverage the three-tier memory system:
 
 - **reflect**: Triggers a separate LLM evaluation of strategy effectiveness
-- **recall**: Queries mission memory (SQLite FTS5) or long-term memory (Qdrant vectors) for relevant context
+- **recall**: Queries mission memory (Redis RediSearch) or long-term memory (Qdrant vectors) for relevant context
 
 See `internal/orchestrator/prompts.go` for the full system prompt and decision schema.
 
@@ -989,6 +1007,187 @@ Gibson is designed for building:
 | Complex workflows are fragile | DAG-based missions with checkpointing and resumption |
 | Building security tools is slow | SDK with batteries included and code generation |
 | No visibility into testing | OpenTelemetry tracing and Langfuse observability |
+
+## Migration Guide
+
+### Migrating from SQLite to Redis Stack
+
+Gibson has transitioned from SQLite to Redis Stack for state storage, providing better scalability, distributed deployments, and advanced search capabilities. If you're upgrading from an older version that used SQLite, follow these steps:
+
+#### 1. Prerequisites
+
+Ensure you have Redis Stack 7.0+ running:
+
+```bash
+# Local development
+docker run -d --name redis-stack -p 6379:6379 redis/redis-stack-server:latest
+
+# Production (example using Redis Enterprise or managed service)
+# Configure redis.url in your config.yaml to point to your Redis Stack instance
+```
+
+Verify Redis Stack modules are available:
+
+```bash
+redis-cli INFO modules
+# Should show: RedisJSON, RediSearch, RedisTimeSeries
+```
+
+#### 2. Update Configuration
+
+Update your `~/.gibson/config.yaml` to remove the `database` section and configure Redis:
+
+```yaml
+# Remove this old section:
+# database:
+#   path: ~/.gibson/gibson.db
+
+# Add/update Redis configuration:
+redis:
+  url: redis://localhost:6379
+  password: ""
+  database: 0
+  pool_size: 10
+  connect_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+```
+
+#### 3. Run Migration
+
+Use the built-in migration command to transfer your existing data:
+
+```bash
+# Basic migration (with progress output)
+gibson migrate sqlite-to-redis \
+  --source ~/.gibson/gibson.db \
+  --redis redis://localhost:6379
+
+# Dry run (validate without making changes)
+gibson migrate sqlite-to-redis \
+  --source ~/.gibson/gibson.db \
+  --redis redis://localhost:6379 \
+  --dry-run
+
+# Custom batch size for large datasets
+gibson migrate sqlite-to-redis \
+  --source ~/.gibson/gibson.db \
+  --redis redis://localhost:6379 \
+  --batch-size 500
+
+# Resume from checkpoint after interruption
+gibson migrate sqlite-to-redis \
+  --source ~/.gibson/gibson.db \
+  --redis redis://localhost:6379 \
+  --resume
+```
+
+#### 4. Migration Features
+
+The migration tool provides:
+
+- **Checkpoint-based resumption**: If migration is interrupted, use `--resume` to continue from the last checkpoint
+- **Progress reporting**: Real-time progress updates for each entity type
+- **Validation**: Use `--dry-run` to validate data integrity before migration
+- **Batch processing**: Configurable batch sizes for optimal performance
+- **Error handling**: Failed records are logged; migration continues for other records
+
+#### 5. What Gets Migrated
+
+The migration transfers all state data:
+
+- Missions and mission runs
+- Mission events (converted to Redis Streams)
+- Security findings
+- Credentials (encrypted)
+- Targets
+- Payloads and payload executions
+- Agent sessions and session events
+- Mission-scoped memory
+- Knowledge vectors
+
+#### 6. Post-Migration Verification
+
+After migration, verify your data:
+
+```bash
+# Check mission count
+gibson mission list
+
+# Check findings
+gibson finding list
+
+# Check credentials
+gibson credential list
+
+# Verify targets
+gibson target list
+```
+
+#### 7. Cleanup (Optional)
+
+Once you've verified the migration succeeded, you can optionally remove the old SQLite database:
+
+```bash
+# Backup first (recommended)
+cp ~/.gibson/gibson.db ~/.gibson/gibson.db.backup
+
+# Remove after verification
+rm ~/.gibson/gibson.db
+```
+
+#### 8. Troubleshooting
+
+**Migration fails with "Redis modules not available":**
+- Ensure you're using Redis Stack, not standard Redis
+- Verify modules: `redis-cli MODULE LIST`
+
+**Migration is slow:**
+- Increase `--batch-size` (default: 100, try 500-1000)
+- Check network latency between Gibson and Redis
+
+**Data mismatch after migration:**
+- Run `gibson migrate sqlite-to-redis --validate` to compare counts
+- Check migration logs for errors: `~/.gibson/logs/migration.log`
+
+**Need to restart migration:**
+- Use `--resume` flag to continue from last checkpoint
+- Checkpoints are saved every 100 records
+
+#### Production Deployment Notes
+
+For production Redis Stack deployments, consider:
+
+- **High Availability**: Use Redis Sentinel or Redis Cluster
+- **Persistence**: Configure AOF (Append-Only File) or RDB snapshots
+- **Memory Management**: Set `maxmemory-policy` to `allkeys-lru`
+- **Security**: Enable TLS/SSL and authentication
+- **Monitoring**: Set up Redis monitoring (Prometheus, Grafana)
+
+Example production configuration:
+
+```yaml
+redis:
+  # Standalone with TLS
+  url: redis://redis.production.internal:6379
+  password: "${REDIS_PASSWORD}"
+  tls_enabled: true
+  tls_cert_file: /path/to/client-cert.pem
+  tls_key_file: /path/to/client-key.pem
+  tls_ca_file: /path/to/ca-cert.pem
+  pool_size: 20
+  connect_timeout: 10s
+  read_timeout: 5s
+  write_timeout: 5s
+  max_retries: 3
+
+  # Or use Redis Sentinel for automatic failover
+  sentinel_master: mymaster
+  sentinel_addrs:
+    - sentinel1:26379
+    - sentinel2:26379
+    - sentinel3:26379
+```
 
 ## License
 

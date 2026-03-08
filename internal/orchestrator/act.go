@@ -1283,9 +1283,14 @@ func (a *Actor) escalate(ctx context.Context, decision *Decision, missionID type
 			"level", decision.EscalationLevel,
 		)
 
-		// TODO: Implement agent spawning with escalation metadata
-		// For now, we just log this - actual agent spawning would require
-		// determining which agent to spawn based on the escalation context
+		// Spawn agent with escalation metadata
+		if err := a.spawnAgentWithEscalation(ctx, decision, missionID, escalation); err != nil {
+			a.logger.Error("failed to spawn escalated agent",
+				"escalation_id", escalationID,
+				"error", err,
+			)
+			// Don't fail the escalation - the notification was delivered
+		}
 	}
 
 	return &ActionResult{
@@ -1689,4 +1694,237 @@ func (a *Actor) processAgentDiscovery(ctx context.Context, output any, agentName
 			)
 		}
 	}()
+}
+
+// spawnAgentWithEscalation spawns a specialized agent with escalation metadata.
+// This is used when escalation level is "senior_agent" or "specialist".
+func (a *Actor) spawnAgentWithEscalation(ctx context.Context, decision *Decision, missionID types.ID, escalation Escalation) error {
+	// Determine which agent to spawn based on escalation level and context
+	agentName := ""
+	taskConfig := make(map[string]interface{})
+
+	switch decision.EscalationLevel {
+	case "senior_agent":
+		// Spawn a more capable version of the current agent or a supervisor agent
+		agentName = "orchestrator-supervisor"
+		taskConfig["escalation_context"] = decision.EscalationContext
+		taskConfig["escalation_level"] = decision.EscalationLevel
+		taskConfig["escalation_urgency"] = decision.EscalationUrgency
+
+	case "specialist":
+		// Spawn a domain-specific expert agent based on context
+		// Parse context to determine specialist type
+		agentName = "security-specialist"
+		taskConfig["escalation_context"] = decision.EscalationContext
+		taskConfig["specialist_domain"] = "security"
+
+	default:
+		return fmt.Errorf("unsupported agent escalation level: %s", decision.EscalationLevel)
+	}
+
+	// Create spawn config
+	spawnConfig := &SpawnNodeConfig{
+		AgentName:   agentName,
+		Description: fmt.Sprintf("Escalated agent for: %s", decision.EscalationContext),
+		TaskConfig:  taskConfig,
+		DependsOn:   []string{}, // No dependencies - run immediately
+	}
+
+	// Create spawn decision
+	spawnDecision := &Decision{
+		Reasoning:    fmt.Sprintf("Spawning escalated agent due to: %s", decision.EscalationContext),
+		Action:       ActionSpawnAgent,
+		SpawnConfig:  spawnConfig,
+		Confidence:   decision.Confidence,
+	}
+
+	// Spawn the agent
+	_, err := a.spawnAgent(ctx, spawnDecision, missionID)
+	return err
+}
+
+// EscalationMetadata contains privilege escalation context for agent spawning.
+// This metadata is passed to spawned agents to provide escalation context.
+type EscalationMetadata struct {
+	// Level is the privilege level (0=normal, 1=elevated, 2=admin)
+	Level int `json:"level"`
+
+	// Reason explains why escalation is needed
+	Reason string `json:"reason"`
+
+	// ParentAgent is the agent that requested escalation
+	ParentAgent string `json:"parent_agent"`
+
+	// Scope limits what the escalated agent can access
+	Scope []string `json:"scope"`
+
+	// Timeout is how long escalation is valid
+	Timeout time.Duration `json:"timeout"`
+
+	// AuditTrail tracks escalation chain
+	AuditTrail []EscalationEvent `json:"audit_trail"`
+}
+
+// EscalationEvent represents a single event in the escalation audit trail.
+type EscalationEvent struct {
+	Timestamp time.Time `json:"timestamp"`
+	Agent     string    `json:"agent"`
+	Action    string    `json:"action"`
+	Level     int       `json:"level"`
+}
+
+// validateEscalation validates an escalation request before processing.
+// This checks level, permissions, and scope constraints.
+func (a *Actor) validateEscalation(ctx context.Context, meta *EscalationMetadata) error {
+	if meta == nil {
+		return fmt.Errorf("escalation metadata is nil")
+	}
+
+	// Validate level
+	if meta.Level < 0 || meta.Level > 2 {
+		return fmt.Errorf("invalid escalation level: %d (must be 0-2)", meta.Level)
+	}
+
+	// Validate reason is provided
+	if meta.Reason == "" {
+		return fmt.Errorf("escalation reason is required")
+	}
+
+	// Validate timeout
+	if meta.Timeout <= 0 {
+		return fmt.Errorf("escalation timeout must be positive")
+	}
+
+	// Validate scope is not empty for elevated privileges
+	if meta.Level > 0 && len(meta.Scope) == 0 {
+		return fmt.Errorf("scope is required for elevated escalation")
+	}
+
+	return nil
+}
+
+// buildObservationState constructs an ObservationState for LLM reflection.
+// This provides context about the current mission state for decision making.
+func (a *Actor) buildObservationState(ctx context.Context, missionID types.ID) *ObservationState {
+	state := &ObservationState{
+		MissionInfo: MissionInfo{
+			ID: missionID.String(),
+		},
+		GraphSummary: GraphSummary{},
+		ReadyNodes:   []NodeSummary{},
+		RunningNodes: []NodeSummary{},
+		CompletedNodes: []CompletedNodeSummary{},
+		FailedNodes:  []NodeSummary{},
+		RecentDecisions: []DecisionSummary{},
+		ResourceConstraints: ResourceConstraints{},
+		ObservedAt:   time.Now(),
+	}
+
+	// Query mission info from Neo4j
+	if a.missionQueries != nil {
+		mission, err := a.missionQueries.GetMission(ctx, missionID)
+		if err == nil && mission != nil {
+			state.MissionInfo.Name = mission.Name
+			state.MissionInfo.Objective = mission.Objective
+			state.MissionInfo.Status = string(mission.Status)
+			if mission.StartedAt != nil {
+				state.MissionInfo.StartedAt = *mission.StartedAt
+				state.MissionInfo.TimeElapsed = time.Since(*mission.StartedAt).String()
+			}
+		}
+	}
+
+	// Query workflow nodes and build execution history
+	if a.execQueries != nil {
+		// Get all workflow nodes for this mission
+		cypher := `
+			MATCH (n:WorkflowNode)-[:PART_OF]->(m:Mission {id: $mission_id})
+			RETURN n.id as node_id,
+			       n.name as name,
+			       n.type as type,
+			       n.status as status,
+			       n.agent_name as agent_name
+			ORDER BY n.created_at
+			LIMIT 100
+		`
+		params := map[string]interface{}{
+			"mission_id": missionID.String(),
+		}
+
+		result, err := a.graphClient.Query(ctx, cypher, params)
+		if err == nil {
+			for _, record := range result.Records {
+				nodeID, _ := record["node_id"].(string)
+				name, _ := record["name"].(string)
+				nodeType, _ := record["type"].(string)
+				status, _ := record["status"].(string)
+				agentName, _ := record["agent_name"].(string)
+
+				summary := NodeSummary{
+					ID:        nodeID,
+					Name:      name,
+					Type:      nodeType,
+					Status:    status,
+					AgentName: agentName,
+				}
+
+				// Categorize by status
+				switch status {
+				case "ready":
+					state.ReadyNodes = append(state.ReadyNodes, summary)
+				case "running":
+					state.RunningNodes = append(state.RunningNodes, summary)
+				case "completed":
+					state.CompletedNodes = append(state.CompletedNodes, CompletedNodeSummary{
+						NodeSummary: summary,
+					})
+				case "failed":
+					state.FailedNodes = append(state.FailedNodes, summary)
+				}
+
+				state.GraphSummary.TotalNodes++
+			}
+		}
+	}
+
+	// Calculate progress
+	if state.GraphSummary.TotalNodes > 0 {
+		state.GraphSummary.CompletedNodes = len(state.CompletedNodes)
+		state.GraphSummary.FailedNodes = len(state.FailedNodes)
+	}
+
+	return state
+}
+
+// NodeExecution represents a completed node execution for observation state.
+type NodeExecution struct {
+	NodeID      string        `json:"node_id"`
+	AgentName   string        `json:"agent_name"`
+	Status      string        `json:"status"`
+	Duration    time.Duration `json:"duration"`
+	OutputKeys  []string      `json:"output_keys"`
+	ErrorBrief  string        `json:"error_brief,omitempty"`
+}
+
+// FindingSummary represents a security finding for observation state.
+type FindingSummary struct {
+	ID       string `json:"id"`
+	Severity string `json:"severity"`
+	Category string `json:"category"`
+	Title    string `json:"title"`
+}
+
+// ErrorSummary represents an error that occurred during execution.
+type ErrorSummary struct {
+	NodeID    string    `json:"node_id"`
+	Timestamp time.Time `json:"timestamp"`
+	Message   string    `json:"message"`
+	Retryable bool      `json:"retryable"`
+}
+
+// ResourceMetrics tracks resource consumption for observation state.
+type ResourceMetrics struct {
+	CPUUsage    float64 `json:"cpu_usage,omitempty"`
+	MemoryUsage int64   `json:"memory_usage,omitempty"`
+	NetworkIO   int64   `json:"network_io,omitempty"`
 }

@@ -11,16 +11,18 @@ import (
 // newLogsCommand creates a logs command for the specified component type.
 func newLogsCommand(cfg Config, flags *LogsFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "logs <name>",
+		Use:   "logs [name]",
 		Short: fmt.Sprintf("View %s logs", cfg.DisplayName),
-		Long: fmt.Sprintf(`Display logs for a %s.
+		Long: fmt.Sprintf(`Display logs for a %s or multiple %s.
 
 Logs are stored in ~/.gibson/logs/%s/<name>.log
 
 Use --follow (-f) to stream logs in real-time.
-Use --lines (-n) to specify the number of lines to show.`,
-			cfg.DisplayName, cfg.DisplayName),
-		Args: cobra.ExactArgs(1),
+Use --lines (-n) to specify the number of lines to show.
+Use --all to view logs from all %s.
+Use --component to view logs from specific %s (can be specified multiple times).`,
+			cfg.DisplayName, cfg.DisplayPlural, cfg.DisplayName, cfg.DisplayPlural, cfg.DisplayPlural),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLogs(cmd, args, cfg, flags)
 		},
@@ -29,6 +31,8 @@ Use --lines (-n) to specify the number of lines to show.`,
 	// Register flags
 	cmd.Flags().BoolVarP(&flags.Follow, "follow", "f", false, "Follow log output (like tail -f)")
 	cmd.Flags().IntVarP(&flags.Lines, "lines", "n", 50, "Number of lines to show")
+	cmd.Flags().BoolVar(&flags.All, "all", false, fmt.Sprintf("View logs from all %s", cfg.DisplayPlural))
+	cmd.Flags().StringSliceVar(&flags.Components, "component", nil, "View logs from specific components (can be specified multiple times)")
 
 	return cmd
 }

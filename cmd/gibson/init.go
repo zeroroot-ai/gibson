@@ -20,7 +20,7 @@ var initCmd = &cobra.Command{
 - Configuration directory structure
 - Default configuration file
 - Encryption key for credential storage
-- SQLite database with schema`,
+- Redis connection validation`,
 	RunE: runInit,
 }
 
@@ -69,7 +69,6 @@ func displayInitResult(cmd *cobra.Command, result *initpkg.InitResult) {
 	cmd.Printf("  Directories created: %d\n", len(result.DirsCreated))
 	cmd.Printf("  Config created: %v\n", result.ConfigCreated)
 	cmd.Printf("  Encryption key created: %v\n", result.KeyCreated)
-	cmd.Printf("  Database created: %v\n", result.DatabaseCreated)
 
 	if len(result.Warnings) > 0 {
 		cmd.Println("\nWarnings:")

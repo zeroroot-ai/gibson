@@ -42,6 +42,15 @@ const (
 	// EventMissionCheckpoint indicates a checkpoint was created.
 	EventMissionCheckpoint MissionEventType = "mission.checkpoint"
 
+	// EventMissionCheckpointSaved indicates a checkpoint was successfully saved.
+	EventMissionCheckpointSaved MissionEventType = "mission.checkpoint.saved"
+
+	// EventMissionCheckpointLoadFailed indicates checkpoint loading failed.
+	EventMissionCheckpointLoadFailed MissionEventType = "mission.checkpoint.load_failed"
+
+	// EventMissionResumedFromCheckpoint indicates a mission resumed from a checkpoint.
+	EventMissionResumedFromCheckpoint MissionEventType = "mission.resumed_from_checkpoint"
+
 	// EventMissionConstraintViolation indicates a constraint was violated.
 	EventMissionConstraintViolation MissionEventType = "mission.constraint_violation"
 )
@@ -116,6 +125,57 @@ type CheckpointPayload struct {
 
 	// TotalNodes is the total number of nodes.
 	TotalNodes int `json:"total_nodes"`
+}
+
+// CheckpointSavedPayload contains checkpoint saved event information.
+type CheckpointSavedPayload struct {
+	// MissionID is the mission this checkpoint belongs to.
+	MissionID types.ID `json:"mission_id"`
+
+	// CheckpointCreatedAt is when the checkpoint was created.
+	CheckpointCreatedAt time.Time `json:"checkpoint_created_at"`
+
+	// CompletedNodes is the number of nodes completed at checkpoint time.
+	CompletedNodes int `json:"completed_nodes"`
+
+	// TotalNodes is the total number of nodes in the mission.
+	TotalNodes int `json:"total_nodes"`
+
+	// CurrentNodeID is the ID of the node being executed when checkpointed.
+	CurrentNodeID string `json:"current_node_id,omitempty"`
+}
+
+// CheckpointLoadFailedPayload contains checkpoint load failure information.
+type CheckpointLoadFailedPayload struct {
+	// MissionID is the mission whose checkpoint failed to load.
+	MissionID types.ID `json:"mission_id"`
+
+	// Error is the error message describing why the load failed.
+	Error string `json:"error"`
+
+	// WillStartFresh indicates whether the mission will start from the beginning.
+	WillStartFresh bool `json:"will_start_fresh"`
+}
+
+// ResumedFromCheckpointPayload contains checkpoint resume information.
+type ResumedFromCheckpointPayload struct {
+	// MissionID is the mission being resumed.
+	MissionID types.ID `json:"mission_id"`
+
+	// CheckpointCreatedAt is when the checkpoint was originally created.
+	CheckpointCreatedAt time.Time `json:"checkpoint_created_at"`
+
+	// CompletedNodes is the number of nodes that were completed in the checkpoint.
+	CompletedNodes int `json:"completed_nodes"`
+
+	// TotalNodes is the total number of nodes in the mission.
+	TotalNodes int `json:"total_nodes"`
+
+	// RemainingNodes is the number of nodes left to execute.
+	RemainingNodes int `json:"remaining_nodes"`
+
+	// CurrentNodeID is the node that was being executed when checkpointed.
+	CurrentNodeID string `json:"current_node_id,omitempty"`
 }
 
 // ConstraintViolationPayload contains constraint violation information.

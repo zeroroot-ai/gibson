@@ -273,7 +273,7 @@ func TestAgentLifecycle(t *testing.T) {
 			).WithTimeout(5 * time.Minute)
 
 			// Create harness for task execution
-			harness := agent.NewDelegationHarness(registry)
+			harness := agent.NewDelegationHarness(registry, registry)
 
 			// Execute via delegation
 			result, err := registry.DelegateToAgent(ctx, "recon", task, harness)
@@ -518,7 +518,7 @@ func TestConcurrentComponentOperations(t *testing.T) {
 						"Concurrent test task",
 						map[string]any{"id": idx},
 					)
-					harness := agent.NewDelegationHarness(registry)
+					harness := agent.NewDelegationHarness(registry, registry)
 					_, err := registry.DelegateToAgent(ctx, "concurrent-agent", task, harness)
 					assert.NoError(t, err, "concurrent task should succeed")
 				}(i)
@@ -568,7 +568,7 @@ func TestComponentInteraction(t *testing.T) {
 		// Test component interaction
 		t.Run("Integration", func(t *testing.T) {
 			// Create harness with tool and plugin executors
-			harness := agent.NewDelegationHarness(agentRegistry).
+			harness := agent.NewDelegationHarness(agentRegistry, agentRegistry).
 				WithToolExecutor(&mockToolExecutor{registry: toolRegistry}).
 				WithPluginExecutor(&mockPluginExecutor{registry: pluginRegistry})
 

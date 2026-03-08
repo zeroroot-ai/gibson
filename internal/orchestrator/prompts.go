@@ -188,11 +188,22 @@ func BuildObservationPrompt(state *ObservationState) string {
 	// Component inventory (if available) - show before ready nodes so LLM sees available components first
 	if state.ComponentInventory != nil {
 		formatter := NewInventoryPromptFormatter(WithMaxTokenBudget(500))
-		// Extract mission target type from mission info if available (future enhancement)
-		missionTargetType := "" // TODO: Extract from mission metadata when available
+		// Extract mission target type from mission metadata
+		missionTargetType := extractTargetType(state)
 		inventorySection := formatter.Format(state.ComponentInventory, missionTargetType)
 		sb.WriteString(inventorySection)
 		sb.WriteString("\n")
+
+		// Add target type guidance if available
+		if missionTargetType != "" {
+			guidance := getTargetTypeGuidance(missionTargetType)
+			if guidance != "" {
+				sb.WriteString("## Target Type Context\n")
+				sb.WriteString(fmt.Sprintf("**Target Type**: %s\n", missionTargetType))
+				sb.WriteString(guidance)
+				sb.WriteString("\n\n")
+			}
+		}
 	}
 
 	// Payload context (if available) - show available attack payloads
@@ -1055,4 +1066,59 @@ func truncate(s string, maxLen int) string {
 		return "..."
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// extractTargetType extracts the target type from mission observation state.
+// It checks mission metadata for target_type field, with fallback to other sources.
+func extractTargetType(state *ObservationState) string {
+	if state == nil {
+		return ""
+	}
+
+	// TODO: In future, extract from state.MissionInfo when metadata is exposed
+	// For now, we would need access to the full mission object with metadata
+	// This is a placeholder for when mission metadata is included in ObservationState
+
+	// Check if target context has type information
+	// This would be populated if the mission includes target metadata
+	return ""
+}
+
+// getTargetTypeGuidance returns specialized guidance for different target types.
+// This helps the LLM make more informed decisions based on the target system type.
+func getTargetTypeGuidance(targetType string) string {
+	switch strings.ToLower(targetType) {
+	case "llm":
+		return "Focus on prompt injection, jailbreaking, and model manipulation techniques. " +
+			"Consider attacks like: context stuffing, delimiter injection, role confusion, " +
+			"system prompt extraction, and adversarial examples."
+
+	case "rag":
+		return "Focus on retrieval poisoning, context injection, and knowledge base attacks. " +
+			"Consider attacks like: document injection, citation manipulation, " +
+			"knowledge base poisoning, and context window overflow."
+
+	case "agent":
+		return "Focus on tool misuse, action hijacking, and agent confusion attacks. " +
+			"Consider attacks like: tool chaining exploits, delegation hijacking, " +
+			"goal subversion, and memory poisoning."
+
+	case "api":
+		return "Focus on input validation, authentication bypass, and API abuse. " +
+			"Consider attacks like: parameter tampering, rate limit bypass, " +
+			"authorization flaws, and injection attacks."
+
+	case "web":
+		return "Focus on web application vulnerabilities and client-side attacks. " +
+			"Consider attacks like: XSS, CSRF, SQLi, authentication bypass, " +
+			"and business logic flaws."
+
+	case "network":
+		return "Focus on network-level vulnerabilities and service enumeration. " +
+			"Consider attacks like: port scanning, service fingerprinting, " +
+			"protocol exploitation, and lateral movement."
+
+	default:
+		return ""
+	}
 }

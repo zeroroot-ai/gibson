@@ -15,12 +15,10 @@ type PromptRegistry interface {
 	// Returns a validation error if the prompt is invalid.
 	Register(prompt Prompt) error
 
-	// RegisterFromYAML loads prompts from a YAML file.
-	// This is a stub for now and will be implemented in task 2.2.
+	// RegisterFromYAML loads prompts from a YAML file and registers them.
 	RegisterFromYAML(path string) error
 
-	// RegisterFromDirectory loads all YAML files from a directory.
-	// This is a stub for now and will be implemented in task 2.2.
+	// RegisterFromDirectory loads all YAML files from a directory and registers them.
 	RegisterFromDirectory(dir string) error
 
 	// Get retrieves a prompt by ID.

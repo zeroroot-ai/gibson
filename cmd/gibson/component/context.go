@@ -20,34 +20,18 @@ func getGibsonHome() (string, error) {
 	return homeDir, nil
 }
 
-// CallbackManagerKey is the context key for storing the callback manager.
-// This is exported so that the main package can use the same key.
-type CallbackManagerKey struct{}
-
-// GetCallbackManager retrieves the callback manager from the context.
-// Returns nil if the manager is not present in the context.
-func GetCallbackManager(ctx context.Context) interface{} {
-	return ctx.Value(CallbackManagerKey{})
-}
-
-// WithCallbackManager returns a new context with the callback manager attached.
-func WithCallbackManager(ctx context.Context, m interface{}) context.Context {
-	return context.WithValue(ctx, CallbackManagerKey{}, m)
-}
-
-// DaemonClientKey is the context key for storing the daemon client.
-// This is exported so that the main package can use the same key.
-type DaemonClientKey struct{}
+// daemonClientKey is the context key for storing the daemon client.
+type daemonClientKey struct{}
 
 // GetDaemonClient retrieves the daemon client from the context.
 // Returns nil if the client is not present in the context.
 func GetDaemonClient(ctx context.Context) interface{} {
-	return ctx.Value(DaemonClientKey{})
+	return ctx.Value(daemonClientKey{})
 }
 
 // WithDaemonClient returns a new context with the daemon client attached.
 func WithDaemonClient(ctx context.Context, client interface{}) context.Context {
-	return context.WithValue(ctx, DaemonClientKey{}, client)
+	return context.WithValue(ctx, daemonClientKey{}, client)
 }
 
 // RegistryManagerKey is the context key for storing the registry manager.

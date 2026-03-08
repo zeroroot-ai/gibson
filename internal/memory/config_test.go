@@ -223,26 +223,16 @@ func TestEmbedderConfig_Validate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid openai config",
+			name: "valid native config",
 			config: EmbedderConfig{
-				Provider: "openai",
-				Model:    "text-embedding-3-small",
-				APIKey:   "sk-test",
+				Provider: "native",
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid llm config",
+			name: "empty provider defaults to native",
 			config: EmbedderConfig{
-				Provider: "llm",
-				Model:    "custom-model",
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid mock config",
-			config: EmbedderConfig{
-				Provider: "mock",
+				Provider: "",
 			},
 			wantErr: false,
 		},
@@ -250,33 +240,8 @@ func TestEmbedderConfig_Validate(t *testing.T) {
 			name: "invalid provider",
 			config: EmbedderConfig{
 				Provider: "invalid",
-				Model:    "some-model",
 			},
 			wantErr: true,
-		},
-		{
-			name: "missing model for openai",
-			config: EmbedderConfig{
-				Provider: "openai",
-				Model:    "",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing model for llm",
-			config: EmbedderConfig{
-				Provider: "llm",
-				Model:    "",
-			},
-			wantErr: true,
-		},
-		{
-			name: "mock without model is valid",
-			config: EmbedderConfig{
-				Provider: "mock",
-				Model:    "",
-			},
-			wantErr: false,
 		},
 	}
 
@@ -300,42 +265,19 @@ func TestEmbedderConfig_ApplyDefaults(t *testing.T) {
 		expected EmbedderConfig
 	}{
 		{
-			name:    "all defaults",
+			name:    "empty provider defaults to native",
 			initial: EmbedderConfig{},
 			expected: EmbedderConfig{
-				Provider: "openai",
-				Model:    "text-embedding-3-small",
+				Provider: "native",
 			},
 		},
 		{
-			name: "custom provider keeps defaults",
+			name: "native provider unchanged",
 			initial: EmbedderConfig{
-				Provider: "llm",
+				Provider: "native",
 			},
 			expected: EmbedderConfig{
-				Provider: "llm",
-				Model:    "", // No default for non-openai
-			},
-		},
-		{
-			name: "custom openai model",
-			initial: EmbedderConfig{
-				Provider: "openai",
-				Model:    "text-embedding-3-large",
-			},
-			expected: EmbedderConfig{
-				Provider: "openai",
-				Model:    "text-embedding-3-large",
-			},
-		},
-		{
-			name: "mock provider",
-			initial: EmbedderConfig{
-				Provider: "mock",
-			},
-			expected: EmbedderConfig{
-				Provider: "mock",
-				Model:    "",
+				Provider: "native",
 			},
 		},
 	}
@@ -361,8 +303,7 @@ func TestLongTermMemoryConfig_Validate(t *testing.T) {
 			config: LongTermMemoryConfig{
 				Backend: "embedded",
 				Embedder: EmbedderConfig{
-					Provider: "openai",
-					Model:    "text-embedding-3-small",
+					Provider: "native",
 				},
 			},
 			wantErr: false,
@@ -373,8 +314,7 @@ func TestLongTermMemoryConfig_Validate(t *testing.T) {
 				Backend:       "qdrant",
 				ConnectionURL: "http://localhost:6333",
 				Embedder: EmbedderConfig{
-					Provider: "openai",
-					Model:    "text-embedding-3-small",
+					Provider: "native",
 				},
 			},
 			wantErr: false,
@@ -384,8 +324,7 @@ func TestLongTermMemoryConfig_Validate(t *testing.T) {
 			config: LongTermMemoryConfig{
 				Backend: "redis",
 				Embedder: EmbedderConfig{
-					Provider: "openai",
-					Model:    "text-embedding-3-small",
+					Provider: "native",
 				},
 			},
 			wantErr: true,
@@ -395,8 +334,7 @@ func TestLongTermMemoryConfig_Validate(t *testing.T) {
 			config: LongTermMemoryConfig{
 				Backend: "qdrant",
 				Embedder: EmbedderConfig{
-					Provider: "openai",
-					Model:    "text-embedding-3-small",
+					Provider: "native",
 				},
 			},
 			wantErr: true,
@@ -407,8 +345,7 @@ func TestLongTermMemoryConfig_Validate(t *testing.T) {
 				Backend:       "embedded",
 				ConnectionURL: "not-needed-but-ok",
 				Embedder: EmbedderConfig{
-					Provider: "openai",
-					Model:    "text-embedding-3-small",
+					Provider: "native",
 				},
 			},
 			wantErr: false,
@@ -419,7 +356,6 @@ func TestLongTermMemoryConfig_Validate(t *testing.T) {
 				Backend: "embedded",
 				Embedder: EmbedderConfig{
 					Provider: "invalid",
-					Model:    "test",
 				},
 			},
 			wantErr: true,
@@ -451,8 +387,7 @@ func TestLongTermMemoryConfig_ApplyDefaults(t *testing.T) {
 			expected: LongTermMemoryConfig{
 				Backend: "embedded",
 				Embedder: EmbedderConfig{
-					Provider: "openai",
-					Model:    "text-embedding-3-small",
+					Provider: "native",
 				},
 			},
 		},
@@ -466,8 +401,7 @@ func TestLongTermMemoryConfig_ApplyDefaults(t *testing.T) {
 				Backend:       "qdrant",
 				ConnectionURL: "http://localhost:6333",
 				Embedder: EmbedderConfig{
-					Provider: "openai",
-					Model:    "text-embedding-3-small",
+					Provider: "native",
 				},
 			},
 		},
@@ -503,8 +437,7 @@ func TestMemoryConfig_Validate(t *testing.T) {
 				LongTerm: LongTermMemoryConfig{
 					Backend: "embedded",
 					Embedder: EmbedderConfig{
-						Provider: "openai",
-						Model:    "text-embedding-3-small",
+						Provider: "native",
 					},
 				},
 			},
@@ -523,8 +456,7 @@ func TestMemoryConfig_Validate(t *testing.T) {
 				LongTerm: LongTermMemoryConfig{
 					Backend: "embedded",
 					Embedder: EmbedderConfig{
-						Provider: "openai",
-						Model:    "text-embedding-3-small",
+						Provider: "native",
 					},
 				},
 			},
@@ -543,8 +475,7 @@ func TestMemoryConfig_Validate(t *testing.T) {
 				LongTerm: LongTermMemoryConfig{
 					Backend: "embedded",
 					Embedder: EmbedderConfig{
-						Provider: "openai",
-						Model:    "text-embedding-3-small",
+						Provider: "native",
 					},
 				},
 			},
@@ -564,8 +495,7 @@ func TestMemoryConfig_Validate(t *testing.T) {
 					Backend: "qdrant",
 					// Missing ConnectionURL
 					Embedder: EmbedderConfig{
-						Provider: "openai",
-						Model:    "text-embedding-3-small",
+						Provider: "native",
 					},
 				},
 			},
@@ -595,8 +525,7 @@ func TestMemoryConfig_ApplyDefaults(t *testing.T) {
 	assert.Equal(t, "lru", config.Working.EvictionPolicy)
 	assert.Equal(t, 1000, config.Mission.CacheSize)
 	assert.Equal(t, "embedded", config.LongTerm.Backend)
-	assert.Equal(t, "openai", config.LongTerm.Embedder.Provider)
-	assert.Equal(t, "text-embedding-3-small", config.LongTerm.Embedder.Model)
+	assert.Equal(t, "native", config.LongTerm.Embedder.Provider)
 }
 
 // TestNewDefaultMemoryConfig tests the default config constructor
@@ -610,7 +539,7 @@ func TestNewDefaultMemoryConfig(t *testing.T) {
 	assert.Equal(t, "lru", config.Working.EvictionPolicy)
 	assert.Equal(t, 1000, config.Mission.CacheSize)
 	assert.Equal(t, "embedded", config.LongTerm.Backend)
-	assert.Equal(t, "openai", config.LongTerm.Embedder.Provider)
+	assert.Equal(t, "native", config.LongTerm.Embedder.Provider)
 
 	// Verify config is valid
 	err := config.Validate()

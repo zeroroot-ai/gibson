@@ -10,26 +10,27 @@ import (
 // ToolDescriptor provides lightweight metadata about a tool without requiring
 // the full tool interface. Used for discovery, filtering, and capability queries.
 type ToolDescriptor struct {
-	Name              string      `json:"name"`
-	Description       string      `json:"description"`
-	Version           string      `json:"version"`
-	Tags              []string    `json:"tags"`
-	InputSchema       schema.JSON `json:"input_schema"`
-	OutputSchema      schema.JSON `json:"output_schema"`
-	InputProtoType    string      `json:"input_proto_type,omitempty"`    // Proto message type name for input (e.g., "tool.v1.Request")
-	OutputProtoType   string      `json:"output_proto_type,omitempty"`   // Proto message type name for output (e.g., "tool.v1.Response")
+	Name            string            `json:"name"`
+	Description     string            `json:"description"`
+	Version         string            `json:"version"`
+	Tags            []string          `json:"tags"`
+	InputSchema     schema.JSON       `json:"input_schema"`
+	OutputSchema    schema.JSON       `json:"output_schema"`
+	InputProtoType  string            `json:"input_proto_type,omitempty"`  // Proto message type name for input (e.g., "tool.v1.Request")
+	OutputProtoType string            `json:"output_proto_type,omitempty"` // Proto message type name for output (e.g., "tool.v1.Response")
+	Metadata        map[string]string `json:"metadata,omitempty"`          // Additional metadata (e.g., FileDescriptorSet for proto resolution)
 }
 
 // FromTool creates a ToolDescriptor from a Tool interface.
 // This extracts metadata without exposing the full tool implementation.
 func FromTool(t tool.Tool) ToolDescriptor {
 	desc := ToolDescriptor{
-		Name:             t.Name(),
-		Description:      t.Description(),
-		Version:          t.Version(),
-		Tags:             t.Tags(),
-		InputProtoType:   t.InputMessageType(),
-		OutputProtoType:  t.OutputMessageType(),
+		Name:            t.Name(),
+		Description:     t.Description(),
+		Version:         t.Version(),
+		Tags:            t.Tags(),
+		InputProtoType:  t.InputMessageType(),
+		OutputProtoType: t.OutputMessageType(),
 	}
 
 	// Check if the tool still supports legacy schema methods (for backward compatibility)
@@ -40,6 +41,14 @@ func FromTool(t tool.Tool) ToolDescriptor {
 	if lt, ok := t.(legacyTool); ok {
 		desc.InputSchema = lt.InputSchema()
 		desc.OutputSchema = lt.OutputSchema()
+	}
+
+	// Extract metadata if the tool provides it
+	type metadataTool interface {
+		Metadata() map[string]string
+	}
+	if mt, ok := t.(metadataTool); ok {
+		desc.Metadata = mt.Metadata()
 	}
 
 	return desc

@@ -256,17 +256,6 @@ type MergeOptions struct {
 	BoostBothSources float64
 }
 
-// DefaultMergeOptions returns sensible default merge options.
-func DefaultMergeOptions() MergeOptions {
-	return MergeOptions{
-		VectorWeight:     0.6,
-		GraphWeight:      0.4,
-		TopK:             10,
-		DeduplicateByID:  true,
-		BoostBothSources: 1.0, // No boost by default
-	}
-}
-
 // Validate checks if the MergeOptions are valid.
 func (mo *MergeOptions) Validate() error {
 	if mo.VectorWeight < 0.0 || mo.VectorWeight > 1.0 {

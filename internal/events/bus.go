@@ -412,3 +412,29 @@ func (noopMetricsRecorder) RecordSubscriberRemoved(subscriberID string, duration
 
 // Ensure DefaultEventBus implements EventBus at compile time.
 var _ EventBus = (*DefaultEventBus)(nil)
+
+// defaultBus is the global singleton EventBus instance.
+var (
+	defaultBus     *DefaultEventBus
+	defaultBusOnce sync.Once
+)
+
+// Default returns the global singleton EventBus instance.
+// The instance is created on first call with default options.
+// This provides a convenient way for components to share a single event bus
+// without explicit dependency injection.
+//
+// Example:
+//
+//	bus := events.Default()
+//	bus.Publish(ctx, event)
+//
+// Thread Safety: Safe for concurrent calls from multiple goroutines.
+func Default() *DefaultEventBus {
+	defaultBusOnce.Do(func() {
+		defaultBus = NewEventBus(
+			WithDefaultBufferSize(100),
+		)
+	})
+	return defaultBus
+}

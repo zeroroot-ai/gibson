@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/api/gen/proto"
+	"github.com/zero-day-ai/sdk/api/gen/commonpb"
 	"github.com/zero-day-ai/sdk/queue"
 	"go.opentelemetry.io/otel"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -248,15 +248,15 @@ func TestRedisToolProxy_ExecuteProto_Success(t *testing.T) {
 	proxy := createTestProxy(client, meta)
 
 	// Create input message
-	input := &proto.HealthStatus{
-		State:     "healthy",
+	input := &commonpb.HealthStatus{
+		Status:    "healthy",
 		Message:   "test input",
 		CheckedAt: time.Now().UnixMilli(),
 	}
 
 	// Create expected output
-	outputMsg := &proto.HealthStatus{
-		State:     "healthy",
+	outputMsg := &commonpb.HealthStatus{
+		Status:    "healthy",
 		Message:   "test output",
 		CheckedAt: time.Now().UnixMilli(),
 	}
@@ -290,9 +290,9 @@ func TestRedisToolProxy_ExecuteProto_Success(t *testing.T) {
 	}
 
 	// Verify output type
-	healthOutput, ok := output.(*proto.HealthStatus)
+	healthOutput, ok := output.(*commonpb.HealthStatus)
 	if !ok {
-		t.Fatalf("ExecuteProto() output type = %T, want *proto.HealthStatus", output)
+		t.Fatalf("ExecuteProto() output type = %T, want *commonpb.HealthStatus", output)
 	}
 
 	if healthOutput.Message != "test output" {
@@ -335,8 +335,8 @@ func TestRedisToolProxy_ExecuteProto_Timeout(t *testing.T) {
 	proxy.SetTimeout(50 * time.Millisecond)
 
 	// Create input message
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test input",
 	}
 
@@ -370,8 +370,8 @@ func TestRedisToolProxy_ExecuteProto_Error(t *testing.T) {
 	proxy := createTestProxy(client, meta)
 
 	// Create input message
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test input",
 	}
 
@@ -443,8 +443,8 @@ func TestRedisToolProxy_ExecuteProto_PushError(t *testing.T) {
 	client.PushError = errors.New("redis connection failed")
 	proxy := createTestProxy(client, meta)
 
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test input",
 	}
 
@@ -474,8 +474,8 @@ func TestRedisToolProxy_ExecuteProto_SubscribeError(t *testing.T) {
 	client.SubscribeError = errors.New("subscribe failed")
 	proxy := createTestProxy(client, meta)
 
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test input",
 	}
 
@@ -504,8 +504,8 @@ func TestRedisToolProxy_ExecuteProto_ChannelClosed(t *testing.T) {
 	client := NewMockRedisClient()
 	proxy := createTestProxy(client, meta)
 
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test input",
 	}
 
@@ -540,8 +540,8 @@ func TestRedisToolProxy_ExecuteProto_WrongJobID(t *testing.T) {
 	client := NewMockRedisClient()
 	proxy := createTestProxy(client, meta)
 
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test input",
 	}
 
@@ -585,8 +585,8 @@ func TestRedisToolProxy_ExecuteProto_MalformedOutput(t *testing.T) {
 	client := NewMockRedisClient()
 	proxy := createTestProxy(client, meta)
 
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test input",
 	}
 
@@ -634,8 +634,8 @@ func TestRedisToolProxy_ExecuteProto_EmptyOutput(t *testing.T) {
 	client := NewMockRedisClient()
 	proxy := createTestProxy(client, meta)
 
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test input",
 	}
 
@@ -684,8 +684,8 @@ func TestRedisToolProxy_WorkItemSerialization(t *testing.T) {
 	proxy := createTestProxy(client, meta)
 
 	// Create input with specific values
-	input := &proto.HealthStatus{
-		State:     "healthy",
+	input := &commonpb.HealthStatus{
+		Status:    "healthy",
 		Message:   "specific test message",
 		CheckedAt: 1234567890,
 	}
@@ -722,7 +722,7 @@ func TestRedisToolProxy_WorkItemSerialization(t *testing.T) {
 	}
 
 	// Verify input JSON can be deserialized
-	var decodedInput proto.HealthStatus
+	var decodedInput commonpb.HealthStatus
 	if err := json.Unmarshal([]byte(workItem.InputJSON), &decodedInput); err != nil {
 		t.Fatalf("Failed to unmarshal InputJSON: %v", err)
 	}
@@ -760,8 +760,8 @@ func TestRedisToolProxy_WorkItemSerialization_WithTracing(t *testing.T) {
 	client := NewMockRedisClient()
 	proxy := createTestProxy(client, meta)
 
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test",
 	}
 
@@ -879,8 +879,8 @@ func TestRedisToolProxy_ContextCancellation(t *testing.T) {
 	client := NewMockRedisClient()
 	proxy := createTestProxy(client, meta)
 
-	input := &proto.HealthStatus{
-		State:   "healthy",
+	input := &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "test input",
 	}
 

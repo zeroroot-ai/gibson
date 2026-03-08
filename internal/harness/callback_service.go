@@ -16,13 +16,14 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
 	pb "github.com/zero-day-ai/sdk/api/gen/proto"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 	// Import toolspb to register proto message types for CallToolProto reflection
 	_ "github.com/zero-day-ai/sdk/api/gen/toolspb"
 	sdkfinding "github.com/zero-day-ai/sdk/finding"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zero-day-ai/sdk/protoresolver"
 	"github.com/zero-day-ai/sdk/queue"
 	"github.com/zero-day-ai/sdk/schema"
 	"go.opentelemetry.io/otel/attribute"
@@ -32,10 +33,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/reflect/protoregistry"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // CredentialStore provides access to stored credentials.
@@ -118,6 +115,12 @@ type HarnessCallbackService struct {
 	// queueManager provides access to the Redis work queue for parallel tool execution
 	queueManager *QueueManager
 
+	// missionManager provides mission creation and lifecycle operations
+	missionManager MissionCreator
+
+	// resolver provides dynamic proto type resolution using FileDescriptorSets
+	resolver protoresolver.ProtoResolver
+
 	// mu protects spanProcessors for concurrent access
 	mu sync.RWMutex
 
@@ -187,6 +190,23 @@ func WithQueueManager(queueMgr *QueueManager) CallbackServiceOption {
 	}
 }
 
+// WithMissionManager sets the MissionCreator for agent-driven mission creation.
+// When set, agents can create child missions through the CreateMission RPC.
+func WithMissionManager(missionMgr MissionCreator) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.missionManager = missionMgr
+	}
+}
+
+// WithProtoResolver sets the ProtoResolver for dynamic proto type resolution.
+// When set, the callback service uses this resolver for CallToolProto requests.
+// If not set, a default resolver with standard configuration will be created.
+func WithProtoResolver(resolver protoresolver.ProtoResolver) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.resolver = resolver
+	}
+}
+
 // NewHarnessCallbackService creates a new callback service instance with
 // task-based harness lookup (legacy mode).
 func NewHarnessCallbackService(logger *slog.Logger, opts ...CallbackServiceOption) *HarnessCallbackService {
@@ -201,6 +221,11 @@ func NewHarnessCallbackService(logger *slog.Logger, opts ...CallbackServiceOptio
 
 	for _, opt := range opts {
 		opt(s)
+	}
+
+	// Create default resolver if none was provided
+	if s.resolver == nil {
+		s.resolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
 	}
 
 	return s
@@ -232,6 +257,11 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 
 	for _, opt := range opts {
 		opt(s)
+	}
+
+	// Create default resolver if none was provided
+	if s.resolver == nil {
+		s.resolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
 	}
 
 	return s
@@ -597,7 +627,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		"output_type":    req.OutputType,
 	})
 
-	// Get tool descriptor to validate it exists
+	// Get tool descriptor to validate it exists and extract metadata
 	toolDesc, err := harness.GetToolDescriptor(ctx, req.Name)
 	if err != nil {
 		s.logger.Error("tool not found", "error", err, "tool", req.Name)
@@ -609,62 +639,40 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		}, nil
 	}
 
-	// Create proto message instances dynamically using proto registry.
-	// If the specific type is not found (tool protos not imported), fall back to
-	// google.protobuf.Struct which can carry arbitrary JSON data. The tool execution
-	// will still work because the harness converts to JSON for the gRPC call.
-	var requestMsg proto.Message
-	var responseMsg proto.Message
+	// Extract metadata from tool descriptor for FileDescriptorSet resolution
+	toolMetadata := make(map[string]string)
+	if toolDesc != nil && toolDesc.Metadata != nil {
+		toolMetadata = toolDesc.Metadata
+	}
 
-	inputMsgType, inputErr := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(req.InputType))
-	outputMsgType, outputErr := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(req.OutputType))
-
-	if inputErr != nil || outputErr != nil {
-		// Use google.protobuf.Struct fallback - parse JSON to Struct
-		s.logger.Debug("using google.protobuf.Struct fallback for tool call",
+	// Use resolver to unmarshal input JSON into proto message
+	requestMsg, err := s.resolver.UnmarshalJSON(ctx, req.InputType, req.InputJson, toolMetadata)
+	if err != nil {
+		s.logger.Error("failed to resolve and unmarshal input type",
+			"error", err,
 			"tool", req.Name,
-			"input_type", req.InputType,
-			"output_type", req.OutputType,
-			"input_err", inputErr,
-			"output_err", outputErr)
+			"input_type", req.InputType)
+		return &pb.CallToolProtoResponse{
+			Error: &pb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: fmt.Sprintf("failed to unmarshal input: %v", err),
+			},
+		}, nil
+	}
 
-		var inputMap map[string]any
-		if err := json.Unmarshal(req.InputJson, &inputMap); err != nil {
-			s.logger.Error("failed to unmarshal JSON input", "error", err, "tool", req.Name)
-			return &pb.CallToolProtoResponse{
-				Error: &pb.HarnessError{
-					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-					Message: fmt.Sprintf("failed to unmarshal input JSON: %v", err),
-				},
-			}, nil
-		}
-		inputStruct, err := structpb.NewStruct(inputMap)
-		if err != nil {
-			s.logger.Error("failed to create Struct from input", "error", err, "tool", req.Name)
-			return &pb.CallToolProtoResponse{
-				Error: &pb.HarnessError{
-					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-					Message: fmt.Sprintf("failed to create Struct from input: %v", err),
-				},
-			}, nil
-		}
-		requestMsg = inputStruct
-		responseMsg = &structpb.Struct{}
-	} else {
-		// Create new instances of the typed proto messages
-		requestMsg = inputMsgType.New().Interface()
-		responseMsg = outputMsgType.New().Interface()
-
-		// Unmarshal JSON to proto request using protojson
-		if err := protojson.Unmarshal(req.InputJson, requestMsg); err != nil {
-			s.logger.Error("failed to unmarshal JSON to proto request", "error", err, "tool", req.Name)
-			return &pb.CallToolProtoResponse{
-				Error: &pb.HarnessError{
-					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
-					Message: fmt.Sprintf("failed to unmarshal input: %v", err),
-				},
-			}, nil
-		}
+	// Create empty output message for tool to fill
+	responseMsg, err := s.resolver.ResolveOutputType(ctx, req.OutputType, toolMetadata)
+	if err != nil {
+		s.logger.Error("failed to resolve output type",
+			"error", err,
+			"tool", req.Name,
+			"output_type", req.OutputType)
+		return &pb.CallToolProtoResponse{
+			Error: &pb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Message: fmt.Sprintf("failed to resolve output type: %v", err),
+			},
+		}, nil
 	}
 
 	// Execute tool using CallToolProto
@@ -749,9 +757,6 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		"task_id":        req.Context.TaskId,
 		"parent_span_id": req.Context.SpanId,
 	})
-
-	// Suppress unused variable warning for toolDesc
-	_ = toolDesc
 
 	return &pb.CallToolProtoResponse{
 		OutputJson: responseJSON,
@@ -2294,16 +2299,6 @@ func (s *HarnessCallbackService) exportSpanData(data *proxySpanData) {
 	span.End(trace.WithTimestamp(data.EndTime))
 }
 
-// exportSpan forwards a span to all registered span processors.
-// Deprecated: Use exportSpanData instead for proxy spans.
-func (s *HarnessCallbackService) exportSpan(span sdktrace.ReadOnlySpan) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, processor := range s.spanProcessors {
-		processor.OnEnd(span)
-	}
-}
-
 // ============================================================================
 // Helper Methods for Proto Conversions
 // ============================================================================
@@ -3779,4 +3774,267 @@ func (s *HarnessCallbackService) anyToGraphragpbValue(v any) *graphragpb.Value {
 	default:
 		return &graphragpb.Value{Kind: &graphragpb.Value_StringValue{StringValue: fmt.Sprintf("%v", val)}}
 	}
+}
+
+// ============================================================================
+// Mission Management Operations
+// ============================================================================
+
+// CreateMission implements the mission creation RPC.
+// This allows agents to autonomously create sub-missions.
+func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *pb.CreateMissionRequest) (*pb.CreateMissionResponse, error) {
+	s.logger.Debug("CreateMission called",
+		"mission_id", req.Context.MissionId,
+		"agent_name", req.Context.AgentName,
+		"target_id", req.TargetId,
+		"name", req.Name,
+	)
+
+	// Check if mission manager is available
+	if s.missionManager == nil {
+		s.logger.Warn("mission creation not available - mission manager not configured")
+		return &pb.CreateMissionResponse{
+			Error: &pb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: "mission creation not available - mission manager not configured",
+			},
+		}, nil
+	}
+
+	// Parse parent mission ID
+	var parentMissionID *types.ID
+	if req.Context != nil && req.Context.MissionId != "" {
+		pid, err := types.ParseID(req.Context.MissionId)
+		if err != nil {
+			s.logger.Error("failed to parse parent mission ID",
+				"mission_id", req.Context.MissionId,
+				"error", err,
+			)
+			return &pb.CreateMissionResponse{
+				Error: &pb.HarnessError{
+					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+					Message: fmt.Sprintf("invalid parent mission ID: %v", err),
+				},
+			}, nil
+		}
+		parentMissionID = &pid
+	}
+
+	// Parse target ID
+	targetID, err := types.ParseID(req.TargetId)
+	if err != nil {
+		s.logger.Error("failed to parse target ID",
+			"target_id", req.TargetId,
+			"error", err,
+		)
+		return &pb.CreateMissionResponse{
+			Error: &pb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: fmt.Sprintf("invalid target ID: %v", err),
+			},
+		}, nil
+	}
+
+	// Convert proto constraints to internal type
+	var constraints *MissionConstraints
+	if req.Constraints != nil {
+		constraints = &MissionConstraints{
+			MaxDuration: time.Duration(req.Constraints.MaxDurationMs) * time.Millisecond,
+			MaxTokens:   req.Constraints.MaxTokens,
+			MaxCost:     req.Constraints.MaxCost,
+			MaxFindings: int(req.Constraints.MaxFindings),
+		}
+	}
+
+	// Convert metadata
+	metadata := make(map[string]any)
+	for k, v := range req.Metadata {
+		if v != nil {
+			metadata[k] = protoTypedValueToAny(v)
+		}
+	}
+
+	// Create mission request
+	createReq := &CreateMissionRequest{
+		WorkflowJSON:    string(req.WorkflowJson),
+		TargetID:        targetID,
+		ParentMissionID: parentMissionID,
+		Name:            req.Name,
+		Constraints:     constraints,
+		Metadata:        metadata,
+		Tags:            req.Tags,
+	}
+
+	// Create the mission through the manager
+	missionInfo, err := s.missionManager.CreateMission(ctx, createReq)
+	if err != nil {
+		s.logger.Error("failed to create mission",
+			"error", err,
+			"parent_mission_id", req.Context.MissionId,
+			"target_id", req.TargetId,
+		)
+		return &pb.CreateMissionResponse{
+			Error: &pb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Message: fmt.Sprintf("failed to create mission: %v", err),
+			},
+		}, nil
+	}
+
+	s.logger.Info("mission created successfully",
+		"mission_id", missionInfo.ID,
+		"parent_mission_id", req.Context.MissionId,
+		"name", req.Name,
+	)
+
+	// Convert mission info to proto response
+	pbMission := &pb.MissionInfo{
+		Id:       missionInfo.ID.String(),
+		Name:     missionInfo.Name,
+		Status:   missionStatusToProto(missionInfo.Status),
+		TargetId: missionInfo.TargetID.String(),
+	}
+	if missionInfo.ParentMissionID != nil {
+		pbMission.ParentMissionId = missionInfo.ParentMissionID.String()
+	}
+
+	return &pb.CreateMissionResponse{
+		Mission: pbMission,
+	}, nil
+}
+
+// protoTypedValueToAny converts a proto TypedValue to a Go any value
+func protoTypedValueToAny(tv *commonpb.TypedValue) any {
+	if tv == nil {
+		return nil
+	}
+
+	switch v := tv.Kind.(type) {
+	case *commonpb.TypedValue_StringValue:
+		return v.StringValue
+	case *commonpb.TypedValue_IntValue:
+		return v.IntValue
+	case *commonpb.TypedValue_DoubleValue:
+		return v.DoubleValue
+	case *commonpb.TypedValue_BoolValue:
+		return v.BoolValue
+	case *commonpb.TypedValue_BytesValue:
+		return v.BytesValue
+	default:
+		return nil
+	}
+}
+
+// missionStatusToProto converts internal MissionStatus to proto format
+func missionStatusToProto(status MissionStatus) pb.MissionStatusEnum {
+	switch status {
+	case MissionStatusPending:
+		return pb.MissionStatusEnum_MISSION_STATUS_PENDING
+	case MissionStatusRunning:
+		return pb.MissionStatusEnum_MISSION_STATUS_RUNNING
+	case MissionStatusCompleted:
+		return pb.MissionStatusEnum_MISSION_STATUS_COMPLETED
+	case MissionStatusFailed:
+		return pb.MissionStatusEnum_MISSION_STATUS_FAILED
+	case MissionStatusCancelled:
+		return pb.MissionStatusEnum_MISSION_STATUS_CANCELLED
+	default:
+		return pb.MissionStatusEnum_MISSION_STATUS_UNSPECIFIED
+	}
+}
+
+// RunMission implements the mission execution RPC.
+func (s *HarnessCallbackService) RunMission(ctx context.Context, req *pb.RunMissionRequest) (*pb.RunMissionResponse, error) {
+	s.logger.Debug("RunMission called",
+		"mission_id", req.Context.MissionId,
+		"agent_name", req.Context.AgentName,
+		"target_mission_id", req.MissionId,
+	)
+
+	return &pb.RunMissionResponse{
+		Error: &pb.HarnessError{
+			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+			Message: "mission execution via callback not yet implemented - use CLI or daemon API",
+		},
+	}, nil
+}
+
+// GetMissionStatus implements the mission status query RPC.
+func (s *HarnessCallbackService) GetMissionStatus(ctx context.Context, req *pb.GetMissionStatusRequest) (*pb.GetMissionStatusResponse, error) {
+	s.logger.Debug("GetMissionStatus called",
+		"mission_id", req.Context.MissionId,
+		"agent_name", req.Context.AgentName,
+		"target_mission_id", req.MissionId,
+	)
+
+	return &pb.GetMissionStatusResponse{
+		Error: &pb.HarnessError{
+			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+			Message: "mission status query via callback not yet implemented - use CLI or daemon API",
+		},
+	}, nil
+}
+
+// WaitForMission implements the mission wait RPC.
+func (s *HarnessCallbackService) WaitForMission(ctx context.Context, req *pb.WaitForMissionRequest) (*pb.WaitForMissionResponse, error) {
+	s.logger.Debug("WaitForMission called",
+		"mission_id", req.Context.MissionId,
+		"agent_name", req.Context.AgentName,
+		"target_mission_id", req.MissionId,
+		"timeout_ms", req.TimeoutMs,
+	)
+
+	return &pb.WaitForMissionResponse{
+		Error: &pb.HarnessError{
+			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+			Message: "mission wait via callback not yet implemented - use CLI or daemon API",
+		},
+	}, nil
+}
+
+// ListMissions implements the mission listing RPC.
+func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *pb.ListMissionsRequest) (*pb.ListMissionsResponse, error) {
+	s.logger.Debug("ListMissions called",
+		"mission_id", req.Context.MissionId,
+		"agent_name", req.Context.AgentName,
+	)
+
+	return &pb.ListMissionsResponse{
+		Error: &pb.HarnessError{
+			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+			Message: "mission listing via callback not yet implemented - use CLI or daemon API",
+		},
+	}, nil
+}
+
+// CancelMission implements the mission cancellation RPC.
+func (s *HarnessCallbackService) CancelMission(ctx context.Context, req *pb.CancelMissionRequest) (*pb.CancelMissionResponse, error) {
+	s.logger.Debug("CancelMission called",
+		"mission_id", req.Context.MissionId,
+		"agent_name", req.Context.AgentName,
+		"target_mission_id", req.MissionId,
+	)
+
+	return &pb.CancelMissionResponse{
+		Error: &pb.HarnessError{
+			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+			Message: "mission cancellation via callback not yet implemented - use CLI or daemon API",
+		},
+	}, nil
+}
+
+// GetMissionResults implements the mission results retrieval RPC.
+func (s *HarnessCallbackService) GetMissionResults(ctx context.Context, req *pb.GetMissionResultsRequest) (*pb.GetMissionResultsResponse, error) {
+	s.logger.Debug("GetMissionResults called",
+		"mission_id", req.Context.MissionId,
+		"agent_name", req.Context.AgentName,
+		"target_mission_id", req.MissionId,
+	)
+
+	return &pb.GetMissionResultsResponse{
+		Error: &pb.HarnessError{
+			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+			Message: "mission results retrieval via callback not yet implemented - use CLI or daemon API",
+		},
+	}, nil
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/protoresolver"
 )
 
 // HarnessFactory is a function type for creating child harnesses.
@@ -152,6 +153,35 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		return f.Create(childAgentName, childMissionCtx, childTarget)
 	}
 
+	// Get or create ProtoResolver for dynamic type resolution
+	// Priority:
+	// 1. Use config.ProtoResolver if set (explicit configuration)
+	// 2. If RegistryAdapter is available, reuse its resolver for cache sharing
+	// 3. Otherwise use the default resolver from ApplyDefaults (should not be nil)
+	var resolver protoresolver.ProtoResolver
+	if f.config.ProtoResolver != nil {
+		// Use explicitly configured resolver
+		resolver = f.config.ProtoResolver
+		logger.Debug("using proto resolver from config")
+	} else if f.config.RegistryAdapter != nil {
+		// Try to reuse resolver from RegistryAdapter for cache sharing
+		type resolverProvider interface {
+			GetResolver() protoresolver.ProtoResolver
+		}
+		if rp, ok := f.config.RegistryAdapter.(resolverProvider); ok {
+			resolver = rp.GetResolver()
+			logger.Debug("reusing proto resolver from registry adapter")
+		} else {
+			// Fallback to creating new resolver (should not happen after ApplyDefaults)
+			resolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
+			logger.Debug("created new proto resolver (registry adapter doesn't provide resolver)")
+		}
+	} else {
+		// Fallback to creating new resolver (should not happen after ApplyDefaults)
+		resolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
+		logger.Debug("created new proto resolver (no registry adapter)")
+	}
+
 	// Create and return DefaultAgentHarness
 	var harness AgentHarness = &DefaultAgentHarness{
 		slotManager:         f.config.SlotManager,
@@ -173,6 +203,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		missionClient:       f.config.MissionClient,
 		spawnLimits:         f.config.SpawnLimits,
 		eventLogger:         f.config.EventLogger,
+		resolver:            resolver,
 	}
 
 	// Apply middleware if configured

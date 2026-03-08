@@ -9,8 +9,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
+	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 	"github.com/zero-day-ai/sdk/registry"
 	"github.com/zero-day-ai/sdk/schema"
 )

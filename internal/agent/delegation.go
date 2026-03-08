@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/zero-day-ai/gibson/internal/plugin"
+	"github.com/zero-day-ai/gibson/internal/tool"
 )
 
 // AgentDelegator provides the capability to delegate tasks to other agents.
@@ -37,13 +40,13 @@ type PluginExecutor interface {
 	QueryPlugin(ctx context.Context, plugin, method string, params map[string]any) (any, error)
 }
 
-// NewDelegationHarness creates a new delegation harness
-func NewDelegationHarness(delegator AgentDelegator) *DelegationHarness {
+// NewDelegationHarness creates a new delegation harness with registry-based executors
+func NewDelegationHarness(delegator AgentDelegator, discovery ComponentDiscovery) *DelegationHarness {
 	return &DelegationHarness{
 		delegator:  delegator,
 		logger:     &defaultLogger{},
-		toolExec:   &noopToolExecutor{},
-		pluginExec: &noopPluginExecutor{},
+		toolExec:   &registryToolExecutor{discovery: discovery},
+		pluginExec: &registryPluginExecutor{discovery: discovery},
 	}
 }
 
@@ -152,16 +155,53 @@ func (l *defaultLogger) Log(level, message string, fields map[string]any) {
 	fmt.Printf("[%s] %s %v\n", level, message, fields)
 }
 
-// noopToolExecutor is a placeholder tool executor
-type noopToolExecutor struct{}
-
-func (e *noopToolExecutor) ExecuteTool(ctx context.Context, name string, input map[string]any) (map[string]any, error) {
-	return nil, fmt.Errorf("tool execution not yet implemented (Stage 3)")
+// ComponentDiscovery provides tool and plugin discovery via registry
+type ComponentDiscovery interface {
+	DiscoverTool(ctx context.Context, name string) (tool.Tool, error)
+	DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error)
 }
 
-// noopPluginExecutor is a placeholder plugin executor
-type noopPluginExecutor struct{}
+// registryToolExecutor implements ToolExecutor using registry-based discovery
+type registryToolExecutor struct {
+	discovery ComponentDiscovery
+}
 
-func (e *noopPluginExecutor) QueryPlugin(ctx context.Context, plugin, method string, params map[string]any) (any, error) {
-	return nil, fmt.Errorf("plugin execution not yet implemented (Stage 4)")
+func (e *registryToolExecutor) ExecuteTool(ctx context.Context, name string, input map[string]any) (map[string]any, error) {
+	// Discover the tool from registry
+	t, err := e.discovery.DiscoverTool(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover tool %s: %w", name, err)
+	}
+
+	// Tools use proto-based execution, but for delegation harness compatibility
+	// we need to convert map[string]any to proto and back.
+	// For now, we return an error indicating this conversion is not yet implemented.
+	// Full implementation would require:
+	// 1. Get InputMessageType from tool
+	// 2. Create proto message instance
+	// 3. Convert map to proto (using protojson or similar)
+	// 4. Call ExecuteProto
+	// 5. Convert proto output back to map
+	return nil, fmt.Errorf("tool %s discovered but proto-to-map conversion not yet implemented", t.Name())
+}
+
+// registryPluginExecutor implements PluginExecutor using registry-based discovery
+type registryPluginExecutor struct {
+	discovery ComponentDiscovery
+}
+
+func (e *registryPluginExecutor) QueryPlugin(ctx context.Context, pluginName, method string, params map[string]any) (any, error) {
+	// Discover the plugin from registry
+	p, err := e.discovery.DiscoverPlugin(ctx, pluginName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover plugin %s: %w", pluginName, err)
+	}
+
+	// Forward the query to the discovered plugin
+	result, err := p.Query(ctx, method, params)
+	if err != nil {
+		return nil, fmt.Errorf("plugin %s query failed: %w", pluginName, err)
+	}
+
+	return result, nil
 }

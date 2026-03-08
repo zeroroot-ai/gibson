@@ -3,6 +3,7 @@ package harness
 import (
 	"log/slog"
 
+	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
@@ -10,6 +11,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/protoresolver"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -48,6 +50,11 @@ type HarnessConfig struct {
 	// Used for tool execution operations (CallTool, ListTools).
 	// Optional: defaults to empty registry (no tools available).
 	ToolRegistry tool.ToolRegistry
+
+	// ProtoResolver provides dynamic proto type resolution for tool execution.
+	// Used to convert structpb.Struct inputs to typed proto messages using FileDescriptorSets.
+	// Optional: defaults to DefaultProtoResolver with standard configuration if nil.
+	ProtoResolver protoresolver.ProtoResolver
 
 	// PluginRegistry provides access to registered plugins.
 	// Used for plugin query operations (QueryPlugin, ListPlugins).
@@ -171,6 +178,12 @@ type HarnessConfig struct {
 	// Expected type: *observability.AgentExecutionLog
 	// Optional: defaults to nil (no parent span context).
 	AgentExecLog any
+
+	// EventBus for plugin event publishing.
+	// Used by the plugin registry to publish plugin lifecycle and health events.
+	// Type: events.EventBus
+	// Optional: if nil, plugin events will not be published.
+	EventBus events.EventBus
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.
@@ -202,6 +215,7 @@ func (c *HarnessConfig) Validate() error {
 // Default implementations:
 //   - LLMRegistry: NewLLMRegistry() (empty registry)
 //   - ToolRegistry: NewToolRegistry() (empty registry)
+//   - ProtoResolver: NewDefaultProtoResolver() (default resolver with standard config)
 //   - PluginRegistry: NewPluginRegistry() (empty registry)
 //   - Tracer: trace.NewNoopTracerProvider().Tracer("gibson.harness")
 //   - Logger: slog.Default()
@@ -222,8 +236,14 @@ func (c *HarnessConfig) ApplyDefaults() {
 		c.ToolRegistry = tool.NewToolRegistry()
 	}
 
+	if c.ProtoResolver == nil {
+		c.ProtoResolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
+	}
+
 	if c.PluginRegistry == nil {
-		c.PluginRegistry = plugin.NewPluginRegistry(nil) // TODO: Pass EventBus when available
+		// Pass EventBus if provided, otherwise pass nil
+		// Plugin registry will work without event publishing if EventBus is nil
+		c.PluginRegistry = plugin.NewPluginRegistry(c.EventBus)
 	}
 
 	if c.Tracer == nil {

@@ -54,6 +54,9 @@ type VersionConstraint struct {
 //   - Minimum: ">=1.0.0"
 //   - Maximum: "<=1.0.0" or "<2.0.0"
 //   - Range: ">=1.0.0,<2.0.0"
+//   - Wildcard: "1.2.*" (matches 1.2.x for any x)
+//   - Caret: "^1.2.3" (compatible with 1.2.3, allows minor/patch updates)
+//   - Tilde: "~1.2.3" (approximately 1.2.3, allows patch updates only)
 //   - Any: "*" or "" (empty string)
 //
 // Examples:
@@ -61,6 +64,9 @@ type VersionConstraint struct {
 //   - ">=1.0.0" → minimum version 1.0.0 (inclusive)
 //   - "<2.0.0" → maximum version 2.0.0 (exclusive)
 //   - ">=1.0.0,<2.0.0" → range from 1.0.0 (inclusive) to 2.0.0 (exclusive)
+//   - "1.2.*" → any version with major=1, minor=2
+//   - "^1.2.3" → >=1.2.3, <2.0.0
+//   - "~1.2.3" → >=1.2.3, <1.3.0
 //   - "*" → any version
 func ParseVersionConstraint(constraint string) (*VersionConstraint, error) {
 	// Normalize the input
@@ -71,6 +77,21 @@ func ParseVersionConstraint(constraint string) (*VersionConstraint, error) {
 		return &VersionConstraint{
 			Type: ConstraintAny,
 		}, nil
+	}
+
+	// Check for caret constraint (^1.2.3)
+	if strings.HasPrefix(constraint, "^") {
+		return parseCaretConstraint(constraint[1:])
+	}
+
+	// Check for tilde constraint (~1.2.3)
+	if strings.HasPrefix(constraint, "~") {
+		return parseTildeConstraint(constraint[1:])
+	}
+
+	// Check for wildcard constraint (1.2.*)
+	if strings.Contains(constraint, "*") {
+		return parseWildcardConstraint(constraint)
 	}
 
 	// Check for range constraint (contains comma)
@@ -361,4 +382,171 @@ func validateVersion(version string) error {
 	}
 
 	return nil
+}
+
+// parseWildcardConstraint parses a wildcard version constraint like "1.2.*".
+// Supports wildcards in the patch position (1.2.*) or minor position (1.*).
+func parseWildcardConstraint(constraint string) (*VersionConstraint, error) {
+	constraint = strings.TrimSpace(constraint)
+	constraint = normalizeVersion(constraint)
+
+	parts := strings.Split(constraint, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid wildcard constraint format: %s (expected format: major.minor.* or major.*)", constraint)
+	}
+
+	// Check which position has the wildcard
+	if parts[2] == "*" {
+		// Wildcard in patch position: 1.2.* means >=1.2.0,<1.3.0
+		major := parts[0]
+		minor := parts[1]
+
+		// Validate major and minor are numbers
+		if _, err := strconv.Atoi(major); err != nil {
+			return nil, fmt.Errorf("invalid major version in wildcard: %s", major)
+		}
+		minorNum, err := strconv.Atoi(minor)
+		if err != nil {
+			return nil, fmt.Errorf("invalid minor version in wildcard: %s", minor)
+		}
+
+		minVersion := fmt.Sprintf("%s.%s.0", major, minor)
+		maxVersion := fmt.Sprintf("%s.%d.0", major, minorNum+1)
+
+		return &VersionConstraint{
+			Type:         ConstraintRange,
+			MinVersion:   minVersion,
+			MaxVersion:   maxVersion,
+			MinInclusive: true,
+			MaxInclusive: false,
+		}, nil
+	}
+
+	if parts[1] == "*" {
+		// Wildcard in minor position: 1.* means >=1.0.0,<2.0.0
+		if parts[2] != "*" && parts[2] != "0" {
+			return nil, fmt.Errorf("invalid wildcard constraint: when minor is *, patch must also be * or 0")
+		}
+
+		major := parts[0]
+		majorNum, err := strconv.Atoi(major)
+		if err != nil {
+			return nil, fmt.Errorf("invalid major version in wildcard: %s", major)
+		}
+
+		minVersion := fmt.Sprintf("%s.0.0", major)
+		maxVersion := fmt.Sprintf("%d.0.0", majorNum+1)
+
+		return &VersionConstraint{
+			Type:         ConstraintRange,
+			MinVersion:   minVersion,
+			MaxVersion:   maxVersion,
+			MinInclusive: true,
+			MaxInclusive: false,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("invalid wildcard constraint: %s (wildcard must be in minor or patch position)", constraint)
+}
+
+// parseCaretConstraint parses a caret version constraint like "^1.2.3".
+// Caret allows changes that do not modify the left-most non-zero digit:
+//   - ^1.2.3 → >=1.2.3, <2.0.0
+//   - ^0.2.3 → >=0.2.3, <0.3.0
+//   - ^0.0.3 → >=0.0.3, <0.0.4
+func parseCaretConstraint(version string) (*VersionConstraint, error) {
+	version = strings.TrimSpace(version)
+	if err := validateVersion(version); err != nil {
+		return nil, fmt.Errorf("invalid caret constraint version: %w", err)
+	}
+
+	version = normalizeVersion(version)
+	parts := parseVersionParts(version)
+
+	var maxVersion string
+	if parts[0] > 0 {
+		// Major version is non-zero: allow minor and patch updates
+		// ^1.2.3 → >=1.2.3, <2.0.0
+		maxVersion = fmt.Sprintf("%d.0.0", parts[0]+1)
+	} else if parts[1] > 0 {
+		// Major is zero, minor is non-zero: allow patch updates
+		// ^0.2.3 → >=0.2.3, <0.3.0
+		maxVersion = fmt.Sprintf("0.%d.0", parts[1]+1)
+	} else {
+		// Major and minor are zero: allow only exact patch version
+		// ^0.0.3 → >=0.0.3, <0.0.4
+		maxVersion = fmt.Sprintf("0.0.%d", parts[2]+1)
+	}
+
+	return &VersionConstraint{
+		Type:         ConstraintRange,
+		MinVersion:   version,
+		MaxVersion:   maxVersion,
+		MinInclusive: true,
+		MaxInclusive: false,
+	}, nil
+}
+
+// parseTildeConstraint parses a tilde version constraint like "~1.2.3".
+// Tilde allows patch-level changes:
+//   - ~1.2.3 → >=1.2.3, <1.3.0
+//   - ~1.2 → >=1.2.0, <1.3.0
+//   - ~1 → >=1.0.0, <2.0.0
+func parseTildeConstraint(version string) (*VersionConstraint, error) {
+	version = strings.TrimSpace(version)
+	version = normalizeVersion(version)
+
+	// Handle partial versions like ~1.2 or ~1
+	parts := strings.Split(version, ".")
+	switch len(parts) {
+	case 1:
+		// ~1 → >=1.0.0, <2.0.0
+		major := parts[0]
+		majorNum, err := strconv.Atoi(major)
+		if err != nil {
+			return nil, fmt.Errorf("invalid major version in tilde: %s", major)
+		}
+		return &VersionConstraint{
+			Type:         ConstraintRange,
+			MinVersion:   fmt.Sprintf("%s.0.0", major),
+			MaxVersion:   fmt.Sprintf("%d.0.0", majorNum+1),
+			MinInclusive: true,
+			MaxInclusive: false,
+		}, nil
+
+	case 2:
+		// ~1.2 → >=1.2.0, <1.3.0
+		major := parts[0]
+		minor := parts[1]
+		minorNum, err := strconv.Atoi(minor)
+		if err != nil {
+			return nil, fmt.Errorf("invalid minor version in tilde: %s", minor)
+		}
+		return &VersionConstraint{
+			Type:         ConstraintRange,
+			MinVersion:   fmt.Sprintf("%s.%s.0", major, minor),
+			MaxVersion:   fmt.Sprintf("%s.%d.0", major, minorNum+1),
+			MinInclusive: true,
+			MaxInclusive: false,
+		}, nil
+
+	case 3:
+		// ~1.2.3 → >=1.2.3, <1.3.0
+		if err := validateVersion(version); err != nil {
+			return nil, fmt.Errorf("invalid tilde constraint version: %w", err)
+		}
+		parts := parseVersionParts(version)
+		maxVersion := fmt.Sprintf("%d.%d.0", parts[0], parts[1]+1)
+
+		return &VersionConstraint{
+			Type:         ConstraintRange,
+			MinVersion:   version,
+			MaxVersion:   maxVersion,
+			MinInclusive: true,
+			MaxInclusive: false,
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("invalid tilde constraint format: %s", version)
+	}
 }

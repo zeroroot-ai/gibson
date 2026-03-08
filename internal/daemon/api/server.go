@@ -13,6 +13,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/version"
 )
 
 // DaemonServer implements the DaemonServiceServer interface.
@@ -131,6 +132,9 @@ type DaemonInterface interface {
 
 	// EnsureMissionDependencies ensures all dependencies for a mission workflow are running
 	EnsureMissionDependencies(ctx context.Context, missionPath string) error
+
+	// CreateMission creates a new mission with target and workflow configuration
+	CreateMission(ctx context.Context, req CreateMissionData) (CreateMissionResultData, error)
 }
 
 // DaemonStatus represents daemon status information.
@@ -363,13 +367,17 @@ type LogEntryData struct {
 
 // MissionRunData represents a single execution instance of a mission.
 type MissionRunData struct {
+	RunID         string
 	MissionID     string
 	RunNumber     int
 	Status        string
+	Progress      float64
 	CreatedAt     int64
+	StartedAt     int64
 	CompletedAt   int64
 	FindingsCount int
-	PreviousRunID string
+	Error         string
+	PreviousRunID string // ID of the previous run (for linking run history)
 }
 
 // CheckpointData provides metadata about a mission checkpoint.
@@ -469,6 +477,74 @@ type VersionMismatchData struct {
 	ActualVersion   string
 }
 
+// CreateMissionData represents the data for creating a new mission.
+type CreateMissionData struct {
+	Name        string
+	Description string
+
+	// Target configuration (mutually exclusive)
+	TargetID     string
+	InlineTarget *InlineTargetData
+
+	// Workflow configuration (mutually exclusive)
+	WorkflowID     string
+	InlineWorkflow *InlineWorkflowData
+
+	// Optional configuration
+	Metadata map[string]string
+}
+
+// InlineTargetData represents inline target configuration data.
+type InlineTargetData struct {
+	Seeds    []*TargetSeedData
+	Profile  string
+	Depth    int32
+	Excluded []string
+	Metadata map[string]string
+}
+
+// TargetSeedData represents a target seed.
+type TargetSeedData struct {
+	Value string
+	Type  string
+	Scope string
+}
+
+// InlineWorkflowData represents inline workflow configuration data.
+type InlineWorkflowData struct {
+	Name     string
+	Nodes    []*WorkflowNodeData
+	Edges    []*WorkflowEdgeData
+	Metadata map[string]string
+}
+
+// WorkflowNodeData represents a workflow node configuration.
+type WorkflowNodeData struct {
+	ID        string
+	Type      string
+	Name      string
+	DependsOn []string
+	Config    map[string]any
+}
+
+// WorkflowEdgeData represents a workflow edge configuration.
+type WorkflowEdgeData struct {
+	From      string
+	To        string
+	Condition string
+}
+
+// CreateMissionResultData represents the result of creating a mission.
+type CreateMissionResultData struct {
+	MissionID   string
+	TargetID    string
+	WorkflowID  string
+	Name        string
+	Description string
+	Status      string
+	CreatedAt   time.Time
+}
+
 // NewDaemonServer creates a new gRPC server that exposes daemon functionality.
 //
 // Parameters:
@@ -508,7 +584,7 @@ func (s *DaemonServer) Connect(ctx context.Context, req *ConnectRequest) (*Conne
 	}
 
 	return &ConnectResponse{
-		DaemonVersion: "0.1.0", // TODO: Get from version package
+		DaemonVersion: version.Version,
 		SessionId:     sessionID,
 		GrpcAddress:   status.GRPCAddress,
 	}, nil
@@ -1915,5 +1991,144 @@ func (s *DaemonServer) UpdateMission(ctx context.Context, req *UpdateMissionRequ
 		NewVersion: result.NewVersion,
 		DurationMs: result.DurationMs,
 		Message:    message,
+	}, nil
+}
+
+// CreateMission creates a new mission with target and workflow configuration.
+func (s *DaemonServer) CreateMission(ctx context.Context, req *CreateMissionRequest) (*CreateMissionResponse, error) {
+	s.logger.Info("create mission request received",
+		"name", req.Name,
+		"has_inline_target", req.GetInlineTarget() != nil,
+		"has_inline_workflow", req.GetInlineWorkflow() != nil,
+	)
+
+	// Validate request - name is required
+	if req.Name == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission name is required")
+	}
+
+	// Build CreateMissionData from proto request
+	data := CreateMissionData{
+		Name:        req.Name,
+		Description: req.Description,
+		Metadata:    req.Metadata,
+	}
+
+	// Handle target configuration (oneof)
+	switch tc := req.GetTargetConfig().(type) {
+	case *CreateMissionRequest_TargetId:
+		if tc.TargetId == "" {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "target_id cannot be empty")
+		}
+		data.TargetID = tc.TargetId
+	case *CreateMissionRequest_InlineTarget:
+		inlineTarget := tc.InlineTarget
+		if inlineTarget == nil {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "inline_target cannot be nil")
+		}
+		// Convert proto InlineTargetConfig to InlineTargetData
+		seeds := make([]*TargetSeedData, len(inlineTarget.Seeds))
+		for i, s := range inlineTarget.Seeds {
+			seeds[i] = &TargetSeedData{
+				Value: s.Value,
+				Type:  s.Type,
+				Scope: s.Scope,
+			}
+		}
+		data.InlineTarget = &InlineTargetData{
+			Seeds:    seeds,
+			Profile:  inlineTarget.Profile,
+			Depth:    inlineTarget.Depth,
+			Excluded: inlineTarget.Excluded,
+			Metadata: inlineTarget.Metadata,
+		}
+	default:
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "target configuration is required (target_id or inline_target)")
+	}
+
+	// Handle workflow configuration (oneof)
+	switch wc := req.GetWorkflowConfig().(type) {
+	case *CreateMissionRequest_WorkflowId:
+		if wc.WorkflowId == "" {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "workflow_id cannot be empty")
+		}
+		data.WorkflowID = wc.WorkflowId
+	case *CreateMissionRequest_InlineWorkflow:
+		inlineWorkflow := wc.InlineWorkflow
+		if inlineWorkflow == nil {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "inline_workflow cannot be nil")
+		}
+		// Convert proto InlineWorkflowConfig to InlineWorkflowData
+		nodes := make([]*WorkflowNodeData, len(inlineWorkflow.Nodes))
+		for i, n := range inlineWorkflow.Nodes {
+			// Convert TypedMap config to map[string]any
+			var config map[string]any
+			if n.Config != nil {
+				config = TypedMapToMap(n.Config)
+			}
+			nodes[i] = &WorkflowNodeData{
+				ID:        n.Id,
+				Type:      n.Type,
+				Name:      n.Name,
+				DependsOn: n.DependsOn,
+				Config:    config,
+			}
+		}
+		edges := make([]*WorkflowEdgeData, len(inlineWorkflow.Edges))
+		for i, e := range inlineWorkflow.Edges {
+			edges[i] = &WorkflowEdgeData{
+				From:      e.From,
+				To:        e.To,
+				Condition: e.Condition,
+			}
+		}
+		data.InlineWorkflow = &InlineWorkflowData{
+			Name:     inlineWorkflow.Name,
+			Nodes:    nodes,
+			Edges:    edges,
+			Metadata: inlineWorkflow.Metadata,
+		}
+	default:
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "workflow configuration is required (workflow_id or inline_workflow)")
+	}
+
+	// Call daemon implementation
+	result, err := s.daemon.CreateMission(ctx, data)
+	if err != nil {
+		s.logger.Error("failed to create mission", "error", err, "name", req.Name)
+
+		// Map errors to appropriate gRPC codes
+		if strings.Contains(err.Error(), "not found") {
+			return nil, status_grpc.Errorf(codes.NotFound, "%v", err)
+		}
+		if strings.Contains(err.Error(), "validation") || strings.Contains(err.Error(), "invalid") {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "%v", err)
+		}
+		if strings.Contains(err.Error(), "already exists") {
+			return nil, status_grpc.Errorf(codes.AlreadyExists, "%v", err)
+		}
+
+		return nil, status_grpc.Errorf(codes.Internal, "failed to create mission: %v", err)
+	}
+
+	s.logger.Info("mission created successfully",
+		"mission_id", result.MissionID,
+		"target_id", result.TargetID,
+		"workflow_id", result.WorkflowID,
+	)
+
+	// Build proto Mission response
+	protoMission := &Mission{
+		Id:         result.MissionID,
+		Name:       result.Name,
+		Status:     MissionStatus_MISSION_STATUS_PENDING,
+		TargetId:   result.TargetID,
+		WorkflowId: result.WorkflowID,
+	}
+
+	return &CreateMissionResponse{
+		Success: true,
+		Mission: protoMission,
+		Message: fmt.Sprintf("Mission '%s' created successfully", result.Name),
 	}, nil
 }

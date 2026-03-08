@@ -17,7 +17,7 @@ func TestNewMemoryManagerFactory(t *testing.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		factory, err := NewMemoryManagerFactory(db, nil)
+		factory, err := NewMemoryManagerFactory(db, nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, factory)
 		assert.NotNil(t, factory.Config())
@@ -46,7 +46,7 @@ func TestNewMemoryManagerFactory(t *testing.T) {
 			},
 		}
 
-		factory, err := NewMemoryManagerFactory(db, config)
+		factory, err := NewMemoryManagerFactory(db, nil, config)
 		require.NoError(t, err)
 		require.NotNil(t, factory)
 		assert.Equal(t, 50000, factory.Config().Working.MaxTokens)
@@ -54,7 +54,7 @@ func TestNewMemoryManagerFactory(t *testing.T) {
 	})
 
 	t.Run("error when db is nil", func(t *testing.T) {
-		factory, err := NewMemoryManagerFactory(nil, nil)
+		factory, err := NewMemoryManagerFactory(nil, nil, nil)
 		assert.Error(t, err)
 		assert.Nil(t, factory)
 		assert.Contains(t, err.Error(), "database connection cannot be nil")
@@ -71,7 +71,7 @@ func TestNewMemoryManagerFactory(t *testing.T) {
 			},
 		}
 
-		factory, err := NewMemoryManagerFactory(db, config)
+		factory, err := NewMemoryManagerFactory(db, nil, config)
 		assert.Error(t, err)
 		assert.Nil(t, factory)
 		assert.Contains(t, err.Error(), "validation failed")
@@ -84,7 +84,7 @@ func TestMemoryManagerFactory_CreateForMission(t *testing.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		factory, err := NewMemoryManagerFactory(db, nil)
+		factory, err := NewMemoryManagerFactory(db, nil, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -108,7 +108,7 @@ func TestMemoryManagerFactory_CreateForMission(t *testing.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		factory, err := NewMemoryManagerFactory(db, nil)
+		factory, err := NewMemoryManagerFactory(db, nil, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -147,7 +147,7 @@ func TestMemoryManagerFactory_CreateForMission(t *testing.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		factory, err := NewMemoryManagerFactory(db, nil)
+		factory, err := NewMemoryManagerFactory(db, nil, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -161,7 +161,7 @@ func TestMemoryManagerFactory_CreateForMission(t *testing.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		factory, err := NewMemoryManagerFactory(db, nil)
+		factory, err := NewMemoryManagerFactory(db, nil, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -179,7 +179,7 @@ func TestMemoryManagerFactory_MemoryManagerLifecycle(t *testing.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		factory, err := NewMemoryManagerFactory(db, nil)
+		factory, err := NewMemoryManagerFactory(db, nil, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -209,7 +209,7 @@ func TestMemoryManagerFactory_MemoryManagerLifecycle(t *testing.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		factory, err := NewMemoryManagerFactory(db, nil)
+		factory, err := NewMemoryManagerFactory(db, nil, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -255,7 +255,7 @@ func TestMemoryManagerFactory_ConfigPropagation(t *testing.T) {
 			},
 		}
 
-		factory, err := NewMemoryManagerFactory(db, config)
+		factory, err := NewMemoryManagerFactory(db, nil, config)
 		require.NoError(t, err)
 
 		ctx := context.Background()

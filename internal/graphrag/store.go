@@ -40,9 +40,11 @@ package graphrag
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
 )
 
 // GraphRAGStore provides a unified, high-level interface for GraphRAG operations.
@@ -97,6 +99,11 @@ type GraphRAGStore interface {
 	// Creates the finding node and relationships to targets/techniques.
 	// Automatically generates embeddings from finding description.
 	StoreFinding(ctx context.Context, finding FindingNode) error
+
+	// StoreFindingWithRun stores a finding and links it to a mission run.
+	// Creates the finding node and a DISCOVERED_IN relationship to the run.
+	// Useful for tracking when findings were discovered across multiple runs.
+	StoreFindingWithRun(ctx context.Context, finding FindingNode, runID types.ID) error
 
 	// GetRelatedFindings retrieves findings related to the given finding.
 	// Traverses SIMILAR_TO and other relationship types to find connected findings.
@@ -347,11 +354,16 @@ func (s *DefaultGraphRAGStore) StoreAttackPattern(ctx context.Context, pattern A
 	// Note: This assumes technique nodes already exist
 	// In a real implementation, we'd either create technique nodes or query for them
 	for _, tactic := range pattern.Tactics {
-		// Create a technique node for this tactic (simplified)
-		// In production, we'd query for existing technique nodes
+		// SIMPLIFIED: Current implementation generates placeholder technique IDs using types.NewID()
+		// instead of querying for existing technique nodes in the graph.
+		// Production implementation would:
+		// 1. Query for existing technique nodes by MITRE technique ID (e.g., T1566)
+		// 2. Create technique node if not found in the graph
+		// 3. Use the actual node ID from query result or newly created node for the relationship
+		// 4. Avoid creating duplicate technique nodes and orphaned relationships
 		rel := NewRelationship(
 			pattern.ID,
-			types.NewID(), // Placeholder - should be actual technique ID
+			types.NewID(), // Placeholder - should be actual technique ID from query or creation
 			RelationType("uses_technique"),
 		).WithProperty("tactic", tactic)
 
@@ -525,12 +537,34 @@ func (s *DefaultGraphRAGStore) StoreFinding(ctx context.Context, finding Finding
 			finding.ID,
 			*finding.TargetID,
 			RelationType("discovered_on"),
-		).WithProperty("severity", finding.Severity)
+		).WithProperty(sdkgraphrag.PropSeverity, finding.Severity)
 
 		if err := s.provider.StoreRelationship(ctx, *rel); err != nil {
 			// Don't fail the entire operation
 			// Log error in production
 		}
+	}
+
+	return nil
+}
+
+// StoreFindingWithRun stores a finding and links it to a mission run.
+// Creates the finding node and a DISCOVERED_IN relationship to the run.
+func (s *DefaultGraphRAGStore) StoreFindingWithRun(ctx context.Context, finding FindingNode, runID types.ID) error {
+	// Store the finding first
+	if err := s.StoreFinding(ctx, finding); err != nil {
+		return fmt.Errorf("failed to store finding: %w", err)
+	}
+
+	// Create DISCOVERED_IN relationship to the run
+	rel := NewRelationship(
+		finding.ID,
+		runID,
+		RelationType("DISCOVERED_IN"),
+	).WithProperty("discovered_at", time.Now().Format(time.RFC3339))
+
+	if err := s.provider.StoreRelationship(ctx, *rel); err != nil {
+		return NewRelationshipError("failed to create DISCOVERED_IN relationship", err)
 	}
 
 	return nil
@@ -699,17 +733,17 @@ func graphNodeToAttackPattern(node GraphNode) AttackPattern {
 	pattern := AttackPattern{
 		ID:          node.ID,
 		TechniqueID: node.GetStringProperty("technique_id"),
-		Name:        node.GetStringProperty("name"),
-		Description: node.GetStringProperty("description"),
+		Name:        node.GetStringProperty(sdkgraphrag.PropName),
+		Description: node.GetStringProperty(sdkgraphrag.PropDescription),
 		Embedding:   node.Embedding,
 		CreatedAt:   node.CreatedAt,
 		UpdatedAt:   node.UpdatedAt,
 	}
 
 	// Extract arrays from properties
-	if tactics, ok := node.Properties["tactics"].([]string); ok {
+	if tactics, ok := node.Properties[sdkgraphrag.PropTactics].([]string); ok {
 		pattern.Tactics = tactics
-	} else if tactics, ok := node.Properties["tactics"].([]interface{}); ok {
+	} else if tactics, ok := node.Properties[sdkgraphrag.PropTactics].([]interface{}); ok {
 		pattern.Tactics = make([]string, 0, len(tactics))
 		for _, t := range tactics {
 			if str, ok := t.(string); ok {
@@ -718,9 +752,9 @@ func graphNodeToAttackPattern(node GraphNode) AttackPattern {
 		}
 	}
 
-	if platforms, ok := node.Properties["platforms"].([]string); ok {
+	if platforms, ok := node.Properties[sdkgraphrag.PropPlatforms].([]string); ok {
 		pattern.Platforms = platforms
-	} else if platforms, ok := node.Properties["platforms"].([]interface{}); ok {
+	} else if platforms, ok := node.Properties[sdkgraphrag.PropPlatforms].([]interface{}); ok {
 		pattern.Platforms = make([]string, 0, len(platforms))
 		for _, p := range platforms {
 			if str, ok := p.(string); ok {
@@ -737,16 +771,16 @@ func graphNodeToFindingNode(node GraphNode) FindingNode {
 	finding := FindingNode{
 		ID:          node.ID,
 		Title:       node.GetStringProperty("title"),
-		Description: node.GetStringProperty("description"),
-		Severity:    node.GetStringProperty("severity"),
-		Category:    node.GetStringProperty("category"),
+		Description: node.GetStringProperty(sdkgraphrag.PropDescription),
+		Severity:    node.GetStringProperty(sdkgraphrag.PropSeverity),
+		Category:    node.GetStringProperty(sdkgraphrag.PropCategory),
 		Embedding:   node.Embedding,
 		CreatedAt:   node.CreatedAt,
 		UpdatedAt:   node.UpdatedAt,
 	}
 
 	// Extract confidence
-	if conf, ok := node.Properties["confidence"].(float64); ok {
+	if conf, ok := node.Properties[sdkgraphrag.PropConfidence].(float64); ok {
 		finding.Confidence = conf
 	}
 
@@ -768,8 +802,15 @@ func graphNodeToFindingNode(node GraphNode) FindingNode {
 // buildAttackChainsFromNodes constructs attack chains from traversed nodes.
 // Analyzes the graph structure to identify technique sequences.
 func buildAttackChainsFromNodes(startNode GraphNode, traversedNodes []GraphNode, maxDepth int) []AttackChain {
-	// Simplified implementation - builds a single chain from the traversal
-	// Production implementation would use path analysis and chain discovery algorithms
+	// SIMPLIFIED: Current implementation builds a single linear attack chain from traversed nodes
+	// without analyzing actual graph paths, relationship sequences, or alternative attack paths.
+	// Production implementation would:
+	// 1. Use path analysis algorithms (e.g., DFS/BFS) to discover all possible attack chains
+	// 2. Implement chain discovery algorithms to identify multi-step attack sequences
+	// 3. Analyze relationship properties to determine valid technique sequences
+	// 4. Calculate chain confidence scores based on evidence and relationship strength
+	// 5. Return multiple chains representing different attack paths through the graph
+	// 6. Filter and rank chains by likelihood, severity, and completeness
 
 	if len(traversedNodes) == 0 {
 		return []AttackChain{}

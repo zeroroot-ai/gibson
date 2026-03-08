@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.com/zero-day-ai/gibson/internal/schema"
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
+	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 	sdkregistry "github.com/zero-day-ai/sdk/registry"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // mockToolServiceClient implements proto.ToolServiceClient for testing
@@ -24,7 +24,7 @@ type mockToolServiceClient struct {
 	// Hooks for test customization
 	getDescriptorFunc func(ctx context.Context, req *proto.ToolGetDescriptorRequest, opts ...grpc.CallOption) (*proto.ToolDescriptor, error)
 	executeFunc       func(ctx context.Context, req *proto.ToolExecuteRequest, opts ...grpc.CallOption) (*proto.ToolExecuteResponse, error)
-	healthFunc        func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*proto.HealthStatus, error)
+	healthFunc        func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*commonpb.HealthStatus, error)
 }
 
 func (m *mockToolServiceClient) GetDescriptor(ctx context.Context, req *proto.ToolGetDescriptorRequest, opts ...grpc.CallOption) (*proto.ToolDescriptor, error) {
@@ -41,7 +41,7 @@ func (m *mockToolServiceClient) Execute(ctx context.Context, req *proto.ToolExec
 	return nil, fmt.Errorf("Execute not implemented in mock")
 }
 
-func (m *mockToolServiceClient) Health(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*proto.HealthStatus, error) {
+func (m *mockToolServiceClient) Health(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*commonpb.HealthStatus, error) {
 	if m.healthFunc != nil {
 		return m.healthFunc(ctx, req, opts...)
 	}
@@ -125,16 +125,7 @@ func TestGRPCToolClient_Tags_FromDescriptor(t *testing.T) {
 	assert.Equal(t, expected, client.Tags())
 }
 
-func TestGRPCToolClient_InputSchema(t *testing.T) {
-	inputSchemaJSON := `{
-		"type": "object",
-		"properties": {
-			"target": {"type": "string"},
-			"port": {"type": "integer"}
-		},
-		"required": ["target"]
-	}`
-
+func TestGRPCToolClient_InputMessageType(t *testing.T) {
 	mockClient := &mockToolServiceClient{
 		getDescriptorFunc: func(ctx context.Context, req *proto.ToolGetDescriptorRequest, opts ...grpc.CallOption) (*proto.ToolDescriptor, error) {
 			return &proto.ToolDescriptor{
@@ -142,35 +133,33 @@ func TestGRPCToolClient_InputSchema(t *testing.T) {
 				Description: "Test tool",
 				Version:     "1.0.0",
 				Tags:        []string{"test"},
-				InputSchema: &commonpb.JSONSchema{
-					Json: inputSchemaJSON,
-				},
-				OutputSchema: &commonpb.JSONSchema{
-					Json: `{"type": "object"}`,
-				},
 			}, nil
 		},
 	}
 
-	client := createTestToolClient(mockClient)
-	schema := client.InputSchema()
+	info := sdkregistry.ServiceInfo{
+		Name:     "test-tool",
+		Version:  "1.0.0",
+		Endpoint: "localhost:50051",
+		Metadata: map[string]string{
+			"description":         "A test tool",
+			"tags":                "network,scanner,test",
+			"input_message_type":  "zero_day.tools.TestInput",
+			"output_message_type": "zero_day.tools.TestOutput",
+		},
+	}
 
-	assert.Equal(t, "object", schema.Type)
-	assert.Contains(t, schema.Properties, "target")
-	assert.Contains(t, schema.Properties, "port")
-	assert.Equal(t, []string{"target"}, schema.Required)
+	client := &GRPCToolClient{
+		conn:   nil,
+		client: mockClient,
+		info:   info,
+	}
+
+	msgType := client.InputMessageType()
+	assert.Equal(t, "zero_day.tools.TestInput", msgType)
 }
 
-func TestGRPCToolClient_OutputSchema(t *testing.T) {
-	outputSchemaJSON := `{
-		"type": "object",
-		"properties": {
-			"result": {"type": "string"},
-			"exitCode": {"type": "integer"}
-		},
-		"required": ["result"]
-	}`
-
+func TestGRPCToolClient_OutputMessageType(t *testing.T) {
 	mockClient := &mockToolServiceClient{
 		getDescriptorFunc: func(ctx context.Context, req *proto.ToolGetDescriptorRequest, opts ...grpc.CallOption) (*proto.ToolDescriptor, error) {
 			return &proto.ToolDescriptor{
@@ -178,26 +167,33 @@ func TestGRPCToolClient_OutputSchema(t *testing.T) {
 				Description: "Test tool",
 				Version:     "1.0.0",
 				Tags:        []string{"test"},
-				InputSchema: &commonpb.JSONSchema{
-					Json: `{"type": "object"}`,
-				},
-				OutputSchema: &commonpb.JSONSchema{
-					Json: outputSchemaJSON,
-				},
 			}, nil
 		},
 	}
 
-	client := createTestToolClient(mockClient)
-	schema := client.OutputSchema()
+	info := sdkregistry.ServiceInfo{
+		Name:     "test-tool",
+		Version:  "1.0.0",
+		Endpoint: "localhost:50051",
+		Metadata: map[string]string{
+			"description":         "A test tool",
+			"tags":                "network,scanner,test",
+			"input_message_type":  "zero_day.tools.TestInput",
+			"output_message_type": "zero_day.tools.TestOutput",
+		},
+	}
 
-	assert.Equal(t, "object", schema.Type)
-	assert.Contains(t, schema.Properties, "result")
-	assert.Contains(t, schema.Properties, "exitCode")
-	assert.Equal(t, []string{"result"}, schema.Required)
+	client := &GRPCToolClient{
+		conn:   nil,
+		client: mockClient,
+		info:   info,
+	}
+
+	msgType := client.OutputMessageType()
+	assert.Equal(t, "zero_day.tools.TestOutput", msgType)
 }
 
-func TestGRPCToolClient_Execute_Success(t *testing.T) {
+func TestGRPCToolClient_ExecuteProto_Success(t *testing.T) {
 	mockClient := &mockToolServiceClient{
 		executeFunc: func(ctx context.Context, req *proto.ToolExecuteRequest, opts ...grpc.CallOption) (*proto.ToolExecuteResponse, error) {
 			// Verify input was marshaled
@@ -209,7 +205,7 @@ func TestGRPCToolClient_Execute_Success(t *testing.T) {
 			// Return success response
 			output := map[string]any{
 				"result":   "success",
-				"exitCode": 0,
+				"exitCode": float64(0),
 			}
 			outputJSON, _ := json.Marshal(output)
 
@@ -218,29 +214,59 @@ func TestGRPCToolClient_Execute_Success(t *testing.T) {
 				Error:      nil,
 			}, nil
 		},
+		getDescriptorFunc: func(ctx context.Context, req *proto.ToolGetDescriptorRequest, opts ...grpc.CallOption) (*proto.ToolDescriptor, error) {
+			return &proto.ToolDescriptor{
+				Name:        "test-tool",
+				Description: "Test tool",
+				Version:     "1.0.0",
+				Tags:        []string{"test"},
+			}, nil
+		},
 	}
 
-	client := createTestToolClient(mockClient)
+	info := sdkregistry.ServiceInfo{
+		Name:     "test-tool",
+		Version:  "1.0.0",
+		Endpoint: "localhost:50051",
+		Metadata: map[string]string{
+			"description":         "A test tool",
+			"output_message_type": "google.protobuf.Struct",
+		},
+	}
+
+	client := &GRPCToolClient{
+		conn:   nil,
+		client: mockClient,
+		info:   info,
+	}
+
 	ctx := context.Background()
 
-	input := map[string]any{
+	// Create proto input (using google.protobuf.Struct as fallback)
+	inputMap := map[string]any{
 		"target": "example.com",
-		"port":   80,
+		"port":   float64(80),
 	}
-
-	output, err := client.Execute(ctx, input)
+	inputProto, err := structpb.NewStruct(inputMap)
 	require.NoError(t, err)
-	assert.Equal(t, "success", output["result"])
-	assert.Equal(t, float64(0), output["exitCode"]) // JSON numbers unmarshal as float64
+
+	output, err := client.ExecuteProto(ctx, inputProto)
+	require.NoError(t, err)
+
+	// Output should be a google.protobuf.Struct
+	outputStruct, ok := output.(*structpb.Struct)
+	require.True(t, ok, "output should be *structpb.Struct")
+	assert.Equal(t, "success", outputStruct.Fields["result"].GetStringValue())
+	assert.Equal(t, float64(0), outputStruct.Fields["exitCode"].GetNumberValue())
 }
 
-func TestGRPCToolClient_Execute_WithError(t *testing.T) {
+func TestGRPCToolClient_ExecuteProto_WithError(t *testing.T) {
 	mockClient := &mockToolServiceClient{
 		executeFunc: func(ctx context.Context, req *proto.ToolExecuteRequest, opts ...grpc.CallOption) (*proto.ToolExecuteResponse, error) {
 			// Return error response
 			return &proto.ToolExecuteResponse{
 				OutputJson: "",
-				Error: &proto.Error{
+				Error: &commonpb.Error{
 					Code:    "EXECUTION_FAILED",
 					Message: "Failed to scan target",
 				},
@@ -248,58 +274,89 @@ func TestGRPCToolClient_Execute_WithError(t *testing.T) {
 		},
 	}
 
-	client := createTestToolClient(mockClient)
-	ctx := context.Background()
-
-	input := map[string]any{
-		"target": "example.com",
+	info := sdkregistry.ServiceInfo{
+		Name:     "test-tool",
+		Version:  "1.0.0",
+		Endpoint: "localhost:50051",
+		Metadata: map[string]string{
+			"output_message_type": "google.protobuf.Struct",
+		},
 	}
 
-	output, err := client.Execute(ctx, input)
+	client := &GRPCToolClient{
+		conn:   nil,
+		client: mockClient,
+		info:   info,
+	}
+
+	ctx := context.Background()
+
+	inputMap := map[string]any{
+		"target": "example.com",
+	}
+	inputProto, err := structpb.NewStruct(inputMap)
+	require.NoError(t, err)
+
+	output, err := client.ExecuteProto(ctx, inputProto)
 	assert.Error(t, err)
 	assert.Nil(t, output)
 	assert.Contains(t, err.Error(), "EXECUTION_FAILED")
 	assert.Contains(t, err.Error(), "Failed to scan target")
 }
 
-func TestGRPCToolClient_Execute_RPCError(t *testing.T) {
+func TestGRPCToolClient_ExecuteProto_RPCError(t *testing.T) {
 	mockClient := &mockToolServiceClient{
 		executeFunc: func(ctx context.Context, req *proto.ToolExecuteRequest, opts ...grpc.CallOption) (*proto.ToolExecuteResponse, error) {
 			return nil, fmt.Errorf("connection refused")
 		},
 	}
 
-	client := createTestToolClient(mockClient)
-	ctx := context.Background()
-
-	input := map[string]any{
-		"target": "example.com",
+	info := sdkregistry.ServiceInfo{
+		Name:     "test-tool",
+		Version:  "1.0.0",
+		Endpoint: "localhost:50051",
+		Metadata: map[string]string{
+			"output_message_type": "google.protobuf.Struct",
+		},
 	}
 
-	output, err := client.Execute(ctx, input)
+	client := &GRPCToolClient{
+		conn:   nil,
+		client: mockClient,
+		info:   info,
+	}
+
+	ctx := context.Background()
+
+	inputMap := map[string]any{
+		"target": "example.com",
+	}
+	inputProto, err := structpb.NewStruct(inputMap)
+	require.NoError(t, err)
+
+	output, err := client.ExecuteProto(ctx, inputProto)
 	assert.Error(t, err)
 	assert.Nil(t, output)
 	assert.Contains(t, err.Error(), "tool execution failed")
 	assert.Contains(t, err.Error(), "connection refused")
 }
 
-func TestGRPCToolClient_Execute_MarshalError(t *testing.T) {
-	mockClient := &mockToolServiceClient{}
-	client := createTestToolClient(mockClient)
-	ctx := context.Background()
-
-	// Create input that can't be marshaled to JSON
+func TestGRPCToolClient_ExecuteProto_MarshalError(t *testing.T) {
+	// Create input that can't be marshaled to proto (map with channel)
 	input := map[string]any{
-		"invalid": make(chan int), // channels can't be marshaled to JSON
+		"invalid": make(chan int), // channels can't be in proto Struct
 	}
 
-	output, err := client.Execute(ctx, input)
-	assert.Error(t, err)
-	assert.Nil(t, output)
-	assert.Contains(t, err.Error(), "failed to marshal input")
+	// structpb.NewStruct will fail on this input
+	inputProto, err := structpb.NewStruct(input)
+	assert.Error(t, err) // Should fail before ExecuteProto
+	assert.Nil(t, inputProto)
+
+	// We don't need to actually call ExecuteProto since NewStruct already failed
+	// This test verifies that invalid proto input is caught at the marshaling stage
 }
 
-func TestGRPCToolClient_Execute_UnmarshalError(t *testing.T) {
+func TestGRPCToolClient_ExecuteProto_UnmarshalError(t *testing.T) {
 	mockClient := &mockToolServiceClient{
 		executeFunc: func(ctx context.Context, req *proto.ToolExecuteRequest, opts ...grpc.CallOption) (*proto.ToolExecuteResponse, error) {
 			// Return invalid JSON
@@ -308,16 +365,40 @@ func TestGRPCToolClient_Execute_UnmarshalError(t *testing.T) {
 				Error:      nil,
 			}, nil
 		},
+		getDescriptorFunc: func(ctx context.Context, req *proto.ToolGetDescriptorRequest, opts ...grpc.CallOption) (*proto.ToolDescriptor, error) {
+			return &proto.ToolDescriptor{
+				Name:        "test-tool",
+				Description: "Test tool",
+				Version:     "1.0.0",
+				Tags:        []string{"test"},
+			}, nil
+		},
 	}
 
-	client := createTestToolClient(mockClient)
+	info := sdkregistry.ServiceInfo{
+		Name:     "test-tool",
+		Version:  "1.0.0",
+		Endpoint: "localhost:50051",
+		Metadata: map[string]string{
+			"output_message_type": "google.protobuf.Struct",
+		},
+	}
+
+	client := &GRPCToolClient{
+		conn:   nil,
+		client: mockClient,
+		info:   info,
+	}
+
 	ctx := context.Background()
 
-	input := map[string]any{
+	inputMap := map[string]any{
 		"target": "example.com",
 	}
+	inputProto, err := structpb.NewStruct(inputMap)
+	require.NoError(t, err)
 
-	output, err := client.Execute(ctx, input)
+	output, err := client.ExecuteProto(ctx, inputProto)
 	assert.Error(t, err)
 	assert.Nil(t, output)
 	assert.Contains(t, err.Error(), "failed to unmarshal output")
@@ -325,9 +406,9 @@ func TestGRPCToolClient_Execute_UnmarshalError(t *testing.T) {
 
 func TestGRPCToolClient_Health_Healthy(t *testing.T) {
 	mockClient := &mockToolServiceClient{
-		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*proto.HealthStatus, error) {
-			return &proto.HealthStatus{
-				State:   "healthy",
+		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*commonpb.HealthStatus, error) {
+			return &commonpb.HealthStatus{
+				Status:  "healthy",
 				Message: "All systems operational",
 			}, nil
 		},
@@ -343,9 +424,9 @@ func TestGRPCToolClient_Health_Healthy(t *testing.T) {
 
 func TestGRPCToolClient_Health_Degraded(t *testing.T) {
 	mockClient := &mockToolServiceClient{
-		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*proto.HealthStatus, error) {
-			return &proto.HealthStatus{
-				State:   "degraded",
+		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*commonpb.HealthStatus, error) {
+			return &commonpb.HealthStatus{
+				Status:  "degraded",
 				Message: "Some features unavailable",
 			}, nil
 		},
@@ -361,9 +442,9 @@ func TestGRPCToolClient_Health_Degraded(t *testing.T) {
 
 func TestGRPCToolClient_Health_Unhealthy(t *testing.T) {
 	mockClient := &mockToolServiceClient{
-		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*proto.HealthStatus, error) {
-			return &proto.HealthStatus{
-				State:   "unhealthy",
+		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*commonpb.HealthStatus, error) {
+			return &commonpb.HealthStatus{
+				Status:  "unhealthy",
 				Message: "Service down",
 			}, nil
 		},
@@ -379,7 +460,7 @@ func TestGRPCToolClient_Health_Unhealthy(t *testing.T) {
 
 func TestGRPCToolClient_Health_RPCError(t *testing.T) {
 	mockClient := &mockToolServiceClient{
-		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*proto.HealthStatus, error) {
+		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*commonpb.HealthStatus, error) {
 			return nil, fmt.Errorf("connection timeout")
 		},
 	}
@@ -395,9 +476,9 @@ func TestGRPCToolClient_Health_RPCError(t *testing.T) {
 
 func TestGRPCToolClient_Health_UnknownState(t *testing.T) {
 	mockClient := &mockToolServiceClient{
-		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*proto.HealthStatus, error) {
-			return &proto.HealthStatus{
-				State:   "unknown",
+		healthFunc: func(ctx context.Context, req *proto.ToolHealthRequest, opts ...grpc.CallOption) (*commonpb.HealthStatus, error) {
+			return &commonpb.HealthStatus{
+				Status:  "unknown",
 				Message: "Unknown status",
 			}, nil
 		},
@@ -422,27 +503,37 @@ func TestGRPCToolClient_FetchDescriptor_Caching(t *testing.T) {
 				Description: "Test tool",
 				Version:     "1.0.0",
 				Tags:        []string{"test"},
-				InputSchema: &commonpb.JSONSchema{
-					Json: `{"type": "object"}`,
-				},
-				OutputSchema: &commonpb.JSONSchema{
-					Json: `{"type": "object"}`,
-				},
 			}, nil
 		},
 	}
 
-	client := createTestToolClient(mockClient)
+	info := sdkregistry.ServiceInfo{
+		Name:     "test-tool",
+		Version:  "1.0.0",
+		Endpoint: "localhost:50051",
+		Metadata: map[string]string{
+			"description":         "A test tool",
+			"tags":                "network,scanner,test",
+			"input_message_type":  "zero_day.tools.TestInput",
+			"output_message_type": "zero_day.tools.TestOutput",
+		},
+	}
+
+	client := &GRPCToolClient{
+		conn:   nil,
+		client: mockClient,
+		info:   info,
+	}
 
 	// First call should fetch descriptor
-	_ = client.InputSchema()
+	_ = client.InputMessageType()
 	assert.Equal(t, 1, callCount)
 
 	// Subsequent calls should use cached descriptor
-	_ = client.InputSchema()
+	_ = client.InputMessageType()
 	assert.Equal(t, 1, callCount)
 
-	_ = client.OutputSchema()
+	_ = client.OutputMessageType()
 	assert.Equal(t, 1, callCount)
 
 	_ = client.Tags()
@@ -459,85 +550,37 @@ func TestGRPCToolClient_FetchDescriptor_Error(t *testing.T) {
 		},
 	}
 
-	client := createTestToolClient(mockClient)
+	info := sdkregistry.ServiceInfo{
+		Name:     "test-tool",
+		Version:  "1.0.0",
+		Endpoint: "localhost:50051",
+		Metadata: map[string]string{
+			"description": "A test tool",
+			"tags":        "network,scanner,test",
+			// No input/output_message_type in metadata - will fallback to google.protobuf.Struct
+		},
+	}
 
-	// Should return empty schema on error
-	inputSchema := client.InputSchema()
-	assert.Equal(t, schema.JSONSchema{}, inputSchema)
+	client := &GRPCToolClient{
+		conn:   nil,
+		client: mockClient,
+		info:   info,
+	}
+
+	// Even though descriptor fetch will fail, the fetchDescriptor method
+	// will return fallback type from metadata (or google.protobuf.Struct if missing)
+	inputType := client.InputMessageType()
+	// On error, fetchDescriptor returns fallback but descriptor is nil
+	// So InputMessageType returns empty string when descriptor is nil and no metadata
+	assert.Equal(t, "", inputType)
 
 	// Should still be able to get metadata from ServiceInfo
 	assert.Equal(t, "test-tool", client.Name())
 	assert.Equal(t, "1.0.0", client.Version())
 }
 
-func TestProtoSchemaToInternal(t *testing.T) {
-	tests := []struct {
-		name        string
-		protoSchema *commonpb.JSONSchema
-		expectError bool
-		validate    func(t *testing.T, schema schema.JSONSchema)
-	}{
-		{
-			name:        "nil schema",
-			protoSchema: nil,
-			expectError: false,
-			validate: func(t *testing.T, s schema.JSONSchema) {
-				assert.Equal(t, schema.JSONSchema{}, s)
-			},
-		},
-		{
-			name:        "empty JSON",
-			protoSchema: &commonpb.JSONSchema{Json: ""},
-			expectError: false,
-			validate: func(t *testing.T, s schema.JSONSchema) {
-				assert.Equal(t, schema.JSONSchema{}, s)
-			},
-		},
-		{
-			name: "valid object schema",
-			protoSchema: &commonpb.JSONSchema{
-				Json: `{
-					"type": "object",
-					"properties": {
-						"name": {"type": "string"},
-						"age": {"type": "integer"}
-					},
-					"required": ["name"]
-				}`,
-			},
-			expectError: false,
-			validate: func(t *testing.T, s schema.JSONSchema) {
-				assert.Equal(t, "object", s.Type)
-				assert.Len(t, s.Properties, 2)
-				assert.Contains(t, s.Properties, "name")
-				assert.Contains(t, s.Properties, "age")
-				assert.Equal(t, []string{"name"}, s.Required)
-			},
-		},
-		{
-			name: "invalid JSON",
-			protoSchema: &commonpb.JSONSchema{
-				Json: `{invalid`,
-			},
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			schema, err := protoSchemaToInternal(tt.protoSchema)
-
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				if tt.validate != nil {
-					tt.validate(t, schema)
-				}
-			}
-		})
-	}
-}
+// TestProtoSchemaToInternal removed - tool interface no longer uses JSON schemas
+// Tools now use proto message types (InputMessageType/OutputMessageType)
 
 func TestNewGRPCToolClient(t *testing.T) {
 	info := sdkregistry.ServiceInfo{
@@ -550,7 +593,7 @@ func TestNewGRPCToolClient(t *testing.T) {
 		},
 	}
 
-	client := NewGRPCToolClient(nil, info)
+	client := NewGRPCToolClient(nil, info, nil)
 
 	assert.NotNil(t, client)
 	assert.Equal(t, "nmap", client.Name())

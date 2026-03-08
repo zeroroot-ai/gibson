@@ -224,12 +224,19 @@ func (b *DefaultGraphRAGBridge) Health(ctx context.Context) types.HealthStatus {
 // storeToGraphRAG performs the actual storage operation for findings.
 //
 // NOTE: Finding storage is currently a no-op after the taxonomy engine removal.
-// This will be re-implemented using Finding domain types and GraphLoader when available.
+// SDK Finding domain types are available, and GraphLoader has loadFindings support.
+// However, this method needs additional work to convert internal agent.Finding to
+// the appropriate proto/SDK format and integrate with the GraphLoader workflow.
 // For now, findings are still stored in SQLite via the finding store - this method
-// would add them to the graph for relationship queries.
+// would add them to the graph for relationship queries once implemented.
 func (b *DefaultGraphRAGBridge) storeToGraphRAG(ctx context.Context, finding agent.Finding, missionID types.ID, targetID *types.ID) {
-	// TODO: Re-implement using GraphLoader when Finding domain types are added to SDK
-	b.logger.Debug("finding graph storage skipped (taxonomy engine removed, pending GraphLoader implementation)",
+	// TODO: Implement finding storage using GraphLoader.loadFindings()
+	// Requires:
+	// 1. Convert internal agent.Finding to graphragpb.Finding proto format
+	// 2. Create ExecContext with mission and agent run information
+	// 3. Call GraphLoader.loadFindings() with proper context
+	// 4. Handle LoadResult and errors appropriately
+	b.logger.Debug("finding graph storage not yet implemented (pending GraphLoader integration)",
 		"finding_id", finding.ID,
 		"mission_id", missionID,
 		"has_target", targetID != nil,

@@ -7138,6 +7138,608 @@ func (x *MissionDefinition) GetUpdatedAt() int64 {
 	return 0
 }
 
+// CreateMissionRequest requests creation of a new mission.
+type CreateMissionRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name is the mission name
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// description is the mission description
+	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	// Target configuration (oneof)
+	//
+	// Types that are valid to be assigned to TargetConfig:
+	//
+	//	*CreateMissionRequest_TargetId
+	//	*CreateMissionRequest_InlineTarget
+	TargetConfig isCreateMissionRequest_TargetConfig `protobuf_oneof:"target_config"`
+	// Workflow configuration (oneof)
+	//
+	// Types that are valid to be assigned to WorkflowConfig:
+	//
+	//	*CreateMissionRequest_WorkflowId
+	//	*CreateMissionRequest_InlineWorkflow
+	WorkflowConfig isCreateMissionRequest_WorkflowConfig `protobuf_oneof:"workflow_config"`
+	// constraints defines execution constraints
+	Constraints *MissionConstraints `protobuf:"bytes,5,opt,name=constraints,proto3" json:"constraints,omitempty"`
+	// metadata provides additional mission metadata
+	Metadata      map[string]string `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateMissionRequest) Reset() {
+	*x = CreateMissionRequest{}
+	mi := &file_daemon_proto_msgTypes[89]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateMissionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateMissionRequest) ProtoMessage() {}
+
+func (x *CreateMissionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[89]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateMissionRequest.ProtoReflect.Descriptor instead.
+func (*CreateMissionRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{89}
+}
+
+func (x *CreateMissionRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateMissionRequest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *CreateMissionRequest) GetTargetConfig() isCreateMissionRequest_TargetConfig {
+	if x != nil {
+		return x.TargetConfig
+	}
+	return nil
+}
+
+func (x *CreateMissionRequest) GetTargetId() string {
+	if x != nil {
+		if x, ok := x.TargetConfig.(*CreateMissionRequest_TargetId); ok {
+			return x.TargetId
+		}
+	}
+	return ""
+}
+
+func (x *CreateMissionRequest) GetInlineTarget() *InlineTargetConfig {
+	if x != nil {
+		if x, ok := x.TargetConfig.(*CreateMissionRequest_InlineTarget); ok {
+			return x.InlineTarget
+		}
+	}
+	return nil
+}
+
+func (x *CreateMissionRequest) GetWorkflowConfig() isCreateMissionRequest_WorkflowConfig {
+	if x != nil {
+		return x.WorkflowConfig
+	}
+	return nil
+}
+
+func (x *CreateMissionRequest) GetWorkflowId() string {
+	if x != nil {
+		if x, ok := x.WorkflowConfig.(*CreateMissionRequest_WorkflowId); ok {
+			return x.WorkflowId
+		}
+	}
+	return ""
+}
+
+func (x *CreateMissionRequest) GetInlineWorkflow() *InlineWorkflowConfig {
+	if x != nil {
+		if x, ok := x.WorkflowConfig.(*CreateMissionRequest_InlineWorkflow); ok {
+			return x.InlineWorkflow
+		}
+	}
+	return nil
+}
+
+func (x *CreateMissionRequest) GetConstraints() *MissionConstraints {
+	if x != nil {
+		return x.Constraints
+	}
+	return nil
+}
+
+func (x *CreateMissionRequest) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+type isCreateMissionRequest_TargetConfig interface {
+	isCreateMissionRequest_TargetConfig()
+}
+
+type CreateMissionRequest_TargetId struct {
+	// target_id is the ID of a pre-registered target
+	TargetId string `protobuf:"bytes,3,opt,name=target_id,json=targetId,proto3,oneof"`
+}
+
+type CreateMissionRequest_InlineTarget struct {
+	// inline_target is an inline target configuration
+	InlineTarget *InlineTargetConfig `protobuf:"bytes,10,opt,name=inline_target,json=inlineTarget,proto3,oneof"`
+}
+
+func (*CreateMissionRequest_TargetId) isCreateMissionRequest_TargetConfig() {}
+
+func (*CreateMissionRequest_InlineTarget) isCreateMissionRequest_TargetConfig() {}
+
+type isCreateMissionRequest_WorkflowConfig interface {
+	isCreateMissionRequest_WorkflowConfig()
+}
+
+type CreateMissionRequest_WorkflowId struct {
+	// workflow_id is the ID of a pre-registered workflow
+	WorkflowId string `protobuf:"bytes,4,opt,name=workflow_id,json=workflowId,proto3,oneof"`
+}
+
+type CreateMissionRequest_InlineWorkflow struct {
+	// inline_workflow is an inline workflow configuration
+	InlineWorkflow *InlineWorkflowConfig `protobuf:"bytes,11,opt,name=inline_workflow,json=inlineWorkflow,proto3,oneof"`
+}
+
+func (*CreateMissionRequest_WorkflowId) isCreateMissionRequest_WorkflowConfig() {}
+
+func (*CreateMissionRequest_InlineWorkflow) isCreateMissionRequest_WorkflowConfig() {}
+
+// CreateMissionResponse returns the result of creating a mission.
+type CreateMissionResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// success indicates if the mission was created successfully
+	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	// mission is the created mission
+	Mission *Mission `protobuf:"bytes,2,opt,name=mission,proto3" json:"mission,omitempty"`
+	// message provides additional context or error information
+	Message       string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateMissionResponse) Reset() {
+	*x = CreateMissionResponse{}
+	mi := &file_daemon_proto_msgTypes[90]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateMissionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateMissionResponse) ProtoMessage() {}
+
+func (x *CreateMissionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[90]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateMissionResponse.ProtoReflect.Descriptor instead.
+func (*CreateMissionResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{90}
+}
+
+func (x *CreateMissionResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *CreateMissionResponse) GetMission() *Mission {
+	if x != nil {
+		return x.Mission
+	}
+	return nil
+}
+
+func (x *CreateMissionResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// Seed represents a target seed for reconnaissance.
+type Seed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// value is the seed value (e.g., domain name, IP address)
+	Value string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	// type is the seed type (domain, host, cidr, org, asn)
+	Type string `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	// scope is the seed scope (in_scope, expand)
+	Scope         string `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Seed) Reset() {
+	*x = Seed{}
+	mi := &file_daemon_proto_msgTypes[91]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Seed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Seed) ProtoMessage() {}
+
+func (x *Seed) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[91]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Seed.ProtoReflect.Descriptor instead.
+func (*Seed) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{91}
+}
+
+func (x *Seed) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+func (x *Seed) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *Seed) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+// InlineTargetConfig defines an inline target configuration.
+type InlineTargetConfig struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// seeds is the list of target seeds (at least one required)
+	Seeds []*Seed `protobuf:"bytes,1,rep,name=seeds,proto3" json:"seeds,omitempty"`
+	// profile is the reconnaissance profile (aggressive, balanced, stealth)
+	Profile string `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	// depth is the enumeration depth (1-5)
+	Depth int32 `protobuf:"varint,3,opt,name=depth,proto3" json:"depth,omitempty"`
+	// excluded is the list of excluded patterns
+	Excluded []string `protobuf:"bytes,4,rep,name=excluded,proto3" json:"excluded,omitempty"`
+	// metadata provides additional target metadata
+	Metadata      map[string]string `protobuf:"bytes,5,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InlineTargetConfig) Reset() {
+	*x = InlineTargetConfig{}
+	mi := &file_daemon_proto_msgTypes[92]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InlineTargetConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InlineTargetConfig) ProtoMessage() {}
+
+func (x *InlineTargetConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[92]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InlineTargetConfig.ProtoReflect.Descriptor instead.
+func (*InlineTargetConfig) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{92}
+}
+
+func (x *InlineTargetConfig) GetSeeds() []*Seed {
+	if x != nil {
+		return x.Seeds
+	}
+	return nil
+}
+
+func (x *InlineTargetConfig) GetProfile() string {
+	if x != nil {
+		return x.Profile
+	}
+	return ""
+}
+
+func (x *InlineTargetConfig) GetDepth() int32 {
+	if x != nil {
+		return x.Depth
+	}
+	return 0
+}
+
+func (x *InlineTargetConfig) GetExcluded() []string {
+	if x != nil {
+		return x.Excluded
+	}
+	return nil
+}
+
+func (x *InlineTargetConfig) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+// InlineWorkflowConfig defines an inline workflow configuration.
+type InlineWorkflowConfig struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name is the workflow name (optional, auto-generated if empty)
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// nodes is the list of workflow nodes (at least one required)
+	Nodes []*InlineNodeConfig `protobuf:"bytes,2,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	// edges is the list of workflow edges (optional, inferred from dependencies)
+	Edges []*InlineEdgeConfig `protobuf:"bytes,3,rep,name=edges,proto3" json:"edges,omitempty"`
+	// metadata provides additional workflow metadata
+	Metadata      map[string]string `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InlineWorkflowConfig) Reset() {
+	*x = InlineWorkflowConfig{}
+	mi := &file_daemon_proto_msgTypes[93]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InlineWorkflowConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InlineWorkflowConfig) ProtoMessage() {}
+
+func (x *InlineWorkflowConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[93]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InlineWorkflowConfig.ProtoReflect.Descriptor instead.
+func (*InlineWorkflowConfig) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{93}
+}
+
+func (x *InlineWorkflowConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *InlineWorkflowConfig) GetNodes() []*InlineNodeConfig {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *InlineWorkflowConfig) GetEdges() []*InlineEdgeConfig {
+	if x != nil {
+		return x.Edges
+	}
+	return nil
+}
+
+func (x *InlineWorkflowConfig) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+// InlineNodeConfig defines a workflow node configuration.
+type InlineNodeConfig struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id is the unique node identifier
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// type is the node type (agent, tool, plugin, condition, parallel, join)
+	Type string `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	// name is the node name
+	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	// depends_on lists node IDs this node depends on
+	DependsOn []string `protobuf:"bytes,4,rep,name=depends_on,json=dependsOn,proto3" json:"depends_on,omitempty"`
+	// config contains node-specific configuration (typed map)
+	Config        *commonpb.TypedMap `protobuf:"bytes,5,opt,name=config,proto3" json:"config,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InlineNodeConfig) Reset() {
+	*x = InlineNodeConfig{}
+	mi := &file_daemon_proto_msgTypes[94]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InlineNodeConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InlineNodeConfig) ProtoMessage() {}
+
+func (x *InlineNodeConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[94]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InlineNodeConfig.ProtoReflect.Descriptor instead.
+func (*InlineNodeConfig) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{94}
+}
+
+func (x *InlineNodeConfig) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *InlineNodeConfig) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *InlineNodeConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *InlineNodeConfig) GetDependsOn() []string {
+	if x != nil {
+		return x.DependsOn
+	}
+	return nil
+}
+
+func (x *InlineNodeConfig) GetConfig() *commonpb.TypedMap {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+// InlineEdgeConfig defines a workflow edge configuration.
+type InlineEdgeConfig struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// from is the source node ID
+	From string `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
+	// to is the target node ID
+	To string `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
+	// condition is an optional condition for the edge
+	Condition     string `protobuf:"bytes,3,opt,name=condition,proto3" json:"condition,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InlineEdgeConfig) Reset() {
+	*x = InlineEdgeConfig{}
+	mi := &file_daemon_proto_msgTypes[95]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InlineEdgeConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InlineEdgeConfig) ProtoMessage() {}
+
+func (x *InlineEdgeConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[95]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InlineEdgeConfig.ProtoReflect.Descriptor instead.
+func (*InlineEdgeConfig) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{95}
+}
+
+func (x *InlineEdgeConfig) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *InlineEdgeConfig) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+func (x *InlineEdgeConfig) GetCondition() string {
+	if x != nil {
+		return x.Condition
+	}
+	return ""
+}
+
 var File_daemon_proto protoreflect.FileDescriptor
 
 const file_daemon_proto_rawDesc = "" +
@@ -7748,7 +8350,59 @@ const file_daemon_proto_rawDesc = "" +
 	"node_count\x18\x05 \x01(\x05R\tnodeCount\x12!\n" +
 	"\finstalled_at\x18\x06 \x01(\x03R\vinstalledAt\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\a \x01(\x03R\tupdatedAt*\xd9\x01\n" +
+	"updated_at\x18\a \x01(\x03R\tupdatedAt\"\xa9\x04\n" +
+	"\x14CreateMissionRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1d\n" +
+	"\ttarget_id\x18\x03 \x01(\tH\x00R\btargetId\x12K\n" +
+	"\rinline_target\x18\n" +
+	" \x01(\v2$.gibson.daemon.v1.InlineTargetConfigH\x00R\finlineTarget\x12!\n" +
+	"\vworkflow_id\x18\x04 \x01(\tH\x01R\n" +
+	"workflowId\x12Q\n" +
+	"\x0finline_workflow\x18\v \x01(\v2&.gibson.daemon.v1.InlineWorkflowConfigH\x01R\x0einlineWorkflow\x12F\n" +
+	"\vconstraints\x18\x05 \x01(\v2$.gibson.daemon.v1.MissionConstraintsR\vconstraints\x12P\n" +
+	"\bmetadata\x18\x06 \x03(\v24.gibson.daemon.v1.CreateMissionRequest.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x0f\n" +
+	"\rtarget_configB\x11\n" +
+	"\x0fworkflow_config\"\x80\x01\n" +
+	"\x15CreateMissionResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x123\n" +
+	"\amission\x18\x02 \x01(\v2\x19.gibson.daemon.v1.MissionR\amission\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"F\n" +
+	"\x04Seed\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x14\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\"\x9b\x02\n" +
+	"\x12InlineTargetConfig\x12,\n" +
+	"\x05seeds\x18\x01 \x03(\v2\x16.gibson.daemon.v1.SeedR\x05seeds\x12\x18\n" +
+	"\aprofile\x18\x02 \x01(\tR\aprofile\x12\x14\n" +
+	"\x05depth\x18\x03 \x01(\x05R\x05depth\x12\x1a\n" +
+	"\bexcluded\x18\x04 \x03(\tR\bexcluded\x12N\n" +
+	"\bmetadata\x18\x05 \x03(\v22.gibson.daemon.v1.InlineTargetConfig.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x02\n" +
+	"\x14InlineWorkflowConfig\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x128\n" +
+	"\x05nodes\x18\x02 \x03(\v2\".gibson.daemon.v1.InlineNodeConfigR\x05nodes\x128\n" +
+	"\x05edges\x18\x03 \x03(\v2\".gibson.daemon.v1.InlineEdgeConfigR\x05edges\x12P\n" +
+	"\bmetadata\x18\x04 \x03(\v24.gibson.daemon.v1.InlineWorkflowConfig.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9a\x01\n" +
+	"\x10InlineNodeConfig\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"depends_on\x18\x04 \x03(\tR\tdependsOn\x12/\n" +
+	"\x06config\x18\x05 \x01(\v2\x17.gibson.common.TypedMapR\x06config\"T\n" +
+	"\x10InlineEdgeConfig\x12\x12\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x02 \x01(\tR\x02to\x12\x1c\n" +
+	"\tcondition\x18\x03 \x01(\tR\tcondition*\xd9\x01\n" +
 	"\rMissionStatus\x12\x1e\n" +
 	"\x1aMISSION_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16MISSION_STATUS_PENDING\x10\x01\x12\x1a\n" +
@@ -7761,14 +8415,15 @@ const file_daemon_proto_rawDesc = "" +
 	"\x0eSOURCE_UNKNOWN\x10\x00\x12\x1b\n" +
 	"\x17SOURCE_MISSION_EXPLICIT\x10\x01\x12\x17\n" +
 	"\x13SOURCE_MISSION_NODE\x10\x02\x12\x13\n" +
-	"\x0fSOURCE_MANIFEST\x10\x032\xfc\x19\n" +
+	"\x0fSOURCE_MANIFEST\x10\x032\xde\x1a\n" +
 	"\rDaemonService\x12N\n" +
 	"\aConnect\x12 .gibson.daemon.v1.ConnectRequest\x1a!.gibson.daemon.v1.ConnectResponse\x12E\n" +
 	"\x04Ping\x12\x1d.gibson.daemon.v1.PingRequest\x1a\x1e.gibson.daemon.v1.PingResponse\x12K\n" +
 	"\x06Status\x12\x1f.gibson.daemon.v1.StatusRequest\x1a .gibson.daemon.v1.StatusResponse\x12S\n" +
 	"\n" +
 	"RunMission\x12#.gibson.daemon.v1.RunMissionRequest\x1a\x1e.gibson.daemon.v1.MissionEvent0\x01\x12Z\n" +
-	"\vStopMission\x12$.gibson.daemon.v1.StopMissionRequest\x1a%.gibson.daemon.v1.StopMissionResponse\x12]\n" +
+	"\vStopMission\x12$.gibson.daemon.v1.StopMissionRequest\x1a%.gibson.daemon.v1.StopMissionResponse\x12`\n" +
+	"\rCreateMission\x12&.gibson.daemon.v1.CreateMissionRequest\x1a'.gibson.daemon.v1.CreateMissionResponse\x12]\n" +
 	"\fListMissions\x12%.gibson.daemon.v1.ListMissionsRequest\x1a&.gibson.daemon.v1.ListMissionsResponse\x12W\n" +
 	"\n" +
 	"ListAgents\x12#.gibson.daemon.v1.ListAgentsRequest\x1a$.gibson.daemon.v1.ListAgentsResponse\x12`\n" +
@@ -7812,7 +8467,7 @@ func file_daemon_proto_rawDescGZIP() []byte {
 }
 
 var file_daemon_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 94)
+var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 104)
 var file_daemon_proto_goTypes = []any{
 	(MissionStatus)(0),                          // 0: gibson.daemon.v1.MissionStatus
 	(DependencySource)(0),                       // 1: gibson.daemon.v1.DependencySource
@@ -7905,136 +8560,159 @@ var file_daemon_proto_goTypes = []any{
 	(*MissionMetrics)(nil),                      // 88: gibson.daemon.v1.MissionMetrics
 	(*MissionCheckpoint)(nil),                   // 89: gibson.daemon.v1.MissionCheckpoint
 	(*MissionDefinition)(nil),                   // 90: gibson.daemon.v1.MissionDefinition
-	nil,                                         // 91: gibson.daemon.v1.RunMissionRequest.VariablesEntry
-	nil,                                         // 92: gibson.daemon.v1.Capabilities.FeaturesEntry
-	nil,                                         // 93: gibson.daemon.v1.Capabilities.ArgAlternativesEntry
-	nil,                                         // 94: gibson.daemon.v1.RunAttackRequest.OptionsEntry
-	nil,                                         // 95: gibson.daemon.v1.DependencyTree.NodesEntry
-	(*commonpb.TypedMap)(nil),                   // 96: gibson.common.TypedMap
-	(*commonpb.TypedValue)(nil),                 // 97: gibson.common.TypedValue
+	(*CreateMissionRequest)(nil),                // 91: gibson.daemon.v1.CreateMissionRequest
+	(*CreateMissionResponse)(nil),               // 92: gibson.daemon.v1.CreateMissionResponse
+	(*Seed)(nil),                                // 93: gibson.daemon.v1.Seed
+	(*InlineTargetConfig)(nil),                  // 94: gibson.daemon.v1.InlineTargetConfig
+	(*InlineWorkflowConfig)(nil),                // 95: gibson.daemon.v1.InlineWorkflowConfig
+	(*InlineNodeConfig)(nil),                    // 96: gibson.daemon.v1.InlineNodeConfig
+	(*InlineEdgeConfig)(nil),                    // 97: gibson.daemon.v1.InlineEdgeConfig
+	nil,                                         // 98: gibson.daemon.v1.RunMissionRequest.VariablesEntry
+	nil,                                         // 99: gibson.daemon.v1.Capabilities.FeaturesEntry
+	nil,                                         // 100: gibson.daemon.v1.Capabilities.ArgAlternativesEntry
+	nil,                                         // 101: gibson.daemon.v1.RunAttackRequest.OptionsEntry
+	nil,                                         // 102: gibson.daemon.v1.DependencyTree.NodesEntry
+	nil,                                         // 103: gibson.daemon.v1.CreateMissionRequest.MetadataEntry
+	nil,                                         // 104: gibson.daemon.v1.InlineTargetConfig.MetadataEntry
+	nil,                                         // 105: gibson.daemon.v1.InlineWorkflowConfig.MetadataEntry
+	(*commonpb.TypedMap)(nil),                   // 106: gibson.common.TypedMap
+	(*commonpb.TypedValue)(nil),                 // 107: gibson.common.TypedValue
 }
 var file_daemon_proto_depIdxs = []int32{
-	91, // 0: gibson.daemon.v1.RunMissionRequest.variables:type_name -> gibson.daemon.v1.RunMissionRequest.VariablesEntry
-	96, // 1: gibson.daemon.v1.MissionEvent.data:type_name -> gibson.common.TypedMap
-	40, // 2: gibson.daemon.v1.MissionEvent.result:type_name -> gibson.daemon.v1.OperationResult
-	14, // 3: gibson.daemon.v1.ListMissionsResponse.missions:type_name -> gibson.daemon.v1.MissionInfo
-	17, // 4: gibson.daemon.v1.ListAgentsResponse.agents:type_name -> gibson.daemon.v1.AgentInfo
-	17, // 5: gibson.daemon.v1.AgentStatusResponse.agent:type_name -> gibson.daemon.v1.AgentInfo
-	23, // 6: gibson.daemon.v1.ListToolsResponse.tools:type_name -> gibson.daemon.v1.ToolInfo
-	92, // 7: gibson.daemon.v1.Capabilities.features:type_name -> gibson.daemon.v1.Capabilities.FeaturesEntry
-	93, // 8: gibson.daemon.v1.Capabilities.arg_alternatives:type_name -> gibson.daemon.v1.Capabilities.ArgAlternativesEntry
-	22, // 9: gibson.daemon.v1.ToolInfo.capabilities:type_name -> gibson.daemon.v1.Capabilities
-	26, // 10: gibson.daemon.v1.ListPluginsResponse.plugins:type_name -> gibson.daemon.v1.PluginInfo
-	96, // 11: gibson.daemon.v1.QueryPluginRequest.params:type_name -> gibson.common.TypedMap
-	97, // 12: gibson.daemon.v1.QueryPluginResponse.result:type_name -> gibson.common.TypedValue
-	94, // 13: gibson.daemon.v1.RunAttackRequest.options:type_name -> gibson.daemon.v1.RunAttackRequest.OptionsEntry
-	96, // 14: gibson.daemon.v1.AttackEvent.data:type_name -> gibson.common.TypedMap
-	31, // 15: gibson.daemon.v1.AttackEvent.finding:type_name -> gibson.daemon.v1.FindingInfo
-	40, // 16: gibson.daemon.v1.AttackEvent.result:type_name -> gibson.daemon.v1.OperationResult
-	96, // 17: gibson.daemon.v1.Event.data:type_name -> gibson.common.TypedMap
-	9,  // 18: gibson.daemon.v1.Event.mission_event:type_name -> gibson.daemon.v1.MissionEvent
-	30, // 19: gibson.daemon.v1.Event.attack_event:type_name -> gibson.daemon.v1.AttackEvent
-	34, // 20: gibson.daemon.v1.Event.agent_event:type_name -> gibson.daemon.v1.AgentEvent
-	35, // 21: gibson.daemon.v1.Event.finding_event:type_name -> gibson.daemon.v1.FindingEvent
-	96, // 22: gibson.daemon.v1.AgentEvent.data:type_name -> gibson.common.TypedMap
-	31, // 23: gibson.daemon.v1.FindingEvent.finding:type_name -> gibson.daemon.v1.FindingInfo
-	46, // 24: gibson.daemon.v1.GetMissionHistoryResponse.runs:type_name -> gibson.daemon.v1.MissionRun
-	49, // 25: gibson.daemon.v1.GetMissionCheckpointsResponse.checkpoints:type_name -> gibson.daemon.v1.CheckpointInfo
-	54, // 26: gibson.daemon.v1.InstallAllComponentResponse.successful:type_name -> gibson.daemon.v1.InstallAllResultItem
-	54, // 27: gibson.daemon.v1.InstallAllComponentResponse.skipped:type_name -> gibson.daemon.v1.InstallAllResultItem
-	55, // 28: gibson.daemon.v1.InstallAllComponentResponse.failed:type_name -> gibson.daemon.v1.InstallAllFailedItem
-	96, // 29: gibson.daemon.v1.LogEntry.fields:type_name -> gibson.common.TypedMap
-	68, // 30: gibson.daemon.v1.InstallMissionResponse.dependencies:type_name -> gibson.daemon.v1.InstalledDependency
-	73, // 31: gibson.daemon.v1.ListMissionDefinitionsResponse.missions:type_name -> gibson.daemon.v1.MissionDefinitionInfo
-	82, // 32: gibson.daemon.v1.ResolveMissionDependenciesResponse.tree:type_name -> gibson.daemon.v1.DependencyTree
-	84, // 33: gibson.daemon.v1.ValidateMissionDependenciesResponse.result:type_name -> gibson.daemon.v1.ValidationResult
-	83, // 34: gibson.daemon.v1.DependencyTree.roots:type_name -> gibson.daemon.v1.DependencyNode
-	95, // 35: gibson.daemon.v1.DependencyTree.nodes:type_name -> gibson.daemon.v1.DependencyTree.NodesEntry
-	83, // 36: gibson.daemon.v1.DependencyTree.agents:type_name -> gibson.daemon.v1.DependencyNode
-	83, // 37: gibson.daemon.v1.DependencyTree.tools:type_name -> gibson.daemon.v1.DependencyNode
-	83, // 38: gibson.daemon.v1.DependencyTree.plugins:type_name -> gibson.daemon.v1.DependencyNode
-	1,  // 39: gibson.daemon.v1.DependencyNode.source:type_name -> gibson.daemon.v1.DependencySource
-	83, // 40: gibson.daemon.v1.ValidationResult.not_installed:type_name -> gibson.daemon.v1.DependencyNode
-	83, // 41: gibson.daemon.v1.ValidationResult.not_running:type_name -> gibson.daemon.v1.DependencyNode
-	83, // 42: gibson.daemon.v1.ValidationResult.unhealthy:type_name -> gibson.daemon.v1.DependencyNode
-	85, // 43: gibson.daemon.v1.ValidationResult.version_mismatches:type_name -> gibson.daemon.v1.VersionMismatchInfo
-	83, // 44: gibson.daemon.v1.VersionMismatchInfo.node:type_name -> gibson.daemon.v1.DependencyNode
-	0,  // 45: gibson.daemon.v1.Mission.status:type_name -> gibson.daemon.v1.MissionStatus
-	87, // 46: gibson.daemon.v1.Mission.constraints:type_name -> gibson.daemon.v1.MissionConstraints
-	88, // 47: gibson.daemon.v1.Mission.metrics:type_name -> gibson.daemon.v1.MissionMetrics
-	89, // 48: gibson.daemon.v1.Mission.checkpoint:type_name -> gibson.daemon.v1.MissionCheckpoint
-	83, // 49: gibson.daemon.v1.DependencyTree.NodesEntry.value:type_name -> gibson.daemon.v1.DependencyNode
-	2,  // 50: gibson.daemon.v1.DaemonService.Connect:input_type -> gibson.daemon.v1.ConnectRequest
-	4,  // 51: gibson.daemon.v1.DaemonService.Ping:input_type -> gibson.daemon.v1.PingRequest
-	6,  // 52: gibson.daemon.v1.DaemonService.Status:input_type -> gibson.daemon.v1.StatusRequest
-	8,  // 53: gibson.daemon.v1.DaemonService.RunMission:input_type -> gibson.daemon.v1.RunMissionRequest
-	10, // 54: gibson.daemon.v1.DaemonService.StopMission:input_type -> gibson.daemon.v1.StopMissionRequest
-	12, // 55: gibson.daemon.v1.DaemonService.ListMissions:input_type -> gibson.daemon.v1.ListMissionsRequest
-	15, // 56: gibson.daemon.v1.DaemonService.ListAgents:input_type -> gibson.daemon.v1.ListAgentsRequest
-	18, // 57: gibson.daemon.v1.DaemonService.GetAgentStatus:input_type -> gibson.daemon.v1.GetAgentStatusRequest
-	20, // 58: gibson.daemon.v1.DaemonService.ListTools:input_type -> gibson.daemon.v1.ListToolsRequest
-	24, // 59: gibson.daemon.v1.DaemonService.ListPlugins:input_type -> gibson.daemon.v1.ListPluginsRequest
-	27, // 60: gibson.daemon.v1.DaemonService.QueryPlugin:input_type -> gibson.daemon.v1.QueryPluginRequest
-	29, // 61: gibson.daemon.v1.DaemonService.RunAttack:input_type -> gibson.daemon.v1.RunAttackRequest
-	32, // 62: gibson.daemon.v1.DaemonService.Subscribe:input_type -> gibson.daemon.v1.SubscribeRequest
-	36, // 63: gibson.daemon.v1.DaemonService.StartComponent:input_type -> gibson.daemon.v1.StartComponentRequest
-	38, // 64: gibson.daemon.v1.DaemonService.StopComponent:input_type -> gibson.daemon.v1.StopComponentRequest
-	41, // 65: gibson.daemon.v1.DaemonService.PauseMission:input_type -> gibson.daemon.v1.PauseMissionRequest
-	43, // 66: gibson.daemon.v1.DaemonService.ResumeMission:input_type -> gibson.daemon.v1.ResumeMissionRequest
-	44, // 67: gibson.daemon.v1.DaemonService.GetMissionHistory:input_type -> gibson.daemon.v1.GetMissionHistoryRequest
-	47, // 68: gibson.daemon.v1.DaemonService.GetMissionCheckpoints:input_type -> gibson.daemon.v1.GetMissionCheckpointsRequest
-	50, // 69: gibson.daemon.v1.DaemonService.InstallComponent:input_type -> gibson.daemon.v1.InstallComponentRequest
-	52, // 70: gibson.daemon.v1.DaemonService.InstallAllComponent:input_type -> gibson.daemon.v1.InstallAllComponentRequest
-	56, // 71: gibson.daemon.v1.DaemonService.UninstallComponent:input_type -> gibson.daemon.v1.UninstallComponentRequest
-	58, // 72: gibson.daemon.v1.DaemonService.UpdateComponent:input_type -> gibson.daemon.v1.UpdateComponentRequest
-	60, // 73: gibson.daemon.v1.DaemonService.BuildComponent:input_type -> gibson.daemon.v1.BuildComponentRequest
-	62, // 74: gibson.daemon.v1.DaemonService.ShowComponent:input_type -> gibson.daemon.v1.ShowComponentRequest
-	64, // 75: gibson.daemon.v1.DaemonService.GetComponentLogs:input_type -> gibson.daemon.v1.GetComponentLogsRequest
-	66, // 76: gibson.daemon.v1.DaemonService.InstallMission:input_type -> gibson.daemon.v1.InstallMissionRequest
-	69, // 77: gibson.daemon.v1.DaemonService.UninstallMission:input_type -> gibson.daemon.v1.UninstallMissionRequest
-	71, // 78: gibson.daemon.v1.DaemonService.ListMissionDefinitions:input_type -> gibson.daemon.v1.ListMissionDefinitionsRequest
-	74, // 79: gibson.daemon.v1.DaemonService.UpdateMission:input_type -> gibson.daemon.v1.UpdateMissionRequest
-	76, // 80: gibson.daemon.v1.DaemonService.ResolveMissionDependencies:input_type -> gibson.daemon.v1.ResolveMissionDependenciesRequest
-	78, // 81: gibson.daemon.v1.DaemonService.ValidateMissionDependencies:input_type -> gibson.daemon.v1.ValidateMissionDependenciesRequest
-	80, // 82: gibson.daemon.v1.DaemonService.EnsureDependenciesRunning:input_type -> gibson.daemon.v1.EnsureDependenciesRunningRequest
-	3,  // 83: gibson.daemon.v1.DaemonService.Connect:output_type -> gibson.daemon.v1.ConnectResponse
-	5,  // 84: gibson.daemon.v1.DaemonService.Ping:output_type -> gibson.daemon.v1.PingResponse
-	7,  // 85: gibson.daemon.v1.DaemonService.Status:output_type -> gibson.daemon.v1.StatusResponse
-	9,  // 86: gibson.daemon.v1.DaemonService.RunMission:output_type -> gibson.daemon.v1.MissionEvent
-	11, // 87: gibson.daemon.v1.DaemonService.StopMission:output_type -> gibson.daemon.v1.StopMissionResponse
-	13, // 88: gibson.daemon.v1.DaemonService.ListMissions:output_type -> gibson.daemon.v1.ListMissionsResponse
-	16, // 89: gibson.daemon.v1.DaemonService.ListAgents:output_type -> gibson.daemon.v1.ListAgentsResponse
-	19, // 90: gibson.daemon.v1.DaemonService.GetAgentStatus:output_type -> gibson.daemon.v1.AgentStatusResponse
-	21, // 91: gibson.daemon.v1.DaemonService.ListTools:output_type -> gibson.daemon.v1.ListToolsResponse
-	25, // 92: gibson.daemon.v1.DaemonService.ListPlugins:output_type -> gibson.daemon.v1.ListPluginsResponse
-	28, // 93: gibson.daemon.v1.DaemonService.QueryPlugin:output_type -> gibson.daemon.v1.QueryPluginResponse
-	30, // 94: gibson.daemon.v1.DaemonService.RunAttack:output_type -> gibson.daemon.v1.AttackEvent
-	33, // 95: gibson.daemon.v1.DaemonService.Subscribe:output_type -> gibson.daemon.v1.Event
-	37, // 96: gibson.daemon.v1.DaemonService.StartComponent:output_type -> gibson.daemon.v1.StartComponentResponse
-	39, // 97: gibson.daemon.v1.DaemonService.StopComponent:output_type -> gibson.daemon.v1.StopComponentResponse
-	42, // 98: gibson.daemon.v1.DaemonService.PauseMission:output_type -> gibson.daemon.v1.PauseMissionResponse
-	9,  // 99: gibson.daemon.v1.DaemonService.ResumeMission:output_type -> gibson.daemon.v1.MissionEvent
-	45, // 100: gibson.daemon.v1.DaemonService.GetMissionHistory:output_type -> gibson.daemon.v1.GetMissionHistoryResponse
-	48, // 101: gibson.daemon.v1.DaemonService.GetMissionCheckpoints:output_type -> gibson.daemon.v1.GetMissionCheckpointsResponse
-	51, // 102: gibson.daemon.v1.DaemonService.InstallComponent:output_type -> gibson.daemon.v1.InstallComponentResponse
-	53, // 103: gibson.daemon.v1.DaemonService.InstallAllComponent:output_type -> gibson.daemon.v1.InstallAllComponentResponse
-	57, // 104: gibson.daemon.v1.DaemonService.UninstallComponent:output_type -> gibson.daemon.v1.UninstallComponentResponse
-	59, // 105: gibson.daemon.v1.DaemonService.UpdateComponent:output_type -> gibson.daemon.v1.UpdateComponentResponse
-	61, // 106: gibson.daemon.v1.DaemonService.BuildComponent:output_type -> gibson.daemon.v1.BuildComponentResponse
-	63, // 107: gibson.daemon.v1.DaemonService.ShowComponent:output_type -> gibson.daemon.v1.ShowComponentResponse
-	65, // 108: gibson.daemon.v1.DaemonService.GetComponentLogs:output_type -> gibson.daemon.v1.LogEntry
-	67, // 109: gibson.daemon.v1.DaemonService.InstallMission:output_type -> gibson.daemon.v1.InstallMissionResponse
-	70, // 110: gibson.daemon.v1.DaemonService.UninstallMission:output_type -> gibson.daemon.v1.UninstallMissionResponse
-	72, // 111: gibson.daemon.v1.DaemonService.ListMissionDefinitions:output_type -> gibson.daemon.v1.ListMissionDefinitionsResponse
-	75, // 112: gibson.daemon.v1.DaemonService.UpdateMission:output_type -> gibson.daemon.v1.UpdateMissionResponse
-	77, // 113: gibson.daemon.v1.DaemonService.ResolveMissionDependencies:output_type -> gibson.daemon.v1.ResolveMissionDependenciesResponse
-	79, // 114: gibson.daemon.v1.DaemonService.ValidateMissionDependencies:output_type -> gibson.daemon.v1.ValidateMissionDependenciesResponse
-	81, // 115: gibson.daemon.v1.DaemonService.EnsureDependenciesRunning:output_type -> gibson.daemon.v1.EnsureDependenciesRunningResponse
-	83, // [83:116] is the sub-list for method output_type
-	50, // [50:83] is the sub-list for method input_type
-	50, // [50:50] is the sub-list for extension type_name
-	50, // [50:50] is the sub-list for extension extendee
-	0,  // [0:50] is the sub-list for field type_name
+	98,  // 0: gibson.daemon.v1.RunMissionRequest.variables:type_name -> gibson.daemon.v1.RunMissionRequest.VariablesEntry
+	106, // 1: gibson.daemon.v1.MissionEvent.data:type_name -> gibson.common.TypedMap
+	40,  // 2: gibson.daemon.v1.MissionEvent.result:type_name -> gibson.daemon.v1.OperationResult
+	14,  // 3: gibson.daemon.v1.ListMissionsResponse.missions:type_name -> gibson.daemon.v1.MissionInfo
+	17,  // 4: gibson.daemon.v1.ListAgentsResponse.agents:type_name -> gibson.daemon.v1.AgentInfo
+	17,  // 5: gibson.daemon.v1.AgentStatusResponse.agent:type_name -> gibson.daemon.v1.AgentInfo
+	23,  // 6: gibson.daemon.v1.ListToolsResponse.tools:type_name -> gibson.daemon.v1.ToolInfo
+	99,  // 7: gibson.daemon.v1.Capabilities.features:type_name -> gibson.daemon.v1.Capabilities.FeaturesEntry
+	100, // 8: gibson.daemon.v1.Capabilities.arg_alternatives:type_name -> gibson.daemon.v1.Capabilities.ArgAlternativesEntry
+	22,  // 9: gibson.daemon.v1.ToolInfo.capabilities:type_name -> gibson.daemon.v1.Capabilities
+	26,  // 10: gibson.daemon.v1.ListPluginsResponse.plugins:type_name -> gibson.daemon.v1.PluginInfo
+	106, // 11: gibson.daemon.v1.QueryPluginRequest.params:type_name -> gibson.common.TypedMap
+	107, // 12: gibson.daemon.v1.QueryPluginResponse.result:type_name -> gibson.common.TypedValue
+	101, // 13: gibson.daemon.v1.RunAttackRequest.options:type_name -> gibson.daemon.v1.RunAttackRequest.OptionsEntry
+	106, // 14: gibson.daemon.v1.AttackEvent.data:type_name -> gibson.common.TypedMap
+	31,  // 15: gibson.daemon.v1.AttackEvent.finding:type_name -> gibson.daemon.v1.FindingInfo
+	40,  // 16: gibson.daemon.v1.AttackEvent.result:type_name -> gibson.daemon.v1.OperationResult
+	106, // 17: gibson.daemon.v1.Event.data:type_name -> gibson.common.TypedMap
+	9,   // 18: gibson.daemon.v1.Event.mission_event:type_name -> gibson.daemon.v1.MissionEvent
+	30,  // 19: gibson.daemon.v1.Event.attack_event:type_name -> gibson.daemon.v1.AttackEvent
+	34,  // 20: gibson.daemon.v1.Event.agent_event:type_name -> gibson.daemon.v1.AgentEvent
+	35,  // 21: gibson.daemon.v1.Event.finding_event:type_name -> gibson.daemon.v1.FindingEvent
+	106, // 22: gibson.daemon.v1.AgentEvent.data:type_name -> gibson.common.TypedMap
+	31,  // 23: gibson.daemon.v1.FindingEvent.finding:type_name -> gibson.daemon.v1.FindingInfo
+	46,  // 24: gibson.daemon.v1.GetMissionHistoryResponse.runs:type_name -> gibson.daemon.v1.MissionRun
+	49,  // 25: gibson.daemon.v1.GetMissionCheckpointsResponse.checkpoints:type_name -> gibson.daemon.v1.CheckpointInfo
+	54,  // 26: gibson.daemon.v1.InstallAllComponentResponse.successful:type_name -> gibson.daemon.v1.InstallAllResultItem
+	54,  // 27: gibson.daemon.v1.InstallAllComponentResponse.skipped:type_name -> gibson.daemon.v1.InstallAllResultItem
+	55,  // 28: gibson.daemon.v1.InstallAllComponentResponse.failed:type_name -> gibson.daemon.v1.InstallAllFailedItem
+	106, // 29: gibson.daemon.v1.LogEntry.fields:type_name -> gibson.common.TypedMap
+	68,  // 30: gibson.daemon.v1.InstallMissionResponse.dependencies:type_name -> gibson.daemon.v1.InstalledDependency
+	73,  // 31: gibson.daemon.v1.ListMissionDefinitionsResponse.missions:type_name -> gibson.daemon.v1.MissionDefinitionInfo
+	82,  // 32: gibson.daemon.v1.ResolveMissionDependenciesResponse.tree:type_name -> gibson.daemon.v1.DependencyTree
+	84,  // 33: gibson.daemon.v1.ValidateMissionDependenciesResponse.result:type_name -> gibson.daemon.v1.ValidationResult
+	83,  // 34: gibson.daemon.v1.DependencyTree.roots:type_name -> gibson.daemon.v1.DependencyNode
+	102, // 35: gibson.daemon.v1.DependencyTree.nodes:type_name -> gibson.daemon.v1.DependencyTree.NodesEntry
+	83,  // 36: gibson.daemon.v1.DependencyTree.agents:type_name -> gibson.daemon.v1.DependencyNode
+	83,  // 37: gibson.daemon.v1.DependencyTree.tools:type_name -> gibson.daemon.v1.DependencyNode
+	83,  // 38: gibson.daemon.v1.DependencyTree.plugins:type_name -> gibson.daemon.v1.DependencyNode
+	1,   // 39: gibson.daemon.v1.DependencyNode.source:type_name -> gibson.daemon.v1.DependencySource
+	83,  // 40: gibson.daemon.v1.ValidationResult.not_installed:type_name -> gibson.daemon.v1.DependencyNode
+	83,  // 41: gibson.daemon.v1.ValidationResult.not_running:type_name -> gibson.daemon.v1.DependencyNode
+	83,  // 42: gibson.daemon.v1.ValidationResult.unhealthy:type_name -> gibson.daemon.v1.DependencyNode
+	85,  // 43: gibson.daemon.v1.ValidationResult.version_mismatches:type_name -> gibson.daemon.v1.VersionMismatchInfo
+	83,  // 44: gibson.daemon.v1.VersionMismatchInfo.node:type_name -> gibson.daemon.v1.DependencyNode
+	0,   // 45: gibson.daemon.v1.Mission.status:type_name -> gibson.daemon.v1.MissionStatus
+	87,  // 46: gibson.daemon.v1.Mission.constraints:type_name -> gibson.daemon.v1.MissionConstraints
+	88,  // 47: gibson.daemon.v1.Mission.metrics:type_name -> gibson.daemon.v1.MissionMetrics
+	89,  // 48: gibson.daemon.v1.Mission.checkpoint:type_name -> gibson.daemon.v1.MissionCheckpoint
+	94,  // 49: gibson.daemon.v1.CreateMissionRequest.inline_target:type_name -> gibson.daemon.v1.InlineTargetConfig
+	95,  // 50: gibson.daemon.v1.CreateMissionRequest.inline_workflow:type_name -> gibson.daemon.v1.InlineWorkflowConfig
+	87,  // 51: gibson.daemon.v1.CreateMissionRequest.constraints:type_name -> gibson.daemon.v1.MissionConstraints
+	103, // 52: gibson.daemon.v1.CreateMissionRequest.metadata:type_name -> gibson.daemon.v1.CreateMissionRequest.MetadataEntry
+	86,  // 53: gibson.daemon.v1.CreateMissionResponse.mission:type_name -> gibson.daemon.v1.Mission
+	93,  // 54: gibson.daemon.v1.InlineTargetConfig.seeds:type_name -> gibson.daemon.v1.Seed
+	104, // 55: gibson.daemon.v1.InlineTargetConfig.metadata:type_name -> gibson.daemon.v1.InlineTargetConfig.MetadataEntry
+	96,  // 56: gibson.daemon.v1.InlineWorkflowConfig.nodes:type_name -> gibson.daemon.v1.InlineNodeConfig
+	97,  // 57: gibson.daemon.v1.InlineWorkflowConfig.edges:type_name -> gibson.daemon.v1.InlineEdgeConfig
+	105, // 58: gibson.daemon.v1.InlineWorkflowConfig.metadata:type_name -> gibson.daemon.v1.InlineWorkflowConfig.MetadataEntry
+	106, // 59: gibson.daemon.v1.InlineNodeConfig.config:type_name -> gibson.common.TypedMap
+	83,  // 60: gibson.daemon.v1.DependencyTree.NodesEntry.value:type_name -> gibson.daemon.v1.DependencyNode
+	2,   // 61: gibson.daemon.v1.DaemonService.Connect:input_type -> gibson.daemon.v1.ConnectRequest
+	4,   // 62: gibson.daemon.v1.DaemonService.Ping:input_type -> gibson.daemon.v1.PingRequest
+	6,   // 63: gibson.daemon.v1.DaemonService.Status:input_type -> gibson.daemon.v1.StatusRequest
+	8,   // 64: gibson.daemon.v1.DaemonService.RunMission:input_type -> gibson.daemon.v1.RunMissionRequest
+	10,  // 65: gibson.daemon.v1.DaemonService.StopMission:input_type -> gibson.daemon.v1.StopMissionRequest
+	91,  // 66: gibson.daemon.v1.DaemonService.CreateMission:input_type -> gibson.daemon.v1.CreateMissionRequest
+	12,  // 67: gibson.daemon.v1.DaemonService.ListMissions:input_type -> gibson.daemon.v1.ListMissionsRequest
+	15,  // 68: gibson.daemon.v1.DaemonService.ListAgents:input_type -> gibson.daemon.v1.ListAgentsRequest
+	18,  // 69: gibson.daemon.v1.DaemonService.GetAgentStatus:input_type -> gibson.daemon.v1.GetAgentStatusRequest
+	20,  // 70: gibson.daemon.v1.DaemonService.ListTools:input_type -> gibson.daemon.v1.ListToolsRequest
+	24,  // 71: gibson.daemon.v1.DaemonService.ListPlugins:input_type -> gibson.daemon.v1.ListPluginsRequest
+	27,  // 72: gibson.daemon.v1.DaemonService.QueryPlugin:input_type -> gibson.daemon.v1.QueryPluginRequest
+	29,  // 73: gibson.daemon.v1.DaemonService.RunAttack:input_type -> gibson.daemon.v1.RunAttackRequest
+	32,  // 74: gibson.daemon.v1.DaemonService.Subscribe:input_type -> gibson.daemon.v1.SubscribeRequest
+	36,  // 75: gibson.daemon.v1.DaemonService.StartComponent:input_type -> gibson.daemon.v1.StartComponentRequest
+	38,  // 76: gibson.daemon.v1.DaemonService.StopComponent:input_type -> gibson.daemon.v1.StopComponentRequest
+	41,  // 77: gibson.daemon.v1.DaemonService.PauseMission:input_type -> gibson.daemon.v1.PauseMissionRequest
+	43,  // 78: gibson.daemon.v1.DaemonService.ResumeMission:input_type -> gibson.daemon.v1.ResumeMissionRequest
+	44,  // 79: gibson.daemon.v1.DaemonService.GetMissionHistory:input_type -> gibson.daemon.v1.GetMissionHistoryRequest
+	47,  // 80: gibson.daemon.v1.DaemonService.GetMissionCheckpoints:input_type -> gibson.daemon.v1.GetMissionCheckpointsRequest
+	50,  // 81: gibson.daemon.v1.DaemonService.InstallComponent:input_type -> gibson.daemon.v1.InstallComponentRequest
+	52,  // 82: gibson.daemon.v1.DaemonService.InstallAllComponent:input_type -> gibson.daemon.v1.InstallAllComponentRequest
+	56,  // 83: gibson.daemon.v1.DaemonService.UninstallComponent:input_type -> gibson.daemon.v1.UninstallComponentRequest
+	58,  // 84: gibson.daemon.v1.DaemonService.UpdateComponent:input_type -> gibson.daemon.v1.UpdateComponentRequest
+	60,  // 85: gibson.daemon.v1.DaemonService.BuildComponent:input_type -> gibson.daemon.v1.BuildComponentRequest
+	62,  // 86: gibson.daemon.v1.DaemonService.ShowComponent:input_type -> gibson.daemon.v1.ShowComponentRequest
+	64,  // 87: gibson.daemon.v1.DaemonService.GetComponentLogs:input_type -> gibson.daemon.v1.GetComponentLogsRequest
+	66,  // 88: gibson.daemon.v1.DaemonService.InstallMission:input_type -> gibson.daemon.v1.InstallMissionRequest
+	69,  // 89: gibson.daemon.v1.DaemonService.UninstallMission:input_type -> gibson.daemon.v1.UninstallMissionRequest
+	71,  // 90: gibson.daemon.v1.DaemonService.ListMissionDefinitions:input_type -> gibson.daemon.v1.ListMissionDefinitionsRequest
+	74,  // 91: gibson.daemon.v1.DaemonService.UpdateMission:input_type -> gibson.daemon.v1.UpdateMissionRequest
+	76,  // 92: gibson.daemon.v1.DaemonService.ResolveMissionDependencies:input_type -> gibson.daemon.v1.ResolveMissionDependenciesRequest
+	78,  // 93: gibson.daemon.v1.DaemonService.ValidateMissionDependencies:input_type -> gibson.daemon.v1.ValidateMissionDependenciesRequest
+	80,  // 94: gibson.daemon.v1.DaemonService.EnsureDependenciesRunning:input_type -> gibson.daemon.v1.EnsureDependenciesRunningRequest
+	3,   // 95: gibson.daemon.v1.DaemonService.Connect:output_type -> gibson.daemon.v1.ConnectResponse
+	5,   // 96: gibson.daemon.v1.DaemonService.Ping:output_type -> gibson.daemon.v1.PingResponse
+	7,   // 97: gibson.daemon.v1.DaemonService.Status:output_type -> gibson.daemon.v1.StatusResponse
+	9,   // 98: gibson.daemon.v1.DaemonService.RunMission:output_type -> gibson.daemon.v1.MissionEvent
+	11,  // 99: gibson.daemon.v1.DaemonService.StopMission:output_type -> gibson.daemon.v1.StopMissionResponse
+	92,  // 100: gibson.daemon.v1.DaemonService.CreateMission:output_type -> gibson.daemon.v1.CreateMissionResponse
+	13,  // 101: gibson.daemon.v1.DaemonService.ListMissions:output_type -> gibson.daemon.v1.ListMissionsResponse
+	16,  // 102: gibson.daemon.v1.DaemonService.ListAgents:output_type -> gibson.daemon.v1.ListAgentsResponse
+	19,  // 103: gibson.daemon.v1.DaemonService.GetAgentStatus:output_type -> gibson.daemon.v1.AgentStatusResponse
+	21,  // 104: gibson.daemon.v1.DaemonService.ListTools:output_type -> gibson.daemon.v1.ListToolsResponse
+	25,  // 105: gibson.daemon.v1.DaemonService.ListPlugins:output_type -> gibson.daemon.v1.ListPluginsResponse
+	28,  // 106: gibson.daemon.v1.DaemonService.QueryPlugin:output_type -> gibson.daemon.v1.QueryPluginResponse
+	30,  // 107: gibson.daemon.v1.DaemonService.RunAttack:output_type -> gibson.daemon.v1.AttackEvent
+	33,  // 108: gibson.daemon.v1.DaemonService.Subscribe:output_type -> gibson.daemon.v1.Event
+	37,  // 109: gibson.daemon.v1.DaemonService.StartComponent:output_type -> gibson.daemon.v1.StartComponentResponse
+	39,  // 110: gibson.daemon.v1.DaemonService.StopComponent:output_type -> gibson.daemon.v1.StopComponentResponse
+	42,  // 111: gibson.daemon.v1.DaemonService.PauseMission:output_type -> gibson.daemon.v1.PauseMissionResponse
+	9,   // 112: gibson.daemon.v1.DaemonService.ResumeMission:output_type -> gibson.daemon.v1.MissionEvent
+	45,  // 113: gibson.daemon.v1.DaemonService.GetMissionHistory:output_type -> gibson.daemon.v1.GetMissionHistoryResponse
+	48,  // 114: gibson.daemon.v1.DaemonService.GetMissionCheckpoints:output_type -> gibson.daemon.v1.GetMissionCheckpointsResponse
+	51,  // 115: gibson.daemon.v1.DaemonService.InstallComponent:output_type -> gibson.daemon.v1.InstallComponentResponse
+	53,  // 116: gibson.daemon.v1.DaemonService.InstallAllComponent:output_type -> gibson.daemon.v1.InstallAllComponentResponse
+	57,  // 117: gibson.daemon.v1.DaemonService.UninstallComponent:output_type -> gibson.daemon.v1.UninstallComponentResponse
+	59,  // 118: gibson.daemon.v1.DaemonService.UpdateComponent:output_type -> gibson.daemon.v1.UpdateComponentResponse
+	61,  // 119: gibson.daemon.v1.DaemonService.BuildComponent:output_type -> gibson.daemon.v1.BuildComponentResponse
+	63,  // 120: gibson.daemon.v1.DaemonService.ShowComponent:output_type -> gibson.daemon.v1.ShowComponentResponse
+	65,  // 121: gibson.daemon.v1.DaemonService.GetComponentLogs:output_type -> gibson.daemon.v1.LogEntry
+	67,  // 122: gibson.daemon.v1.DaemonService.InstallMission:output_type -> gibson.daemon.v1.InstallMissionResponse
+	70,  // 123: gibson.daemon.v1.DaemonService.UninstallMission:output_type -> gibson.daemon.v1.UninstallMissionResponse
+	72,  // 124: gibson.daemon.v1.DaemonService.ListMissionDefinitions:output_type -> gibson.daemon.v1.ListMissionDefinitionsResponse
+	75,  // 125: gibson.daemon.v1.DaemonService.UpdateMission:output_type -> gibson.daemon.v1.UpdateMissionResponse
+	77,  // 126: gibson.daemon.v1.DaemonService.ResolveMissionDependencies:output_type -> gibson.daemon.v1.ResolveMissionDependenciesResponse
+	79,  // 127: gibson.daemon.v1.DaemonService.ValidateMissionDependencies:output_type -> gibson.daemon.v1.ValidateMissionDependenciesResponse
+	81,  // 128: gibson.daemon.v1.DaemonService.EnsureDependenciesRunning:output_type -> gibson.daemon.v1.EnsureDependenciesRunningResponse
+	95,  // [95:129] is the sub-list for method output_type
+	61,  // [61:95] is the sub-list for method input_type
+	61,  // [61:61] is the sub-list for extension type_name
+	61,  // [61:61] is the sub-list for extension extendee
+	0,   // [0:61] is the sub-list for field type_name
 }
 
 func init() { file_daemon_proto_init() }
@@ -8048,13 +8726,19 @@ func file_daemon_proto_init() {
 		(*Event_AgentEvent)(nil),
 		(*Event_FindingEvent)(nil),
 	}
+	file_daemon_proto_msgTypes[89].OneofWrappers = []any{
+		(*CreateMissionRequest_TargetId)(nil),
+		(*CreateMissionRequest_InlineTarget)(nil),
+		(*CreateMissionRequest_WorkflowId)(nil),
+		(*CreateMissionRequest_InlineWorkflow)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_daemon_proto_rawDesc), len(file_daemon_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   94,
+			NumMessages:   104,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

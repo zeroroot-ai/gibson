@@ -21,6 +21,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/daemon"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
 )
 
 // Client represents a connection to the Gibson daemon.
@@ -707,6 +708,72 @@ type MissionInfo struct {
 	FindingCount int
 }
 
+// InlineTargetData represents inline target configuration for mission creation.
+type InlineTargetData struct {
+	Seeds    []*TargetSeedData
+	Profile  string
+	Depth    int32
+	Excluded []string
+	Metadata map[string]string
+}
+
+// TargetSeedData represents a target seed.
+type TargetSeedData struct {
+	Value string
+	Type  string
+	Scope string
+}
+
+// InlineWorkflowData represents inline workflow configuration for mission creation.
+type InlineWorkflowData struct {
+	Name     string
+	Nodes    []*WorkflowNodeData
+	Edges    []*WorkflowEdgeData
+	Metadata map[string]string
+}
+
+// WorkflowNodeData represents a workflow node configuration.
+type WorkflowNodeData struct {
+	ID        string
+	Type      string
+	Name      string
+	DependsOn []string
+	Config    map[string]any
+}
+
+// WorkflowEdgeData represents a workflow edge configuration.
+type WorkflowEdgeData struct {
+	From      string
+	To        string
+	Condition string
+}
+
+// CreateMissionOptions contains options for creating a new mission.
+type CreateMissionOptions struct {
+	Name        string
+	Description string
+
+	// Target configuration (mutually exclusive: use TargetID OR InlineTarget)
+	TargetID     string
+	InlineTarget *InlineTargetData
+
+	// Workflow configuration (mutually exclusive: use WorkflowID OR InlineWorkflow)
+	WorkflowID     string
+	InlineWorkflow *InlineWorkflowData
+
+	Metadata map[string]string
+}
+
+// CreateMissionResult represents the result of creating a mission.
+type CreateMissionResult struct {
+	MissionID   string
+	TargetID    string
+	WorkflowID  string
+	Name        string
+	Description string
+	Status      string
+}
+
 // ListMissions retrieves a list of missions from the daemon.
 //
 // This method queries the daemon's mission store with optional filtering by
@@ -819,6 +886,150 @@ func (c *Client) StopMission(ctx context.Context, missionID string, force bool) 
 	}
 
 	return nil
+}
+
+// CreateMission creates a new mission with inline or referenced target/workflow configurations.
+//
+// This method supports two modes for both target and workflow:
+//   - Referenced: Provide TargetID/WorkflowID to reference existing entities
+//   - Inline: Provide InlineTarget/InlineWorkflow for ad-hoc configurations
+//
+// The inline configurations are useful for one-off missions or when you don't want
+// to pre-create targets and workflows.
+//
+// Parameters:
+//   - ctx: Context for the RPC call
+//   - opts: Mission creation options
+//
+// Returns:
+//   - *CreateMissionResult: Created mission details
+//   - error: Non-nil if creation fails
+//
+// Example with inline configuration:
+//
+//	result, err := client.CreateMission(ctx, CreateMissionOptions{
+//	    Name: "quick-scan",
+//	    InlineTarget: &InlineTargetData{
+//	        Seeds: []*TargetSeedData{{Value: "example.com", Type: "domain"}},
+//	        Profile: "balanced",
+//	        Depth: 2,
+//	    },
+//	    InlineWorkflow: &InlineWorkflowData{
+//	        Name: "recon-workflow",
+//	        Nodes: []*WorkflowNodeData{{ID: "recon", Type: "agent", Name: "recon-agent"}},
+//	    },
+//	})
+func (c *Client) CreateMission(ctx context.Context, opts CreateMissionOptions) (*CreateMissionResult, error) {
+	// Build request
+	req := &api.CreateMissionRequest{
+		Name:        opts.Name,
+		Description: opts.Description,
+		Metadata:    opts.Metadata,
+	}
+
+	// Set target configuration (referenced or inline)
+	if opts.TargetID != "" {
+		req.TargetConfig = &api.CreateMissionRequest_TargetId{
+			TargetId: opts.TargetID,
+		}
+	} else if opts.InlineTarget != nil {
+		// Convert InlineTargetData to proto
+		seeds := make([]*api.Seed, len(opts.InlineTarget.Seeds))
+		for i, s := range opts.InlineTarget.Seeds {
+			seeds[i] = &api.Seed{
+				Value: s.Value,
+				Type:  s.Type,
+				Scope: s.Scope,
+			}
+		}
+		req.TargetConfig = &api.CreateMissionRequest_InlineTarget{
+			InlineTarget: &api.InlineTargetConfig{
+				Seeds:    seeds,
+				Profile:  opts.InlineTarget.Profile,
+				Depth:    opts.InlineTarget.Depth,
+				Excluded: opts.InlineTarget.Excluded,
+				Metadata: opts.InlineTarget.Metadata,
+			},
+		}
+	}
+
+	// Set workflow configuration (referenced or inline)
+	if opts.WorkflowID != "" {
+		req.WorkflowConfig = &api.CreateMissionRequest_WorkflowId{
+			WorkflowId: opts.WorkflowID,
+		}
+	} else if opts.InlineWorkflow != nil {
+		// Convert InlineWorkflowData to proto
+		nodes := make([]*api.InlineNodeConfig, len(opts.InlineWorkflow.Nodes))
+		for i, n := range opts.InlineWorkflow.Nodes {
+			// Convert config map to TypedMap
+			var config *commonpb.TypedMap
+			if n.Config != nil {
+				config = api.MapToTypedMap(n.Config)
+			}
+			nodes[i] = &api.InlineNodeConfig{
+				Id:        n.ID,
+				Type:      n.Type,
+				Name:      n.Name,
+				DependsOn: n.DependsOn,
+				Config:    config,
+			}
+		}
+		edges := make([]*api.InlineEdgeConfig, len(opts.InlineWorkflow.Edges))
+		for i, e := range opts.InlineWorkflow.Edges {
+			edges[i] = &api.InlineEdgeConfig{
+				From:      e.From,
+				To:        e.To,
+				Condition: e.Condition,
+			}
+		}
+		req.WorkflowConfig = &api.CreateMissionRequest_InlineWorkflow{
+			InlineWorkflow: &api.InlineWorkflowConfig{
+				Name:     opts.InlineWorkflow.Name,
+				Nodes:    nodes,
+				Edges:    edges,
+				Metadata: opts.InlineWorkflow.Metadata,
+			},
+		}
+	}
+
+	// Call RPC
+	resp, err := c.daemon.CreateMission(ctx, req)
+	if err != nil {
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.Unavailable:
+				return nil, fmt.Errorf("daemon not responding (is it running?)")
+			case codes.InvalidArgument:
+				return nil, fmt.Errorf("invalid mission configuration: %s", st.Message())
+			case codes.NotFound:
+				return nil, fmt.Errorf("referenced entity not found: %s", st.Message())
+			case codes.AlreadyExists:
+				return nil, fmt.Errorf("mission already exists: %s", st.Message())
+			default:
+				return nil, fmt.Errorf("failed to create mission: %s", st.Message())
+			}
+		}
+		return nil, fmt.Errorf("failed to create mission: %w", err)
+	}
+
+	if !resp.Success {
+		return nil, fmt.Errorf("failed to create mission: %s", resp.Message)
+	}
+
+	result := &CreateMissionResult{
+		Name: opts.Name,
+	}
+
+	if resp.Mission != nil {
+		result.MissionID = resp.Mission.Id
+		result.TargetID = resp.Mission.TargetId
+		result.WorkflowID = resp.Mission.WorkflowId
+		result.Name = resp.Mission.Name
+		result.Status = "pending"
+	}
+
+	return result, nil
 }
 
 // AttackOptions contains options for running an attack.

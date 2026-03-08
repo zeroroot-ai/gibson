@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/api/gen/commonpb"
 	"github.com/zero-day-ai/sdk/api/gen/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -29,7 +30,7 @@ type mockToolServiceServer struct {
 	descriptor      *proto.ToolDescriptor
 	executeResponse *proto.ToolExecuteResponse
 	executeError    error
-	healthResponse  *proto.HealthStatus
+	healthResponse  *commonpb.HealthStatus
 	healthError     error
 }
 
@@ -50,13 +51,13 @@ func (m *mockToolServiceServer) Execute(ctx context.Context, req *proto.ToolExec
 	return m.executeResponse, nil
 }
 
-func (m *mockToolServiceServer) Health(ctx context.Context, req *proto.ToolHealthRequest) (*proto.HealthStatus, error) {
+func (m *mockToolServiceServer) Health(ctx context.Context, req *proto.ToolHealthRequest) (*commonpb.HealthStatus, error) {
 	if m.healthError != nil {
 		return nil, m.healthError
 	}
 	if m.healthResponse == nil {
-		return &proto.HealthStatus{
-			State:     "healthy",
+		return &commonpb.HealthStatus{
+			Status:    "healthy",
 			Message:   "OK",
 			CheckedAt: time.Now().UnixMilli(),
 		}, nil
@@ -145,10 +146,10 @@ func TestNewGRPCToolClient(t *testing.T) {
 			Description: "A test tool",
 			Version:     "1.0.0",
 			Tags:        []string{"test", "mock"},
-			InputSchema: &proto.JSONSchema{
+			InputSchema: &commonpb.JSONSchema{
 				Json: inputSchemaJSON,
 			},
-			OutputSchema: &proto.JSONSchema{
+			OutputSchema: &commonpb.JSONSchema{
 				Json: outputSchemaJSON,
 			},
 		},
@@ -200,10 +201,10 @@ func TestNewGRPCToolClient_InvalidSchema(t *testing.T) {
 			Name:        "bad-schema-tool",
 			Description: "Tool with invalid schema",
 			Version:     "1.0.0",
-			InputSchema: &proto.JSONSchema{
+			InputSchema: &commonpb.JSONSchema{
 				Json: `{invalid json}`,
 			},
-			OutputSchema: &proto.JSONSchema{
+			OutputSchema: &commonpb.JSONSchema{
 				Json: `{"type":"object"}`,
 			},
 		},
@@ -236,8 +237,8 @@ func TestGRPCToolClient_Execute_Success(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		executeResponse: &proto.ToolExecuteResponse{
 			OutputJson: `{"result":"success","data":"test data"}`,
@@ -275,11 +276,11 @@ func TestGRPCToolClient_Execute_WithError(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		executeResponse: &proto.ToolExecuteResponse{
-			Error: &proto.Error{
+			Error: &commonpb.Error{
 				Code:      "tool_execution_failed",
 				Message:   "tool failed to execute",
 				Retryable: false,
@@ -318,8 +319,8 @@ func TestGRPCToolClient_Execute_GRPCError(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		executeError: status.Error(codes.Unavailable, "service unavailable"),
 	}
@@ -350,8 +351,8 @@ func TestGRPCToolClient_Execute_InvalidInput(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 	}
 
@@ -378,8 +379,8 @@ func TestGRPCToolClient_Execute_InvalidOutput(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		executeResponse: &proto.ToolExecuteResponse{
 			OutputJson: `{invalid json}`,
@@ -412,8 +413,8 @@ func TestGRPCToolClient_Execute_ContextCancellation(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 	}
 
@@ -447,11 +448,11 @@ func TestGRPCToolClient_Health_Healthy(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		healthResponse: &proto.HealthStatus{
-			State:     "healthy",
+		healthResponse: &commonpb.HealthStatus{
+			Status:     "healthy",
 			Message:   "All systems operational",
 			CheckedAt: now.UnixMilli(),
 		},
@@ -481,11 +482,11 @@ func TestGRPCToolClient_Health_Unhealthy(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		healthResponse: &proto.HealthStatus{
-			State:     "unhealthy",
+		healthResponse: &commonpb.HealthStatus{
+			Status:     "unhealthy",
 			Message:   "Database connection failed",
 			CheckedAt: now.UnixMilli(),
 		},
@@ -514,11 +515,11 @@ func TestGRPCToolClient_Health_Degraded(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		healthResponse: &proto.HealthStatus{
-			State:     "degraded",
+		healthResponse: &commonpb.HealthStatus{
+			Status:     "degraded",
 			Message:   "High latency detected",
 			CheckedAt: now.UnixMilli(),
 		},
@@ -546,8 +547,8 @@ func TestGRPCToolClient_Health_GRPCError(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		healthError: status.Error(codes.Unavailable, "health check failed"),
 	}
@@ -575,8 +576,8 @@ func TestGRPCToolClient_Health_Timeout(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		healthError: status.Error(codes.DeadlineExceeded, "context deadline exceeded"),
 	}
@@ -609,8 +610,8 @@ func TestGRPCToolClient_Close(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 	}
 
@@ -654,8 +655,8 @@ func TestGRPCToolClient_Metadata(t *testing.T) {
 			Description:  "Network port scanner using nmap",
 			Version:      "2.3.1",
 			Tags:         []string{"network", "scanner", "recon"},
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 	}
 
@@ -681,8 +682,8 @@ func TestGRPCToolClient_EmptyTags(t *testing.T) {
 			Description:  "A test tool",
 			Version:      "1.0.0",
 			Tags:         []string{},
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 	}
 
@@ -734,8 +735,8 @@ func TestGRPCToolClient_ComplexOutput(t *testing.T) {
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
-			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
-			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
+			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
+			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		executeResponse: &proto.ToolExecuteResponse{
 			OutputJson: string(outputJSON),

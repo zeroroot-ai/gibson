@@ -15,8 +15,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/schema"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
+	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 	"github.com/zero-day-ai/sdk/registry"
 )
 
@@ -41,7 +41,7 @@ type mockPluginService struct {
 	shutdownFunc    func(context.Context, *proto.PluginShutdownRequest) (*proto.PluginShutdownResponse, error)
 	listMethodsFunc func(context.Context, *proto.PluginListMethodsRequest) (*proto.PluginListMethodsResponse, error)
 	queryFunc       func(context.Context, *proto.PluginQueryRequest) (*proto.PluginQueryResponse, error)
-	healthFunc      func(context.Context, *proto.PluginHealthRequest) (*proto.HealthStatus, error)
+	healthFunc      func(context.Context, *proto.PluginHealthRequest) (*commonpb.HealthStatus, error)
 }
 
 func (m *mockPluginService) Initialize(ctx context.Context, req *proto.PluginInitializeRequest) (*proto.PluginInitializeResponse, error) {
@@ -75,12 +75,12 @@ func (m *mockPluginService) Query(ctx context.Context, req *proto.PluginQueryReq
 	return &proto.PluginQueryResponse{}, nil
 }
 
-func (m *mockPluginService) Health(ctx context.Context, req *proto.PluginHealthRequest) (*proto.HealthStatus, error) {
+func (m *mockPluginService) Health(ctx context.Context, req *proto.PluginHealthRequest) (*commonpb.HealthStatus, error) {
 	if m.healthFunc != nil {
 		return m.healthFunc(ctx, req)
 	}
-	return &proto.HealthStatus{
-		State:   "healthy",
+	return &commonpb.HealthStatus{
+		Status:  "healthy",
 		Message: "OK",
 	}, nil
 }
@@ -187,7 +187,7 @@ func TestGRPCPluginClient_Initialize(t *testing.T) {
 			},
 			mockFunc: func(ctx context.Context, req *proto.PluginInitializeRequest) (*proto.PluginInitializeResponse, error) {
 				return &proto.PluginInitializeResponse{
-					Error: &proto.Error{
+					Error: &commonpb.Error{
 						Code:    "INIT_FAILED",
 						Message: "initialization failed",
 					},
@@ -261,7 +261,7 @@ func TestGRPCPluginClient_Shutdown(t *testing.T) {
 			name: "shutdown error from plugin",
 			mockFunc: func(ctx context.Context, req *proto.PluginShutdownRequest) (*proto.PluginShutdownResponse, error) {
 				return &proto.PluginShutdownResponse{
-					Error: &proto.Error{
+					Error: &commonpb.Error{
 						Code:    "SHUTDOWN_FAILED",
 						Message: "failed to cleanup resources",
 					},
@@ -497,7 +497,7 @@ func TestGRPCPluginClient_Query(t *testing.T) {
 			},
 			mockQueryFunc: func(ctx context.Context, req *proto.PluginQueryRequest) (*proto.PluginQueryResponse, error) {
 				return &proto.PluginQueryResponse{
-					Error: &proto.Error{
+					Error: &commonpb.Error{
 						Code:    "QUERY_FAILED",
 						Message: "query execution failed",
 					},
@@ -564,14 +564,14 @@ func TestGRPCPluginClient_Query(t *testing.T) {
 func TestGRPCPluginClient_Health(t *testing.T) {
 	tests := []struct {
 		name          string
-		mockFunc      func(context.Context, *proto.PluginHealthRequest) (*proto.HealthStatus, error)
+		mockFunc      func(context.Context, *proto.PluginHealthRequest) (*commonpb.HealthStatus, error)
 		expectedState string
 	}{
 		{
 			name: "healthy status",
-			mockFunc: func(ctx context.Context, req *proto.PluginHealthRequest) (*proto.HealthStatus, error) {
-				return &proto.HealthStatus{
-					State:   "healthy",
+			mockFunc: func(ctx context.Context, req *proto.PluginHealthRequest) (*commonpb.HealthStatus, error) {
+				return &commonpb.HealthStatus{
+					Status:  "healthy",
 					Message: "All systems operational",
 				}, nil
 			},
@@ -579,9 +579,9 @@ func TestGRPCPluginClient_Health(t *testing.T) {
 		},
 		{
 			name: "degraded status",
-			mockFunc: func(ctx context.Context, req *proto.PluginHealthRequest) (*proto.HealthStatus, error) {
-				return &proto.HealthStatus{
-					State:   "degraded",
+			mockFunc: func(ctx context.Context, req *proto.PluginHealthRequest) (*commonpb.HealthStatus, error) {
+				return &commonpb.HealthStatus{
+					Status:  "degraded",
 					Message: "Some issues detected",
 				}, nil
 			},
@@ -589,9 +589,9 @@ func TestGRPCPluginClient_Health(t *testing.T) {
 		},
 		{
 			name: "unhealthy status",
-			mockFunc: func(ctx context.Context, req *proto.PluginHealthRequest) (*proto.HealthStatus, error) {
-				return &proto.HealthStatus{
-					State:   "unhealthy",
+			mockFunc: func(ctx context.Context, req *proto.PluginHealthRequest) (*commonpb.HealthStatus, error) {
+				return &commonpb.HealthStatus{
+					Status:  "unhealthy",
 					Message: "Critical failure",
 				}, nil
 			},
@@ -599,7 +599,7 @@ func TestGRPCPluginClient_Health(t *testing.T) {
 		},
 		{
 			name: "RPC error",
-			mockFunc: func(ctx context.Context, req *proto.PluginHealthRequest) (*proto.HealthStatus, error) {
+			mockFunc: func(ctx context.Context, req *proto.PluginHealthRequest) (*commonpb.HealthStatus, error) {
 				return nil, status.Error(codes.Unavailable, "service unavailable")
 			},
 			expectedState: "unhealthy",

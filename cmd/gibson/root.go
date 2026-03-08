@@ -191,6 +191,7 @@ func init() {
 	rootCmd.AddCommand(payloadCmd)
 	rootCmd.AddCommand(knowledgeCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(daemonCmd)
 }

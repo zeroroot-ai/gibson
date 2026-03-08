@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -55,6 +56,9 @@ type GRPCPool struct {
 
 	// circuitBreaker tracks endpoint health and prevents requests to failing endpoints
 	circuitBreaker *CircuitBreaker
+
+	// tlsConfig provides TLS configuration for secure connections (optional)
+	tlsConfig *TLSConfig
 }
 
 // NewGRPCPool creates a new gRPC connection pool.
@@ -95,6 +99,29 @@ func NewGRPCPoolWithCircuitBreaker(config CircuitBreakerConfig, opts ...grpc.Dia
 		conns:          make(map[string]*grpc.ClientConn),
 		opts:           opts,
 		circuitBreaker: NewCircuitBreaker(config),
+	}
+}
+
+// NewGRPCPoolWithTLS creates a new gRPC connection pool with TLS configuration.
+//
+// This enables secure connections to gRPC services with optional mTLS support.
+// The pool will automatically apply TLS credentials to all connections.
+//
+// Example usage:
+//
+//	tlsConfig := &TLSConfig{
+//	    Enabled: true,
+//	    CAFile: "/etc/ssl/ca.crt",
+//	    ServerName: "grpc.example.com",
+//	}
+//	pool := NewGRPCPoolWithTLS(tlsConfig)
+//	defer pool.Close()
+func NewGRPCPoolWithTLS(tlsConfig *TLSConfig, opts ...grpc.DialOption) *GRPCPool {
+	return &GRPCPool{
+		conns:          make(map[string]*grpc.ClientConn),
+		opts:           opts,
+		circuitBreaker: NewCircuitBreaker(DefaultCircuitBreakerConfig()),
+		tlsConfig:      tlsConfig,
 	}
 }
 
@@ -182,10 +209,20 @@ func (p *GRPCPool) Get(ctx context.Context, endpoint string) (*grpc.ClientConn, 
 	}
 
 	// Create new connection
-	dialOpts := p.opts
-	if len(dialOpts) == 0 {
-		// Default to insecure credentials if no options provided
-		// TODO: Add TLS support in future
+	dialOpts := make([]grpc.DialOption, len(p.opts))
+	copy(dialOpts, p.opts)
+
+	// Add transport credentials based on TLS configuration
+	if p.tlsConfig != nil && p.tlsConfig.Enabled {
+		// Build TLS configuration
+		tlsCfg, err := p.tlsConfig.BuildTLSConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed to build TLS config: %w", err)
+		}
+		// Add TLS credentials to dial options
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	} else if len(dialOpts) == 0 {
+		// Default to insecure credentials if no TLS and no options provided
 		dialOpts = []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		}

@@ -18,6 +18,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component/build"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -51,7 +52,7 @@ func TestListAgents_Success(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -85,7 +86,7 @@ func TestListAgents_EmptyResults(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -112,7 +113,7 @@ func TestListAgents_NoInstances(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -134,7 +135,7 @@ func TestListAgents_RegistryError(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -163,7 +164,7 @@ func TestGetAgentStatus_Success(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -193,7 +194,7 @@ func TestGetAgentStatus_NotFound(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -216,7 +217,7 @@ func TestGetAgentStatus_RegistryError(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -252,7 +253,7 @@ func TestListTools_Success(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -284,7 +285,7 @@ func TestListTools_EmptyResults(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -305,7 +306,7 @@ func TestListTools_RegistryError(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -334,7 +335,7 @@ func TestListPlugins_Success(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -362,7 +363,7 @@ func TestListPlugins_EmptyResults(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -383,7 +384,7 @@ func TestListPlugins_RegistryError(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -411,7 +412,7 @@ func TestListAgents_NoEndpoints(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -441,7 +442,7 @@ func TestListTools_NoEndpoints(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -469,7 +470,7 @@ func TestGetAgentStatus_NoEndpoints(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -496,7 +497,7 @@ func TestListAgents_WithKindFilter(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -551,7 +552,7 @@ func TestHealthStatus_BasedOnInstances(t *testing.T) {
 
 			daemon := &daemonImpl{
 				registryAdapter: mockRegistry,
-				logger:          slog.Default(),
+				logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 			}
 
 			ctx := context.Background()
@@ -590,7 +591,7 @@ func TestListTools_HealthStatus(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -621,7 +622,7 @@ func TestListPlugins_HealthStatus(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -649,7 +650,7 @@ func TestLastSeenTime(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
-		logger:          slog.Default(),
+		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -705,7 +706,7 @@ func TestRunAttack_Success(t *testing.T) {
 
 	daemon := &daemonImpl{
 		attackRunner: mockRunner,
-		logger:       slog.Default(),
+		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	req := api.AttackRequest{
@@ -760,7 +761,7 @@ func TestRunAttack_Success(t *testing.T) {
 func TestRunAttack_ValidationError(t *testing.T) {
 	daemon := &daemonImpl{
 		attackRunner: &mockAttackRunner{},
-		logger:       slog.Default(),
+		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	tests := []struct {
@@ -800,7 +801,7 @@ func TestRunAttack_ValidationError(t *testing.T) {
 func TestRunAttack_RunnerNotInitialized(t *testing.T) {
 	daemon := &daemonImpl{
 		attackRunner: nil, // No runner initialized
-		logger:       slog.Default(),
+		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	req := api.AttackRequest{
@@ -827,7 +828,7 @@ func TestRunAttack_ExecutionError(t *testing.T) {
 
 	daemon := &daemonImpl{
 		attackRunner: mockRunner,
-		logger:       slog.Default(),
+		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	req := api.AttackRequest{
@@ -871,7 +872,7 @@ func TestRunAttack_OptionsMapping(t *testing.T) {
 
 	daemon := &daemonImpl{
 		attackRunner: mockRunner,
-		logger:       slog.Default(),
+		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	req := api.AttackRequest{
@@ -919,7 +920,7 @@ func TestRunAttack_NoFindings(t *testing.T) {
 
 	daemon := &daemonImpl{
 		attackRunner: mockRunner,
-		logger:       slog.Default(),
+		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	req := api.AttackRequest{
@@ -949,7 +950,7 @@ func TestRunAttack_NoFindings(t *testing.T) {
 // TestValidateAttackRequest tests the attack request validation logic
 func TestValidateAttackRequest(t *testing.T) {
 	daemon := &daemonImpl{
-		logger: slog.Default(),
+		logger: observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	tests := []struct {
@@ -1001,7 +1002,7 @@ func TestValidateAttackRequest(t *testing.T) {
 // TestBuildAttackOptions tests conversion from API request to internal attack options
 func TestBuildAttackOptions(t *testing.T) {
 	daemon := &daemonImpl{
-		logger: slog.Default(),
+		logger: observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	tests := []struct {
@@ -1077,6 +1078,7 @@ func TestBuildAttackOptions(t *testing.T) {
 type mockTargetDAO struct {
 	getByNameFunc func(ctx context.Context, name string) (*types.Target, error)
 	getFunc       func(ctx context.Context, id types.ID) (*types.Target, error)
+	createFunc    func(ctx context.Context, target *types.Target) error
 }
 
 func (m *mockTargetDAO) GetByName(ctx context.Context, name string) (*types.Target, error) {
@@ -1093,10 +1095,17 @@ func (m *mockTargetDAO) Get(ctx context.Context, id types.ID) (*types.Target, er
 	return nil, fmt.Errorf("target not found")
 }
 
+func (m *mockTargetDAO) Create(ctx context.Context, target *types.Target) error {
+	if m.createFunc != nil {
+		return m.createFunc(ctx, target)
+	}
+	return nil
+}
+
 // TestValidateAttackRequest_TargetName tests validation with target_name field
 func TestValidateAttackRequest_TargetName(t *testing.T) {
 	daemon := &daemonImpl{
-		logger: slog.Default(),
+		logger: observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	tests := []struct {
@@ -1277,7 +1286,7 @@ func TestBuildAttackOptions_TargetNameResolution(t *testing.T) {
 			mockDAO := tt.mockSetup()
 			daemon := &daemonImpl{
 				targetStore: mockDAO,
-				logger:      slog.Default(),
+				logger:      observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 			}
 
 			opts, err := daemon.buildAttackOptions(tt.req)
@@ -1338,7 +1347,7 @@ func TestBuildAttackOptions_TargetPropagation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			daemon := &daemonImpl{
 				targetStore: mockDAO,
-				logger:      slog.Default(),
+				logger:      observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 			}
 
 			opts, err := daemon.buildAttackOptions(tt.req)
@@ -1486,7 +1495,7 @@ func TestInstallComponent_Success(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentInstaller: mockInstaller,
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1505,7 +1514,7 @@ func TestInstallComponent_Success(t *testing.T) {
 func TestInstallComponent_InvalidKind(t *testing.T) {
 	daemon := &daemonImpl{
 		componentInstaller: &mockComponentInstaller{},
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1520,7 +1529,7 @@ func TestInstallComponent_InvalidKind(t *testing.T) {
 func TestInstallComponent_InstallerNotAvailable(t *testing.T) {
 	daemon := &daemonImpl{
 		componentInstaller: nil,
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1541,7 +1550,7 @@ func TestInstallComponent_InstallationError(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentInstaller: mockInstaller,
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1571,7 +1580,7 @@ func TestInstallComponent_WithOptions(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentInstaller: mockInstaller,
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1610,7 +1619,7 @@ func TestUninstallComponent_Success(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore:     mockStore,
 		componentInstaller: mockInstaller,
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1623,7 +1632,7 @@ func TestUninstallComponent_Success(t *testing.T) {
 func TestUninstallComponent_InvalidKind(t *testing.T) {
 	daemon := &daemonImpl{
 		componentInstaller: &mockComponentInstaller{},
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1648,7 +1657,7 @@ func TestUninstallComponent_ComponentRunning(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore:     mockStore,
 		componentInstaller: &mockComponentInstaller{},
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1672,7 +1681,7 @@ func TestUninstallComponent_ForceWhenRunning(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore:     &mockComponentStore{},
 		componentInstaller: mockInstaller,
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1692,7 +1701,7 @@ func TestUninstallComponent_ComponentNotFound(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore:     mockStore,
 		componentInstaller: &mockComponentInstaller{},
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1718,7 +1727,7 @@ func TestUpdateComponent_Success(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentInstaller: mockInstaller,
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1736,7 +1745,7 @@ func TestUpdateComponent_Success(t *testing.T) {
 func TestUpdateComponent_InvalidKind(t *testing.T) {
 	daemon := &daemonImpl{
 		componentInstaller: &mockComponentInstaller{},
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1763,7 +1772,7 @@ func TestUpdateComponent_NoChanges(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentInstaller: mockInstaller,
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1793,7 +1802,7 @@ func TestUpdateComponent_WithOptions(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentInstaller: mockInstaller,
-		logger:             slog.Default(),
+		logger:             observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1837,7 +1846,7 @@ func TestBuildComponent_Success(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore:         mockStore,
 		componentBuildExecutor: mockBuildExec,
-		logger:                 slog.Default(),
+		logger:                 observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1853,7 +1862,7 @@ func TestBuildComponent_Success(t *testing.T) {
 func TestBuildComponent_InvalidKind(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore: &mockComponentStore{},
-		logger:         slog.Default(),
+		logger:         observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1874,7 +1883,7 @@ func TestBuildComponent_ComponentNotFound(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentStore: mockStore,
-		logger:         slog.Default(),
+		logger:         observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1900,7 +1909,7 @@ func TestBuildComponent_NoBuildConfig(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore:         mockStore,
 		componentBuildExecutor: &mockBuildExecutor{},
-		logger:                 slog.Default(),
+		logger:                 observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1941,7 +1950,7 @@ func TestBuildComponent_BuildFailure(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore:         mockStore,
 		componentBuildExecutor: mockBuildExec,
-		logger:                 slog.Default(),
+		logger:                 observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1975,7 +1984,7 @@ func TestShowComponent_Success(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentStore: mockStore,
-		logger:         slog.Default(),
+		logger:         observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -1997,7 +2006,7 @@ func TestShowComponent_Success(t *testing.T) {
 func TestShowComponent_InvalidKind(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore: &mockComponentStore{},
-		logger:         slog.Default(),
+		logger:         observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -2018,7 +2027,7 @@ func TestShowComponent_ComponentNotFound(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentStore: mockStore,
-		logger:         slog.Default(),
+		logger:         observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -2056,7 +2065,7 @@ func TestGetComponentLogs_Success(t *testing.T) {
 				HomeDir: tmpDir,
 			},
 		},
-		logger: slog.Default(),
+		logger: observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2080,7 +2089,7 @@ func TestGetComponentLogs_Success(t *testing.T) {
 func TestGetComponentLogs_InvalidKind(t *testing.T) {
 	daemon := &daemonImpl{
 		componentStore: &mockComponentStore{},
-		logger:         slog.Default(),
+		logger:         observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -2101,7 +2110,7 @@ func TestGetComponentLogs_ComponentNotFound(t *testing.T) {
 
 	daemon := &daemonImpl{
 		componentStore: mockStore,
-		logger:         slog.Default(),
+		logger:         observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
@@ -2132,7 +2141,7 @@ func TestGetComponentLogs_LogFileNotFound(t *testing.T) {
 				HomeDir: tmpDir,
 			},
 		},
-		logger: slog.Default(),
+		logger: observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()

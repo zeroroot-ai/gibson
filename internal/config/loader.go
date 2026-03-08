@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"strings"
@@ -53,6 +54,11 @@ func (l *viperConfigLoader) Load(path string) (*Config, error) {
 		if err := applyInterpolation(&cfg, interpolatedMap); err != nil {
 			return nil, fmt.Errorf("failed to apply environment variable interpolation: %w", err)
 		}
+
+		// Warn if deprecated database section is present
+		if _, hasDatabase := interpolatedMap["database"]; hasDatabase {
+			slog.Warn("DEPRECATED: 'database' section in config is deprecated and will be removed in a future version. Please migrate to Redis-based state storage using the 'redis' section.")
+		}
 	}
 
 	// Validate the loaded configuration
@@ -102,6 +108,11 @@ func (l *viperConfigLoader) LoadWithDefaults(path string) (*Config, error) {
 		if err := applyInterpolation(cfg, interpolatedMap); err != nil {
 			return nil, fmt.Errorf("failed to apply environment variable interpolation: %w", err)
 		}
+
+		// Warn if deprecated database section is present
+		if _, hasDatabase := interpolatedMap["database"]; hasDatabase {
+			slog.Warn("DEPRECATED: 'database' section in config is deprecated and will be removed in a future version. Please migrate to Redis-based state storage using the 'redis' section.")
+		}
 	}
 
 	// Validate the loaded configuration
@@ -135,22 +146,37 @@ func interpolateEnvVars(data interface{}) interface{} {
 	}
 }
 
-// interpolateString replaces ${VAR_NAME} with environment variable values.
+// interpolateString replaces ${VAR_NAME} or ${VAR_NAME:-default} with environment variable values.
 func interpolateString(s string) string {
-	// Regular expression to match ${VAR_NAME}
+	// Regular expression to match ${VAR_NAME} or ${VAR_NAME:-default}
 	re := regexp.MustCompile(`\$\{([^}]+)\}`)
 
 	return re.ReplaceAllStringFunc(s, func(match string) string {
-		// Extract variable name (remove ${ and })
-		varName := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
+		// Extract content between ${ and }
+		content := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
+
+		// Check for default value syntax: VAR_NAME:-default
+		var varName, defaultValue string
+		if idx := strings.Index(content, ":-"); idx != -1 {
+			varName = content[:idx]
+			defaultValue = content[idx+2:]
+		} else {
+			varName = content
+			defaultValue = ""
+		}
 
 		// Get environment variable value
 		if envValue := os.Getenv(varName); envValue != "" {
 			return envValue
 		}
 
-		// If not found, return original match
-		return match
+		// Return default value if provided, otherwise empty string
+		if defaultValue != "" {
+			return defaultValue
+		}
+
+		// If no default and env not set, return empty string (not the original match)
+		return ""
 	})
 }
 
@@ -166,13 +192,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 		if cacheDir, ok := core["cache_dir"].(string); ok {
 			cfg.Core.CacheDir = interpolateString(cacheDir)
-		}
-	}
-
-	// Apply Database config interpolation
-	if db, ok := interpolated["database"].(map[string]interface{}); ok {
-		if path, ok := db["path"].(string); ok {
-			cfg.Database.Path = interpolateString(path)
 		}
 	}
 
@@ -257,6 +276,67 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 		if filePath, ok := activityLogging["file_path"].(string); ok {
 			cfg.ActivityLogging.FilePath = interpolateString(filePath)
+		}
+	}
+
+	// Apply Registry config interpolation
+	if registry, ok := interpolated["registry"].(map[string]interface{}); ok {
+		if listenAddr, ok := registry["listen_address"].(string); ok {
+			cfg.Registry.ListenAddress = interpolateString(listenAddr)
+		}
+	}
+
+	// Apply GraphRAG/Neo4j config interpolation
+	if graphrag, ok := interpolated["graphrag"].(map[string]interface{}); ok {
+		if neo4j, ok := graphrag["neo4j"].(map[string]interface{}); ok {
+			if uri, ok := neo4j["uri"].(string); ok {
+				cfg.GraphRAG.Neo4j.URI = interpolateString(uri)
+			}
+			if username, ok := neo4j["username"].(string); ok {
+				cfg.GraphRAG.Neo4j.Username = interpolateString(username)
+			}
+			if password, ok := neo4j["password"].(string); ok {
+				cfg.GraphRAG.Neo4j.Password = interpolateString(password)
+			}
+		}
+	}
+
+	// Apply Redis config interpolation
+	if redis, ok := interpolated["redis"].(map[string]interface{}); ok {
+		if url, ok := redis["url"].(string); ok {
+			cfg.Redis.URL = interpolateString(url)
+		}
+		if password, ok := redis["password"].(string); ok {
+			cfg.Redis.Password = interpolateString(password)
+		}
+		if tlsCertFile, ok := redis["tls_cert_file"].(string); ok {
+			cfg.Redis.TLSCertFile = interpolateString(tlsCertFile)
+		}
+		if tlsKeyFile, ok := redis["tls_key_file"].(string); ok {
+			cfg.Redis.TLSKeyFile = interpolateString(tlsKeyFile)
+		}
+		if tlsCAFile, ok := redis["tls_ca_file"].(string); ok {
+			cfg.Redis.TLSCAFile = interpolateString(tlsCAFile)
+		}
+		if sentinelMaster, ok := redis["sentinel_master"].(string); ok {
+			cfg.Redis.SentinelMaster = interpolateString(sentinelMaster)
+		}
+		// Handle string arrays for cluster and sentinel addresses
+		if clusterAddrs, ok := redis["cluster_addrs"].([]interface{}); ok {
+			cfg.Redis.ClusterAddrs = make([]string, len(clusterAddrs))
+			for i, addr := range clusterAddrs {
+				if strAddr, ok := addr.(string); ok {
+					cfg.Redis.ClusterAddrs[i] = interpolateString(strAddr)
+				}
+			}
+		}
+		if sentinelAddrs, ok := redis["sentinel_addrs"].([]interface{}); ok {
+			cfg.Redis.SentinelAddrs = make([]string, len(sentinelAddrs))
+			for i, addr := range sentinelAddrs {
+				if strAddr, ok := addr.(string); ok {
+					cfg.Redis.SentinelAddrs[i] = interpolateString(strAddr)
+				}
+			}
 		}
 	}
 

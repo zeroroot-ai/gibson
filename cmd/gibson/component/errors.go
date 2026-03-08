@@ -48,35 +48,3 @@ func FormatInstallError(cmd *cobra.Command, err error) error {
 	return fmt.Errorf("installation failed: %w", err)
 }
 
-// PrintComponentError prints detailed error information to stderr.
-// Returns a simplified error for the final return.
-// The operation parameter describes what operation failed (e.g., "start", "stop", "update").
-func PrintComponentError(cmd *cobra.Command, err error, operation string) error {
-	// Check if we can extract more details from the error
-	var compErr *component.ComponentError
-	if errors.As(err, &compErr) {
-		// Always show basic error info
-		cmd.PrintErrf("Error: %s\n", err)
-
-		// Show context if available
-		if compErr.Context != nil {
-			// Show build command and work directory if available
-			if buildCmd, ok := compErr.Context["build_command"].(string); ok {
-				cmd.PrintErrf("\nBuild command: %s\n", buildCmd)
-			}
-			if workDir, ok := compErr.Context["work_dir"].(string); ok {
-				cmd.PrintErrf("Working directory: %s\n", workDir)
-			}
-
-			// Show stdout/stderr if available
-			if stdout, ok := compErr.Context["stdout"].(string); ok && stdout != "" {
-				cmd.PrintErrf("\n--- stdout ---\n%s\n", stdout)
-			}
-			if stderr, ok := compErr.Context["stderr"].(string); ok && stderr != "" {
-				cmd.PrintErrf("\n--- stderr ---\n%s\n", stderr)
-			}
-		}
-		return fmt.Errorf("%s failed", operation)
-	}
-	return fmt.Errorf("%s failed: %w", operation, err)
-}

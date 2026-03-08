@@ -11,7 +11,6 @@ import (
 // Config is the root configuration for the Gibson Framework.
 type Config struct {
 	Core         CoreConfig              `mapstructure:"core" yaml:"core" validate:"required"`
-	Database     DBConfig                `mapstructure:"database" yaml:"database" validate:"required"`
 	Security     SecurityConfig          `mapstructure:"security" yaml:"security" validate:"required"`
 	LLM          LLMConfig               `mapstructure:"llm" yaml:"llm"`
 	Memory       memory.MemoryConfig     `mapstructure:"memory" yaml:"memory"`
@@ -23,12 +22,14 @@ type Config struct {
 	Registry     RegistryConfig          `mapstructure:"registry" yaml:"registry"`
 	Callback     CallbackConfig          `mapstructure:"callback" yaml:"callback,omitempty"`
 	Daemon       DaemonConfig            `mapstructure:"daemon" yaml:"daemon,omitempty"`
+	Health       HealthConfig            `mapstructure:"health" yaml:"health,omitempty"`
 	Embedder        embedder.EmbedderConfig `mapstructure:"embedder" yaml:"embedder"`
 	Langfuse        LangfuseConfig          `mapstructure:"langfuse" yaml:"langfuse"`
 	GraphRAG        GraphRAGConfig          `mapstructure:"graphrag" yaml:"graphrag"`
-	Redis           RedisConfig             `mapstructure:"redis" yaml:"redis"`
+	Redis           RedisConfig             `mapstructure:"redis" yaml:"redis" validate:"required"`
 	Plugins         PluginsConfig           `mapstructure:"plugins" yaml:"plugins,omitempty"`
 	ActivityLogging ActivityLoggingConfig   `mapstructure:"activity_logging" yaml:"activity_logging"`
+	Shutdown        ShutdownConfig          `mapstructure:"shutdown" yaml:"shutdown"`
 }
 
 // PluginsConfig contains configuration for all plugins.
@@ -46,14 +47,6 @@ type CoreConfig struct {
 	Debug         bool          `mapstructure:"debug" yaml:"debug"`
 }
 
-// DBConfig contains database configuration.
-type DBConfig struct {
-	Path           string        `mapstructure:"path" yaml:"path"`
-	MaxConnections int           `mapstructure:"max_connections" yaml:"max_connections" validate:"min=1,max=100"`
-	Timeout        time.Duration `mapstructure:"timeout" yaml:"timeout" validate:"min=1s"`
-	WALMode        bool          `mapstructure:"wal_mode" yaml:"wal_mode"`
-	AutoVacuum     bool          `mapstructure:"auto_vacuum" yaml:"auto_vacuum"`
-}
 
 // SecurityConfig contains security-related settings.
 type SecurityConfig struct {
@@ -63,9 +56,49 @@ type SecurityConfig struct {
 	AuditLogging        bool   `mapstructure:"audit_logging" yaml:"audit_logging"`
 }
 
-// LLMConfig contains LLM provider configuration (stub for future stages).
+// LLMConfig contains LLM provider configuration.
 type LLMConfig struct {
+	// DefaultProvider is the default LLM provider
 	DefaultProvider string `mapstructure:"default_provider" yaml:"default_provider"`
+
+	// Providers contains provider-specific configurations
+	Providers map[string]ProviderConfig `mapstructure:"providers" yaml:"providers"`
+}
+
+// ProviderConfig contains configuration for an LLM provider.
+type ProviderConfig struct {
+	// Type is the provider type (openai, anthropic, google, ollama)
+	Type string `mapstructure:"type" yaml:"type"`
+
+	// APIKey is the API key for the provider
+	APIKey string `mapstructure:"api_key" yaml:"api_key"`
+
+	// APIKeyEnv is the environment variable containing the API key
+	APIKeyEnv string `mapstructure:"api_key_env" yaml:"api_key_env"`
+
+	// BaseURL overrides the default API endpoint
+	BaseURL string `mapstructure:"base_url" yaml:"base_url"`
+
+	// Model is the default model to use
+	Model string `mapstructure:"model" yaml:"model"`
+
+	// MaxTokens is the default max tokens
+	MaxTokens int `mapstructure:"max_tokens" yaml:"max_tokens"`
+
+	// Temperature is the default temperature
+	Temperature float64 `mapstructure:"temperature" yaml:"temperature"`
+
+	// Timeout for API requests
+	Timeout time.Duration `mapstructure:"timeout" yaml:"timeout"`
+
+	// RateLimits configures rate limiting
+	RateLimits RateLimitConfig `mapstructure:"rate_limits" yaml:"rate_limits"`
+}
+
+// RateLimitConfig contains rate limiting configuration.
+type RateLimitConfig struct {
+	RequestsPerMinute int `mapstructure:"requests_per_minute" yaml:"requests_per_minute"`
+	TokensPerMinute   int `mapstructure:"tokens_per_minute" yaml:"tokens_per_minute"`
 }
 
 // LoggingConfig contains logging configuration.
@@ -153,6 +186,46 @@ type DaemonConfig struct {
 	// Default: "localhost:50002"
 	// Can be overridden via GIBSON_DAEMON_GRPC_ADDR environment variable.
 	GRPCAddress string `mapstructure:"grpc_address" yaml:"grpc_address"`
+
+	// Executor configuration for mission execution
+	Executor ExecutorConfig `mapstructure:"executor" yaml:"executor"`
+}
+
+// HealthConfig contains HTTP health endpoint configuration.
+type HealthConfig struct {
+	// Port is the HTTP port for health endpoints (/healthz and /readyz).
+	// Default: 8080
+	// Can be overridden via GIBSON_HEALTH_PORT environment variable.
+	Port int `mapstructure:"port" yaml:"port"`
+}
+
+// ExecutorConfig contains configuration for mission execution.
+type ExecutorConfig struct {
+	// MaxConcurrentMissions limits parallel mission execution
+	MaxConcurrentMissions int `mapstructure:"max_concurrent_missions" yaml:"max_concurrent_missions"`
+
+	// DefaultTimeout for mission execution
+	DefaultTimeout time.Duration `mapstructure:"default_timeout" yaml:"default_timeout"`
+
+	// RetryPolicy for failed nodes
+	RetryPolicy RetryConfig `mapstructure:"retry_policy" yaml:"retry_policy"`
+
+	// ResourceLimits for agent execution
+	ResourceLimits ResourceLimitsConfig `mapstructure:"resource_limits" yaml:"resource_limits"`
+}
+
+// RetryConfig contains retry policy configuration.
+type RetryConfig struct {
+	MaxRetries int           `mapstructure:"max_retries" yaml:"max_retries"`
+	BackoffMin time.Duration `mapstructure:"backoff_min" yaml:"backoff_min"`
+	BackoffMax time.Duration `mapstructure:"backoff_max" yaml:"backoff_max"`
+}
+
+// ResourceLimitsConfig contains resource limit configuration for agent execution.
+type ResourceLimitsConfig struct {
+	MaxMemoryMB int           `mapstructure:"max_memory_mb" yaml:"max_memory_mb"`
+	MaxCPUCores float64       `mapstructure:"max_cpu_cores" yaml:"max_cpu_cores"`
+	MaxDuration time.Duration `mapstructure:"max_duration" yaml:"max_duration"`
 }
 
 // LangfuseConfig contains Langfuse LLM observability configuration.
@@ -178,10 +251,103 @@ type GraphRAGConfig struct {
 	Neo4j   Neo4jConfig `mapstructure:"neo4j" yaml:"neo4j"`
 }
 
-// RedisConfig contains Redis connection settings for tool execution.
+// RedisConfig contains Redis connection settings for tool execution and state management.
+// Supports standalone, cluster, and sentinel deployment modes with comprehensive
+// timeout, pooling, and TLS configuration options.
 type RedisConfig struct {
+	// Basic connection settings
 	URL            string        `mapstructure:"url" yaml:"url"`
+	Password       string        `mapstructure:"password" yaml:"password"`
 	Database       int           `mapstructure:"database" yaml:"database"`
+
+	// Connection pooling
+	PoolSize       int           `mapstructure:"pool_size" yaml:"pool_size"`
+
+	// Timeouts
 	ConnectTimeout time.Duration `mapstructure:"connect_timeout" yaml:"connect_timeout"`
 	ReadTimeout    time.Duration `mapstructure:"read_timeout" yaml:"read_timeout"`
+	WriteTimeout   time.Duration `mapstructure:"write_timeout" yaml:"write_timeout"`
+
+	// Retry settings
+	MaxRetries     int           `mapstructure:"max_retries" yaml:"max_retries"`
+
+	// Cluster mode configuration
+	ClusterMode    bool          `mapstructure:"cluster_mode" yaml:"cluster_mode"`
+	ClusterAddrs   []string      `mapstructure:"cluster_addrs" yaml:"cluster_addrs"`
+
+	// Sentinel mode configuration
+	SentinelMaster string        `mapstructure:"sentinel_master" yaml:"sentinel_master"`
+	SentinelAddrs  []string      `mapstructure:"sentinel_addrs" yaml:"sentinel_addrs"`
+
+	// TLS configuration
+	TLSEnabled     bool          `mapstructure:"tls_enabled" yaml:"tls_enabled"`
+	TLSCertFile    string        `mapstructure:"tls_cert_file" yaml:"tls_cert_file"`
+	TLSKeyFile     string        `mapstructure:"tls_key_file" yaml:"tls_key_file"`
+	TLSCAFile      string        `mapstructure:"tls_ca_file" yaml:"tls_ca_file"`
+}
+
+// ShutdownConfig contains configuration for graceful shutdown behavior.
+type ShutdownConfig struct {
+	// Timeout is the total shutdown timeout (default: 30s)
+	Timeout time.Duration `mapstructure:"timeout" yaml:"timeout"`
+
+	// DrainTimeout is the request drain timeout (default: 10s)
+	DrainTimeout time.Duration `mapstructure:"drain_timeout" yaml:"drain_timeout"`
+
+	// CheckpointTimeout is the per-mission checkpoint timeout (default: 5s)
+	CheckpointTimeout time.Duration `mapstructure:"checkpoint_timeout" yaml:"checkpoint_timeout"`
+
+	// AgentTimeout is the agent disconnect timeout (default: 15s)
+	AgentTimeout time.Duration `mapstructure:"agent_timeout" yaml:"agent_timeout"`
+}
+
+// ApplyDefaults fills in zero-valued fields with sensible defaults.
+func (c *ShutdownConfig) ApplyDefaults() {
+	if c.Timeout == 0 {
+		c.Timeout = 30 * time.Second
+	}
+
+	if c.DrainTimeout == 0 {
+		c.DrainTimeout = 10 * time.Second
+	}
+
+	if c.CheckpointTimeout == 0 {
+		c.CheckpointTimeout = 5 * time.Second
+	}
+
+	if c.AgentTimeout == 0 {
+		c.AgentTimeout = 15 * time.Second
+	}
+}
+
+// ApplyDefaults fills in zero-valued fields with sensible defaults.
+// This is useful when loading partial configurations from files or environment.
+func (c *RedisConfig) ApplyDefaults() {
+	if c.URL == "" && !c.ClusterMode && c.SentinelMaster == "" {
+		c.URL = "redis://localhost:6379"
+	}
+
+	if c.Database < 0 {
+		c.Database = 0
+	}
+
+	if c.PoolSize == 0 {
+		c.PoolSize = 10
+	}
+
+	if c.ConnectTimeout == 0 {
+		c.ConnectTimeout = 5 * time.Second
+	}
+
+	if c.ReadTimeout == 0 {
+		c.ReadTimeout = 3 * time.Second
+	}
+
+	if c.WriteTimeout == 0 {
+		c.WriteTimeout = 3 * time.Second
+	}
+
+	if c.MaxRetries == 0 {
+		c.MaxRetries = 3
+	}
 }

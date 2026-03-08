@@ -42,6 +42,10 @@ service DaemonService {
   // StopMission gracefully stops a running mission.
   rpc StopMission(StopMissionRequest) returns (StopMissionResponse);
 
+  // CreateMission creates a new mission with target and workflow configuration.
+  // Supports both referenced and inline configurations.
+  rpc CreateMission(CreateMissionRequest) returns (CreateMissionResponse);
+
   // ListMissions returns all missions (past and active).
   rpc ListMissions(ListMissionsRequest) returns (ListMissionsResponse);
 
@@ -1656,4 +1660,122 @@ message MissionDefinition {
 
   // updated_at is when the mission was last updated (Unix timestamp in milliseconds)
   int64 updated_at = 7;
+}
+
+// CreateMissionRequest requests creation of a new mission.
+message CreateMissionRequest {
+  // name is the mission name
+  string name = 1;
+
+  // description is the mission description
+  string description = 2;
+
+  // Target configuration (oneof)
+  oneof target_config {
+    // target_id is the ID of a pre-registered target
+    string target_id = 3;
+    // inline_target is an inline target configuration
+    InlineTargetConfig inline_target = 10;
+  }
+
+  // Workflow configuration (oneof)
+  oneof workflow_config {
+    // workflow_id is the ID of a pre-registered workflow
+    string workflow_id = 4;
+    // inline_workflow is an inline workflow configuration
+    InlineWorkflowConfig inline_workflow = 11;
+  }
+
+  // constraints defines execution constraints
+  MissionConstraints constraints = 5;
+
+  // metadata provides additional mission metadata
+  map<string, string> metadata = 6;
+}
+
+// CreateMissionResponse returns the result of creating a mission.
+message CreateMissionResponse {
+  // success indicates if the mission was created successfully
+  bool success = 1;
+
+  // mission is the created mission
+  Mission mission = 2;
+
+  // message provides additional context or error information
+  string message = 3;
+}
+
+// Seed represents a target seed for reconnaissance.
+message Seed {
+  // value is the seed value (e.g., domain name, IP address)
+  string value = 1;
+
+  // type is the seed type (domain, host, cidr, org, asn)
+  string type = 2;
+
+  // scope is the seed scope (in_scope, expand)
+  string scope = 3;
+}
+
+// InlineTargetConfig defines an inline target configuration.
+message InlineTargetConfig {
+  // seeds is the list of target seeds (at least one required)
+  repeated Seed seeds = 1;
+
+  // profile is the reconnaissance profile (aggressive, balanced, stealth)
+  string profile = 2;
+
+  // depth is the enumeration depth (1-5)
+  int32 depth = 3;
+
+  // excluded is the list of excluded patterns
+  repeated string excluded = 4;
+
+  // metadata provides additional target metadata
+  map<string, string> metadata = 5;
+}
+
+// InlineWorkflowConfig defines an inline workflow configuration.
+message InlineWorkflowConfig {
+  // name is the workflow name (optional, auto-generated if empty)
+  string name = 1;
+
+  // nodes is the list of workflow nodes (at least one required)
+  repeated InlineNodeConfig nodes = 2;
+
+  // edges is the list of workflow edges (optional, inferred from dependencies)
+  repeated InlineEdgeConfig edges = 3;
+
+  // metadata provides additional workflow metadata
+  map<string, string> metadata = 4;
+}
+
+// InlineNodeConfig defines a workflow node configuration.
+message InlineNodeConfig {
+  // id is the unique node identifier
+  string id = 1;
+
+  // type is the node type (agent, tool, plugin, condition, parallel, join)
+  string type = 2;
+
+  // name is the node name
+  string name = 3;
+
+  // depends_on lists node IDs this node depends on
+  repeated string depends_on = 4;
+
+  // config contains node-specific configuration (typed map)
+  gibson.common.TypedMap config = 5;
+}
+
+// InlineEdgeConfig defines a workflow edge configuration.
+message InlineEdgeConfig {
+  // from is the source node ID
+  string from = 1;
+
+  // to is the target node ID
+  string to = 2;
+
+  // condition is an optional condition for the edge
+  string condition = 3;
 }

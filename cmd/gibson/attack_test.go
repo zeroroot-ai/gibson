@@ -26,7 +26,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -39,6 +38,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/payload"
 	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/schema"
 	sdktypes "github.com/zero-day-ai/sdk/types"
@@ -50,11 +50,11 @@ var errNotFound = errors.New("not found")
 // TestAttackCommand_StoredTarget tests attack command with --target flag (stored target)
 func TestAttackCommand_StoredTarget(t *testing.T) {
 	// Create test database
-	db, cleanup := createTestDatabase(t)
+	stateClient, cleanup := createTestDatabase(t)
 	defer cleanup()
 
 	// Create a stored target in the database
-	targetDAO := database.NewTargetDAO(db)
+	targetDAO := database.NewRedisTargetDAO(stateClient)
 	storedTarget := &types.Target{
 		ID:   types.NewID(),
 		Name: "my-api",
@@ -406,22 +406,30 @@ func TestAttackCommand_StoredTargetNotFound(t *testing.T) {
 
 // Helper functions
 
-// createTestDatabase creates a temporary test database
-func createTestDatabase(t *testing.T) (*database.DB, func()) {
+// createTestDatabase creates a test StateClient for Redis
+func createTestDatabase(t *testing.T) (*state.StateClient, func()) {
 	t.Helper()
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test.db")
-	db, err := database.Open(dbPath)
-	require.NoError(t, err)
 
-	err = db.InitSchema()
-	require.NoError(t, err)
+	// Skip tests that require Redis
+	t.Skip("requires Redis")
 
-	cleanup := func() {
-		db.Close()
+	// Create state config
+	stateCfg := &state.Config{
+		URL: "redis://localhost:6379",
+	}
+	stateCfg.ApplyDefaults()
+
+	// Create StateClient
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		t.Fatalf("failed to create state client: %v", err)
 	}
 
-	return db, cleanup
+	cleanup := func() {
+		stateClient.Close()
+	}
+
+	return stateClient, cleanup
 }
 
 // createAttackCommand creates a fresh attack command for testing

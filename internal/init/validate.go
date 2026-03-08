@@ -7,7 +7,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/database"
 )
 
 // ValidationResult contains the results of setup validation
@@ -19,7 +18,7 @@ type ValidationResult struct {
 
 // ValidationError represents a validation error with context and remediation
 type ValidationError struct {
-	Component string // Which component failed (directories, config, key, database)
+	Component string // Which component failed (directories, config, key, redis)
 	Message   string // What went wrong
 	Action    string // What the user should do to fix it
 }
@@ -35,7 +34,8 @@ type ValidationWarning struct {
 //   - All required directories exist with correct permissions
 //   - Configuration file exists and is valid
 //   - Encryption key exists with secure permissions (0600)
-//   - Database exists and is accessible
+//
+// Note: Redis connectivity is validated at daemon startup, not here.
 //
 // Returns a ValidationResult indicating whether the setup is valid and
 // detailing any errors or warnings found.
@@ -59,9 +59,6 @@ func ValidateSetup(homeDir string) (*ValidationResult, error) {
 
 	// Validate encryption key
 	validateEncryptionKey(homeDir, result)
-
-	// Validate database
-	validateDatabase(homeDir, result)
 
 	// Set overall validity based on whether any errors were found
 	result.Valid = len(result.Errors) == 0
@@ -187,6 +184,14 @@ func validateConfigFile(homeDir string, result *ValidationResult) {
 			Message:   fmt.Sprintf("config home_dir (%s) doesn't match current home (%s)", cfg.Core.HomeDir, homeDir),
 		})
 	}
+
+	// Validate Redis configuration
+	if cfg.Redis.URL == "" {
+		result.Warnings = append(result.Warnings, ValidationWarning{
+			Component: "config",
+			Message:   "Redis address is empty, daemon startup will fail",
+		})
+	}
 }
 
 // validateEncryptionKey checks that the encryption key exists with secure permissions
@@ -239,66 +244,5 @@ func validateEncryptionKey(homeDir string, result *ValidationResult) {
 		})
 		result.Valid = false
 		return
-	}
-}
-
-// validateDatabase checks that the database exists and is accessible
-func validateDatabase(homeDir string, result *ValidationResult) {
-	dbPath := filepath.Join(homeDir, "gibson.db")
-
-	// Check if database file exists
-	_, err := os.Stat(dbPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			result.Errors = append(result.Errors, ValidationError{
-				Component: "database",
-				Message:   fmt.Sprintf("database not found: %s", dbPath),
-				Action:    "run 'gibson init' to create database",
-			})
-			result.Valid = false
-			return
-		}
-		result.Errors = append(result.Errors, ValidationError{
-			Component: "database",
-			Message:   fmt.Sprintf("failed to stat database: %v", err),
-			Action:    "check file permissions and run 'gibson init'",
-		})
-		result.Valid = false
-		return
-	}
-
-	// Try to open the database to verify it's accessible
-	db, err := database.Open(dbPath)
-	if err != nil {
-		result.Errors = append(result.Errors, ValidationError{
-			Component: "database",
-			Message:   fmt.Sprintf("failed to open database: %v", err),
-			Action:    "database may be corrupted, run 'gibson init --force' to recreate (WARNING: will lose data)",
-		})
-		result.Valid = false
-		return
-	}
-	defer db.Close()
-
-	// Try to query the database to verify schema is initialized
-	// Just check that we can execute a simple query
-	row := db.Conn().QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
-	var tableCount int
-	if err := row.Scan(&tableCount); err != nil {
-		result.Errors = append(result.Errors, ValidationError{
-			Component: "database",
-			Message:   fmt.Sprintf("database query failed: %v", err),
-			Action:    "database may be corrupted, run 'gibson init --force' to recreate",
-		})
-		result.Valid = false
-		return
-	}
-
-	// Warn if database has no tables (might not be initialized)
-	if tableCount == 0 {
-		result.Warnings = append(result.Warnings, ValidationWarning{
-			Component: "database",
-			Message:   "database has no tables, schema may not be initialized",
-		})
 	}
 }

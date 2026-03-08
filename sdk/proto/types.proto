@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package gibson.sdk;
+
+option go_package = "github.com/zero-day-ai/gibson/sdk/proto";
+
+// Common types for Gibson SDK protocol buffers.
+// This file defines core data types used across the Gibson framework.
+
+// Finding represents a security finding discovered during testing.
+message Finding {
+  bytes finding_id = 1;  // UUID as bytes (16 bytes)
+  string title = 2;
+  string description = 3;
+  string severity = 4;     // critical, high, medium, low, info
+  double confidence = 5;   // 0.0 - 1.0
+  string category = 6;
+  bytes target_id = 7;     // Optional target UUID as bytes
+  repeated Evidence evidence = 8;
+  CVSSScore cvss = 9;
+  repeated string cwe = 10;
+  map<string, string> metadata = 11;
+  int64 created_at = 12;   // Unix timestamp
+  bytes mission_id = 13;   // UUID as bytes (16 bytes)
+}
+
+// Evidence represents evidence supporting a finding.
+message Evidence {
+  string type = 1;
+  string description = 2;
+  map<string, string> data = 3;
+  int64 timestamp = 4;  // Unix timestamp
+}
+
+// CVSSScore represents a CVSS scoring.
+message CVSSScore {
+  string version = 1;  // e.g., "3.1"
+  string vector = 2;
+  double score = 3;
+}
+
+// Mission represents a security testing mission.
+message Mission {
+  bytes mission_id = 1;  // UUID as bytes (16 bytes)
+  string name = 2;
+  string description = 3;
+  string status = 4;     // pending, running, completed, failed, cancelled
+  int64 created_at = 5;  // Unix timestamp
+  int64 started_at = 6;  // Unix timestamp
+  int64 completed_at = 7; // Unix timestamp
+  map<string, string> metadata = 8;
+}
+
+// Task represents work assigned to an agent.
+message Task {
+  bytes task_id = 1;       // UUID as bytes (16 bytes)
+  string name = 2;
+  string description = 3;
+  string goal = 4;
+  map<string, string> context = 5;
+  int64 timeout = 6;       // Duration in seconds
+  bytes mission_id = 7;    // UUID as bytes (16 bytes)
+  bytes parent_task_id = 8; // Optional parent task UUID
+  bytes target_id = 9;      // Optional target UUID
+  int64 created_at = 10;    // Unix timestamp
+  int32 priority = 11;
+  repeated string tags = 12;
+}
+
+// Result represents the outcome of agent execution.
+message Result {
+  bytes task_id = 1;           // UUID as bytes (16 bytes)
+  string status = 2;            // pending, running, completed, failed, cancelled
+  map<string, string> output = 3;
+  repeated Finding findings = 4;
+  ResultError error = 5;
+  TaskMetrics metrics = 6;
+  int64 started_at = 7;         // Unix timestamp
+  int64 completed_at = 8;       // Unix timestamp
+}
+
+// ResultError contains error information from a failed task.
+message ResultError {
+  string message = 1;
+  string code = 2;
+  map<string, string> details = 3;
+  string stack_trace = 4;
+  bool recoverable = 5;
+}
+
+// TaskMetrics contains execution metrics for a task.
+message TaskMetrics {
+  int64 duration = 1;        // Duration in nanoseconds
+  int32 llm_calls = 2;
+  int32 tool_calls = 3;
+  int32 plugin_calls = 4;
+  int32 tokens_used = 5;
+  double cost = 6;           // USD
+  int32 findings_count = 7;
+  int32 errors = 8;
+  int32 retries = 9;
+  int32 sub_tasks = 10;
+  map<string, string> custom_metrics = 11;
+}

@@ -1076,32 +1076,28 @@ func (b *DefaultGraphRAGQueryBridge) createHierarchyRelationships(ctx context.Co
 	switch node.Type {
 	case sdkgraphrag.NodeTypePort:
 		// Port references its host via host_id property
-		// TODO: Replace "host_id" with sdkgraphrag.PropHostID when SDK is updated
-		if hostID, ok := props["host_id"].(string); ok && hostID != "" {
+		if hostID, ok := props[sdkgraphrag.PropHostID].(string); ok && hostID != "" {
 			fromID = hostID
 			relType = sdkgraphrag.RelTypeHASPORT
 		}
 
 	case sdkgraphrag.NodeTypeService:
 		// Service references its port via port_id property
-		// TODO: Replace "port_id" with sdkgraphrag.PropPortID when SDK is updated
-		if portID, ok := props["port_id"].(string); ok && portID != "" {
+		if portID, ok := props[sdkgraphrag.PropPortID].(string); ok && portID != "" {
 			fromID = portID
 			relType = sdkgraphrag.RelTypeRUNSSERVICE
 		}
 
 	case sdkgraphrag.NodeTypeEndpoint:
 		// Endpoint references its service via service_id property
-		// TODO: Replace "service_id" with sdkgraphrag.PropServiceID when SDK is updated
-		if serviceID, ok := props["service_id"].(string); ok && serviceID != "" {
+		if serviceID, ok := props[sdkgraphrag.PropServiceID].(string); ok && serviceID != "" {
 			fromID = serviceID
 			relType = sdkgraphrag.RelTypeHASENDPOINT
 		}
 
 	case sdkgraphrag.NodeTypeSubdomain:
 		// Subdomain references its parent domain via parent_domain property
-		// TODO: Replace "parent_domain" with sdkgraphrag.PropParentDomain when SDK is updated
-		if parentDomain, ok := props["parent_domain"].(string); ok && parentDomain != "" {
+		if parentDomain, ok := props[sdkgraphrag.PropParentDomain].(string); ok && parentDomain != "" {
 			fromID = parentDomain
 			relType = sdkgraphrag.RelTypeHASSUBDOMAIN
 		}

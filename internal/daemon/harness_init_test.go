@@ -11,6 +11,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/registry"
 )
 
@@ -29,9 +30,7 @@ func TestNewHarnessFactory(t *testing.T) {
 		},
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelError, // Quiet for tests
-	}))
+	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
 
 	// Create daemon instance
 	d := &daemonImpl{
@@ -79,9 +78,7 @@ func TestNewHarnessFactory_WithoutRegistryAdapter(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelError,
-	}))
+	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
 
 	// Create daemon with minimal infrastructure (no registry adapter)
 	d := &daemonImpl{
@@ -111,9 +108,7 @@ func TestNewHarnessFactory_ConfigValidation(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelError,
-	}))
+	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
 
 	// Create daemon with nil slot manager (should fail validation)
 	d := &daemonImpl{

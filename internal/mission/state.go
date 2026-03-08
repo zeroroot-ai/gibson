@@ -87,8 +87,7 @@ type MissionState struct {
 	MissionID types.ID
 
 	// Definition is a reference to the mission definition being executed
-	// This field will be populated from MissionDefinition once definition.go is created
-	Definition any // TODO: Change to *MissionDefinition in task 1.1
+	Definition *MissionDefinition
 
 	// Status is the current execution status of the mission
 	Status MissionStatus
@@ -144,14 +143,11 @@ func NewMissionState(missionID types.ID, nodes map[string]any) *MissionState {
 //   - All of its dependencies have completed successfully
 //
 // This method is thread-safe and uses a read lock.
-//
-// Note: This method signature will change once MissionDefinition is available.
-// For now, it returns a generic interface slice.
-func (ms *MissionState) GetReadyNodes() []any {
+func (ms *MissionState) GetReadyNodes() []string {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
-	var readyNodes []any
+	var readyNodes []string
 
 	for nodeID, nodeState := range ms.NodeStates {
 		// Skip if node is not pending
@@ -159,8 +155,16 @@ func (ms *MissionState) GetReadyNodes() []any {
 			continue
 		}
 
-		// TODO: Once MissionDefinition is available, implement proper dependency checking
-		// For now, we return all pending nodes
+		// Check dependencies if definition is available
+		if ms.Definition != nil {
+			node := ms.Definition.GetNode(nodeID)
+			if node != nil && len(node.Dependencies) > 0 {
+				if !ms.areDependenciesCompleted(node.Dependencies) {
+					continue
+				}
+			}
+		}
+
 		readyNodes = append(readyNodes, nodeID)
 	}
 
@@ -375,10 +379,12 @@ func (ms *MissionState) SetExecutionOrder(order []string) error {
 		}
 	}
 
-	// TODO: Validate dependency order once MissionDefinition is available
-	// if err := ms.validateDependencyOrder(order); err != nil {
-	//     return err
-	// }
+	// Validate dependency order if definition is available
+	if ms.Definition != nil {
+		if err := ms.validateDependencyOrder(order); err != nil {
+			return err
+		}
+	}
 
 	ms.ExecutionOrder = order
 	return nil
@@ -402,10 +408,12 @@ func (ms *MissionState) ReorderRemaining(order []string) error {
 		}
 	}
 
-	// TODO: Validate dependency order once MissionDefinition is available
-	// if err := ms.validateDependencyOrder(order); err != nil {
-	//     return err
-	// }
+	// Validate dependency order if definition is available
+	if ms.Definition != nil {
+		if err := ms.validateDependencyOrder(order); err != nil {
+			return err
+		}
+	}
 
 	ms.ExecutionOrder = order
 	return nil
@@ -491,25 +499,108 @@ func (ms *MissionState) ResetForRetry(nodeID string, newParams map[string]any) e
 // validateDependencyOrder validates that the given node order respects dependency constraints.
 // For each node, all its dependencies must appear earlier in the order.
 // This is an internal helper that must be called with a lock held.
-//
-// TODO: This method will be fully implemented once MissionDefinition is available in task 1.1
 func (ms *MissionState) validateDependencyOrder(order []string) error {
-	// Placeholder implementation until MissionDefinition is available
+	if ms.Definition == nil {
+		return nil
+	}
+
+	// Build a position map for quick lookup
+	position := make(map[string]int, len(order))
+	for i, nodeID := range order {
+		position[nodeID] = i
+	}
+
+	// Check each node's dependencies appear before it in the order
+	for i, nodeID := range order {
+		node := ms.Definition.GetNode(nodeID)
+		if node == nil {
+			continue
+		}
+
+		for _, depID := range node.Dependencies {
+			depPos, exists := position[depID]
+			if !exists {
+				// Dependency not in order - check if it's already completed
+				if depState, ok := ms.NodeStates[depID]; ok && depState.Status == NodeStatusCompleted {
+					continue
+				}
+				return fmt.Errorf("dependency %s for node %s not found in order", depID, nodeID)
+			}
+			if depPos >= i {
+				return fmt.Errorf("dependency %s must appear before node %s in order", depID, nodeID)
+			}
+		}
+	}
+
 	return nil
 }
 
 // getPendingInDependencyOrder returns pending nodes in topological order (respecting dependencies).
 // This is an internal helper that must be called with a lock held.
-//
-// TODO: This method will be fully implemented once MissionDefinition is available in task 1.1
 func (ms *MissionState) getPendingInDependencyOrder() []string {
-	// Placeholder implementation until MissionDefinition is available
-	// For now, just return all pending nodes
 	pending := make([]string, 0)
 	for nodeID, nodeState := range ms.NodeStates {
 		if nodeState.Status == NodeStatusPending {
 			pending = append(pending, nodeID)
 		}
 	}
-	return pending
+
+	// If no definition, return unsorted
+	if ms.Definition == nil {
+		return pending
+	}
+
+	// Topological sort using Kahn's algorithm
+	// Build in-degree map for pending nodes only
+	inDegree := make(map[string]int)
+	for _, nodeID := range pending {
+		inDegree[nodeID] = 0
+	}
+
+	// Count dependencies that are also pending
+	for _, nodeID := range pending {
+		node := ms.Definition.GetNode(nodeID)
+		if node == nil {
+			continue
+		}
+		for _, depID := range node.Dependencies {
+			if _, isPending := inDegree[depID]; isPending {
+				inDegree[nodeID]++
+			}
+		}
+	}
+
+	// Start with nodes that have no pending dependencies
+	var queue []string
+	for nodeID, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, nodeID)
+		}
+	}
+
+	// Process queue
+	result := make([]string, 0, len(pending))
+	for len(queue) > 0 {
+		nodeID := queue[0]
+		queue = queue[1:]
+		result = append(result, nodeID)
+
+		// Find nodes that depend on this one and decrement their in-degree
+		for _, otherID := range pending {
+			node := ms.Definition.GetNode(otherID)
+			if node == nil {
+				continue
+			}
+			for _, depID := range node.Dependencies {
+				if depID == nodeID {
+					inDegree[otherID]--
+					if inDegree[otherID] == 0 {
+						queue = append(queue, otherID)
+					}
+				}
+			}
+		}
+	}
+
+	return result
 }

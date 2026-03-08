@@ -21,13 +21,6 @@ func DefaultConfig() *Config {
 			Timeout:       5 * time.Minute,
 			Debug:         false,
 		},
-		Database: DBConfig{
-			Path:           filepath.Join(homeDir, "gibson.db"),
-			MaxConnections: 10,
-			Timeout:        30 * time.Second,
-			WALMode:        true,
-			AutoVacuum:     true,
-		},
 		Security: SecurityConfig{
 			EncryptionAlgorithm: "aes-256-gcm",
 			KeyDerivation:       "scrypt",
@@ -80,9 +73,21 @@ func DefaultConfig() *Config {
 		Embedder: embedder.DefaultEmbedderConfig(),
 		Redis: RedisConfig{
 			URL:            "redis://localhost:6379",
+			Password:       "",
 			Database:       0,
+			PoolSize:       10,
 			ConnectTimeout: 5 * time.Second,
-			ReadTimeout:    30 * time.Second,
+			ReadTimeout:    3 * time.Second,
+			WriteTimeout:   3 * time.Second,
+			MaxRetries:     3,
+			ClusterMode:    false,
+			ClusterAddrs:   []string{},
+			SentinelMaster: "",
+			SentinelAddrs:  []string{},
+			TLSEnabled:     false,
+			TLSCertFile:    "",
+			TLSKeyFile:     "",
+			TLSCAFile:      "",
 		},
 		ActivityLogging: ActivityLoggingConfig{
 			Enabled:             true,
@@ -92,6 +97,12 @@ func DefaultConfig() *Config {
 			FilePath:            "",
 			BufferSize:          10000,
 			IncludeLangfuseURLs: true,
+		},
+		Shutdown: ShutdownConfig{
+			Timeout:           30 * time.Second,
+			DrainTimeout:      10 * time.Second,
+			CheckpointTimeout: 5 * time.Second,
+			AgentTimeout:      15 * time.Second,
 		},
 	}
 }

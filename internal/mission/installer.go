@@ -527,56 +527,24 @@ func copyFile(src, dst string) error {
 	return os.Chmod(dst, srcInfo.Mode())
 }
 
-// ParseDefinitionFromFile parses a mission definition from a YAML file
-// This will be implemented in task 1.3 (parser.go)
-// For now, we provide a placeholder implementation
+// ParseDefinitionFromFile parses a mission definition from a YAML file.
+// This delegates to ParseDefinition in parser.go.
 func ParseDefinitionFromFile(path string) (*MissionDefinition, error) {
-	// TODO: Implement in task 1.3
-	// This is a placeholder that reads the file and returns a basic definition
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read mission file: %w", err)
-	}
-
-	// For now, just check that the file is not empty
-	if len(data) == 0 {
-		return nil, fmt.Errorf("mission file is empty")
-	}
-
-	// Return a placeholder definition
-	// The actual parsing will be implemented in parser.go
-	def := &MissionDefinition{
-		Name:    extractNameFromPath(path),
-		Version: "0.0.0",
-		Nodes:   make(map[string]*MissionNode),
-	}
-
-	return def, nil
+	return ParseDefinition(path)
 }
 
-// ValidateDefinition validates a mission definition
-// This will be implemented in task 1.4 (validator.go)
-// For now, we provide a placeholder implementation
+// ValidateDefinition validates a mission definition.
+// This delegates to Validate in validator.go.
 func ValidateDefinition(def *MissionDefinition) error {
-	// TODO: Implement in task 1.4
-	// This is a placeholder that performs basic validation
-	if def == nil {
-		return fmt.Errorf("definition is nil")
+	errs := Validate(def)
+	if len(errs) > 0 {
+		return errs
 	}
-
-	if def.Name == "" {
-		return fmt.Errorf("mission name is required")
-	}
-
-	if def.Nodes == nil {
-		return fmt.Errorf("mission must have at least one node")
-	}
-
 	return nil
 }
 
-// extractNameFromPath extracts a mission name from a file path
-// This is a helper for the placeholder ParseDefinitionFromFile
+// extractNameFromPath extracts a mission name from a file path.
+// This is a helper for filesystem-based operations.
 func extractNameFromPath(path string) string {
 	// Get the directory name as a fallback name
 	dir := filepath.Dir(path)

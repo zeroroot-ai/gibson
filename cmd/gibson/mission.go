@@ -17,6 +17,7 @@ import (
 	dclient "github.com/zero-day-ai/gibson/internal/daemon/client"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/state"
 	"gopkg.in/yaml.v3"
 )
 
@@ -226,7 +227,9 @@ var missionStatusCmd = &cobra.Command{
 	Long: `Display the current status of a mission including progress, checkpoint availability, and resume capability.
 
 This command provides a quick overview of mission state, useful for monitoring
-running missions and determining if a paused mission can be resumed.`,
+running missions and determining if a paused mission can be resumed.
+
+Use --run to view status for a specific run number instead of the latest run.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runMissionStatus,
 }
@@ -343,6 +346,16 @@ var (
 	missionMemoryContinuity  string
 	missionStartDependencies bool
 
+	// Inline target configuration flags
+	missionInlineTargetSeeds   string // comma-separated seed values in format type:value (e.g., domain:example.com,host:10.0.0.1)
+	missionInlineTargetProfile string // aggressive, balanced, stealth
+	missionInlineTargetDepth   int    // 1-5
+	missionInlineTargetExclude string // comma-separated patterns to exclude
+
+	// Inline workflow configuration flags
+	missionInlineWorkflowFile  string // YAML file defining inline workflow
+	missionInlineWorkflowAgent string // single-agent shorthand: creates workflow with one agent node
+
 	// Mission install/update flags
 	missionInstallBranch  string
 	missionInstallTag     string
@@ -370,7 +383,7 @@ func getHomeDirFromFlags(flags *GlobalFlags) (string, error) {
 }
 
 // buildMissionCommandContext creates a CommandContext for mission commands.
-// It handles database connection, mission store initialization, and context setup.
+// It handles StateClient connection, mission store initialization, and context setup.
 func buildMissionCommandContext(cmd *cobra.Command) (*core.CommandContext, error) {
 	ctx := cmd.Context()
 
@@ -386,25 +399,42 @@ func buildMissionCommandContext(cmd *cobra.Command) (*core.CommandContext, error
 		return nil, fmt.Errorf("failed to get Gibson home: %w", err)
 	}
 
-	// Open database
-	dbPath := homeDir + "/gibson.db"
-	db, err := database.Open(dbPath)
+	// Load configuration to get Redis settings
+	cfg, err := loadGlobalConfig()
 	if err != nil {
-		return nil, internal.WrapError(internal.ExitDatabaseError, "failed to open database", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Create mission store
-	missionStore := mission.NewDBMissionStore(db)
+	// Create StateClient for Redis state stores
+	stateCfg := &state.Config{
+		URL:         cfg.Redis.URL,
+		Database:    cfg.Redis.Database,
+		Password:    cfg.Redis.Password,
+		PoolSize:    cfg.Redis.PoolSize,
+		DialTimeout: cfg.Redis.ConnectTimeout,
+		ReadTimeout: cfg.Redis.ReadTimeout,
+	}
+	stateCfg.ApplyDefaults()
 
-	// Create target DAO
-	targetDAO := database.NewTargetDAO(db)
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create state client: %w", err)
+	}
+
+	// Create mission stores with Redis backend
+	missionStore := mission.NewRedisMissionStore(stateClient)
+	missionRunStore := mission.NewRedisMissionRunStore(stateClient)
+
+	// Create target DAO with Redis backend
+	targetDAO := database.NewRedisTargetDAO(stateClient)
 
 	return &core.CommandContext{
-		Ctx:          ctx,
-		DB:           db,
-		HomeDir:      homeDir,
-		MissionStore: missionStore,
-		TargetDAO:    targetDAO,
+		Ctx:             ctx,
+		StateClient:     stateClient,
+		HomeDir:         homeDir,
+		MissionStore:    missionStore,
+		MissionRunStore: missionRunStore,
+		TargetDAO:       targetDAO,
 	}, nil
 }
 
@@ -437,6 +467,16 @@ func init() {
 	missionRunCmd.Flags().StringVar(&missionMemoryContinuity, "memory-continuity", "isolated", "Memory continuity mode: isolated (default), inherit, shared")
 	missionRunCmd.Flags().BoolVar(&missionStartDependencies, "start-dependencies", false, "Automatically start stopped component dependencies before running the mission")
 
+	// Inline target configuration flags (alternative to --target)
+	missionRunCmd.Flags().StringVar(&missionInlineTargetSeeds, "target-seeds", "", "Inline target seeds (comma-separated, format: type:value, e.g., domain:example.com,host:10.0.0.1)")
+	missionRunCmd.Flags().StringVar(&missionInlineTargetProfile, "target-profile", "", "Inline target profile: aggressive, balanced, stealth")
+	missionRunCmd.Flags().IntVar(&missionInlineTargetDepth, "target-depth", 0, "Inline target enumeration depth (1-5)")
+	missionRunCmd.Flags().StringVar(&missionInlineTargetExclude, "target-exclude", "", "Inline target patterns to exclude (comma-separated)")
+
+	// Inline workflow configuration flags (alternative to --file)
+	missionRunCmd.Flags().StringVar(&missionInlineWorkflowFile, "workflow-file", "", "Inline workflow YAML file")
+	missionRunCmd.Flags().StringVar(&missionInlineWorkflowAgent, "workflow-agent", "", "Single-agent workflow shorthand (creates workflow with one agent node)")
+
 	// Delete flags
 	missionDeleteCmd.Flags().BoolVar(&missionForceDelete, "force", false, "Skip confirmation prompt")
 
@@ -458,6 +498,9 @@ func init() {
 
 	// Definition show flags
 	missionDefinitionShowCmd.Flags().BoolVar(&missionDefinitionShowYAML, "yaml", false, "Output raw YAML")
+
+	// Status flags
+	missionStatusCmd.Flags().Int("run", 0, "Show status for a specific run number (0 = latest)")
 }
 
 // runMissionList lists all missions with optional status filter
@@ -694,6 +737,63 @@ func runMissionRun(cmd *cobra.Command, args []string) error {
 		return internal.WrapError(internal.ExitError, "mission execution requires daemon", err)
 	}
 	defer client.Close()
+
+	// Check if inline configuration is provided
+	// Build inline configs from CLI flags
+	inlineTarget, err := buildInlineTargetConfig()
+	if err != nil {
+		return internal.WrapError(internal.ExitError, "invalid inline target configuration", err)
+	}
+
+	inlineWorkflow, err := buildInlineWorkflowConfig()
+	if err != nil {
+		return internal.WrapError(internal.ExitError, "invalid inline workflow configuration", err)
+	}
+
+	// If inline configs are provided, use CreateMission API
+	if inlineTarget != nil || inlineWorkflow != nil {
+		if verbose {
+			if inlineTarget != nil {
+				fmt.Printf("Using inline target: %d seeds, profile=%s, depth=%d\n",
+					len(inlineTarget.Seeds), inlineTarget.Profile, inlineTarget.Depth)
+			}
+			if inlineWorkflow != nil {
+				fmt.Printf("Using inline workflow: %s (%d nodes)\n",
+					inlineWorkflow.Name, len(inlineWorkflow.Nodes))
+			}
+		}
+
+		// Build mission name from inline configs or generate one
+		missionName := "inline-mission"
+		if inlineWorkflow != nil && inlineWorkflow.Name != "" {
+			missionName = inlineWorkflow.Name
+		}
+
+		// Create mission options
+		opts := dclient.CreateMissionOptions{
+			Name:           missionName,
+			Description:    "Mission created from CLI inline configuration",
+			InlineTarget:   inlineTarget,
+			InlineWorkflow: inlineWorkflow,
+		}
+
+		// If inline target not provided but target flag is, use it as reference
+		if inlineTarget == nil && missionTargetFlag != "" {
+			opts.TargetID = missionTargetFlag
+		}
+
+		// Create the mission
+		result, err := client.CreateMission(ctx, opts)
+		if err != nil {
+			return internal.WrapError(internal.ExitError, "failed to create inline mission", err)
+		}
+
+		fmt.Printf("Mission '%s' created successfully\n", result.Name)
+		fmt.Printf("Mission ID: %s\n", result.MissionID)
+		fmt.Printf("Target ID: %s\n", result.TargetID)
+		fmt.Printf("Workflow ID: %s\n", result.WorkflowID)
+		return nil
+	}
 
 	// For URL and name sources, we need to resolve to a file path first
 	// This will be handled by the daemon when we add RunMissionFromSource method
@@ -1192,6 +1292,9 @@ func runMissionStatus(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	missionID := args[0]
 
+	// Parse --run flag
+	runNumber, _ := cmd.Flags().GetInt("run")
+
 	// Querying status requires daemon
 	client, err := dclient.RequireDaemon(ctx)
 	if err != nil {
@@ -1218,6 +1321,50 @@ func runMissionStatus(cmd *cobra.Command, args []string) error {
 		return internal.WrapError(internal.ExitError, "mission not found", fmt.Errorf("no mission matches '%s'", missionID))
 	}
 
+	// Get mission run history to determine run number and total runs
+	var currentRunNumber int
+	var totalRuns int
+	runs, total, err := client.GetMissionHistory(ctx, mission.Name, 0, 0)
+	if err == nil {
+		totalRuns = total
+		// Find the run number for this mission ID
+		for _, run := range runs {
+			if run.MissionID == mission.ID {
+				currentRunNumber = run.RunNumber
+				break
+			}
+		}
+
+		// If --run flag specified, check if it's valid
+		if runNumber > 0 {
+			if runNumber > totalRuns {
+				return internal.WrapError(internal.ExitError, "invalid run number",
+					fmt.Errorf("run %d not found (total runs: %d)", runNumber, totalRuns))
+			}
+			// Find the mission ID for the specified run number
+			found := false
+			for _, run := range runs {
+				if run.RunNumber == runNumber {
+					// Update mission info to show the specified run
+					mission.ID = run.MissionID
+					mission.Status = run.Status
+					mission.FindingCount = run.FindingsCount
+					mission.StartTime = run.CreatedAt
+					if run.CompletedAt != nil {
+						mission.EndTime = *run.CompletedAt
+					}
+					currentRunNumber = run.RunNumber
+					found = true
+					break
+				}
+			}
+			if !found {
+				return internal.WrapError(internal.ExitError, "run not found",
+					fmt.Errorf("run %d not found in mission history", runNumber))
+			}
+		}
+	}
+
 	// Query checkpoints for this mission
 	checkpoints, err := client.GetMissionCheckpoints(ctx, mission.ID)
 	hasCheckpoint := err == nil && len(checkpoints) > 0
@@ -1227,6 +1374,9 @@ func runMissionStatus(cmd *cobra.Command, args []string) error {
 
 	// Display mission status
 	fmt.Printf("Mission: %s\n", mission.ID)
+	if currentRunNumber > 0 {
+		fmt.Printf("Run: %d of %d\n", currentRunNumber, totalRuns)
+	}
 	fmt.Printf("Status: %s\n", mission.Status)
 	fmt.Printf("Workflow: %s\n", mission.WorkflowPath)
 	fmt.Printf("Progress: %d findings\n", mission.FindingCount)
@@ -1776,6 +1926,202 @@ func runMissionDefinitionShow(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(tw, "EXIT POINTS:\t%d\n", len(definition.ExitPoints))
 
 	return nil
+}
+
+// buildInlineTargetConfig builds InlineTargetData from CLI flags.
+// Returns nil if no inline target flags are specified.
+func buildInlineTargetConfig() (*dclient.InlineTargetData, error) {
+	// Check if any inline target flags are provided
+	if missionInlineTargetSeeds == "" {
+		return nil, nil
+	}
+
+	// Parse seeds (format: type:value,type:value,...)
+	seedParts := strings.Split(missionInlineTargetSeeds, ",")
+	seeds := make([]*dclient.TargetSeedData, 0, len(seedParts))
+
+	for _, part := range seedParts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// Expected format: type:value or value (assumes domain type)
+		var seedType, seedValue string
+		if idx := strings.Index(part, ":"); idx > 0 {
+			seedType = part[:idx]
+			seedValue = part[idx+1:]
+		} else {
+			seedType = "domain" // default type
+			seedValue = part
+		}
+
+		// Validate seed type
+		validTypes := []string{"domain", "host", "cidr", "org", "asn"}
+		valid := false
+		for _, vt := range validTypes {
+			if seedType == vt {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return nil, fmt.Errorf("invalid seed type '%s', must be one of: %s", seedType, strings.Join(validTypes, ", "))
+		}
+
+		seeds = append(seeds, &dclient.TargetSeedData{
+			Value: seedValue,
+			Type:  seedType,
+			Scope: "in_scope",
+		})
+	}
+
+	if len(seeds) == 0 {
+		return nil, fmt.Errorf("no valid seeds provided")
+	}
+
+	// Validate and set profile
+	profile := missionInlineTargetProfile
+	if profile == "" {
+		profile = "balanced" // default profile
+	}
+	validProfiles := []string{"aggressive", "balanced", "stealth"}
+	validProfile := false
+	for _, vp := range validProfiles {
+		if profile == vp {
+			validProfile = true
+			break
+		}
+	}
+	if !validProfile {
+		return nil, fmt.Errorf("invalid target profile '%s', must be one of: %s", profile, strings.Join(validProfiles, ", "))
+	}
+
+	// Validate and set depth
+	depth := int32(missionInlineTargetDepth)
+	if depth == 0 {
+		depth = 2 // default depth
+	}
+	if depth < 1 || depth > 5 {
+		return nil, fmt.Errorf("invalid target depth %d, must be between 1 and 5", depth)
+	}
+
+	// Parse excluded patterns
+	var excluded []string
+	if missionInlineTargetExclude != "" {
+		for _, ex := range strings.Split(missionInlineTargetExclude, ",") {
+			ex = strings.TrimSpace(ex)
+			if ex != "" {
+				excluded = append(excluded, ex)
+			}
+		}
+	}
+
+	return &dclient.InlineTargetData{
+		Seeds:    seeds,
+		Profile:  profile,
+		Depth:    depth,
+		Excluded: excluded,
+	}, nil
+}
+
+// buildInlineWorkflowConfig builds InlineWorkflowData from CLI flags.
+// Returns nil if no inline workflow flags are specified.
+func buildInlineWorkflowConfig() (*dclient.InlineWorkflowData, error) {
+	// Check for single-agent shorthand
+	if missionInlineWorkflowAgent != "" {
+		// Create a single-node workflow with one agent
+		return &dclient.InlineWorkflowData{
+			Name: fmt.Sprintf("inline-%s-workflow", missionInlineWorkflowAgent),
+			Nodes: []*dclient.WorkflowNodeData{
+				{
+					ID:   "agent-1",
+					Type: "agent",
+					Name: missionInlineWorkflowAgent,
+				},
+			},
+		}, nil
+	}
+
+	// Check for workflow file
+	if missionInlineWorkflowFile != "" {
+		// Read and parse the workflow YAML file
+		content, err := os.ReadFile(missionInlineWorkflowFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read inline workflow file: %w", err)
+		}
+
+		// Parse the YAML into inline workflow structure
+		var yamlWorkflow struct {
+			Name  string `yaml:"name"`
+			Nodes []struct {
+				ID        string            `yaml:"id"`
+				Type      string            `yaml:"type"`
+				Name      string            `yaml:"name"`
+				DependsOn []string          `yaml:"depends_on"`
+				Config    map[string]string `yaml:"config"`
+			} `yaml:"nodes"`
+			Edges []struct {
+				From      string `yaml:"from"`
+				To        string `yaml:"to"`
+				Condition string `yaml:"condition"`
+			} `yaml:"edges"`
+			Metadata map[string]string `yaml:"metadata"`
+		}
+
+		if err := yaml.Unmarshal(content, &yamlWorkflow); err != nil {
+			return nil, fmt.Errorf("failed to parse inline workflow YAML: %w", err)
+		}
+
+		// Validate nodes
+		if len(yamlWorkflow.Nodes) == 0 {
+			return nil, fmt.Errorf("inline workflow must have at least one node")
+		}
+
+		// Convert to InlineWorkflowData
+		nodes := make([]*dclient.WorkflowNodeData, len(yamlWorkflow.Nodes))
+		for i, n := range yamlWorkflow.Nodes {
+			// Convert map[string]string to map[string]any
+			var config map[string]any
+			if len(n.Config) > 0 {
+				config = make(map[string]any, len(n.Config))
+				for k, v := range n.Config {
+					config[k] = v
+				}
+			}
+			nodes[i] = &dclient.WorkflowNodeData{
+				ID:        n.ID,
+				Type:      n.Type,
+				Name:      n.Name,
+				DependsOn: n.DependsOn,
+				Config:    config,
+			}
+		}
+
+		edges := make([]*dclient.WorkflowEdgeData, len(yamlWorkflow.Edges))
+		for i, e := range yamlWorkflow.Edges {
+			edges[i] = &dclient.WorkflowEdgeData{
+				From:      e.From,
+				To:        e.To,
+				Condition: e.Condition,
+			}
+		}
+
+		name := yamlWorkflow.Name
+		if name == "" {
+			name = filepath.Base(missionInlineWorkflowFile)
+		}
+
+		return &dclient.InlineWorkflowData{
+			Name:     name,
+			Nodes:    nodes,
+			Edges:    edges,
+			Metadata: yamlWorkflow.Metadata,
+		}, nil
+	}
+
+	// No inline workflow flags specified
+	return nil, nil
 }
 
 // checkAndStartDependencies verifies that all mission dependencies are installed and running.

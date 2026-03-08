@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -86,21 +85,17 @@ func DefaultRegistryConfig() RegistryConfig {
 	}
 }
 
-// NewPayloadRegistry creates a new payload registry
-func NewPayloadRegistry(db *database.DB, config RegistryConfig) *DefaultPayloadRegistry {
+// NewPayloadRegistryWithStore creates a new payload registry with a custom PayloadStore.
+// This allows using Redis-backed or other store implementations.
+func NewPayloadRegistryWithStore(store PayloadStore, config RegistryConfig) *DefaultPayloadRegistry {
 	return &DefaultPayloadRegistry{
-		store:            NewPayloadStore(db),
+		store:            store,
 		cache:            make(map[types.ID]*registryCache),
 		cacheTTL:         config.CacheTTL,
 		builtInLoader:    NewBuiltInLoader(),
 		builtInsLoaded:   false,
 		enableAutoExpire: config.EnableAutoExpire,
 	}
-}
-
-// NewPayloadRegistryWithDefaults creates a new payload registry with default configuration
-func NewPayloadRegistryWithDefaults(db *database.DB) *DefaultPayloadRegistry {
-	return NewPayloadRegistry(db, DefaultRegistryConfig())
 }
 
 // Register adds a new payload to the registry

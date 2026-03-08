@@ -653,6 +653,9 @@ func (m *mockDaemonServiceClient) ResolveMissionDependencies(ctx context.Context
 func (m *mockDaemonServiceClient) ValidateMissionDependencies(ctx context.Context, req *api.ValidateMissionDependenciesRequest, opts ...grpc.CallOption) (*api.ValidateMissionDependenciesResponse, error) {
 	return nil, nil
 }
+func (m *mockDaemonServiceClient) CreateMission(ctx context.Context, req *api.CreateMissionRequest, opts ...grpc.CallOption) (*api.CreateMissionResponse, error) {
+	return nil, nil
+}
 
 // TestClient_Ping tests the Ping method with mock client.
 func TestClient_Ping(t *testing.T) {

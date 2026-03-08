@@ -21,7 +21,7 @@ type QueueManager struct {
 //
 // Parameters:
 //   - redisURL: Redis connection URL (e.g., "redis://localhost:6379")
-//                If empty, uses REDIS_URL environment variable or defaults to "redis://localhost:6379"
+//     If empty, uses REDIS_URL environment variable or defaults to "redis://localhost:6379"
 //   - logger: Structured logger for queue operations
 //
 // Returns:

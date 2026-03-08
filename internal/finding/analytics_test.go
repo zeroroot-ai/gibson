@@ -2,8 +2,6 @@ package finding
 
 import (
 	"context"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,41 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// setupTestAnalytics creates a test database and analytics instance
-func setupTestAnalytics(t *testing.T) (*FindingAnalytics, *DBFindingStore, types.ID) {
+// setupTestAnalytics creates an in-memory store and analytics instance
+func setupTestAnalytics(t *testing.T) (*FindingAnalytics, *InMemoryFindingStore, types.ID) {
 	t.Helper()
 
-	// Create temporary file for database
-	tmpFile, err := os.CreateTemp("", "analytics_test_*.db")
-	require.NoError(t, err)
-	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-
-	// Cleanup on test completion
-	t.Cleanup(func() {
-		os.Remove(tmpPath)
-		os.Remove(tmpPath + "-wal")
-		os.Remove(tmpPath + "-shm")
-	})
-
-	// Create database
-	db, err := database.Open(tmpPath)
-	require.NoError(t, err)
-
-	// Run migrations - skip test if FTS5 not available
-	migrator := database.NewMigrator(db)
-	err = migrator.Migrate(context.Background())
-	if err != nil && strings.Contains(err.Error(), "no such module: fts5") {
-		t.Skip("Skipping test: FTS5 module not available in SQLite")
-	}
-	require.NoError(t, err)
-
-	// Create store and analytics
-	store := NewDBFindingStore(db)
+	// Create in-memory store and analytics
+	store := NewInMemoryFindingStore()
 	analytics := NewFindingAnalytics(store)
 
 	// Create test mission ID
@@ -256,6 +228,104 @@ func TestGetTrends_WithFindings(t *testing.T) {
 	}
 }
 
+func TestGetTrends_HourlyBucketing(t *testing.T) {
+	analytics, store, missionID := setupTestAnalytics(t)
+	ctx := context.Background()
+
+	// Create findings within a single day (should use hourly buckets)
+	now := time.Now().Truncate(time.Hour)
+	findings := []EnhancedFinding{
+		createTestFinding(missionID, agent.SeverityHigh, CategoryJailbreak, StatusOpen, 8.0),
+		createTestFinding(missionID, agent.SeverityHigh, CategoryJailbreak, StatusOpen, 9.0),
+		createTestFinding(missionID, agent.SeverityMedium, CategoryPromptInjection, StatusOpen, 5.0),
+	}
+
+	// Two findings in first hour, one in second hour
+	findings[0].CreatedAt = now.Add(-2 * time.Hour)
+	findings[1].CreatedAt = now.Add(-2*time.Hour + 30*time.Minute)
+	findings[2].CreatedAt = now.Add(-1 * time.Hour)
+
+	for _, f := range findings {
+		err := store.Store(ctx, f)
+		require.NoError(t, err)
+	}
+
+	trends, err := analytics.GetTrends(ctx, missionID, 24*time.Hour)
+	require.NoError(t, err)
+
+	// Should have 2 buckets
+	assert.Equal(t, 2, len(trends))
+
+	// First bucket should have 2 findings
+	assert.Equal(t, 2, trends[0].Count)
+	assert.InDelta(t, 8.5, trends[0].RiskScore, 0.01) // Average of 8.0 and 9.0
+
+	// Second bucket should have 1 finding
+	assert.Equal(t, 1, trends[1].Count)
+	assert.Equal(t, 5.0, trends[1].RiskScore)
+}
+
+func TestGetTrends_DailyBucketing(t *testing.T) {
+	analytics, store, missionID := setupTestAnalytics(t)
+	ctx := context.Background()
+
+	// Create findings over multiple days (should use 6-hour buckets for week view)
+	now := time.Now().Truncate(24 * time.Hour)
+	findings := []EnhancedFinding{
+		createTestFinding(missionID, agent.SeverityHigh, CategoryJailbreak, StatusOpen, 8.0),
+		createTestFinding(missionID, agent.SeverityMedium, CategoryPromptInjection, StatusOpen, 5.0),
+		createTestFinding(missionID, agent.SeverityLow, CategoryDataExtraction, StatusOpen, 2.0),
+	}
+
+	// Spread findings over 3 days
+	findings[0].CreatedAt = now.Add(-5 * 24 * time.Hour)
+	findings[1].CreatedAt = now.Add(-3 * 24 * time.Hour)
+	findings[2].CreatedAt = now.Add(-1 * 24 * time.Hour)
+
+	for _, f := range findings {
+		err := store.Store(ctx, f)
+		require.NoError(t, err)
+	}
+
+	trends, err := analytics.GetTrends(ctx, missionID, 7*24*time.Hour)
+	require.NoError(t, err)
+
+	// Should have 3 buckets
+	assert.Equal(t, 3, len(trends))
+
+	// Each bucket should have 1 finding
+	for _, trend := range trends {
+		assert.Equal(t, 1, trend.Count)
+	}
+}
+
+func TestGetTrends_WeeklyBucketing(t *testing.T) {
+	analytics, store, missionID := setupTestAnalytics(t)
+	ctx := context.Background()
+
+	// Create findings over multiple weeks (should use weekly buckets)
+	now := time.Now().Truncate(24 * time.Hour)
+	findings := []EnhancedFinding{
+		createTestFinding(missionID, agent.SeverityHigh, CategoryJailbreak, StatusOpen, 8.0),
+		createTestFinding(missionID, agent.SeverityMedium, CategoryPromptInjection, StatusOpen, 5.0),
+	}
+
+	// Spread findings over 2 weeks
+	findings[0].CreatedAt = now.Add(-14 * 24 * time.Hour)
+	findings[1].CreatedAt = now.Add(-7 * 24 * time.Hour)
+
+	for _, f := range findings {
+		err := store.Store(ctx, f)
+		require.NoError(t, err)
+	}
+
+	trends, err := analytics.GetTrends(ctx, missionID, 30*24*time.Hour)
+	require.NoError(t, err)
+
+	// Should have at least 2 buckets
+	assert.GreaterOrEqual(t, len(trends), 2)
+}
+
 func TestGetRiskScore_Empty(t *testing.T) {
 	analytics, _, missionID := setupTestAnalytics(t)
 	ctx := context.Background()
@@ -270,11 +340,11 @@ func TestGetRiskScore_WithFindings(t *testing.T) {
 	ctx := context.Background()
 
 	// Create findings with known severities
-	// Critical = 10, High = 7, Medium = 4, Low = 1
+	// Critical = 4, High = 3, Medium = 2, Low = 1
 	findings := []EnhancedFinding{
-		createTestFinding(missionID, agent.SeverityCritical, CategoryJailbreak, StatusOpen, 9.0),        // weight: 10
-		createTestFinding(missionID, agent.SeverityHigh, CategoryPromptInjection, StatusOpen, 7.0),      // weight: 7
-		createTestFinding(missionID, agent.SeverityMedium, CategoryDataExtraction, StatusOpen, 4.0),     // weight: 4
+		createTestFinding(missionID, agent.SeverityCritical, CategoryJailbreak, StatusOpen, 9.0),        // weight: 4
+		createTestFinding(missionID, agent.SeverityHigh, CategoryPromptInjection, StatusOpen, 7.0),      // weight: 3
+		createTestFinding(missionID, agent.SeverityMedium, CategoryDataExtraction, StatusOpen, 4.0),     // weight: 2
 		createTestFinding(missionID, agent.SeverityLow, CategoryInformationDisclosure, StatusOpen, 1.0), // weight: 1
 	}
 
@@ -286,8 +356,8 @@ func TestGetRiskScore_WithFindings(t *testing.T) {
 	score, err := analytics.GetRiskScore(ctx, missionID)
 	require.NoError(t, err)
 
-	// Expected: (10 + 7 + 4 + 1) / 4 = 5.5
-	assert.InDelta(t, 5.5, score, 0.01)
+	// Expected: (4 + 3 + 2 + 1) / 4 = 2.5
+	assert.InDelta(t, 2.5, score, 0.01)
 }
 
 func TestGetRiskScore_ExcludesResolved(t *testing.T) {
@@ -296,9 +366,9 @@ func TestGetRiskScore_ExcludesResolved(t *testing.T) {
 
 	// Create findings with some resolved
 	findings := []EnhancedFinding{
-		createTestFinding(missionID, agent.SeverityCritical, CategoryJailbreak, StatusOpen, 9.0),       // weight: 10
+		createTestFinding(missionID, agent.SeverityCritical, CategoryJailbreak, StatusOpen, 9.0),       // weight: 4
 		createTestFinding(missionID, agent.SeverityHigh, CategoryPromptInjection, StatusResolved, 7.0), // excluded
-		createTestFinding(missionID, agent.SeverityMedium, CategoryDataExtraction, StatusOpen, 4.0),    // weight: 4
+		createTestFinding(missionID, agent.SeverityMedium, CategoryDataExtraction, StatusOpen, 4.0),    // weight: 2
 	}
 
 	for _, f := range findings {
@@ -309,8 +379,8 @@ func TestGetRiskScore_ExcludesResolved(t *testing.T) {
 	score, err := analytics.GetRiskScore(ctx, missionID)
 	require.NoError(t, err)
 
-	// Expected: (10 + 4) / 2 = 7.0 (resolved not counted)
-	assert.InDelta(t, 7.0, score, 0.01)
+	// Expected: (4 + 2) / 2 = 3.0 (resolved not counted)
+	assert.InDelta(t, 3.0, score, 0.01)
 }
 
 func TestGetTopVulnerabilities_Empty(t *testing.T) {
@@ -391,6 +461,73 @@ func TestGetTopVulnerabilities_Limit(t *testing.T) {
 	assert.LessOrEqual(t, len(patterns), 5)
 }
 
+func TestGetTopVulnerabilities_SeverityAveraging(t *testing.T) {
+	analytics, store, _ := setupTestAnalytics(t)
+	ctx := context.Background()
+
+	// Create findings with same category but different severities
+	findings := []EnhancedFinding{
+		createTestFinding(types.NewID(), agent.SeverityCritical, CategoryJailbreak, StatusOpen, 9.0), // weight: 4
+		createTestFinding(types.NewID(), agent.SeverityHigh, CategoryJailbreak, StatusOpen, 7.0),     // weight: 3
+		createTestFinding(types.NewID(), agent.SeverityMedium, CategoryJailbreak, StatusOpen, 5.0),   // weight: 2
+		createTestFinding(types.NewID(), agent.SeverityLow, CategoryJailbreak, StatusOpen, 3.0),      // weight: 1
+	}
+
+	// Set all to same subcategory
+	for i := range findings {
+		findings[i].Subcategory = "same_pattern"
+		err := store.Store(ctx, findings[i])
+		require.NoError(t, err)
+	}
+
+	patterns, err := analytics.GetTopVulnerabilities(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, patterns, 1)
+
+	// Average severity should be (4 + 3 + 2 + 1) / 4 = 2.5
+	assert.Equal(t, 4, patterns[0].Count)
+	assert.InDelta(t, 2.5, patterns[0].AvgSeverity, 0.01)
+}
+
+func TestGetTopVulnerabilities_CountOrdering(t *testing.T) {
+	analytics, store, _ := setupTestAnalytics(t)
+	ctx := context.Background()
+
+	// Create findings with different counts per pattern
+	// Pattern 1: 5 occurrences
+	for i := 0; i < 5; i++ {
+		f := createTestFinding(types.NewID(), agent.SeverityHigh, CategoryJailbreak, StatusOpen, 8.0)
+		f.Subcategory = "pattern_1"
+		require.NoError(t, store.Store(ctx, f))
+	}
+
+	// Pattern 2: 3 occurrences
+	for i := 0; i < 3; i++ {
+		f := createTestFinding(types.NewID(), agent.SeverityMedium, CategoryPromptInjection, StatusOpen, 5.0)
+		f.Subcategory = "pattern_2"
+		require.NoError(t, store.Store(ctx, f))
+	}
+
+	// Pattern 3: 1 occurrence
+	f := createTestFinding(types.NewID(), agent.SeverityLow, CategoryDataExtraction, StatusOpen, 2.0)
+	f.Subcategory = "pattern_3"
+	require.NoError(t, store.Store(ctx, f))
+
+	patterns, err := analytics.GetTopVulnerabilities(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, patterns, 3)
+
+	// Should be sorted by count descending
+	assert.Equal(t, 5, patterns[0].Count)
+	assert.Equal(t, CategoryJailbreak, patterns[0].Category)
+
+	assert.Equal(t, 3, patterns[1].Count)
+	assert.Equal(t, CategoryPromptInjection, patterns[1].Category)
+
+	assert.Equal(t, 1, patterns[2].Count)
+	assert.Equal(t, CategoryDataExtraction, patterns[2].Category)
+}
+
 func TestGetRemediationProgress_Empty(t *testing.T) {
 	analytics, _, missionID := setupTestAnalytics(t)
 	ctx := context.Background()
@@ -436,9 +573,9 @@ func TestGetSeverityWeight(t *testing.T) {
 		severity agent.FindingSeverity
 		expected float64
 	}{
-		{"Critical", agent.SeverityCritical, 10.0},
-		{"High", agent.SeverityHigh, 7.0},
-		{"Medium", agent.SeverityMedium, 4.0},
+		{"Critical", agent.SeverityCritical, 4.0},
+		{"High", agent.SeverityHigh, 3.0},
+		{"Medium", agent.SeverityMedium, 2.0},
 		{"Low", agent.SeverityLow, 1.0},
 		{"Info", agent.SeverityInfo, 0.5},
 		{"Unknown", "unknown", 0.0},

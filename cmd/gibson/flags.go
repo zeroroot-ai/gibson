@@ -1,8 +1,11 @@
 package main
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 	"github.com/zero-day-ai/gibson/cmd/gibson/internal"
+	"github.com/zero-day-ai/gibson/internal/config"
 )
 
 // OutputFormat represents the output format for CLI commands
@@ -56,14 +59,6 @@ func ParseGlobalFlags(cmd *cobra.Command) (*GlobalFlags, error) {
 	return globalFlags, nil
 }
 
-// GetOutputFormat returns the parsed OutputFormat enum
-func (f *GlobalFlags) GetOutputFormat() OutputFormat {
-	if f.OutputFormat == string(FormatJSON) {
-		return FormatJSON
-	}
-	return FormatText
-}
-
 // IsVerbose returns true if verbose mode is enabled
 func (f *GlobalFlags) IsVerbose() bool {
 	return f.Verbose && !f.Quiet
@@ -104,4 +99,24 @@ func (f *GlobalFlags) VerbosityLevel() internal.VerboseLevel {
 
 	// Default: no verbose output
 	return internal.LevelNone
+}
+
+// loadGlobalConfig loads the Gibson configuration using global flags.
+// This is a convenience function for commands that need config access.
+func loadGlobalConfig() (*config.Config, error) {
+	homeDir := globalFlags.HomeDir
+	if homeDir == "" {
+		homeDir = os.Getenv("GIBSON_HOME")
+	}
+	if homeDir == "" {
+		homeDir = config.DefaultHomeDir()
+	}
+
+	configFile := globalFlags.ConfigFile
+	if configFile == "" {
+		configFile = config.DefaultConfigPath(homeDir)
+	}
+
+	loader := config.NewConfigLoader(config.NewValidator())
+	return loader.LoadWithDefaults(configFile)
 }

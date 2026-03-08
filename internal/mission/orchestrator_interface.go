@@ -18,6 +18,9 @@ type TargetStore interface {
 type MissionOrchestrator interface {
 	// Execute runs the mission workflow and manages all orchestration
 	Execute(ctx context.Context, mission *Mission) (*MissionResult, error)
+
+	// StopMission requests the orchestrator to stop executing a mission
+	StopMission(ctx context.Context, missionID types.ID) error
 }
 
 // EventBusPublisher is an interface for publishing daemon-wide events.

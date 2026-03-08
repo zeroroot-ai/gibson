@@ -45,11 +45,15 @@ type DefaultMissionController struct {
 	service           MissionService
 	orchestrator      MissionOrchestrator
 	checkpointManager CheckpointManager
+	checkpointStore   CheckpointStore // New checkpoint store for pause/resume
+	runStore          MissionRunStore // Optional: tracks mission runs
 
 	// executionMu protects concurrent mission operations
 	executionMu sync.RWMutex
 	// activeMissions tracks currently executing missions
 	activeMissions map[types.ID]context.CancelFunc
+	// activeRuns tracks the current run ID for each active mission
+	activeRuns map[types.ID]types.ID
 
 	// operationLocksMu protects access to the operationLocks map
 	operationLocksMu sync.Mutex
@@ -68,6 +72,21 @@ func WithCheckpointManager(cm CheckpointManager) ControllerOption {
 	}
 }
 
+// WithCheckpointStore sets the checkpoint store for pause/resume capability.
+// This is the new checkpoint system that stores full execution state.
+func WithCheckpointStore(cs CheckpointStore) ControllerOption {
+	return func(c *DefaultMissionController) {
+		c.checkpointStore = cs
+	}
+}
+
+// WithRunStore sets the run store for mission run tracking.
+func WithRunStore(rs MissionRunStore) ControllerOption {
+	return func(c *DefaultMissionController) {
+		c.runStore = rs
+	}
+}
+
 // NewMissionController creates a new mission controller.
 func NewMissionController(
 	store MissionStore,
@@ -80,6 +99,7 @@ func NewMissionController(
 		service:        service,
 		orchestrator:   orchestrator,
 		activeMissions: make(map[types.ID]context.CancelFunc),
+		activeRuns:     make(map[types.ID]types.ID),
 		operationLocks: make(map[types.ID]*sync.Mutex),
 	}
 
@@ -153,6 +173,25 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 		return fmt.Errorf("mission is already running")
 	}
 
+	// Create a new run if run store is available
+	var runID types.ID
+	if c.runStore != nil {
+		runNumber, err := c.runStore.GetNextRunNumber(ctx, missionID)
+		if err != nil {
+			return fmt.Errorf("failed to get next run number: %w", err)
+		}
+
+		run := NewMissionRun(missionID, runNumber)
+		run.MarkStarted()
+
+		if err := c.runStore.Save(ctx, run); err != nil {
+			return fmt.Errorf("failed to create mission run: %w", err)
+		}
+
+		runID = run.ID
+		c.activeRuns[missionID] = runID
+	}
+
 	// Create cancellable context for execution
 	execCtx, cancel := context.WithCancel(context.Background())
 	c.activeMissions[missionID] = cancel
@@ -162,10 +201,30 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 		defer func() {
 			c.executionMu.Lock()
 			delete(c.activeMissions, missionID)
+			delete(c.activeRuns, missionID)
 			c.executionMu.Unlock()
 		}()
 
-		_, err := c.orchestrator.Execute(execCtx, mission)
+		result, err := c.orchestrator.Execute(execCtx, mission)
+
+		// Update the run if run store is available
+		if c.runStore != nil && !runID.IsZero() {
+			run, getErr := c.runStore.Get(context.Background(), runID)
+			if getErr == nil && run != nil {
+				if err != nil {
+					run.MarkFailed(err.Error())
+				} else if result != nil {
+					run.MarkCompleted()
+					// Update findings count if available in result
+					if result.FindingIDs != nil {
+						run.FindingsCount = len(result.FindingIDs)
+					}
+				}
+				c.runStore.Update(context.Background(), run)
+			}
+		}
+
+		// Update mission status
 		if err != nil {
 			// Update mission with error
 			mission.Status = MissionStatusFailed
@@ -205,6 +264,17 @@ func (c *DefaultMissionController) Stop(ctx context.Context, missionID types.ID)
 
 	// Cancel execution
 	cancel()
+
+	// Update the run if run store is available
+	if c.runStore != nil {
+		if runID, hasRun := c.activeRuns[missionID]; hasRun {
+			run, getErr := c.runStore.Get(ctx, runID)
+			if getErr == nil && run != nil {
+				run.MarkCancelled()
+				c.runStore.Update(ctx, run)
+			}
+		}
+	}
 
 	// Update mission status
 	mission.Status = MissionStatusCancelled

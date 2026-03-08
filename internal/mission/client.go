@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -47,12 +49,23 @@ type CreateMissionRequest struct {
 	Tags []string
 }
 
+// OrchestratorInterface defines the orchestrator methods needed by client.
+// This interface allows the client to interact with the orchestrator for
+// mission lifecycle operations like execution and stopping.
+type OrchestratorInterface interface {
+	// Execute runs the mission workflow and manages all orchestration
+	Execute(ctx context.Context, mission *Mission) (*MissionResult, error)
+
+	// StopMission requests the orchestrator to stop executing a mission
+	StopMission(ctx context.Context, missionID types.ID) error
+}
+
 // MissionClient provides mission operations for the harness.
 // It acts as a bridge between the agent harness and the mission orchestrator,
 // handling mission lifecycle management and coordination.
 type MissionClient struct {
 	store        MissionStore
-	orchestrator MissionOrchestrator
+	orchestrator OrchestratorInterface
 	logger       *slog.Logger
 	tracer       trace.Tracer
 
@@ -60,6 +73,16 @@ type MissionClient struct {
 	maxChildMissions      int
 	maxConcurrentMissions int
 	maxMissionDepth       int
+
+	// Resource management
+	cancelFuncs map[types.ID]context.CancelFunc
+	lockManager LockManager
+	tempDir     string
+}
+
+// LockManager defines the interface for managing resource locks.
+type LockManager interface {
+	ReleaseAll(ctx context.Context, ownerID string)
 }
 
 // ClientOption is a functional option for configuring the MissionClient.
@@ -95,7 +118,7 @@ func WithSpawnLimits(maxChildMissions, maxConcurrentMissions, maxMissionDepth in
 // NewMissionClient creates a new MissionClient with the given dependencies.
 // The store is used for mission persistence, and the orchestrator handles execution.
 // Optional configuration can be provided via ClientOption functions.
-func NewMissionClient(store MissionStore, orchestrator MissionOrchestrator, opts ...ClientOption) *MissionClient {
+func NewMissionClient(store MissionStore, orchestrator OrchestratorInterface, opts ...ClientOption) *MissionClient {
 	client := &MissionClient{
 		store:                 store,
 		orchestrator:          orchestrator,
@@ -104,6 +127,7 @@ func NewMissionClient(store MissionStore, orchestrator MissionOrchestrator, opts
 		maxChildMissions:      10, // Default: 10 children per parent
 		maxConcurrentMissions: 50, // Default: 50 concurrent missions
 		maxMissionDepth:       3,  // Default: max depth of 3
+		cancelFuncs:           make(map[types.ID]context.CancelFunc),
 	}
 
 	// Apply functional options
@@ -112,6 +136,23 @@ func NewMissionClient(store MissionStore, orchestrator MissionOrchestrator, opts
 	}
 
 	return client
+}
+
+// SetOrchestrator sets the orchestrator for the client.
+// This allows injecting the orchestrator after client creation,
+// which is useful for breaking circular dependencies.
+func (c *MissionClient) SetOrchestrator(orchestrator OrchestratorInterface) {
+	c.orchestrator = orchestrator
+}
+
+// SetLockManager sets the lock manager for the client.
+func (c *MissionClient) SetLockManager(lockManager LockManager) {
+	c.lockManager = lockManager
+}
+
+// SetTempDir sets the temporary directory for mission resources.
+func (c *MissionClient) SetTempDir(tempDir string) {
+	c.tempDir = tempDir
 }
 
 // Create creates a new mission from the given request.
@@ -322,15 +363,81 @@ func (c *MissionClient) List(ctx context.Context, filter *MissionFilter) ([]*Mis
 	return missions, nil
 }
 
+// Stop cancels a running mission and notifies the orchestrator.
+// This method stops mission execution gracefully by:
+// 1. Verifying the mission is currently running
+// 2. Notifying the orchestrator to stop execution
+// 3. Updating mission status to cancelled
+// 4. Cleaning up resources (locks, temp files, etc.)
+//
+// Returns an error if the mission does not exist or is not running.
+func (c *MissionClient) Stop(ctx context.Context, missionID types.ID) error {
+	// Start tracing span
+	ctx, span := c.tracer.Start(ctx, "mission.client.Stop")
+	defer span.End()
+
+	// Validate mission ID
+	if missionID.IsZero() {
+		return fmt.Errorf("mission ID is required")
+	}
+
+	// Get current mission state
+	mission, err := c.store.Get(ctx, missionID)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "failed to get mission",
+			slog.String("mission_id", missionID.String()),
+			slog.String("error", err.Error()))
+		return fmt.Errorf("failed to get mission: %w", err)
+	}
+
+	// Check if mission is running
+	if mission.Status != MissionStatusRunning {
+		return fmt.Errorf("mission is not running (status: %s)", mission.Status)
+	}
+
+	// Notify orchestrator to stop execution
+	if c.orchestrator != nil {
+		stopCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		if err := c.orchestrator.StopMission(stopCtx, missionID); err != nil {
+			c.logger.WarnContext(ctx, "failed to stop orchestrator gracefully",
+				slog.String("mission_id", missionID.String()),
+				slog.String("error", err.Error()))
+			// Continue with cancellation even if orchestrator stop fails
+		}
+	}
+
+	// Update mission status to cancelled
+	now := time.Now()
+	mission.Status = MissionStatusCancelled
+	mission.CompletedAt = &now
+
+	if err := c.store.Save(ctx, mission); err != nil {
+		c.logger.ErrorContext(ctx, "failed to update mission status",
+			slog.String("mission_id", missionID.String()),
+			slog.String("error", err.Error()))
+		return fmt.Errorf("failed to update mission status: %w", err)
+	}
+
+	// Clean up resources
+	c.cleanupMissionResources(ctx, missionID)
+
+	c.logger.InfoContext(ctx, "mission stopped",
+		slog.String("mission_id", missionID.String()),
+		slog.Duration("duration", now.Sub(*mission.StartedAt)))
+
+	return nil
+}
+
 // Cancel requests cancellation of a running or pending mission.
 // This method is idempotent - calling it multiple times on the same mission
 // will not result in an error. If the mission is already in a terminal state
 // (completed, failed, or cancelled), this method returns successfully without
 // making any changes.
 //
-// For running missions, this method updates the status to cancelled and notifies
-// the orchestrator to stop execution. For pending missions, this method simply
-// updates the status to cancelled.
+// For running missions, this method delegates to Stop. For pending missions,
+// this method simply updates the status to cancelled.
 //
 // Returns an error if the mission does not exist or if the database update fails.
 func (c *MissionClient) Cancel(ctx context.Context, missionID types.ID) error {
@@ -360,7 +467,12 @@ func (c *MissionClient) Cancel(ctx context.Context, missionID types.ID) error {
 		return nil
 	}
 
-	// Update mission status to cancelled
+	// For running missions, use Stop method
+	if mission.Status == MissionStatusRunning {
+		return c.Stop(ctx, missionID)
+	}
+
+	// For pending missions, just update status
 	if err := c.store.UpdateStatus(ctx, missionID, MissionStatusCancelled); err != nil {
 		c.logger.ErrorContext(ctx, "failed to update mission status to cancelled",
 			slog.String("mission_id", missionID.String()),
@@ -372,10 +484,34 @@ func (c *MissionClient) Cancel(ctx context.Context, missionID types.ID) error {
 		slog.String("mission_id", missionID.String()),
 		slog.String("previous_status", string(mission.Status)))
 
-	// TODO: Notify orchestrator to stop execution if mission is running
-	// This will be implemented when orchestrator exposes a cancellation API
-
 	return nil
+}
+
+// cleanupMissionResources releases resources held by a mission.
+// This includes cancelling pending operations, releasing locks, and
+// removing temporary files.
+func (c *MissionClient) cleanupMissionResources(ctx context.Context, missionID types.ID) {
+	// Cancel any pending operations
+	if cancel, ok := c.cancelFuncs[missionID]; ok {
+		cancel()
+		delete(c.cancelFuncs, missionID)
+	}
+
+	// Release any held locks
+	if c.lockManager != nil {
+		c.lockManager.ReleaseAll(ctx, missionID.String())
+	}
+
+	// Clean up temporary files
+	if c.tempDir != "" {
+		missionTempDir := filepath.Join(c.tempDir, missionID.String())
+		if err := os.RemoveAll(missionTempDir); err != nil {
+			c.logger.WarnContext(ctx, "failed to clean up mission temp directory",
+				slog.String("mission_id", missionID.String()),
+				slog.String("temp_dir", missionTempDir),
+				slog.String("error", err.Error()))
+		}
+	}
 }
 
 // GetResults returns the results of a completed mission, including findings
