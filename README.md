@@ -1,569 +1,428 @@
 # Gibson
 
-**Autonomous Security Testing Framework**
+**Kubernetes-Native AI Agent Framework**
 
-Gibson is an extensible framework for building and orchestrating autonomous security testing agents. It provides the infrastructure to rapidly develop agents that can test anything - APIs, networks, web applications, cloud infrastructure, smart contracts, LLMs, IoT devices, or any system you can write an agent for.
+Gibson is a cloud-native platform for developing, deploying, and observing autonomous AI agents. Built for Kubernetes from the ground up, it provides the infrastructure to rapidly build agents that can autonomously perform complex tasks - security testing, API discovery, network reconnaissance, compliance auditing, or any domain you can build an agent for.
 
-## What Gibson Does
+## Why Gibson?
 
-Gibson is **not** a security scanner. It's a **framework** that lets you:
+Modern AI agents need more than just an LLM. They need:
 
-- **Build agents** that autonomously perform security testing tasks
-- **Orchestrate workflows** that coordinate multiple agents in complex testing scenarios
-- **Store knowledge** in a graph database for reasoning about attack paths and relationships
-- **Execute tools** in a distributed, queue-based architecture
-- **Track findings** with full provenance back to the agent and mission that discovered them
+- **Orchestration** - Coordinate multiple agents in complex workflows
+- **Observability** - Trace every decision, tool call, and LLM interaction
+- **State Management** - Persist context across restarts and scale horizontally
+- **Tool Execution** - Invoke capabilities through a distributed, type-safe architecture
+- **Knowledge Persistence** - Store discoveries in a queryable graph for reasoning
 
-Think of it as Kubernetes for security testing - you bring the agents, Gibson handles orchestration, scheduling, observability, and state management.
+Gibson provides all of this as a Kubernetes-native platform, so you can focus on building agents instead of infrastructure.
 
 ## Architecture
 
 ```
-                         ┌─────────────────────────────────────────────────────────────┐
-                         │                      Gibson CLI                             │
-                         │  mission | attack | agent | tool | target | finding | ...  │
-                         └────────────┬────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-                         ┌─────────────────────────────────────────────────────────────┐
-                         │                  Daemon (gRPC Server)                       │
-                         │     Orchestration · Registry · Callbacks · Persistence      │
-                         └────┬──────────────┬──────────────┬──────────────────────────┘
-                              │              │              │
-                              ▼              ▼              ▼
-                         ┌─────────┐  ┌──────────────┐  ┌──────────────┐
-                         │  etcd   │  │ Redis Stack  │  │  GraphRAG    │
-                         │Registry │  │State & Queue │  │  (Neo4j)     │
-                         └─────────┘  └──────────────┘  └──────────────┘
-                                           │
-                                           ▼
-                         ┌─────────────────────────────────────────────────────────────┐
-                         │                    Your Agents & Tools                       │
-                         │   network-scanner | web-fuzzer | cloud-auditor | ...        │
-                         └─────────────────────────────────────────────────────────────┘
+                                    ┌────────────────────────────────────────────────────────────────┐
+                                    │                        Kubernetes Cluster                      │
+                                    │  ┌──────────────────────────────────────────────────────────┐  │
+                                    │  │                     Gibson Daemon                         │  │
+                                    │  │   Orchestration · Registry · Harness · Health Probes     │  │
+                                    │  │   /healthz (liveness) · /readyz (readiness)              │  │
+                                    │  └────┬──────────────┬──────────────┬───────────────────────┘  │
+                                    │       │              │              │                          │
+                                    │       ▼              ▼              ▼                          │
+                                    │  ┌─────────┐  ┌──────────────┐  ┌──────────────┐               │
+                                    │  │  etcd   │  │ Redis Stack  │  │   Neo4j      │               │
+                                    │  │Registry │  │State & Queue │  │  GraphRAG    │               │
+                                    │  └─────────┘  └──────────────┘  └──────────────┘               │
+                                    │                      │                                          │
+                                    │                      ▼                                          │
+                                    │  ┌──────────────────────────────────────────────────────────┐  │
+                                    │  │                    Agent & Tool Pods                      │  │
+                                    │  │   network-recon │ api-discovery │ nmap │ httpx │ ...     │  │
+                                    │  │   HPA scaling · Resource limits · Pod disruption budgets  │  │
+                                    │  └──────────────────────────────────────────────────────────┘  │
+                                    └────────────────────────────────────────────────────────────────┘
+                                                                   │
+                                    ┌──────────────────────────────┼──────────────────────────────┐
+                                    │              Observability Stack                             │
+                                    │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+                                    │  │ OpenTelemetry│  │  Langfuse   │  │ Prometheus/Grafana  │  │
+                                    │  │   Tracing    │  │  LLM Traces │  │     Metrics         │  │
+                                    │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+                                    └─────────────────────────────────────────────────────────────┘
 ```
 
-## Core Concepts
+## Key Features
 
-### Component Hierarchy
+### Kubernetes-Native
 
-Gibson has three types of executable components with distinct roles and invocation patterns:
+- **Health Probes**: `/healthz` and `/readyz` endpoints for liveness and readiness
+- **Graceful Shutdown**: SIGTERM handling with checkpoint persistence
+- **Horizontal Scaling**: Stateless daemon design with Redis-backed state
+- **Service Discovery**: etcd-based registry with automatic agent/tool registration
+- **Resource Management**: Memory limits, CPU requests, pod disruption budgets
 
-| Aspect | Tool | Plugin | Agent |
-|--------|------|--------|-------|
-| **Purpose** | Atomic security operations | External service integrations | Autonomous LLM-driven testing |
-| **State** | Stateless | Stateful (connections, caches) | Stateful (memory, context) |
-| **I/O Format** | Protocol Buffers | JSON maps | Harness interface |
-| **Invoked By** | Agents only | Agents only | **Orchestrator directly** |
-| **LLM Access** | No | No | Yes (multi-slot) |
-| **Memory Access** | No | No | Yes (3-tier) |
-| **Sub-delegation** | No | No | Yes (to other agents) |
-| **Graph Population** | Automatic (Field 100) | Manual | Agent decides |
-| **Examples** | nmap, httpx, nuclei | shodan, scope-ingestion | network-recon, web-fuzzer |
+### Agent Development
 
-**Key Architectural Point:** The mission orchestrator's Observe → Think → Act loop **only manages agents**. Tools and plugins are resources that agents invoke through their harness - they are not directly orchestrated.
+- **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Google Gemini, Ollama (local)
+- **Tool Invocation**: Type-safe Protocol Buffer APIs with distributed execution
+- **Sub-agent Delegation**: Spawn and coordinate child agents
+- **Three-tier Memory**: Working (ephemeral), Mission (Redis), Long-term (vector)
 
-```
-MISSION ORCHESTRATOR (LLM decides which agent to run)
-    │
-    └─→ Executes AGENT (e.g., network-recon)
-            │
-            AGENT has Harness providing:
-            ├─→ CallToolProto("nmap", request)     ← Agent decides when
-            ├─→ QueryPlugin("shodan", "search")    ← Agent decides when
-            ├─→ DelegateToAgent("subdomain-enum")  ← Agent decides when
-            ├─→ Complete("primary", messages)      ← LLM reasoning
-            └─→ Memory().Mission().Set(...)        ← State persistence
-```
+### Observability
 
-This design means:
-- **Agents are autonomous** - they decide which tools/plugins to use based on LLM reasoning
-- **Tools are simple** - stateless operations that don't need orchestrator decisions
-- **Plugins are resources** - stateful services that agents query as needed
-- **Orchestrator focuses on strategy** - which agent runs when, not low-level tool calls
+- **Distributed Tracing**: OpenTelemetry integration for end-to-end visibility
+- **LLM Observability**: Langfuse integration for prompt/completion tracking
+- **Metrics**: Prometheus metrics for performance monitoring
+- **Structured Logging**: JSON logs with trace correlation
 
-### Agents
+### State Management
 
-Autonomous units that perform security testing. An agent can be anything:
-- A network scanner that maps infrastructure
-- A web crawler that discovers endpoints
-- A fuzzer that tests input validation
-- A credential tester that checks authentication
-- An LLM red-teamer that probes AI systems
-- A smart contract auditor that analyzes bytecode
-
-Agents are built with the [Gibson SDK](https://github.com/zero-day-ai/sdk) and can use any tools, call any APIs, and implement any testing logic.
-
-### Tools
-
-Stateless capabilities that agents invoke. Tools execute via a Redis queue-based distributed architecture for horizontal scaling:
-
-- Protocol Buffers for type-safe I/O
-- Automatic GraphRAG population with discovered assets
-- Health monitoring and capability reporting
-- Categories mapped to MITRE ATT&CK techniques
-
-### Missions
-
-YAML-defined workflows that orchestrate agents in a DAG (directed acyclic graph):
-
-- Sequential, parallel, and conditional execution
-- Checkpointing and resumption
-- Constraints (time, cost, finding limits)
-- Auto-installation of dependencies
-
-### GraphRAG
-
-Neo4j-powered hybrid knowledge graph that stores:
-
-- Discovered assets (hosts, ports, services, endpoints)
-- Relationships between entities
-- Attack patterns and MITRE ATT&CK technique mappings
-- Findings with full context and evidence
-- Vector embeddings for semantic search
-
-### Harness
-
-The runtime environment provided to agents:
-
-- **LLM Access** - Anthropic Claude, OpenAI GPT, Google Gemini, Ollama (local)
-- **Tool Invocation** - Proto-based tool execution via Redis queues
-- **Sub-agent Delegation** - Spawn and coordinate child agents
-- **Finding Submission** - Store vulnerabilities with evidence
-- **Three-tier Memory** - Working (ephemeral), Mission (persistent), Long-term (vector)
-
-### Plugins
-
-Stateful service integrations with methods and lifecycle management:
-
-- Initialize with configuration
-- Expose query methods
-- Report health status
-- Integrate external APIs
+- **Redis Stack**: Primary state backend with RediSearch and RedisJSON
+- **Checkpointing**: Mission state persistence for crash recovery
+- **Event Streams**: Redis Streams for durable event processing
+- **Vector Search**: Semantic search across agent memory
 
 ## Quick Start
 
 ### Prerequisites
 
-- Go 1.24+
-- Redis Stack 7.0+ (includes RedisJSON, RediSearch, and Redis Streams)
-- Neo4j 5.0+ (optional, for GraphRAG)
-- etcd 3.5+ (for service discovery and coordination)
+- Kubernetes 1.28+ (or Docker for local development)
+- Helm 3.x
+- kubectl configured for your cluster
 
-**Note:** Gibson now uses Redis Stack as its primary state storage backend, replacing SQLite. If you're upgrading from a previous version, see the [Migration Guide](#migration-guide) below.
+### Deploy to Kubernetes
 
-### Installation
+```bash
+# Add the Gibson Helm repository
+helm repo add gibson https://charts.zero-day.ai
+helm repo update
+
+# Install Gibson with default configuration
+helm install gibson gibson/gibson \
+  --namespace gibson-system \
+  --create-namespace \
+  --set llm.anthropicApiKey=$ANTHROPIC_API_KEY
+
+# Verify deployment
+kubectl -n gibson-system get pods
+kubectl -n gibson-system get svc
+```
+
+### Local Development
 
 ```bash
 # Clone the repository
 git clone https://github.com/zero-day-ai/gibson.git
 cd gibson
+
+# Start dependencies with Docker Compose
+docker-compose up -d redis etcd neo4j
+
+# Build and run
 make build
+./bin/gibson daemon start
 
-# Start Redis Stack for local development
-docker run -d --name redis-stack -p 6379:6379 redis/redis-stack-server:latest
-
-# Start etcd for service discovery
-docker run -d --name etcd -p 2379:2379 -p 2380:2380 \
-  -e ALLOW_NONE_AUTHENTICATION=yes \
-  bitnami/etcd:latest
-
-# Initialize Gibson
-./bin/gibson init
+# In another terminal
+./bin/gibson daemon status
 ```
 
-### Run Your First Mission
+### Deploy Your First Agent
 
 ```bash
-# Start the daemon
-gibson daemon start
+# Install a security agent
+kubectl apply -f https://raw.githubusercontent.com/zero-day-ai/agents/main/network-recon/k8s/deployment.yaml
 
-# Add a target
-gibson target add my-app --type http_api
+# Verify agent registration
+gibson agent list
 
 # Run a mission
 gibson mission run recon.yaml --target my-app
-
-# View findings
-gibson finding list
 ```
 
-## Remote Mission Execution
+## Core Concepts
 
-Gibson supports running missions on remote daemons, enabling CI/CD integration and distributed deployments. When connecting to a remote daemon, the CLI automatically transmits local mission files inline without requiring filesystem access on the remote host.
+### Components
 
-### How It Works
+Gibson has three types of deployable components:
 
-The CLI automatically detects whether you're connecting to a local or remote daemon based on the `GIBSON_DAEMON_ADDRESS` environment variable:
-
-- **Local Mode** (default): Mission file path is sent to the daemon, which reads the file from its local filesystem
-- **Remote Mode**: Mission file content is read locally and transmitted inline via gRPC (up to 10MB)
-
-### Usage
-
-Set the `GIBSON_DAEMON_ADDRESS` environment variable to point to a remote daemon:
-
-```bash
-# Connect to remote daemon
-export GIBSON_DAEMON_ADDRESS="remote-host.example.com:50002"
-
-# Run a local mission file on the remote daemon
-gibson mission run ./missions/recon.yaml --target my-app
-
-# The CLI automatically reads the local file and sends it to the remote daemon
-```
-
-### Local vs Remote Detection
-
-The daemon is considered **remote** when `GIBSON_DAEMON_ADDRESS` is set to any value that is NOT:
-- Empty (unset)
-- `localhost`
-- `127.0.0.1`
-- `::1`
-- `localhost:*` (any port)
-- `127.0.0.1:*` (any port)
-- `::1:*` (any port)
-
-All other addresses (hostnames, IPs, FQDNs) trigger remote mode with inline YAML transmission.
-
-### CI/CD Pipeline Integration
-
-#### GitLab CI Example
-
-```yaml
-# .gitlab-ci.yml
-stages:
-  - security-test
-
-gibson-scan:
-  stage: security-test
-  image: ghcr.io/zero-day-ai/gibson:latest
-  variables:
-    GIBSON_DAEMON_ADDRESS: "gibson.internal.example.com:50002"
-    # Optional: Set LLM provider keys
-    ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
-  script:
-    # Verify daemon connectivity
-    - gibson daemon status
-
-    # Add target (or use pre-configured target)
-    - gibson target add ${CI_PROJECT_NAME} --type http_api --url ${CI_ENVIRONMENT_URL}
-
-    # Run security mission
-    - gibson mission run ./gibson/security-scan.yaml --target ${CI_PROJECT_NAME}
-
-    # Export findings
-    - gibson finding export --format json > findings.json
-
-    # Fail pipeline if critical findings exist
-    - |
-      CRITICAL_COUNT=$(jq '[.[] | select(.severity == "critical")] | length' findings.json)
-      if [ "$CRITICAL_COUNT" -gt 0 ]; then
-        echo "Found $CRITICAL_COUNT critical findings!"
-        exit 1
-      fi
-  artifacts:
-    reports:
-      # Export findings as test report
-      junit: findings.json
-    paths:
-      - findings.json
-    expire_in: 30 days
-  only:
-    - main
-    - merge_requests
-```
-
-#### GitHub Actions Example
-
-```yaml
-# .github/workflows/security-scan.yml
-name: Gibson Security Scan
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    # Run daily security scans
-    - cron: '0 2 * * *'
-
-jobs:
-  security-test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run Gibson security scan
-        env:
-          GIBSON_DAEMON_ADDRESS: gibson.internal.example.com:50002
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          # Install Gibson CLI (if not in container)
-          # curl -L https://github.com/zero-day-ai/gibson/releases/latest/download/gibson-linux-amd64 -o gibson
-          # chmod +x gibson
-
-          # Or use pre-built container
-          docker run --rm \
-            -v $(pwd)/missions:/missions \
-            -e GIBSON_DAEMON_ADDRESS="${GIBSON_DAEMON_ADDRESS}" \
-            -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
-            ghcr.io/zero-day-ai/gibson:latest \
-            mission run /missions/security-scan.yaml
-
-      - name: Upload findings
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-findings
-          path: findings.json
-
-      - name: Check for critical findings
-        run: |
-          CRITICAL_COUNT=$(jq '[.[] | select(.severity == "critical")] | length' findings.json || echo 0)
-          if [ "$CRITICAL_COUNT" -gt 0 ]; then
-            echo "::error::Found $CRITICAL_COUNT critical security findings"
-            exit 1
-          fi
-```
-
-#### Jenkins Pipeline Example
-
-```groovy
-// Jenkinsfile
-pipeline {
-    agent any
-
-    environment {
-        GIBSON_DAEMON_ADDRESS = 'gibson.internal.example.com:50002'
-        ANTHROPIC_API_KEY = credentials('anthropic-api-key')
-    }
-
-    stages {
-        stage('Security Scan') {
-            steps {
-                script {
-                    // Run Gibson mission
-                    sh '''
-                        gibson mission run ./missions/api-security.yaml \
-                          --target ${JOB_NAME} \
-                          --var "base_url=${BUILD_URL}"
-                    '''
-
-                    // Export and analyze findings
-                    sh 'gibson finding export --format json > findings.json'
-
-                    def findings = readJSON file: 'findings.json'
-                    def criticalCount = findings.count { it.severity == 'critical' }
-
-                    if (criticalCount > 0) {
-                        error("Found ${criticalCount} critical security findings!")
-                    }
-                }
-            }
-        }
-    }
-
-    post {
-        always {
-            archiveArtifacts artifacts: 'findings.json', fingerprint: true
-            publishHTML([
-                reportDir: '.',
-                reportFiles: 'findings.json',
-                reportName: 'Security Findings'
-            ])
-        }
-    }
-}
-```
-
-### Troubleshooting
-
-#### Connection Refused
-
-```bash
-Error: failed to connect to remote daemon at remote-host:50002
-```
-
-**Solutions:**
-1. Verify the daemon is running: `ssh user@remote-host 'gibson daemon status'`
-2. Check network connectivity: `telnet remote-host 50002` or `nc -zv remote-host 50002`
-3. Verify firewall rules allow traffic on port 50002
-4. Ensure the daemon gRPC address is configured correctly in `~/.gibson/config.yaml`:
-   ```yaml
-   daemon:
-     grpc_address: 0.0.0.0:50002  # Listen on all interfaces for remote connections
-   ```
-
-#### Mission File Size Limit
-
-```bash
-Error: mission file exceeds 10MB limit
-```
-
-**Solutions:**
-1. Reduce mission file size by splitting into smaller missions
-2. Remove unnecessary comments or documentation from YAML
-3. Extract large data structures into separate configuration files
-4. For very large missions, deploy the mission file directly on the remote daemon filesystem
-
-#### File Not Found
-
-```bash
-Error: failed to read mission file: no such file or directory
-```
-
-**Solutions:**
-1. Verify the file path is correct: `ls -l ./missions/my-mission.yaml`
-2. Use absolute paths if running from different working directories
-3. Check file permissions: `chmod 644 missions/my-mission.yaml`
-
-#### Invalid YAML
-
-```bash
-Error: mission YAML parse error: yaml: line 45: could not find expected ':'
-```
-
-**Solutions:**
-1. Validate YAML syntax: `gibson mission validate ./missions/my-mission.yaml`
-2. Use a YAML linter: `yamllint missions/my-mission.yaml`
-3. Check for tabs vs spaces (YAML requires spaces)
-4. Ensure proper indentation (2 spaces recommended)
-
-#### Daemon Version Mismatch
-
-If connecting to an older daemon that doesn't support inline YAML transmission:
-
-```bash
-Warning: Remote daemon may not support inline YAML transmission
-Error: workflow file not found on daemon filesystem
-```
-
-**Solutions:**
-1. Update the remote daemon to the latest version
-2. Manually copy the mission file to the remote daemon: `scp mission.yaml user@remote:/tmp/`
-3. Use the file path on the remote filesystem: `gibson mission run /tmp/mission.yaml`
-
-### Security Considerations
-
-1. **TLS Encryption**: Enable TLS for remote connections to protect mission content in transit:
-   ```yaml
-   # config.yaml
-   daemon:
-     grpc_address: 0.0.0.0:50002
-     tls:
-       enabled: true
-       cert_file: /path/to/cert.pem
-       key_file: /path/to/key.pem
-   ```
-
-2. **Authentication**: Use network-level authentication (VPN, private networks, mTLS) for remote daemon access
-
-3. **Size Limits**: The 10MB limit prevents excessive memory usage and potential DoS attacks
-
-4. **Input Validation**: Mission YAML is validated before execution to prevent injection attacks
-
-## CLI Reference
-
-### Daemon
-
-```bash
-gibson daemon start    # Start background services
-gibson daemon stop     # Stop daemon
-gibson daemon status   # Check status
-```
-
-### Targets
-
-```bash
-gibson target add <name> --type <type>   # Add target (http_api, kubernetes, network, etc.)
-gibson target list                        # List targets
-gibson target test <name>                 # Test connectivity
-gibson target delete <name>               # Remove target
-```
+| Component | Purpose | Deployment | Scaling |
+|-----------|---------|------------|---------|
+| **Agent** | Autonomous LLM-driven task execution | Deployment/StatefulSet | HPA on queue depth |
+| **Tool** | Stateless security operations | Deployment | HPA on CPU/memory |
+| **Plugin** | Stateful service integrations | StatefulSet | Manual |
 
 ### Missions
 
-```bash
-gibson mission run <file|url|name>       # Execute a mission
-gibson mission list                       # List missions
-gibson mission show <id>                  # Show progress
-gibson mission pause <id>                 # Pause execution
-gibson mission resume <id>                # Resume from checkpoint
-gibson mission cancel <id>                # Cancel mission
-gibson mission validate <file>            # Validate YAML
+YAML-defined workflows that orchestrate agents as directed acyclic graphs:
+
+```yaml
+name: "Infrastructure Assessment"
+version: "1.0.0"
+
+nodes:
+  network-scan:
+    type: agent
+    agent: network-recon
+
+  service-enum:
+    type: agent
+    agent: service-fingerprinter
+    depends_on: [network-scan]
+
+  vuln-testing:
+    type: parallel
+    nodes: [web-scanner, ssh-auditor]
+    depends_on: [service-enum]
+
+constraints:
+  max_duration: 2h
+  checkpoint_interval: 5m
 ```
 
-### Quick Attack
+### Harness
 
-```bash
-gibson attack --target <name> --agent <agent>   # Single-agent attack
-gibson attack --list-agents                      # List available agents
+The runtime environment provided to agents:
+
+```go
+func (a *MyAgent) Execute(ctx context.Context, task agent.Task, h agent.Harness) (agent.Result, error) {
+    // LLM reasoning
+    resp, _ := h.Complete(ctx, "primary", messages)
+
+    // Tool execution (distributed via Redis)
+    output, _ := h.CallToolProto(ctx, "nmap", &pb.NmapRequest{Target: target})
+
+    // Sub-agent delegation
+    result, _ := h.DelegateToAgent(ctx, "subdomain-enum", subtask)
+
+    // Finding submission
+    h.SubmitFinding(ctx, finding)
+
+    // Memory persistence
+    h.Memory().Mission().Set(ctx, "discovered_hosts", hosts)
+}
 ```
 
-### Agents & Tools
+## Observability
 
-```bash
-gibson agent list                    # List installed agents
-gibson agent install <url>           # Install from URL/git
-gibson agent start <name>            # Start agent service
-gibson agent stop <name>             # Stop agent service
+### OpenTelemetry Tracing
 
-gibson tool list                     # List installed tools
-gibson tool install <url>            # Install tool
+Gibson exports traces for every operation:
+
+```yaml
+# config.yaml
+tracing:
+  enabled: true
+  endpoint: otel-collector.observability:4317
+  service_name: gibson-daemon
+  sample_rate: 1.0
 ```
 
-### Knowledge Store
+Trace spans include:
+- Mission execution lifecycle
+- Agent task execution
+- LLM request/response (with token counts)
+- Tool invocations
+- Memory operations
 
-```bash
-gibson knowledge ingest --from-dir ./data    # Ingest documents
-gibson knowledge search "query"               # Semantic search
+### Langfuse Integration
+
+Track LLM interactions with full prompt/completion logging:
+
+```yaml
+langfuse:
+  enabled: true
+  host: "https://cloud.langfuse.com"
+  public_key: "${LANGFUSE_PUBLIC_KEY}"
+  secret_key: "${LANGFUSE_SECRET_KEY}"
 ```
 
-### Findings
+### Prometheus Metrics
 
-```bash
-gibson finding list                  # List findings
-gibson finding show <id>             # Show details
-gibson finding export --format json  # Export findings
+```yaml
+# ServiceMonitor for Prometheus Operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gibson
+spec:
+  selector:
+    matchLabels:
+      app: gibson
+  endpoints:
+    - port: metrics
+      interval: 30s
 ```
 
-### Credentials
+Key metrics:
+- `gibson_missions_total` - Mission execution counts
+- `gibson_agent_executions_total` - Agent task counts
+- `gibson_tool_calls_total` - Tool invocation counts
+- `gibson_llm_tokens_total` - LLM token usage
+- `gibson_proto_resolution_total` - Proto type resolution stats
+
+## Kubernetes Deployment
+
+### Helm Values
+
+```yaml
+# values.yaml
+replicaCount: 3
+
+image:
+  repository: ghcr.io/zero-day-ai/gibson
+  tag: latest
+
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "2Gi"
+    cpu: "2000m"
+
+redis:
+  url: redis://redis-master.redis:6379
+
+etcd:
+  endpoints:
+    - etcd-0.etcd.etcd:2379
+    - etcd-1.etcd.etcd:2379
+    - etcd-2.etcd.etcd:2379
+
+graphrag:
+  enabled: true
+  neo4j:
+    uri: bolt://neo4j.neo4j:7687
+
+health:
+  port: 8080
+  livenessPath: /healthz
+  readinessPath: /readyz
+
+llm:
+  anthropicApiKey: ""  # Set via secret
+  openaiApiKey: ""
+
+observability:
+  tracing:
+    enabled: true
+    endpoint: otel-collector.observability:4317
+  langfuse:
+    enabled: true
+```
+
+### Health Probes
+
+```yaml
+# Kubernetes deployment snippet
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 15
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+### Graceful Shutdown
+
+Gibson handles SIGTERM with a multi-phase shutdown:
+
+1. **Stop accepting new work** - Health probe returns unhealthy
+2. **Checkpoint active missions** - Persist state to Redis
+3. **Drain agent queues** - Wait for in-flight operations
+4. **Close connections** - Clean up gRPC, Redis, etcd connections
+
+```yaml
+terminationGracePeriodSeconds: 60  # Allow time for checkpointing
+```
+
+## CLI Reference
 
 ```bash
-gibson credential add <name>         # Store encrypted credential
-gibson credential list               # List credentials
+# Daemon management
+gibson daemon start      # Start the daemon
+gibson daemon stop       # Graceful shutdown
+gibson daemon status     # Health check
+gibson daemon logs       # Tail daemon logs
+
+# Mission operations
+gibson mission run <file>           # Execute mission
+gibson mission list                 # List missions
+gibson mission show <id>            # Show progress
+gibson mission pause <id>           # Checkpoint and pause
+gibson mission resume <id>          # Resume from checkpoint
+
+# Agent management
+gibson agent list                   # List registered agents
+gibson agent install <url>          # Install from URL
+gibson agent logs <name>            # View agent logs
+
+# Tool management
+gibson tool list                    # List registered tools
+gibson tool install <url>           # Install tool
+
+# Findings
+gibson finding list                 # List findings
+gibson finding export --format json # Export findings
+```
+
+## SDK
+
+Build agents and tools with the [Gibson SDK](https://github.com/zero-day-ai/sdk):
+
+```go
+package main
+
+import (
+    "context"
+    "github.com/zero-day-ai/sdk/agent"
+    "github.com/zero-day-ai/sdk/serve"
+)
+
+type MyAgent struct{}
+
+func (a *MyAgent) Name() string        { return "my-agent" }
+func (a *MyAgent) Version() string     { return "1.0.0" }
+func (a *MyAgent) Description() string { return "My autonomous agent" }
+
+func (a *MyAgent) Execute(ctx context.Context, task agent.Task, h agent.Harness) (agent.Result, error) {
+    // Your agent logic here
+}
+
+func main() {
+    serve.Agent(&MyAgent{},
+        serve.WithHealthPort(8080),  // Kubernetes health probes
+        serve.WithPort(50051),       // gRPC service port
+    )
+}
 ```
 
 ## Configuration
 
-Configuration lives at `~/.gibson/config.yaml`:
-
 ```yaml
+# ~/.gibson/config.yaml
 core:
   home_dir: ~/.gibson
   parallel_limit: 10
-  timeout: 5m
 
 daemon:
-  grpc_address: localhost:50002
+  grpc_address: 0.0.0.0:50002
+  health_port: 8080
 
-# Redis Stack is the primary state storage backend
 redis:
   url: redis://localhost:6379
-  password: ""
-  database: 0
   pool_size: 10
-  connect_timeout: 5s
-  read_timeout: 3s
-  write_timeout: 3s
 
 registry:
   type: etcd
-  listen_address: localhost:2379
+  endpoints:
+    - localhost:2379
 
 graphrag:
   enabled: true
@@ -572,626 +431,37 @@ graphrag:
     username: neo4j
     password: password
 
-# LLM providers (set via environment variables)
-# ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, OLLAMA_URL
+tracing:
+  enabled: true
+  endpoint: localhost:4317
 
-# Observability
 langfuse:
   enabled: false
   host: "https://cloud.langfuse.com"
-  public_key: ""
-  secret_key: ""
-
-tracing:
-  enabled: false
-  endpoint: localhost:4317
-
-callback:
-  enabled: true
-  listen_address: 0.0.0.0:50001
-```
-
-## Mission YAML
-
-Missions define workflows as directed acyclic graphs:
-
-```yaml
-name: "Infrastructure Assessment"
-description: "Map and test network infrastructure"
-version: "1.0.0"
-
-nodes:
-  # Discovery phase
-  network-scan:
-    type: agent
-    agent: network-mapper
-    parameters:
-      ports: "1-65535"
-      timeout: 10m
-
-  # Branch based on findings
-  check-services:
-    type: condition
-    expression: "findings.open_ports > 0"
-    on_true: service-enum
-    on_false: report
-
-  # Enumerate services
-  service-enum:
-    type: agent
-    agent: service-fingerprinter
-
-  # Parallel vulnerability testing
-  vuln-testing:
-    type: parallel
-    nodes: [web-scanner, ssh-auditor, db-tester]
-
-  web-scanner:
-    type: agent
-    agent: web-vulnerability-scanner
-
-  ssh-auditor:
-    type: agent
-    agent: ssh-config-auditor
-
-  db-tester:
-    type: agent
-    agent: database-security-tester
-
-  # Aggregate results
-  aggregate:
-    type: join
-    sources: [vuln-testing]
-
-  report:
-    type: agent
-    agent: report-generator
-
-edges:
-  - from: network-scan
-    to: check-services
-  - from: service-enum
-    to: vuln-testing
-  - from: aggregate
-    to: report
-
-entry_points: [network-scan]
-exit_points: [report]
-
-constraints:
-  max_duration: 2h
-  max_findings: 5000
-
-dependencies:
-  agents:
-    - github.com/your-org/agents/network-mapper
-    - github.com/your-org/agents/web-vulnerability-scanner
-```
-
-### Node Types
-
-| Type | Purpose |
-|------|---------|
-| `agent` | Execute an agent |
-| `tool` | Execute a tool directly |
-| `condition` | Branch based on expression |
-| `parallel` | Run multiple nodes concurrently |
-| `join` | Wait for parallel nodes to complete |
-| `plugin` | Invoke plugin capability |
-
-## Gibson SDK
-
-The [Gibson SDK](https://github.com/zero-day-ai/sdk) provides everything needed to build agents, tools, and plugins.
-
-### SDK Package Structure
-
-```
-sdk/
-├── agent/       # Agent interfaces and types
-├── tool/        # Tool interfaces and worker utilities
-├── plugin/      # Plugin interfaces
-├── llm/         # LLM abstractions and message types
-├── memory/      # Three-tier memory APIs
-├── finding/     # Finding submission types
-├── mission/     # Mission context types
-├── serve/       # gRPC serving utilities
-├── graphrag/    # GraphRAG integration
-│   ├── domain/      # Generated domain types (Host, Port, Finding, etc.)
-│   ├── validation/  # CEL-based validators
-│   └── id/          # Node ID generation
-├── taxonomy/    # YAML-driven taxonomy (single source of truth)
-└── examples/    # Reference implementations
-```
-
-### Building an Agent
-
-```go
-package main
-
-import (
-    "context"
-    "github.com/zero-day-ai/sdk/agent"
-    "github.com/zero-day-ai/sdk/llm"
-    "github.com/zero-day-ai/sdk/serve"
-)
-
-type MyAgent struct{}
-
-func (a *MyAgent) Name() string        { return "my-agent" }
-func (a *MyAgent) Version() string     { return "1.0.0" }
-func (a *MyAgent) Description() string { return "My security agent" }
-
-func (a *MyAgent) Capabilities() []string {
-    return []string{"scanning", "enumeration"}
-}
-
-func (a *MyAgent) LLMSlots() []agent.SlotDefinition {
-    return []agent.SlotDefinition{
-        agent.NewSlotDefinition("primary", "Main reasoning LLM", true).
-            WithConstraints(agent.SlotConstraints{
-                MinContextWindow: 8000,
-                RequiredFeatures: []string{agent.FeatureToolUse},
-            }),
-    }
-}
-
-func (a *MyAgent) Execute(ctx context.Context, task agent.Task, h agent.Harness) (agent.Result, error) {
-    result := agent.NewResult(task.ID)
-    result.Start()
-
-    // Use LLM
-    messages := []llm.Message{
-        llm.NewSystemMessage("You are a security analyst"),
-        llm.NewUserMessage(task.Goal),
-    }
-    resp, err := h.Complete(ctx, "primary", messages)
-    if err != nil {
-        result.Fail(err)
-        return result, err
-    }
-
-    // Execute tools
-    toolOutput, err := h.ExecuteTool(ctx, "nmap", &pb.NmapRequest{
-        Target: task.Context["target"].(string),
-    })
-
-    // Submit findings
-    h.SubmitFinding(ctx, agent.Finding{
-        Title:      "Vulnerability Found",
-        Severity:   agent.SeverityHigh,
-        Confidence: 0.9,
-    })
-
-    result.Complete(map[string]any{"analysis": resp.Content})
-    return result, nil
-}
-
-func main() {
-    serve.Agent(&MyAgent{}, serve.WithPort(50051))
-}
-```
-
-### Building a Tool
-
-Tools are stateless wrappers around security utilities with Protocol Buffer I/O:
-
-```go
-package main
-
-import (
-    "context"
-    pb "github.com/myorg/mytool/proto"
-    "github.com/zero-day-ai/sdk/serve"
-    "github.com/zero-day-ai/sdk/types"
-    "google.golang.org/protobuf/proto"
-)
-
-type MyTool struct{}
-
-func (t *MyTool) Name() string              { return "mytool" }
-func (t *MyTool) Version() string           { return "1.0.0" }
-func (t *MyTool) Description() string       { return "My security tool" }
-func (t *MyTool) Tags() []string            { return []string{"scanning"} }
-func (t *MyTool) InputMessageType() string  { return "gibson.tools.MyToolRequest" }
-func (t *MyTool) OutputMessageType() string { return "gibson.tools.MyToolResponse" }
-
-func (t *MyTool) ExecuteProto(ctx context.Context, input proto.Message) (proto.Message, error) {
-    req := input.(*pb.MyToolRequest)
-
-    // Execute tool logic
-    results := performScan(req.Target)
-
-    return &pb.MyToolResponse{
-        Success: true,
-        Data:    results,
-    }, nil
-}
-
-func (t *MyTool) Health(ctx context.Context) types.HealthStatus {
-    return types.HealthStatus{Status: types.HealthStatusHealthy}
-}
-
-func main() {
-    serve.Tool(&MyTool{}, serve.WithPort(50052))
-}
-```
-
-### Queue-Based Tool Workers
-
-Tools can run as distributed workers processing jobs from Redis queues:
-
-```go
-package main
-
-import (
-    "github.com/myorg/mytool"
-    "github.com/zero-day-ai/sdk/tool/worker"
-    "time"
-)
-
-func main() {
-    tool := &mytool.MyTool{}
-
-    opts := worker.Options{
-        RedisURL:        "redis://localhost:6379",
-        Concurrency:     4,
-        ShutdownTimeout: 30 * time.Second,
-    }
-
-    worker.Run(tool, opts)
-}
-```
-
-### Three-Tier Memory System
-
-```go
-// Working Memory - ephemeral, task-scoped (in-memory key-value)
-harness.Memory().Working().Set(ctx, "key", value)
-harness.Memory().Working().Get(ctx, "key")
-
-// Mission Memory - persistent, mission-scoped (Redis with RediSearch FTS)
-harness.Memory().Mission().Set(ctx, "key", value)
-harness.Memory().Mission().Search(ctx, "query", opts)
-
-// Long-Term Memory - vector storage, cross-mission (semantic embeddings)
-harness.Memory().LongTerm().Store(ctx, "text data", metadata)
-harness.Memory().LongTerm().Search(ctx, "semantic query", threshold, limit)
-```
-
-### GraphRAG Domain Types
-
-Type-safe domain types for storing security data in the knowledge graph:
-
-```go
-import "github.com/zero-day-ai/sdk/graphrag/domain"
-
-// Create entities with automatic UUID assignment
-host := domain.NewHost().
-    SetIp("192.168.1.1").
-    SetHostname("server.local").
-    SetOs("Linux")
-
-// Child entities wire parent relationships automatically
-port := domain.NewPort(443, "tcp").BelongsTo(host)
-service := domain.NewService("https").BelongsTo(port)
-
-// Findings with evidence
-finding := domain.NewFinding("SQL Injection", "critical").
-    SetDescription("SQL injection in login form").
-    SetConfidence(0.95)
-```
-
-## LLM Providers
-
-Gibson automatically detects LLM providers from environment variables:
-
-| Variable | Provider |
-|----------|----------|
-| `ANTHROPIC_API_KEY` | Claude models |
-| `OPENAI_API_KEY` | GPT models |
-| `GOOGLE_API_KEY` | Gemini models |
-| `OLLAMA_URL` | Local Ollama (also tries localhost:11434) |
-
-## Orchestrator Decision Actions
-
-The mission orchestrator uses an LLM-powered Observe → Think → Act loop to make intelligent decisions about workflow execution. The following actions are available:
-
-| Action | Description | When to Use |
-|--------|-------------|-------------|
-| `execute_agent` | Run the specified workflow node | Node is ready, dependencies satisfied |
-| `skip_agent` | Skip execution of a workflow node | Node no longer needed based on findings |
-| `modify_params` | Change parameters for a target node | Discoveries suggest different configuration |
-| `retry` | Retry a failed node | Transient failure that can be overcome |
-| `spawn_agent` | Dynamically add a new node | Unexpected attack surface discovered |
-| `complete` | Mark workflow as complete | Mission objective achieved |
-| `request_approval` | Pause for human approval | Before exploits, credential testing, data extraction |
-| `abort` | Emergency stop the mission | Scope violation, safety concern detected |
-| `escalate` | Escalate to human or specialist | Zero-day discovery, unclear authorization |
-| `rollback` | Revert to previous checkpoint | Strategy triggered defenses, need alternative |
-| `reflect` | Self-evaluate current strategy | Multiple failures, mid-mission assessment |
-| `recall` | Query memory for context | Leverage prior findings for similar targets |
-
-### Safety Actions
-
-The orchestrator includes built-in safety mechanisms:
-
-- **request_approval**: Blocks execution until human approves sensitive operations (exploits, injection tests)
-- **abort**: Immediately terminates mission on scope violations or unintended access
-- **escalate**: Routes critical findings (potential zero-days) to security team
-
-### Memory Actions
-
-The orchestrator can leverage the three-tier memory system:
-
-- **reflect**: Triggers a separate LLM evaluation of strategy effectiveness
-- **recall**: Queries mission memory (Redis RediSearch) or long-term memory (Qdrant vectors) for relevant context
-
-See `internal/orchestrator/prompts.go` for the full system prompt and decision schema.
-
-## Event System
-
-Comprehensive event types for observability with OpenTelemetry trace correlation:
-
-- **Mission Events** - started, progress, node, completed, failed
-- **Agent Events** - registered, started, completed, failed, delegated
-- **LLM Events** - request started/completed/failed, streaming
-- **Tool Events** - call started/completed/failed, progress
-- **Finding Events** - discovered, submitted
-- **Memory Events** - get, set, search
-
-## Project Structure
-
-```
-gibson/
-├── cmd/gibson/           # CLI commands
-├── configs/              # Example configuration
-├── internal/
-│   ├── agent/            # Agent interfaces
-│   ├── config/           # Configuration loading
-│   ├── daemon/           # Daemon and gRPC server
-│   ├── events/           # Event bus and types
-│   ├── finding/          # Finding management
-│   ├── graphrag/         # Neo4j integration
-│   ├── harness/          # Agent runtime environment
-│   ├── llm/              # LLM provider abstraction
-│   ├── memory/           # Three-tier memory implementation
-│   ├── mission/          # Mission execution
-│   ├── observability/    # OpenTelemetry, Langfuse
-│   ├── orchestrator/     # Workflow orchestration
-│   ├── plugin/           # Plugin registry and lifecycle
-│   ├── registry/         # Service discovery (etcd)
-│   ├── component/        # External component management
-│   └── tool/             # Tool execution (Redis)
-└── tests/
-```
-
-## Building
-
-```bash
-make build          # Build binary
-make test           # Run tests
-make test-coverage  # Coverage report
-make lint           # Lint code
-make proto          # Generate protobuf
 ```
 
 ## Use Cases
 
-Gibson is designed for building:
+Gibson is designed for building autonomous agents across domains:
 
-- **Network Security Testing** - Autonomous infrastructure scanning and vulnerability discovery
-- **Web Application Testing** - Crawling, fuzzing, injection testing
-- **Cloud Security Auditing** - AWS/Azure/GCP configuration review
-- **API Security Testing** - Authentication, authorization, input validation
-- **Container Security** - Kubernetes, Docker security assessment
-- **Smart Contract Auditing** - Blockchain and DeFi security
-- **LLM Red-Teaming** - Prompt injection, jailbreak testing
-- **IoT Security** - Device and protocol testing
-- **Compliance Scanning** - Automated compliance checking
-- **Custom Security Workflows** - Whatever you can build an agent for
+- **Security Testing** - Network scanning, vulnerability discovery, penetration testing
+- **API Discovery** - Endpoint enumeration, schema extraction, authentication testing
+- **Cloud Auditing** - AWS/Azure/GCP configuration review, compliance checking
+- **Infrastructure Assessment** - Asset discovery, service fingerprinting
+- **Compliance Automation** - Policy enforcement, audit trail generation
+- **Custom Workflows** - Any domain where autonomous agents add value
 
 ## Related Repositories
 
 | Repository | Description |
 |------------|-------------|
-| [sdk](https://github.com/zero-day-ai/sdk) | Go SDK for building agents, tools, and plugins |
-| [tools](https://github.com/zero-day-ai/tools) | Security tool wrappers (nmap, httpx, nuclei, etc.) |
-
-## Why Gibson?
-
-| Problem | Gibson's Solution |
-|---------|-------------------|
-| Security tools don't integrate | Unified orchestration layer with proto-based APIs |
-| Manual testing doesn't scale | Autonomous agent execution with LLM reasoning |
-| Findings lack context | GraphRAG knowledge relationships and semantic search |
-| Complex workflows are fragile | DAG-based missions with checkpointing and resumption |
-| Building security tools is slow | SDK with batteries included and code generation |
-| No visibility into testing | OpenTelemetry tracing and Langfuse observability |
-
-## Migration Guide
-
-### Migrating from SQLite to Redis Stack
-
-Gibson has transitioned from SQLite to Redis Stack for state storage, providing better scalability, distributed deployments, and advanced search capabilities. If you're upgrading from an older version that used SQLite, follow these steps:
-
-#### 1. Prerequisites
-
-Ensure you have Redis Stack 7.0+ running:
-
-```bash
-# Local development
-docker run -d --name redis-stack -p 6379:6379 redis/redis-stack-server:latest
-
-# Production (example using Redis Enterprise or managed service)
-# Configure redis.url in your config.yaml to point to your Redis Stack instance
-```
-
-Verify Redis Stack modules are available:
-
-```bash
-redis-cli INFO modules
-# Should show: RedisJSON, RediSearch, RedisTimeSeries
-```
-
-#### 2. Update Configuration
-
-Update your `~/.gibson/config.yaml` to remove the `database` section and configure Redis:
-
-```yaml
-# Remove this old section:
-# database:
-#   path: ~/.gibson/gibson.db
-
-# Add/update Redis configuration:
-redis:
-  url: redis://localhost:6379
-  password: ""
-  database: 0
-  pool_size: 10
-  connect_timeout: 5s
-  read_timeout: 3s
-  write_timeout: 3s
-```
-
-#### 3. Run Migration
-
-Use the built-in migration command to transfer your existing data:
-
-```bash
-# Basic migration (with progress output)
-gibson migrate sqlite-to-redis \
-  --source ~/.gibson/gibson.db \
-  --redis redis://localhost:6379
-
-# Dry run (validate without making changes)
-gibson migrate sqlite-to-redis \
-  --source ~/.gibson/gibson.db \
-  --redis redis://localhost:6379 \
-  --dry-run
-
-# Custom batch size for large datasets
-gibson migrate sqlite-to-redis \
-  --source ~/.gibson/gibson.db \
-  --redis redis://localhost:6379 \
-  --batch-size 500
-
-# Resume from checkpoint after interruption
-gibson migrate sqlite-to-redis \
-  --source ~/.gibson/gibson.db \
-  --redis redis://localhost:6379 \
-  --resume
-```
-
-#### 4. Migration Features
-
-The migration tool provides:
-
-- **Checkpoint-based resumption**: If migration is interrupted, use `--resume` to continue from the last checkpoint
-- **Progress reporting**: Real-time progress updates for each entity type
-- **Validation**: Use `--dry-run` to validate data integrity before migration
-- **Batch processing**: Configurable batch sizes for optimal performance
-- **Error handling**: Failed records are logged; migration continues for other records
-
-#### 5. What Gets Migrated
-
-The migration transfers all state data:
-
-- Missions and mission runs
-- Mission events (converted to Redis Streams)
-- Security findings
-- Credentials (encrypted)
-- Targets
-- Payloads and payload executions
-- Agent sessions and session events
-- Mission-scoped memory
-- Knowledge vectors
-
-#### 6. Post-Migration Verification
-
-After migration, verify your data:
-
-```bash
-# Check mission count
-gibson mission list
-
-# Check findings
-gibson finding list
-
-# Check credentials
-gibson credential list
-
-# Verify targets
-gibson target list
-```
-
-#### 7. Cleanup (Optional)
-
-Once you've verified the migration succeeded, you can optionally remove the old SQLite database:
-
-```bash
-# Backup first (recommended)
-cp ~/.gibson/gibson.db ~/.gibson/gibson.db.backup
-
-# Remove after verification
-rm ~/.gibson/gibson.db
-```
-
-#### 8. Troubleshooting
-
-**Migration fails with "Redis modules not available":**
-- Ensure you're using Redis Stack, not standard Redis
-- Verify modules: `redis-cli MODULE LIST`
-
-**Migration is slow:**
-- Increase `--batch-size` (default: 100, try 500-1000)
-- Check network latency between Gibson and Redis
-
-**Data mismatch after migration:**
-- Run `gibson migrate sqlite-to-redis --validate` to compare counts
-- Check migration logs for errors: `~/.gibson/logs/migration.log`
-
-**Need to restart migration:**
-- Use `--resume` flag to continue from last checkpoint
-- Checkpoints are saved every 100 records
-
-#### Production Deployment Notes
-
-For production Redis Stack deployments, consider:
-
-- **High Availability**: Use Redis Sentinel or Redis Cluster
-- **Persistence**: Configure AOF (Append-Only File) or RDB snapshots
-- **Memory Management**: Set `maxmemory-policy` to `allkeys-lru`
-- **Security**: Enable TLS/SSL and authentication
-- **Monitoring**: Set up Redis monitoring (Prometheus, Grafana)
-
-Example production configuration:
-
-```yaml
-redis:
-  # Standalone with TLS
-  url: redis://redis.production.internal:6379
-  password: "${REDIS_PASSWORD}"
-  tls_enabled: true
-  tls_cert_file: /path/to/client-cert.pem
-  tls_key_file: /path/to/client-key.pem
-  tls_ca_file: /path/to/ca-cert.pem
-  pool_size: 20
-  connect_timeout: 10s
-  read_timeout: 5s
-  write_timeout: 5s
-  max_retries: 3
-
-  # Or use Redis Sentinel for automatic failover
-  sentinel_master: mymaster
-  sentinel_addrs:
-    - sentinel1:26379
-    - sentinel2:26379
-    - sentinel3:26379
-```
+| [sdk](https://github.com/zero-day-ai/sdk) | Go SDK for building agents and tools |
+| [tools](https://github.com/zero-day-ai/tools) | Security tool wrappers (nmap, httpx, nuclei) |
+| [deploy](https://github.com/zero-day-ai/deploy) | Helm charts and Kubernetes manifests |
 
 ## License
 
-Apache 2.0
+BSL 1.1 - See LICENSE for details.
 
 ## Contributing
 
