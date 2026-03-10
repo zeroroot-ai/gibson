@@ -8,7 +8,7 @@ import (
 
 // VectorStoreConfig holds configuration for creating a vector store.
 type VectorStoreConfig struct {
-	Backend     string // "embedded", "redis", "qdrant", etc.
+	Backend     string // "embedded" or "redis"
 	StoragePath string // Deprecated: no longer used
 	Dimensions  int    // Embedding dimensions (e.g., 384 for all-MiniLM-L6-v2)
 }
@@ -20,8 +20,6 @@ type VectorStoreConfig struct {
 // Supported backends:
 //   - "embedded": In-memory vector store (non-persistent, brute-force search)
 //   - "redis": Redis-backed vector store (use NewRedisVectorStore directly - requires StateClient)
-//   - "qdrant": Qdrant vector database
-//   - "milvus": Milvus vector database
 func NewVectorStore(cfg VectorStoreConfig) (VectorStore, error) {
 	// Validate dimensions
 	if cfg.Dimensions <= 0 {
@@ -34,17 +32,9 @@ func NewVectorStore(cfg VectorStoreConfig) (VectorStore, error) {
 		// In-memory vector store (default for backward compatibility)
 		return NewEmbeddedVectorStore(cfg.Dimensions), nil
 
-	case "qdrant":
-		// Qdrant vector database integration
-		return NewQdrantVectorStore(cfg)
-
-	case "milvus":
-		// Milvus vector database integration
-		return NewMilvusVectorStore(cfg)
-
 	default:
 		return nil, types.NewError(ErrCodeInvalidConfig,
-			fmt.Sprintf("unknown backend '%s', must be one of: embedded, redis, qdrant, milvus",
+			fmt.Sprintf("unknown backend '%s', must be one of: embedded, redis",
 				cfg.Backend))
 	}
 }

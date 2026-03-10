@@ -117,13 +117,11 @@ func (c *LongTermMemoryConfig) Validate() error {
 	validBackends := map[string]bool{
 		"embedded": true, // In-memory vector store (non-persistent)
 		"redis":    true, // Redis vector database
-		"qdrant":   true, // Qdrant vector database
-		"milvus":   true, // Milvus vector database (future support)
 	}
 
 	if c.Backend != "" && !validBackends[c.Backend] {
 		return types.NewError(types.CONFIG_VALIDATION_FAILED,
-			fmt.Sprintf("invalid backend '%s', must be one of: embedded, redis, qdrant, milvus", c.Backend))
+			fmt.Sprintf("invalid backend '%s', must be one of: embedded, redis", c.Backend))
 	}
 
 	// If using external backend, ConnectionURL is required
