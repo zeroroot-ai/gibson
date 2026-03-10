@@ -315,7 +315,7 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 
 	// Create Actor with DiscoveryProcessor for storing agent output discoveries
 	// ApprovalManager, EscalationManager, CheckpointManager, ReflectionEngine, and MemoryRecaller are nil for now - they will be configured later
-	actor := NewActor(harnessAdapter, executionQueries, missionQueries, m.config.GraphRAGClient, inventory, m.config.MissionTracer, policyChecker, m.config.DiscoveryProcessor, nil, nil, nil, nil, nil, m.config.Logger.Slog())
+	actor := NewActor(harnessAdapter, executionQueries, missionQueries, m.config.GraphRAGClient, inventory, policyChecker, m.config.DiscoveryProcessor, nil, nil, nil, nil, nil, m.config.Logger.Slog())
 
 	// Create the orchestrator
 	orchOptions := []OrchestratorOption{

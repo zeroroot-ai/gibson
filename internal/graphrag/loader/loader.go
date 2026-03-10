@@ -2,30 +2,46 @@ package loader
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
+	"github.com/zero-day-ai/gibson/internal/neo4j"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
 	"github.com/zero-day-ai/sdk/graphrag/protoconv"
 	"github.com/zero-day-ai/sdk/graphrag/taxonomy"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // GraphLoader loads proto nodes into Neo4j.
 // It handles node creation, relationship creation, and provenance tracking.
 type GraphLoader struct {
-	client graph.GraphClient
+	client          graph.GraphClient
+	tracer          trace.Tracer
+	neo4jBrowserURL string // Base URL for Neo4j Browser (for generating deep links)
 }
 
 // NewGraphLoader creates a new GraphLoader with the given Neo4j client.
 func NewGraphLoader(client graph.GraphClient) *GraphLoader {
 	return &GraphLoader{
-		client: client,
+		client:          client,
+		tracer:          otel.Tracer("gibson.graphrag.loader"),
+		neo4jBrowserURL: "", // No browser URL by default
 	}
+}
+
+// WithNeo4jBrowserURL sets the Neo4j Browser URL for generating deep links.
+// This is optional but recommended for enhanced observability.
+func (l *GraphLoader) WithNeo4jBrowserURL(url string) *GraphLoader {
+	l.neo4jBrowserURL = url
+	return l
 }
 
 // ExecContext provides execution context for tracking provenance.
@@ -81,6 +97,53 @@ func (r *LoadResult) HasErrors() bool {
 
 
 
+
+// buildEntityTypesJSON creates a JSON array of entity types that were written in this discovery.
+// Returns a string in the format: ["host", "port", "service", ...]
+func buildEntityTypesJSON(discovery *graphragpb.DiscoveryResult) string {
+	var types []string
+	if len(discovery.Hosts) > 0 {
+		types = append(types, "host")
+	}
+	if len(discovery.Ports) > 0 {
+		types = append(types, "port")
+	}
+	if len(discovery.Services) > 0 {
+		types = append(types, "service")
+	}
+	if len(discovery.Endpoints) > 0 {
+		types = append(types, "endpoint")
+	}
+	if len(discovery.Domains) > 0 {
+		types = append(types, "domain")
+	}
+	if len(discovery.Subdomains) > 0 {
+		types = append(types, "subdomain")
+	}
+	if len(discovery.Technologies) > 0 {
+		types = append(types, "technology")
+	}
+	if len(discovery.Certificates) > 0 {
+		types = append(types, "certificate")
+	}
+	if len(discovery.Findings) > 0 {
+		types = append(types, "finding")
+	}
+	if len(discovery.Evidence) > 0 {
+		types = append(types, "evidence")
+	}
+	if len(discovery.CustomNodes) > 0 {
+		types = append(types, "custom_node")
+	}
+
+	// Encode as JSON array
+	data, err := json.Marshal(types)
+	if err != nil {
+		// Fallback to empty array if marshaling fails
+		return "[]"
+	}
+	return string(data)
+}
 
 // attachToMissionRunBatch creates BELONGS_TO relationships from root nodes to MissionRun in batch.
 // Task 9.3: Root nodes are attached to MissionRun via BELONGS_TO relationship.
@@ -179,6 +242,10 @@ func (l *GraphLoader) LoadDiscovery(ctx context.Context, execCtx ExecContext, di
 	if discovery == nil {
 		return &LoadResult{}, nil
 	}
+
+	// Start tracing span for graph write operation
+	ctx, span := l.tracer.Start(ctx, "gibson.graph.store")
+	defer span.End()
 
 	result := &LoadResult{}
 
@@ -325,6 +392,27 @@ func (l *GraphLoader) LoadDiscovery(ctx context.Context, execCtx ExecContext, di
 			result.Errors = append(result.Errors, r.Errors...)
 		}
 	}
+
+	// Add span attributes for observability
+	attrs := []attribute.KeyValue{
+		attribute.Int("gibson.graph.entities_count", result.NodesCreated),
+		attribute.Int("gibson.graph.relationships_count", result.RelationshipsCreated),
+		attribute.String("gibson.graph.entity_types", buildEntityTypesJSON(discovery)),
+	}
+
+	// Add Neo4j Browser link if configured
+	if l.neo4jBrowserURL != "" && execCtx.MissionID != "" {
+		missionID := types.ID(execCtx.MissionID)
+		browserURL, err := neo4j.BrowserURL(l.neo4jBrowserURL, missionID, neo4j.QueryTypeFull)
+		if err == nil {
+			attrs = append(attrs,
+				attribute.String("neo4j_browser_url", browserURL),
+				attribute.String("neo4j_query", neo4j.QueryReference(missionID, neo4j.QueryTypeFull)),
+			)
+		}
+	}
+
+	span.SetAttributes(attrs...)
 
 	return result, nil
 }

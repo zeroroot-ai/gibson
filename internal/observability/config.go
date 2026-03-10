@@ -5,7 +5,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
+	"time"
+	"unicode/utf8"
 )
 
 // TracingConfig contains distributed tracing configuration for observability.
@@ -253,4 +256,281 @@ func ConfigFromEnv() Config {
 	}
 
 	return cfg
+}
+
+// ContentLoggingConfig contains configuration for logging LLM conversation content.
+// This includes prompts, completions, and tool interactions with security features
+// like redaction and truncation to protect sensitive data and prevent log bloat.
+type ContentLoggingConfig struct {
+	// Enabled determines whether content logging is active.
+	// Default is false for security (opt-in model).
+	Enabled bool `yaml:"enabled" mapstructure:"enabled"`
+
+	// MaxPromptLength is the maximum number of characters to log for prompts.
+	// Content exceeding this will be truncated. Default is 10000.
+	// Set to 0 for no limit (not recommended in production).
+	MaxPromptLength int `yaml:"max_prompt_length" mapstructure:"max_prompt_length"`
+
+	// MaxCompletionLength is the maximum number of characters to log for completions.
+	// Content exceeding this will be truncated. Default is 10000.
+	// Set to 0 for no limit (not recommended in production).
+	MaxCompletionLength int `yaml:"max_completion_length" mapstructure:"max_completion_length"`
+
+	// RedactPatterns contains regex patterns for redacting sensitive information.
+	// Matches are replaced with [REDACTED]. Default includes patterns for API keys,
+	// passwords, secrets, tokens, and bearer tokens.
+	RedactPatterns []string `yaml:"redact_patterns" mapstructure:"redact_patterns"`
+
+	// IncludeToolIO determines whether tool input and output are logged.
+	// Default is false to reduce log volume and potential sensitive data exposure.
+	IncludeToolIO bool `yaml:"include_tool_io" mapstructure:"include_tool_io"`
+
+	// compiledPatterns holds the compiled regex patterns from RedactPatterns.
+	// This field is not exported and is populated by CompilePatterns().
+	compiledPatterns []*regexp.Regexp
+}
+
+// DefaultContentLoggingConfig returns a ContentLoggingConfig with safe defaults.
+// All sensitive features are disabled by default (opt-in security model):
+//   - Content logging disabled (must be explicitly enabled)
+//   - Reasonable truncation limits to prevent log bloat (10000 chars)
+//   - Common redaction patterns for API keys, passwords, secrets, tokens
+//   - Tool I/O logging disabled to reduce volume
+//
+// Example:
+//
+//	cfg := DefaultContentLoggingConfig()
+//	cfg.Enabled = true  // Opt-in to content logging
+//	if err := cfg.CompilePatterns(); err != nil {
+//	    log.Fatal(err)
+//	}
+func DefaultContentLoggingConfig() ContentLoggingConfig {
+	return ContentLoggingConfig{
+		Enabled:             false,
+		MaxPromptLength:     10000,
+		MaxCompletionLength: 10000,
+		RedactPatterns: []string{
+			// Match API keys, passwords, secrets, tokens with various formats
+			`(?i)(api[_-]?key|password|secret|token|bearer)[=:\s]+\S+`,
+		},
+		IncludeToolIO:    false,
+		compiledPatterns: nil,
+	}
+}
+
+// CompilePatterns compiles the RedactPatterns into internal compiled regex patterns.
+// This must be called after configuration is loaded and before using Redact().
+// Returns an error if any pattern fails to compile.
+//
+// Example:
+//
+//	cfg := DefaultContentLoggingConfig()
+//	cfg.RedactPatterns = append(cfg.RedactPatterns, `\d{16}`) // Credit card numbers
+//	if err := cfg.CompilePatterns(); err != nil {
+//	    return fmt.Errorf("failed to compile redaction patterns: %w", err)
+//	}
+func (c *ContentLoggingConfig) CompilePatterns() error {
+	c.compiledPatterns = make([]*regexp.Regexp, 0, len(c.RedactPatterns))
+
+	for i, pattern := range c.RedactPatterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Errorf("failed to compile redaction pattern %d (%q): %w", i, pattern, err)
+		}
+		c.compiledPatterns = append(c.compiledPatterns, re)
+	}
+
+	return nil
+}
+
+// Redact applies all compiled redaction patterns to the given content.
+// Each match is replaced with [REDACTED]. CompilePatterns() must be called
+// before using this method.
+//
+// Example:
+//
+//	cfg := DefaultContentLoggingConfig()
+//	cfg.CompilePatterns()
+//	safe := cfg.Redact("My API key is: sk-1234567890")
+//	// safe == "My API key is: [REDACTED]"
+func (c *ContentLoggingConfig) Redact(content string) string {
+	result := content
+	for _, pattern := range c.compiledPatterns {
+		result = pattern.ReplaceAllString(result, "[REDACTED]")
+	}
+	return result
+}
+
+// Truncate truncates content to maxLen characters and appends "... [truncated]".
+// If content length is <= maxLen or maxLen <= 0, returns content unchanged.
+// Handles UTF-8 properly by not cutting in the middle of multi-byte runes.
+//
+// Example:
+//
+//	cfg := DefaultContentLoggingConfig()
+//	result := cfg.Truncate("This is a very long message", 10)
+//	// result == "This is a ... [truncated]"
+//
+//	result = cfg.Truncate("Short", 10)
+//	// result == "Short"
+//
+//	result = cfg.Truncate("Long message", 0)
+//	// result == "Long message" (no limit)
+func (c *ContentLoggingConfig) Truncate(content string, maxLen int) string {
+	// No truncation if maxLen is 0 or negative
+	if maxLen <= 0 {
+		return content
+	}
+
+	// No truncation needed if content is short enough
+	if utf8.RuneCountInString(content) <= maxLen {
+		return content
+	}
+
+	// Truncate at rune boundary to handle UTF-8 properly
+	runes := []rune(content)
+	if len(runes) <= maxLen {
+		return content
+	}
+
+	return string(runes[:maxLen]) + "... [truncated]"
+}
+
+// Validate validates the ContentLoggingConfig fields.
+// Returns an error if:
+//   - MaxPromptLength is negative
+//   - MaxCompletionLength is negative
+//   - RedactPatterns contains invalid regex patterns
+func (c *ContentLoggingConfig) Validate() error {
+	if c.MaxPromptLength < 0 {
+		return fmt.Errorf("max_prompt_length must be >= 0, got %d", c.MaxPromptLength)
+	}
+
+	if c.MaxCompletionLength < 0 {
+		return fmt.Errorf("max_completion_length must be >= 0, got %d", c.MaxCompletionLength)
+	}
+
+	// Validate that all patterns compile
+	for i, pattern := range c.RedactPatterns {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("invalid redaction pattern %d (%q): %w", i, pattern, err)
+		}
+	}
+
+	return nil
+}
+
+// OTLPConfig contains extended OTLP (OpenTelemetry Protocol) configuration.
+// This includes endpoint settings, batching, compression, and retry policies
+// for exporting observability data to OTLP-compatible backends.
+type OTLPConfig struct {
+	// Endpoint is the OTLP receiver endpoint URL.
+	// Example: "http://localhost:4318" or "https://otlp.example.com:4317"
+	Endpoint string `yaml:"endpoint" mapstructure:"endpoint"`
+
+	// Headers contains additional HTTP headers to send with OTLP requests.
+	// Commonly used for authentication tokens or custom metadata.
+	// Example: {"Authorization": "Bearer token123", "X-Custom": "value"}
+	Headers map[string]string `yaml:"headers" mapstructure:"headers"`
+
+	// Compression specifies the compression algorithm to use.
+	// Valid values: "gzip", "none". Default is empty (no compression).
+	Compression string `yaml:"compression" mapstructure:"compression"`
+
+	// BatchSize is the maximum number of events to batch before sending.
+	// Default is 512. Higher values reduce network overhead but increase latency.
+	BatchSize int `yaml:"batch_size" mapstructure:"batch_size"`
+
+	// BatchTimeout is the maximum time to wait before sending a partial batch.
+	// Default is 5 seconds. Ensures events are sent even if BatchSize isn't reached.
+	BatchTimeout time.Duration `yaml:"batch_timeout" mapstructure:"batch_timeout"`
+
+	// RetryEnabled determines whether failed exports should be retried.
+	// Default is true. Recommended for production to handle transient failures.
+	RetryEnabled bool `yaml:"retry_enabled" mapstructure:"retry_enabled"`
+
+	// RetryInitialInterval is the initial backoff duration for retry attempts.
+	// Default is 1 second. Subsequent retries use exponential backoff.
+	RetryInitialInterval time.Duration `yaml:"retry_initial_interval" mapstructure:"retry_initial_interval"`
+
+	// RetryMaxInterval is the maximum backoff duration between retry attempts.
+	// Default is 30 seconds. Prevents excessive wait times.
+	RetryMaxInterval time.Duration `yaml:"retry_max_interval" mapstructure:"retry_max_interval"`
+
+	// RetryMaxElapsedTime is the maximum total time to spend retrying.
+	// Default is 5 minutes. After this time, the export is abandoned.
+	RetryMaxElapsedTime time.Duration `yaml:"retry_max_elapsed_time" mapstructure:"retry_max_elapsed_time"`
+}
+
+// DefaultOTLPConfig returns an OTLPConfig with sensible production defaults:
+//   - Batch size of 512 events (balances throughput and latency)
+//   - Batch timeout of 5 seconds (ensures timely delivery)
+//   - Retry enabled with exponential backoff (1s initial, 30s max)
+//   - Total retry time of 5 minutes (handles extended outages)
+//   - No compression (can be enabled if network bandwidth is limited)
+//
+// Example:
+//
+//	cfg := DefaultOTLPConfig()
+//	cfg.Endpoint = "http://localhost:4318"
+//	cfg.Compression = "gzip"
+//	if err := cfg.Validate(); err != nil {
+//	    log.Fatal(err)
+//	}
+func DefaultOTLPConfig() OTLPConfig {
+	return OTLPConfig{
+		BatchSize:            512,
+		BatchTimeout:         5 * time.Second,
+		RetryEnabled:         true,
+		RetryInitialInterval: 1 * time.Second,
+		RetryMaxInterval:     30 * time.Second,
+		RetryMaxElapsedTime:  5 * time.Minute,
+		Headers:              make(map[string]string),
+	}
+}
+
+// Validate validates the OTLPConfig fields.
+// Returns an error if:
+//   - Compression is not "gzip", "none", or empty
+//   - BatchSize is <= 0
+//   - BatchTimeout is <= 0
+//   - Retry intervals are invalid (initial > max, negative values)
+//   - RetryMaxElapsedTime is negative
+func (c *OTLPConfig) Validate() error {
+	// Validate compression
+	if c.Compression != "" && c.Compression != "gzip" && c.Compression != "none" {
+		return fmt.Errorf("invalid compression: %s (must be 'gzip', 'none', or empty)", c.Compression)
+	}
+
+	// Validate batch size
+	if c.BatchSize <= 0 {
+		return fmt.Errorf("batch_size must be > 0, got %d", c.BatchSize)
+	}
+
+	// Validate batch timeout
+	if c.BatchTimeout <= 0 {
+		return fmt.Errorf("batch_timeout must be > 0, got %v", c.BatchTimeout)
+	}
+
+	// Validate retry configuration
+	if c.RetryEnabled {
+		if c.RetryInitialInterval < 0 {
+			return fmt.Errorf("retry_initial_interval must be >= 0, got %v", c.RetryInitialInterval)
+		}
+
+		if c.RetryMaxInterval < 0 {
+			return fmt.Errorf("retry_max_interval must be >= 0, got %v", c.RetryMaxInterval)
+		}
+
+		if c.RetryInitialInterval > c.RetryMaxInterval {
+			return fmt.Errorf("retry_initial_interval (%v) must be <= retry_max_interval (%v)",
+				c.RetryInitialInterval, c.RetryMaxInterval)
+		}
+
+		if c.RetryMaxElapsedTime < 0 {
+			return fmt.Errorf("retry_max_elapsed_time must be >= 0, got %v", c.RetryMaxElapsedTime)
+		}
+	}
+
+	return nil
 }

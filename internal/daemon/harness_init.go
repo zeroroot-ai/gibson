@@ -18,33 +18,33 @@ import (
 // The factory is configured with middleware for observability (tracing, logging, events)
 // and all necessary registries for agent execution.
 //
+// Middleware Selection:
+// The factory uses OTel middleware when available for observability integration.
+//
 // Returns:
 //   - harness.HarnessFactoryInterface: Configured factory ready to create harnesses
 //   - error: Non-nil if factory creation fails
 func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFactoryInterface, error) {
 	d.logger.Debug(ctx, "creating harness factory")
 
-	// Get tracer from provider if available
-	var tracer trace.Tracer
-	if d.infrastructure != nil && d.infrastructure.tracerProvider != nil {
-		tracer = d.infrastructure.tracerProvider.Tracer("gibson")
-	}
-
-	// Build middleware chain for harness operations
+	// Configure OTel middleware when OTel stack is available
 	var middlewareChain middleware.Middleware
-	if tracer != nil {
-		// Build middleware chain with tracing
-		// Additional middleware (logging, events) can be added here
-		middlewareChain = middleware.Chain(
-			middleware.TracingMiddleware(tracer),
-			// middleware.LoggingMiddleware(logger, middleware.LevelNormal),
-			// middleware.EventMiddleware(eventBus, errorHandler),
-		)
+	if d.infrastructure != nil && d.infrastructure.otelStack != nil {
+		d.logger.Info(ctx, "using OpenTelemetry tracing middleware for harness operations")
+
+		// OTel middleware will be configured per-harness with agentSpan
+		// Here we just note that OTel is available - actual middleware is created
+		// when each harness is instantiated with its specific agent context
+		// The middleware factory will check for otelStack availability
+		middlewareChain = nil // Configured per-harness in agent execution context
+	} else {
+		d.logger.Info(ctx, "no tracing middleware configured (OTel disabled)")
 	}
 
-	// Create memory wrapper if tracer is available
+	// Create memory wrapper for tracing if OTel is available
 	var memoryWrapper func(memory.MemoryManager) memory.MemoryManager
-	if tracer != nil {
+	if d.infrastructure != nil && d.infrastructure.otelStack != nil {
+		tracer := d.infrastructure.otelStack.TracerProvider.Tracer("gibson.memory")
 		memoryWrapper = func(mm memory.MemoryManager) memory.MemoryManager {
 			return memory.NewTracedMemoryManager(mm, tracer)
 		}
@@ -158,8 +158,13 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		},
 
 		// Observability
-		Logger:  d.logger.WithComponent("harness").Slog(),
-		Tracer:  tracer,
+		Logger: d.logger.WithComponent("harness").Slog(),
+		Tracer: func() trace.Tracer {
+			if d.infrastructure != nil && d.infrastructure.otelStack != nil {
+				return d.infrastructure.otelStack.TracerProvider.Tracer("gibson.harness")
+			}
+			return nil // No tracer available - harness will use no-op tracer
+		}(),
 		Metrics: nil, // Defaulted to no-op
 
 		// Middleware chain for cross-cutting concerns

@@ -1,10 +1,12 @@
 package finding
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/finding/security"
 )
 
 // FindingStatus represents the lifecycle status of a finding
@@ -68,10 +70,6 @@ type EnhancedFinding struct {
 
 	// Reproduction
 	ReproSteps []ReproStep `json:"repro_steps,omitempty"`
-
-	// MITRE Mappings
-	MitreAttack []SimpleMitreMapping `json:"mitre_attack,omitempty"`
-	MitreAtlas  []SimpleMitreMapping `json:"mitre_atlas,omitempty"`
 
 	// Relationships
 	RelatedIDs      []types.ID `json:"related_ids,omitempty"`
@@ -139,8 +137,6 @@ func NewEnhancedFinding(baseFinding agent.Finding, missionID types.ID, agentName
 		RiskScore:       0.0,
 		References:      []string{},
 		ReproSteps:      []ReproStep{},
-		MitreAttack:     []SimpleMitreMapping{},
-		MitreAtlas:      []SimpleMitreMapping{},
 		RelatedIDs:      []types.ID{},
 		OccurrenceCount: 1,
 		UpdatedAt:       now,
@@ -155,8 +151,21 @@ func (f EnhancedFinding) WithClassification(c Classification) EnhancedFinding {
 	f.Confidence = c.Confidence
 	f.RiskScore = c.RiskScore
 	f.Remediation = c.Remediation
-	f.MitreAttack = c.MitreAttack
-	f.MitreAtlas = c.MitreAtlas
+
+	// Store MITRE mappings in Metadata
+	if len(c.MitreAttack) > 0 {
+		if f.Metadata == nil {
+			f.Metadata = make(map[string]any)
+		}
+		f.Metadata["mitre_attack"] = c.MitreAttack
+	}
+	if len(c.MitreAtlas) > 0 {
+		if f.Metadata == nil {
+			f.Metadata = make(map[string]any)
+		}
+		f.Metadata["mitre_atlas"] = c.MitreAtlas
+	}
+
 	f.UpdatedAt = time.Now()
 	return f
 }
@@ -226,4 +235,165 @@ func (f EnhancedFinding) IsCritical() bool {
 func (f EnhancedFinding) NeedsAttention() bool {
 	return (f.Severity == agent.SeverityCritical || f.Severity == agent.SeverityHigh) &&
 		(f.Status == StatusOpen || f.Status == StatusConfirmed)
+}
+
+// GetMitreAttack retrieves the MITRE ATT&CK mappings from Metadata
+func (f EnhancedFinding) GetMitreAttack() []SimpleMitreMapping {
+	if f.Metadata == nil {
+		return nil
+	}
+
+	val, ok := f.Metadata[security.MetaKeyMitreAttack]
+	if !ok {
+		return nil
+	}
+
+	// Handle various types from JSON deserialization
+	return convertToSimpleMappings(val)
+}
+
+// GetMitreAtlas retrieves the MITRE ATLAS mappings from Metadata
+func (f EnhancedFinding) GetMitreAtlas() []SimpleMitreMapping {
+	if f.Metadata == nil {
+		return nil
+	}
+
+	val, ok := f.Metadata[security.MetaKeyMitreAtlas]
+	if !ok {
+		return nil
+	}
+
+	// Handle various types from JSON deserialization
+	return convertToSimpleMappings(val)
+}
+
+// convertToSimpleMappings handles conversion from various MITRE mapping formats
+// to SimpleMitreMapping. Supports security.MitreMapping, SimpleMitreMapping,
+// and generic map[string]interface{} (from JSON deserialization).
+func convertToSimpleMappings(val any) []SimpleMitreMapping {
+	switch v := val.(type) {
+	case SimpleMitreMapping:
+		// Single SimpleMitreMapping
+		return []SimpleMitreMapping{v}
+	case []SimpleMitreMapping:
+		return v
+	case security.MitreMapping:
+		// Single security.MitreMapping
+		return []SimpleMitreMapping{{
+			TechniqueID:   v.TechniqueID,
+			TechniqueName: v.TechniqueName,
+			Tactic:        v.TacticName,
+		}}
+	case []security.MitreMapping:
+		mappings := make([]SimpleMitreMapping, len(v))
+		for i, m := range v {
+			mappings[i] = SimpleMitreMapping{
+				TechniqueID:   m.TechniqueID,
+				TechniqueName: m.TechniqueName,
+				Tactic:        m.TacticName,
+			}
+		}
+		return mappings
+	case map[string]interface{}:
+		// Single map from JSON deserialization
+		mapping := SimpleMitreMapping{}
+		if tid, ok := v["technique_id"].(string); ok {
+			mapping.TechniqueID = tid
+		}
+		if tn, ok := v["technique_name"].(string); ok {
+			mapping.TechniqueName = tn
+		}
+		if tactic, ok := v["tactic"].(string); ok {
+			mapping.Tactic = tactic
+		} else if tacticName, ok := v["tactic_name"].(string); ok {
+			mapping.Tactic = tacticName
+		}
+		return []SimpleMitreMapping{mapping}
+	case []interface{}:
+		// Convert from generic interface slice (JSON deserialization)
+		mappings := make([]SimpleMitreMapping, 0, len(v))
+		for _, item := range v {
+			if m, ok := item.(map[string]interface{}); ok {
+				mapping := SimpleMitreMapping{}
+				if tid, ok := m["technique_id"].(string); ok {
+					mapping.TechniqueID = tid
+				}
+				if tn, ok := m["technique_name"].(string); ok {
+					mapping.TechniqueName = tn
+				}
+				// Try both "tactic" and "tactic_name" keys
+				if tactic, ok := m["tactic"].(string); ok {
+					mapping.Tactic = tactic
+				} else if tacticName, ok := m["tactic_name"].(string); ok {
+					mapping.Tactic = tacticName
+				}
+				mappings = append(mappings, mapping)
+			}
+		}
+		return mappings
+	default:
+		return nil
+	}
+}
+
+// GetCVSS retrieves the CVSS score from Metadata
+func (f EnhancedFinding) GetCVSS() *agent.CVSSScore {
+	if f.CVSS != nil {
+		return f.CVSS
+	}
+	return nil
+}
+
+// MarshalJSON implements custom JSON marshaling to maintain backward compatibility
+// by including mitre_attack and mitre_atlas as top-level fields in the JSON output
+func (f EnhancedFinding) MarshalJSON() ([]byte, error) {
+	// Create an alias type to avoid recursion
+	type Alias EnhancedFinding
+
+	// Create a custom struct that includes both the base fields and MITRE fields
+	return json.Marshal(&struct {
+		*Alias
+		MitreAttack []SimpleMitreMapping `json:"mitre_attack,omitempty"`
+		MitreAtlas  []SimpleMitreMapping `json:"mitre_atlas,omitempty"`
+	}{
+		Alias:       (*Alias)(&f),
+		MitreAttack: f.GetMitreAttack(),
+		MitreAtlas:  f.GetMitreAtlas(),
+	})
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to maintain backward compatibility
+// by reading mitre_attack and mitre_atlas from either top-level fields or metadata
+func (f *EnhancedFinding) UnmarshalJSON(data []byte) error {
+	// Create an alias type to avoid recursion
+	type Alias EnhancedFinding
+
+	// First unmarshal into the base structure
+	aux := &struct {
+		*Alias
+		MitreAttack []SimpleMitreMapping `json:"mitre_attack,omitempty"`
+		MitreAtlas  []SimpleMitreMapping `json:"mitre_atlas,omitempty"`
+	}{
+		Alias: (*Alias)(f),
+	}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// If MITRE fields were in the JSON, store them in Metadata
+	if len(aux.MitreAttack) > 0 {
+		if f.Metadata == nil {
+			f.Metadata = make(map[string]any)
+		}
+		f.Metadata["mitre_attack"] = aux.MitreAttack
+	}
+	if len(aux.MitreAtlas) > 0 {
+		if f.Metadata == nil {
+			f.Metadata = make(map[string]any)
+		}
+		f.Metadata["mitre_atlas"] = aux.MitreAtlas
+	}
+
+	return nil
 }

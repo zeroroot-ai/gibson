@@ -9,7 +9,6 @@ func init() {
 	Register("gibson completion zsh", Standalone)
 	Register("gibson completion fish", Standalone)
 	Register("gibson completion powershell", Standalone)
-	Register("gibson init", Standalone)
 	Register("gibson config", Standalone)
 	Register("gibson config show", Standalone)
 	Register("gibson config get", Standalone)

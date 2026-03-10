@@ -340,5 +340,15 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
+	// Apply Observability config interpolation
+	if observability, ok := interpolated["observability"].(map[string]interface{}); ok {
+		if neo4jBrowserURL, ok := observability["neo4j_browser_url"].(string); ok {
+			cfg.Observability.Neo4jBrowserURL = interpolateString(neo4jBrowserURL)
+		}
+		if langfuseDashboardURL, ok := observability["langfuse_dashboard_url"].(string); ok {
+			cfg.Observability.LangfuseDashboardURL = interpolateString(langfuseDashboardURL)
+		}
+	}
+
 	return nil
 }

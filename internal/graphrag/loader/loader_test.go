@@ -2,6 +2,7 @@ package loader
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -10,6 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestNewGraphLoader(t *testing.T) {
@@ -1535,4 +1539,323 @@ func TestRelationshipCreation_FindingEvidence(t *testing.T) {
 		}
 	}
 	assert.True(t, foundRelQuery, "Expected HAS_EVIDENCE relationship query to be executed")
+}
+
+// ==================== OBSERVABILITY INSTRUMENTATION TESTS ====================
+
+// TestGraphWriteSpanEmission verifies that graph write operations emit tracing spans
+// with correct attributes for observability.
+func TestGraphWriteSpanEmission(t *testing.T) {
+	// Use in-memory trace exporter to capture spans
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+	)
+	defer tp.Shutdown(context.Background())
+
+	// Set global tracer provider for this test
+	otel.SetTracerProvider(tp)
+
+	client := graph.NewMockGraphClient()
+	err := client.Connect(context.Background())
+	require.NoError(t, err)
+
+	// Mock for host creation
+	client.AddQueryResult(graph.QueryResult{
+		Records: []map[string]any{
+			{"element_id": "host-1", "idx": float64(0)},
+			{"element_id": "host-2", "idx": float64(1)},
+		},
+	})
+
+	// Mock for BELONGS_TO relationship
+	client.AddQueryResult(graph.QueryResult{
+		Records: []map[string]any{
+			{"rel_count": int64(2)},
+		},
+	})
+
+	// Mock for port creation
+	client.AddQueryResult(graph.QueryResult{
+		Records: []map[string]any{
+			{"element_id": "port-1", "idx": float64(0)},
+		},
+	})
+
+	// Mock for HAS_PORT relationship
+	client.AddQueryResult(graph.QueryResult{
+		Records: []map[string]any{
+			{"r": map[string]any{"type": "HAS_PORT"}},
+		},
+	})
+
+	loader := NewGraphLoader(client)
+	ctx := context.Background()
+	execCtx := ExecContext{
+		MissionRunID: "run-observability-test",
+		MissionID:    "mission-obs-123",
+	}
+
+	hostID := "host-span-1"
+	discovery := &graphragpb.DiscoveryResult{
+		Hosts: []*graphragpb.Host{
+			{Id: &hostID, Ip: "192.168.1.1"},
+			{Ip: "192.168.1.2"},
+		},
+		Ports: []*graphragpb.Port{
+			{
+				HostId:   hostID,
+				Number:   443,
+				Protocol: "tcp",
+			},
+		},
+	}
+
+	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 3, result.NodesCreated) // 2 hosts + 1 port
+	assert.False(t, result.HasErrors())
+
+	// Verify span was emitted
+	spans := exporter.GetSpans()
+	require.GreaterOrEqual(t, len(spans), 1, "Expected at least one span to be emitted")
+
+	// Find the graph store span
+	var graphStoreSpan *tracetest.SpanStub
+	for i := range spans {
+		if spans[i].Name == "gibson.graph.store" {
+			graphStoreSpan = &spans[i]
+			break
+		}
+	}
+	require.NotNil(t, graphStoreSpan, "Expected to find gibson.graph.store span")
+
+	// Verify span attributes
+	attrs := graphStoreSpan.Attributes
+	attrMap := make(map[string]any)
+	for _, attr := range attrs {
+		attrMap[string(attr.Key)] = attr.Value.AsInterface()
+	}
+
+	// Check entity count attribute
+	entitiesCount, ok := attrMap["gibson.graph.entities_count"]
+	require.True(t, ok, "Span should have gibson.graph.entities_count attribute")
+	assert.Equal(t, int64(3), entitiesCount, "entities_count should be 3")
+
+	// Check relationships count attribute
+	relationshipsCount, ok := attrMap["gibson.graph.relationships_count"]
+	require.True(t, ok, "Span should have gibson.graph.relationships_count attribute")
+	assert.GreaterOrEqual(t, relationshipsCount.(int64), int64(1), "relationships_count should be at least 1")
+
+	// Check entity types attribute
+	entityTypes, ok := attrMap["gibson.graph.entity_types"]
+	require.True(t, ok, "Span should have gibson.graph.entity_types attribute")
+	entityTypesStr := entityTypes.(string)
+	assert.Contains(t, entityTypesStr, "host", "entity_types should contain 'host'")
+	assert.Contains(t, entityTypesStr, "port", "entity_types should contain 'port'")
+
+	// Verify the JSON structure
+	var types []string
+	err = json.Unmarshal([]byte(entityTypesStr), &types)
+	require.NoError(t, err, "entity_types should be valid JSON")
+	assert.Contains(t, types, "host")
+	assert.Contains(t, types, "port")
+}
+
+// TestGraphWriteSpanAttributes verifies that span attributes are correctly set
+// for different types of graph writes.
+func TestGraphWriteSpanAttributes(t *testing.T) {
+	tests := []struct {
+		name                  string
+		discovery             *graphragpb.DiscoveryResult
+		expectedEntities      int
+		expectedRelationships int
+		expectedEntityTypes   []string
+	}{
+		{
+			name: "hosts only",
+			discovery: &graphragpb.DiscoveryResult{
+				Hosts: []*graphragpb.Host{
+					{Ip: "10.0.0.1"},
+					{Ip: "10.0.0.2"},
+					{Ip: "10.0.0.3"},
+				},
+			},
+			expectedEntities:      3,
+			expectedRelationships: 3, // BELONGS_TO relationships
+			expectedEntityTypes:   []string{"host"},
+		},
+		{
+			name: "domains and subdomains",
+			discovery: &graphragpb.DiscoveryResult{
+				Domains: []*graphragpb.Domain{
+					{Name: "example.com"},
+				},
+				Subdomains: []*graphragpb.Subdomain{
+					{DomainId: "example.com", Name: "www"},
+					{DomainId: "example.com", Name: "api"},
+				},
+			},
+			expectedEntities:      3,
+			expectedRelationships: 3, // 1 BELONGS_TO + 2 HAS_SUBDOMAIN
+			expectedEntityTypes:   []string{"domain", "subdomain"},
+		},
+		{
+			name: "findings with evidence",
+			discovery: &graphragpb.DiscoveryResult{
+				Findings: []*graphragpb.Finding{
+					{Title: "SQL Injection", Severity: "high"},
+				},
+				Evidence: []*graphragpb.Evidence{
+					{FindingId: "finding-1", Type: "request"},
+				},
+			},
+			expectedEntities:      2,
+			expectedRelationships: 2, // 1 BELONGS_TO + 1 HAS_EVIDENCE
+			expectedEntityTypes:   []string{"finding", "evidence"},
+		},
+		{
+			name: "mixed entity types",
+			discovery: &graphragpb.DiscoveryResult{
+				Hosts: []*graphragpb.Host{
+					{Ip: "192.168.1.1"},
+				},
+				Domains: []*graphragpb.Domain{
+					{Name: "test.com"},
+				},
+				Technologies: []*graphragpb.Technology{
+					{Name: "nginx"},
+				},
+			},
+			expectedEntities:      3,
+			expectedRelationships: 3, // BELONGS_TO for each
+			expectedEntityTypes:   []string{"host", "domain", "technology"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup in-memory trace exporter
+			exporter := tracetest.NewInMemoryExporter()
+			tp := sdktrace.NewTracerProvider(
+				sdktrace.WithSyncer(exporter),
+			)
+			defer tp.Shutdown(context.Background())
+			otel.SetTracerProvider(tp)
+
+			client := graph.NewMockGraphClient()
+			err := client.Connect(context.Background())
+			require.NoError(t, err)
+
+			// Setup mock responses based on expected entities/relationships
+			for i := 0; i < tt.expectedEntities+tt.expectedRelationships; i++ {
+				client.AddQueryResult(graph.QueryResult{
+					Records: []map[string]any{
+						{"element_id": fmt.Sprintf("elem-%d", i), "idx": float64(0)},
+					},
+				})
+			}
+
+			loader := NewGraphLoader(client)
+			ctx := context.Background()
+			execCtx := ExecContext{
+				MissionRunID: "run-test",
+			}
+
+			result, err := loader.LoadDiscovery(ctx, execCtx, tt.discovery)
+			require.NoError(t, err)
+			assert.False(t, result.HasErrors())
+
+			// Find and verify the graph store span
+			spans := exporter.GetSpans()
+			var graphStoreSpan *tracetest.SpanStub
+			for i := range spans {
+				if spans[i].Name == "gibson.graph.store" {
+					graphStoreSpan = &spans[i]
+					break
+				}
+			}
+			require.NotNil(t, graphStoreSpan)
+
+			// Verify attributes
+			attrs := graphStoreSpan.Attributes
+			attrMap := make(map[string]any)
+			for _, attr := range attrs {
+				attrMap[string(attr.Key)] = attr.Value.AsInterface()
+			}
+
+			// Verify entity types
+			entityTypes, ok := attrMap["gibson.graph.entity_types"]
+			require.True(t, ok)
+			var types []string
+			err = json.Unmarshal([]byte(entityTypes.(string)), &types)
+			require.NoError(t, err)
+
+			for _, expectedType := range tt.expectedEntityTypes {
+				assert.Contains(t, types, expectedType)
+			}
+		})
+	}
+}
+
+// TestGraphWriteSpanWithErrors verifies that spans are still emitted even when errors occur.
+func TestGraphWriteSpanWithErrors(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+	)
+	defer tp.Shutdown(context.Background())
+	otel.SetTracerProvider(tp)
+
+	client := graph.NewMockGraphClient()
+	err := client.Connect(context.Background())
+	require.NoError(t, err)
+
+	// Simulate an error during graph write
+	client.SetQueryError(fmt.Errorf("simulated database error"))
+
+	loader := NewGraphLoader(client)
+	ctx := context.Background()
+	execCtx := ExecContext{
+		MissionRunID: "run-error-test",
+	}
+
+	discovery := &graphragpb.DiscoveryResult{
+		Hosts: []*graphragpb.Host{
+			{Ip: "192.168.1.1"},
+		},
+	}
+
+	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
+
+	// Should not return error, but should have errors in result
+	assert.NoError(t, err)
+	assert.True(t, result.HasErrors())
+
+	// Verify span was still emitted
+	spans := exporter.GetSpans()
+	require.GreaterOrEqual(t, len(spans), 1)
+
+	var graphStoreSpan *tracetest.SpanStub
+	for i := range spans {
+		if spans[i].Name == "gibson.graph.store" {
+			graphStoreSpan = &spans[i]
+			break
+		}
+	}
+	require.NotNil(t, graphStoreSpan, "Span should be emitted even on error")
+
+	// Verify span attributes exist (counts may be 0 due to error)
+	attrs := graphStoreSpan.Attributes
+	attrMap := make(map[string]any)
+	for _, attr := range attrs {
+		attrMap[string(attr.Key)] = attr.Value.AsInterface()
+	}
+
+	_, hasEntitiesCount := attrMap["gibson.graph.entities_count"]
+	assert.True(t, hasEntitiesCount, "Span should have entities_count attribute even on error")
+
+	_, hasRelationshipsCount := attrMap["gibson.graph.relationships_count"]
+	assert.True(t, hasRelationshipsCount, "Span should have relationships_count attribute even on error")
 }

@@ -79,7 +79,7 @@ func (a *FindingAnalytics) GetStatistics(ctx context.Context, missionID types.ID
 		totalRisk += f.RiskScore
 
 		// Aggregate MITRE ATT&CK techniques
-		for _, tech := range f.MitreAttack {
+		for _, tech := range f.GetMitreAttack() {
 			if existing, ok := techniqueMap[tech.TechniqueID]; ok {
 				existing.Count++
 			} else {
@@ -92,7 +92,7 @@ func (a *FindingAnalytics) GetStatistics(ctx context.Context, missionID types.ID
 		}
 
 		// Aggregate MITRE ATLAS techniques
-		for _, tech := range f.MitreAtlas {
+		for _, tech := range f.GetMitreAtlas() {
 			if existing, ok := techniqueMap[tech.TechniqueID]; ok {
 				existing.Count++
 			} else {

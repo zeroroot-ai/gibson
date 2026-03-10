@@ -49,7 +49,7 @@ type missionManager struct {
 	targetStore     targetStoreLookup
 	runLinker       mission.MissionRunLinker
 	infrastructure  *Infrastructure
-	missionTracer   *observability.MissionTracer   // nil when tracing is disabled
+	otelStack       *observability.OTelObservabilityStack // nil when OTel is disabled
 	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
 	// graphLoader will store mission definitions in Neo4j for cross-mission analysis
 	// Currently disabled during workflow -> mission migration
@@ -87,7 +87,7 @@ func newMissionManager(
 	targetStore targetStoreLookup,
 	runLinker mission.MissionRunLinker,
 	infrastructure *Infrastructure,
-	missionTracer *observability.MissionTracer,
+	otelStack *observability.OTelObservabilityStack,
 ) *missionManager {
 	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
 	// GraphLoader initialization disabled during workflow -> mission migration
@@ -111,7 +111,7 @@ func newMissionManager(
 		targetStore:     targetStore,
 		runLinker:       runLinker,
 		infrastructure:  infrastructure,
-		missionTracer:   missionTracer,
+		otelStack:       otelStack,
 		activeMissions:  make(map[string]*activeMission),
 	}
 }
@@ -369,10 +369,10 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	defer close(eventChan)
 	defer m.cleanupMission(missionID)
 
-	// Create mission execution span if tracing is enabled
+	// Create mission execution span if OTel tracing is enabled
 	var span trace.Span
-	if m.infrastructure != nil && m.infrastructure.tracerProvider != nil {
-		tracer := m.infrastructure.tracerProvider.Tracer("gibson")
+	if m.otelStack != nil && m.otelStack.TracerProvider != nil {
+		tracer := m.otelStack.TracerProvider.Tracer("gibson")
 		ctx, span = tracer.Start(ctx, observability.SpanMissionExecute,
 			trace.WithAttributes(
 				attribute.String(observability.GibsonMissionID, missionID),
@@ -556,27 +556,27 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Pass DiscoveryProcessor from infrastructure to enable automatic storage of discovered
 	// hosts, ports, services, etc. from agent outputs to Neo4j for use by downstream agents.
 	// ApprovalManager, EscalationManager, CheckpointManager, ReflectionEngine, and MemoryRecaller are nil for now - they will be configured later
-	actor := orchestrator.NewActor(harnessAdapter, executionQueries, missionQueries, graphClient, inventory, m.infrastructure.missionTracer, policyChecker, m.infrastructure.discoveryProcessor, nil, nil, nil, nil, nil, m.logger)
+	actor := orchestrator.NewActor(harnessAdapter, executionQueries, missionQueries, graphClient, inventory, policyChecker, m.infrastructure.discoveryProcessor, nil, nil, nil, nil, nil, m.logger)
 
-	// Create DecisionLogWriterAdapter for Langfuse tracing if tracer is available
+	// Create OTel DecisionLogWriterAdapter for tracing if OTel stack is available
 	var decisionLogWriter orchestrator.DecisionLogWriter
-	var decisionLogAdapter *observability.DecisionLogWriterAdapter // Keep reference for Close
-	if m.infrastructure != nil && m.infrastructure.missionTracer != nil {
-		// Convert mission state to schema format for Langfuse
+	var otelDecisionLogAdapter *observability.OTelDecisionLogWriterAdapter // Keep reference for Close
+	if m.otelStack != nil && m.otelStack.MissionTracer != nil {
+		// Convert mission state to schema format for OTel
 		schemaMission := convertToSchemaMission(active.mission, def)
 
-		// Create adapter with tracer and schema mission
-		logAdapter, err := observability.NewDecisionLogWriterAdapter(ctx, m.infrastructure.missionTracer, schemaMission)
+		// Create OTel adapter with tracer and schema mission
+		logAdapter, err := observability.NewOTelDecisionLogWriterAdapter(ctx, m.otelStack.MissionTracer, schemaMission)
 		if err != nil {
 			// Log warning but continue without tracing - don't fail mission
-			m.logger.Warn("failed to create DecisionLogWriterAdapter, continuing without decision tracing",
+			m.logger.Warn("failed to create OTelDecisionLogWriterAdapter, continuing without decision tracing",
 				"mission_id", missionID,
 				"error", err,
 			)
 		} else {
 			decisionLogWriter = logAdapter
-			decisionLogAdapter = logAdapter
-			m.logger.Info("created DecisionLogWriterAdapter for mission tracing",
+			otelDecisionLogAdapter = logAdapter
+			m.logger.Info("created OTelDecisionLogWriterAdapter for mission tracing",
 				"mission_id", missionID,
 			)
 		}
@@ -612,11 +612,11 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	var missionDuration time.Duration
 
 	defer func() {
-		if decisionLogAdapter != nil {
+		if otelDecisionLogAdapter != nil {
 			// Build summary from execution results
 			summary := buildMissionTraceSummary(result, finalStatus, missionDuration, errorMsg)
-			if closeErr := decisionLogAdapter.Close(ctx, summary); closeErr != nil {
-				m.logger.Warn("failed to close decision log adapter",
+			if closeErr := otelDecisionLogAdapter.Close(ctx, summary); closeErr != nil {
+				m.logger.Warn("failed to close OTel decision log adapter",
 					"mission_id", missionID,
 					"error", closeErr,
 				)
@@ -1256,9 +1256,9 @@ func buildMissionTraceSummary(result *orchestrator.OrchestratorResult, status mi
 	case mission.MissionStatusFailed:
 		summary.Status = string(schema.MissionStatusFailed)
 	case mission.MissionStatusCancelled:
-		summary.Status = string(schema.MissionStatusFailed) // Treat cancelled as failed for Langfuse
+		summary.Status = string(schema.MissionStatusFailed) // Treat cancelled as failed for tracing
 	case mission.MissionStatusPaused:
-		summary.Status = string(schema.MissionStatusFailed) // Treat paused as failed for Langfuse
+		summary.Status = string(schema.MissionStatusFailed) // Treat paused as failed for tracing
 	default:
 		summary.Status = string(schema.MissionStatusFailed)
 	}

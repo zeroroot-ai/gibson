@@ -123,6 +123,12 @@ func (e *HTMLExporter) buildTemplateData(filtered []*finding.EnhancedFinding, op
 
 // Template functions
 var templateFuncs = template.FuncMap{
+	"getMitreAttack": func(f *finding.EnhancedFinding) []finding.SimpleMitreMapping {
+		return f.GetMitreAttack()
+	},
+	"getMitreAtlas": func(f *finding.EnhancedFinding) []finding.SimpleMitreMapping {
+		return f.GetMitreAtlas()
+	},
 	"severityClass": func(severity agent.FindingSeverity) string {
 		switch severity {
 		case agent.SeverityCritical:
@@ -487,14 +493,14 @@ const htmlTemplate = `<!DOCTYPE html>
                     </div>
                     {{end}}
 
-                    {{if or .MitreAttack .MitreAtlas}}
+                    {{if or (getMitreAttack .) (getMitreAtlas .)}}
                     <div class="finding-section">
                         <h4>MITRE Mappings</h4>
                         <div class="mitre-tags">
-                            {{range .MitreAttack}}
+                            {{range getMitreAttack .}}
                             <span class="mitre-tag">ATT&CK: {{.TechniqueID}}</span>
                             {{end}}
-                            {{range .MitreAtlas}}
+                            {{range getMitreAtlas .}}
                             <span class="mitre-tag">ATLAS: {{.TechniqueID}}</span>
                             {{end}}
                         </div>

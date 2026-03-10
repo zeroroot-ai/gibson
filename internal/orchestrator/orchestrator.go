@@ -11,6 +11,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -857,4 +858,42 @@ func (o *Orchestrator) recordMissionCompleted(result *OrchestratorResult) {
 			"mission_id": result.MissionID,
 		})
 	}
+
+	// Emit mission summary span for observability
+	o.emitMissionSummarySpan(result)
+}
+
+// emitMissionSummarySpan creates a summary span for the completed mission.
+// This span aggregates all mission statistics for observability dashboards.
+func (o *Orchestrator) emitMissionSummarySpan(result *OrchestratorResult) {
+	if result == nil {
+		return
+	}
+
+	// Create a new context for the span (not tied to the mission execution context)
+	ctx := context.Background()
+	ctx, span := o.tracer.Start(ctx, "gibson.mission.complete")
+	defer span.End()
+
+	// Calculate estimated cost from tokens (simplified cost estimation)
+	// Using average pricing: ~$0.01 per 1K tokens
+	estimatedCost := float64(result.TotalTokensUsed) * 0.00001
+
+	// Build base mission summary attributes
+	span.SetAttributes(
+		attribute.String("gibson.mission.id", result.MissionID),
+		attribute.Int64("gibson.mission.total_duration_ms", result.Duration.Milliseconds()),
+		attribute.Int("gibson.mission.total_tokens", result.TotalTokensUsed),
+		attribute.Float64("gibson.mission.total_cost", estimatedCost),
+		attribute.Int("gibson.mission.nodes_completed", result.CompletedNodes),
+		attribute.Int("gibson.mission.nodes_failed", result.FailedNodes),
+		attribute.String("gibson.mission.status", result.Status.String()),
+		attribute.Int("gibson.mission.total_iterations", result.TotalIterations),
+		attribute.Int("gibson.mission.total_decisions", result.TotalDecisions),
+	)
+
+	// Note: The following attributes are not yet tracked and would require additional implementation:
+	// - gibson.mission.findings_count: Would require querying the graph or tracking findings during execution
+	// - gibson.mission.graph_entities_total: Would require querying Neo4j for total entity count
+	// - gibson.mission.graph_relationships_total: Would require querying Neo4j for total relationship count
 }

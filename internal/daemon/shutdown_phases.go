@@ -186,12 +186,13 @@ func (p *AgentPhase) Execute(ctx context.Context) error {
 
 // ConnectionPhase closes database and service connections.
 type ConnectionPhase struct {
-	infrastructure *Infrastructure
-	stateClient    interface{ Close() error }
-	callback       interface{ Stop() }
-	eventBus       interface{ Close() error }
-	registry       interface{ Stop(context.Context) error }
-	logger         *observability.Logger
+	infrastructure  *Infrastructure
+	stateClient     interface{ Close() error }
+	callback        interface{ Stop() }
+	eventBus        interface{ Close() error }
+	registry        interface{ Stop(context.Context) error }
+	credentialStore interface{ Close() error }
+	logger          *observability.Logger
 }
 
 // NewConnectionPhase creates a new ConnectionPhase.
@@ -201,15 +202,17 @@ func NewConnectionPhase(
 	callback interface{ Stop() },
 	eventBus interface{ Close() error },
 	registry interface{ Stop(context.Context) error },
+	credentialStore interface{ Close() error },
 	logger *observability.Logger,
 ) *ConnectionPhase {
 	return &ConnectionPhase{
-		infrastructure: infrastructure,
-		stateClient:    stateClient,
-		callback:       callback,
-		eventBus:       eventBus,
-		registry:       registry,
-		logger:         logger,
+		infrastructure:  infrastructure,
+		stateClient:     stateClient,
+		callback:        callback,
+		eventBus:        eventBus,
+		registry:        registry,
+		credentialStore: credentialStore,
+		logger:          logger,
 	}
 }
 
@@ -244,11 +247,11 @@ func (p *ConnectionPhase) Execute(ctx context.Context) error {
 		}
 	}
 
-	// Shutdown tracing
-	if p.infrastructure != nil && p.infrastructure.tracerProvider != nil {
-		p.logger.Info(ctx, "shutting down tracing")
-		if err := observability.ShutdownTracing(ctx, p.infrastructure.tracerProvider); err != nil {
-			p.logger.Warn(ctx, "failed to shutdown tracing", "error", err)
+	// Shutdown OTel observability stack
+	if p.infrastructure != nil && p.infrastructure.otelStack != nil {
+		p.logger.Info(ctx, "shutting down OTel observability stack")
+		if err := p.infrastructure.otelStack.Close(ctx); err != nil {
+			p.logger.Warn(ctx, "failed to shutdown OTel observability stack", "error", err)
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -282,6 +285,17 @@ func (p *ConnectionPhase) Execute(ctx context.Context) error {
 		p.logger.Info(ctx, "closing StateClient connection")
 		if err := p.stateClient.Close(); err != nil {
 			p.logger.Warn(ctx, "failed to close StateClient connection", "error", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+
+	// Close credential store (and its KeyProvider)
+	if p.credentialStore != nil {
+		p.logger.Info(ctx, "closing credential store")
+		if err := p.credentialStore.Close(); err != nil {
+			p.logger.Warn(ctx, "failed to close credential store", "error", err)
 			if firstErr == nil {
 				firstErr = err
 			}

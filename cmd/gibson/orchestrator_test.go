@@ -37,7 +37,7 @@ func TestCreateOrchestrator_NoRegistry(t *testing.T) {
 
 	// Check error message
 	expectedMsg := "registry not available"
-	if err.Error() != expectedMsg && err.Error() != "registry not available (run 'gibson init' first)" {
+	if err.Error() != expectedMsg && err.Error() != "registry not available (ensure daemon is running)" {
 		t.Errorf("expected error containing %q, got %q", expectedMsg, err.Error())
 	}
 }

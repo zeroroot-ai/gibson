@@ -264,17 +264,17 @@ func (hc *HeuristicClassifier) GetPatternCount() int {
 	return count
 }
 
-// convertMitreMappings converts MitreMapping from mitre.go to SimpleMitreMapping for Classification
+// convertMitreMappings converts internal MitreMapping to SimpleMitreMapping for Classification
 func convertMitreMappings(mappings []MitreMapping) []SimpleMitreMapping {
-	simple := make([]SimpleMitreMapping, len(mappings))
+	result := make([]SimpleMitreMapping, len(mappings))
 	for i, m := range mappings {
-		simple[i] = SimpleMitreMapping{
+		result[i] = SimpleMitreMapping{
 			TechniqueID:   m.TechniqueID,
 			TechniqueName: m.TechniqueName,
 			Tactic:        m.TacticName,
 		}
 	}
-	return simple
+	return result
 }
 
 // Ensure HeuristicClassifier implements FindingClassifier

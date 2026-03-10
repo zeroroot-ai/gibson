@@ -476,7 +476,7 @@ func createAttackRunner(ctx context.Context) (attack.AttackRunner, error) {
 	// Step 2: Get registry manager from context and create adapter
 	regManager := component.GetRegistryManager(ctx)
 	if regManager == nil {
-		return nil, fmt.Errorf("registry not available (run 'gibson init' first)")
+		return nil, fmt.Errorf("registry not available (ensure daemon is running)")
 	}
 
 	// Create registry adapter for component discovery
@@ -611,7 +611,7 @@ func runListAgents(cmd *cobra.Command, ctx context.Context) error {
 	// Fall back to registry adapter for standalone mode (when daemon not running)
 	regManager := component.GetRegistryManager(ctx)
 	if regManager == nil {
-		return fmt.Errorf("registry not available (run 'gibson init' first)")
+		return fmt.Errorf("registry not available (ensure daemon is running)")
 	}
 
 	// Create registry adapter for component discovery

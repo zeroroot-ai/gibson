@@ -3156,7 +3156,7 @@ func protoFindingToSDKFinding(pf *pb.Finding) *sdkfinding.Finding {
 		AgentName:   pf.AgentName,
 		Title:       pf.Title,
 		Description: pf.Description,
-		Category:    sdkfinding.Category(pf.Category),
+		Category:    pf.Category, // Category is now a plain string
 		Subcategory: pf.Subcategory,
 		Severity:    protoSeverityToSDKSeverity(pf.Severity),
 		Confidence:  pf.Confidence,

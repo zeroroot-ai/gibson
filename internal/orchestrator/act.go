@@ -46,7 +46,6 @@ type Actor struct {
 	missionQueries     *queries.MissionQueries
 	graphClient        graph.GraphClient
 	inventory          *ComponentInventory // Component inventory for validation
-	missionTracer      interface{}         // *observability.MissionTracer for Langfuse tracing (optional, can be nil)
 	policyChecker      PolicyChecker       // Policy checker for data reuse enforcement (optional, can be nil)
 	discoveryProcessor DiscoveryProcessor  // Processes DiscoveryResult from agent outputs (optional, can be nil)
 	approvalManager    ApprovalManager     // Manages approval request lifecycle (optional, can be nil)
@@ -99,7 +98,6 @@ func WithMemoryRecaller(mr MemoryRecaller) ActorOption {
 // The harness is used for agent delegation and tool execution.
 // The queries provide graph operations for tracking execution state.
 // The inventory parameter is optional and used for component validation.
-// The missionTracer parameter is optional and enables Langfuse observability when provided.
 // The policyChecker parameter is optional and enables data reuse policy enforcement when provided.
 // The discoveryProcessor parameter is optional and enables automatic storage of DiscoveryResult from agent outputs.
 // The approvalManager parameter is optional and enables approval request handling when provided.
@@ -107,7 +105,7 @@ func WithMemoryRecaller(mr MemoryRecaller) ActorOption {
 // The checkpointManager parameter is optional and enables checkpoint/rollback functionality when provided.
 // The reflectionEngine parameter is optional and enables reflection capability when provided.
 // The memoryRecaller parameter is optional and enables memory recall functionality when provided.
-func NewActor(harness Harness, execQueries *queries.ExecutionQueries, missionQueries *queries.MissionQueries, graphClient graph.GraphClient, inventory *ComponentInventory, missionTracer interface{}, policyChecker PolicyChecker, discoveryProcessor DiscoveryProcessor, approvalManager ApprovalManager, escalationManager EscalationManager, checkpointManager CheckpointManager, reflectionEngine ReflectionEngine, memoryRecaller MemoryRecaller, logger *slog.Logger) *Actor {
+func NewActor(harness Harness, execQueries *queries.ExecutionQueries, missionQueries *queries.MissionQueries, graphClient graph.GraphClient, inventory *ComponentInventory, policyChecker PolicyChecker, discoveryProcessor DiscoveryProcessor, approvalManager ApprovalManager, escalationManager EscalationManager, checkpointManager CheckpointManager, reflectionEngine ReflectionEngine, memoryRecaller MemoryRecaller, logger *slog.Logger) *Actor {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -117,7 +115,6 @@ func NewActor(harness Harness, execQueries *queries.ExecutionQueries, missionQue
 		missionQueries:     missionQueries,
 		graphClient:        graphClient,
 		inventory:          inventory,
-		missionTracer:      missionTracer,
 		policyChecker:      policyChecker,
 		discoveryProcessor: discoveryProcessor,
 		approvalManager:    approvalManager,
@@ -288,26 +285,6 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 	// Create execution in graph
 	if err := a.execQueries.CreateAgentExecution(ctx, execution); err != nil {
 		return nil, fmt.Errorf("failed to create agent execution: %w", err)
-	}
-
-	// Create AgentExecutionLog for Langfuse tracing if tracer is available
-	// This will be passed to the agent harness to link LLM calls to this execution span
-	// We pass it via context so the harness can access it during delegation
-	if a.missionTracer != nil {
-		// Build the log entry with execution metadata
-		// The actual *observability.AgentExecutionLog will be created by the middleware
-		// We pass the raw data through context to avoid import cycles
-		agentExecData := map[string]interface{}{
-			"execution_id":     execution.ID.String(),
-			"agent_name":       node.AgentName,
-			"workflow_node_id": node.ID.String(),
-			"config_used":      node.TaskConfig,
-			"attempt":          attemptNum,
-		}
-
-		// Store both the tracer and execution data in context for the harness/middleware to access
-		ctx = context.WithValue(ctx, "langfuse_mission_tracer", a.missionTracer)
-		ctx = context.WithValue(ctx, "langfuse_agent_exec_data", agentExecData)
 	}
 
 	// Update workflow node status to running

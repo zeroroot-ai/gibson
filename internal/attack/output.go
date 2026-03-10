@@ -189,9 +189,9 @@ func (h *TextOutputHandler) OnFinding(f finding.EnhancedFinding) {
 		}
 
 		// Show MITRE ATT&CK mappings in verbose mode
-		if h.verbose && len(f.MitreAttack) > 0 {
+		if mitreAttack := f.GetMitreAttack(); h.verbose && len(mitreAttack) > 0 {
 			fmt.Fprintf(h.writer, "  %sMITRE ATT&CK:%s\n", colorGray, colorReset)
-			for _, m := range f.MitreAttack {
+			for _, m := range mitreAttack {
 				fmt.Fprintf(h.writer, "    - %s: %s", m.TechniqueID, m.TechniqueName)
 				if m.Tactic != "" {
 					fmt.Fprintf(h.writer, " (%s)", m.Tactic)
@@ -201,9 +201,9 @@ func (h *TextOutputHandler) OnFinding(f finding.EnhancedFinding) {
 		}
 
 		// Show MITRE ATLAS mappings in verbose mode
-		if h.verbose && len(f.MitreAtlas) > 0 {
+		if mitreAtlas := f.GetMitreAtlas(); h.verbose && len(mitreAtlas) > 0 {
 			fmt.Fprintf(h.writer, "  %sMITRE ATLAS:%s\n", colorGray, colorReset)
-			for _, m := range f.MitreAtlas {
+			for _, m := range mitreAtlas {
 				fmt.Fprintf(h.writer, "    - %s: %s", m.TechniqueID, m.TechniqueName)
 				if m.Tactic != "" {
 					fmt.Fprintf(h.writer, " (%s)", m.Tactic)
@@ -564,18 +564,18 @@ func (h *SARIFOutputHandler) buildResults() []sarifResult {
 		}
 
 		// Add MITRE ATT&CK mappings
-		if len(f.MitreAttack) > 0 {
-			mitreIDs := make([]string, len(f.MitreAttack))
-			for i, m := range f.MitreAttack {
+		if mitreAttack := f.GetMitreAttack(); len(mitreAttack) > 0 {
+			mitreIDs := make([]string, len(mitreAttack))
+			for i, m := range mitreAttack {
 				mitreIDs[i] = fmt.Sprintf("%s (%s)", m.TechniqueID, m.TechniqueName)
 			}
 			result.Properties["mitre_attack"] = mitreIDs
 		}
 
 		// Add MITRE ATLAS mappings
-		if len(f.MitreAtlas) > 0 {
-			atlasIDs := make([]string, len(f.MitreAtlas))
-			for i, m := range f.MitreAtlas {
+		if mitreAtlas := f.GetMitreAtlas(); len(mitreAtlas) > 0 {
+			atlasIDs := make([]string, len(mitreAtlas))
+			for i, m := range mitreAtlas {
 				atlasIDs[i] = fmt.Sprintf("%s (%s)", m.TechniqueID, m.TechniqueName)
 			}
 			result.Properties["mitre_atlas"] = atlasIDs

@@ -453,9 +453,9 @@ func displayFindingDetails(cmd *cobra.Command, f *finding.EnhancedFinding) {
 	}
 
 	// MITRE ATT&CK
-	if len(f.MitreAttack) > 0 {
+	if mitreAttack := f.GetMitreAttack(); len(mitreAttack) > 0 {
 		cmd.Println("MITRE ATT&CK Mappings:")
-		for _, m := range f.MitreAttack {
+		for _, m := range mitreAttack {
 			cmd.Printf("  - %s: %s", m.TechniqueID, m.TechniqueName)
 			if m.Tactic != "" {
 				cmd.Printf(" (%s)", m.Tactic)
@@ -466,9 +466,9 @@ func displayFindingDetails(cmd *cobra.Command, f *finding.EnhancedFinding) {
 	}
 
 	// MITRE ATLAS
-	if len(f.MitreAtlas) > 0 {
+	if mitreAtlas := f.GetMitreAtlas(); len(mitreAtlas) > 0 {
 		cmd.Println("MITRE ATLAS Mappings:")
-		for _, m := range f.MitreAtlas {
+		for _, m := range mitreAtlas {
 			cmd.Printf("  - %s: %s", m.TechniqueID, m.TechniqueName)
 			if m.Tactic != "" {
 				cmd.Printf(" (%s)", m.Tactic)
@@ -516,6 +516,35 @@ func displayFindingDetails(cmd *cobra.Command, f *finding.EnhancedFinding) {
 			cmd.Printf("  - %s\n", id)
 		}
 		cmd.Println()
+	}
+
+	// Additional Metadata (domain-specific data not already displayed)
+	if len(f.Metadata) > 0 {
+		// Define well-known keys that are already displayed above
+		wellKnownKeys := map[string]bool{
+			"mitre_attack": true,
+			"mitre_atlas":  true,
+			"cvss":         true,
+			"cwe":          true,
+			"risk_score":   true,
+		}
+
+		// Collect metadata that should be displayed
+		otherMetadata := make(map[string]any)
+		for key, value := range f.Metadata {
+			if !wellKnownKeys[key] {
+				otherMetadata[key] = value
+			}
+		}
+
+		// Display other metadata if present
+		if len(otherMetadata) > 0 {
+			cmd.Println("Additional Metadata:")
+			for key, value := range otherMetadata {
+				cmd.Printf("  %s: %v\n", key, formatMetadataValue(value))
+			}
+			cmd.Println()
+		}
 	}
 
 	// Metadata
@@ -594,6 +623,41 @@ func wrapText(text string, width int) string {
 	}
 
 	return result.String()
+}
+
+// formatMetadataValue formats a metadata value for display
+func formatMetadataValue(value any) string {
+	if value == nil {
+		return "<nil>"
+	}
+
+	switch v := value.(type) {
+	case string:
+		return v
+	case int, int8, int16, int32, int64:
+		return fmt.Sprintf("%d", v)
+	case uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", v)
+	case float32, float64:
+		return fmt.Sprintf("%v", v)
+	case bool:
+		return fmt.Sprintf("%t", v)
+	case []string:
+		return strings.Join(v, ", ")
+	case []any:
+		// Format slice elements
+		parts := make([]string, len(v))
+		for i, elem := range v {
+			parts[i] = formatMetadataValue(elem)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case map[string]any:
+		// Format as JSON-like string for complex objects
+		return fmt.Sprintf("%v", v)
+	default:
+		// Fallback to default string representation
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 // listAllFindings lists findings across all missions with filtering

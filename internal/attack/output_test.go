@@ -234,12 +234,16 @@ func TestTextOutputHandler_OnFinding(t *testing.T) {
 		Subcategory: "blind_sql_injection",
 		RiskScore:   8.5,
 		Remediation: "Use parameterized queries to prevent SQL injection",
-		MitreAttack: []finding.SimpleMitreMapping{
-			{
-				TechniqueID:   "T1190",
-				TechniqueName: "Exploit Public-Facing Application",
-				Tactic:        "Initial Access",
-			},
+	}
+	// Store MITRE ATT&CK mappings in Metadata
+	if enhancedFinding.Metadata == nil {
+		enhancedFinding.Metadata = make(map[string]any)
+	}
+	enhancedFinding.Metadata["mitre_attack"] = []finding.SimpleMitreMapping{
+		{
+			TechniqueID:   "T1190",
+			TechniqueName: "Exploit Public-Facing Application",
+			Tactic:        "Initial Access",
 		},
 	}
 
@@ -583,12 +587,16 @@ func TestSARIFOutputHandler_GenerateValidSARIF(t *testing.T) {
 		Subcategory: "classic_sql_injection",
 		RiskScore:   8.5,
 		Remediation: "Use parameterized queries",
-		MitreAttack: []finding.SimpleMitreMapping{
-			{
-				TechniqueID:   "T1190",
-				TechniqueName: "Exploit Public-Facing Application",
-				Tactic:        "Initial Access",
-			},
+	}
+	// Store MITRE ATT&CK mappings in Metadata
+	if enhancedFinding1.Metadata == nil {
+		enhancedFinding1.Metadata = make(map[string]any)
+	}
+	enhancedFinding1.Metadata["mitre_attack"] = []finding.SimpleMitreMapping{
+		{
+			TechniqueID:   "T1190",
+			TechniqueName: "Exploit Public-Facing Application",
+			Tactic:        "Initial Access",
 		},
 	}
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/finding"
+	sdkSecurity "github.com/zero-day-ai/sdk/finding/security"
 )
 
 // SARIFExporter exports findings in SARIF 2.1.0 format.
@@ -240,30 +241,45 @@ func buildResults(findings []*finding.EnhancedFinding, opts ExportOptions) []Res
 			},
 		}
 
-		// Add MITRE mappings to properties
-		if len(f.MitreAttack) > 0 {
-			mitreIDs := make([]string, len(f.MitreAttack))
-			for i, m := range f.MitreAttack {
+		// Add MITRE Attack mappings from Metadata
+		mitreAttack := getMitreAttackFromMetadata(&f.Finding)
+		if len(mitreAttack) > 0 {
+			mitreIDs := make([]string, len(mitreAttack))
+			for i, m := range mitreAttack {
 				mitreIDs[i] = m.TechniqueID
 			}
 			result.Properties["mitre_attack_techniques"] = mitreIDs
 		}
 
-		if len(f.MitreAtlas) > 0 {
-			atlasIDs := make([]string, len(f.MitreAtlas))
-			for i, m := range f.MitreAtlas {
+		// Add MITRE Atlas mappings from Metadata
+		mitreAtlas := getMitreAtlasFromMetadata(&f.Finding)
+		if len(mitreAtlas) > 0 {
+			atlasIDs := make([]string, len(mitreAtlas))
+			for i, m := range mitreAtlas {
 				atlasIDs[i] = m.TechniqueID
 			}
 			result.Properties["mitre_atlas_techniques"] = atlasIDs
 		}
 
-		// Add CWE if available
-		if len(f.CWE) > 0 {
-			result.Properties["cwe"] = f.CWE
+		// Add CWE - try Metadata first, then fall back to direct field
+		cwe := getCWEFromMetadata(&f.Finding)
+		if len(cwe) == 0 && len(f.CWE) > 0 {
+			// Fall back to direct field for backward compatibility
+			cwe = f.CWE
+		}
+		if len(cwe) > 0 {
+			result.Properties["cwe"] = cwe
 		}
 
-		// Add CVSS if available
-		if f.CVSS != nil {
+		// Add CVSS - try Metadata first, then fall back to direct field
+		if cvss, ok := getCVSSFromMetadata(&f.Finding); ok {
+			result.Properties["cvss"] = map[string]interface{}{
+				"version": cvss.Version,
+				"vector":  cvss.Vector,
+				"score":   cvss.Score,
+			}
+		} else if f.CVSS != nil {
+			// Fall back to direct field for backward compatibility
 			result.Properties["cvss"] = map[string]interface{}{
 				"version": f.CVSS.Version,
 				"vector":  f.CVSS.Vector,
@@ -387,6 +403,237 @@ func buildLocations(f *finding.EnhancedFinding) []Location {
 	}
 
 	return locations
+}
+
+// getMitreAttackFromMetadata retrieves MITRE ATT&CK mappings from agent.Finding's Metadata.
+// Returns empty slice if not found or if conversion fails.
+func getMitreAttackFromMetadata(f *agent.Finding) []finding.SimpleMitreMapping {
+	if f.Metadata == nil {
+		return nil
+	}
+
+	// Try to get from Metadata using the well-known key
+	data, ok := f.Metadata[sdkSecurity.MetaKeyMitreAttack]
+	if !ok {
+		return nil
+	}
+
+	// The metadata could contain a single mapping or an array
+	// Try single mapping first (sdkSecurity.MitreMapping)
+	if mapping, ok := data.(sdkSecurity.MitreMapping); ok {
+		return []finding.SimpleMitreMapping{
+			{
+				TechniqueID:   mapping.TechniqueID,
+				TechniqueName: mapping.TechniqueName,
+				Tactic:        mapping.TacticName,
+			},
+		}
+	}
+
+	// Try array of SDK mappings
+	if mappings, ok := data.([]sdkSecurity.MitreMapping); ok {
+		result := make([]finding.SimpleMitreMapping, len(mappings))
+		for i, m := range mappings {
+			result[i] = finding.SimpleMitreMapping{
+				TechniqueID:   m.TechniqueID,
+				TechniqueName: m.TechniqueName,
+				Tactic:        m.TacticName,
+			}
+		}
+		return result
+	}
+
+	// Try to convert from map (JSON unmarshaling might produce map[string]interface{})
+	if mapData, ok := data.(map[string]interface{}); ok {
+		techniqueID, _ := mapData["technique_id"].(string)
+		techniqueName, _ := mapData["technique_name"].(string)
+		tacticName, _ := mapData["tactic_name"].(string)
+		if techniqueID != "" {
+			return []finding.SimpleMitreMapping{
+				{
+					TechniqueID:   techniqueID,
+					TechniqueName: techniqueName,
+					Tactic:        tacticName,
+				},
+			}
+		}
+	}
+
+	// Try array of maps
+	if arrayData, ok := data.([]interface{}); ok {
+		result := make([]finding.SimpleMitreMapping, 0, len(arrayData))
+		for _, item := range arrayData {
+			if mapItem, ok := item.(map[string]interface{}); ok {
+				techniqueID, _ := mapItem["technique_id"].(string)
+				techniqueName, _ := mapItem["technique_name"].(string)
+				tacticName, _ := mapItem["tactic_name"].(string)
+				if techniqueID != "" {
+					result = append(result, finding.SimpleMitreMapping{
+						TechniqueID:   techniqueID,
+						TechniqueName: techniqueName,
+						Tactic:        tacticName,
+					})
+				}
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+
+	return nil
+}
+
+// getMitreAtlasFromMetadata retrieves MITRE ATLAS mappings from agent.Finding's Metadata.
+// Returns empty slice if not found or if conversion fails.
+func getMitreAtlasFromMetadata(f *agent.Finding) []finding.SimpleMitreMapping {
+	if f.Metadata == nil {
+		return nil
+	}
+
+	// Try to get from Metadata using the well-known key
+	data, ok := f.Metadata[sdkSecurity.MetaKeyMitreAtlas]
+	if !ok {
+		return nil
+	}
+
+	// The metadata could contain a single mapping or an array
+	// Try single mapping first (sdkSecurity.MitreMapping)
+	if mapping, ok := data.(sdkSecurity.MitreMapping); ok {
+		return []finding.SimpleMitreMapping{
+			{
+				TechniqueID:   mapping.TechniqueID,
+				TechniqueName: mapping.TechniqueName,
+				Tactic:        mapping.TacticName,
+			},
+		}
+	}
+
+	// Try array of SDK mappings
+	if mappings, ok := data.([]sdkSecurity.MitreMapping); ok {
+		result := make([]finding.SimpleMitreMapping, len(mappings))
+		for i, m := range mappings {
+			result[i] = finding.SimpleMitreMapping{
+				TechniqueID:   m.TechniqueID,
+				TechniqueName: m.TechniqueName,
+				Tactic:        m.TacticName,
+			}
+		}
+		return result
+	}
+
+	// Try to convert from map (JSON unmarshaling might produce map[string]interface{})
+	if mapData, ok := data.(map[string]interface{}); ok {
+		techniqueID, _ := mapData["technique_id"].(string)
+		techniqueName, _ := mapData["technique_name"].(string)
+		tacticName, _ := mapData["tactic_name"].(string)
+		if techniqueID != "" {
+			return []finding.SimpleMitreMapping{
+				{
+					TechniqueID:   techniqueID,
+					TechniqueName: techniqueName,
+					Tactic:        tacticName,
+				},
+			}
+		}
+	}
+
+	// Try array of maps
+	if arrayData, ok := data.([]interface{}); ok {
+		result := make([]finding.SimpleMitreMapping, 0, len(arrayData))
+		for _, item := range arrayData {
+			if mapItem, ok := item.(map[string]interface{}); ok {
+				techniqueID, _ := mapItem["technique_id"].(string)
+				techniqueName, _ := mapItem["technique_name"].(string)
+				tacticName, _ := mapItem["tactic_name"].(string)
+				if techniqueID != "" {
+					result = append(result, finding.SimpleMitreMapping{
+						TechniqueID:   techniqueID,
+						TechniqueName: techniqueName,
+						Tactic:        tacticName,
+					})
+				}
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+
+	return nil
+}
+
+// getCVSSFromMetadata retrieves CVSS score from agent.Finding's Metadata.
+// Returns the score and true if found, or empty score and false if not present.
+func getCVSSFromMetadata(f *agent.Finding) (agent.CVSSScore, bool) {
+	if f.Metadata == nil {
+		return agent.CVSSScore{}, false
+	}
+
+	// Try to get from Metadata using the well-known key
+	data, ok := f.Metadata[sdkSecurity.MetaKeyCVSS]
+	if !ok {
+		return agent.CVSSScore{}, false
+	}
+
+	// Try direct type assertion (sdkSecurity.CVSSScore)
+	if cvss, ok := data.(sdkSecurity.CVSSScore); ok {
+		return agent.CVSSScore{
+			Version: cvss.Version,
+			Vector:  cvss.Vector,
+			Score:   cvss.Score,
+		}, true
+	}
+
+	// Try to convert from map (JSON unmarshaling might produce map[string]interface{})
+	if mapData, ok := data.(map[string]interface{}); ok {
+		version, _ := mapData["version"].(string)
+		vector, _ := mapData["vector"].(string)
+		score, _ := mapData["score"].(float64)
+		if version != "" || vector != "" || score > 0 {
+			return agent.CVSSScore{
+				Version: version,
+				Vector:  vector,
+				Score:   score,
+			}, true
+		}
+	}
+
+	return agent.CVSSScore{}, false
+}
+
+// getCWEFromMetadata retrieves CWE identifiers from agent.Finding's Metadata.
+// Returns the CWE IDs or empty slice if not present.
+func getCWEFromMetadata(f *agent.Finding) []string {
+	if f.Metadata == nil {
+		return nil
+	}
+
+	// Try to get from Metadata using the well-known key
+	data, ok := f.Metadata[sdkSecurity.MetaKeyCWE]
+	if !ok {
+		return nil
+	}
+
+	// Try direct type assertion ([]string)
+	if cwe, ok := data.([]string); ok {
+		return cwe
+	}
+
+	// Try to convert from []interface{}
+	if arrayData, ok := data.([]interface{}); ok {
+		result := make([]string, 0, len(arrayData))
+		for _, item := range arrayData {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+
+	return nil
 }
 
 // Ensure SARIFExporter implements Exporter interface

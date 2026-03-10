@@ -18,6 +18,41 @@ security:
   ssl_validation: true               # Enable SSL certificate validation
   audit_logging: true                # Enable audit logging for sensitive operations
 
+  # Key provider configuration - required for credential encryption
+  key_provider:
+    # Provider type: kubernetes, vault, aws, azure, gcp
+    type: kubernetes
+
+    # Kubernetes Secrets provider configuration
+    kubernetes:
+      secret_name: gibson-master-key
+      secret_namespace: ""  # Empty = use pod's namespace
+      secret_key: master-key
+
+    # HashiCorp Vault provider (uncomment to use)
+    # vault:
+    #   address: https://vault.example.com:8200
+    #   mount_path: secret
+    #   secret_path: gibson/master-key
+    #   key_field: key
+    #   role: gibson
+
+    # AWS Secrets Manager provider (uncomment to use)
+    # aws:
+    #   region: us-east-1
+    #   secret_arn: arn:aws:secretsmanager:us-east-1:123456789:secret:gibson-master-key
+
+    # Azure Key Vault provider (uncomment to use)
+    # azure:
+    #   vault_url: https://gibson-vault.vault.azure.net/
+    #   secret_name: master-key
+
+    # GCP Secret Manager provider (uncomment to use)
+    # gcp:
+    #   project_id: my-project
+    #   secret_name: gibson-master-key
+    #   version: latest
+
 # LLM provider configuration
 llm:
   default_provider: ""             # Default LLM provider (anthropic, openai, ollama)
@@ -347,6 +382,53 @@ langfuse:
 
 # ============================================================================
 # End of Langfuse Configuration
+# ============================================================================
+
+# ============================================================================
+# Observability Dashboard Configuration
+# ============================================================================
+# Configuration for observability dashboard integrations including Neo4j
+# Browser links and Langfuse dashboard URLs. These settings enable deep linking
+# from Langfuse traces to Neo4j graph visualizations.
+#
+# Configuration Options:
+observability:
+  # neo4j_browser_url is the base URL for Neo4j Browser UI
+  # Used to generate deep links from Langfuse traces to knowledge graph views
+  # Default: http://localhost:7474
+  # Environment variable: GIBSON_OBSERVABILITY_NEO4J_BROWSER_URL
+  neo4j_browser_url: "${GIBSON_OBSERVABILITY_NEO4J_BROWSER_URL:-http://localhost:7474}"
+
+  # langfuse_dashboard_url is the URL for the Langfuse UI
+  # Used for generating links to Langfuse dashboards from Gibson UI/logs
+  # Default: http://localhost:3000
+  # Environment variable: GIBSON_OBSERVABILITY_LANGFUSE_DASHBOARD_URL
+  langfuse_dashboard_url: "${GIBSON_OBSERVABILITY_LANGFUSE_DASHBOARD_URL:-http://localhost:3000}"
+
+# Notes:
+# - Neo4j Browser links are automatically generated for graph write spans
+# - Links include pre-populated Cypher queries for mission context
+# - URLs must be accessible from wherever Langfuse UI is accessed (browser context)
+# - For Kubernetes deployments, use ingress URLs or NodePort addresses
+# - For cloud deployments, ensure Neo4j Browser is properly secured
+
+# Example: Local Development
+# observability:
+#   neo4j_browser_url: "http://localhost:7474"
+#   langfuse_dashboard_url: "http://localhost:3000"
+
+# Example: Kubernetes with Ingress
+# observability:
+#   neo4j_browser_url: "https://neo4j.example.com"
+#   langfuse_dashboard_url: "https://langfuse.example.com"
+
+# Example: Environment Variables (Recommended)
+# observability:
+#   neo4j_browser_url: "${GIBSON_OBSERVABILITY_NEO4J_BROWSER_URL}"
+#   langfuse_dashboard_url: "${GIBSON_OBSERVABILITY_LANGFUSE_DASHBOARD_URL}"
+
+# ============================================================================
+# End of Observability Dashboard Configuration
 # ============================================================================
 
 # Agent registration server (optional)

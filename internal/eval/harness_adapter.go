@@ -525,7 +525,7 @@ func convertFindingFromGibson(gf gibsonAgent.Finding) *finding.Finding {
 		ID:          string(gf.ID),
 		Title:       gf.Title,
 		Description: gf.Description,
-		Category:    finding.Category(gf.Category),
+		Category:    gf.Category, // Category is now a string type
 		Severity:    convertSeverityFromGibson(gf.Severity),
 		Confidence:  gf.Confidence,
 	}

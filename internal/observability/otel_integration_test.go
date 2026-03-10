@@ -3,9 +3,18 @@ package observability
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
+	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -118,4 +127,257 @@ func TestExtractOTELTraceIDFromContext(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestOTelObservabilityStack_Integration tests the full OTel stack with all components
+func TestOTelObservabilityStack_Integration(t *testing.T) {
+	// 1. Create test TracerProvider and MeterProvider
+	spanRecorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(spanRecorder),
+	)
+	defer tp.Shutdown(context.Background())
+
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	// 2. Initialize OTelObservabilityStack (tracer + metrics)
+	contentCfg := DefaultContentLoggingConfig()
+	contentCfg.Enabled = true
+	contentCfg.IncludeToolIO = true
+
+	tracer := NewOTelMissionTracer(tp, mp, &contentCfg).
+		WithNeo4jBrowserURL("http://localhost:7474").
+		WithServiceName("gibson-test")
+
+	metricsRecorder, err := NewOTelMetricsRecorder(mp)
+	require.NoError(t, err)
+
+	// 3. Start mission trace
+	mission := &schema.Mission{
+		ID:        types.NewID(),
+		Name:      "integration-test-mission",
+		Objective: "Test full OTel observability stack",
+		TargetRef: "test-target",
+		Status:    schema.MissionStatusRunning,
+		CreatedAt: time.Now(),
+	}
+
+	ctx, missionSpan, err := tracer.StartMissionTrace(context.Background(), mission)
+	require.NoError(t, err)
+	assert.NotNil(t, missionSpan)
+
+	// 4. Log orchestrator decisions
+	for i := 0; i < 3; i++ {
+		decision := schema.NewDecision(mission.ID, i+1, schema.DecisionActionExecuteAgent)
+		decision.Confidence = 0.9
+		decision.Reasoning = "Execute agent for reconnaissance"
+		decision.TargetNodeID = "node-123"
+		decision.PromptTokens = 100 + (i * 10)
+		decision.CompletionTokens = 50 + (i * 5)
+		decision.WithLatency(1500)
+
+		decisionLog := &DecisionLog{
+			Decision:    decision,
+			Prompt:      "Analyze the target and decide next action",
+			Response:    "Execute reconnaissance agent",
+			Model:       "gpt-4",
+			RequestMeta: &RequestMetadata{
+				Provider:    "openai",
+				Temperature: 0.7,
+				MaxTokens:   1000,
+				TopP:        0.9,
+			},
+		}
+
+		err = tracer.LogDecision(ctx, missionSpan, decisionLog)
+		assert.NoError(t, err)
+
+		// Record metrics for decision
+		metricsRecorder.RecordDecision(ctx, schema.DecisionActionExecuteAgent.String())
+		metricsRecorder.RecordLLMCompletion(ctx, "openai", "gpt-4", "success",
+			decision.PromptTokens, decision.CompletionTokens, 1500.0, 0.05)
+	}
+
+	// 5. Log agent executions
+	for i := 0; i < 2; i++ {
+		execution := &schema.AgentExecution{
+			ID:             types.NewID(),
+			WorkflowNodeID: "node-123",
+			Attempt:        1,
+			Status:         schema.ExecutionStatusCompleted,
+			StartedAt:      time.Now(),
+		}
+
+		agentLog := &AgentExecutionLog{
+			Execution:       execution,
+			AgentName:       "recon-agent",
+			ToolCallsCount:  3,
+			FindingsCount:   2,
+			LLMTimeMs:       500,
+			ToolTimeMs:      1000,
+			MemoryOpsCount:  5,
+		}
+
+		agentCtx, agentSpan, err := tracer.LogAgentExecution(ctx, missionSpan, agentLog)
+		assert.NoError(t, err)
+		assert.NotNil(t, agentSpan)
+
+		// Record metrics for agent execution
+		metricsRecorder.RecordAgentExecution(agentCtx, "recon-agent", "completed", 45000.0)
+
+		// 6. Log tool calls under agent
+		for j := 0; j < 3; j++ {
+			completedAt := time.Now()
+			toolExec := &schema.ToolExecution{
+				ToolName:    "nmap",
+				Status:      schema.ExecutionStatusCompleted,
+				StartedAt:   time.Now().Add(-2 * time.Second),
+				CompletedAt: &completedAt,
+			}
+
+			toolLog := &OTelToolExecutionLog{
+				Execution:       toolExec,
+				Category:        "network",
+				Version:         "1.0.0",
+				InputString:     "-sV 192.168.1.1",
+				OutputString:    "scan results",
+				DiscoveryCount:  5,
+				OutputSizeBytes: 2048,
+			}
+
+			err = tracer.LogToolExecution(agentCtx, agentSpan, toolLog)
+			assert.NoError(t, err)
+
+			// Record metrics for tool execution
+			metricsRecorder.RecordToolCall(agentCtx, "nmap", "success", 2000.0)
+		}
+
+		// 7. Log findings
+		for j := 0; j < 2; j++ {
+			finding := &FindingLog{
+				ID:         types.NewID(),
+				Title:      "Open Port Found",
+				Severity:   "high",
+				Category:   "network",
+				Confidence: 0.95,
+				CVSSScore:  7.5,
+			}
+
+			err = tracer.LogFinding(agentCtx, agentSpan, finding)
+			assert.NoError(t, err)
+
+			// Record metrics for finding
+			metricsRecorder.RecordFinding(agentCtx, "high", "network")
+		}
+
+		// 8. Log memory operations
+		for j := 0; j < 5; j++ {
+			memOp := &MemoryOpLog{
+				Tier:       "short",
+				Operation:  "set",
+				Key:        "scan_result",
+				SizeBytes:  1024,
+				DurationMs: 5,
+			}
+
+			err = tracer.LogMemoryOp(agentCtx, agentSpan, memOp)
+			assert.NoError(t, err)
+
+			// Record metrics for memory operation
+			metricsRecorder.RecordMemoryOp(agentCtx, "short", "set")
+		}
+
+		// End agent span
+		agentSpan.End(codes.Ok, "Agent execution completed")
+	}
+
+	// 9. End mission trace with summary
+	summary := &MissionTraceSummary{
+		Status:   "completed",
+		Outcome:  "Successfully tested full OTel stack",
+		Duration: 5 * time.Minute,
+	}
+
+	err = tracer.EndMissionTrace(ctx, missionSpan, summary)
+	assert.NoError(t, err)
+
+	// Record metrics for mission completion
+	metricsRecorder.RecordMission(ctx, "completed", 300000.0)
+
+	// 10. Verify spans have correct hierarchy
+	spans := spanRecorder.Ended()
+	require.GreaterOrEqual(t, len(spans), 10, "Expected multiple spans")
+
+	// Count span types
+	var missionSpans, decisionSpans, agentSpans, toolSpans, findingSpans, memorySpans int
+	for _, span := range spans {
+		switch span.Name() {
+		case SpanMissionExecute:
+			missionSpans++
+		case SpanGenAIChat:
+			decisionSpans++
+		case SpanAgentExecute:
+			agentSpans++
+		case "gibson.tool.execute":
+			toolSpans++
+		case SpanFindingSubmit:
+			findingSpans++
+		case SpanMemoryGet, SpanMemorySet, SpanMemorySearch:
+			memorySpans++
+		}
+	}
+
+	assert.Equal(t, 1, missionSpans, "Expected 1 mission span")
+	assert.GreaterOrEqual(t, decisionSpans, 3, "Expected at least 3 decision spans")
+	assert.Equal(t, 2, agentSpans, "Expected 2 agent spans")
+	assert.GreaterOrEqual(t, toolSpans, 6, "Expected at least 6 tool spans")
+	assert.GreaterOrEqual(t, findingSpans, 4, "Expected at least 4 finding spans")
+	assert.GreaterOrEqual(t, memorySpans, 10, "Expected at least 10 memory spans")
+
+	// 11. Verify attributes are set correctly
+	var missionSpanData sdktrace.ReadOnlySpan
+	for _, span := range spans {
+		if span.Name() == SpanMissionExecute {
+			missionSpanData = span
+			break
+		}
+	}
+	require.NotNil(t, missionSpanData, "Mission span not found")
+
+	attrs := missionSpanData.Attributes()
+	attrMap := make(map[string]interface{})
+	for _, attr := range attrs {
+		attrMap[string(attr.Key)] = attr.Value.AsInterface()
+	}
+
+	assert.Equal(t, mission.ID.String(), attrMap[GibsonMissionID])
+	assert.Equal(t, mission.Name, attrMap[GibsonMissionName])
+	assert.Equal(t, mission.Objective, attrMap[GibsonMissionObjective])
+	assert.Equal(t, "Successfully tested full OTel stack", attrMap[GibsonMissionOutcome])
+
+	// 12. Verify metrics are recorded
+	rm := &metricdata.ResourceMetrics{}
+	err = reader.Collect(ctx, rm)
+	require.NoError(t, err)
+
+	// Count metric types
+	metricNames := make(map[string]bool)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			metricNames[m.Name] = true
+		}
+	}
+
+	// Verify key metrics exist
+	assert.True(t, metricNames["gibson.llm.requests.total"], "Expected LLM requests metric")
+	assert.True(t, metricNames["gibson.tool.calls.total"], "Expected tool calls metric")
+	assert.True(t, metricNames["gibson.finding.submissions.total"], "Expected findings metric")
+	assert.True(t, metricNames["gibson.agent.executions.total"], "Expected agent executions metric")
+	assert.True(t, metricNames["gibson.mission.total"], "Expected mission metric")
+
+	t.Log("Full OTel observability stack integration test passed")
+	t.Logf("Created %d spans across mission hierarchy", len(spans))
+	t.Logf("Recorded %d different metric types", len(metricNames))
 }

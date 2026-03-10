@@ -14,6 +14,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component/git"
 	"github.com/zero-day-ai/gibson/internal/component/resolver"
 	"github.com/zero-day-ai/gibson/internal/config"
+	"github.com/zero-day-ai/gibson/internal/crypto"
+	"github.com/zero-day-ai/gibson/internal/crypto/providers"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
@@ -176,6 +178,12 @@ type daemonImpl struct {
 
 	// logTailer manages component log tailing with fsnotify
 	logTailer *LogTailer
+
+	// keyProvider provides access to encryption keys from secure storage
+	keyProvider crypto.KeyProvider
+
+	// credentialStore provides credential access with encryption
+	credentialStore *DaemonCredentialStore
 
 	// startTime tracks when the daemon started
 	startTime time.Time
@@ -454,31 +462,39 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Warn(ctx, "dependency resolver not initialized - component store or lifecycle manager unavailable")
 	}
 
-	// Configure callback service with span processors for distributed tracing
-	if len(infra.spanProcessors) > 0 {
-		d.callback.AddSpanProcessors(infra.spanProcessors...)
-		d.logger.Info(ctx, "configured callback service with span processors",
-			"count", len(infra.spanProcessors))
-	}
-
-	// Configure callback service with TracerProvider for proxy span creation
-	if infra.tracerProvider != nil {
-		d.callback.SetTracerProvider(infra.tracerProvider)
-		d.logger.Info(ctx, "configured callback service with tracer provider")
+	// Configure callback service with TracerProvider for proxy span creation (from OTel stack)
+	if infra.otelStack != nil && infra.otelStack.TracerProvider != nil {
+		d.callback.SetTracerProvider(infra.otelStack.TracerProvider)
+		d.logger.Info(ctx, "configured callback service with OTel tracer provider")
 	}
 
 	// Configure callback service with credential store for secure credential retrieval
-	// Use Redis DAO (required)
-	credentialDAO := database.NewRedisCredentialDAO(d.stateClient)
-	d.logger.Info(ctx, "using Redis credential DAO")
+	// Initialize KeyProvider from config if available
+	if d.config.Security.KeyProvider != nil {
+		d.logger.Info(ctx, "initializing key provider", "type", d.config.Security.KeyProvider.Type)
+		keyProvider, err := providers.NewKeyProvider(d.config.Security.KeyProvider)
+		if err != nil {
+			d.logger.Warn(ctx, "failed to initialize key provider (credentials will not be available)",
+				"error", err)
+		} else {
+			d.keyProvider = keyProvider
 
-	credentialStore, err := NewDaemonCredentialStore(credentialDAO, d.config.Core.HomeDir)
-	if err != nil {
-		d.logger.Warn(ctx, "failed to initialize credential store (credentials will not be available)",
-			"error", err)
+			// Create credential store with Redis DAO and KeyProvider
+			credentialDAO := database.NewRedisCredentialDAO(d.stateClient)
+			d.logger.Info(ctx, "using Redis credential DAO")
+
+			credentialStore, err := NewDaemonCredentialStore(credentialDAO, keyProvider)
+			if err != nil {
+				d.logger.Warn(ctx, "failed to initialize credential store (credentials will not be available)",
+					"error", err)
+			} else {
+				d.credentialStore = credentialStore
+				d.callback.SetCredentialStore(credentialStore)
+				d.logger.Info(ctx, "configured callback service with credential store")
+			}
+		}
 	} else {
-		d.callback.SetCredentialStore(credentialStore)
-		d.logger.Info(ctx, "configured callback service with credential store")
+		d.logger.Info(ctx, "credential store disabled - no key provider configured (set security.key_provider in config)")
 	}
 
 	// Configure callback service with event bus for tool/LLM event publishing
@@ -548,35 +564,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// Create GraphLoader for storing mission definitions in Neo4j
 		missionGraphLoader := orchestrator.NewGraphLoader(d.infrastructure.graphRAGClient, d.logger.Slog())
 
-		// Get tracer from tracer provider
+		// Get tracer from OTel stack or use noop
 		var tracer trace.Tracer
-		if d.infrastructure.tracerProvider != nil {
-			tracer = d.infrastructure.tracerProvider.Tracer("gibson-orchestrator")
+		if d.infrastructure.otelStack != nil && d.infrastructure.otelStack.TracerProvider != nil {
+			tracer = d.infrastructure.otelStack.TracerProvider.Tracer("gibson-orchestrator")
 		} else {
 			tracer = trace.NewNoopTracerProvider().Tracer("orchestrator")
-		}
-
-		// Configure Langfuse observability for attack runner missions.
-		//
-		// IMPORTANT: DecisionLogWriterAdapter cannot be created here because it requires
-		// mission-specific context (schema.Mission) at construction time. The attack runner
-		// creates ephemeral missions dynamically when Run() is called, so there's no mission
-		// context available at daemon startup.
-		//
-		// Solution: Pass missionTracer via Config so the orchestrator adapter can create
-		// DecisionLogWriterAdapter per-mission in Execute(). This requires modifying
-		// MissionAdapter.createOrchestrator() to check for MissionTracer and create the
-		// adapter with mission context (future work - see Task 8 notes in spec).
-		//
-		// For now, DecisionLogWriter remains nil. Attack runner missions will have:
-		// - OpenTelemetry tracing (via Tracer) ✓
-		// - No Langfuse decision logging ✗ (requires MissionAdapter enhancement)
-		//
-		// See mission_manager.go:462-484 for the pattern that needs to be replicated
-		// in orchestrator/adapter.go:createOrchestrator().
-		if d.infrastructure.missionTracer != nil {
-			d.logger.Debug(ctx, "mission tracer available for attack runner",
-				"note", "DecisionLogWriter creation deferred to per-mission context (requires MissionAdapter enhancement)")
 		}
 
 		// Create DiscoveryProcessor for processing agent output discoveries
@@ -595,10 +588,9 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			ThinkerMaxRetries:  3,
 			ThinkerTemperature: 0.2,
 			GraphLoader:        missionGraphLoader,
-			Registry:           d.registryAdapter,              // For component discovery and validation
-			DecisionLogWriter:  nil,                            // Cannot create without mission context - see comment above
-			MissionTracer:      d.infrastructure.missionTracer, // Pass for future per-mission adapter creation
-			DiscoveryProcessor: discoveryProcessorAdapter,      // Process agent output discoveries to Neo4j
+			Registry:           d.registryAdapter,         // For component discovery and validation
+			DecisionLogWriter:  nil,                       // OTel adapter created per-mission in mission_manager.go
+			DiscoveryProcessor: discoveryProcessorAdapter, // Process agent output discoveries to Neo4j
 		}
 
 		var err error
@@ -703,6 +695,22 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Register shutdown state check - this signals Kubernetes to stop routing traffic during shutdown
 	d.healthServer.RegisterReadinessCheck("shutdown", d.healthState.CheckFunc())
 	d.logger.Debug(ctx, "registered shutdown state readiness check")
+
+	// Register key provider health check if available
+	if d.keyProvider != nil {
+		keyProvider := d.keyProvider
+		d.healthServer.RegisterReadinessCheck("key_provider", func(ctx context.Context) sdktypes.HealthStatus {
+			status := keyProvider.Health(ctx)
+			// Convert internal types.HealthStatus to SDK types.HealthStatus
+			if status.IsHealthy() {
+				return sdktypes.NewHealthyStatus(status.Message)
+			} else if status.IsDegraded() {
+				return sdktypes.NewDegradedStatus(status.Message, nil)
+			}
+			return sdktypes.NewUnhealthyStatus(status.Message, nil)
+		})
+		d.logger.Debug(ctx, "registered key provider readiness check")
+	}
 
 	// Start the health server (non-blocking)
 	if err := d.healthServer.Start(); err != nil {
@@ -879,6 +887,7 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 		d.callback,
 		d.eventBus,
 		d.registry,
+		d.credentialStore,
 		d.logger,
 	))
 

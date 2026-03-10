@@ -40,8 +40,11 @@ func createTestFinding(missionID types.ID, severity agent.FindingSeverity, categ
 	finding.RiskScore = riskScore
 	finding.Subcategory = "test_subcategory"
 
-	// Add MITRE mappings
-	finding.MitreAttack = []SimpleMitreMapping{
+	// Add MITRE mappings via Metadata
+	if finding.Metadata == nil {
+		finding.Metadata = make(map[string]any)
+	}
+	finding.Metadata["mitre_attack"] = []SimpleMitreMapping{
 		{
 			TechniqueID:   "T1059",
 			TechniqueName: "Command and Scripting Interpreter",
@@ -140,8 +143,11 @@ func TestGetStatistics_TopMitreTechniques(t *testing.T) {
 	for i := 0; i < 15; i++ {
 		finding := createTestFinding(missionID, agent.SeverityHigh, CategoryJailbreak, StatusOpen, 7.0)
 
-		// Add multiple different techniques to test top 10 limit
-		finding.MitreAttack = []SimpleMitreMapping{
+		// Add multiple different techniques to test top 10 limit via Metadata
+		if finding.Metadata == nil {
+			finding.Metadata = make(map[string]any)
+		}
+		finding.Metadata["mitre_attack"] = []SimpleMitreMapping{
 			{
 				TechniqueID:   "T1059",
 				TechniqueName: "Command and Scripting Interpreter",
@@ -151,7 +157,7 @@ func TestGetStatistics_TopMitreTechniques(t *testing.T) {
 
 		// Add unique technique for some findings
 		if i < 12 {
-			finding.MitreAtlas = []SimpleMitreMapping{
+			finding.Metadata["mitre_atlas"] = []SimpleMitreMapping{
 				{
 					TechniqueID:   "AML.T0043",
 					TechniqueName: "Craft Adversarial Data",

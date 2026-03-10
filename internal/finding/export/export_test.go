@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkSecurity "github.com/zero-day-ai/sdk/finding/security"
 )
 
 // createTestFindings creates a set of test findings for export testing
@@ -20,77 +21,91 @@ func createTestFindings() []*finding.EnhancedFinding {
 	now := time.Now()
 	targetID := types.NewID()
 
+	// Create test findings with security metadata stored in Metadata field
+	finding1 := &finding.EnhancedFinding{
+		Finding: agent.Finding{
+			ID:          types.NewID(),
+			Title:       "SQL Injection in Login Form",
+			Description: "User input is not properly sanitized before being used in SQL queries",
+			Severity:    agent.SeverityCritical,
+			Confidence:  0.95,
+			Category:    "injection",
+			TargetID:    &targetID,
+			Evidence: []agent.Evidence{
+				{
+					Type:        "request",
+					Description: "Malicious SQL payload submitted",
+					Data: map[string]any{
+						"payload": "' OR '1'='1",
+					},
+					Timestamp: now,
+				},
+			},
+			CWE:      []string{"CWE-89"},
+			Metadata: make(map[string]any),
+			CreatedAt: now,
+		},
+		MissionID:       types.NewID(),
+		AgentName:       "sql-fuzzer",
+		Subcategory:     "blind_sqli",
+		Status:          finding.StatusOpen,
+		RiskScore:       9.5,
+		Remediation:     "Use parameterized queries and input validation",
+		References:      []string{"https://owasp.org/www-community/attacks/SQL_Injection"},
+		OccurrenceCount: 1,
+		UpdatedAt:       now,
+	}
+	// Store MITRE Attack in Metadata
+	finding1.Finding.Metadata[sdkSecurity.MetaKeyMitreAttack] = sdkSecurity.MitreMapping{
+		TechniqueID:   "T1190",
+		TechniqueName: "Exploit Public-Facing Application",
+		TacticName:    "Initial Access",
+	}
+
 	return []*finding.EnhancedFinding{
-		{
-			Finding: agent.Finding{
-				ID:          types.NewID(),
-				Title:       "SQL Injection in Login Form",
-				Description: "User input is not properly sanitized before being used in SQL queries",
-				Severity:    agent.SeverityCritical,
-				Confidence:  0.95,
-				Category:    "injection",
-				TargetID:    &targetID,
-				Evidence: []agent.Evidence{
-					{
-						Type:        "request",
-						Description: "Malicious SQL payload submitted",
-						Data: map[string]any{
-							"payload": "' OR '1'='1",
+		finding1,
+		func() *finding.EnhancedFinding {
+			finding2 := &finding.EnhancedFinding{
+				Finding: agent.Finding{
+					ID:          types.NewID(),
+					Title:       "Cross-Site Scripting (XSS)",
+					Description: "Reflected XSS vulnerability in search parameter",
+					Severity:    agent.SeverityHigh,
+					Confidence:  0.90,
+					Category:    "xss",
+					TargetID:    &targetID,
+					Evidence: []agent.Evidence{
+						{
+							Type:        "response",
+							Description: "Script executed in browser",
+							Data: map[string]any{
+								"script": "<script>alert('XSS')</script>",
+							},
+							Timestamp: now,
 						},
-						Timestamp: now,
 					},
+					CWE:       []string{"CWE-79"},
+					Metadata:  make(map[string]any),
+					CreatedAt: now.Add(-1 * time.Hour),
 				},
-				CWE:       []string{"CWE-89"},
-				CreatedAt: now,
-			},
-			MissionID:   types.NewID(),
-			AgentName:   "sql-fuzzer",
-			Subcategory: "blind_sqli",
-			Status:      finding.StatusOpen,
-			RiskScore:   9.5,
-			Remediation: "Use parameterized queries and input validation",
-			References:  []string{"https://owasp.org/www-community/attacks/SQL_Injection"},
-			MitreAttack: []finding.SimpleMitreMapping{
-				{TechniqueID: "T1190", TechniqueName: "Exploit Public-Facing Application", Tactic: "Initial Access"},
-			},
-			OccurrenceCount: 1,
-			UpdatedAt:       now,
-		},
-		{
-			Finding: agent.Finding{
-				ID:          types.NewID(),
-				Title:       "Cross-Site Scripting (XSS)",
-				Description: "Reflected XSS vulnerability in search parameter",
-				Severity:    agent.SeverityHigh,
-				Confidence:  0.90,
-				Category:    "xss",
-				TargetID:    &targetID,
-				Evidence: []agent.Evidence{
-					{
-						Type:        "response",
-						Description: "Script executed in browser",
-						Data: map[string]any{
-							"script": "<script>alert('XSS')</script>",
-						},
-						Timestamp: now,
-					},
-				},
-				CWE:       []string{"CWE-79"},
-				CreatedAt: now.Add(-1 * time.Hour),
-			},
-			MissionID:   types.NewID(),
-			AgentName:   "xss-scanner",
-			Subcategory: "reflected",
-			Status:      finding.StatusConfirmed,
-			RiskScore:   7.5,
-			Remediation: "Implement output encoding and Content Security Policy",
-			References:  []string{"https://owasp.org/www-community/attacks/xss/"},
-			MitreAttack: []finding.SimpleMitreMapping{
-				{TechniqueID: "T1189", TechniqueName: "Drive-by Compromise", Tactic: "Initial Access"},
-			},
-			OccurrenceCount: 3,
-			UpdatedAt:       now,
-		},
+				MissionID:       types.NewID(),
+				AgentName:       "xss-scanner",
+				Subcategory:     "reflected",
+				Status:          finding.StatusConfirmed,
+				RiskScore:       7.5,
+				Remediation:     "Implement output encoding and Content Security Policy",
+				References:      []string{"https://owasp.org/www-community/attacks/xss/"},
+				OccurrenceCount: 3,
+				UpdatedAt:       now,
+			}
+			// Store MITRE Attack in Metadata
+			finding2.Finding.Metadata[sdkSecurity.MetaKeyMitreAttack] = sdkSecurity.MitreMapping{
+				TechniqueID:   "T1189",
+				TechniqueName: "Drive-by Compromise",
+				TacticName:    "Initial Access",
+			}
+			return finding2
+		}(),
 		{
 			Finding: agent.Finding{
 				ID:          types.NewID(),
@@ -102,6 +117,7 @@ func createTestFindings() []*finding.EnhancedFinding {
 				TargetID:    &targetID,
 				Evidence:    []agent.Evidence{},
 				CWE:         []string{"CWE-200"},
+				Metadata:    make(map[string]any),
 				CreatedAt:   now.Add(-2 * time.Hour),
 			},
 			MissionID:       types.NewID(),
@@ -121,6 +137,7 @@ func createTestFindings() []*finding.EnhancedFinding {
 				Severity:    agent.SeverityMedium,
 				Confidence:  0.5,
 				Category:    "test",
+				Metadata:    make(map[string]any),
 				CreatedAt:   now.Add(-3 * time.Hour),
 			},
 			MissionID:       types.NewID(),

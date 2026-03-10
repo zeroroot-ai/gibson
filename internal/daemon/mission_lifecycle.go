@@ -78,7 +78,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.targetStore,
 			runLinker,
 			d.infrastructure,
-			d.infrastructure.missionTracer,
+			d.infrastructure.otelStack,
 		)
 
 		d.logger.Info(context.Background(), "mission manager initialized")

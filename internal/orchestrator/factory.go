@@ -60,13 +60,6 @@ type Config struct {
 	// Registry for component discovery and validation (optional)
 	Registry registry.ComponentDiscovery
 
-	// MissionTracer for Langfuse observability (optional)
-	// When set, enables tracing of agent executions and LLM calls to Langfuse.
-	// The tracer is passed to the Actor to create AgentExecutionLog context for
-	// linking agent-level LLM calls to the agent execution span.
-	// Type: *observability.MissionTracer (stored as interface{} to avoid import cycles)
-	MissionTracer interface{}
-
 	// MissionGraphManager manages Mission and MissionRun nodes in Neo4j (optional)
 	// When set, enables automatic mission graph node creation and status tracking
 	// for GraphRAG mission-scoped storage.

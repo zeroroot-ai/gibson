@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 	"github.com/zero-day-ai/gibson/internal/prompt"
@@ -30,6 +31,8 @@ type Config struct {
 	Plugins         PluginsConfig           `mapstructure:"plugins" yaml:"plugins,omitempty"`
 	ActivityLogging ActivityLoggingConfig   `mapstructure:"activity_logging" yaml:"activity_logging"`
 	Shutdown        ShutdownConfig          `mapstructure:"shutdown" yaml:"shutdown"`
+	Observability        ObservabilityConfig        `mapstructure:"observability" yaml:"observability"`
+	OTelObservability    OTelObservabilityConfig    `mapstructure:"otel_observability" yaml:"otel_observability"`
 }
 
 // PluginsConfig contains configuration for all plugins.
@@ -50,10 +53,11 @@ type CoreConfig struct {
 
 // SecurityConfig contains security-related settings.
 type SecurityConfig struct {
-	EncryptionAlgorithm string `mapstructure:"encryption_algorithm" yaml:"encryption_algorithm"`
-	KeyDerivation       string `mapstructure:"key_derivation" yaml:"key_derivation"`
-	SSLValidation       bool   `mapstructure:"ssl_validation" yaml:"ssl_validation"`
-	AuditLogging        bool   `mapstructure:"audit_logging" yaml:"audit_logging"`
+	EncryptionAlgorithm string                     `mapstructure:"encryption_algorithm" yaml:"encryption_algorithm"`
+	KeyDerivation       string                     `mapstructure:"key_derivation" yaml:"key_derivation"`
+	SSLValidation       bool                       `mapstructure:"ssl_validation" yaml:"ssl_validation"`
+	AuditLogging        bool                       `mapstructure:"audit_logging" yaml:"audit_logging"`
+	KeyProvider         *crypto.KeyProviderConfig  `mapstructure:"key_provider" yaml:"key_provider,omitempty"`
 }
 
 // LLMConfig contains LLM provider configuration.
@@ -229,6 +233,12 @@ type ResourceLimitsConfig struct {
 }
 
 // LangfuseConfig contains Langfuse LLM observability configuration.
+//
+// Deprecated: LangfuseConfig is deprecated. Use OTelObservabilityConfig instead.
+// Langfuse will be removed in a future version. See docs/migration/langfuse-to-otel.md
+//
+// The OTel observability stack provides unified tracing to any OTLP-compatible backend
+// (Jaeger, Tempo, Honeycomb, Datadog, etc.) with better standardization and ecosystem support.
 type LangfuseConfig struct {
 	Enabled   bool   `mapstructure:"enabled" yaml:"enabled"`
 	Host      string `mapstructure:"host" yaml:"host"`
@@ -301,6 +311,23 @@ type ShutdownConfig struct {
 	AgentTimeout time.Duration `mapstructure:"agent_timeout" yaml:"agent_timeout"`
 }
 
+// ObservabilityConfig contains configuration for observability dashboard integrations.
+// This includes URLs for Neo4j Browser and Langfuse dashboard, used for generating
+// deep links from traces to knowledge graph visualizations.
+type ObservabilityConfig struct {
+	// Neo4jBrowserURL is the base URL for Neo4j Browser UI
+	// Used to generate deep links from Langfuse traces to graph views
+	// Default: http://localhost:7474
+	// Environment variable: GIBSON_OBSERVABILITY_NEO4J_BROWSER_URL
+	Neo4jBrowserURL string `mapstructure:"neo4j_browser_url" yaml:"neo4j_browser_url"`
+
+	// LangfuseDashboardURL is the URL for the Langfuse UI
+	// Used for generating links to Langfuse dashboards
+	// Default: http://localhost:3000
+	// Environment variable: GIBSON_OBSERVABILITY_LANGFUSE_DASHBOARD_URL
+	LangfuseDashboardURL string `mapstructure:"langfuse_dashboard_url" yaml:"langfuse_dashboard_url"`
+}
+
 // ApplyDefaults fills in zero-valued fields with sensible defaults.
 func (c *ShutdownConfig) ApplyDefaults() {
 	if c.Timeout == 0 {
@@ -317,6 +344,191 @@ func (c *ShutdownConfig) ApplyDefaults() {
 
 	if c.AgentTimeout == 0 {
 		c.AgentTimeout = 15 * time.Second
+	}
+}
+
+// ApplyDefaults fills in zero-valued fields with sensible defaults.
+func (c *ObservabilityConfig) ApplyDefaults() {
+	if c.Neo4jBrowserURL == "" {
+		c.Neo4jBrowserURL = "http://localhost:7474"
+	}
+
+	if c.LangfuseDashboardURL == "" {
+		c.LangfuseDashboardURL = "http://localhost:3000"
+	}
+}
+
+// OTelObservabilityConfig contains configuration for unified OpenTelemetry observability.
+// This replaces the Langfuse-specific configuration for a standard OTel approach that works
+// with any OTLP-compatible backend (Jaeger, Tempo, Honeycomb, Datadog, etc.).
+//
+// OTel observability is optional and gracefully degrades - daemon startup will not fail
+// if OTel is misconfigured or unavailable. All trace/metric export errors are logged
+// but never block mission execution.
+//
+// Example configuration:
+//
+//	otel_observability:
+//	  enabled: true
+//	  endpoint: "http://localhost:4317"
+//	  protocol: "grpc"
+//	  service_name: "gibson"
+//	  headers:
+//	    authorization: "Bearer ${OTEL_API_KEY}"
+//	  content_logging:
+//	    enabled: true
+//	    max_prompt_length: 10000
+//	    max_completion_length: 10000
+//	    include_tool_io: false
+type OTelObservabilityConfig struct {
+	// Enabled controls whether OTel observability is active.
+	// When false, all OTel components are skipped with zero overhead.
+	// Default: false (opt-in model)
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
+
+	// Endpoint is the OTLP receiver endpoint (e.g., "http://localhost:4317" for gRPC).
+	// Supports both gRPC and HTTP/protobuf protocols based on Protocol field.
+	// Required when Enabled is true.
+	Endpoint string `mapstructure:"endpoint" yaml:"endpoint"`
+
+	// Protocol is the OTLP protocol to use: "grpc" or "http".
+	// Default: "grpc" (recommended for production due to better performance)
+	Protocol string `mapstructure:"protocol" yaml:"protocol"`
+
+	// Headers are additional headers to send with OTLP requests.
+	// Commonly used for authentication tokens or custom metadata.
+	// Example: {"Authorization": "Bearer token", "X-Scope-OrgID": "tenant1"}
+	Headers map[string]string `mapstructure:"headers" yaml:"headers"`
+
+	// ServiceName identifies this service in traces (appears in trace search/filtering).
+	// Default: "gibson"
+	ServiceName string `mapstructure:"service_name" yaml:"service_name"`
+
+	// ContentLogging configures prompt/completion capture in traces.
+	// When enabled, LLM prompts and completions are recorded as span events
+	// with redaction and truncation for security.
+	ContentLogging ContentLoggingSubConfig `mapstructure:"content_logging" yaml:"content_logging"`
+
+	// Batching configures export batching to reduce network overhead.
+	// Higher batch sizes improve throughput but increase latency and memory usage.
+	Batching BatchingConfig `mapstructure:"batching" yaml:"batching"`
+
+	// Retry configures export retry behavior for transient failures.
+	// Exponential backoff prevents overwhelming failing backends.
+	Retry RetryExportConfig `mapstructure:"retry" yaml:"retry"`
+}
+
+// ContentLoggingSubConfig maps to observability.ContentLoggingConfig.
+// It controls whether and how LLM conversation content is logged in traces.
+// All fields support security features like redaction and truncation.
+type ContentLoggingSubConfig struct {
+	// Enabled determines whether content logging is active.
+	// Default: false (opt-in for security)
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
+
+	// MaxPromptLength is the maximum number of characters to log for prompts.
+	// Content exceeding this will be truncated with "... [truncated]" suffix.
+	// Set to 0 for no limit (not recommended in production).
+	// Default: 10000
+	MaxPromptLength int `mapstructure:"max_prompt_length" yaml:"max_prompt_length"`
+
+	// MaxCompletionLength is the maximum number of characters to log for completions.
+	// Content exceeding this will be truncated with "... [truncated]" suffix.
+	// Set to 0 for no limit (not recommended in production).
+	// Default: 10000
+	MaxCompletionLength int `mapstructure:"max_completion_length" yaml:"max_completion_length"`
+
+	// RedactPatterns contains regex patterns for redacting sensitive information.
+	// Matches are replaced with [REDACTED] before logging.
+	// Default patterns include: API keys, passwords, secrets, tokens, bearer tokens.
+	RedactPatterns []string `mapstructure:"redact_patterns" yaml:"redact_patterns"`
+
+	// IncludeToolIO determines whether tool input and output are logged.
+	// Tool I/O can be large and may contain sensitive data.
+	// Default: false (to reduce log volume and exposure)
+	IncludeToolIO bool `mapstructure:"include_tool_io" yaml:"include_tool_io"`
+}
+
+// BatchingConfig configures OTLP export batching behavior.
+// Batching reduces network overhead by aggregating multiple spans/metrics
+// into fewer network requests at the cost of increased latency.
+type BatchingConfig struct {
+	// MaxSize is the maximum number of spans/metrics to batch before sending.
+	// Higher values reduce network overhead but increase memory usage and latency.
+	// Default: 512
+	MaxSize int `mapstructure:"max_size" yaml:"max_size"`
+
+	// Timeout is the maximum time to wait before sending a partial batch.
+	// Ensures data is sent even if MaxSize isn't reached.
+	// Default: 5s
+	Timeout time.Duration `mapstructure:"timeout" yaml:"timeout"`
+}
+
+// RetryExportConfig configures OTLP export retry behavior with exponential backoff.
+// Retry is critical for production resilience to handle transient backend failures.
+type RetryExportConfig struct {
+	// Enabled determines whether failed exports should be retried.
+	// Recommended for production to handle transient failures.
+	// Default: true
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
+
+	// InitialInterval is the initial backoff duration for retry attempts.
+	// Subsequent retries use exponential backoff up to MaxInterval.
+	// Default: 1s
+	InitialInterval time.Duration `mapstructure:"initial_interval" yaml:"initial_interval"`
+
+	// MaxInterval is the maximum backoff duration between retry attempts.
+	// Prevents excessive wait times during extended outages.
+	// Default: 30s
+	MaxInterval time.Duration `mapstructure:"max_interval" yaml:"max_interval"`
+
+	// MaxElapsedTime is the maximum total time to spend retrying.
+	// After this time, the export is abandoned and an error is logged.
+	// Default: 5m
+	MaxElapsedTime time.Duration `mapstructure:"max_elapsed_time" yaml:"max_elapsed_time"`
+}
+
+// ApplyDefaults fills in zero-valued fields with production-ready defaults.
+// This ensures the configuration is complete even when partially specified in YAML.
+func (c *OTelObservabilityConfig) ApplyDefaults() {
+	if c.ServiceName == "" {
+		c.ServiceName = "gibson"
+	}
+	if c.Protocol == "" {
+		c.Protocol = "grpc"
+	}
+
+	// Content logging defaults (conservative for security)
+	if c.ContentLogging.MaxPromptLength == 0 {
+		c.ContentLogging.MaxPromptLength = 10000
+	}
+	if c.ContentLogging.MaxCompletionLength == 0 {
+		c.ContentLogging.MaxCompletionLength = 10000
+	}
+	if len(c.ContentLogging.RedactPatterns) == 0 {
+		c.ContentLogging.RedactPatterns = []string{
+			// Match API keys, passwords, secrets, tokens with various formats
+			`(?i)(api[_-]?key|password|secret|token|bearer)[=:\s]+\S+`,
+		}
+	}
+
+	// Batching defaults (balance throughput and latency)
+	if c.Batching.MaxSize == 0 {
+		c.Batching.MaxSize = 512
+	}
+	if c.Batching.Timeout == 0 {
+		c.Batching.Timeout = 5 * time.Second
+	}
+
+	// Retry defaults (production resilience)
+	if c.Retry.InitialInterval == 0 {
+		c.Retry.InitialInterval = 1 * time.Second
+	}
+	if c.Retry.MaxInterval == 0 {
+		c.Retry.MaxInterval = 30 * time.Second
+	}
+	if c.Retry.MaxElapsedTime == 0 {
+		c.Retry.MaxElapsedTime = 5 * time.Minute
 	}
 }
 

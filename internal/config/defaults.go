@@ -104,6 +104,10 @@ func DefaultConfig() *Config {
 			CheckpointTimeout: 5 * time.Second,
 			AgentTimeout:      15 * time.Second,
 		},
+		Observability: ObservabilityConfig{
+			Neo4jBrowserURL:      "http://localhost:7474",
+			LangfuseDashboardURL: "http://localhost:3000",
+		},
 	}
 }
 

@@ -3,6 +3,7 @@ package observability
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -762,5 +763,650 @@ func BenchmarkLoggingConfig_Validate(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = config.Validate()
+	}
+}
+
+// TestContentLoggingConfig_DefaultConfig tests the default configuration.
+func TestContentLoggingConfig_DefaultConfig(t *testing.T) {
+	cfg := DefaultContentLoggingConfig()
+
+	assert.False(t, cfg.Enabled, "content logging should be disabled by default (opt-in)")
+	assert.Equal(t, 10000, cfg.MaxPromptLength)
+	assert.Equal(t, 10000, cfg.MaxCompletionLength)
+	assert.False(t, cfg.IncludeToolIO)
+	assert.NotEmpty(t, cfg.RedactPatterns, "should have default redaction patterns")
+	assert.Nil(t, cfg.compiledPatterns, "patterns should not be compiled yet")
+}
+
+// TestContentLoggingConfig_CompilePatterns tests pattern compilation.
+func TestContentLoggingConfig_CompilePatterns(t *testing.T) {
+	tests := []struct {
+		name      string
+		patterns  []string
+		wantError bool
+	}{
+		{
+			name:      "valid patterns",
+			patterns:  []string{`\d{16}`, `(?i)password\s*=\s*\S+`, `api[_-]?key`},
+			wantError: false,
+		},
+		{
+			name:      "empty patterns",
+			patterns:  []string{},
+			wantError: false,
+		},
+		{
+			name:      "invalid regex",
+			patterns:  []string{`[unclosed`},
+			wantError: true,
+		},
+		{
+			name:      "mixed valid and invalid",
+			patterns:  []string{`\d{16}`, `[unclosed`, `api_key`},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := ContentLoggingConfig{
+				RedactPatterns: tt.patterns,
+			}
+
+			err := cfg.CompilePatterns()
+			if tt.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "failed to compile redaction pattern")
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, len(tt.patterns), len(cfg.compiledPatterns))
+			}
+		})
+	}
+}
+
+// TestContentLoggingConfig_Redact tests content redaction.
+func TestContentLoggingConfig_Redact(t *testing.T) {
+	tests := []struct {
+		name     string
+		patterns []string
+		input    string
+		expected string
+	}{
+		{
+			name:     "redact API key",
+			patterns: []string{`(?i)api[_-]?key[=:\s]+\S+`},
+			input:    "My API_KEY=sk-1234567890 is secret",
+			expected: "My [REDACTED] is secret",
+		},
+		{
+			name:     "redact password",
+			patterns: []string{`(?i)password[=:\s]+\S+`},
+			input:    "password: secretpass123",
+			expected: "password: [REDACTED]",
+		},
+		{
+			name:     "redact credit card",
+			patterns: []string{`\b\d{16}\b`},
+			input:    "Card: 1234567890123456",
+			expected: "Card: [REDACTED]",
+		},
+		{
+			name:     "multiple patterns",
+			patterns: []string{`(?i)api_key=\S+`, `(?i)password=\S+`},
+			input:    "api_key=secret password=hunter2",
+			expected: "[REDACTED] [REDACTED]",
+		},
+		{
+			name:     "no match",
+			patterns: []string{`secret`},
+			input:    "This is public information",
+			expected: "This is public information",
+		},
+		{
+			name:     "empty patterns",
+			patterns: []string{},
+			input:    "api_key=secret",
+			expected: "api_key=secret",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := ContentLoggingConfig{
+				RedactPatterns: tt.patterns,
+			}
+			err := cfg.CompilePatterns()
+			require.NoError(t, err)
+
+			result := cfg.Redact(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestContentLoggingConfig_Truncate tests content truncation.
+func TestContentLoggingConfig_Truncate(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		maxLen   int
+		expected string
+	}{
+		{
+			name:     "no truncation needed",
+			content:  "short",
+			maxLen:   10,
+			expected: "short",
+		},
+		{
+			name:     "exact length",
+			content:  "exactly10c",
+			maxLen:   10,
+			expected: "exactly10c",
+		},
+		{
+			name:     "truncate simple ASCII",
+			content:  "This is a very long message that needs truncation",
+			maxLen:   10,
+			expected: "This is a ... [truncated]",
+		},
+		{
+			name:     "maxLen zero (no limit)",
+			content:  "This should not be truncated",
+			maxLen:   0,
+			expected: "This should not be truncated",
+		},
+		{
+			name:     "maxLen negative (no limit)",
+			content:  "This should not be truncated",
+			maxLen:   -1,
+			expected: "This should not be truncated",
+		},
+		{
+			name:     "truncate UTF-8 multibyte",
+			content:  "Hello 世界 from the world",
+			maxLen:   8,
+			expected: "Hello 世界... [truncated]",
+		},
+		{
+			name:     "UTF-8 emojis",
+			content:  "Hello 👋 🌍 🎉 World",
+			maxLen:   9,
+			expected: "Hello 👋 🌍... [truncated]",
+		},
+		{
+			name:     "one character",
+			content:  "Long content here",
+			maxLen:   1,
+			expected: "L... [truncated]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := ContentLoggingConfig{}
+			result := cfg.Truncate(tt.content, tt.maxLen)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestContentLoggingConfig_Validate tests validation logic.
+func TestContentLoggingConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    ContentLoggingConfig
+		wantError bool
+		errMsg    string
+	}{
+		{
+			name: "valid default config",
+			config: ContentLoggingConfig{
+				Enabled:             true,
+				MaxPromptLength:     10000,
+				MaxCompletionLength: 10000,
+				RedactPatterns:      []string{`api_key`},
+				IncludeToolIO:       false,
+			},
+			wantError: false,
+		},
+		{
+			name: "valid with zero limits",
+			config: ContentLoggingConfig{
+				Enabled:             true,
+				MaxPromptLength:     0,
+				MaxCompletionLength: 0,
+				RedactPatterns:      []string{},
+				IncludeToolIO:       true,
+			},
+			wantError: false,
+		},
+		{
+			name: "negative MaxPromptLength",
+			config: ContentLoggingConfig{
+				Enabled:             true,
+				MaxPromptLength:     -1,
+				MaxCompletionLength: 10000,
+				RedactPatterns:      []string{},
+			},
+			wantError: true,
+			errMsg:    "max_prompt_length must be >= 0",
+		},
+		{
+			name: "negative MaxCompletionLength",
+			config: ContentLoggingConfig{
+				Enabled:             true,
+				MaxPromptLength:     10000,
+				MaxCompletionLength: -1,
+				RedactPatterns:      []string{},
+			},
+			wantError: true,
+			errMsg:    "max_completion_length must be >= 0",
+		},
+		{
+			name: "invalid redaction pattern",
+			config: ContentLoggingConfig{
+				Enabled:             true,
+				MaxPromptLength:     10000,
+				MaxCompletionLength: 10000,
+				RedactPatterns:      []string{`[unclosed`},
+			},
+			wantError: true,
+			errMsg:    "invalid redaction pattern",
+		},
+		{
+			name: "multiple invalid patterns",
+			config: ContentLoggingConfig{
+				Enabled:             true,
+				MaxPromptLength:     10000,
+				MaxCompletionLength: 10000,
+				RedactPatterns:      []string{`valid`, `[invalid`, `also_valid`},
+			},
+			wantError: true,
+			errMsg:    "invalid redaction pattern",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestContentLoggingConfig_YAMLSerialization tests YAML marshaling and unmarshaling.
+func TestContentLoggingConfig_YAMLSerialization(t *testing.T) {
+	original := ContentLoggingConfig{
+		Enabled:             true,
+		MaxPromptLength:     5000,
+		MaxCompletionLength: 8000,
+		RedactPatterns:      []string{`api_key`, `password`},
+		IncludeToolIO:       true,
+	}
+
+	// Marshal to YAML
+	data, err := yaml.Marshal(&original)
+	require.NoError(t, err)
+	assert.NotEmpty(t, data)
+
+	// Verify YAML contains expected fields
+	yamlStr := string(data)
+	assert.Contains(t, yamlStr, "enabled: true")
+	assert.Contains(t, yamlStr, "max_prompt_length: 5000")
+	assert.Contains(t, yamlStr, "max_completion_length: 8000")
+	assert.Contains(t, yamlStr, "redact_patterns:")
+	assert.Contains(t, yamlStr, "include_tool_io: true")
+
+	// Unmarshal back
+	var unmarshaled ContentLoggingConfig
+	err = yaml.Unmarshal(data, &unmarshaled)
+	require.NoError(t, err)
+
+	// Verify fields match
+	assert.Equal(t, original.Enabled, unmarshaled.Enabled)
+	assert.Equal(t, original.MaxPromptLength, unmarshaled.MaxPromptLength)
+	assert.Equal(t, original.MaxCompletionLength, unmarshaled.MaxCompletionLength)
+	assert.Equal(t, original.RedactPatterns, unmarshaled.RedactPatterns)
+	assert.Equal(t, original.IncludeToolIO, unmarshaled.IncludeToolIO)
+}
+
+// TestOTLPConfig_DefaultConfig tests the default configuration.
+func TestOTLPConfig_DefaultConfig(t *testing.T) {
+	cfg := DefaultOTLPConfig()
+
+	assert.Equal(t, 512, cfg.BatchSize)
+	assert.Equal(t, 5*time.Second, cfg.BatchTimeout)
+	assert.True(t, cfg.RetryEnabled)
+	assert.Equal(t, 1*time.Second, cfg.RetryInitialInterval)
+	assert.Equal(t, 30*time.Second, cfg.RetryMaxInterval)
+	assert.Equal(t, 5*time.Minute, cfg.RetryMaxElapsedTime)
+	assert.NotNil(t, cfg.Headers)
+	assert.Empty(t, cfg.Headers)
+}
+
+// TestOTLPConfig_Validate tests validation logic.
+func TestOTLPConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    OTLPConfig
+		wantError bool
+		errMsg    string
+	}{
+		{
+			name: "valid default config",
+			config: OTLPConfig{
+				Endpoint:             "http://localhost:4318",
+				BatchSize:            512,
+				BatchTimeout:         5 * time.Second,
+				RetryEnabled:         true,
+				RetryInitialInterval: 1 * time.Second,
+				RetryMaxInterval:     30 * time.Second,
+				RetryMaxElapsedTime:  5 * time.Minute,
+			},
+			wantError: false,
+		},
+		{
+			name: "valid with gzip compression",
+			config: OTLPConfig{
+				Endpoint:     "http://localhost:4318",
+				Compression:  "gzip",
+				BatchSize:    100,
+				BatchTimeout: 1 * time.Second,
+				RetryEnabled: false,
+			},
+			wantError: false,
+		},
+		{
+			name: "valid with none compression",
+			config: OTLPConfig{
+				Endpoint:     "http://localhost:4318",
+				Compression:  "none",
+				BatchSize:    100,
+				BatchTimeout: 1 * time.Second,
+				RetryEnabled: false,
+			},
+			wantError: false,
+		},
+		{
+			name: "valid with empty compression",
+			config: OTLPConfig{
+				Endpoint:     "http://localhost:4318",
+				Compression:  "",
+				BatchSize:    100,
+				BatchTimeout: 1 * time.Second,
+				RetryEnabled: false,
+			},
+			wantError: false,
+		},
+		{
+			name: "invalid compression",
+			config: OTLPConfig{
+				Endpoint:     "http://localhost:4318",
+				Compression:  "brotli",
+				BatchSize:    100,
+				BatchTimeout: 1 * time.Second,
+			},
+			wantError: true,
+			errMsg:    "invalid compression",
+		},
+		{
+			name: "zero batch size",
+			config: OTLPConfig{
+				Endpoint:     "http://localhost:4318",
+				BatchSize:    0,
+				BatchTimeout: 1 * time.Second,
+			},
+			wantError: true,
+			errMsg:    "batch_size must be > 0",
+		},
+		{
+			name: "negative batch size",
+			config: OTLPConfig{
+				Endpoint:     "http://localhost:4318",
+				BatchSize:    -1,
+				BatchTimeout: 1 * time.Second,
+			},
+			wantError: true,
+			errMsg:    "batch_size must be > 0",
+		},
+		{
+			name: "zero batch timeout",
+			config: OTLPConfig{
+				Endpoint:     "http://localhost:4318",
+				BatchSize:    100,
+				BatchTimeout: 0,
+			},
+			wantError: true,
+			errMsg:    "batch_timeout must be > 0",
+		},
+		{
+			name: "negative batch timeout",
+			config: OTLPConfig{
+				Endpoint:     "http://localhost:4318",
+				BatchSize:    100,
+				BatchTimeout: -1 * time.Second,
+			},
+			wantError: true,
+			errMsg:    "batch_timeout must be > 0",
+		},
+		{
+			name: "negative retry initial interval",
+			config: OTLPConfig{
+				Endpoint:             "http://localhost:4318",
+				BatchSize:            100,
+				BatchTimeout:         1 * time.Second,
+				RetryEnabled:         true,
+				RetryInitialInterval: -1 * time.Second,
+				RetryMaxInterval:     30 * time.Second,
+				RetryMaxElapsedTime:  5 * time.Minute,
+			},
+			wantError: true,
+			errMsg:    "retry_initial_interval must be >= 0",
+		},
+		{
+			name: "negative retry max interval",
+			config: OTLPConfig{
+				Endpoint:             "http://localhost:4318",
+				BatchSize:            100,
+				BatchTimeout:         1 * time.Second,
+				RetryEnabled:         true,
+				RetryInitialInterval: 1 * time.Second,
+				RetryMaxInterval:     -30 * time.Second,
+				RetryMaxElapsedTime:  5 * time.Minute,
+			},
+			wantError: true,
+			errMsg:    "retry_max_interval must be >= 0",
+		},
+		{
+			name: "initial interval greater than max interval",
+			config: OTLPConfig{
+				Endpoint:             "http://localhost:4318",
+				BatchSize:            100,
+				BatchTimeout:         1 * time.Second,
+				RetryEnabled:         true,
+				RetryInitialInterval: 60 * time.Second,
+				RetryMaxInterval:     30 * time.Second,
+				RetryMaxElapsedTime:  5 * time.Minute,
+			},
+			wantError: true,
+			errMsg:    "retry_initial_interval",
+		},
+		{
+			name: "negative retry max elapsed time",
+			config: OTLPConfig{
+				Endpoint:             "http://localhost:4318",
+				BatchSize:            100,
+				BatchTimeout:         1 * time.Second,
+				RetryEnabled:         true,
+				RetryInitialInterval: 1 * time.Second,
+				RetryMaxInterval:     30 * time.Second,
+				RetryMaxElapsedTime:  -5 * time.Minute,
+			},
+			wantError: true,
+			errMsg:    "retry_max_elapsed_time must be >= 0",
+		},
+		{
+			name: "retry disabled - no retry validation",
+			config: OTLPConfig{
+				Endpoint:             "http://localhost:4318",
+				BatchSize:            100,
+				BatchTimeout:         1 * time.Second,
+				RetryEnabled:         false,
+				RetryInitialInterval: -1 * time.Second, // Invalid but ignored
+				RetryMaxInterval:     -30 * time.Second,
+				RetryMaxElapsedTime:  -5 * time.Minute,
+			},
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestOTLPConfig_YAMLSerialization tests YAML marshaling and unmarshaling.
+func TestOTLPConfig_YAMLSerialization(t *testing.T) {
+	original := OTLPConfig{
+		Endpoint:    "http://otlp.example.com:4318",
+		Headers:     map[string]string{"Authorization": "Bearer token123", "X-Custom": "value"},
+		Compression: "gzip",
+		BatchSize:   1000,
+		BatchTimeout: 10 * time.Second,
+		RetryEnabled: true,
+		RetryInitialInterval: 2 * time.Second,
+		RetryMaxInterval:     60 * time.Second,
+		RetryMaxElapsedTime:  10 * time.Minute,
+	}
+
+	// Marshal to YAML
+	data, err := yaml.Marshal(&original)
+	require.NoError(t, err)
+	assert.NotEmpty(t, data)
+
+	// Verify YAML contains expected fields
+	yamlStr := string(data)
+	assert.Contains(t, yamlStr, "endpoint: http://otlp.example.com:4318")
+	assert.Contains(t, yamlStr, "compression: gzip")
+	assert.Contains(t, yamlStr, "batch_size: 1000")
+	assert.Contains(t, yamlStr, "retry_enabled: true")
+
+	// Unmarshal back
+	var unmarshaled OTLPConfig
+	err = yaml.Unmarshal(data, &unmarshaled)
+	require.NoError(t, err)
+
+	// Verify fields match
+	assert.Equal(t, original.Endpoint, unmarshaled.Endpoint)
+	assert.Equal(t, original.Headers, unmarshaled.Headers)
+	assert.Equal(t, original.Compression, unmarshaled.Compression)
+	assert.Equal(t, original.BatchSize, unmarshaled.BatchSize)
+	assert.Equal(t, original.BatchTimeout, unmarshaled.BatchTimeout)
+	assert.Equal(t, original.RetryEnabled, unmarshaled.RetryEnabled)
+	assert.Equal(t, original.RetryInitialInterval, unmarshaled.RetryInitialInterval)
+	assert.Equal(t, original.RetryMaxInterval, unmarshaled.RetryMaxInterval)
+	assert.Equal(t, original.RetryMaxElapsedTime, unmarshaled.RetryMaxElapsedTime)
+}
+
+// TestContentLoggingConfig_RedactWithDefaultPatterns tests default redaction patterns.
+func TestContentLoggingConfig_RedactWithDefaultPatterns(t *testing.T) {
+	cfg := DefaultContentLoggingConfig()
+	err := cfg.CompilePatterns()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "API key with equals",
+			input: "api_key=sk-1234567890",
+		},
+		{
+			name:  "API key with colon",
+			input: "api-key: bearer_token_here",
+		},
+		{
+			name:  "password",
+			input: "password=secret123",
+		},
+		{
+			name:  "secret",
+			input: "secret: my_secret_value",
+		},
+		{
+			name:  "token",
+			input: "token Bearer abc123xyz",
+		},
+		{
+			name:  "bearer token",
+			input: "Authorization: bearer sk-proj-xyz",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := cfg.Redact(tt.input)
+			assert.Contains(t, result, "[REDACTED]", "should redact sensitive content")
+			assert.NotContains(t, result, "sk-", "should not contain API key prefix")
+			assert.NotContains(t, result, "secret123", "should not contain password")
+			assert.NotContains(t, result, "abc123xyz", "should not contain token")
+		})
+	}
+}
+
+// Benchmark content logging operations
+func BenchmarkContentLoggingConfig_Redact(b *testing.B) {
+	cfg := DefaultContentLoggingConfig()
+	_ = cfg.CompilePatterns()
+	content := "This is a test with api_key=sk-1234567890 and password=secret123"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = cfg.Redact(content)
+	}
+}
+
+func BenchmarkContentLoggingConfig_Truncate(b *testing.B) {
+	cfg := ContentLoggingConfig{}
+	content := strings.Repeat("This is a long message. ", 100) // ~2400 chars
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = cfg.Truncate(content, 1000)
+	}
+}
+
+func BenchmarkContentLoggingConfig_CompilePatterns(b *testing.B) {
+	cfg := DefaultContentLoggingConfig()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = cfg.CompilePatterns()
+	}
+}
+
+func BenchmarkOTLPConfig_Validate(b *testing.B) {
+	cfg := DefaultOTLPConfig()
+	cfg.Endpoint = "http://localhost:4318"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = cfg.Validate()
 	}
 }

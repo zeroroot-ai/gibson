@@ -21,11 +21,6 @@ func TestGetMode_StandaloneCommands(t *testing.T) {
 			want:    Standalone,
 		},
 		{
-			name:    "init command",
-			cmdPath: "gibson init",
-			want:    Standalone,
-		},
-		{
 			name:    "config show command",
 			cmdPath: "gibson config show",
 			want:    Standalone,

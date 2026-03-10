@@ -177,11 +177,9 @@ func init() {
 	RegisterGlobalFlags(rootCmd)
 
 	// Add subcommands
-	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(targetCmd)
-	rootCmd.AddCommand(credentialCmd)
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(toolCmd)
 	rootCmd.AddCommand(pluginCmd)

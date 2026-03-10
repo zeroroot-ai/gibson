@@ -263,7 +263,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	// Check if config exists
 	if _, err := os.Stat(configFile); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("config file not found at %s (run 'gibson init' to create)", configFile)
+			return fmt.Errorf("config file not found at %s (use configs/gibson.yaml as a template)", configFile)
 		}
 		return fmt.Errorf("failed to access config file: %w", err)
 	}

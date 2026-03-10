@@ -146,7 +146,7 @@ This checks:
 
 		// Check if file exists
 		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			return fmt.Errorf("config file does not exist: %s\nRun 'gibson init' to create a default configuration", configPath)
+			return fmt.Errorf("config file does not exist: %s\nUse configs/gibson.yaml as a template", configPath)
 		}
 
 		loader := config.NewConfigLoader(config.NewValidator())

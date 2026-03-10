@@ -119,7 +119,7 @@ func createOrchestratorWithOptions(ctx context.Context, opts *OrchestratorOption
 	regManager := component.GetRegistryManager(ctx)
 	if regManager == nil {
 		cleanup()
-		return nil, fmt.Errorf("registry not available (run 'gibson init' first)")
+		return nil, fmt.Errorf("registry not available (ensure daemon is running)")
 	}
 
 	// Create registry adapter for component discovery

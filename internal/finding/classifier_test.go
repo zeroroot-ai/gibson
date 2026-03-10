@@ -437,6 +437,8 @@ func TestLLMClassifier_Classify_InvalidCategory(t *testing.T) {
 
 func TestLLMClassifier_BulkClassify(t *testing.T) {
 	mockCaller := NewMockLLMCaller()
+	// Note: responses are consumed in the order goroutines acquire the lock,
+	// which may not match the order findings were submitted due to concurrency.
 	mockCaller.AddResponse("jailbreak", "jailbreak", "Jailbreak attempt", 0.95)
 	mockCaller.AddResponse("prompt_injection", "prompt_injection", "Prompt injection", 0.90)
 
@@ -451,8 +453,10 @@ func TestLLMClassifier_BulkClassify(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, classifications, 2)
-	assert.Equal(t, CategoryJailbreak, classifications[0].Category)
-	assert.Equal(t, CategoryPromptInjection, classifications[1].Category)
+	// Check that both expected categories are present (order may vary due to concurrency)
+	categories := []FindingCategory{classifications[0].Category, classifications[1].Category}
+	assert.Contains(t, categories, CategoryJailbreak, "should contain jailbreak category")
+	assert.Contains(t, categories, CategoryPromptInjection, "should contain prompt_injection category")
 	assert.Equal(t, 2, mockCaller.GetCallCount())
 }
 

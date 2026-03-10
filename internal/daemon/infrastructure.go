@@ -22,9 +22,9 @@ import (
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/plan"
 	"github.com/zero-day-ai/gibson/internal/state"
+	"github.com/zero-day-ai/gibson/pkg/version"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/queue"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // Infrastructure holds the daemon's infrastructure components that are shared
@@ -54,12 +54,6 @@ type Infrastructure struct {
 	// runLinker manages relationships between mission runs with the same name
 	runLinker mission.MissionRunLinker
 
-	// tracerProvider for distributed tracing (Langfuse or OTLP)
-	tracerProvider *sdktrace.TracerProvider
-
-	// spanProcessors for distributed tracing (used by callback service)
-	spanProcessors []sdktrace.SpanProcessor
-
 	// graphRAGClient for Neo4j knowledge graph operations
 	graphRAGClient *graph.Neo4jClient
 
@@ -69,8 +63,8 @@ type Infrastructure struct {
 	// graphRAGQueryBridge for querying the knowledge graph
 	graphRAGQueryBridge harness.GraphRAGQueryBridge
 
-	// missionTracer provides mission-aware Langfuse tracing (nil when disabled)
-	missionTracer *observability.MissionTracer
+	// otelStack holds the unified OTel observability stack (nil when disabled)
+	otelStack *observability.OTelObservabilityStack
 
 	// taxonomyRegistry manages core taxonomy and agent-installed extensions
 	taxonomyRegistry sdkgraphrag.TaxonomyRegistry
@@ -172,28 +166,13 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	discoveryProcessorAdapter := &discoveryProcessorAdapter{processor: discoveryProc}
 	d.logger.Info(ctx, "initialized DiscoveryProcessor for automatic discovery storage")
 
-	// Initialize Langfuse tracing if enabled
-	// Pass Neo4j client to enable dual export (Langfuse + Neo4j graph recording)
-	var tracerProvider *sdktrace.TracerProvider
-	var spanProcessors []sdktrace.SpanProcessor
-	if d.config != nil && d.config.Langfuse.Enabled {
-		var err error
-		tracerProvider, spanProcessors, err = d.initLangfuseTracing(ctx, graphRAGClient)
-		if err != nil {
-			d.logger.Warn(ctx, "failed to initialize Langfuse tracing, continuing without tracing",
-				"error", err)
-		} else {
-			d.logger.Info(ctx, "initialized Langfuse tracing",
-				"host", d.config.Langfuse.Host)
-			if graphRAGClient != nil {
-				d.logger.Info(ctx, "Langfuse tracing configured with Neo4j graph span recording")
-			}
-		}
+	// Initialize OpenTelemetry observability stack (required for LLM tracing)
+	// This provides unified tracing and metrics to OTLP-compatible backends
+	otelStack := d.initOTelObservability(ctx)
+	if otelStack == nil {
+		d.logger.Warn(ctx, "OTel observability not configured - LLM tracing disabled",
+			"docs", "docs/runbooks/otel-observability.md")
 	}
-
-	// Initialize MissionTracer for mission-aware Langfuse tracing
-	// This is separate from OTEL tracing and provides mission-level observability
-	missionTracer := d.initMissionTracer(ctx)
 
 	// Create plan executor with dependencies
 	// TODO: Add executor config to Config struct when implementing
@@ -209,12 +188,10 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		llmRegistry:          llmRegistry,
 		slotManager:          slotManager,
 		memoryManagerFactory: memoryFactory,
-		tracerProvider:       tracerProvider,
-		spanProcessors:       spanProcessors,
 		graphRAGClient:       graphRAGClient,
 		graphRAGBridge:       graphRAGBridge,
 		graphRAGQueryBridge:  graphRAGQueryBridge,
-		missionTracer:        missionTracer,
+		otelStack:            otelStack,
 		taxonomyRegistry:     taxonomyRegistry,
 		discoveryProcessor:   discoveryProcessorAdapter,
 		redisClient:          redisClient,
@@ -526,51 +503,84 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph
 	return adapter.Bridge(), adapter.QueryBridge(), nil
 }
 
-// initMissionTracer initializes the MissionTracer for Langfuse observability.
-// Returns the tracer or nil if Langfuse is disabled or initialization fails.
+// initOTelObservability initializes the OpenTelemetry observability stack if enabled.
+// Returns the initialized stack or nil if OTel is disabled or initialization fails.
 // Errors are logged as warnings - tracing failures should not prevent daemon startup.
-func (d *daemonImpl) initMissionTracer(ctx context.Context) *observability.MissionTracer {
-	// Check if Langfuse is enabled in configuration
-	if d.config == nil || !d.config.Langfuse.Enabled {
-		d.logger.Debug(ctx, "Langfuse MissionTracer disabled in configuration")
+//
+// This method follows the fail-open pattern: if OTel initialization fails, the daemon
+// continues without observability rather than failing to start. This ensures that
+// misconfigured or unavailable observability backends don't prevent mission execution.
+func (d *daemonImpl) initOTelObservability(ctx context.Context) *observability.OTelObservabilityStack {
+	// Check if OTel is enabled in configuration
+	if d.config == nil || !d.config.OTelObservability.Enabled {
+		d.logger.Debug(ctx, "OpenTelemetry observability disabled in configuration")
 		return nil
 	}
 
-	d.logger.Info(ctx, "initializing Langfuse MissionTracer",
-		"host", d.config.Langfuse.Host)
+	d.logger.Info(ctx, "initializing OpenTelemetry observability stack",
+		"endpoint", d.config.OTelObservability.Endpoint,
+		"protocol", d.config.OTelObservability.Protocol,
+		"service_name", d.config.OTelObservability.ServiceName)
 
-	// Create LangfuseConfig for the MissionTracer
-	langfuseCfg := observability.LangfuseConfig{
-		PublicKey: d.config.Langfuse.PublicKey,
-		SecretKey: d.config.Langfuse.SecretKey,
-		Host:      d.config.Langfuse.Host,
+	// Build OTelConfig from daemon configuration
+	cfg := observability.OTelConfig{
+		Enabled:         d.config.OTelObservability.Enabled,
+		Endpoint:        d.config.OTelObservability.Endpoint,
+		Protocol:        d.config.OTelObservability.Protocol,
+		Headers:         d.config.OTelObservability.Headers,
+		ServiceName:     d.config.OTelObservability.ServiceName,
+		ServiceVersion:  version.Version,
+		BatchSize:       d.config.OTelObservability.Batching.MaxSize,
+		BatchTimeout:    d.config.OTelObservability.Batching.Timeout,
+		RetryEnabled:    d.config.OTelObservability.Retry.Enabled,
+		RetryInitial:    d.config.OTelObservability.Retry.InitialInterval,
+		RetryMax:        d.config.OTelObservability.Retry.MaxInterval,
+		RetryMaxElapsed: d.config.OTelObservability.Retry.MaxElapsedTime,
+		Neo4jBrowserURL: d.config.Observability.Neo4jBrowserURL,
 	}
 
-	// Create the MissionTracer
-	tracer, err := observability.NewMissionTracer(langfuseCfg)
+	// Convert ContentLoggingSubConfig to observability.ContentLoggingConfig
+	if d.config.OTelObservability.ContentLogging.Enabled {
+		contentCfg := &observability.ContentLoggingConfig{
+			Enabled:             d.config.OTelObservability.ContentLogging.Enabled,
+			MaxPromptLength:     d.config.OTelObservability.ContentLogging.MaxPromptLength,
+			MaxCompletionLength: d.config.OTelObservability.ContentLogging.MaxCompletionLength,
+			RedactPatterns:      d.config.OTelObservability.ContentLogging.RedactPatterns,
+			IncludeToolIO:       d.config.OTelObservability.ContentLogging.IncludeToolIO,
+		}
+
+		// Compile redaction patterns
+		if err := contentCfg.CompilePatterns(); err != nil {
+			d.logger.Warn(ctx, "failed to compile content logging patterns, using defaults",
+				"error", err)
+			// Use defaults if pattern compilation fails
+			defaultCfg := observability.DefaultContentLoggingConfig()
+			if err := defaultCfg.CompilePatterns(); err == nil {
+				contentCfg = &defaultCfg
+			}
+		}
+
+		cfg.ContentLogging = contentCfg
+	}
+
+	// Initialize the OTel observability stack
+	stack, err := observability.InitOTelObservability(ctx, cfg)
 	if err != nil {
-		d.logger.Warn(ctx, "failed to initialize MissionTracer, continuing without mission tracing",
-			"error", err)
+		d.logger.Warn(ctx, "failed to initialize OpenTelemetry observability, continuing without OTel tracing",
+			"error", err,
+			"endpoint", cfg.Endpoint,
+			"protocol", cfg.Protocol)
+		// Fail open - continue without OTel observability
 		return nil
 	}
 
-	// Verify connectivity on startup
-	if err := tracer.CheckConnectivity(ctx); err != nil {
-		d.logger.Warn(ctx, "Langfuse connectivity check failed - traces may not be recorded",
-			"host", d.config.Langfuse.Host,
-			"error", err,
-		)
-		// Continue anyway - fail open for observability
-	} else {
-		d.logger.Info(ctx, "Langfuse connectivity verified",
-			"host", d.config.Langfuse.Host,
-		)
-	}
+	d.logger.Info(ctx, "OpenTelemetry observability stack initialized successfully",
+		"endpoint", cfg.Endpoint,
+		"protocol", cfg.Protocol,
+		"service_name", cfg.ServiceName,
+		"content_logging_enabled", cfg.ContentLogging != nil && cfg.ContentLogging.Enabled)
 
-	d.logger.Info(ctx, "MissionTracer initialized successfully",
-		"host", d.config.Langfuse.Host)
-
-	return tracer
+	return stack
 }
 
 // initRedis initializes the Redis client for tool execution.

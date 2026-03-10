@@ -437,15 +437,19 @@ func (e *payloadExecutor) createFinding(
 		UpdatedAt:       time.Now(),
 	}
 
-	// Add MITRE ATLAS mappings if available
+	// Add MITRE ATLAS mappings if available - store in Metadata
 	if len(payload.MitreTechniques) > 0 {
-		enhancedFinding.MitreAtlas = make([]finding.SimpleMitreMapping, 0, len(payload.MitreTechniques))
+		mappings := make([]finding.SimpleMitreMapping, 0, len(payload.MitreTechniques))
 		for _, technique := range payload.MitreTechniques {
-			enhancedFinding.MitreAtlas = append(enhancedFinding.MitreAtlas, finding.SimpleMitreMapping{
+			mappings = append(mappings, finding.SimpleMitreMapping{
 				TechniqueID:   technique,
 				TechniqueName: "", // Would need mapping
 			})
 		}
+		if enhancedFinding.Metadata == nil {
+			enhancedFinding.Metadata = make(map[string]any)
+		}
+		enhancedFinding.Metadata["mitre_atlas"] = mappings
 	}
 
 	// If we have a mission ID, set it

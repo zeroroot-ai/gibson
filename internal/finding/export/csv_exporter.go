@@ -216,12 +216,12 @@ func joinMitreTechniques(f *finding.EnhancedFinding) string {
 	var techniques []string
 
 	// Add ATT&CK techniques
-	for _, m := range f.MitreAttack {
+	for _, m := range f.GetMitreAttack() {
 		techniques = append(techniques, m.TechniqueID)
 	}
 
 	// Add ATLAS techniques
-	for _, m := range f.MitreAtlas {
+	for _, m := range f.GetMitreAtlas() {
 		techniques = append(techniques, m.TechniqueID)
 	}
 

@@ -423,3 +423,338 @@ func TestUsageAttributesTypes(t *testing.T) {
 	assert.Equal(t, attribute.INT64, typeMap[GenAIUsageInputTokens])
 	assert.Equal(t, attribute.INT64, typeMap[GenAIUsageOutputTokens])
 }
+
+func TestToolCallAttributes(t *testing.T) {
+	tests := []struct {
+		name      string
+		toolCalls []llm.ToolCall
+		wantCount int
+		wantKeys  []string
+	}{
+		{
+			name:      "empty tool calls",
+			toolCalls: []llm.ToolCall{},
+			wantCount: 0,
+			wantKeys:  []string{},
+		},
+		{
+			name:      "nil tool calls",
+			toolCalls: nil,
+			wantCount: 0,
+			wantKeys:  []string{},
+		},
+		{
+			name: "single tool call",
+			toolCalls: []llm.ToolCall{
+				{ID: "call_1", Name: "get_weather", Arguments: `{"location": "NYC"}`},
+			},
+			wantCount: 3,
+			wantKeys: []string{
+				GenAIToolsProvided,
+				GenAIToolCallID + ".0",
+				GenAIToolCallName + ".0",
+			},
+		},
+		{
+			name: "multiple tool calls",
+			toolCalls: []llm.ToolCall{
+				{ID: "call_1", Name: "get_weather", Arguments: `{"location": "NYC"}`},
+				{ID: "call_2", Name: "get_time", Arguments: `{"timezone": "UTC"}`},
+				{ID: "call_3", Name: "calculate", Arguments: `{"expression": "2+2"}`},
+			},
+			wantCount: 7, // tools_provided + (id + name) * 3
+			wantKeys: []string{
+				GenAIToolsProvided,
+				GenAIToolCallID + ".0",
+				GenAIToolCallName + ".0",
+				GenAIToolCallID + ".1",
+				GenAIToolCallName + ".1",
+				GenAIToolCallID + ".2",
+				GenAIToolCallName + ".2",
+			},
+		},
+		{
+			name: "more than 3 tool calls - only first 3 included",
+			toolCalls: []llm.ToolCall{
+				{ID: "call_1", Name: "tool1", Arguments: "{}"},
+				{ID: "call_2", Name: "tool2", Arguments: "{}"},
+				{ID: "call_3", Name: "tool3", Arguments: "{}"},
+				{ID: "call_4", Name: "tool4", Arguments: "{}"},
+				{ID: "call_5", Name: "tool5", Arguments: "{}"},
+			},
+			wantCount: 7, // tools_provided (count=5) + (id + name) * 3 (only first 3)
+			wantKeys: []string{
+				GenAIToolsProvided,
+				GenAIToolCallID + ".0",
+				GenAIToolCallName + ".0",
+				GenAIToolCallID + ".1",
+				GenAIToolCallName + ".1",
+				GenAIToolCallID + ".2",
+				GenAIToolCallName + ".2",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attrs := ToolCallAttributes(tt.toolCalls)
+			assert.Len(t, attrs, tt.wantCount)
+
+			if tt.wantCount > 0 {
+				// Verify the keys exist
+				attrMap := make(map[string]any)
+				for _, attr := range attrs {
+					attrMap[string(attr.Key)] = attr.Value.AsInterface()
+				}
+
+				for _, key := range tt.wantKeys {
+					assert.Contains(t, attrMap, key, "missing expected key: %s", key)
+				}
+
+				// Verify tools_provided count
+				if len(tt.toolCalls) > 0 {
+					assert.Equal(t, int64(len(tt.toolCalls)), attrMap[GenAIToolsProvided])
+				}
+			}
+		})
+	}
+}
+
+func TestToolChoiceAttributes(t *testing.T) {
+	tests := []struct {
+		name       string
+		toolChoice string
+		wantCount  int
+		wantValue  string
+	}{
+		{
+			name:       "auto choice",
+			toolChoice: "auto",
+			wantCount:  1,
+			wantValue:  "auto",
+		},
+		{
+			name:       "none choice",
+			toolChoice: "none",
+			wantCount:  1,
+			wantValue:  "none",
+		},
+		{
+			name:       "required choice",
+			toolChoice: "required",
+			wantCount:  1,
+			wantValue:  "required",
+		},
+		{
+			name:       "specific tool name",
+			toolChoice: "get_weather",
+			wantCount:  1,
+			wantValue:  "get_weather",
+		},
+		{
+			name:       "empty tool choice",
+			toolChoice: "",
+			wantCount:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attrs := ToolChoiceAttributes(tt.toolChoice)
+			assert.Len(t, attrs, tt.wantCount)
+
+			if tt.wantCount > 0 {
+				assert.Equal(t, GenAIToolChoice, string(attrs[0].Key))
+				assert.Equal(t, tt.wantValue, attrs[0].Value.AsString())
+			}
+		})
+	}
+}
+
+func TestSingleToolCallAttributes(t *testing.T) {
+	tests := []struct {
+		name      string
+		id        string
+		toolName  string
+		arguments string
+		wantCount int
+		wantKeys  []string
+	}{
+		{
+			name:      "basic tool call",
+			id:        "call_123",
+			toolName:  "get_weather",
+			arguments: `{"location": "NYC"}`,
+			wantCount: 3,
+			wantKeys:  []string{GenAIToolCallID, GenAIToolCallName, GenAIToolCallArguments},
+		},
+		{
+			name:      "tool call without arguments",
+			id:        "call_456",
+			toolName:  "get_time",
+			arguments: "",
+			wantCount: 2,
+			wantKeys:  []string{GenAIToolCallID, GenAIToolCallName},
+		},
+		{
+			name:      "tool call with large arguments - should be truncated",
+			id:        "call_789",
+			toolName:  "process_data",
+			arguments: string(make([]byte, 2000)), // 2KB of data
+			wantCount: 3,
+			wantKeys:  []string{GenAIToolCallID, GenAIToolCallName, GenAIToolCallArguments},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attrs := SingleToolCallAttributes(tt.id, tt.toolName, tt.arguments)
+			assert.Len(t, attrs, tt.wantCount)
+
+			// Verify keys
+			attrMap := make(map[string]any)
+			for _, attr := range attrs {
+				attrMap[string(attr.Key)] = attr.Value.AsInterface()
+			}
+
+			for _, key := range tt.wantKeys {
+				assert.Contains(t, attrMap, key, "missing expected key: %s", key)
+			}
+
+			// Verify values
+			assert.Equal(t, tt.id, attrMap[GenAIToolCallID])
+			assert.Equal(t, tt.toolName, attrMap[GenAIToolCallName])
+
+			// If arguments were provided, check truncation
+			if tt.arguments != "" && len(tt.arguments) > 1024 {
+				argValue := attrMap[GenAIToolCallArguments].(string)
+				assert.Contains(t, argValue, "[truncated]")
+				assert.LessOrEqual(t, len(argValue), 1024+20) // Allow for truncation message
+			}
+		})
+	}
+}
+
+func TestToolResultAttributes(t *testing.T) {
+	tests := []struct {
+		name       string
+		id         string
+		toolName   string
+		result     string
+		truncated  bool
+		wantCount  int
+		wantKeys   []string
+		checkTrunc bool
+	}{
+		{
+			name:      "basic tool result",
+			id:        "call_123",
+			toolName:  "get_weather",
+			result:    `{"temperature": 72, "condition": "sunny"}`,
+			truncated: false,
+			wantCount: 3,
+			wantKeys:  []string{GenAIToolCallID, GenAIToolCallName, GenAIToolCallResult},
+		},
+		{
+			name:       "tool result already truncated",
+			id:         "call_456",
+			toolName:   "fetch_data",
+			result:     "Large result... [truncated]",
+			truncated:  true,
+			wantCount:  4,
+			wantKeys:   []string{GenAIToolCallID, GenAIToolCallName, GenAIToolCallResult, "gen_ai.tool_call.result_truncated"},
+			checkTrunc: true,
+		},
+		{
+			name:       "tool result that needs truncation",
+			id:         "call_789",
+			toolName:   "process_data",
+			result:     string(make([]byte, 3000)), // 3KB of data
+			truncated:  false,
+			wantCount:  4,
+			wantKeys:   []string{GenAIToolCallID, GenAIToolCallName, GenAIToolCallResult, "gen_ai.tool_call.result_truncated"},
+			checkTrunc: true,
+		},
+		{
+			name:      "empty result",
+			id:        "call_999",
+			toolName:  "no_op",
+			result:    "",
+			truncated: false,
+			wantCount: 2,
+			wantKeys:  []string{GenAIToolCallID, GenAIToolCallName},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attrs := ToolResultAttributes(tt.id, tt.toolName, tt.result, tt.truncated)
+			assert.Len(t, attrs, tt.wantCount)
+
+			// Verify keys
+			attrMap := make(map[string]any)
+			for _, attr := range attrs {
+				attrMap[string(attr.Key)] = attr.Value.AsInterface()
+			}
+
+			for _, key := range tt.wantKeys {
+				assert.Contains(t, attrMap, key, "missing expected key: %s", key)
+			}
+
+			// Verify values
+			assert.Equal(t, tt.id, attrMap[GenAIToolCallID])
+			assert.Equal(t, tt.toolName, attrMap[GenAIToolCallName])
+
+			// Check truncation indicator if needed
+			if tt.checkTrunc {
+				assert.True(t, attrMap["gen_ai.tool_call.result_truncated"].(bool))
+				if tt.result != "" && len(tt.result) > 2048 && !tt.truncated {
+					resultValue := attrMap[GenAIToolCallResult].(string)
+					assert.Contains(t, resultValue, "[truncated]")
+				}
+			}
+		})
+	}
+}
+
+func TestToolAttributeConstants(t *testing.T) {
+	// Test that tool-related attribute keys follow the correct naming convention
+	tests := []struct {
+		name     string
+		constant string
+		expected string
+	}{
+		{"GenAI Tools Provided", GenAIToolsProvided, "gen_ai.request.tools_provided"},
+		{"GenAI Tool Choice", GenAIToolChoice, "gen_ai.request.tool_choice"},
+		{"GenAI Tool Call ID", GenAIToolCallID, "gen_ai.tool_call.id"},
+		{"GenAI Tool Call Name", GenAIToolCallName, "gen_ai.tool_call.name"},
+		{"GenAI Tool Call Arguments", GenAIToolCallArguments, "gen_ai.tool_call.arguments"},
+		{"GenAI Tool Call Result", GenAIToolCallResult, "gen_ai.tool_call.result"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.constant)
+		})
+	}
+}
+
+func TestEventNameConstants(t *testing.T) {
+	// Test that event name constants follow the correct naming convention
+	tests := []struct {
+		name     string
+		constant string
+		expected string
+	}{
+		{"Event GenAI Content Prompt", EventGenAIContentPrompt, "gen_ai.content.prompt"},
+		{"Event GenAI Content Completion", EventGenAIContentCompletion, "gen_ai.content.completion"},
+		{"Event GenAI Tool Call Input", EventGenAIToolCallInput, "gen_ai.tool_call.input"},
+		{"Event GenAI Tool Call Output", EventGenAIToolCallOutput, "gen_ai.tool_call.output"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.constant)
+		})
+	}
+}

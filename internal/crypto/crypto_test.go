@@ -2,7 +2,6 @@ package crypto
 
 import (
 	"bytes"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,12 +51,6 @@ func TestConstants(t *testing.T) {
 			constant: ScryptP,
 			expected: 1,
 			reason:   "OWASP recommended p=1",
-		},
-		{
-			name:     "KeyFilePermission",
-			constant: int(KeyFilePermission),
-			expected: 0600,
-			reason:   "Owner-only read/write",
 		},
 	}
 
@@ -595,22 +588,6 @@ func TestEncryptWithVariousKeySizes(t *testing.T) {
 	}
 }
 
-// TestFileKeyManagerDirectoryPermissions tests directory creation with correct permissions
-func TestFileKeyManagerDirectoryPermissions(t *testing.T) {
-	km := NewFileKeyManager()
-	tempDir := t.TempDir()
-
-	// Create a key in a nested directory that doesn't exist
-	keyPath := filepath.Join(tempDir, "level1", "level2", "level3", "test.key")
-	key, err := km.GenerateKey()
-	require.NoError(t, err)
-
-	err = km.SaveKey(key, keyPath)
-	require.NoError(t, err)
-
-	// Verify the nested directories were created
-	assert.True(t, km.KeyExists(keyPath))
-}
 
 // TestEncryptionWithAllZeroPlaintext tests encrypting data that's all zeros
 func TestEncryptionWithAllZeroPlaintext(t *testing.T) {

@@ -27,8 +27,8 @@ func TestEnhancedFinding_NewEnhancedFinding(t *testing.T) {
 	assert.NotZero(t, enhanced.UpdatedAt)
 	assert.Empty(t, enhanced.References)
 	assert.Empty(t, enhanced.ReproSteps)
-	assert.Empty(t, enhanced.MitreAttack)
-	assert.Empty(t, enhanced.MitreAtlas)
+	assert.Empty(t, enhanced.GetMitreAttack())
+	assert.Empty(t, enhanced.GetMitreAtlas())
 	assert.Empty(t, enhanced.RelatedIDs)
 }
 
@@ -60,8 +60,11 @@ func TestEnhancedFinding_WithClassification(t *testing.T) {
 	assert.Equal(t, 0.95, enhanced.Confidence)
 	assert.Equal(t, 9.5, enhanced.RiskScore)
 	assert.Equal(t, "Implement input validation", enhanced.Remediation)
-	assert.Len(t, enhanced.MitreAttack, 1)
-	assert.Equal(t, "AML.T0015", enhanced.MitreAttack[0].TechniqueID)
+
+	// Check MITRE mappings from Metadata
+	mitreAttack := enhanced.GetMitreAttack()
+	assert.Len(t, mitreAttack, 1)
+	assert.Equal(t, "AML.T0015", mitreAttack[0].TechniqueID)
 }
 
 func TestEnhancedFinding_WithStatus(t *testing.T) {

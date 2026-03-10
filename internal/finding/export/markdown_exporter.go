@@ -187,12 +187,15 @@ func (m *MarkdownExporter) writeFinding(buf *bytes.Buffer, f *finding.EnhancedFi
 	buf.WriteString("\n\n")
 
 	// MITRE mappings
-	if len(f.MitreAttack) > 0 || len(f.MitreAtlas) > 0 {
+	mitreAttack := f.GetMitreAttack()
+	mitreAtlas := f.GetMitreAtlas()
+
+	if len(mitreAttack) > 0 || len(mitreAtlas) > 0 {
 		buf.WriteString("#### MITRE Mappings\n\n")
 
-		if len(f.MitreAttack) > 0 {
+		if len(mitreAttack) > 0 {
 			buf.WriteString("**ATT&CK Techniques:**\n\n")
-			for _, m := range f.MitreAttack {
+			for _, m := range mitreAttack {
 				buf.WriteString(fmt.Sprintf("- `%s` - %s", m.TechniqueID, m.TechniqueName))
 				if m.Tactic != "" {
 					buf.WriteString(fmt.Sprintf(" (Tactic: %s)", m.Tactic))
@@ -202,9 +205,9 @@ func (m *MarkdownExporter) writeFinding(buf *bytes.Buffer, f *finding.EnhancedFi
 			buf.WriteString("\n")
 		}
 
-		if len(f.MitreAtlas) > 0 {
+		if len(mitreAtlas) > 0 {
 			buf.WriteString("**ATLAS Techniques:**\n\n")
-			for _, m := range f.MitreAtlas {
+			for _, m := range mitreAtlas {
 				buf.WriteString(fmt.Sprintf("- `%s` - %s\n", m.TechniqueID, m.TechniqueName))
 			}
 			buf.WriteString("\n")
