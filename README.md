@@ -157,11 +157,11 @@ gibson mission run --agent k8s-troubleshooter --goal "Why are pods crashing in p
 └────────────────────────────────────────────────────────────────┘
                                │
 ┌──────────────────────────────┼──────────────────────────────┐
-│              Observability Stack                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ OpenTelemetry│  │  Langfuse   │  │ Prometheus/Grafana  │  │
-│  │   Tracing    │  │  LLM Traces │  │     Metrics         │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+│              Observability Stack (OpenTelemetry)             │
+│  ┌───────────────────────┐  ┌─────────────────────────────┐ │
+│  │ OTLP Collector        │  │ Prometheus/Grafana          │ │
+│  │ Traces + GenAI Spans  │  │ Metrics                     │ │
+│  └───────────────────────┘  └─────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
