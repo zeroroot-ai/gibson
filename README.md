@@ -258,9 +258,11 @@ Domain ──[HAS_SUBDOMAIN]──▶ Subdomain ──[RESOLVES_TO]──▶ Hos
 
 ### Observability
 
-- **OpenTelemetry**: Distributed tracing across daemon, agents, and tools
-- **Langfuse**: LLM observability - token usage, cost tracking, turn analysis
-- **Prometheus**: Metrics for performance monitoring
+Gibson uses **OpenTelemetry** as its unified observability system with GenAI semantic conventions:
+
+- **Distributed Tracing**: Full trace propagation across daemon, agents, and tools
+- **GenAI Conventions**: Token usage, cost tracking, prompt/completion logging per OTel spec
+- **Prometheus Metrics**: Request rates, latencies, error rates
 - **Structured Logging**: JSON logs with trace correlation
 
 ```yaml
@@ -268,10 +270,17 @@ Domain ──[HAS_SUBDOMAIN]──▶ Subdomain ──[RESOLVES_TO]──▶ Hos
 observability:
   tracing:
     enabled: true
-    endpoint: otel-collector.observability:4317
-  langfuse:
+    provider: "otlp"
+    endpoint: "http://otel-collector:4317"
+    service_name: "gibson"
+  metrics:
     enabled: true
-    host: "https://cloud.langfuse.com"
+    provider: "prometheus"
+    port: 9090
+  content_logging:
+    enabled: true
+    max_prompt_length: 10000
+    max_completion_length: 10000
 ```
 
 Key metrics:
@@ -415,13 +424,16 @@ graphrag:
     username: neo4j
     password: password
 
-tracing:
-  enabled: true
-  endpoint: localhost:4317
-
-langfuse:
-  enabled: false
-  host: "https://cloud.langfuse.com"
+observability:
+  tracing:
+    enabled: true
+    provider: "otlp"
+    endpoint: "http://localhost:4317"
+    service_name: "gibson"
+  metrics:
+    enabled: true
+    provider: "prometheus"
+    port: 9090
 ```
 
 ## SDK
