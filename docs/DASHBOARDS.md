@@ -1,6 +1,6 @@
 # Gibson Observability Dashboards
 
-Gibson provides a suite of custom Langfuse dashboards designed for security operations teams. These dashboards offer mission-aware LLM observability with integrated knowledge graph visualizations, cost tracking, and historical analytics.
+Gibson provides Grafana dashboards for monitoring agent execution, LLM usage, and mission performance through OpenTelemetry and Prometheus.
 
 ## Architecture Overview
 
@@ -9,248 +9,283 @@ Gibson provides a suite of custom Langfuse dashboards designed for security oper
 │                     Observability Dashboard Stack                        │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│   Gibson Missions ──► Langfuse Tracing ──► Custom Dashboards             │
-│         │                                        │                       │
-│         │                                        ├── Active Fleet        │
-│         │                                        ├── Mission Detail      │
-│         │                                        └── Historical Analysis │
+│   Gibson Missions ──► OpenTelemetry ──► Grafana Dashboards               │
+│         │                                     │                          │
+│         │                                     ├── Mission Overview       │
+│         │                                     ├── Agent Performance      │
+│         │                                     ├── LLM Analytics          │
+│         │                                     └── Knowledge Graph        │
 │         │                                                                │
-│         └──► Neo4j GraphRAG ──► Browser Links ─┘                        │
+│         └──► Neo4j GraphRAG ──► Graph Explorer                          │
 │                                                                          │
-│   ┌──────────────┐  ┌─────────────┐  ┌────────────────┐                │
-│   │   Langfuse   │  │    Neo4j    │  │   Dashboard    │                │
-│   │      UI      │──│   Browser   │  │  Configuration │                │
-│   │ (port 3000)  │  │ (port 7474) │  │   (GitOps)     │                │
-│   └──────────────┘  └─────────────┘  └────────────────┘                │
+│   ┌──────────────┐  ┌─────────────┐  ┌────────────────┐                 │
+│   │    OTLP      │  │    Loki     │  │   Prometheus   │                 │
+│   │  Collector   │──│    Logs     │  │    Metrics     │                 │
+│   │ (port 4317)  │  │ (port 3100) │  │  (port 9090)   │                 │
+│   └──────────────┘  └─────────────┘  └────────────────┘                 │
+│          │                │                  │                           │
+│          └────────────────┴──────────────────┘                          │
+│                           │                                              │
+│                           ▼                                              │
+│                   ┌──────────────┐                                      │
+│                   │   Grafana    │                                      │
+│                   │ (port 3000)  │                                      │
+│                   └──────────────┘                                      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Dashboard Suite
 
-### 1. Active Fleet Dashboard
+### 1. Mission Overview Dashboard
 
-**Purpose**: Real-time monitoring of currently running missions
+**Purpose**: Real-time monitoring of mission execution
 
 **Key Metrics:**
-- Running missions count
+- Active missions count
 - Completed missions (last hour)
 - Failed missions (last hour)
-- Cost per hour
-- Token consumption per hour
+- Total LLM cost (USD)
+- Token consumption rate
 
-**Widgets:**
-- **Active Missions Table** - Mission name, status, agents deployed, tokens consumed, cost, duration
-- **Token Usage by Model** - Bar chart showing which LLMs are being used
-- **Findings by Severity** - Bar chart of security findings (critical, high, medium, low)
-- **Recent Orchestrator Decisions** - Last 10 decisions with reasoning
+**Panels:**
+- **Active Missions Table** - Mission name, status, duration, agents deployed
+- **Mission Timeline** - Gantt-style view of mission execution
+- **Success/Failure Rate** - Time series of mission outcomes
+- **Recent Errors** - Latest mission errors with stack traces
 
-**Use Cases:**
-- Monitor active security operations in real-time
-- Track resource consumption across fleet
-- Quickly identify failed or stalled missions
-- Review recent orchestrator decision-making
+**PromQL Examples:**
+```promql
+# Active missions
+gibson_missions_active
 
-**Auto-Refresh**: 5 seconds
+# Mission success rate (last hour)
+sum(rate(gibson_missions_total{status="success"}[1h])) / sum(rate(gibson_missions_total[1h]))
 
-### 2. Mission Detail Dashboard
+# Average mission duration
+histogram_quantile(0.95, rate(gibson_mission_duration_seconds_bucket[1h]))
+```
 
-**Purpose**: Deep-dive analysis of a single mission's execution
+### 2. Agent Performance Dashboard
 
-**Parameters:**
-- `mission_id` - Mission identifier for filtering
+**Purpose**: Deep-dive into agent execution metrics
 
-**Sections:**
+**Key Metrics:**
+- Agent execution counts by type
+- Average agent duration
+- Tool call frequency
+- Error rates per agent
 
-#### Mission Summary
-- Status, duration, progress percentage
-- Total tokens consumed and cost
-- Findings discovered
-- Graph statistics (entities, relationships)
+**Panels:**
+- **Agent Execution Heatmap** - Agent activity over time
+- **Tool Usage by Agent** - Bar chart of tool invocations
+- **Agent Duration Distribution** - Histogram of execution times
+- **Agent Error Log** - Loki panel showing agent errors
 
-#### Orchestrator Decisions Timeline
-- Full decision history with timestamps
-- Each decision shows: action, target agent, reasoning, confidence score
-- Expandable full prompts and responses
-- Graph state snapshot at decision time
+**PromQL Examples:**
+```promql
+# Agent executions per minute
+sum(rate(gibson_agent_executions_total[1m])) by (agent_name)
 
-#### Agent Execution Details
-- Per-agent breakdown: duration, tool calls, findings, token usage
-- Tool execution timeline with input/output
-- LLM calls within agent execution
-- Error details for failed agents
+# Agent error rate
+sum(rate(gibson_agent_executions_total{status="error"}[5m])) by (agent_name) /
+sum(rate(gibson_agent_executions_total[5m])) by (agent_name)
 
-#### Knowledge Graph Integration
-- **Neo4j Browser Links** - One-click access to mission graph
-- Pre-populated Cypher queries for:
-  - Full mission graph
-  - Host and service discovery
-  - Vulnerability relationships
-  - Attack path analysis
+# Tool calls per agent
+sum(rate(gibson_tool_calls_total[1h])) by (agent_name, tool)
+```
 
-#### Findings
-- Severity, title, affected target
-- Evidence and detection method
-- Timestamp and discovering agent
+### 3. LLM Analytics Dashboard
 
-**Use Cases:**
-- Debug failed or unexpected mission behavior
-- Analyze orchestrator decision-making process
-- Attribute costs to specific agents or decisions
-- Audit mission execution for compliance
-- Visualize discovered entities and relationships
+**Purpose**: Track LLM usage, costs, and performance using OpenTelemetry GenAI conventions
 
-### 3. Historical Analysis Dashboard
+**Key Metrics:**
+- Total tokens (input/output)
+- Cost per model
+- Latency percentiles
+- Completion success rate
 
-**Purpose**: Aggregate analytics and trend analysis across all missions
+**Panels:**
+- **Token Usage Over Time** - Stacked area chart by model
+- **Cost Breakdown** - Pie chart by provider/model
+- **Latency Heatmap** - Response time distribution
+- **Model Comparison** - Table comparing models on cost/latency
 
-**Filters:**
-- Date range (default: last 7 days)
-- Mission status (all, completed, failed)
-- Agent types (multi-select)
-- Minimum cost threshold
+**PromQL Examples:**
+```promql
+# Total tokens per hour by model
+sum(rate(gibson_llm_tokens_input_total[1h]) + rate(gibson_llm_tokens_output_total[1h])) by (model)
 
-**Aggregate Statistics:**
-- Total missions executed
-- Total tokens consumed
-- Total cost (USD)
-- Total findings discovered
-- Average mission duration
+# LLM cost per hour
+sum(rate(gibson_llm_cost_usd[1h])) by (provider, model)
 
-**Charts and Trends:**
-- **Mission History Table** - Paginated list with all mission metadata
-- **Cost Over Time** - Daily cost trend line chart
-- **Token Distribution by Model** - Pie chart showing Claude vs other models
-- **Findings Trend** - Stacked line chart by severity over time
-- **Agent Performance** - Bar chart of average duration per agent type
-- **Graph Growth** - Cumulative entities discovered over time
+# P95 latency by model
+histogram_quantile(0.95, rate(gibson_llm_latency_ms_bucket[5m])) by (model)
+```
 
-**Use Cases:**
-- Track LLM costs over time and by team
-- Identify most expensive agents or missions
-- Analyze finding production rates
-- Compare agent performance and efficiency
-- Monitor knowledge graph growth
+### 4. Knowledge Graph Dashboard
+
+**Purpose**: Visualize GraphRAG entity growth and relationships
+
+**Key Metrics:**
+- Total entities stored
+- Entities by type (Host, Port, Service, etc.)
+- Relationships created
+- Query performance
+
+**Panels:**
+- **Entity Growth Over Time** - Cumulative entity count
+- **Entity Distribution** - Pie chart by type
+- **Neo4j Query Latency** - Time series of query performance
+- **Recent Graph Operations** - Log of graph writes
+
+**PromQL Examples:**
+```promql
+# Graph write operations
+sum(rate(gibson_graph_operations_total[1m])) by (operation)
+
+# Entity count by type
+gibson_graph_entities_total by (entity_type)
+```
 
 ## Configuration
 
-### Gibson Configuration
+### Grafana Data Sources
 
-Add the observability section to your Gibson config (`~/.gibson/config.yaml` or deployment config):
+Configure these data sources in Grafana:
+
+**Prometheus:**
+```yaml
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    isDefault: true
+```
+
+**Loki:**
+```yaml
+apiVersion: 1
+datasources:
+  - name: Loki
+    type: loki
+    url: http://loki:3100
+```
+
+**Tempo (Traces):**
+```yaml
+apiVersion: 1
+datasources:
+  - name: Tempo
+    type: tempo
+    url: http://tempo:3200
+```
+
+### Gibson Configuration
 
 ```yaml
 observability:
-  # Neo4j Browser base URL for graph visualization links
-  neo4j_browser_url: "http://localhost:7474"
-
-  # Langfuse dashboard URL for UI access
-  langfuse_dashboard_url: "http://localhost:3000"
+  tracing:
+    enabled: true
+    provider: "otlp"
+    endpoint: "http://otel-collector:4317"
+    service_name: "gibson"
+  metrics:
+    enabled: true
+    provider: "prometheus"
+    port: 9090
+  content_logging:
+    enabled: true
+    max_prompt_length: 10000
+    max_completion_length: 10000
 ```
-
-**Environment Variable Overrides:**
-```bash
-export GIBSON_OBSERVABILITY_NEO4J_BROWSER_URL="https://neo4j.example.com"
-export GIBSON_OBSERVABILITY_LANGFUSE_DASHBOARD_URL="https://langfuse.example.com"
-```
-
-### Langfuse Configuration
-
-Langfuse must be enabled in Gibson config for dashboards to receive data:
-
-```yaml
-langfuse:
-  enabled: true
-  host: "https://cloud.langfuse.com"    # Or self-hosted URL
-  public_key: "${LANGFUSE_PUBLIC_KEY}"
-  secret_key: "${LANGFUSE_SECRET_KEY}"
-```
-
-See [LOGGING.md](LOGGING.md#langfuse-llm-observability) for complete Langfuse configuration details.
 
 ## Deployment
 
 ### Local Development
 
-**Prerequisites:**
-- Docker and Docker Compose
-- Gibson configured and running
-
-**Quick Start:**
 ```bash
-# Clone the Langfuse infrastructure repo
-git clone https://github.com/zero-day-ai/langfuse.git
-cd langfuse
+# Start observability stack with Docker Compose
+docker-compose -f docker-compose.observability.yaml up -d
 
-# Copy environment template and configure
-cp .env.example .env
-# Edit .env with your values (API keys, passwords)
-
-# Start Langfuse and PostgreSQL
-make up
-
-# Import dashboards
-make import
-
-# Access Langfuse UI
+# Access Grafana
 open http://localhost:3000
+
+# Default credentials: admin/admin
 ```
 
-The `zero-day-ai/langfuse` repository contains:
-- Docker Compose configurations for local development
-- Dashboard definitions as JSON (GitOps-friendly)
-- Export/import scripts for dashboard management
-- CI/CD workflows for automatic deployment
+**docker-compose.observability.yaml:**
+```yaml
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
 
-**Repository**: [https://github.com/zero-day-ai/langfuse](https://github.com/zero-day-ai/langfuse)
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+
+  tempo:
+    image: grafana/tempo:latest
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+```
 
 ### Kubernetes Deployment
 
-**Prerequisites:**
-- Kubernetes cluster with kubectl access
-- Helm 3.x installed
-- Access to `zero-day-ai/deploy` repository
-
-**Deployment:**
 ```bash
-# Clone the deployment repo
-git clone https://github.com/zero-day-ai/deploy.git
-cd deploy
-
-# Review and customize Langfuse values
-vim helm/gibson/values.yaml
-
-# Deploy Langfuse with Gibson
+# Deploy with Helm
 helm upgrade --install gibson ./helm/gibson \
   --namespace gibson-system \
   --create-namespace \
-  --set langfuse.enabled=true \
-  --set langfuse.ingress.host=langfuse.example.com \
-  --set langfuse.neo4j.browserURL=https://neo4j.example.com
+  --set observability.grafana.enabled=true \
+  --set observability.prometheus.enabled=true \
+  --set observability.loki.enabled=true \
+  --set observability.tempo.enabled=true
 ```
 
-**Key Configuration:**
-- `langfuse.enabled` - Enable Langfuse deployment
-- `langfuse.ingress.host` - External hostname for Langfuse UI
-- `langfuse.neo4j.browserURL` - Neo4j Browser URL for deep linking
-- `langfuse.persistence.enabled` - PostgreSQL persistence (recommended: true)
-
-**Kubernetes Manifests Location:**
-- `helm/gibson/templates/observability/langfuse/` - Langfuse deployment
-- `helm/gibson/templates/observability/neo4j/` - Neo4j deployment (if enabled)
-
-**Repository**: [https://github.com/zero-day-ai/deploy](https://github.com/zero-day-ai/deploy)
+**Helm Values:**
+```yaml
+observability:
+  grafana:
+    enabled: true
+    ingress:
+      enabled: true
+      host: grafana.example.com
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  loki:
+    enabled: true
+  tempo:
+    enabled: true
+```
 
 ## Neo4j Integration
 
-### How Neo4j Links Work
+### Graph Explorer Links
 
-Gibson automatically generates Neo4j Browser URLs with pre-populated Cypher queries for mission context. These links appear in:
-- Graph write spans (`gibson.graph.store`)
-- Mission summary spans
-- Agent completion spans (if they wrote to graph)
+Gibson generates Neo4j Browser URLs for exploring mission graphs:
 
 **Link Format:**
 ```
-http://localhost:7474/browser/?cmd=play&arg={encoded-cypher-query}
+http://neo4j.example.com/browser/?cmd=play&arg={encoded-cypher-query}
 ```
 
 **Example Queries:**
@@ -269,246 +304,98 @@ WHERE h.mission_id = 'mission-abc123'
 RETURN h, p
 ```
 
-**Vulnerabilities:**
-```cypher
-MATCH (v:Vulnerability)-[:AFFECTS]->(s:Service)
-WHERE v.mission_id = 'mission-abc123'
-RETURN v, s
-```
+### Configuration
 
-### Neo4j Browser Setup
-
-**Local Development:**
-```bash
-docker run -d --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/password \
-  neo4j:5-community
-```
-
-**Configuration:**
 ```yaml
 graphrag:
   enabled: true
   neo4j:
-    uri: "bolt://localhost:7687"
+    uri: "bolt://neo4j:7687"
     username: "neo4j"
     password: "${NEO4J_PASSWORD}"
 
 observability:
-  neo4j_browser_url: "http://localhost:7474"
+  neo4j_browser_url: "http://neo4j.example.com:7474"
 ```
 
-**Kubernetes:**
-Neo4j should be deployed with:
-- Ingress for browser access
-- TLS/SSL for production
-- Persistent volumes for data
-- Proper authentication
+## Alerting
 
-See `zero-day-ai/deploy` for Helm chart configuration.
+### Prometheus Alerting Rules
 
-## Dashboard Maintenance
+```yaml
+groups:
+  - name: gibson
+    rules:
+      - alert: HighMissionFailureRate
+        expr: sum(rate(gibson_missions_total{status="failed"}[5m])) / sum(rate(gibson_missions_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High mission failure rate"
 
-### Updating Dashboards
+      - alert: LLMCostSpike
+        expr: sum(rate(gibson_llm_cost_usd[1h])) > 10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM cost exceeding $10/hour"
 
-Dashboards are version-controlled as JSON in the `zero-day-ai/langfuse` repository.
-
-**Workflow:**
-1. Make changes in Langfuse UI
-2. Export updated dashboard: `./scripts/export-dashboards.sh`
-3. Commit changes: `git commit -m "Update Active Fleet dashboard"`
-4. Push to main: `git push origin main`
-5. CI/CD automatically deploys to production Langfuse
-
-**Export Script:**
-```bash
-cd langfuse
-export LANGFUSE_HOST="https://cloud.langfuse.com"
-export LANGFUSE_API_KEY="pk-lf-..."
-./scripts/export-dashboards.sh
+      - alert: AgentStuck
+        expr: gibson_agent_execution_duration_seconds > 3600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent execution exceeding 1 hour"
 ```
-
-**Import Script:**
-```bash
-cd langfuse
-export LANGFUSE_HOST="https://langfuse.example.com"
-export LANGFUSE_API_KEY="pk-lf-..."
-./scripts/import-dashboards.sh
-```
-
-### Adding New Dashboards
-
-1. Create dashboard in Langfuse UI
-2. Export using script
-3. Review JSON in `dashboards/` directory
-4. Commit and push
-5. CI/CD deploys automatically
 
 ## Troubleshooting
 
-### Dashboard Shows No Data
+### No Metrics in Grafana
 
-**Check:**
-1. Langfuse integration is enabled in Gibson config
-2. Gibson is sending traces to Langfuse (check logs for "langfuse" entries)
-3. Langfuse host URL is correct
-4. API keys are valid and not expired
+1. Check Prometheus is scraping Gibson:
+   ```bash
+   curl http://prometheus:9090/api/v1/targets | jq '.data.activeTargets[] | select(.labels.job=="gibson")'
+   ```
 
-**Debug:**
-```bash
-# Check Gibson logs for Langfuse exports
-gibson logs | grep langfuse
+2. Verify Gibson metrics endpoint:
+   ```bash
+   curl http://gibson:9090/metrics | grep gibson_
+   ```
 
-# Verify Langfuse receives traces
-curl -u "${LANGFUSE_PUBLIC_KEY}:${LANGFUSE_SECRET_KEY}" \
-  "${LANGFUSE_HOST}/api/public/traces" | jq
-```
+3. Check ServiceMonitor is deployed:
+   ```bash
+   kubectl get servicemonitor -n gibson-system
+   ```
 
-### Neo4j Links Don't Work
+### No Traces in Tempo
 
-**Check:**
-1. `observability.neo4j_browser_url` is correctly configured
-2. Neo4j Browser is accessible from your browser (network/firewall)
-3. Neo4j authentication is configured
-4. URL uses correct protocol (http/https)
+1. Verify OTLP endpoint is configured:
+   ```bash
+   kubectl exec -n gibson deploy/gibson -- env | grep OTEL
+   ```
 
-**Common Issues:**
-- **Different network**: Neo4j is on internal network but browser is external
-- **Port not exposed**: Neo4j port 7474 not accessible
-- **Protocol mismatch**: Using http when Neo4j requires https
+2. Check Tempo is receiving traces:
+   ```bash
+   curl http://tempo:3200/api/search
+   ```
 
-**Fix:**
-For Kubernetes deployments, ensure Neo4j has an ingress:
-```yaml
-observability:
-  neo4j_browser_url: "https://neo4j.example.com"  # Use ingress URL
-```
+### Logs Not Appearing in Loki
 
-### Dashboards Not Updating After Import
+1. Check Promtail is running:
+   ```bash
+   kubectl get pods -n gibson-system -l app=promtail
+   ```
 
-**Check:**
-1. Import script completed without errors
-2. Langfuse API key has write permissions
-3. Dashboard IDs match between export and import
-4. Browser cache cleared (hard refresh)
-
-**Force Reimport:**
-```bash
-cd langfuse
-./scripts/import-dashboards.sh --force
-```
-
-### High Langfuse Load Time
-
-**Causes:**
-- Large number of traces (>10,000)
-- Complex dashboard queries
-- Insufficient PostgreSQL resources
-
-**Optimizations:**
-1. **Add database indexes** on frequently queried fields
-2. **Adjust dashboard time ranges** (shorter = faster)
-3. **Increase PostgreSQL resources** (CPU, memory)
-4. **Enable query caching** in Langfuse config
-5. **Archive old traces** periodically
-
-**PostgreSQL Tuning:**
-```yaml
-# In docker-compose.yaml or Kubernetes values
-postgres:
-  resources:
-    limits:
-      cpu: 2
-      memory: 4Gi
-  config:
-    shared_buffers: "1GB"
-    effective_cache_size: "3GB"
-    work_mem: "32MB"
-```
-
-### Cost Tracking Inaccurate
-
-**Check:**
-1. LLM provider costs are up-to-date in Gibson
-2. All LLM calls are instrumented
-3. Token counts match actual usage
-
-**Verify:**
-```bash
-# Compare Gibson cost tracking to provider billing
-gibson missions list --format=json | jq '[.[] | .cost] | add'
-```
-
-If costs don't match provider billing:
-1. Update cost-per-token rates in Gibson
-2. Ensure all LLM calls emit cost attributes
-3. Check for missed instrumentation points
-
-## Best Practices
-
-### Mission Naming
-
-Use consistent mission naming for better dashboard filtering:
-- Include team/project prefix: `security-ops/network-scan`
-- Add timestamp for batch missions: `recon-2024-01-15`
-- Use descriptive names: `vuln-scan-prod-web` not `scan-123`
-
-### Dashboard Access Control
-
-**Production:**
-- Use Langfuse's built-in RBAC
-- Restrict write access to dashboard definitions
-- Separate read-only viewers from operators
-- Use SSO for authentication
-
-**Teams:**
-- Create dashboard views per team
-- Filter by mission name prefix
-- Set up alerts for high-cost missions
-- Share dashboard URLs with deep links
-
-### Cost Management
-
-**Monitor:**
-- Set cost thresholds in dashboards
-- Alert on missions exceeding budget
-- Review Historical dashboard weekly
-- Optimize expensive agents
-
-**Control:**
-- Use cheaper models for simple tasks
-- Cache LLM responses where possible
-- Limit agent retries
-- Set mission timeouts
-
-### Knowledge Graph Hygiene
-
-**Best Practices:**
-- Regular graph cleanup (archive old missions)
-- Index frequently queried properties
-- Deduplicate entities across missions
-- Document custom node/relationship types
-
-**Performance:**
-```cypher
-// Add indexes for common queries
-CREATE INDEX mission_id_idx FOR (n:Entity) ON (n.mission_id);
-CREATE INDEX host_ip_idx FOR (n:Host) ON (n.ip_address);
-CREATE INDEX vuln_severity_idx FOR (n:Vulnerability) ON (n.severity);
-```
+2. Verify log format is JSON:
+   ```bash
+   kubectl logs -n gibson-system deploy/gibson | head -5
+   ```
 
 ## Related Documentation
 
 - [LOGGING.md](LOGGING.md) - Complete observability configuration
 - [MISSIONS.md](MISSIONS.md) - Mission execution and orchestration
-- [MEMORY.md](MEMORY.md) - Mission memory and context management
-- [zero-day-ai/langfuse](https://github.com/zero-day-ai/langfuse) - Dashboard definitions and deployment
-- [zero-day-ai/deploy](https://github.com/zero-day-ai/deploy) - Kubernetes manifests and Helm charts
-
-## Support
-
-For issues or questions:
-- GitHub Issues: [zero-day-ai/gibson/issues](https://github.com/zero-day-ai/gibson/issues)
-- Langfuse Repo: [zero-day-ai/langfuse](https://github.com/zero-day-ai/langfuse)
-- Deploy Repo: [zero-day-ai/deploy](https://github.com/zero-day-ai/deploy)
+- [observability/activity-logging.md](observability/activity-logging.md) - Activity stream events

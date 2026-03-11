@@ -504,33 +504,6 @@ tracing:
 - Tool invocations
 - Memory operations
 
-### Langfuse LLM Observability
-
-Track orchestrator decisions:
-
-```yaml
-langfuse:
-  enabled: true
-  host: "https://cloud.langfuse.com"
-  public_key: "${LANGFUSE_PUBLIC_KEY}"
-  secret_key: "${LANGFUSE_SECRET_KEY}"
-```
-
-**Trace Hierarchy:**
-```
-Trace: mission-{mission_id}
-├── Generation: orchestrator-decision-1 (LLM reasoning)
-│   ├── input: full prompt with graph state
-│   ├── output: Decision JSON
-│   └── metadata: {tokens, latency, graph_snapshot}
-├── Span: agent-execution-{id}
-│   ├── Span: tool-call-nmap
-│   ├── Span: tool-call-httpx
-│   └── Generation: agent-llm-call
-├── Generation: orchestrator-decision-2
-└── Span: mission-complete
-```
-
 ### Prometheus Metrics
 
 ```yaml
@@ -684,14 +657,6 @@ tracing:
 metrics:
   enabled: false
   port: 9090
-
-langfuse:
-  enabled: false
-  host: "${LANGFUSE_HOST}"
-  public_key: "${LANGFUSE_PUBLIC_KEY}"
-  secret_key: "${LANGFUSE_SECRET_KEY}"
-  flush_interval: 10s
-  batch_size: 100
 
 logging:
   level: info                      # debug, info, warn, error, fatal

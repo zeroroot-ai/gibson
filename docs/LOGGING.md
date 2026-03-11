@@ -1,13 +1,13 @@
 # Gibson Observability
 
-Gibson provides comprehensive observability through four integrated systems:
+Gibson provides comprehensive observability through OpenTelemetry as the unified system:
 
 | System | Purpose | Backend |
 |--------|---------|---------|
 | **Structured Logging** | Human/machine-readable logs | stdout/stderr (JSON/text) |
 | **Distributed Tracing** | Request flow across services | OpenTelemetry (OTLP) |
 | **Metrics** | Quantitative measurements | Prometheus |
-| **LLM Observability** | AI decision tracking | Langfuse |
+| **GenAI Spans** | LLM decision & token tracking | OpenTelemetry GenAI Conventions |
 
 ## Architecture
 
@@ -19,18 +19,17 @@ Gibson provides comprehensive observability through four integrated systems:
 │   Agent Execution ──► Harness Middleware ──┬──► Structured Logs         │
 │         │                                  │                             │
 │         │                                  ├──► OpenTelemetry Spans      │
+│         │                                  │    (includes GenAI spans)   │
 │         │                                  │                             │
-│         │                                  ├──► Prometheus Metrics       │
-│         │                                  │                             │
-│         └──────────────────────────────────┴──► Langfuse Traces         │
+│         └──────────────────────────────────┴──► Prometheus Metrics       │
 │                                                                          │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│   │   stdout    │  │    OTLP     │  │ Prometheus  │  │  Langfuse   │    │
-│   │   stderr    │  │  Collector  │  │   Server    │  │   Cloud     │    │
-│   └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    │
-│         │                │                │                │             │
-│         ▼                ▼                ▼                ▼             │
-│   Log Aggregator    Jaeger/Tempo     Grafana         Langfuse UI        │
+│   ┌─────────────┐  ┌─────────────────────────────┐  ┌─────────────┐     │
+│   │   stdout    │  │       OTLP Collector        │  │ Prometheus  │     │
+│   │   stderr    │  │  Traces + GenAI Conventions │  │   Server    │     │
+│   └─────────────┘  └─────────────────────────────┘  └─────────────┘     │
+│         │                      │                           │             │
+│         ▼                      ▼                           ▼             │
+│   Log Aggregator         Jaeger/Tempo                  Grafana          │
 │   (Loki, ELK)                                                            │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -129,7 +128,6 @@ h.Logger().Event(ctx, "finding_discovered", "new vulnerability", finding)
 | Provider | Use Case | Configuration |
 |----------|----------|---------------|
 | `otlp` | Production (Jaeger, Tempo, etc.) | gRPC endpoint |
-| `langfuse` | LLM-specific tracing | Langfuse API |
 | `noop` | Testing/disabled | None |
 
 ### Configuration
@@ -137,7 +135,7 @@ h.Logger().Event(ctx, "finding_discovered", "new vulnerability", finding)
 ```yaml
 tracing:
   enabled: true
-  provider: otlp                 # otlp, langfuse, noop
+  provider: otlp                 # otlp or noop
   endpoint: "localhost:4317"     # OTLP collector endpoint
   service_name: gibson-daemon
   sample_rate: 1.0               # 0.0-1.0
@@ -336,132 +334,6 @@ spec:
 
 ---
 
-## Langfuse LLM Observability
-
-Langfuse provides specialized LLM observability with prompt/completion tracking, cost analysis, and decision tracing.
-
-### Configuration
-
-```yaml
-langfuse:
-  enabled: true
-  host: "https://cloud.langfuse.com"    # Or self-hosted URL
-  public_key: "${LANGFUSE_PUBLIC_KEY}"
-  secret_key: "${LANGFUSE_SECRET_KEY}"
-
-  # Optional tuning
-  flush_interval: 10s                    # Batch send interval
-  batch_size: 100                        # Max events per batch
-```
-
-**Environment Variables:**
-```bash
-export LANGFUSE_ENABLED=true
-export LANGFUSE_HOST="https://cloud.langfuse.com"
-export LANGFUSE_PUBLIC_KEY="pk-lf-..."
-export LANGFUSE_SECRET_KEY="sk-lf-..."
-```
-
-### Trace Hierarchy
-
-```
-Trace: mission-{mission_id}
-│
-├── Generation: orchestrator-decision-1
-│   ├── input: Full prompt with graph state, memory, available actions
-│   ├── output: Decision JSON (action, target, reasoning)
-│   ├── model: claude-sonnet-4-20250514
-│   ├── tokens: {input: 2500, output: 350}
-│   ├── latency_ms: 2300
-│   └── metadata:
-│       ├── graph_snapshot: {...}
-│       ├── available_nodes: [...]
-│       └── confidence: 0.85
-│
-├── Span: agent-execution-network-recon
-│   ├── agent: network-recon
-│   ├── duration_ms: 45000
-│   │
-│   ├── Span: tool-call-nmap
-│   │   ├── tool: nmap
-│   │   ├── input: {target: "192.168.1.0/24", ports: "1-1000"}
-│   │   ├── duration_ms: 30000
-│   │   └── output: {hosts: [...]}
-│   │
-│   ├── Generation: agent-llm-reasoning
-│   │   ├── input: "Analyze scan results..."
-│   │   ├── output: "Found 15 hosts with open ports..."
-│   │   └── tokens: {input: 1200, output: 800}
-│   │
-│   └── Span: graph-storage
-│       └── entities_stored: 45
-│
-├── Generation: orchestrator-decision-2
-│   ├── action: execute_agent
-│   ├── target_node_id: service-enum
-│   └── confidence: 0.92
-│
-└── Span: mission-complete
-    └── metadata:
-        ├── total_duration_ms: 320000
-        ├── total_tokens: 45000
-        ├── total_cost_usd: 0.85
-        ├── findings_count: 12
-        ├── nodes_completed: 5
-        └── nodes_failed: 0
-```
-
-### Logged Data Types
-
-**Orchestrator Decisions:**
-- Full input prompt (graph state, memory, available actions)
-- Decision output (action, target, reasoning, confidence)
-- Token usage and latency
-- Graph snapshot at decision time
-
-**Agent Executions:**
-- Agent name and task configuration
-- Duration and status
-- Tool calls made
-- Internal LLM reasoning
-- Findings submitted
-
-**Tool Calls:**
-- Tool name and input parameters
-- Duration and status
-- Output summary
-- Errors (if any)
-
-### Use Cases
-
-1. **Debug Decision Making**: See exactly why the orchestrator chose each action
-2. **Cost Attribution**: Track LLM costs per mission, agent, and decision
-3. **Performance Analysis**: Identify slow agents or expensive decisions
-4. **Prompt Engineering**: Iterate on orchestrator prompts with full visibility
-5. **Audit Trail**: Compliance-ready logs of all AI decisions
-
-### Custom Dashboards
-
-Gibson provides pre-built custom dashboards for Langfuse that offer specialized views for security operations teams. These dashboards provide mission-aware analytics, real-time fleet monitoring, and historical analysis.
-
-**Available Dashboards:**
-- **Active Fleet Dashboard** - Real-time monitoring of running missions
-- **Mission Detail Dashboard** - Deep-dive into individual mission execution
-- **Historical Analysis Dashboard** - Aggregate analytics and trends
-
-For complete documentation on deployment, configuration, and usage of these dashboards, see [DASHBOARDS.md](DASHBOARDS.md).
-
-**Quick Configuration:**
-```yaml
-observability:
-  neo4j_browser_url: "http://localhost:7474"     # Neo4j Browser for graph visualization
-  langfuse_dashboard_url: "http://localhost:3000" # Langfuse UI
-```
-
-The custom dashboards integrate with Gibson's knowledge graph (Neo4j) to provide one-click deep linking from mission traces to graph visualizations of discovered entities and relationships.
-
----
-
 ## Health Endpoints
 
 ### Endpoints
@@ -606,10 +478,10 @@ logging:
   level: info                    # debug, info, warn, error
   format: json                   # json or text
 
-# OpenTelemetry Tracing
+# OpenTelemetry Tracing (includes GenAI spans)
 tracing:
   enabled: true
-  provider: otlp                 # otlp, langfuse, noop
+  provider: otlp                 # otlp or noop
   endpoint: "localhost:4317"
   service_name: gibson-daemon
   sample_rate: 1.0
@@ -623,14 +495,11 @@ metrics:
   provider: prometheus           # prometheus or otlp
   port: 9090
 
-# Langfuse LLM Observability
-langfuse:
+# GenAI Content Logging (prompts/completions in traces)
+content_logging:
   enabled: true
-  host: "https://cloud.langfuse.com"
-  public_key: "${LANGFUSE_PUBLIC_KEY}"
-  secret_key: "${LANGFUSE_SECRET_KEY}"
-  flush_interval: 10s
-  batch_size: 100
+  max_prompt_length: 10000
+  max_completion_length: 10000
 
 # Health Endpoints
 health:
@@ -645,10 +514,4 @@ GIBSON_LOG_LEVEL=debug
 # Tracing
 OTEL_TRACING_ENABLED=true
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
-
-# Langfuse
-LANGFUSE_ENABLED=true
-LANGFUSE_HOST=https://cloud.langfuse.com
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
 ```

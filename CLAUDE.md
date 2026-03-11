@@ -39,7 +39,7 @@ make coverage-html          # Generate HTML coverage report
 - **graphrag**: Neo4j-backed knowledge graph for semantic entity storage and retrieval
 - **registry**: etcd-based service discovery for agents and tools
 - **finding**: Security finding types, classification, and export (SARIF, CSV, HTML, Markdown)
-- **observability**: OpenTelemetry tracing, Langfuse LLM observability, Prometheus metrics
+- **observability**: OpenTelemetry tracing with GenAI conventions, Prometheus metrics
 - **daemon**: gRPC daemon server with health probes (`/healthz`, `/readyz`)
 - **mission**: Mission definition, parsing, and lifecycle management
 - **guardrail**: Input validation and safety checks (PII, scope, rate limiting)

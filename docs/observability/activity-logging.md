@@ -23,7 +23,6 @@ activity_logging:
   max_content_length: 1000
   output: stdout
   buffer_size: 10000
-  include_langfuse_urls: true
 ```
 
 ### Verbosity Levels
@@ -60,7 +59,6 @@ activity_logging:
   "agent_name": "api-discovery",
   "trace_id": "abc123def456",
   "span_id": "span789",
-  "langfuse_trace_id": "lf_xyz",
   "payload": {
     "slot": "primary",
     "role": "system",
@@ -93,7 +91,6 @@ Queryable via LogQL JSON parsing:
 - `mission_id` - Unique per mission
 - `trace_id` - OpenTelemetry trace ID
 - `span_id` - OpenTelemetry span ID
-- `langfuse_trace_id` - Langfuse trace link
 
 ## LogQL Query Examples
 
@@ -166,11 +163,11 @@ sum by (payload_severity) (
 # Full trace for a mission (ordered by time)
 {app="gibson", component="activity"} |= "miss_abc123" | line_format "{{.timestamp}} {{.event_type}} {{.agent_name}}"
 
-# Link to Langfuse trace
+# Link to Grafana Tempo trace
 {app="gibson", component="activity"}
 | json
-| langfuse_trace_id != ""
-| line_format "Langfuse: https://langfuse.example.com/trace/{{.langfuse_trace_id}}"
+| trace_id != ""
+| line_format "Tempo: https://grafana.example.com/explore?left=%5B%22now-1h%22,%22now%22,%22Tempo%22,%7B%22query%22:%22{{.trace_id}}%22%7D%5D"
 ```
 
 ## Grafana Dashboard
