@@ -2,52 +2,167 @@
 
 **Kubernetes-Native AI Agent Framework**
 
-Gibson is a cloud-native platform for developing, deploying, and observing autonomous AI agents. Built for Kubernetes from the ground up, it provides the infrastructure to rapidly build agents that can autonomously perform complex tasks - security testing, API discovery, network reconnaissance, compliance auditing, or any domain you can build an agent for.
+Gibson is the infrastructure for building, deploying, and operating autonomous AI agents at scale. Deploy with Helm, build agents with the SDK, and let Gibson handle orchestration, state management, observability, and knowledge persistence.
 
 ## Why Gibson?
 
-Modern AI agents need more than just an LLM. They need:
+Building production AI agents requires more than an LLM wrapper. You need:
 
 - **Orchestration** - Coordinate multiple agents in complex workflows
+- **State Management** - Persist context across restarts, scale horizontally
+- **Tool Execution** - Distributed, type-safe operations via Redis queues
+- **Knowledge Persistence** - Store discoveries in a queryable Neo4j graph
 - **Observability** - Trace every decision, tool call, and LLM interaction
-- **State Management** - Persist context across restarts and scale horizontally
-- **Tool Execution** - Invoke capabilities through a distributed, type-safe architecture
-- **Knowledge Persistence** - Store discoveries in a queryable graph for reasoning
 
 Gibson provides all of this as a Kubernetes-native platform, so you can focus on building agents instead of infrastructure.
+
+## Quick Start
+
+### Deploy Gibson
+
+```bash
+# Add the Helm repository
+helm repo add gibson https://charts.zero-day.ai
+helm repo update
+
+# Deploy to your cluster
+helm install gibson gibson/gibson \
+  --namespace gibson-system \
+  --create-namespace \
+  --set llm.anthropicApiKey=$ANTHROPIC_API_KEY
+
+# Verify deployment
+kubectl -n gibson-system get pods
+```
+
+### Build Your First Agent
+
+Create an agent to troubleshoot Kubernetes clusters:
+
+```go
+package main
+
+import (
+    "context"
+    "github.com/zero-day-ai/sdk/agent"
+    "github.com/zero-day-ai/sdk/llm"
+    "github.com/zero-day-ai/sdk/serve"
+)
+
+type K8sTroubleshooter struct{}
+
+func (a *K8sTroubleshooter) Name() string        { return "k8s-troubleshooter" }
+func (a *K8sTroubleshooter) Version() string     { return "1.0.0" }
+func (a *K8sTroubleshooter) Description() string { return "Diagnoses Kubernetes cluster issues" }
+
+func (a *K8sTroubleshooter) LLMSlots() []agent.SlotDefinition {
+    return []agent.SlotDefinition{
+        agent.NewSlotDefinition("primary", "Main reasoning LLM", true).
+            WithConstraints(agent.SlotConstraints{
+                MinContextWindow: 8000,
+                RequiredFeatures: []string{agent.FeatureToolUse},
+            }),
+    }
+}
+
+func (a *K8sTroubleshooter) Execute(ctx context.Context, task agent.Task, h agent.Harness) (agent.Result, error) {
+    // Use LLM to reason about the problem
+    resp, _ := h.Complete(ctx, "primary", []llm.Message{
+        llm.NewSystemMessage("You are a Kubernetes expert. Diagnose cluster issues."),
+        llm.NewUserMessage(task.Goal),
+    })
+
+    // Execute kubectl via tool
+    output, _ := h.ExecuteTool(ctx, "kubectl", &pb.KubectlRequest{
+        Command: "get pods -A --field-selector=status.phase!=Running",
+    })
+
+    // Store diagnosis in memory for other agents
+    h.Memory().Mission().Set(ctx, "diagnosis", resp.Content)
+
+    return agent.NewSuccessResult(map[string]any{
+        "diagnosis": resp.Content,
+        "pods":      output,
+    }), nil
+}
+
+func main() {
+    serve.Agent(&K8sTroubleshooter{}, serve.WithPort(50051))
+}
+```
+
+### Deploy the Agent
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-troubleshooter
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: agent
+        image: myorg/k8s-troubleshooter:latest
+        ports:
+        - containerPort: 50051
+        - containerPort: 8080
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+        env:
+        - name: REDIS_URL
+          value: redis://gibson-redis:6379
+```
+
+### Run a Mission
+
+```bash
+# Verify agent registration
+gibson agent list
+
+# Run the agent
+gibson mission run --agent k8s-troubleshooter --goal "Why are pods crashing in prod?"
+```
 
 ## Architecture
 
 ```
-                                    ┌────────────────────────────────────────────────────────────────┐
-                                    │                        Kubernetes Cluster                      │
-                                    │  ┌──────────────────────────────────────────────────────────┐  │
-                                    │  │                     Gibson Daemon                         │  │
-                                    │  │   Orchestration · Registry · Harness · Health Probes     │  │
-                                    │  │   /healthz (liveness) · /readyz (readiness)              │  │
-                                    │  └────┬──────────────┬──────────────┬───────────────────────┘  │
-                                    │       │              │              │                          │
-                                    │       ▼              ▼              ▼                          │
-                                    │  ┌─────────┐  ┌──────────────┐  ┌──────────────┐               │
-                                    │  │  etcd   │  │ Redis Stack  │  │   Neo4j      │               │
-                                    │  │Registry │  │State & Queue │  │  GraphRAG    │               │
-                                    │  └─────────┘  └──────────────┘  └──────────────┘               │
-                                    │                      │                                          │
-                                    │                      ▼                                          │
-                                    │  ┌──────────────────────────────────────────────────────────┐  │
-                                    │  │                    Agent & Tool Pods                      │  │
-                                    │  │   network-recon │ api-discovery │ nmap │ httpx │ ...     │  │
-                                    │  │   HPA scaling · Resource limits · Pod disruption budgets  │  │
-                                    │  └──────────────────────────────────────────────────────────┘  │
-                                    └────────────────────────────────────────────────────────────────┘
-                                                                   │
-                                    ┌──────────────────────────────┼──────────────────────────────┐
-                                    │              Observability Stack                             │
-                                    │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-                                    │  │ OpenTelemetry│  │  Langfuse   │  │ Prometheus/Grafana  │  │
-                                    │  │   Tracing    │  │  LLM Traces │  │     Metrics         │  │
-                                    │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-                                    └─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                        Kubernetes Cluster                      │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                     Gibson Daemon                         │  │
+│  │   Orchestration · Registry · Harness · Health Probes     │  │
+│  │   /healthz (liveness) · /readyz (readiness)              │  │
+│  └────┬──────────────┬──────────────┬───────────────────────┘  │
+│       │              │              │                          │
+│       ▼              ▼              ▼                          │
+│  ┌─────────┐  ┌──────────────┐  ┌──────────────┐               │
+│  │  etcd   │  │ Redis Stack  │  │   Neo4j      │               │
+│  │Registry │  │State & Queue │  │  GraphRAG    │               │
+│  └─────────┘  └──────────────┘  └──────────────┘               │
+│                      │                                          │
+│                      ▼                                          │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                    Agent & Tool Pods                      │  │
+│  │   k8s-troubleshooter │ log-analyzer │ kubectl │ ...      │  │
+│  │   HPA scaling · Resource limits · Pod disruption budgets  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────┘
+                               │
+┌──────────────────────────────┼──────────────────────────────┐
+│              Observability Stack                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │ OpenTelemetry│  │  Langfuse   │  │ Prometheus/Grafana  │  │
+│  │   Tracing    │  │  LLM Traces │  │     Metrics         │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Key Features
@@ -58,129 +173,11 @@ Gibson provides all of this as a Kubernetes-native platform, so you can focus on
 - **Graceful Shutdown**: SIGTERM handling with checkpoint persistence
 - **Horizontal Scaling**: Stateless daemon design with Redis-backed state
 - **Service Discovery**: etcd-based registry with automatic agent/tool registration
-- **Resource Management**: Memory limits, CPU requests, pod disruption budgets
+- **GitOps Ready**: Agents, missions, and configs are all declarative YAML
 
 ### Agent Development
 
-- **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Google Gemini, Ollama (local)
-- **Tool Invocation**: Type-safe Protocol Buffer APIs with distributed execution
-- **Sub-agent Delegation**: Spawn and coordinate child agents
-- **Three-tier Memory**: Working (ephemeral), Mission (Redis), Long-term (vector)
-
-### Observability
-
-- **Distributed Tracing**: OpenTelemetry integration for end-to-end visibility
-- **LLM Observability**: Langfuse integration for prompt/completion tracking
-- **Metrics**: Prometheus metrics for performance monitoring
-- **Structured Logging**: JSON logs with trace correlation
-
-### State Management
-
-- **Redis Stack**: Primary state backend with RediSearch and RedisJSON
-- **Checkpointing**: Mission state persistence for crash recovery
-- **Event Streams**: Redis Streams for durable event processing
-- **Vector Search**: Semantic search across agent memory
-
-## Quick Start
-
-### Prerequisites
-
-- Kubernetes 1.28+ (or Docker for local development)
-- Helm 3.x
-- kubectl configured for your cluster
-
-### Deploy to Kubernetes
-
-```bash
-# Add the Gibson Helm repository
-helm repo add gibson https://charts.zero-day.ai
-helm repo update
-
-# Install Gibson with default configuration
-helm install gibson gibson/gibson \
-  --namespace gibson-system \
-  --create-namespace \
-  --set llm.anthropicApiKey=$ANTHROPIC_API_KEY
-
-# Verify deployment
-kubectl -n gibson-system get pods
-kubectl -n gibson-system get svc
-```
-
-### Local Development
-
-```bash
-# Clone the repository
-git clone https://github.com/zero-day-ai/gibson.git
-cd gibson
-
-# Start dependencies with Docker Compose
-docker-compose up -d redis etcd neo4j
-
-# Build and run
-make build
-./bin/gibson daemon start
-
-# In another terminal
-./bin/gibson daemon status
-```
-
-### Deploy Your First Agent
-
-```bash
-# Install a security agent
-kubectl apply -f https://raw.githubusercontent.com/zero-day-ai/agents/main/network-recon/k8s/deployment.yaml
-
-# Verify agent registration
-gibson agent list
-
-# Run a mission
-gibson mission run recon.yaml --target my-app
-```
-
-## Core Concepts
-
-### Components
-
-Gibson has three types of deployable components:
-
-| Component | Purpose | Deployment | Scaling |
-|-----------|---------|------------|---------|
-| **Agent** | Autonomous LLM-driven task execution | Deployment/StatefulSet | HPA on queue depth |
-| **Tool** | Stateless security operations | Deployment | HPA on CPU/memory |
-| **Plugin** | Stateful service integrations | StatefulSet | Manual |
-
-### Missions
-
-YAML-defined workflows that orchestrate agents as directed acyclic graphs:
-
-```yaml
-name: "Infrastructure Assessment"
-version: "1.0.0"
-
-nodes:
-  network-scan:
-    type: agent
-    agent: network-recon
-
-  service-enum:
-    type: agent
-    agent: service-fingerprinter
-    depends_on: [network-scan]
-
-  vuln-testing:
-    type: parallel
-    nodes: [web-scanner, ssh-auditor]
-    depends_on: [service-enum]
-
-constraints:
-  max_duration: 2h
-  checkpoint_interval: 5m
-```
-
-### Harness
-
-The runtime environment provided to agents:
+Build agents in Go with the [Gibson SDK](https://github.com/zero-day-ai/sdk):
 
 ```go
 func (a *MyAgent) Execute(ctx context.Context, task agent.Task, h agent.Harness) (agent.Result, error) {
@@ -188,68 +185,93 @@ func (a *MyAgent) Execute(ctx context.Context, task agent.Task, h agent.Harness)
     resp, _ := h.Complete(ctx, "primary", messages)
 
     // Tool execution (distributed via Redis)
-    output, _ := h.CallToolProto(ctx, "nmap", &pb.NmapRequest{Target: target})
+    output, _ := h.ExecuteTool(ctx, "kubectl", request)
 
     // Sub-agent delegation
-    result, _ := h.DelegateToAgent(ctx, "subdomain-enum", subtask)
-
-    // Finding submission
-    h.SubmitFinding(ctx, finding)
+    result, _ := h.DelegateToAgent(ctx, "log-analyzer", subtask)
 
     // Memory persistence
-    h.Memory().Mission().Set(ctx, "discovered_hosts", hosts)
+    h.Memory().Mission().Set(ctx, "analysis", data)
+
+    return agent.NewSuccessResult(output), nil
 }
 ```
 
-## Observability
+**Capabilities:**
+- **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Google Gemini, Ollama (local)
+- **Tool Invocation**: Type-safe Protocol Buffer APIs with distributed execution
+- **Sub-agent Delegation**: Spawn and coordinate child agents
+- **Three-tier Memory**: Working (ephemeral), Mission (Redis), Long-term (vector)
 
-### OpenTelemetry Tracing
+### Component Types
 
-Gibson exports traces for every operation:
+| Component | Purpose | Deployment | Scaling |
+|-----------|---------|------------|---------|
+| **Agent** | Autonomous LLM-driven task execution | Deployment/StatefulSet | HPA on queue depth |
+| **Tool** | Stateless operations (CLI wrappers) | Deployment | HPA on CPU/memory |
+| **Plugin** | Stateful service integrations | StatefulSet | Manual |
+
+### Missions
+
+YAML-defined workflows that orchestrate agents as directed acyclic graphs:
 
 ```yaml
-# config.yaml
-tracing:
-  enabled: true
-  endpoint: otel-collector.observability:4317
-  service_name: gibson-daemon
-  sample_rate: 1.0
+name: "Cluster Health Check"
+version: "1.0.0"
+
+nodes:
+  diagnose:
+    type: agent
+    agent: k8s-troubleshooter
+    goal: "Check for unhealthy pods and resource issues"
+
+  analyze-logs:
+    type: agent
+    agent: log-analyzer
+    depends_on: [diagnose]
+    goal: "Analyze logs for errors in problematic pods"
+
+  report:
+    type: agent
+    agent: report-generator
+    depends_on: [analyze-logs]
+    goal: "Generate incident report"
+
+constraints:
+  max_duration: 30m
+  checkpoint_interval: 5m
 ```
 
-Trace spans include:
-- Mission execution lifecycle
-- Agent task execution
-- LLM request/response (with token counts)
-- Tool invocations
-- Memory operations
+### Knowledge Graph (GraphRAG)
 
-### Langfuse Integration
+Every entity discovered by agents persists in Neo4j:
 
-Track LLM interactions with full prompt/completion logging:
-
-```yaml
-langfuse:
-  enabled: true
-  host: "https://cloud.langfuse.com"
-  public_key: "${LANGFUSE_PUBLIC_KEY}"
-  secret_key: "${LANGFUSE_SECRET_KEY}"
+```
+Host ──[HAS_PORT]──▶ Port ──[RUNS_SERVICE]──▶ Service ──[HAS_ENDPOINT]──▶ Endpoint
+Domain ──[HAS_SUBDOMAIN]──▶ Subdomain ──[RESOLVES_TO]──▶ Host
 ```
 
-### Prometheus Metrics
+- UUID-based entity identity with automatic deduplication
+- CEL-based validation rules
+- YAML-driven taxonomy (single source of truth)
+- Cross-mission intelligence - agents learn from past runs
+
+### Observability
+
+- **OpenTelemetry**: Distributed tracing across daemon, agents, and tools
+- **Langfuse**: LLM observability - token usage, cost tracking, turn analysis
+- **Prometheus**: Metrics for performance monitoring
+- **Structured Logging**: JSON logs with trace correlation
 
 ```yaml
-# ServiceMonitor for Prometheus Operator
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: gibson
-spec:
-  selector:
-    matchLabels:
-      app: gibson
-  endpoints:
-    - port: metrics
-      interval: 30s
+# Helm values
+observability:
+  tracing:
+    enabled: true
+    endpoint: otel-collector.observability:4317
+  langfuse:
+    enabled: true
+    host: "https://cloud.langfuse.com"
 ```
 
 Key metrics:
@@ -257,9 +279,8 @@ Key metrics:
 - `gibson_agent_executions_total` - Agent task counts
 - `gibson_tool_calls_total` - Tool invocation counts
 - `gibson_llm_tokens_total` - LLM token usage
-- `gibson_proto_resolution_total` - Proto type resolution stats
 
-## Kubernetes Deployment
+## Deployment
 
 ### Helm Values
 
@@ -286,34 +307,20 @@ etcd:
   endpoints:
     - etcd-0.etcd.etcd:2379
     - etcd-1.etcd.etcd:2379
-    - etcd-2.etcd.etcd:2379
 
 graphrag:
   enabled: true
   neo4j:
     uri: bolt://neo4j.neo4j:7687
 
-health:
-  port: 8080
-  livenessPath: /healthz
-  readinessPath: /readyz
-
 llm:
   anthropicApiKey: ""  # Set via secret
   openaiApiKey: ""
-
-observability:
-  tracing:
-    enabled: true
-    endpoint: otel-collector.observability:4317
-  langfuse:
-    enabled: true
 ```
 
 ### Health Probes
 
 ```yaml
-# Kubernetes deployment snippet
 livenessProbe:
   httpGet:
     path: /healthz
@@ -346,62 +353,39 @@ terminationGracePeriodSeconds: 60  # Allow time for checkpointing
 
 ```bash
 # Daemon management
-gibson daemon start      # Start the daemon
-gibson daemon stop       # Graceful shutdown
-gibson daemon status     # Health check
-gibson daemon logs       # Tail daemon logs
+gibson daemon start          # Start the daemon
+gibson daemon stop           # Graceful shutdown
+gibson daemon status         # Health check
 
 # Mission operations
-gibson mission run <file>           # Execute mission
-gibson mission list                 # List missions
-gibson mission show <id>            # Show progress
-gibson mission pause <id>           # Checkpoint and pause
-gibson mission resume <id>          # Resume from checkpoint
+gibson mission run <file>    # Execute mission
+gibson mission list          # List missions
+gibson mission show <id>     # Show progress
+gibson mission pause <id>    # Checkpoint and pause
+gibson mission resume <id>   # Resume from checkpoint
 
 # Agent management
-gibson agent list                   # List registered agents
-gibson agent install <url>          # Install from URL
-gibson agent logs <name>            # View agent logs
+gibson agent list            # List registered agents
+gibson agent install <url>   # Install from URL
+gibson agent logs <name>     # View agent logs
 
 # Tool management
-gibson tool list                    # List registered tools
-gibson tool install <url>           # Install tool
-
-# Findings
-gibson finding list                 # List findings
-gibson finding export --format json # Export findings
+gibson tool list             # List registered tools
+gibson tool install <url>    # Install tool
 ```
 
-## SDK
+## Use Cases
 
-Build agents and tools with the [Gibson SDK](https://github.com/zero-day-ai/sdk):
+Gibson agents can automate any domain:
 
-```go
-package main
-
-import (
-    "context"
-    "github.com/zero-day-ai/sdk/agent"
-    "github.com/zero-day-ai/sdk/serve"
-)
-
-type MyAgent struct{}
-
-func (a *MyAgent) Name() string        { return "my-agent" }
-func (a *MyAgent) Version() string     { return "1.0.0" }
-func (a *MyAgent) Description() string { return "My autonomous agent" }
-
-func (a *MyAgent) Execute(ctx context.Context, task agent.Task, h agent.Harness) (agent.Result, error) {
-    // Your agent logic here
-}
-
-func main() {
-    serve.Agent(&MyAgent{},
-        serve.WithHealthPort(8080),  // Kubernetes health probes
-        serve.WithPort(50051),       // gRPC service port
-    )
-}
-```
+| Domain | Example Agents |
+|--------|----------------|
+| **DevOps** | K8s troubleshooter, log analyzer, incident responder |
+| **Platform Engineering** | Drift detector, cost optimizer, compliance auditor |
+| **Security** | Vulnerability scanner, pentester, threat hunter |
+| **Data Engineering** | Pipeline monitor, schema validator, ETL orchestrator |
+| **Infrastructure** | Provisioning, configuration management, capacity planning |
+| **Custom Workflows** | Any domain where autonomous agents add value |
 
 ## Configuration
 
@@ -440,23 +424,45 @@ langfuse:
   host: "https://cloud.langfuse.com"
 ```
 
-## Use Cases
+## SDK
 
-Gibson is designed for building autonomous agents across domains:
+Build agents and tools with the [Gibson SDK](https://github.com/zero-day-ai/sdk):
 
-- **Security Testing** - Network scanning, vulnerability discovery, penetration testing
-- **API Discovery** - Endpoint enumeration, schema extraction, authentication testing
-- **Cloud Auditing** - AWS/Azure/GCP configuration review, compliance checking
-- **Infrastructure Assessment** - Asset discovery, service fingerprinting
-- **Compliance Automation** - Policy enforcement, audit trail generation
-- **Custom Workflows** - Any domain where autonomous agents add value
+```bash
+go get github.com/zero-day-ai/sdk@latest
+```
+
+The SDK provides:
+- Agent, Tool, and Plugin interfaces
+- LLM abstraction with slot-based model selection
+- Three-tier memory system
+- GraphRAG knowledge graph helpers
+- gRPC serving utilities with K8s health probes
+
+## Local Development
+
+```bash
+# Clone the repository
+git clone https://github.com/zero-day-ai/gibson.git
+cd gibson
+
+# Start dependencies with Docker Compose
+docker-compose up -d redis etcd neo4j
+
+# Build and run
+make build
+./bin/gibson daemon start
+
+# In another terminal
+./bin/gibson daemon status
+```
 
 ## Related Repositories
 
 | Repository | Description |
 |------------|-------------|
 | [sdk](https://github.com/zero-day-ai/sdk) | Go SDK for building agents and tools |
-| [tools](https://github.com/zero-day-ai/tools) | Security tool wrappers (nmap, httpx, nuclei) |
+| [tools](https://github.com/zero-day-ai/tools) | Tool wrappers (kubectl, curl, terraform) |
 | [deploy](https://github.com/zero-day-ai/deploy) | Helm charts and Kubernetes manifests |
 
 ## License
