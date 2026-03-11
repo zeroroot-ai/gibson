@@ -383,6 +383,257 @@ gibson tool list             # List registered tools
 gibson tool install <url>    # Install tool
 ```
 
+## Remote Daemon Connectivity
+
+The Gibson CLI can connect to remote daemons using the `GIBSON_DAEMON_ADDRESS` environment variable. This enables flexible deployment patterns where the CLI runs separately from the daemon infrastructure.
+
+### Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `GIBSON_DAEMON_ADDRESS` | Remote daemon gRPC address | `gibson.example.com:50002` |
+| `GIBSON_FORCE_INLINE_YAML` | Force inline YAML mode (for port-forwarding) | `true` |
+
+### Connection Modes
+
+**Local Daemon (default)**
+```bash
+# CLI reads daemon.json from ~/.gibson/daemon.json
+gibson mission list
+gibson agent list
+```
+
+**Remote Daemon**
+```bash
+# Connect to a remote Gibson deployment
+export GIBSON_DAEMON_ADDRESS="gibson.example.com:50002"
+gibson status
+gibson mission run ./my-mission.yaml
+```
+
+**Kubernetes Port-Forward**
+```bash
+# Forward the daemon port locally
+kubectl port-forward svc/gibson 50002:50002 -n gibson &
+
+# Connect via localhost (force inline YAML for file transfers)
+export GIBSON_DAEMON_ADDRESS="localhost:50002"
+export GIBSON_FORCE_INLINE_YAML="true"
+gibson status
+gibson mission run ./my-mission.yaml
+```
+
+### Local vs Remote Addresses
+
+The CLI treats these as **local** (uses file paths):
+- `localhost:50002`
+- `127.0.0.1:50002`
+- `unix:///path/to/socket`
+- Empty (reads `~/.gibson/daemon.json`)
+
+Everything else is **remote** (sends workflow YAML inline).
+
+## CI/CD Integration
+
+Gibson supports two deployment patterns for CI/CD pipelines:
+
+### Pattern 1: Remote Daemon (Recommended for Production)
+
+Connect your CI/CD pipeline to a long-running Gibson deployment. The daemon maintains state, registered agents, and infrastructure connections.
+
+```yaml
+# .gitlab-ci.yml
+variables:
+  GIBSON_DAEMON_ADDRESS: "gibson.internal.example.com:50002"
+
+security-scan:
+  stage: test
+  image: ghcr.io/zero-day-ai/gibson:latest
+  script:
+    - gibson status
+    - gibson mission run ./missions/security-scan.yaml --target $CI_PROJECT_NAME
+    - gibson finding export --format sarif > gl-sast-report.json
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+```
+
+```yaml
+# GitHub Actions
+name: Security Scan
+on: [push]
+env:
+  GIBSON_DAEMON_ADDRESS: gibson.internal.example.com:50002
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Gibson Mission
+        run: |
+          gibson status
+          gibson mission run ./missions/api-discovery.yaml
+          gibson finding export --format sarif > results.sarif
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+```
+
+**Advantages:**
+- Shared agent pool across pipelines
+- Persistent knowledge graph (cross-run intelligence)
+- Centralized observability
+- No startup overhead per job
+
+### Pattern 2: Inline Execution (Stateless/Ephemeral)
+
+Run Gibson daemon and agents directly in the CI/CD job. Useful for isolated testing or when you can't maintain persistent infrastructure.
+
+```yaml
+# GitHub Actions - Inline execution
+name: Security Scan (Inline)
+on: [push]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Gibson
+        run: |
+          # Download Gibson and agent binaries
+          curl -L https://github.com/zero-day-ai/gibson/releases/latest/download/gibson-linux-amd64 -o gibson
+          curl -L https://github.com/zero-day-ai/gibson/releases/latest/download/agent-api-discovery-linux-amd64 -o agent-api-discovery
+          chmod +x gibson agent-api-discovery
+
+      - name: Start Gibson Daemon
+        run: |
+          # Minimal config for inline execution
+          cat > config.yaml << EOF
+          redis:
+            url: redis://localhost:6379
+          registry:
+            type: embedded
+          EOF
+
+          ./gibson daemon start --config config.yaml &
+          sleep 5
+          ./gibson daemon status
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Start Agent
+        run: |
+          ./agent-api-discovery serve --port 50051 &
+          sleep 3
+          ./gibson agent list
+
+      - name: Run Mission
+        run: |
+          ./gibson mission run ./missions/api-discovery.yaml
+          ./gibson finding list
+```
+
+```yaml
+# GitLab CI - Inline with Docker Compose
+security-scan:
+  stage: test
+  image: docker:24
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+  script:
+    # Start infrastructure
+    - docker-compose -f deploy/docker-compose.yaml up -d redis neo4j
+
+    # Start Gibson daemon
+    - docker run -d --network host \
+        -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+        -e REDIS_URL=redis://localhost:6379 \
+        ghcr.io/zero-day-ai/gibson:latest \
+        daemon start
+
+    # Start agents
+    - docker run -d --network host \
+        ghcr.io/zero-day-ai/agent-api-discovery:latest \
+        serve --port 50051
+
+    # Run mission
+    - docker run --network host \
+        -e GIBSON_DAEMON_ADDRESS=localhost:50002 \
+        -v $(pwd)/missions:/missions \
+        ghcr.io/zero-day-ai/gibson:latest \
+        mission run /missions/security-scan.yaml
+```
+
+**Advantages:**
+- Fully isolated per job
+- No external dependencies
+- Reproducible builds
+- Works in air-gapped environments
+
+### Pattern 3: Hybrid (Best of Both)
+
+Use a remote daemon for shared infrastructure but run specialized agents inline:
+
+```yaml
+# Run custom agent locally, connect to remote daemon
+name: Custom Agent Test
+on: [push]
+
+env:
+  GIBSON_DAEMON_ADDRESS: gibson.internal.example.com:50002
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Custom Agent
+        run: |
+          cd agents/my-custom-agent
+          go build -o agent .
+
+      - name: Register Agent with Remote Daemon
+        run: |
+          # Agent registers itself via gRPC
+          ./agents/my-custom-agent/agent serve \
+            --callback-address gibson.internal.example.com:50001 \
+            --port 50051 &
+          sleep 5
+          gibson agent list  # Should show my-custom-agent
+
+      - name: Run Mission Using Custom Agent
+        run: |
+          gibson mission run ./missions/custom-workflow.yaml
+```
+
+### CI/CD Best Practices
+
+1. **Use secrets management** for API keys (`ANTHROPIC_API_KEY`, etc.)
+2. **Export findings as SARIF** for GitHub/GitLab security dashboard integration
+3. **Set timeouts** on missions to prevent runaway jobs
+4. **Use `--persist` flag** to save findings even on partial completion
+5. **Tag missions** with CI metadata for traceability:
+   ```bash
+   gibson mission run ./mission.yaml \
+     --metadata "ci.job=$CI_JOB_ID" \
+     --metadata "ci.commit=$CI_COMMIT_SHA"
+   ```
+
 ## Use Cases
 
 Gibson agents can automate any domain:
