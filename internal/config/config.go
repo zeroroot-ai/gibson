@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
@@ -33,6 +34,7 @@ type Config struct {
 	Shutdown        ShutdownConfig          `mapstructure:"shutdown" yaml:"shutdown"`
 	Observability        ObservabilityConfig        `mapstructure:"observability" yaml:"observability"`
 	OTelObservability    OTelObservabilityConfig    `mapstructure:"otel_observability" yaml:"otel_observability"`
+	Auth                 auth.AuthConfig            `mapstructure:"auth" yaml:"auth"`
 }
 
 // PluginsConfig contains configuration for all plugins.

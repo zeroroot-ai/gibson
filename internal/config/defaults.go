@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 )
 
@@ -107,6 +108,14 @@ func DefaultConfig() *Config {
 		Observability: ObservabilityConfig{
 			Neo4jBrowserURL:      "http://localhost:7474",
 			LangfuseDashboardURL: "http://localhost:3000",
+		},
+		Auth: auth.AuthConfig{
+			Enabled:        false, // Disabled by default for backward compatibility
+			TrustLocalhost: false,
+			ClockSkew:      30 * time.Second,
+			OIDC:           []auth.OIDCIssuerConfig{},
+			Kubernetes:     nil,
+			Local:          nil,
 		},
 	}
 }

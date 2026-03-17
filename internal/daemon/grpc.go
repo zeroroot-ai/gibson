@@ -13,6 +13,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/attack"
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/component/build"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
@@ -25,6 +26,9 @@ import (
 //
 // This method creates a gRPC server, registers the daemon service,
 // and starts listening on the configured address in a goroutine.
+//
+// If authentication is enabled in config, auth interceptors are installed
+// to enforce authentication on all gRPC endpoints.
 func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	// Create listener
 	listener, err := net.Listen("tcp", d.grpcAddr)
@@ -32,8 +36,40 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		return fmt.Errorf("failed to listen on %s: %w", d.grpcAddr, err)
 	}
 
-	// Create gRPC server
-	srv := grpc.NewServer()
+	// Build server options with optional auth interceptors
+	serverOpts := []grpc.ServerOption{}
+
+	// Add auth interceptors if authentication is enabled
+	if d.config.Auth.Enabled {
+		d.logger.Info(ctx, "authentication enabled, installing auth interceptors")
+
+		// Create authenticator from config
+		authenticator, err := d.createAuthenticator(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to create authenticator: %w", err)
+		}
+
+		// Create auth interceptors
+		unaryAuthInterceptor := auth.UnaryAuthInterceptor(authenticator, &d.config.Auth, d.logger.Slog())
+		streamAuthInterceptor := auth.StreamAuthInterceptor(authenticator, &d.config.Auth, d.logger.Slog())
+
+		// Add interceptors to server options
+		// Auth interceptors should run before other interceptors (like tracing)
+		serverOpts = append(serverOpts,
+			grpc.UnaryInterceptor(unaryAuthInterceptor),
+			grpc.StreamInterceptor(streamAuthInterceptor),
+		)
+
+		d.logger.Info(ctx, "auth interceptors installed",
+			"trust_localhost", d.config.Auth.TrustLocalhost,
+			"oidc_issuers", len(d.config.Auth.OIDC),
+		)
+	} else {
+		d.logger.Info(ctx, "authentication disabled")
+	}
+
+	// Create gRPC server with options
+	srv := grpc.NewServer(serverOpts...)
 	d.grpcServer = srv
 
 	// Create and register daemon service
@@ -49,6 +85,36 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	}()
 
 	return nil
+}
+
+// createAuthenticator creates an authenticator based on the auth configuration.
+//
+// This method creates the appropriate authenticator implementation based on
+// what authentication methods are configured:
+//   - OIDC validator for OIDC issuers
+//   - K8s validator for Kubernetes (future)
+//   - Local validator for static tokens (future)
+//   - Composite authenticator when multiple methods are configured (future)
+//
+// Currently only OIDC is implemented.
+func (d *daemonImpl) createAuthenticator(ctx context.Context) (auth.Authenticator, error) {
+	// For now, only OIDC authentication is implemented
+	if len(d.config.Auth.OIDC) == 0 {
+		return nil, fmt.Errorf("authentication enabled but no OIDC issuers configured")
+	}
+
+	// Create OIDC validator
+	// JWKS keys are fetched lazily on first use
+	validator, err := auth.NewOIDCValidator(&d.config.Auth)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OIDC validator: %w", err)
+	}
+
+	d.logger.Info(ctx, "OIDC validator created",
+		"issuers", len(d.config.Auth.OIDC),
+		"note", "JWKS will be fetched on first authentication attempt")
+
+	return validator, nil
 }
 
 // Implementation of api.DaemonInterface for delegation from gRPC server.

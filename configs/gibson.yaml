@@ -53,6 +53,215 @@ security:
     #   secret_name: gibson-master-key
     #   version: latest
 
+# ============================================================================
+# Authentication & Authorization Configuration
+# ============================================================================
+# Gibson supports multiple authentication mechanisms for securing the gRPC API:
+#   - OIDC federation with enterprise identity providers (Okta, Auth0, Azure AD)
+#   - GitHub Actions OIDC tokens for CI/CD pipelines
+#   - GitLab CI OIDC tokens for CI/CD pipelines
+#   - Kubernetes ServiceAccount tokens for in-cluster workloads
+#   - Local static tokens for development (NOT FOR PRODUCTION)
+#
+# Authentication is disabled by default for backward compatibility.
+# When disabled, all gRPC requests are allowed without authentication.
+#
+# Role-Based Access Control (RBAC):
+#   Roles are bound to identities based on token claims (groups, repository, etc.)
+#   Roles determine what actions users can perform (mission:execute, findings:read, admin, etc.)
+#
+# Configuration Options:
+auth:
+  # enabled controls whether authentication is enforced on gRPC API calls
+  # When false (default), all requests are allowed without authentication
+  # When true, all requests must include a valid Bearer token
+  # Default: false
+  # Environment variable: GIBSON_AUTH_ENABLED
+  enabled: "${GIBSON_AUTH_ENABLED:-false}"
+
+  # trust_localhost skips authentication for connections from 127.0.0.1 or ::1
+  # Useful for local development with external tools (curl, grpcurl, etc.)
+  # Only applies when enabled is true
+  # Default: false
+  # Environment variable: GIBSON_AUTH_TRUST_LOCALHOST
+  trust_localhost: "${GIBSON_AUTH_TRUST_LOCALHOST:-false}"
+
+  # clock_skew is the maximum allowed time difference when validating token expiry
+  # Accommodates clock drift between Gibson and identity providers
+  # Default: 30s
+  clock_skew: 30s
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # OIDC Provider Configuration
+  # ──────────────────────────────────────────────────────────────────────────
+  # Configure one or more OIDC identity providers for token validation.
+  # Tokens are matched to providers by their "iss" (issuer) claim.
+  # Multiple providers can be configured for federation across organizations.
+
+  # Example: Okta OIDC Provider
+  # oidc:
+  #   - issuer: "https://your-company.okta.com"
+  #     audience: "gibson-prod"
+  #     jwks_ttl: 1h
+  #     claims_mapping:
+  #       groups: groups    # Map "groups" claim to Identity.Groups
+  #       email: email      # Map "email" claim to Identity.Email
+  #     role_bindings:
+  #       # Map OIDC groups to Gibson roles
+  #       security-admins: ["admin"]
+  #       security-team: ["mission:execute", "findings:*"]
+  #       developers: ["findings:read"]
+
+  # Example: GitHub Actions OIDC
+  # oidc:
+  #   - issuer: "https://token.actions.githubusercontent.com"
+  #     audience: "https://github.com/your-org"  # Or use sts.amazonaws.com
+  #     jwks_ttl: 1h
+  #     claims_mapping:
+  #       repository: repo       # GitHub repository (e.g., "myorg/myrepo")
+  #       ref: branch           # Git ref (e.g., "refs/heads/main")
+  #       workflow: workflow    # Workflow name
+  #     role_bindings:
+  #       # Map repository+branch to Gibson roles (supports wildcards)
+  #       "myorg/security-ci:refs/heads/main": ["mission:execute"]
+  #       "myorg/security-ci:refs/heads/prod": ["mission:execute", "findings:export"]
+  #       "myorg/*:refs/heads/main": ["findings:read"]
+
+  # Example: GitLab CI OIDC
+  # oidc:
+  #   - issuer: "https://gitlab.com"
+  #     audience: "https://gitlab.com"
+  #     jwks_ttl: 1h
+  #     claims_mapping:
+  #       project_path: project   # GitLab project path (e.g., "myorg/myrepo")
+  #       ref: branch            # Git ref (e.g., "main")
+  #       pipeline_source: source # Pipeline source (push, web, schedule)
+  #     role_bindings:
+  #       # Map project+branch to Gibson roles
+  #       "myorg/security-pipeline:main": ["mission:*"]
+  #       "myorg/security-pipeline:staging": ["mission:execute"]
+
+  # Example: Azure AD / Microsoft Entra ID
+  # oidc:
+  #   - issuer: "https://login.microsoftonline.com/{tenant-id}/v2.0"
+  #     audience: "api://{application-id}"
+  #     jwks_ttl: 1h
+  #     claims_mapping:
+  #       groups: groups
+  #       preferred_username: email
+  #     role_bindings:
+  #       "{security-group-id}": ["admin"]
+  #       "{developers-group-id}": ["mission:execute", "findings:read"]
+
+  # Example: Auth0
+  # oidc:
+  #   - issuer: "https://your-tenant.auth0.com/"
+  #     audience: "https://gibson.your-company.com"
+  #     jwks_ttl: 1h
+  #     claims_mapping:
+  #       "https://gibson.your-company.com/roles": roles  # Custom claim namespace
+  #       email: email
+  #     role_bindings:
+  #       security-admin: ["admin"]
+  #       security-analyst: ["mission:execute", "findings:*"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Kubernetes ServiceAccount Token Validation
+  # ──────────────────────────────────────────────────────────────────────────
+  # Enable validation of Kubernetes ServiceAccount tokens using TokenReview API.
+  # Useful for in-cluster CI/CD workloads (Argo Workflows, Tekton, GitLab Runner, etc.)
+
+  # kubernetes:
+  #   enabled: true
+  #   role_bindings:
+  #     # Map namespace:serviceaccount to Gibson roles (supports wildcards)
+  #     "ci-cd:security-scanner": ["mission:execute"]
+  #     "ci-cd:findings-exporter": ["findings:*"]
+  #     "ci-cd:*": ["findings:read"]              # All SAs in ci-cd namespace
+  #     "production:admin": ["admin"]             # admin SA in production namespace
+  #     "*:gibson-admin": ["admin"]               # gibson-admin SA in any namespace
+  #   # kubeconfig_path: "/path/to/kubeconfig"    # Optional: for out-of-cluster testing
+  #                                               # Defaults to in-cluster config when running in K8s
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Local Static Token Authentication (DEVELOPMENT ONLY)
+  # ──────────────────────────────────────────────────────────────────────────
+  # WARNING: This stores tokens in plaintext configuration.
+  # NEVER use in production - for local development only.
+
+  # local:
+  #   users:
+  #     - name: "local-dev"
+  #       token: "dev-token-12345"      # Bearer token value (plaintext!)
+  #       roles: ["admin"]              # Roles granted to this token
+  #     - name: "ci-test"
+  #       token: "test-token-67890"
+  #       roles: ["mission:execute", "findings:read"]
+
+# Notes:
+# - Authentication is performed by gRPC interceptors before request handlers execute
+# - Token format: "Bearer <token>" in "authorization" gRPC metadata header
+# - Identity is injected into request context and available in all handlers
+# - JWKS responses are cached with configurable TTL to reduce IdP load
+# - Metrics are exported for auth attempts, latency, and cache performance
+# - Audit logs record all authentication events (success, failure, permission denied)
+# - When auth is disabled, no performance overhead is incurred
+
+# ============================================================================
+# Complete Example: Production Configuration with Okta + GitHub Actions
+# ============================================================================
+# auth:
+#   enabled: true
+#   trust_localhost: false
+#   clock_skew: 30s
+#   oidc:
+#     # Enterprise SSO via Okta
+#     - issuer: "https://company.okta.com"
+#       audience: "gibson-prod"
+#       jwks_ttl: 1h
+#       claims_mapping:
+#         groups: groups
+#         email: email
+#       role_bindings:
+#         security-admins: ["admin"]
+#         security-team: ["mission:execute", "findings:*"]
+#         developers: ["findings:read"]
+#
+#     # CI/CD via GitHub Actions
+#     - issuer: "https://token.actions.githubusercontent.com"
+#       audience: "https://github.com/your-org"
+#       jwks_ttl: 1h
+#       claims_mapping:
+#         repository: repo
+#         ref: branch
+#       role_bindings:
+#         "your-org/security-ci:refs/heads/main": ["mission:execute", "findings:export"]
+#         "your-org/*:refs/heads/main": ["findings:read"]
+#
+#   # In-cluster workloads
+#   kubernetes:
+#     enabled: true
+#     role_bindings:
+#       "ci-cd:security-scanner": ["mission:execute"]
+#       "monitoring:findings-exporter": ["findings:*"]
+
+# ============================================================================
+# Complete Example: Local Development Configuration
+# ============================================================================
+# auth:
+#   enabled: true
+#   trust_localhost: true        # Allow unauthenticated localhost access
+#   clock_skew: 30s
+#   local:
+#     users:
+#       - name: "dev"
+#         token: "dev-local-12345"
+#         roles: ["admin"]
+
+# ============================================================================
+# End of Authentication Configuration
+# ============================================================================
+
 # LLM provider configuration
 llm:
   default_provider: ""             # Default LLM provider (anthropic, openai, ollama)
