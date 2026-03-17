@@ -299,6 +299,10 @@ func (m *mockAgentHarness) GetAllRunFindings(ctx context.Context, filter harness
 	return nil, nil
 }
 
+func (m *mockAgentHarness) Checkpoint() harness.CheckpointAccess {
+	return harness.NewHarnessCheckpointMethods(nil, "", "", 0)
+}
+
 // mockMemoryStore is a minimal mock implementation of memory.MemoryStore for testing.
 type mockMemoryStore struct{}
 

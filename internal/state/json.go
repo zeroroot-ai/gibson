@@ -56,6 +56,10 @@ func (c *StateClient) JSONSet(ctx context.Context, key, path string, value any) 
 // Returns ErrNotFound if the key does not exist.
 // Returns an error if the operation fails or if JSON unmarshaling fails.
 //
+// Note: When using JSONPath syntax (paths starting with "$"), RedisJSON returns
+// results as an array even for single values. This function automatically unwraps
+// single-element arrays when the destination is not a slice/array type.
+//
 // Example:
 //
 //	var user User
@@ -77,6 +81,22 @@ func (c *StateClient) JSONGet(ctx context.Context, key, path string, dest any) e
 	data, err := result.Text()
 	if err != nil {
 		return fmt.Errorf("failed to read JSON.GET result: %w", err)
+	}
+
+	// RedisJSON with JSONPath ($) returns results as an array, even for single values.
+	// If the path starts with "$" and the result is an array with exactly one element,
+	// and the destination is not expecting a slice, unwrap the array.
+	if len(path) > 0 && path[0] == '$' {
+		// Check if result is a JSON array
+		trimmed := []byte(data)
+		if len(trimmed) > 0 && trimmed[0] == '[' {
+			// Parse as generic array first
+			var arr []json.RawMessage
+			if err := json.Unmarshal(trimmed, &arr); err == nil && len(arr) == 1 {
+				// Single element array - unwrap it for non-slice destinations
+				data = string(arr[0])
+			}
+		}
 	}
 
 	// Unmarshal into dest

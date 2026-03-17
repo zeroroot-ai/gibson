@@ -153,10 +153,11 @@ func (c *ControllerCheckpointMethods) PauseWithCheckpoint(
 	threadID := state.ThreadID
 	if threadID == "" {
 		// Create a new thread if none exists
-		threadID, err = c.threadManager.CreateThread(ctx, missionID)
+		thread, err := c.threadManager.CreateThread(ctx, missionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create thread: %w", err)
 		}
+		threadID = thread.ID
 		state.ThreadID = threadID
 	}
 

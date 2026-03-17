@@ -89,8 +89,11 @@ type MissionStore interface {
 
 // MissionFilter provides filtering options for mission queries.
 type MissionFilter struct {
-	// Status filters by mission status
+	// Status filters by mission status (include only this status)
 	Status *MissionStatus
+
+	// ExcludeStatus filters out missions with these statuses
+	ExcludeStatus []MissionStatus
 
 	// TargetID filters by target
 	TargetID *types.ID

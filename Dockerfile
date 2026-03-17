@@ -1,7 +1,7 @@
 # ============================================================================
-# Gibson Core Simplified Multi-Stage Dockerfile
+# Gibson Core Multi-Stage Dockerfile
 # ============================================================================
-# Production-ready container using Go module cache (no SDK copy required).
+# Production-ready container using Go module cache.
 # Pure Go build with CGO disabled for static binary compilation.
 #
 # Build from gibson directory:
@@ -21,7 +21,7 @@ WORKDIR /workspace
 # Copy dependency manifests first for better layer caching
 COPY go.mod go.sum ./
 
-# Download dependencies (including SDK from Go module cache)
+# Download dependencies (SDK fetched from Go module cache)
 RUN go mod download
 
 # Copy source code

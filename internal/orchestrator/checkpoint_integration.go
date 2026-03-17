@@ -389,14 +389,14 @@ func CaptureExecutionState(
 	execState.PendingQueue = missionState.GetReadyNodes()
 
 	// Capture working memory
-	if workingMemory != nil {
-		execState.WorkingMemory = workingMemory.GetAll()
-	}
+	// TODO: WorkingMemory.GetAll() needs to be implemented
+	// For now, working memory is not persisted across checkpoints
+	_ = workingMemory
 
 	// Capture mission memory
-	if missionMemory != nil {
-		execState.MissionMemory = missionMemory.GetAll()
-	}
+	// TODO: MissionMemory.GetAll() needs to be implemented
+	// For now, mission memory is not persisted across checkpoints
+	_ = missionMemory
 
 	// Capture conversation history
 	if conversationHistory != nil {

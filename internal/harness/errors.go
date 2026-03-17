@@ -1,6 +1,10 @@
 package harness
 
-import "github.com/zero-day-ai/gibson/internal/types"
+import (
+	"errors"
+
+	"github.com/zero-day-ai/gibson/internal/types"
+)
 
 // Harness error codes for agent harness operations.
 // These errors are returned when agents interact with the harness
@@ -41,7 +45,10 @@ const (
 
 	// ErrConcurrentMissionLimitExceeded indicates the system-wide concurrent mission limit has been reached
 	ErrConcurrentMissionLimitExceeded types.ErrorCode = "HARNESS_CONCURRENT_MISSION_LIMIT_EXCEEDED"
+)
 
+// Sentinel errors for harness operations
+var (
 	// ErrCheckpointingDisabled indicates checkpointing is not enabled for this mission
-	ErrCheckpointingDisabled types.ErrorCode = "HARNESS_CHECKPOINTING_DISABLED"
+	ErrCheckpointingDisabled = errors.New("checkpointing is disabled for this mission")
 )

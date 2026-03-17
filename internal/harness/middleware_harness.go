@@ -331,6 +331,17 @@ func (h *MiddlewareHarness) GraphRAGHealth(ctx context.Context) types.HealthStat
 	return types.Unhealthy("GraphRAGHealth not supported by inner harness")
 }
 
+// Checkpoint returns the checkpoint access interface from the inner harness.
+func (h *MiddlewareHarness) Checkpoint() CheckpointAccess {
+	if inner, ok := h.inner.(interface {
+		Checkpoint() CheckpointAccess
+	}); ok {
+		return inner.Checkpoint()
+	}
+	// Return a disabled checkpoint implementation
+	return NewHarnessCheckpointMethods(nil, "", "", 0)
+}
+
 // toMiddlewareMessages converts llm.Message slice to middleware.Message slice
 // for passing through context to tracing middleware.
 func toMiddlewareMessages(messages []llm.Message) []middleware.Message {
