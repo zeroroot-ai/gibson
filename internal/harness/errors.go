@@ -41,4 +41,7 @@ const (
 
 	// ErrConcurrentMissionLimitExceeded indicates the system-wide concurrent mission limit has been reached
 	ErrConcurrentMissionLimitExceeded types.ErrorCode = "HARNESS_CONCURRENT_MISSION_LIMIT_EXCEEDED"
+
+	// ErrCheckpointingDisabled indicates checkpointing is not enabled for this mission
+	ErrCheckpointingDisabled types.ErrorCode = "HARNESS_CHECKPOINTING_DISABLED"
 )

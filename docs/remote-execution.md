@@ -39,47 +39,38 @@ The Gibson CLI uses the `GIBSON_DAEMON_ADDRESS` environment variable to determin
 | **Local** | Sends file path to daemon, which reads from its filesystem | Development, single-machine deployments |
 | **Remote** | Reads file locally and transmits content inline (up to 10MB) | CI/CD, distributed deployments, Kubernetes |
 
-### Local vs Remote Addresses
+### Local vs Remote Detection
 
-The daemon is considered **remote** when `GIBSON_DAEMON_ADDRESS` is set to any value except:
+The CLI uses a simple rule to determine whether to send file paths or inline content:
+
+| Connection Type | Behavior | Rationale |
+|-----------------|----------|-----------|
+| **Unix socket** | Send file path | Shared filesystem guaranteed |
+| **TCP (any address)** | Send inline YAML | No shared filesystem assumed |
 
 ```
-# Local addresses (use file path)
-<empty/unset>
-localhost
-localhost:<any-port>
-127.0.0.1
-127.0.0.1:<any-port>
-::1
-::1:<any-port>
+# Local (Unix socket - shared filesystem)
+<empty/unset>           → Uses default Unix socket
+unix:///var/run/gibson.sock
+/var/run/gibson.sock
 
-# Remote addresses (use inline YAML)
-remote-host
-remote-host:50002
-192.168.1.100:50002
+# Remote (TCP - inline YAML)
+localhost:50002         → Inline (could be port-forward)
+127.0.0.1:50002         → Inline (could be port-forward)
 gibson.example.com:50002
-10.0.0.5:50002
+192.168.1.100:50002
 ```
 
-### Force Inline Mode (Port-Forward Support)
-
-When using `kubectl port-forward` to access a remote daemon, the address appears as `localhost:50002` but the daemon is actually remote and doesn't have filesystem access. Use the `GIBSON_FORCE_INLINE_YAML` environment variable to force inline mode:
+This approach correctly handles `kubectl port-forward` scenarios automatically—no special configuration needed:
 
 ```bash
 # Port-forward to remote daemon
 kubectl port-forward svc/gibson 50002:50002 -n gibson &
 
-# Force inline YAML mode even though address is localhost
+# Just works! localhost:50002 is treated as remote (inline YAML)
 export GIBSON_DAEMON_ADDRESS="localhost:50002"
-export GIBSON_FORCE_INLINE_YAML="true"
-
-# Now mission files are sent inline to the remote daemon
 gibson mission run ./missions/recon.yaml
 ```
-
-| Environment Variable | Values | Description |
-|---------------------|--------|-------------|
-| `GIBSON_FORCE_INLINE_YAML` | `true`, `1` | Force inline YAML mode regardless of address |
 
 ### Architecture
 

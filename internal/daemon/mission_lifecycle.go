@@ -63,7 +63,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			return
 		}
 
-		// Create mission manager
+		// Create mission manager with eventBus for orchestration events
 		missionManagerInstance.mgr = newMissionManager(
 			d.config,
 			d.logger.Slog(),
@@ -79,6 +79,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			runLinker,
 			d.infrastructure,
 			d.infrastructure.otelStack,
+			NewOrchestratorEventBusAdapter(d.eventBus), // Pass eventBus for orchestration events
 		)
 
 		d.logger.Info(context.Background(), "mission manager initialized")

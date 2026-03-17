@@ -2,13 +2,10 @@ package client
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -656,6 +653,9 @@ func (m *mockDaemonServiceClient) ValidateMissionDependencies(ctx context.Contex
 func (m *mockDaemonServiceClient) CreateMission(ctx context.Context, req *api.CreateMissionRequest, opts ...grpc.CallOption) (*api.CreateMissionResponse, error) {
 	return nil, nil
 }
+func (m *mockDaemonServiceClient) Shutdown(ctx context.Context, req *api.ShutdownRequest, opts ...grpc.CallOption) (*api.ShutdownResponse, error) {
+	return &api.ShutdownResponse{Success: true, Message: "mock shutdown"}, nil
+}
 
 // TestClient_Ping tests the Ping method with mock client.
 func TestClient_Ping(t *testing.T) {
@@ -1099,47 +1099,7 @@ func TestConnect_UnixSocketFormat(t *testing.T) {
 	}
 }
 
-func TestConnectFromInfo_FileNotFound(t *testing.T) {
-	ctx := context.Background()
-
-	// Test with non-existent file
-	_, err := ConnectFromInfo(ctx, "/nonexistent/daemon.json")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to read daemon info")
-}
-
-func TestConnectFromInfo_InvalidPath(t *testing.T) {
-	ctx := context.Background()
-
-	// Test with empty path
-	_, err := ConnectFromInfo(ctx, "")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be empty")
-}
-
-func TestConnectFromInfo_ValidFileButNoServer(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	// Create temporary daemon info file
-	tempDir := t.TempDir()
-	infoPath := filepath.Join(tempDir, "daemon.json")
-
-	info := &daemon.DaemonInfo{
-		PID:         12345,
-		StartTime:   time.Now(),
-		GRPCAddress: "localhost:59999", // Non-existent server
-		Version:     "1.0.0",
-	}
-
-	err := daemon.WriteDaemonInfo(infoPath, info)
-	require.NoError(t, err)
-
-	// Attempt connection - should fail because server doesn't exist
-	_, err = ConnectFromInfo(ctx, infoPath)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to connect")
-}
+// ConnectFromInfo tests removed - function was deleted as part of K8s-native CLI migration
 
 func TestClient_Close_Nil(t *testing.T) {
 	client := &Client{conn: nil}
@@ -1147,96 +1107,22 @@ func TestClient_Close_Nil(t *testing.T) {
 	assert.NoError(t, err, "Close on nil connection should not error")
 }
 
-func TestConnectOrFail_NoDaemonInfo(t *testing.T) {
-	// Set GIBSON_HOME to a temporary directory without daemon.json
-	tempDir := t.TempDir()
-	os.Setenv("GIBSON_HOME", tempDir)
-	defer os.Unsetenv("GIBSON_HOME")
-
-	ctx := context.Background()
-	client, err := ConnectOrFail(ctx)
-
-	assert.Error(t, err)
-	assert.Nil(t, client)
-	assert.Contains(t, err.Error(), "not running")
-	assert.Contains(t, err.Error(), "gibson daemon start")
-}
-
-func TestConnectOrFail_DaemonInfoExistsButNotRunning(t *testing.T) {
-	// Create temporary directory with daemon.json
-	tempDir := t.TempDir()
-	os.Setenv("GIBSON_HOME", tempDir)
-	defer os.Unsetenv("GIBSON_HOME")
-
-	// Write daemon info for a non-existent server
-	infoPath := filepath.Join(tempDir, "daemon.json")
-	info := &daemon.DaemonInfo{
-		PID:         99999,
-		StartTime:   time.Now(),
-		GRPCAddress: "localhost:59998",
-		Version:     "1.0.0",
-	}
-	err := daemon.WriteDaemonInfo(infoPath, info)
-	require.NoError(t, err)
-
+func TestConnectOrFail_NoDaemon(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	// ConnectOrFail now uses env var or default address
+	// Without a daemon running, it should fail to connect
 	client, err := ConnectOrFail(ctx)
 
 	assert.Error(t, err)
 	assert.Nil(t, client)
-	assert.Contains(t, err.Error(), "failed to connect")
-	assert.Contains(t, err.Error(), "crashed or is not responding")
-	assert.Contains(t, err.Error(), "Troubleshooting")
+	// Error should mention the daemon is not running or unreachable
+	assert.Contains(t, err.Error(), "daemon")
 }
 
-func TestGetGibsonHome(t *testing.T) {
-	tests := []struct {
-		name    string
-		envVal  string
-		wantErr bool
-	}{
-		{
-			name:    "with GIBSON_HOME set",
-			envVal:  "/custom/gibson/home",
-			wantErr: false,
-		},
-		{
-			name:    "without GIBSON_HOME (uses default)",
-			envVal:  "",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Set/unset environment variable
-			if tt.envVal != "" {
-				os.Setenv("GIBSON_HOME", tt.envVal)
-				defer os.Unsetenv("GIBSON_HOME")
-			} else {
-				os.Unsetenv("GIBSON_HOME")
-			}
-
-			home, err := getGibsonHome()
-
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.NotEmpty(t, home)
-
-				if tt.envVal != "" {
-					assert.Equal(t, tt.envVal, home)
-				} else {
-					// Should return default path
-					assert.Contains(t, home, ".gibson")
-				}
-			}
-		})
-	}
-}
+// TestGetGibsonHome removed - function was deleted as part of K8s-native CLI migration
+// Connection now uses GIBSON_DAEMON_ADDRESS env var or defaults to localhost:50002
 
 // mockDaemonClientForComponents extends the mock with component management responses
 type mockDaemonClientForComponents struct {

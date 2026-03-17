@@ -350,5 +350,28 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
+	// Apply Checkpoint config interpolation
+	if checkpoint, ok := interpolated["checkpoint"].(map[string]interface{}); ok {
+		if keyPrefix, ok := checkpoint["key_prefix"].(string); ok {
+			cfg.Checkpoint.KeyPrefix = interpolateString(keyPrefix)
+		}
+		if format, ok := checkpoint["format"].(string); ok {
+			cfg.Checkpoint.Format = interpolateString(format)
+		}
+		if encryption, ok := checkpoint["encryption"].(map[string]interface{}); ok {
+			if keyProvider, ok := encryption["key_provider"].(string); ok {
+				cfg.Checkpoint.Encryption.KeyProvider = interpolateString(keyProvider)
+			}
+			if keySecretName, ok := encryption["key_secret_name"].(string); ok {
+				cfg.Checkpoint.Encryption.KeySecretName = interpolateString(keySecretName)
+			}
+		}
+		if retention, ok := checkpoint["retention"].(map[string]interface{}); ok {
+			if defaultMode, ok := retention["default_mode"].(string); ok {
+				cfg.Checkpoint.Retention.DefaultMode = interpolateString(defaultMode)
+			}
+		}
+	}
+
 	return nil
 }

@@ -35,6 +35,7 @@ type Config struct {
 	Observability        ObservabilityConfig        `mapstructure:"observability" yaml:"observability"`
 	OTelObservability    OTelObservabilityConfig    `mapstructure:"otel_observability" yaml:"otel_observability"`
 	Auth                 auth.AuthConfig            `mapstructure:"auth" yaml:"auth"`
+	Checkpoint           CheckpointConfig           `mapstructure:"checkpoint" yaml:"checkpoint"`
 }
 
 // PluginsConfig contains configuration for all plugins.

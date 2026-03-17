@@ -280,12 +280,12 @@ func TestShutdownPhases_Timeout(t *testing.T) {
 	assert.Equal(t, 1, metrics.ErrorCount())
 }
 
-// mockMissionStore is a simple in-memory mission store for testing.
-type mockMissionStore struct {
+// shutdownMockMissionStore is a simple in-memory mission store for testing shutdown scenarios.
+type shutdownMockMissionStore struct {
 	missions map[types.ID]*mission.Mission
 }
 
-func (m *mockMissionStore) Get(ctx context.Context, id types.ID) (*mission.Mission, error) {
+func (m *shutdownMockMissionStore) Get(ctx context.Context, id types.ID) (*mission.Mission, error) {
 	mis, ok := m.missions[id]
 	if !ok {
 		return nil, mission.ErrMissionNotFound
@@ -293,7 +293,7 @@ func (m *mockMissionStore) Get(ctx context.Context, id types.ID) (*mission.Missi
 	return mis, nil
 }
 
-func (m *mockMissionStore) UpdateStatus(ctx context.Context, id types.ID, status mission.MissionStatus) error {
+func (m *shutdownMockMissionStore) UpdateStatus(ctx context.Context, id types.ID, status mission.MissionStatus) error {
 	mis, ok := m.missions[id]
 	if !ok {
 		return mission.ErrMissionNotFound
@@ -302,22 +302,22 @@ func (m *mockMissionStore) UpdateStatus(ctx context.Context, id types.ID, status
 	return nil
 }
 
-func (m *mockMissionStore) Create(ctx context.Context, mis *mission.Mission) error {
+func (m *shutdownMockMissionStore) Create(ctx context.Context, mis *mission.Mission) error {
 	m.missions[mis.ID] = mis
 	return nil
 }
 
-func (m *mockMissionStore) Update(ctx context.Context, mis *mission.Mission) error {
+func (m *shutdownMockMissionStore) Update(ctx context.Context, mis *mission.Mission) error {
 	m.missions[mis.ID] = mis
 	return nil
 }
 
-func (m *mockMissionStore) Delete(ctx context.Context, id types.ID) error {
+func (m *shutdownMockMissionStore) Delete(ctx context.Context, id types.ID) error {
 	delete(m.missions, id)
 	return nil
 }
 
-func (m *mockMissionStore) List(ctx context.Context) ([]*mission.Mission, error) {
+func (m *shutdownMockMissionStore) List(ctx context.Context) ([]*mission.Mission, error) {
 	missions := make([]*mission.Mission, 0, len(m.missions))
 	for _, mis := range m.missions {
 		missions = append(missions, mis)
@@ -325,7 +325,7 @@ func (m *mockMissionStore) List(ctx context.Context) ([]*mission.Mission, error)
 	return missions, nil
 }
 
-func (m *mockMissionStore) GetActive(ctx context.Context) ([]*mission.Mission, error) {
+func (m *shutdownMockMissionStore) GetActive(ctx context.Context) ([]*mission.Mission, error) {
 	missions := make([]*mission.Mission, 0)
 	for _, mis := range m.missions {
 		if mis.Status == mission.MissionStatusRunning || mis.Status == mission.MissionStatusPaused {

@@ -190,6 +190,7 @@ func init() {
 	rootCmd.AddCommand(knowledgeCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(logsCmd)
+	rootCmd.AddCommand(checkpointCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(daemonCmd)
 }

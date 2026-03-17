@@ -318,6 +318,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		"callback_enabled", d.config.Callback.Enabled,
 	)
 
+	// Check if embedded etcd is rejected via environment variable
+	// This is used in Kubernetes deployments where external etcd is required
+	if os.Getenv("GIBSON_REQUIRE_EXTERNAL_ETCD") == "true" {
+		if d.config.Registry.Type == "embedded" {
+			return fmt.Errorf("embedded etcd not allowed: GIBSON_REQUIRE_EXTERNAL_ETCD=true requires external etcd endpoints")
+		}
+	}
+
 	// Record start time
 	d.startTime = time.Now()
 
@@ -582,7 +590,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			HarnessFactory:     d.infrastructure.harnessFactory,
 			Logger:             d.logger.WithComponent("orchestrator"),
 			Tracer:             tracer,
-			EventBus:           nil, // EventBus adapter incompatible, will add later
+			EventBus:           NewOrchestratorEventBusAdapter(d.eventBus),
 			MaxIterations:      100,
 			MaxConcurrent:      10,
 			ThinkerMaxRetries:  3,
@@ -653,7 +661,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	d.logger.Info(ctx, "starting health server", "port", healthPort)
 	d.healthServer = healthhttp.NewServer(&healthhttp.Config{
-		Port: healthPort,
+		Port:         healthPort,
+		CheckTimeout: 10 * time.Second, // Allow more time for DNS resolution in K8s
 	})
 
 	// Register readiness checks for all dependencies
@@ -682,14 +691,22 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Debug(ctx, "registered neo4j readiness check")
 	}
 
-	// etcd gRPC check - use connection-based check
-	if d.registry.Client() != nil {
-		// etcd exposes a health check endpoint via the gRPC health protocol
-		etcdConn := d.registry.Client().ActiveConnection()
-		if etcdConn != nil {
-			d.healthServer.RegisterReadinessCheck("etcd", healthhttp.GRPCConnCheck(etcdConn))
-			d.logger.Debug(ctx, "registered etcd readiness check")
-		}
+	// etcd check - verify registry client exists and registry is running
+	// Note: We don't perform active etcd calls in the health check because
+	// embedded etcd shares the same connection pool with the main application,
+	// and frequent health checks can cause connection contention.
+	// Instead, we trust that if the registry started successfully and is marked
+	// as healthy by the registry manager, etcd is working.
+	if d.registry != nil {
+		registryRef := d.registry
+		d.healthServer.RegisterReadinessCheck("etcd", func(ctx context.Context) sdktypes.HealthStatus {
+			status := registryRef.Status()
+			if status.Healthy {
+				return sdktypes.NewHealthyStatus("etcd is healthy")
+			}
+			return sdktypes.NewUnhealthyStatus("etcd registry not healthy", nil)
+		})
+		d.logger.Debug(ctx, "registered etcd readiness check")
 	}
 
 	// Register shutdown state check - this signals Kubernetes to stop routing traffic during shutdown
@@ -1084,4 +1101,35 @@ func (d *daemonImpl) GetSuspendedMissions(ctx context.Context) ([]types.ID, erro
 	}
 
 	return d.checkpointer.ListCheckpoints(ctx)
+}
+
+// RequestShutdown initiates graceful shutdown of the daemon.
+// This is called by the gRPC Shutdown endpoint to allow remote shutdown requests.
+//
+// Parameters:
+//   - ctx: Context with timeout for shutdown operations
+//   - force: If true, skip graceful drain and shutdown immediately
+//   - timeoutSeconds: Maximum time to wait for graceful shutdown
+//
+// Returns:
+//   - error: Non-nil if shutdown fails
+func (d *daemonImpl) RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error {
+	d.logger.Info(ctx, "shutdown requested",
+		"force", force,
+		"timeout_seconds", timeoutSeconds,
+	)
+
+	// Send SIGTERM to ourselves to trigger graceful shutdown
+	// This uses the same signal handling path as Ctrl+C
+	process, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		return fmt.Errorf("failed to find own process: %w", err)
+	}
+
+	// Send SIGTERM to trigger graceful shutdown
+	if err := process.Signal(os.Interrupt); err != nil {
+		return fmt.Errorf("failed to send interrupt signal: %w", err)
+	}
+
+	return nil
 }

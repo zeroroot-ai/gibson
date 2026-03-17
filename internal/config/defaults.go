@@ -117,6 +117,7 @@ func DefaultConfig() *Config {
 			Kubernetes:     nil,
 			Local:          nil,
 		},
+		Checkpoint: *DefaultCheckpointConfig(),
 	}
 }
 

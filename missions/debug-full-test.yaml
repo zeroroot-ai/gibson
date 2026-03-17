@@ -1,0 +1,28 @@
+name: Debug Agent Full Test
+description: Comprehensive test of all SDK features via debug agent
+version: 1.0.0
+
+nodes:
+  - id: debug-full
+    type: agent
+    agent: debug-agent
+    task:
+      action: validate
+      goal: Run comprehensive SDK validation tests
+      context:
+        test_id: "full-sdk-test-001"
+        test_llm: true
+        test_tools: true
+        test_plugins: true
+        test_memory: true
+        test_findings: true
+        test_delegation: false  # No other agents to delegate to
+        test_tracing: true
+        test_graphrag: true     # Neo4j is available
+        test_context: true
+        test_planning: false    # Requires planning context
+        test_credentials: false # No test credentials configured
+        test_missions: false    # Resource intensive
+        test_metrics: true
+        verbose: true
+        fail_fast: false

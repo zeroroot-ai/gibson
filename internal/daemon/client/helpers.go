@@ -3,11 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
-
-	"github.com/zero-day-ai/gibson/internal/config"
 )
 
 // RequireDaemon returns a connected daemon client or an error if the daemon is not running.
@@ -16,7 +12,7 @@ import (
 // such as mission execution, attack runs, or component lifecycle operations.
 //
 // The function provides clear, actionable error messages to help users start the daemon
-// if it's not running. Error messages include the expected daemon.json path for troubleshooting.
+// if it's not running.
 //
 // Parameters:
 //   - ctx: Context for the connection attempt
@@ -97,13 +93,9 @@ func OptionalDaemon(ctx context.Context) *Client {
 
 // IsDaemonRunning checks if the Gibson daemon is currently running and responsive.
 //
-// This is a lightweight check that only tests daemon availability without establishing
-// a persistent connection. It's useful for status checks, UI indicators, or conditional
+// This is a lightweight check that only tests daemon availability by attempting
+// a connection and ping. It's useful for status checks, UI indicators, or conditional
 // logic that needs to determine daemon availability.
-//
-// The function checks for:
-//  1. Presence of daemon.json file (indicates daemon was started)
-//  2. Successful gRPC ping to verify daemon is responsive
 //
 // Returns:
 //   - bool: true if daemon is running and responsive, false otherwise
@@ -117,23 +109,11 @@ func OptionalDaemon(ctx context.Context) *Client {
 //	    fmt.Println("  Start with: gibson daemon start")
 //	}
 func IsDaemonRunning() bool {
-	// Get Gibson home directory
-	homeDir := os.Getenv("GIBSON_HOME")
-	if homeDir == "" {
-		homeDir = config.DefaultHomeDir()
-	}
-
-	// Check if daemon.json exists
-	daemonInfoPath := filepath.Join(homeDir, "daemon.json")
-	if _, err := os.Stat(daemonInfoPath); os.IsNotExist(err) {
-		return false
-	}
-
 	// Try to connect with short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	client, err := ConnectFromInfo(ctx, daemonInfoPath)
+	client, err := Connect(ctx, GetDaemonAddress())
 	if err != nil {
 		return false
 	}

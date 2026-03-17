@@ -89,32 +89,38 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 
 // createAuthenticator creates an authenticator based on the auth configuration.
 //
-// This method creates the appropriate authenticator implementation based on
-// what authentication methods are configured:
-//   - OIDC validator for OIDC issuers
-//   - K8s validator for Kubernetes (future)
-//   - Local validator for static tokens (future)
-//   - Composite authenticator when multiple methods are configured (future)
+// This method creates a composite authenticator that supports multiple
+// authentication methods:
+//   - OIDC validator for OIDC issuers (Okta, Azure AD, GitHub Actions, GitLab CI)
+//   - K8s validator for Kubernetes ServiceAccount tokens
+//   - Local validator for static tokens (development only)
 //
-// Currently only OIDC is implemented.
+// Authentication is attempted in order: OIDC → K8s → Local.
+// At least one authentication method must be configured.
 func (d *daemonImpl) createAuthenticator(ctx context.Context) (auth.Authenticator, error) {
-	// For now, only OIDC authentication is implemented
-	if len(d.config.Auth.OIDC) == 0 {
-		return nil, fmt.Errorf("authentication enabled but no OIDC issuers configured")
-	}
-
-	// Create OIDC validator
-	// JWKS keys are fetched lazily on first use
-	validator, err := auth.NewOIDCValidator(&d.config.Auth)
+	// Create composite authenticator that supports multiple auth methods
+	authenticator, err := auth.NewCompositeAuthenticator(&d.config.Auth)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OIDC validator: %w", err)
+		return nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
 
-	d.logger.Info(ctx, "OIDC validator created",
-		"issuers", len(d.config.Auth.OIDC),
-		"note", "JWKS will be fetched on first authentication attempt")
+	// Log what authentication methods are enabled
+	var methods []string
+	if len(d.config.Auth.OIDC) > 0 {
+		methods = append(methods, fmt.Sprintf("oidc(%d issuers)", len(d.config.Auth.OIDC)))
+	}
+	if d.config.Auth.Kubernetes != nil && d.config.Auth.Kubernetes.Enabled {
+		methods = append(methods, "kubernetes")
+	}
+	if d.config.Auth.Local != nil && len(d.config.Auth.Local.Users) > 0 {
+		methods = append(methods, fmt.Sprintf("local(%d users)", len(d.config.Auth.Local.Users)))
+	}
 
-	return validator, nil
+	d.logger.Info(ctx, "composite authenticator created",
+		"methods", methods,
+		"note", "authentication attempted in order: OIDC → K8s → Local")
+
+	return authenticator, nil
 }
 
 // Implementation of api.DaemonInterface for delegation from gRPC server.

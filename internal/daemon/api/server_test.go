@@ -272,6 +272,10 @@ func (m *mockDaemon) CreateMission(ctx context.Context, req CreateMissionData) (
 	return CreateMissionResultData{}, nil
 }
 
+func (m *mockDaemon) RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error {
+	return nil
+}
+
 // mockServerStream implements grpc.ServerStreamingServer[MissionEvent] for testing
 type mockServerStream struct {
 	ctx       context.Context

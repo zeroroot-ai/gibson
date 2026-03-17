@@ -569,7 +569,9 @@ func (d *daemonImpl) initOTelObservability(ctx context.Context) *observability.O
 		d.logger.Warn(ctx, "failed to initialize OpenTelemetry observability, continuing without OTel tracing",
 			"error", err,
 			"endpoint", cfg.Endpoint,
-			"protocol", cfg.Protocol)
+			"protocol", cfg.Protocol,
+			"service_name", cfg.ServiceName,
+			"troubleshooting", "verify OTLP collector is accessible and protocol matches collector configuration")
 		// Fail open - continue without OTel observability
 		return nil
 	}

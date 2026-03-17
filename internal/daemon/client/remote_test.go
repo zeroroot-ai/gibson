@@ -7,35 +7,20 @@ import (
 )
 
 // TestIsRemoteDaemon tests the remote daemon detection logic.
+//
+// The logic is simple: Unix sockets = local (shared filesystem), TCP = remote.
+// This correctly handles kubectl port-forward scenarios where localhost:port
+// routes to a remote daemon without filesystem access.
 func TestIsRemoteDaemon(t *testing.T) {
 	tests := []struct {
 		name     string
 		envValue string
 		want     bool
 	}{
+		// Local: no address (default Unix socket) or explicit Unix socket
 		{
-			name:     "no env var set",
+			name:     "no env var set (default Unix socket)",
 			envValue: "",
-			want:     false,
-		},
-		{
-			name:     "localhost with port",
-			envValue: "localhost:50002",
-			want:     false,
-		},
-		{
-			name:     "localhost without port",
-			envValue: "localhost",
-			want:     false,
-		},
-		{
-			name:     "127.0.0.1 with port",
-			envValue: "127.0.0.1:50002",
-			want:     false,
-		},
-		{
-			name:     "127.0.0.1 without port",
-			envValue: "127.0.0.1",
 			want:     false,
 		},
 		{
@@ -47,6 +32,28 @@ func TestIsRemoteDaemon(t *testing.T) {
 			name:     "unix socket absolute path",
 			envValue: "/var/run/gibson.sock",
 			want:     false,
+		},
+		// Remote: all TCP connections including localhost
+		// This handles port-forward scenarios correctly
+		{
+			name:     "localhost with port (could be port-forward)",
+			envValue: "localhost:50002",
+			want:     true,
+		},
+		{
+			name:     "localhost without port",
+			envValue: "localhost",
+			want:     true,
+		},
+		{
+			name:     "127.0.0.1 with port (could be port-forward)",
+			envValue: "127.0.0.1:50002",
+			want:     true,
+		},
+		{
+			name:     "127.0.0.1 without port",
+			envValue: "127.0.0.1",
+			want:     true,
 		},
 		{
 			name:     "remote host with port",
@@ -72,24 +79,15 @@ func TestIsRemoteDaemon(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save original env values and restore after test
+			// Save original env value and restore after test
 			originalAddress := os.Getenv(EnvDaemonAddress)
-			originalForce := os.Getenv(EnvForceInlineYAML)
 			defer func() {
 				if originalAddress != "" {
 					os.Setenv(EnvDaemonAddress, originalAddress)
 				} else {
 					os.Unsetenv(EnvDaemonAddress)
 				}
-				if originalForce != "" {
-					os.Setenv(EnvForceInlineYAML, originalForce)
-				} else {
-					os.Unsetenv(EnvForceInlineYAML)
-				}
 			}()
-
-			// Clear force inline flag for these tests
-			os.Unsetenv(EnvForceInlineYAML)
 
 			// Set test environment variable
 			if tt.envValue != "" {
@@ -107,97 +105,6 @@ func TestIsRemoteDaemon(t *testing.T) {
 	}
 }
 
-// TestForceInlineYAML tests the GIBSON_FORCE_INLINE_YAML override behavior.
-func TestForceInlineYAML(t *testing.T) {
-	tests := []struct {
-		name           string
-		daemonAddress  string
-		forceInlineVal string
-		want           bool
-	}{
-		{
-			name:           "force inline with localhost (port-forward scenario)",
-			daemonAddress:  "localhost:50002",
-			forceInlineVal: "true",
-			want:           true,
-		},
-		{
-			name:           "force inline with value 1",
-			daemonAddress:  "localhost:50002",
-			forceInlineVal: "1",
-			want:           true,
-		},
-		{
-			name:           "force inline not set, localhost",
-			daemonAddress:  "localhost:50002",
-			forceInlineVal: "",
-			want:           false,
-		},
-		{
-			name:           "force inline false, localhost",
-			daemonAddress:  "localhost:50002",
-			forceInlineVal: "false",
-			want:           false,
-		},
-		{
-			name:           "force inline with 127.0.0.1",
-			daemonAddress:  "127.0.0.1:50002",
-			forceInlineVal: "true",
-			want:           true,
-		},
-		{
-			name:           "force inline with remote address (already remote)",
-			daemonAddress:  "gibson.example.com:50002",
-			forceInlineVal: "true",
-			want:           true,
-		},
-		{
-			name:           "force inline with no daemon address",
-			daemonAddress:  "",
-			forceInlineVal: "true",
-			want:           true, // Force takes precedence
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Save original env values and restore after test
-			originalAddress := os.Getenv(EnvDaemonAddress)
-			originalForce := os.Getenv(EnvForceInlineYAML)
-			defer func() {
-				if originalAddress != "" {
-					os.Setenv(EnvDaemonAddress, originalAddress)
-				} else {
-					os.Unsetenv(EnvDaemonAddress)
-				}
-				if originalForce != "" {
-					os.Setenv(EnvForceInlineYAML, originalForce)
-				} else {
-					os.Unsetenv(EnvForceInlineYAML)
-				}
-			}()
-
-			// Set test environment variables
-			if tt.daemonAddress != "" {
-				os.Setenv(EnvDaemonAddress, tt.daemonAddress)
-			} else {
-				os.Unsetenv(EnvDaemonAddress)
-			}
-			if tt.forceInlineVal != "" {
-				os.Setenv(EnvForceInlineYAML, tt.forceInlineVal)
-			} else {
-				os.Unsetenv(EnvForceInlineYAML)
-			}
-
-			// Test the function
-			got := isRemoteDaemon()
-			if got != tt.want {
-				t.Errorf("isRemoteDaemon() = %v, want %v (address=%q, force=%q)",
-					got, tt.want, tt.daemonAddress, tt.forceInlineVal)
-			}
-		})
-	}
-}
 
 // TestFileReadingForRemote tests that workflow files can be read correctly
 // when connecting to a remote daemon.

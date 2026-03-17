@@ -182,6 +182,17 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		logger.Debug("created new proto resolver (no registry adapter)")
 	}
 
+	// Initialize checkpoint access if checkpointer is configured
+	var checkpointAccess CheckpointAccess
+	if f.config.Checkpointer != nil {
+		checkpointAccess = NewHarnessCheckpointMethods(
+			f.config.Checkpointer,
+			f.config.ThreadID,
+			missionCtx.ID,
+			f.config.RunNumber,
+		)
+	}
+
 	// Create and return DefaultAgentHarness
 	var harness AgentHarness = &DefaultAgentHarness{
 		slotManager:         f.config.SlotManager,
@@ -204,6 +215,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		spawnLimits:         f.config.SpawnLimits,
 		eventLogger:         f.config.EventLogger,
 		resolver:            resolver,
+		checkpointAccess:    checkpointAccess,
 	}
 
 	// Apply middleware if configured

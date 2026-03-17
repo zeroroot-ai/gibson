@@ -66,14 +66,16 @@ func NewManager(cfg config.RegistryConfig) *Manager {
 
 // Start initializes and starts the registry.
 //
-// This method creates an external etcd registry and establishes a connection
-// to the external etcd cluster.
+// This method creates either an embedded or external etcd registry based on
+// the configuration type. For embedded mode, an in-process etcd server is started.
+// For external mode, a connection to the external etcd cluster is established.
 //
 // Start() is idempotent - if the registry is already started, this is a no-op.
 //
 // Returns an error if:
+//   - Cannot start embedded etcd server
 //   - Cannot connect to external etcd cluster
-//   - Invalid configuration (e.g., no endpoints configured)
+//   - Invalid configuration (e.g., no endpoints configured for external mode)
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -86,10 +88,25 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Convert Gibson config to SDK registry config
 	sdkCfg := m.toSDKConfig()
 
-	// Create external registry (etcd is now the only supported backend)
-	reg, err := NewExternalRegistry(sdkCfg)
-	if err != nil {
-		return fmt.Errorf("failed to create external registry: %w", err)
+	var reg registry.Registry
+	var err error
+
+	// Select registry implementation based on type
+	switch m.config.Type {
+	case "embedded", "":
+		// Embedded mode: start in-process etcd server
+		reg, err = NewEmbeddedRegistry(sdkCfg)
+		if err != nil {
+			return fmt.Errorf("failed to create embedded registry: %w", err)
+		}
+	case "etcd", "external":
+		// External mode: connect to existing etcd cluster
+		reg, err = NewExternalRegistry(sdkCfg)
+		if err != nil {
+			return fmt.Errorf("failed to create external registry: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported registry type: %s (supported: embedded, etcd)", m.config.Type)
 	}
 
 	m.registry = reg

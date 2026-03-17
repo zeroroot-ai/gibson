@@ -32,15 +32,15 @@ import (
 //
 // Example usage:
 //
-//	// Connect directly to an address
-//	client, err := Connect(ctx, "unix:///home/user/.gibson/daemon.sock")
+//	// Connect using default address or GIBSON_DAEMON_ADDRESS env var
+//	client, err := ConnectOrFail(ctx)
 //	if err != nil {
 //	    return err
 //	}
 //	defer client.Close()
 //
-//	// Or connect using daemon info file
-//	client, err := ConnectFromInfo(ctx, "/home/user/.gibson/daemon.json")
+//	// Or connect directly to an address
+//	client, err := Connect(ctx, "localhost:50002")
 //	if err != nil {
 //	    return err
 //	}
@@ -135,57 +135,6 @@ func Connect(ctx context.Context, address string) (*Client, error) {
 	}, nil
 }
 
-// ConnectFromInfo reads daemon connection information from a JSON file and connects.
-//
-// This function reads the daemon.json file (created by WriteDaemonInfo) to discover
-// the daemon's gRPC address, then establishes a connection using that address.
-// This is the recommended way for CLI commands to connect to the daemon, as it
-// automatically handles address discovery.
-//
-// Parameters:
-//   - ctx: Context with timeout for connection
-//   - infoPath: Path to daemon.json file (typically ~/.gibson/daemon.json)
-//
-// Returns:
-//   - *Client: Connected client instance
-//   - error: Non-nil if file read or connection fails
-//
-// Example:
-//
-//	ctx := context.Background()
-//	client, err := ConnectFromInfo(ctx, "/home/user/.gibson/daemon.json")
-//	if err != nil {
-//	    if os.IsNotExist(err) {
-//	        return fmt.Errorf("daemon not running")
-//	    }
-//	    return err
-//	}
-//	defer client.Close()
-func ConnectFromInfo(ctx context.Context, infoPath string) (*Client, error) {
-	if infoPath == "" {
-		return nil, fmt.Errorf("daemon info path cannot be empty")
-	}
-
-	// Read daemon connection info from file
-	info, err := daemon.ReadDaemonInfo(infoPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read daemon info: %w", err)
-	}
-
-	// Prefer Unix socket if available, otherwise use gRPC address
-	address := info.GRPCAddress
-	if info.SocketPath != "" {
-		address = info.SocketPath
-	}
-
-	// Connect using the discovered address
-	client, err := Connect(ctx, address)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to daemon (PID %d): %w", info.PID, err)
-	}
-
-	return client, nil
-}
 
 // Close closes the connection to the daemon.
 //
@@ -525,66 +474,50 @@ type MissionEvent struct {
 	Data      map[string]interface{}
 }
 
-// EnvForceInlineYAML is the environment variable to force inline YAML mode.
-// When set to "true" or "1", the client will always send workflow files as
-// inline YAML content, regardless of the daemon address. This is useful for
-// port-forwarding scenarios where localhost:port routes to a remote daemon.
-const EnvForceInlineYAML = "GIBSON_FORCE_INLINE_YAML"
-
 // isRemoteDaemon checks if the client is connecting to a remote daemon.
 //
-// A daemon is considered remote if:
-//   - GIBSON_FORCE_INLINE_YAML is set to "true" or "1" (explicit override)
-//   - OR GIBSON_DAEMON_ADDRESS is set to a non-local address
+// A daemon is considered remote (requiring inline YAML transmission) for all
+// TCP connections. Only Unix sockets are considered local since they guarantee
+// a shared filesystem between the CLI and daemon.
 //
-// Local addresses include:
-//   - Empty string (no env var set)
-//   - localhost (any port)
-//   - 127.0.0.1 (any port)
+// This approach handles kubectl port-forward scenarios correctly: even though
+// the address appears as localhost:port, the daemon is actually remote and
+// doesn't have access to the local filesystem.
+//
+// Local (shared filesystem, use file paths):
+//   - Empty string (no env var set, uses default Unix socket)
 //   - Unix socket (starts with unix:// or /)
 //
-// This function is used to determine whether to send workflow files inline
-// (remote daemon) or as file paths (local daemon with shared filesystem).
+// Remote (no shared filesystem, send inline YAML):
+//   - Any TCP address including localhost:port
 //
 // Returns:
-//   - true: Connecting to a remote daemon, files should be sent inline
-//   - false: Connecting to local daemon or no env var set, use file paths
+//   - true: Connecting via TCP, files should be sent inline
+//   - false: Connecting via Unix socket, use file paths
 //
 // Example:
 //
 //	if isRemoteDaemon() {
 //	    // Read local file and send content inline
 //	} else {
-//	    // Send file path (daemon has filesystem access)
+//	    // Send file path (daemon has filesystem access via Unix socket)
 //	}
 func isRemoteDaemon() bool {
-	// Check explicit force inline flag first (for port-forward scenarios)
-	forceInline := os.Getenv(EnvForceInlineYAML)
-	if forceInline == "true" || forceInline == "1" {
-		return true
-	}
-
 	address := os.Getenv(EnvDaemonAddress)
 
-	// No env var set = local daemon
+	// No env var set = local daemon via default Unix socket
 	if address == "" {
 		return false
 	}
 
-	// Unix socket = local daemon (shared filesystem)
+	// Unix socket = local daemon (shared filesystem guaranteed)
 	if strings.HasPrefix(address, "unix://") || strings.HasPrefix(address, "/") {
 		return false
 	}
 
-	// Check for localhost/127.0.0.1
-	if strings.HasPrefix(address, "localhost:") ||
-		strings.HasPrefix(address, "127.0.0.1:") ||
-		address == "localhost" ||
-		address == "127.0.0.1" {
-		return false
-	}
-
-	// Everything else is considered remote
+	// All TCP connections (including localhost) send inline YAML
+	// This correctly handles port-forward scenarios where localhost:port
+	// routes to a remote daemon without filesystem access
 	return true
 }
 
@@ -2368,4 +2301,36 @@ func (c *Client) ValidateMissionDependencies(ctx context.Context, workflowPath s
 	// TODO: This will be implemented when the gRPC methods are added
 	// For now, return an error indicating the feature is not yet available
 	return nil, fmt.Errorf("mission dependency validation via daemon not yet implemented (requires gRPC methods and daemon integration)")
+}
+
+// Shutdown requests graceful shutdown of the daemon.
+//
+// This method sends a shutdown request to the daemon, which will trigger
+// graceful shutdown of all services. The daemon will stop accepting new
+// connections and complete in-flight operations before exiting.
+//
+// Parameters:
+//   - ctx: Context for the RPC call
+//
+// Returns:
+//   - error: Non-nil if the shutdown request fails
+//
+// Note: This only works for local daemons. Remote daemons (via GIBSON_DAEMON_ADDRESS)
+// must be stopped on the remote host.
+func (c *Client) Shutdown(ctx context.Context) error {
+	req := &api.ShutdownRequest{
+		Force:          false,
+		TimeoutSeconds: 30,
+	}
+
+	resp, err := c.daemon.Shutdown(ctx, req)
+	if err != nil {
+		return fmt.Errorf("shutdown request failed: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("shutdown failed: %s", resp.Message)
+	}
+
+	return nil
 }

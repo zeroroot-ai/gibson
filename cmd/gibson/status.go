@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/zero-day-ai/gibson/cmd/gibson/internal"
 	internalcomponent "github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/daemon"
 	daemonclient "github.com/zero-day-ai/gibson/internal/daemon/client"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/state"
@@ -204,11 +202,10 @@ func showDaemonFileStatus(cmd *cobra.Command, formatter internal.Formatter, form
 		return printTextStatus(formatter, status)
 	}
 
-	// Read daemon info from file
-	infoPath := filepath.Join(homeDir, "daemon.json")
-	info, err := daemon.ReadDaemonInfo(infoPath)
+	// Try to connect to daemon
+	client, err := daemonclient.ConnectOrFail(ctx)
 	if err != nil {
-		// No daemon info - show not running
+		// No daemon running
 		status := SystemStatus{
 			CheckedAt:     time.Now(),
 			OverallHealth: types.Degraded("daemon not running"),
@@ -225,9 +222,28 @@ func showDaemonFileStatus(cmd *cobra.Command, formatter internal.Formatter, form
 		}
 		return printTextStatus(formatter, status)
 	}
+	defer client.Close()
 
-	// Calculate uptime
-	uptime := time.Since(info.StartTime)
+	// Get daemon status via gRPC
+	daemonStatus, err := client.Status(ctx)
+	if err != nil {
+		// Failed to get status
+		status := SystemStatus{
+			CheckedAt:     time.Now(),
+			OverallHealth: types.Degraded("daemon status unavailable"),
+			Registry: RegistryStatus{
+				Healthy: false,
+				Error:   fmt.Sprintf("failed to get daemon status: %v", err),
+			},
+			Database:     checkDatabaseStatus(ctx, homeDir),
+			LLMProviders: checkLLMProviders(ctx, homeDir),
+		}
+
+		if format == internal.FormatJSON {
+			return formatter.PrintJSON(status)
+		}
+		return printTextStatus(formatter, status)
+	}
 
 	status := SystemStatus{
 		CheckedAt:     time.Now(),
@@ -235,7 +251,7 @@ func showDaemonFileStatus(cmd *cobra.Command, formatter internal.Formatter, form
 		Registry: RegistryStatus{
 			Type:    "daemon",
 			Healthy: true,
-			Uptime:  formatDuration(uptime),
+			Uptime:  daemonStatus.Uptime,
 		},
 		Database:     checkDatabaseStatus(ctx, homeDir),
 		LLMProviders: checkLLMProviders(ctx, homeDir),
@@ -245,10 +261,9 @@ func showDaemonFileStatus(cmd *cobra.Command, formatter internal.Formatter, form
 	fmt.Println()
 	fmt.Println("Daemon:")
 	fmt.Printf("  ✓ Running:      yes\n")
-	fmt.Printf("    PID:          %d\n", info.PID)
-	fmt.Printf("    gRPC Address: %s\n", info.GRPCAddress)
-	fmt.Printf("    Uptime:       %s\n", formatDuration(uptime))
-	fmt.Printf("    Version:      %s\n", info.Version)
+	fmt.Printf("    PID:          %d\n", daemonStatus.PID)
+	fmt.Printf("    gRPC Address: %s\n", daemonStatus.GRPCAddress)
+	fmt.Printf("    Uptime:       %s\n", daemonStatus.Uptime)
 	fmt.Println()
 
 	if format == internal.FormatJSON {
@@ -296,19 +311,26 @@ func checkRegistryStatus(ctx context.Context, homeDir string) RegistryStatus {
 	}
 
 	// In daemon mode, registry is managed by daemon
-	// Check daemon.json for info
-	infoPath := filepath.Join(homeDir, "daemon.json")
-	info, err := daemon.ReadDaemonInfo(infoPath)
+	// Try to connect and get status
+	client, err := daemonclient.ConnectOrFail(ctx)
 	if err != nil {
 		regStatus.Error = "daemon not running (no registry available)"
+		return regStatus
+	}
+	defer client.Close()
+
+	// Get daemon status via gRPC
+	daemonStatus, err := client.Status(ctx)
+	if err != nil {
+		regStatus.Error = fmt.Sprintf("failed to get daemon status: %v", err)
 		return regStatus
 	}
 
 	// Daemon is running - registry should be available
 	regStatus.Type = "daemon-managed"
-	regStatus.Endpoint = info.GRPCAddress
+	regStatus.Endpoint = daemonStatus.GRPCAddress
 	regStatus.Healthy = true
-	regStatus.Uptime = formatDuration(time.Since(info.StartTime))
+	regStatus.Uptime = daemonStatus.Uptime
 
 	return regStatus
 }

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -44,8 +42,10 @@ USAGE SCENARIOS:
 2. Container Deployment (Dockerfile):
    CMD ["gibson", "daemon", "start"]
 
-3. System Service (with systemd):
-   ExecStart=/usr/bin/gibson daemon start`,
+3. Kubernetes (with GIBSON_DAEMON_ADDRESS):
+   # CLI connects to remote daemon via port-forward or service
+   $ export GIBSON_DAEMON_ADDRESS=localhost:50002
+   $ gibson agent list`,
 }
 
 var daemonStartCmd = &cobra.Command{
@@ -100,20 +100,19 @@ var daemonStopCmd = &cobra.Command{
 	Short: "Stop the Gibson daemon",
 	Long: `Stop the running Gibson daemon gracefully.
 
-This command sends SIGTERM to the daemon process and waits for it to
-shut down cleanly. All in-flight operations are given time to complete
-(up to 30 seconds).
+This command connects to the daemon and requests graceful shutdown.
+All in-flight operations are given time to complete.
 
 WHAT HAPPENS:
 
-  1. SIGTERM is sent to the daemon process
-  2. Daemon stops accepting new client connections
-  3. In-flight missions and operations complete
-  4. Services shut down in order:
+  1. Connect to daemon via gRPC
+  2. Request graceful shutdown
+  3. Daemon stops accepting new client connections
+  4. In-flight missions and operations complete
+  5. Services shut down in order:
      - gRPC server (no new clients)
      - Callback server (no new agent callbacks)
      - Registry manager (etcd shutdown)
-  5. PID and state files are cleaned up
 
 EXAMPLES:
 
@@ -126,8 +125,7 @@ EXAMPLES:
 
 NOTES:
 
-  - If daemon doesn't respond within 30 seconds, it will be force-killed
-  - Stale PID files (from crashed daemons) are automatically cleaned up
+  - For remote daemons, this command cannot stop them
   - Safe to run even if daemon is not running`,
 	RunE: runDaemonStop,
 }
@@ -275,14 +273,11 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Check if daemon is already running
-	pidFile := filepath.Join(homeDir, "daemon.pid")
-	running, pid, err := daemon.CheckPIDFile(pidFile)
-	if err != nil {
-		return fmt.Errorf("failed to check for existing daemon: %w", err)
-	}
-	if running {
-		return fmt.Errorf("daemon already running (PID %d)", pid)
+	// Check if daemon is already running by attempting connection
+	if daemonclient.IsDaemonRunning() {
+		return fmt.Errorf("daemon already running at %s\n\n"+
+			"Stop it with: gibson daemon stop",
+			daemonclient.GetDaemonAddress())
 	}
 
 	// Set up verbose logging if requested - simple approach using slog directly
@@ -331,65 +326,37 @@ func runDaemonStop(cmd *cobra.Command, args []string) error {
 			daemonclient.EnvDaemonAddress)
 	}
 
+	// Check if daemon is running by attempting connection
+	if !daemonclient.IsDaemonRunning() {
+		fmt.Println("Daemon not running")
+		return nil
+	}
+
 	// Parse global flags
 	flags, err := ParseGlobalFlags(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to parse flags: %w", err)
 	}
 
-	// Get Gibson home directory
-	homeDir := flags.HomeDir
-	if homeDir == "" {
-		homeDir = os.Getenv("GIBSON_HOME")
-	}
-	if homeDir == "" {
-		homeDir = config.DefaultHomeDir()
-	}
-
-	// Read PID file
-	pidFile := filepath.Join(homeDir, "daemon.pid")
-	pid, err := daemon.ReadPIDFile(pidFile)
-	if err != nil {
-		return fmt.Errorf("failed to read PID file: %w", err)
-	}
-
-	// Check if daemon is running
-	if pid == 0 {
-		fmt.Println("Daemon not running")
-		return nil
-	}
-
-	// Check if process exists
-	running, _, err := daemon.CheckPIDFile(pidFile)
-	if err != nil {
-		return fmt.Errorf("failed to check daemon status: %w", err)
-	}
-
-	if !running {
-		// Process not running, clean up stale files
-		fmt.Printf("Daemon not running (stale PID file with PID %d)\n", pid)
-		fmt.Println("Cleaning up stale files...")
-
-		daemon.RemovePIDFile(pidFile)
-		infoFile := filepath.Join(homeDir, "daemon.json")
-		daemon.RemoveDaemonInfo(infoFile)
-
-		fmt.Println("Cleanup complete")
-		return nil
-	}
-
-	// Send SIGTERM to daemon
 	if flags.IsVerbose() {
-		fmt.Printf("Sending SIGTERM to daemon (PID %d)...\n", pid)
+		fmt.Printf("Connecting to daemon at %s...\n", daemonclient.GetDaemonAddress())
 	}
 
-	process, err := os.FindProcess(pid)
+	// Connect and request shutdown
+	ctx := cmd.Context()
+	client, err := daemonclient.ConnectOrFail(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to find daemon process: %w", err)
+		return fmt.Errorf("failed to connect to daemon: %w", err)
+	}
+	defer client.Close()
+
+	// Request shutdown via gRPC
+	if flags.IsVerbose() {
+		fmt.Println("Requesting graceful shutdown...")
 	}
 
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("failed to send SIGTERM to daemon: %w", err)
+	if err := client.Shutdown(ctx); err != nil {
+		return fmt.Errorf("failed to stop daemon: %w", err)
 	}
 
 	// Wait for daemon to stop (up to 30 seconds)
@@ -397,30 +364,16 @@ func runDaemonStop(cmd *cobra.Command, args []string) error {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		// Check if process still exists
-		err := syscall.Kill(pid, 0)
-		if err == syscall.ESRCH {
-			// Process no longer exists
+		if !daemonclient.IsDaemonRunning() {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Check if process stopped
-	err = syscall.Kill(pid, 0)
-	if err != syscall.ESRCH {
-		// Process still running after timeout
-		return fmt.Errorf("daemon did not stop within %v (PID %d still running)", timeout, pid)
+	// Check if daemon stopped
+	if daemonclient.IsDaemonRunning() {
+		return fmt.Errorf("daemon did not stop within %v", timeout)
 	}
-
-	// Clean up files
-	if flags.IsVerbose() {
-		fmt.Println("Cleaning up daemon files...")
-	}
-
-	daemon.RemovePIDFile(pidFile)
-	infoFile := filepath.Join(homeDir, "daemon.json")
-	daemon.RemoveDaemonInfo(infoFile)
 
 	fmt.Println("Gibson daemon stopped successfully")
 	return nil
@@ -429,156 +382,17 @@ func runDaemonStop(cmd *cobra.Command, args []string) error {
 // runDaemonStatus shows the daemon status
 func runDaemonStatus(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+	daemonAddr := daemonclient.GetDaemonAddress()
 
-	// Check if GIBSON_DAEMON_ADDRESS is set (remote daemon mode)
-	if remoteAddr := os.Getenv(daemonclient.EnvDaemonAddress); remoteAddr != "" {
-		// Connect to remote daemon
-		client, err := daemonclient.ConnectOrFail(ctx)
-		if err != nil {
-			// Connection failed - return the detailed error from ConnectOrFail
-			if daemonStatusJSON {
-				status := map[string]interface{}{
-					"running":        false,
-					"remote_address": remoteAddr,
-					"error":          err.Error(),
-				}
-				encoder := json.NewEncoder(cmd.OutOrStdout())
-				encoder.SetIndent("", "  ")
-				encoder.Encode(status)
-				return nil
-			}
-			return err
-		}
-		defer client.Close()
-
-		// Get status from remote daemon
-		daemonStatus, err := client.Status(ctx)
-		if err != nil {
-			if daemonStatusJSON {
-				status := map[string]interface{}{
-					"running":        false,
-					"remote_address": remoteAddr,
-					"error":          fmt.Sprintf("failed to get daemon status: %v", err),
-				}
-				encoder := json.NewEncoder(cmd.OutOrStdout())
-				encoder.SetIndent("", "  ")
-				encoder.Encode(status)
-				return nil
-			}
-			return fmt.Errorf("failed to get daemon status from %s: %w", remoteAddr, err)
-		}
-
-		// Display remote daemon status
-		if daemonStatusJSON {
-			status := map[string]interface{}{
-				"running":              true,
-				"remote":               true,
-				"remote_address":       remoteAddr,
-				"pid":                  daemonStatus.PID,
-				"uptime":               daemonStatus.Uptime,
-				"grpc_address":         daemonStatus.GRPCAddress,
-				"callback_address":     daemonStatus.CallbackAddr,
-				"registry_type":        daemonStatus.RegistryType,
-				"registry_addr":        daemonStatus.RegistryAddr,
-				"agent_count":          daemonStatus.AgentCount,
-				"mission_count":        daemonStatus.MissionCount,
-				"active_mission_count": daemonStatus.ActiveCount,
-			}
-			encoder := json.NewEncoder(cmd.OutOrStdout())
-			encoder.SetIndent("", "  ")
-			return encoder.Encode(status)
-		}
-
-		// Text format for remote daemon
-		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		defer tw.Flush()
-
-		fmt.Fprintln(tw, "GIBSON DAEMON STATUS (REMOTE)")
-		fmt.Fprintln(tw, "")
-		fmt.Fprintf(tw, "Remote Address:\t%s\n", remoteAddr)
-		fmt.Fprintf(tw, "Running:\ttrue\n")
-		fmt.Fprintf(tw, "PID:\t%d\n", daemonStatus.PID)
-		fmt.Fprintf(tw, "Uptime:\t%s\n", daemonStatus.Uptime)
-		fmt.Fprintln(tw, "")
-		fmt.Fprintln(tw, "ENDPOINTS")
-		fmt.Fprintf(tw, "gRPC Address:\t%s\n", daemonStatus.GRPCAddress)
-		if daemonStatus.CallbackAddr != "" {
-			fmt.Fprintf(tw, "Callback Address:\t%s\n", daemonStatus.CallbackAddr)
-		}
-		fmt.Fprintln(tw, "")
-		fmt.Fprintln(tw, "REGISTRY")
-		fmt.Fprintf(tw, "Type:\t%s\n", daemonStatus.RegistryType)
-		fmt.Fprintf(tw, "Address:\t%s\n", daemonStatus.RegistryAddr)
-		fmt.Fprintln(tw, "")
-		fmt.Fprintln(tw, "COMPONENTS")
-		fmt.Fprintf(tw, "Agents:\t%d\n", daemonStatus.AgentCount)
-		fmt.Fprintln(tw, "")
-		fmt.Fprintln(tw, "MISSIONS")
-		fmt.Fprintf(tw, "Active:\t%d\n", daemonStatus.ActiveCount)
-		fmt.Fprintf(tw, "Total:\t%d\n", daemonStatus.MissionCount)
-
-		return nil
-	}
-
-	// Local daemon mode - use existing file-based status check
-	// Parse global flags
-	flags, err := ParseGlobalFlags(cmd)
+	// Try to connect to daemon
+	client, err := daemonclient.ConnectOrFail(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to parse flags: %w", err)
-	}
-
-	// Get Gibson home directory
-	homeDir := flags.HomeDir
-	if homeDir == "" {
-		homeDir = os.Getenv("GIBSON_HOME")
-	}
-	if homeDir == "" {
-		homeDir = config.DefaultHomeDir()
-	}
-
-	// Check for daemon.json file
-	infoFile := filepath.Join(homeDir, "daemon.json")
-	if _, err := os.Stat(infoFile); err != nil {
-		if os.IsNotExist(err) {
-			if daemonStatusJSON {
-				// Output JSON for not running
-				status := map[string]interface{}{
-					"running": false,
-					"message": "Daemon not running",
-				}
-				encoder := json.NewEncoder(cmd.OutOrStdout())
-				encoder.SetIndent("", "  ")
-				encoder.Encode(status)
-				return nil
-			}
-
-			fmt.Println("Daemon not running")
-			fmt.Println()
-			fmt.Println("Start the daemon with: gibson daemon start")
-			return nil
-		}
-		return fmt.Errorf("failed to check daemon status: %w", err)
-	}
-
-	// Read daemon info
-	info, err := daemon.ReadDaemonInfo(infoFile)
-	if err != nil {
-		return fmt.Errorf("failed to read daemon info: %w", err)
-	}
-
-	// Check if process is actually running
-	pidFile := filepath.Join(homeDir, "daemon.pid")
-	running, pid, err := daemon.CheckPIDFile(pidFile)
-	if err != nil {
-		return fmt.Errorf("failed to check daemon status: %w", err)
-	}
-
-	// If not running, clean up and report
-	if !running {
+		// Connection failed - daemon not running
 		if daemonStatusJSON {
 			status := map[string]interface{}{
 				"running": false,
-				"message": "Daemon not running (stale files cleaned up)",
+				"address": daemonAddr,
+				"message": "Daemon not running",
 			}
 			encoder := json.NewEncoder(cmd.OutOrStdout())
 			encoder.SetIndent("", "  ")
@@ -586,34 +400,48 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		fmt.Println("Daemon not running (stale files found)")
-		fmt.Println("Cleaning up stale files...")
-
-		daemon.RemovePIDFile(pidFile)
-		daemon.RemoveDaemonInfo(infoFile)
-
+		fmt.Printf("Daemon not running at %s\n", daemonAddr)
 		fmt.Println()
 		fmt.Println("Start the daemon with: gibson daemon start")
 		return nil
 	}
+	defer client.Close()
 
-	// Calculate uptime
-	uptime := time.Since(info.StartTime)
-	uptimeStr := formatUptime(uptime)
+	// Get status from daemon
+	daemonStatus, err := client.Status(ctx)
+	if err != nil {
+		if daemonStatusJSON {
+			status := map[string]interface{}{
+				"running": false,
+				"address": daemonAddr,
+				"error":   fmt.Sprintf("failed to get daemon status: %v", err),
+			}
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			encoder.Encode(status)
+			return nil
+		}
+		return fmt.Errorf("failed to get daemon status from %s: %w", daemonAddr, err)
+	}
 
-	// Note: For local daemons, we show basic file-based status.
-	// Remote daemons (via GIBSON_DAEMON_ADDRESS) show full status via gRPC above.
-	// Full gRPC status for local daemons could be added in the future if needed.
+	// Check if this is a remote daemon
+	isRemote := os.Getenv(daemonclient.EnvDaemonAddress) != ""
 
-	// Build status output
+	// Display daemon status
 	if daemonStatusJSON {
 		status := map[string]interface{}{
-			"running":      true,
-			"pid":          pid,
-			"start_time":   info.StartTime,
-			"uptime":       uptimeStr,
-			"grpc_address": info.GRPCAddress,
-			"version":      info.Version,
+			"running":              true,
+			"remote":               isRemote,
+			"address":              daemonAddr,
+			"pid":                  daemonStatus.PID,
+			"uptime":               daemonStatus.Uptime,
+			"grpc_address":         daemonStatus.GRPCAddress,
+			"callback_address":     daemonStatus.CallbackAddr,
+			"registry_type":        daemonStatus.RegistryType,
+			"registry_addr":        daemonStatus.RegistryAddr,
+			"agent_count":          daemonStatus.AgentCount,
+			"mission_count":        daemonStatus.MissionCount,
+			"active_mission_count": daemonStatus.ActiveCount,
 		}
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
@@ -624,17 +452,35 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	defer tw.Flush()
 
-	fmt.Fprintln(tw, "GIBSON DAEMON STATUS")
+	if isRemote {
+		fmt.Fprintln(tw, "GIBSON DAEMON STATUS (REMOTE)")
+	} else {
+		fmt.Fprintln(tw, "GIBSON DAEMON STATUS")
+	}
 	fmt.Fprintln(tw, "")
-	fmt.Fprintf(tw, "Running:\t%v\n", running)
-	fmt.Fprintf(tw, "PID:\t%d\n", pid)
-	fmt.Fprintf(tw, "Uptime:\t%s\n", uptimeStr)
-	fmt.Fprintf(tw, "Started:\t%s\n", info.StartTime.Format(time.RFC3339))
+	if isRemote {
+		fmt.Fprintf(tw, "Remote Address:\t%s\n", daemonAddr)
+	}
+	fmt.Fprintf(tw, "Running:\ttrue\n")
+	fmt.Fprintf(tw, "PID:\t%d\n", daemonStatus.PID)
+	fmt.Fprintf(tw, "Uptime:\t%s\n", daemonStatus.Uptime)
 	fmt.Fprintln(tw, "")
 	fmt.Fprintln(tw, "ENDPOINTS")
-	fmt.Fprintf(tw, "gRPC Address:\t%s\n", info.GRPCAddress)
+	fmt.Fprintf(tw, "gRPC Address:\t%s\n", daemonStatus.GRPCAddress)
+	if daemonStatus.CallbackAddr != "" {
+		fmt.Fprintf(tw, "Callback Address:\t%s\n", daemonStatus.CallbackAddr)
+	}
 	fmt.Fprintln(tw, "")
-	fmt.Fprintf(tw, "Version:\t%s\n", info.Version)
+	fmt.Fprintln(tw, "REGISTRY")
+	fmt.Fprintf(tw, "Type:\t%s\n", daemonStatus.RegistryType)
+	fmt.Fprintf(tw, "Address:\t%s\n", daemonStatus.RegistryAddr)
+	fmt.Fprintln(tw, "")
+	fmt.Fprintln(tw, "COMPONENTS")
+	fmt.Fprintf(tw, "Agents:\t%d\n", daemonStatus.AgentCount)
+	fmt.Fprintln(tw, "")
+	fmt.Fprintln(tw, "MISSIONS")
+	fmt.Fprintf(tw, "Active:\t%d\n", daemonStatus.ActiveCount)
+	fmt.Fprintf(tw, "Total:\t%d\n", daemonStatus.MissionCount)
 
 	return nil
 }
@@ -657,31 +503,4 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-// formatUptime formats a duration into a human-readable uptime string
-func formatUptime(d time.Duration) string {
-	d = d.Round(time.Second)
-
-	days := d / (24 * time.Hour)
-	d -= days * 24 * time.Hour
-
-	hours := d / time.Hour
-	d -= hours * time.Hour
-
-	minutes := d / time.Minute
-	d -= minutes * time.Minute
-
-	seconds := d / time.Second
-
-	if days > 0 {
-		return fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
-	}
-	if hours > 0 {
-		return fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
-	}
-	if minutes > 0 {
-		return fmt.Sprintf("%dm %ds", minutes, seconds)
-	}
-	return fmt.Sprintf("%ds", seconds)
 }

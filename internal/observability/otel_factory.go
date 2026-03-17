@@ -170,20 +170,17 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 
 	// Create resource with service metadata
 	// Resource attributes are attached to all spans and metrics
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(cfg.ServiceName),
-			semconv.ServiceVersion(cfg.ServiceVersion),
-		),
+	// Use NewWithAttributes with a single schema URL to avoid schema conflicts
+	// when merging resources. resource.Default() uses a different schema version.
+	res := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceName(cfg.ServiceName),
+		semconv.ServiceVersion(cfg.ServiceVersion),
 	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create resource: %w", err)
-	}
 
 	// Initialize trace exporter based on protocol
 	var traceExporter sdktrace.SpanExporter
+	var err error
 	switch cfg.Protocol {
 	case "grpc":
 		traceExporter, err = createGRPCTraceExporter(ctx, cfg)

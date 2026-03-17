@@ -289,6 +289,120 @@ Key metrics:
 - `gibson_tool_calls_total` - Tool invocation counts
 - `gibson_llm_tokens_total` - LLM token usage
 
+### Checkpointing
+
+Gibson provides production-grade checkpointing for fault tolerance, human-in-the-loop workflows, and time-travel debugging.
+
+**Key Capabilities:**
+- **Auto-checkpoint** at super-step boundaries (DAG node completion)
+- **Thread isolation** - each mission run gets a unique thread for checkpoint organization
+- **Pause/Resume** - checkpoint and resume missions across restarts or pod evictions
+- **Human-in-the-loop** - pause for approval with configurable timeouts
+- **Time-travel** - inspect historical state and branch from any checkpoint
+- **Graceful shutdown** - automatic checkpoint on SIGTERM
+
+```yaml
+# Mission with checkpointing
+name: "Security Audit"
+version: "1.0.0"
+
+checkpoint:
+  enabled: true
+  retention_policy: all        # all | final_only | error_only
+  encryption:
+    enabled: true
+    key_provider: kubernetes   # kubernetes | vault | aws-kms | azure-kv | gcp-kms
+
+nodes:
+  scan:
+    type: agent
+    agent: vulnerability-scanner
+    goal: "Scan for vulnerabilities"
+
+  review:
+    type: agent
+    agent: security-reviewer
+    depends_on: [scan]
+    goal: "Review findings and prioritize"
+    human_approval:
+      required: true
+      timeout: 24h
+      approvers: ["security-team"]
+```
+
+**Agent Checkpoint Access:**
+
+Agents can access checkpoint state via the harness:
+
+```go
+func (a *MyAgent) Execute(ctx context.Context, task agent.Task, h agent.Harness) (agent.Result, error) {
+    // Get checkpoint from previous run (same thread)
+    prevCheckpoint, _ := h.Checkpoint().GetPreviousRunCheckpoint(ctx)
+    if prevCheckpoint != nil {
+        // Resume from previous progress
+        lastProgress := prevCheckpoint.State["progress"]
+    }
+
+    // Create manual checkpoint
+    h.Checkpoint().CreateCheckpoint(ctx, "after-scan", map[string]any{
+        "scanned_hosts": hosts,
+        "findings":      findings,
+    })
+
+    // Get checkpoint history
+    history, _ := h.Checkpoint().GetCheckpointHistory(ctx, 10)
+
+    return agent.NewSuccessResult(output), nil
+}
+```
+
+**CLI Commands:**
+
+```bash
+# List checkpoints for a mission
+gibson checkpoint list --mission abc123
+
+# Inspect checkpoint state
+gibson checkpoint inspect <checkpoint-id>
+gibson checkpoint inspect <checkpoint-id> --key "state.findings"
+
+# Restore mission from checkpoint
+gibson checkpoint restore <checkpoint-id>
+gibson checkpoint restore <checkpoint-id> --branch  # Create new thread
+
+# List threads
+gibson checkpoint threads --mission abc123
+
+# Delete checkpoints
+gibson checkpoint delete <checkpoint-id>
+gibson checkpoint delete --mission abc123 --before 2024-01-01
+```
+
+**Checkpoint Storage:**
+
+Checkpoints are stored in Redis with the following structure:
+- Small checkpoints: RedisJSON for fast access
+- Large checkpoints (>1MB): Blob storage with compression
+- Encryption: AES-256-GCM with pluggable key providers
+- Compression: Zstd for checkpoints >10MB
+
+```yaml
+# Configuration
+checkpoint:
+  enabled: true
+  auto_checkpoint: true
+  compression_threshold: 10485760  # 10MB
+  retention:
+    max_checkpoints_per_thread: 100
+    max_age: 168h  # 7 days
+  encryption:
+    enabled: true
+    key_provider: kubernetes
+    kubernetes:
+      secret_name: gibson-checkpoint-key
+      secret_namespace: gibson-system
+```
+
 ## Deployment
 
 ### Helm Values
@@ -392,7 +506,6 @@ The Gibson CLI can connect to remote daemons using the `GIBSON_DAEMON_ADDRESS` e
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `GIBSON_DAEMON_ADDRESS` | Remote daemon gRPC address | `gibson.example.com:50002` |
-| `GIBSON_FORCE_INLINE_YAML` | Force inline YAML mode (for port-forwarding) | `true` |
 
 ### Connection Modes
 
@@ -416,22 +529,27 @@ gibson mission run ./my-mission.yaml
 # Forward the daemon port locally
 kubectl port-forward svc/gibson 50002:50002 -n gibson &
 
-# Connect via localhost (force inline YAML for file transfers)
+# Connect via localhost (inline YAML automatically used for all TCP)
 export GIBSON_DAEMON_ADDRESS="localhost:50002"
-export GIBSON_FORCE_INLINE_YAML="true"
 gibson status
 gibson mission run ./my-mission.yaml
 ```
 
 ### Local vs Remote Addresses
 
-The CLI treats these as **local** (uses file paths):
-- `localhost:50002`
-- `127.0.0.1:50002`
-- `unix:///path/to/socket`
-- Empty (reads `~/.gibson/daemon.json`)
+The CLI uses a simple rule: Unix sockets = shared filesystem, TCP = no shared filesystem.
 
-Everything else is **remote** (sends workflow YAML inline).
+**Local** (shared filesystem, uses file paths):
+- Empty (uses default Unix socket)
+- `unix:///path/to/socket`
+
+**Remote** (no shared filesystem, sends YAML inline):
+- `localhost:50002` (could be port-forward)
+- `127.0.0.1:50002`
+- `gibson.example.com:50002`
+- Any other TCP address
+
+This correctly handles `kubectl port-forward` scenarios automatically.
 
 ## CI/CD Integration
 

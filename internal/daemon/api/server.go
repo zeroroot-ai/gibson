@@ -135,6 +135,9 @@ type DaemonInterface interface {
 
 	// CreateMission creates a new mission with target and workflow configuration
 	CreateMission(ctx context.Context, req CreateMissionData) (CreateMissionResultData, error)
+
+	// RequestShutdown requests graceful shutdown of the daemon
+	RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error
 }
 
 // DaemonStatus represents daemon status information.
@@ -259,15 +262,18 @@ type FindingData struct {
 
 // EventData represents a generic event from the daemon.
 type EventData struct {
-	EventType    string
-	Timestamp    time.Time
-	Source       string
-	Data         string
-	Metadata     map[string]interface{} // Additional metadata (e.g., trace_id, span_id, parent_span_id)
-	MissionEvent *MissionEventData
-	AttackEvent  *AttackEventData
-	AgentEvent   *AgentEventData
-	FindingEvent *FindingEventData
+	EventType         string
+	Timestamp         time.Time
+	Source            string
+	Data              string
+	Metadata          map[string]interface{} // Additional metadata (e.g., trace_id, span_id, parent_span_id)
+	MissionEvent      *MissionEventData
+	AttackEvent       *AttackEventData
+	AgentEvent        *AgentEventData
+	FindingEvent      *FindingEventData
+	ToolEvent         *ToolEventData
+	LLMEvent          *LLMEventData
+	OrchestratorEvent *OrchestratorEventData
 }
 
 // AgentEventData represents agent event data.
@@ -287,6 +293,63 @@ type FindingEventData struct {
 	Timestamp time.Time
 	Finding   FindingData
 	MissionID string
+}
+
+// ToolEventData represents tool event data.
+type ToolEventData struct {
+	EventType       string
+	Timestamp       time.Time
+	ToolName        string
+	AgentID         string
+	AgentName       string
+	MissionID       string
+	Message         string
+	Duration        float64 // seconds
+	Progress        float64 // 0-1
+	Error           string
+	ErrorCode       string
+	Warning         string
+	WarningSeverity string
+	InputSummary    string // max 200 chars
+	OutputSummary   string // max 200 chars
+	ResultsCount    int
+}
+
+// LLMEventData represents LLM event data.
+type LLMEventData struct {
+	EventType        string
+	Timestamp        time.Time
+	AgentID          string
+	AgentName        string
+	Model            string
+	Slot             string
+	MessageCount     int
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	Duration         float64 // milliseconds
+	Cached           bool
+	Error            string
+	ErrorCode        string
+	WillRetry        bool
+}
+
+// OrchestratorEventData represents orchestrator event data.
+type OrchestratorEventData struct {
+	EventType       string
+	Timestamp       time.Time
+	MissionID       string
+	Iteration       int
+	Action          string
+	TargetNodeID    string
+	TargetAgentName string
+	Confidence      float64
+	Reasoning       string
+	TokensUsed      int
+	Latency         float64 // milliseconds
+	ApprovalID      string
+	Risk            string
+	Timeout         int // seconds
 }
 
 // StartComponentResult represents the result of starting a component.
@@ -1136,6 +1199,12 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 						MissionId: event.FindingEvent.MissionID,
 					},
 				}
+			} else if event.ToolEvent != nil {
+				protoEvent.Event = convertToToolEvent(event.ToolEvent)
+			} else if event.LLMEvent != nil {
+				protoEvent.Event = convertToLLMEvent(event.LLMEvent)
+			} else if event.OrchestratorEvent != nil {
+				protoEvent.Event = convertToOrchestratorEvent(event.OrchestratorEvent)
 			}
 
 			// Send event to client
@@ -1144,6 +1213,84 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 				return status_grpc.Errorf(codes.Internal, "failed to send event: %v", err)
 			}
 		}
+	}
+}
+
+// convertToToolEvent converts internal ToolEventData to proto ToolEvent oneof wrapper.
+func convertToToolEvent(data *ToolEventData) *Event_ToolEvent {
+	if data == nil {
+		return nil
+	}
+
+	return &Event_ToolEvent{
+		ToolEvent: &ToolEvent{
+			EventType:       data.EventType,
+			Timestamp:       data.Timestamp.Unix(),
+			ToolName:        data.ToolName,
+			AgentId:         data.AgentID,
+			AgentName:       data.AgentName,
+			MissionId:       data.MissionID,
+			Message:         data.Message,
+			Duration:        data.Duration,
+			Progress:        data.Progress,
+			Error:           data.Error,
+			ErrorCode:       data.ErrorCode,
+			Warning:         data.Warning,
+			WarningSeverity: data.WarningSeverity,
+		},
+	}
+}
+
+// convertToLLMEvent converts internal LLMEventData to proto LLMEvent oneof wrapper.
+func convertToLLMEvent(data *LLMEventData) *Event_LlmEvent {
+	if data == nil {
+		return nil
+	}
+
+	return &Event_LlmEvent{
+		LlmEvent: &LLMEvent{
+			EventType:        data.EventType,
+			Timestamp:        data.Timestamp.Unix(),
+			AgentId:          data.AgentID,
+			AgentName:        data.AgentName,
+			Model:            data.Model,
+			Slot:             data.Slot,
+			MessageCount:     int32(data.MessageCount),
+			PromptTokens:     int32(data.PromptTokens),
+			CompletionTokens: int32(data.CompletionTokens),
+			TotalTokens:      int32(data.TotalTokens),
+			DurationMs:       data.Duration,
+			Cached:           data.Cached,
+			Error:            data.Error,
+			ErrorCode:        data.ErrorCode,
+			WillRetry:        data.WillRetry,
+		},
+	}
+}
+
+// convertToOrchestratorEvent converts internal OrchestratorEventData to proto OrchestratorEvent oneof wrapper.
+func convertToOrchestratorEvent(data *OrchestratorEventData) *Event_OrchestratorEvent {
+	if data == nil {
+		return nil
+	}
+
+	return &Event_OrchestratorEvent{
+		OrchestratorEvent: &OrchestratorEvent{
+			EventType:       data.EventType,
+			Timestamp:       data.Timestamp.Unix(),
+			MissionId:       data.MissionID,
+			Iteration:       int32(data.Iteration),
+			Action:          data.Action,
+			TargetNodeId:    data.TargetNodeID,
+			TargetAgentName: data.TargetAgentName,
+			Confidence:      data.Confidence,
+			Reasoning:       data.Reasoning,
+			TokensUsed:      int32(data.TokensUsed),
+			LatencyMs:       data.Latency,
+			ApprovalId:      data.ApprovalID,
+			Risk:            data.Risk,
+			TimeoutSeconds:  int32(data.Timeout),
+		},
 	}
 }
 
@@ -2130,5 +2277,46 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *CreateMissionRequ
 		Success: true,
 		Mission: protoMission,
 		Message: fmt.Sprintf("Mission '%s' created successfully", result.Name),
+	}, nil
+}
+
+// Shutdown requests graceful shutdown of the daemon.
+func (s *DaemonServer) Shutdown(ctx context.Context, req *ShutdownRequest) (*ShutdownResponse, error) {
+	s.logger.Info("shutdown requested via gRPC",
+		"force", req.Force,
+		"timeout_seconds", req.TimeoutSeconds,
+	)
+
+	// Validate this is a local daemon (not remote via GIBSON_DAEMON_ADDRESS)
+	// The CLI already prevents this, but we double-check here for safety
+	if remoteAddr := os.Getenv("GIBSON_DAEMON_ADDRESS"); remoteAddr != "" {
+		return &ShutdownResponse{
+			Success: false,
+			Message: "Cannot shutdown a remote daemon via this endpoint",
+		}, nil
+	}
+
+	// Request shutdown from the daemon
+	timeoutSeconds := req.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+
+	// Start shutdown in a goroutine so we can return the response first
+	go func() {
+		// Give the response time to be sent
+		time.Sleep(100 * time.Millisecond)
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+		defer cancel()
+
+		if err := s.daemon.RequestShutdown(shutdownCtx, req.Force, timeoutSeconds); err != nil {
+			s.logger.Error("shutdown failed", "error", err)
+		}
+	}()
+
+	return &ShutdownResponse{
+		Success: true,
+		Message: "Shutdown request accepted, daemon will stop shortly",
 	}, nil
 }

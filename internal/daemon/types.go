@@ -9,7 +9,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"time"
 )
 
@@ -57,11 +56,13 @@ type DaemonStatus struct {
 	ActiveCount int `json:"active_mission_count"`
 }
 
-// DaemonInfo contains persistent daemon information written to daemon.json.
+// DaemonInfo contains daemon connection information stored in etcd.
 //
-// This struct is serialized to ~/.gibson/daemon.json when the daemon starts
-// and is used by clients to discover how to connect to the running daemon.
-// It includes connection endpoints and metadata needed for client operations.
+// This struct is registered in etcd when the daemon starts and is used
+// for service discovery. Clients can query etcd to find daemon endpoints.
+//
+// Note: This struct is NOT written to filesystem files (daemon.json was removed).
+// Discovery is done via etcd or GIBSON_DAEMON_ADDRESS environment variable.
 type DaemonInfo struct {
 	// PID is the process ID of the daemon
 	PID int `json:"pid"`
@@ -119,8 +120,7 @@ type Daemon interface {
 	// Start begins the daemon process and blocks until shutdown.
 	//
 	// This method initializes and starts all daemon services including the
-	// registry, callback server, and gRPC API server. It also writes PID
-	// and info files for client discovery.
+	// registry, callback server, and gRPC API server.
 	//
 	// The daemon always runs in foreground mode, blocking until the context
 	// is cancelled or a shutdown signal (SIGTERM/SIGINT) is received. This
@@ -133,17 +133,14 @@ type Daemon interface {
 	//   - error: Non-nil if startup fails or if another daemon is already running
 	//
 	// The method performs these steps:
-	// 1. Check for existing daemon via PID file
-	// 2. Start registry manager
-	// 3. Start callback server
-	// 4. Start gRPC API server
-	// 5. Write PID and daemon.json files
-	// 6. Block until shutdown signal
+	// 1. Start registry manager
+	// 2. Start callback server
+	// 3. Start gRPC API server
+	// 4. Block until shutdown signal
 	//
 	// Common errors:
-	//   - ErrAlreadyRunning: Another daemon is already running
+	//   - ErrAlreadyRunning: Another daemon is already running on the same port
 	//   - Port binding errors: Required ports are in use
-	//   - Permission errors: Cannot write PID/info files
 	Start(ctx context.Context) error
 
 	// Stop gracefully shuts down the daemon.
@@ -152,7 +149,6 @@ type Daemon interface {
 	// 1. Stop accepting new client connections (gRPC)
 	// 2. Stop callback server (agents can't make new callbacks)
 	// 3. Stop registry (embedded etcd shutdown)
-	// 4. Clean up PID and info files
 	//
 	// Parameters:
 	//   - ctx: Context with timeout for shutdown operations
@@ -175,10 +171,4 @@ type Daemon interface {
 	// For internal status queries, use the daemon's status() private method.
 }
 
-// ReadDaemonInfo reads daemon info from the specified path.
-// NOTE: This function is deprecated. Daemon info is now stored in etcd.
-// Use EtcdDaemonInfo.Get() instead.
-func ReadDaemonInfo(infoPath string) (*DaemonInfo, error) {
-	return nil, fmt.Errorf("ReadDaemonInfo is deprecated - daemon info is now stored in etcd")
-}
 

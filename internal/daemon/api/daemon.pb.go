@@ -2363,6 +2363,9 @@ type Event struct {
 	//	*Event_AttackEvent
 	//	*Event_AgentEvent
 	//	*Event_FindingEvent
+	//	*Event_ToolEvent
+	//	*Event_LlmEvent
+	//	*Event_OrchestratorEvent
 	Event         isEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2469,6 +2472,33 @@ func (x *Event) GetFindingEvent() *FindingEvent {
 	return nil
 }
 
+func (x *Event) GetToolEvent() *ToolEvent {
+	if x != nil {
+		if x, ok := x.Event.(*Event_ToolEvent); ok {
+			return x.ToolEvent
+		}
+	}
+	return nil
+}
+
+func (x *Event) GetLlmEvent() *LLMEvent {
+	if x != nil {
+		if x, ok := x.Event.(*Event_LlmEvent); ok {
+			return x.LlmEvent
+		}
+	}
+	return nil
+}
+
+func (x *Event) GetOrchestratorEvent() *OrchestratorEvent {
+	if x != nil {
+		if x, ok := x.Event.(*Event_OrchestratorEvent); ok {
+			return x.OrchestratorEvent
+		}
+	}
+	return nil
+}
+
 type isEvent_Event interface {
 	isEvent_Event()
 }
@@ -2489,6 +2519,18 @@ type Event_FindingEvent struct {
 	FindingEvent *FindingEvent `protobuf:"bytes,8,opt,name=finding_event,json=findingEvent,proto3,oneof"`
 }
 
+type Event_ToolEvent struct {
+	ToolEvent *ToolEvent `protobuf:"bytes,9,opt,name=tool_event,json=toolEvent,proto3,oneof"`
+}
+
+type Event_LlmEvent struct {
+	LlmEvent *LLMEvent `protobuf:"bytes,10,opt,name=llm_event,json=llmEvent,proto3,oneof"`
+}
+
+type Event_OrchestratorEvent struct {
+	OrchestratorEvent *OrchestratorEvent `protobuf:"bytes,11,opt,name=orchestrator_event,json=orchestratorEvent,proto3,oneof"`
+}
+
 func (*Event_MissionEvent) isEvent_Event() {}
 
 func (*Event_AttackEvent) isEvent_Event() {}
@@ -2496,6 +2538,12 @@ func (*Event_AttackEvent) isEvent_Event() {}
 func (*Event_AgentEvent) isEvent_Event() {}
 
 func (*Event_FindingEvent) isEvent_Event() {}
+
+func (*Event_ToolEvent) isEvent_Event() {}
+
+func (*Event_LlmEvent) isEvent_Event() {}
+
+func (*Event_OrchestratorEvent) isEvent_Event() {}
 
 // AgentEvent represents an agent lifecycle event.
 type AgentEvent struct {
@@ -2661,6 +2709,504 @@ func (x *FindingEvent) GetMissionId() string {
 	return ""
 }
 
+// ToolEvent represents a tool execution event.
+type ToolEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// event_type identifies the tool event type (tool.started, tool.completed, tool.failed, tool.progress, tool.warning)
+	EventType string `protobuf:"bytes,1,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
+	// timestamp is when the event occurred (Unix timestamp)
+	Timestamp int64 `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// tool_name is the name of the tool being executed
+	ToolName string `protobuf:"bytes,3,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
+	// agent_id is the agent identifier executing the tool
+	AgentId string `protobuf:"bytes,4,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// agent_name is the agent name executing the tool
+	AgentName string `protobuf:"bytes,5,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	// mission_id is the mission context for this tool execution
+	MissionId string `protobuf:"bytes,6,opt,name=mission_id,json=missionId,proto3" json:"mission_id,omitempty"`
+	// message is a human-readable event message
+	Message string `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
+	// duration is the execution time in seconds (for completed/failed events)
+	Duration float64 `protobuf:"fixed64,8,opt,name=duration,proto3" json:"duration,omitempty"`
+	// progress is the completion percentage (0-1 for progress events)
+	Progress float64 `protobuf:"fixed64,9,opt,name=progress,proto3" json:"progress,omitempty"`
+	// error contains error information if the event represents an error
+	Error string `protobuf:"bytes,10,opt,name=error,proto3" json:"error,omitempty"`
+	// error_code contains a machine-readable error code
+	ErrorCode string `protobuf:"bytes,11,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	// warning contains warning information if the event represents a warning
+	Warning string `protobuf:"bytes,12,opt,name=warning,proto3" json:"warning,omitempty"`
+	// warning_severity is the severity level (low, medium, high)
+	WarningSeverity string `protobuf:"bytes,13,opt,name=warning_severity,json=warningSeverity,proto3" json:"warning_severity,omitempty"`
+	// data contains event-specific data (typed map)
+	Data          *commonpb.TypedMap `protobuf:"bytes,14,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ToolEvent) Reset() {
+	*x = ToolEvent{}
+	mi := &file_daemon_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolEvent) ProtoMessage() {}
+
+func (x *ToolEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolEvent.ProtoReflect.Descriptor instead.
+func (*ToolEvent) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *ToolEvent) GetEventType() string {
+	if x != nil {
+		return x.EventType
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *ToolEvent) GetToolName() string {
+	if x != nil {
+		return x.ToolName
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetAgentName() string {
+	if x != nil {
+		return x.AgentName
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetMissionId() string {
+	if x != nil {
+		return x.MissionId
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetDuration() float64 {
+	if x != nil {
+		return x.Duration
+	}
+	return 0
+}
+
+func (x *ToolEvent) GetProgress() float64 {
+	if x != nil {
+		return x.Progress
+	}
+	return 0
+}
+
+func (x *ToolEvent) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetWarning() string {
+	if x != nil {
+		return x.Warning
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetWarningSeverity() string {
+	if x != nil {
+		return x.WarningSeverity
+	}
+	return ""
+}
+
+func (x *ToolEvent) GetData() *commonpb.TypedMap {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+// LLMEvent represents an LLM activity event.
+type LLMEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// event_type identifies the LLM event type (llm.request.started, llm.request.completed, llm.request.failed)
+	EventType string `protobuf:"bytes,1,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
+	// timestamp is when the event occurred (Unix timestamp)
+	Timestamp int64 `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// agent_id is the agent identifier
+	AgentId string `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// agent_name is the agent name
+	AgentName string `protobuf:"bytes,4,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	// model is the LLM model identifier (e.g., "claude-3-5-sonnet-20241022")
+	Model string `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`
+	// slot is the LLM slot (primary, fast, reasoning)
+	Slot string `protobuf:"bytes,6,opt,name=slot,proto3" json:"slot,omitempty"`
+	// message_count is the number of messages in the request
+	MessageCount int32 `protobuf:"varint,7,opt,name=message_count,json=messageCount,proto3" json:"message_count,omitempty"`
+	// prompt_tokens is the number of input tokens
+	PromptTokens int32 `protobuf:"varint,8,opt,name=prompt_tokens,json=promptTokens,proto3" json:"prompt_tokens,omitempty"`
+	// completion_tokens is the number of output tokens
+	CompletionTokens int32 `protobuf:"varint,9,opt,name=completion_tokens,json=completionTokens,proto3" json:"completion_tokens,omitempty"`
+	// total_tokens is the sum of prompt and completion tokens
+	TotalTokens int32 `protobuf:"varint,10,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
+	// duration_ms is the request duration in milliseconds
+	DurationMs float64 `protobuf:"fixed64,11,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	// cached indicates if the response was served from cache
+	Cached bool `protobuf:"varint,12,opt,name=cached,proto3" json:"cached,omitempty"`
+	// error contains error information if the event represents a failure
+	Error string `protobuf:"bytes,13,opt,name=error,proto3" json:"error,omitempty"`
+	// error_code identifies the error type (rate_limit, context_length, api_error, timeout)
+	ErrorCode string `protobuf:"bytes,14,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	// will_retry indicates if the failed request will be retried
+	WillRetry     bool `protobuf:"varint,15,opt,name=will_retry,json=willRetry,proto3" json:"will_retry,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LLMEvent) Reset() {
+	*x = LLMEvent{}
+	mi := &file_daemon_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LLMEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LLMEvent) ProtoMessage() {}
+
+func (x *LLMEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LLMEvent.ProtoReflect.Descriptor instead.
+func (*LLMEvent) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *LLMEvent) GetEventType() string {
+	if x != nil {
+		return x.EventType
+	}
+	return ""
+}
+
+func (x *LLMEvent) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *LLMEvent) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *LLMEvent) GetAgentName() string {
+	if x != nil {
+		return x.AgentName
+	}
+	return ""
+}
+
+func (x *LLMEvent) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *LLMEvent) GetSlot() string {
+	if x != nil {
+		return x.Slot
+	}
+	return ""
+}
+
+func (x *LLMEvent) GetMessageCount() int32 {
+	if x != nil {
+		return x.MessageCount
+	}
+	return 0
+}
+
+func (x *LLMEvent) GetPromptTokens() int32 {
+	if x != nil {
+		return x.PromptTokens
+	}
+	return 0
+}
+
+func (x *LLMEvent) GetCompletionTokens() int32 {
+	if x != nil {
+		return x.CompletionTokens
+	}
+	return 0
+}
+
+func (x *LLMEvent) GetTotalTokens() int32 {
+	if x != nil {
+		return x.TotalTokens
+	}
+	return 0
+}
+
+func (x *LLMEvent) GetDurationMs() float64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *LLMEvent) GetCached() bool {
+	if x != nil {
+		return x.Cached
+	}
+	return false
+}
+
+func (x *LLMEvent) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *LLMEvent) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *LLMEvent) GetWillRetry() bool {
+	if x != nil {
+		return x.WillRetry
+	}
+	return false
+}
+
+// OrchestratorEvent represents an orchestrator decision event.
+type OrchestratorEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// event_type identifies the orchestrator event type (orchestrator.decision, orchestrator.approval_required)
+	EventType string `protobuf:"bytes,1,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
+	// timestamp is when the event occurred (Unix timestamp)
+	Timestamp int64 `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// mission_id is the mission identifier
+	MissionId string `protobuf:"bytes,3,opt,name=mission_id,json=missionId,proto3" json:"mission_id,omitempty"`
+	// iteration is the orchestrator iteration number
+	Iteration int32 `protobuf:"varint,4,opt,name=iteration,proto3" json:"iteration,omitempty"`
+	// action is the orchestrator action (execute_agent, skip_node, wait, complete, request_approval)
+	Action string `protobuf:"bytes,5,opt,name=action,proto3" json:"action,omitempty"`
+	// target_node_id is the workflow node ID being targeted
+	TargetNodeId string `protobuf:"bytes,6,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`
+	// target_agent_name is the agent name being targeted
+	TargetAgentName string `protobuf:"bytes,7,opt,name=target_agent_name,json=targetAgentName,proto3" json:"target_agent_name,omitempty"`
+	// confidence is the decision confidence score (0-1)
+	Confidence float64 `protobuf:"fixed64,8,opt,name=confidence,proto3" json:"confidence,omitempty"`
+	// reasoning is the orchestrator's reasoning (max 500 chars in practice)
+	Reasoning string `protobuf:"bytes,9,opt,name=reasoning,proto3" json:"reasoning,omitempty"`
+	// tokens_used is the number of tokens consumed for this decision
+	TokensUsed int32 `protobuf:"varint,10,opt,name=tokens_used,json=tokensUsed,proto3" json:"tokens_used,omitempty"`
+	// latency_ms is the decision latency in milliseconds
+	LatencyMs float64 `protobuf:"fixed64,11,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
+	// approval_id is set when approval is required
+	ApprovalId string `protobuf:"bytes,12,opt,name=approval_id,json=approvalId,proto3" json:"approval_id,omitempty"`
+	// risk is the risk level (low, medium, high, critical)
+	Risk string `protobuf:"bytes,13,opt,name=risk,proto3" json:"risk,omitempty"`
+	// timeout_seconds is the timeout for approval requests
+	TimeoutSeconds int32 `protobuf:"varint,14,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *OrchestratorEvent) Reset() {
+	*x = OrchestratorEvent{}
+	mi := &file_daemon_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrchestratorEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrchestratorEvent) ProtoMessage() {}
+
+func (x *OrchestratorEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrchestratorEvent.ProtoReflect.Descriptor instead.
+func (*OrchestratorEvent) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *OrchestratorEvent) GetEventType() string {
+	if x != nil {
+		return x.EventType
+	}
+	return ""
+}
+
+func (x *OrchestratorEvent) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *OrchestratorEvent) GetMissionId() string {
+	if x != nil {
+		return x.MissionId
+	}
+	return ""
+}
+
+func (x *OrchestratorEvent) GetIteration() int32 {
+	if x != nil {
+		return x.Iteration
+	}
+	return 0
+}
+
+func (x *OrchestratorEvent) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *OrchestratorEvent) GetTargetNodeId() string {
+	if x != nil {
+		return x.TargetNodeId
+	}
+	return ""
+}
+
+func (x *OrchestratorEvent) GetTargetAgentName() string {
+	if x != nil {
+		return x.TargetAgentName
+	}
+	return ""
+}
+
+func (x *OrchestratorEvent) GetConfidence() float64 {
+	if x != nil {
+		return x.Confidence
+	}
+	return 0
+}
+
+func (x *OrchestratorEvent) GetReasoning() string {
+	if x != nil {
+		return x.Reasoning
+	}
+	return ""
+}
+
+func (x *OrchestratorEvent) GetTokensUsed() int32 {
+	if x != nil {
+		return x.TokensUsed
+	}
+	return 0
+}
+
+func (x *OrchestratorEvent) GetLatencyMs() float64 {
+	if x != nil {
+		return x.LatencyMs
+	}
+	return 0
+}
+
+func (x *OrchestratorEvent) GetApprovalId() string {
+	if x != nil {
+		return x.ApprovalId
+	}
+	return ""
+}
+
+func (x *OrchestratorEvent) GetRisk() string {
+	if x != nil {
+		return x.Risk
+	}
+	return ""
+}
+
+func (x *OrchestratorEvent) GetTimeoutSeconds() int32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
 // StartComponentRequest requests starting a component.
 type StartComponentRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -2674,7 +3220,7 @@ type StartComponentRequest struct {
 
 func (x *StartComponentRequest) Reset() {
 	*x = StartComponentRequest{}
-	mi := &file_daemon_proto_msgTypes[34]
+	mi := &file_daemon_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2686,7 +3232,7 @@ func (x *StartComponentRequest) String() string {
 func (*StartComponentRequest) ProtoMessage() {}
 
 func (x *StartComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[34]
+	mi := &file_daemon_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2699,7 +3245,7 @@ func (x *StartComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartComponentRequest.ProtoReflect.Descriptor instead.
 func (*StartComponentRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{34}
+	return file_daemon_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *StartComponentRequest) GetKind() string {
@@ -2735,7 +3281,7 @@ type StartComponentResponse struct {
 
 func (x *StartComponentResponse) Reset() {
 	*x = StartComponentResponse{}
-	mi := &file_daemon_proto_msgTypes[35]
+	mi := &file_daemon_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2747,7 +3293,7 @@ func (x *StartComponentResponse) String() string {
 func (*StartComponentResponse) ProtoMessage() {}
 
 func (x *StartComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[35]
+	mi := &file_daemon_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2760,7 +3306,7 @@ func (x *StartComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartComponentResponse.ProtoReflect.Descriptor instead.
 func (*StartComponentResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{35}
+	return file_daemon_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *StartComponentResponse) GetSuccess() bool {
@@ -2813,7 +3359,7 @@ type StopComponentRequest struct {
 
 func (x *StopComponentRequest) Reset() {
 	*x = StopComponentRequest{}
-	mi := &file_daemon_proto_msgTypes[36]
+	mi := &file_daemon_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2825,7 +3371,7 @@ func (x *StopComponentRequest) String() string {
 func (*StopComponentRequest) ProtoMessage() {}
 
 func (x *StopComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[36]
+	mi := &file_daemon_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2838,7 +3384,7 @@ func (x *StopComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopComponentRequest.ProtoReflect.Descriptor instead.
 func (*StopComponentRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{36}
+	return file_daemon_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *StopComponentRequest) GetKind() string {
@@ -2879,7 +3425,7 @@ type StopComponentResponse struct {
 
 func (x *StopComponentResponse) Reset() {
 	*x = StopComponentResponse{}
-	mi := &file_daemon_proto_msgTypes[37]
+	mi := &file_daemon_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2891,7 +3437,7 @@ func (x *StopComponentResponse) String() string {
 func (*StopComponentResponse) ProtoMessage() {}
 
 func (x *StopComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[37]
+	mi := &file_daemon_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2904,7 +3450,7 @@ func (x *StopComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopComponentResponse.ProtoReflect.Descriptor instead.
 func (*StopComponentResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{37}
+	return file_daemon_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *StopComponentResponse) GetSuccess() bool {
@@ -2975,7 +3521,7 @@ type OperationResult struct {
 
 func (x *OperationResult) Reset() {
 	*x = OperationResult{}
-	mi := &file_daemon_proto_msgTypes[38]
+	mi := &file_daemon_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2987,7 +3533,7 @@ func (x *OperationResult) String() string {
 func (*OperationResult) ProtoMessage() {}
 
 func (x *OperationResult) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[38]
+	mi := &file_daemon_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3000,7 +3546,7 @@ func (x *OperationResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationResult.ProtoReflect.Descriptor instead.
 func (*OperationResult) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{38}
+	return file_daemon_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *OperationResult) GetStatus() string {
@@ -3122,7 +3668,7 @@ type PauseMissionRequest struct {
 
 func (x *PauseMissionRequest) Reset() {
 	*x = PauseMissionRequest{}
-	mi := &file_daemon_proto_msgTypes[39]
+	mi := &file_daemon_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3134,7 +3680,7 @@ func (x *PauseMissionRequest) String() string {
 func (*PauseMissionRequest) ProtoMessage() {}
 
 func (x *PauseMissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[39]
+	mi := &file_daemon_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3147,7 +3693,7 @@ func (x *PauseMissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PauseMissionRequest.ProtoReflect.Descriptor instead.
 func (*PauseMissionRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{39}
+	return file_daemon_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *PauseMissionRequest) GetMissionId() string {
@@ -3179,7 +3725,7 @@ type PauseMissionResponse struct {
 
 func (x *PauseMissionResponse) Reset() {
 	*x = PauseMissionResponse{}
-	mi := &file_daemon_proto_msgTypes[40]
+	mi := &file_daemon_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3191,7 +3737,7 @@ func (x *PauseMissionResponse) String() string {
 func (*PauseMissionResponse) ProtoMessage() {}
 
 func (x *PauseMissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[40]
+	mi := &file_daemon_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3204,7 +3750,7 @@ func (x *PauseMissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PauseMissionResponse.ProtoReflect.Descriptor instead.
 func (*PauseMissionResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{40}
+	return file_daemon_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *PauseMissionResponse) GetSuccess() bool {
@@ -3242,7 +3788,7 @@ type ResumeMissionRequest struct {
 
 func (x *ResumeMissionRequest) Reset() {
 	*x = ResumeMissionRequest{}
-	mi := &file_daemon_proto_msgTypes[41]
+	mi := &file_daemon_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3254,7 +3800,7 @@ func (x *ResumeMissionRequest) String() string {
 func (*ResumeMissionRequest) ProtoMessage() {}
 
 func (x *ResumeMissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[41]
+	mi := &file_daemon_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3267,7 +3813,7 @@ func (x *ResumeMissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeMissionRequest.ProtoReflect.Descriptor instead.
 func (*ResumeMissionRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{41}
+	return file_daemon_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ResumeMissionRequest) GetMissionId() string {
@@ -3299,7 +3845,7 @@ type GetMissionHistoryRequest struct {
 
 func (x *GetMissionHistoryRequest) Reset() {
 	*x = GetMissionHistoryRequest{}
-	mi := &file_daemon_proto_msgTypes[42]
+	mi := &file_daemon_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3311,7 +3857,7 @@ func (x *GetMissionHistoryRequest) String() string {
 func (*GetMissionHistoryRequest) ProtoMessage() {}
 
 func (x *GetMissionHistoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[42]
+	mi := &file_daemon_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3324,7 +3870,7 @@ func (x *GetMissionHistoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMissionHistoryRequest.ProtoReflect.Descriptor instead.
 func (*GetMissionHistoryRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{42}
+	return file_daemon_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetMissionHistoryRequest) GetName() string {
@@ -3361,7 +3907,7 @@ type GetMissionHistoryResponse struct {
 
 func (x *GetMissionHistoryResponse) Reset() {
 	*x = GetMissionHistoryResponse{}
-	mi := &file_daemon_proto_msgTypes[43]
+	mi := &file_daemon_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3373,7 +3919,7 @@ func (x *GetMissionHistoryResponse) String() string {
 func (*GetMissionHistoryResponse) ProtoMessage() {}
 
 func (x *GetMissionHistoryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[43]
+	mi := &file_daemon_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3386,7 +3932,7 @@ func (x *GetMissionHistoryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMissionHistoryResponse.ProtoReflect.Descriptor instead.
 func (*GetMissionHistoryResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{43}
+	return file_daemon_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetMissionHistoryResponse) GetRuns() []*MissionRun {
@@ -3426,7 +3972,7 @@ type MissionRun struct {
 
 func (x *MissionRun) Reset() {
 	*x = MissionRun{}
-	mi := &file_daemon_proto_msgTypes[44]
+	mi := &file_daemon_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3438,7 +3984,7 @@ func (x *MissionRun) String() string {
 func (*MissionRun) ProtoMessage() {}
 
 func (x *MissionRun) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[44]
+	mi := &file_daemon_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3451,7 +3997,7 @@ func (x *MissionRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionRun.ProtoReflect.Descriptor instead.
 func (*MissionRun) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{44}
+	return file_daemon_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *MissionRun) GetMissionId() string {
@@ -3514,7 +4060,7 @@ type GetMissionCheckpointsRequest struct {
 
 func (x *GetMissionCheckpointsRequest) Reset() {
 	*x = GetMissionCheckpointsRequest{}
-	mi := &file_daemon_proto_msgTypes[45]
+	mi := &file_daemon_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3526,7 +4072,7 @@ func (x *GetMissionCheckpointsRequest) String() string {
 func (*GetMissionCheckpointsRequest) ProtoMessage() {}
 
 func (x *GetMissionCheckpointsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[45]
+	mi := &file_daemon_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3539,7 +4085,7 @@ func (x *GetMissionCheckpointsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMissionCheckpointsRequest.ProtoReflect.Descriptor instead.
 func (*GetMissionCheckpointsRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{45}
+	return file_daemon_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *GetMissionCheckpointsRequest) GetMissionId() string {
@@ -3560,7 +4106,7 @@ type GetMissionCheckpointsResponse struct {
 
 func (x *GetMissionCheckpointsResponse) Reset() {
 	*x = GetMissionCheckpointsResponse{}
-	mi := &file_daemon_proto_msgTypes[46]
+	mi := &file_daemon_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3572,7 +4118,7 @@ func (x *GetMissionCheckpointsResponse) String() string {
 func (*GetMissionCheckpointsResponse) ProtoMessage() {}
 
 func (x *GetMissionCheckpointsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[46]
+	mi := &file_daemon_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3585,7 +4131,7 @@ func (x *GetMissionCheckpointsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMissionCheckpointsResponse.ProtoReflect.Descriptor instead.
 func (*GetMissionCheckpointsResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{46}
+	return file_daemon_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *GetMissionCheckpointsResponse) GetCheckpoints() []*CheckpointInfo {
@@ -3616,7 +4162,7 @@ type CheckpointInfo struct {
 
 func (x *CheckpointInfo) Reset() {
 	*x = CheckpointInfo{}
-	mi := &file_daemon_proto_msgTypes[47]
+	mi := &file_daemon_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3628,7 +4174,7 @@ func (x *CheckpointInfo) String() string {
 func (*CheckpointInfo) ProtoMessage() {}
 
 func (x *CheckpointInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[47]
+	mi := &file_daemon_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3641,7 +4187,7 @@ func (x *CheckpointInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckpointInfo.ProtoReflect.Descriptor instead.
 func (*CheckpointInfo) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{47}
+	return file_daemon_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *CheckpointInfo) GetCheckpointId() string {
@@ -3709,7 +4255,7 @@ type InstallComponentRequest struct {
 
 func (x *InstallComponentRequest) Reset() {
 	*x = InstallComponentRequest{}
-	mi := &file_daemon_proto_msgTypes[48]
+	mi := &file_daemon_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3721,7 +4267,7 @@ func (x *InstallComponentRequest) String() string {
 func (*InstallComponentRequest) ProtoMessage() {}
 
 func (x *InstallComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[48]
+	mi := &file_daemon_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3734,7 +4280,7 @@ func (x *InstallComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallComponentRequest.ProtoReflect.Descriptor instead.
 func (*InstallComponentRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{48}
+	return file_daemon_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *InstallComponentRequest) GetKind() string {
@@ -3811,7 +4357,7 @@ type InstallComponentResponse struct {
 
 func (x *InstallComponentResponse) Reset() {
 	*x = InstallComponentResponse{}
-	mi := &file_daemon_proto_msgTypes[49]
+	mi := &file_daemon_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3823,7 +4369,7 @@ func (x *InstallComponentResponse) String() string {
 func (*InstallComponentResponse) ProtoMessage() {}
 
 func (x *InstallComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[49]
+	mi := &file_daemon_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3836,7 +4382,7 @@ func (x *InstallComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallComponentResponse.ProtoReflect.Descriptor instead.
 func (*InstallComponentResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{49}
+	return file_daemon_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *InstallComponentResponse) GetSuccess() bool {
@@ -3918,7 +4464,7 @@ type InstallAllComponentRequest struct {
 
 func (x *InstallAllComponentRequest) Reset() {
 	*x = InstallAllComponentRequest{}
-	mi := &file_daemon_proto_msgTypes[50]
+	mi := &file_daemon_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3930,7 +4476,7 @@ func (x *InstallAllComponentRequest) String() string {
 func (*InstallAllComponentRequest) ProtoMessage() {}
 
 func (x *InstallAllComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[50]
+	mi := &file_daemon_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3943,7 +4489,7 @@ func (x *InstallAllComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallAllComponentRequest.ProtoReflect.Descriptor instead.
 func (*InstallAllComponentRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{50}
+	return file_daemon_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *InstallAllComponentRequest) GetKind() string {
@@ -4024,7 +4570,7 @@ type InstallAllComponentResponse struct {
 
 func (x *InstallAllComponentResponse) Reset() {
 	*x = InstallAllComponentResponse{}
-	mi := &file_daemon_proto_msgTypes[51]
+	mi := &file_daemon_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4036,7 +4582,7 @@ func (x *InstallAllComponentResponse) String() string {
 func (*InstallAllComponentResponse) ProtoMessage() {}
 
 func (x *InstallAllComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[51]
+	mi := &file_daemon_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4049,7 +4595,7 @@ func (x *InstallAllComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallAllComponentResponse.ProtoReflect.Descriptor instead.
 func (*InstallAllComponentResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{51}
+	return file_daemon_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *InstallAllComponentResponse) GetSuccess() bool {
@@ -4137,7 +4683,7 @@ type InstallAllResultItem struct {
 
 func (x *InstallAllResultItem) Reset() {
 	*x = InstallAllResultItem{}
-	mi := &file_daemon_proto_msgTypes[52]
+	mi := &file_daemon_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4149,7 +4695,7 @@ func (x *InstallAllResultItem) String() string {
 func (*InstallAllResultItem) ProtoMessage() {}
 
 func (x *InstallAllResultItem) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[52]
+	mi := &file_daemon_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4162,7 +4708,7 @@ func (x *InstallAllResultItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallAllResultItem.ProtoReflect.Descriptor instead.
 func (*InstallAllResultItem) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{52}
+	return file_daemon_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *InstallAllResultItem) GetName() string {
@@ -4201,7 +4747,7 @@ type InstallAllFailedItem struct {
 
 func (x *InstallAllFailedItem) Reset() {
 	*x = InstallAllFailedItem{}
-	mi := &file_daemon_proto_msgTypes[53]
+	mi := &file_daemon_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4213,7 +4759,7 @@ func (x *InstallAllFailedItem) String() string {
 func (*InstallAllFailedItem) ProtoMessage() {}
 
 func (x *InstallAllFailedItem) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[53]
+	mi := &file_daemon_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4226,7 +4772,7 @@ func (x *InstallAllFailedItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallAllFailedItem.ProtoReflect.Descriptor instead.
 func (*InstallAllFailedItem) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{53}
+	return file_daemon_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *InstallAllFailedItem) GetName() string {
@@ -4265,7 +4811,7 @@ type UninstallComponentRequest struct {
 
 func (x *UninstallComponentRequest) Reset() {
 	*x = UninstallComponentRequest{}
-	mi := &file_daemon_proto_msgTypes[54]
+	mi := &file_daemon_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4277,7 +4823,7 @@ func (x *UninstallComponentRequest) String() string {
 func (*UninstallComponentRequest) ProtoMessage() {}
 
 func (x *UninstallComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[54]
+	mi := &file_daemon_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4290,7 +4836,7 @@ func (x *UninstallComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UninstallComponentRequest.ProtoReflect.Descriptor instead.
 func (*UninstallComponentRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{54}
+	return file_daemon_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *UninstallComponentRequest) GetKind() string {
@@ -4327,7 +4873,7 @@ type UninstallComponentResponse struct {
 
 func (x *UninstallComponentResponse) Reset() {
 	*x = UninstallComponentResponse{}
-	mi := &file_daemon_proto_msgTypes[55]
+	mi := &file_daemon_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4339,7 +4885,7 @@ func (x *UninstallComponentResponse) String() string {
 func (*UninstallComponentResponse) ProtoMessage() {}
 
 func (x *UninstallComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[55]
+	mi := &file_daemon_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4352,7 +4898,7 @@ func (x *UninstallComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UninstallComponentResponse.ProtoReflect.Descriptor instead.
 func (*UninstallComponentResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{55}
+	return file_daemon_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *UninstallComponentResponse) GetSuccess() bool {
@@ -4388,7 +4934,7 @@ type UpdateComponentRequest struct {
 
 func (x *UpdateComponentRequest) Reset() {
 	*x = UpdateComponentRequest{}
-	mi := &file_daemon_proto_msgTypes[56]
+	mi := &file_daemon_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4400,7 +4946,7 @@ func (x *UpdateComponentRequest) String() string {
 func (*UpdateComponentRequest) ProtoMessage() {}
 
 func (x *UpdateComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[56]
+	mi := &file_daemon_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4413,7 +4959,7 @@ func (x *UpdateComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateComponentRequest.ProtoReflect.Descriptor instead.
 func (*UpdateComponentRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{56}
+	return file_daemon_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *UpdateComponentRequest) GetKind() string {
@@ -4474,7 +5020,7 @@ type UpdateComponentResponse struct {
 
 func (x *UpdateComponentResponse) Reset() {
 	*x = UpdateComponentResponse{}
-	mi := &file_daemon_proto_msgTypes[57]
+	mi := &file_daemon_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4486,7 +5032,7 @@ func (x *UpdateComponentResponse) String() string {
 func (*UpdateComponentResponse) ProtoMessage() {}
 
 func (x *UpdateComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[57]
+	mi := &file_daemon_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4499,7 +5045,7 @@ func (x *UpdateComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateComponentResponse.ProtoReflect.Descriptor instead.
 func (*UpdateComponentResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{57}
+	return file_daemon_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *UpdateComponentResponse) GetSuccess() bool {
@@ -4564,7 +5110,7 @@ type BuildComponentRequest struct {
 
 func (x *BuildComponentRequest) Reset() {
 	*x = BuildComponentRequest{}
-	mi := &file_daemon_proto_msgTypes[58]
+	mi := &file_daemon_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4576,7 +5122,7 @@ func (x *BuildComponentRequest) String() string {
 func (*BuildComponentRequest) ProtoMessage() {}
 
 func (x *BuildComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[58]
+	mi := &file_daemon_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4589,7 +5135,7 @@ func (x *BuildComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildComponentRequest.ProtoReflect.Descriptor instead.
 func (*BuildComponentRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{58}
+	return file_daemon_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *BuildComponentRequest) GetKind() string {
@@ -4625,7 +5171,7 @@ type BuildComponentResponse struct {
 
 func (x *BuildComponentResponse) Reset() {
 	*x = BuildComponentResponse{}
-	mi := &file_daemon_proto_msgTypes[59]
+	mi := &file_daemon_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4637,7 +5183,7 @@ func (x *BuildComponentResponse) String() string {
 func (*BuildComponentResponse) ProtoMessage() {}
 
 func (x *BuildComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[59]
+	mi := &file_daemon_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4650,7 +5196,7 @@ func (x *BuildComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildComponentResponse.ProtoReflect.Descriptor instead.
 func (*BuildComponentResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{59}
+	return file_daemon_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *BuildComponentResponse) GetSuccess() bool {
@@ -4701,7 +5247,7 @@ type ShowComponentRequest struct {
 
 func (x *ShowComponentRequest) Reset() {
 	*x = ShowComponentRequest{}
-	mi := &file_daemon_proto_msgTypes[60]
+	mi := &file_daemon_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4713,7 +5259,7 @@ func (x *ShowComponentRequest) String() string {
 func (*ShowComponentRequest) ProtoMessage() {}
 
 func (x *ShowComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[60]
+	mi := &file_daemon_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4726,7 +5272,7 @@ func (x *ShowComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShowComponentRequest.ProtoReflect.Descriptor instead.
 func (*ShowComponentRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{60}
+	return file_daemon_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ShowComponentRequest) GetKind() string {
@@ -4784,7 +5330,7 @@ type ShowComponentResponse struct {
 
 func (x *ShowComponentResponse) Reset() {
 	*x = ShowComponentResponse{}
-	mi := &file_daemon_proto_msgTypes[61]
+	mi := &file_daemon_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4796,7 +5342,7 @@ func (x *ShowComponentResponse) String() string {
 func (*ShowComponentResponse) ProtoMessage() {}
 
 func (x *ShowComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[61]
+	mi := &file_daemon_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4809,7 +5355,7 @@ func (x *ShowComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShowComponentResponse.ProtoReflect.Descriptor instead.
 func (*ShowComponentResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{61}
+	return file_daemon_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *ShowComponentResponse) GetSuccess() bool {
@@ -4941,7 +5487,7 @@ type GetComponentLogsRequest struct {
 
 func (x *GetComponentLogsRequest) Reset() {
 	*x = GetComponentLogsRequest{}
-	mi := &file_daemon_proto_msgTypes[62]
+	mi := &file_daemon_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4953,7 +5499,7 @@ func (x *GetComponentLogsRequest) String() string {
 func (*GetComponentLogsRequest) ProtoMessage() {}
 
 func (x *GetComponentLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[62]
+	mi := &file_daemon_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4966,7 +5512,7 @@ func (x *GetComponentLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetComponentLogsRequest.ProtoReflect.Descriptor instead.
 func (*GetComponentLogsRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{62}
+	return file_daemon_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *GetComponentLogsRequest) GetKind() string {
@@ -5014,7 +5560,7 @@ type LogEntry struct {
 
 func (x *LogEntry) Reset() {
 	*x = LogEntry{}
-	mi := &file_daemon_proto_msgTypes[63]
+	mi := &file_daemon_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5026,7 +5572,7 @@ func (x *LogEntry) String() string {
 func (*LogEntry) ProtoMessage() {}
 
 func (x *LogEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[63]
+	mi := &file_daemon_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5039,7 +5585,7 @@ func (x *LogEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
 func (*LogEntry) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{63}
+	return file_daemon_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *LogEntry) GetTimestamp() int64 {
@@ -5091,7 +5637,7 @@ type InstallMissionRequest struct {
 
 func (x *InstallMissionRequest) Reset() {
 	*x = InstallMissionRequest{}
-	mi := &file_daemon_proto_msgTypes[64]
+	mi := &file_daemon_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5103,7 +5649,7 @@ func (x *InstallMissionRequest) String() string {
 func (*InstallMissionRequest) ProtoMessage() {}
 
 func (x *InstallMissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[64]
+	mi := &file_daemon_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5116,7 +5662,7 @@ func (x *InstallMissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallMissionRequest.ProtoReflect.Descriptor instead.
 func (*InstallMissionRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{64}
+	return file_daemon_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *InstallMissionRequest) GetUrl() string {
@@ -5184,7 +5730,7 @@ type InstallMissionResponse struct {
 
 func (x *InstallMissionResponse) Reset() {
 	*x = InstallMissionResponse{}
-	mi := &file_daemon_proto_msgTypes[65]
+	mi := &file_daemon_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5196,7 +5742,7 @@ func (x *InstallMissionResponse) String() string {
 func (*InstallMissionResponse) ProtoMessage() {}
 
 func (x *InstallMissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[65]
+	mi := &file_daemon_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5209,7 +5755,7 @@ func (x *InstallMissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallMissionResponse.ProtoReflect.Descriptor instead.
 func (*InstallMissionResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{65}
+	return file_daemon_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *InstallMissionResponse) GetSuccess() bool {
@@ -5276,7 +5822,7 @@ type InstalledDependency struct {
 
 func (x *InstalledDependency) Reset() {
 	*x = InstalledDependency{}
-	mi := &file_daemon_proto_msgTypes[66]
+	mi := &file_daemon_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5288,7 +5834,7 @@ func (x *InstalledDependency) String() string {
 func (*InstalledDependency) ProtoMessage() {}
 
 func (x *InstalledDependency) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[66]
+	mi := &file_daemon_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5301,7 +5847,7 @@ func (x *InstalledDependency) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstalledDependency.ProtoReflect.Descriptor instead.
 func (*InstalledDependency) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{66}
+	return file_daemon_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *InstalledDependency) GetType() string {
@@ -5338,7 +5884,7 @@ type UninstallMissionRequest struct {
 
 func (x *UninstallMissionRequest) Reset() {
 	*x = UninstallMissionRequest{}
-	mi := &file_daemon_proto_msgTypes[67]
+	mi := &file_daemon_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5350,7 +5896,7 @@ func (x *UninstallMissionRequest) String() string {
 func (*UninstallMissionRequest) ProtoMessage() {}
 
 func (x *UninstallMissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[67]
+	mi := &file_daemon_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5363,7 +5909,7 @@ func (x *UninstallMissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UninstallMissionRequest.ProtoReflect.Descriptor instead.
 func (*UninstallMissionRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{67}
+	return file_daemon_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *UninstallMissionRequest) GetName() string {
@@ -5393,7 +5939,7 @@ type UninstallMissionResponse struct {
 
 func (x *UninstallMissionResponse) Reset() {
 	*x = UninstallMissionResponse{}
-	mi := &file_daemon_proto_msgTypes[68]
+	mi := &file_daemon_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5405,7 +5951,7 @@ func (x *UninstallMissionResponse) String() string {
 func (*UninstallMissionResponse) ProtoMessage() {}
 
 func (x *UninstallMissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[68]
+	mi := &file_daemon_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5418,7 +5964,7 @@ func (x *UninstallMissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UninstallMissionResponse.ProtoReflect.Descriptor instead.
 func (*UninstallMissionResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{68}
+	return file_daemon_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *UninstallMissionResponse) GetSuccess() bool {
@@ -5448,7 +5994,7 @@ type ListMissionDefinitionsRequest struct {
 
 func (x *ListMissionDefinitionsRequest) Reset() {
 	*x = ListMissionDefinitionsRequest{}
-	mi := &file_daemon_proto_msgTypes[69]
+	mi := &file_daemon_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5460,7 +6006,7 @@ func (x *ListMissionDefinitionsRequest) String() string {
 func (*ListMissionDefinitionsRequest) ProtoMessage() {}
 
 func (x *ListMissionDefinitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[69]
+	mi := &file_daemon_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5473,7 +6019,7 @@ func (x *ListMissionDefinitionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMissionDefinitionsRequest.ProtoReflect.Descriptor instead.
 func (*ListMissionDefinitionsRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{69}
+	return file_daemon_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *ListMissionDefinitionsRequest) GetLimit() int32 {
@@ -5503,7 +6049,7 @@ type ListMissionDefinitionsResponse struct {
 
 func (x *ListMissionDefinitionsResponse) Reset() {
 	*x = ListMissionDefinitionsResponse{}
-	mi := &file_daemon_proto_msgTypes[70]
+	mi := &file_daemon_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5515,7 +6061,7 @@ func (x *ListMissionDefinitionsResponse) String() string {
 func (*ListMissionDefinitionsResponse) ProtoMessage() {}
 
 func (x *ListMissionDefinitionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[70]
+	mi := &file_daemon_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5528,7 +6074,7 @@ func (x *ListMissionDefinitionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMissionDefinitionsResponse.ProtoReflect.Descriptor instead.
 func (*ListMissionDefinitionsResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{70}
+	return file_daemon_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *ListMissionDefinitionsResponse) GetMissions() []*MissionDefinitionInfo {
@@ -5568,7 +6114,7 @@ type MissionDefinitionInfo struct {
 
 func (x *MissionDefinitionInfo) Reset() {
 	*x = MissionDefinitionInfo{}
-	mi := &file_daemon_proto_msgTypes[71]
+	mi := &file_daemon_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5580,7 +6126,7 @@ func (x *MissionDefinitionInfo) String() string {
 func (*MissionDefinitionInfo) ProtoMessage() {}
 
 func (x *MissionDefinitionInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[71]
+	mi := &file_daemon_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5593,7 +6139,7 @@ func (x *MissionDefinitionInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionDefinitionInfo.ProtoReflect.Descriptor instead.
 func (*MissionDefinitionInfo) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{71}
+	return file_daemon_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *MissionDefinitionInfo) GetName() string {
@@ -5658,7 +6204,7 @@ type UpdateMissionRequest struct {
 
 func (x *UpdateMissionRequest) Reset() {
 	*x = UpdateMissionRequest{}
-	mi := &file_daemon_proto_msgTypes[72]
+	mi := &file_daemon_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5670,7 +6216,7 @@ func (x *UpdateMissionRequest) String() string {
 func (*UpdateMissionRequest) ProtoMessage() {}
 
 func (x *UpdateMissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[72]
+	mi := &file_daemon_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5683,7 +6229,7 @@ func (x *UpdateMissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMissionRequest.ProtoReflect.Descriptor instead.
 func (*UpdateMissionRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{72}
+	return file_daemon_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *UpdateMissionRequest) GetName() string {
@@ -5721,7 +6267,7 @@ type UpdateMissionResponse struct {
 
 func (x *UpdateMissionResponse) Reset() {
 	*x = UpdateMissionResponse{}
-	mi := &file_daemon_proto_msgTypes[73]
+	mi := &file_daemon_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5733,7 +6279,7 @@ func (x *UpdateMissionResponse) String() string {
 func (*UpdateMissionResponse) ProtoMessage() {}
 
 func (x *UpdateMissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[73]
+	mi := &file_daemon_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5746,7 +6292,7 @@ func (x *UpdateMissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMissionResponse.ProtoReflect.Descriptor instead.
 func (*UpdateMissionResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{73}
+	return file_daemon_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *UpdateMissionResponse) GetSuccess() bool {
@@ -5802,7 +6348,7 @@ type ResolveMissionDependenciesRequest struct {
 
 func (x *ResolveMissionDependenciesRequest) Reset() {
 	*x = ResolveMissionDependenciesRequest{}
-	mi := &file_daemon_proto_msgTypes[74]
+	mi := &file_daemon_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5814,7 +6360,7 @@ func (x *ResolveMissionDependenciesRequest) String() string {
 func (*ResolveMissionDependenciesRequest) ProtoMessage() {}
 
 func (x *ResolveMissionDependenciesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[74]
+	mi := &file_daemon_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5827,7 +6373,7 @@ func (x *ResolveMissionDependenciesRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ResolveMissionDependenciesRequest.ProtoReflect.Descriptor instead.
 func (*ResolveMissionDependenciesRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{74}
+	return file_daemon_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *ResolveMissionDependenciesRequest) GetWorkflowPath() string {
@@ -5852,7 +6398,7 @@ type ResolveMissionDependenciesResponse struct {
 
 func (x *ResolveMissionDependenciesResponse) Reset() {
 	*x = ResolveMissionDependenciesResponse{}
-	mi := &file_daemon_proto_msgTypes[75]
+	mi := &file_daemon_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5864,7 +6410,7 @@ func (x *ResolveMissionDependenciesResponse) String() string {
 func (*ResolveMissionDependenciesResponse) ProtoMessage() {}
 
 func (x *ResolveMissionDependenciesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[75]
+	mi := &file_daemon_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5877,7 +6423,7 @@ func (x *ResolveMissionDependenciesResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ResolveMissionDependenciesResponse.ProtoReflect.Descriptor instead.
 func (*ResolveMissionDependenciesResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{75}
+	return file_daemon_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *ResolveMissionDependenciesResponse) GetSuccess() bool {
@@ -5912,7 +6458,7 @@ type ValidateMissionDependenciesRequest struct {
 
 func (x *ValidateMissionDependenciesRequest) Reset() {
 	*x = ValidateMissionDependenciesRequest{}
-	mi := &file_daemon_proto_msgTypes[76]
+	mi := &file_daemon_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5924,7 +6470,7 @@ func (x *ValidateMissionDependenciesRequest) String() string {
 func (*ValidateMissionDependenciesRequest) ProtoMessage() {}
 
 func (x *ValidateMissionDependenciesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[76]
+	mi := &file_daemon_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5937,7 +6483,7 @@ func (x *ValidateMissionDependenciesRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ValidateMissionDependenciesRequest.ProtoReflect.Descriptor instead.
 func (*ValidateMissionDependenciesRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{76}
+	return file_daemon_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *ValidateMissionDependenciesRequest) GetWorkflowPath() string {
@@ -5962,7 +6508,7 @@ type ValidateMissionDependenciesResponse struct {
 
 func (x *ValidateMissionDependenciesResponse) Reset() {
 	*x = ValidateMissionDependenciesResponse{}
-	mi := &file_daemon_proto_msgTypes[77]
+	mi := &file_daemon_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5974,7 +6520,7 @@ func (x *ValidateMissionDependenciesResponse) String() string {
 func (*ValidateMissionDependenciesResponse) ProtoMessage() {}
 
 func (x *ValidateMissionDependenciesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[77]
+	mi := &file_daemon_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5987,7 +6533,7 @@ func (x *ValidateMissionDependenciesResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ValidateMissionDependenciesResponse.ProtoReflect.Descriptor instead.
 func (*ValidateMissionDependenciesResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{77}
+	return file_daemon_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *ValidateMissionDependenciesResponse) GetSuccess() bool {
@@ -6024,7 +6570,7 @@ type EnsureDependenciesRunningRequest struct {
 
 func (x *EnsureDependenciesRunningRequest) Reset() {
 	*x = EnsureDependenciesRunningRequest{}
-	mi := &file_daemon_proto_msgTypes[78]
+	mi := &file_daemon_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6036,7 +6582,7 @@ func (x *EnsureDependenciesRunningRequest) String() string {
 func (*EnsureDependenciesRunningRequest) ProtoMessage() {}
 
 func (x *EnsureDependenciesRunningRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[78]
+	mi := &file_daemon_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6049,7 +6595,7 @@ func (x *EnsureDependenciesRunningRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureDependenciesRunningRequest.ProtoReflect.Descriptor instead.
 func (*EnsureDependenciesRunningRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{78}
+	return file_daemon_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *EnsureDependenciesRunningRequest) GetWorkflowPath() string {
@@ -6083,7 +6629,7 @@ type EnsureDependenciesRunningResponse struct {
 
 func (x *EnsureDependenciesRunningResponse) Reset() {
 	*x = EnsureDependenciesRunningResponse{}
-	mi := &file_daemon_proto_msgTypes[79]
+	mi := &file_daemon_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6095,7 +6641,7 @@ func (x *EnsureDependenciesRunningResponse) String() string {
 func (*EnsureDependenciesRunningResponse) ProtoMessage() {}
 
 func (x *EnsureDependenciesRunningResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[79]
+	mi := &file_daemon_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6108,7 +6654,7 @@ func (x *EnsureDependenciesRunningResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use EnsureDependenciesRunningResponse.ProtoReflect.Descriptor instead.
 func (*EnsureDependenciesRunningResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{79}
+	return file_daemon_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *EnsureDependenciesRunningResponse) GetSuccess() bool {
@@ -6162,7 +6708,7 @@ type DependencyTree struct {
 
 func (x *DependencyTree) Reset() {
 	*x = DependencyTree{}
-	mi := &file_daemon_proto_msgTypes[80]
+	mi := &file_daemon_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6174,7 +6720,7 @@ func (x *DependencyTree) String() string {
 func (*DependencyTree) ProtoMessage() {}
 
 func (x *DependencyTree) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[80]
+	mi := &file_daemon_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6187,7 +6733,7 @@ func (x *DependencyTree) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DependencyTree.ProtoReflect.Descriptor instead.
 func (*DependencyTree) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{80}
+	return file_daemon_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *DependencyTree) GetRoots() []*DependencyNode {
@@ -6270,7 +6816,7 @@ type DependencyNode struct {
 
 func (x *DependencyNode) Reset() {
 	*x = DependencyNode{}
-	mi := &file_daemon_proto_msgTypes[81]
+	mi := &file_daemon_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6282,7 +6828,7 @@ func (x *DependencyNode) String() string {
 func (*DependencyNode) ProtoMessage() {}
 
 func (x *DependencyNode) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[81]
+	mi := &file_daemon_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6295,7 +6841,7 @@ func (x *DependencyNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DependencyNode.ProtoReflect.Descriptor instead.
 func (*DependencyNode) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{81}
+	return file_daemon_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *DependencyNode) GetKind() string {
@@ -6408,7 +6954,7 @@ type ValidationResult struct {
 
 func (x *ValidationResult) Reset() {
 	*x = ValidationResult{}
-	mi := &file_daemon_proto_msgTypes[82]
+	mi := &file_daemon_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6420,7 +6966,7 @@ func (x *ValidationResult) String() string {
 func (*ValidationResult) ProtoMessage() {}
 
 func (x *ValidationResult) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[82]
+	mi := &file_daemon_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6433,7 +6979,7 @@ func (x *ValidationResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidationResult.ProtoReflect.Descriptor instead.
 func (*ValidationResult) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{82}
+	return file_daemon_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *ValidationResult) GetValid() bool {
@@ -6535,7 +7081,7 @@ type VersionMismatchInfo struct {
 
 func (x *VersionMismatchInfo) Reset() {
 	*x = VersionMismatchInfo{}
-	mi := &file_daemon_proto_msgTypes[83]
+	mi := &file_daemon_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6547,7 +7093,7 @@ func (x *VersionMismatchInfo) String() string {
 func (*VersionMismatchInfo) ProtoMessage() {}
 
 func (x *VersionMismatchInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[83]
+	mi := &file_daemon_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6560,7 +7106,7 @@ func (x *VersionMismatchInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VersionMismatchInfo.ProtoReflect.Descriptor instead.
 func (*VersionMismatchInfo) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{83}
+	return file_daemon_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *VersionMismatchInfo) GetNode() *DependencyNode {
@@ -6619,7 +7165,7 @@ type Mission struct {
 
 func (x *Mission) Reset() {
 	*x = Mission{}
-	mi := &file_daemon_proto_msgTypes[84]
+	mi := &file_daemon_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6631,7 +7177,7 @@ func (x *Mission) String() string {
 func (*Mission) ProtoMessage() {}
 
 func (x *Mission) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[84]
+	mi := &file_daemon_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6644,7 +7190,7 @@ func (x *Mission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Mission.ProtoReflect.Descriptor instead.
 func (*Mission) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{84}
+	return file_daemon_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *Mission) GetId() string {
@@ -6759,7 +7305,7 @@ type MissionConstraints struct {
 
 func (x *MissionConstraints) Reset() {
 	*x = MissionConstraints{}
-	mi := &file_daemon_proto_msgTypes[85]
+	mi := &file_daemon_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6771,7 +7317,7 @@ func (x *MissionConstraints) String() string {
 func (*MissionConstraints) ProtoMessage() {}
 
 func (x *MissionConstraints) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[85]
+	mi := &file_daemon_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6784,7 +7330,7 @@ func (x *MissionConstraints) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionConstraints.ProtoReflect.Descriptor instead.
 func (*MissionConstraints) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{85}
+	return file_daemon_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *MissionConstraints) GetMaxDurationSeconds() int32 {
@@ -6856,7 +7402,7 @@ type MissionMetrics struct {
 
 func (x *MissionMetrics) Reset() {
 	*x = MissionMetrics{}
-	mi := &file_daemon_proto_msgTypes[86]
+	mi := &file_daemon_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6868,7 +7414,7 @@ func (x *MissionMetrics) String() string {
 func (*MissionMetrics) ProtoMessage() {}
 
 func (x *MissionMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[86]
+	mi := &file_daemon_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6881,7 +7427,7 @@ func (x *MissionMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionMetrics.ProtoReflect.Descriptor instead.
 func (*MissionMetrics) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{86}
+	return file_daemon_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *MissionMetrics) GetTurnsUsed() int32 {
@@ -6968,7 +7514,7 @@ type MissionCheckpoint struct {
 
 func (x *MissionCheckpoint) Reset() {
 	*x = MissionCheckpoint{}
-	mi := &file_daemon_proto_msgTypes[87]
+	mi := &file_daemon_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6980,7 +7526,7 @@ func (x *MissionCheckpoint) String() string {
 func (*MissionCheckpoint) ProtoMessage() {}
 
 func (x *MissionCheckpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[87]
+	mi := &file_daemon_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6993,7 +7539,7 @@ func (x *MissionCheckpoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionCheckpoint.ProtoReflect.Descriptor instead.
 func (*MissionCheckpoint) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{87}
+	return file_daemon_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *MissionCheckpoint) GetId() string {
@@ -7061,7 +7607,7 @@ type MissionDefinition struct {
 
 func (x *MissionDefinition) Reset() {
 	*x = MissionDefinition{}
-	mi := &file_daemon_proto_msgTypes[88]
+	mi := &file_daemon_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7073,7 +7619,7 @@ func (x *MissionDefinition) String() string {
 func (*MissionDefinition) ProtoMessage() {}
 
 func (x *MissionDefinition) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[88]
+	mi := &file_daemon_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7086,7 +7632,7 @@ func (x *MissionDefinition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionDefinition.ProtoReflect.Descriptor instead.
 func (*MissionDefinition) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{88}
+	return file_daemon_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *MissionDefinition) GetName() string {
@@ -7169,7 +7715,7 @@ type CreateMissionRequest struct {
 
 func (x *CreateMissionRequest) Reset() {
 	*x = CreateMissionRequest{}
-	mi := &file_daemon_proto_msgTypes[89]
+	mi := &file_daemon_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7181,7 +7727,7 @@ func (x *CreateMissionRequest) String() string {
 func (*CreateMissionRequest) ProtoMessage() {}
 
 func (x *CreateMissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[89]
+	mi := &file_daemon_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7194,7 +7740,7 @@ func (x *CreateMissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateMissionRequest.ProtoReflect.Descriptor instead.
 func (*CreateMissionRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{89}
+	return file_daemon_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *CreateMissionRequest) GetName() string {
@@ -7326,7 +7872,7 @@ type CreateMissionResponse struct {
 
 func (x *CreateMissionResponse) Reset() {
 	*x = CreateMissionResponse{}
-	mi := &file_daemon_proto_msgTypes[90]
+	mi := &file_daemon_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7338,7 +7884,7 @@ func (x *CreateMissionResponse) String() string {
 func (*CreateMissionResponse) ProtoMessage() {}
 
 func (x *CreateMissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[90]
+	mi := &file_daemon_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7351,7 +7897,7 @@ func (x *CreateMissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateMissionResponse.ProtoReflect.Descriptor instead.
 func (*CreateMissionResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{90}
+	return file_daemon_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *CreateMissionResponse) GetSuccess() bool {
@@ -7390,7 +7936,7 @@ type Seed struct {
 
 func (x *Seed) Reset() {
 	*x = Seed{}
-	mi := &file_daemon_proto_msgTypes[91]
+	mi := &file_daemon_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7402,7 +7948,7 @@ func (x *Seed) String() string {
 func (*Seed) ProtoMessage() {}
 
 func (x *Seed) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[91]
+	mi := &file_daemon_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7415,7 +7961,7 @@ func (x *Seed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Seed.ProtoReflect.Descriptor instead.
 func (*Seed) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{91}
+	return file_daemon_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *Seed) GetValue() string {
@@ -7458,7 +8004,7 @@ type InlineTargetConfig struct {
 
 func (x *InlineTargetConfig) Reset() {
 	*x = InlineTargetConfig{}
-	mi := &file_daemon_proto_msgTypes[92]
+	mi := &file_daemon_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7470,7 +8016,7 @@ func (x *InlineTargetConfig) String() string {
 func (*InlineTargetConfig) ProtoMessage() {}
 
 func (x *InlineTargetConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[92]
+	mi := &file_daemon_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7483,7 +8029,7 @@ func (x *InlineTargetConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InlineTargetConfig.ProtoReflect.Descriptor instead.
 func (*InlineTargetConfig) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{92}
+	return file_daemon_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *InlineTargetConfig) GetSeeds() []*Seed {
@@ -7538,7 +8084,7 @@ type InlineWorkflowConfig struct {
 
 func (x *InlineWorkflowConfig) Reset() {
 	*x = InlineWorkflowConfig{}
-	mi := &file_daemon_proto_msgTypes[93]
+	mi := &file_daemon_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7550,7 +8096,7 @@ func (x *InlineWorkflowConfig) String() string {
 func (*InlineWorkflowConfig) ProtoMessage() {}
 
 func (x *InlineWorkflowConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[93]
+	mi := &file_daemon_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7563,7 +8109,7 @@ func (x *InlineWorkflowConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InlineWorkflowConfig.ProtoReflect.Descriptor instead.
 func (*InlineWorkflowConfig) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{93}
+	return file_daemon_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *InlineWorkflowConfig) GetName() string {
@@ -7613,7 +8159,7 @@ type InlineNodeConfig struct {
 
 func (x *InlineNodeConfig) Reset() {
 	*x = InlineNodeConfig{}
-	mi := &file_daemon_proto_msgTypes[94]
+	mi := &file_daemon_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7625,7 +8171,7 @@ func (x *InlineNodeConfig) String() string {
 func (*InlineNodeConfig) ProtoMessage() {}
 
 func (x *InlineNodeConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[94]
+	mi := &file_daemon_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7638,7 +8184,7 @@ func (x *InlineNodeConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InlineNodeConfig.ProtoReflect.Descriptor instead.
 func (*InlineNodeConfig) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{94}
+	return file_daemon_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *InlineNodeConfig) GetId() string {
@@ -7691,7 +8237,7 @@ type InlineEdgeConfig struct {
 
 func (x *InlineEdgeConfig) Reset() {
 	*x = InlineEdgeConfig{}
-	mi := &file_daemon_proto_msgTypes[95]
+	mi := &file_daemon_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7703,7 +8249,7 @@ func (x *InlineEdgeConfig) String() string {
 func (*InlineEdgeConfig) ProtoMessage() {}
 
 func (x *InlineEdgeConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[95]
+	mi := &file_daemon_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7716,7 +8262,7 @@ func (x *InlineEdgeConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InlineEdgeConfig.ProtoReflect.Descriptor instead.
 func (*InlineEdgeConfig) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{95}
+	return file_daemon_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *InlineEdgeConfig) GetFrom() string {
@@ -7736,6 +8282,116 @@ func (x *InlineEdgeConfig) GetTo() string {
 func (x *InlineEdgeConfig) GetCondition() string {
 	if x != nil {
 		return x.Condition
+	}
+	return ""
+}
+
+// ShutdownRequest requests graceful shutdown of the daemon.
+type ShutdownRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// force indicates whether to force immediate shutdown (skip graceful drain)
+	Force bool `protobuf:"varint,1,opt,name=force,proto3" json:"force,omitempty"`
+	// timeout_seconds is the maximum time to wait for graceful shutdown (0 = default 30s)
+	TimeoutSeconds int32 `protobuf:"varint,2,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ShutdownRequest) Reset() {
+	*x = ShutdownRequest{}
+	mi := &file_daemon_proto_msgTypes[99]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownRequest) ProtoMessage() {}
+
+func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[99]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
+func (*ShutdownRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{99}
+}
+
+func (x *ShutdownRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+func (x *ShutdownRequest) GetTimeoutSeconds() int32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+// ShutdownResponse confirms the shutdown request was accepted.
+type ShutdownResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// success indicates if the shutdown request was accepted
+	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	// message provides additional context about the shutdown
+	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownResponse) Reset() {
+	*x = ShutdownResponse{}
+	mi := &file_daemon_proto_msgTypes[100]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownResponse) ProtoMessage() {}
+
+func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[100]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownResponse.ProtoReflect.Descriptor instead.
+func (*ShutdownResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{100}
+}
+
+func (x *ShutdownResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ShutdownResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
 	}
 	return ""
 }
@@ -7922,7 +8578,7 @@ const file_daemon_proto_rawDesc = "" +
 	"\vevent_types\x18\x01 \x03(\tR\n" +
 	"eventTypes\x12\x1d\n" +
 	"\n" +
-	"mission_id\x18\x02 \x01(\tR\tmissionId\"\xa5\x03\n" +
+	"mission_id\x18\x02 \x01(\tR\tmissionId\"\xf4\x04\n" +
 	"\x05Event\x12\x1d\n" +
 	"\n" +
 	"event_type\x18\x01 \x01(\tR\teventType\x12\x1c\n" +
@@ -7933,7 +8589,12 @@ const file_daemon_proto_rawDesc = "" +
 	"\fattack_event\x18\x06 \x01(\v2\x1d.gibson.daemon.v1.AttackEventH\x00R\vattackEvent\x12?\n" +
 	"\vagent_event\x18\a \x01(\v2\x1c.gibson.daemon.v1.AgentEventH\x00R\n" +
 	"agentEvent\x12E\n" +
-	"\rfinding_event\x18\b \x01(\v2\x1e.gibson.daemon.v1.FindingEventH\x00R\ffindingEventB\a\n" +
+	"\rfinding_event\x18\b \x01(\v2\x1e.gibson.daemon.v1.FindingEventH\x00R\ffindingEvent\x12<\n" +
+	"\n" +
+	"tool_event\x18\t \x01(\v2\x1b.gibson.daemon.v1.ToolEventH\x00R\ttoolEvent\x129\n" +
+	"\tllm_event\x18\n" +
+	" \x01(\v2\x1a.gibson.daemon.v1.LLMEventH\x00R\bllmEvent\x12T\n" +
+	"\x12orchestrator_event\x18\v \x01(\v2#.gibson.daemon.v1.OrchestratorEventH\x00R\x11orchestratorEventB\a\n" +
 	"\x05event\"\xca\x01\n" +
 	"\n" +
 	"AgentEvent\x12\x1d\n" +
@@ -7951,7 +8612,72 @@ const file_daemon_proto_rawDesc = "" +
 	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x127\n" +
 	"\afinding\x18\x03 \x01(\v2\x1d.gibson.daemon.v1.FindingInfoR\afinding\x12\x1d\n" +
 	"\n" +
-	"mission_id\x18\x04 \x01(\tR\tmissionId\"?\n" +
+	"mission_id\x18\x04 \x01(\tR\tmissionId\"\xb7\x03\n" +
+	"\tToolEvent\x12\x1d\n" +
+	"\n" +
+	"event_type\x18\x01 \x01(\tR\teventType\x12\x1c\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x12\x1b\n" +
+	"\ttool_name\x18\x03 \x01(\tR\btoolName\x12\x19\n" +
+	"\bagent_id\x18\x04 \x01(\tR\aagentId\x12\x1d\n" +
+	"\n" +
+	"agent_name\x18\x05 \x01(\tR\tagentName\x12\x1d\n" +
+	"\n" +
+	"mission_id\x18\x06 \x01(\tR\tmissionId\x12\x18\n" +
+	"\amessage\x18\a \x01(\tR\amessage\x12\x1a\n" +
+	"\bduration\x18\b \x01(\x01R\bduration\x12\x1a\n" +
+	"\bprogress\x18\t \x01(\x01R\bprogress\x12\x14\n" +
+	"\x05error\x18\n" +
+	" \x01(\tR\x05error\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\v \x01(\tR\terrorCode\x12\x18\n" +
+	"\awarning\x18\f \x01(\tR\awarning\x12)\n" +
+	"\x10warning_severity\x18\r \x01(\tR\x0fwarningSeverity\x12+\n" +
+	"\x04data\x18\x0e \x01(\v2\x17.gibson.common.TypedMapR\x04data\"\xd2\x03\n" +
+	"\bLLMEvent\x12\x1d\n" +
+	"\n" +
+	"event_type\x18\x01 \x01(\tR\teventType\x12\x1c\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x12\x19\n" +
+	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1d\n" +
+	"\n" +
+	"agent_name\x18\x04 \x01(\tR\tagentName\x12\x14\n" +
+	"\x05model\x18\x05 \x01(\tR\x05model\x12\x12\n" +
+	"\x04slot\x18\x06 \x01(\tR\x04slot\x12#\n" +
+	"\rmessage_count\x18\a \x01(\x05R\fmessageCount\x12#\n" +
+	"\rprompt_tokens\x18\b \x01(\x05R\fpromptTokens\x12+\n" +
+	"\x11completion_tokens\x18\t \x01(\x05R\x10completionTokens\x12!\n" +
+	"\ftotal_tokens\x18\n" +
+	" \x01(\x05R\vtotalTokens\x12\x1f\n" +
+	"\vduration_ms\x18\v \x01(\x01R\n" +
+	"durationMs\x12\x16\n" +
+	"\x06cached\x18\f \x01(\bR\x06cached\x12\x14\n" +
+	"\x05error\x18\r \x01(\tR\x05error\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\x0e \x01(\tR\terrorCode\x12\x1d\n" +
+	"\n" +
+	"will_retry\x18\x0f \x01(\bR\twillRetry\"\xd3\x03\n" +
+	"\x11OrchestratorEvent\x12\x1d\n" +
+	"\n" +
+	"event_type\x18\x01 \x01(\tR\teventType\x12\x1c\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x12\x1d\n" +
+	"\n" +
+	"mission_id\x18\x03 \x01(\tR\tmissionId\x12\x1c\n" +
+	"\titeration\x18\x04 \x01(\x05R\titeration\x12\x16\n" +
+	"\x06action\x18\x05 \x01(\tR\x06action\x12$\n" +
+	"\x0etarget_node_id\x18\x06 \x01(\tR\ftargetNodeId\x12*\n" +
+	"\x11target_agent_name\x18\a \x01(\tR\x0ftargetAgentName\x12\x1e\n" +
+	"\n" +
+	"confidence\x18\b \x01(\x01R\n" +
+	"confidence\x12\x1c\n" +
+	"\treasoning\x18\t \x01(\tR\treasoning\x12\x1f\n" +
+	"\vtokens_used\x18\n" +
+	" \x01(\x05R\n" +
+	"tokensUsed\x12\x1d\n" +
+	"\n" +
+	"latency_ms\x18\v \x01(\x01R\tlatencyMs\x12\x1f\n" +
+	"\vapproval_id\x18\f \x01(\tR\n" +
+	"approvalId\x12\x12\n" +
+	"\x04risk\x18\r \x01(\tR\x04risk\x12'\n" +
+	"\x0ftimeout_seconds\x18\x0e \x01(\x05R\x0etimeoutSeconds\"?\n" +
 	"\x15StartComponentRequest\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"\x8d\x01\n" +
@@ -8402,7 +9128,13 @@ const file_daemon_proto_rawDesc = "" +
 	"\x10InlineEdgeConfig\x12\x12\n" +
 	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
 	"\x02to\x18\x02 \x01(\tR\x02to\x12\x1c\n" +
-	"\tcondition\x18\x03 \x01(\tR\tcondition*\xd9\x01\n" +
+	"\tcondition\x18\x03 \x01(\tR\tcondition\"P\n" +
+	"\x0fShutdownRequest\x12\x14\n" +
+	"\x05force\x18\x01 \x01(\bR\x05force\x12'\n" +
+	"\x0ftimeout_seconds\x18\x02 \x01(\x05R\x0etimeoutSeconds\"F\n" +
+	"\x10ShutdownResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage*\xd9\x01\n" +
 	"\rMissionStatus\x12\x1e\n" +
 	"\x1aMISSION_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16MISSION_STATUS_PENDING\x10\x01\x12\x1a\n" +
@@ -8415,7 +9147,7 @@ const file_daemon_proto_rawDesc = "" +
 	"\x0eSOURCE_UNKNOWN\x10\x00\x12\x1b\n" +
 	"\x17SOURCE_MISSION_EXPLICIT\x10\x01\x12\x17\n" +
 	"\x13SOURCE_MISSION_NODE\x10\x02\x12\x13\n" +
-	"\x0fSOURCE_MANIFEST\x10\x032\xde\x1a\n" +
+	"\x0fSOURCE_MANIFEST\x10\x032\xb1\x1b\n" +
 	"\rDaemonService\x12N\n" +
 	"\aConnect\x12 .gibson.daemon.v1.ConnectRequest\x1a!.gibson.daemon.v1.ConnectResponse\x12E\n" +
 	"\x04Ping\x12\x1d.gibson.daemon.v1.PingRequest\x1a\x1e.gibson.daemon.v1.PingResponse\x12K\n" +
@@ -8452,7 +9184,8 @@ const file_daemon_proto_rawDesc = "" +
 	"\rUpdateMission\x12&.gibson.daemon.v1.UpdateMissionRequest\x1a'.gibson.daemon.v1.UpdateMissionResponse\x12\x87\x01\n" +
 	"\x1aResolveMissionDependencies\x123.gibson.daemon.v1.ResolveMissionDependenciesRequest\x1a4.gibson.daemon.v1.ResolveMissionDependenciesResponse\x12\x8a\x01\n" +
 	"\x1bValidateMissionDependencies\x124.gibson.daemon.v1.ValidateMissionDependenciesRequest\x1a5.gibson.daemon.v1.ValidateMissionDependenciesResponse\x12\x84\x01\n" +
-	"\x19EnsureDependenciesRunning\x122.gibson.daemon.v1.EnsureDependenciesRunningRequest\x1a3.gibson.daemon.v1.EnsureDependenciesRunningResponseB7Z5github.com/zero-day-ai/gibson/internal/daemon/api;apib\x06proto3"
+	"\x19EnsureDependenciesRunning\x122.gibson.daemon.v1.EnsureDependenciesRunningRequest\x1a3.gibson.daemon.v1.EnsureDependenciesRunningResponse\x12Q\n" +
+	"\bShutdown\x12!.gibson.daemon.v1.ShutdownRequest\x1a\".gibson.daemon.v1.ShutdownResponseB7Z5github.com/zero-day-ai/gibson/internal/daemon/api;apib\x06proto3"
 
 var (
 	file_daemon_proto_rawDescOnce sync.Once
@@ -8467,7 +9200,7 @@ func file_daemon_proto_rawDescGZIP() []byte {
 }
 
 var file_daemon_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 104)
+var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 109)
 var file_daemon_proto_goTypes = []any{
 	(MissionStatus)(0),                          // 0: gibson.daemon.v1.MissionStatus
 	(DependencySource)(0),                       // 1: gibson.daemon.v1.DependencySource
@@ -8505,214 +9238,225 @@ var file_daemon_proto_goTypes = []any{
 	(*Event)(nil),                               // 33: gibson.daemon.v1.Event
 	(*AgentEvent)(nil),                          // 34: gibson.daemon.v1.AgentEvent
 	(*FindingEvent)(nil),                        // 35: gibson.daemon.v1.FindingEvent
-	(*StartComponentRequest)(nil),               // 36: gibson.daemon.v1.StartComponentRequest
-	(*StartComponentResponse)(nil),              // 37: gibson.daemon.v1.StartComponentResponse
-	(*StopComponentRequest)(nil),                // 38: gibson.daemon.v1.StopComponentRequest
-	(*StopComponentResponse)(nil),               // 39: gibson.daemon.v1.StopComponentResponse
-	(*OperationResult)(nil),                     // 40: gibson.daemon.v1.OperationResult
-	(*PauseMissionRequest)(nil),                 // 41: gibson.daemon.v1.PauseMissionRequest
-	(*PauseMissionResponse)(nil),                // 42: gibson.daemon.v1.PauseMissionResponse
-	(*ResumeMissionRequest)(nil),                // 43: gibson.daemon.v1.ResumeMissionRequest
-	(*GetMissionHistoryRequest)(nil),            // 44: gibson.daemon.v1.GetMissionHistoryRequest
-	(*GetMissionHistoryResponse)(nil),           // 45: gibson.daemon.v1.GetMissionHistoryResponse
-	(*MissionRun)(nil),                          // 46: gibson.daemon.v1.MissionRun
-	(*GetMissionCheckpointsRequest)(nil),        // 47: gibson.daemon.v1.GetMissionCheckpointsRequest
-	(*GetMissionCheckpointsResponse)(nil),       // 48: gibson.daemon.v1.GetMissionCheckpointsResponse
-	(*CheckpointInfo)(nil),                      // 49: gibson.daemon.v1.CheckpointInfo
-	(*InstallComponentRequest)(nil),             // 50: gibson.daemon.v1.InstallComponentRequest
-	(*InstallComponentResponse)(nil),            // 51: gibson.daemon.v1.InstallComponentResponse
-	(*InstallAllComponentRequest)(nil),          // 52: gibson.daemon.v1.InstallAllComponentRequest
-	(*InstallAllComponentResponse)(nil),         // 53: gibson.daemon.v1.InstallAllComponentResponse
-	(*InstallAllResultItem)(nil),                // 54: gibson.daemon.v1.InstallAllResultItem
-	(*InstallAllFailedItem)(nil),                // 55: gibson.daemon.v1.InstallAllFailedItem
-	(*UninstallComponentRequest)(nil),           // 56: gibson.daemon.v1.UninstallComponentRequest
-	(*UninstallComponentResponse)(nil),          // 57: gibson.daemon.v1.UninstallComponentResponse
-	(*UpdateComponentRequest)(nil),              // 58: gibson.daemon.v1.UpdateComponentRequest
-	(*UpdateComponentResponse)(nil),             // 59: gibson.daemon.v1.UpdateComponentResponse
-	(*BuildComponentRequest)(nil),               // 60: gibson.daemon.v1.BuildComponentRequest
-	(*BuildComponentResponse)(nil),              // 61: gibson.daemon.v1.BuildComponentResponse
-	(*ShowComponentRequest)(nil),                // 62: gibson.daemon.v1.ShowComponentRequest
-	(*ShowComponentResponse)(nil),               // 63: gibson.daemon.v1.ShowComponentResponse
-	(*GetComponentLogsRequest)(nil),             // 64: gibson.daemon.v1.GetComponentLogsRequest
-	(*LogEntry)(nil),                            // 65: gibson.daemon.v1.LogEntry
-	(*InstallMissionRequest)(nil),               // 66: gibson.daemon.v1.InstallMissionRequest
-	(*InstallMissionResponse)(nil),              // 67: gibson.daemon.v1.InstallMissionResponse
-	(*InstalledDependency)(nil),                 // 68: gibson.daemon.v1.InstalledDependency
-	(*UninstallMissionRequest)(nil),             // 69: gibson.daemon.v1.UninstallMissionRequest
-	(*UninstallMissionResponse)(nil),            // 70: gibson.daemon.v1.UninstallMissionResponse
-	(*ListMissionDefinitionsRequest)(nil),       // 71: gibson.daemon.v1.ListMissionDefinitionsRequest
-	(*ListMissionDefinitionsResponse)(nil),      // 72: gibson.daemon.v1.ListMissionDefinitionsResponse
-	(*MissionDefinitionInfo)(nil),               // 73: gibson.daemon.v1.MissionDefinitionInfo
-	(*UpdateMissionRequest)(nil),                // 74: gibson.daemon.v1.UpdateMissionRequest
-	(*UpdateMissionResponse)(nil),               // 75: gibson.daemon.v1.UpdateMissionResponse
-	(*ResolveMissionDependenciesRequest)(nil),   // 76: gibson.daemon.v1.ResolveMissionDependenciesRequest
-	(*ResolveMissionDependenciesResponse)(nil),  // 77: gibson.daemon.v1.ResolveMissionDependenciesResponse
-	(*ValidateMissionDependenciesRequest)(nil),  // 78: gibson.daemon.v1.ValidateMissionDependenciesRequest
-	(*ValidateMissionDependenciesResponse)(nil), // 79: gibson.daemon.v1.ValidateMissionDependenciesResponse
-	(*EnsureDependenciesRunningRequest)(nil),    // 80: gibson.daemon.v1.EnsureDependenciesRunningRequest
-	(*EnsureDependenciesRunningResponse)(nil),   // 81: gibson.daemon.v1.EnsureDependenciesRunningResponse
-	(*DependencyTree)(nil),                      // 82: gibson.daemon.v1.DependencyTree
-	(*DependencyNode)(nil),                      // 83: gibson.daemon.v1.DependencyNode
-	(*ValidationResult)(nil),                    // 84: gibson.daemon.v1.ValidationResult
-	(*VersionMismatchInfo)(nil),                 // 85: gibson.daemon.v1.VersionMismatchInfo
-	(*Mission)(nil),                             // 86: gibson.daemon.v1.Mission
-	(*MissionConstraints)(nil),                  // 87: gibson.daemon.v1.MissionConstraints
-	(*MissionMetrics)(nil),                      // 88: gibson.daemon.v1.MissionMetrics
-	(*MissionCheckpoint)(nil),                   // 89: gibson.daemon.v1.MissionCheckpoint
-	(*MissionDefinition)(nil),                   // 90: gibson.daemon.v1.MissionDefinition
-	(*CreateMissionRequest)(nil),                // 91: gibson.daemon.v1.CreateMissionRequest
-	(*CreateMissionResponse)(nil),               // 92: gibson.daemon.v1.CreateMissionResponse
-	(*Seed)(nil),                                // 93: gibson.daemon.v1.Seed
-	(*InlineTargetConfig)(nil),                  // 94: gibson.daemon.v1.InlineTargetConfig
-	(*InlineWorkflowConfig)(nil),                // 95: gibson.daemon.v1.InlineWorkflowConfig
-	(*InlineNodeConfig)(nil),                    // 96: gibson.daemon.v1.InlineNodeConfig
-	(*InlineEdgeConfig)(nil),                    // 97: gibson.daemon.v1.InlineEdgeConfig
-	nil,                                         // 98: gibson.daemon.v1.RunMissionRequest.VariablesEntry
-	nil,                                         // 99: gibson.daemon.v1.Capabilities.FeaturesEntry
-	nil,                                         // 100: gibson.daemon.v1.Capabilities.ArgAlternativesEntry
-	nil,                                         // 101: gibson.daemon.v1.RunAttackRequest.OptionsEntry
-	nil,                                         // 102: gibson.daemon.v1.DependencyTree.NodesEntry
-	nil,                                         // 103: gibson.daemon.v1.CreateMissionRequest.MetadataEntry
-	nil,                                         // 104: gibson.daemon.v1.InlineTargetConfig.MetadataEntry
-	nil,                                         // 105: gibson.daemon.v1.InlineWorkflowConfig.MetadataEntry
-	(*commonpb.TypedMap)(nil),                   // 106: gibson.common.TypedMap
-	(*commonpb.TypedValue)(nil),                 // 107: gibson.common.TypedValue
+	(*ToolEvent)(nil),                           // 36: gibson.daemon.v1.ToolEvent
+	(*LLMEvent)(nil),                            // 37: gibson.daemon.v1.LLMEvent
+	(*OrchestratorEvent)(nil),                   // 38: gibson.daemon.v1.OrchestratorEvent
+	(*StartComponentRequest)(nil),               // 39: gibson.daemon.v1.StartComponentRequest
+	(*StartComponentResponse)(nil),              // 40: gibson.daemon.v1.StartComponentResponse
+	(*StopComponentRequest)(nil),                // 41: gibson.daemon.v1.StopComponentRequest
+	(*StopComponentResponse)(nil),               // 42: gibson.daemon.v1.StopComponentResponse
+	(*OperationResult)(nil),                     // 43: gibson.daemon.v1.OperationResult
+	(*PauseMissionRequest)(nil),                 // 44: gibson.daemon.v1.PauseMissionRequest
+	(*PauseMissionResponse)(nil),                // 45: gibson.daemon.v1.PauseMissionResponse
+	(*ResumeMissionRequest)(nil),                // 46: gibson.daemon.v1.ResumeMissionRequest
+	(*GetMissionHistoryRequest)(nil),            // 47: gibson.daemon.v1.GetMissionHistoryRequest
+	(*GetMissionHistoryResponse)(nil),           // 48: gibson.daemon.v1.GetMissionHistoryResponse
+	(*MissionRun)(nil),                          // 49: gibson.daemon.v1.MissionRun
+	(*GetMissionCheckpointsRequest)(nil),        // 50: gibson.daemon.v1.GetMissionCheckpointsRequest
+	(*GetMissionCheckpointsResponse)(nil),       // 51: gibson.daemon.v1.GetMissionCheckpointsResponse
+	(*CheckpointInfo)(nil),                      // 52: gibson.daemon.v1.CheckpointInfo
+	(*InstallComponentRequest)(nil),             // 53: gibson.daemon.v1.InstallComponentRequest
+	(*InstallComponentResponse)(nil),            // 54: gibson.daemon.v1.InstallComponentResponse
+	(*InstallAllComponentRequest)(nil),          // 55: gibson.daemon.v1.InstallAllComponentRequest
+	(*InstallAllComponentResponse)(nil),         // 56: gibson.daemon.v1.InstallAllComponentResponse
+	(*InstallAllResultItem)(nil),                // 57: gibson.daemon.v1.InstallAllResultItem
+	(*InstallAllFailedItem)(nil),                // 58: gibson.daemon.v1.InstallAllFailedItem
+	(*UninstallComponentRequest)(nil),           // 59: gibson.daemon.v1.UninstallComponentRequest
+	(*UninstallComponentResponse)(nil),          // 60: gibson.daemon.v1.UninstallComponentResponse
+	(*UpdateComponentRequest)(nil),              // 61: gibson.daemon.v1.UpdateComponentRequest
+	(*UpdateComponentResponse)(nil),             // 62: gibson.daemon.v1.UpdateComponentResponse
+	(*BuildComponentRequest)(nil),               // 63: gibson.daemon.v1.BuildComponentRequest
+	(*BuildComponentResponse)(nil),              // 64: gibson.daemon.v1.BuildComponentResponse
+	(*ShowComponentRequest)(nil),                // 65: gibson.daemon.v1.ShowComponentRequest
+	(*ShowComponentResponse)(nil),               // 66: gibson.daemon.v1.ShowComponentResponse
+	(*GetComponentLogsRequest)(nil),             // 67: gibson.daemon.v1.GetComponentLogsRequest
+	(*LogEntry)(nil),                            // 68: gibson.daemon.v1.LogEntry
+	(*InstallMissionRequest)(nil),               // 69: gibson.daemon.v1.InstallMissionRequest
+	(*InstallMissionResponse)(nil),              // 70: gibson.daemon.v1.InstallMissionResponse
+	(*InstalledDependency)(nil),                 // 71: gibson.daemon.v1.InstalledDependency
+	(*UninstallMissionRequest)(nil),             // 72: gibson.daemon.v1.UninstallMissionRequest
+	(*UninstallMissionResponse)(nil),            // 73: gibson.daemon.v1.UninstallMissionResponse
+	(*ListMissionDefinitionsRequest)(nil),       // 74: gibson.daemon.v1.ListMissionDefinitionsRequest
+	(*ListMissionDefinitionsResponse)(nil),      // 75: gibson.daemon.v1.ListMissionDefinitionsResponse
+	(*MissionDefinitionInfo)(nil),               // 76: gibson.daemon.v1.MissionDefinitionInfo
+	(*UpdateMissionRequest)(nil),                // 77: gibson.daemon.v1.UpdateMissionRequest
+	(*UpdateMissionResponse)(nil),               // 78: gibson.daemon.v1.UpdateMissionResponse
+	(*ResolveMissionDependenciesRequest)(nil),   // 79: gibson.daemon.v1.ResolveMissionDependenciesRequest
+	(*ResolveMissionDependenciesResponse)(nil),  // 80: gibson.daemon.v1.ResolveMissionDependenciesResponse
+	(*ValidateMissionDependenciesRequest)(nil),  // 81: gibson.daemon.v1.ValidateMissionDependenciesRequest
+	(*ValidateMissionDependenciesResponse)(nil), // 82: gibson.daemon.v1.ValidateMissionDependenciesResponse
+	(*EnsureDependenciesRunningRequest)(nil),    // 83: gibson.daemon.v1.EnsureDependenciesRunningRequest
+	(*EnsureDependenciesRunningResponse)(nil),   // 84: gibson.daemon.v1.EnsureDependenciesRunningResponse
+	(*DependencyTree)(nil),                      // 85: gibson.daemon.v1.DependencyTree
+	(*DependencyNode)(nil),                      // 86: gibson.daemon.v1.DependencyNode
+	(*ValidationResult)(nil),                    // 87: gibson.daemon.v1.ValidationResult
+	(*VersionMismatchInfo)(nil),                 // 88: gibson.daemon.v1.VersionMismatchInfo
+	(*Mission)(nil),                             // 89: gibson.daemon.v1.Mission
+	(*MissionConstraints)(nil),                  // 90: gibson.daemon.v1.MissionConstraints
+	(*MissionMetrics)(nil),                      // 91: gibson.daemon.v1.MissionMetrics
+	(*MissionCheckpoint)(nil),                   // 92: gibson.daemon.v1.MissionCheckpoint
+	(*MissionDefinition)(nil),                   // 93: gibson.daemon.v1.MissionDefinition
+	(*CreateMissionRequest)(nil),                // 94: gibson.daemon.v1.CreateMissionRequest
+	(*CreateMissionResponse)(nil),               // 95: gibson.daemon.v1.CreateMissionResponse
+	(*Seed)(nil),                                // 96: gibson.daemon.v1.Seed
+	(*InlineTargetConfig)(nil),                  // 97: gibson.daemon.v1.InlineTargetConfig
+	(*InlineWorkflowConfig)(nil),                // 98: gibson.daemon.v1.InlineWorkflowConfig
+	(*InlineNodeConfig)(nil),                    // 99: gibson.daemon.v1.InlineNodeConfig
+	(*InlineEdgeConfig)(nil),                    // 100: gibson.daemon.v1.InlineEdgeConfig
+	(*ShutdownRequest)(nil),                     // 101: gibson.daemon.v1.ShutdownRequest
+	(*ShutdownResponse)(nil),                    // 102: gibson.daemon.v1.ShutdownResponse
+	nil,                                         // 103: gibson.daemon.v1.RunMissionRequest.VariablesEntry
+	nil,                                         // 104: gibson.daemon.v1.Capabilities.FeaturesEntry
+	nil,                                         // 105: gibson.daemon.v1.Capabilities.ArgAlternativesEntry
+	nil,                                         // 106: gibson.daemon.v1.RunAttackRequest.OptionsEntry
+	nil,                                         // 107: gibson.daemon.v1.DependencyTree.NodesEntry
+	nil,                                         // 108: gibson.daemon.v1.CreateMissionRequest.MetadataEntry
+	nil,                                         // 109: gibson.daemon.v1.InlineTargetConfig.MetadataEntry
+	nil,                                         // 110: gibson.daemon.v1.InlineWorkflowConfig.MetadataEntry
+	(*commonpb.TypedMap)(nil),                   // 111: gibson.common.TypedMap
+	(*commonpb.TypedValue)(nil),                 // 112: gibson.common.TypedValue
 }
 var file_daemon_proto_depIdxs = []int32{
-	98,  // 0: gibson.daemon.v1.RunMissionRequest.variables:type_name -> gibson.daemon.v1.RunMissionRequest.VariablesEntry
-	106, // 1: gibson.daemon.v1.MissionEvent.data:type_name -> gibson.common.TypedMap
-	40,  // 2: gibson.daemon.v1.MissionEvent.result:type_name -> gibson.daemon.v1.OperationResult
+	103, // 0: gibson.daemon.v1.RunMissionRequest.variables:type_name -> gibson.daemon.v1.RunMissionRequest.VariablesEntry
+	111, // 1: gibson.daemon.v1.MissionEvent.data:type_name -> gibson.common.TypedMap
+	43,  // 2: gibson.daemon.v1.MissionEvent.result:type_name -> gibson.daemon.v1.OperationResult
 	14,  // 3: gibson.daemon.v1.ListMissionsResponse.missions:type_name -> gibson.daemon.v1.MissionInfo
 	17,  // 4: gibson.daemon.v1.ListAgentsResponse.agents:type_name -> gibson.daemon.v1.AgentInfo
 	17,  // 5: gibson.daemon.v1.AgentStatusResponse.agent:type_name -> gibson.daemon.v1.AgentInfo
 	23,  // 6: gibson.daemon.v1.ListToolsResponse.tools:type_name -> gibson.daemon.v1.ToolInfo
-	99,  // 7: gibson.daemon.v1.Capabilities.features:type_name -> gibson.daemon.v1.Capabilities.FeaturesEntry
-	100, // 8: gibson.daemon.v1.Capabilities.arg_alternatives:type_name -> gibson.daemon.v1.Capabilities.ArgAlternativesEntry
+	104, // 7: gibson.daemon.v1.Capabilities.features:type_name -> gibson.daemon.v1.Capabilities.FeaturesEntry
+	105, // 8: gibson.daemon.v1.Capabilities.arg_alternatives:type_name -> gibson.daemon.v1.Capabilities.ArgAlternativesEntry
 	22,  // 9: gibson.daemon.v1.ToolInfo.capabilities:type_name -> gibson.daemon.v1.Capabilities
 	26,  // 10: gibson.daemon.v1.ListPluginsResponse.plugins:type_name -> gibson.daemon.v1.PluginInfo
-	106, // 11: gibson.daemon.v1.QueryPluginRequest.params:type_name -> gibson.common.TypedMap
-	107, // 12: gibson.daemon.v1.QueryPluginResponse.result:type_name -> gibson.common.TypedValue
-	101, // 13: gibson.daemon.v1.RunAttackRequest.options:type_name -> gibson.daemon.v1.RunAttackRequest.OptionsEntry
-	106, // 14: gibson.daemon.v1.AttackEvent.data:type_name -> gibson.common.TypedMap
+	111, // 11: gibson.daemon.v1.QueryPluginRequest.params:type_name -> gibson.common.TypedMap
+	112, // 12: gibson.daemon.v1.QueryPluginResponse.result:type_name -> gibson.common.TypedValue
+	106, // 13: gibson.daemon.v1.RunAttackRequest.options:type_name -> gibson.daemon.v1.RunAttackRequest.OptionsEntry
+	111, // 14: gibson.daemon.v1.AttackEvent.data:type_name -> gibson.common.TypedMap
 	31,  // 15: gibson.daemon.v1.AttackEvent.finding:type_name -> gibson.daemon.v1.FindingInfo
-	40,  // 16: gibson.daemon.v1.AttackEvent.result:type_name -> gibson.daemon.v1.OperationResult
-	106, // 17: gibson.daemon.v1.Event.data:type_name -> gibson.common.TypedMap
+	43,  // 16: gibson.daemon.v1.AttackEvent.result:type_name -> gibson.daemon.v1.OperationResult
+	111, // 17: gibson.daemon.v1.Event.data:type_name -> gibson.common.TypedMap
 	9,   // 18: gibson.daemon.v1.Event.mission_event:type_name -> gibson.daemon.v1.MissionEvent
 	30,  // 19: gibson.daemon.v1.Event.attack_event:type_name -> gibson.daemon.v1.AttackEvent
 	34,  // 20: gibson.daemon.v1.Event.agent_event:type_name -> gibson.daemon.v1.AgentEvent
 	35,  // 21: gibson.daemon.v1.Event.finding_event:type_name -> gibson.daemon.v1.FindingEvent
-	106, // 22: gibson.daemon.v1.AgentEvent.data:type_name -> gibson.common.TypedMap
-	31,  // 23: gibson.daemon.v1.FindingEvent.finding:type_name -> gibson.daemon.v1.FindingInfo
-	46,  // 24: gibson.daemon.v1.GetMissionHistoryResponse.runs:type_name -> gibson.daemon.v1.MissionRun
-	49,  // 25: gibson.daemon.v1.GetMissionCheckpointsResponse.checkpoints:type_name -> gibson.daemon.v1.CheckpointInfo
-	54,  // 26: gibson.daemon.v1.InstallAllComponentResponse.successful:type_name -> gibson.daemon.v1.InstallAllResultItem
-	54,  // 27: gibson.daemon.v1.InstallAllComponentResponse.skipped:type_name -> gibson.daemon.v1.InstallAllResultItem
-	55,  // 28: gibson.daemon.v1.InstallAllComponentResponse.failed:type_name -> gibson.daemon.v1.InstallAllFailedItem
-	106, // 29: gibson.daemon.v1.LogEntry.fields:type_name -> gibson.common.TypedMap
-	68,  // 30: gibson.daemon.v1.InstallMissionResponse.dependencies:type_name -> gibson.daemon.v1.InstalledDependency
-	73,  // 31: gibson.daemon.v1.ListMissionDefinitionsResponse.missions:type_name -> gibson.daemon.v1.MissionDefinitionInfo
-	82,  // 32: gibson.daemon.v1.ResolveMissionDependenciesResponse.tree:type_name -> gibson.daemon.v1.DependencyTree
-	84,  // 33: gibson.daemon.v1.ValidateMissionDependenciesResponse.result:type_name -> gibson.daemon.v1.ValidationResult
-	83,  // 34: gibson.daemon.v1.DependencyTree.roots:type_name -> gibson.daemon.v1.DependencyNode
-	102, // 35: gibson.daemon.v1.DependencyTree.nodes:type_name -> gibson.daemon.v1.DependencyTree.NodesEntry
-	83,  // 36: gibson.daemon.v1.DependencyTree.agents:type_name -> gibson.daemon.v1.DependencyNode
-	83,  // 37: gibson.daemon.v1.DependencyTree.tools:type_name -> gibson.daemon.v1.DependencyNode
-	83,  // 38: gibson.daemon.v1.DependencyTree.plugins:type_name -> gibson.daemon.v1.DependencyNode
-	1,   // 39: gibson.daemon.v1.DependencyNode.source:type_name -> gibson.daemon.v1.DependencySource
-	83,  // 40: gibson.daemon.v1.ValidationResult.not_installed:type_name -> gibson.daemon.v1.DependencyNode
-	83,  // 41: gibson.daemon.v1.ValidationResult.not_running:type_name -> gibson.daemon.v1.DependencyNode
-	83,  // 42: gibson.daemon.v1.ValidationResult.unhealthy:type_name -> gibson.daemon.v1.DependencyNode
-	85,  // 43: gibson.daemon.v1.ValidationResult.version_mismatches:type_name -> gibson.daemon.v1.VersionMismatchInfo
-	83,  // 44: gibson.daemon.v1.VersionMismatchInfo.node:type_name -> gibson.daemon.v1.DependencyNode
-	0,   // 45: gibson.daemon.v1.Mission.status:type_name -> gibson.daemon.v1.MissionStatus
-	87,  // 46: gibson.daemon.v1.Mission.constraints:type_name -> gibson.daemon.v1.MissionConstraints
-	88,  // 47: gibson.daemon.v1.Mission.metrics:type_name -> gibson.daemon.v1.MissionMetrics
-	89,  // 48: gibson.daemon.v1.Mission.checkpoint:type_name -> gibson.daemon.v1.MissionCheckpoint
-	94,  // 49: gibson.daemon.v1.CreateMissionRequest.inline_target:type_name -> gibson.daemon.v1.InlineTargetConfig
-	95,  // 50: gibson.daemon.v1.CreateMissionRequest.inline_workflow:type_name -> gibson.daemon.v1.InlineWorkflowConfig
-	87,  // 51: gibson.daemon.v1.CreateMissionRequest.constraints:type_name -> gibson.daemon.v1.MissionConstraints
-	103, // 52: gibson.daemon.v1.CreateMissionRequest.metadata:type_name -> gibson.daemon.v1.CreateMissionRequest.MetadataEntry
-	86,  // 53: gibson.daemon.v1.CreateMissionResponse.mission:type_name -> gibson.daemon.v1.Mission
-	93,  // 54: gibson.daemon.v1.InlineTargetConfig.seeds:type_name -> gibson.daemon.v1.Seed
-	104, // 55: gibson.daemon.v1.InlineTargetConfig.metadata:type_name -> gibson.daemon.v1.InlineTargetConfig.MetadataEntry
-	96,  // 56: gibson.daemon.v1.InlineWorkflowConfig.nodes:type_name -> gibson.daemon.v1.InlineNodeConfig
-	97,  // 57: gibson.daemon.v1.InlineWorkflowConfig.edges:type_name -> gibson.daemon.v1.InlineEdgeConfig
-	105, // 58: gibson.daemon.v1.InlineWorkflowConfig.metadata:type_name -> gibson.daemon.v1.InlineWorkflowConfig.MetadataEntry
-	106, // 59: gibson.daemon.v1.InlineNodeConfig.config:type_name -> gibson.common.TypedMap
-	83,  // 60: gibson.daemon.v1.DependencyTree.NodesEntry.value:type_name -> gibson.daemon.v1.DependencyNode
-	2,   // 61: gibson.daemon.v1.DaemonService.Connect:input_type -> gibson.daemon.v1.ConnectRequest
-	4,   // 62: gibson.daemon.v1.DaemonService.Ping:input_type -> gibson.daemon.v1.PingRequest
-	6,   // 63: gibson.daemon.v1.DaemonService.Status:input_type -> gibson.daemon.v1.StatusRequest
-	8,   // 64: gibson.daemon.v1.DaemonService.RunMission:input_type -> gibson.daemon.v1.RunMissionRequest
-	10,  // 65: gibson.daemon.v1.DaemonService.StopMission:input_type -> gibson.daemon.v1.StopMissionRequest
-	91,  // 66: gibson.daemon.v1.DaemonService.CreateMission:input_type -> gibson.daemon.v1.CreateMissionRequest
-	12,  // 67: gibson.daemon.v1.DaemonService.ListMissions:input_type -> gibson.daemon.v1.ListMissionsRequest
-	15,  // 68: gibson.daemon.v1.DaemonService.ListAgents:input_type -> gibson.daemon.v1.ListAgentsRequest
-	18,  // 69: gibson.daemon.v1.DaemonService.GetAgentStatus:input_type -> gibson.daemon.v1.GetAgentStatusRequest
-	20,  // 70: gibson.daemon.v1.DaemonService.ListTools:input_type -> gibson.daemon.v1.ListToolsRequest
-	24,  // 71: gibson.daemon.v1.DaemonService.ListPlugins:input_type -> gibson.daemon.v1.ListPluginsRequest
-	27,  // 72: gibson.daemon.v1.DaemonService.QueryPlugin:input_type -> gibson.daemon.v1.QueryPluginRequest
-	29,  // 73: gibson.daemon.v1.DaemonService.RunAttack:input_type -> gibson.daemon.v1.RunAttackRequest
-	32,  // 74: gibson.daemon.v1.DaemonService.Subscribe:input_type -> gibson.daemon.v1.SubscribeRequest
-	36,  // 75: gibson.daemon.v1.DaemonService.StartComponent:input_type -> gibson.daemon.v1.StartComponentRequest
-	38,  // 76: gibson.daemon.v1.DaemonService.StopComponent:input_type -> gibson.daemon.v1.StopComponentRequest
-	41,  // 77: gibson.daemon.v1.DaemonService.PauseMission:input_type -> gibson.daemon.v1.PauseMissionRequest
-	43,  // 78: gibson.daemon.v1.DaemonService.ResumeMission:input_type -> gibson.daemon.v1.ResumeMissionRequest
-	44,  // 79: gibson.daemon.v1.DaemonService.GetMissionHistory:input_type -> gibson.daemon.v1.GetMissionHistoryRequest
-	47,  // 80: gibson.daemon.v1.DaemonService.GetMissionCheckpoints:input_type -> gibson.daemon.v1.GetMissionCheckpointsRequest
-	50,  // 81: gibson.daemon.v1.DaemonService.InstallComponent:input_type -> gibson.daemon.v1.InstallComponentRequest
-	52,  // 82: gibson.daemon.v1.DaemonService.InstallAllComponent:input_type -> gibson.daemon.v1.InstallAllComponentRequest
-	56,  // 83: gibson.daemon.v1.DaemonService.UninstallComponent:input_type -> gibson.daemon.v1.UninstallComponentRequest
-	58,  // 84: gibson.daemon.v1.DaemonService.UpdateComponent:input_type -> gibson.daemon.v1.UpdateComponentRequest
-	60,  // 85: gibson.daemon.v1.DaemonService.BuildComponent:input_type -> gibson.daemon.v1.BuildComponentRequest
-	62,  // 86: gibson.daemon.v1.DaemonService.ShowComponent:input_type -> gibson.daemon.v1.ShowComponentRequest
-	64,  // 87: gibson.daemon.v1.DaemonService.GetComponentLogs:input_type -> gibson.daemon.v1.GetComponentLogsRequest
-	66,  // 88: gibson.daemon.v1.DaemonService.InstallMission:input_type -> gibson.daemon.v1.InstallMissionRequest
-	69,  // 89: gibson.daemon.v1.DaemonService.UninstallMission:input_type -> gibson.daemon.v1.UninstallMissionRequest
-	71,  // 90: gibson.daemon.v1.DaemonService.ListMissionDefinitions:input_type -> gibson.daemon.v1.ListMissionDefinitionsRequest
-	74,  // 91: gibson.daemon.v1.DaemonService.UpdateMission:input_type -> gibson.daemon.v1.UpdateMissionRequest
-	76,  // 92: gibson.daemon.v1.DaemonService.ResolveMissionDependencies:input_type -> gibson.daemon.v1.ResolveMissionDependenciesRequest
-	78,  // 93: gibson.daemon.v1.DaemonService.ValidateMissionDependencies:input_type -> gibson.daemon.v1.ValidateMissionDependenciesRequest
-	80,  // 94: gibson.daemon.v1.DaemonService.EnsureDependenciesRunning:input_type -> gibson.daemon.v1.EnsureDependenciesRunningRequest
-	3,   // 95: gibson.daemon.v1.DaemonService.Connect:output_type -> gibson.daemon.v1.ConnectResponse
-	5,   // 96: gibson.daemon.v1.DaemonService.Ping:output_type -> gibson.daemon.v1.PingResponse
-	7,   // 97: gibson.daemon.v1.DaemonService.Status:output_type -> gibson.daemon.v1.StatusResponse
-	9,   // 98: gibson.daemon.v1.DaemonService.RunMission:output_type -> gibson.daemon.v1.MissionEvent
-	11,  // 99: gibson.daemon.v1.DaemonService.StopMission:output_type -> gibson.daemon.v1.StopMissionResponse
-	92,  // 100: gibson.daemon.v1.DaemonService.CreateMission:output_type -> gibson.daemon.v1.CreateMissionResponse
-	13,  // 101: gibson.daemon.v1.DaemonService.ListMissions:output_type -> gibson.daemon.v1.ListMissionsResponse
-	16,  // 102: gibson.daemon.v1.DaemonService.ListAgents:output_type -> gibson.daemon.v1.ListAgentsResponse
-	19,  // 103: gibson.daemon.v1.DaemonService.GetAgentStatus:output_type -> gibson.daemon.v1.AgentStatusResponse
-	21,  // 104: gibson.daemon.v1.DaemonService.ListTools:output_type -> gibson.daemon.v1.ListToolsResponse
-	25,  // 105: gibson.daemon.v1.DaemonService.ListPlugins:output_type -> gibson.daemon.v1.ListPluginsResponse
-	28,  // 106: gibson.daemon.v1.DaemonService.QueryPlugin:output_type -> gibson.daemon.v1.QueryPluginResponse
-	30,  // 107: gibson.daemon.v1.DaemonService.RunAttack:output_type -> gibson.daemon.v1.AttackEvent
-	33,  // 108: gibson.daemon.v1.DaemonService.Subscribe:output_type -> gibson.daemon.v1.Event
-	37,  // 109: gibson.daemon.v1.DaemonService.StartComponent:output_type -> gibson.daemon.v1.StartComponentResponse
-	39,  // 110: gibson.daemon.v1.DaemonService.StopComponent:output_type -> gibson.daemon.v1.StopComponentResponse
-	42,  // 111: gibson.daemon.v1.DaemonService.PauseMission:output_type -> gibson.daemon.v1.PauseMissionResponse
-	9,   // 112: gibson.daemon.v1.DaemonService.ResumeMission:output_type -> gibson.daemon.v1.MissionEvent
-	45,  // 113: gibson.daemon.v1.DaemonService.GetMissionHistory:output_type -> gibson.daemon.v1.GetMissionHistoryResponse
-	48,  // 114: gibson.daemon.v1.DaemonService.GetMissionCheckpoints:output_type -> gibson.daemon.v1.GetMissionCheckpointsResponse
-	51,  // 115: gibson.daemon.v1.DaemonService.InstallComponent:output_type -> gibson.daemon.v1.InstallComponentResponse
-	53,  // 116: gibson.daemon.v1.DaemonService.InstallAllComponent:output_type -> gibson.daemon.v1.InstallAllComponentResponse
-	57,  // 117: gibson.daemon.v1.DaemonService.UninstallComponent:output_type -> gibson.daemon.v1.UninstallComponentResponse
-	59,  // 118: gibson.daemon.v1.DaemonService.UpdateComponent:output_type -> gibson.daemon.v1.UpdateComponentResponse
-	61,  // 119: gibson.daemon.v1.DaemonService.BuildComponent:output_type -> gibson.daemon.v1.BuildComponentResponse
-	63,  // 120: gibson.daemon.v1.DaemonService.ShowComponent:output_type -> gibson.daemon.v1.ShowComponentResponse
-	65,  // 121: gibson.daemon.v1.DaemonService.GetComponentLogs:output_type -> gibson.daemon.v1.LogEntry
-	67,  // 122: gibson.daemon.v1.DaemonService.InstallMission:output_type -> gibson.daemon.v1.InstallMissionResponse
-	70,  // 123: gibson.daemon.v1.DaemonService.UninstallMission:output_type -> gibson.daemon.v1.UninstallMissionResponse
-	72,  // 124: gibson.daemon.v1.DaemonService.ListMissionDefinitions:output_type -> gibson.daemon.v1.ListMissionDefinitionsResponse
-	75,  // 125: gibson.daemon.v1.DaemonService.UpdateMission:output_type -> gibson.daemon.v1.UpdateMissionResponse
-	77,  // 126: gibson.daemon.v1.DaemonService.ResolveMissionDependencies:output_type -> gibson.daemon.v1.ResolveMissionDependenciesResponse
-	79,  // 127: gibson.daemon.v1.DaemonService.ValidateMissionDependencies:output_type -> gibson.daemon.v1.ValidateMissionDependenciesResponse
-	81,  // 128: gibson.daemon.v1.DaemonService.EnsureDependenciesRunning:output_type -> gibson.daemon.v1.EnsureDependenciesRunningResponse
-	95,  // [95:129] is the sub-list for method output_type
-	61,  // [61:95] is the sub-list for method input_type
-	61,  // [61:61] is the sub-list for extension type_name
-	61,  // [61:61] is the sub-list for extension extendee
-	0,   // [0:61] is the sub-list for field type_name
+	36,  // 22: gibson.daemon.v1.Event.tool_event:type_name -> gibson.daemon.v1.ToolEvent
+	37,  // 23: gibson.daemon.v1.Event.llm_event:type_name -> gibson.daemon.v1.LLMEvent
+	38,  // 24: gibson.daemon.v1.Event.orchestrator_event:type_name -> gibson.daemon.v1.OrchestratorEvent
+	111, // 25: gibson.daemon.v1.AgentEvent.data:type_name -> gibson.common.TypedMap
+	31,  // 26: gibson.daemon.v1.FindingEvent.finding:type_name -> gibson.daemon.v1.FindingInfo
+	111, // 27: gibson.daemon.v1.ToolEvent.data:type_name -> gibson.common.TypedMap
+	49,  // 28: gibson.daemon.v1.GetMissionHistoryResponse.runs:type_name -> gibson.daemon.v1.MissionRun
+	52,  // 29: gibson.daemon.v1.GetMissionCheckpointsResponse.checkpoints:type_name -> gibson.daemon.v1.CheckpointInfo
+	57,  // 30: gibson.daemon.v1.InstallAllComponentResponse.successful:type_name -> gibson.daemon.v1.InstallAllResultItem
+	57,  // 31: gibson.daemon.v1.InstallAllComponentResponse.skipped:type_name -> gibson.daemon.v1.InstallAllResultItem
+	58,  // 32: gibson.daemon.v1.InstallAllComponentResponse.failed:type_name -> gibson.daemon.v1.InstallAllFailedItem
+	111, // 33: gibson.daemon.v1.LogEntry.fields:type_name -> gibson.common.TypedMap
+	71,  // 34: gibson.daemon.v1.InstallMissionResponse.dependencies:type_name -> gibson.daemon.v1.InstalledDependency
+	76,  // 35: gibson.daemon.v1.ListMissionDefinitionsResponse.missions:type_name -> gibson.daemon.v1.MissionDefinitionInfo
+	85,  // 36: gibson.daemon.v1.ResolveMissionDependenciesResponse.tree:type_name -> gibson.daemon.v1.DependencyTree
+	87,  // 37: gibson.daemon.v1.ValidateMissionDependenciesResponse.result:type_name -> gibson.daemon.v1.ValidationResult
+	86,  // 38: gibson.daemon.v1.DependencyTree.roots:type_name -> gibson.daemon.v1.DependencyNode
+	107, // 39: gibson.daemon.v1.DependencyTree.nodes:type_name -> gibson.daemon.v1.DependencyTree.NodesEntry
+	86,  // 40: gibson.daemon.v1.DependencyTree.agents:type_name -> gibson.daemon.v1.DependencyNode
+	86,  // 41: gibson.daemon.v1.DependencyTree.tools:type_name -> gibson.daemon.v1.DependencyNode
+	86,  // 42: gibson.daemon.v1.DependencyTree.plugins:type_name -> gibson.daemon.v1.DependencyNode
+	1,   // 43: gibson.daemon.v1.DependencyNode.source:type_name -> gibson.daemon.v1.DependencySource
+	86,  // 44: gibson.daemon.v1.ValidationResult.not_installed:type_name -> gibson.daemon.v1.DependencyNode
+	86,  // 45: gibson.daemon.v1.ValidationResult.not_running:type_name -> gibson.daemon.v1.DependencyNode
+	86,  // 46: gibson.daemon.v1.ValidationResult.unhealthy:type_name -> gibson.daemon.v1.DependencyNode
+	88,  // 47: gibson.daemon.v1.ValidationResult.version_mismatches:type_name -> gibson.daemon.v1.VersionMismatchInfo
+	86,  // 48: gibson.daemon.v1.VersionMismatchInfo.node:type_name -> gibson.daemon.v1.DependencyNode
+	0,   // 49: gibson.daemon.v1.Mission.status:type_name -> gibson.daemon.v1.MissionStatus
+	90,  // 50: gibson.daemon.v1.Mission.constraints:type_name -> gibson.daemon.v1.MissionConstraints
+	91,  // 51: gibson.daemon.v1.Mission.metrics:type_name -> gibson.daemon.v1.MissionMetrics
+	92,  // 52: gibson.daemon.v1.Mission.checkpoint:type_name -> gibson.daemon.v1.MissionCheckpoint
+	97,  // 53: gibson.daemon.v1.CreateMissionRequest.inline_target:type_name -> gibson.daemon.v1.InlineTargetConfig
+	98,  // 54: gibson.daemon.v1.CreateMissionRequest.inline_workflow:type_name -> gibson.daemon.v1.InlineWorkflowConfig
+	90,  // 55: gibson.daemon.v1.CreateMissionRequest.constraints:type_name -> gibson.daemon.v1.MissionConstraints
+	108, // 56: gibson.daemon.v1.CreateMissionRequest.metadata:type_name -> gibson.daemon.v1.CreateMissionRequest.MetadataEntry
+	89,  // 57: gibson.daemon.v1.CreateMissionResponse.mission:type_name -> gibson.daemon.v1.Mission
+	96,  // 58: gibson.daemon.v1.InlineTargetConfig.seeds:type_name -> gibson.daemon.v1.Seed
+	109, // 59: gibson.daemon.v1.InlineTargetConfig.metadata:type_name -> gibson.daemon.v1.InlineTargetConfig.MetadataEntry
+	99,  // 60: gibson.daemon.v1.InlineWorkflowConfig.nodes:type_name -> gibson.daemon.v1.InlineNodeConfig
+	100, // 61: gibson.daemon.v1.InlineWorkflowConfig.edges:type_name -> gibson.daemon.v1.InlineEdgeConfig
+	110, // 62: gibson.daemon.v1.InlineWorkflowConfig.metadata:type_name -> gibson.daemon.v1.InlineWorkflowConfig.MetadataEntry
+	111, // 63: gibson.daemon.v1.InlineNodeConfig.config:type_name -> gibson.common.TypedMap
+	86,  // 64: gibson.daemon.v1.DependencyTree.NodesEntry.value:type_name -> gibson.daemon.v1.DependencyNode
+	2,   // 65: gibson.daemon.v1.DaemonService.Connect:input_type -> gibson.daemon.v1.ConnectRequest
+	4,   // 66: gibson.daemon.v1.DaemonService.Ping:input_type -> gibson.daemon.v1.PingRequest
+	6,   // 67: gibson.daemon.v1.DaemonService.Status:input_type -> gibson.daemon.v1.StatusRequest
+	8,   // 68: gibson.daemon.v1.DaemonService.RunMission:input_type -> gibson.daemon.v1.RunMissionRequest
+	10,  // 69: gibson.daemon.v1.DaemonService.StopMission:input_type -> gibson.daemon.v1.StopMissionRequest
+	94,  // 70: gibson.daemon.v1.DaemonService.CreateMission:input_type -> gibson.daemon.v1.CreateMissionRequest
+	12,  // 71: gibson.daemon.v1.DaemonService.ListMissions:input_type -> gibson.daemon.v1.ListMissionsRequest
+	15,  // 72: gibson.daemon.v1.DaemonService.ListAgents:input_type -> gibson.daemon.v1.ListAgentsRequest
+	18,  // 73: gibson.daemon.v1.DaemonService.GetAgentStatus:input_type -> gibson.daemon.v1.GetAgentStatusRequest
+	20,  // 74: gibson.daemon.v1.DaemonService.ListTools:input_type -> gibson.daemon.v1.ListToolsRequest
+	24,  // 75: gibson.daemon.v1.DaemonService.ListPlugins:input_type -> gibson.daemon.v1.ListPluginsRequest
+	27,  // 76: gibson.daemon.v1.DaemonService.QueryPlugin:input_type -> gibson.daemon.v1.QueryPluginRequest
+	29,  // 77: gibson.daemon.v1.DaemonService.RunAttack:input_type -> gibson.daemon.v1.RunAttackRequest
+	32,  // 78: gibson.daemon.v1.DaemonService.Subscribe:input_type -> gibson.daemon.v1.SubscribeRequest
+	39,  // 79: gibson.daemon.v1.DaemonService.StartComponent:input_type -> gibson.daemon.v1.StartComponentRequest
+	41,  // 80: gibson.daemon.v1.DaemonService.StopComponent:input_type -> gibson.daemon.v1.StopComponentRequest
+	44,  // 81: gibson.daemon.v1.DaemonService.PauseMission:input_type -> gibson.daemon.v1.PauseMissionRequest
+	46,  // 82: gibson.daemon.v1.DaemonService.ResumeMission:input_type -> gibson.daemon.v1.ResumeMissionRequest
+	47,  // 83: gibson.daemon.v1.DaemonService.GetMissionHistory:input_type -> gibson.daemon.v1.GetMissionHistoryRequest
+	50,  // 84: gibson.daemon.v1.DaemonService.GetMissionCheckpoints:input_type -> gibson.daemon.v1.GetMissionCheckpointsRequest
+	53,  // 85: gibson.daemon.v1.DaemonService.InstallComponent:input_type -> gibson.daemon.v1.InstallComponentRequest
+	55,  // 86: gibson.daemon.v1.DaemonService.InstallAllComponent:input_type -> gibson.daemon.v1.InstallAllComponentRequest
+	59,  // 87: gibson.daemon.v1.DaemonService.UninstallComponent:input_type -> gibson.daemon.v1.UninstallComponentRequest
+	61,  // 88: gibson.daemon.v1.DaemonService.UpdateComponent:input_type -> gibson.daemon.v1.UpdateComponentRequest
+	63,  // 89: gibson.daemon.v1.DaemonService.BuildComponent:input_type -> gibson.daemon.v1.BuildComponentRequest
+	65,  // 90: gibson.daemon.v1.DaemonService.ShowComponent:input_type -> gibson.daemon.v1.ShowComponentRequest
+	67,  // 91: gibson.daemon.v1.DaemonService.GetComponentLogs:input_type -> gibson.daemon.v1.GetComponentLogsRequest
+	69,  // 92: gibson.daemon.v1.DaemonService.InstallMission:input_type -> gibson.daemon.v1.InstallMissionRequest
+	72,  // 93: gibson.daemon.v1.DaemonService.UninstallMission:input_type -> gibson.daemon.v1.UninstallMissionRequest
+	74,  // 94: gibson.daemon.v1.DaemonService.ListMissionDefinitions:input_type -> gibson.daemon.v1.ListMissionDefinitionsRequest
+	77,  // 95: gibson.daemon.v1.DaemonService.UpdateMission:input_type -> gibson.daemon.v1.UpdateMissionRequest
+	79,  // 96: gibson.daemon.v1.DaemonService.ResolveMissionDependencies:input_type -> gibson.daemon.v1.ResolveMissionDependenciesRequest
+	81,  // 97: gibson.daemon.v1.DaemonService.ValidateMissionDependencies:input_type -> gibson.daemon.v1.ValidateMissionDependenciesRequest
+	83,  // 98: gibson.daemon.v1.DaemonService.EnsureDependenciesRunning:input_type -> gibson.daemon.v1.EnsureDependenciesRunningRequest
+	101, // 99: gibson.daemon.v1.DaemonService.Shutdown:input_type -> gibson.daemon.v1.ShutdownRequest
+	3,   // 100: gibson.daemon.v1.DaemonService.Connect:output_type -> gibson.daemon.v1.ConnectResponse
+	5,   // 101: gibson.daemon.v1.DaemonService.Ping:output_type -> gibson.daemon.v1.PingResponse
+	7,   // 102: gibson.daemon.v1.DaemonService.Status:output_type -> gibson.daemon.v1.StatusResponse
+	9,   // 103: gibson.daemon.v1.DaemonService.RunMission:output_type -> gibson.daemon.v1.MissionEvent
+	11,  // 104: gibson.daemon.v1.DaemonService.StopMission:output_type -> gibson.daemon.v1.StopMissionResponse
+	95,  // 105: gibson.daemon.v1.DaemonService.CreateMission:output_type -> gibson.daemon.v1.CreateMissionResponse
+	13,  // 106: gibson.daemon.v1.DaemonService.ListMissions:output_type -> gibson.daemon.v1.ListMissionsResponse
+	16,  // 107: gibson.daemon.v1.DaemonService.ListAgents:output_type -> gibson.daemon.v1.ListAgentsResponse
+	19,  // 108: gibson.daemon.v1.DaemonService.GetAgentStatus:output_type -> gibson.daemon.v1.AgentStatusResponse
+	21,  // 109: gibson.daemon.v1.DaemonService.ListTools:output_type -> gibson.daemon.v1.ListToolsResponse
+	25,  // 110: gibson.daemon.v1.DaemonService.ListPlugins:output_type -> gibson.daemon.v1.ListPluginsResponse
+	28,  // 111: gibson.daemon.v1.DaemonService.QueryPlugin:output_type -> gibson.daemon.v1.QueryPluginResponse
+	30,  // 112: gibson.daemon.v1.DaemonService.RunAttack:output_type -> gibson.daemon.v1.AttackEvent
+	33,  // 113: gibson.daemon.v1.DaemonService.Subscribe:output_type -> gibson.daemon.v1.Event
+	40,  // 114: gibson.daemon.v1.DaemonService.StartComponent:output_type -> gibson.daemon.v1.StartComponentResponse
+	42,  // 115: gibson.daemon.v1.DaemonService.StopComponent:output_type -> gibson.daemon.v1.StopComponentResponse
+	45,  // 116: gibson.daemon.v1.DaemonService.PauseMission:output_type -> gibson.daemon.v1.PauseMissionResponse
+	9,   // 117: gibson.daemon.v1.DaemonService.ResumeMission:output_type -> gibson.daemon.v1.MissionEvent
+	48,  // 118: gibson.daemon.v1.DaemonService.GetMissionHistory:output_type -> gibson.daemon.v1.GetMissionHistoryResponse
+	51,  // 119: gibson.daemon.v1.DaemonService.GetMissionCheckpoints:output_type -> gibson.daemon.v1.GetMissionCheckpointsResponse
+	54,  // 120: gibson.daemon.v1.DaemonService.InstallComponent:output_type -> gibson.daemon.v1.InstallComponentResponse
+	56,  // 121: gibson.daemon.v1.DaemonService.InstallAllComponent:output_type -> gibson.daemon.v1.InstallAllComponentResponse
+	60,  // 122: gibson.daemon.v1.DaemonService.UninstallComponent:output_type -> gibson.daemon.v1.UninstallComponentResponse
+	62,  // 123: gibson.daemon.v1.DaemonService.UpdateComponent:output_type -> gibson.daemon.v1.UpdateComponentResponse
+	64,  // 124: gibson.daemon.v1.DaemonService.BuildComponent:output_type -> gibson.daemon.v1.BuildComponentResponse
+	66,  // 125: gibson.daemon.v1.DaemonService.ShowComponent:output_type -> gibson.daemon.v1.ShowComponentResponse
+	68,  // 126: gibson.daemon.v1.DaemonService.GetComponentLogs:output_type -> gibson.daemon.v1.LogEntry
+	70,  // 127: gibson.daemon.v1.DaemonService.InstallMission:output_type -> gibson.daemon.v1.InstallMissionResponse
+	73,  // 128: gibson.daemon.v1.DaemonService.UninstallMission:output_type -> gibson.daemon.v1.UninstallMissionResponse
+	75,  // 129: gibson.daemon.v1.DaemonService.ListMissionDefinitions:output_type -> gibson.daemon.v1.ListMissionDefinitionsResponse
+	78,  // 130: gibson.daemon.v1.DaemonService.UpdateMission:output_type -> gibson.daemon.v1.UpdateMissionResponse
+	80,  // 131: gibson.daemon.v1.DaemonService.ResolveMissionDependencies:output_type -> gibson.daemon.v1.ResolveMissionDependenciesResponse
+	82,  // 132: gibson.daemon.v1.DaemonService.ValidateMissionDependencies:output_type -> gibson.daemon.v1.ValidateMissionDependenciesResponse
+	84,  // 133: gibson.daemon.v1.DaemonService.EnsureDependenciesRunning:output_type -> gibson.daemon.v1.EnsureDependenciesRunningResponse
+	102, // 134: gibson.daemon.v1.DaemonService.Shutdown:output_type -> gibson.daemon.v1.ShutdownResponse
+	100, // [100:135] is the sub-list for method output_type
+	65,  // [65:100] is the sub-list for method input_type
+	65,  // [65:65] is the sub-list for extension type_name
+	65,  // [65:65] is the sub-list for extension extendee
+	0,   // [0:65] is the sub-list for field type_name
 }
 
 func init() { file_daemon_proto_init() }
@@ -8725,8 +9469,11 @@ func file_daemon_proto_init() {
 		(*Event_AttackEvent)(nil),
 		(*Event_AgentEvent)(nil),
 		(*Event_FindingEvent)(nil),
+		(*Event_ToolEvent)(nil),
+		(*Event_LlmEvent)(nil),
+		(*Event_OrchestratorEvent)(nil),
 	}
-	file_daemon_proto_msgTypes[89].OneofWrappers = []any{
+	file_daemon_proto_msgTypes[92].OneofWrappers = []any{
 		(*CreateMissionRequest_TargetId)(nil),
 		(*CreateMissionRequest_InlineTarget)(nil),
 		(*CreateMissionRequest_WorkflowId)(nil),
@@ -8738,7 +9485,7 @@ func file_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_daemon_proto_rawDesc), len(file_daemon_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   104,
+			NumMessages:   109,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

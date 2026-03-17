@@ -132,10 +132,21 @@ func (c *StateClient) Search(ctx context.Context, index, query string, opts *Sea
 		return nil, fmt.Errorf("FT.SEARCH failed for index %q: %w", index, err)
 	}
 
-	// Parse the result array
-	vals, err := result.Slice()
+	// Get raw result to handle both RESP2 and RESP3 formats
+	rawResult, err := result.Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse FT.SEARCH result: %w", err)
+		return nil, fmt.Errorf("failed to get FT.SEARCH result: %w", err)
+	}
+
+	// Try RESP3 format first (map[interface{}]interface{})
+	if resultMap, ok := rawResult.(map[interface{}]interface{}); ok {
+		return parseRESP3SearchResult(resultMap, opts)
+	}
+
+	// Fall back to RESP2 format ([]interface{})
+	vals, ok := rawResult.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected FT.SEARCH result type: %T", rawResult)
 	}
 
 	if len(vals) == 0 {
@@ -158,6 +169,102 @@ func (c *StateClient) Search(ctx context.Context, index, query string, opts *Sea
 		Total:     total,
 		Documents: documents,
 	}, nil
+}
+
+// parseRESP3SearchResult parses FT.SEARCH result in RESP3 map format.
+// RESP3 format returns a map with keys: "total_results", "results", "warning", etc.
+// Each result is a map with keys: "id", "extra_attributes", "score" (if WITHSCORES).
+func parseRESP3SearchResult(resultMap map[interface{}]interface{}, opts *SearchOptions) (*SearchResult, error) {
+	// Extract total_results
+	var total int64
+	if totalVal, exists := resultMap["total_results"]; exists {
+		var err error
+		total, err = parseInteger(totalVal)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse total_results: %w", err)
+		}
+	}
+
+	// Extract results array
+	resultsVal, exists := resultMap["results"]
+	if !exists {
+		return &SearchResult{Total: total, Documents: []Document{}}, nil
+	}
+
+	results, ok := resultsVal.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("expected array for results, got %T", resultsVal)
+	}
+
+	documents := make([]Document, 0, len(results))
+	for _, r := range results {
+		docMap, ok := r.(map[interface{}]interface{})
+		if !ok {
+			continue
+		}
+
+		doc := Document{}
+
+		// Extract document ID
+		if idVal, exists := docMap["id"]; exists {
+			if id, ok := idVal.(string); ok {
+				doc.ID = id
+			}
+		}
+
+		// Extract score if present
+		if opts.WithScores {
+			if scoreVal, exists := docMap["score"]; exists {
+				score, err := parseFloat(scoreVal)
+				if err == nil {
+					doc.Score = score
+				}
+			}
+		}
+
+		// Extract extra_attributes (contains the document fields)
+		if attrsVal, exists := docMap["extra_attributes"]; exists {
+			jsonData, err := extractRESP3JSONField(attrsVal)
+			if err == nil {
+				doc.JSON = jsonData
+			}
+		}
+
+		documents = append(documents, doc)
+	}
+
+	return &SearchResult{
+		Total:     total,
+		Documents: documents,
+	}, nil
+}
+
+// extractRESP3JSONField extracts JSON data from RESP3 extra_attributes.
+// In RESP3 format, extra_attributes is a map with field names as keys.
+func extractRESP3JSONField(attrs interface{}) (json.RawMessage, error) {
+	// Try map format first (RESP3)
+	if attrMap, ok := attrs.(map[interface{}]interface{}); ok {
+		// Look for "$" or "json" field
+		for k, v := range attrMap {
+			keyStr, ok := k.(string)
+			if !ok {
+				continue
+			}
+			if keyStr == "$" || keyStr == "json" {
+				if jsonStr, ok := v.(string); ok {
+					return json.RawMessage(jsonStr), nil
+				}
+			}
+		}
+		return json.RawMessage("{}"), nil
+	}
+
+	// Try array format (field-value pairs)
+	if attrList, ok := attrs.([]interface{}); ok {
+		return extractJSONField(attrList)
+	}
+
+	return json.RawMessage("{}"), nil
 }
 
 // parseSearchDocuments parses the document array from FT.SEARCH response.

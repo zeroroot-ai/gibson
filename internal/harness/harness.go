@@ -668,6 +668,47 @@ type AgentHarness interface {
 	// Observability
 	// ────────────────────────────────────────────────────────────────────────────
 
+	// ────────────────────────────────────────────────────────────────────────────
+	// Checkpoint Access
+	// ────────────────────────────────────────────────────────────────────────────
+
+	// Checkpoint provides access to the checkpointing system for state management.
+	// This enables agents to interact with checkpoints for history tracking and
+	// cross-run continuity.
+	//
+	// Returns:
+	//   - CheckpointAccess: Interface for checkpoint operations
+	//
+	// If checkpointing is not enabled for the mission, all checkpoint methods
+	// will return ErrCheckpointingDisabled.
+	//
+	// Use this to:
+	//   - Access current checkpoint state
+	//   - Create explicit checkpoints at important milestones
+	//   - Review checkpoint history
+	//   - Access state from previous runs
+	//
+	// Example:
+	//   // Get current checkpoint
+	//   cp, err := harness.Checkpoint().GetCurrentCheckpoint()
+	//   if err != nil && err != ErrCheckpointingDisabled {
+	//       return err
+	//   }
+	//
+	//   // Create labeled checkpoint
+	//   cp, err := harness.Checkpoint().CreateCheckpoint("pre_exploit")
+	//
+	//   // Compare with previous run
+	//   prevCP, err := harness.Checkpoint().GetPreviousRunCheckpoint(1)
+	//   if err == nil {
+	//       // Compare findings, strategies, etc.
+	//   }
+	Checkpoint() CheckpointAccess
+
+	// ────────────────────────────────────────────────────────────────────────────
+	// Observability
+	// ────────────────────────────────────────────────────────────────────────────
+
 	// Tracer returns the OpenTelemetry tracer for distributed tracing.
 	// Use this to create custom spans for agent-specific operations.
 	//

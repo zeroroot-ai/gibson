@@ -150,6 +150,11 @@ service DaemonService {
   // EnsureDependenciesRunning starts any stopped dependencies in the correct topological order.
   // Ensures all components required by a mission are running before execution.
   rpc EnsureDependenciesRunning(EnsureDependenciesRunningRequest) returns (EnsureDependenciesRunningResponse);
+
+  // Shutdown requests graceful shutdown of the daemon.
+  // This is used by the CLI to stop the daemon remotely.
+  // Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
 // ConnectRequest initiates a client connection to the daemon.
@@ -627,6 +632,9 @@ message Event {
     AttackEvent attack_event = 6;
     AgentEvent agent_event = 7;
     FindingEvent finding_event = 8;
+    ToolEvent tool_event = 9;
+    LLMEvent llm_event = 10;
+    OrchestratorEvent orchestrator_event = 11;
   }
 }
 
@@ -664,6 +672,144 @@ message FindingEvent {
 
   // mission_id is the mission that discovered the finding
   string mission_id = 4;
+}
+
+// ToolEvent represents a tool execution event.
+message ToolEvent {
+  // event_type identifies the tool event type (tool.started, tool.completed, tool.failed, tool.progress, tool.warning)
+  string event_type = 1;
+
+  // timestamp is when the event occurred (Unix timestamp)
+  int64 timestamp = 2;
+
+  // tool_name is the name of the tool being executed
+  string tool_name = 3;
+
+  // agent_id is the agent identifier executing the tool
+  string agent_id = 4;
+
+  // agent_name is the agent name executing the tool
+  string agent_name = 5;
+
+  // mission_id is the mission context for this tool execution
+  string mission_id = 6;
+
+  // message is a human-readable event message
+  string message = 7;
+
+  // duration is the execution time in seconds (for completed/failed events)
+  double duration = 8;
+
+  // progress is the completion percentage (0-1 for progress events)
+  double progress = 9;
+
+  // error contains error information if the event represents an error
+  string error = 10;
+
+  // error_code contains a machine-readable error code
+  string error_code = 11;
+
+  // warning contains warning information if the event represents a warning
+  string warning = 12;
+
+  // warning_severity is the severity level (low, medium, high)
+  string warning_severity = 13;
+
+  // data contains event-specific data (typed map)
+  gibson.common.TypedMap data = 14;
+}
+
+// LLMEvent represents an LLM activity event.
+message LLMEvent {
+  // event_type identifies the LLM event type (llm.request.started, llm.request.completed, llm.request.failed)
+  string event_type = 1;
+
+  // timestamp is when the event occurred (Unix timestamp)
+  int64 timestamp = 2;
+
+  // agent_id is the agent identifier
+  string agent_id = 3;
+
+  // agent_name is the agent name
+  string agent_name = 4;
+
+  // model is the LLM model identifier (e.g., "claude-3-5-sonnet-20241022")
+  string model = 5;
+
+  // slot is the LLM slot (primary, fast, reasoning)
+  string slot = 6;
+
+  // message_count is the number of messages in the request
+  int32 message_count = 7;
+
+  // prompt_tokens is the number of input tokens
+  int32 prompt_tokens = 8;
+
+  // completion_tokens is the number of output tokens
+  int32 completion_tokens = 9;
+
+  // total_tokens is the sum of prompt and completion tokens
+  int32 total_tokens = 10;
+
+  // duration_ms is the request duration in milliseconds
+  double duration_ms = 11;
+
+  // cached indicates if the response was served from cache
+  bool cached = 12;
+
+  // error contains error information if the event represents a failure
+  string error = 13;
+
+  // error_code identifies the error type (rate_limit, context_length, api_error, timeout)
+  string error_code = 14;
+
+  // will_retry indicates if the failed request will be retried
+  bool will_retry = 15;
+}
+
+// OrchestratorEvent represents an orchestrator decision event.
+message OrchestratorEvent {
+  // event_type identifies the orchestrator event type (orchestrator.decision, orchestrator.approval_required)
+  string event_type = 1;
+
+  // timestamp is when the event occurred (Unix timestamp)
+  int64 timestamp = 2;
+
+  // mission_id is the mission identifier
+  string mission_id = 3;
+
+  // iteration is the orchestrator iteration number
+  int32 iteration = 4;
+
+  // action is the orchestrator action (execute_agent, skip_node, wait, complete, request_approval)
+  string action = 5;
+
+  // target_node_id is the workflow node ID being targeted
+  string target_node_id = 6;
+
+  // target_agent_name is the agent name being targeted
+  string target_agent_name = 7;
+
+  // confidence is the decision confidence score (0-1)
+  double confidence = 8;
+
+  // reasoning is the orchestrator's reasoning (max 500 chars in practice)
+  string reasoning = 9;
+
+  // tokens_used is the number of tokens consumed for this decision
+  int32 tokens_used = 10;
+
+  // latency_ms is the decision latency in milliseconds
+  double latency_ms = 11;
+
+  // approval_id is set when approval is required
+  string approval_id = 12;
+
+  // risk is the risk level (low, medium, high, critical)
+  string risk = 13;
+
+  // timeout_seconds is the timeout for approval requests
+  int32 timeout_seconds = 14;
 }
 
 // StartComponentRequest requests starting a component.
@@ -1778,4 +1924,22 @@ message InlineEdgeConfig {
 
   // condition is an optional condition for the edge
   string condition = 3;
+}
+
+// ShutdownRequest requests graceful shutdown of the daemon.
+message ShutdownRequest {
+  // force indicates whether to force immediate shutdown (skip graceful drain)
+  bool force = 1;
+
+  // timeout_seconds is the maximum time to wait for graceful shutdown (0 = default 30s)
+  int32 timeout_seconds = 2;
+}
+
+// ShutdownResponse confirms the shutdown request was accepted.
+message ShutdownResponse {
+  // success indicates if the shutdown request was accepted
+  bool success = 1;
+
+  // message provides additional context about the shutdown
+  string message = 2;
 }

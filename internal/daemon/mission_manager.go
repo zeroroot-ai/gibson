@@ -50,6 +50,7 @@ type missionManager struct {
 	runLinker       mission.MissionRunLinker
 	infrastructure  *Infrastructure
 	otelStack       *observability.OTelObservabilityStack // nil when OTel is disabled
+	eventBus        orchestrator.EventBus                 // EventBus for emitting orchestration events
 	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
 	// graphLoader will store mission definitions in Neo4j for cross-mission analysis
 	// Currently disabled during workflow -> mission migration
@@ -88,6 +89,7 @@ func newMissionManager(
 	runLinker mission.MissionRunLinker,
 	infrastructure *Infrastructure,
 	otelStack *observability.OTelObservabilityStack,
+	eventBus orchestrator.EventBus,
 ) *missionManager {
 	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
 	// GraphLoader initialization disabled during workflow -> mission migration
@@ -112,6 +114,7 @@ func newMissionManager(
 		runLinker:       runLinker,
 		infrastructure:  infrastructure,
 		otelStack:       otelStack,
+		eventBus:        eventBus,
 		activeMissions:  make(map[string]*activeMission),
 	}
 }
@@ -582,7 +585,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		}
 	}
 
-	// Create the orchestrator with optional decision log writer
+	// Create the orchestrator with optional decision log writer and event bus
 	orchOptions := []orchestrator.OrchestratorOption{
 		orchestrator.WithMaxIterations(100),
 		orchestrator.WithMaxConcurrent(10),
@@ -592,6 +595,12 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Add decision log writer if available
 	if decisionLogWriter != nil {
 		orchOptions = append(orchOptions, orchestrator.WithDecisionLogWriter(decisionLogWriter))
+	}
+
+	// Add event bus for publishing orchestration events to daemon event bus
+	if m.eventBus != nil {
+		orchOptions = append(orchOptions, orchestrator.WithEventBus(m.eventBus))
+		m.logger.Info("orchestrator configured with event bus", "mission_id", missionID)
 	}
 
 	orch := orchestrator.NewOrchestrator(observer, thinker, actor, orchOptions...)

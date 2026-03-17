@@ -53,6 +53,7 @@ const (
 	DaemonService_ResolveMissionDependencies_FullMethodName  = "/gibson.daemon.v1.DaemonService/ResolveMissionDependencies"
 	DaemonService_ValidateMissionDependencies_FullMethodName = "/gibson.daemon.v1.DaemonService/ValidateMissionDependencies"
 	DaemonService_EnsureDependenciesRunning_FullMethodName   = "/gibson.daemon.v1.DaemonService/EnsureDependenciesRunning"
+	DaemonService_Shutdown_FullMethodName                    = "/gibson.daemon.v1.DaemonService/Shutdown"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -158,6 +159,10 @@ type DaemonServiceClient interface {
 	// EnsureDependenciesRunning starts any stopped dependencies in the correct topological order.
 	// Ensures all components required by a mission are running before execution.
 	EnsureDependenciesRunning(ctx context.Context, in *EnsureDependenciesRunningRequest, opts ...grpc.CallOption) (*EnsureDependenciesRunningResponse, error)
+	// Shutdown requests graceful shutdown of the daemon.
+	// This is used by the CLI to stop the daemon remotely.
+	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
+	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
 }
 
 type daemonServiceClient struct {
@@ -553,6 +558,16 @@ func (c *daemonServiceClient) EnsureDependenciesRunning(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *daemonServiceClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShutdownResponse)
+	err := c.cc.Invoke(ctx, DaemonService_Shutdown_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServiceServer is the server API for DaemonService service.
 // All implementations must embed UnimplementedDaemonServiceServer
 // for forward compatibility.
@@ -656,6 +671,10 @@ type DaemonServiceServer interface {
 	// EnsureDependenciesRunning starts any stopped dependencies in the correct topological order.
 	// Ensures all components required by a mission are running before execution.
 	EnsureDependenciesRunning(context.Context, *EnsureDependenciesRunningRequest) (*EnsureDependenciesRunningResponse, error)
+	// Shutdown requests graceful shutdown of the daemon.
+	// This is used by the CLI to stop the daemon remotely.
+	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
+	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
 
@@ -767,6 +786,9 @@ func (UnimplementedDaemonServiceServer) ValidateMissionDependencies(context.Cont
 }
 func (UnimplementedDaemonServiceServer) EnsureDependenciesRunning(context.Context, *EnsureDependenciesRunningRequest) (*EnsureDependenciesRunningResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EnsureDependenciesRunning not implemented")
+}
+func (UnimplementedDaemonServiceServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
 }
 func (UnimplementedDaemonServiceServer) mustEmbedUnimplementedDaemonServiceServer() {}
 func (UnimplementedDaemonServiceServer) testEmbeddedByValue()                       {}
@@ -1366,6 +1388,24 @@ func _DaemonService_EnsureDependenciesRunning_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShutdownRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).Shutdown(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_Shutdown_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).Shutdown(ctx, req.(*ShutdownRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonService_ServiceDesc is the grpc.ServiceDesc for DaemonService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1488,6 +1528,10 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EnsureDependenciesRunning",
 			Handler:    _DaemonService_EnsureDependenciesRunning_Handler,
+		},
+		{
+			MethodName: "Shutdown",
+			Handler:    _DaemonService_Shutdown_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

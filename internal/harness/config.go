@@ -3,6 +3,7 @@ package harness
 import (
 	"log/slog"
 
+	"github.com/zero-day-ai/gibson/internal/checkpoint"
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -184,6 +185,20 @@ type HarnessConfig struct {
 	// Type: events.EventBus
 	// Optional: if nil, plugin events will not be published.
 	EventBus events.EventBus
+
+	// Checkpointer provides checkpointing capabilities for state management.
+	// When set, agents can access checkpoint operations through harness.Checkpoint().
+	// When nil, checkpoint operations will return ErrCheckpointingDisabled.
+	// Optional: defaults to nil (checkpointing disabled).
+	Checkpointer checkpoint.ThreadedCheckpointer
+
+	// ThreadID identifies the current execution thread for checkpoint operations.
+	// Required when Checkpointer is set. Ignored if Checkpointer is nil.
+	ThreadID string
+
+	// RunNumber is the current mission run number (1-indexed).
+	// Required when Checkpointer is set. Ignored if Checkpointer is nil.
+	RunNumber int
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.

@@ -154,7 +154,7 @@ func (c *StateClient) Health(ctx context.Context) error {
 		return nil
 	}
 
-	// Parse module list
+	// Parse module list - handle both RESP2 ([]interface{}) and RESP3 (maps) formats
 	moduleList, ok := modules.([]interface{})
 	if !ok {
 		// Unexpected response format, skip module check
@@ -165,6 +165,23 @@ func (c *StateClient) Health(ctx context.Context) error {
 	hasJSON := false
 
 	for _, mod := range moduleList {
+		// Try RESP3 format first (map[interface{}]interface{})
+		if modMap, ok := mod.(map[interface{}]interface{}); ok {
+			if name, exists := modMap["name"]; exists {
+				if nameStr, ok := name.(string); ok {
+					nameLower := strings.ToLower(nameStr)
+					if nameLower == "search" || nameLower == "ft" {
+						hasSearch = true
+					}
+					if nameLower == "rejson" || nameLower == "json" {
+						hasJSON = true
+					}
+				}
+			}
+			continue
+		}
+
+		// Fallback to RESP2 format ([]interface{})
 		modInfo, ok := mod.([]interface{})
 		if !ok || len(modInfo) < 2 {
 			continue
