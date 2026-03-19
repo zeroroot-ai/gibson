@@ -236,8 +236,8 @@ func (c *MissionClient) Create(ctx context.Context, req *CreateMissionRequest) (
 		Metadata:         req.Metadata,
 		ParentMissionID:  req.ParentMissionID,
 		Depth:            depth,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		CreatedAt:        NewUnixTime(now),
+		UpdatedAt:        NewUnixTime(now),
 		FindingsCount:    0,
 		Progress:         0.0,
 		AgentAssignments: make(map[string]string),
@@ -411,7 +411,7 @@ func (c *MissionClient) Stop(ctx context.Context, missionID types.ID) error {
 	// Update mission status to cancelled
 	now := time.Now()
 	mission.Status = MissionStatusCancelled
-	mission.CompletedAt = &now
+	mission.CompletedAt = NewUnixTimePtr(&now)
 
 	if err := c.store.Save(ctx, mission); err != nil {
 		c.logger.ErrorContext(ctx, "failed to update mission status",
@@ -425,7 +425,7 @@ func (c *MissionClient) Stop(ctx context.Context, missionID types.ID) error {
 
 	c.logger.InfoContext(ctx, "mission stopped",
 		slog.String("mission_id", missionID.String()),
-		slog.Duration("duration", now.Sub(*mission.StartedAt)))
+		slog.Duration("duration", now.Sub(*mission.StartedAt.Time)))
 
 	return nil
 }
@@ -555,8 +555,8 @@ func (c *MissionClient) GetResults(ctx context.Context, missionID types.ID) (*Mi
 	}
 
 	// Set completion timestamp if available
-	if mission.CompletedAt != nil {
-		result.CompletedAt = *mission.CompletedAt
+	if !mission.CompletedAt.IsNil() {
+		result.CompletedAt = *mission.CompletedAt.Time
 	}
 
 	// Parse workflow result from JSON if available

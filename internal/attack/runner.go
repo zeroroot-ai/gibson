@@ -337,8 +337,8 @@ func (r *DefaultAttackRunner) createEphemeralMission(
 		WorkflowID:   workflowObj.ID,
 		WorkflowJSON: string(workflowJSON),
 		Constraints:  r.buildConstraints(opts),
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		CreatedAt:    mission.NewUnixTimeNow(),
+		UpdatedAt:    mission.NewUnixTimeNow(),
 	}
 
 	return missionObj, nil

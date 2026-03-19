@@ -152,12 +152,12 @@ func (c *MissionClient) GetStatus(ctx context.Context, missionID string) (*Missi
 		statusInfo.FindingCounts = mission.Metrics.FindingsBySeverity
 
 		// Calculate duration
-		if mission.StartedAt != nil {
-			if mission.CompletedAt != nil {
-				statusInfo.Duration = mission.CompletedAt.Sub(*mission.StartedAt)
+		if !mission.StartedAt.IsNil() {
+			if !mission.CompletedAt.IsNil() {
+				statusInfo.Duration = mission.CompletedAt.Time.Sub(*mission.StartedAt.Time)
 			} else {
 				// Mission is still running, calculate elapsed time
-				statusInfo.Duration = time.Since(*mission.StartedAt)
+				statusInfo.Duration = time.Since(*mission.StartedAt.Time)
 			}
 		}
 	}
@@ -245,8 +245,8 @@ func (c *MissionClient) WaitForCompletion(ctx context.Context, missionID string,
 					Error:          mission.Error,
 				}
 
-				if mission.CompletedAt != nil {
-					result.CompletedAt = *mission.CompletedAt
+				if !mission.CompletedAt.IsNil() {
+					result.CompletedAt = *mission.CompletedAt.Time
 				} else {
 					result.CompletedAt = time.Now()
 				}

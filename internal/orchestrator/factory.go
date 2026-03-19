@@ -12,8 +12,15 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// CredentialStore provides access to stored credentials for repository authentication.
+// This interface matches workspace.CredentialStore from the SDK.
+type CredentialStore interface {
+	Get(name string) (*sdktypes.Credential, error)
+}
 
 // Config holds configuration for creating a mission orchestrator.
 type Config struct {
@@ -69,6 +76,10 @@ type Config struct {
 	// When set, enables automatic storage of discovered hosts, ports, services, etc.
 	// from agent outputs to Neo4j for use by downstream agents.
 	DiscoveryProcessor DiscoveryProcessor
+
+	// CredentialStore provides access to stored credentials for repository authentication (optional)
+	// Required if missions use workspace configuration with repositories requiring authentication.
+	CredentialStore CredentialStore
 }
 
 // NewMissionAdapter creates a new mission orchestrator adapter.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/zero-day-ai/sdk/agent"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	"github.com/zero-day-ai/sdk/finding"
 	"github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/llm"
@@ -755,6 +756,18 @@ func (a *GibsonHarnessAdapter) ToolResults(ctx context.Context, jobID string) <-
 	ch := make(chan agent.QueuedToolResult)
 	close(ch)
 	return ch
+}
+
+// Workspace returns the primary workspace for single-repository missions.
+// Not implemented in eval harness - returns nil.
+func (a *GibsonHarnessAdapter) Workspace() workspace.Workspace {
+	return nil
+}
+
+// Workspaces returns all workspaces keyed by repository name.
+// Not implemented in eval harness - returns empty map.
+func (a *GibsonHarnessAdapter) Workspaces() map[string]workspace.Workspace {
+	return make(map[string]workspace.Workspace)
 }
 
 var _ agent.Harness = (*GibsonHarnessAdapter)(nil)

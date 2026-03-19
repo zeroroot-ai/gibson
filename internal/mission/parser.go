@@ -55,6 +55,7 @@ type yamlMissionData struct {
 	Target       *yamlTargetSpec      `yaml:"target,omitempty"`
 	Nodes        yaml.Node            `yaml:"nodes"` // Can be array or map
 	Dependencies *MissionDependencies `yaml:"dependencies,omitempty"`
+	Workspace    *yamlWorkspaceData   `yaml:"workspace,omitempty"`
 	Metadata     map[string]any       `yaml:"metadata,omitempty"`
 }
 
@@ -120,6 +121,26 @@ type yamlConditionData struct {
 	Expression  string   `yaml:"expression"`
 	TrueBranch  []string `yaml:"true_branch,omitempty"`
 	FalseBranch []string `yaml:"false_branch,omitempty"`
+}
+
+// yamlWorkspaceData represents workspace configuration from YAML
+type yamlWorkspaceData struct {
+	Repositories      []yamlRepositoryData  `yaml:"repositories,omitempty"`
+	CleanupOnComplete bool                  `yaml:"cleanup_on_complete,omitempty"`
+	UseWorktrees      bool                  `yaml:"use_worktrees,omitempty"`
+	LSPEnabled        bool                  `yaml:"lsp_enabled,omitempty"`
+	LSPTimeout        string                `yaml:"lsp_timeout,omitempty"`
+	BaseDirectory     string                `yaml:"base_directory,omitempty"`
+}
+
+// yamlRepositoryData represents a repository configuration from YAML
+type yamlRepositoryData struct {
+	Name           string   `yaml:"name"`
+	URL            string   `yaml:"url"`
+	Branch         string   `yaml:"branch,omitempty"`
+	CredentialName string   `yaml:"credential_name,omitempty"`
+	Shallow        bool     `yaml:"shallow,omitempty"`
+	DependsOn      []string `yaml:"depends_on,omitempty"`
 }
 
 // ParseDefinition parses a mission definition from a YAML file.
@@ -234,6 +255,15 @@ func ParseDefinitionFromBytes(data []byte) (*MissionDefinition, error) {
 		} else if missionData.Target.Name != "" {
 			def.TargetRef = missionData.Target.Name
 		}
+	}
+
+	// Parse workspace configuration
+	if missionData.Workspace != nil {
+		workspaceConfig, err := parseWorkspaceConfig(missionData.Workspace, &rootNode)
+		if err != nil {
+			return nil, err
+		}
+		def.Workspace = workspaceConfig
 	}
 
 	// Parse nodes - handle both array and map formats
@@ -673,6 +703,75 @@ func parseRetryPolicy(retryData *yamlRetryData, line int) (*RetryPolicy, error) 
 	}
 
 	return policy, nil
+}
+
+// parseWorkspaceConfig parses and validates workspace configuration
+func parseWorkspaceConfig(workspaceData *yamlWorkspaceData, rootNode *yaml.Node) (*WorkspaceConfig, error) {
+	if workspaceData == nil {
+		return nil, nil
+	}
+
+	config := &WorkspaceConfig{
+		Repositories: make([]RepositoryConfig, 0, len(workspaceData.Repositories)),
+		Settings: WorkspaceSettings{
+			CleanupOnComplete: workspaceData.CleanupOnComplete,
+			UseWorktrees:      workspaceData.UseWorktrees,
+			LSPEnabled:        workspaceData.LSPEnabled,
+			BaseDirectory:     workspaceData.BaseDirectory,
+		},
+	}
+
+	// Parse LSP timeout if specified
+	if workspaceData.LSPTimeout != "" {
+		timeout, err := time.ParseDuration(workspaceData.LSPTimeout)
+		if err != nil {
+			return nil, &ParseError{
+				Message: fmt.Sprintf("invalid workspace.lsp_timeout '%s': must be a valid Go duration", workspaceData.LSPTimeout),
+				Line:    getFieldLine(rootNode, "workspace"),
+				Err:     err,
+			}
+		}
+		config.Settings.LSPTimeout = timeout
+	}
+
+	// Parse repositories
+	for i, repoData := range workspaceData.Repositories {
+		repo := RepositoryConfig{
+			Name:           repoData.Name,
+			URL:            repoData.URL,
+			Branch:         repoData.Branch,
+			CredentialName: repoData.CredentialName,
+			Shallow:        repoData.Shallow,
+			DependsOn:      repoData.DependsOn,
+		}
+
+		// Validate required fields
+		if repo.Name == "" {
+			return nil, &ParseError{
+				Message: fmt.Sprintf("repository at index %d: 'name' field is required", i),
+				Line:    getFieldLine(rootNode, "workspace"),
+			}
+		}
+		if repo.URL == "" {
+			return nil, &ParseError{
+				Message: fmt.Sprintf("repository '%s': 'url' field is required", repo.Name),
+				Line:    getFieldLine(rootNode, "workspace"),
+			}
+		}
+
+		config.Repositories = append(config.Repositories, repo)
+	}
+
+	// Validate the entire workspace configuration
+	if err := config.Validate(); err != nil {
+		return nil, &ParseError{
+			Message: fmt.Sprintf("workspace validation failed: %v", err),
+			Line:    getFieldLine(rootNode, "workspace"),
+			Err:     err,
+		}
+	}
+
+	return config, nil
 }
 
 // calculateEntryPoints identifies nodes with no incoming edges

@@ -133,11 +133,11 @@ func convertMissionToData(m *mission.Mission) api.MissionData {
 	var startTime, endTime time.Time
 
 	// Convert time pointers to values
-	if m.StartedAt != nil {
-		startTime = *m.StartedAt
+	if !m.StartedAt.IsNil() {
+		startTime = *m.StartedAt.Time
 	}
-	if m.CompletedAt != nil {
-		endTime = *m.CompletedAt
+	if !m.CompletedAt.IsNil() {
+		endTime = *m.CompletedAt.Time
 	}
 
 	// Determine workflow path - use WorkflowID as a string for now

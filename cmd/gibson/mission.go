@@ -1487,8 +1487,8 @@ func formatMissionListOutput(cmd *cobra.Command, result *core.CommandResult) err
 			string(m.Status),
 			progressPct,
 			fmt.Sprintf("%d", m.FindingsCount),
-			formatTime(m.CreatedAt),
-			formatTime(m.UpdatedAt),
+			formatTime(m.CreatedAt.Time),
+			formatTime(m.UpdatedAt.Time),
 		})
 	}
 
@@ -1530,14 +1530,14 @@ func formatMissionShowOutput(cmd *cobra.Command, result *core.CommandResult) err
 	fmt.Fprintf(tw, "DESCRIPTION:\t%s\n", m.Description)
 	fmt.Fprintf(tw, "PROGRESS:\t%.1f%%\n", m.Progress*100)
 	fmt.Fprintf(tw, "FINDINGS:\t%d\n", m.FindingsCount)
-	fmt.Fprintf(tw, "CREATED:\t%s\n", m.CreatedAt.Format(time.RFC3339))
-	fmt.Fprintf(tw, "UPDATED:\t%s\n", m.UpdatedAt.Format(time.RFC3339))
+	fmt.Fprintf(tw, "CREATED:\t%s\n", m.CreatedAt.Time.Format(time.RFC3339))
+	fmt.Fprintf(tw, "UPDATED:\t%s\n", m.UpdatedAt.Time.Format(time.RFC3339))
 
-	if m.StartedAt != nil {
-		fmt.Fprintf(tw, "STARTED:\t%s\n", m.StartedAt.Format(time.RFC3339))
+	if !m.StartedAt.IsNil() {
+		fmt.Fprintf(tw, "STARTED:\t%s\n", m.StartedAt.Time.Format(time.RFC3339))
 	}
-	if m.CompletedAt != nil {
-		fmt.Fprintf(tw, "COMPLETED:\t%s\n", m.CompletedAt.Format(time.RFC3339))
+	if !m.CompletedAt.IsNil() {
+		fmt.Fprintf(tw, "COMPLETED:\t%s\n", m.CompletedAt.Time.Format(time.RFC3339))
 	}
 
 	// Show workflow details

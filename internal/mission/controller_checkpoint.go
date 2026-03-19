@@ -169,8 +169,8 @@ func (c *ControllerCheckpointMethods) PauseWithCheckpoint(
 
 	// Update mission status to paused
 	mission.Status = MissionStatusPaused
-	mission.CheckpointAt = &chkpt.CreatedAt
-	mission.UpdatedAt = time.Now()
+	mission.CheckpointAt = NewUnixTimePtr(&chkpt.CreatedAt)
+	mission.UpdatedAt = NewUnixTimeNow()
 
 	if err := c.store.Update(ctx, mission); err != nil {
 		return nil, fmt.Errorf("failed to update mission status: %w", err)
@@ -255,9 +255,8 @@ func (c *ControllerCheckpointMethods) ResumeFromCheckpoint(
 
 	// Update mission status to running
 	mission.Status = MissionStatusRunning
-	now := time.Now()
-	mission.StartedAt = &now
-	mission.UpdatedAt = now
+	mission.StartedAt = NewUnixTimePtrNow()
+	mission.UpdatedAt = NewUnixTimeNow()
 
 	if err := c.store.Update(ctx, mission); err != nil {
 		return nil, fmt.Errorf("failed to update mission status: %w", err)
@@ -342,9 +341,8 @@ func (c *ControllerCheckpointMethods) ResumeFromSpecificCheckpoint(
 
 	// Update mission status to running
 	mission.Status = MissionStatusRunning
-	now := time.Now()
-	mission.StartedAt = &now
-	mission.UpdatedAt = now
+	mission.StartedAt = NewUnixTimePtrNow()
+	mission.UpdatedAt = NewUnixTimeNow()
 
 	if err := c.store.Update(ctx, mission); err != nil {
 		return nil, fmt.Errorf("failed to update mission status: %w", err)
@@ -432,7 +430,7 @@ func (c *ControllerCheckpointMethods) DiscoverIncompleteMissions(
 		incomplete = append(incomplete, &IncompleteMission{
 			MissionID:       mission.ID,
 			LastCheckpoint:  chkpt,
-			InterruptedAt:   mission.UpdatedAt,
+			InterruptedAt:   mission.UpdatedAt.Time,
 			RecoveryOptions: options,
 		})
 	}
@@ -472,9 +470,8 @@ func (c *ControllerCheckpointMethods) ExecuteRecovery(
 
 		mission.Status = MissionStatusFailed
 		mission.Error = "Mission marked as failed during recovery"
-		now := time.Now()
-		mission.CompletedAt = &now
-		mission.UpdatedAt = now
+		mission.CompletedAt = NewUnixTimePtrNow()
+		mission.UpdatedAt = NewUnixTimeNow()
 
 		if err := c.store.Update(ctx, mission); err != nil {
 			return nil, fmt.Errorf("failed to update mission: %w", err)

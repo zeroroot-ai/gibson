@@ -563,8 +563,7 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 		if missionObj.Status == mission.MissionStatusPaused {
 			d.logger.Info(ctx, "marking orphaned paused mission as failed", "mission_id", missionID)
 			missionObj.Status = mission.MissionStatusFailed
-			completedAt := time.Now()
-			missionObj.CompletedAt = &completedAt
+			missionObj.CompletedAt = mission.NewUnixTimePtrNow()
 			if missionObj.Metadata == nil {
 				missionObj.Metadata = make(map[string]any)
 			}
@@ -619,7 +618,7 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 		// Update mission status to cancelled
 		missionObj.Status = mission.MissionStatusCancelled
 		completedAt := time.Now()
-		missionObj.CompletedAt = &completedAt
+		missionObj.CompletedAt = mission.NewUnixTimePtr(&completedAt)
 		if missionObj.Metrics != nil {
 			missionObj.Metrics.Duration = completedAt.Sub(missionObj.Metrics.StartedAt)
 		}
@@ -2289,6 +2288,6 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		Name:        m.Name,
 		Description: m.Description,
 		Status:      string(m.Status),
-		CreatedAt:   m.CreatedAt,
+		CreatedAt:   m.CreatedAt.Time,
 	}, nil
 }

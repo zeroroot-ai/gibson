@@ -161,8 +161,8 @@ func (s *DefaultMissionService) CreateFromConfig(ctx context.Context, config *Mi
 		Status:      MissionStatusPending,
 		TargetID:    targetID,
 		WorkflowID:  workflowID,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		CreatedAt:   NewUnixTimeNow(),
+		UpdatedAt:   NewUnixTimeNow(),
 	}
 
 	// Convert constraints if specified

@@ -88,8 +88,8 @@ func convertToSchemaMission(m *mission.Mission, def *mission.MissionDefinition) 
 
 	// Mark as started and set start timestamp
 	// Bootstrap occurs when mission begins execution, so we mark it started
-	if m.StartedAt != nil {
-		schemaMission.StartedAt = m.StartedAt
+	if !m.StartedAt.IsNil() {
+		schemaMission.StartedAt = m.StartedAt.Time
 	} else {
 		// If somehow StartedAt is nil, use current time
 		now := time.Now()
@@ -99,13 +99,13 @@ func convertToSchemaMission(m *mission.Mission, def *mission.MissionDefinition) 
 	// If mission is already completed/failed in SQLite, reflect that state
 	if m.Status == mission.MissionStatusCompleted {
 		schemaMission.MarkCompleted()
-		if m.CompletedAt != nil {
-			schemaMission.CompletedAt = m.CompletedAt
+		if !m.CompletedAt.IsNil() {
+			schemaMission.CompletedAt = m.CompletedAt.Time
 		}
 	} else if m.Status == mission.MissionStatusFailed {
 		schemaMission.MarkFailed()
-		if m.CompletedAt != nil {
-			schemaMission.CompletedAt = m.CompletedAt
+		if !m.CompletedAt.IsNil() {
+			schemaMission.CompletedAt = m.CompletedAt.Time
 		}
 	}
 

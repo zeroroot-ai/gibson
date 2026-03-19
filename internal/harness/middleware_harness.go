@@ -10,6 +10,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
@@ -340,6 +341,28 @@ func (h *MiddlewareHarness) Checkpoint() CheckpointAccess {
 	}
 	// Return a disabled checkpoint implementation
 	return NewHarnessCheckpointMethods(nil, "", "", 0)
+}
+
+// Workspace returns the primary workspace from the inner harness.
+// Returns nil if workspaces are not configured.
+func (h *MiddlewareHarness) Workspace() workspace.Workspace {
+	if inner, ok := h.inner.(interface {
+		Workspace() workspace.Workspace
+	}); ok {
+		return inner.Workspace()
+	}
+	return nil
+}
+
+// Workspaces returns all workspaces from the inner harness.
+// Returns an empty map if workspaces are not configured.
+func (h *MiddlewareHarness) Workspaces() map[string]workspace.Workspace {
+	if inner, ok := h.inner.(interface {
+		Workspaces() map[string]workspace.Workspace
+	}); ok {
+		return inner.Workspaces()
+	}
+	return make(map[string]workspace.Workspace)
 }
 
 // toMiddlewareMessages converts llm.Message slice to middleware.Message slice

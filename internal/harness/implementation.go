@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/protoresolver"
 	sdktypes "github.com/zero-day-ai/sdk/types"
@@ -87,6 +88,9 @@ type DefaultAgentHarness struct {
 
 	// checkpointAccess provides checkpoint operations (nil if checkpointing disabled)
 	checkpointAccess CheckpointAccess
+
+	// workspaceManager provides access to Git repository workspaces (nil if not configured)
+	workspaceManager workspace.WorkspaceManager
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -1485,6 +1489,64 @@ func (h *DefaultAgentHarness) Checkpoint() CheckpointAccess {
 		return NewHarnessCheckpointMethods(nil, "", "", 0)
 	}
 	return h.checkpointAccess
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Workspace Access Methods
+// ────────────────────────────────────────────────────────────────────────────
+
+// Workspace returns the primary workspace for single-repository missions.
+// This is a convenience method that returns the first workspace defined in the mission configuration.
+// Returns nil if no workspaces are configured for this mission.
+//
+// Example:
+//
+//	ws := harness.Workspace()
+//	if ws == nil {
+//	    return errors.New("no workspace configured")
+//	}
+//	content, err := ws.ReadFile(ctx, "main.go")
+func (h *DefaultAgentHarness) Workspace() workspace.Workspace {
+	ctx, span := h.tracer.Start(context.Background(), "harness.Workspace")
+	defer span.End()
+	_ = ctx // Context used by tracer
+
+	if h.workspaceManager == nil {
+		h.logger.Debug("workspace manager not configured")
+		return nil
+	}
+
+	ws := h.workspaceManager.Primary()
+	if ws != nil {
+		h.logger.Debug("returning primary workspace", "name", ws.Name(), "path", ws.Path())
+	}
+	return ws
+}
+
+// Workspaces returns all workspaces keyed by repository name.
+// For multi-repository missions, use this to access specific workspaces by name.
+// Returns an empty map if no workspaces are configured.
+//
+// Example:
+//
+//	workspaces := harness.Workspaces()
+//	if ws, ok := workspaces["backend"]; ok {
+//	    editor := ws.Editor()
+//	    // Perform editing operations
+//	}
+func (h *DefaultAgentHarness) Workspaces() map[string]workspace.Workspace {
+	ctx, span := h.tracer.Start(context.Background(), "harness.Workspaces")
+	defer span.End()
+	_ = ctx // Context used by tracer
+
+	if h.workspaceManager == nil {
+		h.logger.Debug("workspace manager not configured")
+		return make(map[string]workspace.Workspace)
+	}
+
+	workspaces := h.workspaceManager.All()
+	h.logger.Debug("returning all workspaces", "count", len(workspaces))
+	return workspaces
 }
 
 // ────────────────────────────────────────────────────────────────────────────

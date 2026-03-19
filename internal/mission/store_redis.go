@@ -109,7 +109,7 @@ func (s *RedisMissionStore) Save(ctx context.Context, mission *Mission) error {
 	}
 
 	// Set timestamps if not already set
-	now := time.Now()
+	now := NewUnixTimeNow()
 	if mission.CreatedAt.IsZero() {
 		mission.CreatedAt = now
 	}
@@ -296,7 +296,7 @@ func (s *RedisMissionStore) Update(ctx context.Context, mission *Mission) error 
 	}
 
 	// Update timestamp
-	mission.UpdatedAt = time.Now()
+	mission.UpdatedAt = NewUnixTimeNow()
 
 	// Check if mission exists and get old values for index comparison
 	key := missionKey(mission.ID)
@@ -712,7 +712,7 @@ func (s *RedisMissionStore) FindOrCreateByName(ctx context.Context, mission *Mis
 	}
 
 	// Set timestamps
-	now := time.Now()
+	now := NewUnixTimeNow()
 	if mission.CreatedAt.IsZero() {
 		mission.CreatedAt = now
 	}

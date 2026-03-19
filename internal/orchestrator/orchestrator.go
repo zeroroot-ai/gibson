@@ -9,8 +9,10 @@ import (
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -147,6 +149,11 @@ type Orchestrator struct {
 	maxConcurrent int // Max concurrent node executions
 	timeout       time.Duration
 	runMode       RunMode // Error handling behavior mode
+
+	// Workspace management
+	workspaceManager workspace.WorkspaceManager // Manages Git repositories for code operations
+	missionDef       *mission.MissionDefinition // Mission definition for workspace configuration
+	credStore        workspace.CredentialStore  // Credential store for repository access
 }
 
 // EventBus defines the interface for emitting orchestrator events.
@@ -260,6 +267,26 @@ func WithMetricsRecorder(recorder harness.MetricsRecorder) OrchestratorOption {
 	return func(o *Orchestrator) {
 		if recorder != nil {
 			o.metrics = recorder
+		}
+	}
+}
+
+// WithMissionDefinition sets the mission definition for workspace configuration.
+// This is used to extract workspace settings and repository configurations.
+func WithMissionDefinition(def *mission.MissionDefinition) OrchestratorOption {
+	return func(o *Orchestrator) {
+		if def != nil {
+			o.missionDef = def
+		}
+	}
+}
+
+// WithCredentialStore sets the credential store for repository authentication.
+// This is required if any repositories in the workspace require authentication.
+func WithCredentialStore(store workspace.CredentialStore) OrchestratorOption {
+	return func(o *Orchestrator) {
+		if store != nil {
+			o.credStore = store
 		}
 	}
 }
@@ -403,6 +430,32 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 	// Record mission started metric
 	o.recordMissionStarted(missionID)
+
+	// Initialize workspaces if configured
+	if err := o.initializeWorkspaces(ctx); err != nil {
+		o.logger.Error(ctx, "workspace initialization failed", "error", err)
+		result := &OrchestratorResult{
+			MissionID:       missionID,
+			Status:          StatusFailed,
+			Error:           fmt.Errorf("workspace initialization failed: %w", err),
+			Duration:        time.Since(startTime),
+			TotalIterations: 0,
+		}
+		o.recordMissionCompleted(result)
+		return result, err
+	}
+
+	// Register cleanup to run on mission end/cancel
+	defer func() {
+		if o.workspaceManager != nil {
+			cleanupCtx := context.Background() // Use separate context for cleanup
+			if cleanupErr := o.workspaceManager.Cleanup(cleanupCtx); cleanupErr != nil {
+				o.logger.Error(cleanupCtx, "workspace cleanup failed", "error", cleanupErr)
+			} else {
+				o.logger.Info(cleanupCtx, "workspace cleanup completed")
+			}
+		}
+	}()
 
 	// Initialize result
 	result := &OrchestratorResult{
@@ -781,6 +834,78 @@ func (r *OrchestratorResult) String() string {
 // This can be used to conditionally adjust behavior based on the mode.
 func (o *Orchestrator) RunMode() RunMode {
 	return o.runMode
+}
+
+// initializeWorkspaces initializes workspace manager and clones configured repositories.
+// This method is called before the first agent executes to ensure workspaces are ready.
+// Returns an error if workspace initialization fails, causing the mission to fail fast.
+func (o *Orchestrator) initializeWorkspaces(ctx context.Context) error {
+	// Check if mission has workspace configuration
+	if o.missionDef == nil || o.missionDef.Workspace == nil {
+		o.logger.Debug(ctx, "no workspace configuration found, skipping workspace initialization")
+		return nil
+	}
+
+	// Validate workspace configuration
+	workspaceConfig := o.missionDef.Workspace
+	if len(workspaceConfig.Repositories) == 0 {
+		o.logger.Debug(ctx, "no repositories configured in workspace, skipping initialization")
+		return nil
+	}
+
+	o.logger.Info(ctx, "initializing workspaces",
+		"repository_count", len(workspaceConfig.Repositories),
+		"use_worktrees", workspaceConfig.Settings.UseWorktrees,
+		"lsp_enabled", workspaceConfig.Settings.LSPEnabled,
+	)
+
+	// Create workspace manager with credential store
+	o.workspaceManager = workspace.NewWorkspaceManager(o.credStore, o.logger.Slog())
+
+	// Convert mission workspace config to SDK workspace config
+	sdkConfig := o.convertWorkspaceConfig(workspaceConfig)
+
+	// Initialize workspaces (clones repositories)
+	if err := o.workspaceManager.Initialize(ctx, sdkConfig); err != nil {
+		return fmt.Errorf("failed to initialize workspace manager: %w", err)
+	}
+
+	o.logger.Info(ctx, "workspaces initialized successfully",
+		"repository_count", len(workspaceConfig.Repositories),
+	)
+
+	return nil
+}
+
+// convertWorkspaceConfig converts mission.WorkspaceConfig to workspace.WorkspaceConfig.
+// This handles the translation between mission configuration and SDK workspace types.
+func (o *Orchestrator) convertWorkspaceConfig(cfg *mission.WorkspaceConfig) workspace.WorkspaceConfig {
+	// Convert repositories
+	repos := make([]workspace.RepositoryConfig, len(cfg.Repositories))
+	for i, repo := range cfg.Repositories {
+		repos[i] = workspace.RepositoryConfig{
+			Name:           repo.Name,
+			URL:            repo.URL,
+			Branch:         repo.Branch,
+			CredentialName: repo.CredentialName,
+			Shallow:        repo.Shallow,
+			DependsOn:      repo.DependsOn,
+		}
+	}
+
+	// Convert settings
+	settings := workspace.WorkspaceSettings{
+		CleanupOnComplete: cfg.Settings.CleanupOnComplete,
+		UseWorktrees:      cfg.Settings.UseWorktrees,
+		BaseDirectory:     cfg.Settings.BaseDirectory,
+		LSPEnabled:        cfg.Settings.LSPEnabled,
+		LSPTimeout:        cfg.Settings.LSPTimeout,
+	}
+
+	return workspace.WorkspaceConfig{
+		Repositories: repos,
+		Settings:     settings,
+	}
 }
 
 // recordMissionStarted records metrics when a mission starts.

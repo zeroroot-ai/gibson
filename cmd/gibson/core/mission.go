@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -135,7 +134,7 @@ func MissionRun(cc *CommandContext, workflowFile string, targetFlag string) (*Co
 	}
 
 	// Find or create mission with stable ID
-	now := time.Now()
+	now := mission.NewUnixTimeNow()
 	missionTemplate := &mission.Mission{
 		ID:               types.NewID(),
 		Name:             def.Name,

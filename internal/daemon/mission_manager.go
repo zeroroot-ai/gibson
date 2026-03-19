@@ -228,7 +228,7 @@ func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID
 	}
 
 	// Find or create stable mission record (one per workflow name)
-	now := time.Now()
+	now := mission.NewUnixTimeNow()
 	missionTemplate := &mission.Mission{
 		ID:               types.NewID(), // Template ID, may be replaced by existing
 		Name:             def.Name,
@@ -416,8 +416,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	}
 
 	// Set StartedAt timestamp now that execution is beginning
-	now := time.Now()
-	active.mission.StartedAt = &now
+	active.mission.StartedAt = mission.NewUnixTimePtrNow()
 
 	// Update mission status to Running in SQLite
 	if m.missionStore != nil {
@@ -756,8 +755,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Update mission in store
 	active.mission.Status = finalStatus
 	active.mission.Error = errorMsg
-	completedAt := time.Now()
-	active.mission.CompletedAt = &completedAt
+	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
 
 	if m.missionStore != nil {
 		if saveErr := m.missionStore.Update(ctx, active.mission); saveErr != nil {
@@ -815,8 +813,7 @@ func (m *missionManager) Pause(ctx context.Context, missionID string, force bool
 			m.logger.Warn("timeout waiting for mission to pause", "mission_id", missionID)
 			// Update status to paused anyway
 			active.mission.Status = mission.MissionStatusPaused
-			now := time.Now()
-			active.mission.CompletedAt = &now
+			active.mission.CompletedAt = mission.NewUnixTimePtrNow()
 			if m.missionStore != nil {
 				if err := m.missionStore.Update(ctx, active.mission); err != nil {
 					m.logger.Warn("failed to update mission status to paused", "error", err)
@@ -898,8 +895,7 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 
 	// Update mission status to running
 	missionRecord.Status = mission.MissionStatusRunning
-	startedAt := time.Now()
-	missionRecord.StartedAt = &startedAt
+	missionRecord.StartedAt = mission.NewUnixTimePtrNow()
 
 	if err := m.missionStore.Update(ctx, missionRecord); err != nil {
 		m.logger.Warn("failed to update mission status", "error", err)
@@ -983,8 +979,7 @@ func (m *missionManager) Stop(ctx context.Context, missionID string, force bool)
 
 	// Update mission status
 	active.mission.Status = mission.MissionStatusCancelled
-	now := time.Now()
-	active.mission.CompletedAt = &now
+	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
 
 	if m.missionStore != nil {
 		if err := m.missionStore.Update(ctx, active.mission); err != nil {
@@ -1118,12 +1113,12 @@ func missionToData(m *mission.Mission) api.MissionData {
 		ID:           m.ID.String(),
 		WorkflowPath: "", // Not tracked in Mission struct
 		Status:       string(m.Status),
-		StartTime:    m.CreatedAt,
+		StartTime:    m.CreatedAt.Time,
 		FindingCount: int32(m.FindingsCount),
 	}
 
-	if m.CompletedAt != nil {
-		data.EndTime = *m.CompletedAt
+	if !m.CompletedAt.IsNil() {
+		data.EndTime = *m.CompletedAt.Time
 	}
 
 	return data

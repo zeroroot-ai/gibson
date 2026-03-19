@@ -73,6 +73,10 @@ type MissionDefinition struct {
 	// These will be auto-installed when the mission is installed.
 	Dependencies *MissionDependencies `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
 
+	// Workspace contains configuration for Git repository cloning and workspace management.
+	// Agents can access cloned repositories through the harness interface.
+	Workspace *WorkspaceConfig `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+
 	// Source is the git URL this mission was installed from (if applicable).
 	Source string `json:"source,omitempty" yaml:"source,omitempty"`
 

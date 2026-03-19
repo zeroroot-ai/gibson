@@ -1,11 +1,117 @@
 package mission
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
 )
+
+// UnixTime wraps time.Time to marshal/unmarshal as Unix epoch milliseconds.
+// This is required for RediSearch NUMERIC field compatibility.
+type UnixTime struct {
+	time.Time
+}
+
+// MarshalJSON converts time to Unix epoch milliseconds.
+func (t UnixTime) MarshalJSON() ([]byte, error) {
+	if t.Time.IsZero() {
+		return []byte("0"), nil
+	}
+	return json.Marshal(t.Time.UnixMilli())
+}
+
+// UnmarshalJSON converts Unix epoch milliseconds to time.
+func (t *UnixTime) UnmarshalJSON(data []byte) error {
+	var millis int64
+	if err := json.Unmarshal(data, &millis); err != nil {
+		// Try parsing as string (backwards compatibility with ISO 8601)
+		var timeStr string
+		if err2 := json.Unmarshal(data, &timeStr); err2 == nil {
+			parsed, err3 := time.Parse(time.RFC3339Nano, timeStr)
+			if err3 == nil {
+				t.Time = parsed
+				return nil
+			}
+		}
+		return err
+	}
+	if millis == 0 {
+		t.Time = time.Time{}
+	} else {
+		t.Time = time.UnixMilli(millis)
+	}
+	return nil
+}
+
+// UnixTimePtr wraps *time.Time to marshal/unmarshal as Unix epoch milliseconds.
+// Returns null for nil pointers and 0 for zero time values.
+type UnixTimePtr struct {
+	*time.Time
+}
+
+// MarshalJSON converts time pointer to Unix epoch milliseconds or null.
+func (t UnixTimePtr) MarshalJSON() ([]byte, error) {
+	if t.Time == nil || t.Time.IsZero() {
+		return []byte("null"), nil
+	}
+	return json.Marshal(t.Time.UnixMilli())
+}
+
+// UnmarshalJSON converts Unix epoch milliseconds or null to time pointer.
+func (t *UnixTimePtr) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		t.Time = nil
+		return nil
+	}
+	var millis int64
+	if err := json.Unmarshal(data, &millis); err != nil {
+		// Try parsing as string (backwards compatibility with ISO 8601)
+		var timeStr string
+		if err2 := json.Unmarshal(data, &timeStr); err2 == nil {
+			parsed, err3 := time.Parse(time.RFC3339Nano, timeStr)
+			if err3 == nil {
+				t.Time = &parsed
+				return nil
+			}
+		}
+		return err
+	}
+	if millis == 0 {
+		t.Time = nil
+	} else {
+		ts := time.UnixMilli(millis)
+		t.Time = &ts
+	}
+	return nil
+}
+
+// IsNil returns true if the time pointer is nil.
+func (t UnixTimePtr) IsNil() bool {
+	return t.Time == nil
+}
+
+// NewUnixTime creates a UnixTime from a time.Time value.
+func NewUnixTime(t time.Time) UnixTime {
+	return UnixTime{Time: t}
+}
+
+// NewUnixTimeNow creates a UnixTime set to the current time.
+func NewUnixTimeNow() UnixTime {
+	return UnixTime{Time: time.Now()}
+}
+
+// NewUnixTimePtr creates a UnixTimePtr from a *time.Time value.
+func NewUnixTimePtr(t *time.Time) UnixTimePtr {
+	return UnixTimePtr{Time: t}
+}
+
+// NewUnixTimePtrNow creates a UnixTimePtr set to the current time.
+func NewUnixTimePtrNow() UnixTimePtr {
+	now := time.Now()
+	return UnixTimePtr{Time: &now}
+}
 
 // MissionStatus represents the lifecycle state of a mission.
 type MissionStatus string
@@ -164,22 +270,26 @@ type Mission struct {
 	Depth int `json:"depth"`
 
 	// CheckpointAt is the timestamp of the last checkpoint save.
-	CheckpointAt *time.Time `json:"checkpoint_at,omitempty"`
+	CheckpointAt UnixTimePtr `json:"checkpoint_at,omitempty"`
 
 	// Error contains error message if mission failed.
 	Error string `json:"error,omitempty"`
 
 	// CreatedAt is the timestamp when the mission was created.
-	CreatedAt time.Time `json:"created_at"`
+	// Stored as Unix epoch milliseconds for RediSearch NUMERIC compatibility.
+	CreatedAt UnixTime `json:"created_at"`
 
 	// StartedAt is the timestamp when the mission started execution.
-	StartedAt *time.Time `json:"started_at,omitempty"`
+	// Stored as Unix epoch milliseconds for RediSearch NUMERIC compatibility.
+	StartedAt UnixTimePtr `json:"started_at,omitempty"`
 
 	// CompletedAt is the timestamp when the mission finished execution.
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	// Stored as Unix epoch milliseconds for RediSearch NUMERIC compatibility.
+	CompletedAt UnixTimePtr `json:"completed_at,omitempty"`
 
 	// UpdatedAt is the timestamp of the last update to this mission.
-	UpdatedAt time.Time `json:"updated_at"`
+	// Stored as Unix epoch milliseconds for RediSearch NUMERIC compatibility.
+	UpdatedAt UnixTime `json:"updated_at"`
 }
 
 // MissionMetrics tracks mission execution statistics.
@@ -378,16 +488,16 @@ func (m *Mission) GetProgress() *MissionProgress {
 // GetDuration returns the mission execution duration.
 // Returns 0 if the mission hasn't started.
 func (m *Mission) GetDuration() time.Duration {
-	if m.StartedAt == nil {
+	if m.StartedAt.IsNil() {
 		return 0
 	}
 
 	endTime := time.Now()
-	if m.CompletedAt != nil {
-		endTime = *m.CompletedAt
+	if !m.CompletedAt.IsNil() {
+		endTime = *m.CompletedAt.Time
 	}
 
-	return endTime.Sub(*m.StartedAt)
+	return endTime.Sub(*m.StartedAt.Time)
 }
 
 // GetMemoryContinuity returns the memory continuity mode, defaulting to isolated.

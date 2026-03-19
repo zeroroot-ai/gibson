@@ -229,8 +229,7 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 			// Update mission with error
 			mission.Status = MissionStatusFailed
 			mission.Error = err.Error()
-			completedAt := time.Now()
-			mission.CompletedAt = &completedAt
+			mission.CompletedAt = NewUnixTimePtrNow()
 			c.store.Update(context.Background(), mission)
 		}
 	}()
@@ -278,8 +277,7 @@ func (c *DefaultMissionController) Stop(ctx context.Context, missionID types.ID)
 
 	// Update mission status
 	mission.Status = MissionStatusCancelled
-	completedAt := time.Now()
-	mission.CompletedAt = &completedAt
+	mission.CompletedAt = NewUnixTimePtrNow()
 
 	return c.store.Update(ctx, mission)
 }
@@ -382,8 +380,7 @@ func (c *DefaultMissionController) Resume(ctx context.Context, missionID types.I
 
 	// Update mission status to running
 	mission.Status = MissionStatusRunning
-	startedAt := time.Now()
-	mission.StartedAt = &startedAt
+	mission.StartedAt = NewUnixTimePtrNow()
 	if err := c.store.Update(ctx, mission); err != nil {
 		return fmt.Errorf("failed to update mission status: %w", err)
 	}
@@ -417,14 +414,12 @@ func (c *DefaultMissionController) Resume(ctx context.Context, missionID types.I
 			// Update mission with error
 			mission.Status = MissionStatusFailed
 			mission.Error = err.Error()
-			completedAt := time.Now()
-			mission.CompletedAt = &completedAt
+			mission.CompletedAt = NewUnixTimePtrNow()
 			c.store.Update(context.Background(), mission)
 		} else if result != nil {
 			// Update mission with result status
 			mission.Status = result.Status
-			completedAt := time.Now()
-			mission.CompletedAt = &completedAt
+			mission.CompletedAt = NewUnixTimePtrNow()
 			mission.Metrics = result.Metrics
 			c.store.Update(context.Background(), mission)
 		}

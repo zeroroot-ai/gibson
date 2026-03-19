@@ -143,8 +143,8 @@ func (l *DefaultMissionRunLinker) GetRunHistory(ctx context.Context, name string
 		run := &MissionRunInfo{
 			MissionID:   m.ID,
 			Status:      m.Status,
-			CreatedAt:   m.CreatedAt,
-			CompletedAt: m.CompletedAt,
+			CreatedAt:   m.CreatedAt.Time,
+			CompletedAt: m.CompletedAt.Time,
 		}
 
 		// Extract run number from metadata

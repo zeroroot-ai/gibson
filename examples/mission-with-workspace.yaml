@@ -1,0 +1,124 @@
+name: Code Generation with Multi-Repository Workspace
+version: 1.0.0
+description: |
+  Example mission demonstrating workspace configuration for code generation
+  across multiple repositories with dependency ordering.
+
+# Workspace configuration for Git repository cloning and management
+workspace:
+  # List of repositories to clone and make available to agents
+  repositories:
+    # Backend API repository - cloned first (no dependencies)
+    - name: backend
+      url: https://github.com/org/backend-api.git
+      branch: main
+      credential_name: github-token
+      shallow: false
+
+    # Frontend application - depends on backend being available
+    - name: frontend
+      url: git@github.com:org/frontend-app.git
+      branch: develop
+      credential_name: github-ssh-key
+      depends_on:
+        - backend
+
+    # Shared library used by both - cloned with shallow history
+    - name: shared-lib
+      url: https://github.com/org/shared-library.git
+      branch: main
+      credential_name: github-token
+      shallow: true
+
+  # Workspace-wide settings
+  cleanup_on_complete: false  # Keep workspaces for debugging
+  use_worktrees: true          # Enable Git worktrees for concurrent agent work
+  lsp_enabled: true            # Enable Language Server Protocol for validation
+  lsp_timeout: 10s             # Timeout for LSP validation requests
+  base_directory: /tmp/mission-workspaces  # Custom workspace directory
+
+# Mission dependencies - auto-installed components
+dependencies:
+  agents:
+    - code-analyzer
+    - code-generator
+  tools:
+    - git-operations
+  plugins:
+    - github-integration
+
+# Mission execution nodes
+nodes:
+  # Analyze backend codebase
+  - id: analyze-backend
+    type: agent
+    agent: code-analyzer
+    name: Analyze Backend API
+    description: Analyze backend repository structure and identify integration points
+    task:
+      workspace: backend
+      analysis_type: api-surface
+      output_format: json
+    timeout: 10m
+
+  # Analyze frontend codebase
+  - id: analyze-frontend
+    type: agent
+    agent: code-analyzer
+    name: Analyze Frontend Application
+    description: Analyze frontend repository and identify API dependencies
+    task:
+      workspace: frontend
+      analysis_type: api-consumer
+      output_format: json
+    timeout: 10m
+    depends_on:
+      - analyze-backend
+
+  # Generate integration code
+  - id: generate-integration
+    type: agent
+    agent: code-generator
+    name: Generate Integration Code
+    description: Generate type-safe API client in frontend based on backend analysis
+    task:
+      source_workspace: backend
+      target_workspace: frontend
+      generator_type: typescript-api-client
+      create_branch: feature/generated-api-client
+    timeout: 15m
+    depends_on:
+      - analyze-backend
+      - analyze-frontend
+
+  # Update shared library
+  - id: update-shared-lib
+    type: agent
+    agent: code-generator
+    name: Update Shared Library
+    description: Update shared types and utilities based on new integration
+    task:
+      workspace: shared-lib
+      update_type: types-and-utils
+      create_branch: feature/update-types
+    timeout: 10m
+    depends_on:
+      - generate-integration
+
+  # Create pull requests
+  - id: create-prs
+    type: plugin
+    plugin: github-integration
+    method: create_pull_requests
+    name: Create Pull Requests
+    description: Create PRs for all generated changes
+    params:
+      repositories:
+        - frontend
+        - shared-lib
+      pr_template: auto-generated-code
+      reviewers:
+        - team/backend-team
+        - team/frontend-team
+    depends_on:
+      - update-shared-lib

@@ -65,7 +65,7 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 	// Update mission status to running
 	startedAt := time.Now()
 	mis.Status = mission.MissionStatusRunning
-	mis.StartedAt = &startedAt
+	mis.StartedAt = mission.NewUnixTimePtr(&startedAt)
 
 	// Initialize metrics
 	if mis.Metrics == nil {
@@ -327,6 +327,8 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 		WithTracer(m.config.Tracer),
 		WithEventBus(m.config.EventBus),
 		WithDecisionLogWriter(m.config.DecisionLogWriter),
+		WithMissionDefinition(def),
+		WithCredentialStore(m.config.CredentialStore),
 	}
 
 	orchestrator := NewOrchestrator(observer, thinker, actor, orchOptions...)
@@ -388,7 +390,7 @@ func (m *MissionAdapter) convertResult(mis *mission.Mission, orchResult *Orchest
 
 	// Update mission metrics
 	completedAt := time.Now()
-	mis.CompletedAt = &completedAt
+	mis.CompletedAt = mission.NewUnixTimePtr(&completedAt)
 	mis.Metrics.Duration = orchResult.Duration
 	mis.Metrics.CompletedNodes = orchResult.CompletedNodes
 	mis.Metrics.LastUpdateAt = completedAt
@@ -431,7 +433,7 @@ func (m *MissionAdapter) convertErrorToResult(mis *mission.Mission, orchResult *
 	mis.Status = mission.MissionStatusFailed
 	mis.Error = err.Error()
 	completedAt := time.Now()
-	mis.CompletedAt = &completedAt
+	mis.CompletedAt = mission.NewUnixTimePtr(&completedAt)
 	mis.Metrics.Duration = completedAt.Sub(startedAt)
 	result.CompletedAt = completedAt
 
