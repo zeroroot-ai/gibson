@@ -199,6 +199,18 @@ type HarnessConfig struct {
 	// RunNumber is the current mission run number (1-indexed).
 	// Required when Checkpointer is set. Ignored if Checkpointer is nil.
 	RunNumber int
+
+	// ClassifierConfig provides configuration for the category classifier.
+	// When set, the harness will use semantic classification to normalize
+	// finding categories during SubmitFinding operations.
+	// Optional: if nil, category classification is disabled.
+	ClassifierConfig *ClassifierConfig
+
+	// CategoryClassifier provides semantic category normalization for findings.
+	// When set, the harness will classify categories during SubmitFinding operations
+	// based on the ClassifierConfig settings.
+	// Optional: if nil, category classification is disabled.
+	CategoryClassifier CategoryClassifier
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.
@@ -297,7 +309,49 @@ func (c *HarnessConfig) ApplyDefaults() {
 		}
 	}
 
+	// Apply default classifier config if not set
+	// ClassifierConfig is defaulted to disabled for backward compatibility
+	if c.ClassifierConfig == nil {
+		c.ClassifierConfig = DefaultClassifierConfig()
+	}
+
 	// Note: MemoryManager is not defaulted - it requires mission-specific configuration
 	// and database dependencies that cannot be reasonably defaulted.
 	// Note: MissionClient is not defaulted - mission management is opt-in functionality.
+}
+
+// ClassifierConfig configures the category classifier for finding normalization.
+// The classifier uses semantic similarity to match proposed categories against
+// existing ones, enabling LLM agents to use natural language category names
+// while maintaining consistency across findings.
+type ClassifierConfig struct {
+	// Enabled controls whether category classification is active.
+	// When false, findings are stored with their original categories unchanged.
+	// Default: false (for backward compatibility).
+	Enabled bool
+
+	// Threshold is the minimum cosine similarity score (0.0-1.0) required to
+	// match a proposed category to an existing one. Higher values require closer
+	// semantic matches, while lower values are more permissive.
+	// Typical values: 0.80-0.90 for related concepts, 0.90-0.95 for near-exact matches.
+	// Default: 0.85
+	Threshold float64
+
+	// AutoRegister determines whether new categories should be automatically
+	// registered when no existing category meets the similarity threshold.
+	// When true, proposed categories that don't match are added to the index.
+	// When false, proposed categories are used as-is without registration.
+	// Default: true
+	AutoRegister bool
+}
+
+// DefaultClassifierConfig returns the default classifier configuration.
+// This configuration is conservative to avoid unwanted normalization during
+// initial rollout. Adjust threshold based on observed matching behavior.
+func DefaultClassifierConfig() *ClassifierConfig {
+	return &ClassifierConfig{
+		Enabled:      false, // Disabled by default for backward compatibility
+		Threshold:    0.85,  // Balanced threshold for semantic similarity
+		AutoRegister: true,  // Auto-register new categories by default
+	}
 }

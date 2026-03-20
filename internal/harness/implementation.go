@@ -91,6 +91,9 @@ type DefaultAgentHarness struct {
 
 	// workspaceManager provides access to Git repository workspaces (nil if not configured)
 	workspaceManager workspace.WorkspaceManager
+
+	// categoryClassifier provides semantic category normalization (nil if disabled)
+	categoryClassifier CategoryClassifier
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -1375,11 +1378,43 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 	ctx, span := h.tracer.Start(ctx, "harness.SubmitFinding")
 	defer span.End()
 
+	// Store original category before classification
+	originalCategory := finding.Category
+
+	// Apply category classification if classifier is configured
+	if h.categoryClassifier != nil {
+		normalizedCategory, err := h.categoryClassifier.Classify(ctx, finding.Category, finding.Description)
+		if err != nil {
+			// Graceful degradation: log warning and continue with original category
+			h.logger.Warn("category classification failed, using original category",
+				"original_category", finding.Category,
+				"error", err)
+		} else {
+			// Update finding category with normalized value
+			finding.Category = normalizedCategory
+
+			// Add metadata about classification
+			if finding.Metadata == nil {
+				finding.Metadata = make(map[string]any)
+			}
+			finding.Metadata["original_category"] = originalCategory
+
+			// Log normalization if category changed
+			if normalizedCategory != originalCategory {
+				h.logger.Info("normalized finding category",
+					"original_category", originalCategory,
+					"normalized_category", normalizedCategory,
+					"finding_id", finding.ID.String())
+			}
+		}
+	}
+
 	h.logger.Info("submitting finding",
 		"finding_id", finding.ID.String(),
 		"title", finding.Title,
 		"severity", finding.Severity,
-		"confidence", finding.Confidence)
+		"confidence", finding.Confidence,
+		"category", finding.Category)
 
 	// Store finding
 	err := h.findingStore.Store(ctx, h.missionCtx.ID, finding)

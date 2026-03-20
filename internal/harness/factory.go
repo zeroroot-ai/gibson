@@ -193,6 +193,20 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		)
 	}
 
+	// Determine if category classifier should be enabled
+	var categoryClassifier CategoryClassifier
+	if f.config.ClassifierConfig != nil && f.config.ClassifierConfig.Enabled {
+		categoryClassifier = f.config.CategoryClassifier
+		if categoryClassifier != nil {
+			logger.Debug("category classifier enabled for harness",
+				slog.Float64("threshold", f.config.ClassifierConfig.Threshold),
+				slog.Bool("auto_register", f.config.ClassifierConfig.AutoRegister),
+			)
+		} else {
+			logger.Warn("classifier config enabled but no CategoryClassifier provided")
+		}
+	}
+
 	// Create and return DefaultAgentHarness
 	var harness AgentHarness = &DefaultAgentHarness{
 		slotManager:         f.config.SlotManager,
@@ -216,6 +230,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		eventLogger:         f.config.EventLogger,
 		resolver:            resolver,
 		checkpointAccess:    checkpointAccess,
+		categoryClassifier:  categoryClassifier,
 	}
 
 	// Apply middleware if configured
