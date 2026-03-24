@@ -770,4 +770,16 @@ func (a *GibsonHarnessAdapter) Workspaces() map[string]workspace.Workspace {
 	return make(map[string]workspace.Workspace)
 }
 
+// TaxonomyRegistry returns the taxonomy introspector for querying available
+// node types and relationships in the knowledge graph.
+// Delegates to the inner Gibson harness's TaxonomyRegistry implementation.
+func (a *GibsonHarnessAdapter) TaxonomyRegistry() graphrag.TaxonomyIntrospector {
+	// Type assert to access TaxonomyRegistry method from DefaultAgentHarness
+	if h, ok := a.inner.(interface{ TaxonomyRegistry() graphrag.TaxonomyIntrospector }); ok {
+		return h.TaxonomyRegistry()
+	}
+	// Return nil if inner harness doesn't implement TaxonomyRegistry
+	return nil
+}
+
 var _ agent.Harness = (*GibsonHarnessAdapter)(nil)

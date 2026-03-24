@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	"github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/graphrag/protoconv"
 	"github.com/zero-day-ai/sdk/graphrag/taxonomy"
 	"go.opentelemetry.io/otel"
@@ -23,9 +25,11 @@ import (
 // GraphLoader loads proto nodes into Neo4j.
 // It handles node creation, relationship creation, and provenance tracking.
 type GraphLoader struct {
-	client          graph.GraphClient
-	tracer          trace.Tracer
-	neo4jBrowserURL string // Base URL for Neo4j Browser (for generating deep links)
+	client             graph.GraphClient
+	tracer             trace.Tracer
+	neo4jBrowserURL    string // Base URL for Neo4j Browser (for generating deep links)
+	taxonomyRegistry   graphrag.TaxonomyRegistry
+	validateExtensions bool // Enable validation of extension node types
 }
 
 // NewGraphLoader creates a new GraphLoader with the given Neo4j client.
@@ -41,6 +45,21 @@ func NewGraphLoader(client graph.GraphClient) *GraphLoader {
 // This is optional but recommended for enhanced observability.
 func (l *GraphLoader) WithNeo4jBrowserURL(url string) *GraphLoader {
 	l.neo4jBrowserURL = url
+	return l
+}
+
+// WithTaxonomyRegistry sets the taxonomy registry for extension node type validation.
+// This is optional - the loader works without it, but extension validation will be disabled.
+func (l *GraphLoader) WithTaxonomyRegistry(r graphrag.TaxonomyRegistry) *GraphLoader {
+	l.taxonomyRegistry = r
+	return l
+}
+
+// WithValidateExtensions enables or disables validation of extension node types.
+// When enabled, the loader will verify that custom node types are registered in the taxonomy registry.
+// This is optional and defaults to false for backward compatibility.
+func (l *GraphLoader) WithValidateExtensions(validate bool) *GraphLoader {
+	l.validateExtensions = validate
 	return l
 }
 
@@ -511,6 +530,9 @@ func (l *GraphLoader) loadEvidence(ctx context.Context, execCtx ExecContext, evi
 func (l *GraphLoader) loadCustomNodes(ctx context.Context, execCtx ExecContext, customNodes []*graphragpb.CustomNode) (*LoadResult, error) {
 	result := &LoadResult{}
 
+	// Get the current span for observability
+	span := trace.SpanFromContext(ctx)
+
 	// Process each custom node individually since they may have different types and parents
 	for _, node := range customNodes {
 		if node == nil {
@@ -522,6 +544,80 @@ func (l *GraphLoader) loadCustomNodes(ctx context.Context, execCtx ExecContext, 
 		if nodeType == "" {
 			result.AddError(fmt.Errorf("custom node missing node_type"))
 			continue
+		}
+
+		// Task 4.2: Add extension logging
+		// If taxonomyRegistry is set, determine the source of this node type
+		extensionSource := "unknown"
+		if l.taxonomyRegistry != nil {
+			// Type assert to TaxonomyIntrospector to access NodeTypeSource
+			// DefaultTaxonomyRegistry implements both TaxonomyRegistry and TaxonomyIntrospector
+			if introspector, ok := l.taxonomyRegistry.(graphrag.TaxonomyIntrospector); ok {
+				extensionSource = introspector.NodeTypeSource(nodeType)
+			}
+		}
+
+		// Log at debug level
+		slog.Debug("loading custom node",
+			"type", nodeType,
+			"source", extensionSource)
+
+		// Add OpenTelemetry span event for observability
+		span.AddEvent("loading_custom_node",
+			trace.WithAttributes(
+				attribute.String("node_type", nodeType),
+				attribute.String("extension_source", extensionSource),
+			))
+
+		// Task 4.3: Optional property validation for extension types
+		if l.validateExtensions && extensionSource != "core" && extensionSource != "unknown" {
+			// Get the extension info
+			if introspector, ok := l.taxonomyRegistry.(graphrag.TaxonomyIntrospector); ok {
+				ext := introspector.ExtensionInfo(extensionSource)
+				if ext != nil {
+					// Find the NodeTypeDefinition for this node type
+					var nodeDef *graphrag.NodeTypeDefinition
+					for i := range ext.NodeTypes {
+						if ext.NodeTypes[i].Name == nodeType {
+							nodeDef = &ext.NodeTypes[i]
+							break
+						}
+					}
+
+					if nodeDef != nil {
+						// Check required properties
+						missingProps := []string{}
+						for _, prop := range nodeDef.Properties {
+							if prop.Required {
+								// Check if the property exists in the CustomNode properties
+								if _, ok := node.Properties[prop.Name]; !ok {
+									missingProps = append(missingProps, prop.Name)
+								}
+							}
+						}
+
+						if len(missingProps) > 0 {
+							// Validation failed - log warning and add span event
+							slog.Warn("custom node validation failed: missing required properties",
+								"type", nodeType,
+								"source", extensionSource,
+								"missing_properties", missingProps)
+
+							span.AddEvent("validation_failed",
+								trace.WithAttributes(
+									attribute.String("node_type", nodeType),
+									attribute.StringSlice("missing_properties", missingProps),
+								))
+						} else {
+							// Validation passed
+							span.AddEvent("validation_passed",
+								trace.WithAttributes(
+									attribute.String("node_type", nodeType),
+								))
+						}
+					}
+				}
+			}
 		}
 
 		// Build parent ref if specified

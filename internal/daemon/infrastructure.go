@@ -67,7 +67,8 @@ type Infrastructure struct {
 	otelStack *observability.OTelObservabilityStack
 
 	// taxonomyRegistry manages core taxonomy and agent-installed extensions
-	taxonomyRegistry sdkgraphrag.TaxonomyRegistry
+	// Stored as concrete type to satisfy both TaxonomyRegistry and TaxonomyIntrospector interfaces
+	taxonomyRegistry *sdkgraphrag.DefaultTaxonomyRegistry
 
 	// discoveryProcessor processes agent output discoveries to Neo4j
 	// This enables downstream agents to query discovered hosts, ports, services, etc.
@@ -161,7 +162,8 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 
 	// Create DiscoveryProcessor for processing agent output discoveries to Neo4j
 	// This enables downstream agents to query discovered hosts, ports, services, etc.
-	graphLoader := loader.NewGraphLoader(graphRAGClient)
+	graphLoader := loader.NewGraphLoader(graphRAGClient).
+		WithTaxonomyRegistry(taxonomyRegistry)
 	discoveryProc := processor.NewDiscoveryProcessor(graphLoader, graphRAGClient, d.logger.Slog())
 	discoveryProcessorAdapter := &discoveryProcessorAdapter{processor: discoveryProc}
 	d.logger.Info(ctx, "initialized DiscoveryProcessor for automatic discovery storage")
@@ -490,10 +492,16 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph
 	}
 	d.logger.Info(ctx, "created GraphRAG store")
 
-	// Create bridge adapter with the store
+	// Create GraphLoader for persisting findings to Neo4j
+	graphLoader := loader.NewGraphLoader(neo4jClient).
+		WithTaxonomyRegistry(d.infrastructure.taxonomyRegistry)
+	d.logger.Info(ctx, "created GraphLoader for finding storage")
+
+	// Create bridge adapter with the store and graph loader
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
 		Neo4jClient:   neo4jClient,
 		GraphRAGStore: store,
+		GraphLoader:   newGraphLoaderAdapter(graphLoader),
 		Logger:        d.logger.WithComponent("graphrag-bridge").Slog(),
 	})
 	if err != nil {
@@ -524,19 +532,22 @@ func (d *daemonImpl) initOTelObservability(ctx context.Context) *observability.O
 
 	// Build OTelConfig from daemon configuration
 	cfg := observability.OTelConfig{
-		Enabled:         d.config.OTelObservability.Enabled,
-		Endpoint:        d.config.OTelObservability.Endpoint,
-		Protocol:        d.config.OTelObservability.Protocol,
-		Headers:         d.config.OTelObservability.Headers,
-		ServiceName:     d.config.OTelObservability.ServiceName,
-		ServiceVersion:  version.Version,
-		BatchSize:       d.config.OTelObservability.Batching.MaxSize,
-		BatchTimeout:    d.config.OTelObservability.Batching.Timeout,
-		RetryEnabled:    d.config.OTelObservability.Retry.Enabled,
-		RetryInitial:    d.config.OTelObservability.Retry.InitialInterval,
-		RetryMax:        d.config.OTelObservability.Retry.MaxInterval,
-		RetryMaxElapsed: d.config.OTelObservability.Retry.MaxElapsedTime,
-		Neo4jBrowserURL: d.config.Observability.Neo4jBrowserURL,
+		Enabled:           d.config.OTelObservability.Enabled,
+		Endpoint:          d.config.OTelObservability.Endpoint,
+		Protocol:          d.config.OTelObservability.Protocol,
+		Headers:           d.config.OTelObservability.Headers,
+		ServiceName:       d.config.OTelObservability.ServiceName,
+		ServiceVersion:    version.Version,
+		BatchSize:         d.config.OTelObservability.Batching.MaxSize,
+		BatchTimeout:      d.config.OTelObservability.Batching.Timeout,
+		RetryEnabled:      d.config.OTelObservability.Retry.Enabled,
+		RetryInitial:      d.config.OTelObservability.Retry.InitialInterval,
+		RetryMax:          d.config.OTelObservability.Retry.MaxInterval,
+		RetryMaxElapsed:   d.config.OTelObservability.Retry.MaxElapsedTime,
+		Neo4jBrowserURL:   d.config.Observability.Neo4jBrowserURL,
+		LangfuseEnabled:   d.config.OTelObservability.Langfuse.Enabled,
+		LangfusePublicKey: d.config.OTelObservability.Langfuse.PublicKey,
+		LangfuseSecretKey: d.config.OTelObservability.Langfuse.SecretKey,
 	}
 
 	// Convert ContentLoggingSubConfig to observability.ContentLoggingConfig
