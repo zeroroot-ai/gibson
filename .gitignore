@@ -33,4 +33,5 @@ build/.env
 # Editor/IDE
 # .idea/
 # .vscode/
-gibson
+/gibson
+bin/gibson
