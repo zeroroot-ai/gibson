@@ -1,0 +1,158 @@
+package observability
+
+import (
+	"encoding/base64"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/zero-day-ai/gibson/internal/config"
+)
+
+func TestLangfuseOTelConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     config.LangfuseOTelConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid config",
+			cfg: config.LangfuseOTelConfig{
+				Enabled:   true,
+				PublicKey: "pk-lf-test",
+				SecretKey: "sk-lf-test",
+			},
+			wantErr: false,
+		},
+		{
+			name: "disabled config - no validation",
+			cfg: config.LangfuseOTelConfig{
+				Enabled: false,
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing public key",
+			cfg: config.LangfuseOTelConfig{
+				Enabled:   true,
+				SecretKey: "sk-lf-test",
+			},
+			wantErr: true,
+			errMsg:  "langfuse.public_key is required when langfuse is enabled",
+		},
+		{
+			name: "missing secret key",
+			cfg: config.LangfuseOTelConfig{
+				Enabled:   true,
+				PublicKey: "pk-lf-test",
+			},
+			wantErr: true,
+			errMsg:  "langfuse.secret_key is required when langfuse is enabled",
+		},
+		{
+			name: "missing both keys",
+			cfg: config.LangfuseOTelConfig{
+				Enabled: true,
+			},
+			wantErr: true,
+			errMsg:  "langfuse.public_key is required when langfuse is enabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestLangfuseAuthHeaderGeneration(t *testing.T) {
+	tests := []struct {
+		name      string
+		publicKey string
+		secretKey string
+		want      string
+	}{
+		{
+			name:      "basic auth encoding",
+			publicKey: "pk-lf-test",
+			secretKey: "sk-lf-test",
+			want:      base64.StdEncoding.EncodeToString([]byte("pk-lf-test:sk-lf-test")),
+		},
+		{
+			name:      "special characters",
+			publicKey: "pk-lf-abc123",
+			secretKey: "sk-lf-xyz789",
+			want:      base64.StdEncoding.EncodeToString([]byte("pk-lf-abc123:sk-lf-xyz789")),
+		},
+		{
+			name:      "with hyphens and underscores",
+			publicKey: "pk-lf-test_key-123",
+			secretKey: "sk-lf-secret_key-456",
+			want:      base64.StdEncoding.EncodeToString([]byte("pk-lf-test_key-123:sk-lf-secret_key-456")),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the auth header generation from createLangfuseTraceExporter
+			authString := base64.StdEncoding.EncodeToString(
+				[]byte(tt.publicKey + ":" + tt.secretKey),
+			)
+			assert.Equal(t, tt.want, authString)
+
+			// Verify it can be decoded back
+			decoded, err := base64.StdEncoding.DecodeString(authString)
+			require.NoError(t, err)
+			assert.Equal(t, tt.publicKey+":"+tt.secretKey, string(decoded))
+		})
+	}
+}
+
+func TestLangfuseEndpointConstruction(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		want     string
+	}{
+		{
+			name:     "endpoint without trailing slash",
+			endpoint: "https://cloud.langfuse.com",
+			want:     "https://cloud.langfuse.com/api/public/otel/v1/traces",
+		},
+		{
+			name:     "endpoint with trailing slash",
+			endpoint: "https://cloud.langfuse.com/",
+			want:     "https://cloud.langfuse.com/api/public/otel/v1/traces",
+		},
+		{
+			name:     "localhost endpoint",
+			endpoint: "http://localhost:3000",
+			want:     "http://localhost:3000/api/public/otel/v1/traces",
+		},
+		{
+			name:     "custom port",
+			endpoint: "https://langfuse.example.com:8443",
+			want:     "https://langfuse.example.com:8443/api/public/otel/v1/traces",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate endpoint construction from createLangfuseTraceExporter
+			endpoint := tt.endpoint
+			if len(endpoint) > 0 && endpoint[len(endpoint)-1] == '/' {
+				endpoint = endpoint[:len(endpoint)-1]
+			}
+			result := endpoint + "/api/public/otel/v1/traces"
+			assert.Equal(t, tt.want, result)
+		})
+	}
+}

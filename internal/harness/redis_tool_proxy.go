@@ -53,7 +53,7 @@ func NewRedisToolProxy(client *queue.RedisClient, meta queue.ToolMeta, logger *s
 		client:  client,
 		meta:    meta,
 		logger:  logger.With("tool", meta.Name),
-		timeout: 5 * time.Minute, // Default 5-minute timeout
+		timeout: 15 * time.Minute, // Default 15-minute timeout to accommodate long-running tools like nuclei
 	}
 }
 

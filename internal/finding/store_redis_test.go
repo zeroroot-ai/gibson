@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/state"
+	testutil "github.com/zero-day-ai/gibson/internal/testing"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -92,7 +93,7 @@ func TestRedisFindingStore_Store(t *testing.T) {
 	defer cleanupTestData(t, client)
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("store new finding", func(t *testing.T) {
 		missionID := types.NewID()
@@ -175,7 +176,7 @@ func TestRedisFindingStore_Get(t *testing.T) {
 	defer cleanupTestData(t, client)
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("get existing finding", func(t *testing.T) {
 		missionID := types.NewID()
@@ -211,7 +212,7 @@ func TestRedisFindingStore_List(t *testing.T) {
 	defer cleanupTestData(t, client)
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("list without filter", func(t *testing.T) {
 		missionID := types.NewID()
@@ -318,7 +319,7 @@ func TestRedisFindingStore_Update(t *testing.T) {
 	defer cleanupTestData(t, client)
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("update finding fields", func(t *testing.T) {
 		missionID := types.NewID()
@@ -389,7 +390,7 @@ func TestRedisFindingStore_Delete(t *testing.T) {
 	defer cleanupTestData(t, client)
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("delete existing finding", func(t *testing.T) {
 		missionID := types.NewID()
@@ -440,7 +441,7 @@ func TestRedisFindingStore_Count(t *testing.T) {
 	defer cleanupTestData(t, client)
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("count findings for mission", func(t *testing.T) {
 		missionID := types.NewID()
@@ -498,7 +499,7 @@ func TestRedisFindingStore_ListBySeverity(t *testing.T) {
 	defer cleanupTestData(t, client)
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("list by severity", func(t *testing.T) {
 		missionID := types.NewID()
@@ -540,7 +541,7 @@ func TestRedisFindingStore_Search(t *testing.T) {
 	defer cleanupTestData(t, client)
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	// Wait for index to be ready
 	time.Sleep(100 * time.Millisecond)
@@ -632,7 +633,7 @@ func TestRedisFindingStore_SearchWithFilter(t *testing.T) {
 	defer cleanupTestData(t, client)
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	// Wait for index to be ready
 	time.Sleep(100 * time.Millisecond)
@@ -745,7 +746,7 @@ func BenchmarkRedisFindingStore_Store(b *testing.B) {
 	defer client.Close()
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 	missionID := types.NewID()
 
 	b.ResetTimer()
@@ -763,7 +764,7 @@ func BenchmarkRedisFindingStore_Get(b *testing.B) {
 	defer client.Close()
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 	missionID := types.NewID()
 
 	// Prepare test data
@@ -784,7 +785,7 @@ func BenchmarkRedisFindingStore_Search(b *testing.B) {
 	defer client.Close()
 
 	store := NewRedisFindingStore(client)
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 	missionID := types.NewID()
 
 	// Prepare test data

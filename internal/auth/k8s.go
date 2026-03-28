@@ -11,6 +11,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
 
 // K8sValidator validates Kubernetes ServiceAccount tokens using TokenReview API.
@@ -132,15 +134,17 @@ func (v *K8sValidator) Authenticate(ctx context.Context, token string) (*Identit
 
 	// Build identity
 	identity := &Identity{
-		Subject:         subject,
-		Issuer:          "kubernetes",
-		Email:           "", // ServiceAccounts don't have emails
-		Groups:          userInfo.Groups,
-		Claims:          claims,
-		Roles:           []string{},
-		Permissions:     []Permission{},
-		ExpiresAt:       time.Now().Add(24 * time.Hour), // K8s tokens don't have explicit expiry
-		AuthenticatedAt: time.Now(),
+		Identity: sdkauth.Identity{
+			Subject:         subject,
+			Issuer:          "kubernetes",
+			Email:           "", // ServiceAccounts don't have emails
+			Groups:          userInfo.Groups,
+			Claims:          claims,
+			ExpiresAt:       time.Now().Add(24 * time.Hour), // K8s tokens don't have explicit expiry
+			AuthenticatedAt: time.Now(),
+		},
+		Roles:       []string{},
+		Permissions: []Permission{},
 	}
 
 	// Apply role bindings

@@ -18,10 +18,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component/build"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/queue"
 	sdkregistry "github.com/zero-day-ai/sdk/registry"
 )
 
@@ -2150,4 +2151,320 @@ func TestGetComponentLogs_LogFileNotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, logChan)
 	assert.Contains(t, err.Error(), "log file not found")
+}
+
+// mockRedisToolRegistry is a mock implementation of redisToolDiscovery for testing
+type mockRedisToolRegistry struct {
+	refreshFunc        func(ctx context.Context) error
+	getAllMetadataFunc func() []queue.ToolMeta
+	isHealthyFunc      func(ctx context.Context, name string) bool
+}
+
+func (m *mockRedisToolRegistry) Refresh(ctx context.Context) error {
+	if m.refreshFunc != nil {
+		return m.refreshFunc(ctx)
+	}
+	return nil
+}
+
+func (m *mockRedisToolRegistry) GetAllMetadata() []queue.ToolMeta {
+	if m.getAllMetadataFunc != nil {
+		return m.getAllMetadataFunc()
+	}
+	return []queue.ToolMeta{}
+}
+
+func (m *mockRedisToolRegistry) IsHealthy(ctx context.Context, name string) bool {
+	if m.isHealthyFunc != nil {
+		return m.isHealthyFunc(ctx, name)
+	}
+	return true
+}
+
+// TestListTools_RedisToolsOnly tests ListTools when only Redis tools are available
+func TestListTools_RedisToolsOnly(t *testing.T) {
+	mockRegistry := &mockComponentDiscovery{
+		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
+			return []registry.ToolInfo{}, nil // No etcd tools
+		},
+	}
+
+	mockComponentStore := &mockComponentStore{
+		listFunc: func(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+			return []*component.Component{}, nil // No component store tools
+		},
+	}
+
+	mockRedisRegistry := &mockRedisToolRegistry{
+		getAllMetadataFunc: func() []queue.ToolMeta {
+			return []queue.ToolMeta{
+				{Name: "nmap", Version: "7.92", Description: "Network scanner"},
+				{Name: "dnsx", Version: "1.0.0", Description: "DNS toolkit"},
+				{Name: "httpx", Version: "1.2.0", Description: "HTTP toolkit"},
+				{Name: "nuclei", Version: "2.5.0", Description: "Vulnerability scanner"},
+				{Name: "subfinder", Version: "2.4.0", Description: "Subdomain finder"},
+				{Name: "wappalyzer", Version: "1.0.0", Description: "Technology detector"},
+			}
+		},
+		isHealthyFunc: func(ctx context.Context, name string) bool {
+			return true // All tools healthy
+		},
+	}
+
+	daemon := &daemonImpl{
+		registryAdapter:   mockRegistry,
+		componentStore:    mockComponentStore,
+		redisToolRegistry: mockRedisRegistry,
+		logger:            observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
+	}
+
+	ctx := context.Background()
+	tools, err := daemon.ListTools(ctx)
+
+	require.NoError(t, err)
+	assert.Len(t, tools, 6)
+
+	// Verify tools are present
+	toolNames := make(map[string]bool)
+	for _, tool := range tools {
+		toolNames[tool.Name] = true
+		assert.Equal(t, "running", tool.Health)
+	}
+
+	assert.True(t, toolNames["nmap"])
+	assert.True(t, toolNames["dnsx"])
+	assert.True(t, toolNames["httpx"])
+	assert.True(t, toolNames["nuclei"])
+	assert.True(t, toolNames["subfinder"])
+	assert.True(t, toolNames["wappalyzer"])
+}
+
+// TestListTools_MixedSources tests ListTools with tools from both componentStore and Redis
+func TestListTools_MixedSources(t *testing.T) {
+	mockRegistry := &mockComponentDiscovery{
+		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
+			return []registry.ToolInfo{
+				{Name: "local-tool", Version: "1.0.0", Endpoints: []string{"localhost:50300"}, Instances: 1},
+			}, nil
+		},
+	}
+
+	mockComponentStore := &mockComponentStore{
+		listFunc: func(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+			return []*component.Component{
+				{Name: "local-tool", Version: "1.0.0"},
+				{Name: "another-local", Version: "2.0.0"},
+			}, nil
+		},
+	}
+
+	mockRedisRegistry := &mockRedisToolRegistry{
+		getAllMetadataFunc: func() []queue.ToolMeta {
+			return []queue.ToolMeta{
+				{Name: "nmap", Version: "7.92", Description: "Network scanner"},
+				{Name: "dnsx", Version: "1.0.0", Description: "DNS toolkit"},
+				{Name: "httpx", Version: "1.2.0", Description: "HTTP toolkit"},
+			}
+		},
+		isHealthyFunc: func(ctx context.Context, name string) bool {
+			return true
+		},
+	}
+
+	daemon := &daemonImpl{
+		registryAdapter:   mockRegistry,
+		componentStore:    mockComponentStore,
+		redisToolRegistry: mockRedisRegistry,
+		logger:            observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
+	}
+
+	ctx := context.Background()
+	tools, err := daemon.ListTools(ctx)
+
+	require.NoError(t, err)
+	assert.Len(t, tools, 5) // 2 local + 3 Redis
+
+	// Verify all tools are present
+	toolNames := make(map[string]bool)
+	for _, tool := range tools {
+		toolNames[tool.Name] = true
+	}
+
+	assert.True(t, toolNames["local-tool"])
+	assert.True(t, toolNames["another-local"])
+	assert.True(t, toolNames["nmap"])
+	assert.True(t, toolNames["dnsx"])
+	assert.True(t, toolNames["httpx"])
+}
+
+// TestListTools_Deduplication tests that duplicate tools are handled correctly
+func TestListTools_Deduplication(t *testing.T) {
+	mockRegistry := &mockComponentDiscovery{
+		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
+			return []registry.ToolInfo{
+				{Name: "nmap", Version: "7.90", Endpoints: []string{"localhost:50300"}, Instances: 1},
+			}, nil
+		},
+	}
+
+	mockComponentStore := &mockComponentStore{
+		listFunc: func(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+			return []*component.Component{
+				{Name: "nmap", Version: "7.90"}, // Same tool in component store
+			}, nil
+		},
+	}
+
+	mockRedisRegistry := &mockRedisToolRegistry{
+		getAllMetadataFunc: func() []queue.ToolMeta {
+			return []queue.ToolMeta{
+				{Name: "nmap", Version: "7.92", Description: "Network scanner"}, // Duplicate in Redis
+			}
+		},
+		isHealthyFunc: func(ctx context.Context, name string) bool {
+			return true
+		},
+	}
+
+	daemon := &daemonImpl{
+		registryAdapter:   mockRegistry,
+		componentStore:    mockComponentStore,
+		redisToolRegistry: mockRedisRegistry,
+		logger:            observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
+	}
+
+	ctx := context.Background()
+	tools, err := daemon.ListTools(ctx)
+
+	require.NoError(t, err)
+	assert.Len(t, tools, 1) // Should be deduplicated to 1
+
+	// Should have the component store version (first source wins)
+	assert.Equal(t, "nmap", tools[0].Name)
+	assert.Equal(t, "7.90", tools[0].Version)
+}
+
+// TestListTools_RedisRefreshError tests ListTools when Redis refresh fails
+func TestListTools_RedisRefreshError(t *testing.T) {
+	mockRegistry := &mockComponentDiscovery{
+		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
+			return []registry.ToolInfo{}, nil
+		},
+	}
+
+	mockComponentStore := &mockComponentStore{
+		listFunc: func(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+			return []*component.Component{
+				{Name: "local-tool", Version: "1.0.0"},
+			}, nil
+		},
+	}
+
+	mockRedisRegistry := &mockRedisToolRegistry{
+		refreshFunc: func(ctx context.Context) error {
+			return fmt.Errorf("Redis connection failed")
+		},
+	}
+
+	daemon := &daemonImpl{
+		registryAdapter:   mockRegistry,
+		componentStore:    mockComponentStore,
+		redisToolRegistry: mockRedisRegistry,
+		logger:            observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
+	}
+
+	ctx := context.Background()
+	tools, err := daemon.ListTools(ctx)
+
+	// Should succeed with partial results (Redis tools not included)
+	require.NoError(t, err)
+	assert.Len(t, tools, 1)
+	assert.Equal(t, "local-tool", tools[0].Name)
+}
+
+// TestListTools_RedisToolsHealthStatus tests health status from Redis tools
+func TestListTools_RedisToolsHealthStatus(t *testing.T) {
+	mockRegistry := &mockComponentDiscovery{
+		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
+			return []registry.ToolInfo{}, nil
+		},
+	}
+
+	mockComponentStore := &mockComponentStore{
+		listFunc: func(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+			return []*component.Component{}, nil
+		},
+	}
+
+	mockRedisRegistry := &mockRedisToolRegistry{
+		getAllMetadataFunc: func() []queue.ToolMeta {
+			return []queue.ToolMeta{
+				{Name: "healthy-tool", Version: "1.0.0", Description: "A healthy tool"},
+				{Name: "unhealthy-tool", Version: "1.0.0", Description: "An unhealthy tool"},
+			}
+		},
+		isHealthyFunc: func(ctx context.Context, name string) bool {
+			return name == "healthy-tool" // Only healthy-tool is healthy
+		},
+	}
+
+	daemon := &daemonImpl{
+		registryAdapter:   mockRegistry,
+		componentStore:    mockComponentStore,
+		redisToolRegistry: mockRedisRegistry,
+		logger:            observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
+	}
+
+	ctx := context.Background()
+	tools, err := daemon.ListTools(ctx)
+
+	require.NoError(t, err)
+	assert.Len(t, tools, 2)
+
+	// Find tools by name and verify health
+	healthyFound := false
+	unhealthyFound := false
+	for _, tool := range tools {
+		if tool.Name == "healthy-tool" {
+			assert.Equal(t, "running", tool.Health)
+			healthyFound = true
+		}
+		if tool.Name == "unhealthy-tool" {
+			assert.Equal(t, "stopped", tool.Health)
+			unhealthyFound = true
+		}
+	}
+	assert.True(t, healthyFound, "healthy-tool should be present")
+	assert.True(t, unhealthyFound, "unhealthy-tool should be present")
+}
+
+// TestListTools_NoRedisRegistry tests ListTools when Redis registry is nil
+func TestListTools_NoRedisRegistry(t *testing.T) {
+	mockRegistry := &mockComponentDiscovery{
+		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
+			return []registry.ToolInfo{}, nil
+		},
+	}
+
+	mockComponentStore := &mockComponentStore{
+		listFunc: func(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+			return []*component.Component{
+				{Name: "local-tool", Version: "1.0.0"},
+			}, nil
+		},
+	}
+
+	daemon := &daemonImpl{
+		registryAdapter:   mockRegistry,
+		componentStore:    mockComponentStore,
+		redisToolRegistry: nil, // No Redis registry
+		logger:            observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
+	}
+
+	ctx := context.Background()
+	tools, err := daemon.ListTools(ctx)
+
+	require.NoError(t, err)
+	assert.Len(t, tools, 1)
+	assert.Equal(t, "local-tool", tools[0].Name)
 }

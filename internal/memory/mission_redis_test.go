@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/state"
+	testutil "github.com/zero-day-ai/gibson/internal/testing"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -53,7 +54,7 @@ func TestRedisMissionMemory_Store(t *testing.T) {
 	memory := NewRedisMissionMemory(client, missionID)
 	defer cleanupTestRedisMemory(t, memory)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("store simple value", func(t *testing.T) {
 		err := memory.Store(ctx, "test_key", "test_value", nil)
@@ -133,7 +134,7 @@ func TestRedisMissionMemory_Retrieve(t *testing.T) {
 	memory := NewRedisMissionMemory(client, missionID)
 	defer cleanupTestRedisMemory(t, memory)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("retrieve existing key", func(t *testing.T) {
 		// Store a value
@@ -179,7 +180,7 @@ func TestRedisMissionMemory_Delete(t *testing.T) {
 	memory := NewRedisMissionMemory(client, missionID)
 	defer cleanupTestRedisMemory(t, memory)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("delete existing key", func(t *testing.T) {
 		// Store a value
@@ -231,7 +232,7 @@ func TestRedisMissionMemory_Search(t *testing.T) {
 	memory := NewRedisMissionMemory(client, missionID)
 	defer cleanupTestRedisMemory(t, memory)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	// Store test data
 	testData := []struct {
@@ -325,7 +326,7 @@ func TestRedisMissionMemory_History(t *testing.T) {
 	memory := NewRedisMissionMemory(client, missionID)
 	defer cleanupTestRedisMemory(t, memory)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("history ordered by time", func(t *testing.T) {
 		// Store entries with slight delays
@@ -378,7 +379,7 @@ func TestRedisMissionMemory_Keys(t *testing.T) {
 	memory := NewRedisMissionMemory(client, missionID)
 	defer cleanupTestRedisMemory(t, memory)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("list all keys", func(t *testing.T) {
 		// Store multiple entries
@@ -418,7 +419,7 @@ func TestRedisMissionMemory_Clear(t *testing.T) {
 	memory := NewRedisMissionMemory(client, missionID)
 	defer cleanupTestRedisMemory(t, memory)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("clear all entries", func(t *testing.T) {
 		// Store multiple entries
@@ -481,7 +482,7 @@ func TestRedisMissionMemory_Continuity_NotImplemented(t *testing.T) {
 	missionID := types.NewID()
 	memory := NewRedisMissionMemory(client, missionID)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("GetPreviousRunValue not supported", func(t *testing.T) {
 		_, err := memory.GetPreviousRunValue(ctx, "key")
@@ -510,7 +511,7 @@ func TestRedisMissionMemory_MultiTenantIsolation(t *testing.T) {
 	defer cleanupTestRedisMemory(t, memory1)
 	defer cleanupTestRedisMemory(t, memory2)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	// Store data in both missions with same key
 	err := memory1.Store(ctx, "shared_key", "mission1_value", nil)
@@ -559,7 +560,7 @@ func TestRedisMissionMemory_KeyNaming(t *testing.T) {
 	memory := NewRedisMissionMemory(client, missionID)
 	defer cleanupTestRedisMemory(t, memory)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("verify document key format", func(t *testing.T) {
 		key := "test_key"
@@ -602,7 +603,7 @@ func TestRedisMissionMemory_SpecialCharacters(t *testing.T) {
 	memory := NewRedisMissionMemory(client, missionID)
 	defer cleanupTestRedisMemory(t, memory)
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 
 	t.Run("keys with special characters", func(t *testing.T) {
 		specialKeys := []string{

@@ -52,6 +52,11 @@ COPY --from=builder /workspace/configs/gibson.yaml /etc/gibson/gibson.yaml
 # Create gibson home directory
 RUN mkdir -p /root/.gibson && chmod -R 755 /root/.gibson
 
+# Copy pre-cached HuggingFace model files for native embedder
+# These files are required by GraphRAG and must exist to avoid network calls at startup
+# The model directory must be copied from the build context (models/huggingface/)
+COPY models/huggingface/ /root/.cache/huggingface/
+
 # Set environment variables
 ENV GIBSON_CONFIG=/etc/gibson/gibson.yaml
 ENV GIBSON_HOME=/root/.gibson

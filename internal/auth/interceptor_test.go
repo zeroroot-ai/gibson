@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -117,7 +118,7 @@ func TestUnaryAuthInterceptor_LocalhostBypass(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			auth := &mockAuthenticator{}
 			cfg := &AuthConfig{
-				Enabled:        true,
+				Mode:           "enterprise",
 				TrustLocalhost: true,
 			}
 			logger := slog.Default()
@@ -142,11 +143,11 @@ func TestUnaryAuthInterceptor_LocalhostBypass(t *testing.T) {
 				assert.True(t, handler.called)
 
 				// Verify localhost identity was injected (check captured context from handler)
+				// NOTE: IdentityFromContext returns SDK Identity, not Gibson Identity with Roles
 				identity, ok := IdentityFromContext(handler.capturedCtx)
 				require.True(t, ok, "localhost identity should be in context")
 				assert.Equal(t, "localhost", identity.Subject)
 				assert.Equal(t, "internal", identity.Issuer)
-				assert.Contains(t, identity.Roles, "admin")
 			} else {
 				// Should fail without token
 				require.Error(t, err)
@@ -173,7 +174,7 @@ func (m *mockAddr) String() string {
 // TestUnaryAuthInterceptor_MissingToken tests missing bearer token error.
 func TestUnaryAuthInterceptor_MissingToken(t *testing.T) {
 	auth := &mockAuthenticator{}
-	cfg := &AuthConfig{Enabled: true}
+	cfg := &AuthConfig{Mode: "enterprise"}
 	logger := slog.Default()
 
 	interceptor := UnaryAuthInterceptor(auth, cfg, logger)
@@ -220,7 +221,7 @@ func TestUnaryAuthInterceptor_InvalidToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			auth := &mockAuthenticator{}
-			cfg := &AuthConfig{Enabled: true}
+			cfg := &AuthConfig{Mode: "enterprise"}
 			logger := slog.Default()
 
 			interceptor := UnaryAuthInterceptor(auth, cfg, logger)
@@ -292,7 +293,7 @@ func TestUnaryAuthInterceptor_AuthenticationFailure(t *testing.T) {
 					return nil, tt.authErr
 				},
 			}
-			cfg := &AuthConfig{Enabled: true}
+			cfg := &AuthConfig{Mode: "enterprise"}
 			logger := slog.Default()
 
 			interceptor := UnaryAuthInterceptor(auth, cfg, logger)
@@ -320,10 +321,12 @@ func TestUnaryAuthInterceptor_AuthenticationFailure(t *testing.T) {
 // TestUnaryAuthInterceptor_SuccessfulAuth tests successful authentication flow.
 func TestUnaryAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	expectedIdentity := &Identity{
-		Subject:     "user@example.com",
-		Issuer:      "https://issuer.example.com",
-		Email:       "user@example.com",
-		Groups:      []string{"developers", "security-team"},
+		Identity: sdkauth.Identity{
+			Subject: "user@example.com",
+			Issuer:  "https://issuer.example.com",
+			Email:   "user@example.com",
+			Groups:  []string{"developers", "security-team"},
+		},
 		Roles:       []string{"mission:execute", "findings:read"},
 		Permissions: []Permission{{Action: "execute", Resource: "mission", Scope: "*"}},
 	}
@@ -334,7 +337,7 @@ func TestUnaryAuthInterceptor_SuccessfulAuth(t *testing.T) {
 			return expectedIdentity, nil
 		},
 	}
-	cfg := &AuthConfig{Enabled: true}
+	cfg := &AuthConfig{Mode: "enterprise"}
 	logger := slog.Default()
 
 	interceptor := UnaryAuthInterceptor(auth, cfg, logger)
@@ -355,13 +358,14 @@ func TestUnaryAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	assert.True(t, handler.called)
 
 	// Verify identity was injected into context (check captured context from handler)
+	// NOTE: IdentityFromContext returns SDK Identity, not Gibson Identity with Roles
 	identity, ok := IdentityFromContext(handler.capturedCtx)
 	require.True(t, ok, "identity should be in context")
 	assert.Equal(t, expectedIdentity.Subject, identity.Subject)
 	assert.Equal(t, expectedIdentity.Issuer, identity.Issuer)
 	assert.Equal(t, expectedIdentity.Email, identity.Email)
 	assert.Equal(t, expectedIdentity.Groups, identity.Groups)
-	assert.Equal(t, expectedIdentity.Roles, identity.Roles)
+	// Roles are not available via IdentityFromContext (returns SDK Identity only)
 }
 
 // TestStreamAuthInterceptor_AuthDisabled tests stream auth with disabled authentication.
@@ -387,7 +391,7 @@ func TestStreamAuthInterceptor_AuthDisabled(t *testing.T) {
 // TestStreamAuthInterceptor_MissingToken tests stream auth with missing token.
 func TestStreamAuthInterceptor_MissingToken(t *testing.T) {
 	auth := &mockAuthenticator{}
-	cfg := &AuthConfig{Enabled: true}
+	cfg := &AuthConfig{Mode: "enterprise"}
 	logger := slog.Default()
 
 	interceptor := StreamAuthInterceptor(auth, cfg, logger)
@@ -409,9 +413,11 @@ func TestStreamAuthInterceptor_MissingToken(t *testing.T) {
 // TestStreamAuthInterceptor_SuccessfulAuth tests successful stream authentication.
 func TestStreamAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	expectedIdentity := &Identity{
-		Subject: "user@example.com",
-		Issuer:  "https://issuer.example.com",
-		Roles:   []string{"admin"},
+		Identity: sdkauth.Identity{
+			Subject: "user@example.com",
+			Issuer:  "https://issuer.example.com",
+		},
+		Roles: []string{"admin"},
 	}
 
 	auth := &mockAuthenticator{
@@ -419,7 +425,7 @@ func TestStreamAuthInterceptor_SuccessfulAuth(t *testing.T) {
 			return expectedIdentity, nil
 		},
 	}
-	cfg := &AuthConfig{Enabled: true}
+	cfg := &AuthConfig{Mode: "enterprise"}
 	logger := slog.Default()
 
 	interceptor := StreamAuthInterceptor(auth, cfg, logger)
@@ -443,22 +449,25 @@ func TestStreamAuthInterceptor_SuccessfulAuth(t *testing.T) {
 // TestContextWithIdentity tests identity context injection and extraction.
 func TestContextWithIdentity(t *testing.T) {
 	identity := &Identity{
-		Subject: "test-user",
-		Issuer:  "test-issuer",
-		Email:   "test@example.com",
-		Roles:   []string{"admin"},
+		Identity: sdkauth.Identity{
+			Subject: "test-user",
+			Issuer:  "test-issuer",
+			Email:   "test@example.com",
+		},
+		Roles: []string{"admin"},
 	}
 
 	// Test injection
 	ctx := ContextWithIdentity(context.Background(), identity)
 
 	// Test extraction
+	// NOTE: IdentityFromContext returns SDK Identity, not Gibson Identity with Roles
 	extracted, ok := IdentityFromContext(ctx)
 	require.True(t, ok)
 	assert.Equal(t, identity.Subject, extracted.Subject)
 	assert.Equal(t, identity.Issuer, extracted.Issuer)
 	assert.Equal(t, identity.Email, extracted.Email)
-	assert.Equal(t, identity.Roles, extracted.Roles)
+	// Roles are not available via IdentityFromContext (returns SDK Identity only)
 }
 
 // TestIdentityFromContext_NoIdentity tests extraction when no identity is present.
@@ -484,7 +493,7 @@ func TestRequirePermission(t *testing.T) {
 		{
 			name: "has exact permission",
 			identity: &Identity{
-				Subject:     "user",
+				Identity:    sdkauth.Identity{Subject: "user"},
 				Permissions: []Permission{{Action: "execute", Resource: "mission", Scope: "*"}},
 			},
 			action:   "execute",
@@ -494,7 +503,7 @@ func TestRequirePermission(t *testing.T) {
 		{
 			name: "has wildcard action",
 			identity: &Identity{
-				Subject:     "user",
+				Identity:    sdkauth.Identity{Subject: "user"},
 				Permissions: []Permission{{Action: "*", Resource: "mission", Scope: "*"}},
 			},
 			action:   "execute",
@@ -504,7 +513,7 @@ func TestRequirePermission(t *testing.T) {
 		{
 			name: "has wildcard resource",
 			identity: &Identity{
-				Subject:     "user",
+				Identity:    sdkauth.Identity{Subject: "user"},
 				Permissions: []Permission{{Action: "execute", Resource: "*", Scope: "*"}},
 			},
 			action:   "execute",
@@ -514,7 +523,7 @@ func TestRequirePermission(t *testing.T) {
 		{
 			name: "missing permission",
 			identity: &Identity{
-				Subject:     "user",
+				Identity:    sdkauth.Identity{Subject: "user"},
 				Permissions: []Permission{{Action: "read", Resource: "finding", Scope: "*"}},
 			},
 			action:   "execute",
@@ -566,8 +575,8 @@ func TestRequireRole(t *testing.T) {
 		{
 			name: "has exact role",
 			identity: &Identity{
-				Subject: "user",
-				Roles:   []string{"admin", "developer"},
+				Identity: sdkauth.Identity{Subject: "user"},
+				Roles:    []string{"admin", "developer"},
 			},
 			role:    "admin",
 			wantErr: false,
@@ -575,8 +584,8 @@ func TestRequireRole(t *testing.T) {
 		{
 			name: "missing role",
 			identity: &Identity{
-				Subject: "user",
-				Roles:   []string{"developer"},
+				Identity: sdkauth.Identity{Subject: "user"},
+				Roles:    []string{"developer"},
 			},
 			role:     "admin",
 			wantErr:  true,

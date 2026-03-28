@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
 
 // LocalValidator validates static tokens for local development.
@@ -128,15 +130,17 @@ func (v *LocalValidator) Authenticate(ctx context.Context, token string) (*Ident
 
 	// Build identity
 	identity := &Identity{
-		Subject:         matchedUser.name,
-		Issuer:          "local",
-		Email:           "", // Local users don't have emails
-		Groups:          []string{},
-		Claims:          claims,
-		Roles:           matchedUser.roles,
-		Permissions:     permissions,
-		ExpiresAt:       time.Now().Add(24 * time.Hour), // Static tokens don't expire
-		AuthenticatedAt: time.Now(),
+		Identity: sdkauth.Identity{
+			Subject:         matchedUser.name,
+			Issuer:          "local",
+			Email:           "", // Local users don't have emails
+			Groups:          []string{},
+			Claims:          claims,
+			ExpiresAt:       time.Now().Add(24 * time.Hour), // Static tokens don't expire
+			AuthenticatedAt: time.Now(),
+		},
+		Roles:       matchedUser.roles,
+		Permissions: permissions,
 	}
 
 	slog.Debug("local auth: authenticated user",

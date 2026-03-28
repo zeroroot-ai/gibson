@@ -414,9 +414,46 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 		}
 	}
 
-	// Convert component.Component to api.ToolInfoInternal
-	result := make([]api.ToolInfoInternal, len(tools))
-	for i, tool := range tools {
+	// Query Redis tool registry for K8s-deployed tools
+	// These tools register via SADD to tools:available in Redis
+	redisTools := make(map[string]bool)
+	redisToolMeta := make(map[string]struct {
+		Version     string
+		Description string
+		Health      string
+	})
+	if d.redisToolRegistry != nil {
+		if err := d.redisToolRegistry.Refresh(ctx); err != nil {
+			d.logger.Warn(ctx, "failed to refresh Redis tool registry", "error", err)
+		} else {
+			for _, meta := range d.redisToolRegistry.GetAllMetadata() {
+				redisTools[meta.Name] = true
+				health := "stopped"
+				if d.redisToolRegistry.IsHealthy(ctx, meta.Name) {
+					health = "running"
+				}
+				redisToolMeta[meta.Name] = struct {
+					Version     string
+					Description string
+					Health      string
+				}{
+					Version:     meta.Version,
+					Description: meta.Description,
+					Health:      health,
+				}
+			}
+			d.logger.Debug(ctx, "discovered Redis tools", "count", len(redisTools))
+		}
+	}
+
+	// Build result set, starting with component store tools
+	seenTools := make(map[string]bool)
+	var result []api.ToolInfoInternal
+
+	// Add component store tools (CLI-installed)
+	for _, tool := range tools {
+		seenTools[tool.Name] = true
+
 		// Determine health status based on whether tool is running
 		health := "stopped"
 		endpoint := ""
@@ -431,7 +468,7 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 			description = tool.Manifest.Description
 		}
 
-		result[i] = api.ToolInfoInternal{
+		result = append(result, api.ToolInfoInternal{
 			ID:           tool.Name,
 			Name:         tool.Name,
 			Version:      tool.Version,
@@ -440,10 +477,29 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 			Health:       health,
 			LastSeen:     tool.UpdatedAt,
 			Capabilities: toolCapabilities[tool.Name],
-		}
+		})
 	}
 
-	d.logger.Debug(ctx, "listed installed tools", "count", len(result))
+	// Add Redis tools that aren't already in the result (K8s-deployed)
+	for name, meta := range redisToolMeta {
+		if seenTools[name] {
+			// Tool already exists from component store, skip
+			continue
+		}
+		seenTools[name] = true
+
+		result = append(result, api.ToolInfoInternal{
+			ID:          name,
+			Name:        name,
+			Version:     meta.Version,
+			Endpoint:    "", // Redis tools don't have direct endpoints (queue-based)
+			Description: meta.Description,
+			Health:      meta.Health,
+			LastSeen:    time.Now(), // No persistent timestamp for Redis tools
+		})
+	}
+
+	d.logger.Debug(ctx, "listed tools", "total", len(result), "component_store", len(tools), "redis", len(redisTools))
 	return result, nil
 }
 

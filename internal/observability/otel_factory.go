@@ -450,13 +450,27 @@ func createGRPCTraceExporter(ctx context.Context, cfg OTelConfig) (sdktrace.Span
 // createHTTPTraceExporter creates an HTTP/protobuf-based OTLP trace exporter.
 // This is useful for environments where gRPC is not available (e.g., some serverless platforms).
 func createHTTPTraceExporter(ctx context.Context, cfg OTelConfig) (sdktrace.SpanExporter, error) {
+	endpoint := cfg.Endpoint
+
+	// Strip http:// or https:// prefix - WithEndpoint expects host:port only
+	// The scheme is controlled by WithInsecure() option
+	insecure := false
+	if len(endpoint) >= 8 && endpoint[:8] == "https://" {
+		endpoint = endpoint[8:]
+	} else if len(endpoint) >= 7 && endpoint[:7] == "http://" {
+		endpoint = endpoint[7:]
+		insecure = true
+	}
+
 	opts := []otlptracehttp.Option{
-		otlptracehttp.WithEndpoint(cfg.Endpoint),
+		otlptracehttp.WithEndpoint(endpoint),
 		otlptracehttp.WithHeaders(cfg.Headers),
+		// Langfuse uses a custom OTEL path instead of the standard /v1/traces
+		otlptracehttp.WithURLPath("/api/public/otel/v1/traces"),
 	}
 
 	// Use insecure connection for http:// endpoints (dev/testing only)
-	if len(cfg.Endpoint) >= 7 && cfg.Endpoint[:7] == "http://" {
+	if insecure {
 		opts = append(opts, otlptracehttp.WithInsecure())
 	}
 
@@ -517,13 +531,25 @@ func createGRPCMetricExporter(ctx context.Context, cfg OTelConfig) (metric.Expor
 
 // createHTTPMetricExporter creates an HTTP/protobuf-based OTLP metric exporter.
 func createHTTPMetricExporter(ctx context.Context, cfg OTelConfig) (metric.Exporter, error) {
+	endpoint := cfg.Endpoint
+
+	// Strip http:// or https:// prefix - WithEndpoint expects host:port only
+	// The scheme is controlled by WithInsecure() option
+	insecure := false
+	if len(endpoint) >= 8 && endpoint[:8] == "https://" {
+		endpoint = endpoint[8:]
+	} else if len(endpoint) >= 7 && endpoint[:7] == "http://" {
+		endpoint = endpoint[7:]
+		insecure = true
+	}
+
 	opts := []otlpmetrichttp.Option{
-		otlpmetrichttp.WithEndpoint(cfg.Endpoint),
+		otlpmetrichttp.WithEndpoint(endpoint),
 		otlpmetrichttp.WithHeaders(cfg.Headers),
 	}
 
 	// Use insecure connection for http:// endpoints
-	if len(cfg.Endpoint) >= 7 && cfg.Endpoint[:7] == "http://" {
+	if insecure {
 		opts = append(opts, otlpmetrichttp.WithInsecure())
 	}
 

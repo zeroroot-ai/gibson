@@ -1,0 +1,14 @@
+name: GitLab Scanner Test
+description: Test GitLab scanner to verify finding storage
+version: 1.0.0
+
+nodes:
+  - id: scan
+    type: agent
+    agent: gitlab-scanner
+    task:
+      action: scan
+      target: https://gitlab.com/gitlab-org/gitlab
+      context:
+        scan_type: quick
+        max_depth: 1

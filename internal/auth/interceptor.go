@@ -14,14 +14,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
-)
 
-// contextKey is an unexported type for context keys to avoid collisions.
-type contextKey int
-
-const (
-	// identityContextKey is the context key for storing authenticated identity.
-	identityContextKey contextKey = iota
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
 
 var (
@@ -31,22 +25,22 @@ var (
 
 // UnaryAuthInterceptor creates a gRPC unary server interceptor that enforces authentication.
 //
-// The interceptor:
-//   - Checks if authentication is enabled in config
-//   - Extracts Bearer token from "authorization" metadata header
-//   - Validates the token using the provided Authenticator
-//   - Injects the Identity into the request context
-//   - Supports localhost bypass when configured
+// The interceptor behavior depends on the authentication mode:
+//   - "disabled" (or empty): Skip authentication, inject synthetic admin identity
+//   - "dev": Use local token validation with static tokens
+//   - "enterprise" or "saas": Use OIDC validation
 //
-// When authentication is disabled (cfg.Enabled == false), all requests pass through
-// without validation.
+// In SaaS mode, after authentication:
+//   - Extracts tenant ID from identity using TenantClaim configuration
+//   - If no tenant found and no DefaultTenant configured, returns PermissionDenied
+//   - Injects tenant into context for downstream handlers
 //
 // When trust_localhost is enabled and the peer address is localhost (127.0.0.1 or ::1),
 // authentication is bypassed and a synthetic "localhost" identity is injected.
 //
 // The interceptor returns gRPC status codes:
 //   - codes.Unauthenticated: Missing or invalid token
-//   - codes.PermissionDenied: Valid token but insufficient permissions (handled by handlers)
+//   - codes.PermissionDenied: Valid token but missing tenant in SaaS mode
 //
 // Thread Safety:
 // The interceptor is safe for concurrent use. The Authenticator implementation
@@ -67,18 +61,33 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 			oteltrace.WithAttributes(
 				attribute.String("rpc.method", info.FullMethod),
 				attribute.String("rpc.service", "gibson"),
-				attribute.Bool("auth.enabled", cfg.Enabled),
+				attribute.String("auth.mode", cfg.Mode),
 			),
 		)
 		defer span.End()
 
-		// Pass through if authentication is disabled
-		if !cfg.Enabled {
+		// Determine effective mode (treat empty as "disabled" for backward compatibility)
+		mode := cfg.Mode
+		if mode == "" {
+			mode = "disabled"
+		}
+
+		// Handle disabled mode - inject synthetic admin identity and skip auth
+		if mode == "disabled" {
 			span.SetAttributes(attribute.String("auth.result", "disabled"))
+			identity := createSyntheticAdminIdentity()
+			ctx = ContextWithIdentity(ctx, identity)
+
+			// Inject default tenant if configured
+			if cfg.DefaultTenant != "" {
+				ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
+				span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
+			}
+
 			return handler(ctx, req)
 		}
 
-		// Check for localhost bypass
+		// Check for localhost bypass (works in all non-disabled modes)
 		if cfg.TrustLocalhost {
 			if identity, bypassed, peerAddr := checkLocalhostBypassWithAddr(ctx, logger, info.FullMethod); bypassed {
 				span.SetAttributes(
@@ -88,6 +97,17 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 				)
 				logLocalhostBypass(ctx, logger, info.FullMethod, peerAddr)
 				ctx = ContextWithIdentity(ctx, identity)
+
+				// Inject tenant in SaaS mode
+				if mode == "saas" {
+					tenant := extractAndValidateTenant(ctx, identity, cfg, span)
+					if tenant != "" {
+						ctx = ContextWithTenant(ctx, tenant)
+					}
+				} else if cfg.DefaultTenant != "" {
+					ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
+				}
+
 				return handler(ctx, req)
 			}
 		}
@@ -102,7 +122,7 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 			return nil, status.Error(grpccodes.Unauthenticated, "missing bearer token")
 		}
 
-		// Authenticate the token
+		// Authenticate the token (works for dev, enterprise, and saas modes)
 		identity, err := auth.Authenticate(ctx, token)
 		if err != nil {
 			span.RecordError(err)
@@ -129,8 +149,24 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 			span.SetAttributes(attribute.String("auth.email", identity.Email))
 		}
 
-		// Inject identity into context
+		// Inject identity into context (using SDK auth package)
 		ctx = ContextWithIdentity(ctx, identity)
+
+		// Handle tenant extraction for SaaS mode
+		if mode == "saas" {
+			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
+			if tenant == "" {
+				// No tenant found and no default - deny access
+				span.SetAttributes(attribute.String("auth.result", "no_tenant"))
+				logMissingTenant(ctx, logger, info.FullMethod, identity)
+				return nil, status.Error(grpccodes.PermissionDenied, "no tenant identifier found in token")
+			}
+			ctx = ContextWithTenant(ctx, tenant)
+		} else if cfg.DefaultTenant != "" {
+			// For enterprise/dev mode, inject default tenant if configured
+			ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
+			span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
+		}
 
 		// Continue with the request
 		return handler(ctx, req)
@@ -142,8 +178,8 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 // The interceptor performs the same authentication checks as UnaryAuthInterceptor but
 // for streaming RPCs. Authentication is performed once when the stream is established.
 //
-// The authenticated Identity is injected into the stream context and is available
-// for the lifetime of the stream.
+// The authenticated Identity and Tenant (in SaaS mode) are injected into the stream
+// context and available for the lifetime of the stream.
 //
 // Thread Safety:
 // The interceptor is safe for concurrent use. The Authenticator implementation
@@ -167,18 +203,33 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 				attribute.String("rpc.method", info.FullMethod),
 				attribute.String("rpc.service", "gibson"),
 				attribute.Bool("rpc.is_streaming", true),
-				attribute.Bool("auth.enabled", cfg.Enabled),
+				attribute.String("auth.mode", cfg.Mode),
 			),
 		)
 		defer span.End()
 
-		// Pass through if authentication is disabled
-		if !cfg.Enabled {
+		// Determine effective mode (treat empty as "disabled" for backward compatibility)
+		mode := cfg.Mode
+		if mode == "" {
+			mode = "disabled"
+		}
+
+		// Handle disabled mode - inject synthetic admin identity and skip auth
+		if mode == "disabled" {
 			span.SetAttributes(attribute.String("auth.result", "disabled"))
+			identity := createSyntheticAdminIdentity()
+			ctx = ContextWithIdentity(ctx, identity)
+
+			// Inject default tenant if configured
+			if cfg.DefaultTenant != "" {
+				ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
+				span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
+			}
+
 			return handler(srv, &authenticatedServerStream{ServerStream: ss, ctx: ctx})
 		}
 
-		// Check for localhost bypass
+		// Check for localhost bypass (works in all non-disabled modes)
 		if cfg.TrustLocalhost {
 			if identity, bypassed, peerAddr := checkLocalhostBypassWithAddr(ctx, logger, info.FullMethod); bypassed {
 				span.SetAttributes(
@@ -188,6 +239,17 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 				)
 				logLocalhostBypass(ctx, logger, info.FullMethod, peerAddr)
 				ctx = ContextWithIdentity(ctx, identity)
+
+				// Inject tenant in SaaS mode
+				if mode == "saas" {
+					tenant := extractAndValidateTenant(ctx, identity, cfg, span)
+					if tenant != "" {
+						ctx = ContextWithTenant(ctx, tenant)
+					}
+				} else if cfg.DefaultTenant != "" {
+					ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
+				}
+
 				return handler(srv, &authenticatedServerStream{ServerStream: ss, ctx: ctx})
 			}
 		}
@@ -202,7 +264,7 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 			return status.Error(grpccodes.Unauthenticated, "missing bearer token")
 		}
 
-		// Authenticate the token
+		// Authenticate the token (works for dev, enterprise, and saas modes)
 		identity, err := auth.Authenticate(ctx, token)
 		if err != nil {
 			span.RecordError(err)
@@ -229,44 +291,99 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 			span.SetAttributes(attribute.String("auth.email", identity.Email))
 		}
 
-		// Inject identity into context
+		// Inject identity into context (using SDK auth package)
 		ctx = ContextWithIdentity(ctx, identity)
+
+		// Handle tenant extraction for SaaS mode
+		if mode == "saas" {
+			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
+			if tenant == "" {
+				// No tenant found and no default - deny access
+				span.SetAttributes(attribute.String("auth.result", "no_tenant"))
+				logMissingTenant(ctx, logger, info.FullMethod, identity)
+				return status.Error(grpccodes.PermissionDenied, "no tenant identifier found in token")
+			}
+			ctx = ContextWithTenant(ctx, tenant)
+		} else if cfg.DefaultTenant != "" {
+			// For enterprise/dev mode, inject default tenant if configured
+			ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
+			span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
+		}
 
 		// Continue with the stream using the authenticated context
 		return handler(srv, &authenticatedServerStream{ServerStream: ss, ctx: ctx})
 	}
 }
 
-// ContextWithIdentity returns a new context with the given identity attached.
+// createSyntheticAdminIdentity creates a synthetic admin identity for disabled mode.
 //
-// The identity can be retrieved later using IdentityFromContext.
-//
-// This is safe to call with a nil identity, though IdentityFromContext will
-// return false in that case.
-func ContextWithIdentity(ctx context.Context, identity *Identity) context.Context {
-	return context.WithValue(ctx, identityContextKey, identity)
+// This identity has full admin permissions and is used when authentication is
+// disabled to allow unrestricted access for development/testing.
+func createSyntheticAdminIdentity() *Identity {
+	return &Identity{
+		Identity: sdkauth.Identity{
+			Subject:         "system",
+			Issuer:          "internal",
+			Email:           "",
+			Groups:          []string{"admin"},
+			Claims:          map[string]any{"source": "synthetic", "mode": "disabled"},
+			ExpiresAt:       timeNever(),
+			AuthenticatedAt: timeNow(),
+		},
+		Roles:       []string{"admin"},
+		Permissions: []Permission{{Action: "*", Resource: "*", Scope: "*"}},
+	}
 }
 
-// IdentityFromContext extracts the authenticated identity from the context.
+// convertToSDKIdentity converts a Gibson Core Identity to an SDK Identity.
+//
+// Since Gibson Identity embeds sdkauth.Identity, this is a simple dereference
+// of the embedded field.
+func convertToSDKIdentity(coreIdentity *Identity) *sdkauth.Identity {
+	if coreIdentity == nil {
+		return nil
+	}
+
+	// Return a pointer to the embedded SDK Identity
+	return &coreIdentity.Identity
+}
+
+// extractAndValidateTenant extracts the tenant ID from the identity and validates it.
 //
 // Returns:
-//   - identity: The authenticated identity if present
-//   - ok: true if an identity was found in the context, false otherwise
-//
-// Example:
-//
-//	identity, ok := auth.IdentityFromContext(ctx)
-//	if !ok {
-//	    return status.Error(codes.Unauthenticated, "not authenticated")
-//	}
-func IdentityFromContext(ctx context.Context) (*Identity, bool) {
-	identity, ok := ctx.Value(identityContextKey).(*Identity)
-	return identity, ok
+//   - The tenant ID if found in identity claims
+//   - The default tenant if configured and no tenant in claims
+//   - Empty string if no tenant found and no default configured
+func extractAndValidateTenant(ctx context.Context, identity *Identity, cfg *AuthConfig, span oteltrace.Span) string {
+	// Extract tenant from identity using configured claim name
+	tenant := ExtractTenantFromIdentity(identity, cfg.TenantClaim)
+
+	if tenant != "" {
+		span.SetAttributes(
+			attribute.String("auth.tenant", tenant),
+			attribute.String("auth.tenant_source", "token_claim"),
+		)
+		return tenant
+	}
+
+	// Fall back to default tenant if configured
+	if cfg.DefaultTenant != "" {
+		span.SetAttributes(
+			attribute.String("auth.tenant", cfg.DefaultTenant),
+			attribute.String("auth.tenant_source", "default"),
+		)
+		return cfg.DefaultTenant
+	}
+
+	// No tenant found and no default
+	return ""
 }
 
 // RequirePermission checks if the authenticated identity has the specified permission.
 //
-// This is a convenience helper that combines IdentityFromContext and Identity.HasPermission.
+// This is a convenience helper that retrieves the identity from context and
+// checks permissions. Note: This uses the Core Identity which has permission
+// information, not the SDK Identity.
 //
 // Returns:
 //   - nil if the identity has the required permission
@@ -279,16 +396,16 @@ func IdentityFromContext(ctx context.Context) (*Identity, bool) {
 //	    return nil, err
 //	}
 func RequirePermission(ctx context.Context, action, resource string) error {
-	identity, ok := IdentityFromContext(ctx)
+	// Get the full Gibson Identity with Roles/Permissions
+	identity, ok := GibsonIdentityFromContext(ctx)
 	if !ok {
 		return status.Error(grpccodes.Unauthenticated, "not authenticated")
 	}
 
+	// Check if identity has the required permission
 	if !identity.HasPermission(action, resource) {
-		recordPermissionDenied(ctx, action, resource)
-		logPermissionDeniedFromContext(ctx, identity, action, resource)
 		return status.Errorf(grpccodes.PermissionDenied,
-			"insufficient permissions for %s on %s", action, resource)
+			"insufficient permissions: requires %s on %s", action, resource)
 	}
 
 	return nil
@@ -296,7 +413,8 @@ func RequirePermission(ctx context.Context, action, resource string) error {
 
 // RequireRole checks if the authenticated identity has the specified role.
 //
-// This is a convenience helper that combines IdentityFromContext and Identity.HasRole.
+// This is a convenience helper that retrieves the identity from context and
+// checks role membership.
 //
 // Returns:
 //   - nil if the identity has the required role
@@ -309,11 +427,13 @@ func RequirePermission(ctx context.Context, action, resource string) error {
 //	    return nil, err
 //	}
 func RequireRole(ctx context.Context, role string) error {
-	identity, ok := IdentityFromContext(ctx)
+	// Get the full Gibson Identity with Roles
+	identity, ok := GibsonIdentityFromContext(ctx)
 	if !ok {
 		return status.Error(grpccodes.Unauthenticated, "not authenticated")
 	}
 
+	// Check if identity has the required role
 	if !identity.HasRole(role) {
 		return status.Errorf(grpccodes.PermissionDenied,
 			"missing required role: %s", role)
@@ -384,15 +504,17 @@ func checkLocalhostBypassWithAddr(ctx context.Context, logger *slog.Logger, meth
 
 	// Create synthetic localhost identity with admin permissions
 	identity := &Identity{
-		Subject:         "localhost",
-		Issuer:          "internal",
-		Email:           "",
-		Groups:          []string{"localhost"},
-		Claims:          map[string]any{"source": "localhost"},
-		Roles:           []string{"admin"},
-		Permissions:     []Permission{{Action: "*", Resource: "*", Scope: "*"}},
-		ExpiresAt:       timeNever(),
-		AuthenticatedAt: timeNow(),
+		Identity: sdkauth.Identity{
+			Subject:         "localhost",
+			Issuer:          "internal",
+			Email:           "",
+			Groups:          []string{"localhost"},
+			Claims:          map[string]any{"source": "localhost"},
+			ExpiresAt:       timeNever(),
+			AuthenticatedAt: timeNow(),
+		},
+		Roles:       []string{"admin"},
+		Permissions: []Permission{{Action: "*", Resource: "*", Scope: "*"}},
 	}
 
 	return identity, true, addr

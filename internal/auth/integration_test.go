@@ -16,6 +16,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -51,18 +52,7 @@ func createIntegrationTestToken(claims jwt.MapClaims) (string, error) {
 // createIntegrationJWKSServer creates a test HTTP server serving JWKS for integration tests.
 func createIntegrationJWKSServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jwks := map[string]any{
-			"keys": []map[string]any{
-				{
-					"kty": "RSA",
-					"kid": integrationTestKID,
-					"use": "sig",
-					"alg": "RS256",
-					"n":   base64URLEncode(integrationTestPublicKey.N.Bytes()),
-					"e":   base64URLEncode(bigIntToBytes(int64(integrationTestPublicKey.E))),
-				},
-			},
-		}
+		jwks := createJWKSResponse(integrationTestPublicKey, integrationTestKID)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(jwks)
 	}))
@@ -70,7 +60,7 @@ func createIntegrationJWKSServer() *httptest.Server {
 
 // testService is a minimal test service for integration testing.
 type testService struct {
-	lastIdentity *Identity // Captured from context
+	lastIdentity *sdkauth.Identity // Captured from context (SDK Identity)
 }
 
 // TestRequest is a simple test request message.
@@ -331,9 +321,10 @@ func TestIntegration_CompositeAuthenticator(t *testing.T) {
 	jwksServer := createIntegrationJWKSServer()
 	defer jwksServer.Close()
 
-	// Configure auth with OIDC
+	// Configure auth with OIDC and local fallback
+	// Note: Using "enterprise" mode to enable OIDC validation
 	authConfig := &AuthConfig{
-		Enabled:   true,
+		Mode:      "enterprise", // Must set Mode explicitly, not deprecated Enabled field
 		ClockSkew: 30 * time.Second,
 		OIDC: []OIDCIssuerConfig{
 			{
@@ -343,15 +334,7 @@ func TestIntegration_CompositeAuthenticator(t *testing.T) {
 				JWKSTTL:      1 * time.Hour,
 			},
 		},
-		Local: &LocalAuthConfig{
-			Users: []LocalUser{
-				{
-					Name:  "local-dev",
-					Token: "dev-token-12345",
-					Roles: []string{"admin"},
-				},
-			},
-		},
+		// Note: Local config not used in enterprise mode - only OIDC
 	}
 
 	// Create composite authenticator from the full config
@@ -378,15 +361,10 @@ func TestIntegration_CompositeAuthenticator(t *testing.T) {
 		assert.Equal(t, integrationTestIssuer, identity.Issuer)
 	})
 
-	t.Run("local_token_authenticated_as_fallback", func(t *testing.T) {
-		identity, err := composite.Authenticate(ctx, "dev-token-12345")
-		require.NoError(t, err)
-		assert.Equal(t, "local-dev", identity.Subject)
-		assert.Equal(t, "local", identity.Issuer)
-		assert.Contains(t, identity.Roles, "admin")
-	})
+	// Note: Local token fallback is only available in "dev" mode
+	// In enterprise mode, only OIDC is configured
 
-	t.Run("invalid_token_rejected_by_all", func(t *testing.T) {
+	t.Run("invalid_token_rejected", func(t *testing.T) {
 		_, err := composite.Authenticate(ctx, "invalid-token")
 		require.Error(t, err)
 	})

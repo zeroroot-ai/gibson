@@ -3,6 +3,8 @@ package embedder
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -69,24 +71,34 @@ type NativeEmbedder struct {
 //	}
 func CreateNativeEmbedder() (*NativeEmbedder, error) {
 	nativeEmbedderOnce.Do(func() {
+		fmt.Println("[embedder] Starting native embedder initialization...")
+
 		// Initialize GoMLX backend (XLA/PJRT)
+		fmt.Println("[embedder] Initializing GoMLX backend...")
 		backend, err := backends.New()
 		if err != nil {
 			nativeEmbedderErr = gotypes.WrapError(ErrCodeEmbedderUnavailable,
 				"failed to initialize GoMLX backend", err)
 			return
 		}
+		fmt.Println("[embedder] GoMLX backend initialized")
 
-		// Create HuggingFace repo reference for model
-		modelRepo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
-
-		// Download model from HuggingFace Hub
-		// The model will be cached in ~/.cache/huggingface/hub/
-		modelPath, err := modelRepo.DownloadFile("onnx/model.onnx")
+		// Try to find cached model files first to avoid network calls
+		// This is critical for Kubernetes deployments where network access may be limited
+		fmt.Println("[embedder] Looking for cached model files...")
+		modelPath, vocabPath, err := findCachedModelFiles()
 		if err != nil {
-			nativeEmbedderErr = gotypes.WrapError(ErrCodeEmbedderUnavailable,
-				"failed to download all-MiniLM-L6-v2 model from HuggingFace", err)
-			return
+			fmt.Printf("[embedder] Cache lookup failed: %v, trying network download...\n", err)
+			// Fall back to HuggingFace Hub download with timeout
+			modelPath, vocabPath, err = downloadModelFilesWithTimeout(10 * time.Second)
+			if err != nil {
+				nativeEmbedderErr = gotypes.WrapError(ErrCodeEmbedderUnavailable,
+					"failed to load model files (check network or pre-cache model)", err)
+				return
+			}
+			fmt.Println("[embedder] Downloaded model files from HuggingFace")
+		} else {
+			fmt.Printf("[embedder] Found cached model files: model=%s, vocab=%s\n", modelPath, vocabPath)
 		}
 
 		// Load ONNX model via onnx-gomlx
@@ -102,14 +114,6 @@ func CreateNativeEmbedder() (*NativeEmbedder, error) {
 		if err := model.VariablesToContext(ctx); err != nil {
 			nativeEmbedderErr = gotypes.WrapError(ErrCodeEmbedderUnavailable,
 				"failed to extract model variables to context", err)
-			return
-		}
-
-		// Download vocabulary file for tokenizer
-		vocabPath, err := modelRepo.DownloadFile("vocab.txt")
-		if err != nil {
-			nativeEmbedderErr = gotypes.WrapError(ErrCodeEmbedderUnavailable,
-				"failed to download vocabulary from HuggingFace", err)
 			return
 		}
 
@@ -368,4 +372,106 @@ func (e *NativeEmbedder) Health(ctx context.Context) gotypes.HealthStatus {
 
 	return gotypes.NewHealthStatus(gotypes.HealthStateHealthy,
 		"native embedder operational (all-MiniLM-L6-v2 via GoMLX)")
+}
+
+// findCachedModelFiles looks for pre-cached model files in the HuggingFace cache directory.
+// This allows the embedder to work offline in Kubernetes environments where the model
+// is pre-downloaded into the container image.
+//
+// Returns the paths to the ONNX model and vocabulary files, or an error if not found.
+func findCachedModelFiles() (modelPath, vocabPath string, err error) {
+	// Try XDG_CACHE_HOME first, then fall back to ~/.cache
+	cacheDir := os.Getenv("XDG_CACHE_HOME")
+	if cacheDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", "", fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		cacheDir = filepath.Join(homeDir, ".cache")
+	}
+
+	// HuggingFace hub cache structure
+	hubDir := filepath.Join(cacheDir, "huggingface", "hub")
+	modelDir := filepath.Join(hubDir, "models--sentence-transformers--all-MiniLM-L6-v2")
+
+	// Check if the model directory exists
+	if _, err := os.Stat(modelDir); os.IsNotExist(err) {
+		return "", "", fmt.Errorf("model cache directory not found: %s", modelDir)
+	}
+
+	// Look for snapshot directory - try refs/main to find the current snapshot
+	refsMainPath := filepath.Join(modelDir, "refs", "main")
+	snapshotRef, err := os.ReadFile(refsMainPath)
+	if err != nil {
+		// Fall back to looking in snapshots/main directly
+		snapshotDir := filepath.Join(modelDir, "snapshots", "main")
+		if _, err := os.Stat(snapshotDir); err == nil {
+			modelPath = filepath.Join(snapshotDir, "model.onnx")
+			vocabPath = filepath.Join(snapshotDir, "vocab.txt")
+			if _, err := os.Stat(modelPath); err == nil {
+				if _, err := os.Stat(vocabPath); err == nil {
+					return modelPath, vocabPath, nil
+				}
+			}
+			// Try onnx subdirectory
+			modelPath = filepath.Join(snapshotDir, "onnx", "model.onnx")
+			if _, err := os.Stat(modelPath); err == nil {
+				if _, err := os.Stat(vocabPath); err == nil {
+					return modelPath, vocabPath, nil
+				}
+			}
+		}
+		return "", "", fmt.Errorf("cannot read refs/main: %w", err)
+	}
+
+	// Use the snapshot hash from refs
+	snapshotHash := string(snapshotRef)
+	snapshotDir := filepath.Join(modelDir, "snapshots", snapshotHash)
+
+	// Look for model.onnx in the snapshot or in onnx subdirectory
+	modelPath = filepath.Join(snapshotDir, "onnx", "model.onnx")
+	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
+		modelPath = filepath.Join(snapshotDir, "model.onnx")
+		if _, err := os.Stat(modelPath); os.IsNotExist(err) {
+			// Check blobs directory (hub stores files by hash)
+			return "", "", fmt.Errorf("model.onnx not found in snapshot: %s", snapshotDir)
+		}
+	}
+
+	// Look for vocab.txt
+	vocabPath = filepath.Join(snapshotDir, "vocab.txt")
+	if _, err := os.Stat(vocabPath); os.IsNotExist(err) {
+		return "", "", fmt.Errorf("vocab.txt not found in snapshot: %s", snapshotDir)
+	}
+
+	return modelPath, vocabPath, nil
+}
+
+// downloadModelFilesWithTimeout downloads model files from HuggingFace Hub with a timeout.
+// This prevents the daemon from hanging indefinitely if network is unavailable.
+func downloadModelFilesWithTimeout(timeout time.Duration) (modelPath, vocabPath string, err error) {
+	done := make(chan struct{})
+	var downloadErr error
+
+	go func() {
+		defer close(done)
+		modelRepo := hub.New("sentence-transformers/all-MiniLM-L6-v2")
+
+		modelPath, downloadErr = modelRepo.DownloadFile("onnx/model.onnx")
+		if downloadErr != nil {
+			return
+		}
+
+		vocabPath, downloadErr = modelRepo.DownloadFile("vocab.txt")
+	}()
+
+	select {
+	case <-done:
+		if downloadErr != nil {
+			return "", "", fmt.Errorf("download failed: %w", downloadErr)
+		}
+		return modelPath, vocabPath, nil
+	case <-time.After(timeout):
+		return "", "", fmt.Errorf("download timed out after %v", timeout)
+	}
 }

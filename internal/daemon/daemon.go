@@ -29,6 +29,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
 	healthhttp "github.com/zero-day-ai/sdk/health/http"
+	"github.com/zero-day-ai/sdk/queue"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -45,6 +46,17 @@ type targetStore interface {
 	Get(ctx context.Context, id types.ID) (*types.Target, error)
 	GetByName(ctx context.Context, name string) (*types.Target, error)
 	Create(ctx context.Context, target *types.Target) error
+}
+
+// redisToolDiscovery is an interface for Redis-based tool discovery.
+// This interface allows for mock implementations in tests.
+type redisToolDiscovery interface {
+	// Refresh discovers tools from Redis and updates the registry
+	Refresh(ctx context.Context) error
+	// GetAllMetadata returns metadata for all discovered tools
+	GetAllMetadata() []queue.ToolMeta
+	// IsHealthy checks if a tool has healthy workers
+	IsHealthy(ctx context.Context, name string) bool
 }
 
 // AgentRuntimeState tracks runtime state for a single agent.
@@ -184,6 +196,11 @@ type daemonImpl struct {
 
 	// credentialStore provides credential access with encryption
 	credentialStore *DaemonCredentialStore
+
+	// redisToolRegistry discovers tools registered in Redis by K8s-deployed tool workers
+	// This is used by ListTools() to include Redis-based tools in addition to
+	// componentStore (CLI-installed) and etcd-registered tools
+	redisToolRegistry redisToolDiscovery
 
 	// startTime tracks when the daemon started
 	startTime time.Time

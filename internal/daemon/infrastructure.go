@@ -492,16 +492,10 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph
 	}
 	d.logger.Info(ctx, "created GraphRAG store")
 
-	// Create GraphLoader for persisting findings to Neo4j
-	graphLoader := loader.NewGraphLoader(neo4jClient).
-		WithTaxonomyRegistry(d.infrastructure.taxonomyRegistry)
-	d.logger.Info(ctx, "created GraphLoader for finding storage")
-
-	// Create bridge adapter with the store and graph loader
+	// Create bridge adapter with the store
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
 		Neo4jClient:   neo4jClient,
 		GraphRAGStore: store,
-		GraphLoader:   newGraphLoaderAdapter(graphLoader),
 		Logger:        d.logger.WithComponent("graphrag-bridge").Slog(),
 	})
 	if err != nil {
@@ -543,11 +537,8 @@ func (d *daemonImpl) initOTelObservability(ctx context.Context) *observability.O
 		RetryEnabled:      d.config.OTelObservability.Retry.Enabled,
 		RetryInitial:      d.config.OTelObservability.Retry.InitialInterval,
 		RetryMax:          d.config.OTelObservability.Retry.MaxInterval,
-		RetryMaxElapsed:   d.config.OTelObservability.Retry.MaxElapsedTime,
-		Neo4jBrowserURL:   d.config.Observability.Neo4jBrowserURL,
-		LangfuseEnabled:   d.config.OTelObservability.Langfuse.Enabled,
-		LangfusePublicKey: d.config.OTelObservability.Langfuse.PublicKey,
-		LangfuseSecretKey: d.config.OTelObservability.Langfuse.SecretKey,
+		RetryMaxElapsed: d.config.OTelObservability.Retry.MaxElapsedTime,
+		Neo4jBrowserURL: d.config.Observability.Neo4jBrowserURL,
 	}
 
 	// Convert ContentLoggingSubConfig to observability.ContentLoggingConfig

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,97 +16,141 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test fixtures
-var (
-	testPrivateKey *rsa.PrivateKey
-	testPublicKey  *rsa.PublicKey
-	testKID        = "test-key-id"
-	testIssuer     = "https://test.issuer.com"
-	testAudience   = "gibson-api"
-)
+// testIssuerFixture holds test data for generating and validating test tokens.
+type testIssuerFixture struct {
+	privateKey *rsa.PrivateKey
+	publicKey  *rsa.PublicKey
+	keyID      string
+	issuerURL  string
+	audience   string
+	server     *httptest.Server
+}
 
-func init() {
-	// Generate test RSA key pair
-	var err error
-	testPrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		panic(err)
+// newTestIssuer creates a test OIDC issuer with TLS JWKS endpoint.
+func newTestIssuer(t *testing.T) *testIssuerFixture {
+	t.Helper()
+
+	// Generate RSA key pair for signing
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	ti := &testIssuerFixture{
+		privateKey: privateKey,
+		publicKey:  &privateKey.PublicKey,
+		keyID:      "test-key-id",
+		audience:   "gibson-api",
 	}
-	testPublicKey = &testPrivateKey.PublicKey
-}
 
-// createTestToken creates a signed JWT token for testing.
-func createTestToken(claims jwt.MapClaims) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["kid"] = testKID
-	return token.SignedString(testPrivateKey)
-}
-
-// createJWKSServer creates a test HTTP server serving JWKS.
-func createJWKSServer() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Convert RSA public key to JWK format
-		jwks := map[string]any{
-			"keys": []map[string]any{
-				{
-					"kty": "RSA",
-					"kid": testKID,
-					"use": "sig",
-					"alg": "RS256",
-					"n":   base64URLEncode(testPublicKey.N.Bytes()),
-					"e":   base64URLEncode(bigIntToBytes(int64(testPublicKey.E))),
-				},
-			},
-		}
+	// Create mock JWKS endpoint with TLS
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		jwks := ti.createJWKS()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(jwks)
-	}))
+	})
+
+	// Use TLS server (required by SDK's JWKS cache which requires HTTPS)
+	ti.server = httptest.NewTLSServer(mux)
+	ti.issuerURL = ti.server.URL
+
+	return ti
 }
 
-// Helper to convert int64 to bytes
-func bigIntToBytes(n int64) []byte {
-	if n == 0 {
-		return []byte{0}
+// close shuts down the test issuer server.
+func (ti *testIssuerFixture) close() {
+	if ti.server != nil {
+		ti.server.Close()
 	}
-	bytes := make([]byte, 0)
-	for n > 0 {
-		bytes = append([]byte{byte(n & 0xff)}, bytes...)
-		n >>= 8
-	}
-	return bytes
 }
 
-// Helper to base64 URL encode
+// createToken generates a signed JWT with the given claims.
+func (ti *testIssuerFixture) createToken(claims jwt.MapClaims) (string, error) {
+	// Set required claims if not provided
+	if _, ok := claims["iss"]; !ok {
+		claims["iss"] = ti.issuerURL
+	}
+	if _, ok := claims["aud"]; !ok {
+		claims["aud"] = ti.audience
+	}
+	if _, ok := claims["sub"]; !ok {
+		claims["sub"] = "test-user"
+	}
+	if _, ok := claims["exp"]; !ok {
+		claims["exp"] = time.Now().Add(1 * time.Hour).Unix()
+	}
+	if _, ok := claims["iat"]; !ok {
+		claims["iat"] = time.Now().Unix()
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = ti.keyID
+
+	return token.SignedString(ti.privateKey)
+}
+
+// createJWKS creates a JWKS response for the test public key.
+func (ti *testIssuerFixture) createJWKS() map[string]interface{} {
+	n := ti.publicKey.N.Bytes()
+	e := []byte{byte(ti.publicKey.E >> 16), byte(ti.publicKey.E >> 8), byte(ti.publicKey.E)}
+
+	// Remove leading zeros from exponent
+	for len(e) > 1 && e[0] == 0 {
+		e = e[1:]
+	}
+
+	return map[string]interface{}{
+		"keys": []map[string]interface{}{
+			{
+				"kty": "RSA",
+				"use": "sig",
+				"kid": ti.keyID,
+				"alg": "RS256",
+				"n":   base64URLEncode(n),
+				"e":   base64URLEncode(e),
+			},
+		},
+	}
+}
+
+// Helper to base64 URL encode - use standard library for correct JWKS encoding
 func base64URLEncode(data []byte) string {
-	// Simple implementation for testing
-	const base64Table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-	result := ""
-	for i := 0; i < len(data); i += 3 {
-		b1 := data[i]
-		b2 := byte(0)
-		b3 := byte(0)
-		if i+1 < len(data) {
-			b2 = data[i+1]
-		}
-		if i+2 < len(data) {
-			b3 = data[i+2]
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+// Shared test issuer for tests that need compatibility with old pattern.
+// Tests should call initSharedTestIssuer() and use sharedTestIssuer.
+var sharedTestIssuer *testIssuerFixture
+
+// initSharedTestIssuer initializes the shared test issuer if not already done.
+func initSharedTestIssuer(t testing.TB) *testIssuerFixture {
+	t.Helper()
+	if sharedTestIssuer == nil {
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("failed to generate RSA key: %v", err)
 		}
 
-		result += string(base64Table[(b1>>2)&0x3f])
-		result += string(base64Table[((b1&0x3)<<4)|((b2>>4)&0xf)])
-		if i+1 < len(data) {
-			result += string(base64Table[((b2&0xf)<<2)|((b3>>6)&0x3)])
+		ti := &testIssuerFixture{
+			privateKey: privateKey,
+			publicKey:  &privateKey.PublicKey,
+			keyID:      "test-key-id",
+			audience:   "gibson-api",
 		}
-		if i+2 < len(data) {
-			result += string(base64Table[b3&0x3f])
-		}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+			jwks := ti.createJWKS()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(jwks)
+		})
+
+		ti.server = httptest.NewTLSServer(mux)
+		ti.issuerURL = ti.server.URL
+		sharedTestIssuer = ti
 	}
-	// Remove padding
-	for len(result) > 0 && result[len(result)-1] == '=' {
-		result = result[:len(result)-1]
-	}
-	return result
+	return sharedTestIssuer
 }
+
 
 func TestNewOIDCValidator(t *testing.T) {
 	tests := []struct {
@@ -135,8 +180,8 @@ func TestNewOIDCValidator(t *testing.T) {
 			config: &AuthConfig{
 				OIDC: []OIDCIssuerConfig{
 					{
-						Issuer:   testIssuer,
-						Audience: testAudience,
+						Issuer:   "https://test.issuer.com",
+						Audience: "gibson-api",
 					},
 				},
 			},
@@ -165,24 +210,25 @@ func TestNewOIDCValidator(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, validator)
-				assert.NotNil(t, validator.jwksCache)
+				// SDK validator handles JWKS caching internally
+				assert.NotNil(t, validator.sdkValidator)
 			}
 		})
 	}
 }
 
 func TestOIDCValidator_Authenticate_Success(t *testing.T) {
-	// Start JWKS server
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	// Create test issuer with TLS JWKS server
+	ti := newTestIssuer(t)
+	defer ti.close()
 
 	// Create validator config
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
-				Audience:     testAudience,
-				JWKSEndpoint: jwksServer.URL,
+				Issuer:       ti.issuerURL,
+				Audience:     ti.audience,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 			},
 		},
 	}
@@ -190,19 +236,15 @@ func TestOIDCValidator_Authenticate_Success(t *testing.T) {
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
 
+	// Override HTTP client to use test server's client (handles TLS)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+
 	// Create valid token
-	now := time.Now()
-	claims := jwt.MapClaims{
-		"iss":    testIssuer,
+	token, err := ti.createToken(jwt.MapClaims{
 		"sub":    "user123",
-		"aud":    testAudience,
 		"email":  "user@example.com",
 		"groups": []string{"developers", "security-team"},
-		"exp":    now.Add(1 * time.Hour).Unix(),
-		"iat":    now.Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	})
 	require.NoError(t, err)
 
 	// Authenticate
@@ -210,10 +252,10 @@ func TestOIDCValidator_Authenticate_Success(t *testing.T) {
 	identity, err := validator.Authenticate(ctx, token)
 
 	// Assertions
-	assert.NoError(t, err)
-	assert.NotNil(t, identity)
+	require.NoError(t, err)
+	require.NotNil(t, identity)
 	assert.Equal(t, "user123", identity.Subject)
-	assert.Equal(t, testIssuer, identity.Issuer)
+	assert.Equal(t, ti.issuerURL, identity.Issuer)
 	assert.Equal(t, "user@example.com", identity.Email)
 	assert.Equal(t, []string{"developers", "security-team"}, identity.Groups)
 	assert.NotZero(t, identity.AuthenticatedAt)
@@ -221,33 +263,28 @@ func TestOIDCValidator_Authenticate_Success(t *testing.T) {
 }
 
 func TestOIDCValidator_Authenticate_ExpiredToken(t *testing.T) {
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	ti := newTestIssuer(t)
+	defer ti.close()
 
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
-				Audience:     testAudience,
-				JWKSEndpoint: jwksServer.URL,
+				Issuer:       ti.issuerURL,
+				Audience:     ti.audience,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 			},
 		},
-		ClockSkew: 10 * time.Second, // Small clock skew
+		ClockSkew: 1 * time.Second, // Minimal clock skew
 	}
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
 
-	// Create token expired well beyond clock skew
-	claims := jwt.MapClaims{
-		"iss": testIssuer,
-		"sub": "user123",
-		"aud": testAudience,
-		"exp": time.Now().Add(-1 * time.Hour).Unix(), // Expired 1 hour ago (beyond clock skew)
-		"iat": time.Now().Add(-2 * time.Hour).Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	// Create expired token (expired 1 minute ago - well beyond clock skew)
+	token, err := ti.createToken(jwt.MapClaims{
+		"exp": time.Now().Add(-1 * time.Minute).Unix(),
+	})
 	require.NoError(t, err)
 
 	// Authenticate
@@ -257,18 +294,19 @@ func TestOIDCValidator_Authenticate_ExpiredToken(t *testing.T) {
 	// Assertions
 	assert.Error(t, err)
 	assert.Nil(t, identity)
-	// Token expired errors are reported as invalid signature when signature validation fails
-	// This is because jwt.Parse checks expiry during signature validation
-	assert.True(t, IsTokenExpiredError(err) || IsInvalidSignatureError(err),
-		"Expected token expired or invalid signature error, got: %v", err)
+	assert.True(t, IsTokenExpiredError(err), "Expected token expired error, got: %v", err)
 }
 
 func TestOIDCValidator_Authenticate_UnknownIssuer(t *testing.T) {
+	ti := newTestIssuer(t)
+	defer ti.close()
+
+	// Configure validator with different issuer than the token
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:   "https://known.issuer.com",
-				Audience: testAudience,
+				Issuer:   "https://different-issuer.com",
+				Audience: ti.audience,
 			},
 		},
 	}
@@ -276,15 +314,8 @@ func TestOIDCValidator_Authenticate_UnknownIssuer(t *testing.T) {
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
 
-	// Create token from unknown issuer
-	claims := jwt.MapClaims{
-		"iss": "https://unknown.issuer.com",
-		"sub": "user123",
-		"aud": testAudience,
-		"exp": time.Now().Add(1 * time.Hour).Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	// Create token with test issuer URL (different from configured)
+	token, err := ti.createToken(jwt.MapClaims{})
 	require.NoError(t, err)
 
 	// Authenticate
@@ -295,34 +326,31 @@ func TestOIDCValidator_Authenticate_UnknownIssuer(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, identity)
 	assert.True(t, IsUnknownIssuerError(err))
+	assert.Contains(t, err.Error(), ti.issuerURL)
 }
 
 func TestOIDCValidator_Authenticate_InvalidAudience(t *testing.T) {
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	ti := newTestIssuer(t)
+	defer ti.close()
 
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
+				Issuer:       ti.issuerURL,
 				Audience:     "expected-audience",
-				JWKSEndpoint: jwksServer.URL,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 			},
 		},
 	}
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
 
 	// Create token with wrong audience
-	claims := jwt.MapClaims{
-		"iss": testIssuer,
-		"sub": "user123",
+	token, err := ti.createToken(jwt.MapClaims{
 		"aud": "wrong-audience",
-		"exp": time.Now().Add(1 * time.Hour).Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	})
 	require.NoError(t, err)
 
 	// Authenticate
@@ -338,7 +366,7 @@ func TestOIDCValidator_Authenticate_InvalidAudience(t *testing.T) {
 func TestOIDCValidator_Authenticate_MalformedToken(t *testing.T) {
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
-			{Issuer: testIssuer},
+			{Issuer: "https://test.issuer.com"},
 		},
 	}
 
@@ -364,31 +392,27 @@ func TestOIDCValidator_Authenticate_MalformedToken(t *testing.T) {
 }
 
 func TestOIDCValidator_Authenticate_MultipleAudiences(t *testing.T) {
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	ti := newTestIssuer(t)
+	defer ti.close()
 
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
-				Audience:     "gibson-api",
-				JWKSEndpoint: jwksServer.URL,
+				Issuer:       ti.issuerURL,
+				Audience:     ti.audience,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 			},
 		},
 	}
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
 
 	// Create token with multiple audiences (array format)
-	claims := jwt.MapClaims{
-		"iss": testIssuer,
-		"sub": "user123",
-		"aud": []interface{}{"gibson-api", "other-api"},
-		"exp": time.Now().Add(1 * time.Hour).Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	token, err := ti.createToken(jwt.MapClaims{
+		"aud": []string{ti.audience, "other-api"},
+	})
 	require.NoError(t, err)
 
 	// Authenticate
@@ -396,20 +420,20 @@ func TestOIDCValidator_Authenticate_MultipleAudiences(t *testing.T) {
 	identity, err := validator.Authenticate(ctx, token)
 
 	// Should succeed because gibson-api is in the audience list
-	assert.NoError(t, err)
-	assert.NotNil(t, identity)
-	assert.Equal(t, "user123", identity.Subject)
+	require.NoError(t, err)
+	require.NotNil(t, identity)
+	assert.Equal(t, "test-user", identity.Subject)
 }
 
 func TestOIDCValidator_ClaimsMapping(t *testing.T) {
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	ti := newTestIssuer(t)
+	defer ti.close()
 
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
-				JWKSEndpoint: jwksServer.URL,
+				Issuer:       ti.issuerURL,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 				ClaimsMapping: map[string]string{
 					"roles":  "custom_roles_claim",
 					"tenant": "org_id",
@@ -420,17 +444,13 @@ func TestOIDCValidator_ClaimsMapping(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
 
 	// Create token with custom claims
-	claims := jwt.MapClaims{
-		"iss":                 testIssuer,
-		"sub":                 "user123",
-		"custom_roles_claim":  []string{"admin", "developer"},
-		"org_id":              "acme-corp",
-		"exp":                 time.Now().Add(1 * time.Hour).Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	token, err := ti.createToken(jwt.MapClaims{
+		"custom_roles_claim": []string{"admin", "developer"},
+		"org_id":             "acme-corp",
+	})
 	require.NoError(t, err)
 
 	// Authenticate
@@ -438,8 +458,8 @@ func TestOIDCValidator_ClaimsMapping(t *testing.T) {
 	identity, err := validator.Authenticate(ctx, token)
 
 	// Assertions
-	assert.NoError(t, err)
-	assert.NotNil(t, identity)
+	require.NoError(t, err)
+	require.NotNil(t, identity)
 
 	// Verify mapped claims are present
 	assert.Contains(t, identity.Claims, "roles")
@@ -447,73 +467,70 @@ func TestOIDCValidator_ClaimsMapping(t *testing.T) {
 }
 
 func TestOIDCValidator_GroupsExtraction(t *testing.T) {
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	ti := newTestIssuer(t)
+	defer ti.close()
 
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
-				JWKSEndpoint: jwksServer.URL,
+				Issuer:       ti.issuerURL,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 			},
 		},
 	}
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
 
 	tests := []struct {
-		name          string
-		groupsClaim   interface{}
+		name           string
+		groupsClaim    interface{}
 		expectedGroups []string
 	}{
 		{
-			name:          "string array",
-			groupsClaim:   []string{"admin", "developer"},
+			name:           "string array",
+			groupsClaim:    []string{"admin", "developer"},
 			expectedGroups: []string{"admin", "developer"},
 		},
 		{
-			name:          "interface array",
-			groupsClaim:   []interface{}{"admin", "developer"},
+			name:           "interface array",
+			groupsClaim:    []interface{}{"admin", "developer"},
 			expectedGroups: []string{"admin", "developer"},
 		},
 		{
-			name:          "no groups",
-			groupsClaim:   nil,
+			name:           "no groups",
+			groupsClaim:    nil,
 			expectedGroups: nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			claims := jwt.MapClaims{
-				"iss": testIssuer,
-				"sub": "user123",
-				"exp": time.Now().Add(1 * time.Hour).Unix(),
-			}
+			claims := jwt.MapClaims{}
 			if tt.groupsClaim != nil {
 				claims["groups"] = tt.groupsClaim
 			}
 
-			token, err := createTestToken(claims)
+			token, err := ti.createToken(claims)
 			require.NoError(t, err)
 
 			identity, err := validator.Authenticate(context.Background(), token)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expectedGroups, identity.Groups)
 		})
 	}
 }
 
 func TestOIDCValidator_ClockSkewTolerance(t *testing.T) {
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	ti := newTestIssuer(t)
+	defer ti.close()
 
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
-				JWKSEndpoint: jwksServer.URL,
+				Issuer:       ti.issuerURL,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 			},
 		},
 		ClockSkew: 1 * time.Minute, // Allow 1 minute clock skew
@@ -521,16 +538,13 @@ func TestOIDCValidator_ClockSkewTolerance(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
 
 	// Create token that expired 30 seconds ago (within clock skew)
-	claims := jwt.MapClaims{
-		"iss": testIssuer,
-		"sub": "user123",
+	token, err := ti.createToken(jwt.MapClaims{
 		"exp": time.Now().Add(-30 * time.Second).Unix(),
 		"iat": time.Now().Add(-1 * time.Hour).Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	})
 	require.NoError(t, err)
 
 	// Should succeed due to clock skew tolerance
@@ -540,29 +554,26 @@ func TestOIDCValidator_ClockSkewTolerance(t *testing.T) {
 }
 
 func TestOIDCValidator_ConcurrentAuthentication(t *testing.T) {
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	ti := newTestIssuer(t)
+	defer ti.close()
 
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
-				JWKSEndpoint: jwksServer.URL,
+				Issuer:       ti.issuerURL,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 			},
 		},
 	}
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
 
 	// Create valid token
-	claims := jwt.MapClaims{
-		"iss": testIssuer,
+	token, err := ti.createToken(jwt.MapClaims{
 		"sub": "user123",
-		"exp": time.Now().Add(1 * time.Hour).Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	})
 	require.NoError(t, err)
 
 	// Run multiple concurrent authentication requests

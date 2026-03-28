@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/graphrag"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
@@ -195,6 +196,17 @@ func (l *LocalGraphRAGProvider) createIndices(ctx context.Context) error {
 		return err
 	}
 
+	// Create label-agnostic index on tenant_id for multi-tenant isolation
+	// Enables efficient tenant-scoped queries across all node types
+	_, err = l.graphClient.Query(ctx, `
+		CREATE INDEX tenant_id_lookup IF NOT EXISTS
+		FOR (n)
+		ON (n.tenant_id)
+	`, nil)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -233,6 +245,12 @@ func (l *LocalGraphRAGProvider) StoreNode(ctx context.Context, node graphrag.Gra
 		props["updated_at"] = node.UpdatedAt.UTC().Format(time.RFC3339)
 		if node.MissionID != nil {
 			props["mission_id"] = node.MissionID.String()
+		}
+
+		// Add tenant_id from context if present
+		// This enables multi-tenant isolation at the data layer
+		if tenant := auth.TenantFromContext(ctx); tenant != "" {
+			props["tenant_id"] = tenant
 		}
 
 		// Create or update node in Neo4j
@@ -352,6 +370,11 @@ func (l *LocalGraphRAGProvider) QueryNodes(ctx context.Context, query graphrag.N
 func (l *LocalGraphRAGProvider) queryNodesFromGraph(ctx context.Context, query graphrag.NodeQuery) ([]graphrag.GraphNode, error) {
 	params := make(map[string]any)
 
+	// Add tenant_id from context for tenant isolation
+	if tenant := auth.TenantFromContext(ctx); tenant != "" {
+		params["_tenant_id"] = tenant
+	}
+
 	// Build basic query - policy-based filtering will be added later
 	cypher := l.buildGlobalQuery(query, params)
 
@@ -413,6 +436,12 @@ func (l *LocalGraphRAGProvider) buildGlobalQuery(query graphrag.NodeQuery, param
 
 	// Build WHERE clauses
 	whereClauses := []string{}
+
+	// Add tenant filter from context
+	// Extract tenant from query context (passed via params)
+	if tenantID, ok := params["_tenant_id"].(string); ok && tenantID != "" {
+		whereClauses = append(whereClauses, "n.tenant_id = $_tenant_id")
+	}
 
 	// Add property filters
 	for key, value := range query.Properties {
@@ -521,6 +550,13 @@ func (l *LocalGraphRAGProvider) QueryRelationships(ctx context.Context, query gr
 	params := make(map[string]any)
 	where := make([]string, 0)
 
+	// Add tenant_id filter from context for tenant isolation
+	if tenant := auth.TenantFromContext(ctx); tenant != "" {
+		where = append(where, "from.tenant_id = $tenant_id")
+		where = append(where, "to.tenant_id = $tenant_id")
+		params["tenant_id"] = tenant
+	}
+
 	if query.FromID != nil {
 		where = append(where, "from.id = $from_id")
 		params["from_id"] = query.FromID.String()
@@ -612,6 +648,13 @@ func (l *LocalGraphRAGProvider) TraverseGraph(ctx context.Context, startID strin
 
 	// Add WHERE clause for filters
 	where := make([]string, 0)
+
+	// Add tenant_id filter from context for tenant isolation during traversal
+	if tenant := auth.TenantFromContext(ctx); tenant != "" {
+		where = append(where, "start.tenant_id = $tenant_id")
+		where = append(where, "ALL(node IN nodes(path) WHERE node.tenant_id = $tenant_id)")
+		params["tenant_id"] = tenant
+	}
 
 	if len(filters.AllowedNodeTypes) > 0 {
 		// Filter by node labels

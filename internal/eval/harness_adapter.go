@@ -782,4 +782,11 @@ func (a *GibsonHarnessAdapter) TaxonomyRegistry() graphrag.TaxonomyIntrospector 
 	return nil
 }
 
+// Intelligence returns the intelligence queries interface.
+// This adapter returns a no-op implementation since eval harness doesn't have
+// access to the full knowledge graph intelligence queries.
+func (g *GibsonHarnessAdapter) Intelligence() graphrag.IntelligenceQueries {
+	return &graphrag.NoOpIntelligenceQueries{}
+}
+
 var _ agent.Harness = (*GibsonHarnessAdapter)(nil)

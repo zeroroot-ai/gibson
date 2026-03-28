@@ -32,45 +32,47 @@ type authenticatorEntry struct {
 
 // NewCompositeAuthenticator creates a composite authenticator from configuration.
 //
-// Initializes enabled authenticators in priority order:
-//  1. OIDC (if any issuers configured)
-//  2. Kubernetes (if enabled)
-//  3. Local (if configured)
+// Initializes authenticators based on the configured auth mode:
 //
-// Returns an error if no authenticators are configured.
+//   - "disabled": Returns nil (caller should skip authentication entirely)
+//   - "dev": Only local static token authenticator
+//   - "enterprise": OIDC + Kubernetes (if enabled)
+//   - "saas": OIDC only (Kubernetes not typical for SaaS deployments)
+//
+// Authenticators are tried in priority order:
+//  1. OIDC (if configured for the mode)
+//  2. Kubernetes (if configured for the mode)
+//  3. Local (if configured for the mode)
+//
+// Returns nil authenticator for "disabled" mode - caller should handle this case.
+// Returns an error if configuration is invalid for the specified mode.
 func NewCompositeAuthenticator(cfg *AuthConfig) (*CompositeAuthenticator, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("auth config is nil")
 	}
 
+	// Apply defaults to ensure mode is set
+	cfg.ApplyDefaults()
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid auth config: %w", err)
+	}
+
+	// For disabled mode, return nil - caller should skip authentication entirely
+	if cfg.Mode == "disabled" {
+		return nil, nil
+	}
+
 	var authenticators []authenticatorEntry
 
-	// 1. Add OIDC validator if issuers configured
-	if len(cfg.OIDC) > 0 {
-		oidcValidator, err := NewOIDCValidator(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create OIDC validator: %w", err)
+	// Configure authenticators based on mode
+	switch cfg.Mode {
+	case "dev":
+		// Dev mode: Only local static tokens
+		if cfg.Local == nil || len(cfg.Local.Users) == 0 {
+			return nil, fmt.Errorf("dev mode requires local.users configuration")
 		}
-		authenticators = append(authenticators, authenticatorEntry{
-			name:          "oidc",
-			authenticator: oidcValidator,
-		})
-	}
-
-	// 2. Add K8s validator if enabled
-	if cfg.Kubernetes != nil && cfg.Kubernetes.Enabled {
-		k8sValidator, err := NewK8sValidator(cfg.Kubernetes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create k8s validator: %w", err)
-		}
-		authenticators = append(authenticators, authenticatorEntry{
-			name:          "kubernetes",
-			authenticator: k8sValidator,
-		})
-	}
-
-	// 3. Add local validator if configured
-	if cfg.Local != nil && len(cfg.Local.Users) > 0 {
 		localValidator, err := NewLocalValidator(cfg.Local)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create local validator: %w", err)
@@ -79,10 +81,57 @@ func NewCompositeAuthenticator(cfg *AuthConfig) (*CompositeAuthenticator, error)
 			name:          "local",
 			authenticator: localValidator,
 		})
+
+	case "enterprise":
+		// Enterprise mode: OIDC + optional Kubernetes
+		if len(cfg.OIDC) == 0 {
+			return nil, fmt.Errorf("enterprise mode requires at least one OIDC issuer")
+		}
+
+		// 1. Add OIDC validator
+		oidcValidator, err := NewOIDCValidator(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OIDC validator: %w", err)
+		}
+		authenticators = append(authenticators, authenticatorEntry{
+			name:          "oidc",
+			authenticator: oidcValidator,
+		})
+
+		// 2. Add K8s validator if enabled (optional in enterprise mode)
+		if cfg.Kubernetes != nil && cfg.Kubernetes.Enabled {
+			k8sValidator, err := NewK8sValidator(cfg.Kubernetes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create k8s validator: %w", err)
+			}
+			authenticators = append(authenticators, authenticatorEntry{
+				name:          "kubernetes",
+				authenticator: k8sValidator,
+			})
+		}
+
+	case "saas":
+		// SaaS mode: OIDC only (Kubernetes not typical for SaaS)
+		if len(cfg.OIDC) == 0 {
+			return nil, fmt.Errorf("saas mode requires at least one OIDC issuer")
+		}
+
+		// Add OIDC validator only
+		oidcValidator, err := NewOIDCValidator(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OIDC validator: %w", err)
+		}
+		authenticators = append(authenticators, authenticatorEntry{
+			name:          "oidc",
+			authenticator: oidcValidator,
+		})
+
+	default:
+		return nil, fmt.Errorf("unsupported auth mode: %s (must be: disabled, dev, enterprise, saas)", cfg.Mode)
 	}
 
 	if len(authenticators) == 0 {
-		return nil, fmt.Errorf("no authenticators configured (no OIDC issuers, K8s disabled, no local users)")
+		return nil, fmt.Errorf("no authenticators configured for mode %q", cfg.Mode)
 	}
 
 	return &CompositeAuthenticator{

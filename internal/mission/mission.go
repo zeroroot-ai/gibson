@@ -200,6 +200,10 @@ type Mission struct {
 	// ID is the unique identifier for this mission.
 	ID types.ID `json:"id"`
 
+	// TenantID is the tenant identifier for multi-tenant isolation.
+	// This field is optional for backward compatibility.
+	TenantID string `json:"tenant_id,omitempty" yaml:"tenant_id,omitempty"`
+
 	// Name is a human-readable name for the mission.
 	Name string `json:"name"`
 
@@ -522,6 +526,13 @@ func (m *Mission) WithMemoryContinuity(mode string) *Mission {
 func (m *Mission) WithParent(parentID types.ID, parentDepth int) *Mission {
 	m.ParentMissionID = &parentID
 	m.Depth = parentDepth + 1
+	return m
+}
+
+// WithTenant sets the tenant ID for multi-tenant isolation.
+// This method returns the mission for method chaining.
+func (m *Mission) WithTenant(tenantID string) *Mission {
+	m.TenantID = tenantID
 	return m
 }
 

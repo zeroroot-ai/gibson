@@ -94,6 +94,10 @@ type DefaultAgentHarness struct {
 
 	// categoryClassifier provides semantic category normalization (nil if disabled)
 	categoryClassifier CategoryClassifier
+
+	// taxonomyRegistry provides read-only access to the taxonomy registry for querying
+	// available node types, relationships, and extensions in the knowledge graph.
+	taxonomyRegistry sdkgraphrag.TaxonomyIntrospector
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness

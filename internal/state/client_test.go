@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	testutil "github.com/zero-day-ai/gibson/internal/testing"
 )
 
 func setupMiniredis(t *testing.T) (*miniredis.Miniredis, *Config) {
@@ -148,7 +149,7 @@ func TestStateClient_Client(t *testing.T) {
 	assert.NotNil(t, rdb)
 
 	// Test basic operations
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 	err := rdb.Set(ctx, "test-key", "test-value", 0).Err()
 	require.NoError(t, err)
 
@@ -293,7 +294,7 @@ func TestStateClient_IntegrationWithMiniredis(t *testing.T) {
 	}
 	defer client.Close()
 
-	ctx := context.Background()
+	ctx := testutil.WithTestTenant()
 	rdb := client.Client()
 
 	// Test various Redis operations

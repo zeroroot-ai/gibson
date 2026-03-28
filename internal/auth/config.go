@@ -1,22 +1,50 @@
 package auth
 
 import (
+	"fmt"
 	"time"
 )
 
 // AuthConfig contains authentication and authorization configuration.
 //
 // This configuration is loaded from gibson.yaml and supports multiple
-// authentication providers (OIDC, Kubernetes, local dev tokens).
+// deployment models through the Mode field:
+//   - "disabled": No authentication (default for backward compatibility)
+//   - "dev": Static tokens for testing
+//   - "enterprise": OIDC validation with config-based RBAC, single or multi-team
+//   - "saas": OIDC + tenant isolation + database-based RBAC
 type AuthConfig struct {
+	// Mode specifies the authentication deployment model.
+	// Valid values:
+	//   - "disabled": No authentication, all requests allowed (default)
+	//   - "dev": Static tokens for local development
+	//   - "enterprise": Customer IdP (Okta, Azure AD, Keycloak) with OIDC validation
+	//   - "saas": Multi-tenant with tenant isolation via claims
+	// Default: "disabled"
+	Mode string `mapstructure:"mode" yaml:"mode"`
+
+	// TenantClaim is the JWT claim name to extract the tenant ID from.
+	// Used in "saas" and "enterprise" modes for tenant isolation.
+	// Common values: "tenant_id", "org_id", "organization"
+	// Supports dot notation for nested claims: "custom.tenant.id"
+	// Default: "tenant_id"
+	TenantClaim string `mapstructure:"tenant_claim" yaml:"tenant_claim"`
+
+	// DefaultTenant is the fallback tenant ID when no tenant claim is present.
+	// Used in "enterprise" mode for single-tenant deployments.
+	// In "saas" mode, missing tenant claims result in authentication failure.
+	// Optional - no default value
+	DefaultTenant string `mapstructure:"default_tenant" yaml:"default_tenant"`
+
 	// Enabled controls whether authentication is enforced on gRPC requests.
-	// When false, all requests are allowed without authentication (dev mode).
+	// Deprecated: Use Mode field instead. Kept for backward compatibility.
+	// When Mode is set, this field is ignored.
 	// Default: false
 	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
 
 	// TrustLocalhost skips authentication for connections from 127.0.0.1 or ::1.
 	// Useful for local development with external tools.
-	// Only applies when Enabled is true.
+	// Only applies when Mode is not "disabled".
 	// Default: false
 	TrustLocalhost bool `mapstructure:"trust_localhost" yaml:"trust_localhost"`
 
@@ -28,6 +56,7 @@ type AuthConfig struct {
 	// OIDC contains OpenID Connect provider configurations.
 	// Multiple providers can be configured for federation (Okta, GitHub Actions, GitLab CI).
 	// Tokens are matched to providers by their issuer claim.
+	// Required for "enterprise" and "saas" modes.
 	OIDC []OIDCIssuerConfig `mapstructure:"oidc" yaml:"oidc"`
 
 	// Kubernetes enables validation of Kubernetes ServiceAccount tokens.
@@ -36,6 +65,7 @@ type AuthConfig struct {
 	Kubernetes *K8sAuthConfig `mapstructure:"kubernetes" yaml:"kubernetes,omitempty"`
 
 	// Local enables static token authentication for local development.
+	// Required for "dev" mode, ignored in other modes.
 	// NOT FOR PRODUCTION - tokens are stored in plaintext config.
 	// Optional - only enabled when configured.
 	Local *LocalAuthConfig `mapstructure:"local" yaml:"local,omitempty"`
@@ -133,9 +163,18 @@ type LocalUser struct {
 
 // ApplyDefaults fills in zero-valued fields with sensible defaults.
 func (c *AuthConfig) ApplyDefaults() {
-	// Auth disabled by default for backward compatibility
-	// Users must explicitly enable authentication
+	// Default to disabled mode for backward compatibility
+	// Users must explicitly configure authentication mode
+	if c.Mode == "" {
+		c.Mode = "disabled"
+	}
 
+	// Default tenant claim name
+	if c.TenantClaim == "" {
+		c.TenantClaim = "tenant_id"
+	}
+
+	// Default clock skew tolerance
 	if c.ClockSkew == 0 {
 		c.ClockSkew = 30 * time.Second
 	}
@@ -146,4 +185,33 @@ func (c *AuthConfig) ApplyDefaults() {
 			c.OIDC[i].JWKSTTL = 1 * time.Hour
 		}
 	}
+}
+
+// Validate checks that the configuration is valid.
+// Returns an error if the Mode value is not one of the valid values.
+func (c *AuthConfig) Validate() error {
+	validModes := map[string]bool{
+		"disabled":   true,
+		"dev":        true,
+		"enterprise": true,
+		"saas":       true,
+	}
+
+	if !validModes[c.Mode] {
+		return fmt.Errorf("invalid auth mode %q: must be one of: disabled, dev, enterprise, saas", c.Mode)
+	}
+
+	// Validate mode-specific requirements
+	switch c.Mode {
+	case "dev":
+		if c.Local == nil || len(c.Local.Users) == 0 {
+			return fmt.Errorf("auth mode %q requires local.users configuration", c.Mode)
+		}
+	case "enterprise", "saas":
+		if len(c.OIDC) == 0 {
+			return fmt.Errorf("auth mode %q requires at least one OIDC issuer", c.Mode)
+		}
+	}
+
+	return nil
 }

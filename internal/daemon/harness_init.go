@@ -60,6 +60,9 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		} else {
 			redisToolRegistry := harness.NewRedisToolRegistry(redisClient, d.logger.Slog())
 
+			// Store on daemon for use by ListTools() gRPC method
+			d.redisToolRegistry = redisToolRegistry
+
 			// Refresh to discover available tools from Redis
 			if err := redisToolRegistry.Refresh(ctx); err != nil {
 				d.logger.Warn(ctx, "failed to refresh Redis tool registry",

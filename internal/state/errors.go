@@ -25,6 +25,10 @@ var (
 	// This is returned when attempting to create a resource with a name or key that
 	// is already in use, such as credential names or mission names.
 	ErrAlreadyExists = errors.New("resource already exists")
+
+	// ErrTenantRequired indicates that a tenant ID is required but was not found in the context.
+	// This is returned in SaaS mode when operations are attempted without a tenant context.
+	ErrTenantRequired = errors.New("tenant ID required but not found in context")
 )
 
 // IsNotFound checks if an error indicates a not-found condition.
@@ -101,5 +105,28 @@ func NewConnectionError(operation, addr string, err error) *ConnectionError {
 		Operation: operation,
 		Addr:      addr,
 		Err:       err,
+	}
+}
+
+// TenantError represents an error related to tenant isolation.
+type TenantError struct {
+	// Message describes the tenant-related error
+	Message string
+}
+
+// Error implements the error interface.
+func (e *TenantError) Error() string {
+	return fmt.Sprintf("tenant error: %s", e.Message)
+}
+
+// Unwrap returns ErrTenantRequired for error chain unwrapping.
+func (e *TenantError) Unwrap() error {
+	return ErrTenantRequired
+}
+
+// NewTenantError creates a new TenantError.
+func NewTenantError(message string) *TenantError {
+	return &TenantError{
+		Message: message,
 	}
 }

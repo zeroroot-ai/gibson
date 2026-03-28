@@ -158,6 +158,7 @@ type ResultError struct {
 // Finding represents a security finding discovered during task execution
 type Finding struct {
 	ID          types.ID        `json:"id"`
+	TenantID    string          `json:"tenant_id,omitempty" yaml:"tenant_id,omitempty"` // Multi-tenant isolation
 	Title       string          `json:"title"`
 	Description string          `json:"description"`
 	Severity    FindingSeverity `json:"severity"`
@@ -254,6 +255,12 @@ func (f Finding) WithCWE(cwe ...string) Finding {
 // WithTarget sets the target ID for a finding
 func (f Finding) WithTarget(targetID types.ID) Finding {
 	f.TargetID = &targetID
+	return f
+}
+
+// WithTenant sets the tenant ID for a finding (multi-tenant isolation)
+func (f Finding) WithTenant(tenantID string) Finding {
+	f.TenantID = tenantID
 	return f
 }
 

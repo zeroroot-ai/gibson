@@ -1,0 +1,14 @@
+name: GraphRAG Finding Test
+description: Test that findings get stored to Neo4j with proper mission relationships
+version: 1.0.0
+
+nodes:
+  - id: dns-scan
+    type: agent
+    agent: dns-recon
+    task:
+      action: enumerate
+      target: example.com
+      context:
+        discover_subdomains: true
+        check_zone_transfer: false

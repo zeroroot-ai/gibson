@@ -1,0 +1,253 @@
+package extraction
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	"google.golang.org/protobuf/proto"
+)
+
+// This is an example implementation showing how to create a tool-specific extractor.
+// This file is for documentation purposes only and should not be compiled.
+
+// Example tool response proto (would be defined in tool's proto package)
+type ExampleToolResponse struct {
+	Hosts []*ExampleHost `protobuf:"bytes,1,rep,name=hosts,proto3" json:"hosts,omitempty"`
+}
+
+func (m *ExampleToolResponse) ProtoMessage()  {}
+func (m *ExampleToolResponse) Reset()         {}
+func (m *ExampleToolResponse) String() string { return "" }
+
+type ExampleHost struct {
+	Ip    string         `protobuf:"bytes,1,opt,name=ip,proto3" json:"ip,omitempty"`
+	Ports []*ExamplePort `protobuf:"bytes,2,rep,name=ports,proto3" json:"ports,omitempty"`
+}
+
+type ExamplePort struct {
+	Number  int32  `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
+	Service string `protobuf:"bytes,2,opt,name=service,proto3" json:"service,omitempty"`
+}
+
+// ExampleExtractor demonstrates a complete extractor implementation.
+// This extractor converts tool-specific proto responses into standardized DiscoveryResults.
+type ExampleExtractor struct {
+	// Add any configuration or dependencies here
+	// Example: logger *slog.Logger
+}
+
+// NewExampleExtractor creates a new extractor instance.
+// Use this constructor to inject dependencies.
+func NewExampleExtractor() *ExampleExtractor {
+	return &ExampleExtractor{}
+}
+
+// ToolName returns the identifier for this tool.
+// This must match the tool's Name() method.
+func (e *ExampleExtractor) ToolName() string {
+	return "example-tool"
+}
+
+// CanExtract validates that this extractor can process the given message.
+// This provides type safety and prevents runtime panics.
+func (e *ExampleExtractor) CanExtract(msg proto.Message) bool {
+	_, ok := msg.(*ExampleToolResponse)
+	return ok
+}
+
+// Extract converts the tool response into a DiscoveryResult.
+// This is where the core extraction logic lives.
+func (e *ExampleExtractor) Extract(ctx context.Context, msg proto.Message) (*ExtractionResult, error) {
+	// Type assertion (safe because CanExtract was called first)
+	resp, ok := msg.(*ExampleToolResponse)
+	if !ok {
+		return nil, fmt.Errorf("expected *ExampleToolResponse, got %T", msg)
+	}
+
+	// Validate response
+	if len(resp.Hosts) == 0 {
+		// Return empty result for no data (not an error)
+		return &ExtractionResult{
+			Discovery: &graphragpb.DiscoveryResult{},
+			Metadata: map[string]string{
+				"status": "no_hosts_found",
+			},
+		}, nil
+	}
+
+	// Create discovery result
+	discovery := &graphragpb.DiscoveryResult{}
+	var rootHostID string
+
+	// Extract hosts and their ports
+	for _, exampleHost := range resp.Hosts {
+		// Generate deterministic UUID for host
+		hostID := generateHostID(exampleHost.Ip)
+
+		// Create host entity
+		host := &graphragpb.Host{
+			Id:       &hostID,
+			Ip:       exampleHost.Ip,
+			State:    stringPtr("up"),
+			Hostname: nil, // Not available in this tool
+		}
+		discovery.Hosts = append(discovery.Hosts, host)
+
+		// Track first host as root entity
+		if rootHostID == "" {
+			rootHostID = hostID
+		}
+
+		// Extract ports for this host
+		for _, examplePort := range exampleHost.Ports {
+			portID := generatePortID(hostID, examplePort.Number)
+
+			port := &graphragpb.Port{
+				Id:       &portID,
+				HostId:   hostID, // Link to parent host
+				Number:   examplePort.Number,
+				Protocol: "tcp",
+				State:    stringPtr("open"),
+			}
+			discovery.Ports = append(discovery.Ports, port)
+
+			// If service name is present, create service entity
+			if examplePort.Service != "" {
+				serviceID := generateServiceID(portID)
+
+				service := &graphragpb.Service{
+					Id:     &serviceID,
+					PortId: portID, // Link to parent port
+					Name:   examplePort.Service,
+				}
+				discovery.Services = append(discovery.Services, service)
+			}
+		}
+	}
+
+	// Build extraction result
+	result := &ExtractionResult{
+		Discovery:    discovery,
+		RootEntityID: rootHostID,
+		Metadata: map[string]string{
+			"tool_name":   "example-tool",
+			"host_count":  fmt.Sprintf("%d", len(resp.Hosts)),
+			"node_count":  fmt.Sprintf("%d", len(discovery.Hosts)+len(discovery.Ports)+len(discovery.Services)),
+		},
+	}
+
+	return result, nil
+}
+
+// UUID generation helpers - ensure deterministic IDs for idempotency
+
+// generateHostID creates a deterministic UUID for a host based on its IP.
+// This ensures re-scanning the same IP produces the same ID.
+func generateHostID(ip string) string {
+	namespace := uuid.NameSpaceOID
+	name := fmt.Sprintf("host:%s", ip)
+	return uuid.NewSHA1(namespace, []byte(name)).String()
+}
+
+// generatePortID creates a deterministic UUID for a port.
+// It's based on the parent host ID and port number.
+func generatePortID(hostID string, portNum int32) string {
+	namespace := uuid.NameSpaceOID
+	name := fmt.Sprintf("port:%s:%d", hostID, portNum)
+	return uuid.NewSHA1(namespace, []byte(name)).String()
+}
+
+// generateServiceID creates a deterministic UUID for a service.
+// It's based on the parent port ID.
+func generateServiceID(portID string) string {
+	namespace := uuid.NameSpaceOID
+	name := fmt.Sprintf("service:%s", portID)
+	return uuid.NewSHA1(namespace, []byte(name)).String()
+}
+
+// Helper to create string pointers for optional proto fields
+func stringPtr(s string) *string {
+	return &s
+}
+
+// --- Usage Example ---
+
+// Register the extractor during application initialization:
+//
+//   registry := extraction.NewExtractorRegistry()
+//   registry.Register(NewExampleExtractor())
+//
+// Use in harness after tool execution:
+//
+//   toolResp, err := tool.Execute(ctx, toolReq)
+//   if err != nil {
+//       return err
+//   }
+//
+//   result, err := registry.ExtractFromResponse(ctx, "example-tool", toolResp)
+//   if err != nil {
+//       log.Warn("extraction failed", "error", err)
+//   } else if result.Discovery != nil {
+//       // Store in graph
+//       discoveryProcessor.Process(ctx, execCtx, result.Discovery)
+//   }
+
+// --- Testing Example ---
+
+// func TestExampleExtractor(t *testing.T) {
+//     extractor := NewExampleExtractor()
+//
+//     // Test ToolName
+//     assert.Equal(t, "example-tool", extractor.ToolName())
+//
+//     // Test CanExtract
+//     resp := &ExampleToolResponse{}
+//     assert.True(t, extractor.CanExtract(resp))
+//     assert.False(t, extractor.CanExtract(&emptypb.Empty{}))
+//
+//     // Test Extract
+//     resp = &ExampleToolResponse{
+//         Hosts: []*ExampleHost{
+//             {
+//                 Ip: "192.168.1.1",
+//                 Ports: []*ExamplePort{
+//                     {Number: 80, Service: "http"},
+//                     {Number: 443, Service: "https"},
+//                 },
+//             },
+//         },
+//     }
+//
+//     result, err := extractor.Extract(context.Background(), resp)
+//     require.NoError(t, err)
+//     require.NotNil(t, result)
+//     require.NotNil(t, result.Discovery)
+//
+//     // Verify entities
+//     assert.Len(t, result.Discovery.Hosts, 1)
+//     assert.Len(t, result.Discovery.Ports, 2)
+//     assert.Len(t, result.Discovery.Services, 2)
+//
+//     // Verify host
+//     host := result.Discovery.Hosts[0]
+//     assert.Equal(t, "192.168.1.1", host.Ip)
+//     assert.NotEmpty(t, *host.Id)
+//
+//     // Verify ports are linked to host
+//     for _, port := range result.Discovery.Ports {
+//         assert.Equal(t, *host.Id, port.HostId)
+//     }
+//
+//     // Verify services are linked to ports
+//     for i, service := range result.Discovery.Services {
+//         assert.Equal(t, *result.Discovery.Ports[i].Id, service.PortId)
+//     }
+//
+//     // Verify root entity
+//     assert.Equal(t, *host.Id, result.RootEntityID)
+//
+//     // Verify metadata
+//     assert.Equal(t, "1", result.Metadata["host_count"])
+// }

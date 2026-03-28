@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -190,6 +191,14 @@ func (c *Neo4jClient) CreateNode(ctx context.Context, labels []string, props map
 	if c.driver == nil {
 		return "", types.NewError(ErrCodeGraphConnectionClosed,
 			"driver not connected")
+	}
+
+	// Add tenant_id from context if present
+	if tenant := auth.TenantFromContext(ctx); tenant != "" {
+		// Only add tenant_id if not already present in props
+		if _, exists := props["tenant_id"]; !exists {
+			props["tenant_id"] = tenant
+		}
 	}
 
 	// Build CREATE query

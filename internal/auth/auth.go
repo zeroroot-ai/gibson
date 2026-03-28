@@ -2,8 +2,16 @@ package auth
 
 import (
 	"context"
-	"time"
+
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
+
+// gibsonIdentityKey is the context key for storing the full Gibson Identity.
+// This is separate from the SDK Identity key to preserve Roles and Permissions.
+type gibsonIdentityKey struct{}
+
+// gibsonIdentityCtxKey is the singleton context key for Gibson Identity.
+var gibsonIdentityCtxKey = gibsonIdentityKey{}
 
 // Authenticator validates tokens and returns identity information.
 //
@@ -27,42 +35,25 @@ type Authenticator interface {
 
 // Identity represents an authenticated principal with their claims and permissions.
 //
+// This extends the SDK Identity type with Gibson-specific authorization fields.
+// The SDK Identity contains the base authentication information (subject, issuer,
+// groups, claims, expiry), while Gibson adds resolved roles and permissions.
+//
 // Identity is immutable after creation and safe to pass across goroutines.
 type Identity struct {
-	// Subject is the unique identifier for the authenticated principal (sub claim).
-	// This is typically a user ID, service account name, or workflow identifier.
-	Subject string
-
-	// Issuer is the OIDC issuer that validated this token.
-	// Examples: "https://company.okta.com", "https://token.actions.githubusercontent.com"
-	Issuer string
-
-	// Email is the principal's email address if available.
-	// Optional - may be empty for non-user identities (CI/CD, service accounts).
-	Email string
-
-	// Groups are the group memberships extracted from the token.
-	// Used for role binding evaluation.
-	Groups []string
-
-	// Claims contains all extracted token claims as key-value pairs.
-	// Includes standard OIDC claims and provider-specific claims.
-	Claims map[string]any
+	// Embed SDK Identity for base authentication fields
+	// This provides: Subject, Issuer, Email, Groups, Claims, ExpiresAt, AuthenticatedAt
+	sdkauth.Identity
 
 	// Roles are the resolved Gibson role names after evaluating role bindings.
 	// Examples: ["admin"], ["mission:execute", "findings:read"]
+	// These are computed from Groups using role binding configuration.
 	Roles []string
 
 	// Permissions are the computed permissions derived from roles.
 	// Used for fine-grained authorization checks.
+	// These are computed from Roles using permission mapping.
 	Permissions []Permission
-
-	// ExpiresAt is when the underlying token expires.
-	// After this time, the identity should no longer be considered valid.
-	ExpiresAt time.Time
-
-	// AuthenticatedAt is when this identity was created (token validation time).
-	AuthenticatedAt time.Time
 }
 
 // Permission represents a fine-grained authorization grant.
@@ -128,10 +119,48 @@ func (i *Identity) HasRole(role string) bool {
 	return false
 }
 
-// IsExpired returns true if the identity's token has expired.
-func (i *Identity) IsExpired() bool {
-	if i == nil {
-		return true
+// ContextWithIdentity stores a Gibson Identity in the context.
+//
+// This stores BOTH the full Gibson Identity (with Roles/Permissions) AND
+// the SDK Identity (for SDK compatibility). Use GibsonIdentityFromContext
+// to retrieve the full identity with authorization data.
+//
+// Use IdentityFromContext for SDK Identity only (backward compatibility).
+// Use GibsonIdentityFromContext for full identity with Roles/Permissions.
+func ContextWithIdentity(ctx context.Context, identity *Identity) context.Context {
+	if identity == nil {
+		return ctx
 	}
-	return time.Now().After(i.ExpiresAt)
+	// Store the full Gibson Identity for authorization checks
+	ctx = context.WithValue(ctx, gibsonIdentityCtxKey, identity)
+	// Also store the SDK Identity for SDK compatibility
+	ctx = sdkauth.ContextWithIdentity(ctx, &identity.Identity)
+	return ctx
+}
+
+// IdentityFromContext retrieves the SDK Identity from the context.
+//
+// Returns the SDK Identity and true if present, or nil and false if not.
+// Note: This returns the SDK Identity, not the Gibson Identity with roles/permissions.
+// For Gibson-specific authorization checks (roles, permissions), use GibsonIdentityFromContext.
+func IdentityFromContext(ctx context.Context) (*sdkauth.Identity, bool) {
+	return sdkauth.IdentityFromContext(ctx)
+}
+
+// GibsonIdentityFromContext retrieves the full Gibson Identity from the context.
+//
+// Returns the Gibson Identity with Roles and Permissions, and true if present.
+// Returns nil and false if no identity is present.
+//
+// Use this function when you need to check roles or permissions:
+//
+//	identity, ok := auth.GibsonIdentityFromContext(ctx)
+//	if ok && identity.HasRole("admin") {
+//	    // allow admin action
+//	}
+func GibsonIdentityFromContext(ctx context.Context) (*Identity, bool) {
+	if identity, ok := ctx.Value(gibsonIdentityCtxKey).(*Identity); ok {
+		return identity, true
+	}
+	return nil, false
 }
