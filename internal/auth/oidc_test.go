@@ -596,28 +596,23 @@ func TestOIDCValidator_ConcurrentAuthentication(t *testing.T) {
 }
 
 func TestOIDCValidator_ContextCancellation(t *testing.T) {
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	ti := newTestIssuer(t)
+	defer ti.close()
 
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
-				JWKSEndpoint: jwksServer.URL,
+				Issuer:       ti.issuerURL,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 			},
 		},
 	}
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
 
-	claims := jwt.MapClaims{
-		"iss": testIssuer,
-		"sub": "user123",
-		"exp": time.Now().Add(1 * time.Hour).Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	token, err := ti.createToken(jwt.MapClaims{})
 	require.NoError(t, err)
 
 	// Create cancelled context
@@ -639,28 +634,24 @@ func TestOIDCValidator_ContextCancellation(t *testing.T) {
 
 // Benchmark tests
 func BenchmarkOIDCValidator_Authenticate(b *testing.B) {
-	jwksServer := createJWKSServer()
-	defer jwksServer.Close()
+	ti := initSharedTestIssuer(b)
 
 	cfg := &AuthConfig{
 		OIDC: []OIDCIssuerConfig{
 			{
-				Issuer:       testIssuer,
-				JWKSEndpoint: jwksServer.URL,
+				Issuer:       ti.issuerURL,
+				JWKSEndpoint: ti.server.URL + "/.well-known/jwks.json",
 			},
 		},
 	}
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(b, err)
+	validator.sdkValidator.SetJWKSClient(ti.server.Client())
 
-	claims := jwt.MapClaims{
-		"iss": testIssuer,
+	token, err := ti.createToken(jwt.MapClaims{
 		"sub": "user123",
-		"exp": time.Now().Add(1 * time.Hour).Unix(),
-	}
-
-	token, err := createTestToken(claims)
+	})
 	require.NoError(b, err)
 
 	ctx := context.Background()

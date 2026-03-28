@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -182,6 +183,8 @@ var (
 )
 
 // Error checking functions for use in interceptors.
+// These functions check both Gibson AuthError and SDK AuthError types
+// since errors can originate from either layer.
 
 // IsMissingTokenError checks if an error is a missing token error.
 func IsMissingTokenError(err error) bool {
@@ -189,7 +192,8 @@ func IsMissingTokenError(err error) bool {
 	if errors.As(err, &authErr) {
 		return authErr.Reason == "missing_token"
 	}
-	return false
+	// Also check SDK error type
+	return sdkauth.IsMissingTokenError(err)
 }
 
 // IsInvalidTokenError checks if an error is an invalid token error.
@@ -198,7 +202,8 @@ func IsInvalidTokenError(err error) bool {
 	if errors.As(err, &authErr) {
 		return authErr.Reason == "invalid_token" || authErr.Reason == "malformed_token"
 	}
-	return false
+	// Also check SDK error type
+	return sdkauth.IsMalformedTokenError(err)
 }
 
 // IsTokenExpiredError checks if an error is a token expired error.
@@ -207,7 +212,8 @@ func IsTokenExpiredError(err error) bool {
 	if errors.As(err, &authErr) {
 		return authErr.Reason == "token_expired"
 	}
-	return false
+	// Also check SDK error type
+	return sdkauth.IsTokenExpiredError(err)
 }
 
 // IsInvalidSignatureError checks if an error is an invalid signature error.
@@ -216,7 +222,8 @@ func IsInvalidSignatureError(err error) bool {
 	if errors.As(err, &authErr) {
 		return authErr.Reason == "invalid_signature"
 	}
-	return false
+	// Also check SDK error type
+	return sdkauth.IsInvalidSignatureError(err)
 }
 
 // IsUnknownIssuerError checks if an error is an unknown issuer error.
@@ -225,7 +232,8 @@ func IsUnknownIssuerError(err error) bool {
 	if errors.As(err, &authErr) {
 		return authErr.Reason == "unknown_issuer"
 	}
-	return false
+	// Also check SDK error type
+	return sdkauth.IsUnknownIssuerError(err)
 }
 
 // IsAudienceMismatchError checks if an error is an audience mismatch error.
@@ -234,7 +242,8 @@ func IsAudienceMismatchError(err error) bool {
 	if errors.As(err, &authErr) {
 		return authErr.Reason == "invalid_audience"
 	}
-	return false
+	// Also check SDK error type
+	return sdkauth.IsInvalidAudienceError(err)
 }
 
 // IsPermissionDeniedError checks if an error is a permission denied error.
@@ -243,7 +252,8 @@ func IsPermissionDeniedError(err error) bool {
 	if errors.As(err, &authErr) {
 		return authErr.Code == codes.PermissionDenied
 	}
-	return false
+	// Also check SDK error type
+	return sdkauth.IsPermissionDeniedError(err)
 }
 
 // Time helper functions for interceptor.

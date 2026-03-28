@@ -217,3 +217,18 @@ func (c *CompositeAuthenticator) HasLocal() bool {
 	}
 	return false
 }
+
+// GetOIDCValidator returns the OIDC validator if configured, or nil otherwise.
+//
+// This is primarily intended for testing to allow setting custom HTTP clients
+// for JWKS fetching from test servers.
+func (c *CompositeAuthenticator) GetOIDCValidator() *OIDCValidator {
+	for _, entry := range c.authenticators {
+		if entry.name == "oidc" {
+			if validator, ok := entry.authenticator.(*OIDCValidator); ok {
+				return validator
+			}
+		}
+	}
+	return nil
+}

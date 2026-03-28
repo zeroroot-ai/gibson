@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	sdkauth "github.com/zero-day-ai/sdk/auth"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // testLogHandler is a custom slog handler that captures log output for testing.
@@ -114,6 +115,11 @@ func TestLogAuthSuccess_AllRequiredFields(t *testing.T) {
 		Roles: []string{"admin", "user"},
 	}
 
+	// Set up a real trace provider to get valid spans
+	tp := sdktrace.NewTracerProvider()
+	defer tp.Shutdown(context.Background())
+	otel.SetTracerProvider(tp)
+
 	// Create context with trace ID
 	ctx := context.Background()
 	tracer := otel.Tracer("test")
@@ -211,6 +217,11 @@ func TestLogAuthFailure_WithTraceID(t *testing.T) {
 	oldDefault := slog.Default()
 	defer slog.SetDefault(oldDefault)
 	slog.SetDefault(slog.New(handler))
+
+	// Set up a real trace provider to get valid spans
+	tp := sdktrace.NewTracerProvider()
+	defer tp.Shutdown(context.Background())
+	otel.SetTracerProvider(tp)
 
 	// Create context with trace ID
 	ctx := context.Background()
@@ -474,6 +485,11 @@ func TestLogPermissionDenied_WithTraceID(t *testing.T) {
 		},
 		Roles: []string{"viewer"},
 	}
+
+	// Set up a real trace provider to get valid spans
+	tp := sdktrace.NewTracerProvider()
+	defer tp.Shutdown(context.Background())
+	otel.SetTracerProvider(tp)
 
 	// Create context with trace ID
 	ctx := context.Background()

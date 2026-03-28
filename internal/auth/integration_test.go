@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net"
@@ -49,10 +50,32 @@ func createIntegrationTestToken(claims jwt.MapClaims) (string, error) {
 	return token.SignedString(integrationTestPrivateKey)
 }
 
-// createIntegrationJWKSServer creates a test HTTP server serving JWKS for integration tests.
+// createIntegrationJWKS creates a JWKS response for integration tests.
+func createIntegrationJWKS() map[string]interface{} {
+	n := integrationTestPublicKey.N.Bytes()
+	e := []byte{byte(integrationTestPublicKey.E >> 16), byte(integrationTestPublicKey.E >> 8), byte(integrationTestPublicKey.E)}
+	// Remove leading zeros from exponent
+	for len(e) > 1 && e[0] == 0 {
+		e = e[1:]
+	}
+	return map[string]interface{}{
+		"keys": []map[string]interface{}{
+			{
+				"kty": "RSA",
+				"use": "sig",
+				"kid": integrationTestKID,
+				"alg": "RS256",
+				"n":   base64.RawURLEncoding.EncodeToString(n),
+				"e":   base64.RawURLEncoding.EncodeToString(e),
+			},
+		},
+	}
+}
+
+// createIntegrationJWKSServer creates a TLS test server serving JWKS for integration tests.
 func createIntegrationJWKSServer() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jwks := createJWKSResponse(integrationTestPublicKey, integrationTestKID)
+	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwks := createIntegrationJWKS()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(jwks)
 	}))
@@ -163,6 +186,9 @@ func TestIntegration_FullAuthFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, authenticator)
 
+	// Set JWKS client to use the TLS test server's client
+	authenticator.sdkValidator.SetJWKSClient(jwksServer.Client())
+
 	// Setup test server with auth interceptors
 	grpcServer, listener, _ := setupIntegrationTestServer(t, authConfig, authenticator)
 	defer grpcServer.Stop()
@@ -215,8 +241,8 @@ func TestIntegration_FullAuthFlow(t *testing.T) {
 		// Test authentication with expired token
 		_, err = authenticator.Authenticate(ctx, token)
 		require.Error(t, err)
-		// The error contains "invalid_signature" because signature validation fails on expired tokens
-		assert.Contains(t, err.Error(), "invalid")
+		// The error should be token_expired
+		assert.True(t, IsTokenExpiredError(err), "Expected token expired error, got: %v", err)
 	})
 
 	t.Run("authentication_failure_with_wrong_issuer", func(t *testing.T) {
@@ -340,6 +366,11 @@ func TestIntegration_CompositeAuthenticator(t *testing.T) {
 	// Create composite authenticator from the full config
 	composite, err := NewCompositeAuthenticator(authConfig)
 	require.NoError(t, err)
+
+	// Set JWKS client to use the TLS test server's client
+	if oidcValidator := composite.GetOIDCValidator(); oidcValidator != nil {
+		oidcValidator.sdkValidator.SetJWKSClient(jwksServer.Client())
+	}
 
 	ctx := context.Background()
 
