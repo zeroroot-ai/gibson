@@ -122,3 +122,19 @@ func parseCommaSeparated(value string) []string {
 
 	return result
 }
+
+// aggregateHealth computes the overall health status from healthy/unhealthy counts.
+//
+// Returns:
+//   - "healthy" if all instances are healthy (unhealthyCount == 0)
+//   - "degraded" if some instances are unhealthy but not all
+//   - "unhealthy" if all instances are unhealthy (healthyCount == 0)
+func aggregateHealth(healthyCount, unhealthyCount int) string {
+	if unhealthyCount == 0 {
+		return HealthStatusHealthy
+	}
+	if healthyCount == 0 {
+		return HealthStatusUnhealthy
+	}
+	return HealthStatusDegraded
+}

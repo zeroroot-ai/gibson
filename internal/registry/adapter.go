@@ -179,6 +179,13 @@ type AgentInfo struct {
 
 	// TechniqueTypes lists attack techniques employed (e.g., ["prompt_injection", "model_extraction"])
 	TechniqueTypes []string `json:"technique_types"`
+
+	// Health is the aggregated health status of the agent instances.
+	// Values: "healthy", "degraded", "unhealthy"
+	// "healthy" if all instances are healthy
+	// "degraded" if some instances are unhealthy
+	// "unhealthy" if all instances are unhealthy
+	Health string `json:"health"`
 }
 
 // ToolInfo provides metadata about a registered tool.
@@ -201,6 +208,10 @@ type ToolInfo struct {
 	// Capabilities describes runtime privileges and features available to the tool.
 	// Nil if the tool does not implement CapabilityProvider or has no specific requirements.
 	Capabilities *types.Capabilities `json:"capabilities,omitempty"`
+
+	// Health is the aggregated health status of the tool instances.
+	// Values: "healthy", "degraded", "unhealthy"
+	Health string `json:"health"`
 }
 
 // PluginInfo provides metadata about a registered plugin.
@@ -219,6 +230,10 @@ type PluginInfo struct {
 
 	// Endpoints lists all instance endpoints
 	Endpoints []string `json:"endpoints"`
+
+	// Health is the aggregated health status of the plugin instances.
+	// Values: "healthy", "degraded", "unhealthy"
+	Health string `json:"health"`
 }
 
 // RegistryAdapter implements ComponentDiscovery using etcd registry and gRPC connection pooling.
@@ -580,32 +595,61 @@ func (a *RegistryAdapter) ListAgents(ctx context.Context) ([]AgentInfo, error) {
 		return nil, &RegistryUnavailableError{Cause: err}
 	}
 
+	// Track health per agent for aggregation
+	type agentHealthTracker struct {
+		info           *AgentInfo
+		healthyCount   int
+		unhealthyCount int
+	}
+
 	// Aggregate by name
-	agentMap := make(map[string]*AgentInfo)
+	agentMap := make(map[string]*agentHealthTracker)
 	for _, inst := range instances {
-		if info, exists := agentMap[inst.Name]; exists {
+		health := GetHealthStatus(inst)
+
+		if tracker, exists := agentMap[inst.Name]; exists {
 			// Add to existing entry
-			info.Instances++
-			info.Endpoints = append(info.Endpoints, inst.Endpoint)
+			tracker.info.Instances++
+			tracker.info.Endpoints = append(tracker.info.Endpoints, inst.Endpoint)
+			// Track health counts
+			if health == HealthStatusHealthy {
+				tracker.healthyCount++
+			} else {
+				tracker.unhealthyCount++
+			}
 		} else {
 			// Create new entry
-			agentMap[inst.Name] = &AgentInfo{
-				Name:           inst.Name,
-				Version:        inst.Version,
-				Description:    inst.Metadata["description"],
-				Instances:      1,
-				Endpoints:      []string{inst.Endpoint},
-				Capabilities:   parseCommaSeparated(inst.Metadata["capabilities"]),
-				TargetTypes:    parseCommaSeparated(inst.Metadata["target_types"]),
-				TechniqueTypes: parseCommaSeparated(inst.Metadata["technique_types"]),
+			healthyCount := 0
+			unhealthyCount := 0
+			if health == HealthStatusHealthy {
+				healthyCount = 1
+			} else {
+				unhealthyCount = 1
+			}
+
+			agentMap[inst.Name] = &agentHealthTracker{
+				info: &AgentInfo{
+					Name:           inst.Name,
+					Version:        inst.Version,
+					Description:    inst.Metadata["description"],
+					Instances:      1,
+					Endpoints:      []string{inst.Endpoint},
+					Capabilities:   parseCommaSeparated(inst.Metadata["capabilities"]),
+					TargetTypes:    parseCommaSeparated(inst.Metadata["target_types"]),
+					TechniqueTypes: parseCommaSeparated(inst.Metadata["technique_types"]),
+				},
+				healthyCount:   healthyCount,
+				unhealthyCount: unhealthyCount,
 			}
 		}
 	}
 
-	// Convert map to slice
+	// Convert map to slice and compute aggregated health
 	result := make([]AgentInfo, 0, len(agentMap))
-	for _, info := range agentMap {
-		result = append(result, *info)
+	for _, tracker := range agentMap {
+		// Determine aggregated health status
+		tracker.info.Health = aggregateHealth(tracker.healthyCount, tracker.unhealthyCount)
+		result = append(result, *tracker.info)
 	}
 
 	return result, nil
@@ -621,13 +665,28 @@ func (a *RegistryAdapter) ListTools(ctx context.Context) ([]ToolInfo, error) {
 		return nil, &RegistryUnavailableError{Cause: err}
 	}
 
+	// Track health per tool for aggregation
+	type toolHealthTracker struct {
+		info           *ToolInfo
+		healthyCount   int
+		unhealthyCount int
+	}
+
 	// Aggregate by name
-	toolMap := make(map[string]*ToolInfo)
+	toolMap := make(map[string]*toolHealthTracker)
 	for _, inst := range instances {
-		if info, exists := toolMap[inst.Name]; exists {
+		health := GetHealthStatus(inst)
+
+		if tracker, exists := toolMap[inst.Name]; exists {
 			// Add to existing entry
-			info.Instances++
-			info.Endpoints = append(info.Endpoints, inst.Endpoint)
+			tracker.info.Instances++
+			tracker.info.Endpoints = append(tracker.info.Endpoints, inst.Endpoint)
+			// Track health counts
+			if health == HealthStatusHealthy {
+				tracker.healthyCount++
+			} else {
+				tracker.unhealthyCount++
+			}
 		} else {
 			// Parse capabilities from metadata if present
 			var caps *types.Capabilities
@@ -635,22 +694,36 @@ func (a *RegistryAdapter) ListTools(ctx context.Context) ([]ToolInfo, error) {
 				caps = parseCapabilitiesJSON(capsJSON)
 			}
 
+			healthyCount := 0
+			unhealthyCount := 0
+			if health == HealthStatusHealthy {
+				healthyCount = 1
+			} else {
+				unhealthyCount = 1
+			}
+
 			// Create new entry
-			toolMap[inst.Name] = &ToolInfo{
-				Name:         inst.Name,
-				Version:      inst.Version,
-				Description:  inst.Metadata["description"],
-				Instances:    1,
-				Endpoints:    []string{inst.Endpoint},
-				Capabilities: caps,
+			toolMap[inst.Name] = &toolHealthTracker{
+				info: &ToolInfo{
+					Name:         inst.Name,
+					Version:      inst.Version,
+					Description:  inst.Metadata["description"],
+					Instances:    1,
+					Endpoints:    []string{inst.Endpoint},
+					Capabilities: caps,
+				},
+				healthyCount:   healthyCount,
+				unhealthyCount: unhealthyCount,
 			}
 		}
 	}
 
-	// Convert map to slice
+	// Convert map to slice and compute aggregated health
 	result := make([]ToolInfo, 0, len(toolMap))
-	for _, info := range toolMap {
-		result = append(result, *info)
+	for _, tracker := range toolMap {
+		// Determine aggregated health status
+		tracker.info.Health = aggregateHealth(tracker.healthyCount, tracker.unhealthyCount)
+		result = append(result, *tracker.info)
 	}
 
 	return result, nil
@@ -666,29 +739,58 @@ func (a *RegistryAdapter) ListPlugins(ctx context.Context) ([]PluginInfo, error)
 		return nil, &RegistryUnavailableError{Cause: err}
 	}
 
+	// Track health per plugin for aggregation
+	type pluginHealthTracker struct {
+		info           *PluginInfo
+		healthyCount   int
+		unhealthyCount int
+	}
+
 	// Aggregate by name
-	pluginMap := make(map[string]*PluginInfo)
+	pluginMap := make(map[string]*pluginHealthTracker)
 	for _, inst := range instances {
-		if info, exists := pluginMap[inst.Name]; exists {
+		health := GetHealthStatus(inst)
+
+		if tracker, exists := pluginMap[inst.Name]; exists {
 			// Add to existing entry
-			info.Instances++
-			info.Endpoints = append(info.Endpoints, inst.Endpoint)
+			tracker.info.Instances++
+			tracker.info.Endpoints = append(tracker.info.Endpoints, inst.Endpoint)
+			// Track health counts
+			if health == HealthStatusHealthy {
+				tracker.healthyCount++
+			} else {
+				tracker.unhealthyCount++
+			}
 		} else {
+			healthyCount := 0
+			unhealthyCount := 0
+			if health == HealthStatusHealthy {
+				healthyCount = 1
+			} else {
+				unhealthyCount = 1
+			}
+
 			// Create new entry
-			pluginMap[inst.Name] = &PluginInfo{
-				Name:        inst.Name,
-				Version:     inst.Version,
-				Description: inst.Metadata["description"],
-				Instances:   1,
-				Endpoints:   []string{inst.Endpoint},
+			pluginMap[inst.Name] = &pluginHealthTracker{
+				info: &PluginInfo{
+					Name:        inst.Name,
+					Version:     inst.Version,
+					Description: inst.Metadata["description"],
+					Instances:   1,
+					Endpoints:   []string{inst.Endpoint},
+				},
+				healthyCount:   healthyCount,
+				unhealthyCount: unhealthyCount,
 			}
 		}
 	}
 
-	// Convert map to slice
+	// Convert map to slice and compute aggregated health
 	result := make([]PluginInfo, 0, len(pluginMap))
-	for _, info := range pluginMap {
-		result = append(result, *info)
+	for _, tracker := range pluginMap {
+		// Determine aggregated health status
+		tracker.info.Health = aggregateHealth(tracker.healthyCount, tracker.unhealthyCount)
+		result = append(result, *tracker.info)
 	}
 
 	return result, nil

@@ -239,7 +239,7 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 					Name:     agent.Name,
 					Kind:     "agent",
 					Version:  agent.Version,
-					Health:   "stopped", // Will be updated if running
+					Health:   "unknown", // Will be updated to "healthy" if running
 					LastSeen: agent.UpdatedAt,
 				}
 			}
@@ -267,7 +267,11 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 
 				if existing, ok := agentMap[r.Name]; ok {
 					// Update existing agent with running info
-					existing.Health = "running"
+					// Use health from registry (aggregated across instances)
+					existing.Health = r.Health
+					if existing.Health == "" {
+						existing.Health = "healthy" // Default for running agents
+					}
 					existing.Endpoint = endpoint
 					existing.LastSeen = lastSeen
 					if r.Version != "" {
@@ -276,6 +280,10 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 					agentMap[r.Name] = existing
 				} else {
 					// Add agent that's only in registry (e.g., K8s deployed agent)
+					health := r.Health
+					if health == "" {
+						health = "healthy" // Default for running agents
+					}
 					agentMap[r.Name] = api.AgentInfoInternal{
 						ID:           r.Name,
 						Name:         r.Name,
@@ -283,7 +291,7 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 						Version:      r.Version,
 						Endpoint:     endpoint,
 						Capabilities: r.Capabilities,
-						Health:       "running",
+						Health:       health,
 						LastSeen:     lastSeen,
 					}
 				}
@@ -390,6 +398,7 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 	// Query registry to check which tools are running
 	runningTools := make(map[string]bool)
 	runningEndpoints := make(map[string]string)
+	runningHealth := make(map[string]string)
 	toolCapabilities := make(map[string]*api.Capabilities)
 	if d.registryAdapter != nil {
 		running, err := d.registryAdapter.ListTools(ctx)
@@ -399,6 +408,8 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 				if len(r.Endpoints) > 0 {
 					runningEndpoints[r.Name] = r.Endpoints[0]
 				}
+				// Capture health from registry (aggregated across instances)
+				runningHealth[r.Name] = r.Health
 				// Capture capabilities if available
 				if r.Capabilities != nil {
 					toolCapabilities[r.Name] = &api.Capabilities{
@@ -428,9 +439,9 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 		} else {
 			for _, meta := range d.redisToolRegistry.GetAllMetadata() {
 				redisTools[meta.Name] = true
-				health := "stopped"
+				health := "unknown"
 				if d.redisToolRegistry.IsHealthy(ctx, meta.Name) {
-					health = "running"
+					health = "healthy"
 				}
 				redisToolMeta[meta.Name] = struct {
 					Version     string
@@ -455,10 +466,14 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 		seenTools[tool.Name] = true
 
 		// Determine health status based on whether tool is running
-		health := "stopped"
+		health := "unknown"
 		endpoint := ""
 		if runningTools[tool.Name] {
-			health = "running"
+			// Use health from registry (aggregated across instances)
+			health = runningHealth[tool.Name]
+			if health == "" {
+				health = "healthy" // Default for running tools
+			}
 			endpoint = runningEndpoints[tool.Name]
 		}
 
@@ -521,6 +536,7 @@ func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal,
 	// Query registry to check which plugins are running
 	runningPlugins := make(map[string]bool)
 	runningEndpoints := make(map[string]string)
+	runningHealth := make(map[string]string)
 	if d.registryAdapter != nil {
 		running, err := d.registryAdapter.ListPlugins(ctx)
 		if err == nil {
@@ -529,6 +545,8 @@ func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal,
 				if len(r.Endpoints) > 0 {
 					runningEndpoints[r.Name] = r.Endpoints[0]
 				}
+				// Capture health from registry (aggregated across instances)
+				runningHealth[r.Name] = r.Health
 			}
 		}
 	}
@@ -537,10 +555,14 @@ func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal,
 	result := make([]api.PluginInfoInternal, len(plugins))
 	for i, plugin := range plugins {
 		// Determine health status based on whether plugin is running
-		health := "stopped"
+		health := "unknown"
 		endpoint := ""
 		if runningPlugins[plugin.Name] {
-			health = "running"
+			// Use health from registry (aggregated across instances)
+			health = runningHealth[plugin.Name]
+			if health == "" {
+				health = "healthy" // Default for running plugins
+			}
 			endpoint = runningEndpoints[plugin.Name]
 		}
 
