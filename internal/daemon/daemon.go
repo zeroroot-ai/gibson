@@ -16,6 +16,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/crypto/providers"
+	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
@@ -196,6 +197,12 @@ type daemonImpl struct {
 
 	// credentialStore provides credential access with encryption
 	credentialStore *DaemonCredentialStore
+
+	// credentialHandler provides CRUD operations for credentials (used by dashboard API)
+	credentialHandler *api.CredentialHandler
+
+	// llmConfigHandler provides LLM provider configuration management (used by dashboard API)
+	llmConfigHandler *api.LLMConfigHandler
 
 	// redisToolRegistry discovers tools registered in Redis by K8s-deployed tool workers
 	// This is used by ListTools() to include Redis-based tools in addition to
@@ -516,6 +523,24 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				d.credentialStore = credentialStore
 				d.callback.SetCredentialStore(credentialStore)
 				d.logger.Info(ctx, "configured callback service with credential store")
+
+				// Initialize credential handler for dashboard API
+				credentialHandler, err := api.NewCredentialHandler(credentialDAO, keyProvider)
+				if err != nil {
+					d.logger.Warn(ctx, "failed to initialize credential handler", "error", err)
+				} else {
+					d.credentialHandler = credentialHandler
+					d.logger.Info(ctx, "initialized credential handler for dashboard API")
+
+					// Initialize LLM config handler for dashboard API
+					llmConfigHandler, err := api.NewLLMConfigHandler(d.stateClient, credentialHandler)
+					if err != nil {
+						d.logger.Warn(ctx, "failed to initialize LLM config handler", "error", err)
+					} else {
+						d.llmConfigHandler = llmConfigHandler
+						d.logger.Info(ctx, "initialized LLM config handler for dashboard API")
+					}
+				}
 			}
 		}
 	} else {
@@ -1149,4 +1174,16 @@ func (d *daemonImpl) RequestShutdown(ctx context.Context, force bool, timeoutSec
 	}
 
 	return nil
+}
+
+// CredentialHandler returns the credential handler for dashboard API operations.
+// Returns nil if the credential handler was not initialized (missing key provider).
+func (d *daemonImpl) CredentialHandler() *api.CredentialHandler {
+	return d.credentialHandler
+}
+
+// LLMConfigHandler returns the LLM config handler for dashboard API operations.
+// Returns nil if the LLM config handler was not initialized.
+func (d *daemonImpl) LLMConfigHandler() *api.LLMConfigHandler {
+	return d.llmConfigHandler
 }
