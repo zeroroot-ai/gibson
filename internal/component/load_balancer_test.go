@@ -75,6 +75,19 @@ func (m *mockComponentRegistry) ListTenantComponents(_ context.Context, tenant s
 	return all, nil
 }
 
+func (m *mockComponentRegistry) DiscoverTenantOnly(_ context.Context, tenant, kind, name string) ([]ComponentInfo, error) {
+	key := tenant + ":" + kind + ":" + name
+	instances := m.components[key]
+	if instances == nil {
+		return []ComponentInfo{}, nil
+	}
+	return instances, nil
+}
+
+func (m *mockComponentRegistry) DiscoverSystemOnly(_ context.Context, kind, name string) ([]ComponentInfo, error) {
+	return m.DiscoverTenantOnly(context.Background(), systemTenant, kind, name)
+}
+
 // addInstance is a helper to add a ComponentInfo directly to the mock.
 func (m *mockComponentRegistry) addInstance(tenant, kind, name, instanceID, endpoint string) {
 	key := tenant + ":" + kind + ":" + name

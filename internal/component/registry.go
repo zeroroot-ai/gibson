@@ -77,6 +77,16 @@ type ComponentRegistry interface {
 	// ListTenantComponents returns every live instance registered under the tenant,
 	// across all kinds and names.
 	ListTenantComponents(ctx context.Context, tenant string) ([]ComponentInfo, error)
+
+	// DiscoverTenantOnly returns all live instances matching the given tenant, kind,
+	// and name without falling back to the _system namespace. Use this when you
+	// explicitly need only tenant-scoped components.
+	DiscoverTenantOnly(ctx context.Context, tenant, kind, name string) ([]ComponentInfo, error)
+
+	// DiscoverSystemOnly returns all live instances matching the given kind and name
+	// from the _system namespace only. Use this when you need only system-level
+	// components regardless of the calling tenant.
+	DiscoverSystemOnly(ctx context.Context, kind, name string) ([]ComponentInfo, error)
 }
 
 // RedisComponentRegistry is a Redis-backed implementation of ComponentRegistry.
@@ -273,6 +283,36 @@ func (r *RedisComponentRegistry) ListTenantComponents(
 	results, err := r.scan(ctx, scanPattern(tenant, "*", "*", "*"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list components for tenant %s: %w", tenant, err)
+	}
+
+	return results, nil
+}
+
+// DiscoverTenantOnly implements ComponentRegistry.
+// Scans only the tenant namespace; never falls back to _system.
+func (r *RedisComponentRegistry) DiscoverTenantOnly(
+	ctx context.Context,
+	tenant, kind, name string,
+) ([]ComponentInfo, error) {
+	results, err := r.scan(ctx, scanPattern(tenant, kind, name, "*"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover tenant-only components %s/%s/%s: %w",
+			tenant, kind, name, err)
+	}
+
+	return results, nil
+}
+
+// DiscoverSystemOnly implements ComponentRegistry.
+// Scans only the _system namespace, ignoring any tenant-scoped components.
+func (r *RedisComponentRegistry) DiscoverSystemOnly(
+	ctx context.Context,
+	kind, name string,
+) ([]ComponentInfo, error) {
+	results, err := r.scan(ctx, scanPattern(systemTenant, kind, name, "*"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover system-only components %s/%s: %w",
+			kind, name, err)
 	}
 
 	return results, nil
