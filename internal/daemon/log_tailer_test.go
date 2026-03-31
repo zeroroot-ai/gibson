@@ -20,7 +20,7 @@ func TestNewLogTailer(t *testing.T) {
 		Level:     slog.LevelError,
 	})
 
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	require.NotNil(t, tailer)
 	assert.Equal(t, 1000, tailer.bufferSize)
 
@@ -40,7 +40,7 @@ func TestLogTailer_StartWatching(t *testing.T) {
 	err := os.WriteFile(logFile, []byte("test log\n"), 0644)
 	require.NoError(t, err)
 
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	err = tailer.StartWatching("test-component", logFile)
@@ -69,7 +69,7 @@ func TestLogTailer_Subscribe(t *testing.T) {
 	err := os.WriteFile(logFile, []byte("line 1\nline 2\nline 3\n"), 0644)
 	require.NoError(t, err)
 
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	err = tailer.StartWatching("test-component", logFile)
@@ -121,7 +121,7 @@ func TestLogTailer_GetHistory(t *testing.T) {
 	err := os.WriteFile(logFile, []byte("line 1\nline 2\nline 3\nline 4\nline 5\n"), 0644)
 	require.NoError(t, err)
 
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	err = tailer.StartWatching("test-component", logFile)
@@ -144,7 +144,7 @@ func TestLogTailer_ParseLine(t *testing.T) {
 		Level:     slog.LevelError,
 	})
 
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	tests := []struct {
@@ -201,7 +201,7 @@ func TestLogTailer_MultiComponent(t *testing.T) {
 	err = os.WriteFile(logFile2, []byte("comp2 line 1\ncomp2 line 2\n"), 0644)
 	require.NoError(t, err)
 
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	err = tailer.StartWatching("component-1", logFile1)
@@ -272,7 +272,7 @@ func TestLogTailer_GetWatchedComponents(t *testing.T) {
 	err = os.WriteFile(logFile2, []byte("test\n"), 0644)
 	require.NoError(t, err)
 
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	err = tailer.StartWatching("component-1", logFile1)

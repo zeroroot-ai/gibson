@@ -13,10 +13,9 @@ import (
 // with the daemon infrastructure.
 func TestMemoryFactoryIntegration(t *testing.T) {
 	t.Run("factory creates functional memory managers", func(t *testing.T) {
-		db := setupTestDB(t)
-		defer db.Close()
+		sc := setupTestStateClient(t)
 
-		factory, err := NewMemoryManagerFactory(db, nil, nil)
+		factory, err := NewMemoryManagerFactory(sc, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -32,7 +31,8 @@ func TestMemoryFactoryIntegration(t *testing.T) {
 		assert.Equal(t, missionID, mgr.MissionID())
 
 		// Test working memory
-		mgr.Working().Set("integration-test", "success")
+		err = mgr.Working().Set("integration-test", "success")
+		assert.NoError(t, err)
 		val, exists := mgr.Working().Get("integration-test")
 		assert.True(t, exists)
 		assert.Equal(t, "success", val)
@@ -44,10 +44,9 @@ func TestMemoryFactoryIntegration(t *testing.T) {
 	})
 
 	t.Run("multiple missions have isolated memory", func(t *testing.T) {
-		db := setupTestDB(t)
-		defer db.Close()
+		sc := setupTestStateClient(t)
 
-		factory, err := NewMemoryManagerFactory(db, nil, nil)
+		factory, err := NewMemoryManagerFactory(sc, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -65,8 +64,10 @@ func TestMemoryFactoryIntegration(t *testing.T) {
 		defer mgr2.Close()
 
 		// Set data in both managers
-		mgr1.Working().Set("mission-data", "mission-1-value")
-		mgr2.Working().Set("mission-data", "mission-2-value")
+		err = mgr1.Working().Set("mission-data", "mission-1-value")
+		assert.NoError(t, err)
+		err = mgr2.Working().Set("mission-data", "mission-2-value")
+		assert.NoError(t, err)
 
 		// Verify isolation
 		val1, exists1 := mgr1.Working().Get("mission-data")

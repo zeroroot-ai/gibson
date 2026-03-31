@@ -9,20 +9,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/state"
 )
 
 func TestNewHarnessFactory(t *testing.T) {
-	// Setup test database
-	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
-	db, err := database.Open(dbPath)
-	require.NoError(t, err)
-	defer db.Close()
-
 	// Create test daemon with minimal config
 	cfg := &config.Config{
 		Registry: config.RegistryConfig{
@@ -32,11 +25,14 @@ func TestNewHarnessFactory(t *testing.T) {
 
 	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
 
+	// Create StateClient via miniredis
+	sc := setupTestStateClient(t)
+
 	// Create daemon instance
 	d := &daemonImpl{
 		config:         cfg,
 		logger:         logger,
-		db:             db,
+		stateClient:    sc,
 		registry:       registry.NewManager(cfg.Registry),
 		activeMissions: make(map[string]context.CancelFunc),
 	}
@@ -45,7 +41,7 @@ func TestNewHarnessFactory(t *testing.T) {
 	ctx := context.Background()
 
 	// Start registry to create the adapter
-	err = d.registry.Start(ctx)
+	err := d.registry.Start(ctx)
 	require.NoError(t, err)
 	defer d.registry.Stop(ctx)
 
@@ -71,19 +67,11 @@ func TestNewHarnessFactory(t *testing.T) {
 }
 
 func TestNewHarnessFactory_WithoutRegistryAdapter(t *testing.T) {
-	// Setup test database
-	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
-	db, err := database.Open(dbPath)
-	require.NoError(t, err)
-	defer db.Close()
-
 	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
 
 	// Create daemon with minimal infrastructure (no registry adapter)
 	d := &daemonImpl{
 		logger:          logger,
-		db:              db,
 		registryAdapter: nil, // No registry adapter
 	}
 
@@ -101,19 +89,11 @@ func TestNewHarnessFactory_WithoutRegistryAdapter(t *testing.T) {
 }
 
 func TestNewHarnessFactory_ConfigValidation(t *testing.T) {
-	// Setup test database
-	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
-	db, err := database.Open(dbPath)
-	require.NoError(t, err)
-	defer db.Close()
-
 	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
 
 	// Create daemon with nil slot manager (should fail validation)
 	d := &daemonImpl{
 		logger: logger,
-		db:     db,
 		infrastructure: &Infrastructure{
 			llmRegistry: llm.NewLLMRegistry(),
 			slotManager: nil, // Missing required slot manager

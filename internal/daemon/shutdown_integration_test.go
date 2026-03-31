@@ -54,7 +54,7 @@ func TestShutdownCoordinator_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify health state was set to shutting down
-	assert.True(t, healthState.IsShuttingDown())
+	assert.True(t, !healthState.IsHealthy())
 
 	// Verify metrics were recorded
 	metrics := coordinator.Metrics()
@@ -225,7 +225,7 @@ func TestHealthStateManager_ShutdownState(t *testing.T) {
 	healthState := newHealthStateManager()
 
 	// Initially not shutting down
-	assert.False(t, healthState.IsShuttingDown())
+	assert.False(t, !healthState.IsHealthy())
 
 	// Check function should return healthy
 	checkFunc := healthState.CheckFunc()
@@ -235,7 +235,7 @@ func TestHealthStateManager_ShutdownState(t *testing.T) {
 
 	// Set shutting down
 	healthState.SetShuttingDown("graceful_shutdown")
-	assert.True(t, healthState.IsShuttingDown())
+	assert.True(t, !healthState.IsHealthy())
 
 	// Check function should now return unhealthy
 	status = checkFunc(ctx)
@@ -288,7 +288,7 @@ type shutdownMockMissionStore struct {
 func (m *shutdownMockMissionStore) Get(ctx context.Context, id types.ID) (*mission.Mission, error) {
 	mis, ok := m.missions[id]
 	if !ok {
-		return nil, mission.ErrMissionNotFound
+		return nil, mission.NewNotFoundError("not found")
 	}
 	return mis, nil
 }
@@ -296,7 +296,7 @@ func (m *shutdownMockMissionStore) Get(ctx context.Context, id types.ID) (*missi
 func (m *shutdownMockMissionStore) UpdateStatus(ctx context.Context, id types.ID, status mission.MissionStatus) error {
 	mis, ok := m.missions[id]
 	if !ok {
-		return mission.ErrMissionNotFound
+		return mission.NewNotFoundError("not found")
 	}
 	mis.Status = status
 	return nil

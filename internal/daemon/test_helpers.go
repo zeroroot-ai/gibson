@@ -139,7 +139,7 @@ func (m *mockMissionStore) Delete(ctx context.Context, id types.ID) error {
 	return nil
 }
 
-func (m *mockMissionStore) SetStatus(ctx context.Context, id types.ID, status mission.MissionStatus) error {
+func (m *mockMissionStore) UpdateStatus(ctx context.Context, id types.ID, status mission.MissionStatus) error {
 	if m.setStatusFunc != nil {
 		return m.setStatusFunc(ctx, id, status)
 	}
@@ -150,7 +150,7 @@ func (m *mockMissionStore) SetStatus(ctx context.Context, id types.ID, status mi
 	return mission.NewNotFoundError(id.String())
 }
 
-func (m *mockMissionStore) FindByName(ctx context.Context, name string) (*mission.Mission, error) {
+func (m *mockMissionStore) GetByName(ctx context.Context, name string) (*mission.Mission, error) {
 	if m.findByNameFunc != nil {
 		return m.findByNameFunc(ctx, name)
 	}
@@ -160,6 +160,86 @@ func (m *mockMissionStore) FindByName(ctx context.Context, name string) (*missio
 		}
 	}
 	return nil, mission.NewNotFoundError(name)
+}
+
+func (m *mockMissionStore) UpdateProgress(ctx context.Context, id types.ID, progress float64) error {
+	return nil
+}
+
+func (m *mockMissionStore) GetByTarget(ctx context.Context, targetID types.ID) ([]*mission.Mission, error) {
+	return nil, nil
+}
+
+func (m *mockMissionStore) GetActive(ctx context.Context) ([]*mission.Mission, error) {
+	var result []*mission.Mission
+	for _, rec := range m.missions {
+		if rec.Status == mission.MissionStatusRunning || rec.Status == mission.MissionStatusPaused {
+			result = append(result, rec)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockMissionStore) SaveCheckpoint(ctx context.Context, missionID types.ID, checkpoint *mission.MissionCheckpoint) error {
+	return nil
+}
+
+func (m *mockMissionStore) Count(ctx context.Context, filter *mission.MissionFilter) (int, error) {
+	return len(m.missions), nil
+}
+
+func (m *mockMissionStore) GetByNameAndStatus(ctx context.Context, name string, status mission.MissionStatus) (*mission.Mission, error) {
+	for _, rec := range m.missions {
+		if rec.Name == name && rec.Status == status {
+			return rec, nil
+		}
+	}
+	return nil, mission.NewNotFoundError(name)
+}
+
+func (m *mockMissionStore) ListByName(ctx context.Context, name string, limit int) ([]*mission.Mission, error) {
+	return nil, nil
+}
+
+func (m *mockMissionStore) GetLatestByName(ctx context.Context, name string) (*mission.Mission, error) {
+	return nil, mission.NewNotFoundError(name)
+}
+
+func (m *mockMissionStore) IncrementRunNumber(ctx context.Context, name string) (int, error) {
+	return 1, nil
+}
+
+func (m *mockMissionStore) FindOrCreateByName(ctx context.Context, mis *mission.Mission) (*mission.Mission, bool, error) {
+	for _, rec := range m.missions {
+		if rec.Name == mis.Name {
+			return rec, false, nil
+		}
+	}
+	if m.missions == nil {
+		m.missions = make(map[types.ID]*mission.Mission)
+	}
+	m.missions[mis.ID] = mis
+	return mis, true, nil
+}
+
+func (m *mockMissionStore) CreateDefinition(ctx context.Context, def *mission.MissionDefinition) error {
+	return nil
+}
+
+func (m *mockMissionStore) GetDefinition(ctx context.Context, name string) (*mission.MissionDefinition, error) {
+	return nil, nil
+}
+
+func (m *mockMissionStore) ListDefinitions(ctx context.Context) ([]*mission.MissionDefinition, error) {
+	return nil, nil
+}
+
+func (m *mockMissionStore) UpdateDefinition(ctx context.Context, def *mission.MissionDefinition) error {
+	return nil
+}
+
+func (m *mockMissionStore) DeleteDefinition(ctx context.Context, name string) error {
+	return nil
 }
 
 // mockHarnessFactory is a mock implementation of harness.HarnessFactoryInterface for testing.

@@ -99,7 +99,7 @@ func TestGraphBootstrapper_Bootstrap_SimpleWorkflow(t *testing.T) {
 		Status:      mission.MissionStatusRunning,
 		TargetID:    types.NewID(),
 		WorkflowID:  types.NewID(),
-		StartedAt:   &now,
+		StartedAt:   mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with 2 nodes: node-2 depends on node-1
@@ -204,7 +204,7 @@ func TestGraphBootstrapper_Bootstrap_NoDependencies(t *testing.T) {
 		Status:      mission.MissionStatusRunning,
 		TargetID:    types.NewID(),
 		WorkflowID:  types.NewID(),
-		StartedAt:   &now,
+		StartedAt:   mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with 3 nodes, none with dependencies
@@ -286,7 +286,7 @@ func TestGraphBootstrapper_Bootstrap_CreateMissionError(t *testing.T) {
 		Status:      mission.MissionStatusRunning,
 		TargetID:    types.NewID(),
 		WorkflowID:  types.NewID(),
-		StartedAt:   &now,
+		StartedAt:   mission.NewUnixTimePtr(&now),
 	}
 
 	// Create simple mission definition
@@ -343,7 +343,7 @@ func TestGraphBootstrapper_Bootstrap_CreateWorkflowNodeError(t *testing.T) {
 		Status:      mission.MissionStatusRunning,
 		TargetID:    types.NewID(),
 		WorkflowID:  types.NewID(),
-		StartedAt:   &now,
+		StartedAt:   mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with one node
@@ -410,7 +410,7 @@ func TestGraphBootstrapper_Bootstrap_ComplexDAG(t *testing.T) {
 		Status:      mission.MissionStatusRunning,
 		TargetID:    types.NewID(),
 		WorkflowID:  types.NewID(),
-		StartedAt:   &now,
+		StartedAt:   mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with complex DAG:
@@ -497,7 +497,7 @@ func TestGraphBootstrapper_Bootstrap_MissionWithToolNode(t *testing.T) {
 		Status:      mission.MissionStatusRunning,
 		TargetID:    types.NewID(),
 		WorkflowID:  types.NewID(),
-		StartedAt:   &now,
+		StartedAt:   mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with a tool node
@@ -560,7 +560,7 @@ func TestGraphBootstrapper_Bootstrap_MissionWithRetryPolicy(t *testing.T) {
 		Status:      mission.MissionStatusRunning,
 		TargetID:    types.NewID(),
 		WorkflowID:  types.NewID(),
-		StartedAt:   &now,
+		StartedAt:   mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with a node that has a retry policy
@@ -630,7 +630,7 @@ func TestGraphBootstrapper_Bootstrap_DependencyNotFound(t *testing.T) {
 		Status:      mission.MissionStatusRunning,
 		TargetID:    types.NewID(),
 		WorkflowID:  types.NewID(),
-		StartedAt:   &now,
+		StartedAt:   mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with a node that references non-existent dependency
@@ -671,7 +671,7 @@ func TestGraphBootstrapper_ConvertToSchemaMission(t *testing.T) {
 		Status:       mission.MissionStatusRunning,
 		TargetID:     targetID,
 		WorkflowJSON: `{"name": "test", "nodes": []}`,
-		StartedAt:    &now,
+		StartedAt:    mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition

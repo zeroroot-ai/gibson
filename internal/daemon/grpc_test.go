@@ -122,15 +122,14 @@ func TestListAgents_NoInstances(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, agents, 1)
-	assert.Equal(t, "unknown", agents[0].Health) // Should be unknown when no instances
+	assert.Equal(t, "healthy", agents[0].Health) // Registry agents default to healthy
 }
 
-// TestListAgents_RegistryError tests ListAgents error propagation from registry.
+// TestListAgents_RegistryError tests ListAgents graceful degradation when registry fails.
 func TestListAgents_RegistryError(t *testing.T) {
-	expectedErr := fmt.Errorf("registry connection failed")
 	mockRegistry := &mockComponentDiscovery{
 		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return nil, expectedErr
+			return nil, fmt.Errorf("registry connection failed")
 		},
 	}
 
@@ -142,9 +141,9 @@ func TestListAgents_RegistryError(t *testing.T) {
 	ctx := context.Background()
 	agents, err := daemon.ListAgents(ctx, "")
 
-	assert.Error(t, err)
-	assert.Nil(t, agents)
-	assert.Contains(t, err.Error(), "failed to list agents")
+	// Registry error is gracefully degraded - returns empty results, not error
+	require.NoError(t, err)
+	assert.Empty(t, agents)
 }
 
 // TestGetAgentStatus_Success tests GetAgentStatus with existing agent.
@@ -229,31 +228,39 @@ func TestGetAgentStatus_RegistryError(t *testing.T) {
 	assert.Equal(t, api.AgentStatusInternal{}, status)
 }
 
-// TestListTools_Success tests ListTools with mock registry adapter.
+// TestListTools_Success tests ListTools with tools in component store and running in registry.
 func TestListTools_Success(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
 		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
 			return []registry.ToolInfo{
 				{
-					Name:        "nmap",
-					Version:     "7.92",
-					Description: "Network scanner",
-					Endpoints:   []string{"localhost:50300"},
-					Instances:   1,
+					Name:      "nmap",
+					Version:   "7.92",
+					Endpoints: []string{"localhost:50300"},
+					Instances: 1,
 				},
 				{
-					Name:        "sqlmap",
-					Version:     "1.5",
-					Description: "SQL injection tool",
-					Endpoints:   []string{"localhost:50301"},
-					Instances:   1,
+					Name:      "sqlmap",
+					Version:   "1.5",
+					Endpoints: []string{"localhost:50301"},
+					Instances: 1,
 				},
+			}, nil
+		},
+	}
+
+	compStore := &mockComponentStore{
+		listFunc: func(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+			return []*component.Component{
+				{Name: "nmap", Version: "7.92", Manifest: &component.Manifest{Description: "Network scanner"}},
+				{Name: "sqlmap", Version: "1.5", Manifest: &component.Manifest{Description: "SQL injection tool"}},
 			}, nil
 		},
 	}
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
+		componentStore:  compStore,
 		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
@@ -263,17 +270,22 @@ func TestListTools_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, tools, 2)
 
-	// Verify first tool
-	assert.Equal(t, "nmap", tools[0].Name)
-	assert.Equal(t, "nmap", tools[0].ID)
-	assert.Equal(t, "7.92", tools[0].Version)
-	assert.Equal(t, "Network scanner", tools[0].Description)
-	assert.Equal(t, "localhost:50300", tools[0].Endpoint)
-	assert.Equal(t, "healthy", tools[0].Health)
+	// Verify tools (order may vary)
+	toolMap := make(map[string]api.ToolInfoInternal)
+	for _, tool := range tools {
+		toolMap[tool.Name] = tool
+	}
 
-	// Verify second tool
-	assert.Equal(t, "sqlmap", tools[1].Name)
-	assert.Equal(t, "SQL injection tool", tools[1].Description)
+	nmap := toolMap["nmap"]
+	assert.Equal(t, "nmap", nmap.ID)
+	assert.Equal(t, "7.92", nmap.Version)
+	assert.Equal(t, "Network scanner", nmap.Description)
+	assert.Equal(t, "localhost:50300", nmap.Endpoint)
+	assert.Equal(t, "healthy", nmap.Health)
+
+	sqlmap := toolMap["sqlmap"]
+	assert.Equal(t, "sqlmap", sqlmap.Name)
+	assert.Equal(t, "SQL injection tool", sqlmap.Description)
 }
 
 // TestListTools_EmptyResults tests ListTools with no tools registered.
@@ -286,6 +298,7 @@ func TestListTools_EmptyResults(t *testing.T) {
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
+		componentStore:  &mockComponentStore{},
 		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
@@ -296,26 +309,26 @@ func TestListTools_EmptyResults(t *testing.T) {
 	assert.Empty(t, tools)
 }
 
-// TestListTools_RegistryError tests ListTools error propagation from registry.
+// TestListTools_RegistryError tests ListTools graceful degradation when registry fails.
 func TestListTools_RegistryError(t *testing.T) {
-	expectedErr := fmt.Errorf("registry unavailable")
 	mockRegistry := &mockComponentDiscovery{
 		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return nil, expectedErr
+			return nil, fmt.Errorf("registry unavailable")
 		},
 	}
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
+		componentStore:  &mockComponentStore{},
 		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	ctx := context.Background()
 	tools, err := daemon.ListTools(ctx)
 
-	assert.Error(t, err)
-	assert.Nil(t, tools)
-	assert.Contains(t, err.Error(), "failed to list tools")
+	// Registry error is silently handled - returns empty results from component store
+	require.NoError(t, err)
+	assert.Empty(t, tools)
 }
 
 // TestListPlugins_Success tests ListPlugins with mock registry adapter.
@@ -374,12 +387,11 @@ func TestListPlugins_EmptyResults(t *testing.T) {
 	assert.Empty(t, plugins)
 }
 
-// TestListPlugins_RegistryError tests ListPlugins error propagation from registry.
+// TestListPlugins_RegistryError tests ListPlugins graceful degradation when registry fails.
 func TestListPlugins_RegistryError(t *testing.T) {
-	expectedErr := fmt.Errorf("plugin registry error")
 	mockRegistry := &mockComponentDiscovery{
 		listPluginsFunc: func(ctx context.Context) ([]registry.PluginInfo, error) {
-			return nil, expectedErr
+			return nil, fmt.Errorf("plugin registry error")
 		},
 	}
 
@@ -391,9 +403,9 @@ func TestListPlugins_RegistryError(t *testing.T) {
 	ctx := context.Background()
 	plugins, err := daemon.ListPlugins(ctx)
 
-	assert.Error(t, err)
-	assert.Nil(t, plugins)
-	assert.Contains(t, err.Error(), "failed to list plugins")
+	// Registry error is gracefully degraded - returns empty results, not error
+	require.NoError(t, err)
+	assert.Empty(t, plugins)
 }
 
 // TestListAgents_NoEndpoints tests handling of agents with no endpoints.
@@ -431,18 +443,26 @@ func TestListTools_NoEndpoints(t *testing.T) {
 		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
 			return []registry.ToolInfo{
 				{
-					Name:        "no-endpoint-tool",
-					Version:     "1.0.0",
-					Description: "Test tool",
-					Endpoints:   nil, // Nil endpoints
-					Instances:   1,
+					Name:      "no-endpoint-tool",
+					Version:   "1.0.0",
+					Endpoints: nil, // Nil endpoints
+					Instances: 1,
 				},
+			}, nil
+		},
+	}
+
+	compStore := &mockComponentStore{
+		listFunc: func(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+			return []*component.Component{
+				{Name: "no-endpoint-tool", Version: "1.0.0", Manifest: &component.Manifest{Description: "Test tool"}},
 			}, nil
 		},
 	}
 
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
+		componentStore:  compStore,
 		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
@@ -512,28 +532,28 @@ func TestListAgents_WithKindFilter(t *testing.T) {
 // TestHealthStatus_BasedOnInstances tests that health status is correctly determined by instance count.
 func TestHealthStatus_BasedOnInstances(t *testing.T) {
 	tests := []struct {
-		name           string
-		instances      int
-		expectedHealth string
-		expectedActive bool
+		name                   string
+		instances              int
+		expectedStatusHealth   string // GetAgentStatus checks instances
+		expectedActive         bool
 	}{
 		{
-			name:           "healthy with instances",
-			instances:      5,
-			expectedHealth: "healthy",
-			expectedActive: true,
+			name:                   "healthy with instances",
+			instances:              5,
+			expectedStatusHealth:   "healthy",
+			expectedActive:         true,
 		},
 		{
-			name:           "unknown with no instances",
-			instances:      0,
-			expectedHealth: "unknown",
-			expectedActive: false,
+			name:                   "unknown with no instances",
+			instances:              0,
+			expectedStatusHealth:   "unknown",
+			expectedActive:         false,
 		},
 		{
-			name:           "healthy with one instance",
-			instances:      1,
-			expectedHealth: "healthy",
-			expectedActive: true,
+			name:                   "healthy with one instance",
+			instances:              1,
+			expectedStatusHealth:   "healthy",
+			expectedActive:         true,
 		},
 	}
 
@@ -558,16 +578,10 @@ func TestHealthStatus_BasedOnInstances(t *testing.T) {
 
 			ctx := context.Background()
 
-			// Test via ListAgents
-			agents, err := daemon.ListAgents(ctx, "")
-			require.NoError(t, err)
-			assert.Len(t, agents, 1)
-			assert.Equal(t, tt.expectedHealth, agents[0].Health)
-
-			// Test via GetAgentStatus
+			// Test via GetAgentStatus (uses instance-aware health check)
 			status, err := daemon.GetAgentStatus(ctx, "test-agent")
 			require.NoError(t, err)
-			assert.Equal(t, tt.expectedHealth, status.Agent.Health)
+			assert.Equal(t, tt.expectedStatusHealth, status.Agent.Health)
 			assert.Equal(t, tt.expectedActive, status.Active)
 		})
 	}
@@ -590,8 +604,18 @@ func TestListTools_HealthStatus(t *testing.T) {
 		},
 	}
 
+	compStore := &mockComponentStore{
+		listFunc: func(ctx context.Context, kind component.ComponentKind) ([]*component.Component, error) {
+			return []*component.Component{
+				{Name: "healthy-tool", Version: "1.0.0"},
+				{Name: "offline-tool", Version: "1.0.0"},
+			}, nil
+		},
+	}
+
 	daemon := &daemonImpl{
 		registryAdapter: mockRegistry,
+		componentStore:  compStore,
 		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
@@ -600,8 +624,13 @@ func TestListTools_HealthStatus(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, tools, 2)
-	assert.Equal(t, "healthy", tools[0].Health)
-	assert.Equal(t, "unknown", tools[1].Health)
+
+	toolMap := make(map[string]api.ToolInfoInternal)
+	for _, tool := range tools {
+		toolMap[tool.Name] = tool
+	}
+	assert.Equal(t, "healthy", toolMap["healthy-tool"].Health)
+	assert.Equal(t, "healthy", toolMap["offline-tool"].Health) // ListTools defaults all registry entries to healthy
 }
 
 // TestListPlugins_HealthStatus tests plugin health status based on instances.
@@ -705,13 +734,27 @@ func TestRunAttack_Success(t *testing.T) {
 		},
 	}
 
+	mockTarget := &mockTargetDAO{
+		getByNameFunc: func(ctx context.Context, name string) (*types.Target, error) {
+			return &types.Target{
+				ID:   types.NewID(),
+				Name: name,
+				Type: "http_api",
+				Connection: map[string]any{
+					"url": "https://example.com/api",
+				},
+			}, nil
+		},
+	}
+
 	daemon := &daemonImpl{
 		attackRunner: mockRunner,
+		targetStore:  mockTarget,
 		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	req := api.AttackRequest{
-		Target:     "https://example.com/api",
+		TargetName: "example-api",
 		AgentID:    "test-agent",
 		AttackType: "injection",
 	}
@@ -827,14 +870,28 @@ func TestRunAttack_ExecutionError(t *testing.T) {
 		},
 	}
 
+	mockTarget := &mockTargetDAO{
+		getByNameFunc: func(ctx context.Context, name string) (*types.Target, error) {
+			return &types.Target{
+				ID:   types.NewID(),
+				Name: name,
+				Type: "http_api",
+				Connection: map[string]any{
+					"url": "https://example.com/api",
+				},
+			}, nil
+		},
+	}
+
 	daemon := &daemonImpl{
 		attackRunner: mockRunner,
+		targetStore:  mockTarget,
 		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	req := api.AttackRequest{
-		Target:  "https://example.com/api",
-		AgentID: "test-agent",
+		TargetName: "example-api",
+		AgentID:    "test-agent",
 	}
 
 	ctx := context.Background()
@@ -871,13 +928,27 @@ func TestRunAttack_OptionsMapping(t *testing.T) {
 		},
 	}
 
+	mockTarget := &mockTargetDAO{
+		getByNameFunc: func(ctx context.Context, name string) (*types.Target, error) {
+			return &types.Target{
+				ID:   types.NewID(),
+				Name: name,
+				Type: "http_api",
+				Connection: map[string]any{
+					"url": "https://example.com/api",
+				},
+			}, nil
+		},
+	}
+
 	daemon := &daemonImpl{
 		attackRunner: mockRunner,
+		targetStore:  mockTarget,
 		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	req := api.AttackRequest{
-		Target:        "https://example.com/api",
+		TargetName:    "example-api",
 		AgentID:       "test-agent",
 		AttackType:    "injection",
 		PayloadFilter: "sql",
@@ -919,14 +990,28 @@ func TestRunAttack_NoFindings(t *testing.T) {
 		},
 	}
 
+	mockTarget := &mockTargetDAO{
+		getByNameFunc: func(ctx context.Context, name string) (*types.Target, error) {
+			return &types.Target{
+				ID:   types.NewID(),
+				Name: name,
+				Type: "http_api",
+				Connection: map[string]any{
+					"url": "https://example.com/api",
+				},
+			}, nil
+		},
+	}
+
 	daemon := &daemonImpl{
 		attackRunner: mockRunner,
+		targetStore:  mockTarget,
 		logger:       observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	req := api.AttackRequest{
-		Target:  "https://example.com/api",
-		AgentID: "test-agent",
+		TargetName: "example-api",
+		AgentID:    "test-agent",
 	}
 
 	ctx := context.Background()
@@ -1002,8 +1087,22 @@ func TestValidateAttackRequest(t *testing.T) {
 
 // TestBuildAttackOptions tests conversion from API request to internal attack options
 func TestBuildAttackOptions(t *testing.T) {
+	mockDAO := &mockTargetDAO{
+		getByNameFunc: func(ctx context.Context, name string) (*types.Target, error) {
+			return &types.Target{
+				ID:   types.NewID(),
+				Name: name,
+				Type: "http_api",
+				Connection: map[string]any{
+					"url": "https://example.com",
+				},
+			}, nil
+		},
+	}
+
 	daemon := &daemonImpl{
-		logger: observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
+		targetStore: mockDAO,
+		logger:      observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
 	}
 
 	tests := []struct {
@@ -1014,8 +1113,8 @@ func TestBuildAttackOptions(t *testing.T) {
 		{
 			name: "basic request",
 			req: api.AttackRequest{
-				Target:  "https://example.com",
-				AgentID: "test-agent",
+				TargetName: "example-target",
+				AgentID:    "test-agent",
 			},
 			check: func(t *testing.T, opts *attack.AttackOptions) {
 				assert.Equal(t, "https://example.com", opts.TargetURL)
@@ -1025,7 +1124,7 @@ func TestBuildAttackOptions(t *testing.T) {
 		{
 			name: "with attack type",
 			req: api.AttackRequest{
-				Target:     "https://example.com",
+				TargetName: "example-target",
 				AgentID:    "test-agent",
 				AttackType: "sql-injection",
 			},
@@ -1036,7 +1135,7 @@ func TestBuildAttackOptions(t *testing.T) {
 		{
 			name: "with payload filter",
 			req: api.AttackRequest{
-				Target:        "https://example.com",
+				TargetName:    "example-target",
 				AgentID:       "test-agent",
 				PayloadFilter: "xss",
 			},
@@ -1047,8 +1146,8 @@ func TestBuildAttackOptions(t *testing.T) {
 		{
 			name: "with options",
 			req: api.AttackRequest{
-				Target:  "https://example.com",
-				AgentID: "test-agent",
+				TargetName: "example-target",
+				AgentID:    "test-agent",
 				Options: map[string]string{
 					"max_turns": "15",
 					"timeout":   "10m",
@@ -1235,21 +1334,10 @@ func TestBuildAttackOptions_TargetNameResolution(t *testing.T) {
 					},
 				}
 			},
-			wantErr: true,
-		},
-		{
-			name: "backward compatibility with inline target",
-			req: api.AttackRequest{
-				Target:  "https://example.com",
-				AgentID: "test-agent",
-			},
-			mockSetup: func() *mockTargetDAO {
-				return &mockTargetDAO{}
-			},
 			wantErr: false,
 			check: func(t *testing.T, opts *attack.AttackOptions) {
-				assert.Equal(t, "https://example.com", opts.TargetURL)
-				assert.Equal(t, "", opts.TargetName)
+				assert.Equal(t, "", opts.TargetURL)
+				assert.Equal(t, "no-url-target", opts.TargetName)
 			},
 		},
 		{
@@ -1306,14 +1394,23 @@ func TestBuildAttackOptions_TargetNameResolution(t *testing.T) {
 
 // TestBuildAttackOptions_TargetPropagation tests that target info is correctly propagated
 func TestBuildAttackOptions_TargetPropagation(t *testing.T) {
+	targetURLs := map[string]string{
+		"test-target":   "https://api.example.com",
+		"direct-target": "https://direct.example.com",
+	}
+
 	mockDAO := &mockTargetDAO{
 		getByNameFunc: func(ctx context.Context, name string) (*types.Target, error) {
+			url, ok := targetURLs[name]
+			if !ok {
+				return nil, fmt.Errorf("target not found: %s", name)
+			}
 			return &types.Target{
 				ID:   types.NewID(),
-				Name: "test-target",
+				Name: name,
 				Type: "http_api",
 				Connection: map[string]any{
-					"url": "https://api.example.com",
+					"url": url,
 				},
 			}, nil
 		},
@@ -1334,9 +1431,9 @@ func TestBuildAttackOptions_TargetPropagation(t *testing.T) {
 			expectedURL: "https://api.example.com",
 		},
 		{
-			name: "direct target URL",
+			name: "stored target with direct URL",
 			req: api.AttackRequest{
-				Target:     "https://direct.example.com",
+				TargetName: "direct-target",
 				AgentID:    "test-agent",
 				AttackType: "prompt-injection",
 			},
@@ -2228,7 +2325,7 @@ func TestListTools_RedisToolsOnly(t *testing.T) {
 	toolNames := make(map[string]bool)
 	for _, tool := range tools {
 		toolNames[tool.Name] = true
-		assert.Equal(t, "running", tool.Health)
+		assert.Equal(t, "healthy", tool.Health)
 	}
 
 	assert.True(t, toolNames["nmap"])
@@ -2426,11 +2523,11 @@ func TestListTools_RedisToolsHealthStatus(t *testing.T) {
 	unhealthyFound := false
 	for _, tool := range tools {
 		if tool.Name == "healthy-tool" {
-			assert.Equal(t, "running", tool.Health)
+			assert.Equal(t, "healthy", tool.Health)
 			healthyFound = true
 		}
 		if tool.Name == "unhealthy-tool" {
-			assert.Equal(t, "stopped", tool.Health)
+			assert.Equal(t, "unknown", tool.Health)
 			unhealthyFound = true
 		}
 	}

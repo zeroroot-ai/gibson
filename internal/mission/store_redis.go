@@ -372,7 +372,7 @@ func (s *RedisMissionStore) UpdateStatus(ctx context.Context, id types.ID, statu
 	}
 
 	// Update updated_at field
-	if err := s.client.JSONSet(ctx, key, "$.updated_at", time.Now()); err != nil {
+	if err := s.client.JSONSet(ctx, key, "$.updated_at", NewUnixTimeNow()); err != nil {
 		return fmt.Errorf("failed to update timestamp: %w", err)
 	}
 
@@ -421,7 +421,7 @@ func (s *RedisMissionStore) UpdateProgress(ctx context.Context, id types.ID, pro
 	}
 
 	// Update updated_at field
-	if err := s.client.JSONSet(ctx, key, "$.updated_at", time.Now()); err != nil {
+	if err := s.client.JSONSet(ctx, key, "$.updated_at", NewUnixTimeNow()); err != nil {
 		return fmt.Errorf("failed to update timestamp: %w", err)
 	}
 
@@ -526,7 +526,7 @@ func (s *RedisMissionStore) SaveCheckpoint(ctx context.Context, missionID types.
 	}
 
 	// Update checkpoint_at timestamp
-	now := time.Now()
+	now := NewUnixTimeNow()
 	if err := s.client.JSONSet(ctx, key, "$.checkpoint_at", now); err != nil {
 		return fmt.Errorf("failed to update checkpoint_at: %w", err)
 	}

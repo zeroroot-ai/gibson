@@ -19,41 +19,44 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DaemonService_Connect_FullMethodName                     = "/gibson.daemon.v1.DaemonService/Connect"
-	DaemonService_Ping_FullMethodName                        = "/gibson.daemon.v1.DaemonService/Ping"
-	DaemonService_Status_FullMethodName                      = "/gibson.daemon.v1.DaemonService/Status"
-	DaemonService_RunMission_FullMethodName                  = "/gibson.daemon.v1.DaemonService/RunMission"
-	DaemonService_StopMission_FullMethodName                 = "/gibson.daemon.v1.DaemonService/StopMission"
-	DaemonService_CreateMission_FullMethodName               = "/gibson.daemon.v1.DaemonService/CreateMission"
-	DaemonService_ListMissions_FullMethodName                = "/gibson.daemon.v1.DaemonService/ListMissions"
-	DaemonService_ListAgents_FullMethodName                  = "/gibson.daemon.v1.DaemonService/ListAgents"
-	DaemonService_GetAgentStatus_FullMethodName              = "/gibson.daemon.v1.DaemonService/GetAgentStatus"
-	DaemonService_ListTools_FullMethodName                   = "/gibson.daemon.v1.DaemonService/ListTools"
-	DaemonService_ListPlugins_FullMethodName                 = "/gibson.daemon.v1.DaemonService/ListPlugins"
-	DaemonService_QueryPlugin_FullMethodName                 = "/gibson.daemon.v1.DaemonService/QueryPlugin"
-	DaemonService_RunAttack_FullMethodName                   = "/gibson.daemon.v1.DaemonService/RunAttack"
-	DaemonService_Subscribe_FullMethodName                   = "/gibson.daemon.v1.DaemonService/Subscribe"
-	DaemonService_StartComponent_FullMethodName              = "/gibson.daemon.v1.DaemonService/StartComponent"
-	DaemonService_StopComponent_FullMethodName               = "/gibson.daemon.v1.DaemonService/StopComponent"
-	DaemonService_PauseMission_FullMethodName                = "/gibson.daemon.v1.DaemonService/PauseMission"
-	DaemonService_ResumeMission_FullMethodName               = "/gibson.daemon.v1.DaemonService/ResumeMission"
-	DaemonService_GetMissionHistory_FullMethodName           = "/gibson.daemon.v1.DaemonService/GetMissionHistory"
-	DaemonService_GetMissionCheckpoints_FullMethodName       = "/gibson.daemon.v1.DaemonService/GetMissionCheckpoints"
-	DaemonService_InstallComponent_FullMethodName            = "/gibson.daemon.v1.DaemonService/InstallComponent"
-	DaemonService_InstallAllComponent_FullMethodName         = "/gibson.daemon.v1.DaemonService/InstallAllComponent"
-	DaemonService_UninstallComponent_FullMethodName          = "/gibson.daemon.v1.DaemonService/UninstallComponent"
-	DaemonService_UpdateComponent_FullMethodName             = "/gibson.daemon.v1.DaemonService/UpdateComponent"
-	DaemonService_BuildComponent_FullMethodName              = "/gibson.daemon.v1.DaemonService/BuildComponent"
-	DaemonService_ShowComponent_FullMethodName               = "/gibson.daemon.v1.DaemonService/ShowComponent"
-	DaemonService_GetComponentLogs_FullMethodName            = "/gibson.daemon.v1.DaemonService/GetComponentLogs"
-	DaemonService_InstallMission_FullMethodName              = "/gibson.daemon.v1.DaemonService/InstallMission"
-	DaemonService_UninstallMission_FullMethodName            = "/gibson.daemon.v1.DaemonService/UninstallMission"
-	DaemonService_ListMissionDefinitions_FullMethodName      = "/gibson.daemon.v1.DaemonService/ListMissionDefinitions"
-	DaemonService_UpdateMission_FullMethodName               = "/gibson.daemon.v1.DaemonService/UpdateMission"
-	DaemonService_ResolveMissionDependencies_FullMethodName  = "/gibson.daemon.v1.DaemonService/ResolveMissionDependencies"
-	DaemonService_ValidateMissionDependencies_FullMethodName = "/gibson.daemon.v1.DaemonService/ValidateMissionDependencies"
-	DaemonService_EnsureDependenciesRunning_FullMethodName   = "/gibson.daemon.v1.DaemonService/EnsureDependenciesRunning"
-	DaemonService_Shutdown_FullMethodName                    = "/gibson.daemon.v1.DaemonService/Shutdown"
+	DaemonService_Connect_FullMethodName                         = "/gibson.daemon.v1.DaemonService/Connect"
+	DaemonService_Ping_FullMethodName                            = "/gibson.daemon.v1.DaemonService/Ping"
+	DaemonService_Status_FullMethodName                          = "/gibson.daemon.v1.DaemonService/Status"
+	DaemonService_RunMission_FullMethodName                      = "/gibson.daemon.v1.DaemonService/RunMission"
+	DaemonService_StopMission_FullMethodName                     = "/gibson.daemon.v1.DaemonService/StopMission"
+	DaemonService_CreateMission_FullMethodName                   = "/gibson.daemon.v1.DaemonService/CreateMission"
+	DaemonService_ListMissions_FullMethodName                    = "/gibson.daemon.v1.DaemonService/ListMissions"
+	DaemonService_ListAgents_FullMethodName                      = "/gibson.daemon.v1.DaemonService/ListAgents"
+	DaemonService_GetAgentStatus_FullMethodName                  = "/gibson.daemon.v1.DaemonService/GetAgentStatus"
+	DaemonService_ListTools_FullMethodName                       = "/gibson.daemon.v1.DaemonService/ListTools"
+	DaemonService_ListPlugins_FullMethodName                     = "/gibson.daemon.v1.DaemonService/ListPlugins"
+	DaemonService_QueryPlugin_FullMethodName                     = "/gibson.daemon.v1.DaemonService/QueryPlugin"
+	DaemonService_RunAttack_FullMethodName                       = "/gibson.daemon.v1.DaemonService/RunAttack"
+	DaemonService_Subscribe_FullMethodName                       = "/gibson.daemon.v1.DaemonService/Subscribe"
+	DaemonService_StartComponent_FullMethodName                  = "/gibson.daemon.v1.DaemonService/StartComponent"
+	DaemonService_StopComponent_FullMethodName                   = "/gibson.daemon.v1.DaemonService/StopComponent"
+	DaemonService_PauseMission_FullMethodName                    = "/gibson.daemon.v1.DaemonService/PauseMission"
+	DaemonService_ResumeMission_FullMethodName                   = "/gibson.daemon.v1.DaemonService/ResumeMission"
+	DaemonService_GetMissionHistory_FullMethodName               = "/gibson.daemon.v1.DaemonService/GetMissionHistory"
+	DaemonService_GetMissionCheckpoints_FullMethodName           = "/gibson.daemon.v1.DaemonService/GetMissionCheckpoints"
+	DaemonService_InstallComponent_FullMethodName                = "/gibson.daemon.v1.DaemonService/InstallComponent"
+	DaemonService_InstallAllComponent_FullMethodName             = "/gibson.daemon.v1.DaemonService/InstallAllComponent"
+	DaemonService_UninstallComponent_FullMethodName              = "/gibson.daemon.v1.DaemonService/UninstallComponent"
+	DaemonService_UpdateComponent_FullMethodName                 = "/gibson.daemon.v1.DaemonService/UpdateComponent"
+	DaemonService_BuildComponent_FullMethodName                  = "/gibson.daemon.v1.DaemonService/BuildComponent"
+	DaemonService_ShowComponent_FullMethodName                   = "/gibson.daemon.v1.DaemonService/ShowComponent"
+	DaemonService_GetComponentLogs_FullMethodName                = "/gibson.daemon.v1.DaemonService/GetComponentLogs"
+	DaemonService_InstallMission_FullMethodName                  = "/gibson.daemon.v1.DaemonService/InstallMission"
+	DaemonService_UninstallMission_FullMethodName                = "/gibson.daemon.v1.DaemonService/UninstallMission"
+	DaemonService_ListMissionDefinitions_FullMethodName          = "/gibson.daemon.v1.DaemonService/ListMissionDefinitions"
+	DaemonService_UpdateMission_FullMethodName                   = "/gibson.daemon.v1.DaemonService/UpdateMission"
+	DaemonService_ResolveMissionDependencies_FullMethodName      = "/gibson.daemon.v1.DaemonService/ResolveMissionDependencies"
+	DaemonService_ValidateMissionDependencies_FullMethodName     = "/gibson.daemon.v1.DaemonService/ValidateMissionDependencies"
+	DaemonService_EnsureDependenciesRunning_FullMethodName       = "/gibson.daemon.v1.DaemonService/EnsureDependenciesRunning"
+	DaemonService_Shutdown_FullMethodName                        = "/gibson.daemon.v1.DaemonService/Shutdown"
+	DaemonService_GetTenantLangfuseCredentials_FullMethodName    = "/gibson.daemon.v1.DaemonService/GetTenantLangfuseCredentials"
+	DaemonService_SetTenantLangfuseCredentials_FullMethodName    = "/gibson.daemon.v1.DaemonService/SetTenantLangfuseCredentials"
+	DaemonService_DeleteTenantLangfuseCredentials_FullMethodName = "/gibson.daemon.v1.DaemonService/DeleteTenantLangfuseCredentials"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -163,6 +166,13 @@ type DaemonServiceClient interface {
 	// This is used by the CLI to stop the daemon remotely.
 	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
+	// GetTenantLangfuseCredentials retrieves the Langfuse project credentials for a tenant.
+	// Returns NOT_FOUND if no credentials have been configured for the tenant.
+	GetTenantLangfuseCredentials(ctx context.Context, in *GetTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*GetTenantLangfuseCredentialsResponse, error)
+	// SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
+	SetTenantLangfuseCredentials(ctx context.Context, in *SetTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*SetTenantLangfuseCredentialsResponse, error)
+	// DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
+	DeleteTenantLangfuseCredentials(ctx context.Context, in *DeleteTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*DeleteTenantLangfuseCredentialsResponse, error)
 }
 
 type daemonServiceClient struct {
@@ -568,6 +578,36 @@ func (c *daemonServiceClient) Shutdown(ctx context.Context, in *ShutdownRequest,
 	return out, nil
 }
 
+func (c *daemonServiceClient) GetTenantLangfuseCredentials(ctx context.Context, in *GetTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*GetTenantLangfuseCredentialsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTenantLangfuseCredentialsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_GetTenantLangfuseCredentials_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) SetTenantLangfuseCredentials(ctx context.Context, in *SetTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*SetTenantLangfuseCredentialsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetTenantLangfuseCredentialsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_SetTenantLangfuseCredentials_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) DeleteTenantLangfuseCredentials(ctx context.Context, in *DeleteTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*DeleteTenantLangfuseCredentialsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteTenantLangfuseCredentialsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_DeleteTenantLangfuseCredentials_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServiceServer is the server API for DaemonService service.
 // All implementations must embed UnimplementedDaemonServiceServer
 // for forward compatibility.
@@ -675,6 +715,13 @@ type DaemonServiceServer interface {
 	// This is used by the CLI to stop the daemon remotely.
 	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
+	// GetTenantLangfuseCredentials retrieves the Langfuse project credentials for a tenant.
+	// Returns NOT_FOUND if no credentials have been configured for the tenant.
+	GetTenantLangfuseCredentials(context.Context, *GetTenantLangfuseCredentialsRequest) (*GetTenantLangfuseCredentialsResponse, error)
+	// SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
+	SetTenantLangfuseCredentials(context.Context, *SetTenantLangfuseCredentialsRequest) (*SetTenantLangfuseCredentialsResponse, error)
+	// DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
+	DeleteTenantLangfuseCredentials(context.Context, *DeleteTenantLangfuseCredentialsRequest) (*DeleteTenantLangfuseCredentialsResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
 
@@ -789,6 +836,15 @@ func (UnimplementedDaemonServiceServer) EnsureDependenciesRunning(context.Contex
 }
 func (UnimplementedDaemonServiceServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
+}
+func (UnimplementedDaemonServiceServer) GetTenantLangfuseCredentials(context.Context, *GetTenantLangfuseCredentialsRequest) (*GetTenantLangfuseCredentialsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTenantLangfuseCredentials not implemented")
+}
+func (UnimplementedDaemonServiceServer) SetTenantLangfuseCredentials(context.Context, *SetTenantLangfuseCredentialsRequest) (*SetTenantLangfuseCredentialsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetTenantLangfuseCredentials not implemented")
+}
+func (UnimplementedDaemonServiceServer) DeleteTenantLangfuseCredentials(context.Context, *DeleteTenantLangfuseCredentialsRequest) (*DeleteTenantLangfuseCredentialsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteTenantLangfuseCredentials not implemented")
 }
 func (UnimplementedDaemonServiceServer) mustEmbedUnimplementedDaemonServiceServer() {}
 func (UnimplementedDaemonServiceServer) testEmbeddedByValue()                       {}
@@ -1406,6 +1462,60 @@ func _DaemonService_Shutdown_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_GetTenantLangfuseCredentials_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantLangfuseCredentialsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).GetTenantLangfuseCredentials(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_GetTenantLangfuseCredentials_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).GetTenantLangfuseCredentials(ctx, req.(*GetTenantLangfuseCredentialsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_SetTenantLangfuseCredentials_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTenantLangfuseCredentialsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).SetTenantLangfuseCredentials(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_SetTenantLangfuseCredentials_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).SetTenantLangfuseCredentials(ctx, req.(*SetTenantLangfuseCredentialsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_DeleteTenantLangfuseCredentials_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteTenantLangfuseCredentialsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).DeleteTenantLangfuseCredentials(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_DeleteTenantLangfuseCredentials_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).DeleteTenantLangfuseCredentials(ctx, req.(*DeleteTenantLangfuseCredentialsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonService_ServiceDesc is the grpc.ServiceDesc for DaemonService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1532,6 +1642,18 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Shutdown",
 			Handler:    _DaemonService_Shutdown_Handler,
+		},
+		{
+			MethodName: "GetTenantLangfuseCredentials",
+			Handler:    _DaemonService_GetTenantLangfuseCredentials_Handler,
+		},
+		{
+			MethodName: "SetTenantLangfuseCredentials",
+			Handler:    _DaemonService_SetTenantLangfuseCredentials_Handler,
+		},
+		{
+			MethodName: "DeleteTenantLangfuseCredentials",
+			Handler:    _DaemonService_DeleteTenantLangfuseCredentials_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -40,7 +40,7 @@ func TestLogTailer_StreamingLogs(t *testing.T) {
 	require.NoError(t, f.Sync())
 
 	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	// Start watching
@@ -129,7 +129,7 @@ func TestLogTailer_LogRotation(t *testing.T) {
 	f.Close()
 
 	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	// Start watching
@@ -220,7 +220,7 @@ func TestLogTailer_MultipleSubscribers(t *testing.T) {
 	require.NoError(t, f.Sync())
 
 	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	// Start watching
@@ -341,7 +341,7 @@ func TestLogTailer_HistoryRetrieval(t *testing.T) {
 	f.Close()
 
 	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	// Start watching
@@ -419,7 +419,7 @@ func TestLogTailer_SinceTimestamp(t *testing.T) {
 	midTime := time.Now().Add(-250 * time.Millisecond)
 
 	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	// Start watching
@@ -491,7 +491,7 @@ func TestLogTailer_JSONLogParsing(t *testing.T) {
 	f.Close()
 
 	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	// Start watching
@@ -558,7 +558,7 @@ func TestLogTailer_ComponentIsolation(t *testing.T) {
 	require.NoError(t, f2.Sync())
 
 	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	// Start watching both
@@ -610,7 +610,7 @@ func TestLogTailer_SubscribeErrorHandling(t *testing.T) {
 		Level:     slog.LevelError,
 	})
 
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	// Test subscribing to non-existent component
@@ -652,7 +652,7 @@ func TestLogTailer_CleanupOnDisconnect(t *testing.T) {
 	require.NoError(t, f.Sync())
 
 	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, logger)
+	tailer := NewLogTailer(ctx, 1000, *logger)
 	defer tailer.Close()
 
 	// Start watching
@@ -708,7 +708,7 @@ func TestLogTailer_HighVolumeLogs(t *testing.T) {
 	defer f.Close()
 
 	// Create tailer with small buffer to test overflow
-	tailer := NewLogTailer(ctx, 100, logger)
+	tailer := NewLogTailer(ctx, 100, *logger)
 	defer tailer.Close()
 
 	// Start watching

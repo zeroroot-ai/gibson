@@ -73,7 +73,7 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	d.grpcServer = srv
 
 	// Create and register daemon service
-	daemonSvc := api.NewDaemonServer(d, d.logger.Slog())
+	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
 	api.RegisterDaemonServiceServer(srv, daemonSvc)
 
 	// Start serving in goroutine
@@ -518,72 +518,95 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 	return result, nil
 }
 
-// ListPlugins returns all installed plugins from the component store.
+// ListPlugins returns all plugins from both the component store and the registry.
+// This includes plugins installed via CLI and plugins running in Kubernetes/containers
+// that registered directly with the registry.
 func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal, error) {
 	d.logger.Debug(ctx, "ListPlugins called")
 
-	if d.componentStore == nil {
-		return nil, fmt.Errorf("component store not available")
+	// Track plugins by name to avoid duplicates
+	pluginMap := make(map[string]api.PluginInfoInternal)
+
+	// Query component store for installed plugins (if available)
+	if d.componentStore != nil {
+		plugins, err := d.componentStore.List(ctx, component.ComponentKindPlugin)
+		if err != nil {
+			d.logger.Warn(ctx, "failed to list plugins from component store", "error", err)
+			// Continue - we can still list plugins from registry
+		} else {
+			for _, p := range plugins {
+				description := ""
+				if p.Manifest != nil {
+					description = p.Manifest.Description
+				}
+				pluginMap[p.Name] = api.PluginInfoInternal{
+					ID:          p.Name,
+					Name:        p.Name,
+					Version:     p.Version,
+					Description: description,
+					Health:      "unknown",
+					LastSeen:    p.UpdatedAt,
+				}
+			}
+		}
 	}
 
-	// Query component store for installed plugins
-	plugins, err := d.componentStore.List(ctx, component.ComponentKindPlugin)
-	if err != nil {
-		d.logger.Error(ctx, "failed to list plugins from component store", "error", err)
-		return nil, fmt.Errorf("failed to list plugins: %w", err)
-	}
-
-	// Query registry to check which plugins are running
-	runningPlugins := make(map[string]bool)
-	runningEndpoints := make(map[string]string)
-	runningHealth := make(map[string]string)
+	// Query registry for running plugins
 	if d.registryAdapter != nil {
 		running, err := d.registryAdapter.ListPlugins(ctx)
-		if err == nil {
+		if err != nil {
+			d.logger.Warn(ctx, "failed to list plugins from registry", "error", err)
+		} else {
 			for _, r := range running {
-				runningPlugins[r.Name] = true
+				endpoint := ""
 				if len(r.Endpoints) > 0 {
-					runningEndpoints[r.Name] = r.Endpoints[0]
+					endpoint = r.Endpoints[0]
 				}
-				// Capture health from registry (aggregated across instances)
-				runningHealth[r.Name] = r.Health
+
+				// Determine health: use registry value, default based on instance count
+				health := r.Health
+				if health == "" {
+					if r.Instances > 0 {
+						health = "healthy"
+					} else {
+						health = "unknown"
+					}
+				}
+
+				if existing, ok := pluginMap[r.Name]; ok {
+					// Update existing plugin with running info
+					existing.Health = health
+					existing.Endpoint = endpoint
+					if r.Version != "" {
+						existing.Version = r.Version
+					}
+					if r.Description != "" && existing.Description == "" {
+						existing.Description = r.Description
+					}
+					pluginMap[r.Name] = existing
+				} else {
+					// Add plugin that's only in registry (e.g., K8s deployed plugin)
+					pluginMap[r.Name] = api.PluginInfoInternal{
+						ID:          r.Name,
+						Name:        r.Name,
+						Version:     r.Version,
+						Endpoint:    endpoint,
+						Description: r.Description,
+						Health:      health,
+						LastSeen:    time.Now(),
+					}
+				}
 			}
 		}
 	}
 
-	// Convert component.Component to api.PluginInfoInternal
-	result := make([]api.PluginInfoInternal, len(plugins))
-	for i, plugin := range plugins {
-		// Determine health status based on whether plugin is running
-		health := "unknown"
-		endpoint := ""
-		if runningPlugins[plugin.Name] {
-			// Use health from registry (aggregated across instances)
-			health = runningHealth[plugin.Name]
-			if health == "" {
-				health = "healthy" // Default for running plugins
-			}
-			endpoint = runningEndpoints[plugin.Name]
-		}
-
-		// Extract description from manifest if available
-		description := ""
-		if plugin.Manifest != nil {
-			description = plugin.Manifest.Description
-		}
-
-		result[i] = api.PluginInfoInternal{
-			ID:          plugin.Name,
-			Name:        plugin.Name,
-			Version:     plugin.Version,
-			Endpoint:    endpoint,
-			Description: description,
-			Health:      health,
-			LastSeen:    plugin.UpdatedAt,
-		}
+	// Convert map to slice
+	result := make([]api.PluginInfoInternal, 0, len(pluginMap))
+	for _, p := range pluginMap {
+		result = append(result, p)
 	}
 
-	d.logger.Debug(ctx, "listed installed plugins", "count", len(result))
+	d.logger.Debug(ctx, "listed plugins", "count", len(result))
 	return result, nil
 }
 
@@ -1232,6 +1255,14 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 
 	pagedRuns := missionRuns[offset:end]
 
+	// Extract trace ID from mission metadata (written at mission start)
+	traceID := ""
+	if m.Metadata != nil {
+		if v, ok := m.Metadata["trace_id"].(string); ok {
+			traceID = v
+		}
+	}
+
 	// Convert to API format
 	runs := make([]api.MissionRunData, len(pagedRuns))
 	for i, r := range pagedRuns {
@@ -1256,6 +1287,7 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 			CompletedAt:   completedAt,
 			FindingsCount: r.FindingsCount,
 			Error:         r.Error,
+			TraceID:       traceID,
 		}
 	}
 

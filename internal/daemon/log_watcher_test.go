@@ -27,7 +27,7 @@ func TestNewLogWatcher(t *testing.T) {
 	require.NoError(t, err)
 	f.Close()
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 	require.NotNil(t, watcher)
 
@@ -51,7 +51,7 @@ func TestLogWatcher_Start(t *testing.T) {
 	err := os.WriteFile(logFile, []byte("initial line\n"), 0644)
 	require.NoError(t, err)
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 	defer watcher.Close()
 
@@ -76,7 +76,7 @@ func TestLogWatcher_NewLines(t *testing.T) {
 	require.NoError(t, err)
 	f.Close()
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 	defer watcher.Close()
 
@@ -127,7 +127,7 @@ func TestLogWatcher_ReadHistoricalLines(t *testing.T) {
 	err := os.WriteFile(logFile, []byte(content), 0644)
 	require.NoError(t, err)
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 	defer watcher.Close()
 
@@ -144,7 +144,7 @@ func TestLogWatcher_ReadHistoricalLines(t *testing.T) {
 
 	// Read all lines
 	watcher.Close()
-	watcher, err = NewLogWatcher(ctx, logFile, logger)
+	watcher, err = NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 	defer watcher.Close()
 	err = watcher.Start()
@@ -169,7 +169,7 @@ func TestLogWatcher_Rotation(t *testing.T) {
 	err := os.WriteFile(logFile, []byte("line 1\n"), 0644)
 	require.NoError(t, err)
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 	defer watcher.Close()
 
@@ -241,7 +241,7 @@ func TestLogWatcher_FileNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "nonexistent.log")
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 	defer watcher.Close()
 
@@ -263,7 +263,7 @@ func TestLogWatcher_Close(t *testing.T) {
 	err := os.WriteFile(logFile, []byte("line 1\n"), 0644)
 	require.NoError(t, err)
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 
 	err = watcher.Start()
@@ -291,7 +291,7 @@ func TestLogWatcher_ContextCancellation(t *testing.T) {
 	err := os.WriteFile(logFile, []byte("line 1\n"), 0644)
 	require.NoError(t, err)
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 
 	err = watcher.Start()
@@ -326,7 +326,7 @@ func TestLogWatcher_MultipleLines(t *testing.T) {
 	require.NoError(t, err)
 	f.Close()
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 	defer watcher.Close()
 
@@ -375,7 +375,7 @@ func TestLogWatcher_EmptyFile(t *testing.T) {
 	require.NoError(t, err)
 	f.Close()
 
-	watcher, err := NewLogWatcher(ctx, logFile, logger)
+	watcher, err := NewLogWatcher(ctx, logFile, *logger)
 	require.NoError(t, err)
 	defer watcher.Close()
 

@@ -425,7 +425,7 @@ workflow:
 			tt.setupDaemon(daemon)
 
 			// Create server
-			server := NewDaemonServer(daemon, nil)
+			server := NewDaemonServer(daemon, nil, nil)
 
 			// Create request
 			req := &RunMissionRequest{
@@ -503,7 +503,7 @@ workflow:
 		},
 	}
 
-	server := NewDaemonServer(daemon, nil)
+	server := NewDaemonServer(daemon, nil, nil)
 
 	req := &RunMissionRequest{
 		WorkflowYaml: validYAML,
@@ -560,7 +560,7 @@ workflow:
 		},
 	}
 
-	server := NewDaemonServer(daemon, nil)
+	server := NewDaemonServer(daemon, nil, nil)
 
 	req := &RunMissionRequest{
 		WorkflowYaml: validYAML,
@@ -669,7 +669,7 @@ workflow:
 				},
 			}
 
-			server := NewDaemonServer(daemon, nil)
+			server := NewDaemonServer(daemon, nil, nil)
 
 			req := &RunMissionRequest{
 				WorkflowYaml: tt.workflowYAML,

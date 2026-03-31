@@ -2,9 +2,11 @@ package state
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -251,6 +253,7 @@ func NewIndexManager(client redis.UniversalClient) *IndexManager {
 
 // EnsureIndex creates a RediSearch index if it doesn't already exist.
 // This operation is idempotent - no error is returned if the index already exists.
+// When creating a new index, it also re-indexes any existing keys matching the prefix.
 //
 // Example:
 //
@@ -277,8 +280,20 @@ func (m *IndexManager) EnsureIndex(ctx context.Context, def *IndexDefinition) er
 	}
 
 	if exists {
-		return nil // Index already exists, nothing to do
+		// Index exists - but check if there are unindexed keys
+		// This handles the case where index was created but keys existed before
+		// or there were indexing failures
+		_ = m.reindexMissingKeys(ctx, def)
+		// Note: errors are intentionally ignored here. If reindexing fails,
+		// keys will be indexed when they are next modified. The reindexMissingKeys
+		// function transforms string timestamps to numeric values which fixes
+		// the most common indexing failure.
+		return nil
 	}
+
+	// Track that we're creating a new index - we'll need to reindex existing keys
+	needsReindex := true
+	_ = needsReindex // used below after index creation
 
 	// Build FT.CREATE command arguments
 	args := []interface{}{"FT.CREATE", def.Name}
@@ -371,7 +386,215 @@ func (m *IndexManager) EnsureIndex(ctx context.Context, def *IndexDefinition) er
 		return fmt.Errorf("FT.CREATE failed for index %q: %w", def.Name, err)
 	}
 
+	// Reindex existing keys that match the prefix.
+	// RediSearch only indexes keys that are created/modified AFTER the index exists.
+	// We need to "touch" existing keys to trigger indexing.
+	if needsReindex {
+		if err := m.reindexExistingKeys(ctx, def); err != nil {
+			// Log but don't fail - the index is created, just some keys might not be indexed
+			// They'll get indexed when next modified
+			return fmt.Errorf("index created but failed to reindex existing keys: %w", err)
+		}
+	}
+
 	return nil
+}
+
+// reindexMissingKeys checks if there are keys matching the prefix that aren't indexed,
+// and reindexes them if needed. This handles:
+// - Keys that existed before the index was created
+// - Keys that failed to index due to schema mismatches
+func (m *IndexManager) reindexMissingKeys(ctx context.Context, def *IndexDefinition) error {
+	// Get index info to see how many docs are indexed
+	info, err := m.IndexInfo(ctx, def.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get index info for %s: %w", def.Name, err)
+	}
+
+	// Count keys matching the prefix (excluding secondary index keys)
+	pattern := def.Prefix + "*"
+	var keyCount int64
+	var cursor uint64
+
+	for {
+		keys, nextCursor, err := m.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return fmt.Errorf("SCAN failed for pattern %s: %w", pattern, err)
+		}
+
+		for _, key := range keys {
+			// Skip secondary index keys (e.g., by_status, by_target, :runs suffix)
+			if !strings.Contains(key, ":by_") && !strings.HasSuffix(key, ":runs") {
+				keyCount++
+			}
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	// If there are more keys than indexed docs, reindex
+	if keyCount > info.NumDocs {
+		if err := m.reindexExistingKeys(ctx, def); err != nil {
+			return fmt.Errorf("failed to reindex existing keys for %s: %w", def.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// reindexExistingKeys scans for existing keys matching the index prefix and
+// triggers reindexing by reading, transforming, and re-writing each key.
+// This is necessary because RediSearch only indexes keys created/modified after
+// the index exists.
+//
+// For JSON keys, this function also transforms any string timestamp fields
+// (created_at, updated_at, started_at, completed_at) to numeric Unix timestamps
+// to ensure compatibility with RediSearch NUMERIC field indexing.
+func (m *IndexManager) reindexExistingKeys(ctx context.Context, def *IndexDefinition) error {
+	// Use SCAN to find all keys matching the prefix
+	pattern := def.Prefix + "*"
+	var cursor uint64
+	var reindexed int
+	var errors int
+
+	for {
+		// Scan for keys matching the prefix
+		keys, nextCursor, err := m.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return fmt.Errorf("SCAN failed: %w", err)
+		}
+
+		// Reindex each key by reading, transforming, and re-writing it
+		for _, key := range keys {
+			// Skip secondary index keys
+			if strings.Contains(key, ":by_") || strings.HasSuffix(key, ":runs") {
+				continue
+			}
+
+			if def.OnJSON {
+				// For JSON keys, read the entire document
+				data, err := m.client.Do(ctx, "JSON.GET", key).Result()
+				if err != nil {
+					// Key might have been deleted, skip it
+					continue
+				}
+
+				dataStr, ok := data.(string)
+				if !ok {
+					continue
+				}
+
+				// Transform the JSON to fix any string timestamps
+				transformedData, wasTransformed := transformJSONTimestamps(dataStr)
+
+				// Re-set the data to trigger indexing
+				_, err = m.client.Do(ctx, "JSON.SET", key, "$", transformedData).Result()
+				if err != nil {
+					errors++
+					continue
+				}
+
+				if wasTransformed {
+					reindexed++
+				} else {
+					reindexed++
+				}
+			} else {
+				// For HASH keys, use HGETALL and HSET
+				data, err := m.client.HGetAll(ctx, key).Result()
+				if err != nil || len(data) == 0 {
+					continue
+				}
+
+				// Re-set all fields to trigger indexing
+				args := make([]interface{}, 0, len(data)*2)
+				for k, v := range data {
+					args = append(args, k, v)
+				}
+				if len(args) > 0 {
+					_, err = m.client.HSet(ctx, key, args...).Result()
+					if err != nil {
+						errors++
+						continue
+					}
+					reindexed++
+				}
+			}
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return nil
+}
+
+// transformJSONTimestamps parses JSON and converts any string timestamp fields
+// to numeric Unix millisecond values. This fixes documents that were created with
+// string timestamps which are incompatible with RediSearch NUMERIC fields.
+//
+// The following fields are transformed if they are strings:
+// - created_at
+// - updated_at
+// - started_at
+// - completed_at
+// - checkpoint_at
+// - ended_at
+// - last_used
+//
+// Returns the transformed JSON string and a boolean indicating if any transformation occurred.
+func transformJSONTimestamps(jsonStr string) (string, bool) {
+	// Parse the JSON into a map
+	var doc map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &doc); err != nil {
+		// If we can't parse it, return as-is
+		return jsonStr, false
+	}
+
+	timestampFields := []string{
+		"created_at",
+		"updated_at",
+		"started_at",
+		"completed_at",
+		"checkpoint_at",
+		"ended_at",
+		"last_used",
+	}
+
+	transformed := false
+	for _, field := range timestampFields {
+		if val, exists := doc[field]; exists {
+			// Check if it's a string (ISO timestamp format)
+			if strVal, ok := val.(string); ok && strVal != "" {
+				// Try to parse as RFC3339
+				if t, err := time.Parse(time.RFC3339, strVal); err == nil {
+					// Convert to Unix milliseconds
+					doc[field] = t.UnixMilli()
+					transformed = true
+				} else if t, err := time.Parse(time.RFC3339Nano, strVal); err == nil {
+					doc[field] = t.UnixMilli()
+					transformed = true
+				}
+			}
+		}
+	}
+
+	if !transformed {
+		return jsonStr, false
+	}
+
+	// Re-serialize the document
+	result, err := json.Marshal(doc)
+	if err != nil {
+		return jsonStr, false
+	}
+
+	return string(result), true
 }
 
 // DropIndex removes a RediSearch index.

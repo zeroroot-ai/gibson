@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
 )
 
@@ -26,6 +28,9 @@ type DaemonServer struct {
 
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface
+
+	// credentialHandler provides secure credential storage for per-tenant credentials
+	credentialHandler *CredentialHandler
 
 	// logger is the structured logger
 	logger *slog.Logger
@@ -206,11 +211,14 @@ type PluginInfoInternal struct {
 type MissionData struct {
 	ID           string
 	Name         string
+	Description  string
 	WorkflowPath string
+	WorkflowYAML string
 	Status       string
 	StartTime    time.Time
 	EndTime      time.Time
 	FindingCount int32
+	Progress     float64
 }
 
 // MissionEventData represents mission event data from the daemon.
@@ -441,6 +449,7 @@ type MissionRunData struct {
 	FindingsCount int
 	Error         string
 	PreviousRunID string // ID of the previous run (for linking run history)
+	TraceID       string // OTel trace ID for Langfuse lookup
 }
 
 // CheckpointData provides metadata about a mission checkpoint.
@@ -612,19 +621,21 @@ type CreateMissionResultData struct {
 //
 // Parameters:
 //   - daemon: The daemon instance to expose via gRPC
+//   - credentialHandler: Handler for encrypted credential storage (may be nil if credentials are not configured)
 //   - logger: Structured logger for request logging
 //
 // Returns:
 //   - *DaemonServer: A new gRPC server ready to be registered
-func NewDaemonServer(daemon DaemonInterface, logger *slog.Logger) *DaemonServer {
+func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandler, logger *slog.Logger) *DaemonServer {
 	if logger == nil {
 		logger = slog.Default().With("component", "daemon-grpc")
 	}
 
 	return &DaemonServer{
-		daemon:         daemon,
-		logger:         logger.With("component", "daemon-grpc"),
-		sessionCounter: 0,
+		daemon:            daemon,
+		credentialHandler: credentialHandler,
+		logger:            logger.With("component", "daemon-grpc"),
+		sessionCounter:    0,
 	}
 }
 
@@ -847,11 +858,14 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *ListMissionsReques
 		protoMissions[i] = &MissionInfo{
 			Id:           m.ID,
 			Name:         m.Name,
+			Description:  m.Description,
 			WorkflowPath: m.WorkflowPath,
+			WorkflowYaml: m.WorkflowYAML,
 			Status:       m.Status,
 			StartTime:    m.StartTime.Unix(),
 			EndTime:      m.EndTime.Unix(),
 			FindingCount: m.FindingCount,
+			Progress:     m.Progress,
 		}
 	}
 
@@ -1543,6 +1557,7 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *GetMissionHis
 			CompletedAt:   run.CompletedAt,
 			FindingsCount: int32(run.FindingsCount),
 			PreviousRunId: run.PreviousRunID,
+			TraceId:       run.TraceID,
 		}
 	}
 
@@ -2319,4 +2334,135 @@ func (s *DaemonServer) Shutdown(ctx context.Context, req *ShutdownRequest) (*Shu
 		Success: true,
 		Message: "Shutdown request accepted, daemon will stop shortly",
 	}, nil
+}
+
+// langfuseCredentialName returns the credential name used to store Langfuse
+// project credentials for a given tenant.
+func langfuseCredentialName(tenantID string) string {
+	return fmt.Sprintf("langfuse_project:%s", tenantID)
+}
+
+// langfuseCredentialPayload is the JSON structure stored as the encrypted
+// credential value for per-tenant Langfuse project credentials.
+type langfuseCredentialPayload struct {
+	PublicKey string `json:"public_key"`
+	SecretKey string `json:"secret_key"`
+	Host      string `json:"host"`
+	ProjectID string `json:"project_id"`
+}
+
+// GetTenantLangfuseCredentials retrieves the Langfuse project credentials for a tenant.
+func (s *DaemonServer) GetTenantLangfuseCredentials(ctx context.Context, req *GetTenantLangfuseCredentialsRequest) (*GetTenantLangfuseCredentialsResponse, error) {
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if s.credentialHandler == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "credential handler not configured")
+	}
+
+	name := langfuseCredentialName(req.TenantId)
+
+	_, decrypted, err := s.credentialHandler.GetDecrypted(ctx, name)
+	if err != nil {
+		s.logger.Debug("langfuse credentials not found", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.NotFound, "langfuse credentials not found for tenant %q", req.TenantId)
+	}
+
+	var payload langfuseCredentialPayload
+	if err := json.Unmarshal([]byte(decrypted), &payload); err != nil {
+		s.logger.Error("failed to unmarshal langfuse credential payload", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to decode langfuse credentials: %v", err)
+	}
+
+	return &GetTenantLangfuseCredentialsResponse{
+		PublicKey: payload.PublicKey,
+		SecretKey: payload.SecretKey,
+		Host:      payload.Host,
+		ProjectId: payload.ProjectID,
+	}, nil
+}
+
+// SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
+func (s *DaemonServer) SetTenantLangfuseCredentials(ctx context.Context, req *SetTenantLangfuseCredentialsRequest) (*SetTenantLangfuseCredentialsResponse, error) {
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if s.credentialHandler == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "credential handler not configured")
+	}
+
+	payload := langfuseCredentialPayload{
+		PublicKey: req.PublicKey,
+		SecretKey: req.SecretKey,
+		Host:      req.Host,
+		ProjectID: req.ProjectId,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		s.logger.Error("failed to marshal langfuse credential payload", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to encode langfuse credentials: %v", err)
+	}
+
+	name := langfuseCredentialName(req.TenantId)
+
+	// Attempt update if credentials already exist; fall back to create.
+	existing, err := s.credentialHandler.GetByName(ctx, name)
+	if err == nil {
+		// Credential exists — update it.
+		apiKey := string(payloadJSON)
+		_, updateErr := s.credentialHandler.Update(ctx, CredentialUpdateRequest{
+			ID:     existing.ID,
+			APIKey: &apiKey,
+		})
+		if updateErr != nil {
+			s.logger.Error("failed to update langfuse credentials", "tenant_id", req.TenantId, "error", updateErr)
+			return nil, status_grpc.Errorf(codes.Internal, "failed to update langfuse credentials: %v", updateErr)
+		}
+	} else {
+		// Credential does not exist — create it.
+		_, createErr := s.credentialHandler.Create(ctx, CredentialCreateRequest{
+			Name:        name,
+			Type:        types.CredentialTypeLangfuseProject,
+			Provider:    "langfuse",
+			APIKey:      string(payloadJSON),
+			Description: fmt.Sprintf("Langfuse project credentials for tenant %s", req.TenantId),
+		})
+		if createErr != nil {
+			s.logger.Error("failed to create langfuse credentials", "tenant_id", req.TenantId, "error", createErr)
+			return nil, status_grpc.Errorf(codes.Internal, "failed to store langfuse credentials: %v", createErr)
+		}
+	}
+
+	s.logger.Info("langfuse credentials stored", "tenant_id", req.TenantId)
+	return &SetTenantLangfuseCredentialsResponse{}, nil
+}
+
+// DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
+func (s *DaemonServer) DeleteTenantLangfuseCredentials(ctx context.Context, req *DeleteTenantLangfuseCredentialsRequest) (*DeleteTenantLangfuseCredentialsResponse, error) {
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if s.credentialHandler == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "credential handler not configured")
+	}
+
+	name := langfuseCredentialName(req.TenantId)
+
+	existing, err := s.credentialHandler.GetByName(ctx, name)
+	if err != nil {
+		s.logger.Debug("langfuse credentials not found for deletion", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.NotFound, "langfuse credentials not found for tenant %q", req.TenantId)
+	}
+
+	if err := s.credentialHandler.Delete(ctx, existing.ID); err != nil {
+		s.logger.Error("failed to delete langfuse credentials", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to delete langfuse credentials: %v", err)
+	}
+
+	s.logger.Info("langfuse credentials deleted", "tenant_id", req.TenantId)
+	return &DeleteTenantLangfuseCredentialsResponse{}, nil
 }

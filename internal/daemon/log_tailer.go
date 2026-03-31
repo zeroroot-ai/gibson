@@ -234,11 +234,10 @@ func (t *LogTailer) Close() error {
 		}
 	}
 
-	// Cancel all subscriptions
+	// Cancel all subscriptions (channels are closed by handleSubscription's defer)
 	for _, subs := range t.subscribers {
 		for _, sub := range subs {
 			sub.cancel()
-			close(sub.Output)
 		}
 	}
 

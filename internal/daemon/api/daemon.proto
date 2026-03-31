@@ -155,6 +155,16 @@ service DaemonService {
   // This is used by the CLI to stop the daemon remotely.
   // Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+
+  // GetTenantLangfuseCredentials retrieves the Langfuse project credentials for a tenant.
+  // Returns NOT_FOUND if no credentials have been configured for the tenant.
+  rpc GetTenantLangfuseCredentials(GetTenantLangfuseCredentialsRequest) returns (GetTenantLangfuseCredentialsResponse);
+
+  // SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
+  rpc SetTenantLangfuseCredentials(SetTenantLangfuseCredentialsRequest) returns (SetTenantLangfuseCredentialsResponse);
+
+  // DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
+  rpc DeleteTenantLangfuseCredentials(DeleteTenantLangfuseCredentialsRequest) returns (DeleteTenantLangfuseCredentialsResponse);
 }
 
 // ConnectRequest initiates a client connection to the daemon.
@@ -341,6 +351,16 @@ message MissionInfo {
 
   // name is the human-readable mission name
   string name = 7;
+
+  // workflow_yaml is the original mission YAML configuration
+  // This is populated when the mission was created with inline YAML
+  string workflow_yaml = 8;
+
+  // description is the mission description
+  string description = 9;
+
+  // progress is the mission completion progress from 0.0 to 1.0
+  double progress = 10;
 }
 
 // ListAgentsRequest queries agent registry.
@@ -990,6 +1010,9 @@ message MissionRun {
 
   // previous_run_id is the ID of the previous run (if any)
   string previous_run_id = 7;
+
+  // trace_id is the OTel trace ID for Langfuse lookup
+  string trace_id = 8;
 }
 
 // GetMissionCheckpointsRequest queries checkpoints for a mission.
@@ -1943,3 +1966,54 @@ message ShutdownResponse {
   // message provides additional context about the shutdown
   string message = 2;
 }
+
+// GetTenantLangfuseCredentialsRequest requests Langfuse credentials for a tenant.
+message GetTenantLangfuseCredentialsRequest {
+  // tenant_id is the unique identifier of the tenant
+  string tenant_id = 1;
+}
+
+// GetTenantLangfuseCredentialsResponse returns the Langfuse project credentials.
+message GetTenantLangfuseCredentialsResponse {
+  // public_key is the Langfuse public key
+  string public_key = 1;
+
+  // secret_key is the Langfuse secret key
+  string secret_key = 2;
+
+  // host is the Langfuse host URL (e.g., "https://cloud.langfuse.com")
+  string host = 3;
+
+  // project_id is the Langfuse project identifier
+  string project_id = 4;
+}
+
+// SetTenantLangfuseCredentialsRequest stores Langfuse project credentials for a tenant.
+message SetTenantLangfuseCredentialsRequest {
+  // tenant_id is the unique identifier of the tenant
+  string tenant_id = 1;
+
+  // public_key is the Langfuse public key
+  string public_key = 2;
+
+  // secret_key is the Langfuse secret key
+  string secret_key = 3;
+
+  // host is the Langfuse host URL (e.g., "https://cloud.langfuse.com")
+  string host = 4;
+
+  // project_id is the Langfuse project identifier
+  string project_id = 5;
+}
+
+// SetTenantLangfuseCredentialsResponse confirms the credentials were stored.
+message SetTenantLangfuseCredentialsResponse {}
+
+// DeleteTenantLangfuseCredentialsRequest requests deletion of a tenant's Langfuse credentials.
+message DeleteTenantLangfuseCredentialsRequest {
+  // tenant_id is the unique identifier of the tenant
+  string tenant_id = 1;
+}
+
+// DeleteTenantLangfuseCredentialsResponse confirms the credentials were deleted.
+message DeleteTenantLangfuseCredentialsResponse {}

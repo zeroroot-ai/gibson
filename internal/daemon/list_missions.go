@@ -151,11 +151,14 @@ func convertMissionToData(m *mission.Mission) api.MissionData {
 	return api.MissionData{
 		ID:           m.ID.String(),
 		Name:         m.Name,
+		Description:  m.Description,
 		WorkflowPath: workflowPath,
+		WorkflowYAML: m.WorkflowJSON,
 		Status:       string(m.Status),
 		StartTime:    startTime,
 		EndTime:      endTime,
 		FindingCount: int32(m.FindingsCount),
+		Progress:     m.Progress,
 	}
 }
 

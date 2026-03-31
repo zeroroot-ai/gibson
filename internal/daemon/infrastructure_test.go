@@ -11,15 +11,11 @@ import (
 )
 
 func TestInfrastructureInitialization(t *testing.T) {
-	// Create temporary directory for test database
+	// Create temporary directory for test data
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create minimal test configuration using actual config types
 	cfg := &config.Config{
-		Database: config.DBConfig{
-			Path: dbPath,
-		},
 		Registry: config.RegistryConfig{
 			Type:      "embedded",
 			Namespace: "gibson-test",

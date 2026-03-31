@@ -415,6 +415,19 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		span.SetAttributes(attribute.String(observability.GibsonMissionName, active.mission.Name))
 	}
 
+	// Persist the OTel trace ID into mission metadata for Langfuse lookup
+	activeSpan := trace.SpanFromContext(ctx)
+	if activeSpan.SpanContext().HasTraceID() {
+		if active.mission.Metadata == nil {
+			active.mission.Metadata = make(map[string]any)
+		}
+		active.mission.Metadata["trace_id"] = activeSpan.SpanContext().TraceID().String()
+		m.logger.Debug("persisted trace ID to mission metadata",
+			"mission_id", missionID,
+			"trace_id", active.mission.Metadata["trace_id"],
+		)
+	}
+
 	// Set StartedAt timestamp now that execution is beginning
 	active.mission.StartedAt = mission.NewUnixTimePtrNow()
 
