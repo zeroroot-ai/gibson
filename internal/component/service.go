@@ -6,7 +6,7 @@ package component
 // tools, plugins) connect to. It delegates to ComponentRegistry for lifecycle
 // tracking and WorkQueue for pull-based work dispatch.
 //
-// Generated proto code location: github.com/zero-day-ai/gibson/api/gen/componentpb
+// Generated proto code location: github.com/zero-day-ai/sdk/api/gen/componentpb
 
 import (
 	"context"
@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	componentpb "github.com/zero-day-ai/gibson/api/gen/componentpb"
+	componentpb "github.com/zero-day-ai/sdk/api/gen/componentpb"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -139,14 +139,19 @@ type ComponentServiceServer struct {
 	// findingSubmitter persists findings from remote agents.
 	// May be nil; SubmitFinding logs and generates an ID when nil.
 	findingSubmitter FindingSubmitter
+
+	// pluginAccess manages tenant opt-in and encrypted configuration for plugins.
+	// May be nil; plugin access RPCs return codes.Unimplemented when nil.
+	pluginAccess PluginAccessStore
 }
 
 // NewComponentServiceServer constructs a ComponentServiceServer with the core
 // lifecycle dependencies. Both registry and queue must be non-nil.
 //
-// Harness proxy dependencies (llmCompleter, memStore, findingSubmitter) are
-// optional at this stage: pass nil to leave the corresponding RPCs returning
-// codes.Unimplemented until the subsystems are wired (tasks 5.3–5.5).
+// Harness proxy dependencies (llmCompleter, memStore, findingSubmitter,
+// pluginAccess) are optional at this stage: pass nil to leave the
+// corresponding RPCs returning codes.Unimplemented until the subsystems are
+// wired (tasks 5.3–5.5).
 func NewComponentServiceServer(
 	registry ComponentRegistry,
 	queue WorkQueue,
@@ -154,6 +159,7 @@ func NewComponentServiceServer(
 	llmCompleter LLMCompleter,
 	memStore memory.MemoryStore,
 	findingSubmitter FindingSubmitter,
+	pluginAccess PluginAccessStore,
 ) *ComponentServiceServer {
 	if registry == nil {
 		panic("component.NewComponentServiceServer: registry must not be nil")
@@ -171,6 +177,7 @@ func NewComponentServiceServer(
 		llmCompleter:     llmCompleter,
 		memory:           memStore,
 		findingSubmitter: findingSubmitter,
+		pluginAccess:     pluginAccess,
 	}
 }
 
@@ -246,6 +253,29 @@ func (s *ComponentServiceServer) RegisterComponent(
 		slog.String("version", req.Version),
 		slog.String("instance_id", instanceID),
 	)
+
+	// Auto-create access record for self-hosted plugins so they appear in tenant's inventory.
+	if req.Kind == "plugin" && tenant != "_system" && s.pluginAccess != nil {
+		if err := s.pluginAccess.EnableSelfHosted(ctx, tenant, req.Name); err != nil {
+			s.logger.WarnContext(ctx, "register component: failed to auto-create plugin access record",
+				slog.String("tenant", tenant),
+				slog.String("plugin", req.Name),
+				slog.String("error", err.Error()),
+			)
+			// Non-fatal: registration succeeds even if access record creation fails.
+		}
+	}
+
+	// Store plugin config schema if declared.
+	if req.Kind == "plugin" && req.ConfigSchemaJson != "" && s.pluginAccess != nil {
+		if err := s.pluginAccess.StoreConfigSchema(ctx, req.Name, req.ConfigSchemaJson); err != nil {
+			s.logger.WarnContext(ctx, "register component: failed to store plugin config schema",
+				slog.String("plugin", req.Name),
+				slog.String("error", err.Error()),
+			)
+			// Non-fatal: registration succeeds even if schema storage fails.
+		}
+	}
 
 	return &componentpb.RegisterComponentResponse{
 		InstanceId:          instanceID,
@@ -844,15 +874,43 @@ func (s *ComponentServiceServer) QueryPlugin(
 		return nil, status.Errorf(codes.NotFound, "plugin %q not available for tenant %q", req.PluginName, tenant)
 	}
 
+	workCtx := map[string]string{
+		"source_work_id": req.WorkId,
+		"caller_tenant":  tenant,
+		"method":         req.Method,
+	}
+
+	// Inject plugin_config for _system plugins so the remote worker has the
+	// tenant's decrypted credentials available in the work item context.
+	// Only injected for _system instances — tenant-scoped plugins own their
+	// own config and must never receive another tenant's credentials.
+	if instances[0].TenantID == "_system" && s.pluginAccess != nil {
+		pluginCfg, cfgErr := s.pluginAccess.GetDecryptedConfig(ctx, tenant, req.PluginName)
+		if cfgErr == nil {
+			cfgJSON, marshalErr := json.Marshal(pluginCfg)
+			if marshalErr == nil {
+				workCtx["plugin_config"] = string(cfgJSON)
+			} else {
+				s.logger.WarnContext(ctx, "query plugin: failed to marshal plugin config for work item context, proceeding without it",
+					slog.String("tenant", tenant),
+					slog.String("plugin_name", req.PluginName),
+					slog.String("error", marshalErr.Error()),
+				)
+			}
+		} else {
+			s.logger.WarnContext(ctx, "query plugin: failed to retrieve plugin config for work item context, proceeding without it",
+				slog.String("tenant", tenant),
+				slog.String("plugin_name", req.PluginName),
+				slog.String("error", cfgErr.Error()),
+			)
+		}
+	}
+
 	workItem := WorkItem{
 		WorkType:  "execute_proto",
 		Payload:   []byte(req.ParamsJson),
 		TimeoutMs: req.TimeoutMs,
-		Context: map[string]string{
-			"source_work_id": req.WorkId,
-			"caller_tenant":  tenant,
-			"method":         req.Method,
-		},
+		Context:   workCtx,
 	}
 
 	workID, err := s.queue.Enqueue(ctx, tenant, "plugin", req.PluginName, workItem)
@@ -1230,4 +1288,423 @@ func (s *ComponentServiceServer) MemorySearch(
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "unknown memory tier %q", req.Tier)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Plugin access RPCs
+//
+// These seven RPCs expose tenant-scoped plugin management: browsing the
+// catalog, enabling/disabling plugins, updating configuration, retrieving
+// masked config, testing connectivity, and listing tenant-owned records.
+//
+// All handlers follow the same guard pattern:
+//  1. Extract tenant from context; return Unauthenticated if absent.
+//  2. Return Unimplemented when pluginAccess is not wired.
+//  3. Delegate to the PluginAccessStore and map sentinel errors to the
+//     appropriate gRPC status codes.
+// ---------------------------------------------------------------------------
+
+// pluginAccessErrToStatus converts sentinel errors from PluginAccessStore to
+// the appropriate gRPC status codes.
+func pluginAccessErrToStatus(err error, pluginName string) error {
+	switch {
+	case errors.Is(err, ErrPluginNotEnabled):
+		return status.Errorf(codes.NotFound, "plugin %q is not enabled for this tenant; enable it first", pluginName)
+	case errors.Is(err, ErrPluginNotConfigured):
+		return status.Errorf(codes.FailedPrecondition, "plugin %q is enabled but has no configuration stored", pluginName)
+	default:
+		return status.Errorf(codes.Internal, "plugin access operation failed: %v", err)
+	}
+}
+
+// ListAvailablePlugins returns the full plugin catalog visible to the calling
+// tenant, with each entry annotated with the tenant's enablement status.
+func (s *ComponentServiceServer) ListAvailablePlugins(
+	ctx context.Context,
+	_ *componentpb.ListAvailablePluginsRequest,
+) (*componentpb.ListAvailablePluginsResponse, error) {
+	tenant := auth.TenantFromContext(ctx)
+	if tenant == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
+	}
+
+	if s.pluginAccess == nil {
+		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
+	}
+
+	entries, err := s.pluginAccess.ListAvailablePlugins(ctx, tenant)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "list available plugins: failed",
+			slog.String("tenant", tenant),
+			slog.String("error", err.Error()),
+		)
+		return nil, status.Errorf(codes.Internal, "failed to list available plugins: %v", err)
+	}
+
+	protos := make([]*componentpb.PluginCatalogEntryProto, 0, len(entries))
+	for _, e := range entries {
+		protos = append(protos, &componentpb.PluginCatalogEntryProto{
+			Name:             e.Name,
+			Version:          e.Version,
+			Description:      e.Description,
+			Methods:          e.Methods,
+			ConfigSchemaJson: e.ConfigSchema,
+			Enabled:          e.Enabled,
+			Configured:       e.Configured,
+			HealthStatus:     e.HealthStatus,
+			Source:           e.Source,
+			InstanceCount:    int32(e.InstanceCount),
+		})
+	}
+
+	s.logger.DebugContext(ctx, "list available plugins: completed",
+		slog.String("tenant", tenant),
+		slog.Int("count", len(protos)),
+	)
+
+	return &componentpb.ListAvailablePluginsResponse{Plugins: protos}, nil
+}
+
+// EnablePlugin activates a plugin for the calling tenant, optionally supplying
+// initial configuration as a JSON object.
+func (s *ComponentServiceServer) EnablePlugin(
+	ctx context.Context,
+	req *componentpb.EnablePluginRequest,
+) (*componentpb.EnablePluginResponse, error) {
+	tenant := auth.TenantFromContext(ctx)
+	if tenant == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
+	}
+
+	if s.pluginAccess == nil {
+		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
+	}
+
+	if req.PluginName == "" {
+		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
+	}
+
+	var cfg map[string]any
+	if req.ConfigJson != "" {
+		if err := json.Unmarshal([]byte(req.ConfigJson), &cfg); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "config_json is not valid JSON: %v", err)
+		}
+	}
+
+	if err := s.pluginAccess.Enable(ctx, tenant, req.PluginName, cfg, tenant); err != nil {
+		s.logger.ErrorContext(ctx, "enable plugin: failed",
+			slog.String("tenant", tenant),
+			slog.String("plugin_name", req.PluginName),
+			slog.String("error", err.Error()),
+		)
+		return nil, pluginAccessErrToStatus(err, req.PluginName)
+	}
+
+	s.logger.InfoContext(ctx, "enable plugin: plugin enabled",
+		slog.String("tenant", tenant),
+		slog.String("plugin_name", req.PluginName),
+	)
+
+	return &componentpb.EnablePluginResponse{
+		Success: true,
+		Message: fmt.Sprintf("plugin %q enabled for tenant %q", req.PluginName, tenant),
+	}, nil
+}
+
+// DisablePlugin deactivates a plugin for the calling tenant and removes its
+// stored configuration.
+func (s *ComponentServiceServer) DisablePlugin(
+	ctx context.Context,
+	req *componentpb.DisablePluginRequest,
+) (*componentpb.DisablePluginResponse, error) {
+	tenant := auth.TenantFromContext(ctx)
+	if tenant == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
+	}
+
+	if s.pluginAccess == nil {
+		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
+	}
+
+	if req.PluginName == "" {
+		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
+	}
+
+	if err := s.pluginAccess.Disable(ctx, tenant, req.PluginName); err != nil {
+		s.logger.ErrorContext(ctx, "disable plugin: failed",
+			slog.String("tenant", tenant),
+			slog.String("plugin_name", req.PluginName),
+			slog.String("error", err.Error()),
+		)
+		return nil, pluginAccessErrToStatus(err, req.PluginName)
+	}
+
+	s.logger.InfoContext(ctx, "disable plugin: plugin disabled",
+		slog.String("tenant", tenant),
+		slog.String("plugin_name", req.PluginName),
+	)
+
+	return &componentpb.DisablePluginResponse{
+		Success: true,
+		Message: fmt.Sprintf("plugin %q disabled for tenant %q", req.PluginName, tenant),
+	}, nil
+}
+
+// UpdatePluginConfig replaces the stored configuration for an already-enabled
+// plugin. The new config is supplied as a JSON object.
+func (s *ComponentServiceServer) UpdatePluginConfig(
+	ctx context.Context,
+	req *componentpb.UpdatePluginConfigRequest,
+) (*componentpb.UpdatePluginConfigResponse, error) {
+	tenant := auth.TenantFromContext(ctx)
+	if tenant == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
+	}
+
+	if s.pluginAccess == nil {
+		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
+	}
+
+	if req.PluginName == "" {
+		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
+	}
+	if req.ConfigJson == "" {
+		return nil, status.Error(codes.InvalidArgument, "config_json is required")
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(req.ConfigJson), &cfg); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "config_json is not valid JSON: %v", err)
+	}
+
+	if err := s.pluginAccess.UpdateConfig(ctx, tenant, req.PluginName, cfg, tenant); err != nil {
+		s.logger.ErrorContext(ctx, "update plugin config: failed",
+			slog.String("tenant", tenant),
+			slog.String("plugin_name", req.PluginName),
+			slog.String("error", err.Error()),
+		)
+		return nil, pluginAccessErrToStatus(err, req.PluginName)
+	}
+
+	s.logger.InfoContext(ctx, "update plugin config: config updated",
+		slog.String("tenant", tenant),
+		slog.String("plugin_name", req.PluginName),
+	)
+
+	return &componentpb.UpdatePluginConfigResponse{
+		Success: true,
+		Message: fmt.Sprintf("configuration updated for plugin %q", req.PluginName),
+	}, nil
+}
+
+// GetPluginConfig returns the masked configuration for an enabled plugin
+// together with its JSON Schema so callers can render a config form.
+func (s *ComponentServiceServer) GetPluginConfig(
+	ctx context.Context,
+	req *componentpb.GetPluginConfigRequest,
+) (*componentpb.GetPluginConfigResponse, error) {
+	tenant := auth.TenantFromContext(ctx)
+	if tenant == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
+	}
+
+	if s.pluginAccess == nil {
+		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
+	}
+
+	if req.PluginName == "" {
+		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
+	}
+
+	maskedCfg, err := s.pluginAccess.GetMaskedConfig(ctx, tenant, req.PluginName)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "get plugin config: failed",
+			slog.String("tenant", tenant),
+			slog.String("plugin_name", req.PluginName),
+			slog.String("error", err.Error()),
+		)
+		return nil, pluginAccessErrToStatus(err, req.PluginName)
+	}
+
+	cfgBytes, err := json.Marshal(maskedCfg)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to serialize masked config: %v", err)
+	}
+
+	// Include the schema so clients can render a config form without a second
+	// round-trip. Missing schema is not an error — it is returned as an empty
+	// string and the caller renders a generic key-value editor.
+	schema, err := s.pluginAccess.GetConfigSchema(ctx, req.PluginName)
+	if err != nil {
+		s.logger.WarnContext(ctx, "get plugin config: schema lookup failed; returning empty schema",
+			slog.String("tenant", tenant),
+			slog.String("plugin_name", req.PluginName),
+			slog.String("error", err.Error()),
+		)
+		schema = ""
+	}
+
+	s.logger.DebugContext(ctx, "get plugin config: config retrieved",
+		slog.String("tenant", tenant),
+		slog.String("plugin_name", req.PluginName),
+	)
+
+	return &componentpb.GetPluginConfigResponse{
+		ConfigJson:       string(cfgBytes),
+		ConfigSchemaJson: schema,
+	}, nil
+}
+
+// TestPluginConnection validates plugin credentials by dispatching a
+// health-check work item to the _system plugin and waiting for the result.
+//
+// The dispatch pattern mirrors QueryPlugin: the work item is enqueued on the
+// _system tenant's plugin work stream with work_type "health_check" so the
+// plugin worker can run a lightweight connectivity probe using the supplied
+// config without persisting it.
+func (s *ComponentServiceServer) TestPluginConnection(
+	ctx context.Context,
+	req *componentpb.TestPluginConnectionRequest,
+) (*componentpb.TestPluginConnectionResponse, error) {
+	tenant := auth.TenantFromContext(ctx)
+	if tenant == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
+	}
+
+	if s.pluginAccess == nil {
+		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
+	}
+
+	if req.PluginName == "" {
+		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
+	}
+
+	// Discover the plugin in the _system namespace; the health probe must reach
+	// the actual plugin worker regardless of tenant-level enablement.
+	instances, err := s.registry.Discover(ctx, "_system", "plugin", req.PluginName)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "test plugin connection: discovery failed",
+			slog.String("tenant", tenant),
+			slog.String("plugin_name", req.PluginName),
+			slog.String("error", err.Error()),
+		)
+		return nil, status.Errorf(codes.Internal, "plugin discovery failed: %v", err)
+	}
+	if len(instances) == 0 {
+		s.logger.WarnContext(ctx, "test plugin connection: plugin not found in _system",
+			slog.String("tenant", tenant),
+			slog.String("plugin_name", req.PluginName),
+		)
+		return nil, status.Errorf(codes.NotFound, "plugin %q is not available", req.PluginName)
+	}
+
+	workItem := WorkItem{
+		WorkType: "health_check",
+		Payload:  []byte(req.ConfigJson),
+		Context: map[string]string{
+			"caller_tenant": tenant,
+		},
+	}
+
+	workID, err := s.queue.Enqueue(ctx, "_system", "plugin", req.PluginName, workItem)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "test plugin connection: enqueue failed",
+			slog.String("tenant", tenant),
+			slog.String("plugin_name", req.PluginName),
+			slog.String("error", err.Error()),
+		)
+		return nil, status.Errorf(codes.Internal, "failed to enqueue health check: %v", err)
+	}
+
+	// Use a conservative timeout for connectivity probes.
+	const healthCheckTimeout = 30 * time.Second
+
+	s.logger.DebugContext(ctx, "test plugin connection: waiting for result",
+		slog.String("tenant", tenant),
+		slog.String("plugin_name", req.PluginName),
+		slog.String("work_id", workID),
+	)
+
+	start := time.Now()
+	result, err := s.queue.WaitForResult(ctx, workID, healthCheckTimeout)
+	latencyMs := time.Since(start).Milliseconds()
+	if err != nil {
+		s.logger.ErrorContext(ctx, "test plugin connection: wait for result failed",
+			slog.String("tenant", tenant),
+			slog.String("plugin_name", req.PluginName),
+			slog.String("work_id", workID),
+			slog.String("error", err.Error()),
+		)
+		return &componentpb.TestPluginConnectionResponse{
+			Success:   false,
+			Message:   fmt.Sprintf("connection test timed out or failed: %v", err),
+			LatencyMs: latencyMs,
+		}, nil
+	}
+
+	resp := &componentpb.TestPluginConnectionResponse{
+		LatencyMs: latencyMs,
+	}
+	if result.Error != nil && result.Error.Code != "" {
+		resp.Success = false
+		resp.Message = result.Error.Message
+	} else {
+		resp.Success = true
+		resp.Message = "connection successful"
+	}
+
+	s.logger.InfoContext(ctx, "test plugin connection: probe completed",
+		slog.String("tenant", tenant),
+		slog.String("plugin_name", req.PluginName),
+		slog.String("work_id", workID),
+		slog.Bool("success", resp.Success),
+		slog.Int64("latency_ms", latencyMs),
+	)
+
+	return resp, nil
+}
+
+// ListTenantPlugins returns all plugin access records belonging to the calling
+// tenant, i.e. every plugin the tenant has explicitly enabled.
+func (s *ComponentServiceServer) ListTenantPlugins(
+	ctx context.Context,
+	_ *componentpb.ListTenantPluginsRequest,
+) (*componentpb.ListTenantPluginsResponse, error) {
+	tenant := auth.TenantFromContext(ctx)
+	if tenant == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
+	}
+
+	if s.pluginAccess == nil {
+		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
+	}
+
+	records, err := s.pluginAccess.ListTenantPlugins(ctx, tenant)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "list tenant plugins: failed",
+			slog.String("tenant", tenant),
+			slog.String("error", err.Error()),
+		)
+		return nil, status.Errorf(codes.Internal, "failed to list tenant plugins: %v", err)
+	}
+
+	protos := make([]*componentpb.PluginAccessProto, 0, len(records))
+	for _, r := range records {
+		protos = append(protos, &componentpb.PluginAccessProto{
+			TenantId:     r.TenantID,
+			PluginName:   r.PluginName,
+			Enabled:      r.Enabled,
+			Source:       r.Source,
+			ConfiguredAt: r.ConfiguredAt,
+			ConfiguredBy: r.ConfiguredBy,
+			HasConfig:    r.HasConfig,
+		})
+	}
+
+	s.logger.DebugContext(ctx, "list tenant plugins: completed",
+		slog.String("tenant", tenant),
+		slog.Int("count", len(protos)),
+	)
+
+	return &componentpb.ListTenantPluginsResponse{Plugins: protos}, nil
 }

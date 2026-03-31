@@ -80,6 +80,7 @@ func init() {
 	Register("gibson plugin status", Client)
 	Register("gibson plugin logs", Client)
 	Register("gibson plugin query", Client)
+	Register("gibson plugin init", Standalone)
 
 	// Finding commands
 	Register("gibson finding", Client)

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	componentpb "github.com/zero-day-ai/gibson/api/gen/componentpb"
+	componentpb "github.com/zero-day-ai/sdk/api/gen/componentpb"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/auth"
@@ -98,9 +98,10 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 				compRegistry,
 				compQueue,
 				d.logger.Slog(),
-				nil, // llmCompleter: wired in task 5.4
-				nil, // memStore:     wired in task 5.4
-				nil, // findingSubmitter: wired in task 5.5
+				nil,                  // llmCompleter: wired in task 5.4
+				nil,                  // memStore:     wired in task 5.4
+				nil,                  // findingSubmitter: wired in task 5.5
+				d.pluginAccessStore,  // nil when no KeyProvider configured
 			)
 			componentpb.RegisterComponentServiceServer(srv, compSvc)
 			d.logger.Info(ctx, "ComponentService initialized",

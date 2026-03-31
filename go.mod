@@ -34,7 +34,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zero-day-ai/sdk v0.56.0
+	github.com/zero-day-ai/sdk v0.58.0
 	github.com/zero-day-ai/tools/discovery/httpx v0.0.0-20260331020518-42d30066639c
 	github.com/zero-day-ai/tools/discovery/nmap v0.0.0-20260331020518-42d30066639c
 	github.com/zero-day-ai/tools/discovery/nuclei v0.0.0-20260331020518-42d30066639c
