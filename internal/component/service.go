@@ -7,280 +7,25 @@ package component
 // tracking and WorkQueue for pull-based work dispatch.
 //
 // Generated proto code location: github.com/zero-day-ai/gibson/api/gen/componentpb
-// TODO: When proto codegen runs, uncomment the componentpb import and the
-//       embedded UnimplementedComponentServiceServer field, and replace all
-//       placeholder request/response types with their generated counterparts.
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	componentpb "github.com/zero-day-ai/gibson/api/gen/componentpb"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
-
-// ---------------------------------------------------------------------------
-// Placeholder proto types
-//
-// These mirror the message definitions in api/proto/component.proto exactly.
-// Replace each type with the corresponding generated componentpb type once
-// protoc has been run and core/gibson/api/gen/componentpb/ exists.
-// ---------------------------------------------------------------------------
-
-// TODO: replace with componentpb.RegisterComponentRequest
-type RegisterComponentRequest struct {
-	Kind                string
-	Name                string
-	Version             string
-	Metadata            map[string]string
-	Capabilities        []string
-	Methods             []string
-	InputMessageType    string
-	OutputMessageType   string
-	FileDescriptorSet   []byte
-}
-
-// TODO: replace with componentpb.RegisterComponentResponse
-type RegisterComponentResponse struct {
-	InstanceID           string
-	HeartbeatIntervalMs  int32
-	PollIntervalMs       int32
-	PollTimeoutMs        int32
-	Config               map[string]string
-}
-
-// TODO: replace with componentpb.HeartbeatRequest
-type HeartbeatRequest struct {
-	InstanceID    string
-	HealthStatus  string
-	HealthMessage string
-}
-
-// TODO: replace with componentpb.HeartbeatResponse
-type HeartbeatResponse struct {
-	Registered    bool
-	ConfigUpdates map[string]string
-}
-
-// TODO: replace with componentpb.PollWorkRequest
-type PollWorkRequest struct {
-	InstanceID string
-	TimeoutMs  int32
-}
-
-// TODO: replace with componentpb.PollWorkResponse
-type PollWorkResponse struct {
-	WorkID    string
-	WorkType  string
-	Payload   []byte
-	Context   map[string]string
-	TimeoutMs int64
-}
-
-// TODO: replace with componentpb.SubmitResultRequest
-type SubmitResultRequest struct {
-	WorkID string
-	Result []byte
-	Error  *SubmitResultError
-}
-
-// SubmitResultError mirrors componentpb.ComponentError for the SubmitResult RPC.
-// TODO: replace with componentpb.ComponentError
-type SubmitResultError struct {
-	Code      string
-	Message   string
-	Retryable bool
-}
-
-// TODO: replace with componentpb.SubmitResultResponse
-type SubmitResultResponse struct{}
-
-// ---------------------------------------------------------------------------
-// Harness proxy placeholder proto types
-//
-// These types mirror the message definitions for the harness proxy RPCs in
-// api/proto/component.proto. Replace each with the generated componentpb type
-// once protoc has been run.
-// ---------------------------------------------------------------------------
-
-// MemoryTier identifies which of the three memory tiers an operation targets.
-// TODO: replace with componentpb.MemoryTier enum
-type MemoryTier string
-
-const (
-	// MemoryTierWorking targets ephemeral, in-process working memory.
-	MemoryTierWorking MemoryTier = "working"
-	// MemoryTierMission targets Redis-backed mission-scoped persistent storage.
-	MemoryTierMission MemoryTier = "mission"
-	// MemoryTierLongTerm targets the vector-backed long-term semantic memory.
-	MemoryTierLongTerm MemoryTier = "longterm"
-)
-
-// TODO: replace with componentpb.CompleteRequest
-type CompleteRequest struct {
-	// WorkId is the ID of the work item on whose behalf the completion is requested.
-	// Used to look up the associated mission context for LLM routing.
-	WorkId string
-	// Slot selects the named model slot (e.g., "primary", "fast", "reasoning").
-	Slot string
-	// MessagesJson is the JSON-encoded []llm.Message slice to send to the LLM.
-	MessagesJson string
-	// MaxTokens overrides the slot default when non-zero.
-	MaxTokens int32
-	// Temperature overrides the slot default when set to a non-negative value.
-	Temperature float32
-}
-
-// TODO: replace with componentpb.CompleteResponse
-type CompleteResponse struct {
-	// Content is the assistant's response text.
-	Content string
-	// FinishReason is the raw finish reason string from the provider.
-	FinishReason string
-	// PromptTokens is the number of tokens consumed by the prompt.
-	PromptTokens int32
-	// CompletionTokens is the number of tokens generated.
-	CompletionTokens int32
-	// TotalTokens is PromptTokens + CompletionTokens.
-	TotalTokens int32
-	// ModelUsed is the resolved model identifier that served this request.
-	ModelUsed string
-}
-
-// CompleteStreamResponse carries a single chunk of a streaming completion.
-// TODO: replace with componentpb.CompleteStreamResponse
-type CompleteStreamResponse struct {
-	// Delta is the incremental content for this chunk.
-	Delta string
-	// FinishReason is non-empty only on the final chunk.
-	FinishReason string
-	// Error is non-nil when the stream terminated abnormally.
-	Error string
-}
-
-// TODO: replace with componentpb.CallToolRequest
-type CallToolRequest struct {
-	// WorkId is the calling work item, used for audit linkage.
-	WorkId string
-	// ToolName is the registered name of the tool component.
-	ToolName string
-	// InputJson is the JSON-encoded tool input (matches the tool's declared proto input type).
-	InputJson string
-	// TimeoutMs is the maximum milliseconds to wait for a result; 0 means 5 minutes.
-	TimeoutMs int64
-}
-
-// TODO: replace with componentpb.CallToolResponse
-type CallToolResponse struct {
-	// OutputJson is the JSON-encoded tool output.
-	OutputJson string
-	// Error is non-empty when the tool returned a structured error.
-	Error string
-}
-
-// TODO: replace with componentpb.QueryPluginRequest
-type QueryPluginRequest struct {
-	// WorkId is the calling work item, used for audit linkage.
-	WorkId string
-	// PluginName is the registered name of the plugin component.
-	PluginName string
-	// InputJson is the JSON-encoded plugin query input.
-	InputJson string
-	// TimeoutMs is the maximum milliseconds to wait for a result; 0 means 5 minutes.
-	TimeoutMs int64
-}
-
-// TODO: replace with componentpb.QueryPluginResponse
-type QueryPluginResponse struct {
-	// OutputJson is the JSON-encoded plugin query output.
-	OutputJson string
-	// Error is non-empty when the plugin returned a structured error.
-	Error string
-}
-
-// TODO: replace with componentpb.SubmitFindingRequest
-type SubmitFindingRequest struct {
-	// WorkId is the work item that produced this finding.
-	WorkId string
-	// FindingJson is the JSON-encoded finding payload.
-	// This must conform to the agent.Finding schema until proto types are generated.
-	FindingJson string
-	// Severity is a string representation (e.g., "critical", "high", "medium", "low", "info").
-	Severity string
-	// Title is a short human-readable description of the finding.
-	Title string
-}
-
-// TODO: replace with componentpb.SubmitFindingResponse
-type SubmitFindingResponse struct {
-	// FindingId is the generated unique identifier assigned to the stored finding.
-	FindingId string
-}
-
-// TODO: replace with componentpb.MemoryGetRequest
-type MemoryGetRequest struct {
-	// Tier selects the memory tier to read from.
-	Tier MemoryTier
-	// Key is the memory key to retrieve.
-	Key string
-}
-
-// TODO: replace with componentpb.MemoryGetResponse
-type MemoryGetResponse struct {
-	// ValueJson is the JSON-encoded stored value, or empty string if not found.
-	ValueJson string
-	// Found is false when the key does not exist in the requested tier.
-	Found bool
-}
-
-// TODO: replace with componentpb.MemorySetRequest
-type MemorySetRequest struct {
-	// Tier selects the memory tier to write to.
-	Tier MemoryTier
-	// Key is the memory key to set.
-	Key string
-	// ValueJson is the JSON-encoded value to store.
-	ValueJson string
-	// MetadataJson is an optional JSON-encoded map[string]any of metadata.
-	MetadataJson string
-}
-
-// TODO: replace with componentpb.MemorySetResponse
-type MemorySetResponse struct{}
-
-// TODO: replace with componentpb.MemorySearchRequest
-type MemorySearchRequest struct {
-	// Tier selects the memory tier to search (mission supports FTS; longterm supports vector search).
-	Tier MemoryTier
-	// Query is the search query string.
-	Query string
-	// TopK is the maximum number of results to return.
-	TopK int32
-}
-
-// MemorySearchResult is a single result from a memory search operation.
-// TODO: replace with componentpb.MemorySearchResult
-type MemorySearchResult struct {
-	// Key is the memory key for this result.
-	Key string
-	// ValueJson is the JSON-encoded stored value.
-	ValueJson string
-	// Score is the relevance score (0–1 for vector search, BM25 score for FTS).
-	Score float32
-}
-
-// TODO: replace with componentpb.MemorySearchResponse
-type MemorySearchResponse struct {
-	Results []MemorySearchResult
-}
 
 // ---------------------------------------------------------------------------
 // Harness proxy dependency interfaces
@@ -319,6 +64,18 @@ type FindingSubmitter interface {
 	// Submit stores the finding and returns a generated finding_id.
 	Submit(ctx context.Context, tenant, workID, findingJSON, severity, title string) (findingID string, err error)
 }
+
+// ---------------------------------------------------------------------------
+// Local memory tier string constants
+//
+// These match the tier strings used by the generated MemoryRequest proto type.
+// ---------------------------------------------------------------------------
+
+const (
+	memTierWorking  = "working"
+	memTierMission  = "mission"
+	memTierLongTerm = "long_term"
+)
 
 // ---------------------------------------------------------------------------
 // Connection parameter defaults
@@ -362,16 +119,9 @@ const (
 // All operations are tenant-scoped: the tenant is extracted from the context
 // via auth.TenantFromContext and forwarded to both the registry and queue so
 // that data from different tenants is never commingled.
-//
-// TODO: embed componentpb.UnimplementedComponentServiceServer once generated
-// code exists so that newly added RPCs in the proto return UNIMPLEMENTED
-// rather than panicking:
-//
-//	type ComponentServiceServer struct {
-//	    componentpb.UnimplementedComponentServiceServer
-//	    ...
-//	}
 type ComponentServiceServer struct {
+	componentpb.UnimplementedComponentServiceServer
+
 	registry ComponentRegistry
 	queue    WorkQueue
 	logger   *slog.Logger
@@ -438,8 +188,8 @@ func NewComponentServiceServer(
 //  4. Return the instance ID and the recommended connection parameters.
 func (s *ComponentServiceServer) RegisterComponent(
 	ctx context.Context,
-	req *RegisterComponentRequest,
-) (*RegisterComponentResponse, error) {
+	req *componentpb.RegisterComponentRequest,
+) (*componentpb.RegisterComponentResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -497,8 +247,8 @@ func (s *ComponentServiceServer) RegisterComponent(
 		slog.String("instance_id", instanceID),
 	)
 
-	return &RegisterComponentResponse{
-		InstanceID:          instanceID,
+	return &componentpb.RegisterComponentResponse{
+		InstanceId:          instanceID,
 		HeartbeatIntervalMs: defaultHeartbeatIntervalMs,
 		PollIntervalMs:      defaultPollIntervalMs,
 		PollTimeoutMs:       defaultPollTimeoutMs,
@@ -526,14 +276,14 @@ func (s *ComponentServiceServer) RegisterComponent(
 // that tells the client to re-register rather than treating it as a fault.
 func (s *ComponentServiceServer) Heartbeat(
 	ctx context.Context,
-	req *HeartbeatRequest,
-) (*HeartbeatResponse, error) {
+	req *componentpb.HeartbeatRequest,
+) (*componentpb.HeartbeatResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if req.InstanceID == "" {
+	if req.InstanceId == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id is required")
 	}
 
@@ -544,7 +294,7 @@ func (s *ComponentServiceServer) Heartbeat(
 	if err != nil {
 		s.logger.ErrorContext(ctx, "heartbeat: failed to list tenant components",
 			slog.String("tenant", tenant),
-			slog.String("instance_id", req.InstanceID),
+			slog.String("instance_id", req.InstanceId),
 			slog.String("error", err.Error()),
 		)
 		return nil, status.Errorf(codes.Internal, "failed to lookup component instance: %v", err)
@@ -552,7 +302,7 @@ func (s *ComponentServiceServer) Heartbeat(
 
 	var target *ComponentInfo
 	for i := range components {
-		if components[i].InstanceID == req.InstanceID {
+		if components[i].InstanceID == req.InstanceId {
 			target = &components[i]
 			break
 		}
@@ -562,26 +312,26 @@ func (s *ComponentServiceServer) Heartbeat(
 		// Instance is not registered — caller must re-register.
 		s.logger.InfoContext(ctx, "heartbeat: instance not found, signalling re-register",
 			slog.String("tenant", tenant),
-			slog.String("instance_id", req.InstanceID),
+			slog.String("instance_id", req.InstanceId),
 		)
-		return &HeartbeatResponse{Registered: false}, nil
+		return &componentpb.HeartbeatResponse{Registered: false}, nil
 	}
 
-	err = s.registry.RefreshTTL(ctx, tenant, target.Kind, target.Name, req.InstanceID)
+	err = s.registry.RefreshTTL(ctx, tenant, target.Kind, target.Name, req.InstanceId)
 	if err != nil {
 		if errors.Is(err, ErrComponentNotFound) {
 			// Key expired between the Discover scan and the RefreshTTL call.
 			s.logger.InfoContext(ctx, "heartbeat: instance expired between scan and refresh",
 				slog.String("tenant", tenant),
-				slog.String("instance_id", req.InstanceID),
+				slog.String("instance_id", req.InstanceId),
 			)
-			return &HeartbeatResponse{Registered: false}, nil
+			return &componentpb.HeartbeatResponse{Registered: false}, nil
 		}
 		s.logger.ErrorContext(ctx, "heartbeat: failed to refresh TTL",
 			slog.String("tenant", tenant),
 			slog.String("kind", target.Kind),
 			slog.String("name", target.Name),
-			slog.String("instance_id", req.InstanceID),
+			slog.String("instance_id", req.InstanceId),
 			slog.String("error", err.Error()),
 		)
 		return nil, status.Errorf(codes.Internal, "failed to refresh component TTL: %v", err)
@@ -591,11 +341,11 @@ func (s *ComponentServiceServer) Heartbeat(
 		slog.String("tenant", tenant),
 		slog.String("kind", target.Kind),
 		slog.String("name", target.Name),
-		slog.String("instance_id", req.InstanceID),
+		slog.String("instance_id", req.InstanceId),
 		slog.String("health_status", req.HealthStatus),
 	)
 
-	return &HeartbeatResponse{
+	return &componentpb.HeartbeatResponse{
 		Registered:    true,
 		ConfigUpdates: map[string]string{},
 	}, nil
@@ -622,14 +372,14 @@ func (s *ComponentServiceServer) Heartbeat(
 // the recommended poll_interval_ms.
 func (s *ComponentServiceServer) PollWork(
 	ctx context.Context,
-	req *PollWorkRequest,
-) (*PollWorkResponse, error) {
+	req *componentpb.PollWorkRequest,
+) (*componentpb.PollWorkResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if req.InstanceID == "" {
+	if req.InstanceId == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id is required")
 	}
 
@@ -638,7 +388,7 @@ func (s *ComponentServiceServer) PollWork(
 	if err != nil {
 		s.logger.ErrorContext(ctx, "poll work: failed to list tenant components",
 			slog.String("tenant", tenant),
-			slog.String("instance_id", req.InstanceID),
+			slog.String("instance_id", req.InstanceId),
 			slog.String("error", err.Error()),
 		)
 		return nil, status.Errorf(codes.Internal, "failed to lookup component instance: %v", err)
@@ -646,7 +396,7 @@ func (s *ComponentServiceServer) PollWork(
 
 	var target *ComponentInfo
 	for i := range components {
-		if components[i].InstanceID == req.InstanceID {
+		if components[i].InstanceID == req.InstanceId {
 			target = &components[i]
 			break
 		}
@@ -655,7 +405,7 @@ func (s *ComponentServiceServer) PollWork(
 	if target == nil {
 		// Component is not registered; tell the caller to re-register.
 		return nil, status.Errorf(codes.NotFound,
-			"component instance %q not found; re-register before polling", req.InstanceID)
+			"component instance %q not found; re-register before polling", req.InstanceId)
 	}
 
 	// Clamp the requested block timeout.
@@ -668,7 +418,7 @@ func (s *ComponentServiceServer) PollWork(
 	}
 	blockTimeout := time.Duration(timeoutMs) * time.Millisecond
 
-	item, err := s.queue.Claim(ctx, tenant, target.Kind, target.Name, req.InstanceID, blockTimeout)
+	item, err := s.queue.Claim(ctx, tenant, target.Kind, target.Name, req.InstanceId, blockTimeout)
 	if err != nil {
 		// Distinguish context cancellation from genuine queue errors.
 		if ctx.Err() != nil {
@@ -678,7 +428,7 @@ func (s *ComponentServiceServer) PollWork(
 			slog.String("tenant", tenant),
 			slog.String("kind", target.Kind),
 			slog.String("name", target.Name),
-			slog.String("instance_id", req.InstanceID),
+			slog.String("instance_id", req.InstanceId),
 			slog.String("error", err.Error()),
 		)
 		return nil, status.Errorf(codes.Internal, "failed to claim work item: %v", err)
@@ -687,20 +437,20 @@ func (s *ComponentServiceServer) PollWork(
 	if item == nil {
 		// Timeout elapsed with no work available — empty response is the
 		// normal signal for the component to loop.
-		return &PollWorkResponse{}, nil
+		return &componentpb.PollWorkResponse{}, nil
 	}
 
 	s.logger.InfoContext(ctx, "poll work: dispatched work item",
 		slog.String("tenant", tenant),
 		slog.String("kind", target.Kind),
 		slog.String("name", target.Name),
-		slog.String("instance_id", req.InstanceID),
+		slog.String("instance_id", req.InstanceId),
 		slog.String("work_id", item.WorkID),
 		slog.String("work_type", item.WorkType),
 	)
 
-	return &PollWorkResponse{
-		WorkID:    item.WorkID,
+	return &componentpb.PollWorkResponse{
+		WorkId:    item.WorkID,
 		WorkType:  item.WorkType,
 		Payload:   item.Payload,
 		Context:   item.Context,
@@ -724,19 +474,19 @@ func (s *ComponentServiceServer) PollWork(
 //  4. Return an empty response.
 func (s *ComponentServiceServer) SubmitResult(
 	ctx context.Context,
-	req *SubmitResultRequest,
-) (*SubmitResultResponse, error) {
+	req *componentpb.SubmitResultRequest,
+) (*componentpb.SubmitResultResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if req.WorkID == "" {
+	if req.WorkId == "" {
 		return nil, status.Error(codes.InvalidArgument, "work_id is required")
 	}
 
 	result := WorkResult{
-		WorkID: req.WorkID,
+		WorkID: req.WorkId,
 		Result: req.Result,
 	}
 
@@ -748,22 +498,22 @@ func (s *ComponentServiceServer) SubmitResult(
 		}
 	}
 
-	if err := s.queue.DeliverResult(ctx, req.WorkID, result); err != nil {
+	if err := s.queue.DeliverResult(ctx, req.WorkId, result); err != nil {
 		s.logger.ErrorContext(ctx, "submit result: deliver failed",
 			slog.String("tenant", tenant),
-			slog.String("work_id", req.WorkID),
+			slog.String("work_id", req.WorkId),
 			slog.String("error", err.Error()),
 		)
-		return nil, status.Errorf(codes.Internal, "failed to deliver result for work %q: %v", req.WorkID, err)
+		return nil, status.Errorf(codes.Internal, "failed to deliver result for work %q: %v", req.WorkId, err)
 	}
 
 	s.logger.InfoContext(ctx, "submit result: result delivered",
 		slog.String("tenant", tenant),
-		slog.String("work_id", req.WorkID),
+		slog.String("work_id", req.WorkId),
 		slog.Bool("has_error", result.Error != nil),
 	)
 
-	return &SubmitResultResponse{}, nil
+	return &componentpb.SubmitResultResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -783,18 +533,19 @@ func (s *ComponentServiceServer) SubmitResult(
 //
 // Flow:
 //  1. Extract tenant; reject unauthenticated callers.
-//  2. Validate required fields (slot, messages_json).
-//  3. Delegate to llmCompleter.Complete which resolves the slot to a provider
+//  2. Validate required fields (slot, messages).
+//  3. Marshal req.Messages to JSON for the LLMCompleter interface.
+//  4. Delegate to llmCompleter.Complete which resolves the slot to a provider
 //     and model, forwards the messages, and returns usage metrics.
-//  4. Return the assistant content and token usage to the caller.
+//  5. Return the assistant content and token usage to the caller.
 //
 // TODO (task 5.3): look up the work item's mission context so that slot
 // resolution can use per-mission model configuration rather than tenant-level
 // defaults.
 func (s *ComponentServiceServer) Complete(
 	ctx context.Context,
-	req *CompleteRequest,
-) (*CompleteResponse, error) {
+	req *componentpb.CompleteRequest,
+) (*componentpb.CompleteResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -807,8 +558,13 @@ func (s *ComponentServiceServer) Complete(
 	if req.Slot == "" {
 		return nil, status.Error(codes.InvalidArgument, "slot is required")
 	}
-	if req.MessagesJson == "" {
-		return nil, status.Error(codes.InvalidArgument, "messages_json is required")
+	if len(req.Messages) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "messages is required")
+	}
+
+	messagesJSON, err := json.Marshal(req.Messages)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to marshal messages: %v", err)
 	}
 
 	s.logger.DebugContext(ctx, "complete: routing LLM request",
@@ -826,9 +582,9 @@ func (s *ComponentServiceServer) Complete(
 		tenant,
 		missionID,
 		req.Slot,
-		req.MessagesJson,
-		req.MaxTokens,
-		req.Temperature,
+		string(messagesJSON),
+		0,
+		0,
 	)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "complete: LLM completion failed",
@@ -849,32 +605,33 @@ func (s *ComponentServiceServer) Complete(
 		slog.Int("completion_tokens", int(completionTokens)),
 	)
 
-	return &CompleteResponse{
-		Content:          content,
-		FinishReason:     finishReason,
-		ModelUsed:        modelUsed,
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
-		TotalTokens:      promptTokens + completionTokens,
+	_ = finishReason // captured in response via Done on stream; not surfaced in unary response
+
+	return &componentpb.CompleteResponse{
+		Response: &componentpb.LLMMessage{
+			Role:    "assistant",
+			Content: content,
+		},
+		Usage: &componentpb.TokenUsage{
+			InputTokens:  promptTokens,
+			OutputTokens: completionTokens,
+		},
 	}, nil
 }
 
 // CompleteStream is the server-streaming variant of Complete. It invokes the
 // LLM and sends incremental content deltas to the client as they arrive.
 //
-// The final chunk carries a non-empty FinishReason and zero Delta to signal
-// stream termination. On error mid-stream, a chunk with a non-empty Error
-// field is sent before the stream closes.
+// The final chunk carries Done=true to signal stream termination. On error
+// mid-stream, the gRPC error status is returned after a best-effort final chunk.
 //
 // TODO (task 5.3): same mission-context lookup as Complete.
-// TODO: When proto codegen runs, replace the send function signature with the
-//
-//	generated grpc.ServerStream.Send method.
 func (s *ComponentServiceServer) CompleteStream(
-	ctx context.Context,
-	req *CompleteRequest,
-	send func(*CompleteStreamResponse) error,
+	req *componentpb.CompleteRequest,
+	stream grpc.ServerStreamingServer[componentpb.CompleteStreamChunk],
 ) error {
+	ctx := stream.Context()
+
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -887,8 +644,13 @@ func (s *ComponentServiceServer) CompleteStream(
 	if req.Slot == "" {
 		return status.Error(codes.InvalidArgument, "slot is required")
 	}
-	if req.MessagesJson == "" {
-		return status.Error(codes.InvalidArgument, "messages_json is required")
+	if len(req.Messages) == 0 {
+		return status.Error(codes.InvalidArgument, "messages is required")
+	}
+
+	messagesJSON, err := json.Marshal(req.Messages)
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "failed to marshal messages: %v", err)
 	}
 
 	s.logger.DebugContext(ctx, "complete stream: starting streaming LLM request",
@@ -900,18 +662,19 @@ func (s *ComponentServiceServer) CompleteStream(
 	// TODO (task 5.3): resolve mission ID from work item context.
 	missionID := ""
 
-	err := s.llmCompleter.Stream(
+	err = s.llmCompleter.Stream(
 		ctx,
 		tenant,
 		missionID,
 		req.Slot,
-		req.MessagesJson,
-		req.MaxTokens,
-		req.Temperature,
+		string(messagesJSON),
+		0,
+		0,
 		func(delta, finishReason string) error {
-			return send(&CompleteStreamResponse{
-				Delta:        delta,
-				FinishReason: finishReason,
+			done := finishReason != ""
+			return stream.Send(&componentpb.CompleteStreamChunk{
+				Content: delta,
+				Done:    done,
 			})
 		},
 	)
@@ -922,10 +685,10 @@ func (s *ComponentServiceServer) CompleteStream(
 			slog.String("slot", req.Slot),
 			slog.String("error", err.Error()),
 		)
-		// Best-effort: send an error chunk before returning the gRPC error so
+		// Best-effort: send a done chunk before returning the gRPC error so
 		// that clients that do not inspect the trailing status still see the
-		// failure reason.
-		_ = send(&CompleteStreamResponse{Error: err.Error()})
+		// stream terminated.
+		_ = stream.Send(&componentpb.CompleteStreamChunk{Done: true})
 		return status.Errorf(codes.Internal, "LLM streaming failed: %v", err)
 	}
 
@@ -948,8 +711,8 @@ func (s *ComponentServiceServer) CompleteStream(
 // work queue for now, keeping the flow uniform and observable.
 func (s *ComponentServiceServer) CallTool(
 	ctx context.Context,
-	req *CallToolRequest,
-) (*CallToolResponse, error) {
+	req *componentpb.CallToolRequest,
+) (*componentpb.CallToolResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -1024,16 +787,19 @@ func (s *ComponentServiceServer) CallTool(
 		return nil, status.Errorf(codes.DeadlineExceeded, "tool execution timed out or failed: %v", err)
 	}
 
-	resp := &CallToolResponse{OutputJson: string(result.Result)}
+	resp := &componentpb.CallToolResponse{OutputJson: string(result.Result)}
 	if result.Error != nil && result.Error.Code != "" {
-		resp.Error = fmt.Sprintf("[%s] %s", result.Error.Code, result.Error.Message)
+		resp.Error = &componentpb.ComponentError{
+			Code:    fmt.Sprintf("[%s]", result.Error.Code),
+			Message: result.Error.Message,
+		}
 	}
 
 	s.logger.InfoContext(ctx, "call tool: result received",
 		slog.String("tenant", tenant),
 		slog.String("tool_name", req.ToolName),
 		slog.String("work_id", workID),
-		slog.Bool("has_error", resp.Error != ""),
+		slog.Bool("has_error", resp.Error != nil),
 	)
 
 	return resp, nil
@@ -1046,8 +812,8 @@ func (s *ComponentServiceServer) CallTool(
 // kind set to "plugin" instead of "tool".
 func (s *ComponentServiceServer) QueryPlugin(
 	ctx context.Context,
-	req *QueryPluginRequest,
-) (*QueryPluginResponse, error) {
+	req *componentpb.QueryPluginRequest,
+) (*componentpb.QueryPluginResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -1056,8 +822,8 @@ func (s *ComponentServiceServer) QueryPlugin(
 	if req.PluginName == "" {
 		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
 	}
-	if req.InputJson == "" {
-		return nil, status.Error(codes.InvalidArgument, "input_json is required")
+	if req.ParamsJson == "" {
+		return nil, status.Error(codes.InvalidArgument, "params_json is required")
 	}
 
 	// Discover plugin: tenant-scoped first, then _system fallback.
@@ -1080,11 +846,12 @@ func (s *ComponentServiceServer) QueryPlugin(
 
 	workItem := WorkItem{
 		WorkType:  "execute_proto",
-		Payload:   []byte(req.InputJson),
+		Payload:   []byte(req.ParamsJson),
 		TimeoutMs: req.TimeoutMs,
 		Context: map[string]string{
 			"source_work_id": req.WorkId,
 			"caller_tenant":  tenant,
+			"method":         req.Method,
 		},
 	}
 
@@ -1121,16 +888,19 @@ func (s *ComponentServiceServer) QueryPlugin(
 		return nil, status.Errorf(codes.DeadlineExceeded, "plugin execution timed out or failed: %v", err)
 	}
 
-	resp := &QueryPluginResponse{OutputJson: string(result.Result)}
+	resp := &componentpb.QueryPluginResponse{ResultJson: string(result.Result)}
 	if result.Error != nil && result.Error.Code != "" {
-		resp.Error = fmt.Sprintf("[%s] %s", result.Error.Code, result.Error.Message)
+		resp.Error = &componentpb.ComponentError{
+			Code:    fmt.Sprintf("[%s]", result.Error.Code),
+			Message: result.Error.Message,
+		}
 	}
 
 	s.logger.InfoContext(ctx, "query plugin: result received",
 		slog.String("tenant", tenant),
 		slog.String("plugin_name", req.PluginName),
 		slog.String("work_id", workID),
-		slog.Bool("has_error", resp.Error != ""),
+		slog.Bool("has_error", resp.Error != nil),
 	)
 
 	return resp, nil
@@ -1140,7 +910,7 @@ func (s *ComponentServiceServer) QueryPlugin(
 //
 // Flow:
 //  1. Extract tenant; reject unauthenticated callers.
-//  2. Validate that finding_json is present.
+//  2. Validate that finding is present.
 //  3. Delegate to findingSubmitter if wired; otherwise generate a finding_id
 //     and log the payload so that no findings are silently dropped during
 //     the development phase.
@@ -1148,31 +918,32 @@ func (s *ComponentServiceServer) QueryPlugin(
 // TODO (task 5.4): wire findingSubmitter to the Neo4j/GraphRAG pipeline.
 func (s *ComponentServiceServer) SubmitFinding(
 	ctx context.Context,
-	req *SubmitFindingRequest,
-) (*SubmitFindingResponse, error) {
+	req *componentpb.SubmitFindingRequest,
+) (*componentpb.SubmitFindingResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if req.FindingJson == "" {
-		return nil, status.Error(codes.InvalidArgument, "finding_json is required")
+	if len(req.Finding) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "finding is required")
 	}
+
+	findingJSON := string(req.Finding)
 
 	if s.findingSubmitter != nil {
 		findingID, err := s.findingSubmitter.Submit(
 			ctx,
 			tenant,
 			req.WorkId,
-			req.FindingJson,
-			req.Severity,
-			req.Title,
+			findingJSON,
+			"", // severity no longer in proto
+			"", // title no longer in proto
 		)
 		if err != nil {
 			s.logger.ErrorContext(ctx, "submit finding: storage failed",
 				slog.String("tenant", tenant),
 				slog.String("work_id", req.WorkId),
-				slog.String("severity", req.Severity),
 				slog.String("error", err.Error()),
 			)
 			return nil, status.Errorf(codes.Internal, "failed to store finding: %v", err)
@@ -1182,10 +953,9 @@ func (s *ComponentServiceServer) SubmitFinding(
 			slog.String("tenant", tenant),
 			slog.String("work_id", req.WorkId),
 			slog.String("finding_id", findingID),
-			slog.String("severity", req.Severity),
 		)
 
-		return &SubmitFindingResponse{FindingId: findingID}, nil
+		return &componentpb.SubmitFindingResponse{FindingId: findingID}, nil
 	}
 
 	// findingSubmitter not yet wired — generate an ID and log the payload so
@@ -1196,27 +966,25 @@ func (s *ComponentServiceServer) SubmitFinding(
 		slog.String("tenant", tenant),
 		slog.String("work_id", req.WorkId),
 		slog.String("finding_id", findingID),
-		slog.String("severity", req.Severity),
-		slog.String("title", req.Title),
-		slog.String("finding_json", req.FindingJson),
+		slog.String("finding_json", findingJSON),
 	)
 
-	return &SubmitFindingResponse{FindingId: findingID}, nil
+	return &componentpb.SubmitFindingResponse{FindingId: findingID}, nil
 }
 
 // MemoryGet retrieves a value from the requested memory tier by key.
 //
 // Tier routing:
-//   - working  — in-process ephemeral map; returns not-found when key absent.
-//   - mission  — Redis-backed persistent store; returns not-found when absent.
-//   - longterm — not suitable for point lookups; returns codes.InvalidArgument.
+//   - working   — in-process ephemeral map; returns not-found when key absent.
+//   - mission   — Redis-backed persistent store; returns not-found when absent.
+//   - long_term — not suitable for point lookups; returns codes.InvalidArgument.
 //
 // TODO (task 5.5): wire per-agent memory manager lookup so that each remote
 // agent reads from its own mission-scoped memory namespace.
 func (s *ComponentServiceServer) MemoryGet(
 	ctx context.Context,
-	req *MemoryGetRequest,
-) (*MemoryGetResponse, error) {
+	req *componentpb.MemoryRequest,
+) (*componentpb.MemoryResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -1232,10 +1000,10 @@ func (s *ComponentServiceServer) MemoryGet(
 	}
 
 	switch req.Tier {
-	case MemoryTierWorking:
+	case memTierWorking:
 		val, ok := s.memory.Working().Get(req.Key)
 		if !ok {
-			return &MemoryGetResponse{Found: false}, nil
+			return &componentpb.MemoryResponse{Found: false}, nil
 		}
 		// Serialize the retrieved value to JSON for the wire format.
 		// Working memory stores arbitrary any values; JSON is the lowest common
@@ -1247,9 +1015,9 @@ func (s *ComponentServiceServer) MemoryGet(
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to serialize working memory value: %v", err)
 		}
-		return &MemoryGetResponse{Found: true, ValueJson: string(data)}, nil
+		return &componentpb.MemoryResponse{Found: true, Value: data}, nil
 
-	case MemoryTierMission:
+	case memTierMission:
 		item, err := s.memory.Mission().Retrieve(ctx, req.Key)
 		if err != nil {
 			// Translate not-found into a Found=false response instead of an error
@@ -1257,7 +1025,7 @@ func (s *ComponentServiceServer) MemoryGet(
 			// via *types.GibsonError with code ErrCodeMissionMemoryNotFound.
 			var gibsonErr *types.GibsonError
 			if errors.As(err, &gibsonErr) && gibsonErr.Code == memory.ErrCodeMissionMemoryNotFound {
-				return &MemoryGetResponse{Found: false}, nil
+				return &componentpb.MemoryResponse{Found: false}, nil
 			}
 			s.logger.ErrorContext(ctx, "memory get: mission retrieve failed",
 				slog.String("tenant", tenant),
@@ -1270,9 +1038,9 @@ func (s *ComponentServiceServer) MemoryGet(
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to serialize mission memory value: %v", err)
 		}
-		return &MemoryGetResponse{Found: true, ValueJson: string(data)}, nil
+		return &componentpb.MemoryResponse{Found: true, Value: data}, nil
 
-	case MemoryTierLongTerm:
+	case memTierLongTerm:
 		// Long-term memory is a semantic vector store; it does not support
 		// direct key lookups. Use MemorySearch with a precise query instead.
 		return nil, status.Error(codes.InvalidArgument,
@@ -1286,16 +1054,16 @@ func (s *ComponentServiceServer) MemoryGet(
 // MemorySet writes a value to the requested memory tier.
 //
 // Tier routing:
-//   - working  — in-process ephemeral map; value_json is deserialized into any.
-//   - mission  — Redis-backed persistent store; value_json is stored as-is.
-//   - longterm — use the Store call (ID + content + metadata); metadata_json is
-//     treated as the content and key as the ID.
+//   - working   — in-process ephemeral map; value is deserialized into any.
+//   - mission   — Redis-backed persistent store; value is stored as-is.
+//   - long_term — use the Store call (ID + content); key becomes the ID and
+//     value becomes the content.
 //
 // TODO (task 5.5): wire per-agent memory manager lookup.
 func (s *ComponentServiceServer) MemorySet(
 	ctx context.Context,
-	req *MemorySetRequest,
-) (*MemorySetResponse, error) {
+	req *componentpb.MemoryRequest,
+) (*componentpb.MemoryResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -1309,16 +1077,18 @@ func (s *ComponentServiceServer) MemorySet(
 	if req.Key == "" {
 		return nil, status.Error(codes.InvalidArgument, "key is required")
 	}
-	if req.ValueJson == "" {
-		return nil, status.Error(codes.InvalidArgument, "value_json is required")
+	if len(req.Value) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "value is required")
 	}
 
+	valueStr := string(req.Value)
+
 	switch req.Tier {
-	case MemoryTierWorking:
-		// Store the raw JSON string in working memory. The agent is responsible
+	case memTierWorking:
+		// Store the raw value string in working memory. The agent is responsible
 		// for deserializing on retrieval; this keeps working memory agnostic to
 		// schema.
-		if err := s.memory.Working().Set(req.Key, req.ValueJson); err != nil {
+		if err := s.memory.Working().Set(req.Key, valueStr); err != nil {
 			s.logger.ErrorContext(ctx, "memory set: working memory set failed",
 				slog.String("tenant", tenant),
 				slog.String("key", req.Key),
@@ -1327,12 +1097,9 @@ func (s *ComponentServiceServer) MemorySet(
 			return nil, status.Errorf(codes.Internal, "failed to set working memory key %q: %v", req.Key, err)
 		}
 
-	case MemoryTierMission:
-		// Mission memory accepts any value; store the JSON string directly.
-		// metadata_json is ignored for now — agents can embed metadata in value_json.
-		//
-		// TODO (task 5.5): parse MetadataJson and forward as map[string]any.
-		if err := s.memory.Mission().Store(ctx, req.Key, req.ValueJson, nil); err != nil {
+	case memTierMission:
+		// Mission memory accepts any value; store the string directly.
+		if err := s.memory.Mission().Store(ctx, req.Key, valueStr, nil); err != nil {
 			s.logger.ErrorContext(ctx, "memory set: mission memory store failed",
 				slog.String("tenant", tenant),
 				slog.String("key", req.Key),
@@ -1341,12 +1108,10 @@ func (s *ComponentServiceServer) MemorySet(
 			return nil, status.Errorf(codes.Internal, "failed to store mission memory key %q: %v", req.Key, err)
 		}
 
-	case MemoryTierLongTerm:
+	case memTierLongTerm:
 		// Long-term memory requires content as a plain string for embedding.
-		// value_json is treated as that content; key becomes the vector entry ID.
-		//
-		// TODO (task 5.5): parse MetadataJson and forward as map[string]any.
-		if err := s.memory.LongTerm().Store(ctx, req.Key, req.ValueJson, nil); err != nil {
+		// value is treated as that content; key becomes the vector entry ID.
+		if err := s.memory.LongTerm().Store(ctx, req.Key, valueStr, nil); err != nil {
 			s.logger.ErrorContext(ctx, "memory set: long-term memory store failed",
 				slog.String("tenant", tenant),
 				slog.String("key", req.Key),
@@ -1361,26 +1126,26 @@ func (s *ComponentServiceServer) MemorySet(
 
 	s.logger.DebugContext(ctx, "memory set: value stored",
 		slog.String("tenant", tenant),
-		slog.String("tier", string(req.Tier)),
+		slog.String("tier", req.Tier),
 		slog.String("key", req.Key),
 	)
 
-	return &MemorySetResponse{}, nil
+	return &componentpb.MemoryResponse{}, nil
 }
 
 // MemorySearch performs a semantic or full-text search over a memory tier.
 //
 // Tier routing:
-//   - working  — not suitable for search; returns codes.InvalidArgument.
-//   - mission  — full-text search over stored key-value pairs.
-//   - longterm — vector-similarity search using the configured embedder.
+//   - working   — not suitable for search; returns codes.InvalidArgument.
+//   - mission   — full-text search over stored key-value pairs.
+//   - long_term — vector-similarity search using the configured embedder.
 //
 // TODO (task 5.5): wire per-agent memory manager lookup so each remote agent
 // searches within its own mission namespace.
 func (s *ComponentServiceServer) MemorySearch(
 	ctx context.Context,
-	req *MemorySearchRequest,
-) (*MemorySearchResponse, error) {
+	req *componentpb.MemorySearchRequest,
+) (*componentpb.MemorySearchResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -1395,20 +1160,20 @@ func (s *ComponentServiceServer) MemorySearch(
 		return nil, status.Error(codes.InvalidArgument, "query is required")
 	}
 
-	topK := int(req.TopK)
+	topK := int(req.Limit)
 	if topK <= 0 {
 		topK = 10
 	}
 
 	switch req.Tier {
-	case MemoryTierWorking:
+	case memTierWorking:
 		// Working memory is an in-process key-value map with no search index.
 		// Callers should iterate keys via MemoryGet or restructure data for
 		// mission/longterm tiers.
 		return nil, status.Error(codes.InvalidArgument,
 			"working memory does not support search; use mission or longterm tier")
 
-	case MemoryTierMission:
+	case memTierMission:
 		// TODO (task 5.5): call mission memory Search once the interface exposes it.
 		// For now, return Unimplemented so callers know to use longterm search.
 		//
@@ -1423,7 +1188,7 @@ func (s *ComponentServiceServer) MemorySearch(
 		return nil, status.Error(codes.Unimplemented,
 			"mission memory search not yet wired; use longterm tier for semantic search")
 
-	case MemoryTierLongTerm:
+	case memTierLongTerm:
 		rawResults, err := s.memory.LongTerm().Search(ctx, req.Query, topK, nil)
 		if err != nil {
 			s.logger.ErrorContext(ctx, "memory search: long-term search failed",
@@ -1434,7 +1199,7 @@ func (s *ComponentServiceServer) MemorySearch(
 			return nil, status.Errorf(codes.Internal, "long-term memory search failed: %v", err)
 		}
 
-		results := make([]MemorySearchResult, 0, len(rawResults))
+		results := make([]*componentpb.MemoryEntry, 0, len(rawResults))
 		for _, r := range rawResults {
 			data, err := r.Item.MarshalValue()
 			if err != nil {
@@ -1447,10 +1212,10 @@ func (s *ComponentServiceServer) MemorySearch(
 				)
 				continue
 			}
-			results = append(results, MemorySearchResult{
-				Key:       r.Item.Key,
-				ValueJson: string(data),
-				Score:     float32(r.Score),
+			results = append(results, &componentpb.MemoryEntry{
+				Key:   r.Item.Key,
+				Value: data,
+				Score: float32(r.Score),
 			})
 		}
 
@@ -1460,7 +1225,7 @@ func (s *ComponentServiceServer) MemorySearch(
 			slog.Int("result_count", len(results)),
 		)
 
-		return &MemorySearchResponse{Results: results}, nil
+		return &componentpb.MemorySearchResponse{Results: results}, nil
 
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "unknown memory tier %q", req.Tier)
