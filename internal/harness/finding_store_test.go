@@ -34,7 +34,7 @@ func TestInMemoryFindingStore_Store_Success(t *testing.T) {
 
 	finding := agent.NewFinding("Test Finding", "Description", agent.SeverityHigh)
 
-	err := store.Store(ctx, missionID, finding)
+	err := store.Store(ctx, "", missionID, finding)
 	require.NoError(t, err)
 
 	// Verify the finding was stored
@@ -50,11 +50,11 @@ func TestInMemoryFindingStore_Store_MultipleFindingsSameMission(t *testing.T) {
 	finding2 := agent.NewFinding("Finding 2", "Description 2", agent.SeverityMedium)
 	finding3 := agent.NewFinding("Finding 3", "Description 3", agent.SeverityCritical)
 
-	err := store.Store(ctx, missionID, finding1)
+	err := store.Store(ctx, "", missionID, finding1)
 	require.NoError(t, err)
-	err = store.Store(ctx, missionID, finding2)
+	err = store.Store(ctx, "", missionID, finding2)
 	require.NoError(t, err)
-	err = store.Store(ctx, missionID, finding3)
+	err = store.Store(ctx, "", missionID, finding3)
 	require.NoError(t, err)
 
 	assert.Equal(t, 3, store.Count(missionID))
@@ -69,9 +69,9 @@ func TestInMemoryFindingStore_Store_MultipleMissions(t *testing.T) {
 	finding1 := agent.NewFinding("Finding 1", "Description 1", agent.SeverityHigh)
 	finding2 := agent.NewFinding("Finding 2", "Description 2", agent.SeverityMedium)
 
-	err := store.Store(ctx, mission1, finding1)
+	err := store.Store(ctx, "", mission1, finding1)
 	require.NoError(t, err)
-	err = store.Store(ctx, mission2, finding2)
+	err = store.Store(ctx, "", mission2, finding2)
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, store.Count(mission1))
@@ -87,7 +87,7 @@ func TestInMemoryFindingStore_Get_EmptyStore(t *testing.T) {
 	ctx := context.Background()
 	missionID := types.NewID()
 
-	findings, err := store.Get(ctx, missionID, FindingFilter{})
+	findings, err := store.Get(ctx, "", missionID,FindingFilter{})
 	require.NoError(t, err)
 	assert.Empty(t, findings)
 }
@@ -100,13 +100,13 @@ func TestInMemoryFindingStore_Get_NoFilter(t *testing.T) {
 	finding1 := agent.NewFinding("Finding 1", "Description 1", agent.SeverityHigh)
 	finding2 := agent.NewFinding("Finding 2", "Description 2", agent.SeverityMedium)
 
-	err := store.Store(ctx, missionID, finding1)
+	err := store.Store(ctx, "", missionID, finding1)
 	require.NoError(t, err)
-	err = store.Store(ctx, missionID, finding2)
+	err = store.Store(ctx, "", missionID, finding2)
 	require.NoError(t, err)
 
 	// Get all findings with no filter
-	findings, err := store.Get(ctx, missionID, FindingFilter{})
+	findings, err := store.Get(ctx, "", missionID,FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings, 2)
 }
@@ -120,16 +120,16 @@ func TestInMemoryFindingStore_Get_WithFilter_Severity(t *testing.T) {
 	finding2 := agent.NewFinding("Finding 2", "Description 2", agent.SeverityMedium)
 	finding3 := agent.NewFinding("Finding 3", "Description 3", agent.SeverityHigh)
 
-	err := store.Store(ctx, missionID, finding1)
+	err := store.Store(ctx, "", missionID, finding1)
 	require.NoError(t, err)
-	err = store.Store(ctx, missionID, finding2)
+	err = store.Store(ctx, "", missionID, finding2)
 	require.NoError(t, err)
-	err = store.Store(ctx, missionID, finding3)
+	err = store.Store(ctx, "", missionID, finding3)
 	require.NoError(t, err)
 
 	// Filter for high severity
 	filter := NewFindingFilter().WithSeverity(agent.SeverityHigh)
-	findings, err := store.Get(ctx, missionID, *filter)
+	findings, err := store.Get(ctx, "", missionID,*filter)
 	require.NoError(t, err)
 	assert.Len(t, findings, 2)
 
@@ -150,16 +150,16 @@ func TestInMemoryFindingStore_Get_WithFilter_Category(t *testing.T) {
 	finding3 := agent.NewFinding("Finding 3", "Description 3", agent.SeverityHigh).
 		WithCategory("injection")
 
-	err := store.Store(ctx, missionID, finding1)
+	err := store.Store(ctx, "", missionID, finding1)
 	require.NoError(t, err)
-	err = store.Store(ctx, missionID, finding2)
+	err = store.Store(ctx, "", missionID, finding2)
 	require.NoError(t, err)
-	err = store.Store(ctx, missionID, finding3)
+	err = store.Store(ctx, "", missionID, finding3)
 	require.NoError(t, err)
 
 	// Filter for injection category
 	filter := NewFindingFilter().WithCategory("injection")
-	findings, err := store.Get(ctx, missionID, *filter)
+	findings, err := store.Get(ctx, "", missionID,*filter)
 	require.NoError(t, err)
 	assert.Len(t, findings, 2)
 
@@ -183,11 +183,11 @@ func TestInMemoryFindingStore_Get_WithFilter_MultipleConditions(t *testing.T) {
 		WithCategory("injection").
 		WithConfidence(0.7)
 
-	err := store.Store(ctx, missionID, finding1)
+	err := store.Store(ctx, "", missionID, finding1)
 	require.NoError(t, err)
-	err = store.Store(ctx, missionID, finding2)
+	err = store.Store(ctx, "", missionID, finding2)
 	require.NoError(t, err)
-	err = store.Store(ctx, missionID, finding3)
+	err = store.Store(ctx, "", missionID, finding3)
 	require.NoError(t, err)
 
 	// Filter for high severity AND injection category AND confidence >= 0.8
@@ -196,7 +196,7 @@ func TestInMemoryFindingStore_Get_WithFilter_MultipleConditions(t *testing.T) {
 		WithCategory("injection").
 		WithMinConfidence(0.8)
 
-	findings, err := store.Get(ctx, missionID, *filter)
+	findings, err := store.Get(ctx, "", missionID,*filter)
 	require.NoError(t, err)
 	assert.Len(t, findings, 1)
 	assert.Equal(t, "SQL Injection", findings[0].Title)
@@ -208,12 +208,12 @@ func TestInMemoryFindingStore_Get_NoMatches(t *testing.T) {
 	missionID := types.NewID()
 
 	finding := agent.NewFinding("Finding", "Description", agent.SeverityMedium)
-	err := store.Store(ctx, missionID, finding)
+	err := store.Store(ctx, "", missionID, finding)
 	require.NoError(t, err)
 
 	// Filter that matches nothing
 	filter := NewFindingFilter().WithSeverity(agent.SeverityCritical)
-	findings, err := store.Get(ctx, missionID, *filter)
+	findings, err := store.Get(ctx, "", missionID,*filter)
 	require.NoError(t, err)
 	assert.Empty(t, findings)
 }
@@ -227,19 +227,19 @@ func TestInMemoryFindingStore_Get_DifferentMissions(t *testing.T) {
 	finding1 := agent.NewFinding("Finding 1", "Description 1", agent.SeverityHigh)
 	finding2 := agent.NewFinding("Finding 2", "Description 2", agent.SeverityMedium)
 
-	err := store.Store(ctx, mission1, finding1)
+	err := store.Store(ctx, "", mission1, finding1)
 	require.NoError(t, err)
-	err = store.Store(ctx, mission2, finding2)
+	err = store.Store(ctx, "", mission2, finding2)
 	require.NoError(t, err)
 
 	// Get findings for mission1
-	findings, err := store.Get(ctx, mission1, FindingFilter{})
+	findings, err := store.Get(ctx, "", mission1,FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings, 1)
 	assert.Equal(t, "Finding 1", findings[0].Title)
 
 	// Get findings for mission2
-	findings, err = store.Get(ctx, mission2, FindingFilter{})
+	findings, err = store.Get(ctx, "", mission2,FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings, 1)
 	assert.Equal(t, "Finding 2", findings[0].Title)
@@ -260,7 +260,7 @@ func TestInMemoryFindingStore_Count(t *testing.T) {
 	// Add findings
 	for i := 0; i < 5; i++ {
 		finding := agent.NewFinding("Finding", "Description", agent.SeverityMedium)
-		err := store.Store(ctx, missionID, finding)
+		err := store.Store(ctx, "", missionID, finding)
 		require.NoError(t, err)
 	}
 
@@ -285,7 +285,7 @@ func TestInMemoryFindingStore_Clear(t *testing.T) {
 	missionID := types.NewID()
 
 	finding := agent.NewFinding("Finding", "Description", agent.SeverityMedium)
-	err := store.Store(ctx, missionID, finding)
+	err := store.Store(ctx, "", missionID, finding)
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, store.Count(missionID))
@@ -313,9 +313,9 @@ func TestInMemoryFindingStore_Clear_OneMissionLeavesOthers(t *testing.T) {
 	finding1 := agent.NewFinding("Finding 1", "Description 1", agent.SeverityHigh)
 	finding2 := agent.NewFinding("Finding 2", "Description 2", agent.SeverityMedium)
 
-	err := store.Store(ctx, mission1, finding1)
+	err := store.Store(ctx, "", mission1, finding1)
 	require.NoError(t, err)
-	err = store.Store(ctx, mission2, finding2)
+	err = store.Store(ctx, "", mission2, finding2)
 	require.NoError(t, err)
 
 	// Clear mission1
@@ -338,9 +338,9 @@ func TestInMemoryFindingStore_ClearAll(t *testing.T) {
 	finding1 := agent.NewFinding("Finding 1", "Description 1", agent.SeverityHigh)
 	finding2 := agent.NewFinding("Finding 2", "Description 2", agent.SeverityMedium)
 
-	err := store.Store(ctx, mission1, finding1)
+	err := store.Store(ctx, "", mission1, finding1)
 	require.NoError(t, err)
-	err = store.Store(ctx, mission2, finding2)
+	err = store.Store(ctx, "", mission2, finding2)
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, store.Count(mission1))
@@ -383,7 +383,7 @@ func TestInMemoryFindingStore_ConcurrentStore(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < findingsPerGoroutine; j++ {
 				finding := agent.NewFinding("Finding", "Description", agent.SeverityMedium)
-				err := store.Store(ctx, missionID, finding)
+				err := store.Store(ctx, "", missionID, finding)
 				assert.NoError(t, err)
 			}
 		}()
@@ -404,7 +404,7 @@ func TestInMemoryFindingStore_ConcurrentGet(t *testing.T) {
 	// Pre-populate with findings
 	for i := 0; i < 100; i++ {
 		finding := agent.NewFinding("Finding", "Description", agent.SeverityMedium)
-		err := store.Store(ctx, missionID, finding)
+		err := store.Store(ctx, "", missionID, finding)
 		require.NoError(t, err)
 	}
 
@@ -416,7 +416,7 @@ func TestInMemoryFindingStore_ConcurrentGet(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				findings, err := store.Get(ctx, missionID, FindingFilter{})
+				findings, err := store.Get(ctx, "", missionID,FindingFilter{})
 				assert.NoError(t, err)
 				assert.Len(t, findings, 100)
 			}
@@ -444,7 +444,7 @@ func TestInMemoryFindingStore_ConcurrentStoreAndGet(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < operations; j++ {
 				finding := agent.NewFinding("Finding", "Description", agent.SeverityMedium)
-				err := store.Store(ctx, missionID, finding)
+				err := store.Store(ctx, "", missionID, finding)
 				assert.NoError(t, err)
 			}
 		}()
@@ -455,7 +455,7 @@ func TestInMemoryFindingStore_ConcurrentStoreAndGet(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < operations; j++ {
-				_, err := store.Get(ctx, missionID, FindingFilter{})
+				_, err := store.Get(ctx, "", missionID,FindingFilter{})
 				assert.NoError(t, err)
 			}
 		}()
@@ -480,7 +480,7 @@ func TestInMemoryFindingStore_ConcurrentOperations(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
 			finding := agent.NewFinding("Finding", "Description", agent.SeverityMedium)
-			err := store.Store(ctx, missionID, finding)
+			err := store.Store(ctx, "", missionID, finding)
 			assert.NoError(t, err)
 		}
 	}()
@@ -489,7 +489,7 @@ func TestInMemoryFindingStore_ConcurrentOperations(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
-			_, err := store.Get(ctx, missionID, FindingFilter{})
+			_, err := store.Get(ctx, "", missionID,FindingFilter{})
 			assert.NoError(t, err)
 		}
 	}()
@@ -554,7 +554,7 @@ func TestInMemoryFindingStore_ComplexFiltering(t *testing.T) {
 	// Store all findings
 	for _, f := range findings {
 		f.TargetID = &targetID
-		err := store.Store(ctx, missionID, f)
+		err := store.Store(ctx, "", missionID, f)
 		require.NoError(t, err)
 	}
 
@@ -607,7 +607,7 @@ func TestInMemoryFindingStore_ComplexFiltering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := store.Get(ctx, missionID, *tt.filter)
+			results, err := store.Get(ctx, "", missionID,*tt.filter)
 			require.NoError(t, err)
 			assert.Len(t, results, tt.expectedCount)
 
@@ -630,10 +630,10 @@ func TestInMemoryFindingStore_ContextCancellation(t *testing.T) {
 	cancel()
 
 	finding := agent.NewFinding("Test", "Description", agent.SeverityMedium)
-	err := store.Store(ctx, missionID, finding)
+	err := store.Store(ctx, "", missionID, finding)
 	require.NoError(t, err) // In-memory store ignores context
 
-	findings, err := store.Get(ctx, missionID, FindingFilter{})
+	findings, err := store.Get(ctx, "", missionID,FindingFilter{})
 	require.NoError(t, err) // In-memory store ignores context
 	assert.Len(t, findings, 1)
 }
@@ -644,11 +644,11 @@ func TestInMemoryFindingStore_ImmutabilityOfResults(t *testing.T) {
 	missionID := types.NewID()
 
 	finding := agent.NewFinding("Original Title", "Original Description", agent.SeverityHigh)
-	err := store.Store(ctx, missionID, finding)
+	err := store.Store(ctx, "", missionID, finding)
 	require.NoError(t, err)
 
 	// Get findings
-	findings, err := store.Get(ctx, missionID, FindingFilter{})
+	findings, err := store.Get(ctx, "", missionID,FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings, 1)
 
@@ -656,7 +656,7 @@ func TestInMemoryFindingStore_ImmutabilityOfResults(t *testing.T) {
 	findings[0].Title = "Modified Title"
 
 	// Get findings again - should still have original title
-	findings2, err := store.Get(ctx, missionID, FindingFilter{})
+	findings2, err := store.Get(ctx, "", missionID,FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings2, 1)
 
@@ -664,4 +664,98 @@ func TestInMemoryFindingStore_ImmutabilityOfResults(t *testing.T) {
 	// DO affect the stored data since we're not doing deep copies.
 	// This is a known limitation of the in-memory store.
 	// For production use, consider implementing deep copying.
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Tenant Isolation Tests
+// ────────────────────────────────────────────────────────────────────────────
+
+// TestInMemoryFindingStore_TenantIsolation verifies that findings stored under one
+// tenant are not visible when querying under a different tenant, providing
+// defense-in-depth isolation at the storage layer.
+func TestInMemoryFindingStore_TenantIsolation(t *testing.T) {
+	store := NewInMemoryFindingStore()
+	ctx := context.Background()
+	missionID := types.NewID()
+
+	tenantA := "tenant-alpha"
+	tenantB := "tenant-beta"
+
+	findingA := agent.NewFinding("Finding for Tenant A", "Tenant A description", agent.SeverityHigh)
+	findingB := agent.NewFinding("Finding for Tenant B", "Tenant B description", agent.SeverityCritical)
+
+	// Store findings under different tenants for the same missionID
+	err := store.Store(ctx, tenantA, missionID, findingA)
+	require.NoError(t, err)
+
+	err = store.Store(ctx, tenantB, missionID, findingB)
+	require.NoError(t, err)
+
+	// Tenant A should only see its own finding
+	findingsA, err := store.Get(ctx, tenantA, missionID, FindingFilter{})
+	require.NoError(t, err)
+	assert.Len(t, findingsA, 1)
+	assert.Equal(t, "Finding for Tenant A", findingsA[0].Title)
+
+	// Tenant B should only see its own finding
+	findingsB, err := store.Get(ctx, tenantB, missionID, FindingFilter{})
+	require.NoError(t, err)
+	assert.Len(t, findingsB, 1)
+	assert.Equal(t, "Finding for Tenant B", findingsB[0].Title)
+
+	// Count reflects per-tenant totals: total across all tenants is 2
+	assert.Equal(t, 2, store.Count(missionID))
+}
+
+// TestInMemoryFindingStore_TenantIsolation_EmptyTenant verifies backward compatibility:
+// empty tenantID (single-tenant / auth-disabled mode) operates in its own namespace
+// and does not collide with tenant-scoped findings for the same missionID.
+func TestInMemoryFindingStore_TenantIsolation_EmptyTenant(t *testing.T) {
+	store := NewInMemoryFindingStore()
+	ctx := context.Background()
+	missionID := types.NewID()
+
+	findingGlobal := agent.NewFinding("Global Finding", "No tenant", agent.SeverityLow)
+	findingTenanted := agent.NewFinding("Tenant Finding", "Has tenant", agent.SeverityHigh)
+
+	err := store.Store(ctx, "", missionID, findingGlobal)
+	require.NoError(t, err)
+
+	err = store.Store(ctx, "tenant-x", missionID, findingTenanted)
+	require.NoError(t, err)
+
+	// Empty-tenant query returns only the global finding
+	globalFindings, err := store.Get(ctx, "", missionID, FindingFilter{})
+	require.NoError(t, err)
+	assert.Len(t, globalFindings, 1)
+	assert.Equal(t, "Global Finding", globalFindings[0].Title)
+
+	// Tenant-x query returns only the tenanted finding
+	tenantFindings, err := store.Get(ctx, "tenant-x", missionID, FindingFilter{})
+	require.NoError(t, err)
+	assert.Len(t, tenantFindings, 1)
+	assert.Equal(t, "Tenant Finding", tenantFindings[0].Title)
+}
+
+// TestInMemoryFindingStore_TenantIsolation_ClearScopedByMission verifies that
+// Clear() removes findings for all tenants for that mission (cross-tenant cleanup),
+// which is appropriate for admin-level mission teardown.
+func TestInMemoryFindingStore_TenantIsolation_ClearScopedByMission(t *testing.T) {
+	store := NewInMemoryFindingStore()
+	ctx := context.Background()
+	missionID := types.NewID()
+	otherMissionID := types.NewID()
+
+	err := store.Store(ctx, "tenant-a", missionID, agent.NewFinding("F1", "d", agent.SeverityHigh))
+	require.NoError(t, err)
+	err = store.Store(ctx, "tenant-b", missionID, agent.NewFinding("F2", "d", agent.SeverityLow))
+	require.NoError(t, err)
+	err = store.Store(ctx, "tenant-a", otherMissionID, agent.NewFinding("F3", "d", agent.SeverityMedium))
+	require.NoError(t, err)
+
+	// Clear missionID — removes all tenants' findings for that mission
+	store.Clear(missionID)
+
+	assert.Equal(t, 0, store.Count(missionID))
+	assert.Equal(t, 1, store.Count(otherMissionID)) // Other mission unaffected
 }

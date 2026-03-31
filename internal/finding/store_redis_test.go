@@ -684,15 +684,26 @@ func TestRedisFindingStore_KeyGeneration(t *testing.T) {
 		assert.Equal(t, fmt.Sprintf("gibson:finding:%s", id.String()), key)
 	})
 
-	t.Run("mission set key format", func(t *testing.T) {
+	t.Run("mission set key format - no tenant (single-tenant mode)", func(t *testing.T) {
 		missionID := types.NewID()
-		key := store.missionSetKey(missionID)
-		assert.Equal(t, fmt.Sprintf("gibson:finding:by_mission:%s", missionID.String()), key)
+		key := store.missionSetKey("", missionID)
+		assert.Equal(t, fmt.Sprintf("gibson:finding:by_mission:_:%s", missionID.String()), key)
 	})
 
-	t.Run("severity set key format", func(t *testing.T) {
-		key := store.severitySetKey(agent.SeverityCritical)
-		assert.Equal(t, "gibson:finding:by_severity:critical", key)
+	t.Run("mission set key format - with tenant", func(t *testing.T) {
+		missionID := types.NewID()
+		key := store.missionSetKey("acme-corp", missionID)
+		assert.Equal(t, fmt.Sprintf("gibson:finding:by_mission:acme-corp:%s", missionID.String()), key)
+	})
+
+	t.Run("severity set key format - no tenant (single-tenant mode)", func(t *testing.T) {
+		key := store.severitySetKey("", agent.SeverityCritical)
+		assert.Equal(t, "gibson:finding:by_severity:_:critical", key)
+	})
+
+	t.Run("severity set key format - with tenant", func(t *testing.T) {
+		key := store.severitySetKey("acme-corp", agent.SeverityCritical)
+		assert.Equal(t, "gibson:finding:by_severity:acme-corp:critical", key)
 	})
 }
 

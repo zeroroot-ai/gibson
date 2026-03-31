@@ -363,8 +363,8 @@ func TestIntegration_CompositeAuthenticator(t *testing.T) {
 		// Note: Local config not used in enterprise mode - only OIDC
 	}
 
-	// Create composite authenticator from the full config
-	composite, err := NewCompositeAuthenticator(authConfig)
+	// Create composite authenticator from the full config (no API key auth in this test)
+	composite, err := NewCompositeAuthenticator(authConfig, nil)
 	require.NoError(t, err)
 
 	// Set JWKS client to use the TLS test server's client

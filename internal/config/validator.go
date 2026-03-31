@@ -54,13 +54,6 @@ func (v *validatorImpl) Validate(cfg *Config) error {
 		}
 	}
 
-	// Custom validation for RegistryConfig
-	if cfg.Registry.Type == "etcd" {
-		if len(cfg.Registry.Endpoints) == 0 {
-			return fmt.Errorf("configuration validation failed:\n  - registry.endpoints must be non-empty when registry.type is 'etcd'")
-		}
-	}
-
 	// Custom validation for ActivityLoggingConfig
 	if err := validateActivityLogging(&cfg.ActivityLogging); err != nil {
 		return err

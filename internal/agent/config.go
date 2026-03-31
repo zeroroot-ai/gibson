@@ -3,7 +3,6 @@ package agent
 import (
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 )
@@ -98,9 +97,9 @@ type AgentDescriptor struct {
 	Version        string                    `json:"version"`
 	Description    string                    `json:"description"`
 	Capabilities   []string                  `json:"capabilities"`
-	TargetTypes    []component.TargetType    `json:"target_types"`   // Deprecated: use TargetSchemas
+	TargetTypes    []types.TargetType    `json:"target_types"`   // Deprecated: use TargetSchemas
 	TargetSchemas  []TargetSchema            `json:"target_schemas"` // New: schema-based target definitions
-	TechniqueTypes []component.TechniqueType `json:"technique_types"`
+	TechniqueTypes []types.TechniqueType `json:"technique_types"`
 	Slots          []SlotDefinition          `json:"slots"`
 	IsExternal     bool                      `json:"is_external"` // True if agent runs via gRPC
 }
@@ -126,8 +125,8 @@ func NewExternalAgentDescriptor(name, version, description string) AgentDescript
 		Version:        version,
 		Description:    description,
 		Capabilities:   []string{},
-		TargetTypes:    []component.TargetType{},
-		TechniqueTypes: []component.TechniqueType{},
+		TargetTypes:    []types.TargetType{},
+		TechniqueTypes: []types.TechniqueType{},
 		Slots:          []SlotDefinition{},
 		IsExternal:     true,
 	}

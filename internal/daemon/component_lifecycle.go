@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/component"
-	sdkregistry "github.com/zero-day-ai/sdk/registry"
 )
 
 const (
@@ -39,7 +38,8 @@ const (
 func startComponentProcess(
 	ctx context.Context,
 	comp *component.Component,
-	reg sdkregistry.Registry,
+	reg component.ComponentRegistry,
+	tenant string,
 	registryEndpoint string,
 	homeDir string,
 	pluginConfig map[string]string,
@@ -131,7 +131,7 @@ func startComponentProcess(
 	pid = cmd.Process.Pid
 
 	// Wait for component to register in registry
-	if err := waitForRegistration(ctx, reg, string(comp.Kind), comp.Name, registryStartTimeout); err != nil {
+	if err := waitForRegistration(ctx, reg, tenant, string(comp.Kind), comp.Name, registryStartTimeout); err != nil {
 		// Registration failed, kill the process
 		_ = cmd.Process.Kill()
 		return 0, 0, "", fmt.Errorf("component failed to register: %w", err)
@@ -150,12 +150,14 @@ func startComponentProcess(
 //  5. Sends SIGKILL if graceful shutdown times out
 func stopComponentProcess(
 	ctx context.Context,
-	instance sdkregistry.ServiceInfo,
-	reg sdkregistry.Registry,
+	instance component.ComponentInfo,
+	reg component.ComponentRegistry,
+	tenant string,
 	force bool,
 ) error {
 	// Extract port from endpoint (format: "host:port")
-	port, err := parsePortFromEndpoint(instance.Endpoint)
+	endpoint := instance.Metadata["grpc_endpoint"]
+	port, err := parsePortFromEndpoint(endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to parse endpoint: %w", err)
 	}
@@ -198,7 +200,7 @@ func stopComponentProcess(
 	stopCtx, cancel := context.WithTimeout(ctx, registryStopTimeout)
 	defer cancel()
 
-	if err := waitForDeregistration(stopCtx, reg, instance.Kind, instance.Name, instance.InstanceID); err != nil {
+	if err := waitForDeregistration(stopCtx, reg, tenant, instance.Kind, instance.Name, instance.InstanceID); err != nil {
 		// Timeout reached, send SIGKILL
 		if err := process.Kill(); err != nil {
 			if !strings.Contains(err.Error(), "process already finished") {
@@ -215,8 +217,8 @@ func stopComponentProcess(
 // waitForRegistration polls the registry until the component appears.
 func waitForRegistration(
 	ctx context.Context,
-	reg sdkregistry.Registry,
-	kind, name string,
+	reg component.ComponentRegistry,
+	tenant, kind, name string,
 	timeout time.Duration,
 ) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -230,7 +232,7 @@ func waitForRegistration(
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for component to register")
 		case <-ticker.C:
-			instances, err := reg.Discover(ctx, kind, name)
+			instances, err := reg.Discover(ctx, tenant, kind, name)
 			if err != nil {
 				// Continue polling on transient errors
 				continue
@@ -246,8 +248,8 @@ func waitForRegistration(
 // waitForDeregistration polls the registry until a specific instance disappears.
 func waitForDeregistration(
 	ctx context.Context,
-	reg sdkregistry.Registry,
-	kind, name, instanceID string,
+	reg component.ComponentRegistry,
+	tenant, kind, name, instanceID string,
 ) error {
 	ticker := time.NewTicker(registryPollInterval)
 	defer ticker.Stop()
@@ -257,7 +259,7 @@ func waitForDeregistration(
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for deregistration")
 		case <-ticker.C:
-			instances, err := reg.Discover(ctx, kind, name)
+			instances, err := reg.Discover(ctx, tenant, kind, name)
 			if err != nil {
 				// Continue polling on transient errors
 				continue

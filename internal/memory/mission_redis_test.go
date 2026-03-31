@@ -51,7 +51,7 @@ func TestRedisMissionMemory_Store(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 	defer cleanupTestRedisMemory(t, memory)
 
 	ctx := testutil.WithTestTenant()
@@ -131,7 +131,7 @@ func TestRedisMissionMemory_Retrieve(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 	defer cleanupTestRedisMemory(t, memory)
 
 	ctx := testutil.WithTestTenant()
@@ -177,7 +177,7 @@ func TestRedisMissionMemory_Delete(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 	defer cleanupTestRedisMemory(t, memory)
 
 	ctx := testutil.WithTestTenant()
@@ -229,7 +229,7 @@ func TestRedisMissionMemory_Search(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 	defer cleanupTestRedisMemory(t, memory)
 
 	ctx := testutil.WithTestTenant()
@@ -302,7 +302,7 @@ func TestRedisMissionMemory_Search(t *testing.T) {
 	t.Run("mission isolation", func(t *testing.T) {
 		// Create another mission's memory
 		otherMissionID := types.NewID()
-		otherMemory := NewRedisMissionMemory(client, otherMissionID)
+		otherMemory := NewRedisMissionMemory(client, otherMissionID, "")
 		defer cleanupTestRedisMemory(t, otherMemory)
 
 		// Store data in other mission
@@ -323,7 +323,7 @@ func TestRedisMissionMemory_History(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 	defer cleanupTestRedisMemory(t, memory)
 
 	ctx := testutil.WithTestTenant()
@@ -362,7 +362,7 @@ func TestRedisMissionMemory_History(t *testing.T) {
 
 	t.Run("empty history", func(t *testing.T) {
 		emptyMissionID := types.NewID()
-		emptyMemory := NewRedisMissionMemory(client, emptyMissionID)
+		emptyMemory := NewRedisMissionMemory(client, emptyMissionID, "")
 		defer cleanupTestRedisMemory(t, emptyMemory)
 
 		items, err := emptyMemory.History(ctx, 10)
@@ -376,7 +376,7 @@ func TestRedisMissionMemory_Keys(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 	defer cleanupTestRedisMemory(t, memory)
 
 	ctx := testutil.WithTestTenant()
@@ -402,7 +402,7 @@ func TestRedisMissionMemory_Keys(t *testing.T) {
 
 	t.Run("empty keys list", func(t *testing.T) {
 		emptyMissionID := types.NewID()
-		emptyMemory := NewRedisMissionMemory(client, emptyMissionID)
+		emptyMemory := NewRedisMissionMemory(client, emptyMissionID, "")
 		defer cleanupTestRedisMemory(t, emptyMemory)
 
 		keys, err := emptyMemory.Keys(ctx)
@@ -416,7 +416,7 @@ func TestRedisMissionMemory_Clear(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 	defer cleanupTestRedisMemory(t, memory)
 
 	ctx := testutil.WithTestTenant()
@@ -446,7 +446,7 @@ func TestRedisMissionMemory_Clear(t *testing.T) {
 
 	t.Run("clear empty memory", func(t *testing.T) {
 		emptyMissionID := types.NewID()
-		emptyMemory := NewRedisMissionMemory(client, emptyMissionID)
+		emptyMemory := NewRedisMissionMemory(client, emptyMissionID, "")
 
 		// Clear should not error on empty memory
 		err := emptyMemory.Clear(ctx)
@@ -459,7 +459,7 @@ func TestRedisMissionMemory_MissionID(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 
 	assert.Equal(t, missionID, memory.MissionID())
 }
@@ -469,7 +469,7 @@ func TestRedisMissionMemory_ContinuityMode(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 
 	// Should default to isolated mode
 	assert.Equal(t, MemoryIsolated, memory.ContinuityMode())
@@ -480,7 +480,7 @@ func TestRedisMissionMemory_Continuity_NotImplemented(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 
 	ctx := testutil.WithTestTenant()
 
@@ -505,8 +505,8 @@ func TestRedisMissionMemory_MultiTenantIsolation(t *testing.T) {
 	missionID1 := types.NewID()
 	missionID2 := types.NewID()
 
-	memory1 := NewRedisMissionMemory(client, missionID1)
-	memory2 := NewRedisMissionMemory(client, missionID2)
+	memory1 := NewRedisMissionMemory(client, missionID1, "")
+	memory2 := NewRedisMissionMemory(client, missionID2, "")
 
 	defer cleanupTestRedisMemory(t, memory1)
 	defer cleanupTestRedisMemory(t, memory2)
@@ -557,7 +557,7 @@ func TestRedisMissionMemory_KeyNaming(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 	defer cleanupTestRedisMemory(t, memory)
 
 	ctx := testutil.WithTestTenant()
@@ -600,7 +600,7 @@ func TestRedisMissionMemory_SpecialCharacters(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	memory := NewRedisMissionMemory(client, missionID)
+	memory := NewRedisMissionMemory(client, missionID, "")
 	defer cleanupTestRedisMemory(t, memory)
 
 	ctx := testutil.WithTestTenant()

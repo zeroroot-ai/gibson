@@ -17,6 +17,7 @@ type MemoryEntry struct {
 	Key       string         `json:"key"`
 	Value     string         `json:"value"`
 	MissionID string         `json:"mission_id"`
+	TenantID  string         `json:"tenant_id,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -26,9 +27,14 @@ type MemoryEntry struct {
 // It leverages RedisJSON for document storage and RediSearch for efficient querying.
 //
 // Architecture:
-//   - Each memory entry is stored as a JSON document with key pattern: gibson:memory:{mission_id}:{key}
-//   - A Redis set tracks all keys for efficient listing: gibson:memory:idx:{mission_id}
-//   - RediSearch index (gibson:idx:memory) enables full-text search with mission_id filtering
+//   - Each memory entry is stored as a JSON document with key pattern:
+//     gibson:memory:{tenant_id}:{mission_id}:{key}  (when tenantID is set)
+//     gibson:memory:{mission_id}:{key}               (when tenantID is empty, backward compat)
+//   - A Redis set tracks all keys for efficient listing:
+//     gibson:memory:idx:{tenant_id}:{mission_id}  (when tenantID is set)
+//     gibson:memory:idx:{mission_id}               (when tenantID is empty, backward compat)
+//   - RediSearch index (gibson:idx:memory) enables full-text search with mission_id
+//     and tenant_id filtering for defense-in-depth tenant isolation
 //
 // Thread Safety:
 //   - All operations are atomic at the Redis level
@@ -36,6 +42,7 @@ type MemoryEntry struct {
 type RedisMissionMemory struct {
 	client    *state.StateClient
 	missionID types.ID
+	tenantID  string // empty string preserves backward-compatible key format
 
 	// Memory continuity fields (not yet implemented for Redis)
 	continuityMode MemoryContinuityMode
@@ -43,11 +50,14 @@ type RedisMissionMemory struct {
 
 // NewRedisMissionMemory creates a new RedisMissionMemory instance.
 // It uses the provided StateClient for all Redis operations and scopes all
-// operations to the specified mission ID.
+// operations to the specified mission ID and tenant ID.
 //
 // Parameters:
 //   - client: StateClient instance with RediSearch and RedisJSON support
 //   - missionID: Mission identifier to scope all memory operations
+//   - tenantID: Tenant identifier for defense-in-depth isolation.
+//     When non-empty, tenant is included in key prefixes and search filters.
+//     When empty, the old key format without tenant prefix is used for backward compatibility.
 //
 // Example:
 //
@@ -57,12 +67,13 @@ type RedisMissionMemory struct {
 //	}
 //	defer client.Close()
 //
-//	memory := memory.NewRedisMissionMemory(client, missionID)
+//	memory := memory.NewRedisMissionMemory(client, missionID, tenantID)
 //	err = memory.Store(ctx, "api_key", "secret123", nil)
-func NewRedisMissionMemory(client *state.StateClient, missionID types.ID) *RedisMissionMemory {
+func NewRedisMissionMemory(client *state.StateClient, missionID types.ID, tenantID string) *RedisMissionMemory {
 	return &RedisMissionMemory{
 		client:         client,
 		missionID:      missionID,
+		tenantID:       tenantID,
 		continuityMode: MemoryIsolated,
 	}
 }
@@ -94,6 +105,7 @@ func (m *RedisMissionMemory) Store(ctx context.Context, key string, value any, m
 		Key:       key,
 		Value:     string(valueJSON),
 		MissionID: string(m.missionID),
+		TenantID:  m.tenantID,
 		Metadata:  metadata,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -224,9 +236,16 @@ func (m *RedisMissionMemory) Search(ctx context.Context, query string, limit int
 	// Escape query for full-text search
 	escapedQuery := state.EscapeQuery(query)
 
-	// Build RediSearch query with mission_id filter
-	// Format: @mission_id:{escaped_id} escaped_query
-	searchQuery := fmt.Sprintf("@mission_id:{%s} %s", escapedMissionID, escapedQuery)
+	// Build RediSearch query with mission_id filter and optional tenant_id filter.
+	// When tenantID is set, add @tenant_id filter for defense-in-depth isolation
+	// so that a mission_id collision across tenants cannot expose cross-tenant data.
+	var searchQuery string
+	if m.tenantID != "" {
+		escapedTenantID := state.EscapeTag(m.tenantID)
+		searchQuery = fmt.Sprintf("@tenant_id:{%s} @mission_id:{%s} %s", escapedTenantID, escapedMissionID, escapedQuery)
+	} else {
+		searchQuery = fmt.Sprintf("@mission_id:{%s} %s", escapedMissionID, escapedQuery)
+	}
 
 	// Execute search with scores
 	opts := &state.SearchOptions{
@@ -289,8 +308,15 @@ func (m *RedisMissionMemory) History(ctx context.Context, limit int) ([]MemoryIt
 	// Escape mission_id for TAG field filter
 	escapedMissionID := state.EscapeTag(string(m.missionID))
 
-	// Build query to match all entries for this mission
-	searchQuery := fmt.Sprintf("@mission_id:{%s}", escapedMissionID)
+	// Build query to match all entries for this mission.
+	// When tenantID is set, add @tenant_id filter for defense-in-depth isolation.
+	var searchQuery string
+	if m.tenantID != "" {
+		escapedTenantID := state.EscapeTag(m.tenantID)
+		searchQuery = fmt.Sprintf("@tenant_id:{%s} @mission_id:{%s}", escapedTenantID, escapedMissionID)
+	} else {
+		searchQuery = fmt.Sprintf("@mission_id:{%s}", escapedMissionID)
+	}
 
 	// Execute search sorted by created_at descending
 	opts := &state.SearchOptions{
@@ -377,14 +403,36 @@ func (m *RedisMissionMemory) GetValueHistory(ctx context.Context, key string) ([
 }
 
 // buildDocKey constructs the Redis key for a memory document.
-// Format: gibson:memory:{mission_id}:{key}
+//
+// When tenantID is non-empty (multi-tenant mode):
+//
+//	Format: gibson:memory:{tenant_id}:{mission_id}:{key}
+//
+// When tenantID is empty (backward-compatible single-tenant mode):
+//
+//	Format: gibson:memory:{mission_id}:{key}
+//
+// The RediSearch index prefix "gibson:memory:" covers both formats.
 func (m *RedisMissionMemory) buildDocKey(key string) string {
+	if m.tenantID != "" {
+		return fmt.Sprintf("gibson:memory:%s:%s:%s", m.tenantID, m.missionID, key)
+	}
 	return fmt.Sprintf("gibson:memory:%s:%s", m.missionID, key)
 }
 
 // buildIndexKey constructs the Redis key for the mission's key index set.
-// Format: gibson:memory:idx:{mission_id}
+//
+// When tenantID is non-empty (multi-tenant mode):
+//
+//	Format: gibson:memory:idx:{tenant_id}:{mission_id}
+//
+// When tenantID is empty (backward-compatible single-tenant mode):
+//
+//	Format: gibson:memory:idx:{mission_id}
 func (m *RedisMissionMemory) buildIndexKey() string {
+	if m.tenantID != "" {
+		return fmt.Sprintf("gibson:memory:idx:%s:%s", m.tenantID, m.missionID)
+	}
 	return fmt.Sprintf("gibson:memory:idx:%s", m.missionID)
 }
 

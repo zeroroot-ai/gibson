@@ -176,7 +176,7 @@ func TestMemoryWrapper_WithFactory(t *testing.T) {
 
 	config := HarnessConfig{
 		SlotManager: llm.NewSlotManager(nil),
-		MemoryFactory: func(missionID types.ID) (memory.MemoryManager, error) {
+		MemoryFactory: func(missionID types.ID, tenantID string) (memory.MemoryManager, error) {
 			return newMockMemoryManager(missionID), nil
 		},
 		MemoryWrapper: func(mm memory.MemoryManager) memory.MemoryManager {

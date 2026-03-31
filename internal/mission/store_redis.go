@@ -6,47 +6,23 @@ import (
 	"fmt"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// RedisMissionStore implements MissionStore using Redis with RedisJSON and RediSearch.
-// It provides high-performance, scalable mission storage with full-text search capabilities.
-// Mission definitions are stored in etcd (same as DBMissionStore) for watch support.
+// RedisMissionStore implements MissionStore using Redis.
+// It provides high-performance, scalable mission storage.
+// Mission definitions are stored in Redis alongside mission instances.
 type RedisMissionStore struct {
-	client      *state.StateClient
-	etcdClient  *clientv3.Client
-	etcdNS      string // etcd namespace for definitions
+	client *state.StateClient
 }
 
 // NewRedisMissionStore creates a new Redis-backed mission store.
 func NewRedisMissionStore(client *state.StateClient) *RedisMissionStore {
 	return &RedisMissionStore{
 		client: client,
-		etcdNS: "gibson",
 	}
-}
-
-// WithEtcd configures the etcd client for mission definition storage.
-// This must be called to enable CreateDefinition, GetDefinition, etc.
-func (s *RedisMissionStore) WithEtcd(client *clientv3.Client, namespace string) *RedisMissionStore {
-	s.etcdClient = client
-	if namespace != "" {
-		s.etcdNS = namespace
-	}
-	return s
-}
-
-// definitionKey returns the etcd key for a mission definition.
-func (s *RedisMissionStore) definitionKey(name string) string {
-	return fmt.Sprintf("/%s/mission-definitions/%s", s.etcdNS, name)
-}
-
-// definitionPrefix returns the etcd prefix for all mission definitions.
-func (s *RedisMissionStore) definitionPrefix() string {
-	return fmt.Sprintf("/%s/mission-definitions/", s.etcdNS)
 }
 
 // Key naming functions for Redis keys
@@ -758,14 +734,23 @@ func (s *RedisMissionStore) FindOrCreateByName(ctx context.Context, mission *Mis
 	return &foundMission, result.Created, nil
 }
 
-// Mission definition methods (etcd-backed)
+// Mission definition methods (Redis-backed)
 
-// CreateDefinition stores a new mission definition in etcd.
+// missionDefinitionKey returns the Redis key for a mission definition.
+func (s *RedisMissionStore) missionDefinitionKey(name string) string {
+	return fmt.Sprintf("gibson:mission-definitions:%s", name)
+}
+
+// missionDefinitionIndexKey returns the Redis set key that indexes all definition names.
+func (s *RedisMissionStore) missionDefinitionIndexKey() string {
+	return "gibson:mission-definitions"
+}
+
+// CreateDefinition stores a new mission definition in Redis.
 // Returns ErrDefinitionExists if a definition with the same name already exists.
-// Returns ErrEtcdNotConfigured if etcd client is not configured.
 func (s *RedisMissionStore) CreateDefinition(ctx context.Context, def *MissionDefinition) error {
-	if s.etcdClient == nil {
-		return ErrEtcdNotConfigured
+	if s.client == nil {
+		return fmt.Errorf("Redis client not configured")
 	}
 
 	if def == nil {
@@ -783,91 +768,84 @@ func (s *RedisMissionStore) CreateDefinition(ctx context.Context, def *MissionDe
 		def.CreatedAt = now
 	}
 
-	// Serialize definition
 	data, err := json.Marshal(def)
 	if err != nil {
 		return fmt.Errorf("failed to marshal mission definition: %w", err)
 	}
 
-	key := s.definitionKey(def.Name)
+	key := s.missionDefinitionKey(def.Name)
 
-	// Use transaction to ensure we don't overwrite existing
-	txn := s.etcdClient.Txn(ctx)
-	resp, err := txn.
-		If(clientv3.Compare(clientv3.Version(key), "=", 0)).
-		Then(clientv3.OpPut(key, string(data))).
-		Commit()
-
+	// SET NX — only set if key does not exist
+	ok, err := s.client.Client().SetNX(ctx, key, string(data), 0).Result()
 	if err != nil {
 		return fmt.Errorf("failed to create mission definition: %w", err)
 	}
-
-	if !resp.Succeeded {
+	if !ok {
 		return ErrDefinitionExists
 	}
+
+	// Track definition name in the index set
+	_ = s.client.Client().SAdd(ctx, s.missionDefinitionIndexKey(), def.Name).Err()
 
 	return nil
 }
 
-// GetDefinition retrieves a mission definition by name from etcd.
+// GetDefinition retrieves a mission definition by name from Redis.
 // Returns nil, nil if not found.
-// Returns ErrEtcdNotConfigured if etcd client is not configured.
 func (s *RedisMissionStore) GetDefinition(ctx context.Context, name string) (*MissionDefinition, error) {
-	if s.etcdClient == nil {
-		return nil, ErrEtcdNotConfigured
+	if s.client == nil {
+		return nil, fmt.Errorf("Redis client not configured")
 	}
 
-	key := s.definitionKey(name)
+	key := s.missionDefinitionKey(name)
 
-	resp, err := s.etcdClient.Get(ctx, key)
+	data, err := s.client.Client().Get(ctx, key).Result()
+	if err == goredis.Nil {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mission definition: %w", err)
 	}
 
-	if len(resp.Kvs) == 0 {
-		return nil, nil
-	}
-
 	var def MissionDefinition
-	if err := json.Unmarshal(resp.Kvs[0].Value, &def); err != nil {
+	if err := json.Unmarshal([]byte(data), &def); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal mission definition: %w", err)
 	}
 
 	return &def, nil
 }
 
-// ListDefinitions returns all installed mission definitions from etcd.
+// ListDefinitions returns all installed mission definitions from Redis.
 // Returns an empty slice if no definitions are found.
-// Returns ErrEtcdNotConfigured if etcd client is not configured.
 func (s *RedisMissionStore) ListDefinitions(ctx context.Context) ([]*MissionDefinition, error) {
-	if s.etcdClient == nil {
-		return nil, ErrEtcdNotConfigured
+	if s.client == nil {
+		return nil, fmt.Errorf("Redis client not configured")
 	}
 
-	resp, err := s.etcdClient.Get(ctx, s.definitionPrefix(), clientv3.WithPrefix())
+	names, err := s.client.Client().SMembers(ctx, s.missionDefinitionIndexKey()).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list mission definitions: %w", err)
 	}
 
-	definitions := make([]*MissionDefinition, 0, len(resp.Kvs))
-	for _, kv := range resp.Kvs {
-		var def MissionDefinition
-		if err := json.Unmarshal(kv.Value, &def); err != nil {
-			// Log error but continue with other definitions
+	definitions := make([]*MissionDefinition, 0, len(names))
+	for _, name := range names {
+		def, err := s.GetDefinition(ctx, name)
+		if err != nil || def == nil {
+			// Stale index entry — remove it
+			_ = s.client.Client().SRem(ctx, s.missionDefinitionIndexKey(), name).Err()
 			continue
 		}
-		definitions = append(definitions, &def)
+		definitions = append(definitions, def)
 	}
 
 	return definitions, nil
 }
 
-// UpdateDefinition updates an existing mission definition in etcd.
+// UpdateDefinition updates an existing mission definition in Redis.
 // Returns ErrDefinitionNotFound if the definition does not exist.
-// Returns ErrEtcdNotConfigured if etcd client is not configured.
 func (s *RedisMissionStore) UpdateDefinition(ctx context.Context, def *MissionDefinition) error {
-	if s.etcdClient == nil {
-		return ErrEtcdNotConfigured
+	if s.client == nil {
+		return fmt.Errorf("Redis client not configured")
 	}
 
 	if def == nil {
@@ -878,66 +856,50 @@ func (s *RedisMissionStore) UpdateDefinition(ctx context.Context, def *MissionDe
 		return fmt.Errorf("mission definition name is required")
 	}
 
-	key := s.definitionKey(def.Name)
+	key := s.missionDefinitionKey(def.Name)
 
-	// Get existing to preserve InstalledAt
-	resp, err := s.etcdClient.Get(ctx, key)
+	// Fetch existing to preserve timestamps
+	existing, err := s.GetDefinition(ctx, def.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get existing definition: %w", err)
 	}
-
-	if len(resp.Kvs) == 0 {
+	if existing == nil {
 		return ErrDefinitionNotFound
 	}
 
-	// Preserve InstalledAt timestamp from existing record
-	var existing MissionDefinition
-	if err := json.Unmarshal(resp.Kvs[0].Value, &existing); err != nil {
-		return fmt.Errorf("failed to unmarshal existing definition: %w", err)
-	}
-
-	// Preserve original timestamps from existing record
 	def.InstalledAt = existing.InstalledAt
 	def.CreatedAt = existing.CreatedAt
 
-	// Serialize and update
 	data, err := json.Marshal(def)
 	if err != nil {
 		return fmt.Errorf("failed to marshal mission definition: %w", err)
 	}
 
-	_, err = s.etcdClient.Put(ctx, key, string(data))
-	if err != nil {
+	if err := s.client.Client().Set(ctx, key, string(data), 0).Err(); err != nil {
 		return fmt.Errorf("failed to update mission definition: %w", err)
 	}
 
 	return nil
 }
 
-// DeleteDefinition removes a mission definition from etcd.
+// DeleteDefinition removes a mission definition from Redis.
 // Returns ErrDefinitionNotFound if the definition does not exist.
-// Returns ErrEtcdNotConfigured if etcd client is not configured.
 func (s *RedisMissionStore) DeleteDefinition(ctx context.Context, name string) error {
-	if s.etcdClient == nil {
-		return ErrEtcdNotConfigured
+	if s.client == nil {
+		return fmt.Errorf("Redis client not configured")
 	}
 
-	key := s.definitionKey(name)
+	key := s.missionDefinitionKey(name)
 
-	// Use transaction to check existence before delete
-	txn := s.etcdClient.Txn(ctx)
-	resp, err := txn.
-		If(clientv3.Compare(clientv3.Version(key), ">", 0)).
-		Then(clientv3.OpDelete(key)).
-		Commit()
-
+	n, err := s.client.Client().Del(ctx, key).Result()
 	if err != nil {
 		return fmt.Errorf("failed to delete mission definition: %w", err)
 	}
-
-	if !resp.Succeeded {
+	if n == 0 {
 		return ErrDefinitionNotFound
 	}
+
+	_ = s.client.Client().SRem(ctx, s.missionDefinitionIndexKey(), name).Err()
 
 	return nil
 }

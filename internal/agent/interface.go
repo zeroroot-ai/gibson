@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -38,10 +37,10 @@ type Agent interface {
 	Capabilities() []string
 
 	// TargetTypes returns the types of targets this agent can operate against
-	TargetTypes() []component.TargetType
+	TargetTypes() []types.TargetType
 
 	// TechniqueTypes returns the types of techniques this agent can execute
-	TechniqueTypes() []component.TechniqueType
+	TechniqueTypes() []types.TechniqueType
 
 	// LLMSlots returns the LLM slot definitions this agent requires
 	LLMSlots() []SlotDefinition

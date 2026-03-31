@@ -34,7 +34,7 @@ func TestAuthMode_Disabled(t *testing.T) {
 	cfg.ApplyDefaults()
 
 	// Create composite authenticator (should return nil for disabled mode)
-	authenticator, err := auth.NewCompositeAuthenticator(cfg)
+	authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
 	require.NoError(t, err, "Failed to create composite authenticator")
 	assert.Nil(t, authenticator, "Disabled mode should return nil authenticator")
 
@@ -93,7 +93,7 @@ func TestAuthMode_Disabled_WithDefaultTenant(t *testing.T) {
 	cfg.ApplyDefaults()
 
 	// Create authenticator (nil for disabled)
-	authenticator, err := auth.NewCompositeAuthenticator(cfg)
+	authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
 	require.NoError(t, err)
 
 	// Create logger
@@ -151,7 +151,7 @@ func TestAuthMode_Dev(t *testing.T) {
 	cfg.ApplyDefaults()
 
 	// Create authenticator
-	authenticator, err := auth.NewCompositeAuthenticator(cfg)
+	authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
 	require.NoError(t, err, "Failed to create composite authenticator")
 	require.NotNil(t, authenticator, "Dev mode should return authenticator")
 
@@ -268,7 +268,7 @@ func TestAuthMode_Enterprise_Config(t *testing.T) {
 	require.NoError(t, err, "Enterprise config should validate")
 
 	// Create authenticator
-	authenticator, err := auth.NewCompositeAuthenticator(cfg)
+	authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
 	require.NoError(t, err, "Failed to create composite authenticator")
 	require.NotNil(t, authenticator, "Enterprise mode should return authenticator")
 
@@ -820,7 +820,7 @@ func TestFullAuthFlow_Integration(t *testing.T) {
 		}
 		cfg.ApplyDefaults()
 
-		authenticator, err := auth.NewCompositeAuthenticator(cfg)
+		authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
 		require.NoError(t, err)
 
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -866,7 +866,7 @@ func TestFullAuthFlow_Integration(t *testing.T) {
 		}
 		cfg.ApplyDefaults()
 
-		authenticator, err := auth.NewCompositeAuthenticator(cfg)
+		authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
 		require.NoError(t, err)
 
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -919,7 +919,7 @@ func TestConcurrentAuthRequests(t *testing.T) {
 	}
 	cfg.ApplyDefaults()
 
-	authenticator, err := auth.NewCompositeAuthenticator(cfg)
+	authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
 	require.NoError(t, err)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -983,7 +983,7 @@ func TestStreamAuthInterceptor(t *testing.T) {
 	}
 	cfg.ApplyDefaults()
 
-	authenticator, err := auth.NewCompositeAuthenticator(cfg)
+	authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
 	require.NoError(t, err)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{

@@ -7,7 +7,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -37,9 +36,6 @@ type CommandContext struct {
 
 	// MissionRunStore provides access to mission run data (optional, may be nil)
 	MissionRunStore mission.MissionRunStore
-
-	// RegManager provides access to the component registry for service discovery
-	RegManager *registry.Manager
 
 	// ConfigFile is the path to the Gibson configuration file
 	ConfigFile string

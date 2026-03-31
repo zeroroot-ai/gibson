@@ -54,7 +54,7 @@ var daemonStartCmd = &cobra.Command{
 	Long: `Start the Gibson daemon (runs in foreground until stopped).
 
 The daemon manages long-running services including:
-  - etcd registry (embedded or external)
+  - Redis-backed component registry and metadata store
   - Callback server for agent harnesses
   - Component discovery and health monitoring
   - gRPC API server for client connections
@@ -88,10 +88,9 @@ TROUBLESHOOTING:
     Stop it with 'gibson daemon stop' first.
 
   - "port already in use": Another process is using required ports.
-    Check etcd (2379, 2380) and callback (50001) ports.
+    Check callback (50001) and gRPC (50002) ports.
 
-  - "failed to start registry": Check GIBSON_HOME permissions and
-    that etcd data directory is not corrupted.`,
+  - "Redis not available": Ensure Redis is running and REDIS_URL is set.`,
 	RunE: runDaemonStart,
 }
 
@@ -112,7 +111,7 @@ WHAT HAPPENS:
   5. Services shut down in order:
      - gRPC server (no new clients)
      - Callback server (no new agent callbacks)
-     - Registry manager (etcd shutdown)
+     - Registry cleanup (Redis)
 
 EXAMPLES:
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/component"
 )
 
 var errRegistryUnavailable = errors.New("registry unavailable")
@@ -60,7 +60,7 @@ func TestObserver_WithInventoryBuilder(t *testing.T) {
 
 		// Create mock registry with test data
 		mockReg := &mockBuilderComponentDiscovery{
-			agents: []registry.AgentInfo{
+			agents: []component.AgentInfo{
 				{
 					Name:         "davinci",
 					Version:      "1.0.0",
@@ -80,7 +80,7 @@ func TestObserver_WithInventoryBuilder(t *testing.T) {
 					Endpoints:    []string{"localhost:50053"},
 				},
 			},
-			tools: []registry.ToolInfo{
+			tools: []component.ToolInfo{
 				{
 					Name:        "nmap",
 					Version:     "1.0.0",
@@ -89,7 +89,7 @@ func TestObserver_WithInventoryBuilder(t *testing.T) {
 					Endpoints:   []string{"localhost:50054"},
 				},
 			},
-			plugins: []registry.PluginInfo{
+			plugins: []component.PluginInfo{
 				{
 					Name:        "mitre-lookup",
 					Version:     "1.0.0",
@@ -163,7 +163,7 @@ func TestObserver_WithInventoryBuilder(t *testing.T) {
 		ctx := context.Background()
 
 		mockReg := &mockBuilderComponentDiscovery{
-			agents: []registry.AgentInfo{
+			agents: []component.AgentInfo{
 				{
 					Name:         "davinci",
 					Capabilities: []string{"prompt_injection", "jailbreak"},
@@ -295,15 +295,15 @@ func TestObserver_InventoryBuildFailure(t *testing.T) {
 
 		// Create mock registry with partial failure
 		mockReg := &mockBuilderComponentDiscovery{
-			agents: []registry.AgentInfo{
+			agents: []component.AgentInfo{
 				{
 					Name:      "davinci",
 					Instances: 1,
 				},
 			},
 			// Tools and plugins will succeed with empty lists
-			tools:   []registry.ToolInfo{},
-			plugins: []registry.PluginInfo{},
+			tools:   []component.ToolInfo{},
+			plugins: []component.PluginInfo{},
 		}
 
 		builder := NewInventoryBuilder(mockReg)
@@ -336,7 +336,7 @@ func TestObserver_InventoryBuildFailure(t *testing.T) {
 
 		// Create mock registry that succeeds initially
 		mockReg := &mockBuilderComponentDiscovery{
-			agents: []registry.AgentInfo{
+			agents: []component.AgentInfo{
 				{
 					Name:      "davinci",
 					Instances: 1,

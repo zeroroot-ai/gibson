@@ -9,19 +9,28 @@ import (
 // CompositeAuthenticator tries multiple authentication strategies in order.
 //
 // This allows Gibson to support multiple authentication methods simultaneously:
+//   - API key tokens prefixed with "gsk_" (routed directly, bypasses OIDC/K8s chain)
 //   - OIDC tokens from configured providers (Okta, GitHub Actions, GitLab CI)
 //   - Kubernetes ServiceAccount tokens via TokenReview API
 //   - Local static tokens for development
 //
-// Authentication is attempted in the order: OIDC → K8s → Local.
-// The first successful authentication wins and returns the Identity.
+// Authentication routing:
+//   - Tokens starting with "gsk_" are routed directly to the APIKeyAuthenticator
+//     (if configured). No fallback to the OIDC/K8s chain occurs on failure.
+//   - All other tokens are tried in order: OIDC → K8s → Local.
 //
-// If all authenticators fail, returns an error aggregating all failure reasons.
+// The first successful authentication wins and returns the Identity.
+// If all applicable authenticators fail, returns an error aggregating all failure reasons.
 //
 // Implements the Authenticator interface.
 // Thread-safe for concurrent use.
 type CompositeAuthenticator struct {
 	authenticators []authenticatorEntry
+
+	// apiKey is the optional API key authenticator for "gsk_"-prefixed tokens.
+	// When non-nil, tokens starting with "gsk_" are routed exclusively to this
+	// authenticator and never fall through to the OIDC/K8s chain.
+	apiKey *APIKeyAuthenticator
 }
 
 // authenticatorEntry wraps an authenticator with metadata.
@@ -36,17 +45,25 @@ type authenticatorEntry struct {
 //
 //   - "disabled": Returns nil (caller should skip authentication entirely)
 //   - "dev": Only local static token authenticator
-//   - "enterprise": OIDC + Kubernetes (if enabled)
-//   - "saas": OIDC only (Kubernetes not typical for SaaS deployments)
+//   - "enterprise": API key (if provided) + OIDC + Kubernetes (if enabled)
+//   - "saas": API key (if provided) + OIDC only
 //
-// Authenticators are tried in priority order:
+// The optional apiKeyAuthenticator parameter wires in API key support for
+// "enterprise" and "saas" modes. Pass nil to omit API key authentication.
+// In "dev" and "disabled" modes the apiKeyAuthenticator is ignored even if provided.
+//
+// Token routing:
+//   - Tokens with "gsk_" prefix are routed exclusively to the API key authenticator.
+//   - All other tokens fall through the OIDC → K8s → Local chain.
+//
+// Authenticators in the fallback chain are tried in priority order:
 //  1. OIDC (if configured for the mode)
 //  2. Kubernetes (if configured for the mode)
 //  3. Local (if configured for the mode)
 //
 // Returns nil authenticator for "disabled" mode - caller should handle this case.
 // Returns an error if configuration is invalid for the specified mode.
-func NewCompositeAuthenticator(cfg *AuthConfig) (*CompositeAuthenticator, error) {
+func NewCompositeAuthenticator(cfg *AuthConfig, apiKeyAuthenticator *APIKeyAuthenticator) (*CompositeAuthenticator, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("auth config is nil")
 	}
@@ -134,18 +151,26 @@ func NewCompositeAuthenticator(cfg *AuthConfig) (*CompositeAuthenticator, error)
 		return nil, fmt.Errorf("no authenticators configured for mode %q", cfg.Mode)
 	}
 
-	return &CompositeAuthenticator{
+	composite := &CompositeAuthenticator{
 		authenticators: authenticators,
-	}, nil
+	}
+
+	// Wire in API key authenticator for enterprise and saas modes.
+	// Dev and disabled modes do not support API key authentication.
+	if apiKeyAuthenticator != nil && (cfg.Mode == "enterprise" || cfg.Mode == "saas") {
+		composite.apiKey = apiKeyAuthenticator
+	}
+
+	return composite, nil
 }
 
 // Authenticate tries each authenticator in order until one succeeds.
 //
-// Process:
-//  1. Try OIDC authentication first (if configured)
-//  2. Try Kubernetes TokenReview (if enabled)
-//  3. Try local static token (if configured)
-//  4. If all fail, return composite error
+// Routing:
+//   - Tokens starting with "gsk_" are routed exclusively to the API key
+//     authenticator. If no API key authenticator is configured, these tokens
+//     are rejected immediately without falling through to OIDC/K8s.
+//   - All other tokens are tried against the OIDC → K8s → Local chain.
 //
 // Returns the Identity from the first successful authenticator.
 // Returns an error aggregating all failures if all authenticators fail.
@@ -154,10 +179,20 @@ func (c *CompositeAuthenticator) Authenticate(ctx context.Context, token string)
 		return nil, ErrMissingToken()
 	}
 
-	// Track errors from each authenticator
+	// Route "gsk_"-prefixed tokens exclusively to the API key authenticator.
+	// These tokens must never fall through to the OIDC/K8s chain — a gsk_ token
+	// that fails API key auth is always an auth failure, not an OIDC token.
+	if strings.HasPrefix(token, apiKeyPrefix+"_") {
+		if c.apiKey == nil {
+			return nil, ErrInvalidToken(fmt.Errorf("API key authentication is not configured"))
+		}
+		return c.apiKey.Authenticate(ctx, token)
+	}
+
+	// Track errors from each authenticator in the fallback chain
 	var errors []string
 
-	// Try each authenticator in order
+	// Try each authenticator in order: OIDC → K8s → Local
 	for _, entry := range c.authenticators {
 		identity, err := entry.authenticator.Authenticate(ctx, token)
 		if err == nil {
@@ -231,4 +266,20 @@ func (c *CompositeAuthenticator) GetOIDCValidator() *OIDCValidator {
 		}
 	}
 	return nil
+}
+
+// HasAPIKey returns true if API key authentication is configured.
+//
+// When true, tokens starting with "gsk_" will be routed to the API key
+// authenticator rather than the OIDC/K8s chain.
+func (c *CompositeAuthenticator) HasAPIKey() bool {
+	return c.apiKey != nil
+}
+
+// GetAPIKeyAuthenticator returns the API key authenticator if configured, or nil otherwise.
+//
+// This is primarily intended for use by management APIs (CreateKey, RevokeKey,
+// ListKeys) that need direct access to the authenticator beyond token validation.
+func (c *CompositeAuthenticator) GetAPIKeyAuthenticator() *APIKeyAuthenticator {
+	return c.apiKey
 }

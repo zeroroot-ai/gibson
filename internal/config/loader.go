@@ -281,8 +281,11 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 
 	// Apply Registry config interpolation
 	if registry, ok := interpolated["registry"].(map[string]interface{}); ok {
-		if listenAddr, ok := registry["listen_address"].(string); ok {
-			cfg.Registry.ListenAddress = interpolateString(listenAddr)
+		if namespace, ok := registry["namespace"].(string); ok {
+			cfg.Registry.Namespace = interpolateString(namespace)
+		}
+		if ttl, ok := registry["ttl"].(string); ok {
+			cfg.Registry.TTL = interpolateString(ttl)
 		}
 	}
 

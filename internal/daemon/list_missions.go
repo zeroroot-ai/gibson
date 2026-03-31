@@ -150,6 +150,7 @@ func convertMissionToData(m *mission.Mission) api.MissionData {
 
 	return api.MissionData{
 		ID:           m.ID.String(),
+		TenantID:     m.TenantID,
 		Name:         m.Name,
 		Description:  m.Description,
 		WorkflowPath: workflowPath,

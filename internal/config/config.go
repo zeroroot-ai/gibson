@@ -146,44 +146,16 @@ type RegistrationConfig struct {
 	HeartbeatTimeout time.Duration `mapstructure:"heartbeat_timeout" yaml:"heartbeat_timeout,omitempty"`
 }
 
-// RegistryConfig contains configuration for service discovery via etcd-based registry.
-// Supports both embedded etcd (for local development) and external etcd cluster (for production).
+// RegistryConfig contains configuration for the component registry.
+// The registry now uses Redis exclusively for both runtime service discovery
+// and persistent component metadata storage.
 type RegistryConfig struct {
-	// Type specifies the registry mode: "embedded" (default) or "etcd"
-	Type string `mapstructure:"type" yaml:"type"`
-
-	// DataDir is the directory for embedded etcd data storage (default: ~/.gibson/etcd-data)
-	DataDir string `mapstructure:"data_dir" yaml:"data_dir"`
-
-	// ListenAddress is the address for embedded etcd to listen on (default: localhost:2379)
-	ListenAddress string `mapstructure:"listen_address" yaml:"listen_address"`
-
-	// Endpoints is the list of external etcd endpoints (required when Type="etcd")
-	Endpoints []string `mapstructure:"endpoints" yaml:"endpoints"`
-
-	// Namespace is the service prefix for all registry keys (default: "gibson")
+	// Namespace is the key prefix for all registry entries (default: "gibson")
 	Namespace string `mapstructure:"namespace" yaml:"namespace"`
 
-	// TTL is the lease time-to-live for service registration (default: "30s")
+	// TTL is the time-to-live for runtime service registrations (default: "30s")
+	// Persistent component metadata (installed agents/tools/plugins) has no TTL.
 	TTL string `mapstructure:"ttl" yaml:"ttl"`
-
-	// TLS contains TLS configuration for etcd connections
-	TLS TLSConfig `mapstructure:"tls" yaml:"tls"`
-}
-
-// TLSConfig contains TLS/SSL configuration for secure etcd connections.
-type TLSConfig struct {
-	// Enabled controls whether TLS is used for etcd connections
-	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
-
-	// CertFile is the path to the client certificate file
-	CertFile string `mapstructure:"cert_file" yaml:"cert_file"`
-
-	// KeyFile is the path to the client private key file
-	KeyFile string `mapstructure:"key_file" yaml:"key_file"`
-
-	// CAFile is the path to the certificate authority file
-	CAFile string `mapstructure:"ca_file" yaml:"ca_file"`
 }
 
 // DaemonConfig contains configuration for the Gibson daemon process.

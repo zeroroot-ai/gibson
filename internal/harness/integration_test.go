@@ -25,7 +25,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/schema"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -489,7 +489,7 @@ func (m *mockRegistryAdapter) DiscoverTool(ctx context.Context, name string) (to
 	}
 	t, ok := m.tools[name]
 	if !ok {
-		return nil, &registry.ToolNotFoundError{Name: name, Available: []string{}}
+		return nil, &component.ToolNotFoundError{Name: name, Available: []string{}}
 	}
 	return t, nil
 }
@@ -500,22 +500,22 @@ func (m *mockRegistryAdapter) DiscoverPlugin(ctx context.Context, name string) (
 	}
 	p, ok := m.plugins[name]
 	if !ok {
-		return nil, &registry.PluginNotFoundError{Name: name, Available: []string{}}
+		return nil, &component.PluginNotFoundError{Name: name, Available: []string{}}
 	}
 	return p, nil
 }
 
-func (m *mockRegistryAdapter) ListAgents(ctx context.Context) ([]registry.AgentInfo, error) {
-	return []registry.AgentInfo{}, nil
+func (m *mockRegistryAdapter) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
+	return []component.AgentInfo{}, nil
 }
 
-func (m *mockRegistryAdapter) ListTools(ctx context.Context) ([]registry.ToolInfo, error) {
+func (m *mockRegistryAdapter) ListTools(ctx context.Context) ([]component.ToolInfo, error) {
 	if m.tools == nil {
-		return []registry.ToolInfo{}, nil
+		return []component.ToolInfo{}, nil
 	}
-	result := make([]registry.ToolInfo, 0, len(m.tools))
+	result := make([]component.ToolInfo, 0, len(m.tools))
 	for name, t := range m.tools {
-		result = append(result, registry.ToolInfo{
+		result = append(result, component.ToolInfo{
 			Name:        name,
 			Version:     t.Version(),
 			Description: t.Description(),
@@ -526,13 +526,13 @@ func (m *mockRegistryAdapter) ListTools(ctx context.Context) ([]registry.ToolInf
 	return result, nil
 }
 
-func (m *mockRegistryAdapter) ListPlugins(ctx context.Context) ([]registry.PluginInfo, error) {
+func (m *mockRegistryAdapter) ListPlugins(ctx context.Context) ([]component.PluginInfo, error) {
 	if m.plugins == nil {
-		return []registry.PluginInfo{}, nil
+		return []component.PluginInfo{}, nil
 	}
-	result := make([]registry.PluginInfo, 0, len(m.plugins))
+	result := make([]component.PluginInfo, 0, len(m.plugins))
 	for name, p := range m.plugins {
-		result = append(result, registry.PluginInfo{
+		result = append(result, component.PluginInfo{
 			Name:        name,
 			Version:     p.Version(),
 			Description: "",

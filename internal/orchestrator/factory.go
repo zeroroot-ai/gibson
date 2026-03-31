@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
@@ -65,7 +65,7 @@ type Config struct {
 	GraphLoader MissionGraphLoader
 
 	// Registry for component discovery and validation (optional)
-	Registry registry.ComponentDiscovery
+	Registry component.ComponentDiscovery
 
 	// MissionGraphManager manages Mission and MissionRun nodes in Neo4j (optional)
 	// When set, enables automatic mission graph node creation and status tracking

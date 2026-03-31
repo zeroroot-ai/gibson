@@ -26,7 +26,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/payload"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
+	internalcomponent "github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"go.opentelemetry.io/otel/trace"
@@ -473,14 +473,15 @@ func createAttackRunner(ctx context.Context) (attack.AttackRunner, error) {
 	missionStore := mission.NewRedisMissionStore(stateClient)
 	findingStore := finding.NewRedisFindingStore(stateClient)
 
-	// Step 2: Get registry manager from context and create adapter
-	regManager := component.GetRegistryManager(ctx)
-	if regManager == nil {
-		return nil, fmt.Errorf("registry not available (ensure daemon is running)")
+	// Step 2: Create Redis-backed component registry adapter for component discovery.
+	// Check for an injected discovery (used in tests) before creating from Redis.
+	var registryAdapter internalcomponent.ComponentDiscovery
+	if injected := component.GetComponentDiscovery(ctx); injected != nil {
+		registryAdapter = injected
+	} else {
+		compRegistry := internalcomponent.NewRedisComponentRegistry(stateClient.Client(), 0)
+		registryAdapter = internalcomponent.NewRegistryAdapter(compRegistry, "default")
 	}
-
-	// Create registry adapter for component discovery
-	registryAdapter := registry.NewRegistryAdapter(regManager.Registry())
 
 	// Step 2.5: Create registries (tools and plugins still use legacy registries for now)
 	toolRegistry := tool.NewToolRegistry()
@@ -505,7 +506,7 @@ func createAttackRunner(ctx context.Context) (attack.AttackRunner, error) {
 		SlotManager:     slotManager,
 		ToolRegistry:    toolRegistry,
 		PluginRegistry:  pluginRegistry,
-		RegistryAdapter: registryAdapter, // Use new etcd-based registry adapter
+		RegistryAdapter: registryAdapter, // Use Redis-backed component registry adapter
 		FindingStore:    nil,             // Will be created per-harness if needed
 		Logger:          slog.Default(),
 		Tracer:          trace.NewNoopTracerProvider().Tracer("attack-runner"),
@@ -608,14 +609,25 @@ func runListAgents(cmd *cobra.Command, ctx context.Context) error {
 		return runListAgentsViaDaemon(cmd, ctx, daemonClient)
 	}
 
-	// Fall back to registry adapter for standalone mode (when daemon not running)
-	regManager := component.GetRegistryManager(ctx)
-	if regManager == nil {
-		return fmt.Errorf("registry not available (ensure daemon is running)")
+	// Fall back to Redis-backed component registry for standalone mode
+	cfg, err := loadGlobalConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
 	}
+	stateCfg := &state.Config{
+		URL:      cfg.Redis.URL,
+		Database: cfg.Redis.Database,
+		Password: cfg.Redis.Password,
+	}
+	stateCfg.ApplyDefaults()
+	stateClient, err := state.NewStateClient(stateCfg)
+	if err != nil {
+		return fmt.Errorf("registry not available (ensure daemon is running): %w", err)
+	}
+	defer stateClient.Close()
 
-	// Create registry adapter for component discovery
-	registryAdapter := registry.NewRegistryAdapter(regManager.Registry())
+	compRegistry := internalcomponent.NewRedisComponentRegistry(stateClient.Client(), 0)
+	registryAdapter := internalcomponent.NewRegistryAdapter(compRegistry, "default")
 	defer registryAdapter.Close()
 
 	// Query registry for all agents
@@ -645,7 +657,7 @@ func runListAgents(cmd *cobra.Command, ctx context.Context) error {
 		cmd.Println("To register an agent:")
 		cmd.Println("  1. Build your agent using the SDK")
 		cmd.Println("  2. Start it with 'agent serve --port <PORT>'")
-		cmd.Println("  3. It will auto-register with the embedded etcd")
+		cmd.Println("  3. It will auto-register with the component registry")
 		return nil
 	}
 
@@ -737,7 +749,7 @@ func runListAgentsViaDaemon(cmd *cobra.Command, ctx context.Context, daemonClien
 		cmd.Println("To register an agent:")
 		cmd.Println("  1. Build your agent using the SDK")
 		cmd.Println("  2. Start it with 'agent serve --port <PORT>'")
-		cmd.Println("  3. It will auto-register with the embedded etcd")
+		cmd.Println("  3. It will auto-register with the component registry")
 		return nil
 	}
 
@@ -768,7 +780,7 @@ func runListAgentsViaDaemon(cmd *cobra.Command, ctx context.Context, daemonClien
 }
 
 // sumInstances calculates total number of instances across all agents
-func sumInstances(agents []registry.AgentInfo) int {
+func sumInstances(agents []internalcomponent.AgentInfo) int {
 	total := 0
 	for _, agent := range agents {
 		total += agent.Instances

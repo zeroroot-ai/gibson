@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
@@ -335,15 +335,15 @@ func (m *mockComponentDiscovery) DiscoverPlugin(ctx context.Context, name string
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockComponentDiscovery) ListAgents(ctx context.Context) ([]registry.AgentInfo, error) {
+func (m *mockComponentDiscovery) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockComponentDiscovery) ListTools(ctx context.Context) ([]registry.ToolInfo, error) {
+func (m *mockComponentDiscovery) ListTools(ctx context.Context) ([]component.ToolInfo, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]registry.PluginInfo, error) {
+func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]component.PluginInfo, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -487,7 +487,7 @@ func extractHostFromURL(url string) string {
 }
 
 // createHarnessWithResolver creates a test harness with ProtoResolver configured
-func createHarnessWithResolver(t *testing.T, mockRegistry registry.ComponentDiscovery) AgentHarness {
+func createHarnessWithResolver(t *testing.T, mockRegistry component.ComponentDiscovery) AgentHarness {
 	t.Helper()
 
 	// Create ProtoResolver with default config

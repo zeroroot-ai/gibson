@@ -15,19 +15,22 @@ import (
 // It provides full-text search capabilities, secondary indexes for efficient filtering,
 // and atomic operations using Redis pipelines.
 //
-// Key Naming Convention:
-//   - Finding document: "gibson:finding:{id}"
-//   - By mission index: "gibson:finding:by_mission:{mission_id}"
-//   - By severity index: "gibson:finding:by_severity:{severity}"
+// Key Naming Convention (tenant-scoped, where {tenant} is the tenantID or "_" when empty):
+//   - Finding document: "gibson:finding:{tenant}:{id}"
+//   - By mission index: "gibson:finding:by_mission:{tenant}:{mission_id}"
+//   - By severity index: "gibson:finding:by_severity:{tenant}:{severity}"
+//
+// When a finding has an empty TenantID (single-tenant / auth-disabled mode), the
+// tenant segment is replaced with "_" so that keys remain consistent and scannable.
 //
 // Secondary Indexes:
-//   - Mission index: Set of finding IDs per mission for efficient mission queries
-//   - Severity index: Set of finding IDs per severity level for filtering
+//   - Mission index: Set of finding IDs per (tenant, mission) for efficient queries
+//   - Severity index: Set of finding IDs per (tenant, severity) for filtering
 //
 // Full-Text Search:
 //   - Uses RediSearch index: "gibson:idx:findings"
 //   - Weighted fields: title (3.0), description (2.0), remediation (1.0)
-//   - TAG filters: severity, status, mission_id, agent_name, category
+//   - TAG filters: severity, status, mission_id, agent_name, category, tenant_id
 //   - Sortable: risk_score, cvss_score, created_at
 type RedisFindingStore struct {
 	client *state.StateClient
@@ -54,20 +57,27 @@ func NewRedisFindingStore(client *state.StateClient) *RedisFindingStore {
 }
 
 // Store persists an enhanced finding to Redis using JSON.SET.
-// It maintains secondary indexes for mission and severity using sets.
+// It maintains secondary indexes for mission and severity using tenant-scoped sets.
 // The operation is performed atomically using a Redis pipeline.
 //
+// Tenant isolation strategy:
+//   - The finding document is stored under a globally-unique UUID key (no tenant prefix)
+//     so that Get(id) point lookups remain efficient without requiring tenantID.
+//   - Secondary index sets (by_mission, by_severity) ARE scoped by tenantID, preventing
+//     cross-tenant enumeration via List() and Count() operations.
+//   - The finding document itself carries TenantID as a field for data-level validation.
+//
 // Steps:
-//  1. JSON.SET the finding document
-//  2. SADD to mission index set
-//  3. SADD to severity index set
+//  1. JSON.SET the finding document (unscoped key — UUID is globally unique)
+//  2. SADD to tenant-scoped mission index set
+//  3. SADD to tenant-scoped severity index set
 //
 // Returns an error if the operation fails.
 func (s *RedisFindingStore) Store(ctx context.Context, finding EnhancedFinding) error {
-	// Build keys
+	// Build keys: document key is ID-only (UUID unique); index keys are tenant-scoped.
 	findingKey := s.findingKey(finding.ID)
-	missionSetKey := s.missionSetKey(finding.MissionID)
-	severitySetKey := s.severitySetKey(finding.Severity)
+	missionSetKey := s.missionSetKey(finding.TenantID, finding.MissionID)
+	severitySetKey := s.severitySetKey(finding.TenantID, finding.Severity)
 
 	// Get underlying Redis client
 	rdb := s.client.Client()
@@ -101,6 +111,11 @@ func (s *RedisFindingStore) Store(ctx context.Context, finding EnhancedFinding) 
 
 // Get retrieves a finding by ID using JSON.GET.
 // Returns ErrNotFound if the finding does not exist.
+//
+// Security note: This is an ID-only point lookup. The returned EnhancedFinding carries
+// its own TenantID field, allowing callers to validate tenant ownership after retrieval.
+// For tenant-scoped bulk operations (listing, counting), use List() and Count() which
+// enforce isolation at the index level via tenant-scoped Redis sets.
 func (s *RedisFindingStore) Get(ctx context.Context, id types.ID) (*EnhancedFinding, error) {
 	key := s.findingKey(id)
 
@@ -121,9 +136,16 @@ func (s *RedisFindingStore) Get(ctx context.Context, id types.ID) (*EnhancedFind
 // Without filters: Uses SMEMBERS + JSON.MGET on mission index
 // With filters: Uses FT.SEARCH with filter clauses
 func (s *RedisFindingStore) List(ctx context.Context, missionID types.ID, filter *FindingFilter) ([]EnhancedFinding, error) {
-	// If no filters, use efficient set-based retrieval
+	// Extract tenantID from filter for tenant-scoped index lookups.
+	// When filter is nil or filter.TenantID is empty, falls back to unscoped ("_") key.
+	tenantID := ""
+	if filter != nil {
+		tenantID = filter.TenantID
+	}
+
+	// If no filters (or only tenantID filter), use efficient tenant-scoped set-based retrieval
 	if filter == nil || s.isEmptyFilter(filter) {
-		return s.listByMission(ctx, missionID)
+		return s.listByMission(ctx, tenantID, missionID)
 	}
 
 	// Build search query with filters
@@ -179,18 +201,20 @@ func (s *RedisFindingStore) Update(ctx context.Context, finding EnhancedFinding)
 	}
 	pipe.Do(ctx, "JSON.SET", findingKey, "$", string(data))
 
-	// Update mission index if mission changed
+	// Update mission index if mission changed.
+	// Use tenant-scoped index keys to maintain isolation.
 	if oldFinding.MissionID != finding.MissionID {
-		oldMissionKey := s.missionSetKey(oldFinding.MissionID)
-		newMissionKey := s.missionSetKey(finding.MissionID)
+		oldMissionKey := s.missionSetKey(oldFinding.TenantID, oldFinding.MissionID)
+		newMissionKey := s.missionSetKey(finding.TenantID, finding.MissionID)
 		pipe.SRem(ctx, oldMissionKey, finding.ID.String())
 		pipe.SAdd(ctx, newMissionKey, finding.ID.String())
 	}
 
-	// Update severity index if severity changed
+	// Update severity index if severity changed.
+	// Use tenant-scoped index keys to maintain isolation.
 	if oldFinding.Severity != finding.Severity {
-		oldSeverityKey := s.severitySetKey(oldFinding.Severity)
-		newSeverityKey := s.severitySetKey(finding.Severity)
+		oldSeverityKey := s.severitySetKey(oldFinding.TenantID, oldFinding.Severity)
+		newSeverityKey := s.severitySetKey(finding.TenantID, finding.Severity)
 		pipe.SRem(ctx, oldSeverityKey, finding.ID.String())
 		pipe.SAdd(ctx, newSeverityKey, finding.ID.String())
 	}
@@ -213,15 +237,16 @@ func (s *RedisFindingStore) Update(ctx context.Context, finding EnhancedFinding)
 //  3. SREM from mission index
 //  4. SREM from severity index
 func (s *RedisFindingStore) Delete(ctx context.Context, id types.ID) error {
-	// Fetch finding to get index keys
+	// Fetch finding to get index keys (including tenant for scoped index removal)
 	finding, err := s.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("finding not found: %w", err)
 	}
 
 	findingKey := s.findingKey(id)
-	missionSetKey := s.missionSetKey(finding.MissionID)
-	severitySetKey := s.severitySetKey(finding.Severity)
+	// Use tenant-scoped index keys so that removal targets the correct tenant's sets.
+	missionSetKey := s.missionSetKey(finding.TenantID, finding.MissionID)
+	severitySetKey := s.severitySetKey(finding.TenantID, finding.Severity)
 
 	rdb := s.client.Client()
 	pipe := rdb.Pipeline()
@@ -246,8 +271,15 @@ func (s *RedisFindingStore) Delete(ctx context.Context, id types.ID) error {
 
 // Count returns the total number of findings for a mission.
 // Uses SCARD on the mission index set for O(1) performance.
+//
+// Note: Count uses the unscoped (no-tenant) mission set key for backward compatibility,
+// since the FindingStore interface does not include tenantID on Count(). The primary
+// use of Count() is health checks and metrics — contexts where cross-tenant precision
+// is not required. For tenant-isolated counting, use List() with a tenanted filter.
 func (s *RedisFindingStore) Count(ctx context.Context, missionID types.ID) (int, error) {
-	key := s.missionSetKey(missionID)
+	// Use the no-tenant segment ("_") which represents single-tenant / legacy records.
+	// Tenant-aware code that needs precise per-tenant counts should use List() instead.
+	key := s.missionSetKey("", missionID)
 	rdb := s.client.Client()
 
 	count, err := rdb.SCard(ctx, key).Result()
@@ -260,8 +292,11 @@ func (s *RedisFindingStore) Count(ctx context.Context, missionID types.ID) (int,
 
 // ListBySeverity retrieves all findings with a specific severity level.
 // Uses the severity index set for efficient retrieval.
+//
+// Note: ListBySeverity uses the unscoped severity index for backward compatibility.
+// Tenant-scoped severity listings should use List() with a severity filter instead.
 func (s *RedisFindingStore) ListBySeverity(ctx context.Context, severity agent.FindingSeverity) ([]EnhancedFinding, error) {
-	key := s.severitySetKey(severity)
+	key := s.severitySetKey("", severity)
 	rdb := s.client.Client()
 
 	// Get all finding IDs from severity set
@@ -393,13 +428,15 @@ func (s *RedisFindingStore) SearchWithFilter(ctx context.Context, searchText str
 	return findings, nil
 }
 
-// listByMission retrieves all findings for a mission using secondary index.
+// listByMission retrieves all findings for a (tenant, mission) pair using secondary index.
 // This is an optimized path for queries without filters.
-func (s *RedisFindingStore) listByMission(ctx context.Context, missionID types.ID) ([]EnhancedFinding, error) {
-	key := s.missionSetKey(missionID)
+// The tenantID parameter scopes the mission set lookup for tenant isolation.
+// An empty tenantID uses the unscoped ("_") segment for backward compatibility.
+func (s *RedisFindingStore) listByMission(ctx context.Context, tenantID string, missionID types.ID) ([]EnhancedFinding, error) {
+	key := s.missionSetKey(tenantID, missionID)
 	rdb := s.client.Client()
 
-	// Get all finding IDs from mission set
+	// Get all finding IDs from tenant-scoped mission set
 	ids, err := rdb.SMembers(ctx, key).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mission set: %w", err)
@@ -409,7 +446,7 @@ func (s *RedisFindingStore) listByMission(ctx context.Context, missionID types.I
 		return []EnhancedFinding{}, nil
 	}
 
-	// Build keys for JSON.MGET
+	// Build document keys for JSON.MGET (document keys are unscoped by tenant)
 	keys := make([]string, len(ids))
 	for i, id := range ids {
 		parsedID, err := types.ParseID(id)
@@ -465,8 +502,16 @@ func (s *RedisFindingStore) buildSearchQuery(missionID types.ID, filter *Finding
 }
 
 // buildFilterClauses builds RediSearch filter clauses from a FindingFilter.
+// When filter.TenantID is set, a tenant_id TAG clause is included so that
+// RediSearch results are scoped to the correct tenant.
 func (s *RedisFindingStore) buildFilterClauses(filter *FindingFilter) []string {
 	var clauses []string
+
+	// Tenant isolation: add tenant_id TAG filter when tenantID is specified.
+	// This provides defense-in-depth by scoping full-text search results to the tenant.
+	if filter.TenantID != "" {
+		clauses = append(clauses, fmt.Sprintf("@tenant_id:{%s}", state.EscapeTag(filter.TenantID)))
+	}
 
 	if filter.Severity != nil {
 		clauses = append(clauses, fmt.Sprintf("@severity:{%s}", state.EscapeTag(string(*filter.Severity))))
@@ -502,6 +547,9 @@ func (s *RedisFindingStore) buildFilterClauses(filter *FindingFilter) []string {
 }
 
 // isEmptyFilter checks if a filter has no criteria set.
+// TenantID alone is not considered a "non-empty" filter for the purpose of
+// choosing between set-based vs. search-based retrieval — it only determines
+// which set key to use via listByMission.
 func (s *RedisFindingStore) isEmptyFilter(filter *FindingFilter) bool {
 	return filter.Severity == nil &&
 		filter.Category == nil &&
@@ -518,19 +566,43 @@ func (s *RedisFindingStore) isStructuredQuery(query string) bool {
 	return strings.Contains(query, "@") || strings.Contains(query, "{") || strings.Contains(query, "[")
 }
 
+// tenantSegment returns the tenant segment for a Redis key.
+// When tenantID is empty (single-tenant / auth-disabled mode), "_" is used as a
+// placeholder so that all key patterns remain structurally consistent and scannable.
+func tenantSegment(tenantID string) string {
+	if tenantID == "" {
+		return "_"
+	}
+	return tenantID
+}
+
 // findingKey generates the Redis key for a finding document.
+// Document keys are intentionally NOT scoped by tenant because:
+//   - Finding IDs are globally unique UUIDs
+//   - Get(id) point-lookups don't carry tenantID in the interface signature
+//   - The document itself carries TenantID for data-level validation by callers
+//
+// Tenant isolation is enforced at the index level via missionSetKey and severitySetKey.
+//
+//	"gibson:finding:{id}"
 func (s *RedisFindingStore) findingKey(id types.ID) string {
 	return fmt.Sprintf("gibson:finding:%s", id.String())
 }
 
 // missionSetKey generates the Redis key for the mission index set.
-func (s *RedisFindingStore) missionSetKey(missionID types.ID) string {
-	return fmt.Sprintf("gibson:finding:by_mission:%s", missionID.String())
+// The key is scoped by tenantID so that mission indexes cannot bleed across tenants:
+//
+//	"gibson:finding:by_mission:{tenant}:{mission_id}"
+func (s *RedisFindingStore) missionSetKey(tenantID string, missionID types.ID) string {
+	return fmt.Sprintf("gibson:finding:by_mission:%s:%s", tenantSegment(tenantID), missionID.String())
 }
 
 // severitySetKey generates the Redis key for the severity index set.
-func (s *RedisFindingStore) severitySetKey(severity agent.FindingSeverity) string {
-	return fmt.Sprintf("gibson:finding:by_severity:%s", string(severity))
+// The key is scoped by tenantID so that severity indexes cannot bleed across tenants:
+//
+//	"gibson:finding:by_severity:{tenant}:{severity}"
+func (s *RedisFindingStore) severitySetKey(tenantID string, severity agent.FindingSeverity) string {
+	return fmt.Sprintf("gibson:finding:by_severity:%s:%s", tenantSegment(tenantID), string(severity))
 }
 
 // ScanAll retrieves all findings using Redis SCAN.

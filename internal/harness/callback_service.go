@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -332,6 +333,23 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *pb
 		"agent_name", contextInfo.AgentName,
 		"task_id", contextInfo.TaskId,
 	)
+
+	// Tenant isolation: prevent cross-tenant harness access.
+	// When both the context tenant and the mission tenant are non-empty they must
+	// match. An empty value on either side means auth is disabled or the mission
+	// predates multi-tenancy, so we allow it through to preserve backward
+	// compatibility with dev/disabled-auth deployments.
+	contextTenant := auth.TenantFromContext(ctx)
+	missionTenant := harness.Mission().TenantID
+	if contextTenant != "" && missionTenant != "" && contextTenant != missionTenant {
+		s.logger.Warn("tenant mismatch on harness lookup",
+			slog.String("context_tenant", contextTenant),
+			slog.String("mission_tenant", missionTenant),
+			slog.String("mission_id", contextInfo.MissionId),
+			slog.String("agent_name", contextInfo.AgentName),
+		)
+		return nil, status.Error(codes.PermissionDenied, "tenant mismatch")
+	}
 
 	return harness, nil
 }

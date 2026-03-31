@@ -33,11 +33,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/cmd/gibson/component"
 	"github.com/zero-day-ai/gibson/internal/attack"
+	internalcomponent "github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/payload"
-	"github.com/zero-day-ai/gibson/internal/registry"
+	agentpkg "github.com/zero-day-ai/gibson/internal/agent"
+	pluginpkg "github.com/zero-day-ai/gibson/internal/plugin"
+	toolpkg "github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/schema"
@@ -76,10 +79,8 @@ func TestAttackCommand_StoredTarget(t *testing.T) {
 	mockRegistry.registerAgent(mockAgent)
 
 	// Set up command context with registry
-	// Note: We use context.WithValue directly because WithRegistryManager expects *registry.Manager
-	ctx := context.WithValue(context.Background(), component.RegistryManagerKey{}, &mockRegistryManager{
-		registry: mockRegistry,
-	})
+	// Note: We use context.WithValue directly because WithEtcdClient expects *clientv3.Client
+	ctx := component.WithComponentDiscovery(context.Background(), mockRegistry)
 
 	// Create command and execute
 	cmd := createAttackCommand()
@@ -115,10 +116,8 @@ func TestAttackCommand_InlineTarget(t *testing.T) {
 	mockRegistry.registerAgent(mockAgent)
 
 	// Set up command context
-	// Note: We use context.WithValue directly because WithRegistryManager expects *registry.Manager
-	ctx := context.WithValue(context.Background(), component.RegistryManagerKey{}, &mockRegistryManager{
-		registry: mockRegistry,
-	})
+	// Note: We use context.WithValue directly because WithEtcdClient expects *clientv3.Client
+	ctx := component.WithComponentDiscovery(context.Background(), mockRegistry)
 
 	// Create command and execute with inline target
 	cmd := createAttackCommand()
@@ -146,10 +145,8 @@ func TestAttackCommand_RejectURLPositional(t *testing.T) {
 
 	// Create mock registry
 	mockRegistry := newMockRegistry()
-	// Note: We use context.WithValue directly because WithRegistryManager expects *registry.Manager
-	ctx := context.WithValue(context.Background(), component.RegistryManagerKey{}, &mockRegistryManager{
-		registry: mockRegistry,
-	})
+	// Note: We use context.WithValue directly because WithEtcdClient expects *clientv3.Client
+	ctx := component.WithComponentDiscovery(context.Background(), mockRegistry)
 
 	// Create command and execute with URL positional argument
 	cmd := createAttackCommand()
@@ -190,10 +187,8 @@ func TestAttackCommand_AgentTypeNotSupported(t *testing.T) {
 	})
 	mockRegistry.registerAgent(mockAgent)
 
-	// Note: We use context.WithValue directly because WithRegistryManager expects *registry.Manager
-	ctx := context.WithValue(context.Background(), component.RegistryManagerKey{}, &mockRegistryManager{
-		registry: mockRegistry,
-	})
+	// Note: We use context.WithValue directly because WithEtcdClient expects *clientv3.Client
+	ctx := component.WithComponentDiscovery(context.Background(), mockRegistry)
 
 	// Try to attack with http_api target (agent doesn't support it)
 	cmd := createAttackCommand()
@@ -267,10 +262,7 @@ func TestAttackCommand_SchemaValidationError(t *testing.T) {
 			})
 			mockRegistry.registerAgent(mockAgent)
 
-			// Note: We use context.WithValue directly because WithRegistryManager expects *registry.Manager
-			ctx := context.WithValue(context.Background(), component.RegistryManagerKey{}, &mockRegistryManager{
-				registry: mockRegistry,
-			})
+			ctx := component.WithComponentDiscovery(context.Background(), mockRegistry)
 
 			// Create command with invalid connection
 			cmd := createAttackCommand()
@@ -302,10 +294,8 @@ func TestAttackCommand_MissingTargetFlags(t *testing.T) {
 	defer cleanup()
 
 	mockRegistry := newMockRegistry()
-	// Note: We use context.WithValue directly because WithRegistryManager expects *registry.Manager
-	ctx := context.WithValue(context.Background(), component.RegistryManagerKey{}, &mockRegistryManager{
-		registry: mockRegistry,
-	})
+	// Note: We use context.WithValue directly because WithEtcdClient expects *clientv3.Client
+	ctx := component.WithComponentDiscovery(context.Background(), mockRegistry)
 
 	// Create command without target specification
 	cmd := createAttackCommand()
@@ -348,10 +338,7 @@ func TestAttackCommand_IncompleteInlineTarget(t *testing.T) {
 			defer cleanup()
 
 			mockRegistry := newMockRegistry()
-			// Note: We use context.WithValue directly because WithRegistryManager expects *registry.Manager
-			ctx := context.WithValue(context.Background(), component.RegistryManagerKey{}, &mockRegistryManager{
-				registry: mockRegistry,
-			})
+			ctx := component.WithComponentDiscovery(context.Background(), mockRegistry)
 
 			// Create command with incomplete inline target
 			cmd := createAttackCommand()
@@ -379,10 +366,8 @@ func TestAttackCommand_StoredTargetNotFound(t *testing.T) {
 	defer cleanup()
 
 	mockRegistry := newMockRegistry()
-	// Note: We use context.WithValue directly because WithRegistryManager expects *registry.Manager
-	ctx := context.WithValue(context.Background(), component.RegistryManagerKey{}, &mockRegistryManager{
-		registry: mockRegistry,
-	})
+	// Note: We use context.WithValue directly because WithEtcdClient expects *clientv3.Client
+	ctx := component.WithComponentDiscovery(context.Background(), mockRegistry)
 
 	// Create command with non-existent target
 	cmd := createAttackCommand()
@@ -441,7 +426,7 @@ func createAttackCommand() *cobra.Command {
 
 // Mock implementations for testing
 
-// mockRegistry implements registry.ComponentDiscovery for testing
+// mockRegistry implements internalcomponent.ComponentDiscovery for testing
 type mockRegistry struct {
 	agents map[string]*mockAgentInfo
 }
@@ -456,10 +441,10 @@ func (m *mockRegistry) registerAgent(agent *mockAgentInfo) {
 	m.agents[agent.name] = agent
 }
 
-func (m *mockRegistry) ListAgents(ctx context.Context) ([]registry.AgentInfo, error) {
-	infos := make([]registry.AgentInfo, 0, len(m.agents))
+func (m *mockRegistry) ListAgents(ctx context.Context) ([]internalcomponent.AgentInfo, error) {
+	infos := make([]internalcomponent.AgentInfo, 0, len(m.agents))
 	for _, agent := range m.agents {
-		infos = append(infos, registry.AgentInfo{
+		infos = append(infos, internalcomponent.AgentInfo{
 			Name:         agent.name,
 			Version:      agent.version,
 			Capabilities: agent.capabilities,
@@ -469,12 +454,12 @@ func (m *mockRegistry) ListAgents(ctx context.Context) ([]registry.AgentInfo, er
 	return infos, nil
 }
 
-func (m *mockRegistry) GetAgent(ctx context.Context, name string) (registry.AgentInfo, error) {
+func (m *mockRegistry) GetAgent(ctx context.Context, name string) (internalcomponent.AgentInfo, error) {
 	agent, ok := m.agents[name]
 	if !ok {
-		return registry.AgentInfo{}, errNotFound
+		return internalcomponent.AgentInfo{}, errNotFound
 	}
-	return registry.AgentInfo{
+	return internalcomponent.AgentInfo{
 		Name:         agent.name,
 		Version:      agent.version,
 		Capabilities: agent.capabilities,
@@ -484,6 +469,36 @@ func (m *mockRegistry) GetAgent(ctx context.Context, name string) (registry.Agen
 
 func (m *mockRegistry) Close() error {
 	return nil
+}
+
+// DiscoverAgent implements internalcomponent.ComponentDiscovery
+func (m *mockRegistry) DiscoverAgent(ctx context.Context, name string) (agentpkg.Agent, error) {
+	return nil, errNotFound
+}
+
+// DiscoverTool implements internalcomponent.ComponentDiscovery
+func (m *mockRegistry) DiscoverTool(ctx context.Context, name string) (toolpkg.Tool, error) {
+	return nil, errNotFound
+}
+
+// DiscoverPlugin implements internalcomponent.ComponentDiscovery
+func (m *mockRegistry) DiscoverPlugin(ctx context.Context, name string) (pluginpkg.Plugin, error) {
+	return nil, errNotFound
+}
+
+// ListTools implements internalcomponent.ComponentDiscovery
+func (m *mockRegistry) ListTools(ctx context.Context) ([]internalcomponent.ToolInfo, error) {
+	return []internalcomponent.ToolInfo{}, nil
+}
+
+// ListPlugins implements internalcomponent.ComponentDiscovery
+func (m *mockRegistry) ListPlugins(ctx context.Context) ([]internalcomponent.PluginInfo, error) {
+	return []internalcomponent.PluginInfo{}, nil
+}
+
+// DelegateToAgent implements internalcomponent.ComponentDiscovery
+func (m *mockRegistry) DelegateToAgent(ctx context.Context, name string, task agentpkg.Task, harness agentpkg.AgentHarness) (agentpkg.Result, error) {
+	return agentpkg.Result{}, errNotFound
 }
 
 // mockAgentInfo represents a mock agent for testing
@@ -501,27 +516,6 @@ func newMockAgent(name string, schemas []sdktypes.TargetSchema) *mockAgentInfo {
 		capabilities:  []string{"test"},
 		targetSchemas: schemas,
 	}
-}
-
-// mockRegistryManager implements component.RegistryManager for testing
-type mockRegistryManager struct {
-	registry *mockRegistry
-}
-
-func (m *mockRegistryManager) Registry() interface{} {
-	return m.registry
-}
-
-func (m *mockRegistryManager) Start(ctx context.Context) error {
-	return nil
-}
-
-func (m *mockRegistryManager) Stop(ctx context.Context) error {
-	return nil
-}
-
-func (m *mockRegistryManager) Health(ctx context.Context) error {
-	return nil
 }
 
 // Schema creation helpers

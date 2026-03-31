@@ -11,6 +11,11 @@ import (
 )
 
 func TestInfrastructureInitialization(t *testing.T) {
+	// This test requires Redis + Neo4j infrastructure
+	if os.Getenv("GIBSON_INTEGRATION_TESTS") == "" {
+		t.Skip("skipping integration test (set GIBSON_INTEGRATION_TESTS=1 to run)")
+	}
+
 	// Create temporary directory for test data
 	tmpDir := t.TempDir()
 

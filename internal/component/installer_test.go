@@ -14,7 +14,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/component/build"
 	"github.com/zero-day-ai/gibson/internal/component/git"
-	sdkregistry "github.com/zero-day-ai/sdk/registry"
 )
 
 // MockGitOperations is a mock implementation of git.GitOperations
@@ -138,12 +137,12 @@ func (m *MockComponentStore) Delete(ctx context.Context, kind ComponentKind, nam
 	return args.Error(0)
 }
 
-func (m *MockComponentStore) ListInstances(ctx context.Context, kind ComponentKind, name string) ([]sdkregistry.ServiceInfo, error) {
+func (m *MockComponentStore) ListInstances(ctx context.Context, kind ComponentKind, name string) ([]ComponentInfo, error) {
 	args := m.Called(ctx, kind, name)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]sdkregistry.ServiceInfo), args.Error(1)
+	return args.Get(0).([]ComponentInfo), args.Error(1)
 }
 
 // MockLifecycleManager is a mock implementation of LifecycleManager for testing

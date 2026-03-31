@@ -50,18 +50,8 @@ func DefaultConfig() *Config {
 			HeartbeatTimeout: 30 * time.Second,
 		},
 		Registry: RegistryConfig{
-			Type:          "embedded",
-			DataDir:       filepath.Join(homeDir, "etcd-data"),
-			ListenAddress: "localhost:2379",
-			Endpoints:     []string{},
-			Namespace:     "gibson",
-			TTL:           "30s",
-			TLS: TLSConfig{
-				Enabled:  false,
-				CertFile: "",
-				KeyFile:  "",
-				CAFile:   "",
-			},
+			Namespace: "gibson",
+			TTL:       "30s",
 		},
 		Callback: CallbackConfig{
 			Enabled:          true,

@@ -8,16 +8,16 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/tool"
 )
 
-// mockBuilderComponentDiscovery is a test double for registry.ComponentDiscovery
+// mockBuilderComponentDiscovery is a test double for component.ComponentDiscovery
 // Used specifically for inventory builder tests with partial failure support
 type mockBuilderComponentDiscovery struct {
-	agents  []registry.AgentInfo
-	tools   []registry.ToolInfo
-	plugins []registry.PluginInfo
+	agents  []component.AgentInfo
+	tools   []component.ToolInfo
+	plugins []component.PluginInfo
 	err     error
 
 	// Error simulation for partial failures
@@ -26,21 +26,21 @@ type mockBuilderComponentDiscovery struct {
 	pluginsErr error
 }
 
-func (m *mockBuilderComponentDiscovery) ListAgents(ctx context.Context) ([]registry.AgentInfo, error) {
+func (m *mockBuilderComponentDiscovery) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
 	if m.agentsErr != nil {
 		return nil, m.agentsErr
 	}
 	return m.agents, m.err
 }
 
-func (m *mockBuilderComponentDiscovery) ListTools(ctx context.Context) ([]registry.ToolInfo, error) {
+func (m *mockBuilderComponentDiscovery) ListTools(ctx context.Context) ([]component.ToolInfo, error) {
 	if m.toolsErr != nil {
 		return nil, m.toolsErr
 	}
 	return m.tools, m.err
 }
 
-func (m *mockBuilderComponentDiscovery) ListPlugins(ctx context.Context) ([]registry.PluginInfo, error) {
+func (m *mockBuilderComponentDiscovery) ListPlugins(ctx context.Context) ([]component.PluginInfo, error) {
 	if m.pluginsErr != nil {
 		return nil, m.pluginsErr
 	}
@@ -129,7 +129,7 @@ func TestNewInventoryBuilder(t *testing.T) {
 // TestBuild_Success tests successful inventory building
 func TestBuild_Success(t *testing.T) {
 	mock := &mockBuilderComponentDiscovery{
-		agents: []registry.AgentInfo{
+		agents: []component.AgentInfo{
 			{
 				Name:         "davinci",
 				Version:      "1.0.0",
@@ -149,7 +149,7 @@ func TestBuild_Success(t *testing.T) {
 				Endpoints:    []string{"localhost:50053"},
 			},
 		},
-		tools: []registry.ToolInfo{
+		tools: []component.ToolInfo{
 			{
 				Name:        "nmap",
 				Version:     "1.0.0",
@@ -165,7 +165,7 @@ func TestBuild_Success(t *testing.T) {
 				Endpoints:   []string{"localhost:50062"},
 			},
 		},
-		plugins: []registry.PluginInfo{
+		plugins: []component.PluginInfo{
 			{
 				Name:        "mitre-lookup",
 				Version:     "1.0.0",
@@ -251,9 +251,9 @@ func TestBuild_Success(t *testing.T) {
 // TestBuild_EmptyRegistry tests building from an empty registry
 func TestBuild_EmptyRegistry(t *testing.T) {
 	mock := &mockBuilderComponentDiscovery{
-		agents:  []registry.AgentInfo{},
-		tools:   []registry.ToolInfo{},
-		plugins: []registry.PluginInfo{},
+		agents:  []component.AgentInfo{},
+		tools:   []component.ToolInfo{},
+		plugins: []component.PluginInfo{},
 	}
 
 	builder := NewInventoryBuilder(mock)
@@ -340,13 +340,13 @@ func TestBuild_PartialFailure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockBuilderComponentDiscovery{
-				agents: []registry.AgentInfo{
+				agents: []component.AgentInfo{
 					{Name: "agent1", Version: "1.0.0", Instances: 1},
 				},
-				tools: []registry.ToolInfo{
+				tools: []component.ToolInfo{
 					{Name: "tool1", Version: "1.0.0", Instances: 1},
 				},
-				plugins: []registry.PluginInfo{
+				plugins: []component.PluginInfo{
 					{Name: "plugin1", Version: "1.0.0", Instances: 1},
 				},
 				agentsErr:  tt.agentsErr,
@@ -394,9 +394,9 @@ func TestBuild_Timeout(t *testing.T) {
 	// Use error simulation to cause a timeout-like scenario
 	// We can't truly block, but we can simulate the error condition
 	mock := &mockBuilderComponentDiscovery{
-		agents:    []registry.AgentInfo{},
-		tools:     []registry.ToolInfo{},
-		plugins:   []registry.PluginInfo{},
+		agents:    []component.AgentInfo{},
+		tools:     []component.ToolInfo{},
+		plugins:   []component.PluginInfo{},
 		agentsErr: context.DeadlineExceeded, // Simulate timeout
 	}
 
@@ -419,11 +419,11 @@ func TestBuild_Timeout(t *testing.T) {
 // TestBuildWithCache_FreshCache tests returning cached inventory within TTL
 func TestBuildWithCache_FreshCache(t *testing.T) {
 	mock := &mockBuilderComponentDiscovery{
-		agents: []registry.AgentInfo{
+		agents: []component.AgentInfo{
 			{Name: "agent1", Version: "1.0.0", Instances: 1},
 		},
-		tools:   []registry.ToolInfo{},
-		plugins: []registry.PluginInfo{},
+		tools:   []component.ToolInfo{},
+		plugins: []component.PluginInfo{},
 	}
 
 	builder := NewInventoryBuilder(mock, WithCacheTTL(1*time.Second))
@@ -461,11 +461,11 @@ func TestBuildWithCache_FreshCache(t *testing.T) {
 // TestBuildWithCache_ExpiredCache tests cache expiration
 func TestBuildWithCache_ExpiredCache(t *testing.T) {
 	mock := &mockBuilderComponentDiscovery{
-		agents: []registry.AgentInfo{
+		agents: []component.AgentInfo{
 			{Name: "agent1", Version: "1.0.0", Instances: 1},
 		},
-		tools:   []registry.ToolInfo{},
-		plugins: []registry.PluginInfo{},
+		tools:   []component.ToolInfo{},
+		plugins: []component.PluginInfo{},
 	}
 
 	builder := NewInventoryBuilder(mock, WithCacheTTL(100*time.Millisecond))
@@ -503,11 +503,11 @@ func TestBuildWithCache_ExpiredCache(t *testing.T) {
 // TestBuildWithCache_StaleCacheFallback tests fallback to stale cache on error
 func TestBuildWithCache_StaleCacheFallback(t *testing.T) {
 	mock := &mockBuilderComponentDiscovery{
-		agents: []registry.AgentInfo{
+		agents: []component.AgentInfo{
 			{Name: "agent1", Version: "1.0.0", Instances: 1},
 		},
-		tools:   []registry.ToolInfo{},
-		plugins: []registry.PluginInfo{},
+		tools:   []component.ToolInfo{},
+		plugins: []component.PluginInfo{},
 	}
 
 	builder := NewInventoryBuilder(mock, WithCacheTTL(100*time.Millisecond))
@@ -572,13 +572,13 @@ func TestConvertAgentInfo(t *testing.T) {
 
 	tests := []struct {
 		name             string
-		agentInfo        registry.AgentInfo
+		agentInfo        component.AgentInfo
 		expectedHealth   string
 		expectedExternal bool
 	}{
 		{
 			name: "healthy agent with instances",
-			agentInfo: registry.AgentInfo{
+			agentInfo: component.AgentInfo{
 				Name:         "davinci",
 				Version:      "1.0.0",
 				Description:  "Test agent",
@@ -592,7 +592,7 @@ func TestConvertAgentInfo(t *testing.T) {
 		},
 		{
 			name: "unavailable agent with zero instances",
-			agentInfo: registry.AgentInfo{
+			agentInfo: component.AgentInfo{
 				Name:        "offline-agent",
 				Version:     "1.0.0",
 				Description: "Offline agent",
@@ -631,7 +631,7 @@ func TestConvertAgentInfo(t *testing.T) {
 func TestConvertToolInfo(t *testing.T) {
 	builder := NewInventoryBuilder(&mockBuilderComponentDiscovery{})
 
-	toolInfo := registry.ToolInfo{
+	toolInfo := component.ToolInfo{
 		Name:        "nmap",
 		Version:     "1.0.0",
 		Description: "Network scanner",
@@ -658,7 +658,7 @@ func TestConvertToolInfo(t *testing.T) {
 func TestConvertPluginInfo(t *testing.T) {
 	builder := NewInventoryBuilder(&mockBuilderComponentDiscovery{})
 
-	pluginInfo := registry.PluginInfo{
+	pluginInfo := component.PluginInfo{
 		Name:        "mitre-lookup",
 		Version:     "1.0.0",
 		Description: "MITRE lookup plugin",

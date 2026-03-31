@@ -514,7 +514,7 @@ func TestMissionMemoryWithSearch(t *testing.T) {
 	require.NoError(t, client.EnsureIndexes(ctx))
 
 	missionID := types.NewID()
-	mem := memory.NewRedisMissionMemory(client, missionID)
+	mem := memory.NewRedisMissionMemory(client, missionID, "")
 	defer cleanupKeys(ctx, t, client, fmt.Sprintf("gibson:memory:%s:*", missionID))
 
 	// Set memory entries
@@ -562,7 +562,7 @@ func TestMissionMemoryWithSearch(t *testing.T) {
 
 	// Test mission isolation - create another mission's memory
 	otherMissionID := types.NewID()
-	otherMem := memory.NewRedisMissionMemory(client, otherMissionID)
+	otherMem := memory.NewRedisMissionMemory(client, otherMissionID, "")
 	defer cleanupKeys(ctx, t, client, fmt.Sprintf("gibson:memory:%s:*", otherMissionID))
 
 	err = otherMem.Store(ctx, "target_ip", "10.0.0.50", nil)
@@ -962,7 +962,7 @@ func TestAtomicityCascadeDelete(t *testing.T) {
 	}
 
 	// Create memory entries
-	mem := memory.NewRedisMissionMemory(client, m.ID)
+	mem := memory.NewRedisMissionMemory(client, m.ID, "")
 	for i := 0; i < 10; i++ {
 		err := mem.Store(ctx, fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i), nil)
 		require.NoError(t, err)

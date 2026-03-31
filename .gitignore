@@ -35,3 +35,4 @@ build/.env
 # .vscode/
 /gibson
 bin/gibson
+gibson

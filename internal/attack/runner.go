@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/payload"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -32,7 +32,7 @@ type AttackRunner interface {
 // and handles auto-persistence logic based on findings.
 type DefaultAttackRunner struct {
 	orchestrator    mission.MissionOrchestrator
-	discovery       registry.ComponentDiscovery
+	discovery       component.ComponentDiscovery
 	payloadRegistry payload.PayloadRegistry
 	missionStore    mission.MissionStore
 	findingStore    finding.FindingStore
@@ -82,7 +82,7 @@ func WithPayloadFilter(filter PayloadFilter) RunnerOption {
 }
 
 // WithComponentDiscovery sets the component discovery interface for agent discovery.
-func WithComponentDiscovery(discovery registry.ComponentDiscovery) RunnerOption {
+func WithComponentDiscovery(discovery component.ComponentDiscovery) RunnerOption {
 	return func(r *DefaultAttackRunner) {
 		r.discovery = discovery
 	}
@@ -92,7 +92,7 @@ func WithComponentDiscovery(discovery registry.ComponentDiscovery) RunnerOption 
 // It uses functional options for optional configuration.
 func NewAttackRunner(
 	orchestrator mission.MissionOrchestrator,
-	discovery registry.ComponentDiscovery,
+	discovery component.ComponentDiscovery,
 	payloadRegistry payload.PayloadRegistry,
 	missionStore mission.MissionStore,
 	findingStore finding.FindingStore,

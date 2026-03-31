@@ -25,6 +25,8 @@ const (
 	TargetTypeEmbedding TargetType = "embedding"
 	// Deprecated: Use string "multimodal" directly
 	TargetTypeMultimodal TargetType = "multimodal"
+	// Deprecated: Use string "custom" directly
+	TargetTypeCustom TargetType = "custom"
 )
 
 // String returns the string representation of TargetType
@@ -36,7 +38,7 @@ func (t TargetType) String() string {
 func (t TargetType) IsValid() bool {
 	switch t {
 	case TargetTypeLLMChat, TargetTypeLLMAPI, TargetTypeRAG,
-		TargetTypeAgent, TargetTypeEmbedding, TargetTypeMultimodal:
+		TargetTypeAgent, TargetTypeEmbedding, TargetTypeMultimodal, TargetTypeCustom:
 		return true
 	default:
 		return false
@@ -62,6 +64,28 @@ func (t *TargetType) UnmarshalJSON(data []byte) error {
 
 	*t = targetType
 	return nil
+}
+
+// AllTargetTypes returns a slice containing all valid TargetType values
+func AllTargetTypes() []TargetType {
+	return []TargetType{
+		TargetTypeLLMChat,
+		TargetTypeLLMAPI,
+		TargetTypeRAG,
+		TargetTypeAgent,
+		TargetTypeEmbedding,
+		TargetTypeMultimodal,
+		TargetTypeCustom,
+	}
+}
+
+// ParseTargetType parses a string into a TargetType, returning an error if invalid
+func ParseTargetType(s string) (TargetType, error) {
+	t := TargetType(s)
+	if !t.IsValid() {
+		return "", fmt.Errorf("invalid target type: %s", s)
+	}
+	return t, nil
 }
 
 // Provider represents the LLM service provider

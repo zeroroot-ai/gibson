@@ -8,7 +8,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/types"
 	proto "github.com/zero-day-ai/sdk/api/gen/proto"
@@ -133,19 +132,19 @@ func (c *GRPCAgentClient) Capabilities() []string {
 }
 
 // TargetTypes returns the types of targets this agent supports
-func (c *GRPCAgentClient) TargetTypes() []component.TargetType {
+func (c *GRPCAgentClient) TargetTypes() []types.TargetType {
 	if c.descriptor != nil {
 		return c.descriptor.TargetTypes
 	}
-	return []component.TargetType{}
+	return []types.TargetType{}
 }
 
 // TechniqueTypes returns the types of techniques this agent supports
-func (c *GRPCAgentClient) TechniqueTypes() []component.TechniqueType {
+func (c *GRPCAgentClient) TechniqueTypes() []types.TechniqueType {
 	if c.descriptor != nil {
 		return c.descriptor.TechniqueTypes
 	}
-	return []component.TechniqueType{}
+	return []types.TechniqueType{}
 }
 
 // LLMSlots returns the LLM slot requirements
@@ -363,20 +362,20 @@ func (c *GRPCAgentClient) fetchSlots(ctx context.Context) error {
 	return nil
 }
 
-// convertTargetTypes converts proto target types to internal component.TargetType
-func convertTargetTypes(protoTypes []string) []component.TargetType {
-	result := make([]component.TargetType, len(protoTypes))
+// convertTargetTypes converts proto target types to internal types.TargetType
+func convertTargetTypes(protoTypes []string) []types.TargetType {
+	result := make([]types.TargetType, len(protoTypes))
 	for i, t := range protoTypes {
-		result[i] = component.TargetType(t)
+		result[i] = types.TargetType(t)
 	}
 	return result
 }
 
-// convertTechniqueTypes converts proto technique types to internal component.TechniqueType
-func convertTechniqueTypes(protoTypes []string) []component.TechniqueType {
-	result := make([]component.TechniqueType, len(protoTypes))
+// convertTechniqueTypes converts proto technique types to internal types.TechniqueType
+func convertTechniqueTypes(protoTypes []string) []types.TechniqueType {
+	result := make([]types.TechniqueType, len(protoTypes))
 	for i, t := range protoTypes {
-		result[i] = component.TechniqueType(t)
+		result[i] = types.TechniqueType(t)
 	}
 	return result
 }

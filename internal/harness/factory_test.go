@@ -11,7 +11,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -73,9 +73,9 @@ type MockRegistryAdapter struct {
 	DiscoverAgentFn   func(ctx context.Context, name string) (agent.Agent, error)
 	DiscoverToolFn    func(ctx context.Context, name string) (tool.Tool, error)
 	DiscoverPluginFn  func(ctx context.Context, name string) (plugin.Plugin, error)
-	ListAgentsFn      func(ctx context.Context) ([]registry.AgentInfo, error)
-	ListToolsFn       func(ctx context.Context) ([]registry.ToolInfo, error)
-	ListPluginsFn     func(ctx context.Context) ([]registry.PluginInfo, error)
+	ListAgentsFn      func(ctx context.Context) ([]component.AgentInfo, error)
+	ListToolsFn       func(ctx context.Context) ([]component.ToolInfo, error)
+	ListPluginsFn     func(ctx context.Context) ([]component.PluginInfo, error)
 	DelegateToAgentFn func(ctx context.Context, name string, task agent.Task, harness agent.AgentHarness) (agent.Result, error)
 }
 
@@ -100,21 +100,21 @@ func (m *MockRegistryAdapter) DiscoverPlugin(ctx context.Context, name string) (
 	return nil, types.NewError("MOCK_ERROR", "DiscoverPlugin not implemented")
 }
 
-func (m *MockRegistryAdapter) ListAgents(ctx context.Context) ([]registry.AgentInfo, error) {
+func (m *MockRegistryAdapter) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
 	if m.ListAgentsFn != nil {
 		return m.ListAgentsFn(ctx)
 	}
 	return nil, types.NewError("MOCK_ERROR", "ListAgents not implemented")
 }
 
-func (m *MockRegistryAdapter) ListTools(ctx context.Context) ([]registry.ToolInfo, error) {
+func (m *MockRegistryAdapter) ListTools(ctx context.Context) ([]component.ToolInfo, error) {
 	if m.ListToolsFn != nil {
 		return m.ListToolsFn(ctx)
 	}
 	return nil, types.NewError("MOCK_ERROR", "ListTools not implemented")
 }
 
-func (m *MockRegistryAdapter) ListPlugins(ctx context.Context) ([]registry.PluginInfo, error) {
+func (m *MockRegistryAdapter) ListPlugins(ctx context.Context) ([]component.PluginInfo, error) {
 	if m.ListPluginsFn != nil {
 		return m.ListPluginsFn(ctx)
 	}
@@ -128,7 +128,7 @@ func (m *MockRegistryAdapter) DelegateToAgent(ctx context.Context, name string, 
 	return agent.Result{}, types.NewError("MOCK_ERROR", "DelegateToAgent not implemented")
 }
 
-var _ registry.ComponentDiscovery = (*MockRegistryAdapter)(nil)
+var _ component.ComponentDiscovery = (*MockRegistryAdapter)(nil)
 
 // ────────────────────────────────────────────────────────────────────────────
 // NewHarnessFactory Tests

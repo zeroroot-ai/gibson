@@ -203,6 +203,7 @@ func FindingIndex() *IndexDefinition {
 // Indexed Fields:
 //   - key: Full-text searchable with 2.0 weight
 //   - value: Full-text searchable
+//   - tenant_id: Exact-match TAG filtering by tenant (defense-in-depth isolation)
 //   - mission_id: Exact-match filtering by mission
 //   - created_at: Sortable timestamp (Unix milliseconds)
 //
@@ -211,7 +212,10 @@ func FindingIndex() *IndexDefinition {
 //	// Search memory for "database credentials"
 //	FT.SEARCH gibson:idx:memory "database credentials"
 //
-//	// Search memory for a specific mission
+//	// Search memory for a specific tenant and mission
+//	FT.SEARCH gibson:idx:memory "@tenant_id:{acme} @mission_id:{miss_123} session"
+//
+//	// Search memory for a specific mission (single-tenant / no tenant)
 //	FT.SEARCH gibson:idx:memory "@mission_id:{miss_123} session"
 //
 //	// Find recent memory entries
@@ -232,6 +236,11 @@ func MissionMemoryIndex() *IndexDefinition {
 				Path:  "$.value",
 				Alias: "value",
 				Type:  FieldTypeText,
+			},
+			{
+				Path:  "$.tenant_id",
+				Alias: "tenant_id",
+				Type:  FieldTypeTag,
 			},
 			{
 				Path:  "$.mission_id",

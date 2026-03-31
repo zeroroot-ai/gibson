@@ -71,7 +71,7 @@ func NewMemoryManagerFactory(stateClient *state.StateClient, config *memory.Memo
 	}, nil
 }
 
-// CreateForMission creates a new MemoryManager scoped to a specific mission.
+// CreateForMission creates a new MemoryManager scoped to a specific mission and tenant.
 //
 // Each mission receives a fresh MemoryManager with:
 //   - Working memory: Redis-backed for distributed, ephemeral storage
@@ -84,11 +84,14 @@ func NewMemoryManagerFactory(stateClient *state.StateClient, config *memory.Memo
 // Parameters:
 //   - ctx: Context for initialization operations
 //   - missionID: The mission ID to scope this memory manager to
+//   - tenantID: Tenant identifier for defense-in-depth memory isolation.
+//     When non-empty, all Redis keys and search queries are scoped per-tenant.
+//     When empty, the backward-compatible key format (no tenant prefix) is used.
 //
 // Returns:
 //   - memory.MemoryManager: Configured memory manager for the mission
 //   - error: Non-nil if creation or initialization fails
-func (f *MemoryManagerFactory) CreateForMission(ctx context.Context, missionID types.ID) (memory.MemoryManager, error) {
+func (f *MemoryManagerFactory) CreateForMission(ctx context.Context, missionID types.ID, tenantID string) (memory.MemoryManager, error) {
 	if missionID.IsZero() {
 		return nil, fmt.Errorf("mission ID cannot be zero")
 	}
@@ -98,14 +101,14 @@ func (f *MemoryManagerFactory) CreateForMission(ctx context.Context, missionID t
 		return nil, fmt.Errorf("invalid mission ID: %w", err)
 	}
 
-	return f.createRedisBackedManager(ctx, missionID)
+	return f.createRedisBackedManager(ctx, missionID, tenantID)
 }
 
 // createRedisBackedManager creates a MemoryManager with Redis-backed working and mission memory.
 //
 // It creates:
 //   - Working memory: SDK RedisWorkingMemory (distributed, ephemeral) wrapped with adapter
-//   - Mission memory: RedisMissionMemory with RediSearch for full-text search
+//   - Mission memory: RedisMissionMemory with RediSearch for full-text search and tenant isolation
 //   - Long-term memory: Vector store for semantic search
 //
 // The Redis implementations provide distributed, high-performance storage suitable
@@ -113,15 +116,15 @@ func (f *MemoryManagerFactory) CreateForMission(ctx context.Context, missionID t
 //
 // Working memory uses an adapter to bridge SDK RedisWorkingMemory (context-based API)
 // with Gibson's WorkingMemory interface (non-context API).
-func (f *MemoryManagerFactory) createRedisBackedManager(ctx context.Context, missionID types.ID) (memory.MemoryManager, error) {
+func (f *MemoryManagerFactory) createRedisBackedManager(ctx context.Context, missionID types.ID, tenantID string) (memory.MemoryManager, error) {
 	// Create Redis-backed working memory
 	workingMem, err := f.createRedisWorkingMemory(ctx, missionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Redis working memory: %w", err)
 	}
 
-	// Create Redis-backed mission memory
-	missionMem := memory.NewRedisMissionMemory(f.stateClient, missionID)
+	// Create Redis-backed mission memory scoped to the tenant for defense-in-depth isolation
+	missionMem := memory.NewRedisMissionMemory(f.stateClient, missionID, tenantID)
 
 	// Create long-term memory
 	// This uses embedder and vector store

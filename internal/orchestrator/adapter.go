@@ -251,9 +251,10 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 
 	// Create harness for this mission
 	// Use the harness factory to create an appropriate harness
-	missionCtx := harness.NewMissionContext(mis.ID, mis.Name, "")
-	missionCtx.MissionRunID = missionRunID
-	missionCtx.RunNumber = runNumber
+	missionCtx := harness.NewMissionContext(mis.ID, mis.Name, "").
+		WithMissionRunID(missionRunID).
+		WithRunNumber(runNumber).
+		WithTenant(mis.TenantID)
 
 	// Create target info
 	// Note: In a full implementation, we would load the target entity here

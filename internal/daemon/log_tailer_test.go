@@ -63,10 +63,10 @@ func TestLogTailer_Subscribe(t *testing.T) {
 		Level:     slog.LevelError,
 	})
 
-	// Create temp log file
+	// Create empty temp log file, then start watching before writing content
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "test.log")
-	err := os.WriteFile(logFile, []byte("line 1\nline 2\nline 3\n"), 0644)
+	f, err := os.Create(logFile)
 	require.NoError(t, err)
 
 	tailer := NewLogTailer(ctx, 1000, *logger)
@@ -75,8 +75,14 @@ func TestLogTailer_Subscribe(t *testing.T) {
 	err = tailer.StartWatching("test-component", logFile)
 	require.NoError(t, err)
 
-	// Wait for watcher to process initial lines
-	time.Sleep(200 * time.Millisecond)
+	// Write content after watching starts (watcher seeks to EOF on open)
+	_, err = f.WriteString("line 1\nline 2\nline 3\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Sync())
+	f.Close()
+
+	// Wait for watcher to process lines
+	time.Sleep(500 * time.Millisecond)
 
 	// Subscribe with tail lines
 	sub, err := tailer.Subscribe(ctx, SubscribeOptions{
@@ -115,10 +121,10 @@ func TestLogTailer_GetHistory(t *testing.T) {
 		Level:     slog.LevelError,
 	})
 
-	// Create temp log file
+	// Create empty temp log file, start watching, then write content
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "test.log")
-	err := os.WriteFile(logFile, []byte("line 1\nline 2\nline 3\nline 4\nline 5\n"), 0644)
+	f, err := os.Create(logFile)
 	require.NoError(t, err)
 
 	tailer := NewLogTailer(ctx, 1000, *logger)
@@ -127,8 +133,14 @@ func TestLogTailer_GetHistory(t *testing.T) {
 	err = tailer.StartWatching("test-component", logFile)
 	require.NoError(t, err)
 
+	// Write content after watching starts
+	_, err = f.WriteString("line 1\nline 2\nline 3\nline 4\nline 5\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Sync())
+	f.Close()
+
 	// Wait for lines to be processed
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	// Get history
 	entries, err := tailer.GetHistory("test-component", 3)
@@ -191,14 +203,13 @@ func TestLogTailer_MultiComponent(t *testing.T) {
 		Level:     slog.LevelError,
 	})
 
-	// Create temp log files
+	// Create empty temp log files
 	tmpDir := t.TempDir()
 	logFile1 := filepath.Join(tmpDir, "comp1.log")
 	logFile2 := filepath.Join(tmpDir, "comp2.log")
-
-	err := os.WriteFile(logFile1, []byte("comp1 line 1\ncomp1 line 2\n"), 0644)
+	f1, err := os.Create(logFile1)
 	require.NoError(t, err)
-	err = os.WriteFile(logFile2, []byte("comp2 line 1\ncomp2 line 2\n"), 0644)
+	f2, err := os.Create(logFile2)
 	require.NoError(t, err)
 
 	tailer := NewLogTailer(ctx, 1000, *logger)
@@ -209,8 +220,16 @@ func TestLogTailer_MultiComponent(t *testing.T) {
 	err = tailer.StartWatching("component-2", logFile2)
 	require.NoError(t, err)
 
+	// Write content after watching starts
+	_, _ = f1.WriteString("comp1 line 1\ncomp1 line 2\n")
+	_ = f1.Sync()
+	f1.Close()
+	_, _ = f2.WriteString("comp2 line 1\ncomp2 line 2\n")
+	_ = f2.Sync()
+	f2.Close()
+
 	// Wait for processing
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	// Subscribe to both components
 	sub, err := tailer.Subscribe(ctx, SubscribeOptions{

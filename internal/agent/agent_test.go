@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -19,8 +18,8 @@ type mockAgent struct {
 	version        string
 	description    string
 	capabilities   []string
-	targetTypes    []component.TargetType
-	techniqueTypes []component.TechniqueType
+	targetTypes    []types.TargetType
+	techniqueTypes []types.TechniqueType
 	slots          []SlotDefinition
 	initialized    bool
 	shutdownCalled bool
@@ -33,8 +32,8 @@ func newMockAgent(name string) *mockAgent {
 		version:        "1.0.0",
 		description:    "Mock agent for testing",
 		capabilities:   []string{"test"},
-		targetTypes:    []component.TargetType{component.TargetTypeLLMChat},
-		techniqueTypes: []component.TechniqueType{component.TechniqueReconnaissance},
+		targetTypes:    []types.TargetType{types.TargetTypeLLMChat},
+		techniqueTypes: []types.TechniqueType{types.TechniqueReconnaissance},
 		slots: []SlotDefinition{
 			NewSlotDefinition("main", "Main LLM slot", true),
 		},
@@ -45,8 +44,8 @@ func (m *mockAgent) Name() string                              { return m.name }
 func (m *mockAgent) Version() string                           { return m.version }
 func (m *mockAgent) Description() string                       { return m.description }
 func (m *mockAgent) Capabilities() []string                    { return m.capabilities }
-func (m *mockAgent) TargetTypes() []component.TargetType       { return m.targetTypes }
-func (m *mockAgent) TechniqueTypes() []component.TechniqueType { return m.techniqueTypes }
+func (m *mockAgent) TargetTypes() []types.TargetType       { return m.targetTypes }
+func (m *mockAgent) TechniqueTypes() []types.TechniqueType { return m.techniqueTypes }
 func (m *mockAgent) LLMSlots() []SlotDefinition                { return m.slots }
 
 func (m *mockAgent) Execute(ctx context.Context, task Task, harness AgentHarness) (Result, error) {
@@ -814,9 +813,9 @@ func (m *mockExternalAgent) Name() string                        { return m.name
 func (m *mockExternalAgent) Version() string                     { return "1.0.0" }
 func (m *mockExternalAgent) Description() string                 { return "External agent" }
 func (m *mockExternalAgent) Capabilities() []string              { return []string{} }
-func (m *mockExternalAgent) TargetTypes() []component.TargetType { return []component.TargetType{} }
-func (m *mockExternalAgent) TechniqueTypes() []component.TechniqueType {
-	return []component.TechniqueType{}
+func (m *mockExternalAgent) TargetTypes() []types.TargetType { return []types.TargetType{} }
+func (m *mockExternalAgent) TechniqueTypes() []types.TechniqueType {
+	return []types.TechniqueType{}
 }
 func (m *mockExternalAgent) LLMSlots() []SlotDefinition                            { return []SlotDefinition{} }
 func (m *mockExternalAgent) Initialize(ctx context.Context, cfg AgentConfig) error { return nil }

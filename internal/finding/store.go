@@ -32,8 +32,12 @@ type FindingStore interface {
 	Count(ctx context.Context, missionID types.ID) (int, error)
 }
 
-// FindingFilter provides filtering options for finding queries
+// FindingFilter provides filtering options for finding queries.
+// TenantID, when set, scopes all queries to that tenant's findings only,
+// providing defense-in-depth isolation at the query layer. When TenantID is
+// empty (single-tenant / auth-disabled mode), queries are not tenant-scoped.
 type FindingFilter struct {
+	TenantID   string // Multi-tenant scoping — empty means no tenant filter
 	Severity   *agent.FindingSeverity
 	Category   *FindingCategory
 	Status     *FindingStatus
@@ -46,6 +50,13 @@ type FindingFilter struct {
 // NewFindingFilter creates a new empty filter
 func NewFindingFilter() *FindingFilter {
 	return &FindingFilter{}
+}
+
+// WithTenantID scopes the filter to a specific tenant for multi-tenant isolation.
+// When set, List() and Count() operations will only return findings belonging to this tenant.
+func (f *FindingFilter) WithTenantID(tenantID string) *FindingFilter {
+	f.TenantID = tenantID
+	return f
 }
 
 // WithSeverity filters by severity
@@ -115,6 +126,8 @@ func (s *InMemoryFindingStore) Get(ctx context.Context, id types.ID) (*EnhancedF
 }
 
 // List retrieves findings for a mission with optional filtering.
+// When filter.TenantID is set, only findings belonging to that tenant are returned,
+// providing defense-in-depth isolation at the query layer.
 func (s *InMemoryFindingStore) List(ctx context.Context, missionID types.ID, filter *FindingFilter) ([]EnhancedFinding, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -128,6 +141,11 @@ func (s *InMemoryFindingStore) List(ctx context.Context, missionID types.ID, fil
 
 		// Apply filters if provided
 		if filter != nil {
+			// Tenant isolation: skip findings from other tenants when tenantID is set.
+			// When filter.TenantID is empty, no tenant filtering is applied (single-tenant mode).
+			if filter.TenantID != "" && finding.TenantID != filter.TenantID {
+				continue
+			}
 			if filter.Severity != nil && finding.Severity != *filter.Severity {
 				continue
 			}

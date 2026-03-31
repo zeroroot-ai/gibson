@@ -13,7 +13,7 @@
 //
 // ## ComponentStore
 //
-// ComponentStore manages the registration and persistence of components in etcd:
+// ComponentStore manages the registration and persistence of components in Redis:
 //
 //	type ComponentStore interface {
 //	    Create(ctx context.Context, comp *Component) error
@@ -27,7 +27,7 @@
 //
 // The store is used by the Installer and LifecycleManager to persist component metadata.
 // Components are organized by kind (agent, tool, plugin) and name, with unique constraints
-// enforced by etcd transactions. Component metadata is stored persistently, while running
+// enforced by Redis atomic operations. Component metadata is stored persistently, while running
 // instances are stored with leases (ephemeral) for automatic cleanup.
 //
 // ## Installer
@@ -265,7 +265,7 @@
 //	    // Create dependencies
 //	    gitOps := git.NewDefaultGitOperations()
 //	    builder := build.NewDefaultBuildExecutor()
-//	    store := component.EtcdComponentStore(etcdClient, "gibson")
+//	    store := component.NewRedisComponentStore(redisClient, "gibson")
 //
 //	    // Create installer
 //	    installer := component.NewDefaultInstaller(gitOps, builder, store, lifecycleMgr)
@@ -302,8 +302,8 @@
 //
 //	    ctx := context.Background()
 //
-//	    // Get component from etcd store
-//	    store := component.EtcdComponentStore(etcdClient, "gibson")
+//	    // Get component from Redis store
+//	    store := component.NewRedisComponentStore(redisClient, "gibson")
 //	    comp, err := store.GetByName(ctx, component.ComponentKindAgent, "scanner")
 //	    if err != nil || comp == nil {
 //	        log.Fatal("Component not found")
@@ -337,10 +337,10 @@
 //
 // ## Using the Component Store
 //
-// Register, query, and persist components in etcd:
+// Register, query, and persist components in Redis:
 //
 //	func useComponentStore() {
-//	    store := component.EtcdComponentStore(etcdClient, "gibson")
+//	    store := component.NewRedisComponentStore(redisClient, "gibson")
 //	    ctx := context.Background()
 //
 //	    // Create and register a component
@@ -549,7 +549,7 @@
 // The package provides structured error handling with ComponentError:
 //
 //	func handleErrors() {
-//	    store := component.EtcdComponentStore(etcdClient, "gibson")
+//	    store := component.NewRedisComponentStore(redisClient, "gibson")
 //	    comp, err := store.GetByName(ctx, component.ComponentKindAgent, "scanner")
 //
 //	    if err != nil || comp == nil {
@@ -598,7 +598,7 @@
 //	func updateComponents() {
 //	    gitOps := git.NewDefaultGitOperations()
 //	    builder := build.NewDefaultBuildExecutor()
-//	    store := component.EtcdComponentStore(etcdClient, "gibson")
+//	    store := component.NewRedisComponentStore(redisClient, "gibson")
 //	    installer := component.NewDefaultInstaller(gitOps, builder, store, lifecycleMgr)
 //
 //	    ctx := context.Background()
@@ -638,9 +638,9 @@
 //
 // # Thread Safety
 //
-// The ComponentStore uses etcd for persistence, which provides linearizable
+// The ComponentStore uses Redis for persistence, which provides atomic operations
 // consistency through Raft consensus. Multiple processes can safely access
-// the store concurrently. etcd transactions provide atomic operations for
+// the store concurrently. Redis atomic operations (SET NX, pipelines) ensure
 // create-if-not-exists and delete-with-prefix patterns.
 //
 // # Error Handling
@@ -662,7 +662,7 @@
 //  3. Validate manifests before attempting installation
 //  4. Monitor component health in production environments
 //  5. Implement graceful shutdown handlers for component processes
-//  6. Component state is automatically persisted to etcd
+//  6. Component state is automatically persisted to Redis
 //  7. Handle dependency failures gracefully
 //  8. Set appropriate timeouts for install/build operations
 //  9. Clean up resources on installation failures

@@ -326,27 +326,26 @@ func TestLogTailer_HistoryRetrieval(t *testing.T) {
 		Level:     slog.LevelError,
 	})
 
-	// Create temp log file with many lines
+	// Create empty temp log file, start watching, then write content
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "history.log")
 	f, err := os.Create(logFile)
 	require.NoError(t, err)
 
-	// Write 100 lines
+	// Create tailer and start watching before writing content
+	tailer := NewLogTailer(ctx, 1000, *logger)
+	defer tailer.Close()
+
+	err = tailer.StartWatching("history-component", logFile)
+	require.NoError(t, err)
+
+	// Write 100 lines after watching starts
 	for i := 1; i <= 100; i++ {
 		_, err = f.WriteString(fmt.Sprintf("history line %d\n", i))
 		require.NoError(t, err)
 	}
 	require.NoError(t, f.Sync())
 	f.Close()
-
-	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, *logger)
-	defer tailer.Close()
-
-	// Start watching
-	err = tailer.StartWatching("history-component", logFile)
-	require.NoError(t, err)
 
 	// Wait for all lines to be processed
 	time.Sleep(500 * time.Millisecond)
@@ -469,13 +468,20 @@ func TestLogTailer_JSONLogParsing(t *testing.T) {
 		Level:     slog.LevelError,
 	})
 
-	// Create temp log file with JSON logs
+	// Create empty temp log file, start watching, then write content
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "json.log")
 	f, err := os.Create(logFile)
 	require.NoError(t, err)
 
-	// Write JSON formatted logs
+	// Create tailer and start watching before writing content
+	tailer := NewLogTailer(ctx, 1000, *logger)
+	defer tailer.Close()
+
+	err = tailer.StartWatching("json-component", logFile)
+	require.NoError(t, err)
+
+	// Write JSON formatted logs after watching starts
 	jsonLines := []string{
 		`{"timestamp":"2024-01-01T12:00:00Z","level":"info","message":"info message","request_id":"abc123"}`,
 		`{"timestamp":"2024-01-01T12:00:01Z","level":"warn","message":"warning message","user":"admin"}`,
@@ -490,16 +496,8 @@ func TestLogTailer_JSONLogParsing(t *testing.T) {
 	require.NoError(t, f.Sync())
 	f.Close()
 
-	// Create tailer
-	tailer := NewLogTailer(ctx, 1000, *logger)
-	defer tailer.Close()
-
-	// Start watching
-	err = tailer.StartWatching("json-component", logFile)
-	require.NoError(t, err)
-
 	// Wait for processing
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	// Get history
 	entries, err := tailer.GetHistory("json-component", 0)

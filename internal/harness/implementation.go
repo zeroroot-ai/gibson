@@ -2,14 +2,17 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
@@ -50,9 +53,9 @@ type DefaultAgentHarness struct {
 	toolRegistry   tool.ToolRegistry
 	pluginRegistry plugin.PluginRegistry
 
-	// Registry adapter for unified component discovery via etcd
+	// Registry adapter for unified component discovery via the component registry
 	// Used for agent delegation operations (DelegateToAgent, ListAgents)
-	registryAdapter registry.ComponentDiscovery
+	registryAdapter component.ComponentDiscovery
 
 	// Memory and storage
 	memoryStore  memory.MemoryManager
@@ -98,6 +101,21 @@ type DefaultAgentHarness struct {
 	// taxonomyRegistry provides read-only access to the taxonomy registry for querying
 	// available node types, relationships, and extensions in the knowledge graph.
 	taxonomyRegistry sdkgraphrag.TaxonomyIntrospector
+
+	// componentRegistry provides Redis-backed component discovery scoped by tenant.
+	// When non-nil, CallToolProto and QueryPlugin consult this registry first before
+	// falling back to the registryAdapter. Nil means use the registryAdapter path only.
+	componentRegistry component.ComponentRegistry
+
+	// workQueue provides pull-based work dispatch over Redis Streams.
+	// When non-nil, remote components discovered via componentRegistry (those without
+	// a direct grpc_endpoint in their metadata) receive work items via this queue
+	// rather than a direct gRPC call. Nil means use the existing path.
+	workQueue component.WorkQueue
+
+	// workQueueTimeout is the maximum duration to wait for a remote component to
+	// deliver a WorkResult after enqueuing. Defaults to 5 minutes when zero.
+	workQueueTimeout time.Duration
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -488,7 +506,7 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 // Supports GRPCToolClient and RedisToolProxy.
 func getToolMetadata(t tool.Tool) map[string]string {
 	// Check if tool is GRPCToolClient
-	if grpcClient, ok := t.(*registry.GRPCToolClient); ok {
+	if grpcClient, ok := t.(*component.GRPCToolClient); ok {
 		if md := grpcClient.Metadata(); md != nil {
 			return md
 		}
@@ -506,6 +524,14 @@ func getToolMetadata(t tool.Tool) map[string]string {
 // CallToolProto executes a registered tool using proto message input/output.
 // This is the preferred method for tools with proto schemas, providing type safety
 // and schema validation at the protocol level.
+//
+// Discovery order:
+//  1. Local tool registry (in-process tools registered at startup)
+//  2. ComponentRegistry (Redis-backed, tenant-scoped) — if configured:
+//     a. Component has grpc_endpoint metadata → call directly via registryAdapter
+//     b. No grpc_endpoint → enqueue work via WorkQueue and wait for result
+//  3. RegistryAdapter fallback — used when ComponentRegistry is not configured or
+//     did not find the tool (e.g. tools registered directly without ComponentService)
 func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, request proto.Message, response proto.Message) error {
 	// Create span for distributed tracing
 	ctx, span := h.tracer.Start(ctx, "harness.CallToolProto")
@@ -516,17 +542,85 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		"input_type", string(request.ProtoReflect().Descriptor().FullName()),
 		"output_type", string(response.ProtoReflect().Descriptor().FullName()))
 
-	// Try to get tool from local registry first
+	// ── Path 1: Local tool registry ──────────────────────────────────────────
 	t, err := h.toolRegistry.Get(name)
-	if err != nil {
-		// Tool not found locally - try to discover via registry adapter
-		if h.registryAdapter != nil {
-			h.logger.Debug("tool not found locally, attempting remote discovery",
+	if err == nil {
+		// Found locally — fall through to the proto execution block below.
+		goto executeProto
+	}
+
+	// ── Path 2: ComponentRegistry (Redis-backed, tenant-scoped) ──────────────
+	if h.componentRegistry != nil {
+		tenant := auth.TenantFromContext(ctx)
+		if tenant == "" {
+			h.logger.Warn("component registry configured but no tenant in context, skipping registry lookup",
 				"tool", name)
+		} else {
+			instances, discErr := h.componentRegistry.Discover(ctx, tenant, "tool", name)
+			if discErr != nil {
+				h.logger.Warn("component registry discovery failed, falling back to registry adapter",
+					"tool", name,
+					"tenant", tenant,
+					"error", discErr)
+			} else if len(instances) > 0 {
+				info := instances[0] // Use first live instance; load-balancing is a future concern.
+
+				// Determine routing: does this instance expose a direct gRPC endpoint?
+				grpcEndpoint := info.Metadata["grpc_endpoint"]
+				if grpcEndpoint != "" && h.registryAdapter != nil {
+					// In-cluster tool with a direct gRPC endpoint — use the existing gRPC pool path.
+					h.logger.Debug("component registry: routing tool call via direct gRPC endpoint",
+						"tool", name,
+						"tenant", tenant,
+						"endpoint", grpcEndpoint,
+						"instance_id", info.InstanceID,
+						"discovery", "component_registry")
+
+					remoteTool, adapterErr := h.registryAdapter.DiscoverTool(ctx, name)
+					if adapterErr != nil {
+						h.logger.Warn("component registry directed to gRPC but adapter discovery failed, falling through",
+							"tool", name,
+							"endpoint", grpcEndpoint,
+							"error", adapterErr)
+						// Fall through to the legacy adapter path below.
+					} else {
+						t = remoteTool
+						goto executeProto
+					}
+				} else if h.workQueue != nil {
+					// Remote component registered via ComponentService — dispatch via WorkQueue.
+					h.logger.Debug("component registry: routing tool call via work queue",
+						"tool", name,
+						"tenant", tenant,
+						"instance_id", info.InstanceID,
+						"discovery", "component_registry")
+
+					return h.callToolViaWorkQueue(ctx, tenant, name, request, response, info)
+				} else {
+					h.logger.Warn("component registry found tool but no work queue configured, falling back",
+						"tool", name,
+						"tenant", tenant,
+						"instance_id", info.InstanceID)
+					// Fall through to legacy adapter path.
+				}
+			}
+		}
+	}
+
+	// ── Path 3: RegistryAdapter fallback ─────────────────────────────────────
+	// Reached when ComponentRegistry is not configured, returned no instances,
+	// or had no work queue available. RegistryAdapter is Redis-backed and covers
+	// tools that registered directly (e.g. in-cluster gRPC tools with grpc_endpoint
+	// but no ComponentService registration).
+	{
+		if h.registryAdapter != nil {
+			h.logger.Debug("tool not found locally or via component registry, attempting registry adapter discovery",
+				"tool", name,
+				"discovery", "registry_adapter")
 
 			remoteTool, discErr := h.registryAdapter.DiscoverTool(ctx, name)
 			if discErr != nil {
-				h.logger.Error("tool not found (local or remote)",
+				h.logger.Error("tool not found (local, component registry, or registry adapter)",
 					"tool", name,
 					"local_error", err,
 					"discovery_error", discErr)
@@ -537,14 +631,13 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 				)
 			}
 
-			// Use discovered remote tool
 			t = remoteTool
-			h.logger.Debug("discovered remote tool",
+			h.logger.Debug("discovered tool via registry adapter",
 				"tool", name,
-				"version", remoteTool.Version())
+				"version", remoteTool.Version(),
+				"discovery", "registry_adapter")
 		} else {
-			// No registry adapter, can't discover remotely
-			h.logger.Error("tool not found locally and no registry adapter available",
+			h.logger.Error("tool not found and no discovery path available",
 				"tool", name,
 				"error", err)
 			return types.WrapError(
@@ -554,6 +647,8 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 			)
 		}
 	}
+
+executeProto:
 
 	// Check if tool supports proto execution by type assertion
 	// The SDK tool.Tool interface has proto methods, but internal tool.Tool does not
@@ -683,7 +778,7 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 	isRemote := false
 	if h.registryAdapter != nil {
 		// Check if tool implements registry gRPC client (remote)
-		if _, ok := t.(*registry.GRPCToolClient); ok {
+		if _, ok := t.(*component.GRPCToolClient); ok {
 			isRemote = true
 		}
 	}
@@ -812,6 +907,282 @@ metricsSuccess:
 	}
 
 	return nil
+}
+
+// workQueueWaitTimeout returns the configured wait timeout or the 5-minute default.
+func (h *DefaultAgentHarness) workQueueWaitTimeout() time.Duration {
+	if h.workQueueTimeout > 0 {
+		return h.workQueueTimeout
+	}
+	return 5 * time.Minute
+}
+
+// callToolViaWorkQueue enqueues a proto tool call to a remote component registered
+// via ComponentService and waits synchronously for the result. The result JSON is
+// unmarshalled back into response using protojson.
+//
+// This path is taken when:
+//   - A component is found in the ComponentRegistry (Redis), AND
+//   - The component has no grpc_endpoint metadata (pull-based remote component), AND
+//   - A WorkQueue is configured on the harness.
+func (h *DefaultAgentHarness) callToolViaWorkQueue(
+	ctx context.Context,
+	tenant, name string,
+	request proto.Message,
+	response proto.Message,
+	info component.ComponentInfo,
+) error {
+	// Serialize the proto request to JSON for the work item payload.
+	inputJSON, err := protojson.Marshal(request)
+	if err != nil {
+		h.logger.Error("failed to marshal tool request for work queue",
+			"tool", name,
+			"tenant", tenant,
+			"error", err)
+		return types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("failed to marshal tool request for work queue: %s", name),
+			err,
+		)
+	}
+
+	workCtx := map[string]string{
+		"mission_id": h.missionCtx.ID.String(),
+		"agent":      h.missionCtx.CurrentAgent,
+	}
+	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
+		workCtx["trace_id"] = spanCtx.TraceID().String()
+	}
+
+	// Pre-assign a WorkID so we can subscribe for the result by ID. The WorkQueue
+	// preserves an explicitly set WorkID (only auto-generates when WorkID == "").
+	workID := fmt.Sprintf("tool-%s-%d", name, time.Now().UnixNano())
+
+	workItem := component.WorkItem{
+		WorkID:   workID,
+		WorkType: "execute_proto",
+		Payload:  inputJSON,
+		Context:  workCtx,
+	}
+
+	if _, err = h.workQueue.Enqueue(ctx, tenant, "tool", name, workItem); err != nil {
+		h.logger.Error("failed to enqueue tool work item",
+			"tool", name,
+			"tenant", tenant,
+			"work_id", workID,
+			"instance_id", info.InstanceID,
+			"error", err)
+		return types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("failed to enqueue tool work item: %s", name),
+			err,
+		)
+	}
+
+	h.logger.Debug("tool work item enqueued, waiting for result",
+		"tool", name,
+		"tenant", tenant,
+		"work_id", workID,
+		"instance_id", info.InstanceID)
+
+	result, err := h.workQueue.WaitForResult(ctx, workID, h.workQueueWaitTimeout())
+	if err != nil {
+		h.logger.Error("timed out or error waiting for tool work result",
+			"tool", name,
+			"tenant", tenant,
+			"work_id", workID,
+			"error", err)
+		return types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("tool work queue result wait failed: %s", name),
+			err,
+		)
+	}
+
+	if result.Error != nil {
+		h.logger.Error("remote tool returned error",
+			"tool", name,
+			"tenant", tenant,
+			"work_id", workID,
+			"error_code", result.Error.Code,
+			"error_message", result.Error.Message,
+			"retryable", result.Error.Retryable)
+		return types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("remote tool %s returned error [%s]: %s", name, result.Error.Code, result.Error.Message),
+			nil,
+		)
+	}
+
+	// Unmarshal the JSON result back into the response proto message.
+	unmarshaler := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := unmarshaler.Unmarshal(result.Result, response); err != nil {
+		h.logger.Error("failed to unmarshal tool work result",
+			"tool", name,
+			"tenant", tenant,
+			"work_id", workID,
+			"error", err)
+		return types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("failed to unmarshal tool work result: %s", name),
+			err,
+		)
+	}
+
+	h.logger.Debug("tool work queue call succeeded",
+		"tool", name,
+		"tenant", tenant,
+		"work_id", workID,
+		"discovery", "component_registry_work_queue")
+
+	h.metrics.RecordCounter("tools.executions", 1, map[string]string{
+		"tool":      name,
+		"remote":    "true",
+		"status":    "success",
+		"mode":      "proto",
+		"transport": "work_queue",
+	})
+
+	if h.eventLogger != nil {
+		h.eventLogger.Event(ctx, EventToolResult, "tool result", ToolResultEventData{
+			ToolName: name,
+			Success:  true,
+		})
+	}
+
+	return nil
+}
+
+// callPluginViaWorkQueue enqueues a plugin query to a remote component registered
+// via ComponentService and waits synchronously for the result.
+//
+// The result JSON is deserialised into a map[string]any and returned as-is,
+// matching the return type of QueryPlugin.
+func (h *DefaultAgentHarness) callPluginViaWorkQueue(
+	ctx context.Context,
+	tenant, name, method string,
+	params map[string]any,
+	info component.ComponentInfo,
+) (any, error) {
+	// Serialize params + method as the work item payload.
+	payload, err := json.Marshal(map[string]any{
+		"method": method,
+		"params": params,
+	})
+	if err != nil {
+		h.logger.Error("failed to marshal plugin query payload for work queue",
+			"plugin", name,
+			"method", method,
+			"tenant", tenant,
+			"error", err)
+		return nil, types.WrapError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("failed to marshal plugin query payload: %s.%s", name, method),
+			err,
+		)
+	}
+
+	workCtx := map[string]string{
+		"mission_id": h.missionCtx.ID.String(),
+		"agent":      h.missionCtx.CurrentAgent,
+		"method":     method,
+	}
+	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
+		workCtx["trace_id"] = spanCtx.TraceID().String()
+	}
+
+	workID := fmt.Sprintf("plugin-%s-%s-%d", name, method, time.Now().UnixNano())
+
+	workItem := component.WorkItem{
+		WorkID:   workID,
+		WorkType: "query_plugin",
+		Payload:  payload,
+		Context:  workCtx,
+	}
+
+	if _, err = h.workQueue.Enqueue(ctx, tenant, "plugin", name, workItem); err != nil {
+		h.logger.Error("failed to enqueue plugin work item",
+			"plugin", name,
+			"method", method,
+			"tenant", tenant,
+			"work_id", workID,
+			"error", err)
+		return nil, types.WrapError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("failed to enqueue plugin work item: %s.%s", name, method),
+			err,
+		)
+	}
+
+	h.logger.Debug("plugin work item enqueued, waiting for result",
+		"plugin", name,
+		"method", method,
+		"tenant", tenant,
+		"work_id", workID,
+		"instance_id", info.InstanceID)
+
+	result, err := h.workQueue.WaitForResult(ctx, workID, h.workQueueWaitTimeout())
+	if err != nil {
+		h.logger.Error("timed out or error waiting for plugin work result",
+			"plugin", name,
+			"method", method,
+			"tenant", tenant,
+			"work_id", workID,
+			"error", err)
+		return nil, types.WrapError(
+			ErrHarnessPluginMethodNotFound,
+			fmt.Sprintf("plugin work queue result wait failed: %s.%s", name, method),
+			err,
+		)
+	}
+
+	if result.Error != nil {
+		h.logger.Error("remote plugin returned error",
+			"plugin", name,
+			"method", method,
+			"tenant", tenant,
+			"work_id", workID,
+			"error_code", result.Error.Code,
+			"error_message", result.Error.Message)
+		return nil, types.WrapError(
+			ErrHarnessPluginMethodNotFound,
+			fmt.Sprintf("remote plugin %s.%s returned error [%s]: %s", name, method, result.Error.Code, result.Error.Message),
+			nil,
+		)
+	}
+
+	// Deserialise the JSON result into a generic value.
+	var output any
+	if err := json.Unmarshal(result.Result, &output); err != nil {
+		h.logger.Error("failed to unmarshal plugin work result",
+			"plugin", name,
+			"method", method,
+			"tenant", tenant,
+			"work_id", workID,
+			"error", err)
+		return nil, types.WrapError(
+			ErrHarnessPluginMethodNotFound,
+			fmt.Sprintf("failed to unmarshal plugin work result: %s.%s", name, method),
+			err,
+		)
+	}
+
+	h.logger.Debug("plugin work queue call succeeded",
+		"plugin", name,
+		"method", method,
+		"tenant", tenant,
+		"work_id", workID,
+		"discovery", "component_registry_work_queue")
+
+	h.metrics.RecordCounter("plugins.queries", 1, map[string]string{
+		"plugin":    name,
+		"method":    method,
+		"remote":    "true",
+		"status":    "success",
+		"transport": "work_queue",
+	})
+
+	return output, nil
 }
 
 // ListTools returns descriptors for all registered tools.
@@ -1086,6 +1457,14 @@ func (h *DefaultAgentHarness) GetAllToolCapabilities(ctx context.Context) (map[s
 // ────────────────────────────────────────────────────────────────────────────
 
 // QueryPlugin calls a method on a registered plugin with the given parameters.
+//
+// Discovery order:
+//  1. Local plugin registry (in-process plugins registered at startup)
+//  2. ComponentRegistry (Redis-backed, tenant-scoped) — if configured:
+//     a. Component has grpc_endpoint metadata → call directly via registryAdapter
+//     b. No grpc_endpoint → enqueue work via WorkQueue and wait for result
+//  3. RegistryAdapter fallback — used when ComponentRegistry is not configured or
+//     did not find the plugin (e.g. plugins registered directly without ComponentService)
 func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, method string, params map[string]any) (any, error) {
 	// Create span for distributed tracing
 	ctx, span := h.tracer.Start(ctx, "harness.QueryPlugin")
@@ -1096,17 +1475,79 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 		"method", method,
 		"params", params)
 
-	// Try to get plugin from local registry first
+	// ── Path 1: Local plugin registry ────────────────────────────────────────
 	p, err := h.pluginRegistry.Get(name)
 	if err != nil {
-		// Plugin not found locally - try to discover via registry adapter
+		// ── Path 2: ComponentRegistry (Redis-backed, tenant-scoped) ──────────
+		if h.componentRegistry != nil {
+			tenant := auth.TenantFromContext(ctx)
+			if tenant == "" {
+				h.logger.Warn("component registry configured but no tenant in context, skipping registry lookup",
+					"plugin", name)
+			} else {
+				instances, discErr := h.componentRegistry.Discover(ctx, tenant, "plugin", name)
+				if discErr != nil {
+					h.logger.Warn("component registry discovery failed for plugin, falling back to registry adapter",
+						"plugin", name,
+						"tenant", tenant,
+						"error", discErr)
+				} else if len(instances) > 0 {
+					info := instances[0]
+
+					grpcEndpoint := info.Metadata["grpc_endpoint"]
+					if grpcEndpoint != "" && h.registryAdapter != nil {
+						// In-cluster plugin with a direct gRPC endpoint.
+						h.logger.Debug("component registry: routing plugin query via direct gRPC endpoint",
+							"plugin", name,
+							"tenant", tenant,
+							"endpoint", grpcEndpoint,
+							"instance_id", info.InstanceID,
+							"discovery", "component_registry")
+
+						remotePlugin, adapterErr := h.registryAdapter.DiscoverPlugin(ctx, name)
+						if adapterErr != nil {
+							h.logger.Warn("component registry directed to gRPC but adapter discovery failed for plugin, falling through",
+								"plugin", name,
+								"endpoint", grpcEndpoint,
+								"error", adapterErr)
+							// Fall through to legacy adapter path below.
+						} else {
+							p = remotePlugin
+							goto executePlugin
+						}
+					} else if h.workQueue != nil {
+						// Remote component — dispatch via WorkQueue.
+						h.logger.Debug("component registry: routing plugin query via work queue",
+							"plugin", name,
+							"tenant", tenant,
+							"instance_id", info.InstanceID,
+							"discovery", "component_registry")
+
+						return h.callPluginViaWorkQueue(ctx, tenant, name, method, params, info)
+					} else {
+						h.logger.Warn("component registry found plugin but no work queue configured, falling back",
+							"plugin", name,
+							"tenant", tenant,
+							"instance_id", info.InstanceID)
+						// Fall through to legacy adapter path.
+					}
+				}
+			}
+		}
+
+		// ── Path 3: RegistryAdapter fallback ──────────────────────────────────
+		// Reached when ComponentRegistry is not configured, returned no instances,
+		// or had no work queue available. RegistryAdapter is Redis-backed and covers
+		// plugins that registered directly (e.g. in-cluster gRPC plugins with
+		// grpc_endpoint but no ComponentService registration).
 		if h.registryAdapter != nil {
-			h.logger.Debug("plugin not found locally, attempting remote discovery",
-				"plugin", name)
+			h.logger.Debug("plugin not found locally or via component registry, attempting registry adapter discovery",
+				"plugin", name,
+				"discovery", "registry_adapter")
 
 			remotePlugin, discErr := h.registryAdapter.DiscoverPlugin(ctx, name)
 			if discErr != nil {
-				h.logger.Error("plugin not found (local or remote)",
+				h.logger.Error("plugin not found (local, component registry, or registry adapter)",
 					"plugin", name,
 					"local_error", err,
 					"discovery_error", discErr)
@@ -1117,14 +1558,13 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 				)
 			}
 
-			// Use discovered remote plugin
 			p = remotePlugin
-			h.logger.Debug("discovered remote plugin",
+			h.logger.Debug("discovered plugin via registry adapter",
 				"plugin", name,
-				"version", remotePlugin.Version())
+				"version", remotePlugin.Version(),
+				"discovery", "registry_adapter")
 		} else {
-			// No registry adapter, can't discover remotely
-			h.logger.Error("plugin not found locally and no registry adapter available",
+			h.logger.Error("plugin not found and no discovery path available",
 				"plugin", name,
 				"error", err)
 			return nil, types.WrapError(
@@ -1135,11 +1575,13 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 		}
 	}
 
+executePlugin:
+
 	// Determine if plugin is local or remote for logging
 	isRemote := false
 	if h.registryAdapter != nil {
 		// Check if plugin implements registry gRPC client (remote)
-		if _, ok := p.(*registry.GRPCPluginClient); ok {
+		if _, ok := p.(*component.GRPCPluginClient); ok {
 			isRemote = true
 		}
 	}
@@ -1357,7 +1799,7 @@ func (h *DefaultAgentHarness) ListAgents() []AgentDescriptor {
 		return []AgentDescriptor{}
 	}
 
-	// Convert from registry.AgentInfo to harness.AgentDescriptor
+	// Convert from component.AgentInfo to harness.AgentDescriptor
 	descriptors := make([]AgentDescriptor, len(agentInfos))
 	for i, info := range agentInfos {
 		descriptors[i] = AgentDescriptor{
@@ -1413,15 +1855,24 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 		}
 	}
 
+	// Propagate tenant identity onto the finding for defense-in-depth isolation.
+	// This ensures the finding carries tenant provenance even if retrieved later
+	// via a different code path. When TenantID is already set (e.g. agent
+	// explicitly stamped it), we do not overwrite it.
+	if finding.TenantID == "" && h.missionCtx.TenantID != "" {
+		finding.TenantID = h.missionCtx.TenantID
+	}
+
 	h.logger.Info("submitting finding",
 		"finding_id", finding.ID.String(),
 		"title", finding.Title,
 		"severity", finding.Severity,
 		"confidence", finding.Confidence,
-		"category", finding.Category)
+		"category", finding.Category,
+		"tenant_id", finding.TenantID)
 
-	// Store finding
-	err := h.findingStore.Store(ctx, h.missionCtx.ID, finding)
+	// Store finding scoped by tenant and mission for defense-in-depth isolation.
+	err := h.findingStore.Store(ctx, h.missionCtx.TenantID, h.missionCtx.ID, finding)
 	if err != nil {
 		h.logger.Error("failed to submit finding",
 			"finding_id", finding.ID.String(),
@@ -1491,8 +1942,8 @@ func (h *DefaultAgentHarness) GetFindings(ctx context.Context, filter FindingFil
 	h.logger.Debug("retrieving findings",
 		"mission_id", h.missionCtx.ID.String())
 
-	// Get findings from store
-	findings, err := h.findingStore.Get(ctx, h.missionCtx.ID, filter)
+	// Get findings from store scoped by tenant and mission.
+	findings, err := h.findingStore.Get(ctx, h.missionCtx.TenantID, h.missionCtx.ID, filter)
 	if err != nil {
 		h.logger.Error("failed to get findings",
 			"mission_id", h.missionCtx.ID.String(),
@@ -2195,7 +2646,8 @@ func (h *DefaultAgentHarness) GetPreviousRunFindings(ctx context.Context, filter
 		return []agent.Finding{}, nil
 	}
 
-	findings, err := h.findingStore.Get(ctx, prevRun.MissionID, filter)
+	// Scope by tenant to prevent cross-tenant access to historical findings.
+	findings, err := h.findingStore.Get(ctx, h.missionCtx.TenantID, prevRun.MissionID, filter)
 	if err != nil {
 		h.logger.Error("failed to get previous run findings",
 			"previous_run_id", prevRun.MissionID.String(),
@@ -2235,7 +2687,8 @@ func (h *DefaultAgentHarness) GetAllRunFindings(ctx context.Context, filter Find
 	// Collect all findings from all runs
 	var allFindings []agent.Finding
 	for _, run := range runs {
-		findings, err := h.findingStore.Get(ctx, run.MissionID, filter)
+		// Scope by tenant to prevent cross-tenant access across historical runs.
+		findings, err := h.findingStore.Get(ctx, h.missionCtx.TenantID, run.MissionID, filter)
 		if err != nil {
 			h.logger.Warn("failed to get findings for run",
 				"run_id", run.MissionID.String(),

@@ -15,12 +15,12 @@ import (
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -38,7 +38,7 @@ type targetStoreLookup interface {
 type missionManager struct {
 	config          *config.Config
 	logger          *slog.Logger
-	registry        registry.ComponentDiscovery
+	registry        component.ComponentDiscovery
 	missionStore    mission.MissionStore
 	missionRunStore mission.MissionRunStore   // Stores individual run records
 	checkpointStore mission.CheckpointStore   // Stores mission checkpoints for pause/resume
@@ -77,7 +77,7 @@ type activeMission struct {
 func newMissionManager(
 	cfg *config.Config,
 	logger *slog.Logger,
-	reg registry.ComponentDiscovery,
+	reg component.ComponentDiscovery,
 	missionStore mission.MissionStore,
 	missionRunStore mission.MissionRunStore,
 	checkpointStore mission.CheckpointStore,
@@ -490,7 +490,8 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Include MissionRunID for GraphRAG mission-scoped storage
 	missionCtx := harness.NewMissionContext(active.mission.ID, active.mission.Name, "").
 		WithMissionRunID(bootstrapResult.MissionRunID).
-		WithRunNumber(missionRun.RunNumber)
+		WithRunNumber(missionRun.RunNumber).
+		WithTenant(active.mission.TenantID)
 
 	// Load target entity to get connection details
 	var targetInfo harness.TargetInfo

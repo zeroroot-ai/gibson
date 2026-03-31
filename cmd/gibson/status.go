@@ -351,19 +351,15 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh %dm", hours, minutes)
 }
 
-// checkComponentsStatus checks the status of all components
-// NOTE: Component data is now stored in etcd, not SQLite.
-// This function returns empty status for backwards compatibility.
+// checkComponentsStatus checks the status of all components.
+// Component data is stored in Redis via the component store.
+// This function returns empty status; live status is available via the daemon gRPC API.
 func checkComponentsStatus(homeDir string) ComponentsStatus {
-	componentStatus := ComponentsStatus{
+	return ComponentsStatus{
 		Agents:  []ComponentInfo{},
 		Tools:   []ComponentInfo{},
 		Plugins: []ComponentInfo{},
 	}
-
-	// Component data is now stored in etcd, not SQLite
-	// Return empty status for backwards compatibility
-	return componentStatus
 }
 
 // checkDatabaseStatus checks Redis connectivity and status

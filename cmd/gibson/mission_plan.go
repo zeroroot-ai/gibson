@@ -13,7 +13,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/component/resolver"
 	"github.com/zero-day-ai/gibson/internal/mission"
-	sdkregistry "github.com/zero-day-ai/sdk/registry"
 	"gopkg.in/yaml.v3"
 )
 
@@ -445,8 +444,8 @@ func (s *stubComponentStore) Delete(ctx context.Context, kind component.Componen
 	return fmt.Errorf("not implemented: planning mode does not delete components")
 }
 
-func (s *stubComponentStore) ListInstances(ctx context.Context, kind component.ComponentKind, name string) ([]sdkregistry.ServiceInfo, error) {
-	return []sdkregistry.ServiceInfo{}, nil
+func (s *stubComponentStore) ListInstances(ctx context.Context, kind component.ComponentKind, name string) ([]component.ComponentInfo, error) {
+	return []component.ComponentInfo{}, nil
 }
 
 // stubLifecycleManager is a no-op lifecycle manager for planning

@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/zero-day-ai/gibson/internal/registry"
+	internalcomponent "github.com/zero-day-ai/gibson/internal/component"
 )
 
 // getGibsonHome returns the Gibson home directory.
@@ -34,22 +34,21 @@ func WithDaemonClient(ctx context.Context, client interface{}) context.Context {
 	return context.WithValue(ctx, daemonClientKey{}, client)
 }
 
-// RegistryManagerKey is the context key for storing the registry manager.
-// This is ONLY used for daemon-internal operations (attack, orchestrator) that
-// need registry access. CLI commands should use GetDaemonClient instead.
-type RegistryManagerKey struct{}
+// componentDiscoveryKey is the context key for injecting a ComponentDiscovery mock in tests.
+type componentDiscoveryKey struct{}
 
-// GetRegistryManager retrieves the registry manager from the context.
-// This is ONLY for daemon-internal operations. Returns nil if not present.
-func GetRegistryManager(ctx context.Context) *registry.Manager {
-	if m, ok := ctx.Value(RegistryManagerKey{}).(*registry.Manager); ok {
-		return m
+// GetComponentDiscovery retrieves an injected ComponentDiscovery from the context.
+// This is used in tests to inject a mock discovery without a real Redis connection.
+// Returns nil if not present (normal production path).
+func GetComponentDiscovery(ctx context.Context) internalcomponent.ComponentDiscovery {
+	if d, ok := ctx.Value(componentDiscoveryKey{}).(internalcomponent.ComponentDiscovery); ok {
+		return d
 	}
 	return nil
 }
 
-// WithRegistryManager returns a new context with the registry manager attached.
-// This is ONLY for daemon-internal operations.
-func WithRegistryManager(ctx context.Context, m *registry.Manager) context.Context {
-	return context.WithValue(ctx, RegistryManagerKey{}, m)
+// WithComponentDiscovery returns a new context with a ComponentDiscovery injected.
+// Used in tests to inject a mock discovery implementation.
+func WithComponentDiscovery(ctx context.Context, d internalcomponent.ComponentDiscovery) context.Context {
+	return context.WithValue(ctx, componentDiscoveryKey{}, d)
 }

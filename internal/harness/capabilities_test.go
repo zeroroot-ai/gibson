@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 )
@@ -23,8 +23,8 @@ import (
 func TestHarness_GetToolCapabilities_Integration(t *testing.T) {
 	// Create mock registry adapter that returns tools with capabilities
 	mockAdapter := &MockRegistryAdapter{
-		ListToolsFn: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{
+		ListToolsFn: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{
 				{
 					Name:    "nmap",
 					Version: "1.0.0",

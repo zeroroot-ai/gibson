@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/memory"
@@ -138,6 +139,15 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		d.logger.Info(ctx, "registered builtin tools", "count", builtinCount)
 	}
 
+	// Build a Redis-backed WorkQueue for remote component dispatch.
+	// This enables the harness to route tool/plugin calls to pull-based workers
+	// (components registered in ComponentRegistry without a direct gRPC endpoint).
+	var workQueue component.WorkQueue
+	if d.stateClient != nil {
+		workQueue = component.NewRedisWorkQueue(d.stateClient.Client())
+		d.logger.Info(ctx, "initialized Redis work queue for remote component dispatch")
+	}
+
 	// Build HarnessConfig with all required dependencies
 	config := harness.HarnessConfig{
 		// LLM components
@@ -148,16 +158,21 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		ToolRegistry:   toolRegistry,
 		PluginRegistry: nil,
 
-		// Registry adapter for component discovery
-		RegistryAdapter: d.registryAdapter,
+		// ComponentRegistry enables tenant-scoped discovery (Path 2 in CallToolProto/QueryPlugin).
+		// RegistryAdapter handles direct gRPC dispatch when a component exposes grpc_endpoint.
+		// WorkQueue handles pull-based dispatch for components without a direct gRPC endpoint.
+		ComponentRegistry: d.compRegistry,
+		RegistryAdapter:   d.registryAdapter,
+		WorkQueue:         workQueue,
 
 		// Finding storage (in-memory for agent execution)
 		FindingStore: harness.NewInMemoryFindingStore(),
 
-		// MemoryFactory creates mission-scoped memory managers on demand
+		// MemoryFactory creates mission-scoped memory managers on demand.
+		// tenantID is forwarded for defense-in-depth tenant isolation in the memory layer.
 		MemoryManager: nil,
-		MemoryFactory: func(missionID types.ID) (memory.MemoryManager, error) {
-			return d.infrastructure.memoryManagerFactory.CreateForMission(context.Background(), missionID)
+		MemoryFactory: func(missionID types.ID, tenantID string) (memory.MemoryManager, error) {
+			return d.infrastructure.memoryManagerFactory.CreateForMission(context.Background(), missionID, tenantID)
 		},
 
 		// Observability

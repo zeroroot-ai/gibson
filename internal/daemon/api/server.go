@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
@@ -210,6 +211,7 @@ type PluginInfoInternal struct {
 // MissionData represents mission information.
 type MissionData struct {
 	ID           string
+	TenantID     string
 	Name         string
 	Description  string
 	WorkflowPath string
@@ -837,19 +839,40 @@ func (s *DaemonServer) StopMission(ctx context.Context, req *StopMissionRequest)
 }
 
 // ListMissions returns all missions (past and active).
+//
+// When authentication is enabled the tenant is extracted from the context and
+// only missions belonging to that tenant are returned. When authentication is
+// disabled (empty tenant) all missions are returned for backward compatibility.
 func (s *DaemonServer) ListMissions(ctx context.Context, req *ListMissionsRequest) (*ListMissionsResponse, error) {
+	tenant := auth.TenantFromContext(ctx)
+
 	s.logger.Debug("mission list request received",
 		"active_only", req.ActiveOnly,
 		"status_filter", req.StatusFilter,
 		"name_pattern", req.NamePattern,
 		"limit", req.Limit,
 		"offset", req.Offset,
+		"tenant", tenant,
 	)
 
 	missions, total, err := s.daemon.ListMissions(ctx, req.ActiveOnly, req.StatusFilter, req.NamePattern, int(req.Limit), int(req.Offset))
 	if err != nil {
 		s.logger.Error("failed to list missions", "error", err)
 		return nil, status_grpc.Errorf(codes.Internal, "failed to list missions: %v", err)
+	}
+
+	// Apply tenant filtering when auth is enabled.
+	// An empty tenant means auth is disabled; return all missions for backward compatibility.
+	if tenant != "" {
+		filtered := missions[:0]
+		for _, m := range missions {
+			if m.TenantID == tenant {
+				filtered = append(filtered, m)
+			}
+		}
+		// Adjust total to reflect the filtered count so pagination metadata stays accurate.
+		total = len(filtered)
+		missions = filtered
 	}
 
 	// Convert to proto messages

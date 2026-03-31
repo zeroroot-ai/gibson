@@ -14,7 +14,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/types"
 	proto "github.com/zero-day-ai/sdk/api/gen/proto"
 )
@@ -217,8 +216,8 @@ func TestNewGRPCAgentClient(t *testing.T) {
 	assert.Equal(t, "A test agent", client.Description())
 	assert.Equal(t, "1.0.0", client.Version())
 	assert.Equal(t, []string{"prompt_injection", "jailbreak"}, client.Capabilities())
-	assert.Equal(t, []component.TargetType{"llm_chat", "llm_api"}, client.TargetTypes())
-	assert.Equal(t, []component.TechniqueType{"prompt_injection"}, client.TechniqueTypes())
+	assert.Equal(t, []types.TargetType{"llm_chat", "llm_api"}, client.TargetTypes())
+	assert.Equal(t, []types.TechniqueType{"prompt_injection"}, client.TechniqueTypes())
 
 	// Verify slots
 	slots := client.LLMSlots()
@@ -684,8 +683,8 @@ func TestGRPCAgentClient_Metadata(t *testing.T) {
 	assert.Equal(t, "Advanced jailbreak testing agent with multi-turn adversarial techniques", client.Description())
 	assert.Equal(t, "2.1.3", client.Version())
 	assert.Equal(t, []string{"jailbreak", "adversarial", "multi_turn"}, client.Capabilities())
-	assert.Equal(t, []component.TargetType{"llm_chat", "llm_api", "rag_system"}, client.TargetTypes())
-	assert.Equal(t, []component.TechniqueType{"jailbreak", "prompt_injection", "context_manipulation"}, client.TechniqueTypes())
+	assert.Equal(t, []types.TargetType{"llm_chat", "llm_api", "rag_system"}, client.TargetTypes())
+	assert.Equal(t, []types.TechniqueType{"jailbreak", "prompt_injection", "context_manipulation"}, client.TechniqueTypes())
 }
 
 func TestConvertSlots_NilInput(t *testing.T) {

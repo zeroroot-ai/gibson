@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	"go.opentelemetry.io/otel/attribute"
@@ -253,7 +253,7 @@ func WithDecisionLogWriter(writer DecisionLogWriter) OrchestratorOption {
 
 // WithComponentDiscovery sets the component discovery for inventory building and validation.
 // This enables the orchestrator to validate spawned agents against the registry.
-func WithComponentDiscovery(discovery registry.ComponentDiscovery) OrchestratorOption {
+func WithComponentDiscovery(discovery component.ComponentDiscovery) OrchestratorOption {
 	return func(o *Orchestrator) {
 		if discovery != nil {
 			o.inventoryBuilder = NewInventoryBuilder(discovery)

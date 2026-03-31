@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/neo4j"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -212,6 +213,12 @@ func (t *OTelMissionTracer) StartMissionTrace(ctx context.Context, mission *sche
 		trace.WithTimestamp(mission.CreatedAt),
 	)
 
+	// Resolve tenant ID for multi-tenancy attribute.
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Set mission attributes
 	span.SetAttributes(
 		attribute.String(GibsonMissionID, mission.ID.String()),
@@ -219,6 +226,7 @@ func (t *OTelMissionTracer) StartMissionTrace(ctx context.Context, mission *sche
 		attribute.String(GibsonMissionObjective, mission.Objective),
 		attribute.String(GibsonMissionTargetRef, mission.TargetRef),
 		attribute.String(GibsonMissionStatus, mission.Status.String()),
+		attribute.String("tenant_id", tenantID),
 	)
 
 	// Create MissionSpan wrapper for statistics tracking
@@ -276,12 +284,19 @@ func (t *OTelMissionTracer) LogDecision(ctx context.Context, missionSpan *Missio
 	)
 	defer span.End(trace.WithTimestamp(decision.Timestamp.Add(time.Duration(decision.LatencyMs) * time.Millisecond)))
 
+	// Resolve tenant ID for multi-tenancy attribute.
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Set GenAI attributes following OpenTelemetry semantic conventions
 	attrs := []attribute.KeyValue{
 		attribute.String(GenAIRequestModel, log.Model),
 		attribute.String(GenAIResponseModel, log.Model),
 		attribute.Int(GenAIUsageInputTokens, decision.PromptTokens),
 		attribute.Int(GenAIUsageOutputTokens, decision.CompletionTokens),
+		attribute.String("tenant_id", tenantID),
 	}
 
 	// Add provider and request parameters from RequestMeta if available
@@ -399,12 +414,19 @@ func (t *OTelMissionTracer) LogAgentExecution(ctx context.Context, missionSpan *
 		trace.WithTimestamp(exec.StartedAt),
 	)
 
+	// Resolve tenant ID for multi-tenancy attribute.
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Set agent execution attributes
 	attrs := []attribute.KeyValue{
 		attribute.String(GibsonAgentName, log.AgentName),
 		attribute.String(GibsonAgentWorkflowNodeID, exec.WorkflowNodeID),
 		attribute.Int(GibsonAgentAttempt, exec.Attempt),
 		attribute.String(GibsonAgentStatus, exec.Status.String()),
+		attribute.String("tenant_id", tenantID),
 	}
 
 	if log.Neo4jNodeID != "" {
@@ -498,12 +520,19 @@ func (t *OTelMissionTracer) LogToolExecution(ctx context.Context, agentSpan *Age
 		defer span.End()
 	}
 
+	// Resolve tenant ID for multi-tenancy attribute.
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Set tool execution attributes
 	attrs := []attribute.KeyValue{
 		attribute.String(GibsonToolName, exec.ToolName),
 		attribute.String(GibsonToolStatus, exec.Status.String()),
 		attribute.Int64(GibsonToolDurationMs, durationMs),
 		attribute.Int(GibsonToolOutputSizeBytes, log.OutputSizeBytes),
+		attribute.String("tenant_id", tenantID),
 	}
 
 	if log.Category != "" {
@@ -596,12 +625,19 @@ func (t *OTelMissionTracer) LogFinding(ctx context.Context, agentSpan *AgentSpan
 	)
 	defer span.End()
 
+	// Resolve tenant ID for multi-tenancy attribute.
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Set finding attributes
 	attrs := []attribute.KeyValue{
 		attribute.String(GibsonFindingID, finding.ID.String()),
 		attribute.String(GibsonFindingTitle, finding.Title),
 		attribute.String(GibsonFindingSeverity, finding.Severity),
 		attribute.Float64(GibsonFindingConfidence, finding.Confidence),
+		attribute.String("tenant_id", tenantID),
 	}
 
 	if finding.Category != "" {
@@ -690,12 +726,19 @@ func (t *OTelMissionTracer) LogMemoryOp(ctx context.Context, agentSpan *AgentSpa
 	)
 	defer span.End()
 
+	// Resolve tenant ID for multi-tenancy attribute.
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Set memory operation attributes
 	attrs := []attribute.KeyValue{
 		attribute.String(GibsonMemoryTier, op.Tier),
 		attribute.String(GibsonMemoryOperation, op.Operation),
 		attribute.Int(GibsonMemorySizeBytes, op.SizeBytes),
 		attribute.Int64(GibsonMemoryDurationMs, op.DurationMs),
+		attribute.String("tenant_id", tenantID),
 	}
 
 	if op.Key != "" {
@@ -762,12 +805,19 @@ func (t *OTelMissionTracer) LogGraphOp(ctx context.Context, agentSpan *AgentSpan
 	)
 	defer span.End()
 
+	// Resolve tenant ID for multi-tenancy attribute.
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Set graph operation attributes
 	attrs := []attribute.KeyValue{
 		attribute.String(GibsonGraphOperation, op.Operation),
 		attribute.Int(GibsonGraphNodesCreated, op.NodesCreated),
 		attribute.Int(GibsonGraphRelationshipsCreated, op.RelationshipsCreated),
 		attribute.Int64(GibsonGraphDurationMs, op.DurationMs),
+		attribute.String("tenant_id", tenantID),
 	}
 
 	if len(op.NodeLabels) > 0 {

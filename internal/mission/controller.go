@@ -3,9 +3,12 @@ package mission
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -48,6 +51,20 @@ type DefaultMissionController struct {
 	checkpointStore   CheckpointStore // New checkpoint store for pause/resume
 	runStore          MissionRunStore // Optional: tracks mission runs
 
+	// componentRegistry provides Redis-backed component discovery for agent dispatch.
+	// When non-nil, it is used as the primary discovery path for agents. The legacy
+	// etcd-based path (inside the orchestrator's harness registryAdapter) remains
+	// active as the fallback during the transition period (task 11.1 removes it).
+	componentRegistry component.ComponentRegistry
+
+	// workQueue provides pull-based work dispatch over Redis Streams.
+	// Used in conjunction with componentRegistry to route work to remote agents
+	// that have no direct gRPC endpoint.
+	workQueue component.WorkQueue
+
+	// logger for structured mission controller logging.
+	logger *slog.Logger
+
 	// executionMu protects concurrent mission operations
 	executionMu sync.RWMutex
 	// activeMissions tracks currently executing missions
@@ -87,6 +104,32 @@ func WithRunStore(rs MissionRunStore) ControllerOption {
 	}
 }
 
+// WithComponentRegistry sets the Redis-backed ComponentRegistry for agent dispatch.
+// When configured, the controller uses this as the primary agent discovery path,
+// with the orchestrator's built-in etcd adapter as the fallback.
+// This is part of the unified multi-tenancy migration (task 8.1).
+func WithComponentRegistry(reg component.ComponentRegistry) ControllerOption {
+	return func(c *DefaultMissionController) {
+		c.componentRegistry = reg
+	}
+}
+
+// WithWorkQueue sets the WorkQueue used for pull-based remote agent dispatch.
+// Must be configured together with WithComponentRegistry to enable the remote
+// work-queue routing path.
+func WithWorkQueue(q component.WorkQueue) ControllerOption {
+	return func(c *DefaultMissionController) {
+		c.workQueue = q
+	}
+}
+
+// WithControllerLogger sets the structured logger for the mission controller.
+func WithControllerLogger(l *slog.Logger) ControllerOption {
+	return func(c *DefaultMissionController) {
+		c.logger = l
+	}
+}
+
 // NewMissionController creates a new mission controller.
 func NewMissionController(
 	store MissionStore,
@@ -98,6 +141,7 @@ func NewMissionController(
 		store:          store,
 		service:        service,
 		orchestrator:   orchestrator,
+		logger:         slog.Default(),
 		activeMissions: make(map[types.ID]context.CancelFunc),
 		activeRuns:     make(map[types.ID]types.ID),
 		operationLocks: make(map[types.ID]*sync.Mutex),
@@ -192,8 +236,51 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 		c.activeRuns[missionID] = runID
 	}
 
+	// Build the base execution context.
+	// Propagate any tenant present in the caller's context so that the
+	// orchestrator's harness can use it for ComponentRegistry lookups.
+	baseCtx := context.Background()
+	if tenant := auth.TenantFromContext(ctx); tenant != "" {
+		baseCtx = auth.ContextWithTenant(baseCtx, tenant)
+	}
+
+	// Log which discovery path will be used for agent dispatch.
+	if c.componentRegistry != nil {
+		c.logger.Info("mission controller: using ComponentRegistry as primary agent discovery path",
+			slog.String("mission_id", missionID.String()),
+			slog.Bool("work_queue_configured", c.workQueue != nil),
+			slog.String("discovery", "component_registry"),
+		)
+	} else {
+		c.logger.Info("mission controller: ComponentRegistry not configured, using legacy etcd discovery path",
+			slog.String("mission_id", missionID.String()),
+			slog.String("discovery", "registry_adapter_etcd"),
+		)
+	}
+
+	// Log pre-flight agent availability if ComponentRegistry is configured.
+	// This is informational — failure to list agents does not abort the mission start.
+	if c.componentRegistry != nil {
+		if tenant := auth.TenantFromContext(ctx); tenant != "" {
+			agents, listErr := c.componentRegistry.DiscoverAll(ctx, tenant, "agent")
+			if listErr != nil {
+				c.logger.Warn("mission controller: failed to list available agents via ComponentRegistry",
+					slog.String("mission_id", missionID.String()),
+					slog.String("tenant", tenant),
+					slog.String("error", listErr.Error()),
+				)
+			} else {
+				c.logger.Info("mission controller: pre-flight agent availability check",
+					slog.String("mission_id", missionID.String()),
+					slog.String("tenant", tenant),
+					slog.Int("component_registry_agents", len(agents)),
+				)
+			}
+		}
+	}
+
 	// Create cancellable context for execution
-	execCtx, cancel := context.WithCancel(context.Background())
+	execCtx, cancel := context.WithCancel(baseCtx)
 	c.activeMissions[missionID] = cancel
 
 	// Start mission execution in background
@@ -385,8 +472,21 @@ func (c *DefaultMissionController) Resume(ctx context.Context, missionID types.I
 		return fmt.Errorf("failed to update mission status: %w", err)
 	}
 
+	// Propagate tenant from caller context into the resumed execution context.
+	resumeBaseCtx := context.Background()
+	if tenant := auth.TenantFromContext(ctx); tenant != "" {
+		resumeBaseCtx = auth.ContextWithTenant(resumeBaseCtx, tenant)
+	}
+
+	if c.componentRegistry != nil {
+		c.logger.Info("mission controller: resuming with ComponentRegistry as primary agent discovery path",
+			slog.String("mission_id", missionID.String()),
+			slog.String("discovery", "component_registry"),
+		)
+	}
+
 	// Create cancellable context for execution
-	execCtx, cancel := context.WithCancel(context.Background())
+	execCtx, cancel := context.WithCancel(resumeBaseCtx)
 	c.activeMissions[missionID] = cancel
 
 	// Start mission execution in background

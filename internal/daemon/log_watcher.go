@@ -23,6 +23,7 @@ type LogWatcher struct {
 	inode    uint64
 	output   chan string
 	done     chan struct{}
+	started  bool
 	logger   observability.Logger
 	mu       sync.Mutex
 	ctx      context.Context
@@ -68,6 +69,7 @@ func (w *LogWatcher) Start() error {
 	}
 
 	// Start the watch loop
+	w.started = true
 	go w.watchLoop()
 
 	return nil
@@ -81,7 +83,14 @@ func (w *LogWatcher) Lines() <-chan string {
 // Close stops the watcher and cleans up resources.
 func (w *LogWatcher) Close() error {
 	w.cancel()
-	<-w.done
+	if w.started {
+		<-w.done
+	} else {
+		// watchLoop never started; clean up directly
+		w.watcher.Close()
+		close(w.output)
+		close(w.done)
+	}
 	return nil
 }
 

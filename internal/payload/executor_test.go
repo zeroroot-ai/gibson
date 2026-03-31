@@ -12,12 +12,12 @@ import (
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// mockComponentDiscovery implements registry.ComponentDiscovery for testing
+// mockComponentDiscovery implements component.ComponentDiscovery for testing
 type mockComponentDiscovery struct{}
 
 func (m *mockComponentDiscovery) DiscoverAgent(ctx context.Context, name string) (agent.Agent, error) {
@@ -32,16 +32,16 @@ func (m *mockComponentDiscovery) DiscoverPlugin(ctx context.Context, name string
 	return nil, nil
 }
 
-func (m *mockComponentDiscovery) ListAgents(ctx context.Context) ([]registry.AgentInfo, error) {
-	return []registry.AgentInfo{}, nil
+func (m *mockComponentDiscovery) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
+	return []component.AgentInfo{}, nil
 }
 
-func (m *mockComponentDiscovery) ListTools(ctx context.Context) ([]registry.ToolInfo, error) {
-	return []registry.ToolInfo{}, nil
+func (m *mockComponentDiscovery) ListTools(ctx context.Context) ([]component.ToolInfo, error) {
+	return []component.ToolInfo{}, nil
 }
 
-func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]registry.PluginInfo, error) {
-	return []registry.PluginInfo{}, nil
+func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]component.PluginInfo, error) {
+	return []component.PluginInfo{}, nil
 }
 
 func (m *mockComponentDiscovery) DelegateToAgent(ctx context.Context, name string, task agent.Task, harness agent.AgentHarness) (agent.Result, error) {

@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	sdkregistry "github.com/zero-day-ai/sdk/registry"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -64,7 +62,7 @@ func (m *mockComponentStore) Delete(ctx context.Context, kind component.Componen
 	return errors.New("not implemented")
 }
 
-func (m *mockComponentStore) ListInstances(ctx context.Context, kind component.ComponentKind, name string) ([]sdkregistry.ServiceInfo, error) {
+func (m *mockComponentStore) ListInstances(ctx context.Context, kind component.ComponentKind, name string) ([]component.ComponentInfo, error) {
 	return nil, errors.New("not implemented")
 }
 

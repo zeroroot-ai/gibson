@@ -22,7 +22,7 @@ func TestMemoryFactoryIntegration(t *testing.T) {
 		missionID := types.NewID()
 
 		// Create memory manager
-		mgr, err := factory.CreateForMission(ctx, missionID)
+		mgr, err := factory.CreateForMission(ctx, missionID, "")
 		require.NoError(t, err)
 		require.NotNil(t, mgr)
 		defer mgr.Close()
@@ -55,11 +55,11 @@ func TestMemoryFactoryIntegration(t *testing.T) {
 		missionID1 := types.NewID()
 		missionID2 := types.NewID()
 
-		mgr1, err := factory.CreateForMission(ctx, missionID1)
+		mgr1, err := factory.CreateForMission(ctx, missionID1, "")
 		require.NoError(t, err)
 		defer mgr1.Close()
 
-		mgr2, err := factory.CreateForMission(ctx, missionID2)
+		mgr2, err := factory.CreateForMission(ctx, missionID2, "")
 		require.NoError(t, err)
 		defer mgr2.Close()
 

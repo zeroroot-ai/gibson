@@ -8,7 +8,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/registry"
 )
 
 // AgentSelector selects and validates agents for attacks.
@@ -37,11 +36,11 @@ type AgentInfo struct {
 
 // DefaultAgentSelector implements AgentSelector using the component discovery interface.
 type DefaultAgentSelector struct {
-	discovery registry.ComponentDiscovery
+	discovery component.ComponentDiscovery
 }
 
 // NewAgentSelector creates a new agent selector backed by the given component discovery.
-func NewAgentSelector(discovery registry.ComponentDiscovery) *DefaultAgentSelector {
+func NewAgentSelector(discovery component.ComponentDiscovery) *DefaultAgentSelector {
 	return &DefaultAgentSelector{
 		discovery: discovery,
 	}
@@ -65,9 +64,9 @@ func (s *DefaultAgentSelector) Select(ctx context.Context, agentName string) (ag
 	// Discover the agent via registry adapter
 	agentInstance, err := s.discovery.DiscoverAgent(ctx, agentName)
 	if err != nil {
-		// Check if this is a registry.AgentNotFoundError
-		var notFoundErr *registry.AgentNotFoundError
-		if asErr, ok := err.(*registry.AgentNotFoundError); ok {
+		// Check if this is a component.AgentNotFoundError
+		var notFoundErr *component.AgentNotFoundError
+		if asErr, ok := err.(*component.AgentNotFoundError); ok {
 			notFoundErr = asErr
 		}
 
@@ -93,7 +92,7 @@ func (s *DefaultAgentSelector) ListAvailable(ctx context.Context) ([]AgentInfo, 
 		return nil, fmt.Errorf("failed to list agents: %w", err)
 	}
 
-	// Convert registry.AgentInfo to attack.AgentInfo
+	// Convert component.AgentInfo to attack.AgentInfo
 	infos := make([]AgentInfo, 0, len(registryInfos))
 	for _, regInfo := range registryInfos {
 		// Convert string slices to typed slices

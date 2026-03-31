@@ -65,24 +65,24 @@ type MissionStore interface {
 	// Returns the mission and a boolean indicating if it was created (true) or found (false).
 	FindOrCreateByName(ctx context.Context, mission *Mission) (*Mission, bool, error)
 
-	// Mission definition methods (etcd-backed)
+	// Mission definition methods (Redis-backed)
 
-	// CreateDefinition stores a new mission definition in etcd.
+	// CreateDefinition stores a new mission definition in Redis.
 	// Returns error if a definition with the same name already exists.
 	CreateDefinition(ctx context.Context, def *MissionDefinition) error
 
-	// GetDefinition retrieves a mission definition by name from etcd.
+	// GetDefinition retrieves a mission definition by name from Redis.
 	// Returns nil, nil if not found.
 	GetDefinition(ctx context.Context, name string) (*MissionDefinition, error)
 
-	// ListDefinitions returns all installed mission definitions from etcd.
+	// ListDefinitions returns all installed mission definitions from Redis.
 	ListDefinitions(ctx context.Context) ([]*MissionDefinition, error)
 
-	// UpdateDefinition updates an existing mission definition in etcd.
+	// UpdateDefinition updates an existing mission definition in Redis.
 	// Returns error if the definition does not exist.
 	UpdateDefinition(ctx context.Context, def *MissionDefinition) error
 
-	// DeleteDefinition removes a mission definition from etcd.
+	// DeleteDefinition removes a mission definition from Redis.
 	// Returns error if the definition does not exist.
 	DeleteDefinition(ctx context.Context, name string) error
 }
@@ -159,9 +159,6 @@ func (f *MissionFilter) WithPagination(limit, offset int) *MissionFilter {
 
 // Mission Definition Storage errors
 var (
-	// ErrEtcdNotConfigured is returned when etcd operations are attempted without configuration
-	ErrEtcdNotConfigured = fmt.Errorf("etcd client not configured")
-
 	// ErrDefinitionExists is returned when attempting to create a definition that already exists
 	ErrDefinitionExists = fmt.Errorf("mission definition already exists")
 

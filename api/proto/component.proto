@@ -1,0 +1,282 @@
+syntax = "proto3";
+
+package gibson.component;
+
+option go_package = "github.com/zero-day-ai/gibson/api/gen/componentpb";
+
+// ComponentService is the central gRPC service that all Gibson components
+// (agents, tools, and plugins) connect to. Components register themselves,
+// receive work via long-polling, submit results, and access harness operations
+// (LLM completion, tool calls, plugin queries, findings, memory) through
+// the proxy RPCs defined here.
+service ComponentService {
+    // RegisterComponent announces a component to Gibson and receives connection
+    // configuration including heartbeat and poll intervals.
+    rpc RegisterComponent(RegisterComponentRequest) returns (RegisterComponentResponse);
+
+    // Heartbeat sends a periodic health pulse. The response indicates whether
+    // the component is still considered registered and may carry config updates.
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+    // PollWork long-polls for work items assigned to this component instance.
+    // Returns when a work item is available or the server-side timeout expires.
+    rpc PollWork(PollWorkRequest) returns (PollWorkResponse);
+
+    // SubmitResult returns the execution result for a previously polled work item.
+    rpc SubmitResult(SubmitResultRequest) returns (SubmitResultResponse);
+
+    // Complete proxies an LLM completion request through the agent harness.
+    rpc Complete(CompleteRequest) returns (CompleteResponse);
+
+    // CompleteStream proxies a streaming LLM completion request through the agent harness.
+    rpc CompleteStream(CompleteRequest) returns (stream CompleteStreamChunk);
+
+    // CallTool proxies a tool execution request through the agent harness.
+    rpc CallTool(CallToolRequest) returns (CallToolResponse);
+
+    // QueryPlugin proxies a plugin query request through the agent harness.
+    rpc QueryPlugin(QueryPluginRequest) returns (QueryPluginResponse);
+
+    // SubmitFinding submits a security finding through the agent harness.
+    rpc SubmitFinding(SubmitFindingRequest) returns (SubmitFindingResponse);
+
+    // MemoryGet retrieves a value from the specified memory tier via the agent harness.
+    rpc MemoryGet(MemoryRequest) returns (MemoryResponse);
+
+    // MemorySet stores a value in the specified memory tier via the agent harness.
+    rpc MemorySet(MemoryRequest) returns (MemoryResponse);
+
+    // MemorySearch performs a semantic search over the specified memory tier.
+    rpc MemorySearch(MemorySearchRequest) returns (MemorySearchResponse);
+}
+
+// RegisterComponentRequest is sent by a component on startup to announce
+// itself and declare its capabilities.
+message RegisterComponentRequest {
+    // kind identifies the component type: "agent", "tool", or "plugin".
+    string kind = 1;
+    string name = 2;
+    string version = 3;
+    map<string, string> metadata = 4;
+    // capabilities lists agent capabilities (used when kind == "agent").
+    repeated string capabilities = 5;
+    // methods lists plugin methods (used when kind == "plugin").
+    repeated string methods = 6;
+    // input_message_type is the fully-qualified proto message type for tool input
+    // (used when kind == "tool").
+    string input_message_type = 7;
+    // output_message_type is the fully-qualified proto message type for tool output
+    // (used when kind == "tool").
+    string output_message_type = 8;
+    // file_descriptor_set is the serialized proto FileDescriptorSet describing
+    // the tool's schema (used when kind == "tool").
+    bytes file_descriptor_set = 9;
+}
+
+// RegisterComponentResponse carries the assigned instance ID and connection
+// parameters for the component to use going forward.
+message RegisterComponentResponse {
+    // instance_id is the unique identifier assigned to this component instance.
+    string instance_id = 1;
+    // heartbeat_interval_ms is the recommended interval between Heartbeat calls.
+    int32 heartbeat_interval_ms = 2;
+    // poll_interval_ms is the recommended interval between PollWork calls
+    // when the previous poll returned no work.
+    int32 poll_interval_ms = 3;
+    // poll_timeout_ms is the server-side long-poll timeout the component should
+    // pass in PollWorkRequest.timeout_ms.
+    int32 poll_timeout_ms = 4;
+    // config carries initial configuration values for the component.
+    map<string, string> config = 5;
+}
+
+// HeartbeatRequest is the periodic health pulse sent by a registered component.
+message HeartbeatRequest {
+    string instance_id = 1;
+    // health_status is the component's self-reported health: "healthy", "degraded", or "unhealthy".
+    string health_status = 2;
+    // health_message provides optional human-readable detail about the health status.
+    string health_message = 3;
+}
+
+// HeartbeatResponse is returned by the server after each heartbeat.
+message HeartbeatResponse {
+    // registered indicates whether the server still considers this instance registered.
+    // A false value means the component must re-register before polling for work.
+    bool registered = 1;
+    // config_updates carries any configuration values that have changed since the
+    // last heartbeat. The component should merge these into its running config.
+    map<string, string> config_updates = 2;
+}
+
+// PollWorkRequest is sent by a component to request the next available work item.
+message PollWorkRequest {
+    string instance_id = 1;
+    // timeout_ms is the maximum duration the server should hold the request open
+    // waiting for work before returning an empty response. Should match the value
+    // received in RegisterComponentResponse.poll_timeout_ms.
+    int32 timeout_ms = 2;
+}
+
+// PollWorkResponse carries a single work item for the component to execute.
+// When work_id is empty the poll timed out without available work.
+message PollWorkResponse {
+    // work_id uniquely identifies this work item. Must be included in SubmitResult.
+    string work_id = 1;
+    // work_type describes what kind of work this is (e.g. "execute", "stream").
+    string work_type = 2;
+    // payload is the serialized work payload; interpretation depends on work_type.
+    bytes payload = 3;
+    // context carries arbitrary key-value metadata associated with this work item.
+    map<string, string> context = 4;
+    // timeout_ms is the maximum time allowed to complete and submit the result.
+    int64 timeout_ms = 5;
+}
+
+// SubmitResultRequest delivers the outcome of a completed work item back to Gibson.
+message SubmitResultRequest {
+    string work_id = 1;
+    // result is the serialized result payload.
+    bytes result = 2;
+    // error is set when the work item failed; leave unset on success.
+    ComponentError error = 3;
+}
+
+// SubmitResultResponse is returned after a result is accepted.
+message SubmitResultResponse {}
+
+// CompleteRequest is a harness proxy request for a non-streaming LLM completion.
+message CompleteRequest {
+    // work_id ties this request to the active work item for authorization and billing.
+    string work_id = 1;
+    // slot is the named LLM slot defined by the agent (e.g. "primary").
+    string slot = 2;
+    repeated LLMMessage messages = 3;
+    // timeout_ms is the maximum time to wait for the completion.
+    int64 timeout_ms = 4;
+}
+
+// LLMMessage represents a single message in an LLM conversation.
+message LLMMessage {
+    // role is "system", "user", or "assistant".
+    string role = 1;
+    string content = 2;
+}
+
+// CompleteResponse carries the LLM's reply to a non-streaming completion.
+message CompleteResponse {
+    LLMMessage response = 1;
+    TokenUsage usage = 2;
+}
+
+// CompleteStreamChunk is a single chunk in a streaming LLM completion response.
+message CompleteStreamChunk {
+    string content = 1;
+    // done is true on the final chunk; usage is only populated on the final chunk.
+    bool done = 2;
+    TokenUsage usage = 3;
+}
+
+// TokenUsage reports token consumption for an LLM call.
+message TokenUsage {
+    int32 input_tokens = 1;
+    int32 output_tokens = 2;
+}
+
+// CallToolRequest is a harness proxy request to execute a tool.
+message CallToolRequest {
+    string work_id = 1;
+    string tool_name = 2;
+    // input_json is the JSON-encoded tool input matching the tool's input schema.
+    string input_json = 3;
+    int64 timeout_ms = 4;
+}
+
+// CallToolResponse carries the tool execution result.
+message CallToolResponse {
+    // output_json is the JSON-encoded tool output matching the tool's output schema.
+    string output_json = 1;
+    ComponentError error = 2;
+}
+
+// QueryPluginRequest is a harness proxy request to invoke a plugin method.
+message QueryPluginRequest {
+    string work_id = 1;
+    string plugin_name = 2;
+    string method = 3;
+    // params_json is the JSON-encoded method parameters.
+    string params_json = 4;
+    int64 timeout_ms = 5;
+}
+
+// QueryPluginResponse carries the plugin method result.
+message QueryPluginResponse {
+    // result_json is the JSON-encoded method result.
+    string result_json = 1;
+    ComponentError error = 2;
+}
+
+// SubmitFindingRequest is a harness proxy request to record a security finding.
+message SubmitFindingRequest {
+    string work_id = 1;
+    // finding is the serialized finding payload (proto-encoded Finding message).
+    bytes finding = 2;
+}
+
+// SubmitFindingResponse is returned after a finding is accepted.
+message SubmitFindingResponse {
+    // finding_id is the server-assigned identifier for the recorded finding.
+    string finding_id = 1;
+}
+
+// MemoryRequest is used for both MemoryGet and MemorySet harness proxy operations.
+message MemoryRequest {
+    string work_id = 1;
+    // operation is "get" or "set".
+    string operation = 2;
+    // tier identifies the memory tier: "working", "mission", or "long_term".
+    string tier = 3;
+    string key = 4;
+    // value is the serialized value to store (used for MemorySet; omit for MemoryGet).
+    bytes value = 5;
+}
+
+// MemoryResponse is returned for MemoryGet and MemorySet operations.
+message MemoryResponse {
+    // value is the stored value (populated on MemoryGet when found is true).
+    bytes value = 1;
+    // found indicates whether the key existed in the memory tier (MemoryGet only).
+    bool found = 2;
+}
+
+// MemorySearchRequest is a harness proxy request to perform a semantic memory search.
+message MemorySearchRequest {
+    string work_id = 1;
+    // tier identifies the memory tier to search: "working", "mission", or "long_term".
+    string tier = 2;
+    string query = 3;
+    // limit is the maximum number of results to return.
+    int32 limit = 4;
+}
+
+// MemorySearchResponse carries ranked memory search results.
+message MemorySearchResponse {
+    repeated MemoryEntry results = 1;
+}
+
+// MemoryEntry is a single result from a memory search.
+message MemoryEntry {
+    string key = 1;
+    bytes value = 2;
+    // score is the semantic similarity score (higher is more relevant).
+    float score = 3;
+}
+
+// ComponentError represents a structured error returned by a component or harness operation.
+message ComponentError {
+    // code is a short machine-readable error identifier (e.g. "TOOL_NOT_FOUND").
+    string code = 1;
+    string message = 2;
+    // retryable indicates whether the caller should attempt to retry the operation.
+    bool retryable = 3;
+}

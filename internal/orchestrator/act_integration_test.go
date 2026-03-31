@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/component"
 )
 
 // TestActor_SpawnAgent_ValidAgent tests that spawn_agent validation succeeds with a valid agent.
@@ -15,7 +15,7 @@ func TestActor_SpawnAgent_ValidAgent(t *testing.T) {
 
 		// Create mock registry with test agents
 		mockReg := &mockBuilderComponentDiscovery{
-			agents: []registry.AgentInfo{
+			agents: []component.AgentInfo{
 				{
 					Name:        "davinci",
 					Description: "LLM adversarial testing agent",
@@ -69,7 +69,7 @@ func TestActor_SpawnAgent_InvalidAgent(t *testing.T) {
 
 		// Create mock registry with test agents
 		mockReg := &mockBuilderComponentDiscovery{
-			agents: []registry.AgentInfo{
+			agents: []component.AgentInfo{
 				{Name: "davinci", Instances: 1},
 				{Name: "k8skiller", Instances: 1},
 				{Name: "nuclei-runner", Instances: 1},
@@ -146,7 +146,7 @@ func TestActor_SpawnAgent_InvalidAgent(t *testing.T) {
 		ctx := context.Background()
 
 		mockReg := &mockBuilderComponentDiscovery{
-			agents: []registry.AgentInfo{
+			agents: []component.AgentInfo{
 				{Name: "davinci", Instances: 1},
 				{Name: "k8skiller", Instances: 1},
 			},
@@ -238,7 +238,7 @@ func TestActor_ValidationIntegration(t *testing.T) {
 
 		// Create inventory with agents
 		mockReg := &mockBuilderComponentDiscovery{
-			agents: []registry.AgentInfo{
+			agents: []component.AgentInfo{
 				{Name: "recon-agent", Instances: 1},
 				{Name: "exploit-agent", Instances: 1},
 			},
@@ -273,7 +273,7 @@ func TestActor_ValidationIntegration(t *testing.T) {
 		ctx := context.Background()
 
 		mockReg := &mockBuilderComponentDiscovery{
-			agents: []registry.AgentInfo{{Name: "davinci", Instances: 1}},
+			agents: []component.AgentInfo{{Name: "davinci", Instances: 1}},
 		}
 
 		inventory, _ := NewInventoryBuilder(mockReg).Build(ctx)

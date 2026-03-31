@@ -170,4 +170,4 @@ func BenchmarkCreateLLMComponents(b *testing.B) {
 }
 
 // Ensure we have the component package imported for potential mocking
-var _ = component.GetRegistryManager
+var _ = component.GetEtcdClient

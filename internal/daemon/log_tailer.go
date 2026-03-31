@@ -221,7 +221,19 @@ func (t *LogTailer) GetHistory(componentID string, lines int) ([]LogEntry, error
 
 // Close stops all watchers and closes all subscriptions.
 func (t *LogTailer) Close() error {
+	// Cancel the tailer context to stop processLines goroutines
 	t.cancel()
+
+	// Cancel all subscription contexts to unblock handleSubscription goroutines
+	t.mu.RLock()
+	for _, subs := range t.subscribers {
+		for _, sub := range subs {
+			sub.cancel()
+		}
+	}
+	t.mu.RUnlock()
+
+	// Wait for all goroutines to finish (channels closed by handleSubscription's defer)
 	t.wg.Wait()
 
 	t.mu.Lock()
@@ -231,13 +243,6 @@ func (t *LogTailer) Close() error {
 	for componentID, watcher := range t.watchers {
 		if err := watcher.Close(); err != nil {
 			t.logger.Error(t.ctx, "error closing log watcher", "error", err, "component_id", componentID)
-		}
-	}
-
-	// Cancel all subscriptions (channels are closed by handleSubscription's defer)
-	for _, subs := range t.subscribers {
-		for _, sub := range subs {
-			sub.cancel()
 		}
 	}
 

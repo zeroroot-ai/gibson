@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zero-day-ai/gibson/cmd/gibson/component"
@@ -14,11 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/config"
 	daemonclient "github.com/zero-day-ai/gibson/internal/daemon/client"
 	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/registry"
 )
-
-// Global registry manager for cleanup (legacy - only used if daemon owns registry)
-var globalRegistryManager *registry.Manager
 
 // Global callback manager for cleanup (legacy - only used if daemon owns callback)
 var globalCallbackManager *harness.CallbackManager
@@ -124,31 +119,15 @@ func shutdown(cmd *cobra.Command, args []string) error {
 	// Get command mode to determine cleanup strategy
 	cmdMode := mode.GetMode(cmd.CommandPath())
 
-	// For daemon mode or if we own the registry (legacy direct start),
-	// shut down services
-	if cmdMode == mode.Daemon || globalRegistryManager != nil {
-		// Stop callback manager first
+	// For daemon mode, shut down services
+	if cmdMode == mode.Daemon {
+		// Stop callback manager if we own it
 		if globalCallbackManager != nil {
 			if globalFlags.IsVerbose() {
 				cmd.PrintErrf("Stopping callback server...\n")
 			}
 			globalCallbackManager.Stop()
 			globalCallbackManager = nil
-		}
-
-		// Then stop registry manager
-		if globalRegistryManager != nil {
-			// Use a background context with timeout for shutdown
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			if err := globalRegistryManager.Stop(ctx); err != nil {
-				// Log error but don't fail - we're shutting down anyway
-				if globalFlags.IsVerbose() {
-					cmd.PrintErrf("Warning: failed to stop registry cleanly: %v\n", err)
-				}
-			}
-			globalRegistryManager = nil
 		}
 	}
 

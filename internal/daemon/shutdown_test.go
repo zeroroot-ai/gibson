@@ -246,30 +246,29 @@ func TestShutdownCoordinator_TotalTimeout(t *testing.T) {
 
 	coordinator := NewShutdownCoordinator(cfg, logger)
 
-	// Create multiple phases that each take 200ms
+	// Create multiple phases that each take 200ms but respect context cancellation
+	contextAwareSleep := func(ctx context.Context) error {
+		select {
+		case <-time.After(200 * time.Millisecond):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	phase1 := &mockPhase{
 		name:    "phase1",
 		timeout: 300 * time.Millisecond,
-		executeFn: func(ctx context.Context) error {
-			time.Sleep(200 * time.Millisecond)
-			return nil
-		},
+		executeFn: contextAwareSleep,
 	}
 	phase2 := &mockPhase{
 		name:    "phase2",
 		timeout: 300 * time.Millisecond,
-		executeFn: func(ctx context.Context) error {
-			time.Sleep(200 * time.Millisecond)
-			return nil
-		},
+		executeFn: contextAwareSleep,
 	}
 	phase3 := &mockPhase{
 		name:    "phase3",
 		timeout: 300 * time.Millisecond,
-		executeFn: func(ctx context.Context) error {
-			time.Sleep(200 * time.Millisecond)
-			return nil
-		},
+		executeFn: contextAwareSleep,
 	}
 
 	coordinator.RegisterPhase(phase1)

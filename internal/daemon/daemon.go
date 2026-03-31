@@ -25,7 +25,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/payload"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
@@ -77,15 +76,9 @@ type AgentRuntimeState struct {
 //
 // It manages the lifecycle of all Gibson daemon services and coordinates
 // their startup, operation, and shutdown. The daemon owns:
-//   - Registry manager (embedded etcd or external etcd client)
+//   - Redis-backed component registry for runtime service discovery
 //   - Callback manager (harness callback server for agents)
-//   - PID and info files for client discovery
-//
-// The daemon is not yet a full implementation - it will be extended in future
-// phases with:
-//   - gRPC API server for client commands (Phase 3, tasks 9-11)
-//   - Mission manager for orchestration
-//   - Event bus for TUI streaming
+//   - Redis daemon registration for client discovery
 type daemonImpl struct {
 	// config is the loaded Gibson configuration
 	config *config.Config
@@ -93,11 +86,14 @@ type daemonImpl struct {
 	// logger is the structured logger for daemon operations
 	logger *observability.Logger
 
-	// registry manages service discovery (etcd)
-	registry *registry.Manager
+	// compRegistry is the Redis-backed component registry for runtime service discovery
+	compRegistry component.ComponentRegistry
 
-	// registryAdapter provides component discovery and listing
-	registryAdapter registry.ComponentDiscovery
+	// registryTenant is the tenant scope used for component registry discovery
+	registryTenant string
+
+	// registryAdapter provides component discovery and listing via Redis registry
+	registryAdapter component.ComponentDiscovery
 
 	// callback manages the harness callback server
 	callback *harness.CallbackManager
@@ -109,7 +105,7 @@ type daemonImpl struct {
 	// This is initialized when GIBSON_USE_REDIS_STORES=true
 	stateClient *state.StateClient
 
-	// componentStore provides access to component metadata in etcd
+	// componentStore provides access to component metadata in Redis
 	componentStore component.ComponentStore
 
 	// componentInstaller handles component installation, updates, and uninstallation
@@ -174,8 +170,8 @@ type daemonImpl struct {
 	// dependencyResolver manages mission dependency resolution and validation
 	dependencyResolver dependencyResolver
 
-	// etcdDaemonInfo provides etcd-based daemon discovery (required - no fallback)
-	etcdDaemonInfo *EtcdDaemonInfo
+	// redisDaemonInfo provides Redis-based daemon discovery and registration
+	redisDaemonInfo *RedisDaemonInfo
 
 	// healthServer provides HTTP health endpoints for Kubernetes probes
 	healthServer *healthhttp.Server
@@ -206,14 +202,14 @@ type daemonImpl struct {
 
 	// redisToolRegistry discovers tools registered in Redis by K8s-deployed tool workers
 	// This is used by ListTools() to include Redis-based tools in addition to
-	// componentStore (CLI-installed) and etcd-registered tools
+	// componentStore (CLI-installed) tools
 	redisToolRegistry redisToolDiscovery
 
 	// startTime tracks when the daemon started
 	startTime time.Time
 
-	// onRegistryReady is called after the registry is started but before other services
-	// This allows CLI to set up verbose logging after etcd is initialized
+	// onRegistryReady is called during startup before other services are initialized.
+	// This allows CLI to set up verbose logging during startup.
 	onRegistryReady func()
 }
 
@@ -255,9 +251,6 @@ func New(cfg *config.Config, homeDir string) (Daemon, error) {
 	logCfg.Component = "daemon"
 	logger := observability.NewLogger(logCfg)
 
-	// Initialize registry manager
-	regMgr := registry.NewManager(cfg.Registry)
-
 	// Initialize callback manager
 	callbackMgr := harness.NewCallbackManager(harness.CallbackConfig{
 		ListenAddress:    cfg.Callback.ListenAddress,
@@ -294,9 +287,8 @@ func New(cfg *config.Config, homeDir string) (Daemon, error) {
 	healthState := newHealthStateManager()
 
 	return &daemonImpl{
-		config:          cfg,
-		logger:          logger,
-		registry:        regMgr,
+		config: cfg,
+		logger: logger,
 		registryAdapter: nil, // Created in Start() after registry is available
 		callback:        callbackMgr,
 		eventBus:        eventBus,
@@ -314,10 +306,9 @@ func New(cfg *config.Config, homeDir string) (Daemon, error) {
 	}, nil
 }
 
-// SetOnRegistryReady sets a callback that will be called after the registry
-// is started but before other services. This is used by the CLI to set up
-// verbose logging after etcd is initialized, avoiding conflicts with etcd's
-// internal logging during startup.
+// SetOnRegistryReady sets a callback that will be called during startup
+// before other services are initialized. This is used by the CLI to set up
+// verbose logging during startup.
 func (d *daemonImpl) SetOnRegistryReady(fn func()) {
 	d.onRegistryReady = fn
 }
@@ -338,17 +329,8 @@ func (d *daemonImpl) SetOnRegistryReady(fn func()) {
 //   - error: Non-nil if startup fails or daemon already running
 func (d *daemonImpl) Start(ctx context.Context) error {
 	d.logger.Info(ctx, "starting Gibson daemon",
-		"registry_type", d.config.Registry.Type,
 		"callback_enabled", d.config.Callback.Enabled,
 	)
-
-	// Check if embedded etcd is rejected via environment variable
-	// This is used in Kubernetes deployments where external etcd is required
-	if os.Getenv("GIBSON_REQUIRE_EXTERNAL_ETCD") == "true" {
-		if d.config.Registry.Type == "embedded" {
-			return fmt.Errorf("embedded etcd not allowed: GIBSON_REQUIRE_EXTERNAL_ETCD=true requires external etcd endpoints")
-		}
-	}
 
 	// Record start time
 	d.startTime = time.Now()
@@ -357,28 +339,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	internalCtx, internalCancel := context.WithCancel(ctx)
 	defer internalCancel()
 
-	// Start registry manager
-	d.logger.Info(ctx, "starting registry manager")
-	if err := d.registry.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start registry: %w", err)
-	}
-
-	// Call the registry ready callback if set (for future use)
+	// Call the startup callback if set
 	if d.onRegistryReady != nil {
 		d.onRegistryReady()
 	}
-	// Initialize registry adapter now that registry is started
-	regAdapter := registry.NewRegistryAdapter(d.registry.Registry())
-	d.registryAdapter = regAdapter
-	d.logger.Info(ctx, "initialized registry adapter")
-
-	// Wire callback manager to registry adapter for external agent callback support
-	regAdapter.SetCallbackManager(d.callback)
-	d.logger.Info(ctx, "wired callback manager to registry adapter")
-
-	// Share proto resolver between registry adapter and callback manager for unified caching
-	d.callback.SetProtoResolver(regAdapter.GetResolver())
-	d.logger.Info(ctx, "shared proto resolver with callback manager")
 
 	// Initialize StateClient and Redis stores (required for Gibson)
 	d.logger.Info(ctx, "initializing Redis stores")
@@ -404,10 +368,32 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		"target_store", "RedisTargetDAO",
 	)
 
-	// Initialize component store with etcd client from registry
-	if etcdClient := d.registry.Client(); etcdClient != nil {
-		d.componentStore = component.EtcdComponentStore(etcdClient, "gibson")
-		d.logger.Info(ctx, "initialized component store with etcd backend")
+	// Initialize Redis-backed component registry and registry adapter.
+	// The component registry uses Redis for runtime service discovery (registrations with TTL).
+	// The tenant is scoped per-daemon; use "default" as the tenant for the daemon's own discovery.
+	compRegistry := component.NewRedisComponentRegistry(stateClient.Client(), 0)
+	tenant := d.config.Registry.Namespace
+	if tenant == "" {
+		tenant = "default"
+	}
+	d.compRegistry = compRegistry
+	d.registryTenant = tenant
+	regAdapter := component.NewRegistryAdapter(compRegistry, tenant)
+	d.registryAdapter = regAdapter
+	d.logger.Info(ctx, "initialized Redis-backed component registry adapter", "tenant", tenant)
+
+	// Wire callback manager to registry adapter for external agent callback support
+	regAdapter.SetCallbackManager(d.callback)
+	d.logger.Info(ctx, "wired callback manager to registry adapter")
+
+	// Share proto resolver between registry adapter and callback manager for unified caching
+	d.callback.SetProtoResolver(regAdapter.GetResolver())
+	d.logger.Info(ctx, "shared proto resolver with callback manager")
+
+	// Initialize component store with Redis backend
+	if d.stateClient != nil {
+		d.componentStore = component.NewRedisComponentStore(d.stateClient.Client(), d.config.Registry.Namespace)
+		d.logger.Info(ctx, "initialized component store with Redis backend")
 
 		// Initialize component infrastructure for install/uninstall/update operations
 		gitOps := git.NewDefaultGitOperations()
@@ -455,7 +441,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			d.logger.Info(ctx, "initialized mission installer", "missions_dir", missionsDir)
 		}
 	} else {
-		d.logger.Warn(ctx, "etcd client not available, component store not initialized")
+		d.logger.Warn(ctx, "state client not available, component store not initialized")
 	}
 
 	// Initialize infrastructure components (DAG executor, finding store, LLM registry, harness factory)
@@ -674,8 +660,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	if d.config.Callback.Enabled {
 		d.logger.Info(ctx, "starting callback server")
 		if err := d.callback.Start(ctx); err != nil {
-			// Stop registry on callback start failure
-			d.registry.Stop(ctx)
+			d.stopServices(ctx)
 			return fmt.Errorf("failed to start callback server: %w", err)
 		}
 	}
@@ -733,24 +718,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Debug(ctx, "registered neo4j readiness check")
 	}
 
-	// etcd check - verify registry client exists and registry is running
-	// Note: We don't perform active etcd calls in the health check because
-	// embedded etcd shares the same connection pool with the main application,
-	// and frequent health checks can cause connection contention.
-	// Instead, we trust that if the registry started successfully and is marked
-	// as healthy by the registry manager, etcd is working.
-	if d.registry != nil {
-		registryRef := d.registry
-		d.healthServer.RegisterReadinessCheck("etcd", func(ctx context.Context) sdktypes.HealthStatus {
-			status := registryRef.Status()
-			if status.Healthy {
-				return sdktypes.NewHealthyStatus("etcd is healthy")
-			}
-			return sdktypes.NewUnhealthyStatus("etcd registry not healthy", nil)
-		})
-		d.logger.Debug(ctx, "registered etcd readiness check")
-	}
-
 	// Register shutdown state check - this signals Kubernetes to stop routing traffic during shutdown
 	d.healthServer.RegisterReadinessCheck("shutdown", d.healthState.CheckFunc())
 	d.logger.Debug(ctx, "registered shutdown state readiness check")
@@ -781,7 +748,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	// Prepare daemon info for registration
 	pid := os.Getpid()
-	regStatus := d.registry.Status()
 	info := &DaemonInfo{
 		PID:         pid,
 		StartTime:   d.startTime,
@@ -789,23 +755,21 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		Version:     version.Version,
 	}
 
-	// Register daemon info in etcd (required - no filesystem fallback)
-	etcdClient := d.registry.Client()
-	if etcdClient == nil {
+	// Register daemon info in Redis for daemon discovery
+	if d.stateClient == nil || d.stateClient.Client() == nil {
 		d.stopServices(ctx)
-		return fmt.Errorf("etcd client not available - external etcd required for daemon coordination")
+		return fmt.Errorf("Redis state client not available - Redis required for daemon coordination")
 	}
 
-	d.etcdDaemonInfo = NewEtcdDaemonInfo(etcdClient, d.logger)
-	if err := d.etcdDaemonInfo.Register(ctx, info); err != nil {
+	d.redisDaemonInfo = NewRedisDaemonInfo(d.stateClient.Client(), d.logger)
+	if err := d.redisDaemonInfo.Register(ctx, info); err != nil {
 		d.stopServices(ctx)
-		return fmt.Errorf("failed to register daemon info in etcd: %w", err)
+		return fmt.Errorf("failed to register daemon info in Redis: %w", err)
 	}
 
 	d.logger.Info(ctx, "daemon started successfully",
 		"pid", pid,
-		"instance_id", d.etcdDaemonInfo.InstanceID(),
-		"registry_endpoint", regStatus.Endpoint,
+		"instance_id", d.redisDaemonInfo.InstanceID(),
 		"callback_endpoint", d.callback.CallbackEndpoint(),
 	)
 
@@ -838,7 +802,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 //
 // This method performs the following operations:
 // 1. Stop callback server (no new agent callbacks)
-// 2. Stop registry manager (etcd shutdown)
+// 2. Stop registry manager (Redis cleanup)
 // 3. Remove PID and daemon.json files
 //
 // The method is idempotent and safe to call multiple times.
@@ -863,14 +827,12 @@ func (d *daemonImpl) Stop(ctx context.Context) error {
 	// Stop services
 	d.stopServices(shutdownCtx)
 
-	// Deregister from etcd
-	if d.etcdDaemonInfo != nil {
-		d.logger.Info(ctx, "deregistering daemon from etcd")
-		if err := d.etcdDaemonInfo.Deregister(shutdownCtx); err != nil {
-			d.logger.Warn(ctx, "failed to deregister from etcd", "error", err)
+	// Deregister from Redis
+	if d.redisDaemonInfo != nil {
+		d.logger.Info(ctx, "deregistering daemon from Redis")
+		if err := d.redisDaemonInfo.Deregister(shutdownCtx); err != nil {
+			d.logger.Warn(ctx, "failed to deregister from Redis", "error", err)
 		}
-	} else {
-		d.logger.Warn(ctx, "etcd daemon info not initialized, cannot deregister")
 	}
 
 	d.logger.Info(ctx, "daemon stopped successfully")
@@ -945,7 +907,7 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 		d.stateClient,
 		d.callback,
 		d.eventBus,
-		d.registry,
+		nil, // registry stopper: was etcd; now nil (Redis cleanup handled by redisDaemonInfo.Deregister)
 		d.credentialStore,
 		d.logger,
 	))
@@ -979,8 +941,8 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 //   - *DaemonStatus: Complete daemon status information
 //   - error: Non-nil if status check fails
 func (d *daemonImpl) status() (*DaemonStatus, error) {
-	// Check if daemon is running by checking etcd registration
-	running := d.etcdDaemonInfo != nil
+	// Check if daemon is running by checking Redis registration
+	running := d.redisDaemonInfo != nil
 	pid := os.Getpid()
 
 	// Calculate uptime
@@ -990,11 +952,11 @@ func (d *daemonImpl) status() (*DaemonStatus, error) {
 		uptime = formatDuration(duration)
 	}
 
-	// Get registry status
-	regStatus := d.registry.Status()
-
 	// Query mission counts from database
 	totalMissions, activeMissions := d.queryMissionCounts(context.Background())
+
+	// Determine Redis endpoint for status reporting
+	redisAddr := d.config.Redis.URL
 
 	// Build status struct
 	status := &DaemonStatus{
@@ -1003,10 +965,10 @@ func (d *daemonImpl) status() (*DaemonStatus, error) {
 		StartTime:    d.startTime,
 		Uptime:       uptime,
 		GRPCAddress:  d.grpcAddr,
-		RegistryType: regStatus.Type,
-		RegistryAddr: regStatus.Endpoint,
+		RegistryType: "redis",
+		RegistryAddr: redisAddr,
 		CallbackAddr: d.callback.CallbackEndpoint(),
-		AgentCount:   regStatus.Services, // TODO: Break down by kind in future
+		AgentCount:   0, // TODO: query from Redis component registry
 		MissionCount: totalMissions,
 		ActiveCount:  activeMissions,
 	}

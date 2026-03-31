@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -297,12 +298,18 @@ func (r *OTelMetricsRecorder) RecordLLMCompletion(ctx context.Context, provider,
 		return
 	}
 
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Record request count with labels
 	r.llmRequestsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String(MetricAttrProvider, provider),
 			attribute.String(MetricAttrModel, model),
 			attribute.String(MetricAttrStatus, status),
+			attribute.String("tenant_id", tenantID),
 		),
 	)
 
@@ -313,6 +320,7 @@ func (r *OTelMetricsRecorder) RecordLLMCompletion(ctx context.Context, provider,
 				attribute.String(MetricAttrProvider, provider),
 				attribute.String(MetricAttrModel, model),
 				attribute.String(MetricAttrTokenType, "input"),
+				attribute.String("tenant_id", tenantID),
 			),
 		)
 	}
@@ -324,6 +332,7 @@ func (r *OTelMetricsRecorder) RecordLLMCompletion(ctx context.Context, provider,
 				attribute.String(MetricAttrProvider, provider),
 				attribute.String(MetricAttrModel, model),
 				attribute.String(MetricAttrTokenType, "output"),
+				attribute.String("tenant_id", tenantID),
 			),
 		)
 	}
@@ -334,6 +343,7 @@ func (r *OTelMetricsRecorder) RecordLLMCompletion(ctx context.Context, provider,
 			metric.WithAttributes(
 				attribute.String(MetricAttrProvider, provider),
 				attribute.String(MetricAttrModel, model),
+				attribute.String("tenant_id", tenantID),
 			),
 		)
 	}
@@ -344,6 +354,7 @@ func (r *OTelMetricsRecorder) RecordLLMCompletion(ctx context.Context, provider,
 			metric.WithAttributes(
 				attribute.String(MetricAttrProvider, provider),
 				attribute.String(MetricAttrModel, model),
+				attribute.String("tenant_id", tenantID),
 			),
 		)
 	}
@@ -369,11 +380,17 @@ func (r *OTelMetricsRecorder) RecordToolCall(ctx context.Context, toolName, stat
 		return
 	}
 
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Record tool call count
 	r.toolCallsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String(MetricAttrToolName, toolName),
 			attribute.String(MetricAttrStatus, status),
+			attribute.String("tenant_id", tenantID),
 		),
 	)
 
@@ -382,6 +399,7 @@ func (r *OTelMetricsRecorder) RecordToolCall(ctx context.Context, toolName, stat
 		r.toolLatencySeconds.Record(ctx, latencyMs/1000.0,
 			metric.WithAttributes(
 				attribute.String(MetricAttrToolName, toolName),
+				attribute.String("tenant_id", tenantID),
 			),
 		)
 	}
@@ -405,10 +423,16 @@ func (r *OTelMetricsRecorder) RecordFinding(ctx context.Context, severity, categ
 		return
 	}
 
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	r.findingsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String(MetricAttrSeverity, severity),
 			attribute.String(MetricAttrCategory, category),
+			attribute.String("tenant_id", tenantID),
 		),
 	)
 }
@@ -433,11 +457,17 @@ func (r *OTelMetricsRecorder) RecordAgentExecution(ctx context.Context, agentNam
 		return
 	}
 
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Record execution count
 	r.agentExecutionsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String(MetricAttrAgentName, agentName),
 			attribute.String(MetricAttrStatus, status),
+			attribute.String("tenant_id", tenantID),
 		),
 	)
 
@@ -446,6 +476,7 @@ func (r *OTelMetricsRecorder) RecordAgentExecution(ctx context.Context, agentNam
 		r.agentDurationSeconds.Record(ctx, durationMs/1000.0,
 			metric.WithAttributes(
 				attribute.String(MetricAttrAgentName, agentName),
+				attribute.String("tenant_id", tenantID),
 			),
 		)
 	}
@@ -470,10 +501,16 @@ func (r *OTelMetricsRecorder) RecordMission(ctx context.Context, status string, 
 		return
 	}
 
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Record mission count
 	r.missionsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String(MetricAttrStatus, status),
+			attribute.String("tenant_id", tenantID),
 		),
 	)
 
@@ -482,6 +519,7 @@ func (r *OTelMetricsRecorder) RecordMission(ctx context.Context, status string, 
 		r.missionDurationSeconds.Record(ctx, durationMs/1000.0,
 			metric.WithAttributes(
 				attribute.String(MetricAttrStatus, status),
+				attribute.String("tenant_id", tenantID),
 			),
 		)
 	}
@@ -506,10 +544,16 @@ func (r *OTelMetricsRecorder) RecordMemoryOp(ctx context.Context, tier, operatio
 		return
 	}
 
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	r.memoryOpsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String(MetricAttrTier, tier),
 			attribute.String(MetricAttrOperation, operation),
+			attribute.String("tenant_id", tenantID),
 		),
 	)
 }
@@ -532,9 +576,15 @@ func (r *OTelMetricsRecorder) RecordGraphOp(ctx context.Context, operation strin
 		return
 	}
 
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	r.graphOpsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String(MetricAttrOperation, operation),
+			attribute.String("tenant_id", tenantID),
 		),
 	)
 }
@@ -557,9 +607,15 @@ func (r *OTelMetricsRecorder) RecordDecision(ctx context.Context, action string)
 		return
 	}
 
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	r.decisionsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String(MetricAttrAction, action),
+			attribute.String("tenant_id", tenantID),
 		),
 	)
 }

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/registry"
+	"github.com/zero-day-ai/gibson/internal/component"
 )
 
 // InventoryBuilder queries the registry for all components and builds a ComponentInventory.
@@ -30,8 +30,8 @@ import (
 //	    // Handle error - partial inventory may still be available
 //	}
 type InventoryBuilder struct {
-	// registry provides component discovery from etcd
-	registry registry.ComponentDiscovery
+	// registry provides component discovery
+	registry component.ComponentDiscovery
 
 	// Configuration
 	timeout  time.Duration
@@ -80,7 +80,7 @@ func WithCacheTTL(d time.Duration) InventoryBuilderOption {
 //	    WithInventoryTimeout(10*time.Second),
 //	    WithCacheTTL(1*time.Minute),
 //	)
-func NewInventoryBuilder(reg registry.ComponentDiscovery, opts ...InventoryBuilderOption) *InventoryBuilder {
+func NewInventoryBuilder(reg component.ComponentDiscovery, opts ...InventoryBuilderOption) *InventoryBuilder {
 	b := &InventoryBuilder{
 		registry: reg,
 		timeout:  5 * time.Second,  // Default timeout
@@ -127,9 +127,9 @@ func (b *InventoryBuilder) Build(ctx context.Context) (*ComponentInventory, erro
 
 	// Query registry in parallel using goroutines
 	var (
-		agents  []registry.AgentInfo
-		tools   []registry.ToolInfo
-		plugins []registry.PluginInfo
+		agents  []component.AgentInfo
+		tools   []component.ToolInfo
+		plugins []component.PluginInfo
 
 		agentsErr  error
 		toolsErr   error
@@ -283,12 +283,12 @@ func (b *InventoryBuilder) BuildWithCache(ctx context.Context) (*ComponentInvent
 	return nil, fmt.Errorf("failed to build inventory and no cache available: %w", err)
 }
 
-// convertAgentInfo converts registry.AgentInfo to AgentSummary.
+// convertAgentInfo converts component.AgentInfo to AgentSummary.
 //
 // This method maps the basic registry metadata to the richer summary format
 // used by the orchestrator. It includes capability matching, health status,
 // and resource requirements.
-func (b *InventoryBuilder) convertAgentInfo(info registry.AgentInfo) AgentSummary {
+func (b *InventoryBuilder) convertAgentInfo(info component.AgentInfo) AgentSummary {
 	// Determine health status based on instance count
 	healthStatus := "healthy"
 	if info.Instances == 0 {
@@ -312,17 +312,17 @@ func (b *InventoryBuilder) convertAgentInfo(info registry.AgentInfo) AgentSummar
 
 // extractSlots extracts slot summaries from agent info.
 // Currently returns empty as descriptor integration is not yet available.
-func (b *InventoryBuilder) extractSlots(info registry.AgentInfo) []SlotSummary {
+func (b *InventoryBuilder) extractSlots(info component.AgentInfo) []SlotSummary {
 	// TODO: Fetch from agent descriptor when available
 	// For now, return empty slice as manifests don't yet include slot data
 	return []SlotSummary{}
 }
 
-// convertToolInfo converts registry.ToolInfo to ToolSummary.
+// convertToolInfo converts component.ToolInfo to ToolSummary.
 //
 // This method maps basic tool metadata from the registry to the summary format.
 // Schema information is summarized to keep prompt size manageable.
-func (b *InventoryBuilder) convertToolInfo(info registry.ToolInfo) ToolSummary {
+func (b *InventoryBuilder) convertToolInfo(info component.ToolInfo) ToolSummary {
 	// Determine health status based on instance count
 	healthStatus := "healthy"
 	if info.Instances == 0 {
@@ -358,30 +358,30 @@ func (b *InventoryBuilder) convertToolInfo(info registry.ToolInfo) ToolSummary {
 
 // extractTags extracts tags from tool info.
 // Currently returns empty as descriptor integration is not yet available.
-func (b *InventoryBuilder) extractTags(info registry.ToolInfo) []string {
+func (b *InventoryBuilder) extractTags(info component.ToolInfo) []string {
 	// TODO: Fetch from tool descriptor when available
 	return []string{}
 }
 
 // generateToolInputSummary generates a human-readable summary of tool input schema.
 // Currently returns empty as schema information is not yet available from registry.
-func (b *InventoryBuilder) generateToolInputSummary(info registry.ToolInfo) string {
+func (b *InventoryBuilder) generateToolInputSummary(info component.ToolInfo) string {
 	// TODO: Generate from input schema when available in descriptor
 	return ""
 }
 
 // generateToolOutputSummary generates a human-readable summary of tool output schema.
 // Currently returns empty as schema information is not yet available from registry.
-func (b *InventoryBuilder) generateToolOutputSummary(info registry.ToolInfo) string {
+func (b *InventoryBuilder) generateToolOutputSummary(info component.ToolInfo) string {
 	// TODO: Generate from output schema when available in descriptor
 	return ""
 }
 
-// convertPluginInfo converts registry.PluginInfo to PluginSummary.
+// convertPluginInfo converts component.PluginInfo to PluginSummary.
 //
 // This method maps basic plugin metadata from the registry to the summary format.
 // Method information is included for LLM reasoning about plugin capabilities.
-func (b *InventoryBuilder) convertPluginInfo(info registry.PluginInfo) PluginSummary {
+func (b *InventoryBuilder) convertPluginInfo(info component.PluginInfo) PluginSummary {
 	// Determine health status based on instance count
 	healthStatus := "healthy"
 	if info.Instances == 0 {
@@ -401,7 +401,7 @@ func (b *InventoryBuilder) convertPluginInfo(info registry.PluginInfo) PluginSum
 
 // extractMethods extracts method summaries from plugin info.
 // Currently returns empty as descriptor integration is not yet available.
-func (b *InventoryBuilder) extractMethods(info registry.PluginInfo) []MethodSummary {
+func (b *InventoryBuilder) extractMethods(info component.PluginInfo) []MethodSummary {
 	// TODO: Fetch from plugin descriptor when available
 	// For now, return empty slice as plugin method metadata is not yet exposed
 	return []MethodSummary{}

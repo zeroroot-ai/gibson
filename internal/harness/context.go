@@ -27,6 +27,9 @@ type MissionContext struct {
 	// RunNumber is the sequential run number for this mission (1, 2, 3...).
 	// Used for mission memory queries and historical comparisons.
 	RunNumber int `json:"run_number,omitempty"`
+	// TenantID is the tenant identifier for multi-tenant isolation.
+	// Used by the callback harness to prevent cross-tenant access.
+	TenantID string `json:"tenant_id,omitempty"`
 }
 
 // NewMissionContext creates a new mission context with the given ID, name, and current agent.
@@ -72,6 +75,12 @@ func (m MissionContext) WithMissionRunID(missionRunID string) MissionContext {
 // WithRunNumber sets the sequential run number for this mission.
 func (m MissionContext) WithRunNumber(runNumber int) MissionContext {
 	m.RunNumber = runNumber
+	return m
+}
+
+// WithTenant sets the tenant ID for cross-tenant access prevention.
+func (m MissionContext) WithTenant(tenantID string) MissionContext {
+	m.TenantID = tenantID
 	return m
 }
 

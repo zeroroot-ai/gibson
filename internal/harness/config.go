@@ -2,14 +2,15 @@ package harness
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/checkpoint"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/protoresolver"
@@ -62,11 +63,11 @@ type HarnessConfig struct {
 	// Optional: defaults to empty registry (no plugins available).
 	PluginRegistry plugin.PluginRegistry
 
-	// RegistryAdapter provides unified component discovery via etcd registry.
+	// RegistryAdapter provides unified component discovery via the component registry.
 	// This is the preferred method for discovering and connecting to agents, tools, and plugins.
 	// When set, this is used for agent delegation operations (DelegateToAgent, ListAgents).
 	// Optional: if nil, agent delegation will not be available.
-	RegistryAdapter registry.ComponentDiscovery
+	RegistryAdapter component.ComponentDiscovery
 
 	// MemoryManager provides memory store creation and lifecycle management.
 	// Used for accessing working, mission, and long-term memory tiers.
@@ -77,10 +78,11 @@ type HarnessConfig struct {
 
 	// MemoryFactory creates mission-scoped MemoryManager instances on demand.
 	// When set, this factory is called during harness creation to create a
-	// memory manager scoped to the mission ID from the MissionContext.
+	// memory manager scoped to the mission ID and tenant ID from the MissionContext.
+	// The tenantID parameter enables defense-in-depth tenant isolation in the memory layer.
 	// If both MemoryFactory and MemoryManager are set, MemoryFactory takes precedence.
 	// Optional: if nil, MemoryManager is used directly (which may also be nil).
-	MemoryFactory func(missionID types.ID) (memory.MemoryManager, error)
+	MemoryFactory func(missionID types.ID, tenantID string) (memory.MemoryManager, error)
 
 	// Tracer for distributed tracing (OpenTelemetry).
 	// Used for creating spans around LLM operations, tool execution, etc.
@@ -211,6 +213,24 @@ type HarnessConfig struct {
 	// based on the ClassifierConfig settings.
 	// Optional: if nil, category classification is disabled.
 	CategoryClassifier CategoryClassifier
+
+	// ComponentRegistry provides Redis-backed component discovery scoped by tenant.
+	// When non-nil, CallToolProto and QueryPlugin consult this registry before the
+	// RegistryAdapter fallback. Nil means use the RegistryAdapter path only.
+	// Optional.
+	ComponentRegistry component.ComponentRegistry
+
+	// WorkQueue provides pull-based work dispatch over Redis Streams.
+	// When non-nil, remote components found in ComponentRegistry (those without a
+	// direct grpc_endpoint in their metadata) receive work items via this queue.
+	// Nil means use the existing direct-gRPC path only.
+	// Optional.
+	WorkQueue component.WorkQueue
+
+	// WorkQueueTimeout is the maximum duration to wait for a remote component to
+	// return a WorkResult. Zero defaults to 5 minutes.
+	// Optional.
+	WorkQueueTimeout time.Duration
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.
@@ -253,7 +273,7 @@ func (c *HarnessConfig) Validate() error {
 //
 // Note: MemoryManager is not defaulted as it requires mission-specific configuration.
 // Note: SlotManager is not defaulted as it is a required field.
-// Note: RegistryAdapter is not defaulted as it requires etcd configuration (if nil, agent delegation will not be available).
+// Note: RegistryAdapter is not defaulted as it requires external configuration (if nil, agent delegation will not be available).
 func (c *HarnessConfig) ApplyDefaults() {
 	if c.LLMRegistry == nil {
 		c.LLMRegistry = llm.NewLLMRegistry()

@@ -2,8 +2,11 @@ package observability
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -161,6 +164,23 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 
 	// Apply defaults
 	cfg.applyDefaults()
+
+	// Construct Langfuse Basic auth header from env vars if not already set.
+	// The config may reference ${LANGFUSE_AUTH_HEADER} which may not be available.
+	// Fall back to constructing it from LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY.
+	if publicKey := os.Getenv("LANGFUSE_PUBLIC_KEY"); publicKey != "" {
+		if secretKey := os.Getenv("LANGFUSE_SECRET_KEY"); secretKey != "" {
+			authHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte(publicKey+":"+secretKey))
+			if cfg.Headers == nil {
+				cfg.Headers = make(map[string]string)
+			}
+			// Only set if the existing Authorization header is missing or malformed
+			if existing, ok := cfg.Headers["Authorization"]; !ok || existing == "" || strings.HasSuffix(existing, "Basic ") {
+				cfg.Headers["Authorization"] = authHeader
+				slog.Info("constructed Langfuse auth header from environment variables")
+			}
+		}
+	}
 
 	slog.Info("initializing opentelemetry observability stack",
 		"endpoint", cfg.Endpoint,

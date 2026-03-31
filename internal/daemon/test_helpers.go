@@ -6,12 +6,12 @@ import (
 	"log/slog"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdktypes "github.com/zero-day-ai/sdk/types"
@@ -19,44 +19,44 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// mockComponentDiscovery is a mock implementation of registry.ComponentDiscovery for testing.
+// mockComponentDiscovery is a mock implementation of component.ComponentDiscovery for testing.
 type mockComponentDiscovery struct {
-	agents          []registry.AgentInfo
-	tools           []registry.ToolInfo
-	plugins         []registry.PluginInfo
-	listAgentsFunc  func(ctx context.Context) ([]registry.AgentInfo, error)
-	listToolsFunc   func(ctx context.Context) ([]registry.ToolInfo, error)
-	listPluginsFunc func(ctx context.Context) ([]registry.PluginInfo, error)
+	agents          []component.AgentInfo
+	tools           []component.ToolInfo
+	plugins         []component.PluginInfo
+	listAgentsFunc  func(ctx context.Context) ([]component.AgentInfo, error)
+	listToolsFunc   func(ctx context.Context) ([]component.ToolInfo, error)
+	listPluginsFunc func(ctx context.Context) ([]component.PluginInfo, error)
 }
 
-func (m *mockComponentDiscovery) ListAgents(ctx context.Context) ([]registry.AgentInfo, error) {
+func (m *mockComponentDiscovery) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
 	if m.listAgentsFunc != nil {
 		return m.listAgentsFunc(ctx)
 	}
 	if m.agents != nil {
 		return m.agents, nil
 	}
-	return []registry.AgentInfo{}, nil
+	return []component.AgentInfo{}, nil
 }
 
-func (m *mockComponentDiscovery) ListTools(ctx context.Context) ([]registry.ToolInfo, error) {
+func (m *mockComponentDiscovery) ListTools(ctx context.Context) ([]component.ToolInfo, error) {
 	if m.listToolsFunc != nil {
 		return m.listToolsFunc(ctx)
 	}
 	if m.tools != nil {
 		return m.tools, nil
 	}
-	return []registry.ToolInfo{}, nil
+	return []component.ToolInfo{}, nil
 }
 
-func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]registry.PluginInfo, error) {
+func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]component.PluginInfo, error) {
 	if m.listPluginsFunc != nil {
 		return m.listPluginsFunc(ctx)
 	}
 	if m.plugins != nil {
 		return m.plugins, nil
 	}
-	return []registry.PluginInfo{}, nil
+	return []component.PluginInfo{}, nil
 }
 
 // Stub implementations for other ComponentDiscovery interface methods

@@ -6,17 +6,16 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/zero-day-ai/gibson/cmd/gibson/component"
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
+	internalcomponent "github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"go.opentelemetry.io/otel/trace"
@@ -35,7 +34,7 @@ type OrchestratorBundle struct {
 	FindingStore finding.FindingStore
 
 	// RegistryAdapter provides access to component discovery (agents, tools, plugins)
-	RegistryAdapter registry.ComponentDiscovery
+	RegistryAdapter internalcomponent.ComponentDiscovery
 
 	// EventEmitter provides access to mission events for progress reporting
 	EventEmitter mission.EventEmitter
@@ -115,15 +114,9 @@ func createOrchestratorWithOptions(ctx context.Context, opts *OrchestratorOption
 	missionStore := mission.NewRedisMissionStore(stateClient)
 	findingStore := finding.NewRedisFindingStore(stateClient)
 
-	// Step 2: Get registry manager from context and create adapter
-	regManager := component.GetRegistryManager(ctx)
-	if regManager == nil {
-		cleanup()
-		return nil, fmt.Errorf("registry not available (ensure daemon is running)")
-	}
-
-	// Create registry adapter for component discovery
-	registryAdapter := registry.NewRegistryAdapter(regManager.Registry())
+	// Step 2: Create Redis-backed component registry adapter for component discovery
+	compRegistry := internalcomponent.NewRedisComponentRegistry(stateClient.Client(), 0)
+	registryAdapter := internalcomponent.NewRegistryAdapter(compRegistry, "default")
 
 	// Step 3: Create legacy registries (tools and plugins still use legacy registries for now)
 	toolRegistry := tool.NewToolRegistry()

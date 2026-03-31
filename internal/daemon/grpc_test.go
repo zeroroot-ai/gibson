@@ -20,10 +20,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/observability"
-	"github.com/zero-day-ai/gibson/internal/registry"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/queue"
-	sdkregistry "github.com/zero-day-ai/sdk/registry"
 )
 
 // Stub implementations for other interface methods (not tested in this task)
@@ -31,8 +29,8 @@ import (
 // TestListAgents_Success tests ListAgents with mock registry adapter.
 func TestListAgents_Success(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return []registry.AgentInfo{
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+			return []component.AgentInfo{
 				{
 					Name:         "test-agent-1",
 					Version:      "1.0.0",
@@ -80,8 +78,8 @@ func TestListAgents_Success(t *testing.T) {
 // TestListAgents_EmptyResults tests ListAgents with no agents registered.
 func TestListAgents_EmptyResults(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return []registry.AgentInfo{}, nil
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+			return []component.AgentInfo{}, nil
 		},
 	}
 
@@ -100,8 +98,8 @@ func TestListAgents_EmptyResults(t *testing.T) {
 // TestListAgents_NoInstances tests ListAgents with agents that have no instances.
 func TestListAgents_NoInstances(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return []registry.AgentInfo{
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+			return []component.AgentInfo{
 				{
 					Name:      "offline-agent",
 					Version:   "1.0.0",
@@ -128,7 +126,7 @@ func TestListAgents_NoInstances(t *testing.T) {
 // TestListAgents_RegistryError tests ListAgents graceful degradation when registry fails.
 func TestListAgents_RegistryError(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
 			return nil, fmt.Errorf("registry connection failed")
 		},
 	}
@@ -149,8 +147,8 @@ func TestListAgents_RegistryError(t *testing.T) {
 // TestGetAgentStatus_Success tests GetAgentStatus with existing agent.
 func TestGetAgentStatus_Success(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return []registry.AgentInfo{
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+			return []component.AgentInfo{
 				{
 					Name:         "target-agent",
 					Version:      "1.5.0",
@@ -182,8 +180,8 @@ func TestGetAgentStatus_Success(t *testing.T) {
 // TestGetAgentStatus_NotFound tests GetAgentStatus with non-existent agent.
 func TestGetAgentStatus_NotFound(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return []registry.AgentInfo{
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+			return []component.AgentInfo{
 				{
 					Name:    "other-agent",
 					Version: "1.0.0",
@@ -210,7 +208,7 @@ func TestGetAgentStatus_NotFound(t *testing.T) {
 func TestGetAgentStatus_RegistryError(t *testing.T) {
 	expectedErr := fmt.Errorf("etcd timeout")
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
 			return nil, expectedErr
 		},
 	}
@@ -231,8 +229,8 @@ func TestGetAgentStatus_RegistryError(t *testing.T) {
 // TestListTools_Success tests ListTools with tools in component store and running in registry.
 func TestListTools_Success(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{
 				{
 					Name:      "nmap",
 					Version:   "7.92",
@@ -291,8 +289,8 @@ func TestListTools_Success(t *testing.T) {
 // TestListTools_EmptyResults tests ListTools with no tools registered.
 func TestListTools_EmptyResults(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{}, nil
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{}, nil
 		},
 	}
 
@@ -312,7 +310,7 @@ func TestListTools_EmptyResults(t *testing.T) {
 // TestListTools_RegistryError tests ListTools graceful degradation when registry fails.
 func TestListTools_RegistryError(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
 			return nil, fmt.Errorf("registry unavailable")
 		},
 	}
@@ -334,8 +332,8 @@ func TestListTools_RegistryError(t *testing.T) {
 // TestListPlugins_Success tests ListPlugins with mock registry adapter.
 func TestListPlugins_Success(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listPluginsFunc: func(ctx context.Context) ([]registry.PluginInfo, error) {
-			return []registry.PluginInfo{
+		listPluginsFunc: func(ctx context.Context) ([]component.PluginInfo, error) {
+			return []component.PluginInfo{
 				{
 					Name:        "mitre-lookup",
 					Version:     "1.0.0",
@@ -370,8 +368,8 @@ func TestListPlugins_Success(t *testing.T) {
 // TestListPlugins_EmptyResults tests ListPlugins with no plugins registered.
 func TestListPlugins_EmptyResults(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listPluginsFunc: func(ctx context.Context) ([]registry.PluginInfo, error) {
-			return []registry.PluginInfo{}, nil
+		listPluginsFunc: func(ctx context.Context) ([]component.PluginInfo, error) {
+			return []component.PluginInfo{}, nil
 		},
 	}
 
@@ -390,7 +388,7 @@ func TestListPlugins_EmptyResults(t *testing.T) {
 // TestListPlugins_RegistryError tests ListPlugins graceful degradation when registry fails.
 func TestListPlugins_RegistryError(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listPluginsFunc: func(ctx context.Context) ([]registry.PluginInfo, error) {
+		listPluginsFunc: func(ctx context.Context) ([]component.PluginInfo, error) {
 			return nil, fmt.Errorf("plugin registry error")
 		},
 	}
@@ -411,8 +409,8 @@ func TestListPlugins_RegistryError(t *testing.T) {
 // TestListAgents_NoEndpoints tests handling of agents with no endpoints.
 func TestListAgents_NoEndpoints(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return []registry.AgentInfo{
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+			return []component.AgentInfo{
 				{
 					Name:      "no-endpoint-agent",
 					Version:   "1.0.0",
@@ -440,8 +438,8 @@ func TestListAgents_NoEndpoints(t *testing.T) {
 // TestListTools_NoEndpoints tests handling of tools with no endpoints.
 func TestListTools_NoEndpoints(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{
 				{
 					Name:      "no-endpoint-tool",
 					Version:   "1.0.0",
@@ -477,8 +475,8 @@ func TestListTools_NoEndpoints(t *testing.T) {
 // TestGetAgentStatus_NoEndpoints tests GetAgentStatus with agent that has no endpoints.
 func TestGetAgentStatus_NoEndpoints(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return []registry.AgentInfo{
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+			return []component.AgentInfo{
 				{
 					Name:      "target-agent",
 					Version:   "1.0.0",
@@ -505,8 +503,8 @@ func TestGetAgentStatus_NoEndpoints(t *testing.T) {
 // TestListAgents_WithKindFilter tests ListAgents with kind parameter (even though not yet used).
 func TestListAgents_WithKindFilter(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return []registry.AgentInfo{
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+			return []component.AgentInfo{
 				{
 					Name:      "test-agent",
 					Version:   "1.0.0",
@@ -560,8 +558,8 @@ func TestHealthStatus_BasedOnInstances(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockRegistry := &mockComponentDiscovery{
-				listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-					return []registry.AgentInfo{
+				listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+					return []component.AgentInfo{
 						{
 							Name:      "test-agent",
 							Version:   "1.0.0",
@@ -590,8 +588,8 @@ func TestHealthStatus_BasedOnInstances(t *testing.T) {
 // TestListTools_HealthStatus tests tool health status based on instances.
 func TestListTools_HealthStatus(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{
 				{
 					Name:      "healthy-tool",
 					Instances: 2,
@@ -636,8 +634,8 @@ func TestListTools_HealthStatus(t *testing.T) {
 // TestListPlugins_HealthStatus tests plugin health status based on instances.
 func TestListPlugins_HealthStatus(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listPluginsFunc: func(ctx context.Context) ([]registry.PluginInfo, error) {
-			return []registry.PluginInfo{
+		listPluginsFunc: func(ctx context.Context) ([]component.PluginInfo, error) {
+			return []component.PluginInfo{
 				{
 					Name:      "active-plugin",
 					Instances: 1,
@@ -667,8 +665,8 @@ func TestListPlugins_HealthStatus(t *testing.T) {
 // TestLastSeenTime tests that LastSeen is populated (currently uses time.Now()).
 func TestLastSeenTime(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]registry.AgentInfo, error) {
-			return []registry.AgentInfo{
+		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
+			return []component.AgentInfo{
 				{
 					Name:      "test-agent",
 					Version:   "1.0.0",
@@ -1506,7 +1504,7 @@ func (m *mockComponentStore) Delete(ctx context.Context, kind component.Componen
 	return nil
 }
 
-func (m *mockComponentStore) ListInstances(ctx context.Context, kind component.ComponentKind, name string) ([]sdkregistry.ServiceInfo, error) {
+func (m *mockComponentStore) ListInstances(ctx context.Context, kind component.ComponentKind, name string) ([]component.ComponentInfo, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -2281,8 +2279,8 @@ func (m *mockRedisToolRegistry) IsHealthy(ctx context.Context, name string) bool
 // TestListTools_RedisToolsOnly tests ListTools when only Redis tools are available
 func TestListTools_RedisToolsOnly(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{}, nil // No etcd tools
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{}, nil // No etcd tools
 		},
 	}
 
@@ -2339,8 +2337,8 @@ func TestListTools_RedisToolsOnly(t *testing.T) {
 // TestListTools_MixedSources tests ListTools with tools from both componentStore and Redis
 func TestListTools_MixedSources(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{
 				{Name: "local-tool", Version: "1.0.0", Endpoints: []string{"localhost:50300"}, Instances: 1},
 			}, nil
 		},
@@ -2397,8 +2395,8 @@ func TestListTools_MixedSources(t *testing.T) {
 // TestListTools_Deduplication tests that duplicate tools are handled correctly
 func TestListTools_Deduplication(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{
 				{Name: "nmap", Version: "7.90", Endpoints: []string{"localhost:50300"}, Instances: 1},
 			}, nil
 		},
@@ -2444,8 +2442,8 @@ func TestListTools_Deduplication(t *testing.T) {
 // TestListTools_RedisRefreshError tests ListTools when Redis refresh fails
 func TestListTools_RedisRefreshError(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{}, nil
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{}, nil
 		},
 	}
 
@@ -2482,8 +2480,8 @@ func TestListTools_RedisRefreshError(t *testing.T) {
 // TestListTools_RedisToolsHealthStatus tests health status from Redis tools
 func TestListTools_RedisToolsHealthStatus(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{}, nil
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{}, nil
 		},
 	}
 
@@ -2538,8 +2536,8 @@ func TestListTools_RedisToolsHealthStatus(t *testing.T) {
 // TestListTools_NoRedisRegistry tests ListTools when Redis registry is nil
 func TestListTools_NoRedisRegistry(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]registry.ToolInfo, error) {
-			return []registry.ToolInfo{}, nil
+		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
+			return []component.ToolInfo{}, nil
 		},
 	}
 
