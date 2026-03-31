@@ -695,8 +695,8 @@ github.com/yuin/gopher-lua v1.1.1 h1:kYKnWBjvbNP4XLT3+bPEwAXJx262OhaHDWDVOPjL46M
 github.com/yuin/gopher-lua v1.1.1/go.mod h1:GBR0iDaNXjAgGg9zfCvksxSRnQx76gclCIb7kdAd1Pw=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-github.com/zero-day-ai/sdk v0.55.0 h1:0VuN7AO+8+bP/lJJEiCNJYGmWzqJ4jpLcpRwbVHJ5KU=
-github.com/zero-day-ai/sdk v0.55.0/go.mod h1:S18sYQCEh74HtzRQlm3MR7N+z7IelVgCsOozfA8O51U=
+github.com/zero-day-ai/sdk v0.56.0 h1:EAqxYkWx6Y6t0u7yd4Ib63gr3Px7GMoWJIvh+8HOtTQ=
+github.com/zero-day-ai/sdk v0.56.0/go.mod h1:yTari0a7kYup9QtkffeeDq6CrjJwOWwtLgGrmU3WeP0=
 github.com/zero-day-ai/tools/discovery/httpx v0.0.0-20260331020518-42d30066639c h1:bq5TQENGRceuH9ccGS69a0acjzL5xNT6XbT6VIrKuTw=
 github.com/zero-day-ai/tools/discovery/httpx v0.0.0-20260331020518-42d30066639c/go.mod h1:8pLEsjZa4MXVTrXBgfT0XWRIGtZXhOysi9mIjy4JPtg=
 github.com/zero-day-ai/tools/discovery/nmap v0.0.0-20260331020518-42d30066639c h1:grhkcEFKNHCMtlO6rhujJe8cesRQUW+3F9cgSxWYR9w=
