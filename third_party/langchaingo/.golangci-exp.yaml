@@ -1,4 +1,0 @@
-linters:
-  presets:
-    - bugs
-    - comment
