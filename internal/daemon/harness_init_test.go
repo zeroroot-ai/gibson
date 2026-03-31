@@ -12,7 +12,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/registry"
-	"github.com/zero-day-ai/gibson/internal/state"
 )
 
 func TestNewHarnessFactory(t *testing.T) {

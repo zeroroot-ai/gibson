@@ -45,15 +45,18 @@ func TestInfrastructureInitialization(t *testing.T) {
 	}
 
 	// Downcast to daemonImpl to access internal methods
-	daemonImpl, ok := daemon.(*daemonImpl)
+	di, ok := daemon.(*daemonImpl)
 	if !ok {
 		t.Fatal("daemon is not a *daemonImpl")
 	}
 
+	// Inject test StateClient (required by newInfrastructure)
+	di.stateClient = setupTestStateClient(t)
+
 	ctx := context.Background()
 
 	// Initialize infrastructure
-	infra, err := daemonImpl.newInfrastructure(ctx)
+	infra, err := di.newInfrastructure(ctx)
 	if err != nil {
 		t.Fatalf("failed to initialize infrastructure: %v", err)
 	}
