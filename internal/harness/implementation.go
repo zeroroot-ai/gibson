@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -116,6 +117,13 @@ type DefaultAgentHarness struct {
 	// workQueueTimeout is the maximum duration to wait for a remote component to
 	// deliver a WorkResult after enqueuing. Defaults to 5 minutes when zero.
 	workQueueTimeout time.Duration
+
+	// pluginAccess enforces per-tenant opt-in control for platform (_system) plugins.
+	// When non-nil and a QueryPlugin call finds no tenant-scoped instances, the harness
+	// checks that the tenant has explicitly enabled the plugin and has a stored config
+	// before dispatching to the _system instance. Nil disables access enforcement
+	// (backward-compatible for deployments that have not yet wired this store).
+	pluginAccess component.PluginAccessStore
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -1091,6 +1099,30 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 		workCtx["trace_id"] = spanCtx.TraceID().String()
 	}
 
+	// Inject plugin_config for _system plugins so the remote worker has access
+	// to the tenant's decrypted credentials without a separate lookup.
+	// Only injected for _system instances — tenant-scoped plugins manage their
+	// own config and must never receive another tenant's credentials.
+	if info.TenantID == "_system" && h.pluginAccess != nil {
+		pluginCfg, cfgErr := h.pluginAccess.GetDecryptedConfig(ctx, tenant, name)
+		if cfgErr == nil {
+			cfgJSON, marshalErr := json.Marshal(pluginCfg)
+			if marshalErr == nil {
+				workCtx["plugin_config"] = string(cfgJSON)
+			} else {
+				h.logger.Warn("failed to marshal plugin config for work item context, proceeding without it",
+					"plugin", name,
+					"tenant", tenant,
+					"error", marshalErr)
+			}
+		} else {
+			h.logger.Warn("failed to retrieve plugin config for work item context, proceeding without it",
+				"plugin", name,
+				"tenant", tenant,
+				"error", cfgErr)
+		}
+	}
+
 	workID := fmt.Sprintf("plugin-%s-%s-%d", name, method, time.Now().UnixNano())
 
 	workItem := component.WorkItem{
@@ -1485,19 +1517,21 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 				h.logger.Warn("component registry configured but no tenant in context, skipping registry lookup",
 					"plugin", name)
 			} else {
-				instances, discErr := h.componentRegistry.Discover(ctx, tenant, "plugin", name)
+				// Check tenant-scoped instances first (never automatically falls back to _system).
+				tenantInstances, discErr := h.componentRegistry.DiscoverTenantOnly(ctx, tenant, "plugin", name)
 				if discErr != nil {
-					h.logger.Warn("component registry discovery failed for plugin, falling back to registry adapter",
+					h.logger.Warn("component registry tenant discovery failed for plugin, falling back to registry adapter",
 						"plugin", name,
 						"tenant", tenant,
 						"error", discErr)
-				} else if len(instances) > 0 {
-					info := instances[0]
+				} else if len(tenantInstances) > 0 {
+					// Tenant has its own instance — dispatch directly, no access check needed.
+					info := tenantInstances[0]
 
 					grpcEndpoint := info.Metadata["grpc_endpoint"]
 					if grpcEndpoint != "" && h.registryAdapter != nil {
 						// In-cluster plugin with a direct gRPC endpoint.
-						h.logger.Debug("component registry: routing plugin query via direct gRPC endpoint",
+						h.logger.Debug("component registry: routing plugin query via direct gRPC endpoint (tenant instance)",
 							"plugin", name,
 							"tenant", tenant,
 							"endpoint", grpcEndpoint,
@@ -1517,7 +1551,7 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 						}
 					} else if h.workQueue != nil {
 						// Remote component — dispatch via WorkQueue.
-						h.logger.Debug("component registry: routing plugin query via work queue",
+						h.logger.Debug("component registry: routing plugin query via work queue (tenant instance)",
 							"plugin", name,
 							"tenant", tenant,
 							"instance_id", info.InstanceID,
@@ -1530,6 +1564,94 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 							"tenant", tenant,
 							"instance_id", info.InstanceID)
 						// Fall through to legacy adapter path.
+					}
+				} else if h.pluginAccess != nil {
+					// No tenant instance found. Enforce access control before routing to a
+					// _system (platform-hosted) instance.
+					access, accessErr := h.pluginAccess.GetAccess(ctx, tenant, name)
+					if accessErr != nil {
+						if errors.Is(accessErr, component.ErrPluginNotEnabled) {
+							h.logger.Warn("plugin access denied: not enabled for tenant",
+								"plugin", name,
+								"tenant", tenant)
+							return nil, types.WrapError(
+								ErrHarnessPluginNotFound,
+								fmt.Sprintf("plugin %q is not enabled for tenant %q — enable it via the plugin catalog before use", name, tenant),
+								accessErr,
+							)
+						}
+						// Unexpected error — log and fall through to legacy path.
+						h.logger.Warn("plugin access check failed, falling through to legacy path",
+							"plugin", name,
+							"tenant", tenant,
+							"error", accessErr)
+					} else if access != nil && access.Enabled {
+						// Plugin is enabled. Retrieve the tenant's decrypted config.
+						_, configErr := h.pluginAccess.GetDecryptedConfig(ctx, tenant, name)
+						if configErr != nil {
+							if errors.Is(configErr, component.ErrPluginNotConfigured) {
+								h.logger.Warn("plugin access denied: enabled but not configured",
+									"plugin", name,
+									"tenant", tenant)
+								return nil, types.WrapError(
+									ErrHarnessPluginNotFound,
+									fmt.Sprintf("plugin %q is enabled for tenant %q but has no configuration — provide credentials via the plugin catalog", name, tenant),
+									configErr,
+								)
+							}
+							// Non-fatal config retrieval error — log and fall through.
+							h.logger.Warn("plugin config retrieval failed, falling through to legacy path",
+								"plugin", name,
+								"tenant", tenant,
+								"error", configErr)
+						} else {
+							// Access granted and config available — locate the _system instance.
+							systemInstances, sysErr := h.componentRegistry.DiscoverSystemOnly(ctx, "plugin", name)
+							if sysErr != nil {
+								h.logger.Warn("component registry system discovery failed for plugin, falling through",
+									"plugin", name,
+									"error", sysErr)
+							} else if len(systemInstances) > 0 {
+								info := systemInstances[0]
+
+								grpcEndpoint := info.Metadata["grpc_endpoint"]
+								if grpcEndpoint != "" && h.registryAdapter != nil {
+									h.logger.Debug("component registry: routing plugin query to _system instance via direct gRPC endpoint",
+										"plugin", name,
+										"tenant", tenant,
+										"endpoint", grpcEndpoint,
+										"instance_id", info.InstanceID,
+										"discovery", "component_registry_system")
+
+									remotePlugin, adapterErr := h.registryAdapter.DiscoverPlugin(ctx, name)
+									if adapterErr != nil {
+										h.logger.Warn("component registry directed to gRPC but adapter discovery failed for _system plugin, falling through",
+											"plugin", name,
+											"endpoint", grpcEndpoint,
+											"error", adapterErr)
+										// Fall through to legacy adapter path below.
+									} else {
+										p = remotePlugin
+										goto executePlugin
+									}
+								} else if h.workQueue != nil {
+									h.logger.Debug("component registry: routing plugin query to _system instance via work queue",
+										"plugin", name,
+										"tenant", tenant,
+										"instance_id", info.InstanceID,
+										"discovery", "component_registry_system")
+
+									return h.callPluginViaWorkQueue(ctx, tenant, name, method, params, info)
+								} else {
+									h.logger.Warn("component registry found _system plugin but no work queue configured, falling back",
+										"plugin", name,
+										"tenant", tenant,
+										"instance_id", info.InstanceID)
+									// Fall through to legacy adapter path.
+								}
+							}
+							// No _system instances found; fall through to legacy path.
+						}
 					}
 				}
 			}

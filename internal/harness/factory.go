@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -87,6 +88,15 @@ func NewHarnessFactory(config HarnessConfig) (*DefaultHarnessFactory, error) {
 	return &DefaultHarnessFactory{
 		config: config,
 	}, nil
+}
+
+// SetPluginAccess updates the PluginAccess store after the factory has been constructed.
+//
+// This is used during daemon startup to wire in the plugin access store after the
+// KeyProvider is initialized (which happens after newHarnessFactory runs).
+// Passing nil is a no-op so callers do not need to guard.
+func (f *DefaultHarnessFactory) SetPluginAccess(store component.PluginAccessStore) {
+	f.config.PluginAccess = store
 }
 
 // Create creates a new AgentHarness for the given agent and mission context.
@@ -236,6 +246,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		componentRegistry:   f.config.ComponentRegistry,
 		workQueue:           f.config.WorkQueue,
 		workQueueTimeout:    f.config.WorkQueueTimeout,
+		pluginAccess:        f.config.PluginAccess,
 	}
 
 	// Apply middleware if configured

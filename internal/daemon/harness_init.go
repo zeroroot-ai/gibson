@@ -157,6 +157,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// Component registries
 		ToolRegistry:   toolRegistry,
 		PluginRegistry: nil,
+		PluginAccess:   d.pluginAccessStore, // nil when no KeyProvider configured; harness skips opt-in checks
 
 		// ComponentRegistry enables tenant-scoped discovery (Path 2 in CallToolProto/QueryPlugin).
 		// RegistryAdapter handles direct gRPC dispatch when a component exposes grpc_endpoint.

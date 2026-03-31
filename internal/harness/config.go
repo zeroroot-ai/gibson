@@ -231,6 +231,13 @@ type HarnessConfig struct {
 	// return a WorkResult. Zero defaults to 5 minutes.
 	// Optional.
 	WorkQueueTimeout time.Duration
+
+	// PluginAccess enforces per-tenant opt-in control for platform (_system) plugins.
+	// When set, QueryPlugin will verify that the calling tenant has explicitly enabled
+	// the plugin and provided credentials before routing to a _system instance.
+	// When nil, access enforcement is skipped (backward-compatible behavior).
+	// Optional.
+	PluginAccess component.PluginAccessStore
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.

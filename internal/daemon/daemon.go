@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/component/build"
@@ -199,6 +200,11 @@ type daemonImpl struct {
 
 	// llmConfigHandler provides LLM provider configuration management (used by dashboard API)
 	llmConfigHandler *api.LLMConfigHandler
+
+	// pluginAccessStore manages tenant opt-in and encrypted configuration for platform plugins.
+	// Initialized alongside credentialStore when a KeyProvider is configured.
+	// May be nil when no key provider is set (plugin access RPCs will return Unimplemented).
+	pluginAccessStore component.PluginAccessStore
 
 	// redisToolRegistry discovers tools registered in Redis by K8s-deployed tool workers
 	// This is used by ListTools() to include Redis-based tools in addition to
@@ -509,6 +515,32 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				d.credentialStore = credentialStore
 				d.callback.SetCredentialStore(credentialStore)
 				d.logger.Info(ctx, "configured callback service with credential store")
+
+				// Initialize plugin access store for tenant-scoped plugin opt-in management.
+				// Shares the same Redis client, encryptor, key provider, and component registry
+				// as the credential store so plugin configs are co-located with other daemon state.
+				if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
+					d.pluginAccessStore = component.NewRedisPluginAccessStore(
+						redisClient,
+						crypto.NewAESGCMEncryptor(),
+						keyProvider,
+						d.compRegistry,
+						d.logger.Slog(),
+					)
+					d.logger.Info(ctx, "initialized plugin access store")
+
+					// Patch the harness factory that was built before the key provider was
+					// available. The factory stores config by value so we use SetPluginAccess
+					// to inject the store without rebuilding the entire factory.
+					if d.infrastructure != nil && d.infrastructure.harnessFactory != nil {
+						if df, ok := d.infrastructure.harnessFactory.(*harness.DefaultHarnessFactory); ok {
+							df.SetPluginAccess(d.pluginAccessStore)
+							d.logger.Info(ctx, "wired plugin access store into harness factory")
+						}
+					}
+				} else {
+					d.logger.Warn(ctx, "plugin access store unavailable: Redis client is not standalone mode")
+				}
 
 				// Initialize credential handler for dashboard API
 				credentialHandler, err := api.NewCredentialHandler(credentialDAO, keyProvider)

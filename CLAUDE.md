@@ -4,109 +4,124 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Gibson is a Kubernetes-native AI agent framework for developing, deploying, and observing autonomous agents. It provides orchestration, observability, state management, tool execution, and knowledge persistence for AI agents performing security testing, API discovery, compliance auditing, and other autonomous tasks.
+Gibson is a Kubernetes-native AI agent framework for autonomous security operations. This is the core daemon/orchestrator — a Go binary providing a gRPC server (:50002), CLI, DAG-based mission orchestration, multi-provider LLM abstraction, and a component registry for agents, tools, and plugins.
 
-## Build Commands
+## Build & Test
 
 ```bash
-# Build the binary
-make bin                    # Quick local build, outputs to bin/gibson
+make bin                    # Build → bin/gibson (CGO_ENABLED=0, ldflags inject Version/GitCommit/BuildTime)
+make test                   # Unit tests
+make test-race              # Tests with race detection
+make test-coverage          # Coverage with 90% threshold (scripts/check-coverage.sh enforces)
+make lint                   # golangci-lint
+make check                  # fmt + vet + lint + test-race (pre-commit gate)
+make proto                  # protoc: api/proto/*.proto → api/gen/proto/ (needs protoc-gen-go, protoc-gen-go-grpc)
+make proto-clean            # Remove generated .pb.go files
+make tidy                   # go mod tidy
+make install                # Build + install to GOPATH/bin
 
-# Run tests
-make test                   # Run all tests
-make test-race              # Run tests with race detection
-go test ./internal/finding/...  # Run tests for a specific package
-
-# Code quality
-make lint                   # Run golangci-lint
-make fmt                    # Format code
-make vet                    # Run go vet
-make check                  # Run all checks (fmt, vet, lint, test-race)
-
-# Coverage
-make test-coverage          # Run with 90% coverage threshold
-make coverage-html          # Generate HTML coverage report
+# Single test
+go test -v -run TestSpecificName ./internal/path/...
 ```
+
+**Test file conventions**: `*_test.go` (unit), `*_integration_test.go` (testcontainers for Redis/Neo4j), `*_e2e_test.go` (end-to-end). Uses `testify/assert`. Mocks live near implementations (e.g., `internal/component/build/mock.go`).
 
 ## Architecture
 
-### Core Packages (`internal/`)
+### Command Mode System (`cmd/gibson/mode/`)
 
-- **orchestrator**: LLM-driven mission orchestration using DAG execution, makes decisions about agent scheduling
-- **harness**: `AgentHarness` interface provided to agents - coordinates LLM access, tool execution, memory, and findings
-- **llm**: Multi-provider LLM abstraction (Anthropic, OpenAI, Ollama) with slot-based model selection
-- **memory**: Three-tier memory system - working (ephemeral), mission (Redis), long-term (vector)
-- **graphrag**: Neo4j-backed knowledge graph for semantic entity storage and retrieval
-- **registry**: etcd-based service discovery for agents and tools
-- **finding**: Security finding types, classification, and export (SARIF, CSV, HTML, Markdown)
-- **observability**: OpenTelemetry tracing with GenAI conventions, Prometheus metrics
-- **daemon**: gRPC daemon server with health probes (`/healthz`, `/readyz`)
-- **mission**: Mission definition, parsing, and lifecycle management
-- **guardrail**: Input validation and safety checks (PII, scope, rate limiting)
-- **prompt**: Prompt assembly with components, variables, and transformers
-- **state**: Redis-backed state management with checkpointing
+CLI commands are classified into execution modes in `mode/registry.go`:
+- **Standalone** (`version`, `config`, `plugin init`): No daemon connection needed
+- **Daemon** (`daemon start/stop/status`): Manages daemon lifecycle
+- **Client** (default): Connects to running daemon via gRPC
 
-### CLI Structure (`cmd/gibson/`)
+`root.go` uses the mode to determine initialization strategy — standalone commands skip daemon setup entirely, client commands discover the daemon via Redis registration, daemon commands start the full server.
 
-- **root.go**: Command registration and mode-based initialization (daemon, client, standalone)
-- **mode/**: Command mode classification determining initialization strategy
-- **daemon.go**: Daemon start/stop commands
-- Mission, agent, tool, finding commands for respective operations
+### Daemon Startup Pipeline (`internal/daemon/`)
 
-### Agent Execution Flow
+`daemon.New()` constructs; `daemon.Start()` performs phased initialization:
+1. **State Client** (Redis) — always required
+2. **Component Registry/Lifecycle** — etcd-backed, 30-second TTL heartbeat
+3. **Mission services** — Store, RunStore, Installer, Service
+4. **Infrastructure** — OTel, GraphRAG (Neo4j), LLM registry, findings
+5. **Harness Factory** with middleware chain
+6. **gRPC Server** — registers DaemonService + ComponentService, optional auth interceptors
+7. **Event Bus** + Redis daemon registration for client discovery
+8. **Health server** — `/healthz` (liveness) + `/readyz` (readiness) on :8080
 
-1. Mission YAML parsed and validated
-2. Orchestrator builds execution DAG
-3. For each node, orchestrator calls LLM to decide next action
-4. Agent executes via `AgentHarness.Execute(ctx, task, harness)`
-5. Agent uses harness for:
-   - LLM: `harness.Complete(ctx, "primary", messages)`
-   - Tools: `harness.CallToolProto(ctx, "nmap", req, resp)`
-   - Findings: `harness.SubmitFinding(ctx, finding)`
-   - Memory: `harness.Memory().Mission().Set(ctx, key, value)`
-6. Results flow to GraphRAG knowledge graph
+### Graceful Shutdown
 
-### Key Interfaces
+`SignalHandler` runs 4 phases on SIGTERM: PreShutdown (stop accepting missions) → Checkpoint (save active missions to Redis via `DaemonMissionCheckpointer`) → Wait (drain in-flight ops) → Terminate. This enables pause/resume across pod restarts.
 
-```go
-// Agent execution interface
-type AgentHarness interface {
-    Complete(ctx, slot, messages, opts...) (*CompletionResponse, error)
-    CompleteWithTools(ctx, slot, messages, tools, opts...) (*CompletionResponse, error)
-    CallToolProto(ctx, name string, req, resp proto.Message) error
-    SubmitFinding(ctx, finding) error
-    Memory() MemoryManager
-    // ... more methods
-}
-```
+### Multi-Tenancy
+
+Components are scoped to tenants. The **system tenant** (`_system`) hosts platform plugins available to all tenants. `ComponentService` extracts tenant from auth context via `auth.TenantFromContext()`. Registry has four discovery methods: `Discover`, `DiscoverAll`, `DiscoverTenantOnly`, `DiscoverSystemOnly`.
+
+### Component Lifecycle (`internal/component/`)
+
+Components (agents/tools/plugins) register via `RegisterComponent` RPC. The registry uses **30-second TTL** — components must heartbeat to stay alive. Work dispatch uses long-polling via `PollWork`. Results return via `SubmitResult`. A `LoadBalancer` wraps the registry with strategies: RoundRobin, Random, LeastConnection.
+
+### Harness (`internal/harness/`)
+
+The `AgentHarness` interface is the single API agents use for all capabilities. It's built by `HarnessFactory` with dependency injection of three proxy interfaces:
+- **LLMCompleter**: Routes completions to the correct provider per mission slot
+- **FindingSubmitter**: Persists findings through the pipeline
+- **PluginAccessStore**: Manages encrypted per-tenant plugin configuration
+
+Unconnected proxies return `codes.Unimplemented` until wired. The harness wraps with `OTelHarnessMiddleware` for automatic tracing.
+
+### Memory System (`internal/memory/`)
+
+Three-tier, coordinated by `MemoryManager`:
+- **Working** — ephemeral, in-process (per-execution)
+- **Mission** — Redis-backed (persistent within mission lifetime)
+- **LongTerm** — vector store (semantic search over discoveries)
+
+`MemoryFactory` creates managers with pre-initialized Redis + vector store. `TracedMemoryManager` wraps all access with OTel spans.
+
+### LLM Abstraction (`internal/llm/`)
+
+Agents declare **LLM slots** with requirements (context window, features like `tool_use`/`vision`/`json_mode`). The daemon resolves slots to actual providers (Anthropic, OpenAI, Gemini, Ollama) at runtime. Agents never hardcode a specific model.
+
+### Entity Extraction (`internal/extraction/`)
+
+Tool responses are converted to GraphRAG entities via `EntityExtractor` implementations registered in `ExtractorRegistry`. Each tool (nmap, nuclei, httpx) has its own extractor producing `graphragpb.DiscoveryResult` (nodes + relationships) stored in Neo4j.
+
+### Authentication (`internal/auth/`)
+
+Token routing chain: `gsk_`-prefixed → APIKeyAuthenticator (Redis-backed); all others → OIDC → K8s ServiceAccount → Local (first match). Auth modes: `enterprise`, `saas`, `development`. `trust_localhost` bypasses auth for 127.0.0.1 in dev. RBAC maps claims to roles/permissions.
+
+### Encryption (`internal/crypto/`)
+
+AES-256-GCM for plugin config encryption. `KeyProvider` interface with backends: Kubernetes Secret, HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager. Factory pattern selects provider from config.
+
+### Context Keys (`internal/contextkeys/`)
+
+Shared context keys avoid circular imports: `AgentRunID`, `ToolExecutionID`, `MissionRunID`, `AgentName`, `MissionID`. Set during mission execution, consumed by harness, GraphRAG, and observability packages.
+
+## Critical Rules
+
+- **NEVER use local file includes for anything** — all includes, imports, references, and dependencies must point to GitHub (e.g., `github.com/zero-day-ai/...`). No local `replace` directives, no local file paths in imports, no local file:// references. GitHub only.
+
+## Key Conventions
+
+- **Go 1.25**, `CGO_ENABLED=0` for all builds
+- **No local `replace` in go.mod** — causes proto descriptor mismatches and daemon panics. Use `go work` for local SDK development.
+- **Proto field 100** in tool responses is always reserved for `gibson.graphrag.DiscoveryResult`
+- **`component.yaml`** defines tool/plugin/agent metadata for registry discovery
+- **Environment variable substitution** in config: `${VAR:-default}` syntax
+- Structured logging with `log/slog`; context propagation for tracing
+- Proto source: `api/proto/*.proto` → generated: `api/gen/proto/` (source-relative paths)
 
 ## Configuration
 
-- Primary config: `configs/gibson.yaml` (example) or `~/.gibson/config.yaml`
-- Environment variables: `GIBSON_HOME`, `REDIS_URL`, `NEO4J_URI`, `ANTHROPIC_API_KEY`, etc.
-- LLM providers configured via env: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_HOST`
+Primary: `configs/gibson.yaml` or `~/.gibson/config.yaml`. Key sections: core (home/data/cache dirs), security (encryption, key provider), auth (OIDC issuers, K8s, local users), components (gRPC/callback addresses), inference (LLM slots/limits), observability (log level, OTLP exporters).
 
-## Testing Patterns
+## Infrastructure
 
-- Unit tests alongside source files (`*_test.go`)
-- Integration tests use testcontainers for Redis/Neo4j
-- E2E tests in `tests/e2e/` and `cmd/gibson/*_e2e_test.go`
-- Use `github.com/stretchr/testify` for assertions
-- Mock interfaces defined near implementations (e.g., `internal/component/build/mock.go`)
+- **Redis** — state, queues, mission memory, daemon registration, plugin config storage
+- **Neo4j 5.x** — GraphRAG knowledge graph
+- **etcd** — component registry, service discovery (30s TTL heartbeat)
+- **PostgreSQL/ClickHouse** — Langfuse persistence/analytics
 
-## Dependencies
-
-- Uses `github.com/zero-day-ai/sdk` (local replace directive pointing to `../sdk`)
-- Redis via `github.com/redis/go-redis/v9`
-- Neo4j via `github.com/neo4j/neo4j-go-driver/v5`
-- etcd via `go.etcd.io/etcd/client/v3`
-- OpenTelemetry for observability
-- Cobra/Viper for CLI
-
-## Code Conventions
-
-- CGO disabled (`CGO_ENABLED=0`)
-- Go 1.24+ required
-- Structured logging with `log/slog`
-- Context propagation for tracing and cancellation
-- Protocol Buffers for tool communication
+Redis key patterns: `plugin-access:tenant:name`, `plugin-config:tenant:name`, `plugin-schema:name`, `mission:run:*`.
