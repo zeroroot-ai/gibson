@@ -123,11 +123,17 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 					if masterRealm == "" {
 						masterRealm = "master"
 					}
+					// Prefer env var for the secret since the daemon config
+					// loader does not expand ${VAR} placeholders.
+					clientSecret := d.config.Keycloak.ClientSecret
+					if envSecret := os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"); envSecret != "" {
+						clientSecret = envSecret
+					}
 					kcClient := keycloak.NewClient(
 						d.config.Keycloak.BaseURL,
 						masterRealm,
 						d.config.Keycloak.ClientID,
-						d.config.Keycloak.ClientSecret,
+						clientSecret,
 						d.logger.Slog(),
 					)
 					prov.WithKeycloak(kcClient)
