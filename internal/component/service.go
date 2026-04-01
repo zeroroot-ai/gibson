@@ -14,14 +14,18 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 
 	componentpb "github.com/zero-day-ai/sdk/api/gen/componentpb"
+	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -133,8 +137,22 @@ type ComponentServiceServer struct {
 	llmCompleter LLMCompleter
 
 	// memory provides access to all three memory tiers on behalf of remote agents.
-	// May be nil; MemoryGet, MemorySet, and MemorySearch return codes.Unimplemented when nil.
+	// May be nil; MemoryGet, MemorySet, and MemorySearch fall back to
+	// memoryResolver when non-nil, or return codes.Unimplemented when both are nil.
 	memory memory.MemoryStore
+
+	// memoryResolver maps a work_id to its mission-scoped MissionMemory instance.
+	// When non-nil it takes precedence over the shared s.memory.Mission() for
+	// mission-tier operations, giving each agent access to its own namespace.
+	// May be nil; the server falls back to s.memory when nil.
+	memoryResolver MemoryResolver
+
+	// missionCtx resolves a work item ID to its parent mission ID and any
+	// per-mission LLM slot overrides. Used by Complete and CompleteStream to
+	// apply per-mission provider configuration before delegating to llmCompleter.
+	// May be nil; when nil, Complete and CompleteStream pass an empty missionID
+	// and no overrides (current behaviour preserved).
+	missionCtx *MissionContextResolver
 
 	// findingSubmitter persists findings from remote agents.
 	// May be nil; SubmitFinding logs and generates an ID when nil.
@@ -143,6 +161,14 @@ type ComponentServiceServer struct {
 	// pluginAccess manages tenant opt-in and encrypted configuration for plugins.
 	// May be nil; plugin access RPCs return codes.Unimplemented when nil.
 	pluginAccess PluginAccessStore
+
+	// auditLog records security-relevant mutations for compliance purposes.
+	// May be nil; when nil, audit events are silently skipped.
+	auditLog *audit.AuditLogger
+
+	// quotaManager enforces per-tenant agent quotas during RegisterComponent.
+	// May be nil; when nil, quota checks are skipped entirely.
+	quotaManager *QuotaManager
 }
 
 // NewComponentServiceServer constructs a ComponentServiceServer with the core
@@ -152,6 +178,8 @@ type ComponentServiceServer struct {
 // pluginAccess) are optional at this stage: pass nil to leave the
 // corresponding RPCs returning codes.Unimplemented until the subsystems are
 // wired (tasks 5.3–5.5).
+//
+// auditLog may be nil; when nil, audit events are silently skipped.
 func NewComponentServiceServer(
 	registry ComponentRegistry,
 	queue WorkQueue,
@@ -160,6 +188,7 @@ func NewComponentServiceServer(
 	memStore memory.MemoryStore,
 	findingSubmitter FindingSubmitter,
 	pluginAccess PluginAccessStore,
+	auditLog *audit.AuditLogger,
 ) *ComponentServiceServer {
 	if registry == nil {
 		panic("component.NewComponentServiceServer: registry must not be nil")
@@ -178,7 +207,49 @@ func NewComponentServiceServer(
 		memory:           memStore,
 		findingSubmitter: findingSubmitter,
 		pluginAccess:     pluginAccess,
+		auditLog:         auditLog,
 	}
+}
+
+// WithMemoryResolver attaches a MemoryResolver to the server so that
+// MemoryGet, MemorySet, and MemorySearch route mission-tier operations to the
+// per-agent mission namespace rather than a shared store.
+//
+// Call this immediately after NewComponentServiceServer, before serving any
+// RPCs:
+//
+//	svc := component.NewComponentServiceServer(...)
+//	svc.WithMemoryResolver(component.NewRedisMemoryResolver(stateClient))
+func (s *ComponentServiceServer) WithMemoryResolver(r MemoryResolver) *ComponentServiceServer {
+	s.memoryResolver = r
+	return s
+}
+
+// WithMissionContextResolver attaches a MissionContextResolver so that
+// Complete and CompleteStream can look up per-mission LLM slot overrides
+// before delegating to the LLMCompleter. When non-nil the resolver is called
+// with the request's work_id and any returned overrides are passed to the
+// completer. Missing mission context is handled gracefully — the server falls
+// back to tenant-level defaults so existing behaviour is fully preserved.
+//
+// Call this immediately after NewComponentServiceServer, before serving RPCs:
+//
+//	svc := component.NewComponentServiceServer(...)
+//	svc.WithMissionContextResolver(component.NewMissionContextResolver(sc, ts, logger))
+func (s *ComponentServiceServer) WithMissionContextResolver(r *MissionContextResolver) *ComponentServiceServer {
+	s.missionCtx = r
+	return s
+}
+
+// WithQuotaManager attaches a QuotaManager so that RegisterComponent enforces
+// per-tenant agent quotas. Call this immediately after NewComponentServiceServer
+// and before serving any RPCs:
+//
+//	svc := component.NewComponentServiceServer(...)
+//	svc.WithQuotaManager(quotaMgr)
+func (s *ComponentServiceServer) WithQuotaManager(qm *QuotaManager) *ComponentServiceServer {
+	s.quotaManager = qm
+	return s
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +280,20 @@ func (s *ComponentServiceServer) RegisterComponent(
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
 
+	// Enforce per-tenant agent quota before touching the registry.
+	// Only agent-kind components count against the agent quota; tools and plugins
+	// are infrastructure components and are not subject to this limit.
+	if req.Kind == "agent" && s.quotaManager != nil {
+		if err := s.quotaManager.CheckAgentQuota(ctx); err != nil {
+			s.logger.WarnContext(ctx, "agent registration rejected: quota exceeded",
+				slog.String("tenant", tenant),
+				slog.String("name", req.Name),
+				slog.String("error", err.Error()),
+			)
+			return nil, err
+		}
+	}
+
 	info := ComponentInfo{
 		Kind:     req.Kind,
 		Name:     req.Name,
@@ -228,11 +313,31 @@ func (s *ComponentServiceServer) RegisterComponent(
 	for _, method := range req.Methods {
 		info.Metadata["method:"+method] = "true"
 	}
+	// Populate input/output message types. Prefer the explicitly declared fields on the
+	// registration request. When a FileDescriptorSet is provided but the explicit fields
+	// are absent, fall back to extracting types from the descriptor by convention
+	// (messages whose names end in "Request"/"Response").
+	inputMsgType := req.InputMessageType
+	outputMsgType := req.OutputMessageType
 	if len(req.FileDescriptorSet) > 0 {
-		info.Metadata["input_message_type"] = req.InputMessageType
-		info.Metadata["output_message_type"] = req.OutputMessageType
-		// Binary descriptor sets are not stored in string metadata; callers that
-		// need them must re-send on each registration.
+		if inputMsgType == "" || outputMsgType == "" {
+			var fds descriptorpb.FileDescriptorSet
+			if err := proto.Unmarshal(req.FileDescriptorSet, &fds); err == nil {
+				extracted, extractedOut := extractMessageTypesFromFDS(&fds)
+				if inputMsgType == "" {
+					inputMsgType = extracted
+				}
+				if outputMsgType == "" {
+					outputMsgType = extractedOut
+				}
+			}
+		}
+	}
+	if inputMsgType != "" {
+		info.Metadata["input_message_type"] = inputMsgType
+	}
+	if outputMsgType != "" {
+		info.Metadata["output_message_type"] = outputMsgType
 	}
 
 	instanceID, err := s.registry.Register(ctx, tenant, req.Kind, req.Name, info)
@@ -253,6 +358,19 @@ func (s *ComponentServiceServer) RegisterComponent(
 		slog.String("version", req.Version),
 		slog.String("instance_id", instanceID),
 	)
+
+	// Track registered agent count for quota enforcement.
+	if req.Kind == "agent" && s.quotaManager != nil {
+		if err := s.quotaManager.IncrementAgentCount(ctx); err != nil {
+			s.logger.WarnContext(ctx, "failed to increment agent quota counter",
+				slog.String("tenant", tenant),
+				slog.String("name", req.Name),
+				slog.String("error", err.Error()),
+			)
+			// Non-fatal: registration already succeeded; counter mismatch will
+			// self-correct via decrementCounter's floor-at-zero logic.
+		}
+	}
 
 	// Auto-create access record for self-hosted plugins so they appear in tenant's inventory.
 	if req.Kind == "plugin" && tenant != "_system" && s.pluginAccess != nil {
@@ -479,6 +597,24 @@ func (s *ComponentServiceServer) PollWork(
 		slog.String("work_type", item.WorkType),
 	)
 
+	// Register the work-item→mission mapping so that MemoryGet/MemorySet/
+	// MemorySearch can resolve the correct per-mission namespace later.
+	// This is best-effort: if it fails we still return the work item; the
+	// agent will receive a NotFound on any memory RPC rather than a hard failure.
+	if s.memoryResolver != nil && item.WorkID != "" {
+		missionID := item.Context["mission_id"]
+		if missionID != "" {
+			if err := s.memoryResolver.RegisterWorkContext(ctx, item.WorkID, missionID, tenant); err != nil {
+				s.logger.WarnContext(ctx, "poll work: failed to register work context for memory resolver; memory RPCs will return NotFound",
+					slog.String("tenant", tenant),
+					slog.String("work_id", item.WorkID),
+					slog.String("mission_id", missionID),
+					slog.String("error", err.Error()),
+				)
+			}
+		}
+	}
+
 	return &componentpb.PollWorkResponse{
 		WorkId:    item.WorkID,
 		WorkType:  item.WorkType,
@@ -603,9 +739,21 @@ func (s *ComponentServiceServer) Complete(
 		slog.String("slot", req.Slot),
 	)
 
-	// TODO (task 5.3): resolve mission ID from work item context so that
-	// per-mission slot overrides can be applied.
-	missionID := ""
+	// Resolve per-mission slot overrides. Missing context is not an error;
+	// the resolver returns empty strings and nil overrides so we fall back to
+	// the tenant-level defaults that were in place before this lookup was added.
+	missionID, slotOverrides, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant, req.Slot, s.logger)
+	if resolveErr != nil {
+		// Log and continue; the lookup is best-effort.
+		s.logger.WarnContext(ctx, "complete: mission context lookup failed; using tenant defaults",
+			slog.String("tenant", tenant),
+			slog.String("work_id", req.WorkId),
+			slog.String("slot", req.Slot),
+			slog.String("error", resolveErr.Error()),
+		)
+	}
+
+	maxTokens, temperature := applySlotOverrides(req.Slot, slotOverrides)
 
 	content, finishReason, modelUsed, promptTokens, completionTokens, err := s.llmCompleter.Complete(
 		ctx,
@@ -613,8 +761,8 @@ func (s *ComponentServiceServer) Complete(
 		missionID,
 		req.Slot,
 		string(messagesJSON),
-		0,
-		0,
+		maxTokens,
+		temperature,
 	)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "complete: LLM completion failed",
@@ -689,8 +837,20 @@ func (s *ComponentServiceServer) CompleteStream(
 		slog.String("slot", req.Slot),
 	)
 
-	// TODO (task 5.3): resolve mission ID from work item context.
-	missionID := ""
+	// Resolve per-mission slot overrides. Missing context is not an error;
+	// the resolver returns empty strings and nil overrides so we fall back to
+	// the tenant-level defaults that were in place before this lookup was added.
+	missionID, slotOverrides, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant, req.Slot, s.logger)
+	if resolveErr != nil {
+		s.logger.WarnContext(ctx, "complete stream: mission context lookup failed; using tenant defaults",
+			slog.String("tenant", tenant),
+			slog.String("work_id", req.WorkId),
+			slog.String("slot", req.Slot),
+			slog.String("error", resolveErr.Error()),
+		)
+	}
+
+	maxTokens, temperature := applySlotOverrides(req.Slot, slotOverrides)
 
 	err = s.llmCompleter.Stream(
 		ctx,
@@ -698,8 +858,8 @@ func (s *ComponentServiceServer) CompleteStream(
 		missionID,
 		req.Slot,
 		string(messagesJSON),
-		0,
-		0,
+		maxTokens,
+		temperature,
 		func(delta, finishReason string) error {
 			done := finishReason != ""
 			return stream.Send(&componentpb.CompleteStreamChunk{
@@ -1030,15 +1190,51 @@ func (s *ComponentServiceServer) SubmitFinding(
 	return &componentpb.SubmitFindingResponse{FindingId: findingID}, nil
 }
 
+// ---------------------------------------------------------------------------
+// Memory helpers
+// ---------------------------------------------------------------------------
+
+// resolveMissionMemory resolves the MissionMemory for a work item using the
+// MemoryResolver. It falls back to s.memory.Mission() when no MemoryResolver is
+// configured, so that the server works with a shared store during development.
+//
+// Returns a gRPC status error on failure:
+//   - codes.Unimplemented — neither resolver nor shared store is wired
+//   - codes.NotFound      — resolver found no mapping for workID
+//   - codes.Internal      — unexpected resolver or store error
+func (s *ComponentServiceServer) resolveMissionMemory(
+	ctx context.Context,
+	workID, tenant string,
+) (memory.MissionMemory, error) {
+	if s.memoryResolver != nil {
+		mm, err := s.memoryResolver.ResolveForWork(ctx, workID, tenant)
+		if err != nil {
+			var gibsonErr *types.GibsonError
+			if errors.As(err, &gibsonErr) && gibsonErr.Code == ErrCodeWorkContextNotFound {
+				return nil, status.Errorf(codes.NotFound,
+					"no mission context found for work item %q; ensure the agent was dispatched via PollWork", workID)
+			}
+			return nil, status.Errorf(codes.Internal, "failed to resolve mission memory for work %q: %v", workID, err)
+		}
+		return mm, nil
+	}
+
+	// Fall back to the shared mission memory store (useful when running without
+	// the full resolver stack, e.g., in integration tests).
+	if s.memory != nil {
+		return s.memory.Mission(), nil
+	}
+
+	return nil, status.Error(codes.Unimplemented, "mission memory not available: neither resolver nor shared store is wired")
+}
+
 // MemoryGet retrieves a value from the requested memory tier by key.
 //
 // Tier routing:
 //   - working   — in-process ephemeral map; returns not-found when key absent.
-//   - mission   — Redis-backed persistent store; returns not-found when absent.
+//   - mission   — Redis-backed persistent store scoped to the work item's mission;
+//     requires memoryResolver to be wired (falls back to s.memory.Mission() when not).
 //   - long_term — not suitable for point lookups; returns codes.InvalidArgument.
-//
-// TODO (task 5.5): wire per-agent memory manager lookup so that each remote
-// agent reads from its own mission-scoped memory namespace.
 func (s *ComponentServiceServer) MemoryGet(
 	ctx context.Context,
 	req *componentpb.MemoryRequest,
@@ -1048,8 +1244,7 @@ func (s *ComponentServiceServer) MemoryGet(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.memory == nil {
-		// TODO (task 5.5): return codes.Unimplemented until memory is wired.
+	if s.memory == nil && s.memoryResolver == nil {
 		return nil, status.Error(codes.Unimplemented, "memory store not yet wired on this server")
 	}
 
@@ -1059,6 +1254,9 @@ func (s *ComponentServiceServer) MemoryGet(
 
 	switch req.Tier {
 	case memTierWorking:
+		if s.memory == nil {
+			return nil, status.Error(codes.Unimplemented, "working memory not available (shared memory store not wired)")
+		}
 		val, ok := s.memory.Working().Get(req.Key)
 		if !ok {
 			return &componentpb.MemoryResponse{Found: false}, nil
@@ -1066,8 +1264,6 @@ func (s *ComponentServiceServer) MemoryGet(
 		// Serialize the retrieved value to JSON for the wire format.
 		// Working memory stores arbitrary any values; JSON is the lowest common
 		// denominator for cross-language clients.
-		//
-		// TODO (task 5.5): use a shared codec so that types round-trip correctly.
 		item := memory.NewMemoryItem(req.Key, val, nil)
 		data, err := item.MarshalValue()
 		if err != nil {
@@ -1076,7 +1272,11 @@ func (s *ComponentServiceServer) MemoryGet(
 		return &componentpb.MemoryResponse{Found: true, Value: data}, nil
 
 	case memTierMission:
-		item, err := s.memory.Mission().Retrieve(ctx, req.Key)
+		missionMem, err := s.resolveMissionMemory(ctx, req.WorkId, tenant)
+		if err != nil {
+			return nil, err
+		}
+		item, err := missionMem.Retrieve(ctx, req.Key)
 		if err != nil {
 			// Translate not-found into a Found=false response instead of an error
 			// to keep the client contract simple. Mission memory signals not-found
@@ -1087,6 +1287,7 @@ func (s *ComponentServiceServer) MemoryGet(
 			}
 			s.logger.ErrorContext(ctx, "memory get: mission retrieve failed",
 				slog.String("tenant", tenant),
+				slog.String("work_id", req.WorkId),
 				slog.String("key", req.Key),
 				slog.String("error", err.Error()),
 			)
@@ -1113,11 +1314,10 @@ func (s *ComponentServiceServer) MemoryGet(
 //
 // Tier routing:
 //   - working   — in-process ephemeral map; value is deserialized into any.
-//   - mission   — Redis-backed persistent store; value is stored as-is.
+//   - mission   — Redis-backed persistent store scoped to the work item's mission;
+//     requires memoryResolver to be wired (falls back to s.memory.Mission() when not).
 //   - long_term — use the Store call (ID + content); key becomes the ID and
 //     value becomes the content.
-//
-// TODO (task 5.5): wire per-agent memory manager lookup.
 func (s *ComponentServiceServer) MemorySet(
 	ctx context.Context,
 	req *componentpb.MemoryRequest,
@@ -1127,8 +1327,7 @@ func (s *ComponentServiceServer) MemorySet(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.memory == nil {
-		// TODO (task 5.5): return codes.Unimplemented until memory is wired.
+	if s.memory == nil && s.memoryResolver == nil {
 		return nil, status.Error(codes.Unimplemented, "memory store not yet wired on this server")
 	}
 
@@ -1146,6 +1345,9 @@ func (s *ComponentServiceServer) MemorySet(
 		// Store the raw value string in working memory. The agent is responsible
 		// for deserializing on retrieval; this keeps working memory agnostic to
 		// schema.
+		if s.memory == nil {
+			return nil, status.Error(codes.Unimplemented, "working memory not available (shared memory store not wired)")
+		}
 		if err := s.memory.Working().Set(req.Key, valueStr); err != nil {
 			s.logger.ErrorContext(ctx, "memory set: working memory set failed",
 				slog.String("tenant", tenant),
@@ -1156,10 +1358,15 @@ func (s *ComponentServiceServer) MemorySet(
 		}
 
 	case memTierMission:
+		missionMem, err := s.resolveMissionMemory(ctx, req.WorkId, tenant)
+		if err != nil {
+			return nil, err
+		}
 		// Mission memory accepts any value; store the string directly.
-		if err := s.memory.Mission().Store(ctx, req.Key, valueStr, nil); err != nil {
+		if err := missionMem.Store(ctx, req.Key, valueStr, nil); err != nil {
 			s.logger.ErrorContext(ctx, "memory set: mission memory store failed",
 				slog.String("tenant", tenant),
+				slog.String("work_id", req.WorkId),
 				slog.String("key", req.Key),
 				slog.String("error", err.Error()),
 			)
@@ -1169,6 +1376,9 @@ func (s *ComponentServiceServer) MemorySet(
 	case memTierLongTerm:
 		// Long-term memory requires content as a plain string for embedding.
 		// value is treated as that content; key becomes the vector entry ID.
+		if s.memory == nil {
+			return nil, status.Error(codes.Unimplemented, "long-term memory not available (shared memory store not wired)")
+		}
 		if err := s.memory.LongTerm().Store(ctx, req.Key, valueStr, nil); err != nil {
 			s.logger.ErrorContext(ctx, "memory set: long-term memory store failed",
 				slog.String("tenant", tenant),
@@ -1195,11 +1405,9 @@ func (s *ComponentServiceServer) MemorySet(
 //
 // Tier routing:
 //   - working   — not suitable for search; returns codes.InvalidArgument.
-//   - mission   — full-text search over stored key-value pairs.
+//   - mission   — full-text search (RediSearch FTS) over the agent's mission-scoped
+//     namespace, resolved from the work_id via MemoryResolver.
 //   - long_term — vector-similarity search using the configured embedder.
-//
-// TODO (task 5.5): wire per-agent memory manager lookup so each remote agent
-// searches within its own mission namespace.
 func (s *ComponentServiceServer) MemorySearch(
 	ctx context.Context,
 	req *componentpb.MemorySearchRequest,
@@ -1209,8 +1417,7 @@ func (s *ComponentServiceServer) MemorySearch(
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	if s.memory == nil {
-		// TODO (task 5.5): return codes.Unimplemented until memory is wired.
+	if s.memory == nil && s.memoryResolver == nil {
 		return nil, status.Error(codes.Unimplemented, "memory store not yet wired on this server")
 	}
 
@@ -1232,19 +1439,44 @@ func (s *ComponentServiceServer) MemorySearch(
 			"working memory does not support search; use mission or longterm tier")
 
 	case memTierMission:
-		// TODO (task 5.5): call mission memory Search once the interface exposes it.
-		// For now, return Unimplemented so callers know to use longterm search.
-		//
-		// Placeholder: mission memory FTS is exposed via MissionMemory.Search in
-		// the mission_redis.go implementation; wire it here once the interface is
-		// stable.
-		_ = topK
-		s.logger.WarnContext(ctx, "memory search: mission FTS not yet wired",
+		missionMem, err := s.resolveMissionMemory(ctx, req.WorkId, tenant)
+		if err != nil {
+			return nil, err
+		}
+		rawResults, err := missionMem.Search(ctx, req.Query, topK)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "memory search: mission FTS failed",
+				slog.String("tenant", tenant),
+				slog.String("work_id", req.WorkId),
+				slog.String("query", req.Query),
+				slog.String("error", err.Error()),
+			)
+			return nil, status.Errorf(codes.Internal, "mission memory search failed: %v", err)
+		}
+		results := make([]*componentpb.MemoryEntry, 0, len(rawResults))
+		for _, r := range rawResults {
+			data, err := r.Item.MarshalValue()
+			if err != nil {
+				s.logger.WarnContext(ctx, "memory search: failed to serialize mission result; skipping",
+					slog.String("tenant", tenant),
+					slog.String("key", r.Item.Key),
+					slog.String("error", err.Error()),
+				)
+				continue
+			}
+			results = append(results, &componentpb.MemoryEntry{
+				Key:   r.Item.Key,
+				Value: data,
+				Score: float32(r.Score),
+			})
+		}
+		s.logger.DebugContext(ctx, "memory search: mission FTS completed",
 			slog.String("tenant", tenant),
+			slog.String("work_id", req.WorkId),
 			slog.String("query", req.Query),
+			slog.Int("result_count", len(results)),
 		)
-		return nil, status.Error(codes.Unimplemented,
-			"mission memory search not yet wired; use longterm tier for semantic search")
+		return &componentpb.MemorySearchResponse{Results: results}, nil
 
 	case memTierLongTerm:
 		rawResults, err := s.memory.LongTerm().Search(ctx, req.Query, topK, nil)
@@ -1405,6 +1637,12 @@ func (s *ComponentServiceServer) EnablePlugin(
 		slog.String("plugin_name", req.PluginName),
 	)
 
+	if s.auditLog != nil {
+		if err := s.auditLog.Log(ctx, "plugin.enable", "plugin", req.PluginName, nil); err != nil {
+			s.logger.WarnContext(ctx, "audit log failed", "error", err)
+		}
+	}
+
 	return &componentpb.EnablePluginResponse{
 		Success: true,
 		Message: fmt.Sprintf("plugin %q enabled for tenant %q", req.PluginName, tenant),
@@ -1443,6 +1681,12 @@ func (s *ComponentServiceServer) DisablePlugin(
 		slog.String("tenant", tenant),
 		slog.String("plugin_name", req.PluginName),
 	)
+
+	if s.auditLog != nil {
+		if err := s.auditLog.Log(ctx, "plugin.disable", "plugin", req.PluginName, nil); err != nil {
+			s.logger.WarnContext(ctx, "audit log failed", "error", err)
+		}
+	}
 
 	return &componentpb.DisablePluginResponse{
 		Success: true,
@@ -1490,6 +1734,12 @@ func (s *ComponentServiceServer) UpdatePluginConfig(
 		slog.String("tenant", tenant),
 		slog.String("plugin_name", req.PluginName),
 	)
+
+	if s.auditLog != nil {
+		if err := s.auditLog.Log(ctx, "plugin.config.update", "plugin", req.PluginName, nil); err != nil {
+			s.logger.WarnContext(ctx, "audit log failed", "error", err)
+		}
+	}
 
 	return &componentpb.UpdatePluginConfigResponse{
 		Success: true,
@@ -1707,4 +1957,34 @@ func (s *ComponentServiceServer) ListTenantPlugins(
 	)
 
 	return &componentpb.ListTenantPluginsResponse{Plugins: protos}, nil
+}
+
+// extractMessageTypesFromFDS scans a FileDescriptorSet for proto messages that follow the
+// Gibson tool convention: one *Request message for input and one *Response message for output.
+// It returns the fully-qualified type names (package + "." + message name).
+//
+// This is called during RegisterComponent when a FileDescriptorSet is present but the
+// explicit InputMessageType/OutputMessageType fields are empty, providing automatic type
+// resolution without requiring tools to repeat information already encoded in their protos.
+func extractMessageTypesFromFDS(fds *descriptorpb.FileDescriptorSet) (inputType, outputType string) {
+	if fds == nil {
+		return
+	}
+	for _, fd := range fds.GetFile() {
+		pkg := fd.GetPackage()
+		for _, msg := range fd.GetMessageType() {
+			name := msg.GetName()
+			qualified := name
+			if pkg != "" {
+				qualified = pkg + "." + name
+			}
+			if strings.HasSuffix(name, "Request") {
+				inputType = qualified
+			}
+			if strings.HasSuffix(name, "Response") {
+				outputType = qualified
+			}
+		}
+	}
+	return
 }

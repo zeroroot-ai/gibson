@@ -38,6 +38,7 @@ Validate JWT tokens from OpenID Connect identity providers.
 - Cross-organization federation
 
 **Supported Providers:**
+- Keycloak (bundled with Gibson enterprise deployments)
 - Okta
 - Azure AD / Microsoft Entra ID
 - Google Workspace
@@ -146,6 +147,111 @@ Static bearer tokens for local development.
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Keycloak as the Identity Provider
+
+In enterprise deployments, Gibson uses Keycloak as the bundled OIDC identity provider. Keycloak handles user authentication, identity federation, and token issuance. Gibson validates the tokens Keycloak produces.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                     Enterprise Auth Flow                              │
+│                                                                      │
+│  ┌──────────┐     ┌───────────────────┐     ┌────────────────────┐  │
+│  │  User /  │     │    Keycloak       │     │   Gibson Daemon    │  │
+│  │  Browser │     │  :8080/realms/    │     │   (gRPC :50002)    │  │
+│  │          │     │     gibson        │     │                    │  │
+│  └────┬─────┘     └────────┬──────────┘     └─────────┬──────────┘  │
+│       │                    │                          │              │
+│       │  1. Login redirect │                          │              │
+│       │───────────────────▶│                          │              │
+│       │                    │                          │              │
+│       │  2. Authenticate   │                          │              │
+│       │  (LDAP/SAML/OIDC   │                          │              │
+│       │   federation)      │                          │              │
+│       │◀──────────────────▶│                          │              │
+│       │                    │                          │              │
+│       │  3. OIDC tokens    │                          │              │
+│       │  (id_token +       │                          │              │
+│       │   access_token)    │                          │              │
+│       │◀───────────────────│                          │              │
+│       │                    │                          │              │
+│       │  4. gRPC call with Bearer token               │              │
+│       │──────────────────────────────────────────────▶│              │
+│       │                    │                          │              │
+│       │                    │  5. Validate JWT via     │              │
+│       │                    │     JWKS endpoint        │              │
+│       │                    │◀─────────────────────────│              │
+│       │                    │                          │              │
+│       │  6. Response       │                          │              │
+│       │◀─────────────────────────────────────────────│              │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**Keycloak OIDC Endpoints (realm: `gibson`):**
+
+| Endpoint | URL |
+|----------|-----|
+| Issuer | `http://gibson-keycloak:8080/realms/gibson` |
+| Authorization | `http://gibson-keycloak:8080/realms/gibson/protocol/openid-connect/auth` |
+| Token | `http://gibson-keycloak:8080/realms/gibson/protocol/openid-connect/token` |
+| JWKS | `http://gibson-keycloak:8080/realms/gibson/protocol/openid-connect/certs` |
+| UserInfo | `http://gibson-keycloak:8080/realms/gibson/protocol/openid-connect/userinfo` |
+| Admin Console | `http://gibson-keycloak:8080/admin` |
+
+### Keycloak Admin Console
+
+Access the Keycloak admin console at `http://{host}:8080/admin` (Kind cluster: `http://localhost:30080/admin`).
+
+Common administrative tasks:
+
+- **Realm Management**: The `gibson` realm is pre-configured by the Helm chart. All Gibson-related clients, roles, and mappers live in this realm.
+- **User Management**: Create and manage local users, or federate with external identity providers (LDAP, SAML, OIDC).
+- **Client Configuration**: The `gibson` client is pre-registered. Modify redirect URIs, scopes, and protocol mappers here.
+- **Identity Federation**: Add LDAP user federation or external SAML/OIDC identity providers under the **Identity Providers** section.
+
+### Keycloak Realm Management
+
+The `gibson` realm is bootstrapped during Helm deployment. It includes:
+
+- A `gibson` OIDC client configured for authorization code flow
+- Default protocol mappers for `groups`, `email`, and `realm_access.roles`
+- Realm roles that map to Gibson's RBAC model
+
+To export the current realm configuration for GitOps:
+
+```bash
+# Export realm configuration (excludes secrets)
+kubectl exec -n gibson deploy/gibson-keycloak -- \
+  /opt/keycloak/bin/kc.sh export --realm gibson --dir /tmp/export
+
+# Copy the export locally
+kubectl cp gibson/gibson-keycloak-0:/tmp/export/gibson-realm.json ./keycloak-realm-export.json
+```
+
+### Keycloak Protocol Mappers
+
+Protocol mappers control which claims appear in the OIDC tokens issued by Keycloak. Gibson relies on these claims for identity resolution, tenant mapping, and RBAC.
+
+**Pre-configured mappers (included in the Helm chart):**
+
+| Mapper Name | Type | Claim | Purpose |
+|-------------|------|-------|---------|
+| `groups` | Group Membership | `groups` | Maps Keycloak groups to a `groups` claim for RBAC |
+| `email` | User Property | `email` | User email for identity display |
+| `realm-roles` | User Realm Role | `realm_access.roles` | Realm-level roles |
+
+**Adding a custom mapper (e.g., `department` for multi-tenancy):**
+
+1. In the admin console: **Clients** > `gibson` > **Client scopes** > `gibson-dedicated` > **Add mapper** > **By configuration** > **User Attribute**
+2. Set:
+   - Name: `department`
+   - User Attribute: `department`
+   - Token Claim Name: `department`
+   - Claim JSON Type: `String`
+   - Add to ID token: ON
+   - Add to access token: ON
+
+See [ENTERPRISE-MULTI-TENANT.md](./ENTERPRISE-MULTI-TENANT.md) for full multi-tenancy setup.
+
 ## Configuration
 
 ### Basic Configuration
@@ -246,6 +352,49 @@ auth:
 ```
 
 ## Deployment Guides
+
+### Kubernetes with Keycloak (Recommended)
+
+Keycloak is the bundled identity provider for Gibson enterprise deployments. It is deployed alongside Gibson via the Helm chart.
+
+1. **Deploy Gibson with Keycloak enabled:**
+   ```bash
+   helm install gibson ./deploy/helm/gibson \
+     -f deploy/helm/gibson/values-enterprise.yaml \
+     --set keycloak.auth.adminPassword="$KEYCLOAK_ADMIN_PASSWORD"
+   ```
+
+2. **Access the Keycloak admin console:**
+   - URL: `http://localhost:30080/admin` (Kind cluster) or `https://keycloak.your-domain.com/admin` (production)
+   - Log in with the admin credentials set during deployment.
+
+3. **Verify the `gibson` realm is created:**
+   The Helm chart bootstraps a `gibson` realm with a pre-configured `gibson` OIDC client. Verify by navigating to **Realm Settings** in the admin console.
+
+4. **Configure identity federation (optional):**
+   To federate with an external IdP (LDAP, Okta, Azure AD), go to **Identity Providers** in the admin console and add the appropriate provider type. See [ENTERPRISE-MULTI-TENANT.md](./ENTERPRISE-MULTI-TENANT.md) for detailed federation instructions.
+
+5. **Configure Gibson to validate Keycloak tokens:**
+   ```yaml
+   auth:
+     enabled: true
+     oidc:
+       - issuer: "http://gibson-keycloak:8080/realms/gibson"
+         audience: "gibson"
+         jwks_ttl: 1h
+         claims_mapping:
+           groups: groups
+           email: email
+         role_bindings:
+           security-admins: ["admin"]
+           security-team: ["mission:execute", "findings:*"]
+           developers: ["findings:read"]
+   ```
+
+6. **Create users or federate:**
+   - **Local users**: In the admin console, go to **Users** > **Add user**, then set credentials under the **Credentials** tab.
+   - **LDAP federation**: Go to **User Federation** > **Add provider** > **ldap**, configure your LDAP connection details, and sync users.
+   - **External OIDC**: Go to **Identity Providers** > **Add provider** > **OpenID Connect v1.0**, configure the external IdP's client ID, secret, and discovery URL.
 
 ### Kubernetes with Okta
 

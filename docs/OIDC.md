@@ -37,8 +37,20 @@ This requires **application-level authorization** that understands Gibson's doma
 │   │          │  │ Pipeline │  │ Workload │  │                      │   │
 │   └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────┬───────────┘   │
 │        │             │             │                    │              │
-│        │ OIDC JWT    │ OIDC JWT    │ SA Token          │ OIDC JWT     │
-│        └─────────────┴─────────────┴────────────────────┘              │
+│        │ Login       │ OIDC JWT    │ SA Token          │ OIDC JWT     │
+│        ▼             │             │                    │              │
+│   ┌──────────────┐   │             │                    │              │
+│   │  Keycloak    │   │             │                    │              │
+│   │  :8080/      │   │             │                    │              │
+│   │  realms/     │   │             │                    │              │
+│   │  gibson      │   │             │                    │              │
+│   │              │   │             │                    │              │
+│   │ (LDAP/SAML/  │   │             │                    │              │
+│   │  OIDC        │   │             │                    │              │
+│   │  federation) │   │             │                    │              │
+│   └──────┬───────┘   │             │                    │              │
+│          │ OIDC JWT   │             │                    │              │
+│          └────────────┴─────────────┴────────────────────┘              │
 │                                    │                                    │
 │                                    ▼                                    │
 │   ┌────────────────────────────────────────────────────────────────┐   │
@@ -48,11 +60,13 @@ This requires **application-level authorization** that understands Gibson's doma
 │   │  │                                                           │  │   │
 │   │  │  1. Extract Bearer token from metadata                    │  │   │
 │   │  │  2. Route to appropriate validator (OIDC/K8s/Local)       │  │   │
-│   │  │  3. Validate signature, expiry, issuer, audience          │  │   │
-│   │  │  4. Extract claims → map to Identity                      │  │   │
-│   │  │  5. Resolve roles from bindings                           │  │   │
-│   │  │  6. Inject Identity into request context                  │  │   │
-│   │  │  7. Handlers call RequirePermission() as needed           │  │   │
+│   │  │  3. Validate signature via Keycloak JWKS endpoint         │  │   │
+│   │  │     (.../realms/gibson/protocol/openid-connect/certs)     │  │   │
+│   │  │  4. Validate expiry, issuer, audience                     │  │   │
+│   │  │  5. Extract claims → map to Identity                      │  │   │
+│   │  │  6. Resolve roles from bindings                           │  │   │
+│   │  │  7. Inject Identity into request context                  │  │   │
+│   │  │  8. Handlers call RequirePermission() as needed           │  │   │
 │   │  └──────────────────────────────────────────────────────────┘  │   │
 │   │                              │                                  │   │
 │   │                              ▼                                  │   │
@@ -85,7 +99,7 @@ This requires **application-level authorization** that understands Gibson's doma
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key insight**: External clients use OIDC. Internal agent↔daemon communication uses NetworkPolicy (and optionally mTLS via service mesh) with zero auth overhead.
+**Key insight**: External clients authenticate via Keycloak (or other OIDC providers like GitHub Actions, GitLab CI). Keycloak handles user login, identity federation (LDAP, SAML, external OIDC), and token issuance. Gibson validates the resulting JWT tokens via the Keycloak JWKS endpoint. Internal agent-to-daemon communication uses NetworkPolicy (and optionally mTLS via service mesh) with zero auth overhead.
 
 ## Component Architecture
 
@@ -219,13 +233,35 @@ auth:
   enabled: false
 ```
 
-### Production Configuration
+### Production Configuration (Keycloak)
 
 ```yaml
 auth:
   enabled: true
   clock_skew: 30s        # Token expiry tolerance
   trust_localhost: false # Never in production
+
+  oidc:
+    # Keycloak — bundled enterprise IdP
+    - issuer: "http://gibson-keycloak:8080/realms/gibson"
+      audience: "gibson"
+      jwks_ttl: 1h
+      claims_mapping:
+        groups: groups
+        email: email
+      role_bindings:
+        "security-admins": ["admin"]
+        "security-team": ["mission:execute", "findings:*"]
+        "developers": ["findings:read"]
+```
+
+### Production Configuration (External IdP, e.g., Okta)
+
+```yaml
+auth:
+  enabled: true
+  clock_skew: 30s
+  trust_localhost: false
 
   oidc:
     - issuer: https://company.okta.com
@@ -257,13 +293,15 @@ auth:
 
   # OIDC providers (tried in order)
   oidc:
-    # Enterprise IdP
-    - issuer: https://company.okta.com
-      audience: gibson-prod
+    # Keycloak — bundled enterprise IdP
+    - issuer: "http://gibson-keycloak:8080/realms/gibson"
+      audience: "gibson"
       jwks_endpoint: ""           # Auto-discovered from issuer
       jwks_ttl: 1h                # How long to cache JWKS
 
       # Map token claims to identity fields
+      # Keycloak emits groups via Group Membership mapper,
+      # roles via realm_access.roles, email as a standard claim
       claims_mapping:
         groups: groups            # Token claim → Identity.Groups
         email: email              # Token claim → Identity.Email
@@ -277,6 +315,16 @@ auth:
 
         # Wildcard patterns
         "security-*": ["findings:read"]
+
+    # External IdP (e.g., Okta — if not using Keycloak federation)
+    # - issuer: https://company.okta.com
+    #   audience: gibson-prod
+    #   jwks_ttl: 1h
+    #   claims_mapping:
+    #     groups: groups
+    #     email: email
+    #   role_bindings:
+    #     "security-admins": ["admin"]
 
     # GitHub Actions
     - issuer: https://token.actions.githubusercontent.com
@@ -331,6 +379,65 @@ Roles follow the pattern `resource:action` or `resource:action:scope`:
 | `findings:*` | All findings operations |
 | `*:read` | Read any resource |
 | `mission:execute:*.internal.com` | Execute missions scoped to internal |
+
+### Keycloak Token Claim Structure
+
+Keycloak tokens contain a specific claim structure that differs from other OIDC providers. Understanding this structure is important for configuring `claims_mapping` and `role_bindings` correctly.
+
+**Standard Keycloak ID token claims:**
+
+```json
+{
+  "iss": "http://gibson-keycloak:8080/realms/gibson",
+  "sub": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "aud": "gibson",
+  "exp": 1711900000,
+  "iat": 1711896400,
+  "email": "user@company.com",
+  "email_verified": true,
+  "preferred_username": "jdoe",
+  "given_name": "Jane",
+  "family_name": "Doe",
+  "groups": [
+    "security-admins",
+    "appsec-team"
+  ],
+  "realm_access": {
+    "roles": [
+      "default-roles-gibson",
+      "gibson-admin"
+    ]
+  },
+  "resource_access": {
+    "gibson": {
+      "roles": [
+        "mission-operator"
+      ]
+    }
+  },
+  "department": "appsec"
+}
+```
+
+**Key claim locations:**
+
+| Claim | Location | Source in Keycloak | Protocol Mapper Type |
+|-------|----------|-------------------|---------------------|
+| `groups` | Top-level array | Keycloak group membership | Group Membership mapper |
+| `email` | Top-level string | User profile | Built-in |
+| `realm_access.roles` | Nested object | Realm roles assigned to user | Built-in (realm roles) |
+| `resource_access.gibson.roles` | Nested object | Client roles assigned to user | Built-in (client roles) |
+| `department` | Top-level string | User attribute | User Attribute mapper |
+
+**JWKS Endpoint:**
+
+Keycloak serves JWKS keys at a realm-specific URL:
+
+```
+http://gibson-keycloak:8080/realms/gibson/protocol/openid-connect/certs
+```
+
+This is auto-discovered by Gibson from the issuer URL's `.well-known/openid-configuration` endpoint. You do not need to set `jwks_endpoint` explicitly unless your network topology requires a different URL for JWKS retrieval than the issuer URL.
 
 ### Environment Variables
 
@@ -523,3 +630,75 @@ grpcurl -H "authorization: Bearer test-token" \
 3. Enable Gibson auth
 4. Remove external auth (Gibson handles it now)
 5. Or: keep external + set `trust_localhost: true` to trust forwarded identity
+
+### From Dex to Keycloak
+
+If you are migrating from a previous Gibson deployment that used Dex as the OIDC provider:
+
+1. **Deploy Keycloak alongside Dex** (both running temporarily):
+   ```bash
+   helm upgrade gibson deploy/helm/gibson/ \
+     -f deploy/helm/gibson/values-enterprise.yaml \
+     --set keycloak.enabled=true
+   ```
+
+2. **Recreate your identity provider configuration in Keycloak:**
+   - Dex LDAP connectors become Keycloak **User Federation** > **LDAP** providers
+   - Dex OIDC connectors (Okta, Azure AD, Google) become Keycloak **Identity Providers** > **OpenID Connect v1.0**
+   - Dex SAML connectors become Keycloak **Identity Providers** > **SAML v2.0**
+
+3. **Recreate claim mappings as Keycloak protocol mappers:**
+   - Dex `groupSearch` / `groupsAttr` becomes a **Group Membership** protocol mapper on the `gibson` client scope
+   - Dex `userSearch` attribute mappings become **User Attribute** protocol mappers
+   - Custom Dex claim transformers become **Script Mapper** (JavaScript) protocol mappers
+
+4. **Update the Gibson OIDC issuer configuration:**
+   ```yaml
+   # Before (Dex)
+   auth:
+     oidc:
+       - issuer: "http://gibson-dex:5556/dex"
+         audience: "gibson"
+
+   # After (Keycloak)
+   auth:
+     oidc:
+       - issuer: "http://gibson-keycloak:8080/realms/gibson"
+         audience: "gibson"
+   ```
+
+5. **Test authentication with Keycloak:**
+   ```bash
+   # Get a token from Keycloak
+   TOKEN=$(curl -s -X POST \
+     "http://localhost:30080/realms/gibson/protocol/openid-connect/token" \
+     -d "client_id=gibson" \
+     -d "username=testuser" \
+     -d "password=testpass" \
+     -d "grant_type=password" | jq -r .access_token)
+
+   # Verify Gibson accepts it
+   grpcurl -H "authorization: Bearer $TOKEN" \
+     localhost:30002 gibson.DaemonService/Ping
+   ```
+
+6. **Remove Dex from the deployment:**
+   ```bash
+   helm upgrade gibson deploy/helm/gibson/ \
+     -f deploy/helm/gibson/values-enterprise.yaml \
+     --set keycloak.enabled=true
+   ```
+
+**Key differences from Dex:**
+
+| Aspect | Dex | Keycloak |
+|--------|-----|----------|
+| Configuration method | YAML connector blocks in Helm values | Admin console UI or realm import JSON |
+| IdP federation | Static YAML connectors | Dynamic identity providers with auto-discovery |
+| Claim customization | Limited (groups, email) | Full protocol mapper framework (User Attribute, Group Membership, Script, Hardcoded, etc.) |
+| User management | Delegated entirely to upstream IdP | Built-in user management + federation |
+| Admin UI | None | Full admin console at `:8080/admin` |
+| Issuer URL pattern | `http://host:5556/dex` | `http://host:8080/realms/{realm}` |
+| JWKS URL pattern | `http://host:5556/dex/keys` | `http://host:8080/realms/{realm}/protocol/openid-connect/certs` |
+| Session management | Stateless | Server-side sessions with configurable lifetime |
+| Multi-realm | N/A | Supports multiple realms for environment isolation |

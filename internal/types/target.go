@@ -7,26 +7,24 @@ import (
 	"time"
 )
 
-// Deprecated: TargetType enum is deprecated in favor of string-based target types
-// with schema-based validation. Use string type directly for Target.Type field.
-// This enum is kept for backward compatibility during migration.
+// TargetType is the type of target system (e.g. "llm_chat", "llm_api", "rag").
+//
+// Note: Although originally planned for removal in favor of plain string types with
+// schema-based validation, TargetType remains in active use across attack/, payload/,
+// and component/ packages (including payload analytics maps keyed by this type). A full
+// migration requires updating all call sites and analytics structs simultaneously.
+// New code should prefer string literals or NewTargetWithConnection; TargetType constants
+// are kept to avoid breaking existing callers.
 type TargetType string
 
 const (
-	// Deprecated: Use string "llm_chat" directly
-	TargetTypeLLMChat TargetType = "llm_chat"
-	// Deprecated: Use string "llm_api" directly
-	TargetTypeLLMAPI TargetType = "llm_api"
-	// Deprecated: Use string "rag" directly
-	TargetTypeRAG TargetType = "rag"
-	// Deprecated: Use string "agent" directly
-	TargetTypeAgent TargetType = "agent"
-	// Deprecated: Use string "embedding" directly
-	TargetTypeEmbedding TargetType = "embedding"
-	// Deprecated: Use string "multimodal" directly
+	TargetTypeLLMChat    TargetType = "llm_chat"
+	TargetTypeLLMAPI     TargetType = "llm_api"
+	TargetTypeRAG        TargetType = "rag"
+	TargetTypeAgent      TargetType = "agent"
+	TargetTypeEmbedding  TargetType = "embedding"
 	TargetTypeMultimodal TargetType = "multimodal"
-	// Deprecated: Use string "custom" directly
-	TargetTypeCustom TargetType = "custom"
+	TargetTypeCustom     TargetType = "custom"
 )
 
 // String returns the string representation of TargetType
@@ -203,19 +201,17 @@ type Target struct {
 	CreatedAt    time.Time              `json:"created_at"`
 	UpdatedAt    time.Time              `json:"updated_at"`
 
-	// Deprecated: Use Connection["url"] instead. Kept for backward compatibility during migration.
+	// URL is the target endpoint. New code should use Connection["url"] instead;
+	// this field is read by mission_manager and attack/runner for backward compatibility.
 	URL string `json:"url,omitempty"`
-	// Deprecated: Use Connection["headers"] instead. Kept for backward compatibility during migration.
+	// Headers provides default HTTP headers. New code should use Connection["headers"] instead;
+	// this field is populated by NewTarget for backward compatibility with existing callers.
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// NewTarget creates a new Target with default values
-// name: human-readable name for the target
-// url: endpoint URL for the target system
-// targetType: type of LLM system (llm_chat, llm_api, rag, etc.)
-//
-// Deprecated: Use NewTargetWithConnection instead for schema-based targets.
-// This constructor is kept for backward compatibility.
+// NewTarget creates a new Target with default values and sets both URL (for backward
+// compatibility) and Connection["url"] (the preferred field for new code).
+// New code should prefer NewTargetWithConnection for schema-based targets.
 func NewTarget(name, url string, targetType TargetType) *Target {
 	now := time.Now()
 	return &Target{
@@ -269,7 +265,7 @@ func (t *Target) GetURL() string {
 			}
 		}
 	}
-	// Fall back to the deprecated URL field
+	// Fall back to the URL field for backward compatibility with legacy targets.
 	return t.URL
 }
 
@@ -290,8 +286,8 @@ func (t *Target) Validate() error {
 		return fmt.Errorf("target type cannot be empty")
 	}
 
-	// Validate URL/Connection: prefer Connection, fall back to deprecated URL field
-	// For new targets, Connection should be set. For old targets, URL field may be set.
+	// Validate URL/Connection: prefer Connection, fall back to the URL field for
+	// backward compatibility. New targets should set Connection; legacy targets may have URL.
 	hasConnection := t.Connection != nil && len(t.Connection) > 0
 	hasURL := strings.TrimSpace(t.URL) != ""
 	if !hasConnection && !hasURL {

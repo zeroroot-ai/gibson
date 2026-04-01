@@ -146,9 +146,11 @@ func TestSerializer_JSONRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, data)
 
-	// Verify it's valid JSON
+	// Verify the payload (after stripping the 1-byte format header) is valid JSON.
+	// The serializer always prepends a header byte even for plain formats;
+	// data[0] is headerRaw (0x00) here, data[1:] is the actual JSON.
 	var jsonCheck map[string]any
-	err = json.Unmarshal(data, &jsonCheck)
+	err = json.Unmarshal(data[1:], &jsonCheck)
 	require.NoError(t, err)
 
 	// Deserialize

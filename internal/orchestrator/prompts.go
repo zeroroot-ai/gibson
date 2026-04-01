@@ -1069,18 +1069,15 @@ func truncate(s string, maxLen int) string {
 }
 
 // extractTargetType extracts the target type from mission observation state.
-// It checks mission metadata for target_type field, with fallback to other sources.
+// MissionInfo carries ID, Name, Objective, Status, StartedAt, and TimeElapsed
+// but does not include a structured target_type field — that metadata lives in
+// the mission YAML and is not propagated into ObservationState. Returns empty
+// string; callers fall back to getTargetTypeGuidance("") which is a no-op.
 func extractTargetType(state *ObservationState) string {
 	if state == nil {
 		return ""
 	}
 
-	// TODO: In future, extract from state.MissionInfo when metadata is exposed
-	// For now, we would need access to the full mission object with metadata
-	// This is a placeholder for when mission metadata is included in ObservationState
-
-	// Check if target context has type information
-	// This would be populated if the mission includes target metadata
 	return ""
 }
 

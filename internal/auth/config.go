@@ -67,6 +67,11 @@ type AuthConfig struct {
 	// NOT FOR PRODUCTION - tokens are stored in plaintext config.
 	// Optional - only enabled when configured.
 	Local *LocalAuthConfig `mapstructure:"local" yaml:"local,omitempty"`
+
+	// AutoProvisionTenants controls whether new tenants are automatically created
+	// when an OIDC token contains a tenant claim value that doesn't match any existing tenant.
+	// Default: true for "enterprise" mode, false for "saas" mode.
+	AutoProvisionTenants *bool `mapstructure:"auto_provision_tenants" yaml:"auto_provision_tenants,omitempty"`
 }
 
 // OIDCIssuerConfig configures an OpenID Connect identity provider.
@@ -167,6 +172,17 @@ func (c *AuthConfig) IsAuthEnabled() bool {
 		return true
 	}
 	return c.Enabled
+}
+
+// ShouldAutoProvision returns whether auto-provisioning is enabled for the current mode.
+// When AutoProvisionTenants is set explicitly it takes precedence over the mode default.
+// The mode defaults are: enterprise=true, saas=false.
+func (c *AuthConfig) ShouldAutoProvision() bool {
+	if c.AutoProvisionTenants != nil {
+		return *c.AutoProvisionTenants
+	}
+	// Default: true for enterprise, false for saas
+	return c.Mode == "enterprise"
 }
 
 // ApplyDefaults fills in zero-valued fields with sensible defaults.

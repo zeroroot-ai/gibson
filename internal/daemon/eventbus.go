@@ -398,3 +398,40 @@ func NewAgentUnregisteredEvent(agentID, agentName string) api.EventData {
 		},
 	}
 }
+
+// NewAttackStartedEvent creates an attack started event.
+func NewAttackStartedEvent(attackID string) api.EventData {
+	return api.EventData{
+		EventType: "attack.started",
+		Timestamp: time.Now(),
+		Source:    "daemon",
+		AttackEvent: &api.AttackEventData{
+			EventType: "attack.started",
+			Timestamp: time.Now(),
+			AttackID:  attackID,
+			Message:   "Attack started",
+		},
+	}
+}
+
+// NewAttackCompletedEvent creates an attack completed event.
+func NewAttackCompletedEvent(attackID string, success bool) api.EventData {
+	status := "failed"
+	if success {
+		status = "success"
+	}
+	return api.EventData{
+		EventType: "attack.completed",
+		Timestamp: time.Now(),
+		Source:    "daemon",
+		AttackEvent: &api.AttackEventData{
+			EventType: "attack.completed",
+			Timestamp: time.Now(),
+			AttackID:  attackID,
+			Message:   "Attack completed",
+			Result: &api.OperationResult{
+				Status: status,
+			},
+		},
+	}
+}

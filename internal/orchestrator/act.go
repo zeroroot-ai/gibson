@@ -1381,13 +1381,60 @@ func (a *Actor) reflect(ctx context.Context, decision *Decision, missionID types
 		"has_prompt", decision.ReflectionPrompt != "",
 	)
 
-	// Build observation state for context
-	// For now, we pass nil and let the engine handle it
-	// In a full implementation, we would build an ObservationState here
-	// This is a simplified approach that matches the spec's suggestion:
-	// "Build ObservationState for context (or use a simpler approach - just pass nil and let the engine handle it)"
-	var state *ObservationState
-	// TODO: Build actual observation state if needed for better reflection context
+	// Build a minimal observation state for the reflection engine.
+	// The engine requires a non-nil state to emit events and construct prompts.
+	// We populate what is cheaply available: mission identity, graph summary
+	// from recent stats, and the component inventory if already loaded.
+	// Failures in these queries are non-fatal: we degrade gracefully to empty fields.
+	state := &ObservationState{
+		ObservedAt: time.Now(),
+		MissionInfo: MissionInfo{
+			ID: missionID.String(),
+		},
+		ComponentInventory: a.inventory,
+	}
+
+	if a.missionQueries != nil {
+		if mission, err := a.missionQueries.GetMission(ctx, missionID); err == nil && mission != nil {
+			state.MissionInfo.Name = mission.Name
+			state.MissionInfo.Objective = mission.Objective
+			state.MissionInfo.Status = mission.Status.String()
+			if mission.StartedAt != nil {
+				state.MissionInfo.StartedAt = *mission.StartedAt
+				state.MissionInfo.TimeElapsed = time.Since(*mission.StartedAt).Truncate(time.Second).String()
+			}
+		}
+
+		if stats, err := a.missionQueries.GetMissionStats(ctx, missionID); err == nil && stats != nil {
+			state.GraphSummary = GraphSummary{
+				TotalNodes:      stats.TotalNodes,
+				CompletedNodes:  stats.CompletedNodes,
+				FailedNodes:     stats.FailedNodes,
+				PendingNodes:    stats.PendingNodes,
+				TotalDecisions:  stats.TotalDecisions,
+				TotalExecutions: stats.TotalExecutions,
+			}
+		}
+
+		// Include the most recent decisions for context, bounded to last 10 items.
+		const maxRecentDecisions = 10
+		if decisions, err := a.missionQueries.GetMissionDecisions(ctx, missionID); err == nil {
+			start := 0
+			if len(decisions) > maxRecentDecisions {
+				start = len(decisions) - maxRecentDecisions
+			}
+			for _, d := range decisions[start:] {
+				state.RecentDecisions = append(state.RecentDecisions, DecisionSummary{
+					Iteration:  d.Iteration,
+					Action:     string(d.Action),
+					Target:     d.TargetNodeID,
+					Reasoning:  d.Reasoning,
+					Confidence: d.Confidence,
+					Timestamp:  d.Timestamp.Format(time.RFC3339),
+				})
+			}
+		}
+	}
 
 	// Parse reflection scope
 	scope := ReflectionScope(decision.ReflectionScope)

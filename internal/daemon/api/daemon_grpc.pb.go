@@ -57,6 +57,28 @@ const (
 	DaemonService_GetTenantLangfuseCredentials_FullMethodName    = "/gibson.daemon.v1.DaemonService/GetTenantLangfuseCredentials"
 	DaemonService_SetTenantLangfuseCredentials_FullMethodName    = "/gibson.daemon.v1.DaemonService/SetTenantLangfuseCredentials"
 	DaemonService_DeleteTenantLangfuseCredentials_FullMethodName = "/gibson.daemon.v1.DaemonService/DeleteTenantLangfuseCredentials"
+	DaemonService_CreateTenant_FullMethodName                    = "/gibson.daemon.v1.DaemonService/CreateTenant"
+	DaemonService_GetTenant_FullMethodName                       = "/gibson.daemon.v1.DaemonService/GetTenant"
+	DaemonService_ListTenants_FullMethodName                     = "/gibson.daemon.v1.DaemonService/ListTenants"
+	DaemonService_UpdateTenant_FullMethodName                    = "/gibson.daemon.v1.DaemonService/UpdateTenant"
+	DaemonService_DeleteTenant_FullMethodName                    = "/gibson.daemon.v1.DaemonService/DeleteTenant"
+	DaemonService_ProvisionTenant_FullMethodName                 = "/gibson.daemon.v1.DaemonService/ProvisionTenant"
+	DaemonService_GetProvisioningStatus_FullMethodName           = "/gibson.daemon.v1.DaemonService/GetProvisioningStatus"
+	DaemonService_DeprovisionTenant_FullMethodName               = "/gibson.daemon.v1.DaemonService/DeprovisionTenant"
+	DaemonService_UpdateTenantBilling_FullMethodName             = "/gibson.daemon.v1.DaemonService/UpdateTenantBilling"
+	DaemonService_GetTenantBilling_FullMethodName                = "/gibson.daemon.v1.DaemonService/GetTenantBilling"
+	DaemonService_GetTenantByStripeCustomerId_FullMethodName     = "/gibson.daemon.v1.DaemonService/GetTenantByStripeCustomerId"
+	DaemonService_GetOnboardingState_FullMethodName              = "/gibson.daemon.v1.DaemonService/GetOnboardingState"
+	DaemonService_UpdateOnboardingState_FullMethodName           = "/gibson.daemon.v1.DaemonService/UpdateOnboardingState"
+	DaemonService_CreateInvitation_FullMethodName                = "/gibson.daemon.v1.DaemonService/CreateInvitation"
+	DaemonService_AcceptInvitation_FullMethodName                = "/gibson.daemon.v1.DaemonService/AcceptInvitation"
+	DaemonService_ListInvitations_FullMethodName                 = "/gibson.daemon.v1.DaemonService/ListInvitations"
+	DaemonService_RevokeInvitation_FullMethodName                = "/gibson.daemon.v1.DaemonService/RevokeInvitation"
+	DaemonService_CreateAPIKey_FullMethodName                    = "/gibson.daemon.v1.DaemonService/CreateAPIKey"
+	DaemonService_ListAPIKeys_FullMethodName                     = "/gibson.daemon.v1.DaemonService/ListAPIKeys"
+	DaemonService_RevokeAPIKey_FullMethodName                    = "/gibson.daemon.v1.DaemonService/RevokeAPIKey"
+	DaemonService_ListTenantMembers_FullMethodName               = "/gibson.daemon.v1.DaemonService/ListTenantMembers"
+	DaemonService_ImpersonateTenant_FullMethodName               = "/gibson.daemon.v1.DaemonService/ImpersonateTenant"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -173,6 +195,35 @@ type DaemonServiceClient interface {
 	SetTenantLangfuseCredentials(ctx context.Context, in *SetTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*SetTenantLangfuseCredentialsResponse, error)
 	// DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
 	DeleteTenantLangfuseCredentials(ctx context.Context, in *DeleteTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*DeleteTenantLangfuseCredentialsResponse, error)
+	// Tenant Management
+	CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error)
+	GetTenant(ctx context.Context, in *GetTenantRequest, opts ...grpc.CallOption) (*GetTenantResponse, error)
+	ListTenants(ctx context.Context, in *ListTenantsRequest, opts ...grpc.CallOption) (*ListTenantsResponse, error)
+	UpdateTenant(ctx context.Context, in *UpdateTenantRequest, opts ...grpc.CallOption) (*UpdateTenantResponse, error)
+	DeleteTenant(ctx context.Context, in *DeleteTenantRequest, opts ...grpc.CallOption) (*DeleteTenantResponse, error)
+	// Tenant Provisioning
+	ProvisionTenant(ctx context.Context, in *ProvisionTenantRequest, opts ...grpc.CallOption) (*ProvisionTenantResponse, error)
+	GetProvisioningStatus(ctx context.Context, in *GetProvisioningStatusRequest, opts ...grpc.CallOption) (*GetProvisioningStatusResponse, error)
+	DeprovisionTenant(ctx context.Context, in *DeprovisionTenantRequest, opts ...grpc.CallOption) (*DeprovisionTenantResponse, error)
+	// Billing
+	UpdateTenantBilling(ctx context.Context, in *UpdateTenantBillingRequest, opts ...grpc.CallOption) (*UpdateTenantBillingResponse, error)
+	GetTenantBilling(ctx context.Context, in *GetTenantBillingRequest, opts ...grpc.CallOption) (*GetTenantBillingResponse, error)
+	GetTenantByStripeCustomerId(ctx context.Context, in *GetTenantByStripeCustomerIdRequest, opts ...grpc.CallOption) (*GetTenantByStripeCustomerIdResponse, error)
+	// Onboarding
+	GetOnboardingState(ctx context.Context, in *GetOnboardingStateRequest, opts ...grpc.CallOption) (*GetOnboardingStateResponse, error)
+	UpdateOnboardingState(ctx context.Context, in *UpdateOnboardingStateRequest, opts ...grpc.CallOption) (*UpdateOnboardingStateResponse, error)
+	// Invitations
+	CreateInvitation(ctx context.Context, in *CreateInvitationRequest, opts ...grpc.CallOption) (*CreateInvitationResponse, error)
+	AcceptInvitation(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*AcceptInvitationResponse, error)
+	ListInvitations(ctx context.Context, in *ListInvitationsRequest, opts ...grpc.CallOption) (*ListInvitationsResponse, error)
+	RevokeInvitation(ctx context.Context, in *RevokeInvitationRequest, opts ...grpc.CallOption) (*RevokeInvitationResponse, error)
+	// API Keys
+	CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error)
+	ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error)
+	RevokeAPIKey(ctx context.Context, in *RevokeAPIKeyRequest, opts ...grpc.CallOption) (*RevokeAPIKeyResponse, error)
+	// Members
+	ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error)
+	ImpersonateTenant(ctx context.Context, in *ImpersonateTenantRequest, opts ...grpc.CallOption) (*ImpersonateTenantResponse, error)
 }
 
 type daemonServiceClient struct {
@@ -608,6 +659,226 @@ func (c *daemonServiceClient) DeleteTenantLangfuseCredentials(ctx context.Contex
 	return out, nil
 }
 
+func (c *daemonServiceClient) CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateTenantResponse)
+	err := c.cc.Invoke(ctx, DaemonService_CreateTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) GetTenant(ctx context.Context, in *GetTenantRequest, opts ...grpc.CallOption) (*GetTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTenantResponse)
+	err := c.cc.Invoke(ctx, DaemonService_GetTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ListTenants(ctx context.Context, in *ListTenantsRequest, opts ...grpc.CallOption) (*ListTenantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTenantsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListTenants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) UpdateTenant(ctx context.Context, in *UpdateTenantRequest, opts ...grpc.CallOption) (*UpdateTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateTenantResponse)
+	err := c.cc.Invoke(ctx, DaemonService_UpdateTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) DeleteTenant(ctx context.Context, in *DeleteTenantRequest, opts ...grpc.CallOption) (*DeleteTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteTenantResponse)
+	err := c.cc.Invoke(ctx, DaemonService_DeleteTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ProvisionTenant(ctx context.Context, in *ProvisionTenantRequest, opts ...grpc.CallOption) (*ProvisionTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProvisionTenantResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ProvisionTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) GetProvisioningStatus(ctx context.Context, in *GetProvisioningStatusRequest, opts ...grpc.CallOption) (*GetProvisioningStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProvisioningStatusResponse)
+	err := c.cc.Invoke(ctx, DaemonService_GetProvisioningStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) DeprovisionTenant(ctx context.Context, in *DeprovisionTenantRequest, opts ...grpc.CallOption) (*DeprovisionTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeprovisionTenantResponse)
+	err := c.cc.Invoke(ctx, DaemonService_DeprovisionTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) UpdateTenantBilling(ctx context.Context, in *UpdateTenantBillingRequest, opts ...grpc.CallOption) (*UpdateTenantBillingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateTenantBillingResponse)
+	err := c.cc.Invoke(ctx, DaemonService_UpdateTenantBilling_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) GetTenantBilling(ctx context.Context, in *GetTenantBillingRequest, opts ...grpc.CallOption) (*GetTenantBillingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTenantBillingResponse)
+	err := c.cc.Invoke(ctx, DaemonService_GetTenantBilling_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) GetTenantByStripeCustomerId(ctx context.Context, in *GetTenantByStripeCustomerIdRequest, opts ...grpc.CallOption) (*GetTenantByStripeCustomerIdResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTenantByStripeCustomerIdResponse)
+	err := c.cc.Invoke(ctx, DaemonService_GetTenantByStripeCustomerId_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) GetOnboardingState(ctx context.Context, in *GetOnboardingStateRequest, opts ...grpc.CallOption) (*GetOnboardingStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOnboardingStateResponse)
+	err := c.cc.Invoke(ctx, DaemonService_GetOnboardingState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) UpdateOnboardingState(ctx context.Context, in *UpdateOnboardingStateRequest, opts ...grpc.CallOption) (*UpdateOnboardingStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateOnboardingStateResponse)
+	err := c.cc.Invoke(ctx, DaemonService_UpdateOnboardingState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) CreateInvitation(ctx context.Context, in *CreateInvitationRequest, opts ...grpc.CallOption) (*CreateInvitationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateInvitationResponse)
+	err := c.cc.Invoke(ctx, DaemonService_CreateInvitation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) AcceptInvitation(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*AcceptInvitationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AcceptInvitationResponse)
+	err := c.cc.Invoke(ctx, DaemonService_AcceptInvitation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ListInvitations(ctx context.Context, in *ListInvitationsRequest, opts ...grpc.CallOption) (*ListInvitationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListInvitationsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListInvitations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) RevokeInvitation(ctx context.Context, in *RevokeInvitationRequest, opts ...grpc.CallOption) (*RevokeInvitationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeInvitationResponse)
+	err := c.cc.Invoke(ctx, DaemonService_RevokeInvitation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateAPIKeyResponse)
+	err := c.cc.Invoke(ctx, DaemonService_CreateAPIKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAPIKeysResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListAPIKeys_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) RevokeAPIKey(ctx context.Context, in *RevokeAPIKeyRequest, opts ...grpc.CallOption) (*RevokeAPIKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeAPIKeyResponse)
+	err := c.cc.Invoke(ctx, DaemonService_RevokeAPIKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTenantMembersResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListTenantMembers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ImpersonateTenant(ctx context.Context, in *ImpersonateTenantRequest, opts ...grpc.CallOption) (*ImpersonateTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImpersonateTenantResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ImpersonateTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServiceServer is the server API for DaemonService service.
 // All implementations must embed UnimplementedDaemonServiceServer
 // for forward compatibility.
@@ -722,6 +993,35 @@ type DaemonServiceServer interface {
 	SetTenantLangfuseCredentials(context.Context, *SetTenantLangfuseCredentialsRequest) (*SetTenantLangfuseCredentialsResponse, error)
 	// DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
 	DeleteTenantLangfuseCredentials(context.Context, *DeleteTenantLangfuseCredentialsRequest) (*DeleteTenantLangfuseCredentialsResponse, error)
+	// Tenant Management
+	CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error)
+	GetTenant(context.Context, *GetTenantRequest) (*GetTenantResponse, error)
+	ListTenants(context.Context, *ListTenantsRequest) (*ListTenantsResponse, error)
+	UpdateTenant(context.Context, *UpdateTenantRequest) (*UpdateTenantResponse, error)
+	DeleteTenant(context.Context, *DeleteTenantRequest) (*DeleteTenantResponse, error)
+	// Tenant Provisioning
+	ProvisionTenant(context.Context, *ProvisionTenantRequest) (*ProvisionTenantResponse, error)
+	GetProvisioningStatus(context.Context, *GetProvisioningStatusRequest) (*GetProvisioningStatusResponse, error)
+	DeprovisionTenant(context.Context, *DeprovisionTenantRequest) (*DeprovisionTenantResponse, error)
+	// Billing
+	UpdateTenantBilling(context.Context, *UpdateTenantBillingRequest) (*UpdateTenantBillingResponse, error)
+	GetTenantBilling(context.Context, *GetTenantBillingRequest) (*GetTenantBillingResponse, error)
+	GetTenantByStripeCustomerId(context.Context, *GetTenantByStripeCustomerIdRequest) (*GetTenantByStripeCustomerIdResponse, error)
+	// Onboarding
+	GetOnboardingState(context.Context, *GetOnboardingStateRequest) (*GetOnboardingStateResponse, error)
+	UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error)
+	// Invitations
+	CreateInvitation(context.Context, *CreateInvitationRequest) (*CreateInvitationResponse, error)
+	AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error)
+	ListInvitations(context.Context, *ListInvitationsRequest) (*ListInvitationsResponse, error)
+	RevokeInvitation(context.Context, *RevokeInvitationRequest) (*RevokeInvitationResponse, error)
+	// API Keys
+	CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error)
+	ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error)
+	RevokeAPIKey(context.Context, *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error)
+	// Members
+	ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error)
+	ImpersonateTenant(context.Context, *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
 
@@ -845,6 +1145,72 @@ func (UnimplementedDaemonServiceServer) SetTenantLangfuseCredentials(context.Con
 }
 func (UnimplementedDaemonServiceServer) DeleteTenantLangfuseCredentials(context.Context, *DeleteTenantLangfuseCredentialsRequest) (*DeleteTenantLangfuseCredentialsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteTenantLangfuseCredentials not implemented")
+}
+func (UnimplementedDaemonServiceServer) CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateTenant not implemented")
+}
+func (UnimplementedDaemonServiceServer) GetTenant(context.Context, *GetTenantRequest) (*GetTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTenant not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListTenants(context.Context, *ListTenantsRequest) (*ListTenantsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTenants not implemented")
+}
+func (UnimplementedDaemonServiceServer) UpdateTenant(context.Context, *UpdateTenantRequest) (*UpdateTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateTenant not implemented")
+}
+func (UnimplementedDaemonServiceServer) DeleteTenant(context.Context, *DeleteTenantRequest) (*DeleteTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteTenant not implemented")
+}
+func (UnimplementedDaemonServiceServer) ProvisionTenant(context.Context, *ProvisionTenantRequest) (*ProvisionTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProvisionTenant not implemented")
+}
+func (UnimplementedDaemonServiceServer) GetProvisioningStatus(context.Context, *GetProvisioningStatusRequest) (*GetProvisioningStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProvisioningStatus not implemented")
+}
+func (UnimplementedDaemonServiceServer) DeprovisionTenant(context.Context, *DeprovisionTenantRequest) (*DeprovisionTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeprovisionTenant not implemented")
+}
+func (UnimplementedDaemonServiceServer) UpdateTenantBilling(context.Context, *UpdateTenantBillingRequest) (*UpdateTenantBillingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateTenantBilling not implemented")
+}
+func (UnimplementedDaemonServiceServer) GetTenantBilling(context.Context, *GetTenantBillingRequest) (*GetTenantBillingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTenantBilling not implemented")
+}
+func (UnimplementedDaemonServiceServer) GetTenantByStripeCustomerId(context.Context, *GetTenantByStripeCustomerIdRequest) (*GetTenantByStripeCustomerIdResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTenantByStripeCustomerId not implemented")
+}
+func (UnimplementedDaemonServiceServer) GetOnboardingState(context.Context, *GetOnboardingStateRequest) (*GetOnboardingStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetOnboardingState not implemented")
+}
+func (UnimplementedDaemonServiceServer) UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateOnboardingState not implemented")
+}
+func (UnimplementedDaemonServiceServer) CreateInvitation(context.Context, *CreateInvitationRequest) (*CreateInvitationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateInvitation not implemented")
+}
+func (UnimplementedDaemonServiceServer) AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AcceptInvitation not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListInvitations(context.Context, *ListInvitationsRequest) (*ListInvitationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListInvitations not implemented")
+}
+func (UnimplementedDaemonServiceServer) RevokeInvitation(context.Context, *RevokeInvitationRequest) (*RevokeInvitationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeInvitation not implemented")
+}
+func (UnimplementedDaemonServiceServer) CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateAPIKey not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAPIKeys not implemented")
+}
+func (UnimplementedDaemonServiceServer) RevokeAPIKey(context.Context, *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeAPIKey not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTenantMembers not implemented")
+}
+func (UnimplementedDaemonServiceServer) ImpersonateTenant(context.Context, *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ImpersonateTenant not implemented")
 }
 func (UnimplementedDaemonServiceServer) mustEmbedUnimplementedDaemonServiceServer() {}
 func (UnimplementedDaemonServiceServer) testEmbeddedByValue()                       {}
@@ -1516,6 +1882,402 @@ func _DaemonService_DeleteTenantLangfuseCredentials_Handler(srv interface{}, ctx
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_CreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).CreateTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_CreateTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).CreateTenant(ctx, req.(*CreateTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_GetTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).GetTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_GetTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).GetTenant(ctx, req.(*GetTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ListTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTenantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListTenants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListTenants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListTenants(ctx, req.(*ListTenantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_UpdateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).UpdateTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_UpdateTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).UpdateTenant(ctx, req.(*UpdateTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_DeleteTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).DeleteTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_DeleteTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).DeleteTenant(ctx, req.(*DeleteTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ProvisionTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProvisionTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ProvisionTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ProvisionTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ProvisionTenant(ctx, req.(*ProvisionTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_GetProvisioningStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProvisioningStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).GetProvisioningStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_GetProvisioningStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).GetProvisioningStatus(ctx, req.(*GetProvisioningStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_DeprovisionTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeprovisionTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).DeprovisionTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_DeprovisionTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).DeprovisionTenant(ctx, req.(*DeprovisionTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_UpdateTenantBilling_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTenantBillingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).UpdateTenantBilling(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_UpdateTenantBilling_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).UpdateTenantBilling(ctx, req.(*UpdateTenantBillingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_GetTenantBilling_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantBillingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).GetTenantBilling(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_GetTenantBilling_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).GetTenantBilling(ctx, req.(*GetTenantBillingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_GetTenantByStripeCustomerId_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantByStripeCustomerIdRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).GetTenantByStripeCustomerId(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_GetTenantByStripeCustomerId_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).GetTenantByStripeCustomerId(ctx, req.(*GetTenantByStripeCustomerIdRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_GetOnboardingState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOnboardingStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).GetOnboardingState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_GetOnboardingState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).GetOnboardingState(ctx, req.(*GetOnboardingStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_UpdateOnboardingState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateOnboardingStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).UpdateOnboardingState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_UpdateOnboardingState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).UpdateOnboardingState(ctx, req.(*UpdateOnboardingStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_CreateInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateInvitationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).CreateInvitation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_CreateInvitation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).CreateInvitation(ctx, req.(*CreateInvitationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_AcceptInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcceptInvitationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).AcceptInvitation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_AcceptInvitation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).AcceptInvitation(ctx, req.(*AcceptInvitationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ListInvitations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListInvitationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListInvitations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListInvitations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListInvitations(ctx, req.(*ListInvitationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_RevokeInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeInvitationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).RevokeInvitation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_RevokeInvitation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).RevokeInvitation(ctx, req.(*RevokeInvitationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_CreateAPIKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateAPIKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).CreateAPIKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_CreateAPIKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).CreateAPIKey(ctx, req.(*CreateAPIKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ListAPIKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAPIKeysRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListAPIKeys(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListAPIKeys_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListAPIKeys(ctx, req.(*ListAPIKeysRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_RevokeAPIKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeAPIKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).RevokeAPIKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_RevokeAPIKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).RevokeAPIKey(ctx, req.(*RevokeAPIKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ListTenantMembers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTenantMembersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListTenantMembers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListTenantMembers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListTenantMembers(ctx, req.(*ListTenantMembersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ImpersonateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImpersonateTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ImpersonateTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ImpersonateTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ImpersonateTenant(ctx, req.(*ImpersonateTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonService_ServiceDesc is the grpc.ServiceDesc for DaemonService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1654,6 +2416,94 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteTenantLangfuseCredentials",
 			Handler:    _DaemonService_DeleteTenantLangfuseCredentials_Handler,
+		},
+		{
+			MethodName: "CreateTenant",
+			Handler:    _DaemonService_CreateTenant_Handler,
+		},
+		{
+			MethodName: "GetTenant",
+			Handler:    _DaemonService_GetTenant_Handler,
+		},
+		{
+			MethodName: "ListTenants",
+			Handler:    _DaemonService_ListTenants_Handler,
+		},
+		{
+			MethodName: "UpdateTenant",
+			Handler:    _DaemonService_UpdateTenant_Handler,
+		},
+		{
+			MethodName: "DeleteTenant",
+			Handler:    _DaemonService_DeleteTenant_Handler,
+		},
+		{
+			MethodName: "ProvisionTenant",
+			Handler:    _DaemonService_ProvisionTenant_Handler,
+		},
+		{
+			MethodName: "GetProvisioningStatus",
+			Handler:    _DaemonService_GetProvisioningStatus_Handler,
+		},
+		{
+			MethodName: "DeprovisionTenant",
+			Handler:    _DaemonService_DeprovisionTenant_Handler,
+		},
+		{
+			MethodName: "UpdateTenantBilling",
+			Handler:    _DaemonService_UpdateTenantBilling_Handler,
+		},
+		{
+			MethodName: "GetTenantBilling",
+			Handler:    _DaemonService_GetTenantBilling_Handler,
+		},
+		{
+			MethodName: "GetTenantByStripeCustomerId",
+			Handler:    _DaemonService_GetTenantByStripeCustomerId_Handler,
+		},
+		{
+			MethodName: "GetOnboardingState",
+			Handler:    _DaemonService_GetOnboardingState_Handler,
+		},
+		{
+			MethodName: "UpdateOnboardingState",
+			Handler:    _DaemonService_UpdateOnboardingState_Handler,
+		},
+		{
+			MethodName: "CreateInvitation",
+			Handler:    _DaemonService_CreateInvitation_Handler,
+		},
+		{
+			MethodName: "AcceptInvitation",
+			Handler:    _DaemonService_AcceptInvitation_Handler,
+		},
+		{
+			MethodName: "ListInvitations",
+			Handler:    _DaemonService_ListInvitations_Handler,
+		},
+		{
+			MethodName: "RevokeInvitation",
+			Handler:    _DaemonService_RevokeInvitation_Handler,
+		},
+		{
+			MethodName: "CreateAPIKey",
+			Handler:    _DaemonService_CreateAPIKey_Handler,
+		},
+		{
+			MethodName: "ListAPIKeys",
+			Handler:    _DaemonService_ListAPIKeys_Handler,
+		},
+		{
+			MethodName: "RevokeAPIKey",
+			Handler:    _DaemonService_RevokeAPIKey_Handler,
+		},
+		{
+			MethodName: "ListTenantMembers",
+			Handler:    _DaemonService_ListTenantMembers_Handler,
+		},
+		{
+			MethodName: "ImpersonateTenant",
+			Handler:    _DaemonService_ImpersonateTenant_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

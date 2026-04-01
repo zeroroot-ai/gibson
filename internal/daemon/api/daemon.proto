@@ -165,6 +165,42 @@ service DaemonService {
 
   // DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
   rpc DeleteTenantLangfuseCredentials(DeleteTenantLangfuseCredentialsRequest) returns (DeleteTenantLangfuseCredentialsResponse);
+
+  // Tenant Management
+  rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse);
+  rpc GetTenant(GetTenantRequest) returns (GetTenantResponse);
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+  rpc UpdateTenant(UpdateTenantRequest) returns (UpdateTenantResponse);
+  rpc DeleteTenant(DeleteTenantRequest) returns (DeleteTenantResponse);
+
+  // Tenant Provisioning
+  rpc ProvisionTenant(ProvisionTenantRequest) returns (ProvisionTenantResponse);
+  rpc GetProvisioningStatus(GetProvisioningStatusRequest) returns (GetProvisioningStatusResponse);
+  rpc DeprovisionTenant(DeprovisionTenantRequest) returns (DeprovisionTenantResponse);
+
+  // Billing
+  rpc UpdateTenantBilling(UpdateTenantBillingRequest) returns (UpdateTenantBillingResponse);
+  rpc GetTenantBilling(GetTenantBillingRequest) returns (GetTenantBillingResponse);
+  rpc GetTenantByStripeCustomerId(GetTenantByStripeCustomerIdRequest) returns (GetTenantByStripeCustomerIdResponse);
+
+  // Onboarding
+  rpc GetOnboardingState(GetOnboardingStateRequest) returns (GetOnboardingStateResponse);
+  rpc UpdateOnboardingState(UpdateOnboardingStateRequest) returns (UpdateOnboardingStateResponse);
+
+  // Invitations
+  rpc CreateInvitation(CreateInvitationRequest) returns (CreateInvitationResponse);
+  rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse);
+  rpc ListInvitations(ListInvitationsRequest) returns (ListInvitationsResponse);
+  rpc RevokeInvitation(RevokeInvitationRequest) returns (RevokeInvitationResponse);
+
+  // API Keys
+  rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse);
+  rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
+  rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (RevokeAPIKeyResponse);
+
+  // Members
+  rpc ListTenantMembers(ListTenantMembersRequest) returns (ListTenantMembersResponse);
+  rpc ImpersonateTenant(ImpersonateTenantRequest) returns (ImpersonateTenantResponse);
 }
 
 // ConnectRequest initiates a client connection to the daemon.
@@ -2017,3 +2053,558 @@ message DeleteTenantLangfuseCredentialsRequest {
 
 // DeleteTenantLangfuseCredentialsResponse confirms the credentials were deleted.
 message DeleteTenantLangfuseCredentialsResponse {}
+
+// ---------------------------------------------------------------------------
+// Tenant Management RPCs — request/response messages
+// ---------------------------------------------------------------------------
+
+// TenantInfo is the canonical tenant representation returned by all tenant RPCs.
+message TenantInfo {
+  // tenant_id is the unique tenant identifier
+  string tenant_id = 1;
+
+  // display_name is the human-readable tenant name
+  string display_name = 2;
+
+  // status is the tenant lifecycle status ("active", "suspended", "deleted",
+  // "provisioning", "provisioning_failed")
+  string status = 3;
+
+  // tier is the billing tier ("free", "team", "business", "enterprise")
+  string tier = 4;
+
+  // owner_email is the email of the tenant owner
+  string owner_email = 5;
+
+  // stripe_customer_id is the Stripe customer ID (empty for free tier)
+  string stripe_customer_id = 6;
+
+  // billing_alert is true when the tenant has an unresolved payment failure
+  bool billing_alert = 7;
+
+  // config contains arbitrary tenant configuration key/value pairs
+  map<string, string> config = 8;
+
+  // created_at is when the tenant was created (RFC 3339 string)
+  string created_at = 9;
+
+  // updated_at is when the tenant was last updated (RFC 3339 string)
+  string updated_at = 10;
+
+  // member_count is the current number of tenant members
+  int32 member_count = 11;
+
+  // keycloak_realm_name is the Keycloak realm associated with this tenant
+  string keycloak_realm_name = 12;
+}
+
+// CreateTenantRequest creates a new tenant record.
+message CreateTenantRequest {
+  // tenant_id is the desired tenant identifier (alphanumeric and hyphens)
+  string tenant_id = 1;
+
+  // display_name is the human-readable tenant name
+  string display_name = 2;
+
+  // tier is the billing tier ("free", "team", "business", "enterprise")
+  string tier = 3;
+
+  // owner_email is the email of the tenant owner
+  string owner_email = 4;
+
+  // config contains optional initial tenant configuration key/value pairs
+  map<string, string> config = 5;
+}
+
+// CreateTenantResponse returns the newly created tenant.
+message CreateTenantResponse {
+  // tenant is the created tenant record
+  TenantInfo tenant = 1;
+}
+
+// GetTenantRequest queries a single tenant by ID.
+message GetTenantRequest {
+  // tenant_id is the identifier of the tenant to retrieve
+  string tenant_id = 1;
+}
+
+// GetTenantResponse returns the requested tenant.
+message GetTenantResponse {
+  // tenant is the retrieved tenant record
+  TenantInfo tenant = 1;
+}
+
+// ListTenantsRequest queries the list of tenants visible to the caller.
+message ListTenantsRequest {
+  // page is the zero-based page index for pagination (default: 0)
+  int32 page = 1;
+
+  // limit is the maximum number of tenants to return per page (0 = all)
+  int32 limit = 2;
+}
+
+// ListTenantsResponse returns all tenants visible to the caller.
+message ListTenantsResponse {
+  // tenants is the list of tenant records
+  repeated TenantInfo tenants = 1;
+}
+
+// UpdateTenantRequest applies updates to an existing tenant.
+message UpdateTenantRequest {
+  // tenant_id is the identifier of the tenant to update
+  string tenant_id = 1;
+
+  // display_name replaces the existing display name when non-empty
+  string display_name = 2;
+
+  // status replaces the existing status when non-empty
+  string status = 3;
+
+  // tier replaces the existing billing tier when non-empty
+  string tier = 4;
+
+  // config entries are merged into the existing config map
+  map<string, string> config = 5;
+}
+
+// UpdateTenantResponse returns the updated tenant.
+message UpdateTenantResponse {
+  // tenant is the updated tenant record
+  TenantInfo tenant = 1;
+}
+
+// DeleteTenantRequest soft-deletes a tenant.
+message DeleteTenantRequest {
+  // tenant_id is the identifier of the tenant to delete
+  string tenant_id = 1;
+}
+
+// DeleteTenantResponse confirms the tenant was soft-deleted.
+message DeleteTenantResponse {}
+
+// ---------------------------------------------------------------------------
+// Tenant Provisioning RPCs — request/response messages
+// ---------------------------------------------------------------------------
+
+// ProvisionTenantRequest triggers full tenant provisioning (namespace, RBAC,
+// initial API key, etc.).
+message ProvisionTenantRequest {
+  // tenant_id is the identifier of the tenant to provision
+  string tenant_id = 1;
+
+  // display_name is the human-readable tenant name
+  string display_name = 2;
+
+  // tier is the billing tier ("free", "team", "business", "enterprise")
+  string tier = 3;
+
+  // owner_email is the email of the tenant owner
+  string owner_email = 4;
+
+  // stripe_customer_id is the Stripe customer ID (empty for free tier)
+  string stripe_customer_id = 5;
+
+  // stripe_sub_id is the Stripe subscription ID (empty for free tier)
+  string stripe_sub_id = 6;
+}
+
+// ProvisionTenantResponse returns the provisioned tenant and its initial API key.
+message ProvisionTenantResponse {
+  // tenant is the fully provisioned tenant record
+  TenantInfo tenant = 1;
+
+  // api_key is the initial API key for the tenant (shown once — not stored in plaintext)
+  string api_key = 2;
+}
+
+// GetProvisioningStatusRequest queries the provisioning progress for a tenant.
+message GetProvisioningStatusRequest {
+  // tenant_id is the identifier of the tenant to query
+  string tenant_id = 1;
+}
+
+// ProvisionStep describes a single step in the provisioning pipeline.
+message ProvisionStep {
+  // name is the human-readable step name
+  string name = 1;
+
+  // status is the step status ("pending", "running", "completed", "failed")
+  string status = 2;
+
+  // error contains the error message if the step failed
+  string error = 3;
+
+  // timestamp is when the step last transitioned (RFC 3339 string)
+  string timestamp = 4;
+}
+
+// GetProvisioningStatusResponse returns provisioning progress.
+message GetProvisioningStatusResponse {
+  // tenant_id is the identifier of the tenant being provisioned
+  string tenant_id = 1;
+
+  // status is the overall provisioning status ("provisioning", "active", "provisioning_failed")
+  string status = 2;
+
+  // steps lists each provisioning step and its current state
+  repeated ProvisionStep steps = 3;
+}
+
+// DeprovisionTenantRequest tears down all tenant resources.
+message DeprovisionTenantRequest {
+  // tenant_id is the identifier of the tenant to deprovision
+  string tenant_id = 1;
+}
+
+// DeprovisionTenantResponse confirms deprovisioning was accepted.
+message DeprovisionTenantResponse {}
+
+// ---------------------------------------------------------------------------
+// Billing RPCs — request/response messages
+// ---------------------------------------------------------------------------
+
+// UpdateTenantBillingRequest updates billing fields on a tenant record.
+message UpdateTenantBillingRequest {
+  // tenant_id is the identifier of the tenant to update
+  string tenant_id = 1;
+
+  // tier is the new billing tier ("free", "team", "business", "enterprise")
+  string tier = 2;
+
+  // stripe_customer_id is the Stripe customer ID
+  string stripe_customer_id = 3;
+
+  // stripe_sub_id is the Stripe subscription ID
+  string stripe_sub_id = 4;
+
+  // billing_alert sets or clears the payment failure flag
+  bool billing_alert = 5;
+}
+
+// UpdateTenantBillingResponse returns the updated tenant.
+message UpdateTenantBillingResponse {
+  // tenant is the updated tenant record
+  TenantInfo tenant = 1;
+}
+
+// GetTenantBillingRequest queries billing information for a tenant.
+message GetTenantBillingRequest {
+  // tenant_id is the identifier of the tenant to query
+  string tenant_id = 1;
+}
+
+// BillingUsage contains current resource consumption against plan limits.
+message BillingUsage {
+  // missions_used is the number of missions run in the current billing period
+  int32 missions_used = 1;
+
+  // missions_limit is the maximum missions allowed (-1 = unlimited)
+  int32 missions_limit = 2;
+
+  // findings_used is the number of findings stored
+  int32 findings_used = 3;
+
+  // findings_limit is the maximum findings allowed (-1 = unlimited)
+  int32 findings_limit = 4;
+
+  // team_members is the current number of team members
+  int32 team_members = 5;
+
+  // team_members_limit is the maximum team members allowed (-1 = unlimited)
+  int32 team_members_limit = 6;
+
+  // api_keys is the current number of active API keys
+  int32 api_keys = 7;
+
+  // api_keys_limit is the maximum active API keys allowed (-1 = unlimited)
+  int32 api_keys_limit = 8;
+}
+
+// GetTenantBillingResponse returns billing details and usage.
+message GetTenantBillingResponse {
+  // tier is the current billing tier ("free", "team", "business", "enterprise")
+  string tier = 1;
+
+  // stripe_customer_id is the Stripe customer ID
+  string stripe_customer_id = 2;
+
+  // billing_alert is true when the tenant has an unresolved payment failure
+  bool billing_alert = 3;
+
+  // usage contains current resource consumption metrics
+  BillingUsage usage = 4;
+}
+
+// GetTenantByStripeCustomerIdRequest queries a tenant by its Stripe customer ID.
+message GetTenantByStripeCustomerIdRequest {
+  string stripe_customer_id = 1;
+}
+
+// GetTenantByStripeCustomerIdResponse returns the matched tenant.
+message GetTenantByStripeCustomerIdResponse {
+  TenantInfo tenant = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding RPCs — request/response messages
+// ---------------------------------------------------------------------------
+
+// GetOnboardingStateRequest queries the onboarding progress for a tenant.
+message GetOnboardingStateRequest {
+  // tenant_id is the identifier of the tenant to query
+  string tenant_id = 1;
+}
+
+// GetOnboardingStateResponse returns the current onboarding state.
+message GetOnboardingStateResponse {
+  // current_step is the name of the active onboarding step
+  string current_step = 1;
+
+  // completed_steps lists all steps that have been marked complete
+  repeated string completed_steps = 2;
+
+  // setup_tasks maps task names to their completion status ("true"/"false")
+  map<string, string> setup_tasks = 3;
+
+  // completed_at is the RFC 3339 timestamp when onboarding finished (empty if not done)
+  string completed_at = 4;
+}
+
+// UpdateOnboardingStateRequest advances or modifies the onboarding state.
+message UpdateOnboardingStateRequest {
+  // tenant_id is the identifier of the tenant to update
+  string tenant_id = 1;
+
+  // current_step sets the active onboarding step
+  string current_step = 2;
+
+  // completed_steps replaces the list of completed steps
+  repeated string completed_steps = 3;
+
+  // setup_tasks merges into the existing task completion map
+  map<string, string> setup_tasks = 4;
+}
+
+// UpdateOnboardingStateResponse confirms the update was applied.
+message UpdateOnboardingStateResponse {}
+
+// ---------------------------------------------------------------------------
+// Invitation RPCs — request/response messages
+// ---------------------------------------------------------------------------
+
+// CreateInvitationRequest issues a new team invitation.
+message CreateInvitationRequest {
+  // email is the invitee's email address
+  string email = 1;
+
+  // roles lists the RBAC roles to grant upon acceptance
+  repeated string roles = 2;
+
+  // message is an optional personal note included in the invitation email
+  string message = 3;
+
+  // expires_in_hours is how long the invitation token remains valid (default: 72)
+  int32 expires_in_hours = 4;
+}
+
+// CreateInvitationResponse returns the invitation token and magic link.
+message CreateInvitationResponse {
+  // token is the single-use invitation token
+  string token = 1;
+
+  // invitation_link is the fully-qualified URL the invitee should open
+  string invitation_link = 2;
+}
+
+// AcceptInvitationRequest redeems an invitation token.
+message AcceptInvitationRequest {
+  // token is the invitation token to redeem
+  string token = 1;
+
+  // display_name is the name the new member wants to use
+  string display_name = 2;
+}
+
+// AcceptInvitationResponse confirms acceptance and returns the resulting context.
+message AcceptInvitationResponse {
+  // tenant_id is the tenant the new member joined
+  string tenant_id = 1;
+
+  // roles lists the RBAC roles that were granted
+  repeated string roles = 2;
+}
+
+// InvitationInfo describes a pending or consumed invitation.
+message InvitationInfo {
+  // token is the invitation token (opaque)
+  string token = 1;
+
+  // email is the invitee's email address
+  string email = 2;
+
+  // roles lists the RBAC roles that will be granted on acceptance
+  repeated string roles = 3;
+
+  // status is the invitation status ("pending", "accepted", "expired", "revoked")
+  string status = 4;
+
+  // invited_by is the subject of the user who created the invitation
+  string invited_by = 5;
+
+  // created_at is when the invitation was created (RFC 3339 string)
+  string created_at = 6;
+
+  // expires_at is when the invitation token expires (RFC 3339 string)
+  string expires_at = 7;
+}
+
+// ListInvitationsRequest queries the list of invitations for the caller's tenant.
+message ListInvitationsRequest {
+  // page is the zero-based page index for pagination (default: 0)
+  int32 page = 1;
+
+  // limit is the maximum number of results per page (0 = all)
+  int32 limit = 2;
+}
+
+// ListInvitationsResponse returns invitation records.
+message ListInvitationsResponse {
+  // invitations is the list of invitation records
+  repeated InvitationInfo invitations = 1;
+
+  // total is the total count of invitations (for pagination)
+  int32 total = 2;
+}
+
+// RevokeInvitationRequest cancels a pending invitation.
+message RevokeInvitationRequest {
+  // token is the invitation token to revoke
+  string token = 1;
+}
+
+// RevokeInvitationResponse confirms the invitation was revoked.
+message RevokeInvitationResponse {}
+
+// ---------------------------------------------------------------------------
+// API Key RPCs — request/response messages
+// ---------------------------------------------------------------------------
+
+// CreateAPIKeyRequest issues a new API key for a tenant.
+message CreateAPIKeyRequest {
+  // tenant_id is the tenant to create the key for
+  string tenant_id = 1;
+
+  // allowed_kinds restricts the component kinds the key may access (empty = all)
+  repeated string allowed_kinds = 2;
+
+  // allowed_names restricts the specific component names the key may access (empty = all)
+  repeated string allowed_names = 3;
+}
+
+// CreateAPIKeyResponse returns the new API key (raw value shown once).
+message CreateAPIKeyResponse {
+  // key_id is the stable identifier for this key (used for listing/revoking)
+  string key_id = 1;
+
+  // raw_key is the full API key value including the "gsk_" prefix (shown once only)
+  string raw_key = 2;
+
+  // tenant_id is the tenant this key belongs to
+  string tenant_id = 3;
+}
+
+// APIKeyInfo describes a stored API key without exposing the secret value.
+message APIKeyInfo {
+  // key_id is the stable identifier for this key
+  string key_id = 1;
+
+  // tenant_id is the tenant this key belongs to
+  string tenant_id = 2;
+
+  // created_at is when the key was created (RFC 3339 string)
+  string created_at = 3;
+
+  // last_used_at is when the key was last used (RFC 3339 string, empty if never)
+  string last_used_at = 4;
+
+  // allowed_kinds lists the component kinds this key may access (empty = all)
+  repeated string allowed_kinds = 5;
+
+  // allowed_names lists the specific component names this key may access (empty = all)
+  repeated string allowed_names = 6;
+}
+
+// ListAPIKeysRequest queries the API keys for a tenant.
+message ListAPIKeysRequest {
+  // tenant_id is the tenant whose keys to list
+  string tenant_id = 1;
+}
+
+// ListAPIKeysResponse returns API key metadata (never raw key values).
+message ListAPIKeysResponse {
+  // keys is the list of API key metadata records
+  repeated APIKeyInfo keys = 1;
+}
+
+// RevokeAPIKeyRequest permanently revokes an API key.
+message RevokeAPIKeyRequest {
+  // key_id is the identifier of the key to revoke
+  string key_id = 1;
+}
+
+// RevokeAPIKeyResponse confirms the key was revoked.
+message RevokeAPIKeyResponse {}
+
+// ---------------------------------------------------------------------------
+// Member RPCs — request/response messages
+// ---------------------------------------------------------------------------
+
+// ListTenantMembersRequest queries the members of a tenant.
+message ListTenantMembersRequest {
+  // tenant_id is the identifier of the tenant to query
+  string tenant_id = 1;
+}
+
+// MemberInfo describes a single tenant member.
+message MemberInfo {
+  // subject is the OIDC subject claim (unique user identifier)
+  string subject = 1;
+
+  // email is the member's email address
+  string email = 2;
+
+  // name is the member's display name
+  string name = 3;
+
+  // roles lists the RBAC roles granted to this member
+  repeated string roles = 4;
+
+  // groups lists the OIDC groups the member belongs to
+  repeated string groups = 5;
+
+  // last_login is when the member last authenticated (RFC 3339 string)
+  string last_login = 6;
+
+  // login_count is the total number of successful logins
+  int32 login_count = 7;
+}
+
+// ListTenantMembersResponse returns member records.
+message ListTenantMembersResponse {
+  // members is the list of tenant member records
+  repeated MemberInfo members = 1;
+}
+
+// ImpersonateTenantRequest requests a time-limited context token for the given tenant.
+// Requires the "platform-operator" role.
+message ImpersonateTenantRequest {
+  // tenant_id is the identifier of the tenant to impersonate
+  string tenant_id = 1;
+}
+
+// ImpersonateTenantResponse returns a short-lived context token scoped to the
+// target tenant.  The token behaves like a normal auth token for its lifetime.
+message ImpersonateTenantResponse {
+  // token is the time-limited context token granting access to the target tenant
+  string token = 1;
+}

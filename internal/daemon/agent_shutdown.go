@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/observability"
@@ -19,6 +20,9 @@ type DaemonAgentNotifier struct {
 
 	// timeout for waiting for agent disconnection
 	timeout time.Duration
+
+	// activeConns tracks the number of currently connected agents via an atomic counter.
+	activeConns atomic.Int32
 }
 
 // CallbackManagerInterface defines the interface for callback manager operations
@@ -102,13 +106,26 @@ func (n *DaemonAgentNotifier) NotifyShutdown(ctx context.Context) (int, error) {
 	return agentCount, nil
 }
 
+// TrackConnection increments the active connection counter.
+// Call this when an agent establishes a new callback connection.
+func (n *DaemonAgentNotifier) TrackConnection() {
+	n.activeConns.Add(1)
+}
+
+// UntrackConnection decrements the active connection counter.
+// Call this when an agent disconnects from the callback server.
+func (n *DaemonAgentNotifier) UntrackConnection() {
+	n.activeConns.Add(-1)
+}
+
+// ActiveConnections returns the number of currently tracked agent connections
+// as reported by the atomic counter.
+func (n *DaemonAgentNotifier) ActiveConnections() int {
+	return int(n.activeConns.Load())
+}
+
 // GetConnectedAgents returns the number of currently connected agents.
 // This is a helper method for metrics and logging.
-//
-// Note: The current CallbackManager implementation doesn't expose connected agent count.
-// This method returns 0 until that tracking is added.
 func (n *DaemonAgentNotifier) GetConnectedAgents() int {
-	// TODO: Add connection tracking to CallbackServer to return actual count
-	// For now, return 0 as we don't have this information
-	return 0
+	return n.ActiveConnections()
 }

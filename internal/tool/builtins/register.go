@@ -9,10 +9,6 @@ import (
 
 // BuiltinToolsConfig holds dependencies for creating builtin tools.
 type BuiltinToolsConfig struct {
-	// KnowledgeStore is required for knowledge_search tool.
-	// The knowledge.KnowledgeManager implements this interface.
-	KnowledgeStore KnowledgeStore
-
 	// PayloadRegistry is required for payload_search tool.
 	PayloadRegistry payload.PayloadRegistry
 
@@ -24,7 +20,6 @@ type BuiltinToolsConfig struct {
 // This function should be called during harness initialization.
 //
 // The following tools are registered:
-//   - knowledge_search: Searches the knowledge store using semantic similarity
 //   - payload_search: Searches payloads using full-text search
 //   - payload_execute: Executes a payload against a target
 //
@@ -32,14 +27,6 @@ type BuiltinToolsConfig struct {
 // Returns the first error encountered during registration.
 func RegisterBuiltinTools(registry tool.ToolRegistry, cfg BuiltinToolsConfig) error {
 	var errors []error
-
-	// Register knowledge_search tool if KnowledgeStore is available
-	if cfg.KnowledgeStore != nil {
-		knowledgeTool := NewKnowledgeSearchTool(cfg.KnowledgeStore)
-		if err := registry.RegisterInternal(knowledgeTool); err != nil {
-			errors = append(errors, err)
-		}
-	}
 
 	// Register payload_search tool if PayloadRegistry is available
 	if cfg.PayloadRegistry != nil {
@@ -69,7 +56,6 @@ func RegisterBuiltinTools(registry tool.ToolRegistry, cfg BuiltinToolsConfig) er
 // This is useful for documentation and validation purposes.
 func BuiltinToolNames() []string {
 	return []string{
-		"knowledge_search",
 		"payload_search",
 		"payload_execute",
 	}

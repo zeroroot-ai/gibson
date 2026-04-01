@@ -135,7 +135,6 @@ func Connect(ctx context.Context, address string) (*Client, error) {
 	}, nil
 }
 
-
 // Close closes the connection to the daemon.
 //
 // This method should be called when the client is no longer needed, typically
@@ -613,8 +612,15 @@ func (c *Client) RunMission(ctx context.Context, workflowPath string, memoryCont
 				if ctx.Err() != nil {
 					return
 				}
-				// Stream error - log and exit
-				// TODO: Consider sending error event to channel
+				// Send error event so callers know the stream failed
+				select {
+				case eventChan <- MissionEvent{
+					Type:      "error",
+					Timestamp: time.Now(),
+					Message:   fmt.Sprintf("stream error: %v", err),
+				}:
+				default:
+				}
 				return
 			}
 
@@ -1080,8 +1086,15 @@ func (c *Client) RunAttack(ctx context.Context, opts AttackOptions) (<-chan Atta
 				if ctx.Err() != nil {
 					return
 				}
-				// Stream error - log and exit
-				// TODO: Consider sending error event to channel
+				// Send error event so callers know the stream failed
+				select {
+				case eventChan <- AttackEvent{
+					Type:      "error",
+					Timestamp: time.Now(),
+					Message:   fmt.Sprintf("stream error: %v", err),
+				}:
+				default:
+				}
 				return
 			}
 
@@ -1175,8 +1188,17 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan Event, error) {
 				if ctx.Err() != nil {
 					return
 				}
-				// Stream error - log and exit
-				// TODO: Consider sending error event to channel
+				// Send error event so callers know the stream failed
+				select {
+				case eventChan <- Event{
+					Type:      "error",
+					Timestamp: time.Now(),
+					Data: map[string]interface{}{
+						"error": err.Error(),
+					},
+				}:
+				default:
+				}
 				return
 			}
 
@@ -2176,33 +2198,154 @@ type MissionEdge struct {
 
 // InstallMission installs a mission from a git repository URL
 func (c *Client) InstallMission(ctx context.Context, url string, opts MissionInstallOptions) (*MissionInstallResult, error) {
-	// TODO: This will be implemented when the gRPC methods are added (task 7.1/7.2)
-	// For now, return an error indicating the feature is not yet available
-	return nil, fmt.Errorf("mission installation via daemon not yet implemented (requires gRPC methods from task 7.1/7.2)")
+	resp, err := c.daemon.InstallMission(ctx, &api.InstallMissionRequest{
+		Url:       url,
+		Branch:    opts.Branch,
+		Tag:       opts.Tag,
+		Force:     opts.Force,
+		Yes:       opts.Yes,
+		TimeoutMs: opts.Timeout.Milliseconds(),
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.Unavailable:
+				return nil, fmt.Errorf("daemon not responding (is it running?)")
+			case codes.AlreadyExists:
+				return nil, fmt.Errorf("mission already installed (use --force to reinstall)")
+			case codes.InvalidArgument:
+				return nil, fmt.Errorf("invalid mission URL or options: %s", st.Message())
+			case codes.NotFound:
+				return nil, fmt.Errorf("repository not found: %s", url)
+			default:
+				return nil, fmt.Errorf("failed to install mission: %s", st.Message())
+			}
+		}
+		return nil, fmt.Errorf("failed to install mission: %w", err)
+	}
+
+	if !resp.Success {
+		return nil, fmt.Errorf("failed to install mission: %s", resp.Message)
+	}
+
+	deps := make([]MissionDependencyInstallResult, len(resp.Dependencies))
+	for i, d := range resp.Dependencies {
+		deps[i] = MissionDependencyInstallResult{
+			Type:             d.Type,
+			Name:             d.Name,
+			AlreadyInstalled: d.AlreadyInstalled,
+		}
+	}
+
+	return &MissionInstallResult{
+		Name:         resp.Name,
+		Version:      resp.Version,
+		Duration:     time.Duration(resp.DurationMs) * time.Millisecond,
+		Dependencies: deps,
+	}, nil
 }
 
 // UninstallMission uninstalls an installed mission
 func (c *Client) UninstallMission(ctx context.Context, name string, force bool) error {
-	// TODO: This will be implemented when the gRPC methods are added (task 7.1/7.2)
-	return fmt.Errorf("mission uninstallation via daemon not yet implemented (requires gRPC methods from task 7.1/7.2)")
+	resp, err := c.daemon.UninstallMission(ctx, &api.UninstallMissionRequest{
+		Name:  name,
+		Force: force,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.Unavailable:
+				return fmt.Errorf("daemon not responding (is it running?)")
+			case codes.NotFound:
+				return fmt.Errorf("mission '%s' not found", name)
+			case codes.FailedPrecondition:
+				return fmt.Errorf("mission '%s' is currently running (stop it first or use --force)", name)
+			case codes.InvalidArgument:
+				return fmt.Errorf("invalid mission name: %s", st.Message())
+			default:
+				return fmt.Errorf("failed to uninstall mission: %s", st.Message())
+			}
+		}
+		return fmt.Errorf("failed to uninstall mission: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("failed to uninstall mission: %s", resp.Message)
+	}
+
+	return nil
 }
 
 // UpdateMission updates an installed mission to the latest version
 func (c *Client) UpdateMission(ctx context.Context, name string, opts MissionUpdateOptions) (*MissionUpdateResult, error) {
-	// TODO: This will be implemented when the gRPC methods are added (task 7.1/7.2)
-	return nil, fmt.Errorf("mission update via daemon not yet implemented (requires gRPC methods from task 7.1/7.2)")
+	resp, err := c.daemon.UpdateMission(ctx, &api.UpdateMissionRequest{
+		Name: name,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.Unavailable:
+				return nil, fmt.Errorf("daemon not responding (is it running?)")
+			case codes.NotFound:
+				return nil, fmt.Errorf("mission '%s' not found", name)
+			case codes.InvalidArgument:
+				return nil, fmt.Errorf("invalid mission name: %s", st.Message())
+			default:
+				return nil, fmt.Errorf("failed to update mission: %s", st.Message())
+			}
+		}
+		return nil, fmt.Errorf("failed to update mission: %w", err)
+	}
+
+	if !resp.Success {
+		return nil, fmt.Errorf("failed to update mission: %s", resp.Message)
+	}
+
+	return &MissionUpdateResult{
+		Name:       name,
+		Updated:    resp.Updated,
+		OldVersion: resp.OldVersion,
+		NewVersion: resp.NewVersion,
+		Duration:   time.Duration(resp.DurationMs) * time.Millisecond,
+	}, nil
 }
 
-// GetMissionDefinition retrieves an installed mission definition
+// GetMissionDefinition retrieves an installed mission definition.
+// Individual mission definition lookup is not yet exposed as a gRPC method;
+// use ListMissionDefinitions to enumerate all installed definitions.
 func (c *Client) GetMissionDefinition(ctx context.Context, name string) (*MissionDefinition, error) {
-	// TODO: This will be implemented when the gRPC methods are added (task 7.1/7.2)
-	return nil, fmt.Errorf("mission definition retrieval via daemon not yet implemented (requires gRPC methods from task 7.1/7.2)")
+	return nil, fmt.Errorf("GetMissionDefinition is not supported by the current daemon API: use ListMissionDefinitions to retrieve installed mission definitions")
 }
 
 // ListMissionDefinitions lists all installed mission definitions
 func (c *Client) ListMissionDefinitions(ctx context.Context) ([]*MissionDefinition, error) {
-	// TODO: This will be implemented when the gRPC methods are added (task 7.1/7.2)
-	return nil, fmt.Errorf("mission definition listing via daemon not yet implemented (requires gRPC methods from task 7.1/7.2)")
+	resp, err := c.daemon.ListMissionDefinitions(ctx, &api.ListMissionDefinitionsRequest{})
+	if err != nil {
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.Unavailable:
+				return nil, fmt.Errorf("daemon not responding (is it running?)")
+			case codes.DeadlineExceeded:
+				return nil, fmt.Errorf("daemon request timeout while listing mission definitions")
+			default:
+				return nil, fmt.Errorf("failed to list mission definitions: %s", st.Message())
+			}
+		}
+		return nil, fmt.Errorf("failed to list mission definitions: %w", err)
+	}
+
+	defs := make([]*MissionDefinition, len(resp.Missions))
+	for i, m := range resp.Missions {
+		defs[i] = &MissionDefinition{
+			Name:        m.Name,
+			Version:     m.Version,
+			Description: m.Description,
+			Source:      m.Source,
+			InstalledAt: time.Unix(m.InstalledAt, 0),
+		}
+	}
+
+	return defs, nil
 }
 
 // ValidationResult contains the outcome of dependency validation.
@@ -2298,9 +2441,89 @@ type VersionMismatchInfo struct {
 //	    fmt.Printf("Validation issues: %s\n", result.Summary)
 //	}
 func (c *Client) ValidateMissionDependencies(ctx context.Context, workflowPath string) (*ValidationResult, error) {
-	// TODO: This will be implemented when the gRPC methods are added
-	// For now, return an error indicating the feature is not yet available
-	return nil, fmt.Errorf("mission dependency validation via daemon not yet implemented (requires gRPC methods and daemon integration)")
+	resp, err := c.daemon.ValidateMissionDependencies(ctx, &api.ValidateMissionDependenciesRequest{
+		WorkflowPath: workflowPath,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.Unavailable:
+				return nil, fmt.Errorf("daemon not responding (is it running?)")
+			case codes.NotFound:
+				return nil, fmt.Errorf("workflow file not found: %s", workflowPath)
+			case codes.InvalidArgument:
+				return nil, fmt.Errorf("invalid workflow: %s", st.Message())
+			default:
+				return nil, fmt.Errorf("failed to validate mission dependencies: %s", st.Message())
+			}
+		}
+		return nil, fmt.Errorf("failed to validate mission dependencies: %w", err)
+	}
+
+	if !resp.Success {
+		return nil, fmt.Errorf("dependency validation failed: %s", resp.Message)
+	}
+
+	pbr := resp.Result
+	if pbr == nil {
+		return &ValidationResult{Valid: true}, nil
+	}
+
+	convertNode := func(n *api.DependencyNode) *DependencyNode {
+		if n == nil {
+			return nil
+		}
+		return &DependencyNode{
+			Kind:          n.Kind,
+			Name:          n.Name,
+			Version:       n.Version,
+			Source:        n.Source.String(),
+			SourceRef:     n.SourceRef,
+			Installed:     n.Installed,
+			Running:       n.Running,
+			Healthy:       n.Healthy,
+			ActualVersion: n.ActualVersion,
+		}
+	}
+
+	notInstalled := make([]*DependencyNode, len(pbr.NotInstalled))
+	for i, n := range pbr.NotInstalled {
+		notInstalled[i] = convertNode(n)
+	}
+
+	notRunning := make([]*DependencyNode, len(pbr.NotRunning))
+	for i, n := range pbr.NotRunning {
+		notRunning[i] = convertNode(n)
+	}
+
+	unhealthy := make([]*DependencyNode, len(pbr.Unhealthy))
+	for i, n := range pbr.Unhealthy {
+		unhealthy[i] = convertNode(n)
+	}
+
+	versionMismatches := make([]*VersionMismatchInfo, len(pbr.VersionMismatches))
+	for i, vm := range pbr.VersionMismatches {
+		versionMismatches[i] = &VersionMismatchInfo{
+			Node:            convertNode(vm.Node),
+			RequiredVersion: vm.RequiredVersion,
+			ActualVersion:   vm.ActualVersion,
+		}
+	}
+
+	return &ValidationResult{
+		Valid:           pbr.Valid,
+		Summary:         pbr.Summary,
+		TotalComponents: int(pbr.TotalComponents),
+		InstalledCount:  int(pbr.InstalledCount),
+		RunningCount:    int(pbr.RunningCount),
+		HealthyCount:    int(pbr.HealthyCount),
+		NotInstalled:    notInstalled,
+		NotRunning:      notRunning,
+		Unhealthy:       unhealthy,
+		VersionMismatch: versionMismatches,
+		ValidatedAt:     time.Unix(pbr.ValidatedAt, 0),
+		Duration:        time.Duration(pbr.DurationMs) * time.Millisecond,
+	}, nil
 }
 
 // Shutdown requests graceful shutdown of the daemon.

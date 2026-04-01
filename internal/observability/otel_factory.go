@@ -174,8 +174,8 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 			if cfg.Headers == nil {
 				cfg.Headers = make(map[string]string)
 			}
-			// Only set if the existing Authorization header is missing or malformed
-			if existing, ok := cfg.Headers["Authorization"]; !ok || existing == "" || strings.HasSuffix(existing, "Basic ") {
+			// Only set if the existing Authorization header is missing or contains an unresolved variable
+			if existing, ok := cfg.Headers["Authorization"]; !ok || existing == "" || strings.Contains(existing, "${") {
 				cfg.Headers["Authorization"] = authHeader
 				slog.Info("constructed Langfuse auth header from environment variables")
 			}

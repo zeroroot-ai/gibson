@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 )
@@ -160,6 +161,15 @@ func (m *mockAgentHarness) RunNumber() int {
 }
 func (m *mockAgentHarness) CurrentAgentName() string {
 	return m.agentName
+}
+func (m *mockAgentHarness) GetToolCapabilities(ctx context.Context, toolName string) (*sdktypes.Capabilities, error) {
+	return nil, nil
+}
+func (m *mockAgentHarness) GetAllToolCapabilities(ctx context.Context) (map[string]*sdktypes.Capabilities, error) {
+	return nil, nil
+}
+func (m *mockAgentHarness) Checkpoint() harness.CheckpointAccess {
+	return harness.NewHarnessCheckpointMethods(nil, "", "", 0)
 }
 
 // TestNewEvalHarnessFactory tests factory creation

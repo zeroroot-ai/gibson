@@ -311,10 +311,10 @@ func (b *InventoryBuilder) convertAgentInfo(info component.AgentInfo) AgentSumma
 }
 
 // extractSlots extracts slot summaries from agent info.
-// Currently returns empty as descriptor integration is not yet available.
+// LLM slot requirements are declared in agent source code and are not propagated
+// through the component registry metadata, so this always returns an empty slice.
+// Slot resolution happens at runtime via the LLM registry, not at inventory time.
 func (b *InventoryBuilder) extractSlots(info component.AgentInfo) []SlotSummary {
-	// TODO: Fetch from agent descriptor when available
-	// For now, return empty slice as manifests don't yet include slot data
 	return []SlotSummary{}
 }
 
@@ -357,23 +357,30 @@ func (b *InventoryBuilder) convertToolInfo(info component.ToolInfo) ToolSummary 
 }
 
 // extractTags extracts tags from tool info.
-// Currently returns empty as descriptor integration is not yet available.
+// Tags are stored in component metadata as "tag:<name>=true" entries by tools
+// that register with tag metadata. This mirrors the method:* convention used
+// for plugins.
 func (b *InventoryBuilder) extractTags(info component.ToolInfo) []string {
-	// TODO: Fetch from tool descriptor when available
+	// Tags are not directly on ToolInfo; they would need to come from the raw
+	// ComponentInfo metadata. ToolInfo is already an aggregated view and does
+	// not carry the raw metadata map, so tags are not available at this level.
+	// Return empty — callers should use capabilities or description for classification.
 	return []string{}
 }
 
 // generateToolInputSummary generates a human-readable summary of tool input schema.
-// Currently returns empty as schema information is not yet available from registry.
+// Schema definitions are embedded in tool proto files and are not propagated through
+// the component registry metadata. Returns empty string; the tool description
+// field is the primary source of usage information at inventory time.
 func (b *InventoryBuilder) generateToolInputSummary(info component.ToolInfo) string {
-	// TODO: Generate from input schema when available in descriptor
 	return ""
 }
 
 // generateToolOutputSummary generates a human-readable summary of tool output schema.
-// Currently returns empty as schema information is not yet available from registry.
+// Schema definitions are embedded in tool proto files and are not propagated through
+// the component registry metadata. Returns empty string; the tool description
+// field is the primary source of usage information at inventory time.
 func (b *InventoryBuilder) generateToolOutputSummary(info component.ToolInfo) string {
-	// TODO: Generate from output schema when available in descriptor
 	return ""
 }
 
@@ -400,10 +407,13 @@ func (b *InventoryBuilder) convertPluginInfo(info component.PluginInfo) PluginSu
 }
 
 // extractMethods extracts method summaries from plugin info.
-// Currently returns empty as descriptor integration is not yet available.
+// Plugin methods are stored as "method:<name>=true" entries in ComponentInfo.Metadata
+// during registration, but ComponentDiscovery.ListPlugins aggregates instances into
+// PluginInfo which does not carry the raw metadata map. Method discovery requires
+// the PluginAccessStore.ListAvailablePlugins path which returns PluginCatalogEntry
+// with the Methods field populated. At this level we only have PluginInfo, so
+// we return an empty slice; the plugin description remains the primary metadata source.
 func (b *InventoryBuilder) extractMethods(info component.PluginInfo) []MethodSummary {
-	// TODO: Fetch from plugin descriptor when available
-	// For now, return empty slice as plugin method metadata is not yet exposed
 	return []MethodSummary{}
 }
 

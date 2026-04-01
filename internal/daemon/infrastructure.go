@@ -176,11 +176,15 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 			"docs", "docs/runbooks/otel-observability.md")
 	}
 
-	// Create plan executor with dependencies
-	// TODO: Add executor config to Config struct when implementing
-	planExecutor := plan.NewPlanExecutor(
+	// Create plan executor with dependencies.
+	// Executor configuration is read from config.Daemon.Executor.
+	planExecutorOpts := []plan.ExecutorOption{
 		plan.WithExecutorLogger(d.logger.WithComponent("plan-executor").Slog()),
-	)
+	}
+	if d.config != nil && d.config.Daemon.Executor.DefaultTimeout > 0 {
+		planExecutorOpts = append(planExecutorOpts, plan.WithStepTimeout(d.config.Daemon.Executor.DefaultTimeout))
+	}
+	planExecutor := plan.NewPlanExecutor(planExecutorOpts...)
 	d.logger.Info(ctx, "initialized plan executor")
 
 	// Store infrastructure components temporarily so newHarnessFactory can access them

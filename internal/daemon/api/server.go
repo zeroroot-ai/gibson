@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,7 +15,10 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/keycloak"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
 )
@@ -38,6 +42,80 @@ type DaemonServer struct {
 
 	// sessionCounter generates unique session IDs
 	sessionCounter int64
+
+	// quotaManager enforces per-tenant resource quotas on mission submission.
+	// May be nil; when nil, quota checks are skipped.
+	quotaManager MissionQuotaChecker
+
+	// tenantService manages tenant CRUD operations backed by Redis.
+	// May be nil; when nil, tenant management RPCs return codes.Unavailable.
+	tenantService *component.TenantService
+
+	// keycloak is the Keycloak Admin REST API client used for member queries.
+	// May be nil; when nil, ListTenantMembers returns codes.Unavailable.
+	keycloak *keycloak.Client
+
+	// provisioner handles full tenant provisioning (namespace, RBAC, API key).
+	// May be nil; wired via WithProvisioner() during daemon startup.
+	provisioner interface {
+		ProvisionTenant(ctx context.Context, tenantID, displayName, tier, ownerEmail, stripeCustomerID, stripeSubID string) (tenantJSON string, apiKey string, err error)
+		GetProvisioningStatus(ctx context.Context, tenantID string) (status string, steps []ProvisioningStep, err error)
+		DeprovisionTenant(ctx context.Context, tenantID string) error
+	}
+
+	// invitationStore manages team invitations.
+	// May be nil; wired when the invitation service is available.
+	// TODO: replace with concrete type once invitation package is introduced.
+	invitationStore interface {
+		Create(ctx context.Context, tenantID, email string, roles []string, message string, expiresInHours int32) (token, link string, err error)
+		Accept(ctx context.Context, token, displayName string) (tenantID string, roles []string, err error)
+		List(ctx context.Context, tenantID string, page, limit int32) (invitations []InvitationRecord, total int32, err error)
+		Revoke(ctx context.Context, tenantID, token string) error
+	}
+
+	// apiKeyStore manages tenant API keys.
+	// May be nil; wired when the API key service is available.
+	// TODO: replace with concrete type once apikey package is introduced.
+	apiKeyStore interface {
+		Create(ctx context.Context, tenantID string, allowedKinds, allowedNames []string) (keyID, rawKey string, err error)
+		List(ctx context.Context, tenantID string) ([]APIKeyRecord, error)
+		Revoke(ctx context.Context, keyID string) error
+	}
+
+	// onboardingStore manages tenant onboarding state.
+	// May be nil; wired when the onboarding service is available.
+	// TODO: replace with concrete type once onboarding package is introduced.
+	onboardingStore interface {
+		GetState(ctx context.Context, tenantID string) (currentStep string, completedSteps []string, setupTasks map[string]string, completedAt string, err error)
+		UpdateState(ctx context.Context, tenantID, currentStep string, completedSteps []string, setupTasks map[string]string) error
+	}
+
+	// billingStore manages tenant billing records.
+	// May be nil; wired when the billing service is available.
+	// TODO: replace with concrete type once billing package is introduced.
+	billingStore interface {
+		GetBilling(ctx context.Context, tenantID string) (tier, stripeCustomerID string, billingAlert bool, usage BillingUsageRecord, err error)
+		UpdateBilling(ctx context.Context, tenantID, tier, stripeCustomerID, stripeSubID string, billingAlert bool) (*component.TenantRecord, error)
+	}
+
+	// impersonationIssuer issues short-lived impersonation tokens.
+	// May be nil; wired when the impersonation service is available.
+	// TODO: replace with concrete type once impersonation package is introduced.
+	impersonationIssuer interface {
+		IssueToken(ctx context.Context, tenantID string) (token string, err error)
+	}
+}
+
+// MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
+// mission quotas. It is satisfied by *component.QuotaManager.
+type MissionQuotaChecker interface {
+	// CheckMissionQuota returns a codes.ResourceExhausted error when the tenant
+	// in ctx has met or exceeded its configured mission limit.
+	CheckMissionQuota(ctx context.Context) error
+
+	// IncrementMissionCount increments the running mission counter for the
+	// tenant in ctx. Called after successful mission submission.
+	IncrementMissionCount(ctx context.Context) error
 }
 
 // DaemonInterface defines the interface that the daemon must implement
@@ -619,6 +697,51 @@ type CreateMissionResultData struct {
 	CreatedAt   time.Time
 }
 
+// ProvisioningStep describes a single step in the tenant provisioning pipeline.
+// Used by the provisional provisioner interface until the concrete type is wired.
+type ProvisioningStep struct {
+	Name      string
+	Status    string
+	Error     string
+	Timestamp string
+}
+
+// InvitationRecord is the internal representation of a pending or consumed
+// invitation.  Used by the invitation store interface stub.
+type InvitationRecord struct {
+	Token      string
+	Email      string
+	Roles      []string
+	Status     string
+	InvitedBy  string
+	CreatedAt  string
+	ExpiresAt  string
+}
+
+// APIKeyRecord is the internal representation of an API key without the secret
+// value.  Used by the API key store interface stub.
+type APIKeyRecord struct {
+	KeyID        string
+	TenantID     string
+	CreatedAt    string
+	LastUsedAt   string
+	AllowedKinds []string
+	AllowedNames []string
+}
+
+// BillingUsageRecord holds current resource consumption metrics for a tenant.
+// Used by the billing store interface stub.
+type BillingUsageRecord struct {
+	MissionsUsed      int32
+	MissionsLimit     int32
+	FindingsUsed      int32
+	FindingsLimit     int32
+	TeamMembers       int32
+	TeamMembersLimit  int32
+	APIKeys           int32
+	APIKeysLimit      int32
+}
+
 // NewDaemonServer creates a new gRPC server that exposes daemon functionality.
 //
 // Parameters:
@@ -639,6 +762,159 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		logger:            logger.With("component", "daemon-grpc"),
 		sessionCounter:    0,
 	}
+}
+
+// WithQuotaManager attaches a MissionQuotaChecker to the server so that
+// RunMission enforces per-tenant mission quotas.  Call this immediately
+// after NewDaemonServer and before registering the server:
+//
+//	srv := api.NewDaemonServer(d, handler, logger)
+//	srv.WithQuotaManager(quotaMgr)
+//	api.RegisterDaemonServiceServer(grpcSrv, srv)
+func (s *DaemonServer) WithQuotaManager(qm MissionQuotaChecker) *DaemonServer {
+	s.quotaManager = qm
+	return s
+}
+
+// WithTenantService attaches a TenantService so that tenant management RPCs
+// (CreateTenant, GetTenant, ListTenants, UpdateTenant, DeleteTenant) are
+// backed by durable Redis storage.  Call this immediately after NewDaemonServer
+// and before registering the server.
+func (s *DaemonServer) WithTenantService(ts *component.TenantService) *DaemonServer {
+	s.tenantService = ts
+	return s
+}
+
+// WithKeycloakClient attaches a Keycloak Admin REST API client so that
+// ListTenantMembers can query live user data from Keycloak. Call this
+// immediately after NewDaemonServer and before registering the server.
+func (s *DaemonServer) WithKeycloakClient(kc *keycloak.Client) *DaemonServer {
+	s.keycloak = kc
+	return s
+}
+
+// WithProvisioner attaches a Provisioner so that ProvisionTenant,
+// GetProvisioningStatus, and DeprovisionTenant RPCs are backed by the real
+// provisioning pipeline.  Call this immediately after NewDaemonServer and
+// before registering the server.
+func (s *DaemonServer) WithProvisioner(p *provisioner.Provisioner) *DaemonServer {
+	s.provisioner = &provisionerAdapter{p: p}
+	return s
+}
+
+// WithBillingStore attaches a billing store backed by TenantService and
+// QuotaManager so that GetTenantBilling and UpdateTenantBilling RPCs return
+// real data.  Call this immediately after NewDaemonServer and before
+// registering the server.
+func (s *DaemonServer) WithBillingStore(ts *component.TenantService, qm *component.QuotaManager) *DaemonServer {
+	s.billingStore = &billingStoreAdapter{tenants: ts, quotas: qm}
+	return s
+}
+
+// ---------------------------------------------------------------------------
+// provisionerAdapter bridges *provisioner.Provisioner to the DaemonServer's
+// provisioner interface which uses positional arguments and different return
+// types.
+// ---------------------------------------------------------------------------
+
+type provisionerAdapter struct {
+	p *provisioner.Provisioner
+}
+
+func (a *provisionerAdapter) ProvisionTenant(ctx context.Context, tenantID, displayName, tier, ownerEmail, stripeCustomerID, stripeSubID string) (string, string, error) {
+	result, err := a.p.ProvisionTenant(ctx, provisioner.ProvisionRequest{
+		TenantID:         tenantID,
+		DisplayName:      displayName,
+		Tier:             tier,
+		OwnerEmail:       ownerEmail,
+		StripeCustomerID: stripeCustomerID,
+		StripeSubID:      stripeSubID,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return result.TenantID, result.APIKey, nil
+}
+
+func (a *provisionerAdapter) GetProvisioningStatus(ctx context.Context, tenantID string) (string, []ProvisioningStep, error) {
+	ps, err := a.p.GetProvisioningStatus(ctx, tenantID)
+	if err != nil {
+		return "", nil, err
+	}
+	steps := make([]ProvisioningStep, len(ps.Steps))
+	for i, s := range ps.Steps {
+		steps[i] = ProvisioningStep{
+			Name:      s.Name,
+			Status:    s.Status,
+			Error:     s.Error,
+			Timestamp: s.Timestamp.Format(time.RFC3339),
+		}
+	}
+	return ps.Status, steps, nil
+}
+
+func (a *provisionerAdapter) DeprovisionTenant(ctx context.Context, tenantID string) error {
+	return a.p.DeprovisionTenant(ctx, tenantID)
+}
+
+// ---------------------------------------------------------------------------
+// billingStoreAdapter composes TenantService and QuotaManager to satisfy the
+// billingStore interface.
+// ---------------------------------------------------------------------------
+
+type billingStoreAdapter struct {
+	tenants *component.TenantService
+	quotas  *component.QuotaManager
+}
+
+func (a *billingStoreAdapter) GetBilling(ctx context.Context, tenantID string) (string, string, bool, BillingUsageRecord, error) {
+	record, err := a.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		return "", "", false, BillingUsageRecord{}, err
+	}
+
+	var usage BillingUsageRecord
+	if a.quotas != nil {
+		quota, qErr := a.quotas.GetQuota(ctx, tenantID)
+		if qErr == nil && quota != nil {
+			usage.MissionsLimit = int32(quota.MaxMissions)
+			usage.FindingsLimit = int32(quota.MaxFindings)
+			// TeamMembersLimit and APIKeysLimit come from tenant config
+		}
+	}
+
+	// Read limits from tenant config where quota doesn't track them
+	if record.Config != nil {
+		if v, ok := record.Config["max_api_keys"]; ok {
+			if n, err := parseInt32(v); err == nil {
+				usage.APIKeysLimit = n
+			}
+		}
+	}
+
+	return record.Tier, record.StripeCustomerID, record.BillingAlert, usage, nil
+}
+
+func (a *billingStoreAdapter) UpdateBilling(ctx context.Context, tenantID, tier, stripeCustomerID, stripeSubID string, billingAlert bool) (*component.TenantRecord, error) {
+	updates := make(map[string]string)
+	if tier != "" {
+		updates["tier"] = tier
+	}
+	if stripeCustomerID != "" {
+		updates["stripe_customer_id"] = stripeCustomerID
+	}
+	if stripeSubID != "" {
+		updates["stripe_sub_id"] = stripeSubID
+	}
+	updates["billing_alert"] = fmt.Sprintf("%t", billingAlert)
+	return a.tenants.UpdateTenant(ctx, tenantID, updates)
+}
+
+// parseInt32 is a small helper for parsing int32 from string config values.
+func parseInt32(s string) (int32, error) {
+	var n int32
+	_, err := fmt.Sscanf(s, "%d", &n)
+	return n, err
 }
 
 // Connect establishes a client connection to the daemon.
@@ -706,6 +982,14 @@ func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStre
 		"mission_id", req.MissionId,
 		"memory_continuity", req.MemoryContinuity,
 	)
+
+	// Enforce per-tenant mission quota before any resource allocation.
+	if s.quotaManager != nil {
+		if err := s.quotaManager.CheckMissionQuota(stream.Context()); err != nil {
+			s.logger.Warn("mission submission rejected: quota exceeded", "error", err)
+			return err
+		}
+	}
 
 	// Determine workflow path to use
 	var workflowPath string
@@ -780,6 +1064,16 @@ func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStre
 	if err != nil {
 		s.logger.Error("failed to start mission", "error", err)
 		return status_grpc.Errorf(codes.Internal, "failed to start mission: %v", err)
+	}
+
+	// Mission accepted: increment the tenant's running mission counter.
+	if s.quotaManager != nil {
+		if err := s.quotaManager.IncrementMissionCount(stream.Context()); err != nil {
+			// Non-fatal: mission is already running. Log and continue — a
+			// counter mismatch here is harmless given the floor-at-zero
+			// semantics in DecrementMissionCount.
+			s.logger.Warn("failed to increment mission quota counter", "error", err)
+		}
 	}
 
 	// Stream events to client
@@ -2488,4 +2782,788 @@ func (s *DaemonServer) DeleteTenantLangfuseCredentials(ctx context.Context, req 
 
 	s.logger.Info("langfuse credentials deleted", "tenant_id", req.TenantId)
 	return &DeleteTenantLangfuseCredentialsResponse{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Tenant management RPCs
+//
+// NOTE: The proto-generated request/response types referenced below
+// (CreateTenantRequest, TenantInfo, MemberInfo, etc.) are defined in
+// daemon.proto and will be present in daemon.pb.go after `make proto` is run.
+// ---------------------------------------------------------------------------
+
+// tenantRecordToProto converts a component.TenantRecord to the proto TenantInfo
+// message.  member_count is not stored on TenantRecord; callers that need an
+// accurate count should populate it separately.
+func tenantRecordToProto(r *component.TenantRecord) *TenantInfo {
+	return &TenantInfo{
+		TenantId:         r.TenantID,
+		DisplayName:      r.DisplayName,
+		Status:           r.Status,
+		Tier:             r.Tier,
+		OwnerEmail:       r.OwnerEmail,
+		StripeCustomerId: r.StripeCustomerID,
+		BillingAlert:      r.BillingAlert,
+		Config:    r.Config,
+		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+// CreateTenant creates a new tenant record backed by Redis.
+//
+// Requires the "admin" role.  Returns codes.Unavailable when no TenantService
+// has been wired, codes.AlreadyExists when the tenant_id is already taken, and
+// codes.InvalidArgument when the tenant_id fails format validation.
+func (s *DaemonServer) CreateTenant(ctx context.Context, req *CreateTenantRequest) (*CreateTenantResponse, error) {
+	if s.tenantService == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	record, err := s.tenantService.CreateTenant(ctx, req.TenantId, req.DisplayName, req.Config)
+	if err != nil {
+		if errors.Is(err, component.ErrTenantAlreadyExists) {
+			return nil, status_grpc.Errorf(codes.AlreadyExists, "tenant %q already exists", req.TenantId)
+		}
+		if errors.Is(err, component.ErrInvalidTenantID) {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "%v", err)
+		}
+		s.logger.Error("failed to create tenant", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to create tenant: %v", err)
+	}
+
+	s.logger.Info("tenant created via RPC",
+		"tenant_id", req.TenantId,
+		"display_name", req.DisplayName,
+	)
+
+	return &CreateTenantResponse{
+		Tenant: tenantRecordToProto(record),
+	}, nil
+}
+
+// GetTenant retrieves a single tenant by ID.
+//
+// Callers with "admin" or "platform-operator" may retrieve any tenant.
+// All other authenticated callers may only retrieve their own tenant.
+// Returns codes.NotFound when the tenant does not exist.
+func (s *DaemonServer) GetTenant(ctx context.Context, req *GetTenantRequest) (*GetTenantResponse, error) {
+	if s.tenantService == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	record, err := s.tenantService.GetTenant(ctx, req.TenantId)
+	if err != nil {
+		if errors.Is(err, component.ErrTenantNotFound) {
+			return nil, status_grpc.Errorf(codes.NotFound, "tenant %q not found", req.TenantId)
+		}
+		s.logger.Error("failed to get tenant", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to get tenant: %v", err)
+	}
+
+	return &GetTenantResponse{
+		Tenant: tenantRecordToProto(record),
+	}, nil
+}
+
+// ListTenants returns tenants visible to the caller.
+//
+// Callers with "admin" or "platform-operator" receive all tenants.
+// All other authenticated callers receive only their own tenant record.
+func (s *DaemonServer) ListTenants(ctx context.Context, req *ListTenantsRequest) (*ListTenantsResponse, error) {
+	if s.tenantService == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
+	}
+
+	records, err := s.tenantService.ListTenants(ctx)
+	if err != nil {
+		s.logger.Error("failed to list tenants", "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to list tenants: %v", err)
+	}
+
+	tenants := make([]*TenantInfo, 0, len(records))
+	for i := range records {
+		tenants = append(tenants, tenantRecordToProto(&records[i]))
+	}
+
+	return &ListTenantsResponse{
+		Tenants: tenants,
+	}, nil
+}
+
+// UpdateTenant applies field-level updates to an existing tenant.
+//
+// Requires the "admin" role.  Non-empty fields in the request replace the
+// corresponding stored values.  Config entries are merged into the existing
+// config map.  Returns codes.NotFound when the tenant does not exist.
+func (s *DaemonServer) UpdateTenant(ctx context.Context, req *UpdateTenantRequest) (*UpdateTenantResponse, error) {
+	if s.tenantService == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	// Build the updates map from proto request fields.
+	// TenantService.UpdateTenant merges these into the stored record.
+	updates := make(map[string]string)
+	if req.DisplayName != "" {
+		updates["display_name"] = req.DisplayName
+	}
+	if req.Status != "" {
+		updates["status"] = req.Status
+	}
+	if req.Tier != "" {
+		updates["tier"] = req.Tier
+	}
+	for k, v := range req.Config {
+		updates[k] = v
+	}
+
+	record, err := s.tenantService.UpdateTenant(ctx, req.TenantId, updates)
+	if err != nil {
+		if errors.Is(err, component.ErrTenantNotFound) {
+			return nil, status_grpc.Errorf(codes.NotFound, "tenant %q not found", req.TenantId)
+		}
+		s.logger.Error("failed to update tenant", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to update tenant: %v", err)
+	}
+
+	s.logger.Info("tenant updated via RPC", "tenant_id", req.TenantId)
+
+	return &UpdateTenantResponse{
+		Tenant: tenantRecordToProto(record),
+	}, nil
+}
+
+// DeleteTenant soft-deletes a tenant by marking its status as "deleted" and
+// removing it from the active tenant index.
+//
+// Requires the "admin" role.  The underlying Redis meta key is retained for
+// audit history.  Returns codes.NotFound when the tenant does not exist.
+func (s *DaemonServer) DeleteTenant(ctx context.Context, req *DeleteTenantRequest) (*DeleteTenantResponse, error) {
+	if s.tenantService == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if err := s.tenantService.DeleteTenant(ctx, req.TenantId); err != nil {
+		if errors.Is(err, component.ErrTenantNotFound) {
+			return nil, status_grpc.Errorf(codes.NotFound, "tenant %q not found", req.TenantId)
+		}
+		s.logger.Error("failed to delete tenant", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to delete tenant: %v", err)
+	}
+
+	s.logger.Info("tenant soft-deleted via RPC", "tenant_id", req.TenantId)
+
+	return &DeleteTenantResponse{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Membership / Impersonation RPCs
+// ---------------------------------------------------------------------------
+
+// ListTenantMembers returns the set of users registered in the tenant's
+// Keycloak realm, along with their assigned realm roles and last session info.
+//
+// Callers with "admin" or "platform-operator" may query any tenant. All other
+// authenticated callers may only query their own tenant. Returns
+// codes.Unavailable when no Keycloak client has been wired.
+func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMembersRequest) (*ListTenantMembersResponse, error) {
+	if s.keycloak == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "keycloak client not configured")
+	}
+
+	tenantID := req.GetTenantId()
+	if tenantID == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id required")
+	}
+
+	// RBAC: admin/platform-operator can see any tenant, others only their own.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
+	}
+	callerTenant := auth.TenantFromContext(ctx)
+	if !identity.HasRole("admin") && !identity.HasRole("platform-operator") && callerTenant != tenantID {
+		return nil, status_grpc.Error(codes.PermissionDenied, "cannot access other tenant's members")
+	}
+
+	// Determine realm name from tenant record; default to tenant ID.
+	realmName := tenantID
+	if s.tenantService != nil {
+		record, err := s.tenantService.GetTenant(ctx, tenantID)
+		if err == nil && record.KeycloakRealmName != "" {
+			realmName = record.KeycloakRealmName
+		}
+	}
+
+	// Query Keycloak for all users in the realm.
+	users, err := s.keycloak.ListUsers(ctx, realmName, keycloak.ListUsersOpts{Max: 100})
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.Internal, "querying keycloak users: %v", err)
+	}
+
+	// Map each Keycloak user to MemberInfo, enriching with roles and last session.
+	members := make([]*MemberInfo, 0, len(users))
+	for _, u := range users {
+		roles, _ := s.keycloak.GetUserRealmRoles(ctx, realmName, u.ID)
+		roleNames := make([]string, 0, len(roles))
+		for _, r := range roles {
+			roleNames = append(roleNames, r.Name)
+		}
+
+		sessions, _ := s.keycloak.GetUserSessions(ctx, realmName, u.ID)
+		var lastLogin string
+		if len(sessions) > 0 {
+			lastLogin = time.Unix(sessions[0].LastAccess/1000, 0).UTC().Format(time.RFC3339)
+		}
+
+		members = append(members, &MemberInfo{
+			Subject:    u.ID,
+			Email:      u.Email,
+			Name:       strings.TrimSpace(u.FirstName + " " + u.LastName),
+			Roles:      roleNames,
+			Groups:     []string{},
+			LastLogin:  lastLogin,
+			LoginCount: 0,
+		})
+	}
+
+	return &ListTenantMembersResponse{
+		Members: members,
+	}, nil
+}
+
+// ImpersonateTenant issues a short-lived context token scoped to the target
+// tenant for platform-operator use.
+//
+// Requires the "platform-operator" or "admin" role.  The caller's identity is
+// extracted from the request context and written to the structured audit log so
+// every impersonation event is traceable.
+//
+// Token generation is not yet implemented; a TODO placeholder is returned
+// until the token-issuance service is wired.
+func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error) {
+	// Require platform-operator or admin — this is a privileged operation.
+	// Try platform-operator first; fall back to checking admin.
+	platformErr := auth.RequireRole(ctx, "platform-operator")
+	adminErr := auth.RequireRole(ctx, "admin")
+	if platformErr != nil && adminErr != nil {
+		// Return the platform-operator error as the canonical failure message.
+		return nil, platformErr
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	// Extract caller identity for the audit trail.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Errorf(codes.Unauthenticated, "not authenticated")
+	}
+
+	// Verify the target tenant exists when TenantService is available.
+	if s.tenantService != nil {
+		if _, err := s.tenantService.GetTenant(ctx, req.TenantId); err != nil {
+			if errors.Is(err, component.ErrTenantNotFound) {
+				return nil, status_grpc.Errorf(codes.NotFound, "tenant %q not found", req.TenantId)
+			}
+			s.logger.Error("failed to verify target tenant for impersonation",
+				"tenant_id", req.TenantId,
+				"error", err,
+			)
+			return nil, status_grpc.Errorf(codes.Internal, "failed to verify target tenant: %v", err)
+		}
+	}
+
+	s.logger.Info("tenant impersonation started",
+		"admin_subject", identity.Subject,
+		"admin_email", identity.Email,
+		"target_tenant", req.TenantId,
+	)
+
+	// TODO: generate a time-limited impersonation token once the token-issuance
+	// service is wired (e.g. a short-lived JWT signed with the platform key,
+	// scoped to req.TenantId, with the caller's subject embedded as the
+	// "impersonator" claim for downstream audit correlation).
+	return &ImpersonateTenantResponse{
+		Token: "",
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Provisioning RPCs
+// ---------------------------------------------------------------------------
+
+// ProvisionTenant triggers full tenant provisioning (namespace, RBAC, API key).
+//
+// Requires the "admin" role.  Returns codes.Unimplemented until the provisioner
+// service has been wired.
+func (s *DaemonServer) ProvisionTenant(ctx context.Context, req *ProvisionTenantRequest) (*ProvisionTenantResponse, error) {
+	if err := auth.RequireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if s.provisioner == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "provisioner not configured")
+	}
+
+	_, apiKey, err := s.provisioner.ProvisionTenant(
+		ctx,
+		req.TenantId,
+		req.DisplayName,
+		req.Tier,
+		req.OwnerEmail,
+		req.StripeCustomerId,
+		req.StripeSubId,
+	)
+	if err != nil {
+		s.logger.Error("failed to provision tenant", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to provision tenant: %v", err)
+	}
+
+	// Fetch the freshly-created tenant record for the response.
+	var tenantInfo *TenantInfo
+	if s.tenantService != nil {
+		if record, fetchErr := s.tenantService.GetTenant(ctx, req.TenantId); fetchErr == nil {
+			tenantInfo = tenantRecordToProto(record)
+		}
+	}
+
+	s.logger.Info("tenant provisioned via RPC", "tenant_id", req.TenantId)
+	return &ProvisionTenantResponse{Tenant: tenantInfo, ApiKey: apiKey}, nil
+}
+
+// GetProvisioningStatus queries the provisioning progress for a tenant.
+//
+// Returns codes.Unimplemented until the provisioner service has been wired.
+func (s *DaemonServer) GetProvisioningStatus(ctx context.Context, req *GetProvisioningStatusRequest) (*GetProvisioningStatusResponse, error) {
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if s.provisioner == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "provisioner not configured")
+	}
+
+	provStatus, steps, err := s.provisioner.GetProvisioningStatus(ctx, req.TenantId)
+	if err != nil {
+		s.logger.Error("failed to get provisioning status", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to get provisioning status: %v", err)
+	}
+
+	protoSteps := make([]*ProvisionStep, 0, len(steps))
+	for _, step := range steps {
+		protoSteps = append(protoSteps, &ProvisionStep{
+			Name:      step.Name,
+			Status:    step.Status,
+			Error:     step.Error,
+			Timestamp: step.Timestamp,
+		})
+	}
+
+	return &GetProvisioningStatusResponse{
+		TenantId: req.TenantId,
+		Status:   provStatus,
+		Steps:    protoSteps,
+	}, nil
+}
+
+// DeprovisionTenant tears down all resources associated with a tenant.
+//
+// Requires the "admin" role.  Returns codes.Unimplemented until the provisioner
+// service has been wired.
+func (s *DaemonServer) DeprovisionTenant(ctx context.Context, req *DeprovisionTenantRequest) (*DeprovisionTenantResponse, error) {
+	if err := auth.RequireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if s.provisioner == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "provisioner not configured")
+	}
+
+	if err := s.provisioner.DeprovisionTenant(ctx, req.TenantId); err != nil {
+		s.logger.Error("failed to deprovision tenant", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to deprovision tenant: %v", err)
+	}
+
+	s.logger.Info("tenant deprovisioned via RPC", "tenant_id", req.TenantId)
+	return &DeprovisionTenantResponse{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Billing RPCs
+// ---------------------------------------------------------------------------
+
+// UpdateTenantBilling updates billing fields (tier, Stripe IDs, billing alert)
+// on a tenant record.
+//
+// Requires the "admin" role.  Returns codes.Unimplemented until the billing
+// service has been wired.
+func (s *DaemonServer) UpdateTenantBilling(ctx context.Context, req *UpdateTenantBillingRequest) (*UpdateTenantBillingResponse, error) {
+	if err := auth.RequireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if s.billingStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "billing service not configured")
+	}
+
+	record, err := s.billingStore.UpdateBilling(ctx, req.TenantId, req.Tier, req.StripeCustomerId, req.StripeSubId, req.BillingAlert)
+	if err != nil {
+		s.logger.Error("failed to update tenant billing", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to update tenant billing: %v", err)
+	}
+
+	s.logger.Info("tenant billing updated via RPC", "tenant_id", req.TenantId)
+	return &UpdateTenantBillingResponse{Tenant: tenantRecordToProto(record)}, nil
+}
+
+// GetTenantBilling returns billing details and current usage metrics for a
+// tenant.
+//
+// Returns codes.Unimplemented until the billing service has been wired.
+func (s *DaemonServer) GetTenantBilling(ctx context.Context, req *GetTenantBillingRequest) (*GetTenantBillingResponse, error) {
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	if s.billingStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "billing service not configured")
+	}
+
+	tier, stripeCustomerID, billingAlert, usage, err := s.billingStore.GetBilling(ctx, req.TenantId)
+	if err != nil {
+		s.logger.Error("failed to get tenant billing", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to get tenant billing: %v", err)
+	}
+
+	return &GetTenantBillingResponse{
+		Tier:             tier,
+		StripeCustomerId: stripeCustomerID,
+		BillingAlert:     billingAlert,
+		Usage: &BillingUsage{
+			MissionsUsed:     usage.MissionsUsed,
+			MissionsLimit:    usage.MissionsLimit,
+			FindingsUsed:     usage.FindingsUsed,
+			FindingsLimit:    usage.FindingsLimit,
+			TeamMembers:      usage.TeamMembers,
+			TeamMembersLimit: usage.TeamMembersLimit,
+			ApiKeys:          usage.APIKeys,
+			ApiKeysLimit:     usage.APIKeysLimit,
+		},
+	}, nil
+}
+
+// GetTenantByStripeCustomerId resolves a Stripe customer ID to the tenant that
+// owns it, using the reverse-mapping index maintained by TenantService.
+func (s *DaemonServer) GetTenantByStripeCustomerId(ctx context.Context, req *GetTenantByStripeCustomerIdRequest) (*GetTenantByStripeCustomerIdResponse, error) {
+	if s.tenantService == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
+	}
+	if req.StripeCustomerId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "stripe_customer_id is required")
+	}
+	record, err := s.tenantService.GetTenantByStripeCustomer(ctx, req.StripeCustomerId)
+	if err != nil {
+		if errors.Is(err, component.ErrTenantNotFound) {
+			return nil, status_grpc.Errorf(codes.NotFound, "no tenant for stripe customer %q", req.StripeCustomerId)
+		}
+		s.logger.Error("failed to get tenant by stripe customer", "stripe_customer_id", req.StripeCustomerId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to get tenant by stripe customer: %v", err)
+	}
+	return &GetTenantByStripeCustomerIdResponse{
+		Tenant: tenantRecordToProto(record),
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding RPCs
+// ---------------------------------------------------------------------------
+
+// GetOnboardingState returns the current onboarding state for a tenant.
+//
+// Returns codes.Unimplemented until the onboarding service has been wired.
+func (s *DaemonServer) GetOnboardingState(ctx context.Context, req *GetOnboardingStateRequest) (*GetOnboardingStateResponse, error) {
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	// TODO: Wire to the onboarding service once the concrete type is available.
+	if s.onboardingStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "onboarding service not configured")
+	}
+
+	currentStep, completedSteps, setupTasks, completedAt, err := s.onboardingStore.GetState(ctx, req.TenantId)
+	if err != nil {
+		s.logger.Error("failed to get onboarding state", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to get onboarding state: %v", err)
+	}
+
+	return &GetOnboardingStateResponse{
+		CurrentStep:    currentStep,
+		CompletedSteps: completedSteps,
+		SetupTasks:     setupTasks,
+		CompletedAt:    completedAt,
+	}, nil
+}
+
+// UpdateOnboardingState advances or modifies the onboarding state for a tenant.
+//
+// Returns codes.Unimplemented until the onboarding service has been wired.
+func (s *DaemonServer) UpdateOnboardingState(ctx context.Context, req *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error) {
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	// TODO: Wire to the onboarding service once the concrete type is available.
+	if s.onboardingStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "onboarding service not configured")
+	}
+
+	if err := s.onboardingStore.UpdateState(ctx, req.TenantId, req.CurrentStep, req.CompletedSteps, req.SetupTasks); err != nil {
+		s.logger.Error("failed to update onboarding state", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to update onboarding state: %v", err)
+	}
+
+	s.logger.Info("onboarding state updated via RPC", "tenant_id", req.TenantId)
+	return &UpdateOnboardingStateResponse{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Invitation RPCs
+// ---------------------------------------------------------------------------
+
+// CreateInvitation issues a new team invitation for the caller's tenant.
+//
+// Requires the "admin" role.  Returns codes.Unimplemented until the invitation
+// service has been wired.
+func (s *DaemonServer) CreateInvitation(ctx context.Context, req *CreateInvitationRequest) (*CreateInvitationResponse, error) {
+	if err := auth.RequireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+
+	if req.Email == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "email is required")
+	}
+
+	// TODO: Wire to the invitation service once the concrete type is available.
+	if s.invitationStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "invitation service not configured")
+	}
+
+	tenantID := auth.TenantFromContext(ctx)
+	token, link, err := s.invitationStore.Create(ctx, tenantID, req.Email, req.Roles, req.Message, req.ExpiresInHours)
+	if err != nil {
+		s.logger.Error("failed to create invitation", "tenant_id", tenantID, "email", req.Email, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to create invitation: %v", err)
+	}
+
+	s.logger.Info("invitation created via RPC", "tenant_id", tenantID, "email", req.Email)
+	return &CreateInvitationResponse{Token: token, InvitationLink: link}, nil
+}
+
+// AcceptInvitation redeems an invitation token and adds the caller to the
+// tenant.
+//
+// Returns codes.Unimplemented until the invitation service has been wired.
+func (s *DaemonServer) AcceptInvitation(ctx context.Context, req *AcceptInvitationRequest) (*AcceptInvitationResponse, error) {
+	if req.Token == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "token is required")
+	}
+
+	// TODO: Wire to the invitation service once the concrete type is available.
+	if s.invitationStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "invitation service not configured")
+	}
+
+	tenantID, roles, err := s.invitationStore.Accept(ctx, req.Token, req.DisplayName)
+	if err != nil {
+		s.logger.Error("failed to accept invitation", "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to accept invitation: %v", err)
+	}
+
+	s.logger.Info("invitation accepted via RPC", "tenant_id", tenantID)
+	return &AcceptInvitationResponse{TenantId: tenantID, Roles: roles}, nil
+}
+
+// ListInvitations returns all invitations for the caller's tenant.
+//
+// Returns codes.Unimplemented until the invitation service has been wired.
+func (s *DaemonServer) ListInvitations(ctx context.Context, req *ListInvitationsRequest) (*ListInvitationsResponse, error) {
+	// TODO: Wire to the invitation service once the concrete type is available.
+	if s.invitationStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "invitation service not configured")
+	}
+
+	tenantID := auth.TenantFromContext(ctx)
+	records, total, err := s.invitationStore.List(ctx, tenantID, req.Page, req.Limit)
+	if err != nil {
+		s.logger.Error("failed to list invitations", "tenant_id", tenantID, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to list invitations: %v", err)
+	}
+
+	infos := make([]*InvitationInfo, 0, len(records))
+	for _, rec := range records {
+		infos = append(infos, &InvitationInfo{
+			Token:     rec.Token,
+			Email:     rec.Email,
+			Roles:     rec.Roles,
+			Status:    rec.Status,
+			InvitedBy: rec.InvitedBy,
+			CreatedAt: rec.CreatedAt,
+			ExpiresAt: rec.ExpiresAt,
+		})
+	}
+
+	return &ListInvitationsResponse{Invitations: infos, Total: total}, nil
+}
+
+// RevokeInvitation cancels a pending invitation by token.
+//
+// Requires the "admin" role.  Returns codes.Unimplemented until the invitation
+// service has been wired.
+func (s *DaemonServer) RevokeInvitation(ctx context.Context, req *RevokeInvitationRequest) (*RevokeInvitationResponse, error) {
+	if err := auth.RequireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+
+	if req.Token == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "token is required")
+	}
+
+	// TODO: Wire to the invitation service once the concrete type is available.
+	if s.invitationStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "invitation service not configured")
+	}
+
+	tenantID := auth.TenantFromContext(ctx)
+	if err := s.invitationStore.Revoke(ctx, tenantID, req.Token); err != nil {
+		s.logger.Error("failed to revoke invitation", "tenant_id", tenantID, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to revoke invitation: %v", err)
+	}
+
+	s.logger.Info("invitation revoked via RPC", "tenant_id", tenantID)
+	return &RevokeInvitationResponse{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// API Key RPCs
+// ---------------------------------------------------------------------------
+
+// CreateAPIKey issues a new API key for a tenant.
+//
+// Requires the "admin" role.  Returns codes.Unimplemented until the API key
+// service has been wired.
+func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
+	if err := auth.RequireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	// TODO: Wire to the API key service once the concrete type is available.
+	if s.apiKeyStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "api key service not configured")
+	}
+
+	keyID, rawKey, err := s.apiKeyStore.Create(ctx, req.TenantId, req.AllowedKinds, req.AllowedNames)
+	if err != nil {
+		s.logger.Error("failed to create API key", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to create API key: %v", err)
+	}
+
+	s.logger.Info("API key created via RPC", "tenant_id", req.TenantId, "key_id", keyID)
+	return &CreateAPIKeyResponse{KeyId: keyID, RawKey: rawKey, TenantId: req.TenantId}, nil
+}
+
+// ListAPIKeys returns API key metadata for a tenant.  The raw key value is
+// never returned — only the key ID and non-sensitive metadata.
+//
+// Returns codes.Unimplemented until the API key service has been wired.
+func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest) (*ListAPIKeysResponse, error) {
+	if req.TenantId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	// TODO: Wire to the API key service once the concrete type is available.
+	if s.apiKeyStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "api key service not configured")
+	}
+
+	records, err := s.apiKeyStore.List(ctx, req.TenantId)
+	if err != nil {
+		s.logger.Error("failed to list API keys", "tenant_id", req.TenantId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to list API keys: %v", err)
+	}
+
+	keys := make([]*APIKeyInfo, 0, len(records))
+	for _, rec := range records {
+		keys = append(keys, &APIKeyInfo{
+			KeyId:        rec.KeyID,
+			TenantId:     rec.TenantID,
+			CreatedAt:    rec.CreatedAt,
+			LastUsedAt:   rec.LastUsedAt,
+			AllowedKinds: rec.AllowedKinds,
+			AllowedNames: rec.AllowedNames,
+		})
+	}
+
+	return &ListAPIKeysResponse{Keys: keys}, nil
+}
+
+// RevokeAPIKey permanently revokes an API key.
+//
+// Requires the "admin" role.  Returns codes.Unimplemented until the API key
+// service has been wired.
+func (s *DaemonServer) RevokeAPIKey(ctx context.Context, req *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error) {
+	if err := auth.RequireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+
+	if req.KeyId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "key_id is required")
+	}
+
+	// TODO: Wire to the API key service once the concrete type is available.
+	if s.apiKeyStore == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "api key service not configured")
+	}
+
+	if err := s.apiKeyStore.Revoke(ctx, req.KeyId); err != nil {
+		s.logger.Error("failed to revoke API key", "key_id", req.KeyId, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to revoke API key: %v", err)
+	}
+
+	s.logger.Info("API key revoked via RPC", "key_id", req.KeyId)
+	return &RevokeAPIKeyResponse{}, nil
 }

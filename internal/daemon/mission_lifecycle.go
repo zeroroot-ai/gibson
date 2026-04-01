@@ -79,7 +79,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			runLinker,
 			d.infrastructure,
 			d.infrastructure.otelStack,
-			NewOrchestratorEventBusAdapter(d.eventBus), // Pass eventBus for orchestration events
+			NewOrchestratorEventBusAdapterWithRedis(d.eventBus, d.redisEventStream, d.registryTenant), // Bridge events to Redis Streams
 		)
 
 		d.logger.Info(context.Background(), "mission manager initialized")

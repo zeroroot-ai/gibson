@@ -206,10 +206,20 @@ type daemonImpl struct {
 	// May be nil when no key provider is set (plugin access RPCs will return Unimplemented).
 	pluginAccessStore component.PluginAccessStore
 
+	// quotaManager enforces per-tenant resource quotas (missions, agents, memory).
+	// Initialized after stateClient is available. May be nil until then; quota
+	// enforcement is a no-op while nil.
+	quotaManager *component.QuotaManager
+
 	// redisToolRegistry discovers tools registered in Redis by K8s-deployed tool workers
 	// This is used by ListTools() to include Redis-based tools in addition to
 	// componentStore (CLI-installed) tools
 	redisToolRegistry redisToolDiscovery
+
+	// redisEventStream bridges the in-process EventBus to per-tenant Redis Streams.
+	// It is initialised after stateClient is available. May be nil before that;
+	// event publishing gracefully no-ops when nil.
+	redisEventStream *RedisEventStream
 
 	// startTime tracks when the daemon started
 	startTime time.Time
@@ -361,6 +371,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	}
 	d.stateClient = stateClient
 
+	// Initialize Redis event stream bridge for tenant-scoped event persistence.
+	d.redisEventStream = NewRedisEventStream(stateClient, d.logger.Slog())
+	d.logger.Info(ctx, "redis event stream initialized")
+
 	// Initialize Redis stores
 	d.missionStore = mission.NewRedisMissionStore(stateClient)
 	d.missionRunStore = mission.NewRedisMissionRunStore(stateClient)
@@ -448,6 +462,22 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		}
 	} else {
 		d.logger.Warn(ctx, "state client not available, component store not initialized")
+	}
+
+	// Initialize QuotaManager for per-tenant resource enforcement.
+	// The TenantScopedStore wraps stateClient so that all quota counters are
+	// automatically namespaced by tenant — no cross-tenant data leakage.
+	if d.stateClient != nil {
+		tenantStoreCfg := &state.TenantStoreConfig{
+			AuthMode:      d.config.Auth.Mode,
+			DefaultTenant: "default",
+			RequireTenant: d.config.Auth.Mode == "saas",
+		}
+		tenantStore := state.NewTenantScopedStore(d.stateClient, tenantStoreCfg)
+		d.quotaManager = component.NewQuotaManager(tenantStore, d.logger.Slog())
+		d.logger.Info(ctx, "quota manager initialized")
+	} else {
+		d.logger.Warn(ctx, "quota manager not initialized - state client unavailable")
 	}
 
 	// Initialize infrastructure components (DAG executor, finding store, LLM registry, harness factory)
@@ -650,7 +680,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			HarnessFactory:     d.infrastructure.harnessFactory,
 			Logger:             d.logger.WithComponent("orchestrator"),
 			Tracer:             tracer,
-			EventBus:           NewOrchestratorEventBusAdapter(d.eventBus),
+			EventBus:           NewOrchestratorEventBusAdapterWithRedis(d.eventBus, d.redisEventStream, d.registryTenant),
 			MaxIterations:      100,
 			MaxConcurrent:      10,
 			ThinkerMaxRetries:  3,
@@ -1000,12 +1030,27 @@ func (d *daemonImpl) status() (*DaemonStatus, error) {
 		RegistryType: "redis",
 		RegistryAddr: redisAddr,
 		CallbackAddr: d.callback.CallbackEndpoint(),
-		AgentCount:   0, // TODO: query from Redis component registry
+		AgentCount:   d.countRegisteredAgents(context.Background()),
 		MissionCount: totalMissions,
 		ActiveCount:  activeMissions,
 	}
 
 	return status, nil
+}
+
+// countRegisteredAgents returns the number of agent-kind components currently
+// registered in the component registry. Returns 0 on error or if the registry
+// is unavailable.
+func (d *daemonImpl) countRegisteredAgents(ctx context.Context) int {
+	if d.compRegistry == nil {
+		return 0
+	}
+	agents, err := d.compRegistry.DiscoverAll(ctx, d.registryTenant, "agent")
+	if err != nil {
+		d.logger.Warn(ctx, "failed to count registered agents", "error", err)
+		return 0
+	}
+	return len(agents)
 }
 
 // recoverRunningMissions handles crash recovery by transitioning any missions that were

@@ -133,11 +133,15 @@ func (c *DaemonMissionCheckpointer) CheckpointMission(ctx context.Context, missi
 		IsImplicit: true, // Auto-created during shutdown
 	}
 
-	// For graceful shutdown, we create a minimal checkpoint
+	// For graceful shutdown, we create a minimal checkpoint.
 	// The mission will need to restart from the beginning, but we preserve
-	// the mission metadata and can track that it was interrupted
-	// TODO: In a future enhancement, we could integrate with the orchestrator
-	// to get actual node state if the orchestrator supports mid-execution checkpoints
+	// the mission metadata and can track that it was interrupted.
+	// Orchestrator integration for mid-execution node state is pending: the
+	// orchestrator.Checkpoint struct is populated here with the mission ID and
+	// label; finer-grained node states will be added when the orchestrator
+	// exposes a RestoreFromCheckpoint callback.
+	c.logger.Debug(ctx, "creating graceful-shutdown checkpoint (node-level state pending orchestrator integration)",
+		"mission_id", missionID)
 
 	// Serialize checkpoint to JSON
 	checkpointJSON, err := json.Marshal(checkpoint)

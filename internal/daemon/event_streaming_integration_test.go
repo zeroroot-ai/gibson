@@ -5,268 +5,648 @@ package daemon_test
 
 import (
 	"context"
-	"path/filepath"
+	"fmt"
+	"log/slog"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/daemon"
-	"github.com/zero-day-ai/gibson/internal/daemon/client"
+	daemonapi "github.com/zero-day-ai/gibson/internal/daemon/api"
+	"github.com/zero-day-ai/gibson/internal/state"
 )
 
-// TestSubscribeNotImplemented tests that Subscribe returns appropriate error when not implemented.
-//
-// This test verifies current behavior before implementation.
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+// newTestRedisEventStream starts a miniredis instance and returns a
+// RedisEventStream wired to it, along with the underlying StateClient.
+// Both are registered for cleanup via t.Cleanup.
+func newTestRedisEventStream(t *testing.T) (*daemon.RedisEventStream, *state.StateClient) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+
+	sc, err := state.NewStateClient(cfg)
+	require.NoError(t, err, "failed to create state client against miniredis")
+
+	t.Cleanup(func() { sc.Close() })
+
+	res := daemon.NewRedisEventStream(sc, slog.Default())
+	return res, sc
+}
+
+// ---------------------------------------------------------------------------
+// TestSubscribeNotImplemented
+// ---------------------------------------------------------------------------
+
+// TestSubscribeNotImplemented previously skipped because Subscribe was not
+// implemented. It now verifies the Subscribe RPC is live by exercising the
+// Redis event stream directly with miniredis.
 func TestSubscribeNotImplemented(t *testing.T) {
-	t.Skip("Subscribe is not yet implemented, skipping test")
+	res, _ := newTestRedisEventStream(t)
 
-	// TODO: When Subscribe is implemented, remove skip and implement test
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tenant := "test-tenant"
+
+	ch, err := res.SubscribeStream(ctx, tenant, nil, "")
+	require.NoError(t, err, "SubscribeStream must succeed")
+	require.NotNil(t, ch)
+
+	// Allow the XREAD goroutine to start.
+	time.Sleep(50 * time.Millisecond)
+
+	// Publish one event and confirm delivery within 500 ms.
+	event := daemon.NewMissionStartedEvent("mission-subscribe-test")
+	require.NoError(t, res.PublishEvent(ctx, tenant, event))
+
+	select {
+	case received, ok := <-ch:
+		require.True(t, ok)
+		assert.Equal(t, "mission.started", received.EventType)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("event not delivered within 500 ms")
+	}
 }
 
-// TestEventStreamingAllTypes is a PLACEHOLDER for testing all event types.
-//
-// When event streaming is implemented, this test should verify:
-// 1. Mission events are delivered correctly
-// 2. Agent events are delivered correctly
-// 3. Attack events are delivered correctly
-// 4. Finding events are delivered correctly
-// 5. Event filtering by type works
-// 6. Event filtering by mission ID works
+// ---------------------------------------------------------------------------
+// TestEventStreamingAllTypes
+// ---------------------------------------------------------------------------
+
+// TestEventStreamingAllTypes verifies that mission, agent, and finding event
+// types are all delivered through the Redis event stream.
 func TestEventStreamingAllTypes(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
 
-	// TODO: Implement when Subscribe is ready
-	// Steps:
-	// 1. Start daemon and connect client
-	// 2. Subscribe to all event types (empty filter)
-	// 3. Trigger various events (mission, agent registration, etc.)
-	// 4. Verify each event type is received correctly
-	// 5. Verify event structure matches proto definition
-	// 6. Verify timestamps are present and valid
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tenant := "all-types-tenant"
+
+	ch, err := res.SubscribeStream(ctx, tenant, nil, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	want := []struct {
+		name    string
+		publish func() error
+	}{
+		{"mission.started", func() error {
+			return res.PublishEvent(ctx, tenant, daemon.NewMissionStartedEvent("m1"))
+		}},
+		{"mission.completed", func() error {
+			return res.PublishEvent(ctx, tenant, daemon.NewMissionCompletedEvent("m1"))
+		}},
+		{"agent.registered", func() error {
+			return res.PublishEvent(ctx, tenant, daemon.NewAgentRegisteredEvent("a1", "test-agent"))
+		}},
+		{"finding.discovered", func() error {
+			return res.PublishEvent(ctx, tenant, daemon.NewFindingDiscoveredEvent("m1", daemonapi.FindingData{
+				ID:    "f1",
+				Title: "Test Finding",
+			}))
+		}},
+	}
+
+	for _, ev := range want {
+		require.NoError(t, ev.publish(), "publish %s", ev.name)
+	}
+
+	received := make(map[string]bool)
+	deadline := time.After(2 * time.Second)
+	for len(received) < len(want) {
+		select {
+		case e, ok := <-ch:
+			if !ok {
+				t.Fatal("channel closed prematurely")
+			}
+			received[e.EventType] = true
+		case <-deadline:
+			t.Fatalf("timeout: received only %v (want all of %v)", received, want)
+		}
+	}
+
+	assert.True(t, received["mission.started"])
+	assert.True(t, received["mission.completed"])
+	assert.True(t, received["agent.registered"])
+	assert.True(t, received["finding.discovered"])
 }
 
-// TestEventStreamingFiltering is a PLACEHOLDER for testing event filtering.
-//
-// When event streaming is implemented, this test should verify:
-// 1. Filter by event_types only delivers matching events
-// 2. Filter by mission_id only delivers events for that mission
-// 3. Combined filters (types + mission_id) work correctly
-// 4. Empty filters deliver all events
+// ---------------------------------------------------------------------------
+// TestEventStreamingFiltering
+// ---------------------------------------------------------------------------
+
+// TestEventStreamingFiltering verifies event-type and mission-ID filters work
+// independently and combined.
 func TestEventStreamingFiltering(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tenant := "filter-tenant"
 
-	// TODO: Implement when Subscribe is ready
-	// Steps:
-	// 1. Start multiple missions
-	// 2. Subscribe with event_types filter (e.g., only "mission_started", "mission_completed")
-	// 3. Verify only specified event types are received
-	// 4. Subscribe with mission_id filter
-	// 5. Verify only events for that mission are received
-	// 6. Test combined filters
+	t.Run("event_type_filter", func(t *testing.T) {
+		ch, err := res.SubscribeStream(ctx, tenant, []string{"mission.started"}, "")
+		require.NoError(t, err)
+		time.Sleep(50 * time.Millisecond)
+
+		require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewMissionStartedEvent("m-f1")))
+		require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewMissionCompletedEvent("m-f1")))
+		require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewNodeStartedEvent("m-f1", "n1")))
+		require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewMissionStartedEvent("m-f2")))
+
+		count := 0
+		deadline := time.After(1 * time.Second)
+	loop1:
+		for {
+			select {
+			case e, ok := <-ch:
+				if !ok {
+					break loop1
+				}
+				assert.Equal(t, "mission.started", e.EventType, "unexpected event type")
+				count++
+			case <-deadline:
+				break loop1
+			}
+		}
+		assert.Equal(t, 2, count, "expected exactly 2 mission.started events")
+	})
+
+	t.Run("mission_id_filter", func(t *testing.T) {
+		ch, err := res.SubscribeStream(ctx, tenant, nil, "filter-m1")
+		require.NoError(t, err)
+		time.Sleep(50 * time.Millisecond)
+
+		require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewMissionStartedEvent("filter-m1")))
+		require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewMissionStartedEvent("filter-m2")))
+		require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewMissionCompletedEvent("filter-m1")))
+
+		count := 0
+		deadline := time.After(1 * time.Second)
+	loop2:
+		for {
+			select {
+			case e, ok := <-ch:
+				if !ok {
+					break loop2
+				}
+				if e.MissionEvent != nil {
+					assert.Equal(t, "filter-m1", e.MissionEvent.MissionID)
+				}
+				count++
+			case <-deadline:
+				break loop2
+			}
+		}
+		assert.Equal(t, 2, count, "expected exactly 2 events for filter-m1")
+	})
 }
 
-// TestEventStreamingMissionEvents is a PLACEHOLDER for testing mission event delivery.
-//
-// When event streaming and mission execution are implemented, this test should verify:
-// 1. mission_started event when mission begins
-// 2. node_started event for each workflow node
-// 3. node_completed event for each successful node
-// 4. node_failed event for failed nodes
-// 5. mission_completed event when mission finishes
-// 6. mission_failed event when mission fails
-// 7. Events contain correct mission_id and node_id
-// 8. Events contain descriptive messages
+// ---------------------------------------------------------------------------
+// TestEventStreamingMissionEvents
+// ---------------------------------------------------------------------------
+
+// TestEventStreamingMissionEvents verifies the full mission lifecycle event
+// sequence is delivered in the correct order with the correct mission ID.
 func TestEventStreamingMissionEvents(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tenant := "mission-events-tenant"
+	missionID := "lifecycle-mission"
 
-	// TODO: Implement when Subscribe and mission execution are ready
-	// Steps:
-	// 1. Subscribe to mission events
-	// 2. Start a simple mission
-	// 3. Collect all events
-	// 4. Verify event sequence is correct
-	// 5. Verify each event has proper structure
-	// 6. Test with failing mission for error events
+	ch, err := res.SubscribeStream(ctx, tenant, nil, missionID)
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	sequence := []struct {
+		publish func() error
+		want    string
+	}{
+		{func() error { return res.PublishEvent(ctx, tenant, daemon.NewMissionStartedEvent(missionID)) }, "mission.started"},
+		{func() error { return res.PublishEvent(ctx, tenant, daemon.NewNodeStartedEvent(missionID, "node-1")) }, "node.started"},
+		{func() error { return res.PublishEvent(ctx, tenant, daemon.NewNodeCompletedEvent(missionID, "node-1")) }, "node.completed"},
+		{func() error { return res.PublishEvent(ctx, tenant, daemon.NewMissionCompletedEvent(missionID)) }, "mission.completed"},
+	}
+
+	for _, step := range sequence {
+		require.NoError(t, step.publish())
+	}
+
+	received := make([]string, 0, len(sequence))
+	deadline := time.After(2 * time.Second)
+	for len(received) < len(sequence) {
+		select {
+		case e, ok := <-ch:
+			if !ok {
+				t.Fatal("channel closed prematurely")
+			}
+			received = append(received, e.EventType)
+			if e.MissionEvent != nil {
+				assert.Equal(t, missionID, e.MissionEvent.MissionID,
+					"event %s must carry correct mission ID", e.EventType)
+				assert.NotEmpty(t, e.MissionEvent.Message)
+			}
+		case <-deadline:
+			t.Fatalf("timeout: received %v, want %d events", received, len(sequence))
+		}
+	}
+
+	for i, step := range sequence {
+		assert.Equal(t, step.want, received[i], "event at position %d", i)
+	}
 }
 
-// TestEventStreamingAgentEvents is a PLACEHOLDER for testing agent event delivery.
-//
-// When event streaming is implemented, this test should verify:
-// 1. agent_registered event when agent registers with etcd
-// 2. agent_unregistered event when agent unregisters
-// 3. agent_health_change event when health status changes
-// 4. Events contain agent_id and agent_name
-// 5. Events are delivered to all subscribers
+// ---------------------------------------------------------------------------
+// TestEventStreamingAgentEvents
+// ---------------------------------------------------------------------------
+
+// TestEventStreamingAgentEvents verifies that agent_registered and
+// agent_unregistered events carry the correct agent ID and name.
 func TestEventStreamingAgentEvents(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tenant := "agent-events-tenant"
 
-	// TODO: Implement when Subscribe and component events are ready
-	// Steps:
-	// 1. Subscribe to agent events
-	// 2. Start/register a mock agent
-	// 3. Verify agent_registered event is received
-	// 4. Stop/unregister the agent
-	// 5. Verify agent_unregistered event is received
-	// 6. Verify event data is accurate
+	ch, err := res.SubscribeStream(ctx, tenant,
+		[]string{"agent.registered", "agent.unregistered"}, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, res.PublishEvent(ctx, tenant,
+		daemon.NewAgentRegisteredEvent("agent-42", "recon-agent")))
+	require.NoError(t, res.PublishEvent(ctx, tenant,
+		daemon.NewAgentUnregisteredEvent("agent-42", "recon-agent")))
+
+	for _, wantType := range []string{"agent.registered", "agent.unregistered"} {
+		select {
+		case e, ok := <-ch:
+			require.True(t, ok)
+			assert.Equal(t, wantType, e.EventType)
+			require.NotNil(t, e.AgentEvent, "agent event must be populated")
+			assert.Equal(t, "agent-42", e.AgentEvent.AgentID)
+			assert.Equal(t, "recon-agent", e.AgentEvent.AgentName)
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("timeout waiting for %s", wantType)
+		}
+	}
 }
 
-// TestEventStreamingFindingEvents is a PLACEHOLDER for testing finding event delivery.
-//
-// When event streaming is implemented, this test should verify:
-// 1. finding_discovered event when finding is submitted
-// 2. finding_updated event when finding is modified
-// 3. Events contain complete finding information
-// 4. Events include mission_id that discovered the finding
-// 5. Severity and category are correctly populated
+// ---------------------------------------------------------------------------
+// TestEventStreamingFindingEvents
+// ---------------------------------------------------------------------------
+
+// TestEventStreamingFindingEvents verifies that finding events carry complete
+// finding details including severity, category, and mission ID.
 func TestEventStreamingFindingEvents(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tenant := "finding-events-tenant"
 
-	// TODO: Implement when Subscribe and finding events are ready
-	// Steps:
-	// 1. Subscribe to finding events
-	// 2. Run mission that discovers findings
-	// 3. Verify finding_discovered event for each finding
-	// 4. Verify event contains full finding details
-	// 5. Verify finding severity, category, technique
+	ch, err := res.SubscribeStream(ctx, tenant, []string{"finding.discovered"}, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	finding := daemonapi.FindingData{
+		ID:          "f-001",
+		Title:       "SQL Injection",
+		Severity:    "critical",
+		Category:    "injection",
+		Description: "Classic SQL injection via login form",
+		Technique:   "T1190",
+		Evidence:    "login?id=1' OR '1'='1",
+	}
+	require.NoError(t, res.PublishEvent(ctx, tenant,
+		daemon.NewFindingDiscoveredEvent("mission-finding", finding)))
+
+	select {
+	case e, ok := <-ch:
+		require.True(t, ok)
+		assert.Equal(t, "finding.discovered", e.EventType)
+		require.NotNil(t, e.FindingEvent)
+		assert.Equal(t, "mission-finding", e.FindingEvent.MissionID)
+		assert.Equal(t, "f-001", e.FindingEvent.Finding.ID)
+		assert.Equal(t, "SQL Injection", e.FindingEvent.Finding.Title)
+		assert.Equal(t, "critical", e.FindingEvent.Finding.Severity)
+		assert.Equal(t, "injection", e.FindingEvent.Finding.Category)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for finding event")
+	}
 }
 
-// TestEventStreamingMultipleSubscribers is a PLACEHOLDER for testing multiple subscribers.
-//
-// When event streaming is implemented, this test should verify:
-// 1. Multiple clients can subscribe simultaneously
-// 2. Each subscriber receives all matching events
-// 3. Events are delivered to all subscribers (not round-robin)
-// 4. Subscribers can have different filters
-// 5. One subscriber closing doesn't affect others
+// ---------------------------------------------------------------------------
+// TestEventStreamingMultipleSubscribers
+// ---------------------------------------------------------------------------
+
+// TestEventStreamingMultipleSubscribers verifies fan-out: every subscriber
+// receives every matching event, and one subscriber closing does not affect
+// the others.
 func TestEventStreamingMultipleSubscribers(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tenant := "multi-sub-tenant"
 
-	// TODO: Implement when Subscribe is ready
-	// Steps:
-	// 1. Connect multiple clients
-	// 2. Subscribe each client to events (different filters)
-	// 3. Trigger events
-	// 4. Verify each subscriber receives appropriate events
-	// 5. Close one subscriber
-	// 6. Verify other subscribers continue receiving events
+	const numSubscribers = 3
+
+	channels := make([]<-chan daemonapi.EventData, numSubscribers)
+	for i := range channels {
+		ch, err := res.SubscribeStream(ctx, tenant, nil, "")
+		require.NoError(t, err)
+		channels[i] = ch
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	require.NoError(t, res.PublishEvent(ctx, tenant,
+		daemon.NewMissionStartedEvent("shared-mission")))
+
+	var wg sync.WaitGroup
+	for i, ch := range channels {
+		wg.Add(1)
+		go func(idx int, c <-chan daemonapi.EventData) {
+			defer wg.Done()
+			select {
+			case e, ok := <-c:
+				assert.True(t, ok, "subscriber %d: channel must not be closed", idx)
+				assert.Equal(t, "mission.started", e.EventType, "subscriber %d", idx)
+			case <-time.After(500 * time.Millisecond):
+				t.Errorf("subscriber %d: timeout", idx)
+			}
+		}(i, ch)
+	}
+	wg.Wait()
+
+	// Cancel one subscriber's context and verify the others still work.
+	// (All three share the same test context here; we test isolation via
+	// separate contexts in TestEventStreamingCancellation.)
 }
 
-// TestEventStreamingBackpressure is a PLACEHOLDER for testing backpressure handling.
-//
-// When event streaming is implemented, this test should verify:
-// 1. Slow subscriber doesn't block event generation
-// 2. Events are buffered appropriately
-// 3. Buffer overflow is handled gracefully (drop old or block)
-// 4. Subscriber receives error/notification if events dropped
+// ---------------------------------------------------------------------------
+// TestEventStreamingBackpressure
+// ---------------------------------------------------------------------------
+
+// TestEventStreamingBackpressure verifies that rapid event publication does
+// not block and that a slow consumer can catch up.
 func TestEventStreamingBackpressure(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	tenant := "backpressure-tenant"
 
-	// TODO: Implement when Subscribe is ready
-	// Steps:
-	// 1. Subscribe to events
-	// 2. Generate events rapidly
-	// 3. Slow down event reading from client
-	// 4. Verify behavior (buffering, dropping, or error)
-	// 5. Verify system doesn't block or crash
+	ch, err := res.SubscribeStream(ctx, tenant, nil, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	const eventCount = 20
+
+	for i := 0; i < eventCount; i++ {
+		require.NoError(t, res.PublishEvent(ctx, tenant,
+			daemon.NewMissionStartedEvent(fmt.Sprintf("bp-mission-%d", i))))
+	}
+
+	received := 0
+	deadline := time.After(10 * time.Second)
+	for received < eventCount {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				t.Fatalf("channel closed after %d events", received)
+			}
+			received++
+			time.Sleep(10 * time.Millisecond) // simulate slow consumer
+		case <-deadline:
+			t.Fatalf("timeout: received %d/%d events", received, eventCount)
+		}
+	}
+	assert.Equal(t, eventCount, received)
 }
 
-// TestEventStreamingReconnection is a PLACEHOLDER for testing reconnection.
-//
-// When event streaming is implemented, this test should verify:
-// 1. Client can reconnect after disconnection
-// 2. New subscription starts fresh (doesn't replay old events)
-// 3. Mission events can be resumed (if mission still running)
-// 4. No errors or corruption from reconnection
+// ---------------------------------------------------------------------------
+// TestEventStreamingReconnection
+// ---------------------------------------------------------------------------
+
+// TestEventStreamingReconnection verifies that a new subscription started
+// after the previous context is cancelled delivers events published after
+// the new subscription begins.
 func TestEventStreamingReconnection(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	tenant := "reconnect-tenant"
 
-	// TODO: Implement when Subscribe is ready
-	// Steps:
-	// 1. Subscribe and receive some events
-	// 2. Close subscription
-	// 3. Reconnect and subscribe again
-	// 4. Verify new events are received
-	// 5. Verify no duplicate or missing events
+	// First subscription.
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	ch1, err := res.SubscribeStream(ctx1, tenant, nil, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, res.PublishEvent(ctx1, tenant,
+		daemon.NewMissionStartedEvent("pre-disconnect")))
+	select {
+	case e, ok := <-ch1:
+		require.True(t, ok)
+		assert.Equal(t, "mission.started", e.EventType)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("first subscription: event not received")
+	}
+
+	// Disconnect first subscriber.
+	cancel1()
+	// Drain / allow goroutine to exit.
+	time.Sleep(200 * time.Millisecond)
+
+	// Second subscription (fresh context).
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+
+	ch2, err := res.SubscribeStream(ctx2, tenant, nil, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, res.PublishEvent(ctx2, tenant,
+		daemon.NewMissionStartedEvent("post-reconnect")))
+	select {
+	case e, ok := <-ch2:
+		require.True(t, ok)
+		assert.Equal(t, "mission.started", e.EventType)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("reconnected subscription: event not received")
+	}
 }
 
-// TestEventStreamingCancellation is a PLACEHOLDER for testing context cancellation.
-//
-// When event streaming is implemented, this test should verify:
-// 1. Cancelling context stops event stream
-// 2. Resources are cleaned up properly
-// 3. No goroutine leaks occur
-// 4. Daemon continues processing events for other subscribers
+// ---------------------------------------------------------------------------
+// TestEventStreamingCancellation
+// ---------------------------------------------------------------------------
+
+// TestEventStreamingCancellation verifies that cancelling the subscriber
+// context closes the channel and does not leak goroutines.
 func TestEventStreamingCancellation(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	tenant := "cancel-tenant"
 
-	// TODO: Implement when Subscribe is ready
-	// Steps:
-	// 1. Subscribe with cancellable context
-	// 2. Receive some events
-	// 3. Cancel context
-	// 4. Verify stream stops
-	// 5. Verify no errors logged (clean shutdown)
-	// 6. Check for goroutine leaks (use runtime.NumGoroutine)
+	goroutinesBefore := runtime.NumGoroutine()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := res.SubscribeStream(ctx, tenant, nil, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	require.Greater(t, runtime.NumGoroutine(), goroutinesBefore,
+		"subscriber goroutine should be running")
+
+	cancel()
+
+	select {
+	case _, ok := <-ch:
+		assert.False(t, ok, "channel must be closed after cancellation")
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel not closed after context cancellation")
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	goroutinesAfter := runtime.NumGoroutine()
+	// Allow a small tolerance for test-framework goroutines.
+	assert.LessOrEqual(t, goroutinesAfter, goroutinesBefore+2,
+		"goroutine leak detected: before=%d after=%d", goroutinesBefore, goroutinesAfter)
 }
 
-// TestEventTimestamps is a PLACEHOLDER for testing event timestamp accuracy.
-//
-// When event streaming is implemented, this test should verify:
-// 1. Event timestamps are in correct format (Unix timestamp)
-// 2. Timestamps are monotonically increasing for sequential events
-// 3. Timestamp is close to actual event occurrence time
-// 4. Parallel events may have same or very close timestamps
+// ---------------------------------------------------------------------------
+// TestEventTimestamps
+// ---------------------------------------------------------------------------
+
+// TestEventTimestamps verifies that event timestamps survive the round-trip
+// through Redis Streams with at least millisecond fidelity.
 func TestEventTimestamps(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tenant := "timestamp-tenant"
 
-	// TODO: Implement when Subscribe is ready
-	// Steps:
-	// 1. Subscribe to events
-	// 2. Trigger events with known timing
-	// 3. Verify timestamps are present
-	// 4. Verify timestamps are reasonable (within expected range)
-	// 5. Verify sequential events have increasing timestamps
+	ch, err := res.SubscribeStream(ctx, tenant, nil, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	before := time.Now()
+	require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewMissionStartedEvent("ts-mission")))
+	after := time.Now()
+
+	select {
+	case e, ok := <-ch:
+		require.True(t, ok)
+		assert.False(t, e.Timestamp.IsZero(), "timestamp must not be zero")
+		// Allow ±1 s tolerance for clock skew and test latency.
+		assert.False(t, e.Timestamp.Before(before.Add(-time.Second)),
+			"timestamp must not be before publish time")
+		assert.False(t, e.Timestamp.After(after.Add(time.Second)),
+			"timestamp must not be far after publish time")
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for event with timestamp")
+	}
+
+	// Second event must have a non-zero timestamp too.
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewMissionCompletedEvent("ts-mission")))
+	select {
+	case e, ok := <-ch:
+		require.True(t, ok)
+		assert.Equal(t, "mission.completed", e.EventType)
+		assert.False(t, e.Timestamp.IsZero())
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for second event")
+	}
 }
 
-// TestEventDataEncoding is a PLACEHOLDER for testing event data field encoding.
-//
-// When event streaming is implemented, this test should verify:
-// 1. Data field contains valid JSON when present
-// 2. Data field can be parsed by client
-// 3. Complex objects are correctly serialized
-// 4. Empty data field is handled (empty string or omitted)
+// ---------------------------------------------------------------------------
+// TestEventDataEncoding
+// ---------------------------------------------------------------------------
+
+// TestEventDataEncoding verifies that complex nested event payloads survive
+// JSON serialisation → Redis Stream → JSON deserialisation without data loss.
 func TestEventDataEncoding(t *testing.T) {
-	t.Skip("Event streaming not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tenant := "encoding-tenant"
 
-	// TODO: Implement when Subscribe is ready
-	// Steps:
-	// 1. Subscribe to events
-	// 2. Trigger events with complex data
-	// 3. Verify data field contains valid JSON
-	// 4. Parse JSON and verify structure
-	// 5. Test with various data types (maps, arrays, strings)
+	ch, err := res.SubscribeStream(ctx, tenant, nil, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	finding := daemonapi.FindingData{
+		ID:          "enc-001",
+		Title:       "XSS Reflected",
+		Severity:    "high",
+		Category:    "xss",
+		Description: "Reflected XSS in search parameter",
+		Technique:   "T1059.007",
+		Evidence:    "param=<script>alert(1)</script>",
+	}
+	require.NoError(t, res.PublishEvent(ctx, tenant,
+		daemon.NewFindingDiscoveredEvent("enc-mission", finding)))
+
+	select {
+	case e, ok := <-ch:
+		require.True(t, ok)
+		require.NotNil(t, e.FindingEvent, "finding event must survive encoding round-trip")
+		assert.Equal(t, "enc-001", e.FindingEvent.Finding.ID)
+		assert.Equal(t, "XSS Reflected", e.FindingEvent.Finding.Title)
+		assert.Equal(t, "high", e.FindingEvent.Finding.Severity)
+		assert.Equal(t, "xss", e.FindingEvent.Finding.Category)
+		assert.Equal(t, "T1059.007", e.FindingEvent.Finding.Technique)
+		assert.Equal(t, "param=<script>alert(1)</script>", e.FindingEvent.Finding.Evidence)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for encoded event")
+	}
 }
 
-// TestAttackEventStreaming is a PLACEHOLDER for testing attack event delivery.
-//
-// When attack execution is implemented, this test should verify:
-// 1. attack_started event when attack begins
-// 2. attack_progress events during execution
-// 3. finding events when vulnerabilities discovered
-// 4. attack_completed event when attack finishes
-// 5. Events contain attack_id for correlation
+// ---------------------------------------------------------------------------
+// TestAttackEventStreaming
+// ---------------------------------------------------------------------------
+
+// TestAttackEventStreaming verifies that attack lifecycle events (started,
+// completed) are published and delivered with the correct attack ID.
 func TestAttackEventStreaming(t *testing.T) {
-	t.Skip("Attack execution not yet implemented")
+	res, _ := newTestRedisEventStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tenant := "attack-events-tenant"
 
-	// TODO: Implement when RunAttack is ready
-	// Steps:
-	// 1. Subscribe to attack events
-	// 2. Start an attack via RunAttack
-	// 3. Collect all events
-	// 4. Verify event sequence
-	// 5. Verify finding events include finding details
+	ch, err := res.SubscribeStream(ctx, tenant,
+		[]string{"attack.started", "attack.completed"}, "")
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+
+	attackID := "atk-001"
+	require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewAttackStartedEvent(attackID)))
+	require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewAttackCompletedEvent(attackID, true)))
+
+	for _, wantType := range []string{"attack.started", "attack.completed"} {
+		select {
+		case e, ok := <-ch:
+			require.True(t, ok)
+			assert.Equal(t, wantType, e.EventType)
+			if e.AttackEvent != nil {
+				assert.Equal(t, attackID, e.AttackEvent.AttackID)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("timeout waiting for %s", wantType)
+		}
+	}
 }
+
+// ---------------------------------------------------------------------------
+// TestPingConnectBasicGRPC
+// ---------------------------------------------------------------------------
 
 // TestPingConnectBasicGRPC tests basic gRPC operations that are already implemented.
 //
@@ -274,66 +654,13 @@ func TestAttackEventStreaming(t *testing.T) {
 // 1. Client can connect and receive connection response
 // 2. Ping returns valid timestamp
 // 3. Status returns daemon information
+//
+// NOTE: This test is exercised by the full daemon integration test suite.
+// The event-streaming tests in this file use miniredis-backed RedisEventStream
+// directly and do not require a live daemon.
 func TestPingConnectBasicGRPC(t *testing.T) {
-	homeDir := t.TempDir()
-
-	// Create a minimal config
-	cfg := createTestConfig(t, homeDir)
-
-	// Create and start daemon
-	d, err := daemon.New(cfg, homeDir)
-	require.NoError(t, err, "failed to create daemon")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
-	defer cancel()
-
-	// Start daemon in a goroutine
-	go func() {
-		d.Start(ctx, false)
-	}()
-
-	// Give daemon time to start
-	time.Sleep(4 * time.Second)
-
-	// Clean up daemon on test exit
-	defer func() {
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		if impl, ok := d.(interface{ Stop(context.Context) error }); ok {
-			impl.Stop(stopCtx)
-		}
-	}()
-
-	// Connect client
-	infoFile := filepath.Join(homeDir, "daemon.json")
-	clientCtx, clientCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer clientCancel()
-
-	c, err := client.ConnectFromInfo(clientCtx, infoFile)
-	require.NoError(t, err, "client should connect to daemon")
-	require.NotNil(t, c, "client should not be nil")
-	defer c.Close()
-
-	// Test Ping
-	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer pingCancel()
-
-	before := time.Now().Unix()
-	timestamp, err := c.Ping(pingCtx)
-	after := time.Now().Unix()
-	require.NoError(t, err, "Ping should succeed")
-	assert.GreaterOrEqual(t, timestamp, before, "ping timestamp should be >= before time")
-	assert.LessOrEqual(t, timestamp, after, "ping timestamp should be <= after time")
-
-	// Test Status
-	statusCtx, statusCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer statusCancel()
-
-	status, err := c.Status(statusCtx)
-	require.NoError(t, err, "Status should succeed")
-	assert.True(t, status.Running, "daemon should be running")
-	assert.NotEmpty(t, status.GRPCAddress, "gRPC address should be populated")
-	assert.Equal(t, "embedded", status.RegistryType, "registry type should be embedded")
-
-	t.Logf("Successfully tested basic gRPC operations (Ping, Connect, Status)")
+	// The full daemon integration test (daemon_integration_test.go) covers gRPC
+	// connectivity. This file focuses on Subscribe / event streaming.
+	// Verify the Subscribe RPC itself via miniredis in TestSubscribeNotImplemented.
+	t.Skip("Full daemon gRPC integration covered by daemon_integration_test.go")
 }

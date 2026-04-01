@@ -158,13 +158,13 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 		// always carry tenant_id; OIDC tokens carry it via TenantClaim). If no
 		// tenant is found, deny access with PermissionDenied.
 		//
-		// Enterprise mode with API key identity: the key record carries the
-		// tenant_id in Claims, so extract it the same way as SaaS. This ensures
-		// API-key-authenticated requests are always scoped to the correct tenant
-		// even when no DefaultTenant is configured.
+		// Enterprise mode: attempt to extract tenant from identity claims for ALL
+		// identity types (API keys carry tenant_id in Claims; OIDC tokens carry it
+		// via TenantClaim). If no claim is present, fall back to DefaultTenant.
+		// This ensures OIDC-authenticated requests in enterprise mode are scoped to
+		// the correct tenant when the IdP embeds tenant_id in the token.
 		//
-		// Enterprise/dev mode with non-API-key identity: fall back to DefaultTenant
-		// if configured.
+		// Dev mode: fall back to DefaultTenant if configured.
 		if mode == "saas" {
 			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
 			if tenant == "" {
@@ -174,15 +174,15 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 				return nil, status.Error(grpccodes.PermissionDenied, "no tenant identifier found in token")
 			}
 			ctx = ContextWithTenant(ctx, tenant)
-		} else if mode == "enterprise" && identity.Issuer == apiKeyIssuer {
-			// API key identities carry tenant_id in claims regardless of mode.
-			// Extract and inject it so downstream handlers can scope data correctly.
+		} else if mode == "enterprise" {
+			// All identity types in enterprise mode attempt claim-based extraction,
+			// falling back to DefaultTenant when no claim is present.
 			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
 			if tenant != "" {
 				ctx = ContextWithTenant(ctx, tenant)
 			}
 		} else if cfg.DefaultTenant != "" {
-			// For enterprise/dev mode with non-API-key identity, inject default tenant if configured
+			// For dev mode, inject default tenant if configured.
 			ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
 			span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
 		}
@@ -319,13 +319,13 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 		// always carry tenant_id; OIDC tokens carry it via TenantClaim). If no
 		// tenant is found, deny access with PermissionDenied.
 		//
-		// Enterprise mode with API key identity: the key record carries the
-		// tenant_id in Claims, so extract it the same way as SaaS. This ensures
-		// API-key-authenticated requests are always scoped to the correct tenant
-		// even when no DefaultTenant is configured.
+		// Enterprise mode: attempt to extract tenant from identity claims for ALL
+		// identity types (API keys carry tenant_id in Claims; OIDC tokens carry it
+		// via TenantClaim). If no claim is present, fall back to DefaultTenant.
+		// This ensures OIDC-authenticated requests in enterprise mode are scoped to
+		// the correct tenant when the IdP embeds tenant_id in the token.
 		//
-		// Enterprise/dev mode with non-API-key identity: fall back to DefaultTenant
-		// if configured.
+		// Dev mode: fall back to DefaultTenant if configured.
 		if mode == "saas" {
 			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
 			if tenant == "" {
@@ -335,15 +335,15 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 				return status.Error(grpccodes.PermissionDenied, "no tenant identifier found in token")
 			}
 			ctx = ContextWithTenant(ctx, tenant)
-		} else if mode == "enterprise" && identity.Issuer == apiKeyIssuer {
-			// API key identities carry tenant_id in claims regardless of mode.
-			// Extract and inject it so downstream handlers can scope data correctly.
+		} else if mode == "enterprise" {
+			// All identity types in enterprise mode attempt claim-based extraction,
+			// falling back to DefaultTenant when no claim is present.
 			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
 			if tenant != "" {
 				ctx = ContextWithTenant(ctx, tenant)
 			}
 		} else if cfg.DefaultTenant != "" {
-			// For enterprise/dev mode with non-API-key identity, inject default tenant if configured
+			// For dev mode, inject default tenant if configured.
 			ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
 			span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
 		}

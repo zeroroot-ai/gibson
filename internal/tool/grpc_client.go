@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 // GRPCToolClient wraps a gRPC connection to implement the Tool interface.
@@ -49,12 +51,12 @@ func NewGRPCToolClient(endpoint string, opts ...grpc.DialOption) (*GRPCToolClien
 		opts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	}
 
-	// Dial the gRPC server
-	// Note: Using deprecated Dial for better compatibility with testing (bufconn)
-	//nolint:staticcheck // Dial provides better blocking behavior for connection establishment
-	conn, err := grpc.Dial(endpoint, opts...)
+	// Connect to the gRPC server. grpc.NewClient is non-blocking; the actual
+	// TCP connection is established lazily on the first RPC call. Connection
+	// failures are surfaced during GetDescriptor below rather than here.
+	conn, err := grpc.NewClient(endpoint, opts...)
 	if err != nil {
-		return nil, types.WrapError(ErrToolExecutionFailed, fmt.Sprintf("failed to dial gRPC endpoint %q", endpoint), err)
+		return nil, types.WrapError(ErrToolExecutionFailed, fmt.Sprintf("failed to create gRPC client for endpoint %q", endpoint), err)
 	}
 
 	// Create the ToolService client
@@ -70,11 +72,10 @@ func NewGRPCToolClient(endpoint string, opts ...grpc.DialOption) (*GRPCToolClien
 		return nil, types.WrapError(ErrToolExecutionFailed, "failed to get tool descriptor", err)
 	}
 
-	// TODO: Once SDK task 1.3 is complete and tool.proto has input_message_type/output_message_type fields,
-	// use descriptor.GetInputMessageType() and descriptor.GetOutputMessageType() instead.
-	// For now, default to google.protobuf.Struct as the proto interface.
-	inputMsgType := "google.protobuf.Struct"
-	outputMsgType := "google.protobuf.Struct"
+	// When SDK task 1.3 adds input_message_type/output_message_type to ToolDescriptor,
+	// call descriptor.GetInputMessageType() and descriptor.GetOutputMessageType() directly.
+	// Until then, fall back to google.protobuf.Struct so existing tools remain functional.
+	inputMsgType, outputMsgType := "google.protobuf.Struct", "google.protobuf.Struct"
 
 	return &GRPCToolClient{
 		name:              descriptor.GetName(),
@@ -201,4 +202,39 @@ func (c *GRPCToolClient) Close() error {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+// extractMessageTypes resolves the fully-qualified input and output proto message type
+// names from a FileDescriptorSet by scanning for messages whose names end in "Request"
+// and "Response". This is used during tool registration to populate inputMessageType and
+// outputMessageType when the ToolDescriptor proto does not yet carry those fields directly.
+//
+// The heuristic matches the Gibson convention that every tool defines exactly one
+// *Request message for input and one *Response message for output. If multiple
+// candidates are found the last one wins; callers should prefer the explicit
+// descriptor fields once task 1.3 adds them to tool.proto.
+//
+// Returns empty strings when fds is nil or no matching messages are found, in which
+// case the caller should fall back to google.protobuf.Struct.
+func extractMessageTypes(fds *descriptorpb.FileDescriptorSet, _ string) (inputType, outputType string) {
+	if fds == nil {
+		return
+	}
+	for _, fd := range fds.GetFile() {
+		pkg := fd.GetPackage()
+		for _, msg := range fd.GetMessageType() {
+			name := msg.GetName()
+			qualified := name
+			if pkg != "" {
+				qualified = pkg + "." + name
+			}
+			if strings.HasSuffix(name, "Request") {
+				inputType = qualified
+			}
+			if strings.HasSuffix(name, "Response") {
+				outputType = qualified
+			}
+		}
+	}
+	return
 }

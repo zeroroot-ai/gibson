@@ -99,19 +99,8 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 	}
 
 	// Register builtin tools - Phase 8
-	// These tools provide agent access to knowledge store and payload library
+	// These tools provide agent access to the payload library
 	builtinCount := 0
-
-	// Register knowledge_search tool
-	// Pass nil for knowledge store - the tool handles this gracefully by returning empty results
-	// The knowledge store will be wired in future phases
-	knowledgeTool := builtins.NewKnowledgeSearchTool(nil)
-	if err := toolRegistry.RegisterInternal(knowledgeTool); err != nil {
-		d.logger.Warn(ctx, "failed to register knowledge_search tool", "error", err.Error())
-	} else {
-		builtinCount++
-		d.logger.Debug(ctx, "registered builtin tool", "name", "knowledge_search", "status", "stub")
-	}
 
 	// Register payload_search tool
 	// Pass nil for payload registry - the tool handles this gracefully

@@ -753,6 +753,243 @@ func TestCheckLocalhostBypassWithAddr_NoPeer(t *testing.T) {
 	assert.Empty(t, addr)
 }
 
+// mockStreamHandlerWithCtx is a gRPC stream handler that captures the stream context.
+type mockStreamHandlerWithCtx struct {
+	called      bool
+	err         error
+	capturedCtx context.Context
+}
+
+func (m *mockStreamHandlerWithCtx) handle(srv any, stream grpc.ServerStream) error {
+	m.called = true
+	m.capturedCtx = stream.Context()
+	return m.err
+}
+
+// newOIDCIdentity builds an OIDC Identity with optional claims for use in tenant tests.
+func newOIDCIdentity(issuer string, claims map[string]any) *Identity {
+	return &Identity{
+		Identity: sdkauth.Identity{
+			Subject: "user@example.com",
+			Issuer:  issuer,
+			Email:   "user@example.com",
+			Claims:  claims,
+		},
+		Roles: []string{"developer"},
+	}
+}
+
+// newBearerContext wraps a background context with an "authorization: Bearer <token>" metadata header.
+func newBearerContext(token string) context.Context {
+	md := metadata.New(map[string]string{
+		"authorization": "Bearer " + token,
+	})
+	return metadata.NewIncomingContext(context.Background(), md)
+}
+
+// TestUnaryAuthInterceptor_EnterpriseTenantExtraction covers the five enterprise/saas
+// multi-tenancy scenarios introduced by the interceptor fix.
+func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
+	const oidcIssuer = "https://idp.example.com"
+
+	tests := []struct {
+		name          string
+		mode          string
+		identity      *Identity
+		tenantClaim   string
+		defaultTenant string
+		wantTenant    string
+		wantErr       bool
+	}{
+		{
+			// Scenario A: enterprise + OIDC WITH tenant claim → claim value wins.
+			name: "A: enterprise OIDC with tenant claim",
+			mode: "enterprise",
+			identity: newOIDCIdentity(oidcIssuer, map[string]any{
+				"tenant_id": "team-alpha",
+			}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "",
+			wantTenant:    "team-alpha",
+		},
+		{
+			// Scenario B: enterprise + OIDC WITHOUT tenant claim + DefaultTenant set → fallback.
+			name:          "B: enterprise OIDC without tenant claim, default tenant set",
+			mode:          "enterprise",
+			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "fallback-tenant",
+			wantTenant:    "fallback-tenant",
+		},
+		{
+			// Scenario C: enterprise + OIDC WITHOUT tenant claim + NO DefaultTenant → no tenant.
+			name:          "C: enterprise OIDC without tenant claim, no default",
+			mode:          "enterprise",
+			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "",
+			wantTenant:    "",
+		},
+		{
+			// Scenario D: enterprise + API key identity with tenant claim → claim value wins.
+			name: "D: enterprise API key with tenant claim",
+			mode: "enterprise",
+			identity: newOIDCIdentity(apiKeyIssuer, map[string]any{
+				"tenant_id": "api-tenant",
+			}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "",
+			wantTenant:    "api-tenant",
+		},
+		{
+			// Scenario E: saas mode with OIDC tenant claim → claim value (unchanged behaviour).
+			name: "E: saas OIDC with tenant claim",
+			mode: "saas",
+			identity: newOIDCIdentity(oidcIssuer, map[string]any{
+				"tenant_id": "saas-tenant",
+			}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "",
+			wantTenant:    "saas-tenant",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAuth := &mockAuthenticator{
+				authenticateFn: func(ctx context.Context, token string) (*Identity, error) {
+					return tt.identity, nil
+				},
+			}
+			cfg := &AuthConfig{
+				Mode:          tt.mode,
+				TenantClaim:   tt.tenantClaim,
+				DefaultTenant: tt.defaultTenant,
+			}
+			logger := slog.Default()
+
+			interceptor := UnaryAuthInterceptor(mockAuth, cfg, logger)
+
+			handler := &mockHandler{}
+			info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+			ctx := newBearerContext("test-token")
+
+			resp, err := interceptor(ctx, "request", info, handler.handle)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, resp)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, "response", resp)
+			assert.True(t, handler.called)
+
+			gotTenant := TenantFromContext(handler.capturedCtx)
+			assert.Equal(t, tt.wantTenant, gotTenant)
+		})
+	}
+}
+
+// TestStreamAuthInterceptor_EnterpriseTenantExtraction covers the enterprise/saas
+// multi-tenancy scenarios for streaming RPCs (mirrors the unary tests for scenarios A and B).
+func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
+	const oidcIssuer = "https://idp.example.com"
+
+	tests := []struct {
+		name          string
+		mode          string
+		identity      *Identity
+		tenantClaim   string
+		defaultTenant string
+		wantTenant    string
+	}{
+		{
+			// Scenario A (stream): enterprise + OIDC WITH tenant claim → claim value wins.
+			name: "A: enterprise OIDC with tenant claim",
+			mode: "enterprise",
+			identity: newOIDCIdentity(oidcIssuer, map[string]any{
+				"tenant_id": "team-alpha",
+			}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "",
+			wantTenant:    "team-alpha",
+		},
+		{
+			// Scenario B (stream): enterprise + OIDC WITHOUT tenant claim + DefaultTenant set.
+			name:          "B: enterprise OIDC without tenant claim, default tenant set",
+			mode:          "enterprise",
+			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "fallback-tenant",
+			wantTenant:    "fallback-tenant",
+		},
+		{
+			// Scenario C (stream): enterprise + OIDC WITHOUT tenant claim + NO DefaultTenant.
+			name:          "C: enterprise OIDC without tenant claim, no default",
+			mode:          "enterprise",
+			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "",
+			wantTenant:    "",
+		},
+		{
+			// Scenario D (stream): enterprise + API key identity.
+			name: "D: enterprise API key with tenant claim",
+			mode: "enterprise",
+			identity: newOIDCIdentity(apiKeyIssuer, map[string]any{
+				"tenant_id": "api-tenant",
+			}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "",
+			wantTenant:    "api-tenant",
+		},
+		{
+			// Scenario E (stream): saas mode with OIDC tenant claim.
+			name: "E: saas OIDC with tenant claim",
+			mode: "saas",
+			identity: newOIDCIdentity(oidcIssuer, map[string]any{
+				"tenant_id": "saas-tenant",
+			}),
+			tenantClaim:   "tenant_id",
+			defaultTenant: "",
+			wantTenant:    "saas-tenant",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAuth := &mockAuthenticator{
+				authenticateFn: func(ctx context.Context, token string) (*Identity, error) {
+					return tt.identity, nil
+				},
+			}
+			cfg := &AuthConfig{
+				Mode:          tt.mode,
+				TenantClaim:   tt.tenantClaim,
+				DefaultTenant: tt.defaultTenant,
+			}
+			logger := slog.Default()
+
+			interceptor := StreamAuthInterceptor(mockAuth, cfg, logger)
+
+			streamHandler := &mockStreamHandlerWithCtx{}
+			info := &grpc.StreamServerInfo{FullMethod: "/test.Service/StreamMethod"}
+			ctx := newBearerContext("stream-token")
+			stream := &mockServerStream{ctx: ctx}
+
+			err := interceptor(nil, stream, info, streamHandler.handle)
+
+			require.NoError(t, err)
+			assert.True(t, streamHandler.called)
+
+			gotTenant := TenantFromContext(streamHandler.capturedCtx)
+			assert.Equal(t, tt.wantTenant, gotTenant)
+		})
+	}
+}
+
 // TestToGRPCStatus tests error code mapping.
 func TestToGRPCStatus(t *testing.T) {
 	tests := []struct {

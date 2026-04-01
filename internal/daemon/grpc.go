@@ -15,11 +15,14 @@ import (
 	componentpb "github.com/zero-day-ai/sdk/api/gen/componentpb"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/attack"
+	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/component/build"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"google.golang.org/grpc"
 )
@@ -76,8 +79,58 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	srv := grpc.NewServer(serverOpts...)
 	d.grpcServer = srv
 
-	// Create and register daemon service
+	// Create and register daemon service.
+	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
+	if d.quotaManager != nil {
+		daemonSvc.WithQuotaManager(d.quotaManager)
+		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
+	}
+
+	// Wire TenantService, Provisioner, and BillingStore into DaemonServer.
+	// These enable tenant CRUD, provisioning, and billing RPCs respectively.
+	if d.stateClient != nil {
+		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
+			auditLogger := audit.NewAuditLogger(d.stateClient, d.logger.Slog())
+
+			tenantService := component.NewTenantService(redisClient, d.logger.Slog(), auditLogger)
+			if d.quotaManager != nil {
+				tenantService.WithQuotaManager(d.quotaManager)
+			}
+			daemonSvc.WithTenantService(tenantService)
+			d.logger.Info(ctx, "tenant service wired into DaemonServer")
+
+			// Create APIKeyAuthenticator for provisioner's key generation.
+			apiKeyAuth, akErr := auth.NewAPIKeyAuthenticator(redisClient)
+			if akErr != nil {
+				d.logger.Warn(ctx, "failed to create API key authenticator for provisioner", "error", akErr)
+			}
+
+			// Create and wire the Provisioner.
+			if apiKeyAuth != nil {
+				prov := provisioner.New(
+					redisClient,
+					&tenantCreatorAdapter{svc: tenantService},
+					&apiKeyCreatorAdapter{auth: apiKeyAuth},
+					nil,
+					d.logger.Slog(),
+				)
+				daemonSvc.WithProvisioner(prov)
+				d.logger.Info(ctx, "provisioner wired into DaemonServer")
+			} else {
+				d.logger.Warn(ctx, "provisioner not wired: API key authenticator unavailable")
+			}
+
+			// Wire BillingStore (composed from TenantService + QuotaManager).
+			daemonSvc.WithBillingStore(tenantService, d.quotaManager)
+			d.logger.Info(ctx, "billing store wired into DaemonServer")
+		} else {
+			d.logger.Warn(ctx, "tenant provisioning not wired: Redis client is not standalone mode")
+		}
+	} else {
+		d.logger.Warn(ctx, "tenant provisioning not wired: stateClient is nil")
+	}
+
 	api.RegisterDaemonServiceServer(srv, daemonSvc)
 
 	// Initialize and register the ComponentService on the same gRPC port.
@@ -90,25 +143,70 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	// The registry uses a 30-second TTL: components that stop heartbeating within
 	// that window are automatically deregistered by Redis key expiry.
 	//
-	// Harness proxy dependencies (llmCompleter, memStore, findingSubmitter) are
-	// wired as nil until tasks 5.4-5.5 connect those subsystems.
+	// Harness proxy dependencies (llmCompleter, memStore) are wired as nil until
+	// task 5.4 connects those subsystems. findingSubmitter is wired here using
+	// GraphRAGFindingSubmitter when infrastructure is available.
 	if d.stateClient != nil {
 		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
 			compRegistry := component.NewRedisComponentRegistry(redisClient, 30*time.Second)
 			compQueue := component.NewRedisWorkQueue(d.stateClient.Client())
+
+			auditLogger := audit.NewAuditLogger(d.stateClient, d.logger.Slog())
+
+			// Wire GraphRAGFindingSubmitter when infrastructure is available.
+			// It routes findings to both Redis (tenant-scoped indexes) and Neo4j
+			// (via GraphRAGBridge.StoreAsync, fire-and-forget). Falls back to nil
+			// when the finding store or bridge has not been initialized, in which
+			// case ComponentServiceServer logs and returns a generated finding_id.
+			var findingSubmitter component.FindingSubmitter
+			if d.infrastructure != nil &&
+				d.infrastructure.findingStore != nil &&
+				d.infrastructure.graphRAGBridge != nil {
+				if redisStore, ok := d.infrastructure.findingStore.(*finding.RedisFindingStore); ok {
+					findingSubmitter = component.NewGraphRAGFindingSubmitter(
+						d.infrastructure.graphRAGBridge,
+						redisStore,
+						d.stateClient,
+						d.logger.WithComponent("finding-submitter").Slog(),
+					)
+					d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings routed to Redis and Neo4j")
+				} else {
+					d.logger.Warn(ctx, "finding store is not *finding.RedisFindingStore; finding submitter not wired")
+				}
+			} else {
+				d.logger.Warn(ctx, "infrastructure not ready; finding submitter not wired (findings will be logged only)")
+			}
+
 			compSvc := component.NewComponentServiceServer(
 				compRegistry,
 				compQueue,
 				d.logger.Slog(),
-				nil,                  // llmCompleter: wired in task 5.4
-				nil,                  // memStore:     wired in task 5.4
-				nil,                  // findingSubmitter: wired in task 5.5
-				d.pluginAccessStore,  // nil when no KeyProvider configured
+				nil,                 // llmCompleter: wired in task 5.4
+				nil,                 // memStore:     wired in task 5.4
+				findingSubmitter,    // GraphRAGFindingSubmitter or nil
+				d.pluginAccessStore, // nil when no KeyProvider configured
+				auditLogger,
 			)
+
+			// Wire MemoryResolver so that MemoryGet/MemorySet/MemorySearch route
+			// mission-tier operations to the per-agent mission namespace.
+			// RedisMemoryResolver caches MissionMemory instances in a sync.Map and
+			// resolves work_id → mission_id via short-lived Redis hash keys written
+			// by PollWork when work items carrying mission_id context are dispatched.
+			compSvc.WithMemoryResolver(component.NewRedisMemoryResolver(d.stateClient))
+
+			// Wire the quota manager so RegisterComponent enforces per-tenant
+			// agent quotas before the agent is admitted to the registry.
+			if d.quotaManager != nil {
+				compSvc.WithQuotaManager(d.quotaManager)
+				d.logger.Info(ctx, "quota manager wired into ComponentService for agent quota enforcement")
+			}
+
 			componentpb.RegisterComponentServiceServer(srv, compSvc)
 			d.logger.Info(ctx, "ComponentService initialized",
 				"registry_ttl", "30s",
 				"redis_mode", "standalone",
+				"memory_resolver", "redis",
 			)
 		} else {
 			d.logger.Warn(ctx, "ComponentService unavailable: Redis client is not standalone mode; requires *redis.Client")
@@ -741,22 +839,17 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 			}
 
 			// Emit event for the status change
-			if d.eventBus != nil {
-				event := api.EventData{
+			d.publishEvent(ctx, api.EventData{
+				EventType: "mission_failed",
+				Timestamp: time.Now(),
+				Source:    "daemon",
+				MissionEvent: &api.MissionEventData{
 					EventType: "mission_failed",
 					Timestamp: time.Now(),
-					Source:    "daemon",
-					MissionEvent: &api.MissionEventData{
-						EventType: "mission_failed",
-						Timestamp: time.Now(),
-						MissionID: missionID,
-						Message:   "Orphaned paused mission marked as failed",
-					},
-				}
-				if err := d.eventBus.Publish(ctx, event); err != nil {
-					d.logger.Warn(ctx, "failed to publish mission failed event", "error", err)
-				}
-			}
+					MissionID: missionID,
+					Message:   "Orphaned paused mission marked as failed",
+				},
+			})
 
 			d.logger.Info(ctx, "orphaned paused mission marked as failed", "mission_id", missionID)
 			return nil
@@ -794,23 +887,18 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 		}
 	}
 
-	// Emit mission stopped event if event bus is available
-	if d.eventBus != nil {
-		event := api.EventData{
+	// Emit mission stopped event to all transports.
+	d.publishEvent(ctx, api.EventData{
+		EventType: "mission_stopped",
+		Timestamp: time.Now(),
+		Source:    "daemon",
+		MissionEvent: &api.MissionEventData{
 			EventType: "mission_stopped",
 			Timestamp: time.Now(),
-			Source:    "daemon",
-			MissionEvent: &api.MissionEventData{
-				EventType: "mission_stopped",
-				Timestamp: time.Now(),
-				MissionID: missionID,
-				Message:   fmt.Sprintf("Mission %s stopped (force=%t)", missionID, force),
-			},
-		}
-		if err := d.eventBus.Publish(ctx, event); err != nil {
-			d.logger.Warn(ctx, "failed to publish mission stopped event", "error", err)
-		}
-	}
+			MissionID: missionID,
+			Message:   fmt.Sprintf("Mission %s stopped (force=%t)", missionID, force),
+		},
+	})
 
 	d.logger.Info(ctx, "mission stopped successfully", "mission_id", missionID)
 	return nil
@@ -1039,20 +1127,73 @@ func (d *daemonImpl) buildAttackOptions(req api.AttackRequest) (*attack.AttackOp
 }
 
 // Subscribe establishes an event stream.
+//
+// When redisEventStream is available it uses Redis Streams (XREAD BLOCK) as
+// the transport, which allows events to survive daemon restarts and be shared
+// across multiple daemon pods. The tenant is extracted from the request context
+// via auth.TenantFromContext; "default" is used when no tenant is present.
+//
+// When redisEventStream is nil (e.g., during unit tests that use a lightweight
+// daemon without Redis) the implementation falls back to the in-process
+// EventBus for full backwards compatibility.
 func (d *daemonImpl) Subscribe(ctx context.Context, eventTypes []string, missionID string) (<-chan api.EventData, error) {
 	d.logger.Info(ctx, "Subscribe called", "event_types", eventTypes, "mission_id", missionID)
 
-	// Subscribe to events from the event bus
+	// Use Redis Streams when available: this is the production path.
+	if d.redisEventStream != nil {
+		tenant := auth.TenantFromContext(ctx)
+		if tenant == "" {
+			tenant = "default"
+		}
+
+		redisChan, err := d.redisEventStream.SubscribeStream(ctx, tenant, eventTypes, missionID)
+		if err != nil {
+			// Log and fall through to EventBus fallback.
+			d.logger.Warn(ctx, "redis stream subscribe failed, falling back to eventbus",
+				"error", err)
+		} else {
+			d.logger.Info(ctx, "subscription established via redis streams",
+				"tenant", tenant, "mission_id", missionID)
+			return redisChan, nil
+		}
+	}
+
+	// Fallback: in-process EventBus (no Redis, unit-test scenario).
 	eventChan, cleanup := d.eventBus.Subscribe(ctx, eventTypes, missionID)
 
-	// Start a goroutine to handle cleanup when context is cancelled
 	go func() {
 		<-ctx.Done()
 		cleanup()
-		d.logger.Info(ctx, "subscription cleanup completed", "mission_id", missionID)
+		d.logger.Info(ctx, "eventbus subscription cleanup completed", "mission_id", missionID)
 	}()
 
 	return eventChan, nil
+}
+
+// publishEvent writes an event to both the in-process EventBus and, when
+// redisEventStream is available, the tenant-scoped Redis Stream.
+//
+// It extracts the tenant from the context (auth.TenantFromContext) and falls
+// back to "default" when none is present.  Errors from either transport are
+// logged as warnings but do not propagate — event publishing is best-effort.
+func (d *daemonImpl) publishEvent(ctx context.Context, event api.EventData) {
+	// In-process EventBus (always present; used by in-process subscribers and tests).
+	if d.eventBus != nil {
+		if err := d.eventBus.Publish(ctx, event); err != nil {
+			d.logger.Warn(ctx, "failed to publish to eventbus", "error", err, "event_type", event.EventType)
+		}
+	}
+
+	// Redis Streams (optional; available after stateClient is initialized).
+	if d.redisEventStream != nil {
+		tenant := auth.TenantFromContext(ctx)
+		if tenant == "" {
+			tenant = "default"
+		}
+		if err := d.redisEventStream.PublishEvent(ctx, tenant, event); err != nil {
+			d.logger.Warn(ctx, "failed to publish to redis stream", "error", err, "event_type", event.EventType)
+		}
+	}
 }
 
 // formatEvidence converts a slice of Evidence to a string representation.
@@ -1649,8 +1790,19 @@ func (d *daemonImpl) UpdateComponent(ctx context.Context, kind string, name stri
 		return api.UpdateComponentResult{}, fmt.Errorf("failed to update component: %w", err)
 	}
 
-	// TODO: Handle restart if requested and component was running
-	// This requires the lifecycle manager to be integrated
+	// Handle restart if requested and component was running
+	if restart && result.Updated && d.componentLifecycleManager != nil && d.componentStore != nil {
+		comp, getErr := d.componentStore.GetByName(ctx, componentKind, name)
+		if getErr != nil {
+			d.logger.Warn(ctx, "failed to get component for restart check", "error", getErr, "kind", kind, "name", name)
+		} else if comp != nil && comp.IsRunning() {
+			if _, startErr := d.componentLifecycleManager.StartComponent(ctx, comp); startErr != nil {
+				d.logger.Warn(ctx, "failed to restart component after update", "error", startErr, "kind", kind, "name", name)
+			} else {
+				d.logger.Info(ctx, "component restarted after update", "kind", kind, "name", name)
+			}
+		}
+	}
 
 	d.logger.Info(ctx, "component updated successfully", "kind", kind, "name", name, "updated", result.Updated)
 
@@ -2115,12 +2267,43 @@ func (d *daemonImpl) UninstallMission(ctx context.Context, name string, force bo
 func (d *daemonImpl) ListMissionDefinitions(ctx context.Context, limit int, offset int) ([]api.MissionDefinitionData, int, error) {
 	d.logger.Debug(ctx, "ListMissionDefinitions called", "limit", limit, "offset", offset)
 
-	// For now, return empty list as the MissionStore doesn't have ListDefinitions yet
-	// This will be implemented in task 3.1/3.2 when the store is extended
-	// TODO: Implement once MissionStore has ListDefinitions method
+	if d.missionStore == nil {
+		d.logger.Warn(ctx, "mission store not available, returning empty list")
+		return []api.MissionDefinitionData{}, 0, nil
+	}
 
-	d.logger.Debug(ctx, "listed mission definitions", "count", 0, "total", 0)
-	return []api.MissionDefinitionData{}, 0, nil
+	defs, err := d.missionStore.ListDefinitions(ctx)
+	if err != nil {
+		d.logger.Error(ctx, "failed to list mission definitions", "error", err)
+		return nil, 0, fmt.Errorf("failed to list mission definitions: %w", err)
+	}
+
+	total := len(defs)
+
+	// Apply offset and limit for pagination
+	if offset > total {
+		offset = total
+	}
+	defs = defs[offset:]
+	if limit > 0 && len(defs) > limit {
+		defs = defs[:limit]
+	}
+
+	result := make([]api.MissionDefinitionData, 0, len(defs))
+	for _, def := range defs {
+		nodeCount := len(def.Nodes)
+		result = append(result, api.MissionDefinitionData{
+			Name:        def.Name,
+			Version:     def.Version,
+			Description: def.Description,
+			Source:      def.Source,
+			InstalledAt: def.InstalledAt,
+			NodeCount:   nodeCount,
+		})
+	}
+
+	d.logger.Debug(ctx, "listed mission definitions", "count", len(result), "total", total)
+	return result, total, nil
 }
 
 // UpdateMission updates an installed mission to the latest version.
@@ -2470,4 +2653,34 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		Status:      string(m.Status),
 		CreatedAt:   m.CreatedAt.Time,
 	}, nil
+}
+
+// tenantCreatorAdapter wraps *component.TenantService to satisfy the
+// provisioner.TenantCreator interface, which returns (interface{}, error)
+// rather than (*component.TenantRecord, error).
+type tenantCreatorAdapter struct {
+	svc *component.TenantService
+}
+
+func (a *tenantCreatorAdapter) CreateTenant(ctx context.Context, tenantID, displayName string, config map[string]string) (interface{}, error) {
+	return a.svc.CreateTenant(ctx, tenantID, displayName, config)
+}
+
+func (a *tenantCreatorAdapter) GetTenant(ctx context.Context, tenantID string) (interface{}, error) {
+	return a.svc.GetTenant(ctx, tenantID)
+}
+
+func (a *tenantCreatorAdapter) UpdateTenant(ctx context.Context, tenantID string, updates map[string]string) (interface{}, error) {
+	return a.svc.UpdateTenant(ctx, tenantID, updates)
+}
+
+// apiKeyCreatorAdapter wraps *auth.APIKeyAuthenticator to satisfy the
+// provisioner.APIKeyCreator interface, which returns (rawKey, interface{}, error)
+// rather than (rawKey, *auth.APIKeyRecord, error).
+type apiKeyCreatorAdapter struct {
+	auth *auth.APIKeyAuthenticator
+}
+
+func (a *apiKeyCreatorAdapter) CreateKey(ctx context.Context, tenantID string, allowedKinds, allowedNames []string) (string, interface{}, error) {
+	return a.auth.CreateKey(ctx, tenantID, allowedKinds, allowedNames)
 }

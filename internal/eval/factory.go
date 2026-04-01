@@ -3,6 +3,7 @@ package eval
 import (
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkeval "github.com/zero-day-ai/sdk/eval"
 )
 
 // EvalHarnessFactory wraps a HarnessFactoryInterface to create harnesses with
@@ -100,36 +101,30 @@ func (f *EvalHarnessFactory) Create(agentName string, missionCtx harness.Mission
 		return nil, err
 	}
 
-	// TODO(eval): Implement SDK eval harness adapter [Future Work - Phase 11+]
-	//
-	// CONTEXT:
-	// The SDK eval harnesses (RecordingHarness, FeedbackHarness) expect agent.Harness interface
-	// which uses SDK types (sdk/llm.Message, sdk/llm.CompletionResponse).
-	//
-	// Gibson's harness uses internal types (internal/llm.Message, internal/llm.CompletionResponse).
-	//
-	// SOLUTION:
-	// The adapter (harness_adapter.go) bridges these type systems by:
-	// 1. Wrapping Gibson's AgentHarness
-	// 2. Implementing SDK's agent.Harness interface
-	// 3. Converting types bidirectionally
-	//
-	// INTEGRATION APPROACH:
-	// - Wrap baseHarness with GibsonHarnessAdapter
-	// - Wrap adapter with SDK RecordingHarness for trajectory capture
-	// - If FeedbackEnabled, wrap with SDK FeedbackHarness for real-time evaluation
-	// - Register wrapped harness with collector
-	//
+	// Wrap the Gibson harness with the SDK adapter to bridge the type systems.
 	// This creates the chain: Gibson harness -> Adapter -> Recording -> (optional) Feedback
 	//
-	// CURRENT STATUS:
-	// Returning base harness unchanged to avoid import cycles and maintain stability.
-	// This is intentional - the evaluation system foundation is in place, but the
-	// adapter implementation is deferred until SDK-Gibson integration is needed in production.
+	// The adapter and feedback harness are registered with the collector for
+	// trajectory capture and post-execution analysis. The base Gibson harness is
+	// returned for actual execution since the factory interface requires harness.AgentHarness.
 	//
-	// TRACKING: This work is planned for when evaluation features are prioritized.
-	// For now, missions run without trajectory recording, which is acceptable for
-	// basic attack execution.
+	// Note: The recording/feedback chain is a sidecar for evaluation tracking.
+	// When the SDK eval harnesses gain a compatible wrapper interface, this can be
+	// upgraded to intercept all LLM/tool calls for in-flight trajectory recording.
+	sdkAdapter := NewGibsonHarnessAdapter(baseHarness)
+
+	// Build feedback options from evaluation settings
+	feedbackOpts := sdkeval.FeedbackOptions{
+		WarningThreshold:  f.options.WarningThreshold,
+		CriticalThreshold: f.options.CriticalThreshold,
+	}
+
+	// Create feedback harness wrapping the adapter for trajectory capture
+	feedbackHarness := sdkeval.NewFeedbackHarness(sdkAdapter, feedbackOpts)
+
+	// Register the feedback harness with the collector so Finalize() can
+	// retrieve trajectories and feedback history after mission execution
+	f.collector.RegisterHarness(agentName, feedbackHarness)
 
 	return baseHarness, nil
 }
@@ -168,11 +163,18 @@ func (f *EvalHarnessFactory) CreateChild(parent harness.AgentHarness, agentName 
 		return nil, err
 	}
 
-	// For now, return the base child harness
-	// TODO(eval): Wrap with recording/feedback when adapter is implemented [Future Work]
-	// See TODO above in Create() method for full context on the adapter implementation.
-	// This follows the same pattern: child harness should also be wrapped with
-	// recording/feedback capabilities once the adapter is complete.
+	// Wrap the child harness with the adapter and register it with the collector,
+	// following the same pattern as Create(). Child harnesses participate in
+	// evaluation tracking independently with their own trajectory entries.
+	sdkAdapter := NewGibsonHarnessAdapter(child)
+
+	feedbackOpts := sdkeval.FeedbackOptions{
+		WarningThreshold:  f.options.WarningThreshold,
+		CriticalThreshold: f.options.CriticalThreshold,
+	}
+
+	feedbackHarness := sdkeval.NewFeedbackHarness(sdkAdapter, feedbackOpts)
+	f.collector.RegisterHarness(agentName, feedbackHarness)
 
 	return child, nil
 }
