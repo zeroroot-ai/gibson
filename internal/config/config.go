@@ -36,6 +36,16 @@ type Config struct {
 	OTelObservability    OTelObservabilityConfig    `mapstructure:"otel_observability" yaml:"otel_observability"`
 	Auth                 auth.AuthConfig            `mapstructure:"auth" yaml:"auth"`
 	Checkpoint           CheckpointConfig           `mapstructure:"checkpoint" yaml:"checkpoint"`
+	Keycloak             KeycloakConfig             `mapstructure:"keycloak" yaml:"keycloak"`
+}
+
+// KeycloakConfig contains settings for the Keycloak Admin REST API client
+// used by the provisioner to create per-tenant realms and OIDC clients.
+type KeycloakConfig struct {
+	BaseURL      string `mapstructure:"base_url" yaml:"base_url"`
+	MasterRealm  string `mapstructure:"master_realm" yaml:"master_realm"`
+	ClientID     string `mapstructure:"client_id" yaml:"client_id"`
+	ClientSecret string `mapstructure:"client_secret" yaml:"client_secret"`
 }
 
 // PluginsConfig contains configuration for all plugins.

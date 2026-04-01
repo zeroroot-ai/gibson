@@ -21,6 +21,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component/build"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zero-day-ai/gibson/internal/keycloak"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -115,6 +116,24 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 					nil,
 					d.logger.Slog(),
 				)
+
+				// Wire Keycloak admin client if configured.
+				if d.config.Keycloak.BaseURL != "" && d.config.Keycloak.ClientID != "" {
+					masterRealm := d.config.Keycloak.MasterRealm
+					if masterRealm == "" {
+						masterRealm = "master"
+					}
+					kcClient := keycloak.NewClient(
+						d.config.Keycloak.BaseURL,
+						masterRealm,
+						d.config.Keycloak.ClientID,
+						d.config.Keycloak.ClientSecret,
+						d.logger.Slog(),
+					)
+					prov.WithKeycloak(kcClient)
+					d.logger.Info(ctx, "keycloak admin client wired into provisioner", "base_url", d.config.Keycloak.BaseURL)
+				}
+
 				daemonSvc.WithProvisioner(prov)
 				d.logger.Info(ctx, "provisioner wired into DaemonServer")
 			} else {
