@@ -237,14 +237,15 @@ func (c *GRPCPluginClient) Health(ctx context.Context) types.HealthStatus {
 	}
 
 	// Convert proto health status to internal type
-	// The proto HealthStatus has a "state" field with values: "healthy", "degraded", "unhealthy"
-	switch resp.Status {
+	// The proto HealthResponse wraps a commonpb.HealthStatus with fields: status, message, checked_at
+	hs := resp.GetStatus()
+	switch hs.GetStatus() {
 	case "healthy":
-		return types.Healthy(resp.Message)
+		return types.Healthy(hs.GetMessage())
 	case "degraded":
-		return types.Degraded(resp.Message)
+		return types.Degraded(hs.GetMessage())
 	case "unhealthy":
-		return types.Unhealthy(resp.Message)
+		return types.Unhealthy(hs.GetMessage())
 	default:
 		return types.Unhealthy("unknown health status")
 	}

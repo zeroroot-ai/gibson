@@ -30,7 +30,7 @@ type mockAgentServiceServer struct {
 	slotSchema      *agentpb.GetSlotSchemaResponse
 	executeResponse *agentpb.ExecuteResponse
 	executeError    error
-	healthResponse  *commonpb.HealthStatus
+	healthResponse  *agentpb.HealthResponse
 	healthError     error
 	descriptorError error
 	slotSchemaError error
@@ -68,15 +68,17 @@ func (m *mockAgentServiceServer) Execute(ctx context.Context, req *agentpb.Execu
 	return m.executeResponse, nil
 }
 
-func (m *mockAgentServiceServer) Health(ctx context.Context, req *agentpb.HealthRequest) (*commonpb.HealthStatus, error) {
+func (m *mockAgentServiceServer) Health(ctx context.Context, req *agentpb.HealthRequest) (*agentpb.HealthResponse, error) {
 	if m.healthError != nil {
 		return nil, m.healthError
 	}
 	if m.healthResponse == nil {
-		return &commonpb.HealthStatus{
-			State:     "healthy",
-			Message:   "OK",
-			CheckedAt: time.Now().UnixMilli(),
+		return &agentpb.HealthResponse{
+			Status: &commonpb.HealthStatus{
+				Status:    "healthy",
+				Message:   "OK",
+				CheckedAt: time.Now().UnixMilli(),
+			},
 		}, nil
 	}
 	return m.healthResponse, nil
@@ -458,10 +460,12 @@ func TestGRPCAgentClient_Health_Healthy(t *testing.T) {
 			Description: "A test agent",
 			Version:     "1.0.0",
 		},
-		healthResponse: &commonpb.HealthStatus{
-			State:     "healthy",
-			Message:   "All systems operational",
-			CheckedAt: now.UnixMilli(),
+		healthResponse: &agentpb.HealthResponse{
+			Status: &commonpb.HealthStatus{
+				Status:    "healthy",
+				Message:   "All systems operational",
+				CheckedAt: now.UnixMilli(),
+			},
 		},
 	}
 
@@ -486,10 +490,12 @@ func TestGRPCAgentClient_Health_Unhealthy(t *testing.T) {
 			Description: "A test agent",
 			Version:     "1.0.0",
 		},
-		healthResponse: &commonpb.HealthStatus{
-			State:     "unhealthy",
-			Message:   "Database connection failed",
-			CheckedAt: now.UnixMilli(),
+		healthResponse: &agentpb.HealthResponse{
+			Status: &commonpb.HealthStatus{
+				Status:    "unhealthy",
+				Message:   "Database connection failed",
+				CheckedAt: now.UnixMilli(),
+			},
 		},
 	}
 
@@ -514,10 +520,12 @@ func TestGRPCAgentClient_Health_Degraded(t *testing.T) {
 			Description: "A test agent",
 			Version:     "1.0.0",
 		},
-		healthResponse: &commonpb.HealthStatus{
-			State:     "degraded",
-			Message:   "High latency detected",
-			CheckedAt: now.UnixMilli(),
+		healthResponse: &agentpb.HealthResponse{
+			Status: &commonpb.HealthStatus{
+				Status:    "degraded",
+				Message:   "High latency detected",
+				CheckedAt: now.UnixMilli(),
+			},
 		},
 	}
 

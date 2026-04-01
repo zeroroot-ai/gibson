@@ -460,7 +460,7 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb
 }
 
 // LLMCompleteWithTools implements the LLM completion with tools RPC.
-func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *harnesspb.LLMCompleteWithToolsRequest) (*harnesspb.LLMCompleteResponse, error) {
+func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *harnesspb.LLMCompleteWithToolsRequest) (*harnesspb.LLMCompleteWithToolsResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -474,7 +474,7 @@ func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *
 	resp, err := harness.CompleteWithTools(ctx, req.Slot, messages, tools)
 	if err != nil {
 		s.logger.Error("LLM completion with tools failed", "error", err, "task_id", req.Context.TaskId)
-		return &harnesspb.LLMCompleteResponse{
+		return &harnesspb.LLMCompleteWithToolsResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
@@ -483,7 +483,7 @@ func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *
 	}
 
 	// Convert response
-	return &harnesspb.LLMCompleteResponse{
+	return &harnesspb.LLMCompleteWithToolsResponse{
 		Content:      resp.Message.Content,
 		ToolCalls:    s.toolCallsToProto(resp.Message.ToolCalls),
 		FinishReason: string(resp.FinishReason),
@@ -531,7 +531,7 @@ func (s *HarnessCallbackService) LLMStream(req *harnesspb.LLMStreamRequest, stre
 	for chunk := range chunkChan {
 		// Check for error in chunk
 		if chunk.Error != nil {
-			protoChunk := &harnesspb.LLMStreamChunk{
+			protoChunk := &harnesspb.LLMStreamResponse{
 				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: chunk.Error.Error(),
@@ -541,7 +541,7 @@ func (s *HarnessCallbackService) LLMStream(req *harnesspb.LLMStreamRequest, stre
 			return nil
 		}
 
-		protoChunk := &harnesspb.LLMStreamChunk{
+		protoChunk := &harnesspb.LLMStreamResponse{
 			Delta:        chunk.Delta.Content,
 			FinishReason: string(chunk.FinishReason),
 		}
@@ -989,7 +989,7 @@ func (s *HarnessCallbackService) ToolResults(req *harnesspb.ToolResultsRequest, 
 		resultCount++
 
 		// Convert queue.Result to proto ToolResultResponse
-		protoResult := &harnesspb.ToolResultResponse{
+		protoResult := &harnesspb.ToolResultsResponse{
 			Index: int32(result.Index),
 		}
 
@@ -2514,7 +2514,7 @@ func (s *HarnessCallbackService) protoStatusCodeToOtel(code harnesspb.StatusCode
 }
 
 // protoAttributesToOtel converts proto KeyValue attributes to OpenTelemetry attributes.
-func (s *HarnessCallbackService) protoAttributesToOtel(protoAttrs []*commonpb.KeyValue) []attribute.KeyValue {
+func (s *HarnessCallbackService) protoAttributesToOtel(protoAttrs []*harnesspb.KeyValue) []attribute.KeyValue {
 	attrs := make([]attribute.KeyValue, 0, len(protoAttrs))
 	for _, protoAttr := range protoAttrs {
 		if protoAttr.Value == nil {
@@ -2524,13 +2524,13 @@ func (s *HarnessCallbackService) protoAttributesToOtel(protoAttrs []*commonpb.Ke
 		key := attribute.Key(protoAttr.Key)
 		// Handle different value types from AnyValue
 		switch v := protoAttr.Value.Value.(type) {
-		case *commonpb.AnyValue_StringValue:
+		case *harnesspb.AnyValue_StringValue:
 			attrs = append(attrs, key.String(v.StringValue))
-		case *commonpb.AnyValue_BoolValue:
+		case *harnesspb.AnyValue_BoolValue:
 			attrs = append(attrs, key.Bool(v.BoolValue))
-		case *commonpb.AnyValue_IntValue:
+		case *harnesspb.AnyValue_IntValue:
 			attrs = append(attrs, key.Int64(v.IntValue))
-		case *commonpb.AnyValue_DoubleValue:
+		case *harnesspb.AnyValue_DoubleValue:
 			attrs = append(attrs, key.Float64(v.DoubleValue))
 		}
 	}
@@ -2804,7 +2804,7 @@ func (s *HarnessCallbackService) GenerateNodeID(ctx context.Context, req *harnes
 
 // ValidateFinding validates a finding.
 // NOTE: Taxonomy-based validation has been removed. Basic validation is still performed.
-func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harnesspb.ValidateFindingRequest) (*harnesspb.ValidationResponse, error) {
+func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harnesspb.ValidateFindingRequest) (*harnesspb.ValidateFindingResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request cannot be nil")
 	}
@@ -2814,7 +2814,7 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harne
 	// Convert proto finding to SDK finding
 	finding := protoFindingToSDKFinding(req.Finding)
 	if finding == nil {
-		return &harnesspb.ValidationResponse{
+		return &harnesspb.ValidateFindingResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "finding cannot be nil",
@@ -2822,7 +2822,7 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harne
 		}, nil
 	}
 
-	resp := &harnesspb.ValidationResponse{Valid: true}
+	resp := &harnesspb.ValidateFindingResponse{Valid: true}
 
 	// Validate severity
 	validSeverities := []string{"critical", "high", "medium", "low", "informational"}
@@ -2859,9 +2859,9 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harne
 
 // ValidateGraphNode validates a graph node.
 // NOTE: Taxonomy-based validation has been removed. Returns success with a warning.
-func (s *HarnessCallbackService) ValidateGraphNode(ctx context.Context, req *harnesspb.ValidateGraphNodeRequest) (*harnesspb.ValidationResponse, error) {
+func (s *HarnessCallbackService) ValidateGraphNode(ctx context.Context, req *harnesspb.ValidateGraphNodeRequest) (*harnesspb.ValidateGraphNodeResponse, error) {
 	s.logger.Debug("ValidateGraphNode called (taxonomy removed)")
-	return &harnesspb.ValidationResponse{
+	return &harnesspb.ValidateGraphNodeResponse{
 		Valid:    true,
 		Warnings: []string{"taxonomy-based validation has been removed; use domain types for type-safe node creation"},
 	}, nil
@@ -2869,9 +2869,9 @@ func (s *HarnessCallbackService) ValidateGraphNode(ctx context.Context, req *har
 
 // ValidateRelationship validates a relationship.
 // NOTE: Taxonomy-based validation has been removed. Returns success with a warning.
-func (s *HarnessCallbackService) ValidateRelationship(ctx context.Context, req *harnesspb.ValidateRelationshipRequest) (*harnesspb.ValidationResponse, error) {
+func (s *HarnessCallbackService) ValidateRelationship(ctx context.Context, req *harnesspb.ValidateRelationshipRequest) (*harnesspb.ValidateRelationshipResponse, error) {
 	s.logger.Debug("ValidateRelationship called (taxonomy removed)")
-	return &harnesspb.ValidationResponse{
+	return &harnesspb.ValidateRelationshipResponse{
 		Valid:    true,
 		Warnings: []string{"taxonomy-based validation has been removed; use domain types for type-safe relationship creation"},
 	}, nil

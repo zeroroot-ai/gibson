@@ -346,7 +346,7 @@ func TestConvertProtoPlugins(t *testing.T) {
 func TestConvertProtoMissionEvent(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    *api.MissionEvent
+		input    *api.RunMissionResponse
 		expected MissionEvent
 	}{
 		{
@@ -356,7 +356,7 @@ func TestConvertProtoMissionEvent(t *testing.T) {
 		},
 		{
 			name: "complete mission event",
-			input: &api.MissionEvent{
+			input: &api.RunMissionResponse{
 				EventType: "mission_started",
 				Timestamp: 1640000000,
 				MissionId: "mission-1",
@@ -378,7 +378,7 @@ func TestConvertProtoMissionEvent(t *testing.T) {
 		},
 		{
 			name: "mission event with no data",
-			input: &api.MissionEvent{
+			input: &api.RunMissionResponse{
 				EventType: "mission_completed",
 				Timestamp: 1640000100,
 				Message:   "Mission completed",
@@ -393,7 +393,7 @@ func TestConvertProtoMissionEvent(t *testing.T) {
 		},
 		{
 			name: "mission event with empty data",
-			input: &api.MissionEvent{
+			input: &api.RunMissionResponse{
 				EventType: "mission.finding",
 				Timestamp: 1640000200,
 				Message:   "Found vulnerability",
@@ -420,7 +420,7 @@ func TestConvertProtoMissionEvent(t *testing.T) {
 func TestConvertProtoAttackEvent(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    *api.AttackEvent
+		input    *api.RunAttackResponse
 		expected AttackEvent
 	}{
 		{
@@ -430,7 +430,7 @@ func TestConvertProtoAttackEvent(t *testing.T) {
 		},
 		{
 			name: "complete attack event",
-			input: &api.AttackEvent{
+			input: &api.RunAttackResponse{
 				EventType: "attack.started",
 				Timestamp: 1640000000,
 				AttackId:  "attack-1",
@@ -452,7 +452,7 @@ func TestConvertProtoAttackEvent(t *testing.T) {
 		},
 		{
 			name: "attack event with no data",
-			input: &api.AttackEvent{
+			input: &api.RunAttackResponse{
 				EventType: "attack.completed",
 				Timestamp: 1640000100,
 				Message:   "Attack completed",
@@ -479,7 +479,7 @@ func TestConvertProtoAttackEvent(t *testing.T) {
 func TestConvertProtoEvent(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    *api.Event
+		input    *api.SubscribeResponse
 		expected Event
 	}{
 		{
@@ -489,7 +489,7 @@ func TestConvertProtoEvent(t *testing.T) {
 		},
 		{
 			name: "complete event",
-			input: &api.Event{
+			input: &api.SubscribeResponse{
 				EventType: "agent_registered",
 				Timestamp: 1640000000,
 				Source:    "registry",
@@ -508,7 +508,7 @@ func TestConvertProtoEvent(t *testing.T) {
 		},
 		{
 			name: "event with no data",
-			input: &api.Event{
+			input: &api.SubscribeResponse{
 				EventType: "system_ready",
 				Timestamp: 1640000100,
 				Source:    "daemon",
@@ -578,7 +578,7 @@ func (m *mockDaemonServiceClient) StopMission(ctx context.Context, req *api.Stop
 func (m *mockDaemonServiceClient) ListMissions(ctx context.Context, req *api.ListMissionsRequest, opts ...grpc.CallOption) (*api.ListMissionsResponse, error) {
 	return nil, nil
 }
-func (m *mockDaemonServiceClient) GetAgentStatus(ctx context.Context, req *api.GetAgentStatusRequest, opts ...grpc.CallOption) (*api.AgentStatusResponse, error) {
+func (m *mockDaemonServiceClient) GetAgentStatus(ctx context.Context, req *api.GetAgentStatusRequest, opts ...grpc.CallOption) (*api.GetAgentStatusResponse, error) {
 	return nil, nil
 }
 func (m *mockDaemonServiceClient) RunAttack(ctx context.Context, req *api.RunAttackRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[api.AttackEvent], error) {

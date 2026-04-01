@@ -975,7 +975,7 @@ func (s *DaemonServer) Status(ctx context.Context, req *StatusRequest) (*StatusR
 }
 
 // RunMission starts a mission and streams execution events.
-func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStreamingServer[MissionEvent]) error {
+func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStreamingServer[RunMissionResponse]) error {
 	s.logger.Info("mission run request received",
 		"workflow_path", req.WorkflowPath,
 		"workflow_yaml_size", len(req.WorkflowYaml),
@@ -1091,7 +1091,7 @@ func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStre
 			}
 
 			// Convert event to proto message
-			protoEvent := &MissionEvent{
+			protoEvent := &RunMissionResponse{
 				EventType: event.EventType,
 				Timestamp: event.Timestamp.Unix(),
 				MissionId: event.MissionID,
@@ -1223,7 +1223,7 @@ func (s *DaemonServer) ListAgents(ctx context.Context, req *ListAgentsRequest) (
 }
 
 // GetAgentStatus returns the current status of a specific agent.
-func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *GetAgentStatusRequest) (*AgentStatusResponse, error) {
+func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *GetAgentStatusRequest) (*GetAgentStatusResponse, error) {
 	s.logger.Debug("agent status request received", "agent_id", req.AgentId)
 
 	agentStatus, err := s.daemon.GetAgentStatus(ctx, req.AgentId)
@@ -1232,7 +1232,7 @@ func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *GetAgentStatusRe
 		return nil, status_grpc.Errorf(codes.Internal, "failed to get agent status: %v", err)
 	}
 
-	return &AgentStatusResponse{
+	return &GetAgentStatusResponse{
 		Agent: &AgentInfo{
 			Id:           agentStatus.Agent.ID,
 			Name:         agentStatus.Agent.Name,
@@ -1351,7 +1351,7 @@ func (s *DaemonServer) QueryPlugin(ctx context.Context, req *QueryPluginRequest)
 }
 
 // RunAttack executes an attack and streams progress events.
-func (s *DaemonServer) RunAttack(req *RunAttackRequest, stream grpc.ServerStreamingServer[AttackEvent]) error {
+func (s *DaemonServer) RunAttack(req *RunAttackRequest, stream grpc.ServerStreamingServer[RunAttackResponse]) error {
 	s.logger.Info("attack run request received",
 		"target", req.Target,
 		"attack_type", req.AttackType,
@@ -1390,7 +1390,7 @@ func (s *DaemonServer) RunAttack(req *RunAttackRequest, stream grpc.ServerStream
 			}
 
 			// Convert event to proto message
-			protoEvent := &AttackEvent{
+			protoEvent := &RunAttackResponse{
 				EventType: event.EventType,
 				Timestamp: event.Timestamp.Unix(),
 				AttackId:  event.AttackID,
@@ -1428,7 +1428,7 @@ func (s *DaemonServer) RunAttack(req *RunAttackRequest, stream grpc.ServerStream
 }
 
 // Subscribe establishes an event stream for TUI real-time updates.
-func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStreamingServer[Event]) error {
+func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStreamingServer[SubscribeResponse]) error {
 	s.logger.Info("event subscription request received",
 		"event_types", req.EventTypes,
 		"mission_id", req.MissionId,
@@ -1456,7 +1456,7 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 			}
 
 			// Convert event to proto message
-			protoEvent := &Event{
+			protoEvent := &SubscribeResponse{
 				EventType: event.EventType,
 				Timestamp: event.Timestamp.Unix(),
 				Source:    event.Source,
@@ -1465,7 +1465,7 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 
 			// Add specific event type if present
 			if event.MissionEvent != nil {
-				protoEvent.Event = &Event_MissionEvent{
+				protoEvent.Event = &SubscribeResponse_MissionEvent{
 					MissionEvent: &MissionEvent{
 						EventType: event.MissionEvent.EventType,
 						Timestamp: event.MissionEvent.Timestamp.Unix(),
@@ -1490,7 +1490,7 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 						Timestamp:   event.AttackEvent.Finding.Timestamp.Unix(),
 					}
 				}
-				protoEvent.Event = &Event_AttackEvent{
+				protoEvent.Event = &SubscribeResponse_AttackEvent{
 					AttackEvent: &AttackEvent{
 						EventType: event.AttackEvent.EventType,
 						Timestamp: event.AttackEvent.Timestamp.Unix(),
@@ -1502,7 +1502,7 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 					},
 				}
 			} else if event.AgentEvent != nil {
-				protoEvent.Event = &Event_AgentEvent{
+				protoEvent.Event = &SubscribeResponse_AgentEvent{
 					AgentEvent: &AgentEvent{
 						EventType: event.AgentEvent.EventType,
 						Timestamp: event.AgentEvent.Timestamp.Unix(),
@@ -1513,7 +1513,7 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 					},
 				}
 			} else if event.FindingEvent != nil {
-				protoEvent.Event = &Event_FindingEvent{
+				protoEvent.Event = &SubscribeResponse_FindingEvent{
 					FindingEvent: &FindingEvent{
 						EventType: event.FindingEvent.EventType,
 						Timestamp: event.FindingEvent.Timestamp.Unix(),
@@ -1548,12 +1548,12 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 }
 
 // convertToToolEvent converts internal ToolEventData to proto ToolEvent oneof wrapper.
-func convertToToolEvent(data *ToolEventData) *Event_ToolEvent {
+func convertToToolEvent(data *ToolEventData) *SubscribeResponse_ToolEvent {
 	if data == nil {
 		return nil
 	}
 
-	return &Event_ToolEvent{
+	return &SubscribeResponse_ToolEvent{
 		ToolEvent: &ToolEvent{
 			EventType:       data.EventType,
 			Timestamp:       data.Timestamp.Unix(),
@@ -1573,12 +1573,12 @@ func convertToToolEvent(data *ToolEventData) *Event_ToolEvent {
 }
 
 // convertToLLMEvent converts internal LLMEventData to proto LLMEvent oneof wrapper.
-func convertToLLMEvent(data *LLMEventData) *Event_LlmEvent {
+func convertToLLMEvent(data *LLMEventData) *SubscribeResponse_LlmEvent {
 	if data == nil {
 		return nil
 	}
 
-	return &Event_LlmEvent{
+	return &SubscribeResponse_LlmEvent{
 		LlmEvent: &LLMEvent{
 			EventType:        data.EventType,
 			Timestamp:        data.Timestamp.Unix(),
@@ -1600,12 +1600,12 @@ func convertToLLMEvent(data *LLMEventData) *Event_LlmEvent {
 }
 
 // convertToOrchestratorEvent converts internal OrchestratorEventData to proto OrchestratorEvent oneof wrapper.
-func convertToOrchestratorEvent(data *OrchestratorEventData) *Event_OrchestratorEvent {
+func convertToOrchestratorEvent(data *OrchestratorEventData) *SubscribeResponse_OrchestratorEvent {
 	if data == nil {
 		return nil
 	}
 
-	return &Event_OrchestratorEvent{
+	return &SubscribeResponse_OrchestratorEvent{
 		OrchestratorEvent: &OrchestratorEvent{
 			EventType:       data.EventType,
 			Timestamp:       data.Timestamp.Unix(),
@@ -1764,7 +1764,7 @@ func (s *DaemonServer) PauseMission(ctx context.Context, req *PauseMissionReques
 }
 
 // ResumeMission resumes a paused mission from its last checkpoint and streams execution events.
-func (s *DaemonServer) ResumeMission(req *ResumeMissionRequest, stream grpc.ServerStreamingServer[MissionEvent]) error {
+func (s *DaemonServer) ResumeMission(req *ResumeMissionRequest, stream grpc.ServerStreamingServer[ResumeMissionResponse]) error {
 	s.logger.Info("mission resume request received",
 		"mission_id", req.MissionId,
 		"checkpoint_id", req.CheckpointId,
@@ -1809,7 +1809,7 @@ func (s *DaemonServer) ResumeMission(req *ResumeMissionRequest, stream grpc.Serv
 			}
 
 			// Convert event to proto message
-			protoEvent := &MissionEvent{
+			protoEvent := &ResumeMissionResponse{
 				EventType: event.EventType,
 				Timestamp: event.Timestamp.Unix(),
 				MissionId: event.MissionID,
@@ -2233,7 +2233,7 @@ func (s *DaemonServer) ShowComponent(ctx context.Context, req *ShowComponentRequ
 }
 
 // GetComponentLogs streams log entries for a component (agent, tool, or plugin).
-func (s *DaemonServer) GetComponentLogs(req *GetComponentLogsRequest, stream grpc.ServerStreamingServer[LogEntry]) error {
+func (s *DaemonServer) GetComponentLogs(req *GetComponentLogsRequest, stream grpc.ServerStreamingServer[GetComponentLogsResponse]) error {
 	s.logger.Info("get component logs request received",
 		"kind", req.Kind,
 		"name", req.Name,
@@ -2282,7 +2282,7 @@ func (s *DaemonServer) GetComponentLogs(req *GetComponentLogsRequest, stream grp
 			}
 
 			// Convert to proto message
-			protoEntry := &LogEntry{
+			protoEntry := &GetComponentLogsResponse{
 				Timestamp: entry.Timestamp,
 				Level:     entry.Level,
 				Message:   entry.Message,

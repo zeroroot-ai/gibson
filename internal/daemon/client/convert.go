@@ -167,7 +167,7 @@ func convertProtoPlugins(plugins []*api.PluginInfo) []PluginInfo {
 //
 // Returns:
 //   - MissionEvent: The converted mission event
-func convertProtoMissionEvent(event *api.MissionEvent) MissionEvent {
+func convertProtoMissionEvent(event *api.RunMissionResponse) MissionEvent {
 	if event == nil {
 		return MissionEvent{}
 	}
@@ -197,7 +197,7 @@ func convertProtoMissionEvent(event *api.MissionEvent) MissionEvent {
 //
 // Returns:
 //   - AttackEvent: The converted attack event
-func convertProtoAttackEvent(event *api.AttackEvent) AttackEvent {
+func convertProtoAttackEvent(event *api.RunAttackResponse) AttackEvent {
 	if event == nil {
 		return AttackEvent{}
 	}
@@ -251,7 +251,7 @@ func convertProtoAttackEvent(event *api.AttackEvent) AttackEvent {
 //
 // Returns:
 //   - Event: The converted event
-func convertProtoEvent(event *api.Event) Event {
+func convertProtoEvent(event *api.SubscribeResponse) Event {
 	if event == nil {
 		return Event{}
 	}

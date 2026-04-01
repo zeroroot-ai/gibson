@@ -247,14 +247,15 @@ func (c *GRPCAgentClient) Health(ctx context.Context) types.HealthStatus {
 		return types.Unhealthy(fmt.Sprintf("gRPC health check failed: %v", err))
 	}
 
-	// Convert proto health status to internal type
-	switch resp.Status {
+	// Convert proto HealthResponse → HealthStatus → internal type
+	hs := resp.GetStatus()
+	switch hs.GetStatus() {
 	case "healthy":
-		return types.Healthy(resp.Message)
+		return types.Healthy(hs.GetMessage())
 	case "degraded":
-		return types.Degraded(resp.Message)
+		return types.Degraded(hs.GetMessage())
 	case "unhealthy":
-		return types.Unhealthy(resp.Message)
+		return types.Unhealthy(hs.GetMessage())
 	default:
 		return types.Unhealthy("unknown health status")
 	}

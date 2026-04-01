@@ -44,7 +44,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 		// Send error event
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
-				Error: &toolpb.ToolError{
+				Error: &harnesspb.ToolErrorEvent{
 					Error: &harnesspb.HarnessError{
 						Code:    commonpb.ErrorCode_ERROR_CODE_TOOL_NOT_FOUND,
 						Message: fmt.Sprintf("tool not found: %s", req.Name),
@@ -84,7 +84,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
-				Error: &toolpb.ToolError{
+				Error: &harnesspb.ToolErrorEvent{
 					Error: &harnesspb.HarnessError{
 						Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 						Message: fmt.Sprintf("failed to resolve tool endpoint: %v", err),
@@ -120,7 +120,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
-				Error: &toolpb.ToolError{
+				Error: &harnesspb.ToolErrorEvent{
 					Error: &harnesspb.HarnessError{
 						Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 						Message: "streaming not yet supported for local tools",
@@ -151,7 +151,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
-				Error: &toolpb.ToolError{
+				Error: &harnesspb.ToolErrorEvent{
 					Error: &harnesspb.HarnessError{
 						Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 						Message: fmt.Sprintf("failed to connect to tool: %v", err),
@@ -189,7 +189,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
 			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
-				Error: &toolpb.ToolError{
+				Error: &harnesspb.ToolErrorEvent{
 					Error: &harnesspb.HarnessError{
 						Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 						Message: fmt.Sprintf("failed to start tool execution: %v", err),
@@ -278,7 +278,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 			sequence++
 			errEvent := &harnesspb.CallToolProtoStreamResponse{
 				Payload: &harnesspb.CallToolProtoStreamResponse_Error{
-					Error: &toolpb.ToolError{
+					Error: &harnesspb.ToolErrorEvent{
 						Error: &harnesspb.HarnessError{
 							Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 							Message: fmt.Sprintf("tool stream error: %v", err),
@@ -308,7 +308,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 		case *toolpb.StreamExecuteResponse_Progress:
 			response = &harnesspb.CallToolProtoStreamResponse{
 				Payload: &harnesspb.CallToolProtoStreamResponse_Progress{
-					Progress: &toolpb.ToolProgress{
+					Progress: &harnesspb.ToolProgressEvent{
 						Percent: payload.Progress.Percent,
 						Stage:   payload.Progress.Stage,
 						Message: payload.Progress.Message,
@@ -346,7 +346,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 		case *toolpb.StreamExecuteResponse_Partial:
 			response = &harnesspb.CallToolProtoStreamResponse{
 				Payload: &harnesspb.CallToolProtoStreamResponse_Partial{
-					Partial: &toolpb.ToolPartialResult{
+					Partial: &harnesspb.ToolPartialResultEvent{
 						OutputJson:  []byte(payload.Partial.OutputJson),
 						Description: payload.Partial.Description,
 					},
@@ -373,7 +373,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 		case *toolpb.StreamExecuteResponse_Warning:
 			response = &harnesspb.CallToolProtoStreamResponse{
 				Payload: &harnesspb.CallToolProtoStreamResponse_Warning{
-					Warning: &toolpb.ToolWarning{
+					Warning: &harnesspb.ToolWarningEvent{
 						Message: payload.Warning.Message,
 						Code:    payload.Warning.Code,
 					},
@@ -399,7 +399,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 		case *toolpb.StreamExecuteResponse_Complete:
 			response = &harnesspb.CallToolProtoStreamResponse{
 				Payload: &harnesspb.CallToolProtoStreamResponse_Complete{
-					Complete: &toolpb.ToolComplete{
+					Complete: &harnesspb.ToolCompleteEvent{
 						OutputJson: []byte(payload.Complete.OutputJson),
 					},
 				},
@@ -438,7 +438,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 
 			response = &harnesspb.CallToolProtoStreamResponse{
 				Payload: &harnesspb.CallToolProtoStreamResponse_Error{
-					Error: &toolpb.ToolError{
+					Error: &harnesspb.ToolErrorEvent{
 						Error: &harnesspb.HarnessError{
 							Code:    errorCode,
 							Message: payload.Error.Error.Message,

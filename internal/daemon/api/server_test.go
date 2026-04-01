@@ -280,10 +280,10 @@ func (m *mockDaemon) RequestShutdown(ctx context.Context, force bool, timeoutSec
 type mockServerStream struct {
 	ctx       context.Context
 	sentCount int
-	events    []*MissionEvent
+	events    []*RunMissionResponse
 }
 
-func (m *mockServerStream) Send(event *MissionEvent) error {
+func (m *mockServerStream) Send(event *RunMissionResponse) error {
 	m.sentCount++
 	m.events = append(m.events, event)
 	return nil

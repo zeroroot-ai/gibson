@@ -805,8 +805,8 @@ func (s *ComponentServiceServer) Complete(
 //
 // TODO (task 5.3): same mission-context lookup as Complete.
 func (s *ComponentServiceServer) CompleteStream(
-	req *componentpb.CompleteRequest,
-	stream grpc.ServerStreamingServer[componentpb.CompleteStreamChunk],
+	req *componentpb.CompleteStreamRequest,
+	stream grpc.ServerStreamingServer[componentpb.CompleteStreamResponse],
 ) error {
 	ctx := stream.Context()
 
@@ -862,7 +862,7 @@ func (s *ComponentServiceServer) CompleteStream(
 		temperature,
 		func(delta, finishReason string) error {
 			done := finishReason != ""
-			return stream.Send(&componentpb.CompleteStreamChunk{
+			return stream.Send(&componentpb.CompleteStreamResponse{
 				Content: delta,
 				Done:    done,
 			})
@@ -878,7 +878,7 @@ func (s *ComponentServiceServer) CompleteStream(
 		// Best-effort: send a done chunk before returning the gRPC error so
 		// that clients that do not inspect the trailing status still see the
 		// stream terminated.
-		_ = stream.Send(&componentpb.CompleteStreamChunk{Done: true})
+		_ = stream.Send(&componentpb.CompleteStreamResponse{Done: true})
 		return status.Errorf(codes.Internal, "LLM streaming failed: %v", err)
 	}
 
@@ -1237,8 +1237,8 @@ func (s *ComponentServiceServer) resolveMissionMemory(
 //   - long_term — not suitable for point lookups; returns codes.InvalidArgument.
 func (s *ComponentServiceServer) MemoryGet(
 	ctx context.Context,
-	req *componentpb.MemoryRequest,
-) (*componentpb.MemoryResponse, error) {
+	req *componentpb.MemoryGetRequest,
+) (*componentpb.MemoryGetResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -1259,7 +1259,7 @@ func (s *ComponentServiceServer) MemoryGet(
 		}
 		val, ok := s.memory.Working().Get(req.Key)
 		if !ok {
-			return &componentpb.MemoryResponse{Found: false}, nil
+			return &componentpb.MemoryGetResponse{Found: false}, nil
 		}
 		// Serialize the retrieved value to JSON for the wire format.
 		// Working memory stores arbitrary any values; JSON is the lowest common
@@ -1269,7 +1269,7 @@ func (s *ComponentServiceServer) MemoryGet(
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to serialize working memory value: %v", err)
 		}
-		return &componentpb.MemoryResponse{Found: true, Value: data}, nil
+		return &componentpb.MemoryGetResponse{Found: true, Value: data}, nil
 
 	case memTierMission:
 		missionMem, err := s.resolveMissionMemory(ctx, req.WorkId, tenant)
@@ -1283,7 +1283,7 @@ func (s *ComponentServiceServer) MemoryGet(
 			// via *types.GibsonError with code ErrCodeMissionMemoryNotFound.
 			var gibsonErr *types.GibsonError
 			if errors.As(err, &gibsonErr) && gibsonErr.Code == memory.ErrCodeMissionMemoryNotFound {
-				return &componentpb.MemoryResponse{Found: false}, nil
+				return &componentpb.MemoryGetResponse{Found: false}, nil
 			}
 			s.logger.ErrorContext(ctx, "memory get: mission retrieve failed",
 				slog.String("tenant", tenant),
@@ -1297,7 +1297,7 @@ func (s *ComponentServiceServer) MemoryGet(
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to serialize mission memory value: %v", err)
 		}
-		return &componentpb.MemoryResponse{Found: true, Value: data}, nil
+		return &componentpb.MemoryGetResponse{Found: true, Value: data}, nil
 
 	case memTierLongTerm:
 		// Long-term memory is a semantic vector store; it does not support
@@ -1320,8 +1320,8 @@ func (s *ComponentServiceServer) MemoryGet(
 //     value becomes the content.
 func (s *ComponentServiceServer) MemorySet(
 	ctx context.Context,
-	req *componentpb.MemoryRequest,
-) (*componentpb.MemoryResponse, error) {
+	req *componentpb.MemorySetRequest,
+) (*componentpb.MemorySetResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
@@ -1398,7 +1398,7 @@ func (s *ComponentServiceServer) MemorySet(
 		slog.String("key", req.Key),
 	)
 
-	return &componentpb.MemoryResponse{}, nil
+	return &componentpb.MemorySetResponse{}, nil
 }
 
 // MemorySearch performs a semantic or full-text search over a memory tier.

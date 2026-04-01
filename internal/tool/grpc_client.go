@@ -183,11 +183,12 @@ func (c *GRPCToolClient) Health(ctx context.Context) types.HealthStatus {
 		return types.Unhealthy(fmt.Sprintf("gRPC health check failed: %v", err))
 	}
 
-	// Convert proto HealthStatus to internal type
+	// Convert proto HealthResponse → HealthStatus → internal type
+	hs := resp.GetStatus()
 	return types.HealthStatus{
-		State:     types.HealthState(resp.GetStatus()),
-		Message:   resp.GetMessage(),
-		CheckedAt: time.UnixMilli(resp.GetCheckedAt()),
+		State:     types.HealthState(hs.GetStatus()),
+		Message:   hs.GetMessage(),
+		CheckedAt: time.UnixMilli(hs.GetCheckedAt()),
 	}
 }
 
