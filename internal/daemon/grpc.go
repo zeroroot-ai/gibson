@@ -42,8 +42,10 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	serverOpts := []grpc.ServerOption{}
 
 	// Add auth interceptors if authentication is enabled
-	if d.config.Auth.Enabled {
-		d.logger.Info(ctx, "authentication enabled, installing auth interceptors")
+	if d.config.Auth.IsAuthEnabled() {
+		d.logger.Info(ctx, "authentication enabled, installing auth interceptors",
+			"mode", d.config.Auth.Mode,
+		)
 
 		// Create authenticator from config
 		authenticator, err := d.createAuthenticator(ctx)

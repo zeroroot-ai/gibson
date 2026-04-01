@@ -36,10 +36,8 @@ type AuthConfig struct {
 	// Optional - no default value
 	DefaultTenant string `mapstructure:"default_tenant" yaml:"default_tenant"`
 
-	// Enabled controls whether authentication is enforced on gRPC requests.
-	// Deprecated: Use Mode field instead. Kept for backward compatibility.
-	// When Mode is set, this field is ignored.
-	// Default: false
+	// Enabled is deprecated. Use Mode instead.
+	// Ignored when Mode is set. Removed in a future release.
 	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
 
 	// TrustLocalhost skips authentication for connections from 127.0.0.1 or ::1.
@@ -159,6 +157,16 @@ type LocalUser struct {
 
 	// Roles are the Gibson roles granted to this token.
 	Roles []string `mapstructure:"roles" yaml:"roles"`
+}
+
+// IsAuthEnabled returns true if authentication should be enforced.
+// Mode is the source of truth. The deprecated Enabled field is only
+// checked as a fallback when Mode is empty or "disabled".
+func (c *AuthConfig) IsAuthEnabled() bool {
+	if c.Mode != "" && c.Mode != "disabled" {
+		return true
+	}
+	return c.Enabled
 }
 
 // ApplyDefaults fills in zero-valued fields with sensible defaults.
