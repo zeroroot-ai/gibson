@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	nmappb "github.com/zero-day-ai/tools/discovery/nmap/gen"
+	"github.com/zero-day-ai/sdk/api/gen/toolspb"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -26,7 +26,7 @@ func TestNmapExtractor_CanExtract(t *testing.T) {
 	}{
 		{
 			name:     "valid NmapResponse",
-			msg:      &nmappb.NmapResponse{},
+			msg:      &toolspb.NmapResponse{},
 			expected: true,
 		},
 		{
@@ -54,13 +54,13 @@ func TestNmapExtractor_Extract_EmptyResponse(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:   5,
 		HostsUp:      0,
 		HostsDown:    5,
 		NmapVersion:  "7.80",
 		ScanDuration: 12.5,
-		Hosts:        []*nmappb.NmapHost{},
+		Hosts:        []*toolspb.NmapHost{},
 	}
 
 	result, err := extractor.Extract(ctx, resp)
@@ -88,25 +88,25 @@ func TestNmapExtractor_Extract_InvalidMessageType(t *testing.T) {
 	result, err := extractor.Extract(ctx, &emptypb.Empty{})
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "expected *nmappb.NmapResponse")
+	assert.Contains(t, err.Error(), "expected *toolspb.NmapResponse")
 }
 
 func TestNmapExtractor_Extract_SingleHost(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:   1,
 		HostsUp:      1,
 		HostsDown:    0,
 		NmapVersion:  "7.80",
 		ScanDuration: 5.2,
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:       "192.168.1.1",
 				Hostname: "router.local",
 				State:    "up",
-				Ports:    []*nmappb.NmapPort{},
+				Ports:    []*toolspb.NmapPort{},
 			},
 		},
 	}
@@ -138,18 +138,18 @@ func TestNmapExtractor_Extract_HostWithPorts(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:   1,
 		HostsUp:      1,
 		HostsDown:    0,
 		NmapVersion:  "7.80",
 		ScanDuration: 8.3,
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:       "10.0.0.5",
 				Hostname: "webserver",
 				State:    "up",
-				Ports: []*nmappb.NmapPort{
+				Ports: []*toolspb.NmapPort{
 					{
 						Number:      80,
 						Protocol:    "tcp",
@@ -212,24 +212,24 @@ func TestNmapExtractor_Extract_HostWithServices(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:   1,
 		HostsUp:      1,
 		HostsDown:    0,
 		NmapVersion:  "7.80",
 		ScanDuration: 15.7,
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:       "172.16.0.10",
 				Hostname: "api.example.com",
 				State:    "up",
-				Ports: []*nmappb.NmapPort{
+				Ports: []*toolspb.NmapPort{
 					{
 						Number:      80,
 						Protocol:    "tcp",
 						State:       "open",
 						StateReason: "syn-ack",
-						Service: &nmappb.NmapService{
+						Service: &toolspb.NmapService{
 							Name:       "http",
 							Product:    "nginx",
 							Version:    "1.18.0",
@@ -243,7 +243,7 @@ func TestNmapExtractor_Extract_HostWithServices(t *testing.T) {
 						Protocol:    "tcp",
 						State:       "open",
 						StateReason: "syn-ack",
-						Service: &nmappb.NmapService{
+						Service: &toolspb.NmapService{
 							Name:      "https",
 							Product:   "nginx",
 							Version:   "1.18.0",
@@ -256,7 +256,7 @@ func TestNmapExtractor_Extract_HostWithServices(t *testing.T) {
 						Protocol:    "tcp",
 						State:       "open",
 						StateReason: "syn-ack",
-						Service: &nmappb.NmapService{
+						Service: &toolspb.NmapService{
 							Name:    "mysql",
 							Product: "MySQL",
 							Version: "8.0.27",
@@ -313,22 +313,22 @@ func TestNmapExtractor_Extract_HostWithOS(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:   1,
 		HostsUp:      1,
 		HostsDown:    0,
 		NmapVersion:  "7.80",
 		ScanDuration: 20.1,
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:       "192.168.1.100",
 				Hostname: "linux-server",
 				State:    "up",
-				OsMatches: []*nmappb.OSMatch{
+				OsMatches: []*toolspb.OSMatch{
 					{
 						Name:     "Linux 5.4",
 						Accuracy: 95,
-						Classes: []*nmappb.OSClass{
+						Classes: []*toolspb.OSClass{
 							{
 								Type:     "general purpose",
 								Vendor:   "Linux",
@@ -342,7 +342,7 @@ func TestNmapExtractor_Extract_HostWithOS(t *testing.T) {
 					{
 						Name:     "Linux 5.10",
 						Accuracy: 90,
-						Classes: []*nmappb.OSClass{
+						Classes: []*toolspb.OSClass{
 							{
 								Type:     "general purpose",
 								Vendor:   "Linux",
@@ -353,7 +353,7 @@ func TestNmapExtractor_Extract_HostWithOS(t *testing.T) {
 						},
 					},
 				},
-				Ports: []*nmappb.NmapPort{},
+				Ports: []*toolspb.NmapPort{},
 			},
 		},
 	}
@@ -373,18 +373,18 @@ func TestNmapExtractor_Extract_MultipleHosts(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:   3,
 		HostsUp:      3,
 		HostsDown:    0,
 		NmapVersion:  "7.80",
 		ScanDuration: 25.6,
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:       "10.0.0.1",
 				Hostname: "host1",
 				State:    "up",
-				Ports: []*nmappb.NmapPort{
+				Ports: []*toolspb.NmapPort{
 					{Number: 22, Protocol: "tcp", State: "open"},
 				},
 			},
@@ -392,7 +392,7 @@ func TestNmapExtractor_Extract_MultipleHosts(t *testing.T) {
 				Ip:       "10.0.0.2",
 				Hostname: "host2",
 				State:    "up",
-				Ports: []*nmappb.NmapPort{
+				Ports: []*toolspb.NmapPort{
 					{Number: 80, Protocol: "tcp", State: "open"},
 					{Number: 443, Protocol: "tcp", State: "open"},
 				},
@@ -401,7 +401,7 @@ func TestNmapExtractor_Extract_MultipleHosts(t *testing.T) {
 				Ip:       "10.0.0.3",
 				Hostname: "host3",
 				State:    "up",
-				Ports:    []*nmappb.NmapPort{},
+				Ports:    []*toolspb.NmapPort{},
 			},
 		},
 	}
@@ -431,18 +431,18 @@ func TestNmapExtractor_Extract_HostWithMultipleHostnames(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:   1,
 		HostsUp:      1,
 		HostsDown:    0,
 		NmapVersion:  "7.80",
 		ScanDuration: 5.0,
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:        "192.168.1.1",
 				Hostnames: []string{"gateway.local", "router.local", "admin.local"},
 				State:     "up",
-				Ports:     []*nmappb.NmapPort{},
+				Ports:     []*toolspb.NmapPort{},
 			},
 		},
 	}
@@ -461,22 +461,22 @@ func TestNmapExtractor_Extract_HostDownFiltered(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:   2,
 		HostsUp:      1,
 		HostsDown:    1,
 		NmapVersion:  "7.80",
 		ScanDuration: 10.0,
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:    "10.0.0.1",
 				State: "up",
-				Ports: []*nmappb.NmapPort{},
+				Ports: []*toolspb.NmapPort{},
 			},
 			{
 				Ip:    "10.0.0.2",
 				State: "down",
-				Ports: []*nmappb.NmapPort{},
+				Ports: []*toolspb.NmapPort{},
 			},
 		},
 	}
@@ -494,16 +494,16 @@ func TestNmapExtractor_Extract_DeterministicUUIDs(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:  1,
 		HostsUp:     1,
 		HostsDown:   0,
 		NmapVersion: "7.80",
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:    "192.168.1.1",
 				State: "up",
-				Ports: []*nmappb.NmapPort{
+				Ports: []*toolspb.NmapPort{
 					{Number: 80, Protocol: "tcp", State: "open"},
 				},
 			},
@@ -528,16 +528,16 @@ func TestNmapExtractor_Extract_PortProtocolInUUID(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:  1,
 		HostsUp:     1,
 		HostsDown:   0,
 		NmapVersion: "7.80",
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:    "192.168.1.1",
 				State: "up",
-				Ports: []*nmappb.NmapPort{
+				Ports: []*toolspb.NmapPort{
 					{Number: 53, Protocol: "tcp", State: "open"},
 					{Number: 53, Protocol: "udp", State: "open"},
 				},
@@ -557,21 +557,21 @@ func TestNmapExtractor_Extract_ServiceWithoutOptionalFields(t *testing.T) {
 	extractor := NewNmapExtractor()
 	ctx := context.Background()
 
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:  1,
 		HostsUp:     1,
 		HostsDown:   0,
 		NmapVersion: "7.80",
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:    "192.168.1.1",
 				State: "up",
-				Ports: []*nmappb.NmapPort{
+				Ports: []*toolspb.NmapPort{
 					{
 						Number:   80,
 						Protocol: "tcp",
 						State:    "open",
-						Service: &nmappb.NmapService{
+						Service: &toolspb.NmapService{
 							Name: "http",
 							// No product, version, extra_info, or cpe
 						},
@@ -607,21 +607,21 @@ func TestNmapExtractor_Integration_WithRegistry(t *testing.T) {
 	assert.True(t, registry.Has("nmap"))
 
 	// Create test response
-	resp := &nmappb.NmapResponse{
+	resp := &toolspb.NmapResponse{
 		TotalHosts:  1,
 		HostsUp:     1,
 		HostsDown:   0,
 		NmapVersion: "7.80",
-		Hosts: []*nmappb.NmapHost{
+		Hosts: []*toolspb.NmapHost{
 			{
 				Ip:    "10.0.0.1",
 				State: "up",
-				Ports: []*nmappb.NmapPort{
+				Ports: []*toolspb.NmapPort{
 					{
 						Number:   443,
 						Protocol: "tcp",
 						State:    "open",
-						Service: &nmappb.NmapService{
+						Service: &toolspb.NmapService{
 							Name:    "https",
 							Product: "nginx",
 							Version: "1.20.0",

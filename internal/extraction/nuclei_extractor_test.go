@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	nucleipb "github.com/zero-day-ai/tools/discovery/nuclei/gen"
+	"github.com/zero-day-ai/sdk/api/gen/toolspb"
 )
 
 func TestNucleiExtractor_ToolName(t *testing.T) {
@@ -19,7 +19,7 @@ func TestNucleiExtractor_CanExtract(t *testing.T) {
 	extractor := NewNucleiExtractor()
 
 	t.Run("valid NucleiResponse", func(t *testing.T) {
-		result := extractor.CanExtract(&nucleipb.NucleiResponse{})
+		result := extractor.CanExtract(&toolspb.NucleiResponse{})
 		assert.True(t, result)
 	})
 
@@ -33,8 +33,8 @@ func TestNucleiExtractor_Extract_EmptyResults(t *testing.T) {
 	extractor := NewNucleiExtractor()
 	ctx := context.Background()
 
-	resp := &nucleipb.NucleiResponse{
-		Results:           []*nucleipb.TemplateMatch{},
+	resp := &toolspb.NucleiResponse{
+		Results:           []*toolspb.TemplateMatch{},
 		TotalRequests:     10,
 		TotalMatches:      0,
 		Duration:          1.5,
@@ -64,8 +64,8 @@ func TestNucleiExtractor_Extract_SingleFinding(t *testing.T) {
 	extractor := NewNucleiExtractor()
 	ctx := context.Background()
 
-	resp := &nucleipb.NucleiResponse{
-		Results: []*nucleipb.TemplateMatch{
+	resp := &toolspb.NucleiResponse{
+		Results: []*toolspb.TemplateMatch{
 			{
 				TemplateId:   "CVE-2021-12345",
 				TemplateName: "Test Vulnerability",
@@ -78,14 +78,14 @@ func TestNucleiExtractor_Extract_SingleFinding(t *testing.T) {
 					"admin panel exposed",
 					"version 1.2.3",
 				},
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:        "Admin Panel Exposure",
 					Author:      "security-team",
 					Severity:    "high",
 					Description: "Admin panel is publicly accessible",
 					Reference:   []string{"https://example.com/advisory"},
 					Tags:        []string{"admin", "exposure", "misconfig"},
-					Classification: &nucleipb.TemplateClassification{
+					Classification: &toolspb.TemplateClassification{
 						CveId:       []string{"CVE-2021-12345"},
 						CweId:       []string{"CWE-200"},
 						CvssMetrics: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
@@ -176,8 +176,8 @@ func TestNucleiExtractor_Extract_MultipleFindingsSameEndpoint(t *testing.T) {
 	extractor := NewNucleiExtractor()
 	ctx := context.Background()
 
-	resp := &nucleipb.NucleiResponse{
-		Results: []*nucleipb.TemplateMatch{
+	resp := &toolspb.NucleiResponse{
+		Results: []*toolspb.TemplateMatch{
 			{
 				TemplateId:  "CVE-2021-00001",
 				Type:        "http",
@@ -185,7 +185,7 @@ func TestNucleiExtractor_Extract_MultipleFindingsSameEndpoint(t *testing.T) {
 				Url:         "https://example.com/api",
 				MatchedAt:   "https://example.com/api/v1",
 				MatcherName: "status",
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:        "API Exposure 1",
 					Severity:    "medium",
 					Description: "API endpoint exposed",
@@ -198,7 +198,7 @@ func TestNucleiExtractor_Extract_MultipleFindingsSameEndpoint(t *testing.T) {
 				Url:         "https://example.com/api",
 				MatchedAt:   "https://example.com/api/v2",
 				MatcherName: "body",
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:        "API Exposure 2",
 					Severity:    "low",
 					Description: "Another API issue",
@@ -228,8 +228,8 @@ func TestNucleiExtractor_Extract_FindingWithoutExtractedResults(t *testing.T) {
 	extractor := NewNucleiExtractor()
 	ctx := context.Background()
 
-	resp := &nucleipb.NucleiResponse{
-		Results: []*nucleipb.TemplateMatch{
+	resp := &toolspb.NucleiResponse{
+		Results: []*toolspb.TemplateMatch{
 			{
 				TemplateId:       "test-template",
 				Type:             "http",
@@ -238,7 +238,7 @@ func TestNucleiExtractor_Extract_FindingWithoutExtractedResults(t *testing.T) {
 				MatchedAt:        "https://example.com/login",
 				MatcherName:      "status-code",
 				ExtractedResults: []string{}, // No extracted results
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:     "Test Finding",
 					Severity: "info",
 				},
@@ -293,15 +293,15 @@ func TestNucleiExtractor_Extract_InvalidMessageType(t *testing.T) {
 	// Pass wrong message type
 	_, err := extractor.Extract(ctx, &graphragpb.DiscoveryResult{})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected *nucleipb.NucleiResponse")
+	assert.Contains(t, err.Error(), "expected *toolspb.NucleiResponse")
 }
 
 func TestNucleiExtractor_Extract_NilInfo(t *testing.T) {
 	extractor := NewNucleiExtractor()
 	ctx := context.Background()
 
-	resp := &nucleipb.NucleiResponse{
-		Results: []*nucleipb.TemplateMatch{
+	resp := &toolspb.NucleiResponse{
+		Results: []*toolspb.TemplateMatch{
 			{
 				TemplateId: "test",
 				Host:       "example.com",
@@ -323,9 +323,9 @@ func TestNucleiExtractor_DeterministicIDs(t *testing.T) {
 	ctx := context.Background()
 
 	// Create same response twice
-	createResponse := func() *nucleipb.NucleiResponse {
-		return &nucleipb.NucleiResponse{
-			Results: []*nucleipb.TemplateMatch{
+	createResponse := func() *toolspb.NucleiResponse {
+		return &toolspb.NucleiResponse{
+			Results: []*toolspb.TemplateMatch{
 				{
 					TemplateId:       "CVE-2021-12345",
 					Type:             "http",
@@ -333,7 +333,7 @@ func TestNucleiExtractor_DeterministicIDs(t *testing.T) {
 					Url:              "https://example.com/test",
 					MatchedAt:        "https://example.com/test",
 					ExtractedResults: []string{"data"},
-					Info: &nucleipb.TemplateInfo{
+					Info: &toolspb.TemplateInfo{
 						Name:     "Test",
 						Severity: "high",
 					},
@@ -367,18 +367,18 @@ func TestNucleiExtractor_ComplexClassification(t *testing.T) {
 	extractor := NewNucleiExtractor()
 	ctx := context.Background()
 
-	resp := &nucleipb.NucleiResponse{
-		Results: []*nucleipb.TemplateMatch{
+	resp := &toolspb.NucleiResponse{
+		Results: []*toolspb.TemplateMatch{
 			{
 				TemplateId: "complex-vuln",
 				Type:       "http",
 				Host:       "example.com",
 				Url:        "https://example.com",
 				MatchedAt:  "https://example.com/vuln",
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:     "Complex Vulnerability",
 					Severity: "critical",
-					Classification: &nucleipb.TemplateClassification{
+					Classification: &toolspb.TemplateClassification{
 						CveId: []string{
 							"CVE-2021-00001",
 							"CVE-2021-00002",
@@ -423,14 +423,14 @@ func TestNucleiExtractor_ExtractorRegistry_Integration(t *testing.T) {
 	assert.True(t, registry.Has("nuclei"))
 
 	// Create test response
-	resp := &nucleipb.NucleiResponse{
-		Results: []*nucleipb.TemplateMatch{
+	resp := &toolspb.NucleiResponse{
+		Results: []*toolspb.TemplateMatch{
 			{
 				TemplateId: "test",
 				Host:       "example.com",
 				Url:        "https://example.com",
 				MatchedAt:  "https://example.com",
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:     "Test Finding",
 					Severity: "medium",
 				},

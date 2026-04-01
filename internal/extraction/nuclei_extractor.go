@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	nucleipb "github.com/zero-day-ai/tools/discovery/nuclei/gen"
+	"github.com/zero-day-ai/sdk/api/gen/toolspb"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -33,7 +33,7 @@ func (e *NucleiExtractor) ToolName() string {
 
 // CanExtract validates that this extractor can process NucleiResponse messages.
 func (e *NucleiExtractor) CanExtract(msg proto.Message) bool {
-	_, ok := msg.(*nucleipb.NucleiResponse)
+	_, ok := msg.(*toolspb.NucleiResponse)
 	return ok
 }
 
@@ -51,9 +51,9 @@ func (e *NucleiExtractor) CanExtract(msg proto.Message) bool {
 // Returns an empty result (not an error) if no matches were found.
 func (e *NucleiExtractor) Extract(ctx context.Context, msg proto.Message) (*ExtractionResult, error) {
 	// Type assertion (safe because CanExtract was called first)
-	resp, ok := msg.(*nucleipb.NucleiResponse)
+	resp, ok := msg.(*toolspb.NucleiResponse)
 	if !ok {
-		return nil, fmt.Errorf("expected *nucleipb.NucleiResponse, got %T", msg)
+		return nil, fmt.Errorf("expected *toolspb.NucleiResponse, got %T", msg)
 	}
 
 	// Handle empty scan results gracefully
@@ -152,7 +152,7 @@ func (e *NucleiExtractor) Extract(ctx context.Context, msg proto.Message) (*Extr
 }
 
 // extractFinding creates a Finding entity from TemplateMatch data.
-func (e *NucleiExtractor) extractFinding(match *nucleipb.TemplateMatch, findingID string) *graphragpb.Finding {
+func (e *NucleiExtractor) extractFinding(match *toolspb.TemplateMatch, findingID string) *graphragpb.Finding {
 	info := match.Info
 
 	finding := &graphragpb.Finding{
@@ -204,7 +204,7 @@ func (e *NucleiExtractor) extractFinding(match *nucleipb.TemplateMatch, findingI
 }
 
 // extractEndpoint creates an Endpoint entity from TemplateMatch data.
-func (e *NucleiExtractor) extractEndpoint(match *nucleipb.TemplateMatch, endpointID string) *graphragpb.Endpoint {
+func (e *NucleiExtractor) extractEndpoint(match *toolspb.TemplateMatch, endpointID string) *graphragpb.Endpoint {
 	endpoint := &graphragpb.Endpoint{
 		Id:  &endpointID,
 		Url: match.Url,
@@ -223,7 +223,7 @@ func (e *NucleiExtractor) extractEndpoint(match *nucleipb.TemplateMatch, endpoin
 }
 
 // extractEvidence creates an Evidence entity from extracted results.
-func (e *NucleiExtractor) extractEvidence(match *nucleipb.TemplateMatch, extracted string, index int, evidenceID, findingID string) *graphragpb.Evidence {
+func (e *NucleiExtractor) extractEvidence(match *toolspb.TemplateMatch, extracted string, index int, evidenceID, findingID string) *graphragpb.Evidence {
 	evidence := &graphragpb.Evidence{
 		Id:        &evidenceID,
 		FindingId: findingID,
@@ -245,7 +245,7 @@ func (e *NucleiExtractor) extractEvidence(match *nucleipb.TemplateMatch, extract
 
 // extractMatchedAtEvidence creates an Evidence entity from the matched_at field.
 // This is used when there are no extracted results but we have a match location.
-func (e *NucleiExtractor) extractMatchedAtEvidence(match *nucleipb.TemplateMatch, evidenceID, findingID string) *graphragpb.Evidence {
+func (e *NucleiExtractor) extractMatchedAtEvidence(match *toolspb.TemplateMatch, evidenceID, findingID string) *graphragpb.Evidence {
 	evidence := &graphragpb.Evidence{
 		Id:        &evidenceID,
 		FindingId: findingID,

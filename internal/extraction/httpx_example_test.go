@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/zero-day-ai/gibson/internal/extraction"
-	httpxpb "github.com/zero-day-ai/tools/discovery/httpx/gen"
+	"github.com/zero-day-ai/sdk/api/gen/toolspb"
 )
 
 // Example demonstrates basic usage of the HttpxExtractor.
@@ -14,8 +14,8 @@ func ExampleHttpxExtractor() {
 	extractor := extraction.NewHttpxExtractor()
 
 	// Create httpx response
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://example.com",
 				StatusCode: 200,
@@ -51,13 +51,13 @@ func Example_httpxWithTechnologies() {
 	extractor := extraction.NewHttpxExtractor()
 
 	// Create httpx response with technology detection
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://api.example.com",
 				StatusCode: 200,
 				Failed:     false,
-				Technologies: []*httpxpb.Technology{
+				Technologies: []*toolspb.Technology{
 					{
 						Name:       "nginx",
 						Version:    "1.21.0",
@@ -103,13 +103,13 @@ func Example_httpxWithCertificate() {
 	extractor := extraction.NewHttpxExtractor()
 
 	// Create httpx response with TLS information
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://secure.example.com",
 				StatusCode: 200,
 				Failed:     false,
-				Tls: &httpxpb.TLSInfo{
+				Tls: &toolspb.TLSInfo{
 					Version:      "TLS 1.3",
 					SubjectDn:    "CN=secure.example.com",
 					IssuerDn:     "CN=Let's Encrypt Authority X3",
@@ -157,8 +157,8 @@ func Example_httpxWithRegistry() {
 	}
 
 	// Create httpx response
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://example.com/api",
 				StatusCode: 200,

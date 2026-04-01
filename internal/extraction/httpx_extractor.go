@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	httpxpb "github.com/zero-day-ai/tools/discovery/httpx/gen"
+	"github.com/zero-day-ai/sdk/api/gen/toolspb"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -35,7 +35,7 @@ func (e *HttpxExtractor) ToolName() string {
 
 // CanExtract validates that this extractor can process HttpxResponse messages.
 func (e *HttpxExtractor) CanExtract(msg proto.Message) bool {
-	_, ok := msg.(*httpxpb.HttpxResponse)
+	_, ok := msg.(*toolspb.HttpxResponse)
 	return ok
 }
 
@@ -49,9 +49,9 @@ func (e *HttpxExtractor) CanExtract(msg proto.Message) bool {
 // Returns an empty result (not an error) if no results were found.
 func (e *HttpxExtractor) Extract(ctx context.Context, msg proto.Message) (*ExtractionResult, error) {
 	// Type assertion (safe because CanExtract was called first)
-	resp, ok := msg.(*httpxpb.HttpxResponse)
+	resp, ok := msg.(*toolspb.HttpxResponse)
 	if !ok {
-		return nil, fmt.Errorf("expected *httpxpb.HttpxResponse, got %T", msg)
+		return nil, fmt.Errorf("expected *toolspb.HttpxResponse, got %T", msg)
 	}
 
 	// Handle empty scan results gracefully
@@ -131,7 +131,7 @@ func (e *HttpxExtractor) Extract(ctx context.Context, msg proto.Message) (*Extra
 }
 
 // extractEndpoint creates an Endpoint entity from HttpxResult data.
-func (e *HttpxExtractor) extractEndpoint(result *httpxpb.HttpxResult, endpointID string) *graphragpb.Endpoint {
+func (e *HttpxExtractor) extractEndpoint(result *toolspb.HttpxResult, endpointID string) *graphragpb.Endpoint {
 	endpoint := &graphragpb.Endpoint{
 		Id:     &endpointID,
 		Url:    result.Url,
@@ -162,7 +162,7 @@ func (e *HttpxExtractor) extractEndpoint(result *httpxpb.HttpxResult, endpointID
 }
 
 // extractTechnology creates a Technology entity from Technology data.
-func (e *HttpxExtractor) extractTechnology(tech *httpxpb.Technology, techID, parentID string) *graphragpb.Technology {
+func (e *HttpxExtractor) extractTechnology(tech *toolspb.Technology, techID, parentID string) *graphragpb.Technology {
 	technology := &graphragpb.Technology{
 		Id:         &techID,
 		Name:       tech.Name,
@@ -190,7 +190,7 @@ func (e *HttpxExtractor) extractTechnology(tech *httpxpb.Technology, techID, par
 }
 
 // extractCertificate creates a Certificate entity from TLSInfo data.
-func (e *HttpxExtractor) extractCertificate(tls *httpxpb.TLSInfo, certID, parentID string) *graphragpb.Certificate {
+func (e *HttpxExtractor) extractCertificate(tls *toolspb.TLSInfo, certID, parentID string) *graphragpb.Certificate {
 	certificate := &graphragpb.Certificate{
 		Id:         &certID,
 		ParentId:   stringPtr(parentID),

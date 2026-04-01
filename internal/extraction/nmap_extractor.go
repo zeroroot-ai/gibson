@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	nmappb "github.com/zero-day-ai/tools/discovery/nmap/gen"
+	"github.com/zero-day-ai/sdk/api/gen/toolspb"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -32,7 +32,7 @@ func (e *NmapExtractor) ToolName() string {
 
 // CanExtract validates that this extractor can process NmapResponse messages.
 func (e *NmapExtractor) CanExtract(msg proto.Message) bool {
-	_, ok := msg.(*nmappb.NmapResponse)
+	_, ok := msg.(*toolspb.NmapResponse)
 	return ok
 }
 
@@ -46,9 +46,9 @@ func (e *NmapExtractor) CanExtract(msg proto.Message) bool {
 // Returns an empty result (not an error) if no hosts were found.
 func (e *NmapExtractor) Extract(ctx context.Context, msg proto.Message) (*ExtractionResult, error) {
 	// Type assertion (safe because CanExtract was called first)
-	resp, ok := msg.(*nmappb.NmapResponse)
+	resp, ok := msg.(*toolspb.NmapResponse)
 	if !ok {
-		return nil, fmt.Errorf("expected *nmappb.NmapResponse, got %T", msg)
+		return nil, fmt.Errorf("expected *toolspb.NmapResponse, got %T", msg)
 	}
 
 	// Handle empty scan results gracefully
@@ -131,7 +131,7 @@ func (e *NmapExtractor) Extract(ctx context.Context, msg proto.Message) (*Extrac
 }
 
 // extractHost creates a Host entity from NmapHost data.
-func (e *NmapExtractor) extractHost(nmapHost *nmappb.NmapHost, hostID string) *graphragpb.Host {
+func (e *NmapExtractor) extractHost(nmapHost *toolspb.NmapHost, hostID string) *graphragpb.Host {
 	host := &graphragpb.Host{
 		Id:    &hostID,
 		Ip:    nmapHost.Ip,
@@ -163,7 +163,7 @@ func (e *NmapExtractor) extractHost(nmapHost *nmappb.NmapHost, hostID string) *g
 }
 
 // extractPort creates a Port entity from NmapPort data.
-func (e *NmapExtractor) extractPort(nmapPort *nmappb.NmapPort, portID, hostID string) *graphragpb.Port {
+func (e *NmapExtractor) extractPort(nmapPort *toolspb.NmapPort, portID, hostID string) *graphragpb.Port {
 	port := &graphragpb.Port{
 		Id:       &portID,
 		HostId:   hostID,
@@ -181,7 +181,7 @@ func (e *NmapExtractor) extractPort(nmapPort *nmappb.NmapPort, portID, hostID st
 }
 
 // extractService creates a Service entity from NmapService data.
-func (e *NmapExtractor) extractService(nmapService *nmappb.NmapService, serviceID, portID string) *graphragpb.Service {
+func (e *NmapExtractor) extractService(nmapService *toolspb.NmapService, serviceID, portID string) *graphragpb.Service {
 	service := &graphragpb.Service{
 		Id:     &serviceID,
 		PortId: portID,

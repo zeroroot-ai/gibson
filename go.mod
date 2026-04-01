@@ -35,9 +35,6 @@ require (
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zero-day-ai/sdk v0.58.0
-	github.com/zero-day-ai/tools/discovery/httpx v0.0.0-20260331020518-42d30066639c
-	github.com/zero-day-ai/tools/discovery/nmap v0.0.0-20260331020518-42d30066639c
-	github.com/zero-day-ai/tools/discovery/nuclei v0.0.0-20260331020518-42d30066639c
 	go.etcd.io/etcd/client/v3 v3.6.7
 	go.etcd.io/etcd/server/v3 v3.5.5
 	go.opentelemetry.io/otel v1.42.0

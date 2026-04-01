@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	httpxpb "github.com/zero-day-ai/tools/discovery/httpx/gen"
+	"github.com/zero-day-ai/sdk/api/gen/toolspb"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -26,7 +26,7 @@ func TestHttpxExtractor_CanExtract(t *testing.T) {
 	}{
 		{
 			name:     "valid HttpxResponse",
-			msg:      &httpxpb.HttpxResponse{},
+			msg:      &toolspb.HttpxResponse{},
 			expected: true,
 		},
 		{
@@ -56,15 +56,15 @@ func TestHttpxExtractor_Extract_InvalidMessageType(t *testing.T) {
 	// Pass wrong message type
 	_, err := extractor.Extract(ctx, &graphragpb.Host{})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected *httpxpb.HttpxResponse")
+	assert.Contains(t, err.Error(), "expected *toolspb.HttpxResponse")
 }
 
 func TestHttpxExtractor_Extract_EmptyResults(t *testing.T) {
 	extractor := NewHttpxExtractor()
 	ctx := context.Background()
 
-	resp := &httpxpb.HttpxResponse{
-		Results:      []*httpxpb.HttpxResult{},
+	resp := &toolspb.HttpxResponse{
+		Results:      []*toolspb.HttpxResult{},
 		TotalScanned: 10,
 		TotalSuccess: 0,
 		TotalFailed:  10,
@@ -92,8 +92,8 @@ func TestHttpxExtractor_Extract_BasicEndpoint(t *testing.T) {
 	extractor := NewHttpxExtractor()
 	ctx := context.Background()
 
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:           "https://example.com",
 				StatusCode:    200,
@@ -144,13 +144,13 @@ func TestHttpxExtractor_Extract_WithTechnologies(t *testing.T) {
 	extractor := NewHttpxExtractor()
 	ctx := context.Background()
 
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://example.com",
 				StatusCode: 200,
 				Failed:     false,
-				Technologies: []*httpxpb.Technology{
+				Technologies: []*toolspb.Technology{
 					{
 						Name:       "nginx",
 						Version:    "1.21.0",
@@ -212,13 +212,13 @@ func TestHttpxExtractor_Extract_WithCertificate(t *testing.T) {
 	extractor := NewHttpxExtractor()
 	ctx := context.Background()
 
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://example.com",
 				StatusCode: 200,
 				Failed:     false,
-				Tls: &httpxpb.TLSInfo{
+				Tls: &toolspb.TLSInfo{
 					Version:            "TLS 1.3",
 					SubjectDn:          "CN=example.com",
 					IssuerDn:           "CN=Let's Encrypt Authority X3",
@@ -274,8 +274,8 @@ func TestHttpxExtractor_Extract_SkipsFailedRequests(t *testing.T) {
 	extractor := NewHttpxExtractor()
 	ctx := context.Background()
 
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://example.com",
 				StatusCode: 200,
@@ -316,8 +316,8 @@ func TestHttpxExtractor_Extract_CompleteScenario(t *testing.T) {
 	extractor := NewHttpxExtractor()
 	ctx := context.Background()
 
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:           "https://api.example.com/v1",
 				StatusCode:    200,
@@ -326,7 +326,7 @@ func TestHttpxExtractor_Extract_CompleteScenario(t *testing.T) {
 				Title:         "API v1",
 				Method:        "GET",
 				Failed:        false,
-				Technologies: []*httpxpb.Technology{
+				Technologies: []*toolspb.Technology{
 					{
 						Name:       "Express",
 						Version:    "4.18.0",
@@ -334,7 +334,7 @@ func TestHttpxExtractor_Extract_CompleteScenario(t *testing.T) {
 						Confidence: 0.90,
 					},
 				},
-				Tls: &httpxpb.TLSInfo{
+				Tls: &toolspb.TLSInfo{
 					Version:      "TLS 1.3",
 					SubjectDn:    "CN=api.example.com",
 					IssuerDn:     "CN=DigiCert",
@@ -348,7 +348,7 @@ func TestHttpxExtractor_Extract_CompleteScenario(t *testing.T) {
 				Url:        "https://www.example.com",
 				StatusCode: 200,
 				Failed:     false,
-				Technologies: []*httpxpb.Technology{
+				Technologies: []*toolspb.Technology{
 					{
 						Name:     "WordPress",
 						Version:  "6.2.0",
@@ -390,13 +390,13 @@ func TestHttpxExtractor_DeterministicIDs(t *testing.T) {
 	ctx := context.Background()
 
 	// Same response run twice should produce same IDs
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://example.com",
 				StatusCode: 200,
 				Failed:     false,
-				Technologies: []*httpxpb.Technology{
+				Technologies: []*toolspb.Technology{
 					{
 						Name:    "nginx",
 						Version: "1.21.0",
@@ -529,7 +529,7 @@ func TestHttpxExtractor_ParseTimestamp(t *testing.T) {
 func TestHttpxExtractor_ExtractEndpoint_AllFields(t *testing.T) {
 	extractor := NewHttpxExtractor()
 
-	result := &httpxpb.HttpxResult{
+	result := &toolspb.HttpxResult{
 		Url:           "https://example.com/api",
 		StatusCode:    201,
 		ContentLength: 9999,
@@ -553,7 +553,7 @@ func TestHttpxExtractor_ExtractEndpoint_AllFields(t *testing.T) {
 func TestHttpxExtractor_ExtractEndpoint_MinimalFields(t *testing.T) {
 	extractor := NewHttpxExtractor()
 
-	result := &httpxpb.HttpxResult{
+	result := &toolspb.HttpxResult{
 		Url: "https://example.com",
 	}
 
@@ -572,7 +572,7 @@ func TestHttpxExtractor_ExtractEndpoint_MinimalFields(t *testing.T) {
 func TestHttpxExtractor_ExtractTechnology_AllFields(t *testing.T) {
 	extractor := NewHttpxExtractor()
 
-	tech := &httpxpb.Technology{
+	tech := &toolspb.Technology{
 		Name:       "React",
 		Version:    "18.2.0",
 		Category:   "javascript-framework",
@@ -595,7 +595,7 @@ func TestHttpxExtractor_ExtractTechnology_AllFields(t *testing.T) {
 func TestHttpxExtractor_ExtractCertificate_AllFields(t *testing.T) {
 	extractor := NewHttpxExtractor()
 
-	tls := &httpxpb.TLSInfo{
+	tls := &toolspb.TLSInfo{
 		SubjectDn:    "CN=test.com",
 		IssuerDn:     "CN=Test CA",
 		SerialNumber: "AA:BB:CC",
@@ -632,13 +632,13 @@ func TestHttpxExtractor_Integration_WithRegistry(t *testing.T) {
 	assert.True(t, registry.Has("httpx"))
 
 	// Create test response
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://api.example.com",
 				StatusCode: 200,
 				Failed:     false,
-				Technologies: []*httpxpb.Technology{
+				Technologies: []*toolspb.Technology{
 					{Name: "nginx", Version: "1.21.0"},
 				},
 			},
@@ -664,8 +664,8 @@ func BenchmarkHttpxExtractor_Extract_SingleEndpoint(b *testing.B) {
 	extractor := NewHttpxExtractor()
 	ctx := context.Background()
 
-	resp := &httpxpb.HttpxResponse{
-		Results: []*httpxpb.HttpxResult{
+	resp := &toolspb.HttpxResponse{
+		Results: []*toolspb.HttpxResult{
 			{
 				Url:        "https://example.com",
 				StatusCode: 200,
@@ -687,19 +687,19 @@ func BenchmarkHttpxExtractor_Extract_MultipleEndpoints(b *testing.B) {
 	ctx := context.Background()
 
 	// Create 100 endpoints
-	results := make([]*httpxpb.HttpxResult, 100)
+	results := make([]*toolspb.HttpxResult, 100)
 	for i := 0; i < 100; i++ {
-		results[i] = &httpxpb.HttpxResult{
+		results[i] = &toolspb.HttpxResult{
 			Url:        "https://example.com/endpoint/" + string(rune(i)),
 			StatusCode: 200,
 			Failed:     false,
-			Technologies: []*httpxpb.Technology{
+			Technologies: []*toolspb.Technology{
 				{Name: "nginx", Version: "1.21.0"},
 			},
 		}
 	}
 
-	resp := &httpxpb.HttpxResponse{
+	resp := &toolspb.HttpxResponse{
 		Results:      results,
 		TotalScanned: 100,
 		TotalSuccess: 100,
