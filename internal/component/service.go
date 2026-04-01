@@ -24,7 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	componentpb "github.com/zero-day-ai/sdk/api/gen/componentpb"
+	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/memory"

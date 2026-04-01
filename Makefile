@@ -37,6 +37,11 @@ COVERAGE_THRESHOLD=90
 PROTO_DIR=api/proto
 PROTO_OUT=api/gen/proto
 
+# Buf code generation (delegates to the repo root workspace)
+# Resolve repo root relative to this Makefile's location (core/gibson → root is ../..)
+ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../..)
+BUF := npx --prefix $(ROOT_DIR)/enterprise/dashboard buf
+
 # Default target
 all: test build
 
@@ -126,16 +131,12 @@ check: fmt vet lint test-race
 # Proto generation
 proto-deps:
 	@echo "Installing protoc plugins..."
-	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 
 proto: proto-deps
-	@echo "Generating Go code from proto files..."
-	@mkdir -p $(PROTO_OUT)
-	protoc --proto_path=$(PROTO_DIR) \
-		--go_out=$(PROTO_OUT) --go_opt=paths=source_relative \
-		--go-grpc_out=$(PROTO_OUT) --go-grpc_opt=paths=source_relative \
-		$(PROTO_DIR)/*.proto
+	@echo "Generating Go code from daemon proto files via Buf..."
+	cd $(ROOT_DIR) && $(BUF) generate --template buf.gen.yaml --path core/gibson/internal/daemon/api
 	@echo "Proto generation complete"
 
 proto-clean:

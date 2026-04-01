@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
 // RelationshipBuilder constructs entity relationships from extracted discovery results.

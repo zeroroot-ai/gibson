@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
 // TestExtraction_EndToEnd_NmapToRelationships tests the full extraction pipeline

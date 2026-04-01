@@ -12,7 +12,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	componentpb "github.com/zero-day-ai/sdk/api/gen/componentpb"
+	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/audit"

@@ -13,7 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/neo4j"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
-	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/graphrag/protoconv"
 	"github.com/zero-day-ai/sdk/graphrag/taxonomy"

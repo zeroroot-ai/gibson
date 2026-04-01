@@ -10,7 +10,7 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	toolpb "github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1"
 	"github.com/zero-day-ai/sdk/protoresolver"
 )
 
@@ -28,7 +28,7 @@ import (
 // - Proto-based execution using ExecuteProto
 type GRPCToolClient struct {
 	conn     *grpc.ClientConn
-	client   proto.ToolServiceClient
+	client   toolpb.ToolServiceClient
 	info     ComponentInfo
 	resolver protoresolver.ProtoResolver
 
@@ -63,7 +63,7 @@ type toolDescriptor struct {
 func NewGRPCToolClient(conn *grpc.ClientConn, info ComponentInfo, resolver protoresolver.ProtoResolver) *GRPCToolClient {
 	return &GRPCToolClient{
 		conn:     conn,
-		client:   proto.NewToolServiceClient(conn),
+		client:   toolpb.NewToolServiceClient(conn),
 		info:     info,
 		resolver: resolver,
 	}
@@ -176,7 +176,7 @@ func (c *GRPCToolClient) ExecuteProto(ctx context.Context, input protobuf.Messag
 	}
 
 	// Send Execute RPC
-	req := &proto.ToolExecuteRequest{
+	req := &toolpb.ExecuteRequest{
 		InputJson: string(inputJSON),
 		TimeoutMs: 0, // Use tool's default timeout
 	}
@@ -224,7 +224,7 @@ func (c *GRPCToolClient) ExecuteProto(ctx context.Context, input protobuf.Messag
 // This sends a Health RPC to the remote tool to check its status.
 // If the RPC fails, the tool is considered unhealthy.
 func (c *GRPCToolClient) Health(ctx context.Context) types.HealthStatus {
-	req := &proto.ToolHealthRequest{}
+	req := &toolpb.HealthRequest{}
 
 	resp, err := c.client.Health(ctx, req)
 	if err != nil {
@@ -257,7 +257,7 @@ func (c *GRPCToolClient) fetchDescriptor(ctx context.Context) (*toolDescriptor, 
 		return c.descriptor, nil
 	}
 
-	req := &proto.ToolGetDescriptorRequest{}
+	req := &toolpb.GetDescriptorRequest{}
 	resp, err := c.client.GetDescriptor(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get descriptor: %w", err)

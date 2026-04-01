@@ -15,27 +15,28 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 )
 
 const bufSize = 1024 * 1024
 
-// mockAgentServiceServer implements proto.AgentServiceServer for testing
+// mockAgentServiceServer implements agentpb.AgentServiceServer for testing
 type mockAgentServiceServer struct {
-	proto.UnimplementedAgentServiceServer
+	agentpb.UnimplementedAgentServiceServer
 
 	// Configuration for mock behavior
-	descriptor      *proto.AgentDescriptor
-	slotSchema      *proto.AgentGetSlotSchemaResponse
-	executeResponse *proto.AgentExecuteResponse
+	descriptor      *agentpb.GetDescriptorResponse
+	slotSchema      *agentpb.GetSlotSchemaResponse
+	executeResponse *agentpb.ExecuteResponse
 	executeError    error
-	healthResponse  *proto.HealthStatus
+	healthResponse  *commonpb.HealthStatus
 	healthError     error
 	descriptorError error
 	slotSchemaError error
 }
 
-func (m *mockAgentServiceServer) GetDescriptor(ctx context.Context, req *proto.AgentGetDescriptorRequest) (*proto.AgentDescriptor, error) {
+func (m *mockAgentServiceServer) GetDescriptor(ctx context.Context, req *agentpb.GetDescriptorRequest) (*agentpb.GetDescriptorResponse, error) {
 	if m.descriptorError != nil {
 		return nil, m.descriptorError
 	}
@@ -45,19 +46,19 @@ func (m *mockAgentServiceServer) GetDescriptor(ctx context.Context, req *proto.A
 	return m.descriptor, nil
 }
 
-func (m *mockAgentServiceServer) GetSlotSchema(ctx context.Context, req *proto.AgentGetSlotSchemaRequest) (*proto.AgentGetSlotSchemaResponse, error) {
+func (m *mockAgentServiceServer) GetSlotSchema(ctx context.Context, req *agentpb.GetSlotSchemaRequest) (*agentpb.GetSlotSchemaResponse, error) {
 	if m.slotSchemaError != nil {
 		return nil, m.slotSchemaError
 	}
 	if m.slotSchema == nil {
-		return &proto.AgentGetSlotSchemaResponse{
-			Slots: []*proto.AgentSlotDefinition{},
+		return &agentpb.GetSlotSchemaResponse{
+			Slots: []*agentpb.AgentSlotDefinition{},
 		}, nil
 	}
 	return m.slotSchema, nil
 }
 
-func (m *mockAgentServiceServer) Execute(ctx context.Context, req *proto.AgentExecuteRequest) (*proto.AgentExecuteResponse, error) {
+func (m *mockAgentServiceServer) Execute(ctx context.Context, req *agentpb.ExecuteRequest) (*agentpb.ExecuteResponse, error) {
 	if m.executeError != nil {
 		return nil, m.executeError
 	}
@@ -67,12 +68,12 @@ func (m *mockAgentServiceServer) Execute(ctx context.Context, req *proto.AgentEx
 	return m.executeResponse, nil
 }
 
-func (m *mockAgentServiceServer) Health(ctx context.Context, req *proto.AgentHealthRequest) (*proto.HealthStatus, error) {
+func (m *mockAgentServiceServer) Health(ctx context.Context, req *agentpb.HealthRequest) (*commonpb.HealthStatus, error) {
 	if m.healthError != nil {
 		return nil, m.healthError
 	}
 	if m.healthResponse == nil {
-		return &proto.HealthStatus{
+		return &commonpb.HealthStatus{
 			State:     "healthy",
 			Message:   "OK",
 			CheckedAt: time.Now().UnixMilli(),
@@ -87,7 +88,7 @@ func setupTestServer(t *testing.T, mock *mockAgentServiceServer) (*grpc.Server, 
 
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
-	proto.RegisterAgentServiceServer(srv, mock)
+	agentpb.RegisterAgentServiceServer(srv, mock)
 
 	go func() {
 		if err := srv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
@@ -127,20 +128,20 @@ func createTestClient(t *testing.T, lis *bufconn.Listener) *GRPCAgentClient {
 	)
 	require.NoError(t, err)
 
-	client := proto.NewAgentServiceClient(conn)
+	client := agentpb.NewAgentServiceClient(conn)
 
 	// Fetch descriptor
 	descCtx, descCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer descCancel()
 
-	descriptor, err := client.GetDescriptor(descCtx, &proto.AgentGetDescriptorRequest{})
+	descriptor, err := client.GetDescriptor(descCtx, &agentpb.GetDescriptorRequest{})
 	require.NoError(t, err)
 
 	// Fetch slots
 	slotCtx, slotCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer slotCancel()
 
-	slotResp, err := client.GetSlotSchema(slotCtx, &proto.AgentGetSlotSchemaRequest{})
+	slotResp, err := client.GetSlotSchema(slotCtx, &agentpb.GetSlotSchemaRequest{})
 	require.NoError(t, err)
 
 	// Create agent descriptor
@@ -164,7 +165,7 @@ func createTestClient(t *testing.T, lis *bufconn.Listener) *GRPCAgentClient {
 
 func TestNewGRPCAgentClient(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:           "test-agent",
 			Description:    "A test agent",
 			Version:        "1.0.0",
@@ -172,19 +173,19 @@ func TestNewGRPCAgentClient(t *testing.T) {
 			TargetTypes:    []string{"llm_chat", "llm_api"},
 			TechniqueTypes: []string{"prompt_injection"},
 		},
-		slotSchema: &proto.AgentGetSlotSchemaResponse{
-			Slots: []*proto.AgentSlotDefinition{
+		slotSchema: &agentpb.GetSlotSchemaResponse{
+			Slots: []*agentpb.AgentSlotDefinition{
 				{
 					Name:        "primary",
 					Description: "Primary LLM for reasoning",
 					Required:    true,
-					DefaultConfig: &proto.AgentSlotConfig{
+					DefaultConfig: &agentpb.AgentSlotConfig{
 						Provider:    "anthropic",
 						Model:       "claude-3-opus-20240229",
 						Temperature: 0.7,
 						MaxTokens:   4096,
 					},
-					Constraints: &proto.AgentSlotConstraints{
+					Constraints: &agentpb.AgentSlotConstraints{
 						MinContextWindow: 100000,
 						RequiredFeatures: []string{"tool_use"},
 					},
@@ -264,7 +265,7 @@ func TestNewGRPCAgentClient_DescriptorFailure(t *testing.T) {
 
 func TestNewGRPCAgentClient_SlotSchemaFailure(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
@@ -301,12 +302,12 @@ func TestGRPCAgentClient_Execute_Success(t *testing.T) {
 	}
 
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
 		},
-		executeResponse: &proto.AgentExecuteResponse{
+		executeResponse: &agentpb.ExecuteResponse{
 			Result: ResultToProto(result),
 		},
 	}
@@ -335,13 +336,13 @@ func TestGRPCAgentClient_Execute_Success(t *testing.T) {
 
 func TestGRPCAgentClient_Execute_WithError(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
 		},
-		executeResponse: &proto.AgentExecuteResponse{
-			Error: &proto.Error{
+		executeResponse: &agentpb.ExecuteResponse{
+			Error: &commonpb.Error{
 				Code:      "agent_execution_failed",
 				Message:   "agent failed to execute",
 				Retryable: false,
@@ -368,7 +369,7 @@ func TestGRPCAgentClient_Execute_WithError(t *testing.T) {
 
 func TestGRPCAgentClient_Execute_GRPCError(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
@@ -395,12 +396,12 @@ func TestGRPCAgentClient_Execute_GRPCError(t *testing.T) {
 
 func TestGRPCAgentClient_Execute_NilResult(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
 		},
-		executeResponse: &proto.AgentExecuteResponse{
+		executeResponse: &agentpb.ExecuteResponse{
 			Result: nil, // No result provided
 		},
 	}
@@ -422,7 +423,7 @@ func TestGRPCAgentClient_Execute_NilResult(t *testing.T) {
 
 func TestGRPCAgentClient_Execute_ContextCancellation(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
@@ -452,12 +453,12 @@ func TestGRPCAgentClient_Execute_ContextCancellation(t *testing.T) {
 func TestGRPCAgentClient_Health_Healthy(t *testing.T) {
 	now := time.Now()
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
 		},
-		healthResponse: &proto.HealthStatus{
+		healthResponse: &commonpb.HealthStatus{
 			State:     "healthy",
 			Message:   "All systems operational",
 			CheckedAt: now.UnixMilli(),
@@ -480,12 +481,12 @@ func TestGRPCAgentClient_Health_Healthy(t *testing.T) {
 func TestGRPCAgentClient_Health_Unhealthy(t *testing.T) {
 	now := time.Now()
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
 		},
-		healthResponse: &proto.HealthStatus{
+		healthResponse: &commonpb.HealthStatus{
 			State:     "unhealthy",
 			Message:   "Database connection failed",
 			CheckedAt: now.UnixMilli(),
@@ -508,12 +509,12 @@ func TestGRPCAgentClient_Health_Unhealthy(t *testing.T) {
 func TestGRPCAgentClient_Health_Degraded(t *testing.T) {
 	now := time.Now()
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
 		},
-		healthResponse: &proto.HealthStatus{
+		healthResponse: &commonpb.HealthStatus{
 			State:     "degraded",
 			Message:   "High latency detected",
 			CheckedAt: now.UnixMilli(),
@@ -535,7 +536,7 @@ func TestGRPCAgentClient_Health_Degraded(t *testing.T) {
 
 func TestGRPCAgentClient_Health_GRPCError(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
@@ -558,7 +559,7 @@ func TestGRPCAgentClient_Health_GRPCError(t *testing.T) {
 
 func TestGRPCAgentClient_Initialize(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
@@ -581,7 +582,7 @@ func TestGRPCAgentClient_Initialize(t *testing.T) {
 
 func TestGRPCAgentClient_Shutdown(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
@@ -606,7 +607,7 @@ func TestGRPCAgentClient_Shutdown(t *testing.T) {
 
 func TestGRPCAgentClient_Close(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
@@ -635,7 +636,7 @@ func TestGRPCAgentClient_Close_NilConnection(t *testing.T) {
 
 func TestGRPCAgentClient_SupportsStreaming(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:        "test-agent",
 			Description: "A test agent",
 			Version:     "1.0.0",
@@ -663,7 +664,7 @@ func TestGRPCAgentClient_SupportsStreaming_NilConnection(t *testing.T) {
 
 func TestGRPCAgentClient_Metadata(t *testing.T) {
 	mock := &mockAgentServiceServer{
-		descriptor: &proto.AgentDescriptor{
+		descriptor: &agentpb.GetDescriptorResponse{
 			Name:           "advanced-jailbreak-agent",
 			Description:    "Advanced jailbreak testing agent with multi-turn adversarial techniques",
 			Version:        "2.1.3",
@@ -693,23 +694,23 @@ func TestConvertSlots_NilInput(t *testing.T) {
 }
 
 func TestConvertSlots_EmptyInput(t *testing.T) {
-	result := convertSlots([]*proto.AgentSlotDefinition{})
+	result := convertSlots([]*agentpb.AgentSlotDefinition{})
 	assert.Empty(t, result)
 }
 
 func TestConvertSlots_ValidInput(t *testing.T) {
-	protoSlots := []*proto.AgentSlotDefinition{
+	protoSlots := []*agentpb.AgentSlotDefinition{
 		{
 			Name:        "primary",
 			Description: "Primary LLM",
 			Required:    true,
-			DefaultConfig: &proto.AgentSlotConfig{
+			DefaultConfig: &agentpb.AgentSlotConfig{
 				Provider:    "anthropic",
 				Model:       "claude-3-opus-20240229",
 				Temperature: 0.7,
 				MaxTokens:   4096,
 			},
-			Constraints: &proto.AgentSlotConstraints{
+			Constraints: &agentpb.AgentSlotConstraints{
 				MinContextWindow: 100000,
 				RequiredFeatures: []string{"tool_use", "vision"},
 			},
@@ -718,13 +719,13 @@ func TestConvertSlots_ValidInput(t *testing.T) {
 			Name:        "secondary",
 			Description: "Secondary LLM for validation",
 			Required:    false,
-			DefaultConfig: &proto.AgentSlotConfig{
+			DefaultConfig: &agentpb.AgentSlotConfig{
 				Provider:    "openai",
 				Model:       "gpt-4-turbo",
 				Temperature: 0.5,
 				MaxTokens:   2048,
 			},
-			Constraints: &proto.AgentSlotConstraints{
+			Constraints: &agentpb.AgentSlotConstraints{
 				MinContextWindow: 50000,
 				RequiredFeatures: []string{},
 			},

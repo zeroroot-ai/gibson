@@ -16,7 +16,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/protoresolver"

@@ -11,7 +11,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/api/gen/workflowpb"
+	workflowpb "github.com/zero-day-ai/sdk/api/gen/gibson/workflow/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 )

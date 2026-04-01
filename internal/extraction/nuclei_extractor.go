@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	nucleipb "github.com/zero-day-ai/tools/discovery/nuclei/gen"
 	"google.golang.org/protobuf/proto"
 )

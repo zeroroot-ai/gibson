@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/extraction"
-	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
 // ExampleRelationshipBuilder demonstrates building relationships from a discovery result.

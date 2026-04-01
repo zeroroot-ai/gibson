@@ -10,15 +10,17 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
 // mockStream implements the bidirectional stream interface for testing
 type mockStream struct {
-	sendCh chan *proto.ClientMessage
-	recvCh chan *proto.AgentMessage
+	sendCh chan *agentpb.StreamExecuteRequest
+	recvCh chan *agentpb.StreamExecuteResponse
 	ctx    context.Context
 	mu     sync.Mutex
 	closed bool
@@ -26,13 +28,13 @@ type mockStream struct {
 
 func newMockStream(ctx context.Context) *mockStream {
 	return &mockStream{
-		sendCh: make(chan *proto.ClientMessage, 10),
-		recvCh: make(chan *proto.AgentMessage, 10),
+		sendCh: make(chan *agentpb.StreamExecuteRequest, 10),
+		recvCh: make(chan *agentpb.StreamExecuteResponse, 10),
 		ctx:    ctx,
 	}
 }
 
-func (m *mockStream) Send(msg *proto.ClientMessage) error {
+func (m *mockStream) Send(msg *agentpb.StreamExecuteRequest) error {
 	select {
 	case m.sendCh <- msg:
 		return nil
@@ -41,7 +43,7 @@ func (m *mockStream) Send(msg *proto.ClientMessage) error {
 	}
 }
 
-func (m *mockStream) Recv() (*proto.AgentMessage, error) {
+func (m *mockStream) Recv() (*agentpb.StreamExecuteResponse, error) {
 	select {
 	case msg, ok := <-m.recvCh:
 		if !ok {
@@ -64,7 +66,7 @@ func (m *mockStream) CloseSend() error {
 }
 
 func (m *mockStream) SendMsg(msg any) error {
-	return m.Send(msg.(*proto.ClientMessage))
+	return m.Send(msg.(*agentpb.StreamExecuteRequest))
 }
 
 func (m *mockStream) RecvMsg(msg any) error {
@@ -73,7 +75,7 @@ func (m *mockStream) RecvMsg(msg any) error {
 		return err
 	}
 	// Avoid copying lock values by manually copying fields
-	target := msg.(*proto.AgentMessage)
+	target := msg.(*agentpb.StreamExecuteResponse)
 	target.Payload = received.Payload
 	target.TraceId = received.TraceId
 	return nil
@@ -114,14 +116,14 @@ func TestStreamClient_EventConversion(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		msg      *proto.AgentMessage
+		msg      *agentpb.StreamExecuteResponse
 		wantType database.StreamEventType
 	}{
 		{
 			name: "output chunk",
-			msg: &proto.AgentMessage{
-				Payload: &proto.AgentMessage_Output{
-					Output: &proto.OutputChunk{
+			msg: &agentpb.StreamExecuteResponse{
+				Payload: &agentpb.StreamExecuteResponse_Output{
+					Output: &agentpb.OutputChunk{
 						Content:     "test output",
 						IsReasoning: true,
 					},
@@ -135,12 +137,12 @@ func TestStreamClient_EventConversion(t *testing.T) {
 		},
 		{
 			name: "tool call",
-			msg: &proto.AgentMessage{
-				Payload: &proto.AgentMessage_ToolCall{
-					ToolCall: &proto.ToolCallEvent{
+			msg: &agentpb.StreamExecuteResponse{
+				Payload: &agentpb.StreamExecuteResponse_ToolCall{
+					ToolCall: &agentpb.ToolCallEvent{
 						ToolName: "scan",
-						Input: map[string]*proto.TypedValue{
-							"target": {Kind: &proto.TypedValue_StringValue{StringValue: "192.168.1.1"}},
+						Input: map[string]*commonpb.TypedValue{
+							"target": {Kind: &commonpb.TypedValue_StringValue{StringValue: "192.168.1.1"}},
 						},
 						CallId: "call-1",
 					},
@@ -152,11 +154,11 @@ func TestStreamClient_EventConversion(t *testing.T) {
 		},
 		{
 			name: "tool result",
-			msg: &proto.AgentMessage{
-				Payload: &proto.AgentMessage_ToolResult{
-					ToolResult: &proto.ToolResultEvent{
+			msg: &agentpb.StreamExecuteResponse{
+				Payload: &agentpb.StreamExecuteResponse_ToolResult{
+					ToolResult: &agentpb.ToolResultEvent{
 						CallId:  "call-1",
-						Output:  &proto.TypedValue{Kind: &proto.TypedValue_StringValue{StringValue: "success"}},
+						Output:  &commonpb.TypedValue{Kind: &commonpb.TypedValue_StringValue{StringValue: "success"}},
 						Success: true,
 					},
 				},
@@ -167,11 +169,11 @@ func TestStreamClient_EventConversion(t *testing.T) {
 		},
 		{
 			name: "finding",
-			msg: &proto.AgentMessage{
-				Payload: &proto.AgentMessage_Finding{
-					Finding: &proto.FindingEvent{
-						Finding: &proto.Finding{
-							Severity: proto.FindingSeverity_FINDING_SEVERITY_HIGH,
+			msg: &agentpb.StreamExecuteResponse{
+				Payload: &agentpb.StreamExecuteResponse_Finding{
+					Finding: &agentpb.FindingEvent{
+						Finding: &typespb.Finding{
+							Severity: typespb.FindingSeverity_FINDING_SEVERITY_HIGH,
 							Title:    "SQL Injection",
 						},
 					},
@@ -183,10 +185,10 @@ func TestStreamClient_EventConversion(t *testing.T) {
 		},
 		{
 			name: "status change",
-			msg: &proto.AgentMessage{
-				Payload: &proto.AgentMessage_Status{
-					Status: &proto.StatusChange{
-						Status:  proto.AgentStatus_AGENT_STATUS_RUNNING,
+			msg: &agentpb.StreamExecuteResponse{
+				Payload: &agentpb.StreamExecuteResponse_Status{
+					Status: &agentpb.StatusChange{
+						Status:  agentpb.AgentStatus_AGENT_STATUS_RUNNING,
 						Message: "Agent is running",
 					},
 				},
@@ -197,9 +199,9 @@ func TestStreamClient_EventConversion(t *testing.T) {
 		},
 		{
 			name: "steering acknowledgment",
-			msg: &proto.AgentMessage{
-				Payload: &proto.AgentMessage_SteeringAck{
-					SteeringAck: &proto.SteeringAck{
+			msg: &agentpb.StreamExecuteResponse{
+				Payload: &agentpb.StreamExecuteResponse_SteeringAck{
+					SteeringAck: &agentpb.SteeringAck{
 						MessageId: "msg-1",
 						Response:  "Acknowledged",
 					},
@@ -211,10 +213,10 @@ func TestStreamClient_EventConversion(t *testing.T) {
 		},
 		{
 			name: "error event",
-			msg: &proto.AgentMessage{
-				Payload: &proto.AgentMessage_Error{
-					Error: &proto.ErrorEvent{
-						Code:    proto.ErrorCode_ERROR_CODE_TIMEOUT,
+			msg: &agentpb.StreamExecuteResponse{
+				Payload: &agentpb.StreamExecuteResponse_Error{
+					Error: &agentpb.ErrorEvent{
+						Code:    commonpb.ErrorCode_ERROR_CODE_TIMEOUT,
 						Message: "Operation timed out",
 						Fatal:   true,
 					},
@@ -267,7 +269,7 @@ func TestStreamClient_GracefulShutdown(t *testing.T) {
 		agentName:  "test-agent",
 		sessionID:  types.NewID(),
 		eventCh:    make(chan *database.StreamEvent, 10),
-		steeringCh: make(chan *proto.ClientMessage, 10),
+		steeringCh: make(chan *agentpb.StreamExecuteRequest, 10),
 		ctx:        ctx,
 		closed:     false,
 	}
@@ -319,7 +321,7 @@ func TestStreamClient_SendOperations(t *testing.T) {
 		agentName:  "test-agent",
 		sessionID:  types.NewID(),
 		eventCh:    make(chan *database.StreamEvent, 10),
-		steeringCh: make(chan *proto.ClientMessage, 10),
+		steeringCh: make(chan *agentpb.StreamExecuteRequest, 10),
 		ctx:        ctx,
 		closed:     false,
 	}
@@ -408,7 +410,7 @@ func TestStreamClient_SendOperations(t *testing.T) {
 			if msg.GetSetMode() == nil {
 				t.Error("Expected SetModeRequest")
 			}
-			if msg.GetSetMode().Mode != proto.AgentMode_AGENT_MODE_INTERACTIVE {
+			if msg.GetSetMode().Mode != agentpb.AgentMode_AGENT_MODE_INTERACTIVE {
 				t.Errorf("Mode = %v, want AGENT_MODE_INTERACTIVE", msg.GetSetMode().Mode)
 			}
 		case <-time.After(100 * time.Millisecond):
@@ -450,7 +452,7 @@ func TestStreamClient_SendAfterClose(t *testing.T) {
 		agentName:  "test-agent",
 		sessionID:  types.NewID(),
 		eventCh:    make(chan *database.StreamEvent, 10),
-		steeringCh: make(chan *proto.ClientMessage, 10),
+		steeringCh: make(chan *agentpb.StreamExecuteRequest, 10),
 		ctx:        ctx,
 		closed:     false,
 	}

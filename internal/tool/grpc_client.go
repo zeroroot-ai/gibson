@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/api/gen/proto"
+	toolpb "github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	protobuf "google.golang.org/protobuf/proto"
@@ -33,7 +33,7 @@ type GRPCToolClient struct {
 	inputMessageType  string
 	outputMessageType string
 	conn              *grpc.ClientConn
-	client            proto.ToolServiceClient
+	client            toolpb.ToolServiceClient
 }
 
 // NewGRPCToolClient creates a new GRPCToolClient by connecting to a gRPC tool service.
@@ -60,13 +60,13 @@ func NewGRPCToolClient(endpoint string, opts ...grpc.DialOption) (*GRPCToolClien
 	}
 
 	// Create the ToolService client
-	client := proto.NewToolServiceClient(conn)
+	client := toolpb.NewToolServiceClient(conn)
 
 	// Fetch the tool descriptor
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	descriptor, err := client.GetDescriptor(ctx, &proto.ToolGetDescriptorRequest{})
+	descriptor, err := client.GetDescriptor(ctx, &toolpb.GetDescriptorRequest{})
 	if err != nil {
 		conn.Close()
 		return nil, types.WrapError(ErrToolExecutionFailed, "failed to get tool descriptor", err)
@@ -133,7 +133,7 @@ func (c *GRPCToolClient) ExecuteProto(ctx context.Context, input protobuf.Messag
 	}
 
 	// Create the gRPC request
-	req := &proto.ToolExecuteRequest{
+	req := &toolpb.ExecuteRequest{
 		InputJson: string(inputJSON),
 	}
 
@@ -178,7 +178,7 @@ func (c *GRPCToolClient) Health(ctx context.Context) types.HealthStatus {
 	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	resp, err := c.client.Health(healthCtx, &proto.ToolHealthRequest{})
+	resp, err := c.client.Health(healthCtx, &toolpb.HealthRequest{})
 	if err != nil {
 		return types.Unhealthy(fmt.Sprintf("gRPC health check failed: %v", err))
 	}

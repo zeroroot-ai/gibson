@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	pb "github.com/zero-day-ai/sdk/api/gen/proto"
+	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -81,7 +81,7 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 	s.server = grpc.NewServer(serverOpts...)
 
 	// Register HarnessCallbackService
-	pb.RegisterHarnessCallbackServiceServer(s.server, s.service)
+	harnesspb.RegisterHarnessCallbackServiceServer(s.server, s.service)
 
 	// Register health service
 	healthServer := health.NewServer()

@@ -7,43 +7,44 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
-	"github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
+	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // mockStreamSender is a mock implementation of StreamSender for testing
 type mockStreamSender struct {
-	toolCalls   []*proto.ToolCallEvent
-	toolResults []*proto.ToolResultEvent
-	outputs     []*proto.OutputChunk
-	findings    []*proto.FindingEvent
+	toolCalls   []*agentpb.ToolCallEvent
+	toolResults []*agentpb.ToolResultEvent
+	outputs     []*agentpb.OutputChunk
+	findings    []*agentpb.FindingEvent
 }
 
 func newMockStreamSender() *mockStreamSender {
 	return &mockStreamSender{
-		toolCalls:   make([]*proto.ToolCallEvent, 0),
-		toolResults: make([]*proto.ToolResultEvent, 0),
-		outputs:     make([]*proto.OutputChunk, 0),
-		findings:    make([]*proto.FindingEvent, 0),
+		toolCalls:   make([]*agentpb.ToolCallEvent, 0),
+		toolResults: make([]*agentpb.ToolResultEvent, 0),
+		outputs:     make([]*agentpb.OutputChunk, 0),
+		findings:    make([]*agentpb.FindingEvent, 0),
 	}
 }
 
-func (m *mockStreamSender) SendToolCall(call *proto.ToolCallEvent) error {
+func (m *mockStreamSender) SendToolCall(call *agentpb.ToolCallEvent) error {
 	m.toolCalls = append(m.toolCalls, call)
 	return nil
 }
 
-func (m *mockStreamSender) SendToolResult(result *proto.ToolResultEvent) error {
+func (m *mockStreamSender) SendToolResult(result *agentpb.ToolResultEvent) error {
 	m.toolResults = append(m.toolResults, result)
 	return nil
 }
 
-func (m *mockStreamSender) SendOutput(output *proto.OutputChunk) error {
+func (m *mockStreamSender) SendOutput(output *agentpb.OutputChunk) error {
 	m.outputs = append(m.outputs, output)
 	return nil
 }
 
-func (m *mockStreamSender) SendFinding(finding *proto.FindingEvent) error {
+func (m *mockStreamSender) SendFinding(finding *agentpb.FindingEvent) error {
 	m.findings = append(m.findings, finding)
 	return nil
 }

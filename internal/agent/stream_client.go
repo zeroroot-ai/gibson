@@ -13,7 +13,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
 )
 
 // StreamClient manages a bidirectional gRPC stream to a single agent.
@@ -21,11 +21,11 @@ import (
 // and graceful shutdown without goroutine leaks.
 type StreamClient struct {
 	conn       *grpc.ClientConn
-	stream     grpc.BidiStreamingClient[proto.ClientMessage, proto.AgentMessage]
+	stream     grpc.BidiStreamingClient[agentpb.StreamExecuteRequest, agentpb.StreamExecuteResponse]
 	agentName  string
 	sessionID  types.ID
 	eventCh    chan *database.StreamEvent
-	steeringCh chan *proto.ClientMessage
+	steeringCh chan *agentpb.StreamExecuteRequest
 	ctx        context.Context
 	cancel     context.CancelFunc
 	mu         sync.Mutex
@@ -41,7 +41,7 @@ func NewStreamClient(ctx context.Context, conn *grpc.ClientConn, agentName strin
 	clientCtx, cancel := context.WithCancel(ctx)
 
 	// Create the bidirectional stream
-	client := proto.NewAgentServiceClient(conn)
+	client := agentpb.NewAgentServiceClient(conn)
 	stream, err := client.StreamExecute(clientCtx)
 	if err != nil {
 		cancel()
@@ -54,7 +54,7 @@ func NewStreamClient(ctx context.Context, conn *grpc.ClientConn, agentName strin
 		agentName:  agentName,
 		sessionID:  sessionID,
 		eventCh:    make(chan *database.StreamEvent, 100), // Buffered to prevent blocking
-		steeringCh: make(chan *proto.ClientMessage, 10),
+		steeringCh: make(chan *agentpb.StreamExecuteRequest, 10),
 		ctx:        clientCtx,
 		cancel:     cancel,
 		closed:     false,
@@ -99,16 +99,16 @@ func (c *StreamClient) StartWithTask(task Task, mode database.AgentMode) error {
 	}
 	c.mu.Unlock()
 
-	protoMode := proto.AgentMode_AGENT_MODE_AUTONOMOUS
+	protoMode := agentpb.AgentMode_AGENT_MODE_AUTONOMOUS
 	if mode == database.AgentModeInteractive {
-		protoMode = proto.AgentMode_AGENT_MODE_INTERACTIVE
+		protoMode = agentpb.AgentMode_AGENT_MODE_INTERACTIVE
 	}
 
 	protoTask := TaskToProto(task)
 
-	msg := &proto.ClientMessage{
-		Payload: &proto.ClientMessage_Start{
-			Start: &proto.StartExecutionRequest{
+	msg := &agentpb.StreamExecuteRequest{
+		Payload: &agentpb.StreamExecuteRequest_Start{
+			Start: &agentpb.StartExecutionRequest{
 				Task:        protoTask,
 				InitialMode: protoMode,
 			},
@@ -141,9 +141,9 @@ func (c *StreamClient) SendSteering(content string, metadata map[string]string) 
 	}
 	c.mu.Unlock()
 
-	clientMsg := &proto.ClientMessage{
-		Payload: &proto.ClientMessage_Steering{
-			Steering: &proto.SteeringMessage{
+	clientMsg := &agentpb.StreamExecuteRequest{
+		Payload: &agentpb.StreamExecuteRequest_Steering{
+			Steering: &agentpb.SteeringMessage{
 				Id:       types.NewID().String(),
 				Content:  content,
 				Metadata: metadata,
@@ -170,9 +170,9 @@ func (c *StreamClient) SendInterrupt(reason string) error {
 	}
 	c.mu.Unlock()
 
-	msg := &proto.ClientMessage{
-		Payload: &proto.ClientMessage_Interrupt{
-			Interrupt: &proto.InterruptRequest{
+	msg := &agentpb.StreamExecuteRequest{
+		Payload: &agentpb.StreamExecuteRequest_Interrupt{
+			Interrupt: &agentpb.InterruptRequest{
 				Reason: reason,
 			},
 		},
@@ -197,14 +197,14 @@ func (c *StreamClient) SetMode(mode database.AgentMode) error {
 	}
 	c.mu.Unlock()
 
-	protoMode := proto.AgentMode_AGENT_MODE_AUTONOMOUS
+	protoMode := agentpb.AgentMode_AGENT_MODE_AUTONOMOUS
 	if mode == database.AgentModeInteractive {
-		protoMode = proto.AgentMode_AGENT_MODE_INTERACTIVE
+		protoMode = agentpb.AgentMode_AGENT_MODE_INTERACTIVE
 	}
 
-	msg := &proto.ClientMessage{
-		Payload: &proto.ClientMessage_SetMode{
-			SetMode: &proto.SetModeRequest{
+	msg := &agentpb.StreamExecuteRequest{
+		Payload: &agentpb.StreamExecuteRequest_SetMode{
+			SetMode: &agentpb.SetModeRequest{
 				Mode: protoMode,
 			},
 		},
@@ -229,9 +229,9 @@ func (c *StreamClient) Resume(guidance string) error {
 	}
 	c.mu.Unlock()
 
-	msg := &proto.ClientMessage{
-		Payload: &proto.ClientMessage_Resume{
-			Resume: &proto.ResumeRequest{
+	msg := &agentpb.StreamExecuteRequest{
+		Payload: &agentpb.StreamExecuteRequest_Resume{
+			Resume: &agentpb.ResumeRequest{
 				Guidance: guidance,
 			},
 		},
@@ -338,7 +338,7 @@ func (c *StreamClient) recvLoop() {
 }
 
 // protoToEvent converts a proto AgentMessage to a database.StreamEvent
-func (c *StreamClient) protoToEvent(msg *proto.AgentMessage) (*database.StreamEvent, error) {
+func (c *StreamClient) protoToEvent(msg *agentpb.StreamExecuteResponse) (*database.StreamEvent, error) {
 	event := &database.StreamEvent{
 		ID:        types.NewID(),
 		SessionID: c.sessionID,
@@ -350,7 +350,7 @@ func (c *StreamClient) protoToEvent(msg *proto.AgentMessage) (*database.StreamEv
 
 	// Handle the payload based on type
 	switch payload := msg.Payload.(type) {
-	case *proto.AgentMessage_Output:
+	case *agentpb.StreamExecuteResponse_Output:
 		event.EventType = database.StreamEventOutput
 		content, err := json.Marshal(map[string]any{
 			"content":      payload.Output.Content,
@@ -361,7 +361,7 @@ func (c *StreamClient) protoToEvent(msg *proto.AgentMessage) (*database.StreamEv
 		}
 		event.Content = content
 
-	case *proto.AgentMessage_ToolCall:
+	case *agentpb.StreamExecuteResponse_ToolCall:
 		event.EventType = database.StreamEventToolCall
 		// Convert Input map[string]*TypedValue to map[string]any
 		input := typedValueMapToMap(payload.ToolCall.Input)
@@ -375,7 +375,7 @@ func (c *StreamClient) protoToEvent(msg *proto.AgentMessage) (*database.StreamEv
 		}
 		event.Content = content
 
-	case *proto.AgentMessage_ToolResult:
+	case *agentpb.StreamExecuteResponse_ToolResult:
 		event.EventType = database.StreamEventToolResult
 		// Convert Output TypedValue to any
 		output := typedValueToAny(payload.ToolResult.Output)
@@ -389,7 +389,7 @@ func (c *StreamClient) protoToEvent(msg *proto.AgentMessage) (*database.StreamEv
 		}
 		event.Content = content
 
-	case *proto.AgentMessage_Finding:
+	case *agentpb.StreamExecuteResponse_Finding:
 		event.EventType = database.StreamEventFinding
 		// Convert proto Finding to JSON
 		findingJSON, err := json.Marshal(payload.Finding.Finding)
@@ -398,7 +398,7 @@ func (c *StreamClient) protoToEvent(msg *proto.AgentMessage) (*database.StreamEv
 		}
 		event.Content = findingJSON
 
-	case *proto.AgentMessage_Status:
+	case *agentpb.StreamExecuteResponse_Status:
 		event.EventType = database.StreamEventStatus
 		content, err := json.Marshal(map[string]any{
 			"status":  payload.Status.Status.String(),
@@ -409,7 +409,7 @@ func (c *StreamClient) protoToEvent(msg *proto.AgentMessage) (*database.StreamEv
 		}
 		event.Content = content
 
-	case *proto.AgentMessage_SteeringAck:
+	case *agentpb.StreamExecuteResponse_SteeringAck:
 		event.EventType = database.StreamEventSteeringAck
 		content, err := json.Marshal(map[string]any{
 			"message_id": payload.SteeringAck.MessageId,
@@ -420,7 +420,7 @@ func (c *StreamClient) protoToEvent(msg *proto.AgentMessage) (*database.StreamEv
 		}
 		event.Content = content
 
-	case *proto.AgentMessage_Error:
+	case *agentpb.StreamExecuteResponse_Error:
 		event.EventType = database.StreamEventError
 		content, err := json.Marshal(map[string]any{
 			"code":    payload.Error.Code,

@@ -17,7 +17,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/api/gen/proto"
+	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zero-day-ai/sdk/serve"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
@@ -254,7 +254,7 @@ func TestCallbackIntegration(t *testing.T) {
 	setCtx, setCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer setCancel()
 
-	setReq := &proto.MemorySetRequest{
+	setReq := &harnesspb.MemorySetRequest{
 		Key:   testKey,
 		Value: serve.ToTypedValue(testValue),
 	}
@@ -273,7 +273,7 @@ func TestCallbackIntegration(t *testing.T) {
 	getCtx, getCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer getCancel()
 
-	getReq := &proto.MemoryGetRequest{
+	getReq := &harnesspb.MemoryGetRequest{
 		Key: testKey,
 	}
 
@@ -289,7 +289,7 @@ func TestCallbackIntegration(t *testing.T) {
 	getNonExistentCtx, getNonExistentCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer getNonExistentCancel()
 
-	getNonExistentReq := &proto.MemoryGetRequest{
+	getNonExistentReq := &harnesspb.MemoryGetRequest{
 		Key: "non-existent-key",
 	}
 
@@ -403,7 +403,7 @@ func TestMissionManagementCallbackIntegration(t *testing.T) {
 		createCtx, createCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer createCancel()
 
-		createReq := &proto.CreateMissionRequest{
+		createReq := &harnesspb.CreateMissionRequest{
 			TargetId:     "target-456",
 			Name:         "sub-mission-test",
 			WorkflowJson: []byte(`{"name": "test-workflow"}`),
@@ -423,7 +423,7 @@ func TestMissionManagementCallbackIntegration(t *testing.T) {
 		statusCtx, statusCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer statusCancel()
 
-		statusReq := &proto.GetMissionStatusRequest{
+		statusReq := &harnesspb.GetMissionStatusRequest{
 			MissionId: "target-mission-789",
 		}
 
@@ -440,7 +440,7 @@ func TestMissionManagementCallbackIntegration(t *testing.T) {
 		listCtx, listCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer listCancel()
 
-		listReq := &proto.ListMissionsRequest{}
+		listReq := &harnesspb.ListMissionsRequest{}
 
 		listResp, err := client.ListMissions(listCtx, listReq)
 		require.NoError(t, err, "ListMissions RPC should complete without transport error")
@@ -455,7 +455,7 @@ func TestMissionManagementCallbackIntegration(t *testing.T) {
 		cancelCtx, cancelOpCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancelOpCancel()
 
-		cancelReq := &proto.CancelMissionRequest{
+		cancelReq := &harnesspb.CancelMissionRequest{
 			MissionId: "mission-to-cancel",
 		}
 

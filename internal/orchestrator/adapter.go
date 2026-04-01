@@ -12,9 +12,9 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
-	pb "github.com/zero-day-ai/sdk/api/gen/proto"
-	"github.com/zero-day-ai/sdk/api/gen/workflowpb"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
+	workflowpb "github.com/zero-day-ai/sdk/api/gen/gibson/workflow/v1"
 )
 
 // MissionAdapter adapts the orchestrator to the mission.MissionOrchestrator interface.
@@ -789,7 +789,7 @@ func protoNodeToMissionNode(nodeID string, protoNode *workflowpb.WorkflowNode) (
 }
 
 // protoTaskToAgentTask converts a proto Task to an internal agent.Task.
-func protoTaskToAgentTask(protoTask *pb.Task) *agent.Task {
+func protoTaskToAgentTask(protoTask *typespb.Task) *agent.Task {
 	if protoTask == nil {
 		return nil
 	}

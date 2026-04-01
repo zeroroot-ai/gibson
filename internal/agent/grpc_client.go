@@ -10,7 +10,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
 )
 
 // GRPCAgentClient implements the Agent interface for gRPC-based agents.
@@ -27,7 +27,7 @@ import (
 // from the agent via GetDescriptor and GetSlotSchema RPCs.
 type GRPCAgentClient struct {
 	conn   *grpc.ClientConn
-	client proto.AgentServiceClient
+	client agentpb.AgentServiceClient
 
 	// Cached descriptor from GetDescriptor RPC
 	// This avoids repeated gRPC calls for static metadata
@@ -72,7 +72,7 @@ func NewGRPCAgentClient(address string, opts ...grpc.DialOption) (*GRPCAgentClie
 		return nil, fmt.Errorf("failed to dial gRPC endpoint %s: %w", address, err)
 	}
 
-	client := proto.NewAgentServiceClient(conn)
+	client := agentpb.NewAgentServiceClient(conn)
 
 	// Create the agent client
 	agentClient := &GRPCAgentClient{
@@ -179,7 +179,7 @@ func (c *GRPCAgentClient) Execute(ctx context.Context, task Task, harness AgentH
 
 	// Send Execute RPC
 	timeoutMs := int64(task.Timeout.Milliseconds())
-	req := &proto.AgentExecuteRequest{
+	req := &agentpb.ExecuteRequest{
 		Task:      protoTask,
 		TimeoutMs: timeoutMs,
 	}
@@ -240,7 +240,7 @@ func (c *GRPCAgentClient) Shutdown(ctx context.Context) error {
 //   - degraded: Agent is partially operational
 //   - unhealthy: Agent is not operational or unreachable
 func (c *GRPCAgentClient) Health(ctx context.Context) types.HealthStatus {
-	req := &proto.AgentHealthRequest{}
+	req := &agentpb.HealthRequest{}
 
 	resp, err := c.client.Health(ctx, req)
 	if err != nil {
@@ -316,7 +316,7 @@ func (c *GRPCAgentClient) fetchDescriptor(ctx context.Context) error {
 		return nil
 	}
 
-	req := &proto.AgentGetDescriptorRequest{}
+	req := &agentpb.GetDescriptorRequest{}
 	resp, err := c.client.GetDescriptor(ctx, req)
 	if err != nil {
 		return fmt.Errorf("GetDescriptor RPC failed: %w", err)
@@ -351,7 +351,7 @@ func (c *GRPCAgentClient) fetchSlots(ctx context.Context) error {
 		return nil // Already fetched
 	}
 
-	req := &proto.AgentGetSlotSchemaRequest{}
+	req := &agentpb.GetSlotSchemaRequest{}
 	resp, err := c.client.GetSlotSchema(ctx, req)
 	if err != nil {
 		return fmt.Errorf("GetSlotSchema RPC failed: %w", err)
@@ -381,7 +381,7 @@ func convertTechniqueTypes(protoTypes []string) []types.TechniqueType {
 }
 
 // convertSlots converts proto slot definitions to internal SlotDefinition
-func convertSlots(protoSlots []*proto.AgentSlotDefinition) []SlotDefinition {
+func convertSlots(protoSlots []*agentpb.AgentSlotDefinition) []SlotDefinition {
 	if protoSlots == nil {
 		return []SlotDefinition{}
 	}

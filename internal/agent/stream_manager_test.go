@@ -10,7 +10,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -166,7 +166,7 @@ func setupTestAgent(t *testing.T, manager *StreamManager, dao *mockSessionDAO, a
 		agentName:  agentName,
 		sessionID:  session.ID,
 		eventCh:    make(chan *database.StreamEvent, 100),
-		steeringCh: make(chan *proto.ClientMessage, 10),
+		steeringCh: make(chan *agentpb.StreamExecuteRequest, 10),
 		ctx:        clientCtx,
 		cancel:     cancel,
 		closed:     false,
@@ -326,9 +326,9 @@ func TestStreamManager_Subscribe(t *testing.T) {
 	}
 
 	// Simulate an event from the agent
-	testEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Output{
-			Output: &proto.OutputChunk{
+	testEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Output{
+			Output: &agentpb.OutputChunk{
 				Content:     "test output",
 				IsReasoning: false,
 			},
@@ -415,9 +415,9 @@ func TestStreamManager_MultipleSubscribers(t *testing.T) {
 	sub3 := manager.Subscribe(agentName)
 
 	// Simulate an event
-	testEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Output{
-			Output: &proto.OutputChunk{
+	testEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Output{
+			Output: &agentpb.OutputChunk{
 				Content:     "broadcast test",
 				IsReasoning: false,
 			},
@@ -759,10 +759,10 @@ func TestStreamManager_StatusChangeHandling(t *testing.T) {
 	sessionID, stream := setupTestAgent(t, manager, dao, agentName)
 
 	// Simulate status change event
-	statusEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Status{
-			Status: &proto.StatusChange{
-				Status:  proto.AgentStatus_AGENT_STATUS_COMPLETED,
+	statusEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Status{
+			Status: &agentpb.StatusChange{
+				Status:  agentpb.AgentStatus_AGENT_STATUS_COMPLETED,
 				Message: "Task completed successfully",
 			},
 		},

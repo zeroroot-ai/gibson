@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	httpxpb "github.com/zero-day-ai/tools/discovery/httpx/gen"
 	"google.golang.org/protobuf/proto"
 )

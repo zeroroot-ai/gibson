@@ -9,8 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/llm"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
-	"github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
+	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -19,16 +20,16 @@ import (
 // without depending on the concrete gRPC stream type.
 type StreamSender interface {
 	// SendToolCall sends a tool invocation event before the tool is executed.
-	SendToolCall(call *proto.ToolCallEvent) error
+	SendToolCall(call *agentpb.ToolCallEvent) error
 
 	// SendToolResult sends the result of a tool invocation after execution.
-	SendToolResult(result *proto.ToolResultEvent) error
+	SendToolResult(result *agentpb.ToolResultEvent) error
 
 	// SendOutput sends a text output chunk (final response or reasoning).
-	SendOutput(output *proto.OutputChunk) error
+	SendOutput(output *agentpb.OutputChunk) error
 
 	// SendFinding sends a security finding discovered during execution.
-	SendFinding(finding *proto.FindingEvent) error
+	SendFinding(finding *agentpb.FindingEvent) error
 }
 
 // StreamingMiddleware creates middleware that emits events to a gRPC stream.
@@ -193,7 +194,7 @@ func emitFindingEvent(ctx context.Context, stream StreamSender, req any, traceID
 }
 
 // buildToolCallEvent constructs a ToolCallEvent proto message.
-func buildToolCallEvent(toolName, inputJSON, callID, traceID, spanID string) *proto.ToolCallEvent {
+func buildToolCallEvent(toolName, inputJSON, callID, traceID, spanID string) *agentpb.ToolCallEvent {
 	// Parse input JSON to map[string]any, then convert to TypedValue map
 	var inputMap map[string]any
 	if err := json.Unmarshal([]byte(inputJSON), &inputMap); err != nil {
@@ -207,7 +208,7 @@ func buildToolCallEvent(toolName, inputJSON, callID, traceID, spanID string) *pr
 		inputTypedMap[k] = anyToTypedValue(v)
 	}
 
-	return &proto.ToolCallEvent{
+	return &agentpb.ToolCallEvent{
 		ToolName: toolName,
 		Input:    inputTypedMap,
 		CallId:   callID,
@@ -215,7 +216,7 @@ func buildToolCallEvent(toolName, inputJSON, callID, traceID, spanID string) *pr
 }
 
 // buildToolResultEvent constructs a ToolResultEvent proto message.
-func buildToolResultEvent(callID, outputJSON string, success bool, traceID, spanID string) *proto.ToolResultEvent {
+func buildToolResultEvent(callID, outputJSON string, success bool, traceID, spanID string) *agentpb.ToolResultEvent {
 	// Parse output JSON to any, then convert to TypedValue
 	var output any
 	if err := json.Unmarshal([]byte(outputJSON), &output); err != nil {
@@ -223,7 +224,7 @@ func buildToolResultEvent(callID, outputJSON string, success bool, traceID, span
 		output = nil
 	}
 
-	return &proto.ToolResultEvent{
+	return &agentpb.ToolResultEvent{
 		CallId:  callID,
 		Output:  anyToTypedValue(output),
 		Success: success,
@@ -231,25 +232,25 @@ func buildToolResultEvent(callID, outputJSON string, success bool, traceID, span
 }
 
 // buildOutputEvent constructs an OutputChunk proto message.
-func buildOutputEvent(content string, isReasoning bool, traceID, spanID string) *proto.OutputChunk {
-	return &proto.OutputChunk{
+func buildOutputEvent(content string, isReasoning bool, traceID, spanID string) *agentpb.OutputChunk {
+	return &agentpb.OutputChunk{
 		Content:     content,
 		IsReasoning: isReasoning,
 	}
 }
 
 // buildFindingEvent constructs a FindingEvent proto message.
-func buildFindingEvent(findingJSON, traceID, spanID string) *proto.FindingEvent {
+func buildFindingEvent(findingJSON, traceID, spanID string) *agentpb.FindingEvent {
 	// Parse finding JSON to proto Finding
-	var finding proto.Finding
+	var finding typespb.Finding
 	if err := json.Unmarshal([]byte(findingJSON), &finding); err != nil {
 		// If parsing fails, return empty finding
-		return &proto.FindingEvent{
-			Finding: &proto.Finding{},
+		return &agentpb.FindingEvent{
+			Finding: &typespb.Finding{},
 		}
 	}
 
-	return &proto.FindingEvent{
+	return &agentpb.FindingEvent{
 		Finding: &finding,
 	}
 }
@@ -273,14 +274,14 @@ func extractTraceInfo(ctx context.Context, tracer trace.Tracer) (traceID, spanID
 // This allows the middleware to work with the actual gRPC stream.
 type gRPCStreamAdapter struct {
 	stream interface {
-		Send(*proto.AgentMessage) error
+		Send(*agentpb.StreamExecuteResponse) error
 	}
 	sequence int64
 }
 
 // NewGRPCStreamAdapter creates a StreamSender from a gRPC bidirectional stream.
 func NewGRPCStreamAdapter(stream interface {
-	Send(*proto.AgentMessage) error
+	Send(*agentpb.StreamExecuteResponse) error
 }) StreamSender {
 	return &gRPCStreamAdapter{
 		stream:   stream,
@@ -293,9 +294,9 @@ func (a *gRPCStreamAdapter) nextSequence() int64 {
 	return a.sequence
 }
 
-func (a *gRPCStreamAdapter) SendToolCall(call *proto.ToolCallEvent) error {
-	msg := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_ToolCall{
+func (a *gRPCStreamAdapter) SendToolCall(call *agentpb.ToolCallEvent) error {
+	msg := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_ToolCall{
 			ToolCall: call,
 		},
 		Sequence:    a.nextSequence(),
@@ -304,9 +305,9 @@ func (a *gRPCStreamAdapter) SendToolCall(call *proto.ToolCallEvent) error {
 	return a.stream.Send(msg)
 }
 
-func (a *gRPCStreamAdapter) SendToolResult(result *proto.ToolResultEvent) error {
-	msg := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_ToolResult{
+func (a *gRPCStreamAdapter) SendToolResult(result *agentpb.ToolResultEvent) error {
+	msg := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_ToolResult{
 			ToolResult: result,
 		},
 		Sequence:    a.nextSequence(),
@@ -315,9 +316,9 @@ func (a *gRPCStreamAdapter) SendToolResult(result *proto.ToolResultEvent) error 
 	return a.stream.Send(msg)
 }
 
-func (a *gRPCStreamAdapter) SendOutput(output *proto.OutputChunk) error {
-	msg := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Output{
+func (a *gRPCStreamAdapter) SendOutput(output *agentpb.OutputChunk) error {
+	msg := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Output{
 			Output: output,
 		},
 		Sequence:    a.nextSequence(),
@@ -326,9 +327,9 @@ func (a *gRPCStreamAdapter) SendOutput(output *proto.OutputChunk) error {
 	return a.stream.Send(msg)
 }
 
-func (a *gRPCStreamAdapter) SendFinding(finding *proto.FindingEvent) error {
-	msg := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Finding{
+func (a *gRPCStreamAdapter) SendFinding(finding *agentpb.FindingEvent) error {
+	msg := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Finding{
 			Finding: finding,
 		},
 		Sequence:    a.nextSequence(),
@@ -342,7 +343,7 @@ func anyToTypedValue(v any) *commonpb.TypedValue {
 	if v == nil {
 		return &commonpb.TypedValue{
 			Kind: &commonpb.TypedValue_NullValue{
-				NullValue: commonpb.NullValue_NULL_VALUE,
+				NullValue: commonpb.NullValue_NULL_VALUE_UNSPECIFIED,
 			},
 		}
 	}

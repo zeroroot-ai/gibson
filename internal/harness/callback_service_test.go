@@ -15,7 +15,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
-	pb "github.com/zero-day-ai/sdk/api/gen/proto"
+	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -76,7 +76,7 @@ func TestGetHarness_WithExplicitMissionId(t *testing.T) {
 	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
 
 	// Create ContextInfo with explicit MissionId
-	contextInfo := &pb.ContextInfo{
+	contextInfo := &harnesspb.ContextInfo{
 		TaskId:    "task-456",
 		AgentName: "test-agent",
 		MissionId: "mission-123",
@@ -102,7 +102,7 @@ func TestGetHarness_EmptyMissionId_ReturnsError(t *testing.T) {
 	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
 
 	// Create ContextInfo with empty MissionId
-	contextInfo := &pb.ContextInfo{
+	contextInfo := &harnesspb.ContextInfo{
 		TaskId:    "task-789",
 		AgentName: "test-agent",
 		MissionId: "", // Empty - should return error (legacy fallback removed)
@@ -133,7 +133,7 @@ func TestGetHarness_LegacyTaskIdWithColon_NoLongerSupported(t *testing.T) {
 	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
 
 	// Create ContextInfo with legacy format (mission in TaskId) but no explicit MissionId
-	contextInfo := &pb.ContextInfo{
+	contextInfo := &harnesspb.ContextInfo{
 		TaskId:    "mission-abc:task-xyz", // Legacy format
 		AgentName: "test-agent",
 		MissionId: "", // Empty - legacy parsing no longer supported
@@ -159,7 +159,7 @@ func TestGetHarness_MissionIdNotFound(t *testing.T) {
 	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
 
 	// Create ContextInfo with non-existent mission
-	contextInfo := &pb.ContextInfo{
+	contextInfo := &harnesspb.ContextInfo{
 		TaskId:    "task-999",
 		AgentName: "test-agent",
 		MissionId: "nonexistent-mission",
@@ -184,8 +184,8 @@ func TestHarnessCallbackService_CreateMission(t *testing.T) {
 	service := NewHarnessCallbackService(logger)
 
 	ctx := context.Background()
-	req := &pb.CreateMissionRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.CreateMissionRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: "test-agent",
 			MissionId: "mission-123",
@@ -209,8 +209,8 @@ func TestHarnessCallbackService_RunMission(t *testing.T) {
 	service := NewHarnessCallbackService(logger)
 
 	ctx := context.Background()
-	req := &pb.RunMissionRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.RunMissionRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: "test-agent",
 			MissionId: "mission-123",
@@ -232,8 +232,8 @@ func TestHarnessCallbackService_GetMissionStatus(t *testing.T) {
 	service := NewHarnessCallbackService(logger)
 
 	ctx := context.Background()
-	req := &pb.GetMissionStatusRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.GetMissionStatusRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: "test-agent",
 			MissionId: "mission-123",
@@ -255,8 +255,8 @@ func TestHarnessCallbackService_WaitForMission(t *testing.T) {
 	service := NewHarnessCallbackService(logger)
 
 	ctx := context.Background()
-	req := &pb.WaitForMissionRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.WaitForMissionRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: "test-agent",
 			MissionId: "mission-123",
@@ -279,8 +279,8 @@ func TestHarnessCallbackService_ListMissions(t *testing.T) {
 	service := NewHarnessCallbackService(logger)
 
 	ctx := context.Background()
-	req := &pb.ListMissionsRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.ListMissionsRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: "test-agent",
 			MissionId: "mission-123",
@@ -301,8 +301,8 @@ func TestHarnessCallbackService_CancelMission(t *testing.T) {
 	service := NewHarnessCallbackService(logger)
 
 	ctx := context.Background()
-	req := &pb.CancelMissionRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.CancelMissionRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: "test-agent",
 			MissionId: "mission-123",
@@ -324,8 +324,8 @@ func TestHarnessCallbackService_GetMissionResults(t *testing.T) {
 	service := NewHarnessCallbackService(logger)
 
 	ctx := context.Background()
-	req := &pb.GetMissionResultsRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.GetMissionResultsRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: "test-agent",
 			MissionId: "mission-123",
@@ -637,8 +637,8 @@ func TestCallToolProto_WithExternalAgentDynamicType(t *testing.T) {
 
 	// Create request with JSON input
 	inputJSON := []byte(`{"query": "test query", "limit": 10}`)
-	req := &pb.CallToolProtoRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.CallToolProtoRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: agentName,
 			MissionId: missionID,
@@ -743,8 +743,8 @@ func TestCallToolProto_InputJSONToTypedMessage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			capturedInput = nil
 
-			req := &pb.CallToolProtoRequest{
-				Context: &pb.ContextInfo{
+			req := &harnesspb.CallToolProtoRequest{
+				Context: &harnesspb.ContextInfo{
 					TaskId:    "task-123",
 					AgentName: agentName,
 					MissionId: missionID,
@@ -831,8 +831,8 @@ func TestCallToolProto_OutputTypedMessageToJSON(t *testing.T) {
 			agentName := "test-agent"
 			registry.Register(missionID, agentName, mockHarness)
 
-			req := &pb.CallToolProtoRequest{
-				Context: &pb.ContextInfo{
+			req := &harnesspb.CallToolProtoRequest{
+				Context: &harnesspb.ContextInfo{
 					TaskId:    "task-123",
 					AgentName: agentName,
 					MissionId: missionID,
@@ -911,8 +911,8 @@ func TestCallToolProto_DiscoveryResultExtraction(t *testing.T) {
 	agentName := "test-agent"
 	registry.Register(missionID, agentName, mockHarness)
 
-	req := &pb.CallToolProtoRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.CallToolProtoRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: agentName,
 			MissionId: missionID,
@@ -960,7 +960,7 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 	testCases := []struct {
 		name          string
 		setupHarness  func() AgentHarness
-		request       *pb.CallToolProtoRequest
+		request       *harnesspb.CallToolProtoRequest
 		expectedError string
 	}{
 		{
@@ -970,8 +970,8 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 					toolDescriptors: map[string]*ToolDescriptor{},
 				}
 			},
-			request: &pb.CallToolProtoRequest{
-				Context: &pb.ContextInfo{
+			request: &harnesspb.CallToolProtoRequest{
+				Context: &harnesspb.ContextInfo{
 					TaskId:    "task-123",
 					AgentName: "test-agent",
 					MissionId: "mission-123",
@@ -999,8 +999,8 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 					},
 				}
 			},
-			request: &pb.CallToolProtoRequest{
-				Context: &pb.ContextInfo{
+			request: &harnesspb.CallToolProtoRequest{
+				Context: &harnesspb.ContextInfo{
 					TaskId:    "task-123",
 					AgentName: "test-agent",
 					MissionId: "mission-123",
@@ -1031,8 +1031,8 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 					},
 				}
 			},
-			request: &pb.CallToolProtoRequest{
-				Context: &pb.ContextInfo{
+			request: &harnesspb.CallToolProtoRequest{
+				Context: &harnesspb.ContextInfo{
 					TaskId:    "task-123",
 					AgentName: "test-agent",
 					MissionId: "mission-123",

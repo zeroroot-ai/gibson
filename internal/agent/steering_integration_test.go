@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/types"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -46,9 +46,9 @@ func TestSteeringFlow_EndToEnd(t *testing.T) {
 	require.NotNil(t, eventCh, "Subscribe should return event channel")
 
 	// 4. Send output event from agent to verify stream is working
-	outputEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Output{
-			Output: &proto.OutputChunk{
+	outputEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Output{
+			Output: &agentpb.OutputChunk{
 				Content:     "Agent initialization complete",
 				IsReasoning: false,
 			},
@@ -111,10 +111,10 @@ func TestSteeringFlow_EndToEnd(t *testing.T) {
 	assert.Equal(t, database.SteeringTypeInterrupt, messages[1].MessageType)
 
 	// 10. Simulate status change event from agent
-	statusEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Status{
-			Status: &proto.StatusChange{
-				Status:  proto.AgentStatus_AGENT_STATUS_INTERRUPTED,
+	statusEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Status{
+			Status: &agentpb.StatusChange{
+				Status:  agentpb.AgentStatus_AGENT_STATUS_INTERRUPTED,
 				Message: "Interrupted by user",
 			},
 		},
@@ -167,10 +167,10 @@ func TestSteeringFlow_Persistence(t *testing.T) {
 	sessionID, stream := setupTestAgent(t, manager, dao, agentName)
 
 	// Send multiple types of events from agent
-	events := []*proto.AgentMessage{
+	events := []*agentpb.StreamExecuteResponse{
 		{
-			Payload: &proto.AgentMessage_Output{
-				Output: &proto.OutputChunk{
+			Payload: &agentpb.StreamExecuteResponse_Output{
+				Output: &agentpb.OutputChunk{
 					Content:     "Starting scan",
 					IsReasoning: false,
 				},
@@ -179,8 +179,8 @@ func TestSteeringFlow_Persistence(t *testing.T) {
 			TimestampMs: time.Now().UnixMilli(),
 		},
 		{
-			Payload: &proto.AgentMessage_ToolCall{
-				ToolCall: &proto.ToolCallEvent{
+			Payload: &agentpb.StreamExecuteResponse_ToolCall{
+				ToolCall: &agentpb.ToolCallEvent{
 					ToolName:  "nmap",
 					InputJson: `{"target": "192.168.1.1", "ports": "80,443"}`,
 					CallId:    "call-001",
@@ -190,8 +190,8 @@ func TestSteeringFlow_Persistence(t *testing.T) {
 			TimestampMs: time.Now().UnixMilli(),
 		},
 		{
-			Payload: &proto.AgentMessage_ToolResult{
-				ToolResult: &proto.ToolResultEvent{
+			Payload: &agentpb.StreamExecuteResponse_ToolResult{
+				ToolResult: &agentpb.ToolResultEvent{
 					CallId:     "call-001",
 					OutputJson: `{"open_ports": [80, 443]}`,
 					Success:    true,
@@ -201,8 +201,8 @@ func TestSteeringFlow_Persistence(t *testing.T) {
 			TimestampMs: time.Now().UnixMilli(),
 		},
 		{
-			Payload: &proto.AgentMessage_Finding{
-				Finding: &proto.FindingEvent{
+			Payload: &agentpb.StreamExecuteResponse_Finding{
+				Finding: &agentpb.FindingEvent{
 					FindingJson: `{"severity": "medium", "title": "Open HTTP port"}`,
 				},
 			},
@@ -407,9 +407,9 @@ func TestSteeringFlow_MultipleAgents(t *testing.T) {
 	assert.Contains(t, content3["content"], "executive summary")
 
 	// Send output from agent1 and verify only agent1 subscribers receive it
-	outputEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Output{
-			Output: &proto.OutputChunk{
+	outputEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Output{
+			Output: &agentpb.OutputChunk{
 				Content:     "Found 5 hosts",
 				IsReasoning: false,
 			},
@@ -485,9 +485,9 @@ func TestSteeringFlow_SteeringAcknowledgment(t *testing.T) {
 	assert.Nil(t, messages[0].AcknowledgedAt, "Should not be acknowledged yet")
 
 	// Simulate agent acknowledging the steering message
-	ackEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_SteeringAck{
-			SteeringAck: &proto.SteeringAck{
+	ackEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_SteeringAck{
+			SteeringAck: &agentpb.SteeringAck{
 				MessageId: msgID.String(),
 				Response:  "Acknowledged, starting deep scan",
 			},
@@ -531,9 +531,9 @@ func TestSteeringFlow_ErrorHandling(t *testing.T) {
 	eventCh := manager.Subscribe(agentName)
 
 	// Simulate agent sending an error event
-	errorEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Error{
-			Error: &proto.ErrorEvent{
+	errorEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Error{
+			Error: &agentpb.ErrorEvent{
 				Code:    "NETWORK_ERROR",
 				Message: "Failed to connect to target",
 				Fatal:   false,
@@ -565,9 +565,9 @@ func TestSteeringFlow_ErrorHandling(t *testing.T) {
 	assert.Len(t, streamEvents, 1)
 
 	// Simulate fatal error and verify session status
-	fatalErrorEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Error{
-			Error: &proto.ErrorEvent{
+	fatalErrorEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Error{
+			Error: &agentpb.ErrorEvent{
 				Code:    "FATAL_ERROR",
 				Message: "Critical system failure",
 				Fatal:   true,
@@ -579,10 +579,10 @@ func TestSteeringFlow_ErrorHandling(t *testing.T) {
 	stream.recvCh <- fatalErrorEvent
 
 	// Also send status change to failed
-	statusEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Status{
-			Status: &proto.StatusChange{
-				Status:  proto.AgentStatus_AGENT_STATUS_FAILED,
+	statusEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Status{
+			Status: &agentpb.StatusChange{
+				Status:  agentpb.AgentStatus_AGENT_STATUS_FAILED,
 				Message: "Agent failed due to critical error",
 			},
 		},
@@ -784,7 +784,7 @@ func TestSteeringFlow_DatabaseAndOTelIntegration(t *testing.T) {
 		agentName:  agentName,
 		sessionID:  session.ID,
 		eventCh:    make(chan *database.StreamEvent, 100),
-		steeringCh: make(chan *proto.ClientMessage, 10),
+		steeringCh: make(chan *agentpb.StreamExecuteRequest, 10),
 		ctx:        clientCtx,
 		cancel:     clientCancel,
 		closed:     false,
@@ -834,9 +834,9 @@ func TestSteeringFlow_DatabaseAndOTelIntegration(t *testing.T) {
 	assert.Equal(t, steeringSpan.traceID, msg.TraceID)
 
 	// Send stream event
-	outputEvent := &proto.AgentMessage{
-		Payload: &proto.AgentMessage_Output{
-			Output: &proto.OutputChunk{
+	outputEvent := &agentpb.StreamExecuteResponse{
+		Payload: &agentpb.StreamExecuteResponse_Output{
+			Output: &agentpb.OutputChunk{
 				Content:     "Test output",
 				IsReasoning: false,
 			},

@@ -21,7 +21,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/daemon"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 )
 
 // Client represents a connection to the Gibson daemon.

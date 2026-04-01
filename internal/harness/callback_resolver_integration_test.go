@@ -17,7 +17,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
-	pb "github.com/zero-day-ai/sdk/api/gen/proto"
+	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -312,8 +312,8 @@ func TestCallbackServiceWithProtoResolver_Integration(t *testing.T) {
 
 	// Create request
 	inputJSON := []byte(`{"query": "test query", "limit": 10}`)
-	req := &pb.CallToolProtoRequest{
-		Context: &pb.ContextInfo{
+	req := &harnesspb.CallToolProtoRequest{
+		Context: &harnesspb.ContextInfo{
 			TaskId:    "task-123",
 			AgentName: agentName,
 			MissionId: missionID,

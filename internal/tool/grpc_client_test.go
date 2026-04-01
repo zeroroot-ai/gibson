@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/api/gen/commonpb"
-	"github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	toolpb "github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -22,26 +22,26 @@ import (
 
 const bufSize = 1024 * 1024
 
-// mockToolServiceServer implements proto.ToolServiceServer for testing
+// mockToolServiceServer implements toolpb.ToolServiceServer for testing
 type mockToolServiceServer struct {
-	proto.UnimplementedToolServiceServer
+	toolpb.UnimplementedToolServiceServer
 
 	// Configuration for mock behavior
-	descriptor      *proto.ToolDescriptor
-	executeResponse *proto.ToolExecuteResponse
+	descriptor      *toolpb.GetDescriptorResponse
+	executeResponse *toolpb.ExecuteResponse
 	executeError    error
 	healthResponse  *commonpb.HealthStatus
 	healthError     error
 }
 
-func (m *mockToolServiceServer) GetDescriptor(ctx context.Context, req *proto.ToolGetDescriptorRequest) (*proto.ToolDescriptor, error) {
+func (m *mockToolServiceServer) GetDescriptor(ctx context.Context, req *toolpb.GetDescriptorRequest) (*toolpb.GetDescriptorResponse, error) {
 	if m.descriptor == nil {
 		return nil, status.Error(codes.Internal, "descriptor not configured")
 	}
 	return m.descriptor, nil
 }
 
-func (m *mockToolServiceServer) Execute(ctx context.Context, req *proto.ToolExecuteRequest) (*proto.ToolExecuteResponse, error) {
+func (m *mockToolServiceServer) Execute(ctx context.Context, req *toolpb.ExecuteRequest) (*toolpb.ExecuteResponse, error) {
 	if m.executeError != nil {
 		return nil, m.executeError
 	}
@@ -51,7 +51,7 @@ func (m *mockToolServiceServer) Execute(ctx context.Context, req *proto.ToolExec
 	return m.executeResponse, nil
 }
 
-func (m *mockToolServiceServer) Health(ctx context.Context, req *proto.ToolHealthRequest) (*commonpb.HealthStatus, error) {
+func (m *mockToolServiceServer) Health(ctx context.Context, req *toolpb.HealthRequest) (*commonpb.HealthStatus, error) {
 	if m.healthError != nil {
 		return nil, m.healthError
 	}
@@ -71,7 +71,7 @@ func setupTestServer(t *testing.T, mock *mockToolServiceServer) (*grpc.Server, *
 
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
-	proto.RegisterToolServiceServer(srv, mock)
+	toolpb.RegisterToolServiceServer(srv, mock)
 
 	go func() {
 		if err := srv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
@@ -111,13 +111,13 @@ func createTestClient(t *testing.T, lis *bufconn.Listener) *GRPCToolClient {
 	)
 	require.NoError(t, err)
 
-	client := proto.NewToolServiceClient(conn)
+	client := toolpb.NewToolServiceClient(conn)
 
 	// Fetch descriptor
 	descCtx, descCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer descCancel()
 
-	descriptor, err := client.GetDescriptor(descCtx, &proto.ToolGetDescriptorRequest{})
+	descriptor, err := client.GetDescriptor(descCtx, &toolpb.GetDescriptorRequest{})
 	require.NoError(t, err)
 
 	// TODO: Once SDK task 1.3 is complete, use descriptor.GetInputMessageType() and descriptor.GetOutputMessageType()
@@ -141,7 +141,7 @@ func TestNewGRPCToolClient(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"result":{"type":"string"}},"required":["result"]}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:        "test-tool",
 			Description: "A test tool",
 			Version:     "1.0.0",
@@ -197,7 +197,7 @@ func TestNewGRPCToolClient_ConnectionFailure(t *testing.T) {
 
 func TestNewGRPCToolClient_InvalidSchema(t *testing.T) {
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:        "bad-schema-tool",
 			Description: "Tool with invalid schema",
 			Version:     "1.0.0",
@@ -233,14 +233,14 @@ func TestGRPCToolClient_Execute_Success(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"result":{"type":"string"}},"required":["result"]}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
 			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		executeResponse: &proto.ToolExecuteResponse{
+		executeResponse: &toolpb.ExecuteResponse{
 			OutputJson: `{"result":"success","data":"test data"}`,
 		},
 	}
@@ -272,14 +272,14 @@ func TestGRPCToolClient_Execute_WithError(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"result":{"type":"string"}},"required":["result"]}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
 			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		executeResponse: &proto.ToolExecuteResponse{
+		executeResponse: &toolpb.ExecuteResponse{
 			Error: &commonpb.Error{
 				Code:      "tool_execution_failed",
 				Message:   "tool failed to execute",
@@ -315,7 +315,7 @@ func TestGRPCToolClient_Execute_GRPCError(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"result":{"type":"string"}},"required":["result"]}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -347,7 +347,7 @@ func TestGRPCToolClient_Execute_InvalidInput(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"result":{"type":"string"}},"required":["result"]}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -375,14 +375,14 @@ func TestGRPCToolClient_Execute_InvalidOutput(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"result":{"type":"string"}},"required":["result"]}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
 			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		executeResponse: &proto.ToolExecuteResponse{
+		executeResponse: &toolpb.ExecuteResponse{
 			OutputJson: `{invalid json}`,
 		},
 	}
@@ -409,7 +409,7 @@ func TestGRPCToolClient_Execute_ContextCancellation(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"result":{"type":"string"}},"required":["result"]}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -444,7 +444,7 @@ func TestGRPCToolClient_Health_Healthy(t *testing.T) {
 
 	now := time.Now()
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -478,7 +478,7 @@ func TestGRPCToolClient_Health_Unhealthy(t *testing.T) {
 
 	now := time.Now()
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -511,7 +511,7 @@ func TestGRPCToolClient_Health_Degraded(t *testing.T) {
 
 	now := time.Now()
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -543,7 +543,7 @@ func TestGRPCToolClient_Health_GRPCError(t *testing.T) {
 	outputSchemaJSON := `{"type":"object"}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -572,7 +572,7 @@ func TestGRPCToolClient_Health_Timeout(t *testing.T) {
 
 	// Test timeout by simulating a deadline exceeded error
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -606,7 +606,7 @@ func TestGRPCToolClient_Close(t *testing.T) {
 	outputSchemaJSON := `{"type":"object"}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -650,7 +650,7 @@ func TestGRPCToolClient_Metadata(t *testing.T) {
 	outputSchemaJSON := `{"type":"object"}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "nmap-scanner",
 			Description:  "Network port scanner using nmap",
 			Version:      "2.3.1",
@@ -677,7 +677,7 @@ func TestGRPCToolClient_EmptyTags(t *testing.T) {
 	outputSchemaJSON := `{"type":"object"}`
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
@@ -731,14 +731,14 @@ func TestGRPCToolClient_ComplexOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	mock := &mockToolServiceServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "test-tool",
 			Description:  "A test tool",
 			Version:      "1.0.0",
 			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		executeResponse: &proto.ToolExecuteResponse{
+		executeResponse: &toolpb.ExecuteResponse{
 			OutputJson: string(outputJSON),
 		},
 	}

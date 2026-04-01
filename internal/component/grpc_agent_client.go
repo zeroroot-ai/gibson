@@ -10,8 +10,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/types"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
 	"github.com/zero-day-ai/sdk/schema"
 )
 
@@ -28,7 +28,7 @@ import (
 // - Handles descriptor caching and health checks
 type GRPCAgentClient struct {
 	conn   *grpc.ClientConn
-	client proto.AgentServiceClient
+	client agentpb.AgentServiceClient
 	info   ComponentInfo
 
 	// Cached descriptor from GetDescriptor RPC
@@ -50,7 +50,7 @@ type GRPCAgentClient struct {
 func NewGRPCAgentClient(conn *grpc.ClientConn, info ComponentInfo) *GRPCAgentClient {
 	return &GRPCAgentClient{
 		conn:   conn,
-		client: proto.NewAgentServiceClient(conn),
+		client: agentpb.NewAgentServiceClient(conn),
 		info:   info,
 	}
 }
@@ -205,7 +205,7 @@ func (c *GRPCAgentClient) Execute(ctx context.Context, task agent.Task, harness 
 
 	// Send Execute RPC
 	timeoutMs := int64(task.Timeout.Milliseconds())
-	req := &proto.AgentExecuteRequest{
+	req := &agentpb.ExecuteRequest{
 		Task:      protoTask,
 		TimeoutMs: timeoutMs,
 	}
@@ -264,7 +264,7 @@ func (c *GRPCAgentClient) ExecuteWithCallback(ctx context.Context, task agent.Ta
 
 	// Build the base request
 	timeoutMs := int64(task.Timeout.Milliseconds())
-	req := &proto.AgentExecuteRequest{
+	req := &agentpb.ExecuteRequest{
 		Task:      protoTask,
 		TimeoutMs: timeoutMs,
 	}
@@ -404,7 +404,7 @@ func (c *GRPCAgentClient) Shutdown(ctx context.Context) error {
 // This sends a Health RPC to the remote agent to check its status.
 // If the RPC fails, the agent is considered unhealthy.
 func (c *GRPCAgentClient) Health(ctx context.Context) types.HealthStatus {
-	req := &proto.AgentHealthRequest{}
+	req := &agentpb.HealthRequest{}
 
 	resp, err := c.client.Health(ctx, req)
 	if err != nil {
@@ -435,7 +435,7 @@ func (c *GRPCAgentClient) fetchDescriptor(ctx context.Context) (*agent.AgentDesc
 		return c.descriptor, nil
 	}
 
-	req := &proto.AgentGetDescriptorRequest{}
+	req := &agentpb.GetDescriptorRequest{}
 	resp, err := c.client.GetDescriptor(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get descriptor: %w", err)
@@ -472,7 +472,7 @@ func (c *GRPCAgentClient) fetchSlots(ctx context.Context) error {
 		return nil // Already fetched
 	}
 
-	req := &proto.AgentGetSlotSchemaRequest{}
+	req := &agentpb.GetSlotSchemaRequest{}
 	resp, err := c.client.GetSlotSchema(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to get slot schema: %w", err)
@@ -504,7 +504,7 @@ func convertTechniqueTypes(protoTypes []string) []TechniqueType {
 }
 
 // convertSlots converts proto slot definitions to internal agent.SlotDefinition
-func convertSlots(protoSlots []*proto.AgentSlotDefinition) []agent.SlotDefinition {
+func convertSlots(protoSlots []*agentpb.AgentSlotDefinition) []agent.SlotDefinition {
 	if protoSlots == nil {
 		return []agent.SlotDefinition{}
 	}
@@ -532,7 +532,7 @@ func convertSlots(protoSlots []*proto.AgentSlotDefinition) []agent.SlotDefinitio
 
 // convertTargetSchemas converts proto target schemas to SDK TargetSchema types.
 // It parses the schema_json field and converts it to the schema.JSON type used by the SDK.
-func convertTargetSchemas(protoSchemas []*proto.TargetSchemaProto) []agent.TargetSchema {
+func convertTargetSchemas(protoSchemas []*agentpb.TargetSchemaProto) []agent.TargetSchema {
 	if protoSchemas == nil {
 		return []agent.TargetSchema{}
 	}
@@ -580,7 +580,7 @@ func anyToTypedValue(v any) *commonpb.TypedValue {
 	if v == nil {
 		return &commonpb.TypedValue{
 			Kind: &commonpb.TypedValue_NullValue{
-				NullValue: commonpb.NullValue_NULL_VALUE,
+				NullValue: commonpb.NullValue_NULL_VALUE_UNSPECIFIED,
 			},
 		}
 	}

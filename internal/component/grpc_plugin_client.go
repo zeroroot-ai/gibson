@@ -9,8 +9,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/types"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
 	"github.com/zero-day-ai/sdk/schema"
 )
 
@@ -27,7 +27,7 @@ import (
 // - Validates method exists before invoking Query RPC
 type GRPCPluginClient struct {
 	conn   *grpc.ClientConn
-	client proto.PluginServiceClient
+	client pluginpb.PluginServiceClient
 	info   ComponentInfo
 
 	// Cached methods from ListMethods RPC
@@ -49,7 +49,7 @@ type GRPCPluginClient struct {
 func NewGRPCPluginClient(conn *grpc.ClientConn, info ComponentInfo) *GRPCPluginClient {
 	return &GRPCPluginClient{
 		conn:   conn,
-		client: proto.NewPluginServiceClient(conn),
+		client: pluginpb.NewPluginServiceClient(conn),
 		info:   info,
 	}
 }
@@ -79,7 +79,7 @@ func (c *GRPCPluginClient) Initialize(ctx context.Context, cfg plugin.PluginConf
 	}
 
 	// Send Initialize RPC
-	req := &proto.PluginInitializeRequest{
+	req := &pluginpb.InitializeRequest{
 		ConfigJson: string(cfgJSON),
 	}
 
@@ -103,7 +103,7 @@ func (c *GRPCPluginClient) Initialize(ctx context.Context, cfg plugin.PluginConf
 // operations.
 func (c *GRPCPluginClient) Shutdown(ctx context.Context) error {
 	// Send Shutdown RPC
-	req := &proto.PluginShutdownRequest{}
+	req := &pluginpb.ShutdownRequest{}
 
 	resp, err := c.client.Shutdown(ctx, req)
 	if err != nil {
@@ -175,7 +175,7 @@ func (c *GRPCPluginClient) Query(ctx context.Context, method string, params map[
 	}
 
 	// Send Query RPC
-	req := &proto.PluginQueryRequest{
+	req := &pluginpb.QueryRequest{
 		Method:     method,
 		ParamsJson: string(paramsJSON),
 		TimeoutMs:  0, // Use default timeout
@@ -229,7 +229,7 @@ func (c *GRPCPluginClient) Methods() []plugin.MethodDescriptor {
 // This sends a Health RPC to the remote plugin to check its status.
 // If the RPC fails, the plugin is considered unhealthy.
 func (c *GRPCPluginClient) Health(ctx context.Context) types.HealthStatus {
-	req := &proto.PluginHealthRequest{}
+	req := &pluginpb.HealthRequest{}
 
 	resp, err := c.client.Health(ctx, req)
 	if err != nil {
@@ -259,7 +259,7 @@ func (c *GRPCPluginClient) fetchMethods(ctx context.Context) error {
 		return nil // Already fetched
 	}
 
-	req := &proto.PluginListMethodsRequest{}
+	req := &pluginpb.ListMethodsRequest{}
 	resp, err := c.client.ListMethods(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to list plugin methods: %w", err)
@@ -271,7 +271,7 @@ func (c *GRPCPluginClient) fetchMethods(ctx context.Context) error {
 }
 
 // convertMethodDescriptors converts proto method descriptors to internal plugin.MethodDescriptor
-func convertMethodDescriptors(protoMethods []*proto.PluginMethodDescriptor) []plugin.MethodDescriptor {
+func convertMethodDescriptors(protoMethods []*pluginpb.PluginMethodDescriptor) []plugin.MethodDescriptor {
 	if protoMethods == nil {
 		return []plugin.MethodDescriptor{}
 	}

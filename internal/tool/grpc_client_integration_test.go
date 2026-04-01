@@ -13,28 +13,28 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/api/gen/proto"
+	toolpb "github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// mockIntegrationToolServer implements proto.ToolServiceServer for integration testing
+// mockIntegrationToolServer implements toolpb.ToolServiceServer for integration testing
 type mockIntegrationToolServer struct {
-	proto.UnimplementedToolServiceServer
+	toolpb.UnimplementedToolServiceServer
 
 	// Configuration for mock behavior
-	descriptor      *proto.ToolDescriptor
-	executeResponse *proto.ToolExecuteResponse
+	descriptor      *toolpb.GetDescriptorResponse
+	executeResponse *toolpb.ExecuteResponse
 	executeError    error
 	healthResponse  *proto.HealthStatus
 	healthError     error
 }
 
-func (m *mockIntegrationToolServer) GetDescriptor(ctx context.Context, req *proto.ToolGetDescriptorRequest) (*proto.ToolDescriptor, error) {
+func (m *mockIntegrationToolServer) GetDescriptor(ctx context.Context, req *toolpb.GetDescriptorRequest) (*toolpb.GetDescriptorResponse, error) {
 	if m.descriptor == nil {
-		return &proto.ToolDescriptor{
+		return &toolpb.GetDescriptorResponse{
 			Name:         "integration-tool",
 			Description:  "Integration test tool",
 			Version:      "1.0.0",
@@ -46,20 +46,20 @@ func (m *mockIntegrationToolServer) GetDescriptor(ctx context.Context, req *prot
 	return m.descriptor, nil
 }
 
-func (m *mockIntegrationToolServer) Execute(ctx context.Context, req *proto.ToolExecuteRequest) (*proto.ToolExecuteResponse, error) {
+func (m *mockIntegrationToolServer) Execute(ctx context.Context, req *toolpb.ExecuteRequest) (*toolpb.ExecuteResponse, error) {
 	if m.executeError != nil {
 		return nil, m.executeError
 	}
 	if m.executeResponse == nil {
 		// Default response
-		return &proto.ToolExecuteResponse{
+		return &toolpb.ExecuteResponse{
 			OutputJson: `{"output":"success","message":"Integration test executed"}`,
 		}, nil
 	}
 	return m.executeResponse, nil
 }
 
-func (m *mockIntegrationToolServer) Health(ctx context.Context, req *proto.ToolHealthRequest) (*proto.HealthStatus, error) {
+func (m *mockIntegrationToolServer) Health(ctx context.Context, req *toolpb.HealthRequest) (*proto.HealthStatus, error) {
 	if m.healthError != nil {
 		return nil, m.healthError
 	}
@@ -85,7 +85,7 @@ func startRealGRPCServer(t *testing.T, mock *mockIntegrationToolServer) (*grpc.S
 	t.Logf("Started gRPC server on %s", addr)
 
 	srv := grpc.NewServer()
-	proto.RegisterToolServiceServer(srv, mock)
+	toolpb.RegisterToolServiceServer(srv, mock)
 
 	// Start server in background
 	go func() {
@@ -139,7 +139,7 @@ func TestGRPCToolClient_Integration_RealServer(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"result":{"type":"string"},"success":{"type":"boolean"}},"required":["result"]}`
 
 	mock := &mockIntegrationToolServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:        "integration-scanner",
 			Description: "Integration test network scanner",
 			Version:     "1.0.0",
@@ -151,7 +151,7 @@ func TestGRPCToolClient_Integration_RealServer(t *testing.T) {
 				Json: outputSchemaJSON,
 			},
 		},
-		executeResponse: &proto.ToolExecuteResponse{
+		executeResponse: &toolpb.ExecuteResponse{
 			OutputJson: `{"result":"scan completed","success":true,"ports_found":3}`,
 		},
 		healthResponse: &proto.HealthStatus{
@@ -211,7 +211,7 @@ func TestGRPCToolClient_Integration_ServerRestart(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"output":{"type":"string"}},"required":["output"]}`
 
 	mock := &mockIntegrationToolServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:        "restart-test-tool",
 			Description: "Tool for testing server restart",
 			Version:     "1.0.0",
@@ -283,7 +283,7 @@ func TestGRPCToolClient_Integration_ServerRestart(t *testing.T) {
 	}
 
 	srv2 := grpc.NewServer()
-	proto.RegisterToolServiceServer(srv2, mock)
+	toolpb.RegisterToolServiceServer(srv2, mock)
 
 	go func() {
 		if err := srv2.Serve(listener); err != nil && err != grpc.ErrServerStopped {
@@ -349,7 +349,7 @@ func TestGRPCToolClient_Integration_MultipleClients(t *testing.T) {
 	outputSchemaJSON := `{"type":"object","properties":{"response":{"type":"string"}},"required":["response"]}`
 
 	mock := &mockIntegrationToolServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:        "multi-client-tool",
 			Description: "Tool for testing multiple clients",
 			Version:     "1.0.0",
@@ -444,7 +444,7 @@ func TestGRPCToolClient_Integration_Timeout(t *testing.T) {
 	outputSchemaJSON := `{"type":"object"}`
 
 	mock := &mockIntegrationToolServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "timeout-tool",
 			Description:  "Tool for testing timeouts",
 			Version:      "1.0.0",
@@ -521,14 +521,14 @@ func TestGRPCToolClient_Integration_ComplexDataFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	mock := &mockIntegrationToolServer{
-		descriptor: &proto.ToolDescriptor{
+		descriptor: &toolpb.GetDescriptorResponse{
 			Name:         "complex-scanner",
 			Description:  "Scanner with complex output",
 			Version:      "1.0.0",
 			InputSchema:  &proto.JSONSchema{Json: inputSchemaJSON},
 			OutputSchema: &proto.JSONSchema{Json: outputSchemaJSON},
 		},
-		executeResponse: &proto.ToolExecuteResponse{
+		executeResponse: &toolpb.ExecuteResponse{
 			OutputJson: string(outputJSON),
 		},
 	}

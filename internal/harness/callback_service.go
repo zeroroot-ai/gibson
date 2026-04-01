@@ -17,9 +17,10 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
-	"github.com/zero-day-ai/sdk/api/gen/graphragpb"
-	pb "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
+	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
 	// Import toolspb to register proto message types for CallToolProto reflection
 	_ "github.com/zero-day-ai/sdk/api/gen/toolspb"
 	sdkfinding "github.com/zero-day-ai/sdk/finding"
@@ -77,14 +78,14 @@ type DiscoveryProcessor interface {
 // To register this service with a gRPC server:
 //
 //	service := harness.NewHarnessCallbackServiceWithRegistry(logger, registry)
-//	pb.RegisterHarnessCallbackServiceServer(grpcServer, service)
+//	harnesspb.RegisterHarnessCallbackServiceServer(grpcServer, service)
 //
 // Before executing an agent task, register its harness:
 //
 //	registry.RegisterHarnessForMission(missionID, agentName, harness)
 //	defer registry.UnregisterHarnessForMission(missionID, agentName)
 type HarnessCallbackService struct {
-	pb.UnimplementedHarnessCallbackServiceServer
+	harnesspb.UnimplementedHarnessCallbackServiceServer
 
 	// activeHarnesses maps task IDs to their corresponding harness instances (legacy mode)
 	activeHarnesses sync.Map // map[string]AgentHarness
@@ -296,7 +297,7 @@ func (s *HarnessCallbackService) UnregisterHarness(taskID string) {
 // Returns:
 //   - AgentHarness: The harness instance to use for this request
 //   - error: Non-nil if no harness is found or if context info is invalid
-func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *pb.ContextInfo) (AgentHarness, error) {
+func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *harnesspb.ContextInfo) (AgentHarness, error) {
 	if contextInfo == nil {
 		return nil, status.Error(codes.InvalidArgument, "missing context info in request")
 	}
@@ -355,7 +356,7 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *pb
 }
 
 // getGraphRAGHarness retrieves a harness that supports GraphRAG operations.
-func (s *HarnessCallbackService) getGraphRAGHarness(ctx context.Context, contextInfo *pb.ContextInfo) (GraphRAGSupport, error) {
+func (s *HarnessCallbackService) getGraphRAGHarness(ctx context.Context, contextInfo *harnesspb.ContextInfo) (GraphRAGSupport, error) {
 	harness, err := s.getHarness(ctx, contextInfo)
 	if err != nil {
 		return nil, err
@@ -374,7 +375,7 @@ func (s *HarnessCallbackService) getGraphRAGHarness(ctx context.Context, context
 // ============================================================================
 
 // LLMComplete implements the LLM completion RPC.
-func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *pb.LLMCompleteRequest) (*pb.LLMCompleteResponse, error) {
+func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb.LLMCompleteRequest) (*harnesspb.LLMCompleteResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -424,8 +425,8 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *pb.LLMCom
 			"parent_span_id": req.Context.SpanId,
 		})
 
-		return &pb.LLMCompleteResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.LLMCompleteResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -446,11 +447,11 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *pb.LLMCom
 	})
 
 	// Convert response
-	return &pb.LLMCompleteResponse{
+	return &harnesspb.LLMCompleteResponse{
 		Content:      resp.Message.Content,
 		ToolCalls:    s.toolCallsToProto(resp.Message.ToolCalls),
 		FinishReason: string(resp.FinishReason),
-		Usage: &pb.TokenUsage{
+		Usage: &harnesspb.TokenUsage{
 			InputTokens:  int32(resp.Usage.PromptTokens),
 			OutputTokens: int32(resp.Usage.CompletionTokens),
 			TotalTokens:  int32(resp.Usage.PromptTokens + resp.Usage.CompletionTokens),
@@ -459,7 +460,7 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *pb.LLMCom
 }
 
 // LLMCompleteWithTools implements the LLM completion with tools RPC.
-func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *pb.LLMCompleteWithToolsRequest) (*pb.LLMCompleteResponse, error) {
+func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *harnesspb.LLMCompleteWithToolsRequest) (*harnesspb.LLMCompleteResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -473,8 +474,8 @@ func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *
 	resp, err := harness.CompleteWithTools(ctx, req.Slot, messages, tools)
 	if err != nil {
 		s.logger.Error("LLM completion with tools failed", "error", err, "task_id", req.Context.TaskId)
-		return &pb.LLMCompleteResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.LLMCompleteResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -482,11 +483,11 @@ func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *
 	}
 
 	// Convert response
-	return &pb.LLMCompleteResponse{
+	return &harnesspb.LLMCompleteResponse{
 		Content:      resp.Message.Content,
 		ToolCalls:    s.toolCallsToProto(resp.Message.ToolCalls),
 		FinishReason: string(resp.FinishReason),
-		Usage: &pb.TokenUsage{
+		Usage: &harnesspb.TokenUsage{
 			InputTokens:  int32(resp.Usage.PromptTokens),
 			OutputTokens: int32(resp.Usage.CompletionTokens),
 			TotalTokens:  int32(resp.Usage.PromptTokens + resp.Usage.CompletionTokens),
@@ -495,7 +496,7 @@ func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *
 }
 
 // LLMStream implements the streaming LLM completion RPC.
-func (s *HarnessCallbackService) LLMStream(req *pb.LLMStreamRequest, stream pb.HarnessCallbackService_LLMStreamServer) error {
+func (s *HarnessCallbackService) LLMStream(req *harnesspb.LLMStreamRequest, stream harnesspb.HarnessCallbackService_LLMStreamServer) error {
 	harness, err := s.getHarness(stream.Context(), req.Context)
 	if err != nil {
 		return err
@@ -530,8 +531,8 @@ func (s *HarnessCallbackService) LLMStream(req *pb.LLMStreamRequest, stream pb.H
 	for chunk := range chunkChan {
 		// Check for error in chunk
 		if chunk.Error != nil {
-			protoChunk := &pb.LLMStreamChunk{
-				Error: &pb.HarnessError{
+			protoChunk := &harnesspb.LLMStreamChunk{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: chunk.Error.Error(),
 				},
@@ -540,7 +541,7 @@ func (s *HarnessCallbackService) LLMStream(req *pb.LLMStreamRequest, stream pb.H
 			return nil
 		}
 
-		protoChunk := &pb.LLMStreamChunk{
+		protoChunk := &harnesspb.LLMStreamChunk{
 			Delta:        chunk.Delta.Content,
 			FinishReason: string(chunk.FinishReason),
 		}
@@ -557,7 +558,7 @@ func (s *HarnessCallbackService) LLMStream(req *pb.LLMStreamRequest, stream pb.H
 // LLMCompleteStructured implements the structured LLM completion RPC.
 // This uses provider-native structured output mechanisms (tool_use for Anthropic,
 // response_format for OpenAI) to guarantee JSON responses matching the schema.
-func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req *pb.LLMCompleteStructuredRequest) (*pb.LLMCompleteStructuredResponse, error) {
+func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req *harnesspb.LLMCompleteStructuredRequest) (*harnesspb.LLMCompleteStructuredResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -570,8 +571,8 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 	var schemaData map[string]any
 	if err := json.Unmarshal([]byte(req.SchemaJson), &schemaData); err != nil {
 		s.logger.Error("failed to parse schema JSON", "error", err, "task_id", req.Context.TaskId)
-		return &pb.LLMCompleteStructuredResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.LLMCompleteStructuredResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("invalid schema JSON: %v", err),
 			},
@@ -584,8 +585,8 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 	result, err := harness.CompleteStructuredAny(ctx, req.Slot, messages, schemaData)
 	if err != nil {
 		s.logger.Error("LLM structured completion failed", "error", err, "task_id", req.Context.TaskId)
-		return &pb.LLMCompleteStructuredResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.LLMCompleteStructuredResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -596,8 +597,8 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
 		s.logger.Error("failed to serialize structured result", "error", err, "task_id", req.Context.TaskId)
-		return &pb.LLMCompleteStructuredResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.LLMCompleteStructuredResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to serialize result: %v", err),
 			},
@@ -607,15 +608,15 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 	// Unmarshal JSON back to any to convert to TypedValue
 	var resultData any
 	if err := json.Unmarshal(resultJSON, &resultData); err != nil {
-		return &pb.LLMCompleteStructuredResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.LLMCompleteStructuredResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to unmarshal result: %v", err),
 			},
 		}, nil
 	}
 
-	return &pb.LLMCompleteStructuredResponse{
+	return &harnesspb.LLMCompleteStructuredResponse{
 		Result: anyToTypedValue(resultData),
 		// Note: Token usage would need to be extracted from the completion response
 		// For now we return nil usage since we don't have access to it from CompleteStructuredAny
@@ -628,7 +629,7 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 
 // CallToolProto implements the proto-based tool execution RPC.
 // This is the canonical way to execute tools from external agents.
-func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.CallToolProtoRequest) (*pb.CallToolProtoResponse, error) {
+func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harnesspb.CallToolProtoRequest) (*harnesspb.CallToolProtoResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -649,8 +650,8 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 	toolDesc, err := harness.GetToolDescriptor(ctx, req.Name)
 	if err != nil {
 		s.logger.Error("tool not found", "error", err, "tool", req.Name)
-		return &pb.CallToolProtoResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
 				Message: fmt.Sprintf("tool not found: %s", req.Name),
 			},
@@ -670,8 +671,8 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 			"error", err,
 			"tool", req.Name,
 			"input_type", req.InputType)
-		return &pb.CallToolProtoResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("failed to unmarshal input: %v", err),
 			},
@@ -685,8 +686,8 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 			"error", err,
 			"tool", req.Name,
 			"output_type", req.OutputType)
-		return &pb.CallToolProtoResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to resolve output type: %v", err),
 			},
@@ -707,8 +708,8 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 			"parent_span_id": req.Context.SpanId,
 		})
 
-		return &pb.CallToolProtoResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -759,8 +760,8 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 	responseJSON, err := marshaler.Marshal(responseMsg)
 	if err != nil {
 		s.logger.Error("failed to marshal proto response to JSON", "error", err, "tool", req.Name)
-		return &pb.CallToolProtoResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to marshal response: %v", err),
 			},
@@ -776,13 +777,13 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *pb.Call
 		"parent_span_id": req.Context.SpanId,
 	})
 
-	return &pb.CallToolProtoResponse{
+	return &harnesspb.CallToolProtoResponse{
 		OutputJson: responseJSON,
 	}, nil
 }
 
 // ListTools implements the tool listing RPC.
-func (s *HarnessCallbackService) ListTools(ctx context.Context, req *pb.ListToolsRequest) (*pb.ListToolsResponse, error) {
+func (s *HarnessCallbackService) ListTools(ctx context.Context, req *harnesspb.ListToolsRequest) (*harnesspb.ListToolsResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -792,9 +793,9 @@ func (s *HarnessCallbackService) ListTools(ctx context.Context, req *pb.ListTool
 	tools := harness.ListTools()
 
 	// Convert to proto with structured schemas (including taxonomy)
-	protoTools := make([]*pb.HarnessToolDescriptor, len(tools))
+	protoTools := make([]*harnesspb.HarnessToolDescriptor, len(tools))
 	for i, tool := range tools {
-		protoTools[i] = &pb.HarnessToolDescriptor{
+		protoTools[i] = &harnesspb.HarnessToolDescriptor{
 			Name:         tool.Name,
 			Description:  tool.Description,
 			InputSchema:  SchemaToCallbackProto(tool.InputSchema),  // Structured schema with taxonomy
@@ -802,19 +803,19 @@ func (s *HarnessCallbackService) ListTools(ctx context.Context, req *pb.ListTool
 		}
 	}
 
-	return &pb.ListToolsResponse{
+	return &harnesspb.ListToolsResponse{
 		Tools: protoTools,
 	}, nil
 }
 
 // QueueToolWork implements the queue-based parallel tool execution RPC.
 // It queues multiple tool invocations to Redis for processing by distributed workers.
-func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.QueueToolWorkRequest) (*pb.QueueToolWorkResponse, error) {
+func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *harnesspb.QueueToolWorkRequest) (*harnesspb.QueueToolWorkResponse, error) {
 	// Check if queue manager is available
 	if s.queueManager == nil {
 		s.logger.Error("queue manager not configured", "tool", req.ToolName)
-		return &pb.QueueToolWorkResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.QueueToolWorkResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: "queue-based tool execution not available (Redis not configured)",
 			},
@@ -843,8 +844,8 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 	availableTools, err := queueClient.ListTools(ctx)
 	if err != nil {
 		s.logger.Error("failed to list available tools", "error", err)
-		return &pb.QueueToolWorkResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.QueueToolWorkResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to check tool availability: %v", err),
 			},
@@ -862,8 +863,8 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 
 	if !toolFound {
 		s.logger.Warn("tool not found in queue", "tool", req.ToolName, "available", len(availableTools))
-		return &pb.QueueToolWorkResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.QueueToolWorkResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
 				Message: fmt.Sprintf("tool %s not available in queue (no workers registered)", req.ToolName),
 			},
@@ -903,8 +904,8 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 		// Validate work item before pushing
 		if err := workItem.IsValid(); err != nil {
 			s.logger.Error("invalid work item", "error", err, "index", i)
-			return &pb.QueueToolWorkResponse{
-				Error: &pb.HarnessError{
+			return &harnesspb.QueueToolWorkResponse{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 					Message: fmt.Sprintf("invalid work item at index %d: %v", i, err),
 				},
@@ -919,8 +920,8 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 				"job_id", jobID,
 				"index", i,
 			)
-			return &pb.QueueToolWorkResponse{
-				Error: &pb.HarnessError{
+			return &harnesspb.QueueToolWorkResponse{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to queue work item %d: %v", i, err),
 				},
@@ -935,14 +936,14 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *pb.Queu
 		"queue", queueName,
 	)
 
-	return &pb.QueueToolWorkResponse{
+	return &harnesspb.QueueToolWorkResponse{
 		JobId: jobID,
 	}, nil
 }
 
 // ToolResults implements the streaming RPC that delivers results from queued tool work.
 // It subscribes to the Redis pub/sub channel for the job and streams results as they arrive.
-func (s *HarnessCallbackService) ToolResults(req *pb.ToolResultsRequest, stream pb.HarnessCallbackService_ToolResultsServer) error {
+func (s *HarnessCallbackService) ToolResults(req *harnesspb.ToolResultsRequest, stream harnesspb.HarnessCallbackService_ToolResultsServer) error {
 	ctx := stream.Context()
 
 	// Check if queue manager is available
@@ -988,12 +989,12 @@ func (s *HarnessCallbackService) ToolResults(req *pb.ToolResultsRequest, stream 
 		resultCount++
 
 		// Convert queue.Result to proto ToolResultResponse
-		protoResult := &pb.ToolResultResponse{
+		protoResult := &harnesspb.ToolResultResponse{
 			Index: int32(result.Index),
 		}
 
 		if result.Error != "" {
-			protoResult.Error = &pb.HarnessError{
+			protoResult.Error = &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: result.Error,
 			}
@@ -1031,7 +1032,7 @@ func (s *HarnessCallbackService) ToolResults(req *pb.ToolResultsRequest, stream 
 // ============================================================================
 
 // QueryPlugin implements the plugin query RPC.
-func (s *HarnessCallbackService) QueryPlugin(ctx context.Context, req *pb.QueryPluginRequest) (*pb.QueryPluginResponse, error) {
+func (s *HarnessCallbackService) QueryPlugin(ctx context.Context, req *harnesspb.QueryPluginRequest) (*harnesspb.QueryPluginResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1044,21 +1045,21 @@ func (s *HarnessCallbackService) QueryPlugin(ctx context.Context, req *pb.QueryP
 	result, err := harness.QueryPlugin(ctx, req.Name, req.Method, params)
 	if err != nil {
 		s.logger.Error("plugin query failed", "error", err, "plugin", req.Name, "method", req.Method)
-		return &pb.QueryPluginResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.QueryPluginResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
 	}
 
-	return &pb.QueryPluginResponse{
+	return &harnesspb.QueryPluginResponse{
 		Result: anyToTypedValue(result),
 	}, nil
 }
 
 // ListPlugins implements the plugin listing RPC.
-func (s *HarnessCallbackService) ListPlugins(ctx context.Context, req *pb.ListPluginsRequest) (*pb.ListPluginsResponse, error) {
+func (s *HarnessCallbackService) ListPlugins(ctx context.Context, req *harnesspb.ListPluginsRequest) (*harnesspb.ListPluginsResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1068,7 +1069,7 @@ func (s *HarnessCallbackService) ListPlugins(ctx context.Context, req *pb.ListPl
 	plugins := harness.ListPlugins()
 
 	// Convert to proto
-	protoPlugins := make([]*pb.HarnessPluginDescriptor, len(plugins))
+	protoPlugins := make([]*harnesspb.HarnessPluginDescriptor, len(plugins))
 	for i, plugin := range plugins {
 		// Extract method names from MethodDescriptor slice
 		methodNames := make([]string, len(plugin.Methods))
@@ -1076,7 +1077,7 @@ func (s *HarnessCallbackService) ListPlugins(ctx context.Context, req *pb.ListPl
 			methodNames[j] = method.Name
 		}
 
-		protoPlugins[i] = &pb.HarnessPluginDescriptor{
+		protoPlugins[i] = &harnesspb.HarnessPluginDescriptor{
 			Name:        plugin.Name,
 			Description: "",
 			Version:     plugin.Version,
@@ -1084,7 +1085,7 @@ func (s *HarnessCallbackService) ListPlugins(ctx context.Context, req *pb.ListPl
 		}
 	}
 
-	return &pb.ListPluginsResponse{
+	return &harnesspb.ListPluginsResponse{
 		Plugins: protoPlugins,
 	}, nil
 }
@@ -1094,7 +1095,7 @@ func (s *HarnessCallbackService) ListPlugins(ctx context.Context, req *pb.ListPl
 // ============================================================================
 
 // DelegateToAgent implements the agent delegation RPC.
-func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *pb.DelegateToAgentRequest) (*pb.DelegateToAgentResponse, error) {
+func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *harnesspb.DelegateToAgentRequest) (*harnesspb.DelegateToAgentResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1145,8 +1146,8 @@ func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *pb.De
 			})
 		}
 
-		return &pb.DelegateToAgentResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.DelegateToAgentResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1162,13 +1163,13 @@ func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *pb.De
 		"success":        true,
 	})
 
-	return &pb.DelegateToAgentResponse{
+	return &harnesspb.DelegateToAgentResponse{
 		Result: resultToProtoResult(result),
 	}, nil
 }
 
 // ListAgents implements the agent listing RPC.
-func (s *HarnessCallbackService) ListAgents(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error) {
+func (s *HarnessCallbackService) ListAgents(ctx context.Context, req *harnesspb.ListAgentsRequest) (*harnesspb.ListAgentsResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1178,9 +1179,9 @@ func (s *HarnessCallbackService) ListAgents(ctx context.Context, req *pb.ListAge
 	agents := harness.ListAgents()
 
 	// Convert to proto
-	protoAgents := make([]*pb.HarnessAgentDescriptor, len(agents))
+	protoAgents := make([]*harnesspb.HarnessAgentDescriptor, len(agents))
 	for i, agent := range agents {
-		protoAgents[i] = &pb.HarnessAgentDescriptor{
+		protoAgents[i] = &harnesspb.HarnessAgentDescriptor{
 			Name:        agent.Name,
 			Version:     agent.Version,
 			Description: agent.Description,
@@ -1189,7 +1190,7 @@ func (s *HarnessCallbackService) ListAgents(ctx context.Context, req *pb.ListAge
 		}
 	}
 
-	return &pb.ListAgentsResponse{
+	return &harnesspb.ListAgentsResponse{
 		Agents: protoAgents,
 	}, nil
 }
@@ -1199,7 +1200,7 @@ func (s *HarnessCallbackService) ListAgents(ctx context.Context, req *pb.ListAge
 // ============================================================================
 
 // SubmitFinding implements the finding submission RPC.
-func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *pb.SubmitFindingRequest) (*pb.SubmitFindingResponse, error) {
+func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harnesspb.SubmitFindingRequest) (*harnesspb.SubmitFindingResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1211,19 +1212,19 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *pb.Subm
 	// Submit finding
 	if err := harness.SubmitFinding(ctx, finding); err != nil {
 		s.logger.Error("finding submission failed", "error", err)
-		return &pb.SubmitFindingResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.SubmitFindingResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
 	}
 
-	return &pb.SubmitFindingResponse{}, nil
+	return &harnesspb.SubmitFindingResponse{}, nil
 }
 
 // GetFindings implements the finding retrieval RPC.
-func (s *HarnessCallbackService) GetFindings(ctx context.Context, req *pb.GetFindingsRequest) (*pb.GetFindingsResponse, error) {
+func (s *HarnessCallbackService) GetFindings(ctx context.Context, req *harnesspb.GetFindingsRequest) (*harnesspb.GetFindingsResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1236,8 +1237,8 @@ func (s *HarnessCallbackService) GetFindings(ctx context.Context, req *pb.GetFin
 	findings, err := harness.GetFindings(ctx, filter)
 	if err != nil {
 		s.logger.Error("get findings failed", "error", err)
-		return &pb.GetFindingsResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GetFindingsResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1245,12 +1246,12 @@ func (s *HarnessCallbackService) GetFindings(ctx context.Context, req *pb.GetFin
 	}
 
 	// Convert findings to proto
-	protoFindings := make([]*pb.Finding, len(findings))
+	protoFindings := make([]*typespb.Finding, len(findings))
 	for i, finding := range findings {
 		protoFindings[i] = findingToProtoFinding(finding)
 	}
 
-	return &pb.GetFindingsResponse{
+	return &harnesspb.GetFindingsResponse{
 		Findings: protoFindings,
 	}, nil
 }
@@ -1260,7 +1261,7 @@ func (s *HarnessCallbackService) GetFindings(ctx context.Context, req *pb.GetFin
 // ============================================================================
 
 // MemoryGet implements the memory get RPC with tier routing.
-func (s *HarnessCallbackService) MemoryGet(ctx context.Context, req *pb.MemoryGetRequest) (*pb.MemoryGetResponse, error) {
+func (s *HarnessCallbackService) MemoryGet(ctx context.Context, req *harnesspb.MemoryGetRequest) (*harnesspb.MemoryGetResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1268,37 +1269,37 @@ func (s *HarnessCallbackService) MemoryGet(ctx context.Context, req *pb.MemoryGe
 
 	// Default to WORKING tier for backward compatibility
 	tier := req.Tier
-	if tier == pb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
-		tier = pb.MemoryTier_MEMORY_TIER_WORKING
+	if tier == harnesspb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
+		tier = harnesspb.MemoryTier_MEMORY_TIER_WORKING
 	}
 
 	switch tier {
-	case pb.MemoryTier_MEMORY_TIER_WORKING:
+	case harnesspb.MemoryTier_MEMORY_TIER_WORKING:
 		// Working memory: existing logic
 		value, found := harness.Memory().Working().Get(req.Key)
 		if !found {
-			return &pb.MemoryGetResponse{
+			return &harnesspb.MemoryGetResponse{
 				Found: false,
 			}, nil
 		}
 
-		return &pb.MemoryGetResponse{
+		return &harnesspb.MemoryGetResponse{
 			Value: anyToTypedValue(value),
 			Found: true,
 		}, nil
 
-	case pb.MemoryTier_MEMORY_TIER_MISSION:
+	case harnesspb.MemoryTier_MEMORY_TIER_MISSION:
 		// Mission memory: use Retrieve method
 		item, err := harness.Memory().Mission().Retrieve(ctx, req.Key)
 		if err != nil {
 			// Check for not found error
 			if err.Error() == "memory: item not found" || err.Error() == "not found" {
-				return &pb.MemoryGetResponse{
+				return &harnesspb.MemoryGetResponse{
 					Found: false,
 				}, nil
 			}
-			return &pb.MemoryGetResponse{
-				Error: &pb.HarnessError{
+			return &harnesspb.MemoryGetResponse{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to retrieve from mission memory: %v", err),
 				},
@@ -1306,25 +1307,25 @@ func (s *HarnessCallbackService) MemoryGet(ctx context.Context, req *pb.MemoryGe
 		}
 
 		typedMapMetadata := mapToTypedMap(item.Metadata)
-		return &pb.MemoryGetResponse{
+		return &harnesspb.MemoryGetResponse{
 			Value:     anyToTypedValue(item.Value),
 			Metadata:  typedMapMetadata.Entries,
 			Found:     true,
 			CreatedAt: item.CreatedAt.Format(time.RFC3339),
 		}, nil
 
-	case pb.MemoryTier_MEMORY_TIER_LONG_TERM:
+	case harnesspb.MemoryTier_MEMORY_TIER_LONG_TERM:
 		// Long-term memory does not support Get by key
-		return &pb.MemoryGetResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.MemoryGetResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "Long-term memory does not support Get by key. Use LongTermMemorySearch instead.",
 			},
 		}, nil
 
 	default:
-		return &pb.MemoryGetResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.MemoryGetResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("unknown memory tier: %v", tier),
 			},
@@ -1333,7 +1334,7 @@ func (s *HarnessCallbackService) MemoryGet(ctx context.Context, req *pb.MemoryGe
 }
 
 // MemorySet implements the memory set RPC with tier routing.
-func (s *HarnessCallbackService) MemorySet(ctx context.Context, req *pb.MemorySetRequest) (*pb.MemorySetResponse, error) {
+func (s *HarnessCallbackService) MemorySet(ctx context.Context, req *harnesspb.MemorySetRequest) (*harnesspb.MemorySetResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1344,50 +1345,50 @@ func (s *HarnessCallbackService) MemorySet(ctx context.Context, req *pb.MemorySe
 
 	// Default to WORKING tier for backward compatibility
 	tier := req.Tier
-	if tier == pb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
-		tier = pb.MemoryTier_MEMORY_TIER_WORKING
+	if tier == harnesspb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
+		tier = harnesspb.MemoryTier_MEMORY_TIER_WORKING
 	}
 
 	switch tier {
-	case pb.MemoryTier_MEMORY_TIER_WORKING:
+	case harnesspb.MemoryTier_MEMORY_TIER_WORKING:
 		// Working memory: existing logic
 		if err := harness.Memory().Working().Set(req.Key, value); err != nil {
-			return &pb.MemorySetResponse{
-				Error: &pb.HarnessError{
+			return &harnesspb.MemorySetResponse{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to set value: %v", err),
 				},
 			}, nil
 		}
-		return &pb.MemorySetResponse{}, nil
+		return &harnesspb.MemorySetResponse{}, nil
 
-	case pb.MemoryTier_MEMORY_TIER_MISSION:
+	case harnesspb.MemoryTier_MEMORY_TIER_MISSION:
 		// Mission memory: use Store method
 		// Convert metadata from proto TypedMap
 		metadata := typedValueMapToMap(req.Metadata)
 
 		if err := harness.Memory().Mission().Store(ctx, req.Key, value, metadata); err != nil {
-			return &pb.MemorySetResponse{
-				Error: &pb.HarnessError{
+			return &harnesspb.MemorySetResponse{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to store in mission memory: %v", err),
 				},
 			}, nil
 		}
-		return &pb.MemorySetResponse{}, nil
+		return &harnesspb.MemorySetResponse{}, nil
 
-	case pb.MemoryTier_MEMORY_TIER_LONG_TERM:
+	case harnesspb.MemoryTier_MEMORY_TIER_LONG_TERM:
 		// Long-term memory does not support Set by key
-		return &pb.MemorySetResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.MemorySetResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "Long-term memory does not support Set by key. Use LongTermMemoryStore instead.",
 			},
 		}, nil
 
 	default:
-		return &pb.MemorySetResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.MemorySetResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("unknown memory tier: %v", tier),
 			},
@@ -1396,7 +1397,7 @@ func (s *HarnessCallbackService) MemorySet(ctx context.Context, req *pb.MemorySe
 }
 
 // MemoryDelete implements the memory delete RPC with tier routing.
-func (s *HarnessCallbackService) MemoryDelete(ctx context.Context, req *pb.MemoryDeleteRequest) (*pb.MemoryDeleteResponse, error) {
+func (s *HarnessCallbackService) MemoryDelete(ctx context.Context, req *harnesspb.MemoryDeleteRequest) (*harnesspb.MemoryDeleteResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1404,40 +1405,40 @@ func (s *HarnessCallbackService) MemoryDelete(ctx context.Context, req *pb.Memor
 
 	// Default to WORKING tier for backward compatibility
 	tier := req.Tier
-	if tier == pb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
-		tier = pb.MemoryTier_MEMORY_TIER_WORKING
+	if tier == harnesspb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
+		tier = harnesspb.MemoryTier_MEMORY_TIER_WORKING
 	}
 
 	switch tier {
-	case pb.MemoryTier_MEMORY_TIER_WORKING:
+	case harnesspb.MemoryTier_MEMORY_TIER_WORKING:
 		// Working memory: existing logic
 		harness.Memory().Working().Delete(req.Key)
-		return &pb.MemoryDeleteResponse{}, nil
+		return &harnesspb.MemoryDeleteResponse{}, nil
 
-	case pb.MemoryTier_MEMORY_TIER_MISSION:
+	case harnesspb.MemoryTier_MEMORY_TIER_MISSION:
 		// Mission memory: use Delete method
 		if err := harness.Memory().Mission().Delete(ctx, req.Key); err != nil {
-			return &pb.MemoryDeleteResponse{
-				Error: &pb.HarnessError{
+			return &harnesspb.MemoryDeleteResponse{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to delete from mission memory: %v", err),
 				},
 			}, nil
 		}
-		return &pb.MemoryDeleteResponse{}, nil
+		return &harnesspb.MemoryDeleteResponse{}, nil
 
-	case pb.MemoryTier_MEMORY_TIER_LONG_TERM:
+	case harnesspb.MemoryTier_MEMORY_TIER_LONG_TERM:
 		// Long-term memory does not support Delete by key
-		return &pb.MemoryDeleteResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.MemoryDeleteResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "Long-term memory does not support Delete by key. Use LongTermMemoryDelete instead.",
 			},
 		}, nil
 
 	default:
-		return &pb.MemoryDeleteResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.MemoryDeleteResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("unknown memory tier: %v", tier),
 			},
@@ -1446,7 +1447,7 @@ func (s *HarnessCallbackService) MemoryDelete(ctx context.Context, req *pb.Memor
 }
 
 // MemoryList implements the memory list RPC with tier routing.
-func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *pb.MemoryListRequest) (*pb.MemoryListResponse, error) {
+func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *harnesspb.MemoryListRequest) (*harnesspb.MemoryListResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1454,12 +1455,12 @@ func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *pb.MemoryL
 
 	// Default to WORKING tier for backward compatibility
 	tier := req.Tier
-	if tier == pb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
-		tier = pb.MemoryTier_MEMORY_TIER_WORKING
+	if tier == harnesspb.MemoryTier_MEMORY_TIER_UNSPECIFIED {
+		tier = harnesspb.MemoryTier_MEMORY_TIER_WORKING
 	}
 
 	switch tier {
-	case pb.MemoryTier_MEMORY_TIER_WORKING:
+	case harnesspb.MemoryTier_MEMORY_TIER_WORKING:
 		// List keys from working memory
 		// Note: The proto request has a prefix field, but the working memory List() doesn't support prefix filtering
 		// We'll get all keys and filter by prefix if needed
@@ -1477,16 +1478,16 @@ func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *pb.MemoryL
 			keys = allKeys
 		}
 
-		return &pb.MemoryListResponse{
+		return &harnesspb.MemoryListResponse{
 			Keys: keys,
 		}, nil
 
-	case pb.MemoryTier_MEMORY_TIER_MISSION:
+	case harnesspb.MemoryTier_MEMORY_TIER_MISSION:
 		// Mission memory: use Keys method
 		allKeys, err := harness.Memory().Mission().Keys(ctx)
 		if err != nil {
-			return &pb.MemoryListResponse{
-				Error: &pb.HarnessError{
+			return &harnesspb.MemoryListResponse{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 					Message: fmt.Sprintf("failed to list keys from mission memory: %v", err),
 				},
@@ -1505,22 +1506,22 @@ func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *pb.MemoryL
 			keys = allKeys
 		}
 
-		return &pb.MemoryListResponse{
+		return &harnesspb.MemoryListResponse{
 			Keys: keys,
 		}, nil
 
-	case pb.MemoryTier_MEMORY_TIER_LONG_TERM:
+	case harnesspb.MemoryTier_MEMORY_TIER_LONG_TERM:
 		// Long-term memory does not support listing keys
-		return &pb.MemoryListResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.MemoryListResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "Long-term memory does not support listing keys.",
 			},
 		}, nil
 
 	default:
-		return &pb.MemoryListResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.MemoryListResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("unknown memory tier: %v", tier),
 			},
@@ -1529,7 +1530,7 @@ func (s *HarnessCallbackService) MemoryList(ctx context.Context, req *pb.MemoryL
 }
 
 // LongTermMemoryStore implements the long-term memory store RPC.
-func (s *HarnessCallbackService) LongTermMemoryStore(ctx context.Context, req *pb.LongTermMemoryStoreRequest) (*pb.LongTermMemoryStoreResponse, error) {
+func (s *HarnessCallbackService) LongTermMemoryStore(ctx context.Context, req *harnesspb.LongTermMemoryStoreRequest) (*harnesspb.LongTermMemoryStoreResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1544,16 +1545,16 @@ func (s *HarnessCallbackService) LongTermMemoryStore(ctx context.Context, req *p
 	// Daemon's LongTermMemory.Store takes (ctx, id, content, metadata)
 	err = harness.Memory().LongTerm().Store(ctx, id, req.Content, metadata)
 	if err != nil {
-		return &pb.LongTermMemoryStoreResponse{
-			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+		return &harnesspb.LongTermMemoryStoreResponse{
+			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
-	return &pb.LongTermMemoryStoreResponse{Id: id}, nil
+	return &harnesspb.LongTermMemoryStoreResponse{Id: id}, nil
 }
 
 // LongTermMemorySearch implements the long-term memory search RPC.
-func (s *HarnessCallbackService) LongTermMemorySearch(ctx context.Context, req *pb.LongTermMemorySearchRequest) (*pb.LongTermMemorySearchResponse, error) {
+func (s *HarnessCallbackService) LongTermMemorySearch(ctx context.Context, req *harnesspb.LongTermMemorySearchRequest) (*harnesspb.LongTermMemorySearchResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1564,15 +1565,15 @@ func (s *HarnessCallbackService) LongTermMemorySearch(ctx context.Context, req *
 
 	results, err := harness.Memory().LongTerm().Search(ctx, req.Query, int(req.TopK), filters)
 	if err != nil {
-		return &pb.LongTermMemorySearchResponse{
-			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+		return &harnesspb.LongTermMemorySearchResponse{
+			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
-	pbResults := make([]*pb.LongTermMemoryResult, len(results))
+	pbResults := make([]*harnesspb.LongTermMemoryResult, len(results))
 	for i, r := range results {
 		typedMapMetadata := mapToTypedMap(r.Item.Metadata)
-		pbResults[i] = &pb.LongTermMemoryResult{
+		pbResults[i] = &harnesspb.LongTermMemoryResult{
 			Id:        r.Item.Key,
 			Content:   r.Item.Value.(string), // Content is stored as string
 			Metadata:  typedMapMetadata.Entries,
@@ -1581,11 +1582,11 @@ func (s *HarnessCallbackService) LongTermMemorySearch(ctx context.Context, req *
 		}
 	}
 
-	return &pb.LongTermMemorySearchResponse{Results: pbResults}, nil
+	return &harnesspb.LongTermMemorySearchResponse{Results: pbResults}, nil
 }
 
 // LongTermMemoryDelete implements the long-term memory delete RPC.
-func (s *HarnessCallbackService) LongTermMemoryDelete(ctx context.Context, req *pb.LongTermMemoryDeleteRequest) (*pb.LongTermMemoryDeleteResponse, error) {
+func (s *HarnessCallbackService) LongTermMemoryDelete(ctx context.Context, req *harnesspb.LongTermMemoryDeleteRequest) (*harnesspb.LongTermMemoryDeleteResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1593,16 +1594,16 @@ func (s *HarnessCallbackService) LongTermMemoryDelete(ctx context.Context, req *
 
 	err = harness.Memory().LongTerm().Delete(ctx, req.Id)
 	if err != nil {
-		return &pb.LongTermMemoryDeleteResponse{
-			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+		return &harnesspb.LongTermMemoryDeleteResponse{
+			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
-	return &pb.LongTermMemoryDeleteResponse{}, nil
+	return &harnesspb.LongTermMemoryDeleteResponse{}, nil
 }
 
 // MissionMemorySearch implements the mission memory search RPC.
-func (s *HarnessCallbackService) MissionMemorySearch(ctx context.Context, req *pb.MissionMemorySearchRequest) (*pb.MissionMemorySearchResponse, error) {
+func (s *HarnessCallbackService) MissionMemorySearch(ctx context.Context, req *harnesspb.MissionMemorySearchRequest) (*harnesspb.MissionMemorySearchResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1610,15 +1611,15 @@ func (s *HarnessCallbackService) MissionMemorySearch(ctx context.Context, req *p
 
 	results, err := harness.Memory().Mission().Search(ctx, req.Query, int(req.Limit))
 	if err != nil {
-		return &pb.MissionMemorySearchResponse{
-			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+		return &harnesspb.MissionMemorySearchResponse{
+			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
-	pbResults := make([]*pb.MissionMemoryResult, len(results))
+	pbResults := make([]*harnesspb.MissionMemoryResult, len(results))
 	for i, r := range results {
 		typedMapMetadata := mapToTypedMap(r.Item.Metadata)
-		pbResults[i] = &pb.MissionMemoryResult{
+		pbResults[i] = &harnesspb.MissionMemoryResult{
 			Key:       r.Item.Key,
 			Value:     anyToTypedValue(r.Item.Value),
 			Metadata:  typedMapMetadata.Entries,
@@ -1628,11 +1629,11 @@ func (s *HarnessCallbackService) MissionMemorySearch(ctx context.Context, req *p
 		}
 	}
 
-	return &pb.MissionMemorySearchResponse{Results: pbResults}, nil
+	return &harnesspb.MissionMemorySearchResponse{Results: pbResults}, nil
 }
 
 // MissionMemoryHistory implements the mission memory history RPC.
-func (s *HarnessCallbackService) MissionMemoryHistory(ctx context.Context, req *pb.MissionMemoryHistoryRequest) (*pb.MissionMemoryHistoryResponse, error) {
+func (s *HarnessCallbackService) MissionMemoryHistory(ctx context.Context, req *harnesspb.MissionMemoryHistoryRequest) (*harnesspb.MissionMemoryHistoryResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1640,15 +1641,15 @@ func (s *HarnessCallbackService) MissionMemoryHistory(ctx context.Context, req *
 
 	items, err := harness.Memory().Mission().History(ctx, int(req.Limit))
 	if err != nil {
-		return &pb.MissionMemoryHistoryResponse{
-			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+		return &harnesspb.MissionMemoryHistoryResponse{
+			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
-	pbItems := make([]*pb.MissionMemoryItem, len(items))
+	pbItems := make([]*harnesspb.MissionMemoryItem, len(items))
 	for i, item := range items {
 		typedMapMetadata := mapToTypedMap(item.Metadata)
-		pbItems[i] = &pb.MissionMemoryItem{
+		pbItems[i] = &harnesspb.MissionMemoryItem{
 			Key:       item.Key,
 			Value:     anyToTypedValue(item.Value),
 			Metadata:  typedMapMetadata.Entries,
@@ -1657,11 +1658,11 @@ func (s *HarnessCallbackService) MissionMemoryHistory(ctx context.Context, req *
 		}
 	}
 
-	return &pb.MissionMemoryHistoryResponse{Items: pbItems}, nil
+	return &harnesspb.MissionMemoryHistoryResponse{Items: pbItems}, nil
 }
 
 // MissionMemoryGetPreviousRunValue implements the mission memory get previous run value RPC.
-func (s *HarnessCallbackService) MissionMemoryGetPreviousRunValue(ctx context.Context, req *pb.MissionMemoryGetPreviousRunValueRequest) (*pb.MissionMemoryGetPreviousRunValueResponse, error) {
+func (s *HarnessCallbackService) MissionMemoryGetPreviousRunValue(ctx context.Context, req *harnesspb.MissionMemoryGetPreviousRunValueRequest) (*harnesspb.MissionMemoryGetPreviousRunValueResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1671,20 +1672,20 @@ func (s *HarnessCallbackService) MissionMemoryGetPreviousRunValue(ctx context.Co
 	if err != nil {
 		// Check for specific errors
 		errMsg := err.Error()
-		return &pb.MissionMemoryGetPreviousRunValueResponse{
+		return &harnesspb.MissionMemoryGetPreviousRunValueResponse{
 			Found: false,
-			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, Message: errMsg},
+			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, Message: errMsg},
 		}, nil
 	}
 
-	return &pb.MissionMemoryGetPreviousRunValueResponse{
+	return &harnesspb.MissionMemoryGetPreviousRunValueResponse{
 		Value: anyToTypedValue(value),
 		Found: true,
 	}, nil
 }
 
 // MissionMemoryGetValueHistory implements the mission memory get value history RPC.
-func (s *HarnessCallbackService) MissionMemoryGetValueHistory(ctx context.Context, req *pb.MissionMemoryGetValueHistoryRequest) (*pb.MissionMemoryGetValueHistoryResponse, error) {
+func (s *HarnessCallbackService) MissionMemoryGetValueHistory(ctx context.Context, req *harnesspb.MissionMemoryGetValueHistoryRequest) (*harnesspb.MissionMemoryGetValueHistoryResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1692,14 +1693,14 @@ func (s *HarnessCallbackService) MissionMemoryGetValueHistory(ctx context.Contex
 
 	history, err := harness.Memory().Mission().GetValueHistory(ctx, req.Key)
 	if err != nil {
-		return &pb.MissionMemoryGetValueHistoryResponse{
-			Error: &pb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
+		return &harnesspb.MissionMemoryGetValueHistoryResponse{
+			Error: &harnesspb.HarnessError{Code: commonpb.ErrorCode_ERROR_CODE_INTERNAL, Message: err.Error()},
 		}, nil
 	}
 
-	pbValues := make([]*pb.HistoricalValueItem, len(history))
+	pbValues := make([]*harnesspb.HistoricalValueItem, len(history))
 	for i, h := range history {
-		pbValues[i] = &pb.HistoricalValueItem{
+		pbValues[i] = &harnesspb.HistoricalValueItem{
 			Value:     anyToTypedValue(h.Value),
 			RunNumber: int32(h.RunNumber),
 			MissionId: h.MissionID,
@@ -1707,18 +1708,18 @@ func (s *HarnessCallbackService) MissionMemoryGetValueHistory(ctx context.Contex
 		}
 	}
 
-	return &pb.MissionMemoryGetValueHistoryResponse{Values: pbValues}, nil
+	return &harnesspb.MissionMemoryGetValueHistoryResponse{Values: pbValues}, nil
 }
 
 // MissionMemoryContinuityMode implements the mission memory continuity mode RPC.
-func (s *HarnessCallbackService) MissionMemoryContinuityMode(ctx context.Context, req *pb.MissionMemoryContinuityModeRequest) (*pb.MissionMemoryContinuityModeResponse, error) {
+func (s *HarnessCallbackService) MissionMemoryContinuityMode(ctx context.Context, req *harnesspb.MissionMemoryContinuityModeRequest) (*harnesspb.MissionMemoryContinuityModeResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
 	}
 
 	mode := harness.Memory().Mission().ContinuityMode()
-	return &pb.MissionMemoryContinuityModeResponse{
+	return &harnesspb.MissionMemoryContinuityModeResponse{
 		Mode: string(mode),
 	}, nil
 }
@@ -1743,7 +1744,7 @@ type GraphRAGSupport interface {
 }
 
 // GraphRAGQuery implements the GraphRAG query RPC.
-func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *pb.GraphRAGQueryRequest) (*pb.GraphRAGQueryResponse, error) {
+func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *harnesspb.GraphRAGQueryRequest) (*harnesspb.GraphRAGQueryResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -1752,8 +1753,8 @@ func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *pb.Grap
 	// Check if harness supports GraphRAG
 	graphRAG, ok := harness.(GraphRAGSupport)
 	if !ok {
-		return &pb.GraphRAGQueryResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GraphRAGQueryResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: "GraphRAG not supported by this harness",
 			},
@@ -1784,8 +1785,8 @@ func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *pb.Grap
 			"mission_run_id", missionRunID)
 	}
 	if query.Text == "" && len(query.NodeTypes) == 0 {
-		return &pb.GraphRAGQueryResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GraphRAGQueryResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "query must have Text or NodeTypes",
 			},
@@ -1796,8 +1797,8 @@ func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *pb.Grap
 	results, err := graphRAG.QueryGraphRAG(ctx, query)
 	if err != nil {
 		s.logger.Error("GraphRAG query failed", "error", err)
-		return &pb.GraphRAGQueryResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GraphRAGQueryResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1805,9 +1806,9 @@ func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *pb.Grap
 	}
 
 	// Convert results to proto
-	protoResults := make([]*pb.GraphRAGResult, len(results))
+	protoResults := make([]*harnesspb.GraphRAGResult, len(results))
 	for i, result := range results {
-		protoResults[i] = &pb.GraphRAGResult{
+		protoResults[i] = &harnesspb.GraphRAGResult{
 			Node:        s.graphNodeToProto(result.Node),
 			Score:       result.Score,
 			VectorScore: result.VectorScore,
@@ -1817,17 +1818,17 @@ func (s *HarnessCallbackService) GraphRAGQuery(ctx context.Context, req *pb.Grap
 		}
 	}
 
-	return &pb.GraphRAGQueryResponse{
+	return &harnesspb.GraphRAGQueryResponse{
 		Results: protoResults,
 	}, nil
 }
 
 // FindSimilarAttacks implements the find similar attacks RPC.
-func (s *HarnessCallbackService) FindSimilarAttacks(ctx context.Context, req *pb.FindSimilarAttacksRequest) (*pb.FindSimilarAttacksResponse, error) {
+func (s *HarnessCallbackService) FindSimilarAttacks(ctx context.Context, req *harnesspb.FindSimilarAttacksRequest) (*harnesspb.FindSimilarAttacksResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.FindSimilarAttacksResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.FindSimilarAttacksResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1838,8 +1839,8 @@ func (s *HarnessCallbackService) FindSimilarAttacks(ctx context.Context, req *pb
 	attacks, err := graphRAG.FindSimilarAttacks(ctx, req.Content, int(req.TopK))
 	if err != nil {
 		s.logger.Error("find similar attacks failed", "error", err)
-		return &pb.FindSimilarAttacksResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.FindSimilarAttacksResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1847,9 +1848,9 @@ func (s *HarnessCallbackService) FindSimilarAttacks(ctx context.Context, req *pb
 	}
 
 	// Convert to proto
-	protoAttacks := make([]*pb.AttackPattern, len(attacks))
+	protoAttacks := make([]*harnesspb.AttackPattern, len(attacks))
 	for i, attack := range attacks {
-		protoAttacks[i] = &pb.AttackPattern{
+		protoAttacks[i] = &harnesspb.AttackPattern{
 			TechniqueId: attack.TechniqueID,
 			Name:        attack.Name,
 			Description: attack.Description,
@@ -1859,17 +1860,17 @@ func (s *HarnessCallbackService) FindSimilarAttacks(ctx context.Context, req *pb
 		}
 	}
 
-	return &pb.FindSimilarAttacksResponse{
+	return &harnesspb.FindSimilarAttacksResponse{
 		Attacks: protoAttacks,
 	}, nil
 }
 
 // FindSimilarFindings implements the find similar findings RPC.
-func (s *HarnessCallbackService) FindSimilarFindings(ctx context.Context, req *pb.FindSimilarFindingsRequest) (*pb.FindSimilarFindingsResponse, error) {
+func (s *HarnessCallbackService) FindSimilarFindings(ctx context.Context, req *harnesspb.FindSimilarFindingsRequest) (*harnesspb.FindSimilarFindingsResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.FindSimilarFindingsResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.FindSimilarFindingsResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1880,8 +1881,8 @@ func (s *HarnessCallbackService) FindSimilarFindings(ctx context.Context, req *p
 	findings, err := graphRAG.FindSimilarFindings(ctx, req.FindingId, int(req.TopK))
 	if err != nil {
 		s.logger.Error("find similar findings failed", "error", err)
-		return &pb.FindSimilarFindingsResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.FindSimilarFindingsResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1889,9 +1890,9 @@ func (s *HarnessCallbackService) FindSimilarFindings(ctx context.Context, req *p
 	}
 
 	// Convert to proto
-	protoFindings := make([]*pb.FindingNode, len(findings))
+	protoFindings := make([]*harnesspb.FindingNode, len(findings))
 	for i, finding := range findings {
-		protoFindings[i] = &pb.FindingNode{
+		protoFindings[i] = &harnesspb.FindingNode{
 			Id:          finding.ID,
 			Title:       finding.Title,
 			Description: finding.Description,
@@ -1902,17 +1903,17 @@ func (s *HarnessCallbackService) FindSimilarFindings(ctx context.Context, req *p
 		}
 	}
 
-	return &pb.FindSimilarFindingsResponse{
+	return &harnesspb.FindSimilarFindingsResponse{
 		Findings: protoFindings,
 	}, nil
 }
 
 // GetAttackChains implements the get attack chains RPC.
-func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *pb.GetAttackChainsRequest) (*pb.GetAttackChainsResponse, error) {
+func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *harnesspb.GetAttackChainsRequest) (*harnesspb.GetAttackChainsResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.GetAttackChainsResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GetAttackChainsResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1923,8 +1924,8 @@ func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *pb.Ge
 	chains, err := graphRAG.GetAttackChains(ctx, req.TechniqueId, int(req.MaxDepth))
 	if err != nil {
 		s.logger.Error("get attack chains failed", "error", err)
-		return &pb.GetAttackChainsResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GetAttackChainsResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1932,11 +1933,11 @@ func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *pb.Ge
 	}
 
 	// Convert to proto
-	protoChains := make([]*pb.AttackChain, len(chains))
+	protoChains := make([]*harnesspb.AttackChain, len(chains))
 	for i, chain := range chains {
-		protoSteps := make([]*pb.AttackStep, len(chain.Steps))
+		protoSteps := make([]*harnesspb.AttackStep, len(chain.Steps))
 		for j, step := range chain.Steps {
-			protoSteps[j] = &pb.AttackStep{
+			protoSteps[j] = &harnesspb.AttackStep{
 				Order:       int32(step.Order),
 				TechniqueId: step.TechniqueID,
 				NodeId:      step.NodeID,
@@ -1945,7 +1946,7 @@ func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *pb.Ge
 			}
 		}
 
-		protoChains[i] = &pb.AttackChain{
+		protoChains[i] = &harnesspb.AttackChain{
 			Id:       chain.ID,
 			Name:     chain.Name,
 			Severity: chain.Severity,
@@ -1953,17 +1954,17 @@ func (s *HarnessCallbackService) GetAttackChains(ctx context.Context, req *pb.Ge
 		}
 	}
 
-	return &pb.GetAttackChainsResponse{
+	return &harnesspb.GetAttackChainsResponse{
 		Chains: protoChains,
 	}, nil
 }
 
 // GetRelatedFindings implements the get related findings RPC.
-func (s *HarnessCallbackService) GetRelatedFindings(ctx context.Context, req *pb.GetRelatedFindingsRequest) (*pb.GetRelatedFindingsResponse, error) {
+func (s *HarnessCallbackService) GetRelatedFindings(ctx context.Context, req *harnesspb.GetRelatedFindingsRequest) (*harnesspb.GetRelatedFindingsResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.GetRelatedFindingsResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GetRelatedFindingsResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1974,8 +1975,8 @@ func (s *HarnessCallbackService) GetRelatedFindings(ctx context.Context, req *pb
 	findings, err := graphRAG.GetRelatedFindings(ctx, req.FindingId)
 	if err != nil {
 		s.logger.Error("get related findings failed", "error", err)
-		return &pb.GetRelatedFindingsResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GetRelatedFindingsResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -1983,9 +1984,9 @@ func (s *HarnessCallbackService) GetRelatedFindings(ctx context.Context, req *pb
 	}
 
 	// Convert to proto
-	protoFindings := make([]*pb.FindingNode, len(findings))
+	protoFindings := make([]*harnesspb.FindingNode, len(findings))
 	for i, finding := range findings {
-		protoFindings[i] = &pb.FindingNode{
+		protoFindings[i] = &harnesspb.FindingNode{
 			Id:          finding.ID,
 			Title:       finding.Title,
 			Description: finding.Description,
@@ -1996,7 +1997,7 @@ func (s *HarnessCallbackService) GetRelatedFindings(ctx context.Context, req *pb
 		}
 	}
 
-	return &pb.GetRelatedFindingsResponse{
+	return &harnesspb.GetRelatedFindingsResponse{
 		Findings: protoFindings,
 	}, nil
 }
@@ -2006,11 +2007,11 @@ func (s *HarnessCallbackService) GetRelatedFindings(ctx context.Context, req *pb
 // ============================================================================
 
 // StoreGraphNode implements the store graph node RPC.
-func (s *HarnessCallbackService) StoreGraphNode(ctx context.Context, req *pb.StoreGraphNodeRequest) (*pb.StoreGraphNodeResponse, error) {
+func (s *HarnessCallbackService) StoreGraphNode(ctx context.Context, req *harnesspb.StoreGraphNodeRequest) (*harnesspb.StoreGraphNodeResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.StoreGraphNodeResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.StoreGraphNodeResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -2050,8 +2051,8 @@ func (s *HarnessCallbackService) StoreGraphNode(ctx context.Context, req *pb.Sto
 	// Inject mission context metadata before storage
 	if err := s.metadataInjector.Inject(ctx, &node); err != nil {
 		s.logger.Error("metadata injection failed", "error", err, "node_type", req.Node.Type)
-		return &pb.StoreGraphNodeResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.StoreGraphNodeResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("metadata injection failed: %v", err),
 			},
@@ -2062,25 +2063,25 @@ func (s *HarnessCallbackService) StoreGraphNode(ctx context.Context, req *pb.Sto
 	nodeID, err := graphRAG.StoreGraphNode(ctx, node)
 	if err != nil {
 		s.logger.Error("store graph node failed", "error", err)
-		return &pb.StoreGraphNodeResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.StoreGraphNodeResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
 	}
 
-	return &pb.StoreGraphNodeResponse{
+	return &harnesspb.StoreGraphNodeResponse{
 		NodeId: nodeID,
 	}, nil
 }
 
 // CreateGraphRelationship implements the create graph relationship RPC.
-func (s *HarnessCallbackService) CreateGraphRelationship(ctx context.Context, req *pb.CreateGraphRelationshipRequest) (*pb.CreateGraphRelationshipResponse, error) {
+func (s *HarnessCallbackService) CreateGraphRelationship(ctx context.Context, req *harnesspb.CreateGraphRelationshipRequest) (*harnesspb.CreateGraphRelationshipResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.CreateGraphRelationshipResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CreateGraphRelationshipResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -2093,23 +2094,23 @@ func (s *HarnessCallbackService) CreateGraphRelationship(ctx context.Context, re
 	// Create relationship
 	if err := graphRAG.CreateGraphRelationship(ctx, rel); err != nil {
 		s.logger.Error("create graph relationship failed", "error", err)
-		return &pb.CreateGraphRelationshipResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CreateGraphRelationshipResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
 	}
 
-	return &pb.CreateGraphRelationshipResponse{}, nil
+	return &harnesspb.CreateGraphRelationshipResponse{}, nil
 }
 
 // StoreGraphBatch implements the store graph batch RPC.
-func (s *HarnessCallbackService) StoreGraphBatch(ctx context.Context, req *pb.StoreGraphBatchRequest) (*pb.StoreGraphBatchResponse, error) {
+func (s *HarnessCallbackService) StoreGraphBatch(ctx context.Context, req *harnesspb.StoreGraphBatchRequest) (*harnesspb.StoreGraphBatchResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.StoreGraphBatchResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.StoreGraphBatchResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -2154,8 +2155,8 @@ func (s *HarnessCallbackService) StoreGraphBatch(ctx context.Context, req *pb.St
 				"error", err,
 				"node_type", protoNode.Type,
 				"node_index", i)
-			return &pb.StoreGraphBatchResponse{
-				Error: &pb.HarnessError{
+			return &harnesspb.StoreGraphBatchResponse{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 					Message: fmt.Sprintf("metadata injection failed for node %d: %v", i, err),
 				},
@@ -2173,25 +2174,25 @@ func (s *HarnessCallbackService) StoreGraphBatch(ctx context.Context, req *pb.St
 	nodeIDs, err := graphRAG.StoreGraphBatch(ctx, batch)
 	if err != nil {
 		s.logger.Error("store graph batch failed", "error", err)
-		return &pb.StoreGraphBatchResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.StoreGraphBatchResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
 	}
 
-	return &pb.StoreGraphBatchResponse{
+	return &harnesspb.StoreGraphBatchResponse{
 		NodeIds: nodeIDs,
 	}, nil
 }
 
 // TraverseGraph implements the traverse graph RPC.
-func (s *HarnessCallbackService) TraverseGraph(ctx context.Context, req *pb.TraverseGraphRequest) (*pb.TraverseGraphResponse, error) {
+func (s *HarnessCallbackService) TraverseGraph(ctx context.Context, req *harnesspb.TraverseGraphRequest) (*harnesspb.TraverseGraphResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.TraverseGraphResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.TraverseGraphResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -2210,8 +2211,8 @@ func (s *HarnessCallbackService) TraverseGraph(ctx context.Context, req *pb.Trav
 	results, err := graphRAG.TraverseGraph(ctx, req.StartNodeId, opts)
 	if err != nil {
 		s.logger.Error("traverse graph failed", "error", err)
-		return &pb.TraverseGraphResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.TraverseGraphResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -2219,22 +2220,22 @@ func (s *HarnessCallbackService) TraverseGraph(ctx context.Context, req *pb.Trav
 	}
 
 	// Convert results to proto
-	protoResults := make([]*pb.TraversalResult, len(results))
+	protoResults := make([]*harnesspb.TraversalResult, len(results))
 	for i, result := range results {
-		protoResults[i] = &pb.TraversalResult{
+		protoResults[i] = &harnesspb.TraversalResult{
 			Node:     s.graphNodeToProto(result.Node),
 			Path:     result.Path,
 			Distance: int32(result.Distance),
 		}
 	}
 
-	return &pb.TraverseGraphResponse{
+	return &harnesspb.TraverseGraphResponse{
 		Results: protoResults,
 	}, nil
 }
 
 // GraphRAGHealth implements the GraphRAG health check RPC.
-func (s *HarnessCallbackService) GraphRAGHealth(ctx context.Context, req *pb.GraphRAGHealthRequest) (*pb.GraphRAGHealthResponse, error) {
+func (s *HarnessCallbackService) GraphRAGHealth(ctx context.Context, req *harnesspb.GraphRAGHealthRequest) (*harnesspb.GraphRAGHealthResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -2243,8 +2244,8 @@ func (s *HarnessCallbackService) GraphRAGHealth(ctx context.Context, req *pb.Gra
 	// Get health status
 	healthStatus := graphRAG.GraphRAGHealth(ctx)
 
-	return &pb.GraphRAGHealthResponse{
-		Status: &pb.HarnessHealthStatus{
+	return &harnesspb.GraphRAGHealthResponse{
+		Status: &harnesspb.HarnessHealthStatus{
 			State:   string(healthStatus.State),
 			Message: healthStatus.Message,
 		},
@@ -2257,21 +2258,21 @@ func (s *HarnessCallbackService) GraphRAGHealth(ctx context.Context, req *pb.Gra
 
 // RecordSpan implements the span recording RPC for distributed tracing.
 // It receives spans from remote agents and forwards them to registered span processors.
-func (s *HarnessCallbackService) RecordSpan(ctx context.Context, req *pb.RecordSpanRequest) (*pb.RecordSpanResponse, error) {
+func (s *HarnessCallbackService) RecordSpan(ctx context.Context, req *harnesspb.RecordSpanRequest) (*harnesspb.RecordSpanResponse, error) {
 	if req.Span == nil {
-		return &pb.RecordSpanResponse{}, nil
+		return &harnesspb.RecordSpanResponse{}, nil
 	}
 
 	// Convert proto span to span data and export
 	spanData := s.protoToSpanData(req.Span)
 	s.exportSpanData(spanData)
 
-	return &pb.RecordSpanResponse{}, nil
+	return &harnesspb.RecordSpanResponse{}, nil
 }
 
 // RecordSpans implements the batch span recording RPC for distributed tracing.
 // It receives multiple spans from remote agents and forwards them to registered span processors.
-func (s *HarnessCallbackService) RecordSpans(ctx context.Context, req *pb.RecordSpansRequest) (*pb.RecordSpansResponse, error) {
+func (s *HarnessCallbackService) RecordSpans(ctx context.Context, req *harnesspb.RecordSpansRequest) (*harnesspb.RecordSpansResponse, error) {
 	for _, protoSpan := range req.Spans {
 		if protoSpan == nil {
 			continue
@@ -2282,7 +2283,7 @@ func (s *HarnessCallbackService) RecordSpans(ctx context.Context, req *pb.Record
 		s.exportSpanData(spanData)
 	}
 
-	return &pb.RecordSpansResponse{}, nil
+	return &harnesspb.RecordSpansResponse{}, nil
 }
 
 // exportSpanData creates a real span using the TracerProvider and immediately ends it.
@@ -2321,7 +2322,7 @@ func (s *HarnessCallbackService) exportSpanData(data *proxySpanData) {
 // Helper Methods for Proto Conversions
 // ============================================================================
 
-func (s *HarnessCallbackService) protoToMessages(protoMessages []*pb.LLMMessage) []llm.Message {
+func (s *HarnessCallbackService) protoToMessages(protoMessages []*harnesspb.LLMMessage) []llm.Message {
 	messages := make([]llm.Message, len(protoMessages))
 	for i, protoMsg := range protoMessages {
 		msg := llm.Message{
@@ -2349,10 +2350,10 @@ func (s *HarnessCallbackService) protoToMessages(protoMessages []*pb.LLMMessage)
 	return messages
 }
 
-func (s *HarnessCallbackService) toolCallsToProto(calls []llm.ToolCall) []*pb.ToolCall {
-	protoCalls := make([]*pb.ToolCall, len(calls))
+func (s *HarnessCallbackService) toolCallsToProto(calls []llm.ToolCall) []*harnesspb.ToolCall {
+	protoCalls := make([]*harnesspb.ToolCall, len(calls))
 	for i, call := range calls {
-		protoCalls[i] = &pb.ToolCall{
+		protoCalls[i] = &harnesspb.ToolCall{
 			Id:        call.ID,
 			Name:      call.Name,
 			Arguments: call.Arguments,
@@ -2361,7 +2362,7 @@ func (s *HarnessCallbackService) toolCallsToProto(calls []llm.ToolCall) []*pb.To
 	return protoCalls
 }
 
-func (s *HarnessCallbackService) protoToToolDefs(protoTools []*pb.ToolDef) []llm.ToolDef {
+func (s *HarnessCallbackService) protoToToolDefs(protoTools []*harnesspb.ToolDef) []llm.ToolDef {
 	tools := make([]llm.ToolDef, len(protoTools))
 	for i, protoTool := range protoTools {
 		// Convert JSONSchemaNode to schema.JSON
@@ -2379,9 +2380,9 @@ func (s *HarnessCallbackService) protoToToolDefs(protoTools []*pb.ToolDef) []llm
 	return tools
 }
 
-func (s *HarnessCallbackService) graphNodeToProto(node sdkgraphrag.GraphNode) *pb.GraphNode {
+func (s *HarnessCallbackService) graphNodeToProto(node sdkgraphrag.GraphNode) *harnesspb.GraphNode {
 	typedMapProps := mapToTypedMap(node.Properties)
-	return &pb.GraphNode{
+	return &harnesspb.GraphNode{
 		Id:         node.ID,
 		Type:       node.Type,
 		Properties: typedMapProps.Entries,
@@ -2393,7 +2394,7 @@ func (s *HarnessCallbackService) graphNodeToProto(node sdkgraphrag.GraphNode) *p
 	}
 }
 
-func (s *HarnessCallbackService) protoToGraphNode(protoNode *pb.GraphNode) sdkgraphrag.GraphNode {
+func (s *HarnessCallbackService) protoToGraphNode(protoNode *harnesspb.GraphNode) sdkgraphrag.GraphNode {
 	props := typedValueMapToMap(protoNode.Properties)
 
 	return sdkgraphrag.GraphNode{
@@ -2406,7 +2407,7 @@ func (s *HarnessCallbackService) protoToGraphNode(protoNode *pb.GraphNode) sdkgr
 	}
 }
 
-func (s *HarnessCallbackService) protoToRelationship(protoRel *pb.Relationship) sdkgraphrag.Relationship {
+func (s *HarnessCallbackService) protoToRelationship(protoRel *harnesspb.Relationship) sdkgraphrag.Relationship {
 	props := typedValueMapToMap(protoRel.Properties)
 
 	return sdkgraphrag.Relationship{
@@ -2421,7 +2422,7 @@ func (s *HarnessCallbackService) protoToRelationship(protoRel *pb.Relationship) 
 // protoToSpanData converts a proto Span to a proxySpanData container.
 // Since sdktrace.ReadOnlySpan has an unexported method, we can't implement it directly.
 // Instead, we extract the data and export it directly via the Langfuse exporter.
-func (s *HarnessCallbackService) protoToSpanData(protoSpan *pb.Span) *proxySpanData {
+func (s *HarnessCallbackService) protoToSpanData(protoSpan *harnesspb.Span) *proxySpanData {
 	// Parse trace ID and span ID from hex strings
 	var traceID trace.TraceID
 	var spanID trace.SpanID
@@ -2483,17 +2484,17 @@ func (s *HarnessCallbackService) protoToSpanData(protoSpan *pb.Span) *proxySpanD
 }
 
 // protoSpanKindToOtel converts proto SpanKind to OpenTelemetry SpanKind.
-func (s *HarnessCallbackService) protoSpanKindToOtel(kind pb.SpanKind) trace.SpanKind {
+func (s *HarnessCallbackService) protoSpanKindToOtel(kind harnesspb.SpanKind) trace.SpanKind {
 	switch kind {
-	case pb.SpanKind_SPAN_KIND_INTERNAL:
+	case harnesspb.SpanKind_SPAN_KIND_INTERNAL:
 		return trace.SpanKindInternal
-	case pb.SpanKind_SPAN_KIND_SERVER:
+	case harnesspb.SpanKind_SPAN_KIND_SERVER:
 		return trace.SpanKindServer
-	case pb.SpanKind_SPAN_KIND_CLIENT:
+	case harnesspb.SpanKind_SPAN_KIND_CLIENT:
 		return trace.SpanKindClient
-	case pb.SpanKind_SPAN_KIND_PRODUCER:
+	case harnesspb.SpanKind_SPAN_KIND_PRODUCER:
 		return trace.SpanKindProducer
-	case pb.SpanKind_SPAN_KIND_CONSUMER:
+	case harnesspb.SpanKind_SPAN_KIND_CONSUMER:
 		return trace.SpanKindConsumer
 	default:
 		return trace.SpanKindUnspecified
@@ -2501,11 +2502,11 @@ func (s *HarnessCallbackService) protoSpanKindToOtel(kind pb.SpanKind) trace.Spa
 }
 
 // protoStatusCodeToOtel converts proto StatusCode to OpenTelemetry status code.
-func (s *HarnessCallbackService) protoStatusCodeToOtel(code pb.StatusCode) otelcodes.Code {
+func (s *HarnessCallbackService) protoStatusCodeToOtel(code harnesspb.StatusCode) otelcodes.Code {
 	switch code {
-	case pb.StatusCode_STATUS_CODE_OK:
+	case harnesspb.StatusCode_STATUS_CODE_OK:
 		return otelcodes.Ok
-	case pb.StatusCode_STATUS_CODE_ERROR:
+	case harnesspb.StatusCode_STATUS_CODE_ERROR:
 		return otelcodes.Error
 	default:
 		return otelcodes.Unset
@@ -2513,7 +2514,7 @@ func (s *HarnessCallbackService) protoStatusCodeToOtel(code pb.StatusCode) otelc
 }
 
 // protoAttributesToOtel converts proto KeyValue attributes to OpenTelemetry attributes.
-func (s *HarnessCallbackService) protoAttributesToOtel(protoAttrs []*pb.KeyValue) []attribute.KeyValue {
+func (s *HarnessCallbackService) protoAttributesToOtel(protoAttrs []*commonpb.KeyValue) []attribute.KeyValue {
 	attrs := make([]attribute.KeyValue, 0, len(protoAttrs))
 	for _, protoAttr := range protoAttrs {
 		if protoAttr.Value == nil {
@@ -2523,13 +2524,13 @@ func (s *HarnessCallbackService) protoAttributesToOtel(protoAttrs []*pb.KeyValue
 		key := attribute.Key(protoAttr.Key)
 		// Handle different value types from AnyValue
 		switch v := protoAttr.Value.Value.(type) {
-		case *pb.AnyValue_StringValue:
+		case *commonpb.AnyValue_StringValue:
 			attrs = append(attrs, key.String(v.StringValue))
-		case *pb.AnyValue_BoolValue:
+		case *commonpb.AnyValue_BoolValue:
 			attrs = append(attrs, key.Bool(v.BoolValue))
-		case *pb.AnyValue_IntValue:
+		case *commonpb.AnyValue_IntValue:
 			attrs = append(attrs, key.Int64(v.IntValue))
-		case *pb.AnyValue_DoubleValue:
+		case *commonpb.AnyValue_DoubleValue:
 			attrs = append(attrs, key.Float64(v.DoubleValue))
 		}
 	}
@@ -2537,7 +2538,7 @@ func (s *HarnessCallbackService) protoAttributesToOtel(protoAttrs []*pb.KeyValue
 }
 
 // protoEventsToOtel converts proto SpanEvents to OpenTelemetry Events.
-func (s *HarnessCallbackService) protoEventsToOtel(protoEvents []*pb.SpanEvent) []sdktrace.Event {
+func (s *HarnessCallbackService) protoEventsToOtel(protoEvents []*harnesspb.SpanEvent) []sdktrace.Event {
 	events := make([]sdktrace.Event, len(protoEvents))
 	for i, protoEvent := range protoEvents {
 		events[i] = sdktrace.Event{
@@ -2599,11 +2600,11 @@ func (s *HarnessCallbackService) createProxySpanData(
 
 // GetCredential retrieves a credential by name from the credential store.
 // The credential is decrypted and returned with its secret value.
-func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *pb.GetCredentialRequest) (*pb.GetCredentialResponse, error) {
+func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *harnesspb.GetCredentialRequest) (*harnesspb.GetCredentialResponse, error) {
 	// Validate context
 	if req.Context == nil {
-		return &pb.GetCredentialResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GetCredentialResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "missing context info in request",
 			},
@@ -2620,8 +2621,8 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *pb.GetC
 	// Check if credential store is configured
 	if s.credentialStore == nil {
 		s.logger.Warn("GetCredential called but credential store not configured")
-		return &pb.GetCredentialResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GetCredentialResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
 				Message: "credential store not available",
 			},
@@ -2632,8 +2633,8 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *pb.GetC
 	cred, secret, err := s.credentialStore.GetCredential(ctx, req.Name)
 	if err != nil {
 		s.logger.Warn("GetCredential failed", "name", req.Name, "error", err)
-		return &pb.GetCredentialResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.GetCredentialResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
 				Message: fmt.Sprintf("credential %q not found: %v", req.Name, err),
 			},
@@ -2641,26 +2642,26 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *pb.GetC
 	}
 
 	// Map internal credential type to proto type
-	var credType pb.CredentialType
+	var credType harnesspb.CredentialType
 	switch cred.Type {
 	case types.CredentialTypeAPIKey:
-		credType = pb.CredentialType_CREDENTIAL_TYPE_API_KEY
+		credType = harnesspb.CredentialType_CREDENTIAL_TYPE_API_KEY
 	case types.CredentialTypeBearer:
-		credType = pb.CredentialType_CREDENTIAL_TYPE_BEARER
+		credType = harnesspb.CredentialType_CREDENTIAL_TYPE_BEARER
 	case types.CredentialTypeBasic:
-		credType = pb.CredentialType_CREDENTIAL_TYPE_BASIC
+		credType = harnesspb.CredentialType_CREDENTIAL_TYPE_BASIC
 	case types.CredentialTypeOAuth:
-		credType = pb.CredentialType_CREDENTIAL_TYPE_OAUTH
+		credType = harnesspb.CredentialType_CREDENTIAL_TYPE_OAUTH
 	case types.CredentialTypeCustom:
-		credType = pb.CredentialType_CREDENTIAL_TYPE_CUSTOM
+		credType = harnesspb.CredentialType_CREDENTIAL_TYPE_CUSTOM
 	default:
-		credType = pb.CredentialType_CREDENTIAL_TYPE_API_KEY
+		credType = harnesspb.CredentialType_CREDENTIAL_TYPE_API_KEY
 	}
 
 	s.logger.Debug("GetCredential succeeded", "name", req.Name)
 
 	// Build credential with oneof secret_data based on type
-	pbCred := &pb.Credential{
+	pbCred := &harnesspb.Credential{
 		Name:     cred.Name,
 		Type:     credType,
 		Metadata: mapToTypedValueMap(map[string]any{"provider": cred.Provider, "tags": cred.Tags}),
@@ -2668,17 +2669,17 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *pb.GetC
 
 	// Set secret using oneof field based on credential type
 	switch credType {
-	case pb.CredentialType_CREDENTIAL_TYPE_API_KEY:
-		pbCred.SecretData = &pb.Credential_ApiKey{ApiKey: secret}
-	case pb.CredentialType_CREDENTIAL_TYPE_BEARER:
-		pbCred.SecretData = &pb.Credential_BearerToken{BearerToken: secret}
-	case pb.CredentialType_CREDENTIAL_TYPE_CUSTOM:
-		pbCred.SecretData = &pb.Credential_CustomSecret{CustomSecret: secret}
+	case harnesspb.CredentialType_CREDENTIAL_TYPE_API_KEY:
+		pbCred.SecretData = &harnesspb.Credential_ApiKey{ApiKey: secret}
+	case harnesspb.CredentialType_CREDENTIAL_TYPE_BEARER:
+		pbCred.SecretData = &harnesspb.Credential_BearerToken{BearerToken: secret}
+	case harnesspb.CredentialType_CREDENTIAL_TYPE_CUSTOM:
+		pbCred.SecretData = &harnesspb.Credential_CustomSecret{CustomSecret: secret}
 	default:
-		pbCred.SecretData = &pb.Credential_ApiKey{ApiKey: secret}
+		pbCred.SecretData = &harnesspb.Credential_ApiKey{ApiKey: secret}
 	}
 
-	return &pb.GetCredentialResponse{
+	return &harnesspb.GetCredentialResponse{
 		Credential: pbCred,
 	}, nil
 }
@@ -2689,7 +2690,7 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *pb.GetC
 
 // extractAgentRunID extracts the agent run ID from context.
 // Tries multiple sources: trace span ID, mission ID, task ID, or generates a fallback.
-func (s *HarnessCallbackService) extractAgentRunID(ctx context.Context, contextInfo *pb.ContextInfo) string {
+func (s *HarnessCallbackService) extractAgentRunID(ctx context.Context, contextInfo *harnesspb.ContextInfo) string {
 	// Priority 1: Use trace span ID if available (most specific)
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
 		return span.SpanContext().SpanID().String()
@@ -2782,19 +2783,19 @@ func (s *HarnessCallbackService) publishEvent(ctx context.Context, eventType str
 
 // GetTaxonomySchema returns the full taxonomy schema to agents.
 // NOTE: Taxonomy has been removed. This returns an empty response.
-func (s *HarnessCallbackService) GetTaxonomySchema(ctx context.Context, req *pb.GetTaxonomySchemaRequest) (*pb.GetTaxonomySchemaResponse, error) {
+func (s *HarnessCallbackService) GetTaxonomySchema(ctx context.Context, req *harnesspb.GetTaxonomySchemaRequest) (*harnesspb.GetTaxonomySchemaResponse, error) {
 	s.logger.Debug("GetTaxonomySchema called (taxonomy removed)")
-	return &pb.GetTaxonomySchemaResponse{
+	return &harnesspb.GetTaxonomySchemaResponse{
 		Version: "0.0.0",
 	}, nil
 }
 
 // GenerateNodeID generates a deterministic node ID.
 // NOTE: Taxonomy has been removed. Use domain types instead which generate their own IDs.
-func (s *HarnessCallbackService) GenerateNodeID(ctx context.Context, req *pb.GenerateNodeIDRequest) (*pb.GenerateNodeIDResponse, error) {
+func (s *HarnessCallbackService) GenerateNodeID(ctx context.Context, req *harnesspb.GenerateNodeIDRequest) (*harnesspb.GenerateNodeIDResponse, error) {
 	s.logger.Debug("GenerateNodeID called (taxonomy removed)")
-	return &pb.GenerateNodeIDResponse{
-		Error: &pb.HarnessError{
+	return &harnesspb.GenerateNodeIDResponse{
+		Error: &harnesspb.HarnessError{
 			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 			Message: "taxonomy has been removed; use domain types which generate their own IDs",
 		},
@@ -2803,7 +2804,7 @@ func (s *HarnessCallbackService) GenerateNodeID(ctx context.Context, req *pb.Gen
 
 // ValidateFinding validates a finding.
 // NOTE: Taxonomy-based validation has been removed. Basic validation is still performed.
-func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *pb.ValidateFindingRequest) (*pb.ValidationResponse, error) {
+func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harnesspb.ValidateFindingRequest) (*harnesspb.ValidationResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request cannot be nil")
 	}
@@ -2813,15 +2814,15 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *pb.Va
 	// Convert proto finding to SDK finding
 	finding := protoFindingToSDKFinding(req.Finding)
 	if finding == nil {
-		return &pb.ValidationResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.ValidationResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: "finding cannot be nil",
 			},
 		}, nil
 	}
 
-	resp := &pb.ValidationResponse{Valid: true}
+	resp := &harnesspb.ValidationResponse{Valid: true}
 
 	// Validate severity
 	validSeverities := []string{"critical", "high", "medium", "low", "informational"}
@@ -2834,7 +2835,7 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *pb.Va
 	}
 	if !severityValid && finding.Severity != "" {
 		resp.Valid = false
-		resp.Errors = append(resp.Errors, &pb.ValidationError{
+		resp.Errors = append(resp.Errors, &harnesspb.ValidationError{
 			Field:   "severity",
 			Message: fmt.Sprintf("invalid severity: %s", finding.Severity),
 			Code:    "INVALID_ENUM",
@@ -2844,7 +2845,7 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *pb.Va
 	// Validate required fields
 	if finding.Title == "" {
 		resp.Valid = false
-		resp.Errors = append(resp.Errors, &pb.ValidationError{
+		resp.Errors = append(resp.Errors, &harnesspb.ValidationError{
 			Field:   "title",
 			Message: "title is required",
 			Code:    "MISSING_REQUIRED",
@@ -2858,9 +2859,9 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *pb.Va
 
 // ValidateGraphNode validates a graph node.
 // NOTE: Taxonomy-based validation has been removed. Returns success with a warning.
-func (s *HarnessCallbackService) ValidateGraphNode(ctx context.Context, req *pb.ValidateGraphNodeRequest) (*pb.ValidationResponse, error) {
+func (s *HarnessCallbackService) ValidateGraphNode(ctx context.Context, req *harnesspb.ValidateGraphNodeRequest) (*harnesspb.ValidationResponse, error) {
 	s.logger.Debug("ValidateGraphNode called (taxonomy removed)")
-	return &pb.ValidationResponse{
+	return &harnesspb.ValidationResponse{
 		Valid:    true,
 		Warnings: []string{"taxonomy-based validation has been removed; use domain types for type-safe node creation"},
 	}, nil
@@ -2868,9 +2869,9 @@ func (s *HarnessCallbackService) ValidateGraphNode(ctx context.Context, req *pb.
 
 // ValidateRelationship validates a relationship.
 // NOTE: Taxonomy-based validation has been removed. Returns success with a warning.
-func (s *HarnessCallbackService) ValidateRelationship(ctx context.Context, req *pb.ValidateRelationshipRequest) (*pb.ValidationResponse, error) {
+func (s *HarnessCallbackService) ValidateRelationship(ctx context.Context, req *harnesspb.ValidateRelationshipRequest) (*harnesspb.ValidationResponse, error) {
 	s.logger.Debug("ValidateRelationship called (taxonomy removed)")
-	return &pb.ValidationResponse{
+	return &harnesspb.ValidationResponse{
 		Valid:    true,
 		Warnings: []string{"taxonomy-based validation has been removed; use domain types for type-safe relationship creation"},
 	}, nil
@@ -2881,7 +2882,7 @@ func anyToTypedValue(v any) *commonpb.TypedValue {
 	if v == nil {
 		return &commonpb.TypedValue{
 			Kind: &commonpb.TypedValue_NullValue{
-				NullValue: commonpb.NullValue_NULL_VALUE,
+				NullValue: commonpb.NullValue_NULL_VALUE_UNSPECIFIED,
 			},
 		}
 	}
@@ -3008,7 +3009,7 @@ func typedValueMapToMap(m map[string]*commonpb.TypedValue) map[string]any {
 }
 
 // protoTaskToTask converts a proto Task to an internal agent.Task.
-func protoTaskToTask(pt *pb.Task) agent.Task {
+func protoTaskToTask(pt *typespb.Task) agent.Task {
 	if pt == nil {
 		return agent.Task{}
 	}
@@ -3072,8 +3073,8 @@ func protoTaskToTask(pt *pb.Task) agent.Task {
 }
 
 // resultToProtoResult converts an internal agent.Result to a proto Result.
-func resultToProtoResult(r agent.Result) *pb.Result {
-	result := &pb.Result{
+func resultToProtoResult(r agent.Result) *typespb.Result {
+	result := &typespb.Result{
 		Status: resultStatusToProtoStatus(r.Status),
 		Output: mapToTypedValue(r.Output),
 	}
@@ -3084,7 +3085,7 @@ func resultToProtoResult(r agent.Result) *pb.Result {
 		if codeVal, ok := commonpb.ErrorCode_value["ERROR_CODE_"+r.Error.Code]; ok {
 			errCode = commonpb.ErrorCode(codeVal)
 		}
-		result.Error = &pb.ResultError{
+		result.Error = &typespb.ResultError{
 			Message:   r.Error.Message,
 			Code:      errCode,
 			Details:   convertMapStringAnyToMapStringString(r.Error.Details),
@@ -3096,18 +3097,18 @@ func resultToProtoResult(r agent.Result) *pb.Result {
 }
 
 // resultStatusToProtoStatus converts an internal ResultStatus to proto ResultStatus.
-func resultStatusToProtoStatus(status agent.ResultStatus) pb.ResultStatus {
+func resultStatusToProtoStatus(status agent.ResultStatus) typespb.ResultStatus {
 	switch status {
 	case agent.ResultStatusPending:
-		return pb.ResultStatus_RESULT_STATUS_UNSPECIFIED
+		return typespb.ResultStatus_RESULT_STATUS_UNSPECIFIED
 	case agent.ResultStatusCompleted:
-		return pb.ResultStatus_RESULT_STATUS_SUCCESS
+		return typespb.ResultStatus_RESULT_STATUS_SUCCESS
 	case agent.ResultStatusFailed:
-		return pb.ResultStatus_RESULT_STATUS_FAILED
+		return typespb.ResultStatus_RESULT_STATUS_FAILED
 	case agent.ResultStatusCancelled:
-		return pb.ResultStatus_RESULT_STATUS_CANCELLED
+		return typespb.ResultStatus_RESULT_STATUS_CANCELLED
 	default:
-		return pb.ResultStatus_RESULT_STATUS_FAILED
+		return typespb.ResultStatus_RESULT_STATUS_FAILED
 	}
 }
 
@@ -3163,7 +3164,7 @@ func mapToTypedValueMap(m map[string]any) map[string]*commonpb.TypedValue {
 }
 
 // protoFindingToSDKFinding converts a proto Finding to an SDK finding.Finding.
-func protoFindingToSDKFinding(pf *pb.Finding) *sdkfinding.Finding {
+func protoFindingToSDKFinding(pf *typespb.Finding) *sdkfinding.Finding {
 	if pf == nil {
 		return nil
 	}
@@ -3236,17 +3237,17 @@ func protoFindingToSDKFinding(pf *pb.Finding) *sdkfinding.Finding {
 }
 
 // protoSeverityToSDKSeverity converts a proto FindingSeverity to an SDK Severity.
-func protoSeverityToSDKSeverity(severity pb.FindingSeverity) sdkfinding.Severity {
+func protoSeverityToSDKSeverity(severity typespb.FindingSeverity) sdkfinding.Severity {
 	switch severity {
-	case pb.FindingSeverity_FINDING_SEVERITY_CRITICAL:
+	case typespb.FindingSeverity_FINDING_SEVERITY_CRITICAL:
 		return sdkfinding.SeverityCritical
-	case pb.FindingSeverity_FINDING_SEVERITY_HIGH:
+	case typespb.FindingSeverity_FINDING_SEVERITY_HIGH:
 		return sdkfinding.SeverityHigh
-	case pb.FindingSeverity_FINDING_SEVERITY_MEDIUM:
+	case typespb.FindingSeverity_FINDING_SEVERITY_MEDIUM:
 		return sdkfinding.SeverityMedium
-	case pb.FindingSeverity_FINDING_SEVERITY_LOW:
+	case typespb.FindingSeverity_FINDING_SEVERITY_LOW:
 		return sdkfinding.SeverityLow
-	case pb.FindingSeverity_FINDING_SEVERITY_INFO:
+	case typespb.FindingSeverity_FINDING_SEVERITY_INFO:
 		return sdkfinding.SeverityInfo
 	default:
 		return sdkfinding.SeverityInfo
@@ -3254,17 +3255,17 @@ func protoSeverityToSDKSeverity(severity pb.FindingSeverity) sdkfinding.Severity
 }
 
 // protoEvidenceTypeToSDK converts a proto EvidenceType to an SDK EvidenceType.
-func protoEvidenceTypeToSDK(evidenceType pb.EvidenceType) sdkfinding.EvidenceType {
+func protoEvidenceTypeToSDK(evidenceType typespb.EvidenceType) sdkfinding.EvidenceType {
 	switch evidenceType {
-	case pb.EvidenceType_EVIDENCE_TYPE_REQUEST:
+	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST:
 		return sdkfinding.EvidenceHTTPRequest
-	case pb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
+	case typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
 		return sdkfinding.EvidenceHTTPResponse
-	case pb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
+	case typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
 		return sdkfinding.EvidenceScreenshot
-	case pb.EvidenceType_EVIDENCE_TYPE_LOG:
+	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
 		return sdkfinding.EvidenceLog
-	case pb.EvidenceType_EVIDENCE_TYPE_CODE:
+	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
 		return sdkfinding.EvidencePayload
 	default:
 		return sdkfinding.EvidenceLog
@@ -3272,19 +3273,19 @@ func protoEvidenceTypeToSDK(evidenceType pb.EvidenceType) sdkfinding.EvidenceTyp
 }
 
 // protoEvidenceTypeToString converts a proto EvidenceType to a string.
-func protoEvidenceTypeToString(evidenceType pb.EvidenceType) string {
+func protoEvidenceTypeToString(evidenceType typespb.EvidenceType) string {
 	switch evidenceType {
-	case pb.EvidenceType_EVIDENCE_TYPE_REQUEST:
+	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST:
 		return "request"
-	case pb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
+	case typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
 		return "response"
-	case pb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
+	case typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
 		return "screenshot"
-	case pb.EvidenceType_EVIDENCE_TYPE_LOG:
+	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
 		return "log"
-	case pb.EvidenceType_EVIDENCE_TYPE_CODE:
+	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
 		return "code"
-	case pb.EvidenceType_EVIDENCE_TYPE_OTHER:
+	case typespb.EvidenceType_EVIDENCE_TYPE_OTHER:
 		return "other"
 	default:
 		return "other"
@@ -3292,25 +3293,25 @@ func protoEvidenceTypeToString(evidenceType pb.EvidenceType) string {
 }
 
 // stringToProtoEvidenceType converts a string to a proto EvidenceType.
-func stringToProtoEvidenceType(typeStr string) pb.EvidenceType {
+func stringToProtoEvidenceType(typeStr string) typespb.EvidenceType {
 	switch typeStr {
 	case "request":
-		return pb.EvidenceType_EVIDENCE_TYPE_REQUEST
+		return typespb.EvidenceType_EVIDENCE_TYPE_REQUEST
 	case "response":
-		return pb.EvidenceType_EVIDENCE_TYPE_RESPONSE
+		return typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE
 	case "screenshot":
-		return pb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT
+		return typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT
 	case "log":
-		return pb.EvidenceType_EVIDENCE_TYPE_LOG
+		return typespb.EvidenceType_EVIDENCE_TYPE_LOG
 	case "code":
-		return pb.EvidenceType_EVIDENCE_TYPE_CODE
+		return typespb.EvidenceType_EVIDENCE_TYPE_CODE
 	default:
-		return pb.EvidenceType_EVIDENCE_TYPE_OTHER
+		return typespb.EvidenceType_EVIDENCE_TYPE_OTHER
 	}
 }
 
 // protoFindingToFinding converts a proto Finding to an internal agent.Finding.
-func protoFindingToFinding(pf *pb.Finding) agent.Finding {
+func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 	if pf == nil {
 		return agent.Finding{}
 	}
@@ -3379,8 +3380,8 @@ func protoFindingToFinding(pf *pb.Finding) agent.Finding {
 }
 
 // findingToProtoFinding converts an internal agent.Finding to a proto Finding.
-func findingToProtoFinding(f agent.Finding) *pb.Finding {
-	finding := &pb.Finding{
+func findingToProtoFinding(f agent.Finding) *typespb.Finding {
+	finding := &typespb.Finding{
 		Id:          f.ID.String(),
 		Title:       f.Title,
 		Description: f.Description,
@@ -3401,7 +3402,7 @@ func findingToProtoFinding(f agent.Finding) *pb.Finding {
 
 	// Convert Evidence
 	if len(f.Evidence) > 0 {
-		finding.Evidence = make([]*pb.Evidence, len(f.Evidence))
+		finding.Evidence = make([]*typespb.Evidence, len(f.Evidence))
 		for i, ev := range f.Evidence {
 			// Extract content from Data map if present
 			content := ""
@@ -3423,7 +3424,7 @@ func findingToProtoFinding(f agent.Finding) *pb.Finding {
 				}
 			}
 
-			finding.Evidence[i] = &pb.Evidence{
+			finding.Evidence[i] = &typespb.Evidence{
 				Type:     stringToProtoEvidenceType(ev.Type),
 				Title:    ev.Description,
 				Content:  content,
@@ -3448,17 +3449,17 @@ func mapToTypedMap(m map[string]any) *commonpb.TypedMap {
 }
 
 // protoSeverityToAgentSeverity converts proto FindingSeverity to agent.FindingSeverity.
-func protoSeverityToAgentSeverity(severity pb.FindingSeverity) agent.FindingSeverity {
+func protoSeverityToAgentSeverity(severity typespb.FindingSeverity) agent.FindingSeverity {
 	switch severity {
-	case pb.FindingSeverity_FINDING_SEVERITY_CRITICAL:
+	case typespb.FindingSeverity_FINDING_SEVERITY_CRITICAL:
 		return agent.SeverityCritical
-	case pb.FindingSeverity_FINDING_SEVERITY_HIGH:
+	case typespb.FindingSeverity_FINDING_SEVERITY_HIGH:
 		return agent.SeverityHigh
-	case pb.FindingSeverity_FINDING_SEVERITY_MEDIUM:
+	case typespb.FindingSeverity_FINDING_SEVERITY_MEDIUM:
 		return agent.SeverityMedium
-	case pb.FindingSeverity_FINDING_SEVERITY_LOW:
+	case typespb.FindingSeverity_FINDING_SEVERITY_LOW:
 		return agent.SeverityLow
-	case pb.FindingSeverity_FINDING_SEVERITY_INFO:
+	case typespb.FindingSeverity_FINDING_SEVERITY_INFO:
 		return agent.SeverityInfo
 	default:
 		return agent.SeverityInfo
@@ -3466,25 +3467,25 @@ func protoSeverityToAgentSeverity(severity pb.FindingSeverity) agent.FindingSeve
 }
 
 // agentSeverityToProtoSeverity converts agent.FindingSeverity to proto FindingSeverity.
-func agentSeverityToProtoSeverity(severity agent.FindingSeverity) pb.FindingSeverity {
+func agentSeverityToProtoSeverity(severity agent.FindingSeverity) typespb.FindingSeverity {
 	switch severity {
 	case agent.SeverityCritical:
-		return pb.FindingSeverity_FINDING_SEVERITY_CRITICAL
+		return typespb.FindingSeverity_FINDING_SEVERITY_CRITICAL
 	case agent.SeverityHigh:
-		return pb.FindingSeverity_FINDING_SEVERITY_HIGH
+		return typespb.FindingSeverity_FINDING_SEVERITY_HIGH
 	case agent.SeverityMedium:
-		return pb.FindingSeverity_FINDING_SEVERITY_MEDIUM
+		return typespb.FindingSeverity_FINDING_SEVERITY_MEDIUM
 	case agent.SeverityLow:
-		return pb.FindingSeverity_FINDING_SEVERITY_LOW
+		return typespb.FindingSeverity_FINDING_SEVERITY_LOW
 	case agent.SeverityInfo:
-		return pb.FindingSeverity_FINDING_SEVERITY_INFO
+		return typespb.FindingSeverity_FINDING_SEVERITY_INFO
 	default:
-		return pb.FindingSeverity_FINDING_SEVERITY_INFO
+		return typespb.FindingSeverity_FINDING_SEVERITY_INFO
 	}
 }
 
 // protoFilterToFindingFilter converts a proto FindingFilter to internal FindingFilter.
-func protoFilterToFindingFilter(pf *pb.FindingFilter) FindingFilter {
+func protoFilterToFindingFilter(pf *harnesspb.FindingFilter) FindingFilter {
 	if pf == nil {
 		return FindingFilter{}
 	}
@@ -3492,7 +3493,7 @@ func protoFilterToFindingFilter(pf *pb.FindingFilter) FindingFilter {
 	filter := FindingFilter{}
 
 	// Convert optional fields that exist in proto
-	if pf.Severity != pb.FindingSeverity_FINDING_SEVERITY_UNSPECIFIED {
+	if pf.Severity != typespb.FindingSeverity_FINDING_SEVERITY_UNSPECIFIED {
 		severity := protoSeverityToAgentSeverity(pf.Severity)
 		filter.Severity = &severity
 	}
@@ -3504,7 +3505,7 @@ func protoFilterToFindingFilter(pf *pb.FindingFilter) FindingFilter {
 }
 
 // protoQueryToSDKQuery converts a proto GraphQuery to SDK Query.
-func protoQueryToSDKQuery(pq *pb.GraphQuery) sdkgraphrag.Query {
+func protoQueryToSDKQuery(pq *typespb.GraphQuery) sdkgraphrag.Query {
 	if pq == nil {
 		return sdkgraphrag.Query{}
 	}
@@ -3543,11 +3544,11 @@ func protoQueryToSDKQuery(pq *pb.GraphQuery) sdkgraphrag.Query {
 
 // StoreNode implements the proto-canonical StoreNode RPC using graphragpb.GraphNode.
 // This is the preferred method for storing graph nodes with full type safety.
-func (s *HarnessCallbackService) StoreNode(ctx context.Context, req *pb.StoreNodeRequest) (*pb.StoreNodeResponse, error) {
+func (s *HarnessCallbackService) StoreNode(ctx context.Context, req *harnesspb.StoreNodeRequest) (*harnesspb.StoreNodeResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.StoreNodeResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.StoreNodeResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -3587,8 +3588,8 @@ func (s *HarnessCallbackService) StoreNode(ctx context.Context, req *pb.StoreNod
 	// Inject mission context metadata before storage
 	if err := s.metadataInjector.Inject(ctx, &node); err != nil {
 		s.logger.Error("metadata injection failed", "error", err, "node_type", req.Node.Type)
-		return &pb.StoreNodeResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.StoreNodeResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("metadata injection failed: %v", err),
 			},
@@ -3599,26 +3600,26 @@ func (s *HarnessCallbackService) StoreNode(ctx context.Context, req *pb.StoreNod
 	nodeID, err := graphRAG.StoreGraphNode(ctx, node)
 	if err != nil {
 		s.logger.Error("store graph node failed", "error", err)
-		return &pb.StoreNodeResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.StoreNodeResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
 		}, nil
 	}
 
-	return &pb.StoreNodeResponse{
+	return &harnesspb.StoreNodeResponse{
 		NodeId: nodeID,
 	}, nil
 }
 
 // QueryNodes implements the proto-canonical QueryNodes RPC using graphragpb.GraphQuery.
 // This is the preferred method for querying graph nodes with full type safety.
-func (s *HarnessCallbackService) QueryNodes(ctx context.Context, req *pb.QueryNodesRequest) (*pb.QueryNodesResponse, error) {
+func (s *HarnessCallbackService) QueryNodes(ctx context.Context, req *harnesspb.QueryNodesRequest) (*harnesspb.QueryNodesResponse, error) {
 	graphRAG, err := s.getGraphRAGHarness(ctx, req.Context)
 	if err != nil {
-		return &pb.QueryNodesResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.QueryNodesResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -3637,8 +3638,8 @@ func (s *HarnessCallbackService) QueryNodes(ctx context.Context, req *pb.QueryNo
 	results, err := graphRAG.QueryGraphRAG(ctx, query)
 	if err != nil {
 		s.logger.Error("query graph nodes failed", "error", err)
-		return &pb.QueryNodesResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.QueryNodesResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: err.Error(),
 			},
@@ -3651,7 +3652,7 @@ func (s *HarnessCallbackService) QueryNodes(ctx context.Context, req *pb.QueryNo
 		protoResults[i] = s.sdkResultToGraphragpbResult(r)
 	}
 
-	return &pb.QueryNodesResponse{
+	return &harnesspb.QueryNodesResponse{
 		Results: protoResults,
 	}, nil
 }
@@ -3800,7 +3801,7 @@ func (s *HarnessCallbackService) anyToGraphragpbValue(v any) *graphragpb.Value {
 
 // CreateMission implements the mission creation RPC.
 // This allows agents to autonomously create sub-missions.
-func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *pb.CreateMissionRequest) (*pb.CreateMissionResponse, error) {
+func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harnesspb.CreateMissionRequest) (*harnesspb.CreateMissionResponse, error) {
 	s.logger.Debug("CreateMission called",
 		"mission_id", req.Context.MissionId,
 		"agent_name", req.Context.AgentName,
@@ -3811,8 +3812,8 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *pb.Crea
 	// Check if mission manager is available
 	if s.missionManager == nil {
 		s.logger.Warn("mission creation not available - mission manager not configured")
-		return &pb.CreateMissionResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CreateMissionResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
 				Message: "mission creation not available - mission manager not configured",
 			},
@@ -3828,8 +3829,8 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *pb.Crea
 				"mission_id", req.Context.MissionId,
 				"error", err,
 			)
-			return &pb.CreateMissionResponse{
-				Error: &pb.HarnessError{
+			return &harnesspb.CreateMissionResponse{
+				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 					Message: fmt.Sprintf("invalid parent mission ID: %v", err),
 				},
@@ -3845,8 +3846,8 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *pb.Crea
 			"target_id", req.TargetId,
 			"error", err,
 		)
-		return &pb.CreateMissionResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CreateMissionResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
 				Message: fmt.Sprintf("invalid target ID: %v", err),
 			},
@@ -3891,8 +3892,8 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *pb.Crea
 			"parent_mission_id", req.Context.MissionId,
 			"target_id", req.TargetId,
 		)
-		return &pb.CreateMissionResponse{
-			Error: &pb.HarnessError{
+		return &harnesspb.CreateMissionResponse{
+			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 				Message: fmt.Sprintf("failed to create mission: %v", err),
 			},
@@ -3906,7 +3907,7 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *pb.Crea
 	)
 
 	// Convert mission info to proto response
-	pbMission := &pb.MissionInfo{
+	pbMission := &harnesspb.MissionInfo{
 		Id:       missionInfo.ID.String(),
 		Name:     missionInfo.Name,
 		Status:   missionStatusToProto(missionInfo.Status),
@@ -3916,7 +3917,7 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *pb.Crea
 		pbMission.ParentMissionId = missionInfo.ParentMissionID.String()
 	}
 
-	return &pb.CreateMissionResponse{
+	return &harnesspb.CreateMissionResponse{
 		Mission: pbMission,
 	}, nil
 }
@@ -3944,33 +3945,33 @@ func protoTypedValueToAny(tv *commonpb.TypedValue) any {
 }
 
 // missionStatusToProto converts internal MissionStatus to proto format
-func missionStatusToProto(status MissionStatus) pb.MissionStatusEnum {
+func missionStatusToProto(status MissionStatus) harnesspb.MissionStatus {
 	switch status {
 	case MissionStatusPending:
-		return pb.MissionStatusEnum_MISSION_STATUS_PENDING
+		return harnesspb.MissionStatus_MISSION_STATUS_PENDING
 	case MissionStatusRunning:
-		return pb.MissionStatusEnum_MISSION_STATUS_RUNNING
+		return harnesspb.MissionStatus_MISSION_STATUS_RUNNING
 	case MissionStatusCompleted:
-		return pb.MissionStatusEnum_MISSION_STATUS_COMPLETED
+		return harnesspb.MissionStatus_MISSION_STATUS_COMPLETED
 	case MissionStatusFailed:
-		return pb.MissionStatusEnum_MISSION_STATUS_FAILED
+		return harnesspb.MissionStatus_MISSION_STATUS_FAILED
 	case MissionStatusCancelled:
-		return pb.MissionStatusEnum_MISSION_STATUS_CANCELLED
+		return harnesspb.MissionStatus_MISSION_STATUS_CANCELLED
 	default:
-		return pb.MissionStatusEnum_MISSION_STATUS_UNSPECIFIED
+		return harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED
 	}
 }
 
 // RunMission implements the mission execution RPC.
-func (s *HarnessCallbackService) RunMission(ctx context.Context, req *pb.RunMissionRequest) (*pb.RunMissionResponse, error) {
+func (s *HarnessCallbackService) RunMission(ctx context.Context, req *harnesspb.RunMissionRequest) (*harnesspb.RunMissionResponse, error) {
 	s.logger.Debug("RunMission called",
 		"mission_id", req.Context.MissionId,
 		"agent_name", req.Context.AgentName,
 		"target_mission_id", req.MissionId,
 	)
 
-	return &pb.RunMissionResponse{
-		Error: &pb.HarnessError{
+	return &harnesspb.RunMissionResponse{
+		Error: &harnesspb.HarnessError{
 			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 			Message: "mission execution via callback not yet implemented - use CLI or daemon API",
 		},
@@ -3978,15 +3979,15 @@ func (s *HarnessCallbackService) RunMission(ctx context.Context, req *pb.RunMiss
 }
 
 // GetMissionStatus implements the mission status query RPC.
-func (s *HarnessCallbackService) GetMissionStatus(ctx context.Context, req *pb.GetMissionStatusRequest) (*pb.GetMissionStatusResponse, error) {
+func (s *HarnessCallbackService) GetMissionStatus(ctx context.Context, req *harnesspb.GetMissionStatusRequest) (*harnesspb.GetMissionStatusResponse, error) {
 	s.logger.Debug("GetMissionStatus called",
 		"mission_id", req.Context.MissionId,
 		"agent_name", req.Context.AgentName,
 		"target_mission_id", req.MissionId,
 	)
 
-	return &pb.GetMissionStatusResponse{
-		Error: &pb.HarnessError{
+	return &harnesspb.GetMissionStatusResponse{
+		Error: &harnesspb.HarnessError{
 			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 			Message: "mission status query via callback not yet implemented - use CLI or daemon API",
 		},
@@ -3994,7 +3995,7 @@ func (s *HarnessCallbackService) GetMissionStatus(ctx context.Context, req *pb.G
 }
 
 // WaitForMission implements the mission wait RPC.
-func (s *HarnessCallbackService) WaitForMission(ctx context.Context, req *pb.WaitForMissionRequest) (*pb.WaitForMissionResponse, error) {
+func (s *HarnessCallbackService) WaitForMission(ctx context.Context, req *harnesspb.WaitForMissionRequest) (*harnesspb.WaitForMissionResponse, error) {
 	s.logger.Debug("WaitForMission called",
 		"mission_id", req.Context.MissionId,
 		"agent_name", req.Context.AgentName,
@@ -4002,8 +4003,8 @@ func (s *HarnessCallbackService) WaitForMission(ctx context.Context, req *pb.Wai
 		"timeout_ms", req.TimeoutMs,
 	)
 
-	return &pb.WaitForMissionResponse{
-		Error: &pb.HarnessError{
+	return &harnesspb.WaitForMissionResponse{
+		Error: &harnesspb.HarnessError{
 			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 			Message: "mission wait via callback not yet implemented - use CLI or daemon API",
 		},
@@ -4011,14 +4012,14 @@ func (s *HarnessCallbackService) WaitForMission(ctx context.Context, req *pb.Wai
 }
 
 // ListMissions implements the mission listing RPC.
-func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *pb.ListMissionsRequest) (*pb.ListMissionsResponse, error) {
+func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *harnesspb.ListMissionsRequest) (*harnesspb.ListMissionsResponse, error) {
 	s.logger.Debug("ListMissions called",
 		"mission_id", req.Context.MissionId,
 		"agent_name", req.Context.AgentName,
 	)
 
-	return &pb.ListMissionsResponse{
-		Error: &pb.HarnessError{
+	return &harnesspb.ListMissionsResponse{
+		Error: &harnesspb.HarnessError{
 			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 			Message: "mission listing via callback not yet implemented - use CLI or daemon API",
 		},
@@ -4026,15 +4027,15 @@ func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *pb.ListM
 }
 
 // CancelMission implements the mission cancellation RPC.
-func (s *HarnessCallbackService) CancelMission(ctx context.Context, req *pb.CancelMissionRequest) (*pb.CancelMissionResponse, error) {
+func (s *HarnessCallbackService) CancelMission(ctx context.Context, req *harnesspb.CancelMissionRequest) (*harnesspb.CancelMissionResponse, error) {
 	s.logger.Debug("CancelMission called",
 		"mission_id", req.Context.MissionId,
 		"agent_name", req.Context.AgentName,
 		"target_mission_id", req.MissionId,
 	)
 
-	return &pb.CancelMissionResponse{
-		Error: &pb.HarnessError{
+	return &harnesspb.CancelMissionResponse{
+		Error: &harnesspb.HarnessError{
 			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 			Message: "mission cancellation via callback not yet implemented - use CLI or daemon API",
 		},
@@ -4042,15 +4043,15 @@ func (s *HarnessCallbackService) CancelMission(ctx context.Context, req *pb.Canc
 }
 
 // GetMissionResults implements the mission results retrieval RPC.
-func (s *HarnessCallbackService) GetMissionResults(ctx context.Context, req *pb.GetMissionResultsRequest) (*pb.GetMissionResultsResponse, error) {
+func (s *HarnessCallbackService) GetMissionResults(ctx context.Context, req *harnesspb.GetMissionResultsRequest) (*harnesspb.GetMissionResultsResponse, error) {
 	s.logger.Debug("GetMissionResults called",
 		"mission_id", req.Context.MissionId,
 		"agent_name", req.Context.AgentName,
 		"target_mission_id", req.MissionId,
 	)
 
-	return &pb.GetMissionResultsResponse{
-		Error: &pb.HarnessError{
+	return &harnesspb.GetMissionResultsResponse{
+		Error: &harnesspb.HarnessError{
 			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
 			Message: "mission results retrieval via callback not yet implemented - use CLI or daemon API",
 		},

@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 
-	commonpb "github.com/zero-day-ai/sdk/api/gen/commonpb"
-	proto "github.com/zero-day-ai/sdk/api/gen/proto"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // TaskToProto converts a Gibson internal Task to a proto Task message.
-func TaskToProto(task Task) *proto.Task {
-	protoTask := &proto.Task{
+func TaskToProto(task Task) *typespb.Task {
+	protoTask := &typespb.Task{
 		Id:       task.ID.String(),
 		Goal:     task.Goal,
 		Context:  mapToTypedValueMap(task.Context),
@@ -45,8 +45,8 @@ func TaskToProto(task Task) *proto.Task {
 }
 
 // ResultToProto converts a Gibson internal Result to a proto Result message.
-func ResultToProto(r Result) *proto.Result {
-	protoResult := &proto.Result{
+func ResultToProto(r Result) *typespb.Result {
+	protoResult := &typespb.Result{
 		Status: resultStatusToProto(r.Status),
 		Output: anyToTypedValue(r.Output),
 	}
@@ -57,7 +57,7 @@ func ResultToProto(r Result) *proto.Result {
 		for k, v := range r.Error.Details {
 			details[k] = fmt.Sprintf("%v", v)
 		}
-		protoResult.Error = &proto.ResultError{
+		protoResult.Error = &typespb.ResultError{
 			Message: r.Error.Message,
 			Code:    commonpb.ErrorCode(commonpb.ErrorCode_value[r.Error.Code]),
 			Details: details,
@@ -76,23 +76,23 @@ func ResultToProto(r Result) *proto.Result {
 }
 
 // resultStatusToProto converts an internal ResultStatus to a proto ResultStatus.
-func resultStatusToProto(status ResultStatus) proto.ResultStatus {
+func resultStatusToProto(status ResultStatus) typespb.ResultStatus {
 	switch status {
 	case ResultStatusPending:
-		return proto.ResultStatus_RESULT_STATUS_UNSPECIFIED
+		return typespb.ResultStatus_RESULT_STATUS_UNSPECIFIED
 	case ResultStatusCompleted:
-		return proto.ResultStatus_RESULT_STATUS_SUCCESS
+		return typespb.ResultStatus_RESULT_STATUS_SUCCESS
 	case ResultStatusFailed:
-		return proto.ResultStatus_RESULT_STATUS_FAILED
+		return typespb.ResultStatus_RESULT_STATUS_FAILED
 	case ResultStatusCancelled:
-		return proto.ResultStatus_RESULT_STATUS_CANCELLED
+		return typespb.ResultStatus_RESULT_STATUS_CANCELLED
 	default:
-		return proto.ResultStatus_RESULT_STATUS_UNSPECIFIED
+		return typespb.ResultStatus_RESULT_STATUS_UNSPECIFIED
 	}
 }
 
 // ProtoToResult converts a proto Result to a Gibson internal Result.
-func ProtoToResult(pr *proto.Result) Result {
+func ProtoToResult(pr *typespb.Result) Result {
 	if pr == nil {
 		return Result{}
 	}
@@ -122,19 +122,19 @@ func ProtoToResult(pr *proto.Result) Result {
 }
 
 // protoStatusToResultStatus converts a proto ResultStatus to an internal ResultStatus.
-func protoStatusToResultStatus(status proto.ResultStatus) ResultStatus {
+func protoStatusToResultStatus(status typespb.ResultStatus) ResultStatus {
 	switch status {
-	case proto.ResultStatus_RESULT_STATUS_UNSPECIFIED:
+	case typespb.ResultStatus_RESULT_STATUS_UNSPECIFIED:
 		return ResultStatusPending
-	case proto.ResultStatus_RESULT_STATUS_SUCCESS:
+	case typespb.ResultStatus_RESULT_STATUS_SUCCESS:
 		return ResultStatusCompleted
-	case proto.ResultStatus_RESULT_STATUS_FAILED:
+	case typespb.ResultStatus_RESULT_STATUS_FAILED:
 		return ResultStatusFailed
-	case proto.ResultStatus_RESULT_STATUS_PARTIAL:
+	case typespb.ResultStatus_RESULT_STATUS_PARTIAL:
 		return ResultStatusCompleted // Partial is still completed
-	case proto.ResultStatus_RESULT_STATUS_CANCELLED:
+	case typespb.ResultStatus_RESULT_STATUS_CANCELLED:
 		return ResultStatusCancelled
-	case proto.ResultStatus_RESULT_STATUS_TIMEOUT:
+	case typespb.ResultStatus_RESULT_STATUS_TIMEOUT:
 		return ResultStatusFailed // Timeout is a type of failure
 	default:
 		return ResultStatusFailed
@@ -201,7 +201,7 @@ func anyToTypedValue(v any) *commonpb.TypedValue {
 	if v == nil {
 		return &commonpb.TypedValue{
 			Kind: &commonpb.TypedValue_NullValue{
-				NullValue: commonpb.NullValue_NULL_VALUE,
+				NullValue: commonpb.NullValue_NULL_VALUE_UNSPECIFIED,
 			},
 		}
 	}

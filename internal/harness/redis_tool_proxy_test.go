@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/api/gen/commonpb"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 	"github.com/zero-day-ai/sdk/queue"
 	"go.opentelemetry.io/otel"
 	"google.golang.org/protobuf/encoding/protojson"

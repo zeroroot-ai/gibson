@@ -3,19 +3,19 @@ package harness
 import (
 	"encoding/json"
 
-	pb "github.com/zero-day-ai/sdk/api/gen/proto"
+	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zero-day-ai/sdk/schema"
 )
 
 // SchemaToCallbackProto converts SDK schema.JSON to harness callback proto JSONSchemaNode.
 // This preserves taxonomy mappings during gRPC transport to agents.
-func SchemaToCallbackProto(s schema.JSON) *pb.JSONSchemaNode {
+func SchemaToCallbackProto(s schema.JSON) *harnesspb.JSONSchemaNode {
 	// Return nil for empty schemas
 	if s.Type == "" && len(s.Properties) == 0 && s.Items == nil {
 		return nil
 	}
 
-	node := &pb.JSONSchemaNode{
+	node := &harnesspb.JSONSchemaNode{
 		Type:        s.Type,
 		Description: s.Description,
 		Required:    s.Required,
@@ -25,7 +25,7 @@ func SchemaToCallbackProto(s schema.JSON) *pb.JSONSchemaNode {
 
 	// Convert properties recursively
 	if len(s.Properties) > 0 {
-		node.Properties = make(map[string]*pb.JSONSchemaNode)
+		node.Properties = make(map[string]*harnesspb.JSONSchemaNode)
 		for name, prop := range s.Properties {
 			node.Properties[name] = SchemaToCallbackProto(prop)
 		}
@@ -74,7 +74,7 @@ func SchemaToCallbackProto(s schema.JSON) *pb.JSONSchemaNode {
 
 // CallbackProtoToSchema converts harness callback proto JSONSchemaNode to SDK schema.JSON.
 // This reconstructs the full SDK schema with taxonomy from the proto representation.
-func CallbackProtoToSchema(node *pb.JSONSchemaNode) schema.JSON {
+func CallbackProtoToSchema(node *harnesspb.JSONSchemaNode) schema.JSON {
 	if node == nil {
 		return schema.JSON{}
 	}
