@@ -99,6 +99,42 @@ AES-256-GCM for plugin config encryption. `KeyProvider` interface with backends:
 
 Shared context keys avoid circular imports: `AgentRunID`, `ToolExecutionID`, `MissionRunID`, `AgentName`, `MissionID`. Set during mission execution, consumed by harness, GraphRAG, and observability packages.
 
+## Proto / Generated Code
+
+Gibson owns one proto file: the daemon gRPC API surface.
+
+**Proto source:** `internal/daemon/api/gibson/daemon/v1/daemon.proto` (package `gibson.daemon.v1`)
+**Generated Go:** `internal/daemon/api/daemon.pb.go` + `daemon_grpc.pb.go`
+
+**Buf configuration** — this repo has its own `buf.yaml` and `buf.gen.yaml` at the repo root:
+```bash
+buf lint                   # Lint daemon proto (STANDARD ruleset, zero exceptions)
+buf generate               # Regenerate daemon Go code
+```
+
+**SDK proto imports** — Gibson imports generated Go types from the SDK. Package mapping:
+
+| SDK Package | Import Path | Alias | Types |
+|-------------|------------|-------|-------|
+| `gibson.agent.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1` | `agentpb` | AgentService client, GetDescriptorResponse, ExecuteRequest/Response |
+| `gibson.tool.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1` | `toolpb` | ToolService client, ExecuteRequest/Response |
+| `gibson.plugin.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1` | `pluginpb` | PluginService client, InitializeRequest/Response |
+| `gibson.harness.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1` | `harnesspb` | HarnessCallbackService, LLM/memory/validation types |
+| `gibson.types.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/types/v1` | `typespb` | Task, Result, Finding, enums |
+| `gibson.common.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/common/v1` | `commonpb` | TypedValue, TypedMap, ErrorCode, HealthStatus |
+| `gibson.component.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/component/v1` | `componentpb` | ComponentService types |
+| `gibson.graphrag.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1` | `graphragpb` | GraphQuery, GraphNode, DiscoveryResult |
+| `gibson.workflow.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/workflow/v1` | `workflowpb` | WorkflowDefinition |
+| `taxonomy.v1` | `github.com/zero-day-ai/sdk/api/gen/taxonomy/v1` | `taxonomypb` | CoreNodeType, CoreRelationType |
+| `intelligence.v1` | `github.com/zero-day-ai/sdk/api/gen/intelligence/v1` | `intelligencepb` | IntelligenceService types |
+| toolspb | `github.com/zero-day-ai/sdk/api/gen/toolspb` | `toolspb` | Nmap/Httpx/Nuclei protobuf types for extraction |
+
+**NEVER import tool, plugin, or agent Go modules in Gibson's go.mod.** Gibson depends ONLY on the SDK (plus third-party libs). Tool protobuf types for extraction come from the SDK's `toolspb` package, not from individual tool repos.
+
+**NEVER hand-write proto message types or gRPC service stubs.** Always generate from `.proto` files using `buf generate`.
+
+**When adding new RPCs to daemon.proto:** regenerate Go code here, then regenerate TypeScript in the dashboard repo.
+
 ## Critical Rules
 
 - **NEVER use local file includes for anything** — all includes, imports, references, and dependencies must point to GitHub (e.g., `github.com/zero-day-ai/...`). No local `replace` directives, no local file paths in imports, no local file:// references. GitHub only.
@@ -107,11 +143,12 @@ Shared context keys avoid circular imports: `AgentRunID`, `ToolExecutionID`, `Mi
 
 - **Go 1.25**, `CGO_ENABLED=0` for all builds
 - **No local `replace` in go.mod** — causes proto descriptor mismatches and daemon panics. Use `go work` for local SDK development.
-- **Proto field 100** in tool responses is always reserved for `gibson.graphrag.DiscoveryResult`
+- **No tool/plugin/agent dependencies in go.mod** — Gibson only depends on the SDK. Tool proto types come from SDK's `toolspb`.
+- **Proto field 100** in tool responses is always reserved for `gibson.graphrag.v1.DiscoveryResult`
 - **`component.yaml`** defines tool/plugin/agent metadata for registry discovery
 - **Environment variable substitution** in config: `${VAR:-default}` syntax
 - Structured logging with `log/slog`; context propagation for tracing
-- Proto source: `api/proto/*.proto` → generated: `api/gen/proto/` (source-relative paths)
+- Proto source: `internal/daemon/api/gibson/daemon/v1/daemon.proto` → generated: `internal/daemon/api/`
 
 ## Configuration
 
