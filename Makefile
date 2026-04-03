@@ -37,10 +37,9 @@ COVERAGE_THRESHOLD=90
 PROTO_DIR=api/proto
 PROTO_OUT=api/gen/proto
 
-# Buf code generation (delegates to the repo root workspace)
-# Resolve repo root relative to this Makefile's location (core/gibson → root is ../..)
-ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../..)
-BUF := npx --prefix $(ROOT_DIR)/enterprise/dashboard buf
+# Buf code generation (uses local buf.yaml + buf.gen.yaml in this directory)
+DASHBOARD_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../../enterprise/dashboard)
+BUF := npx --prefix $(DASHBOARD_DIR) buf
 
 # Default target
 all: test build
@@ -136,7 +135,7 @@ proto-deps:
 
 proto: proto-deps
 	@echo "Generating Go code from daemon proto files via Buf..."
-	cd $(ROOT_DIR) && $(BUF) generate --template buf.gen.yaml --path core/gibson/internal/daemon/api
+	$(BUF) generate
 	@echo "Proto generation complete"
 
 proto-clean:

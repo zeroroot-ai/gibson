@@ -52,50 +52,107 @@ func TestRedisMissionStore_KeyNaming(t *testing.T) {
 		fn       func() string
 		expected string
 	}{
+		// Legacy (no tenant) key formats
 		{
-			name:     "missionKey",
-			fn:       func() string { return missionKey(types.ID("abc123")) },
+			name:     "missionKey legacy",
+			fn:       func() string { return missionKey("", types.ID("abc123")) },
 			expected: "gibson:mission:abc123",
 		},
 		{
-			name:     "missionRunsKey",
-			fn:       func() string { return missionRunsKey(types.ID("abc123")) },
+			name:     "missionRunsKey legacy",
+			fn:       func() string { return missionRunsKey("", types.ID("abc123")) },
 			expected: "gibson:mission:abc123:runs",
 		},
 		{
-			name:     "missionRunKey",
-			fn:       func() string { return missionRunKey(types.ID("run456")) },
+			name:     "missionRunKey legacy",
+			fn:       func() string { return missionRunKey("", types.ID("run456")) },
 			expected: "gibson:mission_run:run456",
 		},
 		{
-			name:     "missionEventsStream",
-			fn:       func() string { return missionEventsStream(types.ID("abc123")) },
+			name:     "missionEventsStream legacy",
+			fn:       func() string { return missionEventsStream("", types.ID("abc123")) },
 			expected: "gibson:stream:mission:abc123:events",
 		},
 		{
-			name:     "missionCounterKey",
-			fn:       func() string { return missionCounterKey("test-mission") },
+			name:     "missionCounterKey legacy",
+			fn:       func() string { return missionCounterKey("", "test-mission") },
 			expected: "gibson:counter:mission:test-mission:run",
 		},
 		{
-			name:     "missionByStatusKey",
-			fn:       func() string { return missionByStatusKey(MissionStatusRunning) },
+			name:     "missionByStatusKey legacy",
+			fn:       func() string { return missionByStatusKey("", MissionStatusRunning) },
 			expected: "gibson:mission:by_status:running",
 		},
 		{
-			name:     "missionByStatusKey pending",
-			fn:       func() string { return missionByStatusKey(MissionStatusPending) },
+			name:     "missionByStatusKey pending legacy",
+			fn:       func() string { return missionByStatusKey("", MissionStatusPending) },
 			expected: "gibson:mission:by_status:pending",
 		},
 		{
-			name:     "missionByStatusKey completed",
-			fn:       func() string { return missionByStatusKey(MissionStatusCompleted) },
+			name:     "missionByStatusKey completed legacy",
+			fn:       func() string { return missionByStatusKey("", MissionStatusCompleted) },
 			expected: "gibson:mission:by_status:completed",
 		},
 		{
-			name:     "missionByTargetKey",
-			fn:       func() string { return missionByTargetKey(types.ID("target123")) },
+			name:     "missionByTargetKey legacy",
+			fn:       func() string { return missionByTargetKey("", types.ID("target123")) },
 			expected: "gibson:mission:by_target:target123",
+		},
+		{
+			name:     "missionDefinitionKey legacy",
+			fn:       func() string { return missionDefinitionKey("", "recon") },
+			expected: "gibson:mission-definitions:recon",
+		},
+		{
+			name:     "missionDefinitionIndexKey legacy",
+			fn:       func() string { return missionDefinitionIndexKey("") },
+			expected: "gibson:mission-definitions",
+		},
+		// Tenant-scoped key formats
+		{
+			name:     "missionKey with tenant",
+			fn:       func() string { return missionKey("acme-corp", types.ID("abc123")) },
+			expected: "gibson:mission:acme-corp:abc123",
+		},
+		{
+			name:     "missionRunsKey with tenant",
+			fn:       func() string { return missionRunsKey("acme-corp", types.ID("abc123")) },
+			expected: "gibson:mission:acme-corp:abc123:runs",
+		},
+		{
+			name:     "missionRunKey with tenant",
+			fn:       func() string { return missionRunKey("acme-corp", types.ID("run456")) },
+			expected: "gibson:mission_run:acme-corp:run456",
+		},
+		{
+			name:     "missionEventsStream with tenant",
+			fn:       func() string { return missionEventsStream("acme-corp", types.ID("abc123")) },
+			expected: "gibson:stream:mission:acme-corp:abc123:events",
+		},
+		{
+			name:     "missionCounterKey with tenant",
+			fn:       func() string { return missionCounterKey("acme-corp", "test-mission") },
+			expected: "gibson:counter:mission:acme-corp:test-mission:run",
+		},
+		{
+			name:     "missionByStatusKey with tenant",
+			fn:       func() string { return missionByStatusKey("acme-corp", MissionStatusRunning) },
+			expected: "gibson:mission:by_status:acme-corp:running",
+		},
+		{
+			name:     "missionByTargetKey with tenant",
+			fn:       func() string { return missionByTargetKey("acme-corp", types.ID("target123")) },
+			expected: "gibson:mission:by_target:acme-corp:target123",
+		},
+		{
+			name:     "missionDefinitionKey with tenant",
+			fn:       func() string { return missionDefinitionKey("acme-corp", "recon") },
+			expected: "gibson:mission-definitions:acme-corp:recon",
+		},
+		{
+			name:     "missionDefinitionIndexKey with tenant",
+			fn:       func() string { return missionDefinitionIndexKey("acme-corp") },
+			expected: "gibson:mission-definitions:acme-corp",
 		},
 	}
 

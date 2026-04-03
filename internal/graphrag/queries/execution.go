@@ -9,10 +9,21 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
+
+// tenantFromCtx extracts the tenant ID from the context and returns an error
+// if it is missing. All GraphRAG execution queries require tenant isolation.
+func tenantFromCtx(ctx context.Context) (string, error) {
+	tid := auth.TenantFromContext(ctx)
+	if tid == "" {
+		return "", fmt.Errorf("tenant_id required for GraphRAG queries")
+	}
+	return tid, nil
+}
 
 // ExecutionQueries provides methods for tracking orchestrator execution state.
 // All methods are context-aware and return typed errors for better error handling.
@@ -32,6 +43,11 @@ func NewExecutionQueries(client graph.GraphClient) *ExecutionQueries {
 // The execution is validated before creation and linked via :EXECUTES relationship.
 // Returns an error if validation fails or if the workflow node doesn't exist.
 func (eq *ExecutionQueries) CreateAgentExecution(ctx context.Context, exec *schema.AgentExecution) error {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+
 	if exec == nil {
 		return types.NewError(graph.ErrCodeGraphInvalidQuery, "execution cannot be nil")
 	}
@@ -56,13 +72,15 @@ func (eq *ExecutionQueries) CreateAgentExecution(ctx context.Context, exec *sche
 		SET e = $props
 		WITH e
 		MATCH (n:WorkflowNode {id: $nodeId})
+		WHERE n.tenant_id = $tenant_id
 		CREATE (e)-[:EXECUTES]->(n)
 		RETURN e.id as id
 	`
 
 	params := map[string]any{
-		"props":  props,
-		"nodeId": exec.WorkflowNodeID,
+		"props":     props,
+		"nodeId":    exec.WorkflowNodeID,
+		"tenant_id": tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)
@@ -84,6 +102,11 @@ func (eq *ExecutionQueries) CreateAgentExecution(ctx context.Context, exec *sche
 // This is typically called when an execution completes or fails.
 // Returns an error if the execution doesn't exist or if validation fails.
 func (eq *ExecutionQueries) UpdateExecution(ctx context.Context, exec *schema.AgentExecution) error {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+
 	if exec == nil {
 		return types.NewError(graph.ErrCodeGraphInvalidQuery, "execution cannot be nil")
 	}
@@ -106,13 +129,15 @@ func (eq *ExecutionQueries) UpdateExecution(ctx context.Context, exec *schema.Ag
 
 	cypher := `
 		MATCH (e:AgentExecution {id: $id})
+		WHERE e.tenant_id = $tenant_id
 		SET e += $props
 		RETURN e.id as id
 	`
 
 	params := map[string]any{
-		"id":    exec.ID.String(),
-		"props": props,
+		"id":        exec.ID.String(),
+		"props":     props,
+		"tenant_id": tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)
@@ -133,6 +158,11 @@ func (eq *ExecutionQueries) UpdateExecution(ctx context.Context, exec *schema.Ag
 // Decisions are linked to the mission for audit trail purposes.
 // The Langfuse correlation ID enables tracing decisions back to LLM calls.
 func (eq *ExecutionQueries) CreateDecision(ctx context.Context, decision *schema.Decision) error {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+
 	if decision == nil {
 		return types.NewError(graph.ErrCodeGraphInvalidQuery, "decision cannot be nil")
 	}
@@ -156,13 +186,15 @@ func (eq *ExecutionQueries) CreateDecision(ctx context.Context, decision *schema
 		SET d = $props
 		WITH d
 		MATCH (m:Mission {id: $missionId})
+		WHERE m.tenant_id = $tenant_id
 		CREATE (m)-[:HAS_DECISION]->(d)
 		RETURN d.id as id
 	`
 
 	params := map[string]any{
-		"props":     props,
-		"missionId": decision.MissionID.String(),
+		"props":      props,
+		"missionId":  decision.MissionID.String(),
+		"tenant_id":  tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)
@@ -183,6 +215,11 @@ func (eq *ExecutionQueries) CreateDecision(ctx context.Context, decision *schema
 // This enables tracking which execution produced which findings for provenance.
 // Returns an error if the execution doesn't exist. Missing findings are skipped silently.
 func (eq *ExecutionQueries) LinkExecutionToFindings(ctx context.Context, execID string, findingIDs []string) error {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+
 	if execID == "" {
 		return types.NewError(graph.ErrCodeGraphInvalidQuery, "execID cannot be empty")
 	}
@@ -199,9 +236,11 @@ func (eq *ExecutionQueries) LinkExecutionToFindings(ctx context.Context, execID 
 	// Create relationships in batch for better performance
 	cypher := `
 		MATCH (e:AgentExecution {id: $execId})
+		WHERE e.tenant_id = $tenant_id
 		WITH e
 		UNWIND $findingIds as findingId
 		MATCH (f:Finding {id: findingId})
+		WHERE f.tenant_id = $tenant_id
 		MERGE (e)-[:PRODUCED]->(f)
 		RETURN count(*) as linked_count
 	`
@@ -209,6 +248,7 @@ func (eq *ExecutionQueries) LinkExecutionToFindings(ctx context.Context, execID 
 	params := map[string]any{
 		"execId":     execID,
 		"findingIds": findingIDs,
+		"tenant_id":  tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)
@@ -230,6 +270,11 @@ func (eq *ExecutionQueries) LinkExecutionToFindings(ctx context.Context, execID 
 // This provides a complete audit trail of the orchestrator's decision-making process.
 // Returns an empty slice if no decisions exist for the mission.
 func (eq *ExecutionQueries) GetMissionDecisions(ctx context.Context, missionID string) ([]*schema.Decision, error) {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	if missionID == "" {
 		return nil, types.NewError(graph.ErrCodeGraphInvalidQuery, "missionID cannot be empty")
 	}
@@ -242,12 +287,14 @@ func (eq *ExecutionQueries) GetMissionDecisions(ctx context.Context, missionID s
 
 	cypher := `
 		MATCH (m:Mission {id: $missionId})-[:HAS_DECISION]->(d:Decision)
+		WHERE m.tenant_id = $tenant_id
 		RETURN d
 		ORDER BY d.iteration ASC, d.timestamp ASC
 	`
 
 	params := map[string]any{
-		"missionId": missionID,
+		"missionId":  missionID,
+		"tenant_id":  tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)
@@ -280,18 +327,25 @@ func (eq *ExecutionQueries) GetMissionDecisions(ctx context.Context, missionID s
 // This is useful for tracking retry attempts and execution history.
 // Results are ordered by attempt number ascending.
 func (eq *ExecutionQueries) GetNodeExecutions(ctx context.Context, nodeID string) ([]*schema.AgentExecution, error) {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	if nodeID == "" {
 		return nil, types.NewError(graph.ErrCodeGraphInvalidQuery, "nodeID cannot be empty")
 	}
 
 	cypher := `
 		MATCH (e:AgentExecution)-[:EXECUTES]->(n:WorkflowNode {id: $nodeId})
+		WHERE n.tenant_id = $tenant_id
 		RETURN e
 		ORDER BY e.attempt ASC, e.started_at ASC
 	`
 
 	params := map[string]any{
-		"nodeId": nodeID,
+		"nodeId":    nodeID,
+		"tenant_id": tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)
@@ -324,6 +378,11 @@ func (eq *ExecutionQueries) GetNodeExecutions(ctx context.Context, nodeID string
 // This tracks individual tool invocations within an agent's execution.
 // Returns an error if the parent agent execution doesn't exist.
 func (eq *ExecutionQueries) CreateToolExecution(ctx context.Context, tool *schema.ToolExecution) error {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+
 	if tool == nil {
 		return types.NewError(graph.ErrCodeGraphInvalidQuery, "tool execution cannot be nil")
 	}
@@ -347,6 +406,7 @@ func (eq *ExecutionQueries) CreateToolExecution(ctx context.Context, tool *schem
 		SET t = $props
 		WITH t
 		MATCH (e:AgentExecution {id: $agentExecId})
+		WHERE e.tenant_id = $tenant_id
 		CREATE (e)-[:USED_TOOL]->(t)
 		RETURN t.id as id
 	`
@@ -354,6 +414,7 @@ func (eq *ExecutionQueries) CreateToolExecution(ctx context.Context, tool *schem
 	params := map[string]any{
 		"props":       props,
 		"agentExecId": tool.AgentExecutionID.String(),
+		"tenant_id":   tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)
@@ -374,6 +435,11 @@ func (eq *ExecutionQueries) CreateToolExecution(ctx context.Context, tool *schem
 // This provides insight into which tools were used during an agent's execution.
 // Results are ordered by start time ascending.
 func (eq *ExecutionQueries) GetExecutionTools(ctx context.Context, execID string) ([]*schema.ToolExecution, error) {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	if execID == "" {
 		return nil, types.NewError(graph.ErrCodeGraphInvalidQuery, "execID cannot be empty")
 	}
@@ -386,12 +452,14 @@ func (eq *ExecutionQueries) GetExecutionTools(ctx context.Context, execID string
 
 	cypher := `
 		MATCH (e:AgentExecution {id: $execId})-[:USED_TOOL]->(t:ToolExecution)
+		WHERE e.tenant_id = $tenant_id
 		RETURN t
 		ORDER BY t.started_at ASC
 	`
 
 	params := map[string]any{
-		"execId": execID,
+		"execId":    execID,
+		"tenant_id": tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)

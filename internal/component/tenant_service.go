@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -211,6 +212,13 @@ func (s *TenantService) CreateTenant(ctx context.Context, tenantID, displayName 
 	if cid, ok := config["stripe_customer_id"]; ok && cid != "" {
 		if err := s.writeStripeReverseMapping(ctx, cid, tenantID); err != nil {
 			s.logger.WarnContext(ctx, "failed to write stripe reverse mapping on create", "error", err)
+		}
+	}
+
+	// Write email reverse mapping if owner email is set.
+	if email, ok := config["owner_email"]; ok && email != "" {
+		if err := s.writeEmailReverseMapping(ctx, email, tenantID); err != nil {
+			s.logger.WarnContext(ctx, "failed to write email reverse mapping on create", "error", err)
 		}
 	}
 
@@ -460,6 +468,13 @@ func (s *TenantService) UpdateTenant(ctx context.Context, tenantID string, updat
 		}
 	}
 
+	// Write email reverse mapping when owner_email is set or changed.
+	if newEmail, ok := updates["owner_email"]; ok && newEmail != "" {
+		if err := s.writeEmailReverseMapping(ctx, newEmail, tenantID); err != nil {
+			s.logger.WarnContext(ctx, "failed to write email reverse mapping", "error", err)
+		}
+	}
+
 	record.UpdatedAt = time.Now().UTC()
 
 	data, err := json.Marshal(record)
@@ -509,6 +524,11 @@ func (s *TenantService) DeleteTenant(ctx context.Context, tenantID string) error
 	// Clean up Stripe reverse mapping before soft-deleting.
 	if record.StripeCustomerID != "" {
 		s.deleteStripeReverseMapping(ctx, record.StripeCustomerID)
+	}
+
+	// Clean up email reverse mapping before soft-deleting.
+	if record.OwnerEmail != "" {
+		s.deleteEmailReverseMapping(ctx, record.OwnerEmail)
 	}
 
 	record.Status = "deleted"
@@ -661,6 +681,58 @@ func (s *TenantService) GetTenantByStripeCustomer(ctx context.Context, customerI
 			return nil, fmt.Errorf("%w: no tenant for stripe customer %q", ErrTenantNotFound, customerID)
 		}
 		return nil, fmt.Errorf("failed to lookup stripe customer %q: %w", customerID, err)
+	}
+
+	return s.fetchTenant(ctx, tenantID)
+}
+
+// ---------------------------------------------------------------------------
+// Email → Tenant reverse mapping
+// ---------------------------------------------------------------------------
+
+// emailTenantKey returns the Redis key for the email → tenant reverse mapping.
+func emailTenantKey(email string) string {
+	return fmt.Sprintf("email_tenant:%s", strings.ToLower(strings.TrimSpace(email)))
+}
+
+// writeEmailReverseMapping writes a Redis STRING mapping an owner email to a
+// tenant ID, enabling O(1) tenant lookups from email addresses.
+func (s *TenantService) writeEmailReverseMapping(ctx context.Context, email, tenantID string) error {
+	if email == "" {
+		return nil
+	}
+	if err := s.client.Set(ctx, emailTenantKey(email), tenantID, 0).Err(); err != nil {
+		return fmt.Errorf("failed to write email reverse mapping for %q: %w", email, err)
+	}
+	return nil
+}
+
+// deleteEmailReverseMapping removes the reverse mapping for an owner email.
+func (s *TenantService) deleteEmailReverseMapping(ctx context.Context, email string) {
+	if email == "" {
+		return
+	}
+	if err := s.client.Del(ctx, emailTenantKey(email)).Err(); err != nil {
+		s.logger.WarnContext(ctx, "failed to delete email reverse mapping",
+			slog.String("email", email),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
+// GetTenantByEmail looks up a tenant by the owner's email address using the
+// reverse mapping index.  Returns ErrTenantNotFound if no mapping exists.
+func (s *TenantService) GetTenantByEmail(ctx context.Context, email string) (*TenantRecord, error) {
+	if email == "" {
+		return nil, fmt.Errorf("%w: empty email", ErrTenantNotFound)
+	}
+
+	tenantID, err := s.client.Get(ctx, emailTenantKey(email)).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, fmt.Errorf("%w: no tenant for email %q", ErrTenantNotFound, email)
+		}
+		return nil, fmt.Errorf("failed to lookup email %q: %w", email, err)
 	}
 
 	return s.fetchTenant(ctx, tenantID)

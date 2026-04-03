@@ -369,6 +369,125 @@ func (c *Client) CreateRealm(ctx context.Context, cfg RealmConfig) error {
 	return nil
 }
 
+// DisableRequiredAction disables a specific required action on a realm.
+// Call this AFTER GrantSelfAdminOnRealm so the service account has permissions.
+func (c *Client) DisableRequiredAction(ctx context.Context, realm, actionAlias string) {
+	c.disableRequiredAction(ctx, realm, actionAlias)
+}
+
+// ConfigureUserProfile updates the realm's User Profile configuration to:
+// - Add tenant_id as a recognized user attribute (Keycloak 24+ silently drops unknown attrs)
+// - Remove username-prohibited-characters validation (allows email-as-username with @)
+// Call this AFTER GrantSelfAdminOnRealm.
+func (c *Client) ConfigureUserProfile(ctx context.Context, realm string) {
+	path := "/admin/realms/" + url.PathEscape(realm) + "/users/profile"
+
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		c.logger.WarnContext(ctx, "keycloak: could not get user profile config",
+			slog.String("realm", realm))
+		return
+	}
+
+	body, err := readBody(resp, http.StatusOK)
+	if err != nil {
+		return
+	}
+
+	var profile map[string]interface{}
+	if err := json.Unmarshal(body, &profile); err != nil {
+		return
+	}
+
+	attrs, ok := profile["attributes"].([]interface{})
+	if !ok {
+		return
+	}
+
+	// Check if tenant_id already exists
+	hasTenantID := false
+	for _, a := range attrs {
+		attr, ok := a.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := attr["name"].(string)
+		if name == "tenant_id" {
+			hasTenantID = true
+		}
+		// Remove username-prohibited-characters validation
+		if name == "username" {
+			if validations, ok := attr["validations"].(map[string]interface{}); ok {
+				delete(validations, "username-prohibited-characters")
+				delete(validations, "up-username-not-idn-homograph")
+			}
+		}
+	}
+
+	if !hasTenantID {
+		attrs = append(attrs, map[string]interface{}{
+			"name":        "tenant_id",
+			"displayName": "Tenant ID",
+			"permissions": map[string]interface{}{
+				"view": []string{"admin", "user"},
+				"edit": []string{"admin"},
+			},
+			"multivalued": false,
+		})
+		profile["attributes"] = attrs
+	}
+
+	putResp, err := c.doRequest(ctx, http.MethodPut, path, profile)
+	if err != nil {
+		c.logger.WarnContext(ctx, "keycloak: could not update user profile config",
+			slog.String("realm", realm))
+		return
+	}
+	putResp.Body.Close()
+
+	c.logger.InfoContext(ctx, "keycloak: configured user profile",
+		slog.String("realm", realm),
+		slog.Bool("tenant_id_added", !hasTenantID))
+}
+
+func (c *Client) disableRequiredAction(ctx context.Context, realm, actionAlias string) {
+	path := "/admin/realms/" + url.PathEscape(realm) +
+		"/authentication/required-actions/" + url.PathEscape(actionAlias)
+
+	// Get current config
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		c.logger.WarnContext(ctx, "keycloak: could not get required action",
+			slog.String("realm", realm), slog.String("action", actionAlias))
+		return
+	}
+
+	body, err := readBody(resp, http.StatusOK)
+	if err != nil {
+		return
+	}
+
+	var action map[string]interface{}
+	if err := json.Unmarshal(body, &action); err != nil {
+		return
+	}
+
+	// Disable it
+	action["enabled"] = false
+	action["defaultAction"] = false
+
+	putResp, err := c.doRequest(ctx, http.MethodPut, path, action)
+	if err != nil {
+		c.logger.WarnContext(ctx, "keycloak: could not disable required action",
+			slog.String("realm", realm), slog.String("action", actionAlias))
+		return
+	}
+	putResp.Body.Close()
+
+	c.logger.InfoContext(ctx, "keycloak: disabled required action",
+		slog.String("realm", realm), slog.String("action", actionAlias))
+}
+
 // GetRealm retrieves the representation of a realm by name.
 func (c *Client) GetRealm(ctx context.Context, realmName string) (*RealmRepresentation, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet,
@@ -487,14 +606,26 @@ func (c *Client) CreateOIDCClient(ctx context.Context, realm string, cfg OIDCCli
 // returned.
 func (c *Client) CreateUser(ctx context.Context, realm string, cfg UserConfig) (string, error) {
 	payload := map[string]interface{}{
-		"username":        cfg.Username,
-		"email":           cfg.Email,
-		"firstName":       cfg.FirstName,
-		"lastName":        cfg.LastName,
-		"enabled":         cfg.Enabled,
-		"emailVerified":   cfg.EmailVerified,
-		"requiredActions": cfg.RequiredActions,
-		"attributes":      cfg.Attributes,
+		"username":      cfg.Username,
+		"enabled":       cfg.Enabled,
+		"emailVerified": cfg.EmailVerified,
+	}
+	// Only include non-empty fields to avoid Keycloak treating empty strings
+	// as intentional "clear this field" directives.
+	if cfg.Email != "" {
+		payload["email"] = cfg.Email
+	}
+	if cfg.FirstName != "" {
+		payload["firstName"] = cfg.FirstName
+	}
+	if cfg.LastName != "" {
+		payload["lastName"] = cfg.LastName
+	}
+	if len(cfg.RequiredActions) > 0 {
+		payload["requiredActions"] = cfg.RequiredActions
+	}
+	if len(cfg.Attributes) > 0 {
+		payload["attributes"] = cfg.Attributes
 	}
 
 	if cfg.Password != "" {
@@ -909,4 +1040,193 @@ func (c *Client) AddProtocolMapper(ctx context.Context, realm, clientUUID string
 	}
 
 	return nil
+}
+
+// AddDefaultClientScope adds a client scope as a default scope on an OIDC client.
+// This ensures tokens issued by the client include the claims from that scope.
+func (c *Client) AddDefaultClientScope(ctx context.Context, realm, clientUUID, scopeName string) error {
+	// 1. Find the scope UUID by listing realm client scopes
+	listPath := "/admin/realms/" + url.PathEscape(realm) + "/client-scopes"
+	listResp, err := c.doRequest(ctx, http.MethodGet, listPath, nil)
+	if err != nil {
+		return fmt.Errorf("keycloak: list client scopes in realm %q: %w", realm, err)
+	}
+	body, err := readBody(listResp, http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("keycloak: list client scopes in realm %q: %w", realm, err)
+	}
+
+	var scopes []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(body, &scopes); err != nil {
+		return fmt.Errorf("keycloak: parse client scopes: %w", err)
+	}
+
+	var scopeUUID string
+	for _, s := range scopes {
+		if s.Name == scopeName {
+			scopeUUID = s.ID
+			break
+		}
+	}
+	if scopeUUID == "" {
+		return fmt.Errorf("keycloak: scope %q not found in realm %q", scopeName, realm)
+	}
+
+	// 2. Add it as a default scope on the client
+	putPath := "/admin/realms/" + url.PathEscape(realm) +
+		"/clients/" + url.PathEscape(clientUUID) +
+		"/default-client-scopes/" + url.PathEscape(scopeUUID)
+
+	putResp, err := c.doRequest(ctx, http.MethodPut, putPath, nil)
+	if err != nil {
+		return fmt.Errorf("keycloak: add default scope %q to client %q: %w", scopeName, clientUUID, err)
+	}
+	putResp.Body.Close()
+
+	if putResp.StatusCode != http.StatusNoContent && putResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("keycloak: add default scope: unexpected status %d", putResp.StatusCode)
+	}
+
+	c.logger.InfoContext(ctx, "keycloak: added default client scope",
+		slog.String("realm", realm),
+		slog.String("scope", scopeName),
+		slog.String("client_uuid", clientUUID))
+
+	return nil
+}
+
+// -------------------------------------------------------------------------
+// Service account self-admin for new realms
+// -------------------------------------------------------------------------
+
+// GrantSelfAdminOnRealm grants this client's own service account admin
+// permissions on a newly created realm. When Keycloak creates a realm,
+// it produces a `{realm}-realm` client in the master realm with management
+// roles. This method finds that client, resolves key roles, and assigns
+// them to the service account user.
+func (c *Client) GrantSelfAdminOnRealm(ctx context.Context, realmName string) error {
+	realmClientID := realmName + "-realm"
+	path := "/admin/realms/" + url.PathEscape(c.masterRealm) +
+		"/clients?clientId=" + url.QueryEscape(realmClientID) + "&max=1"
+
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return fmt.Errorf("keycloak: find %s client: %w", realmClientID, err)
+	}
+
+	body, err := readBody(resp, http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("keycloak: find %s client: %w", realmClientID, err)
+	}
+
+	var clients []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &clients); err != nil || len(clients) == 0 {
+		return fmt.Errorf("keycloak: %s client not found in master realm", realmClientID)
+	}
+	clientUUID := clients[0].ID
+
+	saPath := "/admin/realms/" + url.PathEscape(c.masterRealm) +
+		"/users?username=service-account-" + url.QueryEscape(c.clientID) + "&max=1"
+
+	saResp, err := c.doRequest(ctx, http.MethodGet, saPath, nil)
+	if err != nil {
+		return fmt.Errorf("keycloak: find service account: %w", err)
+	}
+
+	saBody, err := readBody(saResp, http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("keycloak: find service account: %w", err)
+	}
+
+	var saUsers []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(saBody, &saUsers); err != nil || len(saUsers) == 0 {
+		return fmt.Errorf("keycloak: service account user not found for client %s", c.clientID)
+	}
+	saUserID := saUsers[0].ID
+
+	wantedRoles := []string{"manage-users", "manage-clients", "manage-realm", "manage-events",
+		"view-users", "view-clients", "view-realm", "create-client", "manage-authorization",
+		"manage-identity-providers", "view-authorization", "view-events", "view-identity-providers",
+		"query-users", "query-clients", "query-groups", "query-realms", "impersonation"}
+
+	rolesPath := "/admin/realms/" + url.PathEscape(c.masterRealm) +
+		"/clients/" + url.PathEscape(clientUUID) + "/roles"
+
+	rolesResp, err := c.doRequest(ctx, http.MethodGet, rolesPath, nil)
+	if err != nil {
+		return fmt.Errorf("keycloak: list %s roles: %w", realmClientID, err)
+	}
+
+	rolesBody, err := readBody(rolesResp, http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("keycloak: list %s roles: %w", realmClientID, err)
+	}
+
+	var allRoles []map[string]interface{}
+	if err := json.Unmarshal(rolesBody, &allRoles); err != nil {
+		return fmt.Errorf("keycloak: parse %s roles: %w", realmClientID, err)
+	}
+
+	wantedSet := make(map[string]bool)
+	for _, r := range wantedRoles {
+		wantedSet[r] = true
+	}
+
+	var rolesToAssign []map[string]interface{}
+	for _, r := range allRoles {
+		name, _ := r["name"].(string)
+		if wantedSet[name] {
+			rolesToAssign = append(rolesToAssign, r)
+		}
+	}
+
+	if len(rolesToAssign) == 0 {
+		c.logger.WarnContext(ctx, "no matching roles found on realm client",
+			slog.String("realm", realmName), slog.String("client", realmClientID))
+		return nil
+	}
+
+	assignPath := "/admin/realms/" + url.PathEscape(c.masterRealm) +
+		"/users/" + url.PathEscape(saUserID) +
+		"/role-mappings/clients/" + url.PathEscape(clientUUID)
+
+	assignResp, err := c.doRequest(ctx, http.MethodPost, assignPath, rolesToAssign)
+	if err != nil {
+		return fmt.Errorf("keycloak: assign %s roles to service account: %w", realmClientID, err)
+	}
+
+	if assignResp.StatusCode != http.StatusNoContent && assignResp.StatusCode != http.StatusOK {
+		assignBody, _ := io.ReadAll(assignResp.Body)
+		assignResp.Body.Close()
+		return fmt.Errorf("keycloak: assign %s roles: unexpected status %d: %s",
+			realmClientID, assignResp.StatusCode, string(assignBody))
+	}
+	assignResp.Body.Close()
+
+	c.logger.InfoContext(ctx, "granted service account admin on new realm",
+		slog.String("realm", realmName),
+		slog.Int("roles_assigned", len(rolesToAssign)))
+
+	// Force token refresh so the next request uses a token that includes
+	// the newly assigned roles. Without this, cached tokens issued before
+	// the role grant will still get 403 on the new realm's resources.
+	c.invalidateToken()
+
+	return nil
+}
+
+// invalidateToken clears the cached access token, forcing the next API call
+// to acquire a fresh token from Keycloak.
+func (c *Client) invalidateToken() {
+	c.token.mu.Lock()
+	defer c.token.mu.Unlock()
+	c.token.token = ""
+	c.token.expiresAt = time.Time{}
 }
