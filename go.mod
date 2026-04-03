@@ -88,6 +88,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.12 // indirect
 	github.com/aws/smithy-go v1.24.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
+	github.com/casbin/casbin/v2 v2.135.0 // indirect
+	github.com/casbin/govaluate v1.3.0 // indirect
+	github.com/casbin/redis-adapter/v3 v3.6.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -127,6 +131,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/gomlx/exceptions v0.0.3 // indirect
+	github.com/gomodule/redigo v1.8.9 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/generative-ai-go v0.15.1 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect

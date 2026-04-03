@@ -37,7 +37,8 @@ type Authenticator interface {
 //
 // This extends the SDK Identity type with Gibson-specific authorization fields.
 // The SDK Identity contains the base authentication information (subject, issuer,
-// groups, claims, expiry), while Gibson adds resolved roles and permissions.
+// groups, claims, expiry), while Gibson adds resolved roles, permissions, and
+// Casbin-backed capability grants.
 //
 // Identity is immutable after creation and safe to pass across goroutines.
 type Identity struct {
@@ -54,6 +55,15 @@ type Identity struct {
 	// Used for fine-grained authorization checks.
 	// These are computed from Roles using permission mapping.
 	Permissions []Permission
+
+	// Capabilities are the Casbin resource:action grants assigned to this identity.
+	// For API keys these are sourced from the APIKeyRecord.Capabilities field.
+	// An empty slice should be treated as ["*"] (unrestricted) by callers; the
+	// APIKeyAuthenticator normalises this on every Authenticate call so that
+	// legacy keys created before capability support was added retain full access.
+	//
+	// Examples: ["graphrag:write", "plugin:gitlab:read", "missions:execute", "*"]
+	Capabilities []string
 }
 
 // Permission represents a fine-grained authorization grant.
@@ -99,6 +109,23 @@ func (i *Identity) HasPermission(action, resource string) bool {
 		}
 	}
 
+	return false
+}
+
+// HasCapability reports whether the identity holds the named capability.
+//
+// Returns true if cap is present in i.Capabilities, or if the wildcard
+// capability "*" is present (granting unrestricted access).
+// A nil Identity always returns false.
+func (i *Identity) HasCapability(cap string) bool {
+	if i == nil {
+		return false
+	}
+	for _, c := range i.Capabilities {
+		if c == "*" || c == cap {
+			return true
+		}
+	}
 	return false
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/casbin/casbin/v2"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/zero-day-ai/gibson/internal/crypto"
@@ -19,17 +20,54 @@ var (
 	ErrPluginNotEnabled    = errors.New("plugin not enabled for tenant")
 	ErrPluginNotConfigured = errors.New("plugin enabled but not configured")
 	ErrPluginAlreadyExists = errors.New("plugin access record already exists")
+	ErrPluginAccessDenied  = errors.New("plugin access level not granted for tenant")
 )
 
 // PluginAccess represents a tenant's opt-in record for a plugin.
+//
+// ReadEnabled and WriteEnabled provide fine-grained access control within an
+// enabled plugin. When both are false (legacy records where only Enabled is
+// true), the effective access is read+write for backward compatibility. New
+// records should always set at least one of ReadEnabled or WriteEnabled
+// explicitly; callers should use EffectiveReadEnabled / EffectiveWriteEnabled
+// (or CheckAccess) rather than reading these fields directly.
 type PluginAccess struct {
-	TenantID     string `json:"tenant_id"`
-	PluginName   string `json:"plugin_name"`
-	Enabled      bool   `json:"enabled"`
-	Source       string `json:"source"` // "platform" or "self-hosted"
-	ConfiguredAt string `json:"configured_at,omitempty"`
-	ConfiguredBy string `json:"configured_by,omitempty"`
-	HasConfig    bool   `json:"has_config"`
+	TenantID      string `json:"tenant_id"`
+	PluginName    string `json:"plugin_name"`
+	Enabled       bool   `json:"enabled"`
+	ReadEnabled   bool   `json:"read_enabled"`
+	WriteEnabled  bool   `json:"write_enabled"`
+	Source        string `json:"source"` // "platform" or "self-hosted"
+	ConfiguredAt  string `json:"configured_at,omitempty"`
+	ConfiguredBy  string `json:"configured_by,omitempty"`
+	HasConfig     bool   `json:"has_config"`
+}
+
+// EffectiveReadEnabled returns whether the tenant has read access to the plugin,
+// applying backward-compat logic: if both ReadEnabled and WriteEnabled are false
+// but Enabled is true (a legacy record), read access is implicitly granted.
+func (a *PluginAccess) EffectiveReadEnabled() bool {
+	if !a.Enabled {
+		return false
+	}
+	// Legacy record: neither granular flag is set — treat as full access.
+	if !a.ReadEnabled && !a.WriteEnabled {
+		return true
+	}
+	return a.ReadEnabled
+}
+
+// EffectiveWriteEnabled returns whether the tenant has write access to the
+// plugin, applying the same backward-compat logic as EffectiveReadEnabled.
+func (a *PluginAccess) EffectiveWriteEnabled() bool {
+	if !a.Enabled {
+		return false
+	}
+	// Legacy record: neither granular flag is set — treat as full access.
+	if !a.ReadEnabled && !a.WriteEnabled {
+		return true
+	}
+	return a.WriteEnabled
 }
 
 // PluginCatalogEntry describes a plugin available to a tenant, combining
@@ -58,10 +96,24 @@ type encryptedConfig struct {
 // platform-hosted plugins.
 type PluginAccessStore interface {
 	// Enable grants a tenant access to a _system plugin and stores their config.
+	// ReadEnabled and writeEnabled control the granular access flags; when both
+	// are false the record is stored with Enabled=true and no granular flags,
+	// which is treated as full read+write access (legacy behavior).
 	Enable(ctx context.Context, tenant, pluginName string, config map[string]any, configuredBy string) error
 
 	// Disable removes access and deletes stored config.
 	Disable(ctx context.Context, tenant, pluginName string) error
+
+	// SetAccessGranularity updates the ReadEnabled/WriteEnabled toggles for an
+	// already-enabled plugin without touching its configuration. Returns
+	// ErrPluginNotEnabled if the plugin has not been enabled first.
+	SetAccessGranularity(ctx context.Context, tenant, pluginName string, readEnabled, writeEnabled bool) error
+
+	// CheckAccess returns nil if the tenant has the requested access level for
+	// the plugin. Pass write=false for read-only operations and write=true for
+	// mutations. Returns ErrPluginNotEnabled if the plugin is not enabled at all,
+	// or ErrPluginAccessDenied if the requested level is not granted.
+	CheckAccess(ctx context.Context, tenant, pluginName string, write bool) error
 
 	// GetAccess returns the access record for a tenant+plugin.
 	// Returns ErrPluginNotEnabled if no record exists.
@@ -96,12 +148,26 @@ type PluginAccessStore interface {
 
 // RedisPluginAccessStore implements PluginAccessStore using Redis for storage
 // and AES-256-GCM for config encryption.
+//
+// An optional Casbin enforcer can be attached via SetEnforcer. When present,
+// Enable and Disable sync Casbin policies for the "tenant-admin" subject so
+// that the harness layer can enforce per-plugin read/write capabilities without
+// additional Redis lookups.
 type RedisPluginAccessStore struct {
 	client      *redis.Client
 	encryptor   crypto.Encryptor
 	keyProvider crypto.KeyProvider
 	registry    ComponentRegistry
 	logger      *slog.Logger
+	enforcer    *casbin.Enforcer // optional; nil disables Casbin sync
+}
+
+// SetEnforcer attaches a Casbin enforcer to the store. When non-nil, calls to
+// Enable, Disable, and SetAccessGranularity will sync Casbin policies so that
+// "tenant-admin" subjects gain or lose read/write capabilities for each plugin
+// in real time. Passing nil disables Casbin sync (safe default).
+func (s *RedisPluginAccessStore) SetEnforcer(e *casbin.Enforcer) {
+	s.enforcer = e
 }
 
 // NewRedisPluginAccessStore creates a new store.
@@ -138,6 +204,14 @@ func accessPattern(tenant string) string {
 }
 
 // Enable implements PluginAccessStore.
+//
+// The access record is stored with Enabled=true. ReadEnabled and WriteEnabled
+// are left as their zero values (false), so EffectiveReadEnabled and
+// EffectiveWriteEnabled will both return true (legacy/full-access semantics).
+// Call SetAccessGranularity after Enable to apply granular restrictions.
+//
+// If a Casbin enforcer is attached, Enable adds both read and write policies
+// for the "tenant-admin" subject in the tenant domain.
 func (s *RedisPluginAccessStore) Enable(ctx context.Context, tenant, pluginName string, config map[string]any, configuredBy string) error {
 	s.logger.InfoContext(ctx, "enabling plugin for tenant",
 		slog.String("tenant", tenant),
@@ -172,10 +246,17 @@ func (s *RedisPluginAccessStore) Enable(ctx context.Context, tenant, pluginName 
 		}
 	}
 
+	// Sync full read+write Casbin policies (legacy: no granular restrictions).
+	s.syncCasbinEnable(ctx, tenant, pluginName, true, true)
+
 	return nil
 }
 
 // Disable implements PluginAccessStore.
+//
+// Removes the access record and encrypted config from Redis. If a Casbin
+// enforcer is attached, all policies for "tenant-admin" on this plugin resource
+// are removed regardless of read/write state.
 func (s *RedisPluginAccessStore) Disable(ctx context.Context, tenant, pluginName string) error {
 	s.logger.InfoContext(ctx, "disabling plugin for tenant",
 		slog.String("tenant", tenant),
@@ -188,6 +269,9 @@ func (s *RedisPluginAccessStore) Disable(ctx context.Context, tenant, pluginName
 	if err != nil {
 		return fmt.Errorf("disable plugin: %w", err)
 	}
+
+	// Remove all Casbin policies for this plugin resource and tenant domain.
+	s.syncCasbinDisable(ctx, tenant, pluginName)
 
 	return nil
 }
@@ -208,6 +292,127 @@ func (s *RedisPluginAccessStore) GetAccess(ctx context.Context, tenant, pluginNa
 	}
 
 	return &access, nil
+}
+
+// SetAccessGranularity implements PluginAccessStore.
+//
+// Updates ReadEnabled and WriteEnabled on an existing access record without
+// touching the configuration. Returns ErrPluginNotEnabled if the plugin has not
+// been enabled first. If a Casbin enforcer is attached the policies are synced
+// immediately: read/write policies are added for enabled levels and removed for
+// disabled ones.
+func (s *RedisPluginAccessStore) SetAccessGranularity(ctx context.Context, tenant, pluginName string, readEnabled, writeEnabled bool) error {
+	access, err := s.GetAccess(ctx, tenant, pluginName)
+	if err != nil {
+		return err
+	}
+
+	access.ReadEnabled = readEnabled
+	access.WriteEnabled = writeEnabled
+
+	accessJSON, err := json.Marshal(access)
+	if err != nil {
+		return fmt.Errorf("marshal access record: %w", err)
+	}
+
+	if err := s.client.Set(ctx, accessKey(tenant, pluginName), accessJSON, 0).Err(); err != nil {
+		return fmt.Errorf("store access record: %w", err)
+	}
+
+	s.logger.InfoContext(ctx, "plugin access granularity updated",
+		slog.String("tenant", tenant),
+		slog.String("plugin", pluginName),
+		slog.Bool("read_enabled", readEnabled),
+		slog.Bool("write_enabled", writeEnabled),
+	)
+
+	// Sync Casbin policies to reflect the new access levels.
+	if readEnabled || writeEnabled {
+		s.syncCasbinEnable(ctx, tenant, pluginName, readEnabled, writeEnabled)
+	} else {
+		// Both disabled — remove all policies (equivalent to a full disable at the
+		// Casbin level even though the Redis record remains for config retention).
+		s.syncCasbinDisable(ctx, tenant, pluginName)
+	}
+
+	return nil
+}
+
+// CheckAccess implements PluginAccessStore.
+//
+// Returns nil if the tenant has the requested access level for the plugin.
+// Returns ErrPluginNotEnabled if the plugin is not enabled at all.
+// Returns ErrPluginAccessDenied if the plugin is enabled but the requested
+// level (read or write) is not granted.
+func (s *RedisPluginAccessStore) CheckAccess(ctx context.Context, tenant, pluginName string, write bool) error {
+	access, err := s.GetAccess(ctx, tenant, pluginName)
+	if err != nil {
+		return err // propagates ErrPluginNotEnabled
+	}
+
+	if write {
+		if !access.EffectiveWriteEnabled() {
+			return ErrPluginAccessDenied
+		}
+		return nil
+	}
+
+	if !access.EffectiveReadEnabled() {
+		return ErrPluginAccessDenied
+	}
+	return nil
+}
+
+// syncCasbinEnable adds Casbin allow policies for the "tenant-admin" role in
+// the tenant domain for the given plugin resource. It is a best-effort
+// operation: errors are logged but never returned to callers.
+func (s *RedisPluginAccessStore) syncCasbinEnable(ctx context.Context, tenant, pluginName string, read, write bool) {
+	if s.enforcer == nil {
+		return
+	}
+
+	resource := fmt.Sprintf("plugin:%s", pluginName)
+
+	if read {
+		if _, err := s.enforcer.AddPolicy("tenant-admin", tenant, resource, "read"); err != nil {
+			s.logger.WarnContext(ctx, "casbin: failed to add read policy for plugin",
+				slog.String("tenant", tenant),
+				slog.String("plugin", pluginName),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+
+	if write {
+		if _, err := s.enforcer.AddPolicy("tenant-admin", tenant, resource, "write"); err != nil {
+			s.logger.WarnContext(ctx, "casbin: failed to add write policy for plugin",
+				slog.String("tenant", tenant),
+				slog.String("plugin", pluginName),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+}
+
+// syncCasbinDisable removes all Casbin policies for "tenant-admin" on this
+// plugin resource in the tenant domain. It is a best-effort operation: errors
+// are logged but never returned to callers.
+func (s *RedisPluginAccessStore) syncCasbinDisable(ctx context.Context, tenant, pluginName string) {
+	if s.enforcer == nil {
+		return
+	}
+
+	resource := fmt.Sprintf("plugin:%s", pluginName)
+
+	// RemoveFilteredPolicy(1, ...) removes rows where field[1] (dom) == tenant
+	// AND field[2] (obj) == resource, regardless of subject or action.
+	if _, err := s.enforcer.RemoveFilteredPolicy(1, tenant, resource); err != nil {
+		s.logger.WarnContext(ctx, "casbin: failed to remove policies for plugin",
+			slog.String("tenant", tenant),
+			slog.String("plugin", pluginName),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 // GetDecryptedConfig implements PluginAccessStore.

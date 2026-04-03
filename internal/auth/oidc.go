@@ -3,16 +3,67 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/casbin/casbin/v2"
 	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
+
+// roleCapabilities maps well-known Gibson roles to their granted capabilities.
+//
+// The special wildcard entry "*" grants unrestricted access to all resources.
+// Capabilities follow the "resource:action" convention used by ParseCapability.
+var roleCapabilities = map[string][]string{
+	"owner": {"*"},
+	"admin": {"*"},
+	"operator": {
+		"missions:execute",
+		"missions:read",
+		"findings:read",
+		"findings:write",
+		"findings:export",
+		"graphrag:read",
+		"graphrag:write",
+		"components:register",
+		"components:manage",
+		"memory:read",
+		"memory:write",
+		"llm:complete",
+		"tools:execute",
+		"agents:delegate",
+	},
+	"viewer": {
+		"missions:read",
+		"findings:read",
+		"graphrag:read",
+		"memory:read",
+	},
+	"agent": {
+		"missions:execute",
+		"findings:write",
+		"graphrag:read",
+		"graphrag:write",
+		"components:register",
+		"memory:read",
+		"memory:write",
+		"llm:complete",
+		"tools:execute",
+		"agents:delegate",
+	},
+	"tool": {
+		"components:register",
+		"graphrag:write",
+	},
+}
 
 // OIDCValidator validates OIDC JWT tokens from configured issuers.
 //
 // This wraps the SDK OIDCValidator and adds Gibson-specific functionality:
 //   - Role binding resolution from groups
 //   - Permission derivation from roles
+//   - Capability resolution from roles via roleCapabilities
+//   - Casbin policy sync for role-derived capabilities
 //   - Authentication metrics recording
 //   - Integration with Gibson's AuthConfig format
 //
@@ -28,6 +79,10 @@ type OIDCValidator struct {
 
 	// roleBinder resolves roles from groups using role bindings
 	roleBinder *RoleBinder
+
+	// enforcer is the optional Casbin enforcer used to sync role-derived
+	// capabilities as policies. When nil, Casbin sync is skipped.
+	enforcer *casbin.Enforcer
 }
 
 // NewOIDCValidator creates a new OIDC validator from Gibson configuration.
@@ -100,6 +155,19 @@ func NewOIDCValidator(cfg *AuthConfig) (*OIDCValidator, error) {
 		issuerConfigs: issuerConfigs,
 		roleBinder:    roleBinder,
 	}, nil
+}
+
+// SetEnforcer attaches a Casbin enforcer to the validator.
+//
+// When set, Authenticate will sync the role-derived capabilities for each
+// authenticated identity into Casbin as policies, using an upsert pattern
+// (remove all existing policies for the subject, then add the new set).
+//
+// This method is safe to call before the validator is used concurrently,
+// but must not be called after Authenticate has started being called on
+// multiple goroutines.
+func (v *OIDCValidator) SetEnforcer(e *casbin.Enforcer) {
+	v.enforcer = e
 }
 
 // Authenticate validates a JWT token and returns the authenticated identity.
@@ -175,5 +243,84 @@ func (v *OIDCValidator) Authenticate(ctx context.Context, tokenString string) (*
 		gibsonIdentity.Permissions = []Permission{}
 	}
 
+	// Resolve capabilities from roles using the roleCapabilities map.
+	//
+	// If any role grants the wildcard "*", short-circuit and grant full access.
+	// Otherwise collect and deduplicate all capabilities across all roles.
+	caps := resolveCapabilitiesFromRoles(gibsonIdentity.Roles)
+	gibsonIdentity.Capabilities = caps
+
+	// Sync capabilities into Casbin if an enforcer is configured.
+	if v.enforcer != nil {
+		v.syncCasbin(ctx, gibsonIdentity, caps)
+	}
+
 	return gibsonIdentity, nil
+}
+
+// resolveCapabilitiesFromRoles maps role names to their capabilities and deduplicates
+// the result. If any role maps to the wildcard ["*"], it returns ["*"] immediately.
+func resolveCapabilitiesFromRoles(roles []string) []string {
+	seen := make(map[string]bool)
+	var caps []string
+
+	for _, role := range roles {
+		roleCaps, ok := roleCapabilities[role]
+		if !ok {
+			continue
+		}
+
+		for _, c := range roleCaps {
+			if c == "*" {
+				// Wildcard supersedes all other capabilities.
+				return []string{"*"}
+			}
+			if !seen[c] {
+				seen[c] = true
+				caps = append(caps, c)
+			}
+		}
+	}
+
+	return caps
+}
+
+// syncCasbin performs an upsert of the identity's capabilities into Casbin.
+//
+// The tenant is extracted from the "tenant_id" claim in the token. If the claim
+// is absent, Casbin sync is skipped with a warning — the tenant may be injected
+// later in the request pipeline by a higher-level interceptor.
+//
+// Errors from Casbin are logged but do not fail authentication.
+func (v *OIDCValidator) syncCasbin(ctx context.Context, identity *Identity, caps []string) {
+	if len(caps) == 0 {
+		return
+	}
+
+	tenantID := identity.Identity.GetStringClaim("tenant_id")
+	if tenantID == "" {
+		slog.WarnContext(ctx, "oidc: skipping casbin sync — tenant_id claim absent",
+			"subject", identity.Subject,
+			"issuer", identity.Issuer,
+		)
+		return
+	}
+
+	// Upsert: remove stale policies first, then add the current set.
+	if err := RemovePoliciesForKey(v.enforcer, identity.Subject); err != nil {
+		slog.ErrorContext(ctx, "oidc: failed to remove stale casbin policies",
+			"subject", identity.Subject,
+			"tenant_id", tenantID,
+			"error", err,
+		)
+		// Continue — adding policies is still worthwhile even if removal fails.
+	}
+
+	if err := AddPoliciesForKey(v.enforcer, identity.Subject, tenantID, caps); err != nil {
+		slog.ErrorContext(ctx, "oidc: failed to add casbin policies",
+			"subject", identity.Subject,
+			"tenant_id", tenantID,
+			"error", err,
+		)
+	}
 }

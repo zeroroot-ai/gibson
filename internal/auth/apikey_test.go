@@ -41,7 +41,7 @@ func TestAPIKeyAuthenticator_CreateAndAuthenticate(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := context.Background()
 
-	rawKey, record, err := a.CreateKey(ctx, "acme", nil, nil)
+	rawKey, record, err := a.CreateKey(ctx, "acme", nil, nil, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, rawKey)
 	require.NotNil(t, record)
@@ -60,7 +60,7 @@ func TestAPIKeyAuthenticator_KeyFormat(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := context.Background()
 
-	rawKey, _, err := a.CreateKey(ctx, "acme", nil, nil)
+	rawKey, _, err := a.CreateKey(ctx, "acme", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.True(t, strings.HasPrefix(rawKey, "gsk_"),
@@ -97,7 +97,7 @@ func TestAPIKeyAuthenticator_RevokedKeyRejected(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := context.Background()
 
-	rawKey, record, err := a.CreateKey(ctx, "acme", nil, nil)
+	rawKey, record, err := a.CreateKey(ctx, "acme", nil, nil, nil)
 	require.NoError(t, err)
 
 	// Sanity-check: key works before revocation.
@@ -120,7 +120,7 @@ func TestAPIKeyAuthenticator_RevokeIdempotent(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := context.Background()
 
-	_, record, err := a.CreateKey(ctx, "acme", nil, nil)
+	_, record, err := a.CreateKey(ctx, "acme", nil, nil, nil)
 	require.NoError(t, err)
 
 	require.NoError(t, a.RevokeKey(ctx, record.KeyID))
@@ -135,7 +135,7 @@ func TestAPIKeyAuthenticator_TenantExtraction(t *testing.T) {
 
 	const wantTenant = "acme"
 
-	rawKey, _, err := a.CreateKey(ctx, wantTenant, nil, nil)
+	rawKey, _, err := a.CreateKey(ctx, wantTenant, nil, nil, nil)
 	require.NoError(t, err)
 
 	identity, err := a.Authenticate(ctx, rawKey)
@@ -157,7 +157,7 @@ func TestAPIKeyAuthenticator_AllowedKinds(t *testing.T) {
 
 	wantKinds := []string{"scanner", "recon"}
 
-	_, record, err := a.CreateKey(ctx, "acme", wantKinds, nil)
+	_, record, err := a.CreateKey(ctx, "acme", wantKinds, nil, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, wantKinds, record.AllowedKinds,
@@ -172,7 +172,7 @@ func TestAPIKeyAuthenticator_AllowedKindsInIdentityClaims(t *testing.T) {
 
 	wantKinds := []string{"scanner", "recon"}
 
-	rawKey, _, err := a.CreateKey(ctx, "acme", wantKinds, nil)
+	rawKey, _, err := a.CreateKey(ctx, "acme", wantKinds, nil, nil)
 	require.NoError(t, err)
 
 	identity, err := a.Authenticate(ctx, rawKey)
@@ -189,7 +189,7 @@ func TestAPIKeyAuthenticator_NilAllowedKindsDefaultsToEmptySlice(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := context.Background()
 
-	_, record, err := a.CreateKey(ctx, "acme", nil, nil)
+	_, record, err := a.CreateKey(ctx, "acme", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.NotNil(t, record.AllowedKinds)
@@ -205,7 +205,7 @@ func TestAPIKeyAuthenticator_LastUsedAtUpdated(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := context.Background()
 
-	rawKey, record, err := a.CreateKey(ctx, "acme", nil, nil)
+	rawKey, record, err := a.CreateKey(ctx, "acme", nil, nil, nil)
 	require.NoError(t, err)
 
 	createdAt := record.CreatedAt
@@ -242,11 +242,11 @@ func TestAPIKeyAuthenticator_ListKeys(t *testing.T) {
 	const tenant = "acme"
 
 	// Create three keys for the tenant.
-	_, rec1, err := a.CreateKey(ctx, tenant, nil, nil)
+	_, rec1, err := a.CreateKey(ctx, tenant, nil, nil, nil)
 	require.NoError(t, err)
-	_, rec2, err := a.CreateKey(ctx, tenant, nil, nil)
+	_, rec2, err := a.CreateKey(ctx, tenant, nil, nil, nil)
 	require.NoError(t, err)
-	_, rec3, err := a.CreateKey(ctx, tenant, nil, nil)
+	_, rec3, err := a.CreateKey(ctx, tenant, nil, nil, nil)
 	require.NoError(t, err)
 
 	// Revoke the third key.
@@ -288,9 +288,9 @@ func TestAPIKeyAuthenticator_ListKeysIsolatedByTenant(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := context.Background()
 
-	_, _, err := a.CreateKey(ctx, "acme", nil, nil)
+	_, _, err := a.CreateKey(ctx, "acme", nil, nil, nil)
 	require.NoError(t, err)
-	_, _, err = a.CreateKey(ctx, "other-corp", nil, nil)
+	_, _, err = a.CreateKey(ctx, "other-corp", nil, nil, nil)
 	require.NoError(t, err)
 
 	acmeKeys, err := a.ListKeys(ctx, "acme")
@@ -305,7 +305,7 @@ func TestAPIKeyAuthenticator_EmptyTenantIDRejected(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := context.Background()
 
-	_, _, err := a.CreateKey(ctx, "", nil, nil)
+	_, _, err := a.CreateKey(ctx, "", nil, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "tenantID")
 }
@@ -316,9 +316,9 @@ func TestAPIKeyAuthenticator_KeysAreUnique(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := context.Background()
 
-	rawKey1, rec1, err := a.CreateKey(ctx, "acme", nil, nil)
+	rawKey1, rec1, err := a.CreateKey(ctx, "acme", nil, nil, nil)
 	require.NoError(t, err)
-	rawKey2, rec2, err := a.CreateKey(ctx, "acme", nil, nil)
+	rawKey2, rec2, err := a.CreateKey(ctx, "acme", nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, rawKey1, rawKey2, "raw keys must be distinct")
@@ -360,13 +360,13 @@ func TestAPIKeyAuthenticator_SystemTenantRequiresAdminRole(t *testing.T) {
 	a := newTestAuthenticator(t)
 
 	// No identity in context — must be rejected.
-	_, _, err := a.CreateKey(context.Background(), SystemTenant, nil, nil)
+	_, _, err := a.CreateKey(context.Background(), SystemTenant, nil, nil, nil)
 	require.Error(t, err, "no identity in context must be rejected")
 	assert.Contains(t, err.Error(), SystemTenant)
 
 	// Identity present but wrong role — must be rejected.
 	ctx := adminIdentityContext([]string{"viewer"})
-	_, _, err = a.CreateKey(ctx, SystemTenant, nil, nil)
+	_, _, err = a.CreateKey(ctx, SystemTenant, nil, nil, nil)
 	require.Error(t, err, "unprivileged role must be rejected")
 	assert.Contains(t, err.Error(), SystemTenant)
 }
@@ -377,7 +377,7 @@ func TestAPIKeyAuthenticator_SystemTenantAllowedForAdmin(t *testing.T) {
 	a := newTestAuthenticator(t)
 	ctx := adminIdentityContext([]string{"admin"})
 
-	rawKey, record, err := a.CreateKey(ctx, SystemTenant, nil, nil)
+	rawKey, record, err := a.CreateKey(ctx, SystemTenant, nil, nil, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, rawKey)
 	assert.Equal(t, SystemTenant, record.TenantID)
@@ -391,7 +391,7 @@ func TestAPIKeyAuthenticator_SystemTenantAllowedForPlatformOperator(t *testing.T
 	a := newTestAuthenticator(t)
 	ctx := adminIdentityContext([]string{"platform-operator"})
 
-	rawKey, record, err := a.CreateKey(ctx, SystemTenant, nil, nil)
+	rawKey, record, err := a.CreateKey(ctx, SystemTenant, nil, nil, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, rawKey)
 	assert.Equal(t, SystemTenant, record.TenantID)
@@ -405,7 +405,7 @@ func TestAPIKeyAuthenticator_SystemTenantKeyAuthenticatesWithCorrectTenant(t *te
 	a := newTestAuthenticator(t)
 	ctx := adminIdentityContext([]string{"admin"})
 
-	rawKey, _, err := a.CreateKey(ctx, SystemTenant, nil, nil)
+	rawKey, _, err := a.CreateKey(ctx, SystemTenant, nil, nil, nil)
 	require.NoError(t, err)
 
 	identity, err := a.Authenticate(context.Background(), rawKey)

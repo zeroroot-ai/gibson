@@ -728,3 +728,199 @@ func TestPluginAccessStore_ListAvailablePlugins_EmptyWhenNoSystemPlugins(t *test
 	require.NoError(t, err)
 	assert.Empty(t, catalog)
 }
+
+// ---------------------------------------------------------------------------
+// EffectiveReadEnabled / EffectiveWriteEnabled (unit tests — no Redis)
+// ---------------------------------------------------------------------------
+
+func TestPluginAccess_EffectiveAccess_LegacyEnabledRecord(t *testing.T) {
+	// A record with Enabled=true and both granular flags false must be treated
+	// as full read+write for backward compatibility.
+	access := &PluginAccess{
+		TenantID:     "t",
+		PluginName:   "p",
+		Enabled:      true,
+		ReadEnabled:  false,
+		WriteEnabled: false,
+	}
+
+	assert.True(t, access.EffectiveReadEnabled(), "legacy record must grant read")
+	assert.True(t, access.EffectiveWriteEnabled(), "legacy record must grant write")
+}
+
+func TestPluginAccess_EffectiveAccess_ReadOnly(t *testing.T) {
+	access := &PluginAccess{
+		TenantID:     "t",
+		PluginName:   "p",
+		Enabled:      true,
+		ReadEnabled:  true,
+		WriteEnabled: false,
+	}
+
+	assert.True(t, access.EffectiveReadEnabled())
+	assert.False(t, access.EffectiveWriteEnabled())
+}
+
+func TestPluginAccess_EffectiveAccess_WriteOnly(t *testing.T) {
+	access := &PluginAccess{
+		TenantID:     "t",
+		PluginName:   "p",
+		Enabled:      true,
+		ReadEnabled:  false,
+		WriteEnabled: true,
+	}
+
+	assert.False(t, access.EffectiveReadEnabled())
+	assert.True(t, access.EffectiveWriteEnabled())
+}
+
+func TestPluginAccess_EffectiveAccess_DisabledRecordGrantsNothing(t *testing.T) {
+	access := &PluginAccess{
+		TenantID:     "t",
+		PluginName:   "p",
+		Enabled:      false,
+		ReadEnabled:  true,
+		WriteEnabled: true,
+	}
+
+	assert.False(t, access.EffectiveReadEnabled(), "disabled record must not grant read even if flag is set")
+	assert.False(t, access.EffectiveWriteEnabled(), "disabled record must not grant write even if flag is set")
+}
+
+// ---------------------------------------------------------------------------
+// SetAccessGranularity
+// ---------------------------------------------------------------------------
+
+func TestPluginAccessStore_SetAccessGranularity_ReadOnly(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
+
+	require.NoError(t, store.SetAccessGranularity(ctx, "tenant-a", "gitlab", true, false))
+
+	access, err := store.GetAccess(ctx, "tenant-a", "gitlab")
+	require.NoError(t, err)
+	assert.True(t, access.ReadEnabled)
+	assert.False(t, access.WriteEnabled)
+	assert.True(t, access.EffectiveReadEnabled())
+	assert.False(t, access.EffectiveWriteEnabled())
+}
+
+func TestPluginAccessStore_SetAccessGranularity_WriteOnly(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
+
+	require.NoError(t, store.SetAccessGranularity(ctx, "tenant-a", "gitlab", false, true))
+
+	access, err := store.GetAccess(ctx, "tenant-a", "gitlab")
+	require.NoError(t, err)
+	assert.False(t, access.ReadEnabled)
+	assert.True(t, access.WriteEnabled)
+}
+
+func TestPluginAccessStore_SetAccessGranularity_BothEnabled(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
+
+	require.NoError(t, store.SetAccessGranularity(ctx, "tenant-a", "gitlab", true, true))
+
+	access, err := store.GetAccess(ctx, "tenant-a", "gitlab")
+	require.NoError(t, err)
+	assert.True(t, access.ReadEnabled)
+	assert.True(t, access.WriteEnabled)
+}
+
+func TestPluginAccessStore_SetAccessGranularity_FailsWhenNotEnabled(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	err := store.SetAccessGranularity(ctx, "tenant-a", "nonexistent", true, false)
+	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+}
+
+func TestPluginAccessStore_SetAccessGranularity_PreservesConfig(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	cfg := map[string]any{"token": "secret-token-value-here"}
+	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", cfg, "admin"))
+
+	// Change granularity — config must survive.
+	require.NoError(t, store.SetAccessGranularity(ctx, "tenant-a", "gitlab", true, false))
+
+	got, err := store.GetDecryptedConfig(ctx, "tenant-a", "gitlab")
+	require.NoError(t, err)
+	assert.Equal(t, "secret-token-value-here", got["token"])
+}
+
+// ---------------------------------------------------------------------------
+// CheckAccess
+// ---------------------------------------------------------------------------
+
+func TestPluginAccessStore_CheckAccess_LegacyRecord_GrantsReadAndWrite(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	// Enable without granular flags — legacy full-access semantics.
+	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
+
+	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", false), "read must be allowed")
+	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true), "write must be allowed")
+}
+
+func TestPluginAccessStore_CheckAccess_ReadOnlyRecord_DeniesWrite(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
+	require.NoError(t, store.SetAccessGranularity(ctx, "tenant-a", "gitlab", true, false))
+
+	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", false), "read must be allowed")
+	assert.ErrorIs(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true), ErrPluginAccessDenied, "write must be denied")
+}
+
+func TestPluginAccessStore_CheckAccess_WriteOnlyRecord_DeniesRead(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
+	require.NoError(t, store.SetAccessGranularity(ctx, "tenant-a", "gitlab", false, true))
+
+	assert.ErrorIs(t, store.CheckAccess(ctx, "tenant-a", "gitlab", false), ErrPluginAccessDenied, "read must be denied")
+	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true), "write must be allowed")
+}
+
+func TestPluginAccessStore_CheckAccess_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	err := store.CheckAccess(ctx, "tenant-a", "nonexistent", false)
+	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+}
+
+func TestPluginAccessStore_CheckAccess_BothGranted_GrantsReadAndWrite(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
+	require.NoError(t, store.SetAccessGranularity(ctx, "tenant-a", "gitlab", true, true))
+
+	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", false))
+	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true))
+}
+
+func TestPluginAccessStore_CheckAccess_AfterDisable_ReturnsErrPluginNotEnabled(t *testing.T) {
+	store, _ := newTestPluginAccessStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
+	require.NoError(t, store.Disable(ctx, "tenant-a", "gitlab"))
+
+	err := store.CheckAccess(ctx, "tenant-a", "gitlab", false)
+	assert.ErrorIs(t, err, ErrPluginNotEnabled)
+}

@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -179,8 +180,9 @@ type TenantCreator interface {
 type APIKeyCreator interface {
 	// CreateKey generates a new API key for the tenant.  rawKey is the only
 	// time the secret material is visible; record contains the persisted
-	// metadata.
-	CreateKey(ctx context.Context, tenantID string, allowedKinds, allowedNames []string) (rawKey string, record interface{}, err error)
+	// metadata. capabilities is the list of Casbin resource:action grants;
+	// pass nil for unrestricted access (backward-compatible legacy behaviour).
+	CreateKey(ctx context.Context, tenantID string, allowedKinds, allowedNames []string, capabilities []string) (rawKey string, record interface{}, err error)
 }
 
 // LangfuseSetup creates Langfuse observability projects for tenants.
@@ -204,6 +206,12 @@ type Provisioner struct {
 	langfuse LangfuseSetup  // optional; nil disables the create_langfuse step
 	keycloak *keycloak.Client // optional; nil disables the create_realm step
 	logger   *slog.Logger
+
+	// oidcClientSecret is the shared OIDC client secret used for the
+	// gibson-dashboard client in every per-tenant realm.  Using the same
+	// secret across realms allows the dashboard's CredentialsProvider to
+	// authenticate against any realm with a single set of credentials.
+	oidcClientSecret string
 
 	// retryMax is the maximum number of execution attempts per step before
 	// the provisioner marks the overall operation as failed.
@@ -245,6 +253,15 @@ func New(
 // skipped with a warning log and provisioning continues normally.
 func (p *Provisioner) WithKeycloak(kc *keycloak.Client) *Provisioner {
 	p.keycloak = kc
+	return p
+}
+
+// WithOIDCClientSecret sets the shared OIDC client secret that will be used
+// for the gibson-dashboard client created in each per-tenant realm.  This
+// ensures the dashboard can authenticate against any realm using a single
+// client secret.
+func (p *Provisioner) WithOIDCClientSecret(secret string) *Provisioner {
+	p.oidcClientSecret = secret
 	return p
 }
 
@@ -457,9 +474,31 @@ func (p *Provisioner) stepCreateRealm(ctx context.Context, req ProvisionRequest)
 		return fmt.Errorf("creating realm: %w", err)
 	}
 
+	// Grant our service account admin permissions on the newly created realm.
+	// Keycloak creates a {realm}-realm client in master with management roles;
+	// we need those roles assigned to our service account so subsequent
+	// operations (create client, roles, users) within the realm succeed.
+	if err := p.keycloak.GrantSelfAdminOnRealm(ctx, realmName); err != nil {
+		p.logger.WarnContext(ctx, "failed to grant self-admin on new realm (will retry operations)",
+			slog.String("realm", realmName),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	// Disable VERIFY_PROFILE so direct-grant (password) auth works without
+	// requiring users to complete their profile via browser flow.
+	p.keycloak.DisableRequiredAction(ctx, realmName, "VERIFY_PROFILE")
+
+	// Configure User Profile: add tenant_id attribute and allow @ in usernames.
+	// Keycloak 24+ silently drops unknown attributes and blocks email-as-username.
+	p.keycloak.ConfigureUserProfile(ctx, realmName)
+
 	// 2. Create the OIDC client used by the dashboard.
+	//    The shared oidcClientSecret ensures the dashboard's CredentialsProvider
+	//    can authenticate against any per-tenant realm with a single secret.
 	clientUUID, err := p.keycloak.CreateOIDCClient(ctx, realmName, keycloak.OIDCClientConfig{
 		ClientID:     "gibson-dashboard",
+		Secret:       p.oidcClientSecret,
 		RedirectURIs: []string{"*"},
 	})
 	if err != nil {
@@ -480,20 +519,23 @@ func (p *Provisioner) stepCreateRealm(ctx context.Context, req ProvisionRequest)
 		}
 	}
 
-	// 4. Add a hardcoded tenant_id claim mapper so every issued token carries
-	//    the tenant identifier without requiring runtime logic in the app.
+	// 4. Add a user-attribute-based tenant_id claim mapper so every issued
+	//    token carries the tenant identifier derived from the user's
+	//    tenant_id attribute.
 	if clientUUID != "" {
 		if mapErr := p.keycloak.AddProtocolMapper(ctx, realmName, clientUUID, keycloak.ProtocolMapperConfig{
 			Name:           "tenant_id",
 			Protocol:       "openid-connect",
-			ProtocolMapper: "oidc-hardcoded-claim-mapper",
+			ProtocolMapper: "oidc-usermodel-attribute-mapper",
 			Config: map[string]string{
+				"user.attribute":       "tenant_id",
 				"claim.name":           "tenant_id",
-				"claim.value":          req.TenantID,
 				"jsonType.label":       "String",
 				"id.token.claim":       "true",
 				"access.token.claim":   "true",
 				"userinfo.token.claim": "true",
+				"multivalued":          "false",
+				"aggregate.attrs":      "false",
 			},
 		}); mapErr != nil {
 			p.logger.WarnContext(ctx, "failed to add tenant_id protocol mapper",
@@ -503,13 +545,48 @@ func (p *Provisioner) stepCreateRealm(ctx context.Context, req ProvisionRequest)
 		}
 	}
 
+	// Add realm roles mapper so tokens include user's realm roles (owner, admin, etc.)
+	if clientUUID != "" {
+		if err := p.keycloak.AddProtocolMapper(ctx, realmName, clientUUID, keycloak.ProtocolMapperConfig{
+			Name:           "realm roles",
+			Protocol:       "openid-connect",
+			ProtocolMapper: "oidc-usermodel-realm-role-mapper",
+			Config: map[string]string{
+				"claim.name":           "realm_access.roles",
+				"jsonType.label":       "String",
+				"id.token.claim":       "true",
+				"access.token.claim":   "true",
+				"userinfo.token.claim": "true",
+				"multivalued":          "true",
+			},
+		}); err != nil {
+			p.logger.WarnContext(ctx, "failed to add realm roles mapper",
+				slog.String("realm", realmName),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+
+	// 4b. Add the "email" client scope as a default so tokens include the email claim.
+	if clientUUID != "" {
+		if err := p.keycloak.AddDefaultClientScope(ctx, realmName, clientUUID, "email"); err != nil {
+			p.logger.WarnContext(ctx, "failed to add email scope to OIDC client",
+				slog.String("realm", realmName),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+
 	// 5. Create the owner user in the new realm.
 	if req.OwnerEmail != "" {
 		userID, userErr := p.keycloak.CreateUser(ctx, realmName, keycloak.UserConfig{
 			Username:      req.OwnerEmail,
 			Email:         req.OwnerEmail,
+			FirstName:     req.DisplayName,
+			LastName:      "Owner",
 			Enabled:       true,
 			EmailVerified: true, // User completed signup flow.
+			Attributes:    map[string][]string{"tenant_id": {req.TenantID}},
 		})
 		if userErr != nil {
 			p.logger.WarnContext(ctx, "failed to create owner user",
@@ -530,6 +607,15 @@ func (p *Provisioner) stepCreateRealm(ctx context.Context, req ProvisionRequest)
 					slog.String("realm", realmName),
 					slog.String("user_id", userID),
 				)
+			}
+
+			// Write email→tenant index so login can resolve the tenant from the
+			// owner's email address without scanning Keycloak realms.
+			indexKey := fmt.Sprintf("gibson:email-tenant:%s", strings.ToLower(req.OwnerEmail))
+			if err := p.redis.Set(ctx, indexKey, req.TenantID, 0).Err(); err != nil {
+				p.logger.WarnContext(ctx, "failed to write email-tenant index",
+					"email", req.OwnerEmail, "error", err)
+				// Don't fail provisioning over index write failure
 			}
 		}
 	}
@@ -595,7 +681,7 @@ func (p *Provisioner) stepGenerateAPIKey(ctx context.Context, tenantID string) (
 		return "", nil
 	}
 
-	rawKey, _, err := p.apikeys.CreateKey(ctx, tenantID, nil, nil)
+	rawKey, _, err := p.apikeys.CreateKey(ctx, tenantID, nil, nil, []string{"*"})
 	if err != nil {
 		return "", fmt.Errorf("create API key: %w", err)
 	}
@@ -699,6 +785,18 @@ func (p *Provisioner) DeprovisionTenant(ctx context.Context, tenantID string) er
 			slog.String("tenant_id", tenantID),
 			slog.String("error", delErr.Error()),
 		)
+	}
+
+	// Clean up the email→tenant index if we can determine the owner email.
+	if ownerEmail, emailErr := extractConfigField(record, "owner_email"); emailErr == nil && ownerEmail != "" {
+		indexKey := fmt.Sprintf("gibson:email-tenant:%s", strings.ToLower(ownerEmail))
+		if delErr := p.redis.Del(ctx, indexKey).Err(); delErr != nil {
+			p.logger.WarnContext(ctx, "failed to remove email-tenant index after deprovision",
+				slog.String("tenant_id", tenantID),
+				slog.String("email", ownerEmail),
+				slog.String("error", delErr.Error()),
+			)
+		}
 	}
 
 	p.logger.InfoContext(ctx, "tenant deprovisioned",
@@ -915,4 +1013,30 @@ func extractStatus(record interface{}) (string, error) {
 		return "", errors.New("status field missing or not a string")
 	}
 	return s, nil
+}
+
+// extractConfigField reads a field from the Config map of an opaque tenant
+// record via JSON round-trip.  This is used during deprovision to recover
+// the owner_email without a hard dependency on the concrete TenantRecord type.
+func extractConfigField(record interface{}, field string) (string, error) {
+	data, err := json.Marshal(record)
+	if err != nil {
+		return "", fmt.Errorf("marshal record for config extraction: %w", err)
+	}
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return "", fmt.Errorf("unmarshal record for config extraction: %w", err)
+	}
+
+	cfg, ok := m["config"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("config field missing or not a map")
+	}
+
+	v, ok := cfg[field].(string)
+	if !ok {
+		return "", fmt.Errorf("config field %q missing or not a string", field)
+	}
+	return v, nil
 }

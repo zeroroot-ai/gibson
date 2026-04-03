@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/casbin/casbin/v2"
 	"github.com/redis/go-redis/v9"
 	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
@@ -101,6 +102,17 @@ type APIKeyRecord struct {
 	// Updated asynchronously on each successful Authenticate call.
 	LastUsedAt time.Time `json:"last_used_at"`
 
+	// Capabilities are the Casbin resource:action grants for this key.
+	// Each entry is a capability string parsed by ParseCapability to derive
+	// the (resource, action) tuple stored as a Casbin policy rule.
+	//
+	// An empty slice means "all capabilities" for backward compatibility with
+	// keys created before capability-scoping was introduced; Authenticate will
+	// normalise this to []string{"*"} when building the Identity.
+	//
+	// Examples: ["graphrag:write", "plugin:gitlab:read", "missions:execute", "*"]
+	Capabilities []string `json:"capabilities"`
+
 	// Status is either "active" or "revoked".
 	// Revoked keys are retained in Redis for audit purposes but will never
 	// authenticate successfully.
@@ -119,17 +131,34 @@ type APIKeyRecord struct {
 // Thread-safe for concurrent use.
 // Implements the Authenticator interface.
 type APIKeyAuthenticator struct {
-	client *redis.Client
+	client   *redis.Client
+	enforcer *casbin.Enforcer
 }
 
 // NewAPIKeyAuthenticator creates a new authenticator backed by the provided Redis client.
 //
 // The client must be connected and ready; no dial is performed here.
+// To enable Casbin policy synchronisation, call WithEnforcer after construction.
 func NewAPIKeyAuthenticator(client *redis.Client) (*APIKeyAuthenticator, error) {
 	if client == nil {
 		return nil, fmt.Errorf("redis client is nil")
 	}
 	return &APIKeyAuthenticator{client: client}, nil
+}
+
+// WithEnforcer wires a Casbin enforcer into the authenticator so that
+// CreateKey and RevokeKey automatically sync policies to the Casbin store.
+//
+// This method returns the receiver to allow call chaining:
+//
+//	auth, _ := NewAPIKeyAuthenticator(redisClient)
+//	auth.WithEnforcer(enforcer)
+//
+// Calling this with a nil enforcer is a no-op; the authenticator continues to
+// operate without Casbin synchronisation.
+func (a *APIKeyAuthenticator) WithEnforcer(enforcer *casbin.Enforcer) *APIKeyAuthenticator {
+	a.enforcer = enforcer
+	return a
 }
 
 // CreateKey generates a new tenant-scoped API key and persists the record.
@@ -139,6 +168,14 @@ func NewAPIKeyAuthenticator(client *redis.Client) (*APIKeyAuthenticator, error) 
 // never logged or stored by this function.
 //
 // Key format: gsk_{tenantID}_{32_hex_random}
+//
+// capabilities is the list of Casbin resource:action grants for this key.
+// Pass nil or an empty slice to grant unrestricted access (legacy behaviour);
+// the record will store an empty slice and Authenticate will normalise it to
+// []string{"*"} when building the Identity.
+//
+// If the authenticator has an enforcer configured (via WithEnforcer), Casbin
+// policies are added for each capability immediately after the Redis writes.
 //
 // Redis writes (non-atomic — partial failure is possible; the secondary
 // hash-lookup entry is written last so a missing reverse-lookup entry causes
@@ -150,6 +187,7 @@ func (a *APIKeyAuthenticator) CreateKey(
 	ctx context.Context,
 	tenantID string,
 	allowedKinds, allowedNames []string,
+	capabilities []string,
 ) (rawKey string, record *APIKeyRecord, err error) {
 	if tenantID == "" {
 		return "", nil, fmt.Errorf("tenantID must not be empty")
@@ -192,6 +230,7 @@ func (a *APIKeyAuthenticator) CreateKey(
 		AllowedKinds: allowedKinds,
 		AllowedNames: allowedNames,
 		Permissions:  []string{},
+		Capabilities: capabilities,
 		CreatedAt:    now,
 		LastUsedAt:   now,
 		Status:       apiKeyStatusActive,
@@ -201,6 +240,9 @@ func (a *APIKeyAuthenticator) CreateKey(
 	}
 	if record.AllowedNames == nil {
 		record.AllowedNames = []string{}
+	}
+	if record.Capabilities == nil {
+		record.Capabilities = []string{}
 	}
 
 	data, err := json.Marshal(record)
@@ -234,11 +276,26 @@ func (a *APIKeyAuthenticator) CreateKey(
 		return "", nil, fmt.Errorf("failed to store API key hash lookup: %w", err)
 	}
 
+	// Sync Casbin policies for the new key's capabilities if an enforcer is
+	// configured. This is best-effort: a Casbin failure does not roll back the
+	// Redis writes because the key must be usable even when the policy store is
+	// temporarily unavailable. The policies can be recovered via SyncAllPolicies.
+	if a.enforcer != nil && len(record.Capabilities) > 0 {
+		if casbinErr := AddPoliciesForKey(a.enforcer, keyID, tenantID, record.Capabilities); casbinErr != nil {
+			slog.Warn("apikey: failed to sync Casbin policies for new key",
+				"key_id", keyID,
+				"tenant_id", tenantID,
+				"error", casbinErr,
+			)
+		}
+	}
+
 	slog.Info("apikey: created new API key",
 		"key_id", keyID,
 		"tenant_id", tenantID,
 		"allowed_kinds", allowedKinds,
 		"allowed_names", allowedNames,
+		"capabilities", record.Capabilities,
 	)
 
 	return rawKey, record, nil
@@ -319,6 +376,15 @@ func (a *APIKeyAuthenticator) Authenticate(ctx context.Context, token string) (*
 	// Build permissions from the record's permission strings.
 	permissions := parsePermissions(record.Permissions)
 
+	// Resolve capabilities with backward-compatibility: keys created before
+	// capability-scoping was introduced have an empty Capabilities slice. Treat
+	// this as unrestricted ("*") so existing keys continue to work without
+	// requiring a migration.
+	caps := record.Capabilities
+	if len(caps) == 0 {
+		caps = []string{"*"}
+	}
+
 	// Build the Identity. Tenant is encoded in Claims["tenant_id"] following
 	// the existing ExtractTenantFromIdentity("tenant_id") convention.
 	identity := &Identity{
@@ -336,8 +402,9 @@ func (a *APIKeyAuthenticator) Authenticate(ctx context.Context, token string) (*
 			ExpiresAt:       time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC),
 			AuthenticatedAt: time.Now().UTC(),
 		},
-		Roles:       []string{},
-		Permissions: permissions,
+		Roles:        []string{},
+		Permissions:  permissions,
+		Capabilities: caps,
 	}
 
 	recordAuthAttempt(ctx, apiKeyIssuer, "success")
@@ -375,6 +442,20 @@ func (a *APIKeyAuthenticator) RevokeKey(ctx context.Context, keyID string) error
 	recordKey := apiKeyRecordKeyPrefix + keyID
 	if err := a.client.Set(ctx, recordKey, data, 0).Err(); err != nil {
 		return fmt.Errorf("failed to update API key record for revocation: %w", err)
+	}
+
+	// Remove all Casbin policies for the revoked key so it can no longer be
+	// used for authorization decisions even if somehow re-activated in Redis.
+	// Best-effort: a Casbin failure is logged but does not cause RevokeKey to
+	// return an error, since the Redis record is already marked revoked.
+	if a.enforcer != nil {
+		if casbinErr := RemovePoliciesForKey(a.enforcer, keyID); casbinErr != nil {
+			slog.Warn("apikey: failed to remove Casbin policies on revocation",
+				"key_id", keyID,
+				"tenant_id", record.TenantID,
+				"error", casbinErr,
+			)
+		}
 	}
 
 	slog.Info("apikey: revoked API key",
@@ -417,6 +498,92 @@ func (a *APIKeyAuthenticator) ListKeys(ctx context.Context, tenantID string) ([]
 	}
 
 	return records, nil
+}
+
+// SyncAllPolicies loads every active API key from Redis across all known tenants
+// and ensures that each key's Casbin policies exist in the enforcer.
+//
+// This is intended for use at daemon startup to reconcile the Casbin policy store
+// with the ground-truth key records in Redis. It is safe to call multiple times;
+// AddPoliciesForKey is idempotent for policies that already exist.
+//
+// Returns a non-nil error only if the initial tenant-set scan fails. Per-key
+// errors are logged and skipped so that a single corrupt record does not block
+// the rest of the sync.
+//
+// No-op if the authenticator has no enforcer configured.
+func (a *APIKeyAuthenticator) SyncAllPolicies(ctx context.Context) error {
+	if a.enforcer == nil {
+		return nil
+	}
+
+	// Scan all apikeys:tenant:* keys to discover every known tenant.
+	pattern := apiKeyTenantSetKeyPrefix + "*"
+	var cursor uint64
+	var tenantSetKeys []string
+	for {
+		keys, nextCursor, err := a.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return fmt.Errorf("apikey: SyncAllPolicies: failed to scan tenant sets: %w", err)
+		}
+		tenantSetKeys = append(tenantSetKeys, keys...)
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	synced, skipped := 0, 0
+	for _, tenantSetKey := range tenantSetKeys {
+		tenantID := tenantSetKey[len(apiKeyTenantSetKeyPrefix):]
+
+		keyIDs, err := a.client.SMembers(ctx, tenantSetKey).Result()
+		if err != nil {
+			slog.Warn("apikey: SyncAllPolicies: failed to list keys for tenant",
+				"tenant_id", tenantID,
+				"error", err,
+			)
+			skipped++
+			continue
+		}
+
+		for _, keyID := range keyIDs {
+			record, err := a.fetchRecord(ctx, keyID)
+			if err != nil {
+				slog.Warn("apikey: SyncAllPolicies: skipping key with missing record",
+					"key_id", keyID,
+					"tenant_id", tenantID,
+					"error", err,
+				)
+				skipped++
+				continue
+			}
+
+			// Only sync active keys with explicit capability grants. Inactive keys
+			// have their policies removed on revocation; omit legacy wildcard keys
+			// from Casbin since they were never added there in the first place.
+			if record.Status != apiKeyStatusActive || len(record.Capabilities) == 0 {
+				continue
+			}
+
+			if err := AddPoliciesForKey(a.enforcer, record.KeyID, record.TenantID, record.Capabilities); err != nil {
+				slog.Warn("apikey: SyncAllPolicies: failed to sync policies for key",
+					"key_id", keyID,
+					"tenant_id", tenantID,
+					"error", err,
+				)
+				skipped++
+				continue
+			}
+			synced++
+		}
+	}
+
+	slog.Info("apikey: SyncAllPolicies complete",
+		"synced", synced,
+		"skipped", skipped,
+	)
+	return nil
 }
 
 // fetchRecord retrieves and unmarshals the APIKeyRecord for the given key_id.

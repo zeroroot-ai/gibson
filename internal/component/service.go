@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
+	"github.com/casbin/casbin/v2"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
@@ -169,6 +170,11 @@ type ComponentServiceServer struct {
 	// quotaManager enforces per-tenant agent quotas during RegisterComponent.
 	// May be nil; when nil, quota checks are skipped entirely.
 	quotaManager *QuotaManager
+
+	// enforcer is the Casbin enforcer used for capability-based authorization.
+	// May be nil; when nil, Casbin enforcement is skipped entirely (backward
+	// compatible with dev mode and deployments where Casbin is not configured).
+	enforcer *casbin.Enforcer
 }
 
 // NewComponentServiceServer constructs a ComponentServiceServer with the core
@@ -252,6 +258,21 @@ func (s *ComponentServiceServer) WithQuotaManager(qm *QuotaManager) *ComponentSe
 	return s
 }
 
+// WithEnforcer attaches a Casbin enforcer for capability-based authorization
+// checks during RegisterComponent. When non-nil, the enforcer is used to verify
+// that the authenticated identity holds the "components:register" capability for
+// the target tenant domain. Passing nil is safe and disables Casbin enforcement
+// (backward compatible for dev mode or deployments without Casbin configured).
+//
+// Call this immediately after NewComponentServiceServer and before serving RPCs:
+//
+//	svc := component.NewComponentServiceServer(...)
+//	svc.WithEnforcer(casbinEnforcer)
+func (s *ComponentServiceServer) WithEnforcer(e *casbin.Enforcer) *ComponentServiceServer {
+	s.enforcer = e
+	return s
+}
+
 // ---------------------------------------------------------------------------
 // RegisterComponent
 // ---------------------------------------------------------------------------
@@ -271,6 +292,110 @@ func (s *ComponentServiceServer) RegisterComponent(
 	tenant := auth.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
+	}
+
+	// ---------------------------------------------------------------------------
+	// Capability-based authorization
+	//
+	// When an authenticated identity is present in the context, validate that the
+	// registering component's Kind and Name are permitted by the identity's
+	// allowed_kinds / allowed_names claims, and that the identity holds the
+	// "components:register" Casbin capability. Identities without these claims
+	// (empty slice = unrestricted) pass through.
+	//
+	// When no identity is present we skip all checks to preserve backward
+	// compatibility for dev mode and in-cluster service accounts that do not
+	// carry a Gibson identity.
+	// ---------------------------------------------------------------------------
+	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
+		// Check allowed_kinds: if the claim is non-empty, the request Kind must
+		// appear in it. An empty (or absent) slice means all kinds are permitted.
+		if rawKinds, exists := identity.Claims["allowed_kinds"]; exists {
+			var allowedKinds []string
+			switch v := rawKinds.(type) {
+			case []string:
+				allowedKinds = v
+			case []interface{}:
+				for _, elem := range v {
+					if s, ok := elem.(string); ok {
+						allowedKinds = append(allowedKinds, s)
+					}
+				}
+			}
+			if len(allowedKinds) > 0 {
+				permitted := false
+				for _, k := range allowedKinds {
+					if k == req.Kind {
+						permitted = true
+						break
+					}
+				}
+				if !permitted {
+					s.logger.WarnContext(ctx, "component registration rejected: kind not in allowed_kinds",
+						slog.String("tenant", tenant),
+						slog.String("kind", req.Kind),
+						slog.String("subject", identity.Subject),
+					)
+					return nil, status.Errorf(codes.PermissionDenied, "component kind %q not permitted for this identity", req.Kind)
+				}
+			}
+		}
+
+		// Check allowed_names: if the claim is non-empty, the request Name must
+		// appear in it. An empty (or absent) slice means all names are permitted.
+		if rawNames, exists := identity.Claims["allowed_names"]; exists {
+			var allowedNames []string
+			switch v := rawNames.(type) {
+			case []string:
+				allowedNames = v
+			case []interface{}:
+				for _, elem := range v {
+					if s, ok := elem.(string); ok {
+						allowedNames = append(allowedNames, s)
+					}
+				}
+			}
+			if len(allowedNames) > 0 {
+				permitted := false
+				for _, n := range allowedNames {
+					if n == req.Name {
+						permitted = true
+						break
+					}
+				}
+				if !permitted {
+					s.logger.WarnContext(ctx, "component registration rejected: name not in allowed_names",
+						slog.String("tenant", tenant),
+						slog.String("name", req.Name),
+						slog.String("subject", identity.Subject),
+					)
+					return nil, status.Errorf(codes.PermissionDenied, "component name %q not permitted for this identity", req.Name)
+				}
+			}
+		}
+
+		// Casbin enforcement: verify the subject holds the "components:register"
+		// capability within the tenant domain. Skipped when enforcer is nil.
+		if s.enforcer != nil {
+			allowed, err := s.enforcer.Enforce(identity.Subject, tenant, "components", "register")
+			if err != nil {
+				s.logger.ErrorContext(ctx, "casbin enforce error during component registration",
+					slog.String("tenant", tenant),
+					slog.String("subject", identity.Subject),
+					slog.String("error", err.Error()),
+				)
+				return nil, status.Errorf(codes.Internal, "authorization check failed: %v", err)
+			}
+			if !allowed {
+				s.logger.WarnContext(ctx, "component registration rejected: missing casbin capability",
+					slog.String("tenant", tenant),
+					slog.String("kind", req.Kind),
+					slog.String("name", req.Name),
+					slog.String("subject", identity.Subject),
+				)
+				return nil, status.Error(codes.PermissionDenied, "missing capability: components:register")
+			}
+		}
 	}
 
 	if req.Kind == "" {

@@ -100,7 +100,7 @@ func newStubAPIKeys(rawKey string) *stubAPIKeys {
 	return &stubAPIKeys{rawKey: rawKey}
 }
 
-func (s *stubAPIKeys) CreateKey(_ context.Context, _ string, _, _ []string) (string, interface{}, error) {
+func (s *stubAPIKeys) CreateKey(_ context.Context, _ string, _, _, _ []string) (string, interface{}, error) {
 	s.calls++
 	if s.err != nil {
 		return "", nil, s.err

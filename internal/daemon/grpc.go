@@ -138,6 +138,13 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 					)
 					prov.WithKeycloak(kcClient)
 					d.logger.Info(ctx, "keycloak admin client wired into provisioner", "base_url", d.config.Keycloak.BaseURL)
+
+					// Pass the shared OIDC client secret so per-tenant
+					// realms get a gibson-dashboard client with the same
+					// secret the dashboard uses in the shared gibson realm.
+					if oidcSecret := os.Getenv("OIDC_CLIENT_SECRET"); oidcSecret != "" {
+						prov.WithOIDCClientSecret(oidcSecret)
+					}
 				}
 
 				daemonSvc.WithProvisioner(prov)
@@ -2706,6 +2713,6 @@ type apiKeyCreatorAdapter struct {
 	auth *auth.APIKeyAuthenticator
 }
 
-func (a *apiKeyCreatorAdapter) CreateKey(ctx context.Context, tenantID string, allowedKinds, allowedNames []string) (string, interface{}, error) {
-	return a.auth.CreateKey(ctx, tenantID, allowedKinds, allowedNames)
+func (a *apiKeyCreatorAdapter) CreateKey(ctx context.Context, tenantID string, allowedKinds, allowedNames []string, capabilities []string) (string, interface{}, error) {
+	return a.auth.CreateKey(ctx, tenantID, allowedKinds, allowedNames, capabilities)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/casbin/casbin/v2"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -57,7 +58,8 @@ type HarnessFactoryInterface interface {
 // It provides a production-ready implementation of the factory pattern for creating
 // agent harnesses with proper dependency injection and state management.
 type DefaultHarnessFactory struct {
-	config HarnessConfig
+	config   HarnessConfig
+	enforcer *casbin.Enforcer
 }
 
 // NewHarnessFactory creates a new DefaultHarnessFactory with the given configuration.
@@ -86,7 +88,8 @@ func NewHarnessFactory(config HarnessConfig) (*DefaultHarnessFactory, error) {
 	}
 
 	return &DefaultHarnessFactory{
-		config: config,
+		config:   config,
+		enforcer: config.Enforcer,
 	}, nil
 }
 
@@ -247,6 +250,13 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		workQueue:           f.config.WorkQueue,
 		workQueueTimeout:    f.config.WorkQueueTimeout,
 		pluginAccess:        f.config.PluginAccess,
+	}
+
+	// Wrap with AuthorizingHarness if a Casbin enforcer is configured.
+	// This must happen before middleware so that capability checks run on the inner
+	// harness and observability middleware wraps around the authorizing layer.
+	if f.enforcer != nil {
+		harness = NewAuthorizingHarness(harness, f.enforcer)
 	}
 
 	// Apply middleware if configured

@@ -77,7 +77,7 @@ type DaemonServer struct {
 	// May be nil; wired when the API key service is available.
 	// TODO: replace with concrete type once apikey package is introduced.
 	apiKeyStore interface {
-		Create(ctx context.Context, tenantID string, allowedKinds, allowedNames []string) (keyID, rawKey string, err error)
+		Create(ctx context.Context, tenantID string, allowedKinds, allowedNames, capabilities []string, name, createdBy string) (keyID, rawKey string, err error)
 		List(ctx context.Context, tenantID string) ([]APIKeyRecord, error)
 		Revoke(ctx context.Context, keyID string) error
 	}
@@ -727,6 +727,9 @@ type APIKeyRecord struct {
 	LastUsedAt   string
 	AllowedKinds []string
 	AllowedNames []string
+	Name         string
+	Capabilities []string
+	CreatedBy    string
 }
 
 // BillingUsageRecord holds current resource consumption metrics for a tenant.
@@ -915,6 +918,17 @@ func parseInt32(s string) (int32, error) {
 	var n int32
 	_, err := fmt.Sscanf(s, "%d", &n)
 	return n, err
+}
+
+// containsString reports whether needle is present in the haystack slice.
+// Used for capability-based scope filtering on agent lists.
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // Connect establishes a client connection to the daemon.
@@ -1193,6 +1207,13 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *ListMissionsReques
 }
 
 // ListAgents returns all registered agents from the etcd registry.
+//
+// Capability-based filtering is applied when an authenticated identity is present
+// in the context. If the identity carries non-empty allowed_kinds or allowed_names
+// claims (scoped API keys), only agents matching those constraints are returned.
+// Identities with the wildcard capability "*" always receive the full list.
+// When no identity is present (dev mode / unauthenticated path), no filtering is
+// applied for backward compatibility.
 func (s *DaemonServer) ListAgents(ctx context.Context, req *ListAgentsRequest) (*ListAgentsResponse, error) {
 	s.logger.Debug("agent list request received", "kind", req.Kind)
 
@@ -1200,6 +1221,41 @@ func (s *DaemonServer) ListAgents(ctx context.Context, req *ListAgentsRequest) (
 	if err != nil {
 		s.logger.Error("failed to list agents", "error", err)
 		return nil, status_grpc.Errorf(codes.Internal, "failed to list agents: %v", err)
+	}
+
+	// Apply capability-based scope filtering when an identity is present.
+	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok && !identity.HasCapability("*") {
+		// Extract allowed_kinds and allowed_names from the identity claims.
+		// These are set by APIKeyAuthenticator for scoped API keys.
+		var allowedKinds, allowedNames []string
+		if v, exists := identity.GetClaim("allowed_kinds"); exists {
+			if kinds, ok := v.([]string); ok {
+				allowedKinds = kinds
+			}
+		}
+		if v, exists := identity.GetClaim("allowed_names"); exists {
+			if names, ok := v.([]string); ok {
+				allowedNames = names
+			}
+		}
+
+		// Only filter when at least one scope constraint is present.
+		if len(allowedKinds) > 0 || len(allowedNames) > 0 {
+			filtered := agents[:0]
+			for _, a := range agents {
+				kindAllowed := len(allowedKinds) == 0 || containsString(allowedKinds, a.Kind)
+				nameAllowed := len(allowedNames) == 0 || containsString(allowedNames, a.Name)
+				if kindAllowed && nameAllowed {
+					filtered = append(filtered, a)
+				}
+			}
+			agents = filtered
+			s.logger.Debug("agent list filtered by identity scope",
+				"allowed_kinds", allowedKinds,
+				"allowed_names", allowedNames,
+				"result_count", len(agents),
+			)
+		}
 	}
 
 	// Convert to proto messages
@@ -1250,8 +1306,26 @@ func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *GetAgentStatusRe
 }
 
 // ListTools returns all registered tools from the etcd registry.
+//
+// Capability-based filtering is applied when an authenticated identity is present.
+// The identity must hold the "tools:execute" capability (or the wildcard "*") to
+// receive any tools. If neither capability is present, an empty list is returned.
+// When no identity is present (dev mode / unauthenticated path), no filtering is
+// applied for backward compatibility.
 func (s *DaemonServer) ListTools(ctx context.Context, req *ListToolsRequest) (*ListToolsResponse, error) {
 	s.logger.Debug("tool list request received")
+
+	// Gate the entire tool list on the tools:execute capability when an identity
+	// is present. An identity without this capability should not be able to
+	// discover or invoke tools.
+	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
+		if !identity.HasCapability("tools:execute") && !identity.HasCapability("*") {
+			s.logger.Debug("tool list denied: identity lacks tools:execute capability",
+				"subject", identity.Subject,
+			)
+			return &ListToolsResponse{Tools: []*ToolInfo{}}, nil
+		}
+	}
 
 	tools, err := s.daemon.ListTools(ctx)
 	if err != nil {
@@ -1291,6 +1365,13 @@ func (s *DaemonServer) ListTools(ctx context.Context, req *ListToolsRequest) (*L
 }
 
 // ListPlugins returns all registered plugins from the etcd registry.
+//
+// Capability-based filtering is applied when an authenticated identity is present.
+// For each plugin, the identity must hold either the "plugin:{name}:read" capability
+// or the wildcard "*" capability to see that plugin in the response. Plugins the
+// identity is not authorised to see are silently omitted.
+// When no identity is present (dev mode / unauthenticated path), no filtering is
+// applied for backward compatibility.
 func (s *DaemonServer) ListPlugins(ctx context.Context, req *ListPluginsRequest) (*ListPluginsResponse, error) {
 	s.logger.Debug("plugin list request received")
 
@@ -1298,6 +1379,22 @@ func (s *DaemonServer) ListPlugins(ctx context.Context, req *ListPluginsRequest)
 	if err != nil {
 		s.logger.Error("failed to list plugins", "error", err)
 		return nil, status_grpc.Errorf(codes.Internal, "failed to list plugins: %v", err)
+	}
+
+	// When an identity is present and does not hold the wildcard capability,
+	// filter the plugin list to only those the identity is authorised to read.
+	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok && !identity.HasCapability("*") {
+		filtered := plugins[:0]
+		for _, p := range plugins {
+			if identity.HasCapability("plugin:" + p.Name + ":read") {
+				filtered = append(filtered, p)
+			}
+		}
+		plugins = filtered
+		s.logger.Debug("plugin list filtered by identity capabilities",
+			"subject", identity.Subject,
+			"result_count", len(plugins),
+		)
 	}
 
 	// Convert to proto messages
@@ -3304,6 +3401,34 @@ func (s *DaemonServer) GetTenantByStripeCustomerId(ctx context.Context, req *Get
 	}, nil
 }
 
+// GetTenantByEmail resolves an owner email address to the tenant that owns it,
+// using the reverse-mapping index maintained by TenantService.
+func (s *DaemonServer) GetTenantByEmail(ctx context.Context, req *GetTenantByEmailRequest) (*GetTenantByEmailResponse, error) {
+	if s.tenantService == nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
+	}
+	if req.Email == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "email is required")
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+
+	record, err := s.tenantService.GetTenantByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, component.ErrTenantNotFound) {
+			return nil, status_grpc.Errorf(codes.NotFound, "no tenant for email %q", email)
+		}
+		s.logger.Error("failed to get tenant by email", "email", email, "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to get tenant by email: %v", err)
+	}
+
+	return &GetTenantByEmailResponse{
+		TenantId:  record.TenantID,
+		RealmName: record.KeycloakRealmName,
+		Status:    record.Status,
+	}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Onboarding RPCs
 // ---------------------------------------------------------------------------
@@ -3496,13 +3621,24 @@ func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReques
 		return nil, status_grpc.Errorf(codes.Unimplemented, "api key service not configured")
 	}
 
-	keyID, rawKey, err := s.apiKeyStore.Create(ctx, req.TenantId, req.AllowedKinds, req.AllowedNames)
+	// Extract the caller's email for the audit trail. Fall back to the subject
+	// when no email claim is present (e.g. service-account tokens).
+	createdBy := ""
+	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
+		if identity.Email != "" {
+			createdBy = identity.Email
+		} else {
+			createdBy = identity.Subject
+		}
+	}
+
+	keyID, rawKey, err := s.apiKeyStore.Create(ctx, req.TenantId, req.AllowedKinds, req.AllowedNames, req.Capabilities, req.Name, createdBy)
 	if err != nil {
 		s.logger.Error("failed to create API key", "tenant_id", req.TenantId, "error", err)
 		return nil, status_grpc.Errorf(codes.Internal, "failed to create API key: %v", err)
 	}
 
-	s.logger.Info("API key created via RPC", "tenant_id", req.TenantId, "key_id", keyID)
+	s.logger.Info("API key created via RPC", "tenant_id", req.TenantId, "key_id", keyID, "name", req.Name, "created_by", createdBy)
 	return &CreateAPIKeyResponse{KeyId: keyID, RawKey: rawKey, TenantId: req.TenantId}, nil
 }
 
@@ -3535,6 +3671,9 @@ func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest)
 			LastUsedAt:   rec.LastUsedAt,
 			AllowedKinds: rec.AllowedKinds,
 			AllowedNames: rec.AllowedNames,
+			Name:         rec.Name,
+			Capabilities: rec.Capabilities,
+			CreatedBy:    rec.CreatedBy,
 		})
 	}
 

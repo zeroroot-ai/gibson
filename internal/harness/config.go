@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/casbin/casbin/v2"
 	"github.com/zero-day-ai/gibson/internal/checkpoint"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/events"
@@ -238,6 +239,14 @@ type HarnessConfig struct {
 	// When nil, access enforcement is skipped (backward-compatible behavior).
 	// Optional.
 	PluginAccess component.PluginAccessStore
+
+	// Enforcer is the Casbin enforcer used to gate AgentHarness method calls with
+	// capability-based access control. When set, Create() wraps every harness with
+	// an AuthorizingHarness that checks (sub, tenant, resource, action) tuples before
+	// delegating to the inner harness. When nil, no Casbin enforcement is applied
+	// (backward-compatible behavior).
+	// Optional.
+	Enforcer *casbin.Enforcer
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.
