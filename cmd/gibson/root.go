@@ -2,16 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/zero-day-ai/gibson/cmd/gibson/component"
 	"github.com/zero-day-ai/gibson/cmd/gibson/mode"
 	"github.com/zero-day-ai/gibson/internal/config"
-	daemonclient "github.com/zero-day-ai/gibson/internal/daemon/client"
 	"github.com/zero-day-ai/gibson/internal/harness"
 )
 
@@ -87,34 +84,10 @@ func loadConfig(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Client mode: connect to existing daemon
-	if cmdMode == mode.Client {
-		// Connect to daemon using the client library
-		client, err := daemonclient.ConnectOrFail(cmd.Context())
-		if err != nil {
-			return err
-		}
-
-		// Store client in context for subcommands
-		ctx := component.WithDaemonClient(cmd.Context(), client)
-		cmd.SetContext(ctx)
-
-		if flags.IsVerbose() {
-			cmd.PrintErrf("Connected to daemon\n")
-		}
-
-		return nil
-	}
-
-	// This should never happen (all modes should be handled above)
-	return fmt.Errorf("unknown command mode: %v", cmdMode)
+	return nil
 }
 
 // shutdown gracefully shuts down resources when Gibson exits.
-// The shutdown behavior depends on the command mode:
-// - Daemon mode: stop registry and callback manager (owned by daemon)
-// - Client mode: close daemon client connection
-// - Standalone mode: no cleanup needed
 func shutdown(cmd *cobra.Command, args []string) error {
 	// Get command mode to determine cleanup strategy
 	cmdMode := mode.GetMode(cmd.CommandPath())
@@ -131,23 +104,6 @@ func shutdown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// For client mode, close daemon client connection
-	if cmdMode == mode.Client {
-		if client := component.GetDaemonClient(cmd.Context()); client != nil {
-			// Type assert to *daemonclient.Client
-			if dc, ok := client.(*daemonclient.Client); ok {
-				if err := dc.Close(); err != nil {
-					// Log error but don't fail - we're shutting down anyway
-					if globalFlags.IsVerbose() {
-						cmd.PrintErrf("Warning: failed to close daemon client: %v\n", err)
-					}
-				}
-			}
-		}
-	}
-
-	// Standalone mode: no cleanup needed
-
 	return nil
 }
 
@@ -155,20 +111,9 @@ func init() {
 	// Register global flags
 	RegisterGlobalFlags(rootCmd)
 
-	// Add subcommands
+	// Add subcommands - daemon binary only exposes daemon lifecycle and version
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(configCmd)
-	rootCmd.AddCommand(targetCmd)
-	rootCmd.AddCommand(agentCmd)
-	rootCmd.AddCommand(toolCmd)
-	rootCmd.AddCommand(pluginCmd)
-	rootCmd.AddCommand(missionCmd)
-	rootCmd.AddCommand(findingCmd)
-	rootCmd.AddCommand(attackCmd)
-	rootCmd.AddCommand(payloadCmd)
-	rootCmd.AddCommand(statusCmd)
-	rootCmd.AddCommand(logsCmd)
-	rootCmd.AddCommand(checkpointCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(daemonCmd)
 }

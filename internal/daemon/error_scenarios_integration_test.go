@@ -5,14 +5,13 @@ package daemon_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/daemon"
-	"github.com/zero-day-ai/gibson/internal/daemon/client"
+	daemonclient "github.com/zero-day-ai/sdk/daemonclient"
 )
 
 // TestInvalidWorkflowParsing is a PLACEHOLDER for testing invalid workflow handling.
@@ -214,13 +213,12 @@ func TestConcurrentMissionStop(t *testing.T) {
 func TestDaemonConnectionErrors(t *testing.T) {
 	homeDir := t.TempDir()
 
-	// Test 1: Connect to nonexistent daemon (no daemon.json)
-	infoFile := filepath.Join(homeDir, "daemon.json")
+	// Test 1: Connect to nonexistent daemon (should fail to connect)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	c, err := client.ConnectFromInfo(ctx, infoFile)
-	assert.Error(t, err, "should fail to connect when daemon.json doesn't exist")
+	c, err := daemonclient.Connect(ctx, "localhost:59999") // use a port with no daemon
+	assert.Error(t, err, "should fail to connect when no daemon is running")
 	assert.Nil(t, c, "client should be nil on connection failure")
 
 	t.Logf("Successfully tested connection error scenarios")
@@ -260,11 +258,10 @@ func TestGRPCMethodsWithoutDaemon(t *testing.T) {
 	}()
 
 	// Connect client
-	infoFile := filepath.Join(homeDir, "daemon.json")
 	clientCtx, clientCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer clientCancel()
 
-	c, err := client.ConnectFromInfo(clientCtx, infoFile)
+	c, err := daemonclient.Connect(clientCtx, daemonclient.DefaultDaemonAddress)
 	require.NoError(t, err, "client should connect to daemon")
 	require.NotNil(t, c, "client should not be nil")
 	defer c.Close()

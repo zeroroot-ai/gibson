@@ -14,9 +14,11 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/keycloak"
+	"github.com/zero-day-ai/gibson/internal/membership"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -29,7 +31,8 @@ import (
 // execution, agent management, attack operations, and real-time event streaming.
 // It acts as a facade that delegates to the daemon's internal services.
 type DaemonServer struct {
-	UnimplementedDaemonServiceServer
+	daemonpb.UnimplementedDaemonServiceServer
+	UnimplementedDaemonAdminServiceServer
 
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface
@@ -104,6 +107,10 @@ type DaemonServer struct {
 	impersonationIssuer interface {
 		IssueToken(ctx context.Context, tenantID string) (token string, err error)
 	}
+
+	// membershipStore manages user-to-tenant membership records.
+	// May be nil; when nil, membership RPCs return codes.Unavailable.
+	membershipStore membership.MembershipStore
 }
 
 // MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
@@ -271,7 +278,7 @@ type ToolInfoInternal struct {
 	Description  string
 	Health       string
 	LastSeen     time.Time
-	Capabilities *Capabilities
+	Capabilities *daemonpb.Capabilities
 }
 
 // PluginInfoInternal represents plugin information for internal daemon operations.
@@ -310,7 +317,7 @@ type MissionEventData struct {
 	Message   string
 	Data      string
 	Error     string
-	Result    *OperationResult
+	Result    *daemonpb.OperationResult
 	Payload   map[string]interface{} // Additional payload data (workflow_name, duration, status, etc.)
 }
 
@@ -333,7 +340,7 @@ type AttackEventData struct {
 	Data      string
 	Error     string
 	Finding   *FindingData
-	Result    *OperationResult
+	Result    *daemonpb.OperationResult
 }
 
 // FindingData represents finding information.
@@ -470,9 +477,9 @@ type InstallAllComponentResult struct {
 	SuccessfulCount int
 	SkippedCount    int
 	FailedCount     int
-	Successful      []InstallAllResultItem
-	Skipped         []InstallAllResultItem
-	Failed          []InstallAllFailedItem
+	Successful      []daemonpb.InstallAllResultItem
+	Skipped         []daemonpb.InstallAllResultItem
+	Failed          []daemonpb.InstallAllFailedItem
 	DurationMs      int64
 	Message         string
 }
@@ -822,6 +829,15 @@ func (s *DaemonServer) WithAPIKeyStore(a *auth.APIKeyAuthenticator) *DaemonServe
 	return s
 }
 
+// WithMembershipStore wires the membership store so that the membership RPCs
+// (AddTenantMember, RemoveTenantMember, UpdateMemberRole, ListUserTenants,
+// TransferOwnership) are backed by durable Redis storage.
+// Call this immediately after NewDaemonServer and before registering the server.
+func (s *DaemonServer) WithMembershipStore(ms membership.MembershipStore) *DaemonServer {
+	s.membershipStore = ms
+	return s
+}
+
 // ---------------------------------------------------------------------------
 // provisionerAdapter bridges *provisioner.Provisioner to the DaemonServer's
 // provisioner interface which uses positional arguments and different return
@@ -992,7 +1008,7 @@ func containsString(haystack []string, needle string) bool {
 }
 
 // Connect establishes a client connection to the daemon.
-func (s *DaemonServer) Connect(ctx context.Context, req *ConnectRequest) (*ConnectResponse, error) {
+func (s *DaemonServer) Connect(ctx context.Context, req *daemonpb.ConnectRequest) (*daemonpb.ConnectResponse, error) {
 	s.logger.Info("client connecting",
 		"client_version", req.ClientVersion,
 		"client_id", req.ClientId,
@@ -1009,7 +1025,7 @@ func (s *DaemonServer) Connect(ctx context.Context, req *ConnectRequest) (*Conne
 		return nil, status_grpc.Errorf(codes.Internal, "failed to get daemon status: %v", err)
 	}
 
-	return &ConnectResponse{
+	return &daemonpb.ConnectResponse{
 		DaemonVersion: version.Version,
 		SessionId:     sessionID,
 		GrpcAddress:   status.GRPCAddress,
@@ -1017,14 +1033,14 @@ func (s *DaemonServer) Connect(ctx context.Context, req *ConnectRequest) (*Conne
 }
 
 // Ping checks if the daemon is responsive.
-func (s *DaemonServer) Ping(ctx context.Context, req *PingRequest) (*PingResponse, error) {
-	return &PingResponse{
+func (s *DaemonServer) Ping(ctx context.Context, req *daemonpb.PingRequest) (*daemonpb.PingResponse, error) {
+	return &daemonpb.PingResponse{
 		Timestamp: time.Now().Unix(),
 	}, nil
 }
 
 // Status returns the current daemon status.
-func (s *DaemonServer) Status(ctx context.Context, req *StatusRequest) (*StatusResponse, error) {
+func (s *DaemonServer) Status(ctx context.Context, req *daemonpb.StatusRequest) (*daemonpb.StatusResponse, error) {
 	s.logger.Debug("status request received")
 
 	status, err := s.daemon.Status()
@@ -1033,7 +1049,7 @@ func (s *DaemonServer) Status(ctx context.Context, req *StatusRequest) (*StatusR
 		return nil, status_grpc.Errorf(codes.Internal, "failed to get daemon status: %v", err)
 	}
 
-	return &StatusResponse{
+	return &daemonpb.StatusResponse{
 		Running:            status.Running,
 		Pid:                status.PID,
 		StartTime:          status.StartTime.Unix(),
@@ -1049,7 +1065,7 @@ func (s *DaemonServer) Status(ctx context.Context, req *StatusRequest) (*StatusR
 }
 
 // RunMission starts a mission and streams execution events.
-func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStreamingServer[RunMissionResponse]) error {
+func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.ServerStreamingServer[daemonpb.RunMissionResponse]) error {
 	s.logger.Info("mission run request received",
 		"workflow_path", req.WorkflowPath,
 		"workflow_yaml_size", len(req.WorkflowYaml),
@@ -1165,7 +1181,7 @@ func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStre
 			}
 
 			// Convert event to proto message
-			protoEvent := &RunMissionResponse{
+			protoEvent := &daemonpb.RunMissionResponse{
 				EventType: event.EventType,
 				Timestamp: event.Timestamp.Unix(),
 				MissionId: event.MissionID,
@@ -1185,7 +1201,7 @@ func (s *DaemonServer) RunMission(req *RunMissionRequest, stream grpc.ServerStre
 }
 
 // StopMission gracefully stops a running mission.
-func (s *DaemonServer) StopMission(ctx context.Context, req *StopMissionRequest) (*StopMissionResponse, error) {
+func (s *DaemonServer) StopMission(ctx context.Context, req *daemonpb.StopMissionRequest) (*daemonpb.StopMissionResponse, error) {
 	s.logger.Info("mission stop request received",
 		"mission_id", req.MissionId,
 		"force", req.Force,
@@ -1194,13 +1210,13 @@ func (s *DaemonServer) StopMission(ctx context.Context, req *StopMissionRequest)
 	err := s.daemon.StopMission(ctx, req.MissionId, req.Force)
 	if err != nil {
 		s.logger.Error("failed to stop mission", "error", err, "mission_id", req.MissionId)
-		return &StopMissionResponse{
+		return &daemonpb.StopMissionResponse{
 			Success: false,
 			Message: fmt.Sprintf("failed to stop mission: %v", err),
 		}, nil
 	}
 
-	return &StopMissionResponse{
+	return &daemonpb.StopMissionResponse{
 		Success: true,
 		Message: "Mission stop requested",
 	}, nil
@@ -1211,7 +1227,7 @@ func (s *DaemonServer) StopMission(ctx context.Context, req *StopMissionRequest)
 // When authentication is enabled the tenant is extracted from the context and
 // only missions belonging to that tenant are returned. When authentication is
 // disabled (empty tenant) all missions are returned for backward compatibility.
-func (s *DaemonServer) ListMissions(ctx context.Context, req *ListMissionsRequest) (*ListMissionsResponse, error) {
+func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissionsRequest) (*daemonpb.ListMissionsResponse, error) {
 	tenant := auth.TenantFromContext(ctx)
 
 	s.logger.Debug("mission list request received",
@@ -1244,9 +1260,9 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *ListMissionsReques
 	}
 
 	// Convert to proto messages
-	protoMissions := make([]*MissionInfo, len(missions))
+	protoMissions := make([]*daemonpb.MissionInfo, len(missions))
 	for i, m := range missions {
-		protoMissions[i] = &MissionInfo{
+		protoMissions[i] = &daemonpb.MissionInfo{
 			Id:           m.ID,
 			Name:         m.Name,
 			Description:  m.Description,
@@ -1260,7 +1276,7 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *ListMissionsReques
 		}
 	}
 
-	return &ListMissionsResponse{
+	return &daemonpb.ListMissionsResponse{
 		Missions: protoMissions,
 		Total:    int32(total),
 	}, nil
@@ -1274,7 +1290,7 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *ListMissionsReques
 // Identities with the wildcard capability "*" always receive the full list.
 // When no identity is present (dev mode / unauthenticated path), no filtering is
 // applied for backward compatibility.
-func (s *DaemonServer) ListAgents(ctx context.Context, req *ListAgentsRequest) (*ListAgentsResponse, error) {
+func (s *DaemonServer) ListAgents(ctx context.Context, req *daemonpb.ListAgentsRequest) (*daemonpb.ListAgentsResponse, error) {
 	s.logger.Debug("agent list request received", "kind", req.Kind)
 
 	agents, err := s.daemon.ListAgents(ctx, req.Kind)
@@ -1319,9 +1335,9 @@ func (s *DaemonServer) ListAgents(ctx context.Context, req *ListAgentsRequest) (
 	}
 
 	// Convert to proto messages
-	protoAgents := make([]*AgentInfo, len(agents))
+	protoAgents := make([]*daemonpb.AgentInfo, len(agents))
 	for i, a := range agents {
-		protoAgents[i] = &AgentInfo{
+		protoAgents[i] = &daemonpb.AgentInfo{
 			Id:           a.ID,
 			Name:         a.Name,
 			Kind:         a.Kind,
@@ -1333,13 +1349,13 @@ func (s *DaemonServer) ListAgents(ctx context.Context, req *ListAgentsRequest) (
 		}
 	}
 
-	return &ListAgentsResponse{
+	return &daemonpb.ListAgentsResponse{
 		Agents: protoAgents,
 	}, nil
 }
 
 // GetAgentStatus returns the current status of a specific agent.
-func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *GetAgentStatusRequest) (*GetAgentStatusResponse, error) {
+func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *daemonpb.GetAgentStatusRequest) (*daemonpb.GetAgentStatusResponse, error) {
 	s.logger.Debug("agent status request received", "agent_id", req.AgentId)
 
 	agentStatus, err := s.daemon.GetAgentStatus(ctx, req.AgentId)
@@ -1348,8 +1364,8 @@ func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *GetAgentStatusRe
 		return nil, status_grpc.Errorf(codes.Internal, "failed to get agent status: %v", err)
 	}
 
-	return &GetAgentStatusResponse{
-		Agent: &AgentInfo{
+	return &daemonpb.GetAgentStatusResponse{
+		Agent: &daemonpb.AgentInfo{
 			Id:           agentStatus.Agent.ID,
 			Name:         agentStatus.Agent.Name,
 			Kind:         agentStatus.Agent.Kind,
@@ -1372,7 +1388,7 @@ func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *GetAgentStatusRe
 // receive any tools. If neither capability is present, an empty list is returned.
 // When no identity is present (dev mode / unauthenticated path), no filtering is
 // applied for backward compatibility.
-func (s *DaemonServer) ListTools(ctx context.Context, req *ListToolsRequest) (*ListToolsResponse, error) {
+func (s *DaemonServer) ListTools(ctx context.Context, req *daemonpb.ListToolsRequest) (*daemonpb.ListToolsResponse, error) {
 	s.logger.Debug("tool list request received")
 
 	// Gate the entire tool list on the tools:execute capability when an identity
@@ -1383,7 +1399,7 @@ func (s *DaemonServer) ListTools(ctx context.Context, req *ListToolsRequest) (*L
 			s.logger.Debug("tool list denied: identity lacks tools:execute capability",
 				"subject", identity.Subject,
 			)
-			return &ListToolsResponse{Tools: []*ToolInfo{}}, nil
+			return &daemonpb.ListToolsResponse{Tools: []*daemonpb.ToolInfo{}}, nil
 		}
 	}
 
@@ -1394,11 +1410,11 @@ func (s *DaemonServer) ListTools(ctx context.Context, req *ListToolsRequest) (*L
 	}
 
 	// Convert to proto messages
-	protoTools := make([]*ToolInfo, len(tools))
+	protoTools := make([]*daemonpb.ToolInfo, len(tools))
 	for i, t := range tools {
-		var protoCaps *Capabilities
+		var protoCaps *daemonpb.Capabilities
 		if t.Capabilities != nil {
-			protoCaps = &Capabilities{
+			protoCaps = &daemonpb.Capabilities{
 				HasRoot:         t.Capabilities.HasRoot,
 				HasSudo:         t.Capabilities.HasSudo,
 				CanRawSocket:    t.Capabilities.CanRawSocket,
@@ -1407,7 +1423,7 @@ func (s *DaemonServer) ListTools(ctx context.Context, req *ListToolsRequest) (*L
 				ArgAlternatives: t.Capabilities.ArgAlternatives,
 			}
 		}
-		protoTools[i] = &ToolInfo{
+		protoTools[i] = &daemonpb.ToolInfo{
 			Id:           t.ID,
 			Name:         t.Name,
 			Version:      t.Version,
@@ -1419,7 +1435,7 @@ func (s *DaemonServer) ListTools(ctx context.Context, req *ListToolsRequest) (*L
 		}
 	}
 
-	return &ListToolsResponse{
+	return &daemonpb.ListToolsResponse{
 		Tools: protoTools,
 	}, nil
 }
@@ -1432,7 +1448,7 @@ func (s *DaemonServer) ListTools(ctx context.Context, req *ListToolsRequest) (*L
 // identity is not authorised to see are silently omitted.
 // When no identity is present (dev mode / unauthenticated path), no filtering is
 // applied for backward compatibility.
-func (s *DaemonServer) ListPlugins(ctx context.Context, req *ListPluginsRequest) (*ListPluginsResponse, error) {
+func (s *DaemonServer) ListPlugins(ctx context.Context, req *daemonpb.ListPluginsRequest) (*daemonpb.ListPluginsResponse, error) {
 	s.logger.Debug("plugin list request received")
 
 	plugins, err := s.daemon.ListPlugins(ctx)
@@ -1458,9 +1474,9 @@ func (s *DaemonServer) ListPlugins(ctx context.Context, req *ListPluginsRequest)
 	}
 
 	// Convert to proto messages
-	protoPlugins := make([]*PluginInfo, len(plugins))
+	protoPlugins := make([]*daemonpb.PluginInfo, len(plugins))
 	for i, p := range plugins {
-		protoPlugins[i] = &PluginInfo{
+		protoPlugins[i] = &daemonpb.PluginInfo{
 			Id:          p.ID,
 			Name:        p.Name,
 			Version:     p.Version,
@@ -1471,13 +1487,13 @@ func (s *DaemonServer) ListPlugins(ctx context.Context, req *ListPluginsRequest)
 		}
 	}
 
-	return &ListPluginsResponse{
+	return &daemonpb.ListPluginsResponse{
 		Plugins: protoPlugins,
 	}, nil
 }
 
 // QueryPlugin executes a method on a plugin and returns the result.
-func (s *DaemonServer) QueryPlugin(ctx context.Context, req *QueryPluginRequest) (*QueryPluginResponse, error) {
+func (s *DaemonServer) QueryPlugin(ctx context.Context, req *daemonpb.QueryPluginRequest) (*daemonpb.QueryPluginResponse, error) {
 	s.logger.Debug("plugin query request received", "plugin", req.Name, "method", req.Method)
 
 	// Convert params from TypedMap to map[string]any
@@ -1493,7 +1509,7 @@ func (s *DaemonServer) QueryPlugin(ctx context.Context, req *QueryPluginRequest)
 
 	if err != nil {
 		s.logger.Error("plugin query failed", "plugin", req.Name, "method", req.Method, "error", err)
-		return &QueryPluginResponse{
+		return &daemonpb.QueryPluginResponse{
 			Error:      err.Error(),
 			DurationMs: duration.Milliseconds(),
 		}, nil
@@ -1501,91 +1517,14 @@ func (s *DaemonServer) QueryPlugin(ctx context.Context, req *QueryPluginRequest)
 
 	// Convert result to TypedValue
 	s.logger.Debug("plugin query completed", "plugin", req.Name, "method", req.Method, "duration_ms", duration.Milliseconds())
-	return &QueryPluginResponse{
+	return &daemonpb.QueryPluginResponse{
 		Result:     anyToTypedValue(result),
 		DurationMs: duration.Milliseconds(),
 	}, nil
 }
 
-// RunAttack executes an attack and streams progress events.
-func (s *DaemonServer) RunAttack(req *RunAttackRequest, stream grpc.ServerStreamingServer[RunAttackResponse]) error {
-	s.logger.Info("attack run request received",
-		"target", req.Target,
-		"attack_type", req.AttackType,
-		"agent_id", req.AgentId,
-	)
-
-	// Convert proto request to internal request
-	attackReq := AttackRequest{
-		Target:        req.Target,
-		TargetName:    req.TargetName,
-		AttackType:    req.AttackType,
-		AgentID:       req.AgentId,
-		PayloadFilter: req.PayloadFilter,
-		Options:       req.Options,
-	}
-
-	// Start attack and get event channel
-	eventChan, err := s.daemon.RunAttack(stream.Context(), attackReq)
-	if err != nil {
-		s.logger.Error("failed to start attack", "error", err)
-		return status_grpc.Errorf(codes.Internal, "failed to start attack: %v", err)
-	}
-
-	// Stream events to client
-	for {
-		select {
-		case <-stream.Context().Done():
-			s.logger.Info("attack stream cancelled", "target", req.Target)
-			return stream.Context().Err()
-
-		case event, ok := <-eventChan:
-			if !ok {
-				// Event channel closed, attack completed
-				s.logger.Info("attack completed", "target", req.Target)
-				return nil
-			}
-
-			// Convert event to proto message
-			protoEvent := &RunAttackResponse{
-				EventType: event.EventType,
-				Timestamp: event.Timestamp.Unix(),
-				AttackId:  event.AttackID,
-				Message:   event.Message,
-				Data:      StringToTypedMap(event.Data),
-				Error:     event.Error,
-			}
-
-			// Add operation result if present
-			if event.Result != nil {
-				protoEvent.Result = event.Result
-			}
-
-			// Add finding if present
-			if event.Finding != nil {
-				protoEvent.Finding = &FindingInfo{
-					Id:          event.Finding.ID,
-					Title:       event.Finding.Title,
-					Severity:    event.Finding.Severity,
-					Category:    event.Finding.Category,
-					Description: event.Finding.Description,
-					Technique:   event.Finding.Technique,
-					Evidence:    event.Finding.Evidence,
-					Timestamp:   event.Finding.Timestamp.Unix(),
-				}
-			}
-
-			// Send event to client
-			if err := stream.Send(protoEvent); err != nil {
-				s.logger.Error("failed to send attack event", "error", err)
-				return status_grpc.Errorf(codes.Internal, "failed to send event: %v", err)
-			}
-		}
-	}
-}
-
 // Subscribe establishes an event stream for TUI real-time updates.
-func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStreamingServer[SubscribeResponse]) error {
+func (s *DaemonServer) Subscribe(req *daemonpb.SubscribeRequest, stream grpc.ServerStreamingServer[daemonpb.SubscribeResponse]) error {
 	s.logger.Info("event subscription request received",
 		"event_types", req.EventTypes,
 		"mission_id", req.MissionId,
@@ -1613,7 +1552,7 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 			}
 
 			// Convert event to proto message
-			protoEvent := &SubscribeResponse{
+			protoEvent := &daemonpb.SubscribeResponse{
 				EventType: event.EventType,
 				Timestamp: event.Timestamp.Unix(),
 				Source:    event.Source,
@@ -1622,8 +1561,8 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 
 			// Add specific event type if present
 			if event.MissionEvent != nil {
-				protoEvent.Event = &SubscribeResponse_MissionEvent{
-					MissionEvent: &MissionEvent{
+				protoEvent.Event = &daemonpb.SubscribeResponse_MissionEvent{
+					MissionEvent: &daemonpb.MissionEvent{
 						EventType: event.MissionEvent.EventType,
 						Timestamp: event.MissionEvent.Timestamp.Unix(),
 						MissionId: event.MissionEvent.MissionID,
@@ -1634,9 +1573,9 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 					},
 				}
 			} else if event.AttackEvent != nil {
-				var finding *FindingInfo
+				var finding *daemonpb.FindingInfo
 				if event.AttackEvent.Finding != nil {
-					finding = &FindingInfo{
+					finding = &daemonpb.FindingInfo{
 						Id:          event.AttackEvent.Finding.ID,
 						Title:       event.AttackEvent.Finding.Title,
 						Severity:    event.AttackEvent.Finding.Severity,
@@ -1647,8 +1586,8 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 						Timestamp:   event.AttackEvent.Finding.Timestamp.Unix(),
 					}
 				}
-				protoEvent.Event = &SubscribeResponse_AttackEvent{
-					AttackEvent: &AttackEvent{
+				protoEvent.Event = &daemonpb.SubscribeResponse_AttackEvent{
+					AttackEvent: &daemonpb.AttackEvent{
 						EventType: event.AttackEvent.EventType,
 						Timestamp: event.AttackEvent.Timestamp.Unix(),
 						AttackId:  event.AttackEvent.AttackID,
@@ -1659,8 +1598,8 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 					},
 				}
 			} else if event.AgentEvent != nil {
-				protoEvent.Event = &SubscribeResponse_AgentEvent{
-					AgentEvent: &AgentEvent{
+				protoEvent.Event = &daemonpb.SubscribeResponse_AgentEvent{
+					AgentEvent: &daemonpb.AgentEvent{
 						EventType: event.AgentEvent.EventType,
 						Timestamp: event.AgentEvent.Timestamp.Unix(),
 						AgentId:   event.AgentEvent.AgentID,
@@ -1670,11 +1609,11 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 					},
 				}
 			} else if event.FindingEvent != nil {
-				protoEvent.Event = &SubscribeResponse_FindingEvent{
-					FindingEvent: &FindingEvent{
+				protoEvent.Event = &daemonpb.SubscribeResponse_FindingEvent{
+					FindingEvent: &daemonpb.FindingEvent{
 						EventType: event.FindingEvent.EventType,
 						Timestamp: event.FindingEvent.Timestamp.Unix(),
-						Finding: &FindingInfo{
+						Finding: &daemonpb.FindingInfo{
 							Id:          event.FindingEvent.Finding.ID,
 							Title:       event.FindingEvent.Finding.Title,
 							Severity:    event.FindingEvent.Finding.Severity,
@@ -1705,13 +1644,13 @@ func (s *DaemonServer) Subscribe(req *SubscribeRequest, stream grpc.ServerStream
 }
 
 // convertToToolEvent converts internal ToolEventData to proto ToolEvent oneof wrapper.
-func convertToToolEvent(data *ToolEventData) *SubscribeResponse_ToolEvent {
+func convertToToolEvent(data *ToolEventData) *daemonpb.SubscribeResponse_ToolEvent {
 	if data == nil {
 		return nil
 	}
 
-	return &SubscribeResponse_ToolEvent{
-		ToolEvent: &ToolEvent{
+	return &daemonpb.SubscribeResponse_ToolEvent{
+		ToolEvent: &daemonpb.ToolEvent{
 			EventType:       data.EventType,
 			Timestamp:       data.Timestamp.Unix(),
 			ToolName:        data.ToolName,
@@ -1730,13 +1669,13 @@ func convertToToolEvent(data *ToolEventData) *SubscribeResponse_ToolEvent {
 }
 
 // convertToLLMEvent converts internal LLMEventData to proto LLMEvent oneof wrapper.
-func convertToLLMEvent(data *LLMEventData) *SubscribeResponse_LlmEvent {
+func convertToLLMEvent(data *LLMEventData) *daemonpb.SubscribeResponse_LlmEvent {
 	if data == nil {
 		return nil
 	}
 
-	return &SubscribeResponse_LlmEvent{
-		LlmEvent: &LLMEvent{
+	return &daemonpb.SubscribeResponse_LlmEvent{
+		LlmEvent: &daemonpb.LLMEvent{
 			EventType:        data.EventType,
 			Timestamp:        data.Timestamp.Unix(),
 			AgentId:          data.AgentID,
@@ -1757,13 +1696,13 @@ func convertToLLMEvent(data *LLMEventData) *SubscribeResponse_LlmEvent {
 }
 
 // convertToOrchestratorEvent converts internal OrchestratorEventData to proto OrchestratorEvent oneof wrapper.
-func convertToOrchestratorEvent(data *OrchestratorEventData) *SubscribeResponse_OrchestratorEvent {
+func convertToOrchestratorEvent(data *OrchestratorEventData) *daemonpb.SubscribeResponse_OrchestratorEvent {
 	if data == nil {
 		return nil
 	}
 
-	return &SubscribeResponse_OrchestratorEvent{
-		OrchestratorEvent: &OrchestratorEvent{
+	return &daemonpb.SubscribeResponse_OrchestratorEvent{
+		OrchestratorEvent: &daemonpb.OrchestratorEvent{
 			EventType:       data.EventType,
 			Timestamp:       data.Timestamp.Unix(),
 			MissionId:       data.MissionID,
@@ -1783,7 +1722,7 @@ func convertToOrchestratorEvent(data *OrchestratorEventData) *SubscribeResponse_
 }
 
 // StartComponent starts a component (agent, tool, or plugin) by kind and name.
-func (s *DaemonServer) StartComponent(ctx context.Context, req *StartComponentRequest) (*StartComponentResponse, error) {
+func (s *DaemonServer) StartComponent(ctx context.Context, req *daemonpb.StartComponentRequest) (*daemonpb.StartComponentResponse, error) {
 	s.logger.Info("start component request received",
 		"kind", req.Kind,
 		"name", req.Name,
@@ -1825,7 +1764,7 @@ func (s *DaemonServer) StartComponent(ctx context.Context, req *StartComponentRe
 		"port", result.Port,
 	)
 
-	return &StartComponentResponse{
+	return &daemonpb.StartComponentResponse{
 		Success: true,
 		Pid:     int32(result.PID),
 		Port:    int32(result.Port),
@@ -1835,7 +1774,7 @@ func (s *DaemonServer) StartComponent(ctx context.Context, req *StartComponentRe
 }
 
 // StopComponent stops a running component (agent, tool, or plugin) by kind and name.
-func (s *DaemonServer) StopComponent(ctx context.Context, req *StopComponentRequest) (*StopComponentResponse, error) {
+func (s *DaemonServer) StopComponent(ctx context.Context, req *daemonpb.StopComponentRequest) (*daemonpb.StopComponentResponse, error) {
 	s.logger.Info("stop component request received",
 		"kind", req.Kind,
 		"name", req.Name,
@@ -1875,7 +1814,7 @@ func (s *DaemonServer) StopComponent(ctx context.Context, req *StopComponentRequ
 		"total_count", result.TotalCount,
 	)
 
-	return &StopComponentResponse{
+	return &daemonpb.StopComponentResponse{
 		Success:      true,
 		StoppedCount: int32(result.StoppedCount),
 		TotalCount:   int32(result.TotalCount),
@@ -1884,7 +1823,7 @@ func (s *DaemonServer) StopComponent(ctx context.Context, req *StopComponentRequ
 }
 
 // PauseMission pauses a running mission at the next clean checkpoint boundary.
-func (s *DaemonServer) PauseMission(ctx context.Context, req *PauseMissionRequest) (*PauseMissionResponse, error) {
+func (s *DaemonServer) PauseMission(ctx context.Context, req *daemonpb.PauseMissionRequest) (*daemonpb.PauseMissionResponse, error) {
 	s.logger.Info("mission pause request received",
 		"mission_id", req.MissionId,
 		"force", req.Force,
@@ -1913,7 +1852,7 @@ func (s *DaemonServer) PauseMission(ctx context.Context, req *PauseMissionReques
 
 	s.logger.Info("mission paused successfully", "mission_id", req.MissionId)
 
-	return &PauseMissionResponse{
+	return &daemonpb.PauseMissionResponse{
 		Success:      true,
 		CheckpointId: "", // Will be populated when checkpoint system is fully integrated
 		Message:      fmt.Sprintf("Mission %s paused successfully", req.MissionId),
@@ -1921,7 +1860,7 @@ func (s *DaemonServer) PauseMission(ctx context.Context, req *PauseMissionReques
 }
 
 // ResumeMission resumes a paused mission from its last checkpoint and streams execution events.
-func (s *DaemonServer) ResumeMission(req *ResumeMissionRequest, stream grpc.ServerStreamingServer[ResumeMissionResponse]) error {
+func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream grpc.ServerStreamingServer[daemonpb.ResumeMissionResponse]) error {
 	s.logger.Info("mission resume request received",
 		"mission_id", req.MissionId,
 		"checkpoint_id", req.CheckpointId,
@@ -1966,7 +1905,7 @@ func (s *DaemonServer) ResumeMission(req *ResumeMissionRequest, stream grpc.Serv
 			}
 
 			// Convert event to proto message
-			protoEvent := &ResumeMissionResponse{
+			protoEvent := &daemonpb.ResumeMissionResponse{
 				EventType: event.EventType,
 				Timestamp: event.Timestamp.Unix(),
 				MissionId: event.MissionID,
@@ -1991,7 +1930,7 @@ func (s *DaemonServer) ResumeMission(req *ResumeMissionRequest, stream grpc.Serv
 }
 
 // GetMissionHistory returns all runs for a mission name.
-func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *GetMissionHistoryRequest) (*GetMissionHistoryResponse, error) {
+func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetMissionHistoryRequest) (*daemonpb.GetMissionHistoryResponse, error) {
 	s.logger.Debug("mission history request received",
 		"name", req.Name,
 		"limit", req.Limit,
@@ -2021,9 +1960,9 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *GetMissionHis
 	}
 
 	// Convert internal types to proto types
-	protoRuns := make([]*MissionRun, len(runs))
+	protoRuns := make([]*daemonpb.MissionRun, len(runs))
 	for i, run := range runs {
-		protoRuns[i] = &MissionRun{
+		protoRuns[i] = &daemonpb.MissionRun{
 			MissionId:     run.MissionID,
 			RunNumber:     int32(run.RunNumber),
 			Status:        run.Status,
@@ -2037,14 +1976,14 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *GetMissionHis
 
 	s.logger.Debug("mission history retrieved", "name", req.Name, "count", len(runs), "total", total)
 
-	return &GetMissionHistoryResponse{
+	return &daemonpb.GetMissionHistoryResponse{
 		Runs:  protoRuns,
 		Total: int32(total),
 	}, nil
 }
 
 // GetMissionCheckpoints returns all checkpoints for a specific mission.
-func (s *DaemonServer) GetMissionCheckpoints(ctx context.Context, req *GetMissionCheckpointsRequest) (*GetMissionCheckpointsResponse, error) {
+func (s *DaemonServer) GetMissionCheckpoints(ctx context.Context, req *daemonpb.GetMissionCheckpointsRequest) (*daemonpb.GetMissionCheckpointsResponse, error) {
 	s.logger.Debug("mission checkpoints request received",
 		"mission_id", req.MissionId,
 	)
@@ -2068,9 +2007,9 @@ func (s *DaemonServer) GetMissionCheckpoints(ctx context.Context, req *GetMissio
 	}
 
 	// Convert internal types to proto types
-	protoCheckpoints := make([]*CheckpointInfo, len(checkpoints))
+	protoCheckpoints := make([]*daemonpb.CheckpointInfo, len(checkpoints))
 	for i, cp := range checkpoints {
-		protoCheckpoints[i] = &CheckpointInfo{
+		protoCheckpoints[i] = &daemonpb.CheckpointInfo{
 			CheckpointId:   cp.CheckpointID,
 			CreatedAt:      cp.CreatedAt,
 			CompletedNodes: int32(cp.CompletedNodes),
@@ -2082,13 +2021,13 @@ func (s *DaemonServer) GetMissionCheckpoints(ctx context.Context, req *GetMissio
 
 	s.logger.Debug("mission checkpoints retrieved", "mission_id", req.MissionId, "count", len(checkpoints))
 
-	return &GetMissionCheckpointsResponse{
+	return &daemonpb.GetMissionCheckpointsResponse{
 		Checkpoints: protoCheckpoints,
 	}, nil
 }
 
 // InstallAllComponent installs all components from a mono-repo.
-func (s *DaemonServer) InstallAllComponent(ctx context.Context, req *InstallAllComponentRequest) (*InstallAllComponentResponse, error) {
+func (s *DaemonServer) InstallAllComponent(ctx context.Context, req *daemonpb.InstallAllComponentRequest) (*daemonpb.InstallAllComponentResponse, error) {
 	s.logger.Info("install all components request received",
 		"kind", req.Kind,
 		"url", req.Url,
@@ -2135,34 +2074,34 @@ func (s *DaemonServer) InstallAllComponent(ctx context.Context, req *InstallAllC
 	)
 
 	// Convert result to proto response
-	protoSuccessful := make([]*InstallAllResultItem, len(result.Successful))
-	for i, item := range result.Successful {
-		protoSuccessful[i] = &InstallAllResultItem{
-			Name:    item.Name,
-			Version: item.Version,
-			Path:    item.Path,
+	protoSuccessful := make([]*daemonpb.InstallAllResultItem, len(result.Successful))
+	for i := range result.Successful {
+		protoSuccessful[i] = &daemonpb.InstallAllResultItem{
+			Name:    result.Successful[i].Name,
+			Version: result.Successful[i].Version,
+			Path:    result.Successful[i].Path,
 		}
 	}
 
-	protoSkipped := make([]*InstallAllResultItem, len(result.Skipped))
-	for i, item := range result.Skipped {
-		protoSkipped[i] = &InstallAllResultItem{
-			Name:    item.Name,
-			Version: item.Version,
-			Path:    item.Path,
+	protoSkipped := make([]*daemonpb.InstallAllResultItem, len(result.Skipped))
+	for i := range result.Skipped {
+		protoSkipped[i] = &daemonpb.InstallAllResultItem{
+			Name:    result.Skipped[i].Name,
+			Version: result.Skipped[i].Version,
+			Path:    result.Skipped[i].Path,
 		}
 	}
 
-	protoFailed := make([]*InstallAllFailedItem, len(result.Failed))
-	for i, item := range result.Failed {
-		protoFailed[i] = &InstallAllFailedItem{
-			Name:  item.Name,
-			Path:  item.Path,
-			Error: item.Error,
+	protoFailed := make([]*daemonpb.InstallAllFailedItem, len(result.Failed))
+	for i := range result.Failed {
+		protoFailed[i] = &daemonpb.InstallAllFailedItem{
+			Name:  result.Failed[i].Name,
+			Path:  result.Failed[i].Path,
+			Error: result.Failed[i].Error,
 		}
 	}
 
-	return &InstallAllComponentResponse{
+	return &daemonpb.InstallAllComponentResponse{
 		Success:         result.Success,
 		ComponentsFound: int32(result.ComponentsFound),
 		SuccessfulCount: int32(result.SuccessfulCount),
@@ -2177,7 +2116,7 @@ func (s *DaemonServer) InstallAllComponent(ctx context.Context, req *InstallAllC
 }
 
 // UninstallComponent removes a component (agent, tool, or plugin) by kind and name.
-func (s *DaemonServer) UninstallComponent(ctx context.Context, req *UninstallComponentRequest) (*UninstallComponentResponse, error) {
+func (s *DaemonServer) UninstallComponent(ctx context.Context, req *daemonpb.UninstallComponentRequest) (*daemonpb.UninstallComponentResponse, error) {
 	s.logger.Info("uninstall component request received",
 		"kind", req.Kind,
 		"name", req.Name,
@@ -2218,14 +2157,14 @@ func (s *DaemonServer) UninstallComponent(ctx context.Context, req *UninstallCom
 		"name", req.Name,
 	)
 
-	return &UninstallComponentResponse{
+	return &daemonpb.UninstallComponentResponse{
 		Success: true,
 		Message: fmt.Sprintf("Component '%s' uninstalled successfully", req.Name),
 	}, nil
 }
 
 // UpdateComponent updates a component (agent, tool, or plugin) to the latest version.
-func (s *DaemonServer) UpdateComponent(ctx context.Context, req *UpdateComponentRequest) (*UpdateComponentResponse, error) {
+func (s *DaemonServer) UpdateComponent(ctx context.Context, req *daemonpb.UpdateComponentRequest) (*daemonpb.UpdateComponentResponse, error) {
 	s.logger.Info("update component request received",
 		"kind", req.Kind,
 		"name", req.Name,
@@ -2271,7 +2210,7 @@ func (s *DaemonServer) UpdateComponent(ctx context.Context, req *UpdateComponent
 		msg = fmt.Sprintf("Component '%s' is already at the latest version", req.Name)
 	}
 
-	return &UpdateComponentResponse{
+	return &daemonpb.UpdateComponentResponse{
 		Success:     true,
 		Updated:     result.Updated,
 		OldVersion:  result.OldVersion,
@@ -2283,7 +2222,7 @@ func (s *DaemonServer) UpdateComponent(ctx context.Context, req *UpdateComponent
 }
 
 // BuildComponent rebuilds a component (agent, tool, or plugin) from source.
-func (s *DaemonServer) BuildComponent(ctx context.Context, req *BuildComponentRequest) (*BuildComponentResponse, error) {
+func (s *DaemonServer) BuildComponent(ctx context.Context, req *daemonpb.BuildComponentRequest) (*daemonpb.BuildComponentResponse, error) {
 	s.logger.Info("build component request received",
 		"kind", req.Kind,
 		"name", req.Name,
@@ -2326,7 +2265,7 @@ func (s *DaemonServer) BuildComponent(ctx context.Context, req *BuildComponentRe
 		msg = fmt.Sprintf("Component '%s' build failed", req.Name)
 	}
 
-	return &BuildComponentResponse{
+	return &daemonpb.BuildComponentResponse{
 		Success:    result.Success,
 		Stdout:     result.Stdout,
 		Stderr:     result.Stderr,
@@ -2336,7 +2275,7 @@ func (s *DaemonServer) BuildComponent(ctx context.Context, req *BuildComponentRe
 }
 
 // ShowComponent returns detailed information about a component (agent, tool, or plugin).
-func (s *DaemonServer) ShowComponent(ctx context.Context, req *ShowComponentRequest) (*ShowComponentResponse, error) {
+func (s *DaemonServer) ShowComponent(ctx context.Context, req *daemonpb.ShowComponentRequest) (*daemonpb.ShowComponentResponse, error) {
 	s.logger.Debug("show component request received",
 		"kind", req.Kind,
 		"name", req.Name,
@@ -2373,7 +2312,7 @@ func (s *DaemonServer) ShowComponent(ctx context.Context, req *ShowComponentRequ
 		"name", req.Name,
 	)
 
-	return &ShowComponentResponse{
+	return &daemonpb.ShowComponentResponse{
 		Success:   true,
 		Name:      info.Name,
 		Version:   info.Version,
@@ -2390,7 +2329,7 @@ func (s *DaemonServer) ShowComponent(ctx context.Context, req *ShowComponentRequ
 }
 
 // GetComponentLogs streams log entries for a component (agent, tool, or plugin).
-func (s *DaemonServer) GetComponentLogs(req *GetComponentLogsRequest, stream grpc.ServerStreamingServer[GetComponentLogsResponse]) error {
+func (s *DaemonServer) GetComponentLogs(req *daemonpb.GetComponentLogsRequest, stream grpc.ServerStreamingServer[daemonpb.GetComponentLogsResponse]) error {
 	s.logger.Info("get component logs request received",
 		"kind", req.Kind,
 		"name", req.Name,
@@ -2439,7 +2378,7 @@ func (s *DaemonServer) GetComponentLogs(req *GetComponentLogsRequest, stream grp
 			}
 
 			// Convert to proto message
-			protoEntry := &GetComponentLogsResponse{
+			protoEntry := &daemonpb.GetComponentLogsResponse{
 				Timestamp: entry.Timestamp,
 				Level:     entry.Level,
 				Message:   entry.Message,
@@ -2455,7 +2394,7 @@ func (s *DaemonServer) GetComponentLogs(req *GetComponentLogsRequest, stream grp
 }
 
 // InstallMission installs a mission from a Git repository.
-func (s *DaemonServer) InstallMission(ctx context.Context, req *InstallMissionRequest) (*InstallMissionResponse, error) {
+func (s *DaemonServer) InstallMission(ctx context.Context, req *daemonpb.InstallMissionRequest) (*daemonpb.InstallMissionResponse, error) {
 	s.logger.Info("install mission request received",
 		"url", req.Url,
 		"branch", req.Branch,
@@ -2493,16 +2432,16 @@ func (s *DaemonServer) InstallMission(ctx context.Context, req *InstallMissionRe
 	)
 
 	// Convert dependencies to proto format
-	protoDeps := make([]*InstalledDependency, len(result.Dependencies))
+	protoDeps := make([]*daemonpb.InstalledDependency, len(result.Dependencies))
 	for i, dep := range result.Dependencies {
-		protoDeps[i] = &InstalledDependency{
+		protoDeps[i] = &daemonpb.InstalledDependency{
 			Type:             dep.Type,
 			Name:             dep.Name,
 			AlreadyInstalled: dep.AlreadyInstalled,
 		}
 	}
 
-	return &InstallMissionResponse{
+	return &daemonpb.InstallMissionResponse{
 		Success:      true,
 		Name:         result.Name,
 		Version:      result.Version,
@@ -2514,7 +2453,7 @@ func (s *DaemonServer) InstallMission(ctx context.Context, req *InstallMissionRe
 }
 
 // UninstallMission removes an installed mission.
-func (s *DaemonServer) UninstallMission(ctx context.Context, req *UninstallMissionRequest) (*UninstallMissionResponse, error) {
+func (s *DaemonServer) UninstallMission(ctx context.Context, req *daemonpb.UninstallMissionRequest) (*daemonpb.UninstallMissionResponse, error) {
 	s.logger.Info("uninstall mission request received",
 		"name", req.Name,
 		"force", req.Force,
@@ -2540,14 +2479,14 @@ func (s *DaemonServer) UninstallMission(ctx context.Context, req *UninstallMissi
 
 	s.logger.Info("mission uninstalled successfully", "name", req.Name)
 
-	return &UninstallMissionResponse{
+	return &daemonpb.UninstallMissionResponse{
 		Success: true,
 		Message: fmt.Sprintf("Mission '%s' uninstalled successfully", req.Name),
 	}, nil
 }
 
 // ListMissionDefinitions returns all installed mission definitions.
-func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *ListMissionDefinitionsRequest) (*ListMissionDefinitionsResponse, error) {
+func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb.ListMissionDefinitionsRequest) (*daemonpb.ListMissionDefinitionsResponse, error) {
 	s.logger.Debug("list mission definitions request received",
 		"limit", req.Limit,
 		"offset", req.Offset,
@@ -2565,9 +2504,9 @@ func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *ListMiss
 	}
 
 	// Convert to proto format
-	protoDefinitions := make([]*MissionDefinitionInfo, len(definitions))
+	protoDefinitions := make([]*daemonpb.MissionDefinitionInfo, len(definitions))
 	for i, def := range definitions {
-		protoDefinitions[i] = &MissionDefinitionInfo{
+		protoDefinitions[i] = &daemonpb.MissionDefinitionInfo{
 			Name:        def.Name,
 			Version:     def.Version,
 			Description: def.Description,
@@ -2580,14 +2519,14 @@ func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *ListMiss
 
 	s.logger.Debug("listed mission definitions", "count", len(definitions), "total", total)
 
-	return &ListMissionDefinitionsResponse{
+	return &daemonpb.ListMissionDefinitionsResponse{
 		Missions: protoDefinitions,
 		Total:    int32(total),
 	}, nil
 }
 
 // UpdateMission updates an installed mission to the latest version.
-func (s *DaemonServer) UpdateMission(ctx context.Context, req *UpdateMissionRequest) (*UpdateMissionResponse, error) {
+func (s *DaemonServer) UpdateMission(ctx context.Context, req *daemonpb.UpdateMissionRequest) (*daemonpb.UpdateMissionResponse, error) {
 	s.logger.Info("update mission request received", "name", req.Name)
 
 	// Validate request
@@ -2620,7 +2559,7 @@ func (s *DaemonServer) UpdateMission(ctx context.Context, req *UpdateMissionRequ
 		message = fmt.Sprintf("Mission '%s' updated from %s to %s", req.Name, result.OldVersion, result.NewVersion)
 	}
 
-	return &UpdateMissionResponse{
+	return &daemonpb.UpdateMissionResponse{
 		Success:    true,
 		Updated:    result.Updated,
 		OldVersion: result.OldVersion,
@@ -2631,7 +2570,7 @@ func (s *DaemonServer) UpdateMission(ctx context.Context, req *UpdateMissionRequ
 }
 
 // CreateMission creates a new mission with target and workflow configuration.
-func (s *DaemonServer) CreateMission(ctx context.Context, req *CreateMissionRequest) (*CreateMissionResponse, error) {
+func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMissionRequest) (*daemonpb.CreateMissionResponse, error) {
 	s.logger.Info("create mission request received",
 		"name", req.Name,
 		"has_inline_target", req.GetInlineTarget() != nil,
@@ -2652,12 +2591,12 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *CreateMissionRequ
 
 	// Handle target configuration (oneof)
 	switch tc := req.GetTargetConfig().(type) {
-	case *CreateMissionRequest_TargetId:
+	case *daemonpb.CreateMissionRequest_TargetId:
 		if tc.TargetId == "" {
 			return nil, status_grpc.Errorf(codes.InvalidArgument, "target_id cannot be empty")
 		}
 		data.TargetID = tc.TargetId
-	case *CreateMissionRequest_InlineTarget:
+	case *daemonpb.CreateMissionRequest_InlineTarget:
 		inlineTarget := tc.InlineTarget
 		if inlineTarget == nil {
 			return nil, status_grpc.Errorf(codes.InvalidArgument, "inline_target cannot be nil")
@@ -2684,12 +2623,12 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *CreateMissionRequ
 
 	// Handle workflow configuration (oneof)
 	switch wc := req.GetWorkflowConfig().(type) {
-	case *CreateMissionRequest_WorkflowId:
+	case *daemonpb.CreateMissionRequest_WorkflowId:
 		if wc.WorkflowId == "" {
 			return nil, status_grpc.Errorf(codes.InvalidArgument, "workflow_id cannot be empty")
 		}
 		data.WorkflowID = wc.WorkflowId
-	case *CreateMissionRequest_InlineWorkflow:
+	case *daemonpb.CreateMissionRequest_InlineWorkflow:
 		inlineWorkflow := wc.InlineWorkflow
 		if inlineWorkflow == nil {
 			return nil, status_grpc.Errorf(codes.InvalidArgument, "inline_workflow cannot be nil")
@@ -2754,15 +2693,15 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *CreateMissionRequ
 	)
 
 	// Build proto Mission response
-	protoMission := &Mission{
+	protoMission := &daemonpb.Mission{
 		Id:         result.MissionID,
 		Name:       result.Name,
-		Status:     MissionStatus_MISSION_STATUS_PENDING,
+		Status:     daemonpb.MissionStatus_MISSION_STATUS_PENDING,
 		TargetId:   result.TargetID,
 		WorkflowId: result.WorkflowID,
 	}
 
-	return &CreateMissionResponse{
+	return &daemonpb.CreateMissionResponse{
 		Success: true,
 		Mission: protoMission,
 		Message: fmt.Sprintf("Mission '%s' created successfully", result.Name),
@@ -3314,6 +3253,36 @@ func (s *DaemonServer) ProvisionTenant(ctx context.Context, req *ProvisionTenant
 		return nil, status_grpc.Errorf(codes.Internal, "failed to provision tenant: %v", err)
 	}
 
+	// Bootstrap Casbin role hierarchy for the new tenant. This is idempotent —
+	// duplicate policy rules are silently ignored by the Casbin adapter.
+	if s.membershipStore != nil {
+		if concrete, ok := s.membershipStore.(*membership.RedisMembershipStore); ok {
+			if enforcer := concrete.GetEnforcer(); enforcer != nil {
+				if bootstrapErr := membership.BootstrapTenantRoles(enforcer, req.TenantId); bootstrapErr != nil {
+					slog.Warn("failed to bootstrap Casbin roles for tenant",
+						"tenant", req.TenantId,
+						"error", bootstrapErr,
+					)
+				}
+			}
+		}
+	}
+
+	// Create the owner membership record so the provisioning user is immediately
+	// recognised as the tenant owner. AddMember is idempotent on retry via
+	// ErrAlreadyMember — we log and continue rather than failing the RPC.
+	if s.membershipStore != nil && req.OwnerEmail != "" {
+		if addErr := s.membershipStore.AddMember(ctx, req.TenantId, req.OwnerEmail, req.OwnerEmail, "owner", "provisioner"); addErr != nil {
+			if !errors.Is(addErr, membership.ErrAlreadyMember) {
+				slog.Warn("failed to create owner membership",
+					"tenant", req.TenantId,
+					"email", req.OwnerEmail,
+					"error", addErr,
+				)
+			}
+		}
+	}
+
 	// Fetch the freshly-created tenant record for the response.
 	var tenantInfo *TenantInfo
 	if s.tenantService != nil {
@@ -3781,4 +3750,261 @@ func (s *DaemonServer) RevokeAPIKey(ctx context.Context, req *RevokeAPIKeyReques
 
 	s.logger.Info("API key revoked via RPC", "key_id", req.KeyId)
 	return &RevokeAPIKeyResponse{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Membership RPCs
+// ---------------------------------------------------------------------------
+
+// AddTenantMember adds a user to a tenant with the specified role.
+//
+// The caller must be a member of the tenant with at least the admin role and
+// may only assign roles equal to or lower in privilege than their own.
+func (s *DaemonServer) AddTenantMember(ctx context.Context, req *AddTenantMemberRequest) (*AddTenantMemberResponse, error) {
+	if s.membershipStore == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
+	}
+	if req.UserId == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
+	}
+	if req.Role == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "role is required")
+	}
+
+	// Get caller identity.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
+	}
+
+	// Verify the caller is a member of the tenant with at least admin role.
+	callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
+	}
+
+	if membership.RoleLevel(callerMember.Role) > membership.RoleLevel("admin") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "admin role required to manage team")
+	}
+
+	// Enforce role hierarchy: callers cannot grant a role higher than their own.
+	if !membership.CanAssignRole(callerMember.Role, req.Role) {
+		return nil, status_grpc.Errorf(codes.PermissionDenied, "cannot assign role %s (your role: %s)", req.Role, callerMember.Role)
+	}
+
+	if err := s.membershipStore.AddMember(ctx, req.TenantId, req.UserId, req.Email, req.Role, identity.Subject); err != nil {
+		if errors.Is(err, membership.ErrAlreadyMember) {
+			return nil, status_grpc.Error(codes.AlreadyExists, err.Error())
+		}
+		if errors.Is(err, membership.ErrInvalidRole) {
+			return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
+		}
+		return nil, status_grpc.Errorf(codes.Internal, "add member: %v", err)
+	}
+
+	m, _ := s.membershipStore.GetMember(ctx, req.TenantId, req.UserId)
+	return &AddTenantMemberResponse{
+		Membership: membershipToProto(m),
+	}, nil
+}
+
+// RemoveTenantMember removes a user from a tenant.
+//
+// The caller must hold at least the admin role within the tenant.
+// The tenant owner cannot be removed; ownership must first be transferred.
+func (s *DaemonServer) RemoveTenantMember(ctx context.Context, req *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error) {
+	if s.membershipStore == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
+	}
+	if req.UserId == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
+	}
+
+	// Get caller identity.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
+	}
+
+	// Verify the caller is a member of the tenant with at least admin role.
+	callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
+	}
+
+	if membership.RoleLevel(callerMember.Role) > membership.RoleLevel("admin") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "admin role required to manage team")
+	}
+
+	if err := s.membershipStore.RemoveMember(ctx, req.TenantId, req.UserId); err != nil {
+		if errors.Is(err, membership.ErrMemberNotFound) {
+			return nil, status_grpc.Error(codes.NotFound, err.Error())
+		}
+		if errors.Is(err, membership.ErrCannotRemoveOwner) {
+			return nil, status_grpc.Error(codes.FailedPrecondition, err.Error())
+		}
+		return nil, status_grpc.Errorf(codes.Internal, "remove member: %v", err)
+	}
+
+	return &RemoveTenantMemberResponse{}, nil
+}
+
+// UpdateMemberRole changes the role of an existing tenant member.
+//
+// The caller must hold at least the admin role and may only assign roles equal
+// to or lower in privilege than their own.
+func (s *DaemonServer) UpdateMemberRole(ctx context.Context, req *UpdateMemberRoleRequest) (*UpdateMemberRoleResponse, error) {
+	if s.membershipStore == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
+	}
+	if req.UserId == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
+	}
+	if req.NewRole == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "new_role is required")
+	}
+
+	// Get caller identity.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
+	}
+
+	// Verify the caller is a member of the tenant with at least admin role.
+	callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
+	}
+
+	if membership.RoleLevel(callerMember.Role) > membership.RoleLevel("admin") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "admin role required to manage team")
+	}
+
+	// Enforce role hierarchy: callers cannot grant a role higher than their own.
+	if !membership.CanAssignRole(callerMember.Role, req.NewRole) {
+		return nil, status_grpc.Errorf(codes.PermissionDenied, "cannot assign role %s (your role: %s)", req.NewRole, callerMember.Role)
+	}
+
+	if err := s.membershipStore.UpdateRole(ctx, req.TenantId, req.UserId, req.NewRole, identity.Subject); err != nil {
+		if errors.Is(err, membership.ErrMemberNotFound) {
+			return nil, status_grpc.Error(codes.NotFound, err.Error())
+		}
+		if errors.Is(err, membership.ErrInvalidRole) {
+			return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
+		}
+		return nil, status_grpc.Errorf(codes.Internal, "update role: %v", err)
+	}
+
+	m, _ := s.membershipStore.GetMember(ctx, req.TenantId, req.UserId)
+	return &UpdateMemberRoleResponse{
+		Membership: membershipToProto(m),
+	}, nil
+}
+
+// ListUserTenants returns all tenants the specified user belongs to.
+//
+// Users may list their own tenants. Platform operators and admins may query
+// any user.
+func (s *DaemonServer) ListUserTenants(ctx context.Context, req *ListUserTenantsRequest) (*ListUserTenantsResponse, error) {
+	if s.membershipStore == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
+	}
+
+	if req.UserId == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
+	}
+
+	// Users may query their own tenants; admins/platform-operators may query any user.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
+	}
+	if identity.Subject != req.UserId && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "cannot list tenants for another user")
+	}
+
+	memberships, err := s.membershipStore.ListUserTenants(ctx, req.UserId)
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.Internal, "list user tenants: %v", err)
+	}
+
+	infos := make([]*MembershipInfo, 0, len(memberships))
+	for i := range memberships {
+		infos = append(infos, membershipToProto(&memberships[i]))
+	}
+
+	return &ListUserTenantsResponse{
+		Memberships: infos,
+	}, nil
+}
+
+// TransferOwnership transfers tenant ownership from the caller to another
+// existing member of the tenant.
+//
+// Only the current tenant owner may invoke this RPC.
+func (s *DaemonServer) TransferOwnership(ctx context.Context, req *TransferOwnershipRequest) (*TransferOwnershipResponse, error) {
+	if s.membershipStore == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
+	}
+
+	if req.TenantId == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
+	}
+	if req.NewOwnerUserId == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "new_owner_user_id is required")
+	}
+
+	// Get caller identity.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
+	}
+
+	// Verify the caller is the current owner.
+	callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
+	}
+	if callerMember.Role != "owner" {
+		return nil, status_grpc.Error(codes.PermissionDenied, "only the tenant owner can transfer ownership")
+	}
+
+	if err := s.membershipStore.TransferOwnership(ctx, req.TenantId, identity.Subject, req.NewOwnerUserId, identity.Subject); err != nil {
+		if errors.Is(err, membership.ErrMemberNotFound) {
+			return nil, status_grpc.Error(codes.NotFound, err.Error())
+		}
+		if errors.Is(err, membership.ErrNotOwner) {
+			return nil, status_grpc.Error(codes.PermissionDenied, err.Error())
+		}
+		return nil, status_grpc.Errorf(codes.Internal, "transfer ownership: %v", err)
+	}
+
+	return &TransferOwnershipResponse{}, nil
+}
+
+// membershipToProto converts a domain Membership record to the proto MembershipInfo type.
+func membershipToProto(m *membership.Membership) *MembershipInfo {
+	if m == nil {
+		return nil
+	}
+	return &MembershipInfo{
+		TenantId: m.TenantID,
+		UserId:   m.UserID,
+		Email:    m.Email,
+		Role:     m.Role,
+		AddedAt:  m.AddedAt.Format(time.RFC3339),
+		AddedBy:  m.AddedBy,
+	}
 }

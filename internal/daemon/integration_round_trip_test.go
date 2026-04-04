@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon"
-	"github.com/zero-day-ai/gibson/internal/daemon/client"
+	daemonclient "github.com/zero-day-ai/sdk/daemonclient"
 )
 
 // TestDaemonClientListAgentsRoundTrip tests the full round trip of client connecting and calling ListAgents.
@@ -57,11 +57,10 @@ func TestDaemonClientListAgentsRoundTrip(t *testing.T) {
 	}()
 
 	// Connect client
-	infoFile := filepath.Join(homeDir, "daemon.json")
 	clientCtx, clientCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer clientCancel()
 
-	c, err := client.ConnectFromInfo(clientCtx, infoFile)
+	c, err := daemonclient.Connect(clientCtx, daemonclient.DefaultDaemonAddress)
 	require.NoError(t, err, "client should connect to daemon")
 	require.NotNil(t, c, "client should not be nil")
 	defer c.Close()
@@ -117,11 +116,10 @@ func TestDaemonClientListToolsAndPlugins(t *testing.T) {
 	}()
 
 	// Connect client
-	infoFile := filepath.Join(homeDir, "daemon.json")
 	clientCtx, clientCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer clientCancel()
 
-	c, err := client.ConnectFromInfo(clientCtx, infoFile)
+	c, err := daemonclient.Connect(clientCtx, daemonclient.DefaultDaemonAddress)
 	require.NoError(t, err, "client should connect to daemon")
 	require.NotNil(t, c, "client should not be nil")
 	defer c.Close()

@@ -19,6 +19,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
 	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zero-day-ai/gibson/internal/membership"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
@@ -170,6 +171,11 @@ type daemonImpl struct {
 	// agentAccessStore manages tenant opt-in for agents and syncs Casbin policies.
 	// Initialized when a standalone Redis client is available.
 	agentAccessStore *component.RedisAgentAccessStore
+
+	// membershipStore manages user-to-tenant membership records with role
+	// hierarchy and optional Casbin policy synchronization.
+	// Initialized when a standalone Redis client is available.
+	membershipStore *membership.RedisMembershipStore
 
 	// quotaManager enforces per-tenant resource quotas (missions, agents, memory).
 	// Initialized after stateClient is available. May be nil until then; quota
@@ -471,6 +477,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 					d.agentAccessStore = component.NewRedisAgentAccessStore(redisClient, d.logger.Slog())
 					d.logger.Info(ctx, "initialized tool and agent access stores")
 
+					// Initialize membership store for user-to-tenant membership management.
+					d.membershipStore = membership.NewRedisMembershipStore(redisClient, d.logger.Slog())
+					d.logger.Info(ctx, "initialized membership store")
+
 					// Initialize Casbin enforcer for policy-backed access control.
 					// Parse the Redis URL to get host:port for the Casbin adapter; fall back to
 					// the config password if the URL does not embed credentials.
@@ -491,7 +501,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 						}
 						d.toolAccessStore.SetEnforcer(enforcer)
 						d.agentAccessStore.SetEnforcer(enforcer)
-						d.logger.Info(ctx, "casbin enforcer wired to plugin, tool, and agent access stores")
+						if d.membershipStore != nil {
+							d.membershipStore.SetEnforcer(enforcer)
+						}
+						d.logger.Info(ctx, "casbin enforcer wired to plugin, tool, agent access stores, and membership store")
 					}
 				} else {
 					d.logger.Warn(ctx, "plugin access store unavailable: Redis client is not standalone mode")

@@ -11,7 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon"
-	daemonclient "github.com/zero-day-ai/gibson/internal/daemon/client"
+	adminclient "github.com/zero-day-ai/gibson/internal/daemon/client"
+	"github.com/zero-day-ai/sdk/daemonclient"
 )
 
 var daemonCmd = &cobra.Command{
@@ -341,20 +342,20 @@ func runDaemonStop(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Connecting to daemon at %s...\n", daemonclient.GetDaemonAddress())
 	}
 
-	// Connect and request shutdown
+	// Connect to admin service and request shutdown
 	ctx := cmd.Context()
-	client, err := daemonclient.ConnectOrFail(ctx)
+	admin, err := adminclient.ConnectAdmin(ctx, daemonclient.GetDaemonAddress())
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w", err)
 	}
-	defer client.Close()
+	defer admin.Close()
 
-	// Request shutdown via gRPC
+	// Request shutdown via admin gRPC
 	if flags.IsVerbose() {
 		fmt.Println("Requesting graceful shutdown...")
 	}
 
-	if err := client.Shutdown(ctx); err != nil {
+	if err := admin.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to stop daemon: %w", err)
 	}
 

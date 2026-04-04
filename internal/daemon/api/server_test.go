@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -280,10 +281,10 @@ func (m *mockDaemon) RequestShutdown(ctx context.Context, force bool, timeoutSec
 type mockServerStream struct {
 	ctx       context.Context
 	sentCount int
-	events    []*RunMissionResponse
+	events    []*daemonpb.RunMissionResponse
 }
 
-func (m *mockServerStream) Send(event *RunMissionResponse) error {
+func (m *mockServerStream) Send(event *daemonpb.RunMissionResponse) error {
 	m.sentCount++
 	m.events = append(m.events, event)
 	return nil
@@ -428,7 +429,7 @@ workflow:
 			server := NewDaemonServer(daemon, nil, nil)
 
 			// Create request
-			req := &RunMissionRequest{
+			req := &daemonpb.RunMissionRequest{
 				WorkflowYaml: tt.workflowYAML,
 				WorkflowPath: tt.workflowPath,
 				MissionId:    "test-mission-id",
@@ -505,7 +506,7 @@ workflow:
 
 	server := NewDaemonServer(daemon, nil, nil)
 
-	req := &RunMissionRequest{
+	req := &daemonpb.RunMissionRequest{
 		WorkflowYaml: validYAML,
 		MissionId:    "test-mission-id",
 	}
@@ -562,7 +563,7 @@ workflow:
 
 	server := NewDaemonServer(daemon, nil, nil)
 
-	req := &RunMissionRequest{
+	req := &daemonpb.RunMissionRequest{
 		WorkflowYaml: validYAML,
 		MissionId:    "test-mission-id",
 		Variables: map[string]string{
@@ -671,7 +672,7 @@ workflow:
 
 			server := NewDaemonServer(daemon, nil, nil)
 
-			req := &RunMissionRequest{
+			req := &daemonpb.RunMissionRequest{
 				WorkflowYaml: tt.workflowYAML,
 				WorkflowPath: "/fallback/path.yaml", // Provide fallback for empty YAML tests
 				MissionId:    "test-mission-id",

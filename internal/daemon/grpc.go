@@ -13,6 +13,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
+	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/audit"
@@ -164,6 +165,12 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 			// Wire BillingStore (composed from TenantService + QuotaManager).
 			daemonSvc.WithBillingStore(tenantService, d.quotaManager)
 			d.logger.Info(ctx, "billing store wired into DaemonServer")
+
+			// Wire MembershipStore for the membership management RPCs.
+			if d.membershipStore != nil {
+				daemonSvc.WithMembershipStore(d.membershipStore)
+				d.logger.Info(ctx, "membership store wired into DaemonServer")
+			}
 		} else {
 			d.logger.Warn(ctx, "tenant provisioning not wired: Redis client is not standalone mode")
 		}
@@ -171,7 +178,8 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		d.logger.Warn(ctx, "tenant provisioning not wired: stateClient is nil")
 	}
 
-	api.RegisterDaemonServiceServer(srv, daemonSvc)
+	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
+	api.RegisterDaemonAdminServiceServer(srv, daemonSvc)
 
 	// Initialize and register the ComponentService on the same gRPC port.
 	//
@@ -551,9 +559,9 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 			endpoint = t.Endpoints[0]
 		}
 
-		var caps *api.Capabilities
+		var caps *daemonpb.Capabilities
 		if t.Capabilities != nil {
-			caps = &api.Capabilities{
+			caps = &daemonpb.Capabilities{
 				HasRoot:         t.Capabilities.HasRoot,
 				HasSudo:         t.Capabilities.HasSudo,
 				CanRawSocket:    t.Capabilities.CanRawSocket,
@@ -841,7 +849,7 @@ func (d *daemonImpl) RunAttack(ctx context.Context, req api.AttackRequest) (<-ch
 		startTime := now.Add(-result.Duration)
 
 		// Create typed operation result
-		operationResult := &api.OperationResult{
+		operationResult := &daemonpb.OperationResult{
 			Status:        string(result.Status),
 			DurationMs:    result.Duration.Milliseconds(),
 			StartedAt:     startTime.UnixMilli(),

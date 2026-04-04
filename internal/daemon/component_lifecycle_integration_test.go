@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon"
-	"github.com/zero-day-ai/gibson/internal/daemon/client"
+	daemonclient "github.com/zero-day-ai/sdk/daemonclient"
 )
 
 // TestComponentLifecycle tests the full lifecycle of a component through the daemon client.
@@ -71,11 +71,10 @@ func TestComponentLifecycle(t *testing.T) {
 	}()
 
 	// Connect client
-	infoFile := filepath.Join(homeDir, "daemon.json")
 	clientCtx, clientCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer clientCancel()
 
-	c, err := client.ConnectFromInfo(clientCtx, infoFile)
+	c, err := daemonclient.Connect(clientCtx, daemonclient.DefaultDaemonAddress)
 	require.NoError(t, err, "client should connect to daemon")
 	require.NotNil(t, c, "client should not be nil")
 	defer c.Close()
@@ -97,7 +96,7 @@ func TestComponentLifecycle(t *testing.T) {
 	defer installCancel()
 
 	t.Logf("Installing debug-agent from: %s", debugAgentPath)
-	result, err := c.InstallAgent(installCtx, debugAgentPath, client.InstallOptions{
+	result, err := c.InstallAgent(installCtx, debugAgentPath, daemonclient.InstallOptions{
 		SkipBuild: false, // Build the agent
 		Verbose:   true,  // Get build output for debugging
 	})
@@ -153,7 +152,7 @@ func TestComponentLifecycle(t *testing.T) {
 	logsCtx, logsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer logsCancel()
 
-	logChan, err := c.GetAgentLogs(logsCtx, "debug-agent", client.LogsOptions{
+	logChan, err := c.GetAgentLogs(logsCtx, "debug-agent", daemonclient.LogsOptions{
 		Follow: false,
 		Lines:  10,
 	})
@@ -183,7 +182,7 @@ func TestComponentLifecycle(t *testing.T) {
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer updateCancel()
 
-	updateResult, err := c.UpdateAgent(updateCtx, "debug-agent", client.UpdateOptions{
+	updateResult, err := c.UpdateAgent(updateCtx, "debug-agent", daemonclient.UpdateOptions{
 		Restart:   false,
 		SkipBuild: true, // Skip rebuild to make test faster
 		Verbose:   false,
@@ -293,11 +292,10 @@ func TestComponentLifecycleWithMockComponent(t *testing.T) {
 	}()
 
 	// Connect client
-	infoFile := filepath.Join(homeDir, "daemon.json")
 	clientCtx, clientCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer clientCancel()
 
-	c, err := client.ConnectFromInfo(clientCtx, infoFile)
+	c, err := daemonclient.Connect(clientCtx, daemonclient.DefaultDaemonAddress)
 	require.NoError(t, err, "client should connect to daemon")
 	require.NotNil(t, c, "client should not be nil")
 	defer c.Close()
@@ -308,7 +306,7 @@ func TestComponentLifecycleWithMockComponent(t *testing.T) {
 	installCtx, installCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer installCancel()
 
-	result, err := c.InstallAgent(installCtx, mockComponentDir, client.InstallOptions{
+	result, err := c.InstallAgent(installCtx, mockComponentDir, daemonclient.InstallOptions{
 		SkipBuild: false,
 		Verbose:   true,
 	})
