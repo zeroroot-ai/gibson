@@ -113,6 +113,15 @@ type APIKeyRecord struct {
 	// Examples: ["graphrag:write", "plugin:gitlab:read", "missions:execute", "*"]
 	Capabilities []string `json:"capabilities"`
 
+	// Name is a human-readable label for this key (e.g. "CI/CD Deploy Key").
+	// Set at creation time; may be empty for keys created before this field
+	// was introduced.
+	Name string `json:"name,omitempty"`
+
+	// CreatedBy is the email or subject identifier of the identity that created
+	// this key.  Used for audit trail attribution.
+	CreatedBy string `json:"created_by,omitempty"`
+
 	// Status is either "active" or "revoked".
 	// Revoked keys are retained in Redis for audit purposes but will never
 	// authenticate successfully.
@@ -188,6 +197,7 @@ func (a *APIKeyAuthenticator) CreateKey(
 	tenantID string,
 	allowedKinds, allowedNames []string,
 	capabilities []string,
+	name, createdBy string,
 ) (rawKey string, record *APIKeyRecord, err error) {
 	if tenantID == "" {
 		return "", nil, fmt.Errorf("tenantID must not be empty")
@@ -234,6 +244,8 @@ func (a *APIKeyAuthenticator) CreateKey(
 		CreatedAt:    now,
 		LastUsedAt:   now,
 		Status:       apiKeyStatusActive,
+		Name:         name,
+		CreatedBy:    createdBy,
 	}
 	if record.AllowedKinds == nil {
 		record.AllowedKinds = []string{}
@@ -296,6 +308,8 @@ func (a *APIKeyAuthenticator) CreateKey(
 		"allowed_kinds", allowedKinds,
 		"allowed_names", allowedNames,
 		"capabilities", record.Capabilities,
+		"name", name,
+		"created_by", createdBy,
 	)
 
 	return rawKey, record, nil

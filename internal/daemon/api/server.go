@@ -814,6 +814,14 @@ func (s *DaemonServer) WithBillingStore(ts *component.TenantService, qm *compone
 	return s
 }
 
+// WithAPIKeyStore wires the API key authenticator so that CreateAPIKey,
+// ListAPIKeys, and RevokeAPIKey RPCs operate against Redis-backed storage.
+// Call this immediately after NewDaemonServer and before registering the server.
+func (s *DaemonServer) WithAPIKeyStore(a *auth.APIKeyAuthenticator) *DaemonServer {
+	s.apiKeyStore = &apiKeyStoreAdapter{auth: a}
+	return s
+}
+
 // ---------------------------------------------------------------------------
 // provisionerAdapter bridges *provisioner.Provisioner to the DaemonServer's
 // provisioner interface which uses positional arguments and different return
@@ -911,6 +919,58 @@ func (a *billingStoreAdapter) UpdateBilling(ctx context.Context, tenantID, tier,
 	}
 	updates["billing_alert"] = fmt.Sprintf("%t", billingAlert)
 	return a.tenants.UpdateTenant(ctx, tenantID, updates)
+}
+
+// ---------------------------------------------------------------------------
+// apiKeyStoreAdapter bridges *auth.APIKeyAuthenticator to the apiKeyStore
+// interface expected by DaemonServer.  It translates between the auth
+// package's APIKeyRecord type and the server-local APIKeyRecord type, and
+// maps the slightly different method signatures.
+// ---------------------------------------------------------------------------
+
+type apiKeyStoreAdapter struct {
+	auth *auth.APIKeyAuthenticator
+}
+
+// Create generates a new API key via the auth package and returns the stable
+// key ID plus the raw (unhashed) key material.  The raw key is shown once
+// and never stored.
+func (a *apiKeyStoreAdapter) Create(ctx context.Context, tenantID string, allowedKinds, allowedNames, capabilities []string, name, createdBy string) (keyID, rawKey string, err error) {
+	raw, record, err := a.auth.CreateKey(ctx, tenantID, allowedKinds, allowedNames, capabilities, name, createdBy)
+	if err != nil {
+		return "", "", err
+	}
+	return record.KeyID, raw, nil
+}
+
+// List retrieves all API key records for a tenant, converting auth.APIKeyRecord
+// to the server-local APIKeyRecord type.  Key hashes are never returned.
+func (a *apiKeyStoreAdapter) List(ctx context.Context, tenantID string) ([]APIKeyRecord, error) {
+	authRecords, err := a.auth.ListKeys(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]APIKeyRecord, 0, len(authRecords))
+	for _, r := range authRecords {
+		records = append(records, APIKeyRecord{
+			KeyID:        r.KeyID,
+			TenantID:     r.TenantID,
+			CreatedAt:    r.CreatedAt.Format(time.RFC3339),
+			LastUsedAt:   r.LastUsedAt.Format(time.RFC3339),
+			AllowedKinds: r.AllowedKinds,
+			AllowedNames: r.AllowedNames,
+			Name:         r.Name,
+			Capabilities: r.Capabilities,
+			CreatedBy:    r.CreatedBy,
+		})
+	}
+	return records, nil
+}
+
+// Revoke marks the given key as revoked in Redis and removes its Casbin
+// policies.  The revoked record is retained for audit purposes.
+func (a *apiKeyStoreAdapter) Revoke(ctx context.Context, keyID string) error {
+	return a.auth.RevokeKey(ctx, keyID)
 }
 
 // parseInt32 is a small helper for parsing int32 from string config values.
@@ -2921,7 +2981,23 @@ func (s *DaemonServer) CreateTenant(ctx context.Context, req *CreateTenantReques
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
 	}
 
-	record, err := s.tenantService.CreateTenant(ctx, req.TenantId, req.DisplayName, req.Config)
+	// Merge proto fields into the config map so TenantService persists them
+	// and writes reverse-lookup indices (email, Stripe).
+	cfg := req.Config
+	if cfg == nil {
+		cfg = make(map[string]string)
+	}
+	if req.OwnerEmail != "" {
+		cfg["owner_email"] = req.OwnerEmail
+	}
+	if req.Tier != "" {
+		cfg["tier"] = req.Tier
+	}
+	if _, ok := cfg["keycloak_realm_name"]; !ok {
+		cfg["keycloak_realm_name"] = req.TenantId
+	}
+
+	record, err := s.tenantService.CreateTenant(ctx, req.TenantId, req.DisplayName, cfg)
 	if err != nil {
 		if errors.Is(err, component.ErrTenantAlreadyExists) {
 			return nil, status_grpc.Errorf(codes.AlreadyExists, "tenant %q already exists", req.TenantId)

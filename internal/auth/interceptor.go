@@ -368,8 +368,9 @@ func createSyntheticAdminIdentity() *Identity {
 			ExpiresAt:       timeNever(),
 			AuthenticatedAt: timeNow(),
 		},
-		Roles:       []string{"admin"},
-		Permissions: []Permission{{Action: "*", Resource: "*", Scope: "*"}},
+		Roles:        []string{"admin"},
+		Permissions:  []Permission{{Action: "*", Resource: "*", Scope: "*"}},
+		Capabilities: []string{"*"},
 	}
 }
 
@@ -551,8 +552,9 @@ func checkLocalhostBypassWithAddr(ctx context.Context, logger *slog.Logger, meth
 			ExpiresAt:       timeNever(),
 			AuthenticatedAt: timeNow(),
 		},
-		Roles:       []string{"admin"},
-		Permissions: []Permission{{Action: "*", Resource: "*", Scope: "*"}},
+		Roles:        []string{"admin"},
+		Permissions:  []Permission{{Action: "*", Resource: "*", Scope: "*"}},
+		Capabilities: []string{"*"},
 	}
 
 	return identity, true, addr

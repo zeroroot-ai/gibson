@@ -10,7 +10,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/tool/builtins"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/queue"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -51,52 +50,8 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		}
 	}
 
-	// Create tool registry and populate with Redis-based tools
+	// Create tool registry and populate with built-in tools
 	toolRegistry := tool.NewToolRegistry()
-	if d.infrastructure.RedisClient() != nil {
-		// Create Redis tool registry
-		redisClient, ok := d.infrastructure.RedisClient().(*queue.RedisClient)
-		if !ok {
-			d.logger.Warn(ctx, "Redis client type assertion failed, skipping Redis tool registry population")
-		} else {
-			redisToolRegistry := harness.NewRedisToolRegistry(redisClient, d.logger.Slog())
-
-			// Store on daemon for use by ListTools() gRPC method
-			d.redisToolRegistry = redisToolRegistry
-
-			// Refresh to discover available tools from Redis
-			if err := redisToolRegistry.Refresh(ctx); err != nil {
-				d.logger.Warn(ctx, "failed to refresh Redis tool registry",
-					"error", err.Error(),
-				)
-			}
-
-			// Populate tool registry with Redis tools
-			registered := 0
-			for _, toolName := range redisToolRegistry.List() {
-				if proxy, ok := redisToolRegistry.Get(toolName); ok {
-					if err := toolRegistry.RegisterInternal(proxy); err != nil {
-						d.logger.Warn(ctx, "failed to register Redis tool",
-							"tool", toolName,
-							"error", err.Error(),
-						)
-						continue
-					}
-					registered++
-				}
-			}
-
-			if registered > 0 {
-				d.logger.Info(ctx, "populated tool registry with Redis tools",
-					"tools_registered", registered,
-				)
-			} else {
-				d.logger.Info(ctx, "no Redis tools available yet (workers may not be registered)")
-			}
-		}
-	} else {
-		d.logger.Info(ctx, "Redis client not available, skipping Redis tool registry population")
-	}
 
 	// Register builtin tools - Phase 8
 	// These tools provide agent access to the payload library

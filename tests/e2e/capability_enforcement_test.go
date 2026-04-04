@@ -153,7 +153,7 @@ func TestCapabilityEnforcement_MissionsReadOnly(t *testing.T) {
 	a, _ := newAPIKeyAuthenticatorWithEnforcer(t, enforcer)
 
 	// CreateKey with capability "missions:read" → adds policy (keyID, tenant, "missions", "read").
-	rawKey, record, err := a.CreateKey(context.Background(), tenant, nil, nil, []string{"missions:read"})
+	rawKey, record, err := a.CreateKey(context.Background(), tenant, nil, nil, []string{"missions:read"}, "", "")
 	require.NoError(t, err)
 
 	t.Logf("created key %s with capabilities=%v", record.KeyID, record.Capabilities)
@@ -216,7 +216,7 @@ func TestCapabilityEnforcement_GraphRAGReadOnly(t *testing.T) {
 	enforcer := newInMemoryEnforcer(t)
 	a, _ := newAPIKeyAuthenticatorWithEnforcer(t, enforcer)
 
-	rawKey, record, err := a.CreateKey(context.Background(), tenant, nil, nil, []string{"graphrag:read"})
+	rawKey, record, err := a.CreateKey(context.Background(), tenant, nil, nil, []string{"graphrag:read"}, "", "")
 	require.NoError(t, err)
 
 	t.Logf("created key %s with capabilities=%v", record.KeyID, record.Capabilities)
@@ -269,7 +269,7 @@ func TestCapabilityEnforcement_WildcardKey(t *testing.T) {
 	enforcer := newInMemoryEnforcer(t)
 	a, _ := newAPIKeyAuthenticatorWithEnforcer(t, enforcer)
 
-	rawKey, record, err := a.CreateKey(context.Background(), tenant, nil, nil, []string{"*"})
+	rawKey, record, err := a.CreateKey(context.Background(), tenant, nil, nil, []string{"*"}, "", "")
 	require.NoError(t, err)
 
 	t.Logf("created wildcard key %s", record.KeyID)
@@ -316,7 +316,7 @@ func TestCapabilityEnforcement_WildcardKey(t *testing.T) {
 
 		// A key created with nil capabilities gets an empty Capabilities slice in
 		// the record. Authenticate normalises this to ["*"] on every auth call.
-		rawKeyLegacy, _, err := a.CreateKey(context.Background(), tenant, nil, nil, nil)
+		rawKeyLegacy, _, err := a.CreateKey(context.Background(), tenant, nil, nil, nil, "", "")
 		require.NoError(t, err)
 
 		identity, err := a.Authenticate(context.Background(), rawKeyLegacy)
@@ -504,6 +504,7 @@ func TestCapabilityEnforcement_ComponentScope(t *testing.T) {
 		[]string{"agent"},        // AllowedKinds
 		[]string{"recon-agent"},  // AllowedNames
 		[]string{"missions:read", "graphrag:read"},
+		"", "",
 	)
 	require.NoError(t, err)
 	t.Logf("created scoped key %s: kinds=%v names=%v", record.KeyID, record.AllowedKinds, record.AllowedNames)
@@ -568,7 +569,7 @@ func TestCapabilityEnforcement_ComponentScope(t *testing.T) {
 		t.Parallel()
 
 		// A key with empty AllowedKinds and AllowedNames allows any registration.
-		rawKeyFull, _, err := a.CreateKey(ctx, tenant, nil, nil, []string{"*"})
+		rawKeyFull, _, err := a.CreateKey(ctx, tenant, nil, nil, []string{"*"}, "", "")
 		require.NoError(t, err)
 
 		identity, err := a.Authenticate(ctx, rawKeyFull)
@@ -600,7 +601,7 @@ func TestCapabilityEnforcement_MultipleCapabilities(t *testing.T) {
 
 	caps := []string{"missions:read", "missions:execute", "graphrag:read", "findings:write"}
 
-	rawKey, record, err := a.CreateKey(context.Background(), tenant, nil, nil, caps)
+	rawKey, record, err := a.CreateKey(context.Background(), tenant, nil, nil, caps, "", "")
 	require.NoError(t, err)
 	t.Logf("created key %s with %d capabilities", record.KeyID, len(caps))
 
@@ -663,7 +664,7 @@ func TestCapabilityEnforcement_RevocationRemovesPolicies(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, record, err := a.CreateKey(ctx, tenant, nil, nil, []string{"missions:read", "graphrag:write"})
+	_, record, err := a.CreateKey(ctx, tenant, nil, nil, []string{"missions:read", "graphrag:write"}, "", "")
 	require.NoError(t, err)
 
 	// Verify policies are active before revocation.
@@ -705,9 +706,9 @@ func TestCapabilityEnforcement_SyncAllPolicies(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two keys with different capabilities.
-	_, rec1, err := a.CreateKey(ctx, tenant, nil, nil, []string{"missions:read"})
+	_, rec1, err := a.CreateKey(ctx, tenant, nil, nil, []string{"missions:read"}, "", "")
 	require.NoError(t, err)
-	_, rec2, err := a.CreateKey(ctx, tenant, nil, nil, []string{"graphrag:write", "findings:read"})
+	_, rec2, err := a.CreateKey(ctx, tenant, nil, nil, []string{"graphrag:write", "findings:read"}, "", "")
 	require.NoError(t, err)
 
 	// Simulate a cold enforcer restart by creating a brand-new empty enforcer and

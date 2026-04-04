@@ -315,7 +315,7 @@ func TestComponentLifecycle_APIKeyToTenantFlow(t *testing.T) {
 	)
 
 	// Step 1: Create an API key for the target tenant.
-	rawKey, record, err := authenticator.CreateKey(ctx, targetTenant, nil, nil, nil)
+	rawKey, record, err := authenticator.CreateKey(ctx, targetTenant, nil, nil, nil, "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, rawKey)
 	require.NotNil(t, record)

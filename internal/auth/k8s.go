@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -162,6 +163,17 @@ func (v *K8sValidator) Authenticate(ctx context.Context, token string) (*Identit
 
 		identity.Roles = roles
 		identity.Permissions = permissions
+
+		// Auto-assign component role for Gibson-managed ServiceAccounts.
+		// This is additive — existing role bindings still apply. Non-Gibson SAs
+		// are unaffected because deriveComponentRole returns "" for unrecognised names.
+		if role, compType, compName := deriveComponentRole(saName); role != "" {
+			identity.Roles = append(identity.Roles, role)
+			identity.Claims["gibson.io/type"] = compType
+			identity.Claims["gibson.io/name"] = compName
+		}
+
+		identity.Capabilities = resolveCapabilitiesFromRoles(identity.Roles)
 	}
 
 	recordAuthAttempt(ctx, "kubernetes", "success")
@@ -245,4 +257,24 @@ func parseServiceAccountUsername(username string) (namespace, name string, err e
 	}
 
 	return namespace, name, nil
+}
+
+// deriveComponentRole returns the Gibson component role for a ServiceAccount
+// name following the gibson-{type}-{name} convention. Returns empty string
+// if the SA name does not match a known component pattern.
+func deriveComponentRole(saName string) (role, compType, compName string) {
+	prefixes := map[string]string{
+		"gibson-tool-":   "tool-executor",
+		"gibson-agent-":  "agent-executor",
+		"gibson-plugin-": "plugin-executor",
+	}
+	for prefix, r := range prefixes {
+		if strings.HasPrefix(saName, prefix) {
+			name := strings.TrimPrefix(saName, prefix)
+			typ := strings.TrimPrefix(prefix, "gibson-")
+			typ = strings.TrimSuffix(typ, "-")
+			return r, typ, name
+		}
+	}
+	return "", "", ""
 }

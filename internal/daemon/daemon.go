@@ -4,16 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/attack"
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/component/build"
-	"github.com/zero-day-ai/gibson/internal/component/git"
-	"github.com/zero-day-ai/gibson/internal/component/resolver"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/crypto/providers"
@@ -30,16 +27,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
 	healthhttp "github.com/zero-day-ai/sdk/health/http"
-	"github.com/zero-day-ai/sdk/queue"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
-)
-
-// Type aliases to avoid exposing resolver types directly through the daemon API
-type (
-	dependencyTree     = resolver.DependencyTree
-	validationResult   = resolver.ValidationResult
-	dependencyResolver = resolver.DependencyResolver
 )
 
 // targetStore is an interface for target data access
@@ -47,17 +36,6 @@ type targetStore interface {
 	Get(ctx context.Context, id types.ID) (*types.Target, error)
 	GetByName(ctx context.Context, name string) (*types.Target, error)
 	Create(ctx context.Context, target *types.Target) error
-}
-
-// redisToolDiscovery is an interface for Redis-based tool discovery.
-// This interface allows for mock implementations in tests.
-type redisToolDiscovery interface {
-	// Refresh discovers tools from Redis and updates the registry
-	Refresh(ctx context.Context) error
-	// GetAllMetadata returns metadata for all discovered tools
-	GetAllMetadata() []queue.ToolMeta
-	// IsHealthy checks if a tool has healthy workers
-	IsHealthy(ctx context.Context, name string) bool
 }
 
 // AgentRuntimeState tracks runtime state for a single agent.
@@ -106,21 +84,6 @@ type daemonImpl struct {
 	// This is initialized when GIBSON_USE_REDIS_STORES=true
 	stateClient *state.StateClient
 
-	// componentStore provides access to component metadata in Redis
-	componentStore component.ComponentStore
-
-	// componentInstaller handles component installation, updates, and uninstallation
-	componentInstaller component.Installer
-
-	// componentBuildExecutor executes component builds
-	componentBuildExecutor build.BuildExecutor
-
-	// componentLogWriter manages component log files
-	componentLogWriter component.LogWriter
-
-	// componentLifecycleManager manages component start/stop operations
-	componentLifecycleManager component.LifecycleManager
-
 	// missionStore provides access to mission persistence
 	missionStore mission.MissionStore
 
@@ -129,9 +92,6 @@ type daemonImpl struct {
 
 	// checkpointStore provides checkpoint persistence for pause/resume
 	checkpointStore mission.CheckpointStore
-
-	// missionInstaller handles mission installation, updates, and uninstallation
-	missionInstaller mission.MissionInstaller
 
 	// missionService provides mission business logic operations
 	missionService mission.MissionService
@@ -168,9 +128,6 @@ type daemonImpl struct {
 	// attackRunner executes ad-hoc attacks
 	attackRunner attack.AttackRunner
 
-	// dependencyResolver manages mission dependency resolution and validation
-	dependencyResolver dependencyResolver
-
 	// redisDaemonInfo provides Redis-based daemon discovery and registration
 	redisDaemonInfo *RedisDaemonInfo
 
@@ -206,15 +163,18 @@ type daemonImpl struct {
 	// May be nil when no key provider is set (plugin access RPCs will return Unimplemented).
 	pluginAccessStore component.PluginAccessStore
 
+	// toolAccessStore manages tenant opt-in for tools and syncs Casbin policies.
+	// Initialized when a standalone Redis client is available.
+	toolAccessStore *component.RedisToolAccessStore
+
+	// agentAccessStore manages tenant opt-in for agents and syncs Casbin policies.
+	// Initialized when a standalone Redis client is available.
+	agentAccessStore *component.RedisAgentAccessStore
+
 	// quotaManager enforces per-tenant resource quotas (missions, agents, memory).
 	// Initialized after stateClient is available. May be nil until then; quota
 	// enforcement is a no-op while nil.
 	quotaManager *component.QuotaManager
-
-	// redisToolRegistry discovers tools registered in Redis by K8s-deployed tool workers
-	// This is used by ListTools() to include Redis-based tools in addition to
-	// componentStore (CLI-installed) tools
-	redisToolRegistry redisToolDiscovery
 
 	// redisEventStream bridges the in-process EventBus to per-tenant Redis Streams.
 	// It is initialised after stateClient is available. May be nil before that;
@@ -410,59 +370,21 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.callback.SetProtoResolver(regAdapter.GetResolver())
 	d.logger.Info(ctx, "shared proto resolver with callback manager")
 
-	// Initialize component store with Redis backend
-	if d.stateClient != nil {
-		d.componentStore = component.NewRedisComponentStore(d.stateClient.Client(), d.config.Registry.Namespace)
-		d.logger.Info(ctx, "initialized component store with Redis backend")
+	// Initialize log tailer for component log streaming
+	d.logTailer = NewLogTailer(ctx, 10000, *d.logger)
+	d.logger.Info(ctx, "initialized log tailer")
 
-		// Initialize component infrastructure for install/uninstall/update operations
-		gitOps := git.NewDefaultGitOperations()
-		buildExecutor := build.NewDefaultBuildExecutor()
-		logsDir := filepath.Join(d.config.Core.HomeDir, "logs")
-		logWriter, err := component.NewDefaultLogWriter(logsDir, nil)
-		if err != nil {
-			d.logger.Warn(ctx, "failed to create log writer, component lifecycle management may be limited", "error", err)
-		} else {
-			lifecycleManager := component.NewLifecycleManager(d.componentStore, logWriter)
-			d.componentLifecycleManager = lifecycleManager
-			d.componentInstaller = component.NewDefaultInstaller(gitOps, buildExecutor, d.componentStore, lifecycleManager)
-			d.componentBuildExecutor = buildExecutor
-			d.componentLogWriter = logWriter
-			d.logger.Info(ctx, "initialized component installer")
+	// Initialize mission service with inline config processor support
+	// Note: MissionStore implements WorkflowCreator (has CreateDefinition method)
+	// and targetStore implements TargetCreator (has Create method)
+	missionService := mission.NewMissionService(d.missionStore, nil, nil) // No workflow/finding stores for now
+	missionService.SetTargetStore(d.targetStore)
 
-			// Initialize log tailer for component log streaming
-			d.logTailer = NewLogTailer(ctx, 10000, *d.logger)
-			d.logger.Info(ctx, "initialized log tailer")
-
-			// Initialize mission service with inline config processor support
-			// Note: MissionStore implements WorkflowCreator (has CreateDefinition method)
-			// and targetStore implements TargetCreator (has Create method)
-			missionService := mission.NewMissionService(d.missionStore, nil, nil) // No workflow/finding stores for now
-			missionService.SetTargetStore(d.targetStore)
-
-			// Create inline config processor using the target store and mission store
-			inlineProcessor := mission.NewInlineConfigProcessor(d.targetStore, d.missionStore)
-			missionService.SetInlineProcessor(inlineProcessor)
-			d.missionService = missionService
-			d.logger.Info(ctx, "initialized mission service with inline config processor")
-
-			// Initialize mission installer with same git operations and mission store
-			// Create adapters to bridge component package types to mission interfaces
-			missionsDir := filepath.Join(d.config.Core.HomeDir, "missions")
-			componentStoreAdapter := mission.NewComponentStoreAdapter(d.componentStore)
-			componentInstallerAdapter := mission.NewComponentInstallerAdapter(d.componentInstaller)
-			d.missionInstaller = mission.NewDefaultMissionInstaller(
-				gitOps,
-				d.missionStore,
-				missionsDir,
-				componentStoreAdapter,
-				componentInstallerAdapter,
-			)
-			d.logger.Info(ctx, "initialized mission installer", "missions_dir", missionsDir)
-		}
-	} else {
-		d.logger.Warn(ctx, "state client not available, component store not initialized")
-	}
+	// Create inline config processor using the target store and mission store
+	inlineProcessor := mission.NewInlineConfigProcessor(d.targetStore, d.missionStore)
+	missionService.SetInlineProcessor(inlineProcessor)
+	d.missionService = missionService
+	d.logger.Info(ctx, "initialized mission service with inline config processor")
 
 	// Initialize QuotaManager for per-tenant resource enforcement.
 	// The TenantScopedStore wraps stateClient so that all quota counters are
@@ -490,31 +412,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	}
 	d.infrastructure = infra
 	d.logger.Info(ctx, "infrastructure components initialized")
-
-	// Inject taxonomy registry into component installer so it can unregister extensions on agent uninstall
-	if d.componentInstaller != nil && infra.taxonomyRegistry != nil {
-		// Cast to *DefaultInstaller since SetTaxonomyRegistry is not on the Installer interface
-		if defaultInstaller, ok := d.componentInstaller.(*component.DefaultInstaller); ok {
-			adapter := component.NewTaxonomyRegistryAdapter(infra.taxonomyRegistry)
-			defaultInstaller.SetTaxonomyRegistry(adapter)
-			d.logger.Info(ctx, "taxonomy registry injected into component installer")
-		}
-	}
-
-	// Initialize dependency resolver for mission dependency validation
-	// The resolver needs component store, lifecycle manager, and a manifest loader
-	if d.componentStore != nil && d.componentLifecycleManager != nil {
-		d.logger.Info(ctx, "initializing dependency resolver")
-		manifestLoader := newManifestLoader(d.componentStore)
-		d.dependencyResolver = resolver.NewResolver(
-			d.componentStore,
-			d.componentLifecycleManager,
-			manifestLoader,
-		)
-		d.logger.Info(ctx, "dependency resolver initialized")
-	} else {
-		d.logger.Warn(ctx, "dependency resolver not initialized - component store or lifecycle manager unavailable")
-	}
 
 	// Configure callback service with TracerProvider for proxy span creation (from OTel stack)
 	if infra.otelStack != nil && infra.otelStack.TracerProvider != nil {
@@ -567,6 +464,34 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 							df.SetPluginAccess(d.pluginAccessStore)
 							d.logger.Info(ctx, "wired plugin access store into harness factory")
 						}
+					}
+
+					// Initialize tool and agent access stores.
+					d.toolAccessStore = component.NewRedisToolAccessStore(redisClient, d.logger.Slog())
+					d.agentAccessStore = component.NewRedisAgentAccessStore(redisClient, d.logger.Slog())
+					d.logger.Info(ctx, "initialized tool and agent access stores")
+
+					// Initialize Casbin enforcer for policy-backed access control.
+					// Parse the Redis URL to get host:port for the Casbin adapter; fall back to
+					// the config password if the URL does not embed credentials.
+					// Failure here is non-fatal — stores operate without policy sync.
+					var casbinRedisAddr string
+					if opts, parseErr := goredis.ParseURL(d.config.Redis.URL); parseErr == nil {
+						casbinRedisAddr = opts.Addr
+					}
+					casbinRedisPassword := d.config.Redis.Password
+
+					enforcer, enforcerErr := auth.NewCasbinEnforcer(casbinRedisAddr, casbinRedisPassword)
+					if enforcerErr != nil {
+						d.logger.Warn(ctx, "casbin enforcer init failed, continuing without policy sync",
+							"error", enforcerErr)
+					} else {
+						if pas, ok := d.pluginAccessStore.(*component.RedisPluginAccessStore); ok {
+							pas.SetEnforcer(enforcer)
+						}
+						d.toolAccessStore.SetEnforcer(enforcer)
+						d.agentAccessStore.SetEnforcer(enforcer)
+						d.logger.Info(ctx, "casbin enforcer wired to plugin, tool, and agent access stores")
 					}
 				} else {
 					d.logger.Warn(ctx, "plugin access store unavailable: Redis client is not standalone mode")

@@ -139,8 +139,9 @@ func (v *LocalValidator) Authenticate(ctx context.Context, token string) (*Ident
 			ExpiresAt:       time.Now().Add(24 * time.Hour), // Static tokens don't expire
 			AuthenticatedAt: time.Now(),
 		},
-		Roles:       matchedUser.roles,
-		Permissions: permissions,
+		Roles:        matchedUser.roles,
+		Permissions:  permissions,
+		Capabilities: resolveCapabilitiesFromRoles(matchedUser.roles),
 	}
 
 	slog.Debug("local auth: authenticated user",

@@ -182,7 +182,7 @@ type APIKeyCreator interface {
 	// time the secret material is visible; record contains the persisted
 	// metadata. capabilities is the list of Casbin resource:action grants;
 	// pass nil for unrestricted access (backward-compatible legacy behaviour).
-	CreateKey(ctx context.Context, tenantID string, allowedKinds, allowedNames []string, capabilities []string) (rawKey string, record interface{}, err error)
+	CreateKey(ctx context.Context, tenantID string, allowedKinds, allowedNames []string, capabilities []string, name, createdBy string) (rawKey string, record interface{}, err error)
 }
 
 // LangfuseSetup creates Langfuse observability projects for tenants.
@@ -681,7 +681,7 @@ func (p *Provisioner) stepGenerateAPIKey(ctx context.Context, tenantID string) (
 		return "", nil
 	}
 
-	rawKey, _, err := p.apikeys.CreateKey(ctx, tenantID, nil, nil, []string{"*"})
+	rawKey, _, err := p.apikeys.CreateKey(ctx, tenantID, nil, nil, []string{"*"}, "provisioner-initial-key", "provisioner")
 	if err != nil {
 		return "", fmt.Errorf("create API key: %w", err)
 	}
