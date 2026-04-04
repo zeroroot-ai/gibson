@@ -485,11 +485,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 					// Parse the Redis URL to get host:port for the Casbin adapter; fall back to
 					// the config password if the URL does not embed credentials.
 					// Failure here is non-fatal — stores operate without policy sync.
-					var casbinRedisAddr, casbinRedisPassword string
+					var casbinRedisAddr string
 					if opts, parseErr := goredis.ParseURL(d.config.Redis.URL); parseErr == nil {
 						casbinRedisAddr = opts.Addr
-						casbinRedisPassword = opts.Password
 					}
+					casbinRedisPassword := d.config.Redis.Password
 
 					enforcer, enforcerErr := auth.NewCasbinEnforcer(casbinRedisAddr, casbinRedisPassword)
 					if enforcerErr != nil {
