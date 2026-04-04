@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
@@ -190,9 +191,21 @@ func (a *RegistryAdapter) GetResolver() protoresolver.ProtoResolver {
 	return a.resolver
 }
 
+// resolveTenant returns the tenant for a registry query. It checks the request
+// context first (set by the auth interceptor for authenticated RPCs), falling
+// back to the adapter's configured default tenant for unauthenticated or
+// dev-mode paths.
+func (a *RegistryAdapter) resolveTenant(ctx context.Context) string {
+	if tenant := auth.TenantFromContext(ctx); tenant != "" {
+		return tenant
+	}
+	return a.tenant
+}
+
 // DiscoverAgent discovers and connects to an agent by name.
 func (a *RegistryAdapter) DiscoverAgent(ctx context.Context, name string) (agent.Agent, error) {
-	instances, err := a.registry.Discover(ctx, a.tenant, "agent", name)
+	tenant := a.resolveTenant(ctx)
+	instances, err := a.registry.Discover(ctx, tenant, "agent", name)
 	if err != nil {
 		return nil, &RegistryUnavailableError{Cause: err}
 	}
@@ -202,7 +215,7 @@ func (a *RegistryAdapter) DiscoverAgent(ctx context.Context, name string) (agent
 		return nil, &AgentNotFoundError{Name: name, Available: available}
 	}
 
-	selected, err := a.loadBalancer.Select(ctx, a.tenant, "agent", name)
+	selected, err := a.loadBalancer.Select(ctx, tenant, "agent", name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to select agent instance: %w", err)
 	}
@@ -223,7 +236,8 @@ func (a *RegistryAdapter) DiscoverAgent(ctx context.Context, name string) (agent
 
 // DiscoverTool discovers and connects to a tool by name.
 func (a *RegistryAdapter) DiscoverTool(ctx context.Context, name string) (tool.Tool, error) {
-	instances, err := a.registry.Discover(ctx, a.tenant, "tool", name)
+	tenant := a.resolveTenant(ctx)
+	instances, err := a.registry.Discover(ctx, tenant, "tool", name)
 	if err != nil {
 		return nil, &RegistryUnavailableError{Cause: err}
 	}
@@ -233,7 +247,7 @@ func (a *RegistryAdapter) DiscoverTool(ctx context.Context, name string) (tool.T
 		return nil, &ToolNotFoundError{Name: name, Available: available}
 	}
 
-	selected, err := a.loadBalancer.Select(ctx, a.tenant, "tool", name)
+	selected, err := a.loadBalancer.Select(ctx, tenant, "tool", name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to select tool instance: %w", err)
 	}
@@ -254,7 +268,8 @@ func (a *RegistryAdapter) DiscoverTool(ctx context.Context, name string) (tool.T
 
 // DiscoverPlugin discovers and connects to a plugin by name.
 func (a *RegistryAdapter) DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error) {
-	instances, err := a.registry.Discover(ctx, a.tenant, "plugin", name)
+	tenant := a.resolveTenant(ctx)
+	instances, err := a.registry.Discover(ctx, tenant, "plugin", name)
 	if err != nil {
 		return nil, &RegistryUnavailableError{Cause: err}
 	}
@@ -264,7 +279,7 @@ func (a *RegistryAdapter) DiscoverPlugin(ctx context.Context, name string) (plug
 		return nil, &PluginNotFoundError{Name: name, Available: available}
 	}
 
-	selected, err := a.loadBalancer.Select(ctx, a.tenant, "plugin", name)
+	selected, err := a.loadBalancer.Select(ctx, tenant, "plugin", name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to select plugin instance: %w", err)
 	}
@@ -285,7 +300,8 @@ func (a *RegistryAdapter) DiscoverPlugin(ctx context.Context, name string) (plug
 
 // ListAgents returns information about all registered agents.
 func (a *RegistryAdapter) ListAgents(ctx context.Context) ([]AgentInfo, error) {
-	instances, err := a.registry.DiscoverAll(ctx, a.tenant, "agent")
+	tenant := a.resolveTenant(ctx)
+	instances, err := a.registry.DiscoverAll(ctx, tenant, "agent")
 	if err != nil {
 		return nil, &RegistryUnavailableError{Cause: err}
 	}
@@ -349,7 +365,8 @@ func (a *RegistryAdapter) ListAgents(ctx context.Context) ([]AgentInfo, error) {
 
 // ListTools returns information about all registered tools.
 func (a *RegistryAdapter) ListTools(ctx context.Context) ([]ToolInfo, error) {
-	instances, err := a.registry.DiscoverAll(ctx, a.tenant, "tool")
+	tenant := a.resolveTenant(ctx)
+	instances, err := a.registry.DiscoverAll(ctx, tenant, "tool")
 	if err != nil {
 		return nil, &RegistryUnavailableError{Cause: err}
 	}
@@ -415,7 +432,8 @@ func (a *RegistryAdapter) ListTools(ctx context.Context) ([]ToolInfo, error) {
 
 // ListPlugins returns information about all registered plugins.
 func (a *RegistryAdapter) ListPlugins(ctx context.Context) ([]PluginInfo, error) {
-	instances, err := a.registry.DiscoverAll(ctx, a.tenant, "plugin")
+	tenant := a.resolveTenant(ctx)
+	instances, err := a.registry.DiscoverAll(ctx, tenant, "plugin")
 	if err != nil {
 		return nil, &RegistryUnavailableError{Cause: err}
 	}
@@ -600,7 +618,8 @@ func (a *RegistryAdapter) Close() error {
 }
 
 func (a *RegistryAdapter) getAvailableAgentNames(ctx context.Context) ([]string, error) {
-	instances, err := a.registry.DiscoverAll(ctx, a.tenant, "agent")
+	tenant := a.resolveTenant(ctx)
+	instances, err := a.registry.DiscoverAll(ctx, tenant, "agent")
 	if err != nil {
 		return []string{}, err
 	}
@@ -616,7 +635,8 @@ func (a *RegistryAdapter) getAvailableAgentNames(ctx context.Context) ([]string,
 }
 
 func (a *RegistryAdapter) getAvailableToolNames(ctx context.Context) ([]string, error) {
-	instances, err := a.registry.DiscoverAll(ctx, a.tenant, "tool")
+	tenant := a.resolveTenant(ctx)
+	instances, err := a.registry.DiscoverAll(ctx, tenant, "tool")
 	if err != nil {
 		return []string{}, err
 	}
@@ -632,7 +652,8 @@ func (a *RegistryAdapter) getAvailableToolNames(ctx context.Context) ([]string, 
 }
 
 func (a *RegistryAdapter) getAvailablePluginNames(ctx context.Context) ([]string, error) {
-	instances, err := a.registry.DiscoverAll(ctx, a.tenant, "plugin")
+	tenant := a.resolveTenant(ctx)
+	instances, err := a.registry.DiscoverAll(ctx, tenant, "plugin")
 	if err != nil {
 		return []string{}, err
 	}
