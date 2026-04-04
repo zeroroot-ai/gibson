@@ -21,7 +21,8 @@ WORKDIR /workspace
 # Copy dependency manifests first for better layer caching
 COPY go.mod go.sum ./
 
-# Download dependencies (SDK fetched from Go module cache)
+# Download dependencies directly from source (bypass stale proxy)
+ENV GOPROXY=direct
 RUN go mod download
 
 # Copy source code
