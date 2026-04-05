@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -175,6 +176,52 @@ type ComponentServiceServer struct {
 	// May be nil; when nil, Casbin enforcement is skipped entirely (backward
 	// compatible with dev mode and deployments where Casbin is not configured).
 	enforcer *casbin.Enforcer
+
+	// llmToolCompleter extends LLM completions with tool-calling and structured output.
+	// May be nil; CompleteWithTools and CompleteStructured return codes.Unimplemented when nil.
+	llmToolCompleter LLMToolCompleter
+
+	// toolExecutor dispatches tool execution for streaming and queued operations.
+	// May be nil; tool streaming and queue RPCs return codes.Unimplemented when nil.
+	toolExecutor ToolExecutor
+
+	// toolJobs tracks queued tool batches for ToolResults streaming.
+	toolJobsMu sync.Mutex
+	toolJobs   map[string]*toolJob
+
+	// --- Harness parity dependencies (platform-harness-parity spec) ---
+
+	// graphrag handles knowledge graph operations for remote agents.
+	// May be nil; GraphRAG RPCs return codes.Unimplemented when nil.
+	graphrag GraphRAGQuerier
+
+	// findingQuerier reads findings for remote agents.
+	// May be nil; finding query RPCs return codes.Unimplemented when nil.
+	findingQuerier FindingQuerier
+
+	// missionMgr handles sub-mission lifecycle for remote agents.
+	// May be nil; mission management RPCs return codes.Unimplemented when nil.
+	missionMgr MissionManager
+
+	// agentDelegator dispatches sub-agent execution for remote agents.
+	// May be nil; delegation RPCs return codes.Unimplemented when nil.
+	agentDelegator AgentDelegator
+
+	// componentLister provides tool/agent discovery for remote agents.
+	// May be nil; list RPCs return codes.Unimplemented when nil.
+	componentLister ComponentLister
+
+	// credentialStore retrieves tenant-scoped credentials for remote agents.
+	// May be nil; GetCredential returns codes.Unimplemented when nil.
+	credentialStore CredentialStore
+
+	// taxonomyProvider returns the taxonomy schema for remote agents.
+	// May be nil; GetTaxonomySchema returns codes.Unimplemented when nil.
+	taxonomyProvider TaxonomyProvider
+
+	// stepHintsReporter accepts planning step hints from remote agents.
+	// May be nil; ReportStepHints returns codes.Unimplemented when nil.
+	stepHintsReporter StepHintsReporter
 }
 
 // NewComponentServiceServer constructs a ComponentServiceServer with the core
@@ -270,6 +317,76 @@ func (s *ComponentServiceServer) WithQuotaManager(qm *QuotaManager) *ComponentSe
 //	svc.WithEnforcer(casbinEnforcer)
 func (s *ComponentServiceServer) WithEnforcer(e *casbin.Enforcer) *ComponentServiceServer {
 	s.enforcer = e
+	return s
+}
+
+// WithToolExecutor attaches a ToolExecutor for streaming and queued tool execution.
+// May be nil; tool streaming and queue RPCs return codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithToolExecutor(te ToolExecutor) *ComponentServiceServer {
+	s.toolExecutor = te
+	return s
+}
+
+// WithLLMToolCompleter attaches an LLMToolCompleter for tool-calling and structured completions.
+// May be nil; CompleteWithTools and CompleteStructured return codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithLLMToolCompleter(tc LLMToolCompleter) *ComponentServiceServer {
+	s.llmToolCompleter = tc
+	return s
+}
+
+// WithGraphRAG attaches a GraphRAGQuerier for knowledge graph operations.
+// May be nil; GraphRAG RPCs return codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithGraphRAG(g GraphRAGQuerier) *ComponentServiceServer {
+	s.graphrag = g
+	return s
+}
+
+// WithFindingQuerier attaches a FindingQuerier for finding read operations.
+// May be nil; finding query RPCs return codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithFindingQuerier(fq FindingQuerier) *ComponentServiceServer {
+	s.findingQuerier = fq
+	return s
+}
+
+// WithMissionManager attaches a MissionManager for sub-mission lifecycle.
+// May be nil; mission management RPCs return codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithMissionManager(mm MissionManager) *ComponentServiceServer {
+	s.missionMgr = mm
+	return s
+}
+
+// WithAgentDelegator attaches an AgentDelegator for sub-agent dispatch.
+// May be nil; delegation RPCs return codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithAgentDelegator(ad AgentDelegator) *ComponentServiceServer {
+	s.agentDelegator = ad
+	return s
+}
+
+// WithComponentLister attaches a ComponentLister for tool/agent discovery.
+// May be nil; list RPCs return codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithComponentLister(cl ComponentLister) *ComponentServiceServer {
+	s.componentLister = cl
+	return s
+}
+
+// WithCredentialStore attaches a CredentialStore for credential retrieval.
+// May be nil; GetCredential returns codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithCredentialStore(cs CredentialStore) *ComponentServiceServer {
+	s.credentialStore = cs
+	return s
+}
+
+// WithTaxonomyProvider attaches a TaxonomyProvider for taxonomy schema access.
+// May be nil; GetTaxonomySchema returns codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithTaxonomyProvider(tp TaxonomyProvider) *ComponentServiceServer {
+	s.taxonomyProvider = tp
+	return s
+}
+
+// WithStepHintsReporter attaches a StepHintsReporter for planning hints.
+// May be nil; ReportStepHints returns codes.Unimplemented when nil.
+func (s *ComponentServiceServer) WithStepHintsReporter(sr StepHintsReporter) *ComponentServiceServer {
+	s.stepHintsReporter = sr
 	return s
 }
 
@@ -736,6 +853,21 @@ func (s *ComponentServiceServer) PollWork(
 					slog.String("mission_id", missionID),
 					slog.String("error", err.Error()),
 				)
+			}
+		}
+	}
+
+	// Enrich context with mission execution metadata for pull-mode harness.
+	// This enables PlatformHarness to populate MissionExecutionContext(),
+	// PlanContext(), and ContinuityMode() from the work item context.
+	if item.Context == nil {
+		item.Context = make(map[string]string)
+	}
+	if s.missionMgr != nil {
+		missionID := item.Context["mission_id"]
+		if missionID != "" {
+			if execCtxJSON, err := s.missionMgr.GetMissionRunHistory(ctx, tenant, item.WorkID); err == nil && len(execCtxJSON) > 0 {
+				item.Context["mission_execution_context_json"] = string(execCtxJSON)
 			}
 		}
 	}
