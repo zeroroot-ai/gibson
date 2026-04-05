@@ -337,9 +337,9 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 
 	// Tenant isolation: prevent cross-tenant harness access.
 	// When both the context tenant and the mission tenant are non-empty they must
-	// match. An empty value on either side means auth is disabled or the mission
-	// predates multi-tenancy, so we allow it through to preserve backward
-	// compatibility with dev/disabled-auth deployments.
+	// match. An empty value on either side means the mission predates
+	// multi-tenancy, so we allow it through to preserve backward
+	// compatibility with dev mode deployments.
 	contextTenant := auth.TenantFromContext(ctx)
 	missionTenant := harness.Mission().TenantID
 	if contextTenant != "" && missionTenant != "" && contextTenant != missionTenant {

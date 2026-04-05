@@ -108,6 +108,17 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 
 	// Create slot manager with the LLM registry
 	slotManager := NewDaemonSlotManager(llmRegistry, d.logger.WithComponent("slot-manager").Slog())
+
+	// Populate provider env var hints for clear error messages on slot resolution failures
+	if d.config != nil && d.config.LLM.Providers != nil {
+		envVars := make(map[string]string)
+		for name, providerCfg := range d.config.LLM.Providers {
+			if providerCfg.APIKeyEnv != "" {
+				envVars[name] = providerCfg.APIKeyEnv
+			}
+		}
+		slotManager.SetProviderEnvVars(envVars)
+	}
 	d.logger.Info(ctx, "initialized slot manager")
 
 	// Create memory manager factory with StateClient and config
@@ -268,10 +279,12 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 			// Create provider using factory
 			provider, err := providers.NewProvider(llmCfg)
 			if err != nil {
+				// Wrap auth errors with env var hint so operators know which variable to check
+				translatedErr := llm.TranslateErrorWithEnvHint(name, providerCfg.APIKeyEnv, err)
 				d.logger.Warn(ctx, "failed to create provider",
 					"name", name,
 					"type", providerCfg.Type,
-					"error", err)
+					"error", translatedErr)
 				continue
 			}
 

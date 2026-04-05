@@ -36,6 +36,12 @@ type MemoryEntry struct {
 //   - RediSearch index (gibson:idx:memory) enables full-text search with mission_id
 //     and tenant_id filtering for defense-in-depth tenant isolation
 //
+// TTL Management:
+//   - All keys (doc + index set) receive a configurable TTL on creation
+//   - TTL is refreshed on every read/write access to keep active missions alive
+//   - After mission completion, SetCompletedTTL reduces TTL for faster cleanup
+//   - Set ttl to 0 to disable TTL entirely (backward-compatible behavior)
+//
 // Thread Safety:
 //   - All operations are atomic at the Redis level
 //   - No local caching to ensure consistency in distributed environments
@@ -44,8 +50,33 @@ type RedisMissionMemory struct {
 	missionID types.ID
 	tenantID  string // empty string preserves backward-compatible key format
 
-	// Memory continuity fields (not yet implemented for Redis)
-	continuityMode MemoryContinuityMode
+	// TTL for mission memory keys. Zero means no expiry.
+	ttl time.Duration
+
+	// Memory continuity fields
+	continuityMode    MemoryContinuityMode
+	previousMissionID types.ID // ID of the prior run's mission (for inherit/shared modes)
+	missionName       string   // Mission name (for shared mode key scoping)
+}
+
+// RedisMissionMemoryOption configures optional behavior on RedisMissionMemory.
+type RedisMissionMemoryOption func(*RedisMissionMemory)
+
+// WithTTL sets the TTL for mission memory keys. Zero disables TTL.
+func WithTTL(ttl time.Duration) RedisMissionMemoryOption {
+	return func(m *RedisMissionMemory) {
+		m.ttl = ttl
+	}
+}
+
+// WithContinuity configures memory continuity mode and the previous mission ID
+// for cross-run memory access.
+func WithContinuity(mode MemoryContinuityMode, previousMissionID types.ID, missionName string) RedisMissionMemoryOption {
+	return func(m *RedisMissionMemory) {
+		m.continuityMode = mode
+		m.previousMissionID = previousMissionID
+		m.missionName = missionName
+	}
 }
 
 // NewRedisMissionMemory creates a new RedisMissionMemory instance.
@@ -58,24 +89,61 @@ type RedisMissionMemory struct {
 //   - tenantID: Tenant identifier for defense-in-depth isolation.
 //     When non-empty, tenant is included in key prefixes and search filters.
 //     When empty, the old key format without tenant prefix is used for backward compatibility.
+//   - opts: Optional configuration (TTL, continuity mode)
 //
 // Example:
 //
-//	client, err := state.NewStateClient(cfg)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer client.Close()
-//
-//	memory := memory.NewRedisMissionMemory(client, missionID, tenantID)
-//	err = memory.Store(ctx, "api_key", "secret123", nil)
-func NewRedisMissionMemory(client *state.StateClient, missionID types.ID, tenantID string) *RedisMissionMemory {
-	return &RedisMissionMemory{
+//	memory := memory.NewRedisMissionMemory(client, missionID, tenantID,
+//	    memory.WithTTL(24 * time.Hour),
+//	    memory.WithContinuity(memory.MemoryInherit, prevID, "recon-scan"),
+//	)
+func NewRedisMissionMemory(client *state.StateClient, missionID types.ID, tenantID string, opts ...RedisMissionMemoryOption) *RedisMissionMemory {
+	m := &RedisMissionMemory{
 		client:         client,
 		missionID:      missionID,
 		tenantID:       tenantID,
 		continuityMode: MemoryIsolated,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// SetCompletedTTL reduces the TTL on all mission memory keys after a mission completes.
+// This enables faster cleanup of finished missions while keeping active ones alive longer.
+// If completedTTL is 0, no change is made.
+func (m *RedisMissionMemory) SetCompletedTTL(ctx context.Context, completedTTL time.Duration) error {
+	if completedTTL <= 0 {
+		return nil
+	}
+
+	keys, err := m.Keys(ctx)
+	if err != nil {
+		return NewMissionMemoryStoreError("failed to retrieve keys for TTL update", err)
+	}
+
+	if len(keys) == 0 {
+		return nil
+	}
+
+	pipe := m.client.Client().Pipeline()
+
+	// Reduce TTL on all document keys
+	for _, key := range keys {
+		docKey := m.buildDocKey(key)
+		pipe.Expire(ctx, docKey, completedTTL)
+	}
+
+	// Reduce TTL on the index set key
+	indexKey := m.buildIndexKey()
+	pipe.Expire(ctx, indexKey, completedTTL)
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return NewMissionMemoryStoreError("failed to set completed TTL on mission memory keys", err)
+	}
+
+	return nil
 }
 
 // Store persists a key-value pair with optional metadata to Redis.
@@ -129,6 +197,12 @@ func (m *RedisMissionMemory) Store(ctx context.Context, key string, value any, m
 	// Add key to index set for efficient listing
 	pipe.SAdd(ctx, indexKey, key)
 
+	// Apply TTL to both keys if configured
+	if m.ttl > 0 {
+		pipe.Expire(ctx, docKey, m.ttl)
+		pipe.Expire(ctx, indexKey, m.ttl)
+	}
+
 	// Execute pipeline
 	if _, err := pipe.Exec(ctx); err != nil {
 		return NewMissionMemoryStoreError("failed to store item in Redis", err)
@@ -153,6 +227,16 @@ func (m *RedisMissionMemory) Retrieve(ctx context.Context, key string) (*MemoryI
 			return nil, NewMissionMemoryNotFoundError(key)
 		}
 		return nil, NewMissionMemoryStoreError("failed to retrieve item", err)
+	}
+
+	// Refresh TTL on read access to keep active missions alive
+	if m.ttl > 0 {
+		indexKey := m.buildIndexKey()
+		pipe := m.client.Client().Pipeline()
+		pipe.Expire(ctx, docKey, m.ttl)
+		pipe.Expire(ctx, indexKey, m.ttl)
+		// Best-effort TTL refresh — don't fail the read if expire fails
+		_, _ = pipe.Exec(ctx)
 	}
 
 	// Unmarshal the value from JSON string
@@ -391,15 +475,103 @@ func (m *RedisMissionMemory) ContinuityMode() MemoryContinuityMode {
 }
 
 // GetPreviousRunValue retrieves a value from the prior run's memory.
-// Not yet implemented for Redis - returns ErrContinuityNotSupported.
+// Requires continuity mode 'inherit' or 'shared' and a valid previousMissionID.
+// Returns ErrContinuityNotSupported if mode is 'isolated'.
+// Returns ErrNoPreviousRun if no previous mission ID is configured.
 func (m *RedisMissionMemory) GetPreviousRunValue(ctx context.Context, key string) (any, error) {
-	return nil, ErrContinuityNotSupported
+	if m.continuityMode == MemoryIsolated {
+		return nil, ErrContinuityNotSupported
+	}
+
+	if m.previousMissionID.IsZero() {
+		return nil, ErrNoPreviousRun
+	}
+
+	// Build the key for the previous mission's memory entry
+	prevDocKey := m.buildDocKeyForMission(m.previousMissionID, key)
+
+	var entry MemoryEntry
+	err := m.client.JSONGet(ctx, prevDocKey, "$", &entry)
+	if err != nil {
+		if state.IsNotFound(err) {
+			return nil, NewMissionMemoryNotFoundError(key)
+		}
+		return nil, NewMissionMemoryStoreError("failed to retrieve previous run value", err)
+	}
+
+	// Unmarshal the value
+	var value any
+	if entry.Value != "" {
+		if err := json.Unmarshal([]byte(entry.Value), &value); err != nil {
+			return nil, NewMissionMemoryStoreError("failed to unmarshal previous run value", err)
+		}
+	}
+
+	return value, nil
 }
 
-// GetValueHistory returns values for a key across all runs.
-// Not yet implemented for Redis - returns empty slice.
+// GetValueHistory returns values for a key across recent runs by walking the
+// RediSearch index for entries with the same key and mission name.
+// Returns entries in chronological order (oldest first).
 func (m *RedisMissionMemory) GetValueHistory(ctx context.Context, key string) ([]HistoricalValue, error) {
-	return []HistoricalValue{}, nil
+	if m.continuityMode == MemoryIsolated {
+		return []HistoricalValue{}, nil
+	}
+
+	// Use RediSearch to find all entries with this key across missions.
+	// The search uses the key field (exact match) and tenant scoping.
+	escapedKey := state.EscapeQuery(key)
+
+	var searchQuery string
+	if m.tenantID != "" {
+		escapedTenantID := state.EscapeTag(m.tenantID)
+		searchQuery = fmt.Sprintf("@tenant_id:{%s} @key:{%s}", escapedTenantID, escapedKey)
+	} else {
+		searchQuery = fmt.Sprintf("@key:{%s}", escapedKey)
+	}
+
+	opts := &state.SearchOptions{
+		Limit:   100, // Cap history depth
+		Offset:  0,
+		SortBy:  "created_at",
+		SortAsc: true, // Chronological order
+	}
+
+	result, err := m.client.Search(ctx, "gibson:idx:memory", searchQuery, opts)
+	if err != nil {
+		return nil, NewMissionMemoryStoreError("failed to query value history", err)
+	}
+
+	history := make([]HistoricalValue, 0, len(result.Documents))
+	for _, doc := range result.Documents {
+		var entry MemoryEntry
+		if err := json.Unmarshal(doc.JSON, &entry); err != nil {
+			continue
+		}
+
+		var value any
+		if entry.Value != "" {
+			if err := json.Unmarshal([]byte(entry.Value), &value); err != nil {
+				continue
+			}
+		}
+
+		history = append(history, HistoricalValue{
+			Value:     value,
+			MissionID: entry.MissionID,
+			StoredAt:  entry.CreatedAt,
+		})
+	}
+
+	return history, nil
+}
+
+// buildDocKeyForMission constructs a doc key for a specific mission (used for cross-run reads).
+func (m *RedisMissionMemory) buildDocKeyForMission(missionID types.ID, key string) string {
+	if m.tenantID != "" {
+		return fmt.Sprintf("gibson:memory:%s:%s:%s", m.tenantID, missionID, key)
+	}
+	return fmt.Sprintf("gibson:memory:%s:%s", missionID, key)
 }
 
 // buildDocKey constructs the Redis key for a memory document.

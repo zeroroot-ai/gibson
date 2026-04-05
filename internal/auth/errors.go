@@ -136,18 +136,6 @@ func ErrJWKSFetchFailed(issuer string, err error) error {
 	}
 }
 
-// ErrAuthDisabled is returned when attempting auth operations with auth disabled.
-//
-// This is NOT a gRPC error - it's an internal error that should be caught
-// before reaching the gRPC layer.
-func ErrAuthDisabled() error {
-	return &AuthError{
-		Code:    codes.Internal,
-		Message: "authentication is disabled",
-		Reason:  "auth_disabled",
-	}
-}
-
 // ErrK8sAPIError is returned when Kubernetes TokenReview API call fails.
 func ErrK8sAPIError(err error) error {
 	return &AuthError{

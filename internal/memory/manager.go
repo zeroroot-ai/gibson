@@ -1,7 +1,9 @@
 package memory
 
 import (
+	"context"
 	"sync"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -79,8 +81,19 @@ func (m *DefaultMemoryManager) MissionID() types.ID {
 	return m.missionID
 }
 
+// CompleteMission should be called when a mission finishes (success or failure).
+// It reduces the TTL on mission memory keys to speed up cleanup of finished missions,
+// while keeping active mission data alive at the full TTL.
+// This is a no-op if mission memory does not support TTL reduction.
+func (m *DefaultMemoryManager) CompleteMission(ctx context.Context, completedTTL time.Duration) {
+	if redisMem, ok := m.mission.(*RedisMissionMemory); ok {
+		_ = redisMem.SetCompletedTTL(ctx, completedTTL)
+	}
+}
+
 // Close releases all resources held by the memory manager.
 // This method is idempotent and safe to call multiple times.
+// Note: Close does NOT close the shared vector store — that is managed by the factory.
 func (m *DefaultMemoryManager) Close() error {
 	m.closeMu.Lock()
 	defer m.closeMu.Unlock()
@@ -92,7 +105,8 @@ func (m *DefaultMemoryManager) Close() error {
 	// Clear working memory (ephemeral)
 	m.working.Clear()
 
-	// Close vector store
+	// Close vector store only if it's a per-mission store (not shared).
+	// The shared vector store's lifecycle is managed by MemoryManagerFactory.
 	if m.store != nil {
 		if err := m.store.Close(); err != nil {
 			return NewVectorStoreError("failed to close vector store", err)

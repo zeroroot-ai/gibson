@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -271,6 +272,39 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	cfg, err := loader.LoadWithDefaults(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Validate provider API key environment variables
+	providerResults := config.ValidateProviderKeys(cfg.LLM.Providers, nil)
+
+	var fatalErrors []string
+	for _, result := range providerResults {
+		if result.Error != nil {
+			fatalErrors = append(fatalErrors, result.Error.Error())
+		}
+		if result.Warning != "" {
+			slog.Warn(result.Warning)
+		}
+		if result.EnvVar == "" && !result.Available {
+			slog.Info("provider not configured, will be unavailable",
+				"provider", result.ProviderName,
+			)
+		}
+	}
+
+	if len(fatalErrors) > 0 {
+		return fmt.Errorf("provider API key validation failed:\n  - %s",
+			strings.Join(fatalErrors, "\n  - "))
+	}
+
+	slog.Info("all provider API key environment variables validated successfully")
+
+	// Update provider configs with Available status from validation results
+	for _, result := range providerResults {
+		if p, ok := cfg.LLM.Providers[result.ProviderName]; ok {
+			p.Available = result.Available
+			cfg.LLM.Providers[result.ProviderName] = p
+		}
 	}
 
 	// Check if daemon is already running by attempting connection

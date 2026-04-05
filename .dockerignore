@@ -59,3 +59,7 @@ scripts/
 
 # Makefile (build tool, not runtime)
 Makefile
+
+# Go workspace (local dev only, breaks Docker build)
+go.work
+go.work.sum

@@ -12,7 +12,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/observability"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 func TestNewHarnessFactory(t *testing.T) {
@@ -23,23 +22,13 @@ func TestNewHarnessFactory(t *testing.T) {
 
 	// Create test daemon with minimal config
 	cfg := &config.Config{
-		Registry: config.RegistryConfig{
-			Type: "embedded",
-		},
+		Registry: config.RegistryConfig{},
 	}
 
 	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
 
 	// Create StateClient via miniredis
 	sc := setupTestStateClient(t)
-
-	// Create a minimal etcd client for the daemon (will fail if etcd not available,
-	// but this is an integration test so that's expected)
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{"localhost:2379"},
-	})
-	require.NoError(t, err)
-	defer etcdClient.Close()
 
 	// Create a mock Redis-backed component registry adapter using a nil registry
 	// (acceptable for this test since we only check harness factory initialization)
@@ -50,7 +39,6 @@ func TestNewHarnessFactory(t *testing.T) {
 		config:          cfg,
 		logger:          logger,
 		stateClient:     sc,
-		etcdClient:      etcdClient,
 		registryAdapter: registryAdapter,
 		activeMissions:  make(map[string]context.CancelFunc),
 	}

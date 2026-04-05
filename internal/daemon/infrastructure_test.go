@@ -22,9 +22,7 @@ func TestInfrastructureInitialization(t *testing.T) {
 	// Create minimal test configuration using actual config types
 	cfg := &config.Config{
 		Registry: config.RegistryConfig{
-			Type:      "embedded",
 			Namespace: "gibson-test",
-			DataDir:   filepath.Join(tmpDir, "etcd"),
 			TTL:       "30s",
 		},
 		Callback: config.CallbackConfig{
@@ -146,7 +144,7 @@ func TestInfrastructureInitialization(t *testing.T) {
 
 		// Try to create a memory manager for a mission
 		missionID := types.NewID()
-		memMgr, err := infra.memoryManagerFactory.CreateForMission(ctx, missionID)
+		memMgr, err := infra.memoryManagerFactory.CreateForMission(ctx, missionID, "test-tenant")
 		if err != nil {
 			t.Errorf("failed to create memory manager: %v", err)
 		}

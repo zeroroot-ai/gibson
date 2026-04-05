@@ -573,9 +573,7 @@ auth:
 ### Testing Auth Locally
 
 ```bash
-# Start with auth disabled
-gibson daemon start --config configs/gibson.yaml
-
+# Start with dev mode (local static tokens)
 # Or with local tokens
 cat > /tmp/auth-test.yaml <<EOF
 auth:

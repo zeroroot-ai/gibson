@@ -355,10 +355,10 @@ func TestProvisioner_ProvisionTenant_APIKeyFails(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tier limits: free tier applied when tier is empty
+// Tier limits: indie tier applied when tier is empty
 // ---------------------------------------------------------------------------
 
-func TestProvisioner_ProvisionTenant_DefaultFreeTier(t *testing.T) {
+func TestProvisioner_ProvisionTenant_DefaultIndieTier(t *testing.T) {
 	prov, tenants, _, _, _ := newTestProvisioner(t)
 
 	req := newTestRequest()
@@ -368,14 +368,15 @@ func TestProvisioner_ProvisionTenant_DefaultFreeTier(t *testing.T) {
 	require.NoError(t, err)
 
 	record := tenants.records["acme"]
-	assert.Equal(t, "1", record["max_agents"], "free tier should have max_agents=1")
+	assert.Equal(t, "unlimited", record["max_agents"], "indie tier should have max_agents=unlimited")
+	assert.Equal(t, "1", record["max_team_members"], "indie tier should have max_team_members=1")
 }
 
 // ---------------------------------------------------------------------------
-// Tier limits: unknown tier falls back to free
+// Tier limits: unknown tier falls back to indie
 // ---------------------------------------------------------------------------
 
-func TestProvisioner_ProvisionTenant_UnknownTierFallsBackToFree(t *testing.T) {
+func TestProvisioner_ProvisionTenant_UnknownTierFallsBackToIndie(t *testing.T) {
 	prov, tenants, _, _, _ := newTestProvisioner(t)
 
 	req := newTestRequest()
@@ -385,8 +386,9 @@ func TestProvisioner_ProvisionTenant_UnknownTierFallsBackToFree(t *testing.T) {
 	require.NoError(t, err)
 
 	record := tenants.records["acme"]
-	// Free tier limits must be applied.
-	assert.Equal(t, "1", record["max_agents"])
+	// Indie tier limits must be applied as the fallback.
+	assert.Equal(t, "unlimited", record["max_agents"])
+	assert.Equal(t, "1", record["max_team_members"])
 }
 
 // ---------------------------------------------------------------------------

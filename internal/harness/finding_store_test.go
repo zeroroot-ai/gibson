@@ -708,7 +708,7 @@ func TestInMemoryFindingStore_TenantIsolation(t *testing.T) {
 }
 
 // TestInMemoryFindingStore_TenantIsolation_EmptyTenant verifies backward compatibility:
-// empty tenantID (single-tenant / auth-disabled mode) operates in its own namespace
+// empty tenantID (single-tenant mode) operates in its own namespace
 // and does not collide with tenant-scoped findings for the same missionID.
 func TestInMemoryFindingStore_TenantIsolation_EmptyTenant(t *testing.T) {
 	store := NewInMemoryFindingStore()

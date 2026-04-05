@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -77,10 +78,21 @@ func (c *WorkingMemoryConfig) ApplyDefaults() {
 }
 
 // MissionMemoryConfig configures mission memory behavior.
-// Mission memory is persistent SQLite storage with FTS5 search and LRU caching.
+// Mission memory is persistent Redis storage with RediSearch for FTS and configurable TTLs.
 type MissionMemoryConfig struct {
 	CacheSize int  `mapstructure:"cache_size" yaml:"cache_size" json:"cache_size"`
 	EnableFTS bool `mapstructure:"enable_fts" yaml:"enable_fts" json:"enable_fts"`
+
+	// TTL is the default time-to-live for mission memory keys.
+	// Keys are refreshed on every read/write access. After a mission completes
+	// or becomes inactive for this duration, its memory keys expire automatically.
+	// Set to 0 to disable TTL (keys persist indefinitely). Default: 24h.
+	TTL time.Duration `mapstructure:"ttl" yaml:"ttl" json:"ttl"`
+
+	// CompletedTTL is the TTL applied to mission memory keys after a mission completes.
+	// This allows faster cleanup of finished missions while keeping active ones longer.
+	// Set to 0 to use the default TTL for completed missions. Default: 2h.
+	CompletedTTL time.Duration `mapstructure:"completed_ttl" yaml:"completed_ttl" json:"completed_ttl"`
 }
 
 // Validate performs validation on the MissionMemoryConfig.
@@ -90,6 +102,16 @@ func (c *MissionMemoryConfig) Validate() error {
 			fmt.Sprintf("mission memory cache_size cannot be negative, got %d", c.CacheSize))
 	}
 
+	if c.TTL < 0 {
+		return types.NewError(types.CONFIG_VALIDATION_FAILED,
+			fmt.Sprintf("mission memory ttl cannot be negative, got %v", c.TTL))
+	}
+
+	if c.CompletedTTL < 0 {
+		return types.NewError(types.CONFIG_VALIDATION_FAILED,
+			fmt.Sprintf("mission memory completed_ttl cannot be negative, got %v", c.CompletedTTL))
+	}
+
 	return nil
 }
 
@@ -97,6 +119,12 @@ func (c *MissionMemoryConfig) Validate() error {
 func (c *MissionMemoryConfig) ApplyDefaults() {
 	if c.CacheSize == 0 {
 		c.CacheSize = 1000 // Default: 1000 entries
+	}
+	if c.TTL == 0 {
+		c.TTL = 24 * time.Hour // Default: 24 hours
+	}
+	if c.CompletedTTL == 0 {
+		c.CompletedTTL = 2 * time.Hour // Default: 2 hours for completed missions
 	}
 	// EnableFTS defaults to true (zero value for bool is false, so we need special handling)
 	// This will be set explicitly in code when config is loaded
@@ -124,8 +152,9 @@ func (c *LongTermMemoryConfig) Validate() error {
 			fmt.Sprintf("invalid backend '%s', must be one of: embedded, redis", c.Backend))
 	}
 
-	// If using external backend, ConnectionURL is required
-	if c.Backend != "" && c.Backend != "embedded" {
+	// If using an external backend other than redis, ConnectionURL is required.
+	// Redis backend reuses the daemon's existing StateClient connection.
+	if c.Backend != "" && c.Backend != "embedded" && c.Backend != "redis" {
 		if c.ConnectionURL == "" {
 			return types.NewError(types.CONFIG_VALIDATION_FAILED,
 				fmt.Sprintf("connection_url is required for backend '%s'", c.Backend))

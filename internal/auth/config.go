@@ -9,18 +9,16 @@ import (
 //
 // This configuration is loaded from gibson.yaml and supports multiple
 // deployment models through the Mode field:
-//   - "disabled": No authentication (default for backward compatibility)
 //   - "dev": Static tokens for testing
 //   - "enterprise": OIDC validation with config-based RBAC, single or multi-team
 //   - "saas": OIDC + tenant isolation + database-based RBAC
 type AuthConfig struct {
 	// Mode specifies the authentication deployment model.
 	// Valid values:
-	//   - "disabled": No authentication, all requests allowed (default)
 	//   - "dev": Static tokens for local development
 	//   - "enterprise": Customer IdP (Okta, Azure AD, Keycloak) with OIDC validation
 	//   - "saas": Multi-tenant with tenant isolation via claims
-	// Default: "disabled"
+	// Required: auth mode must be explicitly configured.
 	Mode string `mapstructure:"mode" yaml:"mode"`
 
 	// TenantClaim is the JWT claim name to extract the tenant ID from.
@@ -42,7 +40,6 @@ type AuthConfig struct {
 
 	// TrustLocalhost skips authentication for connections from 127.0.0.1 or ::1.
 	// Useful for local development with external tools.
-	// Only applies when Mode is not "disabled".
 	// Default: false
 	TrustLocalhost bool `mapstructure:"trust_localhost" yaml:"trust_localhost"`
 
@@ -165,10 +162,10 @@ type LocalUser struct {
 }
 
 // IsAuthEnabled returns true if authentication should be enforced.
-// Mode is the source of truth. The deprecated Enabled field is only
-// checked as a fallback when Mode is empty or "disabled".
+// Auth is always enabled when a valid mode is configured.
+// The deprecated Enabled field is checked as a fallback when Mode is empty.
 func (c *AuthConfig) IsAuthEnabled() bool {
-	if c.Mode != "" && c.Mode != "disabled" {
+	if c.Mode != "" {
 		return true
 	}
 	return c.Enabled
@@ -186,13 +183,9 @@ func (c *AuthConfig) ShouldAutoProvision() bool {
 }
 
 // ApplyDefaults fills in zero-valued fields with sensible defaults.
+// Note: Mode is NOT defaulted — it must be explicitly configured.
+// An empty mode will cause Validate() to return an error.
 func (c *AuthConfig) ApplyDefaults() {
-	// Default to disabled mode for backward compatibility
-	// Users must explicitly configure authentication mode
-	if c.Mode == "" {
-		c.Mode = "disabled"
-	}
-
 	// Default tenant claim name
 	if c.TenantClaim == "" {
 		c.TenantClaim = "tenant_id"
@@ -212,17 +205,20 @@ func (c *AuthConfig) ApplyDefaults() {
 }
 
 // Validate checks that the configuration is valid.
-// Returns an error if the Mode value is not one of the valid values.
+// Returns an error if the Mode value is empty or not one of the valid values.
 func (c *AuthConfig) Validate() error {
+	if c.Mode == "" {
+		return fmt.Errorf("auth mode is required (must be one of: dev, enterprise, saas)")
+	}
+
 	validModes := map[string]bool{
-		"disabled":   true,
 		"dev":        true,
 		"enterprise": true,
 		"saas":       true,
 	}
 
 	if !validModes[c.Mode] {
-		return fmt.Errorf("invalid auth mode %q: must be one of: disabled, dev, enterprise, saas", c.Mode)
+		return fmt.Errorf("invalid auth mode %q: must be one of: dev, enterprise, saas", c.Mode)
 	}
 
 	// Validate mode-specific requirements

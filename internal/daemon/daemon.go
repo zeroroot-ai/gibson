@@ -773,6 +773,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		"callback_endpoint", d.callback.CallbackEndpoint(),
 	)
 
+	// Async network policy validation (warning only, never blocks startup)
+	podNamespace := os.Getenv("POD_NAMESPACE")
+	if podNamespace == "" {
+		podNamespace = "default"
+	}
+	validateNetworkPolicies(d.logger, podNamespace, d.config.Auth.Mode == "saas")
+
 	// Setup signal handler for graceful shutdown
 	d.logger.Info(ctx, "setting up signal handler for graceful shutdown")
 	d.signalHandler = NewSignalHandler(SignalHandlerConfig{

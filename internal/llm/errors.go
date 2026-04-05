@@ -275,6 +275,61 @@ func NewProviderUnauthorizedError(providerName string, cause error) *types.Gibso
 	}
 }
 
+// NewProviderAuthErrorWithHint creates an authentication error that includes the
+// environment variable name the operator should check.
+func NewProviderAuthErrorWithHint(providerName string, statusCode int, envVar string, cause error) *types.GibsonError {
+	msg := fmt.Sprintf(
+		"provider %q returned authentication error (HTTP %d) -- verify that the API key in environment variable %q is valid and has not expired",
+		providerName, statusCode, envVar,
+	)
+	return &types.GibsonError{
+		Code:    ErrProviderUnauthorized,
+		Message: msg,
+		Cause:   cause,
+	}
+}
+
+// NewProviderUnavailableWithHint creates an error for when a slot resolves to a
+// provider that has no API key configured.
+func NewProviderUnavailableWithHint(slotName, providerName, envHint string) *types.GibsonError {
+	return &types.GibsonError{
+		Code: ErrProviderUnavailable,
+		Message: fmt.Sprintf(
+			"LLM slot %q resolved to provider %q which has no API key configured. Set %q or configure an alternative provider",
+			slotName, providerName, envHint,
+		),
+	}
+}
+
+// TranslateErrorWithEnvHint translates generic errors into Gibson errors, adding
+// environment variable context to authentication errors so operators know which
+// env var to check.
+func TranslateErrorWithEnvHint(provider string, envVar string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Check if it's already a Gibson error
+	var gibsonErr *types.GibsonError
+	if errors.As(err, &gibsonErr) {
+		return err
+	}
+
+	errMsg := err.Error()
+	lowerMsg := strings.ToLower(errMsg)
+
+	// Detect auth errors and add env var hint
+	if strings.Contains(lowerMsg, "unauthorized") || strings.Contains(lowerMsg, "authentication") || strings.Contains(lowerMsg, "api key") || strings.Contains(lowerMsg, "401") || strings.Contains(lowerMsg, "403") {
+		if envVar != "" {
+			return NewProviderAuthErrorWithHint(provider, 0, envVar, err)
+		}
+		return NewProviderUnauthorizedError(provider, err)
+	}
+
+	// Fall through to standard translation for non-auth errors
+	return TranslateError(provider, err)
+}
+
 // StructuredOutputError is the base error type for structured output failures.
 // It provides detailed context for debugging structured output operations including
 // the operation that failed, provider name, raw response, and underlying error.

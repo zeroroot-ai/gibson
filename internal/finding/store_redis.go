@@ -20,7 +20,7 @@ import (
 //   - By mission index: "gibson:finding:by_mission:{tenant}:{mission_id}"
 //   - By severity index: "gibson:finding:by_severity:{tenant}:{severity}"
 //
-// When a finding has an empty TenantID (single-tenant / auth-disabled mode), the
+// When a finding has an empty TenantID (single-tenant mode), the
 // tenant segment is replaced with "_" so that keys remain consistent and scannable.
 //
 // Secondary Indexes:
@@ -567,7 +567,7 @@ func (s *RedisFindingStore) isStructuredQuery(query string) bool {
 }
 
 // tenantSegment returns the tenant segment for a Redis key.
-// When tenantID is empty (single-tenant / auth-disabled mode), "_" is used as a
+// When tenantID is empty (single-tenant mode), "_" is used as a
 // placeholder so that all key patterns remain structurally consistent and scannable.
 func tenantSegment(tenantID string) string {
 	if tenantID == "" {

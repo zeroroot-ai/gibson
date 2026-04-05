@@ -38,14 +38,17 @@ type K8sValidator struct {
 // This allows configuration to be loaded without requiring K8s API access
 // at startup.
 //
-// Returns an error if configuration is invalid.
+// When cfg is nil, a default empty config is used (no role bindings).
+// The Enabled field is ignored — callers that want to skip K8s auth
+// should simply not call this function.
+//
+// Returns an error only if role binder creation fails.
 func NewK8sValidator(cfg *K8sAuthConfig) (*K8sValidator, error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("k8s auth config is nil")
-	}
-
-	if !cfg.Enabled {
-		return nil, fmt.Errorf("k8s auth is not enabled")
+		cfg = &K8sAuthConfig{
+			Enabled:      true,
+			RoleBindings: map[string][]string{},
+		}
 	}
 
 	// Initialize role binder with K8s-specific bindings

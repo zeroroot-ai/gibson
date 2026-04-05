@@ -36,14 +36,14 @@ import (
 //	data, err := tenantStore.Get(ctx, "mission:123")
 type TenantScopedStore struct {
 	client        *StateClient
-	authMode      string // "disabled", "dev", "enterprise", "saas"
+	authMode      string // "dev", "enterprise", "saas"
 	defaultTenant string // Fallback tenant for single-tenant deployments
 	requireTenant bool   // If true, fail operations when no tenant in context
 }
 
 // TenantStoreConfig configures tenant scoping behavior.
 type TenantStoreConfig struct {
-	// AuthMode determines tenant requirement: "disabled", "dev", "enterprise", "saas"
+	// AuthMode determines tenant requirement: "dev", "enterprise", "saas"
 	AuthMode string
 
 	// DefaultTenant is used when no tenant is in context (enterprise mode with single tenant)
@@ -56,7 +56,7 @@ type TenantStoreConfig struct {
 // NewTenantScopedStore creates a new tenant-aware Redis store wrapper.
 //
 // The config determines how tenant isolation is enforced:
-//   - disabled/dev mode: Uses defaultTenant for all operations
+//   - dev mode: Uses defaultTenant for all operations
 //   - enterprise mode: Uses tenant from context, falls back to defaultTenant
 //   - saas mode: Requires tenant in context, fails if missing
 //
@@ -75,7 +75,7 @@ type TenantStoreConfig struct {
 func NewTenantScopedStore(client *StateClient, config *TenantStoreConfig) *TenantScopedStore {
 	if config == nil {
 		config = &TenantStoreConfig{
-			AuthMode:      "disabled",
+			AuthMode:      "dev",
 			DefaultTenant: "default",
 			RequireTenant: false,
 		}
@@ -110,7 +110,7 @@ func (s *TenantScopedStore) resolveTenant(ctx context.Context) (string, error) {
 		return "", NewTenantError("tenant required but not found in context")
 	}
 
-	// Auth disabled or dev mode - use "default" as safety fallback
+	// Dev mode or missing tenant - use "default" as safety fallback
 	return "default", nil
 }
 

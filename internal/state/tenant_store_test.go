@@ -50,9 +50,9 @@ func TestTenantScopedStore_ResolveTenant(t *testing.T) {
 			wantErr:       true,
 		},
 		{
-			name: "disabled mode uses default",
+			name: "dev mode uses default",
 			config: &TenantStoreConfig{
-				AuthMode:      "disabled",
+				AuthMode:      "dev",
 				DefaultTenant: "dev",
 				RequireTenant: false,
 			},

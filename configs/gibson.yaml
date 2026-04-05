@@ -63,8 +63,7 @@ security:
 #   - Kubernetes ServiceAccount tokens for in-cluster workloads
 #   - Local static tokens for development (NOT FOR PRODUCTION)
 #
-# Authentication is disabled by default for backward compatibility.
-# When disabled, all gRPC requests are allowed without authentication.
+# Authentication is always required. A valid auth mode must be configured.
 #
 # Role-Based Access Control (RBAC):
 #   Roles are bound to identities based on token claims (groups, repository, etc.)
@@ -226,7 +225,7 @@ auth:
 # - JWKS responses are cached with configurable TTL to reduce IdP load
 # - Metrics are exported for auth attempts, latency, and cache performance
 # - Audit logs record all authentication events (success, failure, permission denied)
-# - When auth is disabled, no performance overhead is incurred
+# - Auth is always required; a valid auth mode must be configured
 
 # ============================================================================
 # Complete Example: Production Configuration with Dex (Recommended)

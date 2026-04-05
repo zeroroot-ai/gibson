@@ -133,10 +133,9 @@ func seedTenant(t *testing.T, mr *miniredis.Miniredis, tenantID, displayName str
 // ---------------------------------------------------------------------------
 // CreateTenant — RBAC
 //
-// CreateTenant calls auth.RequireRole(ctx, "admin").  Only identities carrying
-// the exact "admin" role are permitted.  "platform-operator" alone does not
-// satisfy the "admin" requirement because RequireRole does an exact role-name
-// match; it is not a permissions-based check.
+// CreateTenant calls auth.RequireRole(ctx, "platform-operator").  Only
+// identities carrying the "platform-operator" role are permitted.  The
+// tenant-scoped "admin" role does NOT grant cross-tenant operations.
 // ---------------------------------------------------------------------------
 
 func TestTenantService_CreateTenant_RBAC(t *testing.T) {
@@ -146,13 +145,13 @@ func TestTenantService_CreateTenant_RBAC(t *testing.T) {
 		wantCode codes.Code
 	}{
 		{
-			name:     "admin succeeds",
-			ctx:      adminCtx("acme"),
+			name:     "platform-operator succeeds",
+			ctx:      platformOperatorCtx(),
 			wantCode: codes.OK,
 		},
 		{
-			name:     "platform-operator without admin role gets PermissionDenied",
-			ctx:      platformOperatorCtx(),
+			name:     "admin gets PermissionDenied (tenant-scoped only)",
+			ctx:      adminCtx("acme"),
 			wantCode: codes.PermissionDenied,
 		},
 		{
@@ -180,8 +179,8 @@ func TestTenantService_CreateTenant_RBAC(t *testing.T) {
 // ---------------------------------------------------------------------------
 // UpdateTenant — RBAC
 //
-// UpdateTenant calls auth.RequireRole(ctx, "admin").  Same semantics as
-// CreateTenant: only the exact "admin" role passes.
+// UpdateTenant calls auth.RequireRole(ctx, "platform-operator").  Only
+// platform-operators can modify tenant records.
 // ---------------------------------------------------------------------------
 
 func TestTenantService_UpdateTenant_RBAC(t *testing.T) {
@@ -193,13 +192,13 @@ func TestTenantService_UpdateTenant_RBAC(t *testing.T) {
 		wantCode codes.Code
 	}{
 		{
-			name:     "admin succeeds",
-			ctx:      adminCtx(tenantID),
+			name:     "platform-operator succeeds",
+			ctx:      platformOperatorCtx(),
 			wantCode: codes.OK,
 		},
 		{
-			name:     "platform-operator without admin role gets PermissionDenied",
-			ctx:      platformOperatorCtx(),
+			name:     "admin gets PermissionDenied (tenant-scoped only)",
+			ctx:      adminCtx(tenantID),
 			wantCode: codes.PermissionDenied,
 		},
 		{
@@ -228,8 +227,8 @@ func TestTenantService_UpdateTenant_RBAC(t *testing.T) {
 // ---------------------------------------------------------------------------
 // DeleteTenant — RBAC
 //
-// DeleteTenant calls auth.RequireRole(ctx, "admin").  Same semantics as the
-// other mutating methods: only the exact "admin" role passes.
+// DeleteTenant calls auth.RequireRole(ctx, "platform-operator").  Only
+// platform-operators can delete tenants.
 // ---------------------------------------------------------------------------
 
 func TestTenantService_DeleteTenant_RBAC(t *testing.T) {
@@ -241,13 +240,13 @@ func TestTenantService_DeleteTenant_RBAC(t *testing.T) {
 		wantCode codes.Code
 	}{
 		{
-			name:     "admin succeeds",
-			ctx:      adminCtx(tenantID),
+			name:     "platform-operator succeeds",
+			ctx:      platformOperatorCtx(),
 			wantCode: codes.OK,
 		},
 		{
-			name:     "platform-operator without admin role gets PermissionDenied",
-			ctx:      platformOperatorCtx(),
+			name:     "admin gets PermissionDenied (tenant-scoped only)",
+			ctx:      adminCtx(tenantID),
 			wantCode: codes.PermissionDenied,
 		},
 		{
@@ -265,8 +264,8 @@ func TestTenantService_DeleteTenant_RBAC(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, mr := newTestTenantService(t)
-			// Seed a fresh copy for each sub-test so the admin case actually
-			// finds a record to delete.
+			// Seed a fresh copy for each sub-test so the platform-operator
+			// case actually finds a record to delete.
 			seedTenant(t, mr, tenantID, "ACME Corp")
 
 			err := svc.DeleteTenant(tt.ctx, tenantID)
@@ -334,9 +333,9 @@ func TestTenantService_GetTenant_RBAC(t *testing.T) {
 // ListTenants — RBAC and scoped visibility
 //
 // ListTenants applies different visibility depending on the caller role:
-//   - admin or platform-operator: sees every tenant in the Redis index
-//   - any other authenticated caller: sees only their own tenant (read from
-//     meta key by tenant ID; the index is not consulted for this path)
+//   - platform-operator: sees every tenant in the Redis index
+//   - all other authenticated callers (including admin): see only their own
+//     tenant (read from meta key by tenant ID; the index is not consulted)
 //   - no identity or no tenant context: returns an error
 // ---------------------------------------------------------------------------
 
@@ -365,13 +364,11 @@ func TestTenantService_ListTenants_RBAC(t *testing.T) {
 			wantTenants: []string{tenantA},
 		},
 		{
-			// ListTenants grants admins the same full-index view as
-			// platform-operators because both roles appear in the
-			// privileged branch of the implementation.
-			name:        "admin sees all tenants (same as platform-operator)",
+			// admin is now tenant-scoped and does NOT see other tenants.
+			name:        "admin sees only their own tenant (tenant-scoped)",
 			ctx:         adminCtx(tenantA),
 			wantCode:    codes.OK,
-			wantTenants: []string{tenantA, tenantB},
+			wantTenants: []string{tenantA},
 		},
 		{
 			name:     "no identity gets Unauthenticated",
@@ -422,10 +419,10 @@ func TestTenantService_ListTenants_NoTenantContext(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestTenantService_CreateTenant_Roundtrip verifies that a record created by
-// an admin can be retrieved by that same admin.
+// a platform-operator can be retrieved.
 func TestTenantService_CreateTenant_Roundtrip(t *testing.T) {
 	svc, _ := newTestTenantService(t)
-	ctx := adminCtx("acme")
+	ctx := platformOperatorCtx()
 
 	created, err := svc.CreateTenant(ctx, "acme", "ACME Corp", map[string]string{"plan": "enterprise"})
 	require.NoError(t, err)
@@ -450,21 +447,22 @@ func TestTenantService_DeleteTenant_SoftDelete(t *testing.T) {
 	const tenantID = "acme"
 	seedTenant(t, mr, tenantID, "ACME Corp")
 
-	adminContext := adminCtx(tenantID)
+	poCtx := platformOperatorCtx()
 
 	// Soft-delete the tenant.
-	err := svc.DeleteTenant(adminContext, tenantID)
+	err := svc.DeleteTenant(poCtx, tenantID)
 	require.NoError(t, err)
 
 	// A platform-operator listing all tenants should no longer see the deleted
 	// tenant because it was removed from the active index SET.
-	records, err := svc.ListTenants(platformOperatorCtx())
+	records, err := svc.ListTenants(poCtx)
 	require.NoError(t, err)
 	assert.Empty(t, records, "soft-deleted tenant must not appear in platform-operator list")
 
-	// A direct GetTenant by the admin context (same tenant) still finds the
-	// meta record (soft-delete keeps the key for audit history).
-	record, err := svc.GetTenant(adminContext, tenantID)
+	// A direct GetTenant by a tenant member still finds the meta record
+	// (soft-delete keeps the key for audit history).
+	memberCtx := adminCtx(tenantID)
+	record, err := svc.GetTenant(memberCtx, tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, "deleted", record.Status, "soft-deleted record must have status 'deleted'")
 }

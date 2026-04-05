@@ -21,10 +21,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
-	"github.com/zero-day-ai/gibson/internal/keycloak"
+
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
 )
 
@@ -42,38 +43,62 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		return fmt.Errorf("failed to listen on %s: %w", d.grpcAddr, err)
 	}
 
-	// Build server options with optional auth interceptors
-	serverOpts := []grpc.ServerOption{}
+	// Build interceptor chains. Recovery is always first (outermost).
+	var unaryInterceptors []grpc.UnaryServerInterceptor
+	var streamInterceptors []grpc.StreamServerInterceptor
 
-	// Add auth interceptors if authentication is enabled
+	// 1. Panic recovery (outermost — catches panics from all inner interceptors)
+	var recoveryMeter metric.Meter
+	if d.infrastructure != nil && d.infrastructure.otelStack != nil &&
+		d.infrastructure.otelStack.MeterProvider != nil {
+		recoveryMeter = d.infrastructure.otelStack.MeterProvider.Meter("gibson.grpc.recovery")
+	}
+	unaryRecovery, streamRecovery, err := panicRecoveryInterceptors(d.logger.Slog(), recoveryMeter)
+	if err != nil {
+		return fmt.Errorf("failed to create recovery interceptors: %w", err)
+	}
+	unaryInterceptors = append(unaryInterceptors, unaryRecovery)
+	streamInterceptors = append(streamInterceptors, streamRecovery)
+
+	// 2. Error scrubbing (strips internal paths, YAML parse details, Go types from responses)
+	var scrubMeter metric.Meter
+	if d.infrastructure != nil && d.infrastructure.otelStack != nil &&
+		d.infrastructure.otelStack.MeterProvider != nil {
+		scrubMeter = d.infrastructure.otelStack.MeterProvider.Meter("gibson.grpc.error_scrub")
+	}
+	unaryScrub, streamScrub, err := errorScrubInterceptors(d.logger.Slog(), scrubMeter)
+	if err != nil {
+		return fmt.Errorf("failed to create error scrub interceptors: %w", err)
+	}
+	unaryInterceptors = append(unaryInterceptors, unaryScrub)
+	streamInterceptors = append(streamInterceptors, streamScrub)
+
+	// 3. Auth interceptors (if enabled)
 	if d.config.Auth.IsAuthEnabled() {
 		d.logger.Info(ctx, "authentication enabled, installing auth interceptors",
 			"mode", d.config.Auth.Mode,
 		)
 
-		// Create authenticator from config
 		authenticator, err := d.createAuthenticator(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to create authenticator: %w", err)
 		}
 
-		// Create auth interceptors
-		unaryAuthInterceptor := auth.UnaryAuthInterceptor(authenticator, &d.config.Auth, d.logger.Slog())
-		streamAuthInterceptor := auth.StreamAuthInterceptor(authenticator, &d.config.Auth, d.logger.Slog())
-
-		// Add interceptors to server options
-		// Auth interceptors should run before other interceptors (like tracing)
-		serverOpts = append(serverOpts,
-			grpc.UnaryInterceptor(unaryAuthInterceptor),
-			grpc.StreamInterceptor(streamAuthInterceptor),
-		)
+		unaryInterceptors = append(unaryInterceptors, auth.UnaryAuthInterceptor(authenticator, &d.config.Auth, d.logger.Slog()))
+		streamInterceptors = append(streamInterceptors, auth.StreamAuthInterceptor(authenticator, &d.config.Auth, d.logger.Slog()))
 
 		d.logger.Info(ctx, "auth interceptors installed",
 			"trust_localhost", d.config.Auth.TrustLocalhost,
 			"oidc_issuers", len(d.config.Auth.OIDC),
 		)
 	} else {
-		d.logger.Info(ctx, "authentication disabled")
+		d.logger.Warn(ctx, "auth interceptors not installed - auth mode not configured")
+	}
+
+	// Build server options with chained interceptors
+	serverOpts := []grpc.ServerOption{
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
 	}
 
 	// Create gRPC server with options
@@ -126,36 +151,9 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 					d.logger.Slog(),
 				)
 
-				// Wire Keycloak admin client if configured.
-				if d.config.Keycloak.BaseURL != "" && d.config.Keycloak.ClientID != "" {
-					masterRealm := d.config.Keycloak.MasterRealm
-					if masterRealm == "" {
-						masterRealm = "master"
-					}
-					// Prefer env var for the secret since the daemon config
-					// loader does not expand ${VAR} placeholders.
-					clientSecret := d.config.Keycloak.ClientSecret
-					if envSecret := os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"); envSecret != "" {
-						clientSecret = envSecret
-					}
-					kcClient := keycloak.NewClient(
-						d.config.Keycloak.BaseURL,
-						masterRealm,
-						d.config.Keycloak.ClientID,
-						clientSecret,
-						d.logger.Slog(),
-					)
-					prov.WithKeycloak(kcClient)
-					d.logger.Info(ctx, "keycloak admin client wired into provisioner", "base_url", d.config.Keycloak.BaseURL)
-
-					// Pass the shared OIDC client secret so per-tenant
-					// realms get a gibson-dashboard client with the same
-					// secret the dashboard uses in the shared gibson realm.
-					if oidcSecret := os.Getenv("OIDC_CLIENT_SECRET"); oidcSecret != "" {
-						prov.WithOIDCClientSecret(oidcSecret)
-					}
+				if d.membershipStore != nil {
+					prov.WithMembership(d.membershipStore)
 				}
-
 				daemonSvc.WithProvisioner(prov)
 				d.logger.Info(ctx, "provisioner wired into DaemonServer")
 			} else {

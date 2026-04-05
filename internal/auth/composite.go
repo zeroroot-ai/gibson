@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -43,14 +44,13 @@ type authenticatorEntry struct {
 //
 // Initializes authenticators based on the configured auth mode:
 //
-//   - "disabled": Returns nil (caller should skip authentication entirely)
 //   - "dev": Only local static token authenticator
 //   - "enterprise": API key (if provided) + OIDC + Kubernetes (if enabled)
 //   - "saas": API key (if provided) + OIDC only
 //
 // The optional apiKeyAuthenticator parameter wires in API key support for
 // "enterprise" and "saas" modes. Pass nil to omit API key authentication.
-// In "dev" and "disabled" modes the apiKeyAuthenticator is ignored even if provided.
+// In "dev" mode the apiKeyAuthenticator is ignored even if provided.
 //
 // Token routing:
 //   - Tokens with "gsk_" prefix are routed exclusively to the API key authenticator.
@@ -61,7 +61,6 @@ type authenticatorEntry struct {
 //  2. Kubernetes (if configured for the mode)
 //  3. Local (if configured for the mode)
 //
-// Returns nil authenticator for "disabled" mode - caller should handle this case.
 // Returns an error if configuration is invalid for the specified mode.
 func NewCompositeAuthenticator(cfg *AuthConfig, apiKeyAuthenticator *APIKeyAuthenticator) (*CompositeAuthenticator, error) {
 	if cfg == nil {
@@ -74,11 +73,6 @@ func NewCompositeAuthenticator(cfg *AuthConfig, apiKeyAuthenticator *APIKeyAuthe
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid auth config: %w", err)
-	}
-
-	// For disabled mode, return nil - caller should skip authentication entirely
-	if cfg.Mode == "disabled" {
-		return nil, nil
 	}
 
 	var authenticators []authenticatorEntry
@@ -100,7 +94,7 @@ func NewCompositeAuthenticator(cfg *AuthConfig, apiKeyAuthenticator *APIKeyAuthe
 		})
 
 	case "enterprise":
-		// Enterprise mode: OIDC + optional Kubernetes
+		// Enterprise mode: OIDC + auto-detected Kubernetes SA
 		if len(cfg.OIDC) == 0 {
 			return nil, fmt.Errorf("enterprise mode requires at least one OIDC issuer")
 		}
@@ -115,12 +109,13 @@ func NewCompositeAuthenticator(cfg *AuthConfig, apiKeyAuthenticator *APIKeyAuthe
 			authenticator: oidcValidator,
 		})
 
-		// 2. Add K8s validator if enabled (optional in enterprise mode)
-		if cfg.Kubernetes != nil && cfg.Kubernetes.Enabled {
-			k8sValidator, err := NewK8sValidator(cfg.Kubernetes)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create k8s validator: %w", err)
-			}
+		// 2. Auto-detect K8s SA auth — works when running in K8s, silently
+		// skipped when running outside K8s (local dev, Docker).
+		k8sValidator, err := NewK8sValidator(cfg.Kubernetes)
+		if err != nil {
+			slog.Warn("K8s SA auth unavailable, skipping — components must use API keys or OIDC",
+				"error", err)
+		} else {
 			authenticators = append(authenticators, authenticatorEntry{
 				name:          "kubernetes",
 				authenticator: k8sValidator,
@@ -128,12 +123,12 @@ func NewCompositeAuthenticator(cfg *AuthConfig, apiKeyAuthenticator *APIKeyAuthe
 		}
 
 	case "saas":
-		// SaaS mode: OIDC only (Kubernetes not typical for SaaS)
+		// SaaS mode: OIDC + auto-detected Kubernetes SA
 		if len(cfg.OIDC) == 0 {
 			return nil, fmt.Errorf("saas mode requires at least one OIDC issuer")
 		}
 
-		// Add OIDC validator only
+		// 1. Add OIDC validator
 		oidcValidator, err := NewOIDCValidator(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OIDC validator: %w", err)
@@ -143,8 +138,19 @@ func NewCompositeAuthenticator(cfg *AuthConfig, apiKeyAuthenticator *APIKeyAuthe
 			authenticator: oidcValidator,
 		})
 
+		// 2. Auto-detect K8s SA auth (same as enterprise)
+		k8sValidator, err := NewK8sValidator(cfg.Kubernetes)
+		if err != nil {
+			slog.Warn("K8s SA auth unavailable, skipping", "error", err)
+		} else {
+			authenticators = append(authenticators, authenticatorEntry{
+				name:          "kubernetes",
+				authenticator: k8sValidator,
+			})
+		}
+
 	default:
-		return nil, fmt.Errorf("unsupported auth mode: %s (must be: disabled, dev, enterprise, saas)", cfg.Mode)
+		return nil, fmt.Errorf("unsupported auth mode: %s (must be: dev, enterprise, saas)", cfg.Mode)
 	}
 
 	if len(authenticators) == 0 {
@@ -156,7 +162,7 @@ func NewCompositeAuthenticator(cfg *AuthConfig, apiKeyAuthenticator *APIKeyAuthe
 	}
 
 	// Wire in API key authenticator for enterprise and saas modes.
-	// Dev and disabled modes do not support API key authentication.
+	// Dev mode does not support API key authentication.
 	if apiKeyAuthenticator != nil && (cfg.Mode == "enterprise" || cfg.Mode == "saas") {
 		composite.apiKey = apiKeyAuthenticator
 	}

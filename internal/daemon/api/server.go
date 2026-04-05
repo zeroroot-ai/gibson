@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	grpcmeta "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
@@ -1246,7 +1247,7 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissi
 	}
 
 	// Apply tenant filtering when auth is enabled.
-	// An empty tenant means auth is disabled; return all missions for backward compatibility.
+	// An empty tenant means no tenant context is set; return all missions for backward compatibility.
 	if tenant != "" {
 		filtered := missions[:0]
 		for _, m := range missions {
@@ -2908,10 +2909,15 @@ func tenantRecordToProto(r *component.TenantRecord) *TenantInfo {
 
 // CreateTenant creates a new tenant record backed by Redis.
 //
-// Requires the "admin" role.  Returns codes.Unavailable when no TenantService
-// has been wired, codes.AlreadyExists when the tenant_id is already taken, and
+// Requires the "platform-operator" role (cross-tenant operation).
+// Returns codes.Unavailable when no TenantService has been wired,
+// codes.AlreadyExists when the tenant_id is already taken, and
 // codes.InvalidArgument when the tenant_id fails format validation.
 func (s *DaemonServer) CreateTenant(ctx context.Context, req *CreateTenantRequest) (*CreateTenantResponse, error) {
+	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
+		return nil, err
+	}
+
 	if s.tenantService == nil {
 		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
 	}
@@ -2960,7 +2966,7 @@ func (s *DaemonServer) CreateTenant(ctx context.Context, req *CreateTenantReques
 
 // GetTenant retrieves a single tenant by ID.
 //
-// Callers with "admin" or "platform-operator" may retrieve any tenant.
+// Callers with "platform-operator" may retrieve any tenant.
 // All other authenticated callers may only retrieve their own tenant.
 // Returns codes.NotFound when the tenant does not exist.
 func (s *DaemonServer) GetTenant(ctx context.Context, req *GetTenantRequest) (*GetTenantResponse, error) {
@@ -2988,7 +2994,7 @@ func (s *DaemonServer) GetTenant(ctx context.Context, req *GetTenantRequest) (*G
 
 // ListTenants returns tenants visible to the caller.
 //
-// Callers with "admin" or "platform-operator" receive all tenants.
+// Requires the "platform-operator" role to list all tenants.
 // All other authenticated callers receive only their own tenant record.
 func (s *DaemonServer) ListTenants(ctx context.Context, req *ListTenantsRequest) (*ListTenantsResponse, error) {
 	if s.tenantService == nil {
@@ -3013,9 +3019,10 @@ func (s *DaemonServer) ListTenants(ctx context.Context, req *ListTenantsRequest)
 
 // UpdateTenant applies field-level updates to an existing tenant.
 //
-// Requires the "admin" role.  Non-empty fields in the request replace the
-// corresponding stored values.  Config entries are merged into the existing
-// config map.  Returns codes.NotFound when the tenant does not exist.
+// Requires the "platform-operator" role (cross-tenant operation).
+// Non-empty fields in the request replace the corresponding stored values.
+// Config entries are merged into the existing config map.
+// Returns codes.NotFound when the tenant does not exist.
 func (s *DaemonServer) UpdateTenant(ctx context.Context, req *UpdateTenantRequest) (*UpdateTenantResponse, error) {
 	if s.tenantService == nil {
 		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
@@ -3060,9 +3067,14 @@ func (s *DaemonServer) UpdateTenant(ctx context.Context, req *UpdateTenantReques
 // DeleteTenant soft-deletes a tenant by marking its status as "deleted" and
 // removing it from the active tenant index.
 //
-// Requires the "admin" role.  The underlying Redis meta key is retained for
-// audit history.  Returns codes.NotFound when the tenant does not exist.
+// Requires the "platform-operator" role (cross-tenant operation).
+// The underlying Redis meta key is retained for audit history.
+// Returns codes.NotFound when the tenant does not exist.
 func (s *DaemonServer) DeleteTenant(ctx context.Context, req *DeleteTenantRequest) (*DeleteTenantResponse, error) {
+	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
+		return nil, err
+	}
+
 	if s.tenantService == nil {
 		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
 	}
@@ -3091,9 +3103,9 @@ func (s *DaemonServer) DeleteTenant(ctx context.Context, req *DeleteTenantReques
 // ListTenantMembers returns the set of users registered in the tenant's
 // Keycloak realm, along with their assigned realm roles and last session info.
 //
-// Callers with "admin" or "platform-operator" may query any tenant. All other
-// authenticated callers may only query their own tenant. Returns
-// codes.Unavailable when no Keycloak client has been wired.
+// Callers with "platform-operator" may query any tenant. Callers with "owner"
+// or "admin" may query their own tenant. Returns codes.Unavailable when no
+// Keycloak client has been wired.
 func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMembersRequest) (*ListTenantMembersResponse, error) {
 	if s.keycloak == nil {
 		return nil, status_grpc.Error(codes.Unavailable, "keycloak client not configured")
@@ -3104,14 +3116,16 @@ func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMem
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id required")
 	}
 
-	// RBAC: admin/platform-operator can see any tenant, others only their own.
+	// RBAC: platform-operator can see any tenant; owner/admin can see their own.
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	callerTenant := auth.TenantFromContext(ctx)
-	if !identity.HasRole("admin") && !identity.HasRole("platform-operator") && callerTenant != tenantID {
-		return nil, status_grpc.Error(codes.PermissionDenied, "cannot access other tenant's members")
+	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
+	}
+	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != tenantID {
+		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
 	// Determine realm name from tenant record; default to tenant ID.
@@ -3163,20 +3177,16 @@ func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMem
 // ImpersonateTenant issues a short-lived context token scoped to the target
 // tenant for platform-operator use.
 //
-// Requires the "platform-operator" or "admin" role.  The caller's identity is
-// extracted from the request context and written to the structured audit log so
-// every impersonation event is traceable.
+// Requires the "platform-operator" role (cross-tenant god-mode operation).
+// The caller's identity is extracted from the request context and written to
+// the structured audit log so every impersonation event is traceable.
 //
 // Token generation is not yet implemented; a TODO placeholder is returned
 // until the token-issuance service is wired.
 func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error) {
-	// Require platform-operator or admin — this is a privileged operation.
-	// Try platform-operator first; fall back to checking admin.
-	platformErr := auth.RequireRole(ctx, "platform-operator")
-	adminErr := auth.RequireRole(ctx, "admin")
-	if platformErr != nil && adminErr != nil {
-		// Return the platform-operator error as the canonical failure message.
-		return nil, platformErr
+	// Require platform-operator — this is a cross-tenant privileged operation.
+	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
+		return nil, err
 	}
 
 	if req.TenantId == "" {
@@ -3224,10 +3234,10 @@ func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTe
 
 // ProvisionTenant triggers full tenant provisioning (namespace, RBAC, API key).
 //
-// Requires the "admin" role.  Returns codes.Unimplemented until the provisioner
-// service has been wired.
+// Requires the "platform-operator" role (cross-tenant operation).
+// Returns codes.Unimplemented until the provisioner service has been wired.
 func (s *DaemonServer) ProvisionTenant(ctx context.Context, req *ProvisionTenantRequest) (*ProvisionTenantResponse, error) {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
+	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
 		return nil, err
 	}
 
@@ -3272,11 +3282,20 @@ func (s *DaemonServer) ProvisionTenant(ctx context.Context, req *ProvisionTenant
 	// recognised as the tenant owner. AddMember is idempotent on retry via
 	// ErrAlreadyMember — we log and continue rather than failing the RPC.
 	if s.membershipStore != nil && req.OwnerEmail != "" {
-		if addErr := s.membershipStore.AddMember(ctx, req.TenantId, req.OwnerEmail, req.OwnerEmail, "owner", "provisioner"); addErr != nil {
+		// Use the Keycloak user ID from gRPC metadata if provided; fall back to
+		// email as user ID for backward compat.
+		ownerUserID := req.OwnerEmail
+		if md, ok := grpcmeta.FromIncomingContext(ctx); ok {
+			if vals := md.Get("x-owner-user-id"); len(vals) > 0 && vals[0] != "" {
+				ownerUserID = vals[0]
+			}
+		}
+		if addErr := s.membershipStore.AddMember(ctx, req.TenantId, ownerUserID, req.OwnerEmail, "owner", "provisioner"); addErr != nil {
 			if !errors.Is(addErr, membership.ErrAlreadyMember) {
 				slog.Warn("failed to create owner membership",
 					"tenant", req.TenantId,
 					"email", req.OwnerEmail,
+					"user_id", ownerUserID,
 					"error", addErr,
 				)
 			}
@@ -3332,10 +3351,10 @@ func (s *DaemonServer) GetProvisioningStatus(ctx context.Context, req *GetProvis
 
 // DeprovisionTenant tears down all resources associated with a tenant.
 //
-// Requires the "admin" role.  Returns codes.Unimplemented until the provisioner
-// service has been wired.
+// Requires the "platform-operator" role (cross-tenant operation).
+// Returns codes.Unimplemented until the provisioner service has been wired.
 func (s *DaemonServer) DeprovisionTenant(ctx context.Context, req *DeprovisionTenantRequest) (*DeprovisionTenantResponse, error) {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
+	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
 		return nil, err
 	}
 
@@ -3363,15 +3382,23 @@ func (s *DaemonServer) DeprovisionTenant(ctx context.Context, req *DeprovisionTe
 // UpdateTenantBilling updates billing fields (tier, Stripe IDs, billing alert)
 // on a tenant record.
 //
-// Requires the "admin" role.  Returns codes.Unimplemented until the billing
-// service has been wired.
+// Requires "platform-operator" for cross-tenant access or "owner" for the
+// caller's own tenant.  Returns codes.Unimplemented until the billing service
+// has been wired.
 func (s *DaemonServer) UpdateTenantBilling(ctx context.Context, req *UpdateTenantBillingRequest) (*UpdateTenantBillingResponse, error) {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
-		return nil, err
-	}
-
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
+	}
+	if !identity.HasRole("owner") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or platform-operator role")
+	}
+	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != req.TenantId {
+		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
 	if s.billingStore == nil {
@@ -3391,10 +3418,23 @@ func (s *DaemonServer) UpdateTenantBilling(ctx context.Context, req *UpdateTenan
 // GetTenantBilling returns billing details and current usage metrics for a
 // tenant.
 //
-// Returns codes.Unimplemented until the billing service has been wired.
+// Requires "platform-operator" for cross-tenant access or "owner" for the
+// caller's own tenant.  Returns codes.Unimplemented until the billing service
+// has been wired.
 func (s *DaemonServer) GetTenantBilling(ctx context.Context, req *GetTenantBillingRequest) (*GetTenantBillingResponse, error) {
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
+	}
+	if !identity.HasRole("owner") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or platform-operator role")
+	}
+	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != req.TenantId {
+		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
 	if s.billingStore == nil {
@@ -3446,32 +3486,11 @@ func (s *DaemonServer) GetTenantByStripeCustomerId(ctx context.Context, req *Get
 	}, nil
 }
 
-// GetTenantByEmail resolves an owner email address to the tenant that owns it,
-// using the reverse-mapping index maintained by TenantService.
-func (s *DaemonServer) GetTenantByEmail(ctx context.Context, req *GetTenantByEmailRequest) (*GetTenantByEmailResponse, error) {
-	if s.tenantService == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
-	}
-	if req.Email == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "email is required")
-	}
-
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-
-	record, err := s.tenantService.GetTenantByEmail(ctx, email)
-	if err != nil {
-		if errors.Is(err, component.ErrTenantNotFound) {
-			return nil, status_grpc.Errorf(codes.NotFound, "no tenant for email %q", email)
-		}
-		s.logger.Error("failed to get tenant by email", "email", email, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to get tenant by email: %v", err)
-	}
-
-	return &GetTenantByEmailResponse{
-		TenantId:  record.TenantID,
-		RealmName: record.KeycloakRealmName,
-		Status:    record.Status,
-	}, nil
+// GetTenantByEmail is no longer supported in the single-realm Keycloak model.
+// The email→tenant reverse mapping has been removed; tenant resolution now
+// happens via the shared "gibson" realm using the tenant_id token claim.
+func (s *DaemonServer) GetTenantByEmail(_ context.Context, _ *GetTenantByEmailRequest) (*GetTenantByEmailResponse, error) {
+	return nil, status_grpc.Errorf(codes.Unimplemented, "GetTenantByEmail is not supported in single-realm mode")
 }
 
 // ---------------------------------------------------------------------------
@@ -3533,11 +3552,17 @@ func (s *DaemonServer) UpdateOnboardingState(ctx context.Context, req *UpdateOnb
 
 // CreateInvitation issues a new team invitation for the caller's tenant.
 //
-// Requires the "admin" role.  Returns codes.Unimplemented until the invitation
-// service has been wired.
+// Requires "owner" or "admin" role within the caller's own tenant, or
+// "platform-operator" for cross-tenant access.
+// Returns codes.Unimplemented until the invitation service has been wired.
 func (s *DaemonServer) CreateInvitation(ctx context.Context, req *CreateInvitationRequest) (*CreateInvitationResponse, error) {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
-		return nil, err
+	// Check caller has owner or admin role.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
+	}
+	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
 	}
 
 	if req.Email == "" {
@@ -3586,8 +3611,19 @@ func (s *DaemonServer) AcceptInvitation(ctx context.Context, req *AcceptInvitati
 
 // ListInvitations returns all invitations for the caller's tenant.
 //
+// Requires "owner" or "admin" role within the caller's own tenant, or
+// "platform-operator" for cross-tenant access.
 // Returns codes.Unimplemented until the invitation service has been wired.
 func (s *DaemonServer) ListInvitations(ctx context.Context, req *ListInvitationsRequest) (*ListInvitationsResponse, error) {
+	// Check caller has owner or admin role.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
+	}
+	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
+	}
+
 	// TODO: Wire to the invitation service once the concrete type is available.
 	if s.invitationStore == nil {
 		return nil, status_grpc.Errorf(codes.Unimplemented, "invitation service not configured")
@@ -3618,11 +3654,17 @@ func (s *DaemonServer) ListInvitations(ctx context.Context, req *ListInvitations
 
 // RevokeInvitation cancels a pending invitation by token.
 //
-// Requires the "admin" role.  Returns codes.Unimplemented until the invitation
-// service has been wired.
+// Requires "owner" or "admin" role within the caller's own tenant, or
+// "platform-operator" for cross-tenant access.
+// Returns codes.Unimplemented until the invitation service has been wired.
 func (s *DaemonServer) RevokeInvitation(ctx context.Context, req *RevokeInvitationRequest) (*RevokeInvitationResponse, error) {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
-		return nil, err
+	// Check caller has owner or admin role.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
+	}
+	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
 	}
 
 	if req.Token == "" {
@@ -3650,15 +3692,26 @@ func (s *DaemonServer) RevokeInvitation(ctx context.Context, req *RevokeInvitati
 
 // CreateAPIKey issues a new API key for a tenant.
 //
-// Requires the "admin" role.  Returns codes.Unimplemented until the API key
-// service has been wired.
+// Requires "owner" or "admin" role within the caller's own tenant, or
+// "platform-operator" for cross-tenant access.
+// Returns codes.Unimplemented until the API key service has been wired.
 func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
-		return nil, err
+	// Check caller has owner or admin role.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
+	}
+	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
 	}
 
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	// Check caller's tenant matches target tenant (unless platform-operator).
+	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != req.TenantId {
+		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
 	// TODO: Wire to the API key service once the concrete type is available.
@@ -3669,12 +3722,10 @@ func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReques
 	// Extract the caller's email for the audit trail. Fall back to the subject
 	// when no email claim is present (e.g. service-account tokens).
 	createdBy := ""
-	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
-		if identity.Email != "" {
-			createdBy = identity.Email
-		} else {
-			createdBy = identity.Subject
-		}
+	if identity.Email != "" {
+		createdBy = identity.Email
+	} else {
+		createdBy = identity.Subject
 	}
 
 	keyID, rawKey, err := s.apiKeyStore.Create(ctx, req.TenantId, req.AllowedKinds, req.AllowedNames, req.Capabilities, req.Name, createdBy)
@@ -3690,10 +3741,25 @@ func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReques
 // ListAPIKeys returns API key metadata for a tenant.  The raw key value is
 // never returned — only the key ID and non-sensitive metadata.
 //
+// Requires "owner" or "admin" role within the caller's own tenant, or
+// "platform-operator" for cross-tenant access.
 // Returns codes.Unimplemented until the API key service has been wired.
 func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest) (*ListAPIKeysResponse, error) {
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+	}
+
+	// Check caller has owner or admin role.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
+	}
+	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
+	}
+	// Check caller's tenant matches target tenant (unless platform-operator).
+	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != req.TenantId {
+		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
 	// TODO: Wire to the API key service once the concrete type is available.
@@ -3727,11 +3793,17 @@ func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest)
 
 // RevokeAPIKey permanently revokes an API key.
 //
-// Requires the "admin" role.  Returns codes.Unimplemented until the API key
-// service has been wired.
+// Requires "owner" or "admin" role within the caller's tenant, or
+// "platform-operator" for cross-tenant access.
+// Returns codes.Unimplemented until the API key service has been wired.
 func (s *DaemonServer) RevokeAPIKey(ctx context.Context, req *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error) {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
-		return nil, err
+	// Check caller has owner or admin role.
+	identity, ok := auth.GibsonIdentityFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
+	}
+	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
+		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
 	}
 
 	if req.KeyId == "" {
@@ -3781,19 +3853,28 @@ func (s *DaemonServer) AddTenantMember(ctx context.Context, req *AddTenantMember
 		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
 	}
 
-	// Verify the caller is a member of the tenant with at least admin role.
-	callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
-	if err != nil {
-		return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
-	}
+	// Allow bootstrap: when a tenant has zero members, the first AddMember
+	// call (owner) is permitted without an existing membership check.  This
+	// is the signup path — the dashboard provisions the tenant then adds the
+	// first owner before anyone is a member yet.
+	members, listErr := s.membershipStore.ListTenantMembers(ctx, req.TenantId)
+	isBootstrap := listErr == nil && len(members) == 0 && req.Role == "owner"
 
-	if membership.RoleLevel(callerMember.Role) > membership.RoleLevel("admin") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "admin role required to manage team")
-	}
+	if !isBootstrap {
+		// Verify the caller is a member of the tenant with at least admin role.
+		callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
+		if err != nil {
+			return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
+		}
 
-	// Enforce role hierarchy: callers cannot grant a role higher than their own.
-	if !membership.CanAssignRole(callerMember.Role, req.Role) {
-		return nil, status_grpc.Errorf(codes.PermissionDenied, "cannot assign role %s (your role: %s)", req.Role, callerMember.Role)
+		if membership.RoleLevel(callerMember.Role) > membership.RoleLevel("admin") {
+			return nil, status_grpc.Error(codes.PermissionDenied, "admin role required to manage team")
+		}
+
+		// Enforce role hierarchy: callers cannot grant a role higher than their own.
+		if !membership.CanAssignRole(callerMember.Role, req.Role) {
+			return nil, status_grpc.Errorf(codes.PermissionDenied, "cannot assign role %s (your role: %s)", req.Role, callerMember.Role)
+		}
 	}
 
 	if err := s.membershipStore.AddMember(ctx, req.TenantId, req.UserId, req.Email, req.Role, identity.Subject); err != nil {
@@ -3915,8 +3996,8 @@ func (s *DaemonServer) UpdateMemberRole(ctx context.Context, req *UpdateMemberRo
 
 // ListUserTenants returns all tenants the specified user belongs to.
 //
-// Users may list their own tenants. Platform operators and admins may query
-// any user.
+// Users may list their own tenants (identity.Subject == req.UserId).
+// Platform operators may query any user.
 func (s *DaemonServer) ListUserTenants(ctx context.Context, req *ListUserTenantsRequest) (*ListUserTenantsResponse, error) {
 	if s.membershipStore == nil {
 		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
@@ -3926,12 +4007,12 @@ func (s *DaemonServer) ListUserTenants(ctx context.Context, req *ListUserTenants
 		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
 	}
 
-	// Users may query their own tenants; admins/platform-operators may query any user.
+	// Users may query their own tenants; platform-operators may query any user.
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
 	}
-	if identity.Subject != req.UserId && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
+	if identity.Subject != req.UserId && !identity.HasRole("platform-operator") {
 		return nil, status_grpc.Error(codes.PermissionDenied, "cannot list tenants for another user")
 	}
 

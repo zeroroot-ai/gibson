@@ -205,14 +205,14 @@ func (a *APIKeyAuthenticator) CreateKey(
 
 	// Keys scoped to the system tenant are privileged: they grant access to
 	// platform-hosted shared components visible to all tenants. Only identities
-	// carrying the "admin" or "platform-operator" role may create them. This
-	// prevents unprivileged tenants from minting keys that can masquerade as or
-	// interact with system-level infrastructure.
+	// carrying the "platform-operator" role may create them. This prevents
+	// unprivileged tenants from minting keys that can masquerade as or interact
+	// with system-level infrastructure.
 	if tenantID == SystemTenant {
 		caller, ok := GibsonIdentityFromContext(ctx)
-		if !ok || (!caller.HasRole("admin") && !caller.HasRole("platform-operator")) {
+		if !ok || !caller.HasRole("platform-operator") {
 			return "", nil, fmt.Errorf(
-				"creating a key for tenant %q requires the admin or platform-operator role",
+				"creating a key for tenant %q requires the platform-operator role",
 				SystemTenant,
 			)
 		}

@@ -353,10 +353,11 @@ func adminIdentityContext(roles []string) context.Context {
 	return ContextWithIdentity(context.Background(), identity)
 }
 
-// TestAPIKeyAuthenticator_SystemTenantRequiresAdminRole verifies that creating a
-// key for the reserved SystemTenant ("_system") is rejected when the caller does
-// not hold the "admin" or "platform-operator" role.
-func TestAPIKeyAuthenticator_SystemTenantRequiresAdminRole(t *testing.T) {
+// TestAPIKeyAuthenticator_SystemTenantRequiresPlatformOperator verifies that
+// creating a key for the reserved SystemTenant ("_system") is rejected when the
+// caller does not hold the "platform-operator" role.  The tenant-scoped "admin"
+// role is NOT sufficient for system-tenant key creation.
+func TestAPIKeyAuthenticator_SystemTenantRequiresPlatformOperator(t *testing.T) {
 	a := newTestAuthenticator(t)
 
 	// No identity in context — must be rejected.
@@ -369,13 +370,20 @@ func TestAPIKeyAuthenticator_SystemTenantRequiresAdminRole(t *testing.T) {
 	_, _, err = a.CreateKey(ctx, SystemTenant, nil, nil, nil, "", "")
 	require.Error(t, err, "unprivileged role must be rejected")
 	assert.Contains(t, err.Error(), SystemTenant)
+
+	// Tenant-scoped admin — must also be rejected.
+	ctx = adminIdentityContext([]string{"admin"})
+	_, _, err = a.CreateKey(ctx, SystemTenant, nil, nil, nil, "", "")
+	require.Error(t, err, "tenant-scoped admin must be rejected for system tenant")
+	assert.Contains(t, err.Error(), SystemTenant)
 }
 
-// TestAPIKeyAuthenticator_SystemTenantAllowedForAdmin verifies that an identity
-// with the "admin" role can create a key scoped to SystemTenant.
-func TestAPIKeyAuthenticator_SystemTenantAllowedForAdmin(t *testing.T) {
+// TestAPIKeyAuthenticator_SystemTenantAllowedForPlatformOperatorCreate verifies
+// that an identity with the "platform-operator" role can create a key scoped to
+// SystemTenant.
+func TestAPIKeyAuthenticator_SystemTenantAllowedForPlatformOperatorCreate(t *testing.T) {
 	a := newTestAuthenticator(t)
-	ctx := adminIdentityContext([]string{"admin"})
+	ctx := adminIdentityContext([]string{"platform-operator"})
 
 	rawKey, record, err := a.CreateKey(ctx, SystemTenant, nil, nil, nil, "", "")
 	require.NoError(t, err)
@@ -403,7 +411,7 @@ func TestAPIKeyAuthenticator_SystemTenantAllowedForPlatformOperator(t *testing.T
 // interceptor processes the identity.
 func TestAPIKeyAuthenticator_SystemTenantKeyAuthenticatesWithCorrectTenant(t *testing.T) {
 	a := newTestAuthenticator(t)
-	ctx := adminIdentityContext([]string{"admin"})
+	ctx := adminIdentityContext([]string{"platform-operator"})
 
 	rawKey, _, err := a.CreateKey(ctx, SystemTenant, nil, nil, nil, "", "")
 	require.NoError(t, err)

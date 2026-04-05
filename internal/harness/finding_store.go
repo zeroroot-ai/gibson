@@ -16,7 +16,7 @@ import (
 // may submit findings in parallel during mission execution.
 //
 // Tenant isolation: tenantID is included in all storage keys/lookups to prevent cross-tenant
-// data access. If tenantID is empty (single-tenant / auth-disabled mode), the store
+// data access. If tenantID is empty (single-tenant mode), the store
 // falls back to mission-only scoping for backward compatibility.
 type FindingStore interface {
 	// Store persists a finding for a specific tenant and mission.
@@ -58,7 +58,7 @@ type FindingStore interface {
 
 // findingStoreKey is the composite key used by InMemoryFindingStore to scope
 // findings by both tenant and mission, providing defense-in-depth isolation.
-// When tenantID is empty (single-tenant / auth-disabled mode), the key falls
+// When tenantID is empty (single-tenant mode), the key falls
 // back to mission-only scoping for backward compatibility.
 type findingStoreKey struct {
 	tenantID  string

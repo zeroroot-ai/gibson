@@ -110,6 +110,10 @@ type ProviderConfig struct {
 
 	// RateLimits configures rate limiting
 	RateLimits RateLimitConfig `mapstructure:"rate_limits" yaml:"rate_limits"`
+
+	// Available indicates whether this provider passed API key validation at startup.
+	// Set by ValidateProviderKeys(). Not persisted to config file.
+	Available bool `mapstructure:"-" yaml:"-" json:"-"`
 }
 
 // RateLimitConfig contains rate limiting configuration.

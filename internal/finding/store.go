@@ -35,7 +35,7 @@ type FindingStore interface {
 // FindingFilter provides filtering options for finding queries.
 // TenantID, when set, scopes all queries to that tenant's findings only,
 // providing defense-in-depth isolation at the query layer. When TenantID is
-// empty (single-tenant / auth-disabled mode), queries are not tenant-scoped.
+// empty (single-tenant mode), queries are not tenant-scoped.
 type FindingFilter struct {
 	TenantID   string // Multi-tenant scoping — empty means no tenant filter
 	Severity   *agent.FindingSeverity

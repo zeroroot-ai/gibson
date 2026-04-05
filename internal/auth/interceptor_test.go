@@ -61,10 +61,10 @@ func (m *mockStreamHandler) handle(srv any, stream grpc.ServerStream) error {
 	return m.err
 }
 
-// TestUnaryAuthInterceptor_AuthDisabled tests that requests pass through when auth is disabled.
-func TestUnaryAuthInterceptor_AuthDisabled(t *testing.T) {
+// TestUnaryAuthInterceptor_EmptyMode_Rejects tests that requests are rejected when auth mode is empty.
+func TestUnaryAuthInterceptor_EmptyMode_Rejects(t *testing.T) {
 	auth := &mockAuthenticator{}
-	cfg := &AuthConfig{Enabled: false}
+	cfg := &AuthConfig{Mode: ""}
 	logger := slog.Default()
 
 	interceptor := UnaryAuthInterceptor(auth, cfg, logger)
@@ -73,11 +73,32 @@ func TestUnaryAuthInterceptor_AuthDisabled(t *testing.T) {
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
 	ctx := context.Background()
-	resp, err := interceptor(ctx, "request", info, handler.handle)
+	_, err := interceptor(ctx, "request", info, handler.handle)
 
-	require.NoError(t, err)
-	assert.Equal(t, "response", resp)
-	assert.True(t, handler.called, "handler should be called when auth is disabled")
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	assert.Contains(t, err.Error(), "authentication required")
+	assert.False(t, handler.called, "handler should not be called when auth mode is empty")
+}
+
+// TestUnaryAuthInterceptor_DisabledMode_Rejects tests that "disabled" mode is rejected.
+func TestUnaryAuthInterceptor_DisabledMode_Rejects(t *testing.T) {
+	auth := &mockAuthenticator{}
+	cfg := &AuthConfig{Mode: "disabled"}
+	logger := slog.Default()
+
+	interceptor := UnaryAuthInterceptor(auth, cfg, logger)
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+
+	ctx := context.Background()
+	_, err := interceptor(ctx, "request", info, handler.handle)
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	assert.Contains(t, err.Error(), "authentication required")
+	assert.False(t, handler.called, "handler should not be called when auth mode is disabled")
 }
 
 // TestUnaryAuthInterceptor_LocalhostBypass tests localhost bypass functionality.
@@ -368,10 +389,10 @@ func TestUnaryAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	// Roles are not available via IdentityFromContext (returns SDK Identity only)
 }
 
-// TestStreamAuthInterceptor_AuthDisabled tests stream auth with disabled authentication.
-func TestStreamAuthInterceptor_AuthDisabled(t *testing.T) {
+// TestStreamAuthInterceptor_EmptyMode_Rejects tests stream auth rejects when auth mode is empty.
+func TestStreamAuthInterceptor_EmptyMode_Rejects(t *testing.T) {
 	auth := &mockAuthenticator{}
-	cfg := &AuthConfig{Enabled: false}
+	cfg := &AuthConfig{Mode: ""}
 	logger := slog.Default()
 
 	interceptor := StreamAuthInterceptor(auth, cfg, logger)
@@ -384,8 +405,32 @@ func TestStreamAuthInterceptor_AuthDisabled(t *testing.T) {
 
 	err := interceptor(nil, stream, info, streamHandler.handle)
 
-	require.NoError(t, err)
-	assert.True(t, streamHandler.called)
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	assert.Contains(t, err.Error(), "authentication required")
+	assert.False(t, streamHandler.called, "handler should not be called when auth mode is empty")
+}
+
+// TestStreamAuthInterceptor_DisabledMode_Rejects tests stream auth rejects "disabled" mode.
+func TestStreamAuthInterceptor_DisabledMode_Rejects(t *testing.T) {
+	auth := &mockAuthenticator{}
+	cfg := &AuthConfig{Mode: "disabled"}
+	logger := slog.Default()
+
+	interceptor := StreamAuthInterceptor(auth, cfg, logger)
+
+	streamHandler := &mockStreamHandler{}
+	info := &grpc.StreamServerInfo{FullMethod: "/test.Service/StreamMethod"}
+
+	ctx := context.Background()
+	stream := &mockServerStream{ctx: ctx}
+
+	err := interceptor(nil, stream, info, streamHandler.handle)
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	assert.Contains(t, err.Error(), "authentication required")
+	assert.False(t, streamHandler.called, "handler should not be called when auth mode is disabled")
 }
 
 // TestStreamAuthInterceptor_MissingToken tests stream auth with missing token.
@@ -732,7 +777,7 @@ func TestCheckLocalhostBypassWithAddr(t *testing.T) {
 				require.NotNil(t, identity)
 				assert.Equal(t, tt.wantSubject, identity.Subject)
 				assert.Equal(t, "internal", identity.Issuer)
-				assert.Contains(t, identity.Roles, "admin")
+				assert.Contains(t, identity.Roles, "platform-operator")
 				assert.Equal(t, tt.peerAddr, addr)
 			} else {
 				assert.Nil(t, identity)

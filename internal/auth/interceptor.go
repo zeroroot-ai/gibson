@@ -26,7 +26,6 @@ var (
 // UnaryAuthInterceptor creates a gRPC unary server interceptor that enforces authentication.
 //
 // The interceptor behavior depends on the authentication mode:
-//   - "disabled" (or empty): Skip authentication, inject synthetic admin identity
 //   - "dev": Use local token validation with static tokens
 //   - "enterprise" or "saas": Use OIDC validation
 //
@@ -66,28 +65,16 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 		)
 		defer span.End()
 
-		// Determine effective mode (treat empty as "disabled" for backward compatibility)
+		// Determine effective mode
 		mode := cfg.Mode
-		if mode == "" {
-			mode = "disabled"
+
+		// Reject requests when auth mode is not configured
+		if mode == "" || mode == "disabled" {
+			span.SetAttributes(attribute.String("auth.result", "rejected_no_config"))
+			return nil, status.Error(grpccodes.Unauthenticated, "authentication required")
 		}
 
-		// Handle disabled mode - inject synthetic admin identity and skip auth
-		if mode == "disabled" {
-			span.SetAttributes(attribute.String("auth.result", "disabled"))
-			identity := createSyntheticAdminIdentity()
-			ctx = ContextWithIdentity(ctx, identity)
-
-			// Inject default tenant if configured
-			if cfg.DefaultTenant != "" {
-				ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
-				span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
-			}
-
-			return handler(ctx, req)
-		}
-
-		// Check for localhost bypass (works in all non-disabled modes)
+		// Check for localhost bypass
 		if cfg.TrustLocalhost {
 			if identity, bypassed, peerAddr := checkLocalhostBypassWithAddr(ctx, logger, info.FullMethod); bypassed {
 				span.SetAttributes(
@@ -227,28 +214,16 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 		)
 		defer span.End()
 
-		// Determine effective mode (treat empty as "disabled" for backward compatibility)
+		// Determine effective mode
 		mode := cfg.Mode
-		if mode == "" {
-			mode = "disabled"
+
+		// Reject requests when auth mode is not configured
+		if mode == "" || mode == "disabled" {
+			span.SetAttributes(attribute.String("auth.result", "rejected_no_config"))
+			return status.Error(grpccodes.Unauthenticated, "authentication required")
 		}
 
-		// Handle disabled mode - inject synthetic admin identity and skip auth
-		if mode == "disabled" {
-			span.SetAttributes(attribute.String("auth.result", "disabled"))
-			identity := createSyntheticAdminIdentity()
-			ctx = ContextWithIdentity(ctx, identity)
-
-			// Inject default tenant if configured
-			if cfg.DefaultTenant != "" {
-				ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
-				span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
-			}
-
-			return handler(srv, &authenticatedServerStream{ServerStream: ss, ctx: ctx})
-		}
-
-		// Check for localhost bypass (works in all non-disabled modes)
+		// Check for localhost bypass
 		if cfg.TrustLocalhost {
 			if identity, bypassed, peerAddr := checkLocalhostBypassWithAddr(ctx, logger, info.FullMethod); bypassed {
 				span.SetAttributes(
@@ -350,27 +325,6 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 
 		// Continue with the stream using the authenticated context
 		return handler(srv, &authenticatedServerStream{ServerStream: ss, ctx: ctx})
-	}
-}
-
-// createSyntheticAdminIdentity creates a synthetic admin identity for disabled mode.
-//
-// This identity has full admin permissions and is used when authentication is
-// disabled to allow unrestricted access for development/testing.
-func createSyntheticAdminIdentity() *Identity {
-	return &Identity{
-		Identity: sdkauth.Identity{
-			Subject:         "system",
-			Issuer:          "internal",
-			Email:           "",
-			Groups:          []string{"admin"},
-			Claims:          map[string]any{"source": "synthetic", "mode": "disabled"},
-			ExpiresAt:       timeNever(),
-			AuthenticatedAt: timeNow(),
-		},
-		Roles:        []string{"admin"},
-		Permissions:  []Permission{{Action: "*", Resource: "*", Scope: "*"}},
-		Capabilities: []string{"*"},
 	}
 }
 
@@ -541,7 +495,7 @@ func checkLocalhostBypassWithAddr(ctx context.Context, logger *slog.Logger, meth
 		return nil, false, ""
 	}
 
-	// Create synthetic localhost identity with admin permissions
+	// Create synthetic localhost identity with platform-operator permissions
 	identity := &Identity{
 		Identity: sdkauth.Identity{
 			Subject:         "localhost",
@@ -552,7 +506,7 @@ func checkLocalhostBypassWithAddr(ctx context.Context, logger *slog.Logger, meth
 			ExpiresAt:       timeNever(),
 			AuthenticatedAt: timeNow(),
 		},
-		Roles:        []string{"admin"},
+		Roles:        []string{"platform-operator"},
 		Permissions:  []Permission{{Action: "*", Resource: "*", Scope: "*"}},
 		Capabilities: []string{"*"},
 	}

@@ -21,8 +21,7 @@ WORKDIR /workspace
 # Copy dependency manifests first for better layer caching
 COPY go.mod go.sum ./
 
-# Download dependencies directly from source (bypass stale proxy)
-ENV GOPROXY=direct
+# Download dependencies
 RUN go mod download
 
 # Copy source code
@@ -39,7 +38,7 @@ RUN go build \
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
-FROM alpine:3.19 AS runtime
+FROM alpine:3.21 AS runtime
 
 # Install ca-certificates for HTTPS connections
 RUN apk add --no-cache ca-certificates

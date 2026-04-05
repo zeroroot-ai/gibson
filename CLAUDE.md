@@ -83,13 +83,13 @@ Three-tier, coordinated by `MemoryManager`:
 
 Agents declare **LLM slots** with requirements (context window, features like `tool_use`/`vision`/`json_mode`). The daemon resolves slots to actual providers (Anthropic, OpenAI, Gemini, Ollama) at runtime. Agents never hardcode a specific model.
 
-### Entity Extraction (`internal/extraction/`)
+### Discovery Processing (`internal/graphrag/processor/`)
 
-Tool responses are converted to GraphRAG entities via `EntityExtractor` implementations registered in `ExtractorRegistry`. Each tool (nmap, nuclei, httpx) has its own extractor producing `graphragpb.DiscoveryResult` (nodes + relationships) stored in Neo4j.
+Tool workers perform entity extraction tool-side (in the SDK serve loop) and populate proto field 100 (`DiscoveryResult`) on their response before returning results. The daemon does **not** run any extraction logic itself. When it receives a tool response with field 100 populated, `DiscoveryProcessor` delegates to `GraphLoader.LoadDiscovery()` to persist the proto entities (hosts, ports, services, endpoints, domains, findings, etc.) into Neo4j with mission scoping and provenance tracking.
 
 ### Authentication (`internal/auth/`)
 
-Token routing chain: `gsk_`-prefixed → APIKeyAuthenticator (Redis-backed); all others → OIDC → K8s ServiceAccount → Local (first match). Auth modes: `enterprise`, `saas`, `development`. `trust_localhost` bypasses auth for 127.0.0.1 in dev. RBAC maps claims to roles/permissions.
+Three auth paths: (1) `gsk_`-prefixed tokens → APIKeyAuthenticator (Redis-backed, for external components/CLI); (2) OIDC JWTs → OIDCValidator (for users via Keycloak); (3) K8s ServiceAccount tokens → K8sValidator (auto-detected, for in-cluster components). Auth modes: `enterprise`, `saas`, `dev`. In enterprise/saas mode, K8s SA auth is auto-detected (no config flag needed). RBAC maps claims to roles/permissions.
 
 ### Encryption (`internal/crypto/`)
 

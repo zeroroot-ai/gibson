@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -113,10 +112,11 @@ func validateTenantID(tenantID string) error {
 // TenantService provides CRUD operations for Gibson tenants.  All records are
 // stored in Redis using the layout described at the top of this file.
 //
-// Every mutating method requires the caller to carry an "admin" role in the
-// request context.  Read methods apply scoped visibility rules: "admin" and
-// "platform-operator" callers may access any tenant; all other authenticated
-// callers are restricted to their own tenant.
+// Cross-tenant operations (CreateTenant, DeleteTenant, SetTenantQuota) require
+// the "platform-operator" role.  Within-tenant mutations require "owner" or
+// "admin" scoped to the caller's own tenant.  Read methods apply scoped
+// visibility rules: only "platform-operator" callers may access other tenants;
+// all other authenticated callers are restricted to their own tenant.
 type TenantService struct {
 	client       *redis.Client
 	logger       *slog.Logger
@@ -159,7 +159,7 @@ func (s *TenantService) WithQuotaManager(qm *QuotaManager) *TenantService {
 // The tenantID must be URL-safe: only alphanumeric characters and hyphens are
 // allowed.  Returns ErrTenantAlreadyExists if the ID is already taken.
 func (s *TenantService) CreateTenant(ctx context.Context, tenantID, displayName string, config map[string]string) (*TenantRecord, error) {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
+	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
 		return nil, err
 	}
 
@@ -212,13 +212,6 @@ func (s *TenantService) CreateTenant(ctx context.Context, tenantID, displayName 
 	if cid, ok := config["stripe_customer_id"]; ok && cid != "" {
 		if err := s.writeStripeReverseMapping(ctx, cid, tenantID); err != nil {
 			s.logger.WarnContext(ctx, "failed to write stripe reverse mapping on create", "error", err)
-		}
-	}
-
-	// Write email reverse mapping if owner email is set.
-	if email, ok := config["owner_email"]; ok && email != "" {
-		if err := s.writeEmailReverseMapping(ctx, email, tenantID); err != nil {
-			s.logger.WarnContext(ctx, "failed to write email reverse mapping on create", "error", err)
 		}
 	}
 
@@ -322,8 +315,8 @@ func (s *TenantService) GetTenant(ctx context.Context, tenantID string) (*Tenant
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !identity.HasRole("admin") && !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != tenantID {
-		return nil, status.Errorf(codes.PermissionDenied, "missing required role: admin or platform-operator")
+	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != tenantID {
+		return nil, status.Errorf(codes.PermissionDenied, "access denied: can only view own tenant")
 	}
 
 	return s.fetchTenant(ctx, tenantID)
@@ -355,7 +348,7 @@ func (s *TenantService) fetchTenant(ctx context.Context, tenantID string) (*Tena
 
 // ListTenants returns tenants visible to the caller.
 //
-// Callers with the "admin" or "platform-operator" role receive the full list
+// Only callers with the "platform-operator" role receive the full list
 // from the index SET (tenants:all).  All other authenticated callers receive
 // only the record for their own tenant (extracted from the request context).
 //
@@ -369,8 +362,8 @@ func (s *TenantService) ListTenants(ctx context.Context) ([]TenantRecord, error)
 		return nil, status.Error(codes.Unauthenticated, "not authenticated")
 	}
 
-	if identity.HasRole("admin") || identity.HasRole("platform-operator") {
-		// Admins and platform-operators see every tenant in the index.
+	if identity.HasRole("platform-operator") {
+		// Platform-operators see every tenant in the index.
 		ids, err := s.client.SMembers(ctx, tenantIndexKey).Result()
 		if err != nil {
 			return nil, fmt.Errorf("failed to list tenant IDs from index: %w", err)
@@ -422,7 +415,7 @@ func (s *TenantService) ListTenants(ctx context.Context) ([]TenantRecord, error)
 //
 // Returns ErrTenantNotFound when no record exists for tenantID.
 func (s *TenantService) UpdateTenant(ctx context.Context, tenantID string, updates map[string]string) (*TenantRecord, error) {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
+	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
 		return nil, err
 	}
 
@@ -468,13 +461,6 @@ func (s *TenantService) UpdateTenant(ctx context.Context, tenantID string, updat
 		}
 	}
 
-	// Write email reverse mapping when owner_email is set or changed.
-	if newEmail, ok := updates["owner_email"]; ok && newEmail != "" {
-		if err := s.writeEmailReverseMapping(ctx, newEmail, tenantID); err != nil {
-			s.logger.WarnContext(ctx, "failed to write email reverse mapping", "error", err)
-		}
-	}
-
 	record.UpdatedAt = time.Now().UTC()
 
 	data, err := json.Marshal(record)
@@ -512,7 +498,7 @@ func (s *TenantService) UpdateTenant(ctx context.Context, tenantID string, updat
 //
 // Returns ErrTenantNotFound when no record exists for tenantID.
 func (s *TenantService) DeleteTenant(ctx context.Context, tenantID string) error {
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
+	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
 		return err
 	}
 
@@ -524,11 +510,6 @@ func (s *TenantService) DeleteTenant(ctx context.Context, tenantID string) error
 	// Clean up Stripe reverse mapping before soft-deleting.
 	if record.StripeCustomerID != "" {
 		s.deleteStripeReverseMapping(ctx, record.StripeCustomerID)
-	}
-
-	// Clean up email reverse mapping before soft-deleting.
-	if record.OwnerEmail != "" {
-		s.deleteEmailReverseMapping(ctx, record.OwnerEmail)
 	}
 
 	record.Status = "deleted"
@@ -602,8 +583,8 @@ func (s *TenantService) GetTenantQuota(ctx context.Context, tenantID string) (*T
 
 // SetTenantQuota stores or replaces the resource quota for a tenant.
 //
-// Requires the "admin" role.  The quota.TenantID field is always overwritten
-// with the tenantID parameter to prevent mismatches.
+// Requires the "platform-operator" role.  The quota.TenantID field is always
+// overwritten with the tenantID parameter to prevent mismatches.
 //
 // Returns codes.Unimplemented when no QuotaManager has been attached via
 // WithQuotaManager.
@@ -612,7 +593,7 @@ func (s *TenantService) SetTenantQuota(ctx context.Context, tenantID string, quo
 		return status.Error(codes.Unimplemented, "quota management not configured")
 	}
 
-	if err := auth.RequireRole(ctx, "admin"); err != nil {
+	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
 		return err
 	}
 
@@ -686,54 +667,3 @@ func (s *TenantService) GetTenantByStripeCustomer(ctx context.Context, customerI
 	return s.fetchTenant(ctx, tenantID)
 }
 
-// ---------------------------------------------------------------------------
-// Email → Tenant reverse mapping
-// ---------------------------------------------------------------------------
-
-// emailTenantKey returns the Redis key for the email → tenant reverse mapping.
-func emailTenantKey(email string) string {
-	return fmt.Sprintf("email_tenant:%s", strings.ToLower(strings.TrimSpace(email)))
-}
-
-// writeEmailReverseMapping writes a Redis STRING mapping an owner email to a
-// tenant ID, enabling O(1) tenant lookups from email addresses.
-func (s *TenantService) writeEmailReverseMapping(ctx context.Context, email, tenantID string) error {
-	if email == "" {
-		return nil
-	}
-	if err := s.client.Set(ctx, emailTenantKey(email), tenantID, 0).Err(); err != nil {
-		return fmt.Errorf("failed to write email reverse mapping for %q: %w", email, err)
-	}
-	return nil
-}
-
-// deleteEmailReverseMapping removes the reverse mapping for an owner email.
-func (s *TenantService) deleteEmailReverseMapping(ctx context.Context, email string) {
-	if email == "" {
-		return
-	}
-	if err := s.client.Del(ctx, emailTenantKey(email)).Err(); err != nil {
-		s.logger.WarnContext(ctx, "failed to delete email reverse mapping",
-			slog.String("email", email),
-			slog.String("error", err.Error()),
-		)
-	}
-}
-
-// GetTenantByEmail looks up a tenant by the owner's email address using the
-// reverse mapping index.  Returns ErrTenantNotFound if no mapping exists.
-func (s *TenantService) GetTenantByEmail(ctx context.Context, email string) (*TenantRecord, error) {
-	if email == "" {
-		return nil, fmt.Errorf("%w: empty email", ErrTenantNotFound)
-	}
-
-	tenantID, err := s.client.Get(ctx, emailTenantKey(email)).Result()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return nil, fmt.Errorf("%w: no tenant for email %q", ErrTenantNotFound, email)
-		}
-		return nil, fmt.Errorf("failed to lookup email %q: %w", email, err)
-	}
-
-	return s.fetchTenant(ctx, tenantID)
-}

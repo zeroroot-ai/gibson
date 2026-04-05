@@ -24,7 +24,7 @@ Gibson authentication is built on industry-standard OpenID Connect (OIDC) with s
 - **Kubernetes Integration**: ServiceAccount token validation via TokenReview API
 - **Development Mode**: Static tokens for local development (not for production)
 
-Authentication is **disabled by default** for backward compatibility. When enabled, all gRPC API calls require a valid Bearer token in the `authorization` metadata header.
+Authentication is **always required**. A valid auth mode (`dev`, `enterprise`, or `saas`) must be configured. All gRPC API calls require a valid Bearer token in the `authorization` metadata header.
 
 ## Supported Authentication Methods
 
@@ -711,13 +711,13 @@ for _, role := range identity.Roles {
 
 ## Security Best Practices
 
-### 1. Never Disable Authentication in Production
+### 1. Use Enterprise or SaaS Mode in Production
 
-Auth is disabled by default for backward compatibility. Always enable in production:
+Always use `enterprise` or `saas` auth mode in production. The `dev` mode with static tokens is for local development only:
 
 ```yaml
 auth:
-  enabled: true
+  mode: enterprise
 ```
 
 ### 2. Use Short-Lived Tokens

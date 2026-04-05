@@ -22,108 +22,85 @@ import (
 	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
 
-// TestAuthMode_Disabled verifies that disabled mode skips authentication
-// and injects a synthetic admin identity.
-func TestAuthMode_Disabled(t *testing.T) {
+// TestAuthMode_Disabled_Rejects verifies that disabled mode is rejected
+// and returns Unauthenticated error.
+func TestAuthMode_Disabled_Rejects(t *testing.T) {
 	t.Parallel()
 
-	// Setup config with disabled mode
+	// Setup config with disabled mode (no longer valid)
 	cfg := &auth.AuthConfig{
 		Mode: "disabled",
 	}
-	cfg.ApplyDefaults()
-
-	// Create composite authenticator (should return nil for disabled mode)
-	authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
-	require.NoError(t, err, "Failed to create composite authenticator")
-	assert.Nil(t, authenticator, "Disabled mode should return nil authenticator")
 
 	// Create logger
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 
-	// Create interceptor
-	interceptor := auth.UnaryAuthInterceptor(authenticator, cfg, logger)
+	// Create interceptor with nil authenticator
+	interceptor := auth.UnaryAuthInterceptor(nil, cfg, logger)
 	require.NotNil(t, interceptor, "Interceptor should not be nil")
 
 	// Create test context
 	ctx := context.Background()
 
-	// Define test handler that extracts identity
-	var capturedIdentity *sdkauth.Identity
+	// Define test handler that should not be called
 	testHandler := func(ctx context.Context, req any) (any, error) {
-		// Extract identity from context
-		identity, ok := sdkauth.IdentityFromContext(ctx)
-		if ok {
-			capturedIdentity = identity
-		}
+		t.Fatal("handler should not be called for disabled mode")
 		return "success", nil
 	}
 
-	// Call interceptor without token (should still succeed)
-	resp, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
+	// Call interceptor without token (should be rejected)
+	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
 		FullMethod: "/test.Service/Method",
 	}, testHandler)
 
-	// Verify success
-	require.NoError(t, err, "Disabled mode should succeed without token")
-	assert.Equal(t, "success", resp)
+	// Verify rejection
+	require.Error(t, err, "Disabled mode should be rejected")
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	assert.Contains(t, err.Error(), "authentication required")
 
-	// Verify synthetic identity was injected
-	require.NotNil(t, capturedIdentity, "Identity should be injected")
-	assert.Equal(t, "system", capturedIdentity.Subject, "Disabled mode should inject system identity")
-	assert.Equal(t, "internal", capturedIdentity.Issuer, "Issuer should be internal")
-	assert.Contains(t, capturedIdentity.Groups, "admin", "Should have admin group")
-
-	t.Logf("Successfully verified disabled mode: subject=%s, groups=%v",
-		capturedIdentity.Subject, capturedIdentity.Groups)
+	t.Logf("Successfully verified disabled mode is rejected")
 }
 
-// TestAuthMode_Disabled_WithDefaultTenant verifies that disabled mode
-// injects the default tenant when configured.
-func TestAuthMode_Disabled_WithDefaultTenant(t *testing.T) {
+// TestAuthMode_Disabled_WithDefaultTenant_Rejects verifies that disabled mode
+// is rejected even when default tenant is configured.
+func TestAuthMode_Disabled_WithDefaultTenant_Rejects(t *testing.T) {
 	t.Parallel()
 
-	// Setup config with disabled mode and default tenant
+	// Setup config with disabled mode and default tenant (disabled is no longer valid)
 	cfg := &auth.AuthConfig{
 		Mode:          "disabled",
 		DefaultTenant: "acme-corp",
 	}
-	cfg.ApplyDefaults()
-
-	// Create authenticator (nil for disabled)
-	authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
-	require.NoError(t, err)
 
 	// Create logger
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 
-	// Create interceptor
-	interceptor := auth.UnaryAuthInterceptor(authenticator, cfg, logger)
+	// Create interceptor with nil authenticator
+	interceptor := auth.UnaryAuthInterceptor(nil, cfg, logger)
 
 	// Create test context
 	ctx := context.Background()
 
-	// Define test handler that extracts tenant
-	var capturedTenant string
+	// Define test handler that should not be called
 	testHandler := func(ctx context.Context, req any) (any, error) {
-		capturedTenant = auth.TenantFromContext(ctx)
+		t.Fatal("handler should not be called for disabled mode")
 		return "success", nil
 	}
 
-	// Call interceptor
-	_, err = interceptor(ctx, nil, &grpc.UnaryServerInfo{
+	// Call interceptor - should be rejected
+	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
 		FullMethod: "/test.Service/Method",
 	}, testHandler)
 
-	// Verify success and tenant injection
-	require.NoError(t, err)
-	assert.Equal(t, "acme-corp", capturedTenant, "Default tenant should be injected")
+	// Verify rejection
+	require.Error(t, err, "Disabled mode should be rejected")
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
 
-	t.Logf("Successfully verified disabled mode with default tenant: %s", capturedTenant)
+	t.Logf("Successfully verified disabled mode with default tenant is rejected")
 }
 
 // TestAuthMode_Dev verifies that dev mode uses local static tokens.
@@ -697,11 +674,12 @@ func TestAuthMode_LocalhostBypass_Config(t *testing.T) {
 func TestAuthConfig_Validation(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid_disabled_mode", func(t *testing.T) {
+	t.Run("disabled_mode_is_invalid", func(t *testing.T) {
 		cfg := &auth.AuthConfig{Mode: "disabled"}
 		cfg.ApplyDefaults()
 		err := cfg.Validate()
-		assert.NoError(t, err, "Disabled mode should validate")
+		assert.Error(t, err, "Disabled mode should not validate")
+		assert.Contains(t, err.Error(), "invalid auth mode")
 	})
 
 	t.Run("valid_dev_mode", func(t *testing.T) {
@@ -771,10 +749,10 @@ func TestAuthConfig_Validation(t *testing.T) {
 func TestAuthConfig_Defaults(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty_mode_defaults_to_disabled", func(t *testing.T) {
+	t.Run("empty_mode_stays_empty", func(t *testing.T) {
 		cfg := &auth.AuthConfig{}
 		cfg.ApplyDefaults()
-		assert.Equal(t, "disabled", cfg.Mode, "Empty mode should default to disabled")
+		assert.Equal(t, "", cfg.Mode, "Empty mode should NOT be defaulted")
 	})
 
 	t.Run("tenant_claim_default", func(t *testing.T) {
@@ -809,45 +787,33 @@ func TestFullAuthFlow_Integration(t *testing.T) {
 	// This test verifies the conceptual flow without real tokens
 	// Full integration with OIDC providers is tested in SDK integration tests
 
-	t.Run("flow_disabled_mode", func(t *testing.T) {
-		// 1. Token validation -> SKIPPED (disabled mode)
-		// 2. Tenant extraction -> From config (default tenant)
-		// 3. Permission check -> Granted (synthetic admin)
+	t.Run("flow_disabled_mode_rejected", func(t *testing.T) {
+		// Disabled mode is no longer valid - requests should be rejected
 
 		cfg := &auth.AuthConfig{
 			Mode:          "disabled",
 			DefaultTenant: "test-tenant",
 		}
-		cfg.ApplyDefaults()
-
-		authenticator, err := auth.NewCompositeAuthenticator(cfg, nil)
-		require.NoError(t, err)
 
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 			Level: slog.LevelError, // Quiet for tests
 		}))
 
-		interceptor := auth.UnaryAuthInterceptor(authenticator, cfg, logger)
-
-		var capturedIdentity *sdkauth.Identity
-		var capturedTenant string
+		interceptor := auth.UnaryAuthInterceptor(nil, cfg, logger)
 
 		testHandler := func(ctx context.Context, req any) (any, error) {
-			identity, _ := sdkauth.IdentityFromContext(ctx)
-			capturedIdentity = identity
-			capturedTenant = auth.TenantFromContext(ctx)
+			t.Fatal("handler should not be called for disabled mode")
 			return "success", nil
 		}
 
-		_, err = interceptor(context.Background(), nil, &grpc.UnaryServerInfo{
+		_, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{
 			FullMethod: "/test.Service/Method",
 		}, testHandler)
 
-		require.NoError(t, err)
-		assert.NotNil(t, capturedIdentity, "Identity injected")
-		assert.Equal(t, "test-tenant", capturedTenant, "Tenant injected")
+		require.Error(t, err, "Disabled mode should be rejected")
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
 
-		t.Logf("Full flow verified: mode=disabled, tenant=%s", capturedTenant)
+		t.Logf("Full flow verified: mode=disabled is rejected")
 	})
 
 	t.Run("flow_dev_mode", func(t *testing.T) {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -159,4 +160,149 @@ func camelToSnake(s string) string {
 		result.WriteRune(r)
 	}
 	return strings.ToLower(result.String())
+}
+
+// PlaceholderPatterns are values that indicate a copy-paste error or template value.
+// The validation function checks for these patterns (case-insensitive).
+var PlaceholderPatterns = []string{
+	"sk-your-key-here",
+	"<your-api-key>",
+	"<your-",
+	"CHANGE_ME",
+	"changeme",
+	"TODO",
+	"xxx",
+	"your-key-here",
+	"replace-me",
+	"INSERT_KEY_HERE",
+}
+
+// ProviderKeyPrefixes maps provider types to their expected API key prefixes.
+// Used for advisory warnings only -- providers may change key formats.
+var ProviderKeyPrefixes = map[string]string{
+	"anthropic": "sk-ant-",
+	"openai":    "sk-",
+}
+
+// IsPlaceholderValue checks if a string matches known placeholder patterns.
+func IsPlaceholderValue(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	for _, pattern := range PlaceholderPatterns {
+		if strings.Contains(lower, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+	return false
+}
+
+// ProviderValidationResult contains the result of validating a single provider.
+type ProviderValidationResult struct {
+	ProviderName string
+	EnvVar       string
+	Available    bool   // true if key is present and valid
+	Error        error  // non-nil if fatal validation error
+	Warning      string // non-empty if advisory warning
+}
+
+// ValidateProviderKeys checks that all configured provider API key environment
+// variables are set and contain valid-looking values. The env parameter allows
+// injection of a custom environment lookup function for testing.
+//
+// Returns a slice of results (one per provider). The function reports ALL errors,
+// not just the first.
+func ValidateProviderKeys(providers map[string]ProviderConfig, env func(string) string) []ProviderValidationResult {
+	if env == nil {
+		env = os.Getenv
+	}
+
+	var results []ProviderValidationResult
+
+	for name, provider := range providers {
+		result := validateSingleProvider(name, provider, env)
+		results = append(results, result)
+	}
+
+	return results
+}
+
+// validateSingleProvider validates a single provider's API key configuration.
+func validateSingleProvider(name string, provider ProviderConfig, env func(string) string) ProviderValidationResult {
+	result := ProviderValidationResult{
+		ProviderName: name,
+		EnvVar:       provider.APIKeyEnv,
+	}
+
+	// Case 1: Both api_key and api_key_env are set
+	if provider.APIKey != "" && provider.APIKeyEnv != "" {
+		result.Warning = fmt.Sprintf(
+			"provider %q: both api_key and api_key_env are set, using api_key_env",
+			name)
+	}
+
+	// Case 2: api_key_env is empty -- provider is unconfigured (acceptable)
+	if provider.APIKeyEnv == "" {
+		if provider.APIKey == "" {
+			// Fully unconfigured provider
+			result.Available = false
+			return result
+		}
+		// Has inline api_key but no api_key_env
+		result.Available = true
+		return result
+	}
+
+	// Case 3: api_key_env is set -- validate the env var exists
+	value := env(provider.APIKeyEnv)
+	if value == "" {
+		result.Error = fmt.Errorf(
+			"provider %q: environment variable %q is not set or is empty",
+			name, provider.APIKeyEnv)
+		result.Available = false
+		return result
+	}
+
+	// Trim whitespace
+	trimmed := strings.TrimSpace(value)
+	if trimmed != value {
+		result.Warning = fmt.Sprintf(
+			"provider %q: API key in %q has leading/trailing whitespace (trimmed)",
+			name, provider.APIKeyEnv)
+	}
+
+	// Check for placeholder values
+	if IsPlaceholderValue(trimmed) {
+		result.Error = fmt.Errorf(
+			"provider %q: API key appears to be a placeholder value",
+			name)
+		result.Available = false
+		return result
+	}
+
+	// Check known prefix (advisory warning only)
+	providerType := provider.Type
+	if providerType == "" {
+		providerType = name // fall back to provider name
+	}
+	if expectedPrefix, ok := ProviderKeyPrefixes[providerType]; ok {
+		if !strings.HasPrefix(trimmed, expectedPrefix) {
+			if result.Warning != "" {
+				result.Warning += "; "
+			}
+			result.Warning += fmt.Sprintf(
+				"provider %q: API key does not match expected prefix %q, verify the key is correct",
+				name, expectedPrefix)
+		}
+	}
+
+	result.Available = true
+	return result
+}
+
+// maskKey returns a masked version of an API key for diagnostic output.
+// Never used in standard logging.
+func maskKey(key string) string {
+	if len(key) <= 8 {
+		return "****"
+	}
+	return key[:6] + "...****"
 }
