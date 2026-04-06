@@ -7,42 +7,37 @@ import (
 	"time"
 
 	"github.com/casbin/casbin/v2"
-	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
 
 // OIDCValidator validates OIDC JWT tokens from configured issuers.
 //
-// This wraps the SDK OIDCValidator and adds Gibson-specific functionality:
+// Uses the daemon's own DaemonOIDCValidator for OIDC token validation
+// (with proper OIDC discovery for JWKS endpoints), and adds Gibson-specific:
 //   - Role binding resolution from groups
 //   - Permission derivation from roles
 //   - Capability resolution from roles via roleCapabilities
 //   - Casbin policy sync for role-derived capabilities
 //   - Authentication metrics recording
-//   - Integration with Gibson's AuthConfig format
 //
 // Implements the Authenticator interface.
 // Thread-safe for concurrent use.
 type OIDCValidator struct {
-	// sdkValidator performs the actual OIDC token validation
-	sdkValidator *sdkauth.OIDCValidator
+	// validator performs OIDC token validation with proper discovery
+	validator *DaemonOIDCValidator
 
 	// issuerConfigs maps issuer URLs to Gibson issuer configs
-	// Used for role binding resolution after SDK validation
 	issuerConfigs map[string]*OIDCIssuerConfig
 
 	// roleBinder resolves roles from groups using role bindings
 	roleBinder *RoleBinder
 
-	// enforcer is the optional Casbin enforcer used to sync role-derived
-	// capabilities as policies. When nil, Casbin sync is skipped.
+	// enforcer is the optional Casbin enforcer for capability sync
 	enforcer *casbin.Enforcer
 }
 
 // NewOIDCValidator creates a new OIDC validator from Gibson configuration.
 //
-// Converts Gibson's AuthConfig to SDK Config format and wraps the SDK validator
-// with Gibson-specific authorization logic (role binding, permissions).
-//
+// Uses proper OIDC discovery to find JWKS endpoints — no hardcoded paths.
 // Returns an error if configuration is invalid.
 func NewOIDCValidator(cfg *AuthConfig) (*OIDCValidator, error) {
 	if cfg == nil {
@@ -53,58 +48,46 @@ func NewOIDCValidator(cfg *AuthConfig) (*OIDCValidator, error) {
 		return nil, fmt.Errorf("no OIDC issuers configured")
 	}
 
-	// Convert Gibson config to SDK config format
-	sdkCfg := &sdkauth.Config{
-		Issuers:   make([]sdkauth.OIDCConfig, len(cfg.OIDC)),
-		ClockSkew: cfg.ClockSkew,
-	}
-
-	// Build issuer map for role binding lookup
+	// Convert Gibson config to DaemonOIDCValidator IssuerConfig format
+	issuers := make([]IssuerConfig, len(cfg.OIDC))
 	issuerConfigs := make(map[string]*OIDCIssuerConfig)
 
-	// Convert each issuer config
 	for i := range cfg.OIDC {
 		gibsonIssuer := &cfg.OIDC[i]
 		if gibsonIssuer.Issuer == "" {
 			return nil, fmt.Errorf("OIDC issuer URL cannot be empty")
 		}
 
-		// Convert to SDK format
-		sdkCfg.Issuers[i] = sdkauth.OIDCConfig{
+		issuers[i] = IssuerConfig{
 			Issuer:        gibsonIssuer.Issuer,
 			Audience:      gibsonIssuer.Audience,
 			JWKSEndpoint:  gibsonIssuer.JWKSEndpoint,
 			JWKSTTL:       gibsonIssuer.JWKSTTL,
 			ClaimsMapping: gibsonIssuer.ClaimsMapping,
+			RoleBindings:  gibsonIssuer.RoleBindings,
 		}
 
-		// Store Gibson config for role binding
 		issuerConfigs[gibsonIssuer.Issuer] = gibsonIssuer
 	}
 
-	// Apply defaults
-	sdkCfg.ApplyDefaults()
-
-	// Create SDK validator
-	sdkValidator, err := sdkauth.NewOIDCValidator(sdkCfg)
+	// Create daemon OIDC validator (uses proper OIDC discovery)
+	validator, err := NewDaemonOIDCValidator(issuers, cfg.ClockSkew)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create SDK validator: %w", err)
+		return nil, fmt.Errorf("failed to create OIDC validator: %w", err)
 	}
 
 	// Aggregate all role bindings from all issuers
 	allRoleBindings := make(map[string][]string)
 	for _, issuerCfg := range cfg.OIDC {
 		for pattern, roles := range issuerCfg.RoleBindings {
-			// Merge role bindings (later bindings override earlier ones)
 			allRoleBindings[pattern] = roles
 		}
 	}
 
-	// Create role binder from config
 	roleBinder := NewRoleBinderFromConfig(allRoleBindings)
 
 	return &OIDCValidator{
-		sdkValidator:  sdkValidator,
+		validator:     validator,
 		issuerConfigs: issuerConfigs,
 		roleBinder:    roleBinder,
 	}, nil
@@ -151,27 +134,21 @@ func (v *OIDCValidator) Authenticate(ctx context.Context, tokenString string) (*
 		}
 	}()
 
-	// Delegate to SDK validator for OIDC validation
-	sdkIdentity, err := v.sdkValidator.Validate(ctx, tokenString)
+	// Validate token using daemon's OIDC validator (proper discovery)
+	sdkIdentity, err := v.validator.Validate(ctx, tokenString)
 	if err != nil {
-		// Extract issuer from error for metrics if available
-		// For unknown issuer errors, record as "unknown"
 		issuer = "unknown"
 		if sdkIdentity != nil {
 			issuer = sdkIdentity.Issuer
 		}
 		recordAuthAttempt(ctx, issuer, "failure")
-
-		// SDK errors are already properly formatted AuthError types
-		// We can return them directly - they have correct gRPC codes
 		return nil, err
 	}
 
 	issuer = sdkIdentity.Issuer
 	recordAuthAttempt(ctx, issuer, "success")
 
-	// Build Gibson Identity by embedding SDK Identity
-	// and adding Gibson-specific authorization fields
+	// Build Gibson Identity with SDK Identity embedded
 	gibsonIdentity := &Identity{
 		Identity: *sdkIdentity,
 	}

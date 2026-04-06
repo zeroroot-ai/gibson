@@ -115,11 +115,19 @@ type DaemonServer struct {
 }
 
 // MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
-// mission quotas. It is satisfied by *component.QuotaManager.
+// per-tenant quotas. It is satisfied by *component.QuotaManager.
 type MissionQuotaChecker interface {
 	// CheckMissionQuota returns a codes.ResourceExhausted error when the tenant
 	// in ctx has met or exceeded its configured mission limit.
 	CheckMissionQuota(ctx context.Context) error
+
+	// CheckAgentQuota returns a codes.ResourceExhausted error when the tenant
+	// in ctx has met or exceeded its configured agent limit.
+	CheckAgentQuota(ctx context.Context) error
+
+	// CheckMemoryQuota returns a codes.ResourceExhausted error when allocating
+	// additionalMB would exceed the tenant's configured memory limit.
+	CheckMemoryQuota(ctx context.Context, additionalMB int64) error
 
 	// IncrementMissionCount increments the running mission counter for the
 	// tenant in ctx. Called after successful mission submission.
@@ -1074,10 +1082,19 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 		"memory_continuity", req.MemoryContinuity,
 	)
 
-	// Enforce per-tenant mission quota before any resource allocation.
+	// Enforce per-tenant quotas before any resource allocation.
 	if s.quotaManager != nil {
 		if err := s.quotaManager.CheckMissionQuota(stream.Context()); err != nil {
-			s.logger.Warn("mission submission rejected: quota exceeded", "error", err)
+			s.logger.Warn("mission submission rejected: mission quota exceeded", "error", err)
+			return err
+		}
+		if err := s.quotaManager.CheckAgentQuota(stream.Context()); err != nil {
+			s.logger.Warn("mission submission rejected: agent quota exceeded", "error", err)
+			return err
+		}
+		// Reserve a default memory budget per mission (10MB) for working + mission memory.
+		if err := s.quotaManager.CheckMemoryQuota(stream.Context(), 10); err != nil {
+			s.logger.Warn("mission submission rejected: memory quota exceeded", "error", err)
 			return err
 		}
 	}

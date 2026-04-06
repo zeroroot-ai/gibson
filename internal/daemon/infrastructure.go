@@ -274,6 +274,10 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 				APIKey:       apiKey,
 				BaseURL:      providerCfg.BaseURL,
 				DefaultModel: providerCfg.Model,
+				RateLimits: llm.RateLimitConfig{
+					RequestsPerMinute: providerCfg.RateLimits.RequestsPerMinute,
+					TokensPerMinute:   providerCfg.RateLimits.TokensPerMinute,
+				},
 			}
 
 			// Create provider using factory
@@ -286,6 +290,16 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 					"type", providerCfg.Type,
 					"error", translatedErr)
 				continue
+			}
+
+			// Wrap with rate limiter if configured
+			if llmCfg.RateLimits.IsEnabled() {
+				provider = llm.NewRateLimitedProvider(provider, llmCfg.RateLimits)
+				d.logger.Info(ctx, "rate limiting enabled for provider",
+					"name", name,
+					"requests_per_minute", llmCfg.RateLimits.RequestsPerMinute,
+					"tokens_per_minute", llmCfg.RateLimits.TokensPerMinute,
+				)
 			}
 
 			// Register provider

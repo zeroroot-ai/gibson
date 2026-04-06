@@ -69,6 +69,7 @@ type ProviderConfig struct {
 	DefaultModel string                 `mapstructure:"default_model" yaml:"default_model" validate:"required"`
 	Models       map[string]ModelConfig `mapstructure:"models" yaml:"models" validate:"dive"`
 	Options      map[string]interface{} `mapstructure:"options" yaml:"options"`
+	RateLimits   RateLimitConfig        `mapstructure:"rate_limits" yaml:"rate_limits"`
 }
 
 // Validate performs validation on the ProviderConfig.
