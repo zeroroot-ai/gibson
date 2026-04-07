@@ -68,17 +68,17 @@
 //	    grpc.StreamInterceptor(auth.StreamAuthInterceptor(auth, &cfg.Auth)),
 //	)
 //
-// Handlers access the authenticated identity from context:
+// Authorization is enforced by the RPCAuthzInterceptor via permissions.yaml,
+// NOT by per-handler checks. Handlers read the authenticated identity from
+// context for data-scoping and audit purposes only:
 //
 //	func (s *server) ExecuteMission(ctx context.Context, req *pb.Request) (*pb.Response, error) {
-//	    identity, ok := auth.IdentityFromContext(ctx)
+//	    identity, ok := auth.GibsonIdentityFromContext(ctx)
 //	    if !ok {
 //	        return nil, status.Error(codes.Unauthenticated, "not authenticated")
 //	    }
-//
-//	    if !identity.HasPermission("execute", "mission") {
-//	        return nil, status.Error(codes.PermissionDenied, "insufficient permissions")
-//	    }
+//	    // identity.Subject, identity.Roles are data; the interceptor has
+//	    // already authorized this call.
 //
 //	    // ... execute mission
 //	}

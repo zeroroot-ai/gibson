@@ -3,7 +3,6 @@ package auth
 import (
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
@@ -79,75 +78,9 @@ func NewCasbinEnforcer(redisAddr, redisPassword string) (*casbin.Enforcer, error
 	return enforcer, nil
 }
 
-// ParseCapability splits a capability string into its resource and action components.
-//
-// The split is performed on the LAST colon in the string, so compound resource names
-// like "plugin:gitlab" are preserved as the resource while only the terminal segment
-// becomes the action.
-//
-// Examples:
-//
-//	"graphrag:write"     → ("graphrag", "write")
-//	"plugin:gitlab:read" → ("plugin:gitlab", "read")
-//	"*"                  → ("*", "*")
-//	"missions:execute"   → ("missions", "execute")
-func ParseCapability(cap string) (resource, action string) {
-	if cap == "*" {
-		return "*", "*"
-	}
-
-	idx := strings.LastIndex(cap, ":")
-	if idx < 0 {
-		// No colon: treat the entire string as the resource with wildcard action.
-		return cap, "*"
-	}
-
-	return cap[:idx], cap[idx+1:]
-}
-
-// AddPoliciesForKey adds Casbin allow policies for each capability granted to a key.
-//
-// Each capability string is parsed via ParseCapability to extract (resource, action),
-// then a policy rule (keyID, tenantID, resource, action) is added to the enforcer.
-// The wildcard capability "*" expands to a single policy with ("*", "*") granting
-// unrestricted access within the tenant domain.
-//
-// Policies are persisted to Redis immediately via the adapter's SavePolicy logic
-// embedded in AddPolicy.
-func AddPoliciesForKey(enforcer *casbin.Enforcer, keyID, tenantID string, capabilities []string) error {
-	for _, cap := range capabilities {
-		resource, action := ParseCapability(cap)
-
-		_, err := enforcer.AddPolicy(keyID, tenantID, resource, action)
-		if err != nil {
-			return fmt.Errorf("casbin: failed to add policy for key %q capability %q: %w", keyID, cap, err)
-		}
-
-		slog.Debug("casbin: added policy",
-			"key_id", keyID,
-			"tenant_id", tenantID,
-			"resource", resource,
-			"action", action,
-		)
-	}
-
-	return nil
-}
-
-// RemovePoliciesForKey removes all Casbin policies associated with a given key subject.
-//
-// This performs a filtered removal on field index 0 (the subject/sub field), deleting
-// every policy row where the subject matches keyID regardless of domain, object, or action.
-// Call this when revoking or rotating an API key to ensure no stale grants remain.
-func RemovePoliciesForKey(enforcer *casbin.Enforcer, keyID string) error {
-	_, err := enforcer.RemoveFilteredPolicy(0, keyID)
-	if err != nil {
-		return fmt.Errorf("casbin: failed to remove policies for key %q: %w", keyID, err)
-	}
-
-	slog.Info("casbin: removed all policies for key",
-		"key_id", keyID,
-	)
-
-	return nil
-}
+// Note: the per-key and per-identity Casbin policy helpers that used to
+// live in this file were removed as part of the declarative-rbac-framework
+// spec. Authz policies now come from permissions.yaml loaded once at
+// daemon startup. The NewCasbinEnforcer above is retained for the
+// membership store's `g` (user -> role -> tenant) rules which still live
+// in Redis.

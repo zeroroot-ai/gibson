@@ -84,67 +84,13 @@ type Permission struct {
 	Scope string
 }
 
-// HasPermission checks if the identity has a specific permission.
-//
-// Supports wildcard matching:
-//   - Action "*" matches any action
-//   - Resource "*" matches any resource
-//   - Scope "*" matches any scope
-//
-// Returns true if any permission in the identity matches the request.
-func (i *Identity) HasPermission(action, resource string) bool {
-	if i == nil {
-		return false
-	}
-
-	for _, perm := range i.Permissions {
-		// Check action match (exact or wildcard)
-		actionMatch := perm.Action == action || perm.Action == "*"
-
-		// Check resource match (exact or wildcard)
-		resourceMatch := perm.Resource == resource || perm.Resource == "*"
-
-		if actionMatch && resourceMatch {
-			return true
-		}
-	}
-
-	return false
-}
-
-// HasCapability reports whether the identity holds the named capability.
-//
-// Returns true if cap is present in i.Capabilities, or if the wildcard
-// capability "*" is present (granting unrestricted access).
-// A nil Identity always returns false.
-func (i *Identity) HasCapability(cap string) bool {
-	if i == nil {
-		return false
-	}
-	for _, c := range i.Capabilities {
-		if c == "*" || c == cap {
-			return true
-		}
-	}
-	return false
-}
-
-// HasRole checks if the identity has a specific role.
-//
-// Role names are case-sensitive exact matches.
-func (i *Identity) HasRole(role string) bool {
-	if i == nil {
-		return false
-	}
-
-	for _, r := range i.Roles {
-		if r == role {
-			return true
-		}
-	}
-
-	return false
-}
+// Note: HasPermission, HasCapability, and HasRole methods were removed as
+// part of the declarative-rbac-framework spec. Authorization is enforced
+// exclusively by the RPCAuthzInterceptor against Casbin policies loaded
+// from permissions.yaml. The Identity struct still carries Roles,
+// Permissions, and Capabilities as DATA fields — consumed by the
+// interceptor (for Casbin subject lookup) and by handlers (for data
+// scoping via slices.Contains on Capabilities).
 
 // ContextWithIdentity stores a Gibson Identity in the context.
 //
@@ -176,14 +122,17 @@ func IdentityFromContext(ctx context.Context) (*sdkauth.Identity, bool) {
 
 // GibsonIdentityFromContext retrieves the full Gibson Identity from the context.
 //
-// Returns the Gibson Identity with Roles and Permissions, and true if present.
-// Returns nil and false if no identity is present.
+// Returns the Gibson Identity with Roles, Permissions, and Capabilities, and
+// true if present. Returns nil and false if no identity is present.
 //
-// Use this function when you need to check roles or permissions:
+// Use this function to read the authenticated caller for data-scoping and
+// audit purposes. Authorization decisions are handled by the
+// RPCAuthzInterceptor via permissions.yaml; handlers should NOT perform
+// in-handler role checks.
 //
 //	identity, ok := auth.GibsonIdentityFromContext(ctx)
-//	if ok && identity.HasRole("admin") {
-//	    // allow admin action
+//	if ok {
+//	    // identity.Subject for audit, identity.Roles as data, etc.
 //	}
 func GibsonIdentityFromContext(ctx context.Context) (*Identity, bool) {
 	if identity, ok := ctx.Value(gibsonIdentityCtxKey).(*Identity); ok {

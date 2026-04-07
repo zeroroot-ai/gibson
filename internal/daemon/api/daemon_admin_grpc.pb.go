@@ -51,6 +51,7 @@ const (
 	DaemonAdminService_UpdateMemberRole_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/UpdateMemberRole"
 	DaemonAdminService_ListUserTenants_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/ListUserTenants"
 	DaemonAdminService_TransferOwnership_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/TransferOwnership"
+	DaemonAdminService_GetAuthSchema_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/GetAuthSchema"
 )
 
 // DaemonAdminServiceClient is the client API for DaemonAdminService service.
@@ -133,6 +134,17 @@ type DaemonAdminServiceClient interface {
 	ListUserTenants(ctx context.Context, in *ListUserTenantsRequest, opts ...grpc.CallOption) (*ListUserTenantsResponse, error)
 	// TransferOwnership transfers tenant ownership to another existing member.
 	TransferOwnership(ctx context.Context, in *TransferOwnershipRequest, opts ...grpc.CallOption) (*TransferOwnershipResponse, error)
+	// GetAuthSchema returns the daemon's live authorization schema: roles,
+	// permissions, and the per-RPC requirement map loaded from the daemon's
+	// internal permissions.yaml. Requires any authenticated identity (the
+	// schema is not secret, but unauthenticated enumeration is blocked to
+	// prevent platform attack-surface scraping).
+	//
+	// Consumed by the dashboard at runtime (cached with TTL) to drive UI
+	// gating via hasPermission / canCallRpc helpers.
+	//
+	// Added by the declarative-rbac-framework spec.
+	GetAuthSchema(ctx context.Context, in *GetAuthSchemaRequest, opts ...grpc.CallOption) (*GetAuthSchemaResponse, error)
 }
 
 type daemonAdminServiceClient struct {
@@ -463,6 +475,16 @@ func (c *daemonAdminServiceClient) TransferOwnership(ctx context.Context, in *Tr
 	return out, nil
 }
 
+func (c *daemonAdminServiceClient) GetAuthSchema(ctx context.Context, in *GetAuthSchemaRequest, opts ...grpc.CallOption) (*GetAuthSchemaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAuthSchemaResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetAuthSchema_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonAdminServiceServer is the server API for DaemonAdminService service.
 // All implementations must embed UnimplementedDaemonAdminServiceServer
 // for forward compatibility.
@@ -543,6 +565,17 @@ type DaemonAdminServiceServer interface {
 	ListUserTenants(context.Context, *ListUserTenantsRequest) (*ListUserTenantsResponse, error)
 	// TransferOwnership transfers tenant ownership to another existing member.
 	TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error)
+	// GetAuthSchema returns the daemon's live authorization schema: roles,
+	// permissions, and the per-RPC requirement map loaded from the daemon's
+	// internal permissions.yaml. Requires any authenticated identity (the
+	// schema is not secret, but unauthenticated enumeration is blocked to
+	// prevent platform attack-surface scraping).
+	//
+	// Consumed by the dashboard at runtime (cached with TTL) to drive UI
+	// gating via hasPermission / canCallRpc helpers.
+	//
+	// Added by the declarative-rbac-framework spec.
+	GetAuthSchema(context.Context, *GetAuthSchemaRequest) (*GetAuthSchemaResponse, error)
 	mustEmbedUnimplementedDaemonAdminServiceServer()
 }
 
@@ -648,6 +681,9 @@ func (UnimplementedDaemonAdminServiceServer) ListUserTenants(context.Context, *L
 }
 func (UnimplementedDaemonAdminServiceServer) TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TransferOwnership not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetAuthSchema(context.Context, *GetAuthSchemaRequest) (*GetAuthSchemaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAuthSchema not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) mustEmbedUnimplementedDaemonAdminServiceServer() {}
 func (UnimplementedDaemonAdminServiceServer) testEmbeddedByValue()                            {}
@@ -1246,6 +1282,24 @@ func _DaemonAdminService_TransferOwnership_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonAdminService_GetAuthSchema_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAuthSchemaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetAuthSchema(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetAuthSchema_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetAuthSchema(ctx, req.(*GetAuthSchemaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonAdminService_ServiceDesc is the grpc.ServiceDesc for DaemonAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1380,6 +1434,10 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TransferOwnership",
 			Handler:    _DaemonAdminService_TransferOwnership_Handler,
+		},
+		{
+			MethodName: "GetAuthSchema",
+			Handler:    _DaemonAdminService_GetAuthSchema_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -79,6 +79,7 @@ type OTelMetricsRecorder struct {
 	memoryOpsTotal        metric.Int64Counter
 	graphOpsTotal         metric.Int64Counter
 	decisionsTotal        metric.Int64Counter
+	authzDecisionsTotal   metric.Int64Counter
 
 	// Histograms track distributions of values
 	llmLatencySeconds      metric.Float64Histogram
@@ -198,6 +199,17 @@ func NewOTelMetricsRecorder(mp metric.MeterProvider) (*OTelMetricsRecorder, erro
 	recorder.decisionsTotal, err = meter.Int64Counter(
 		"gibson.orchestrator.decisions.total",
 		metric.WithDescription("Total orchestrator decisions"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Authz decisions: counter for every RPC the authz interceptor
+	// evaluates, labeled by decision (allow|deny), method, and permission.
+	// Added by the declarative-rbac-framework spec (Requirement 9.5).
+	recorder.authzDecisionsTotal, err = meter.Int64Counter(
+		"gibson.authz.decisions.total",
+		metric.WithDescription("Total RPC authorization decisions by decision (allow|deny), method, and permission"),
 	)
 	if err != nil {
 		return nil, err
@@ -618,4 +630,47 @@ func (r *OTelMetricsRecorder) RecordDecision(ctx context.Context, action string)
 			attribute.String("tenant_id", tenantID),
 		),
 	)
+}
+
+// RecordAuthzDecision records metrics for a single RPC authorization decision.
+//
+// Called from the RPC authz interceptor (internal/auth/rpc_authz_interceptor.go)
+// after every Enforce call. Labeled by decision, method, and permission so
+// operators can drill into "which roles are failing to call which RPCs for
+// which permissions" without grepping logs.
+//
+// Added by the declarative-rbac-framework spec (Requirement 9.5).
+//
+// Parameters:
+//   - ctx: gRPC request context (provides tenant_id label)
+//   - decision: "allow" or "deny"
+//   - method: fully-qualified gRPC method path
+//   - permission: the permission name evaluated (e.g. "tenants:provision"), or
+//     "rpc_not_in_schema" for default-deny on unmapped methods, or empty for
+//     RPCs with no required permissions
+//
+// Example:
+//
+//	recorder.RecordAuthzDecision(ctx, "allow", "/gibson.daemon.admin.v1.DaemonAdminService/ProvisionTenant", "tenants:provision")
+//	recorder.RecordAuthzDecision(ctx, "deny", "/gibson.daemon.admin.v1.DaemonAdminService/ListTenants", "tenants:list-all")
+func (r *OTelMetricsRecorder) RecordAuthzDecision(ctx context.Context, decision, method, permission string) {
+	if r == nil || r.authzDecisionsTotal == nil {
+		return
+	}
+
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	attrs := []attribute.KeyValue{
+		attribute.String("decision", decision),
+		attribute.String("method", method),
+		attribute.String("tenant_id", tenantID),
+	}
+	if permission != "" {
+		attrs = append(attrs, attribute.String("permission", permission))
+	}
+
+	r.authzDecisionsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
 }

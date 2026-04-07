@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/casbin/casbin/v2"
@@ -13,11 +12,11 @@ import (
 //
 // Uses the daemon's own DaemonOIDCValidator for OIDC token validation
 // (with proper OIDC discovery for JWKS endpoints), and adds Gibson-specific:
-//   - Role binding resolution from groups
-//   - Permission derivation from roles
-//   - Capability resolution from roles via roleCapabilities
-//   - Casbin policy sync for role-derived capabilities
+//   - Role binding resolution from groups (via operator-supplied helm config)
 //   - Authentication metrics recording
+//
+// Authorization is handled by the RPCAuthzInterceptor via permissions.yaml;
+// this validator is only responsible for authenticating the caller.
 //
 // Implements the Authenticator interface.
 // Thread-safe for concurrent use.
@@ -173,57 +172,12 @@ func (v *OIDCValidator) Authenticate(ctx context.Context, tokenString string) (*
 		gibsonIdentity.Permissions = []Permission{}
 	}
 
-	// Resolve capabilities from roles using the roleCapabilities map.
-	//
-	// If any role grants the wildcard "*", short-circuit and grant full access.
-	// Otherwise collect and deduplicate all capabilities across all roles.
-	caps := resolveCapabilitiesFromRoles(gibsonIdentity.Roles)
-	gibsonIdentity.Capabilities = caps
-
-	// Sync capabilities into Casbin if an enforcer is configured.
-	if v.enforcer != nil {
-		v.syncCasbin(ctx, gibsonIdentity, caps)
-	}
+	// Capabilities are not derived from roles anymore — the
+	// declarative-rbac-framework interceptor authorizes via Casbin using
+	// roles loaded from permissions.yaml at startup. Handlers that still
+	// perform data-scoping on Capabilities read from Identity.Capabilities
+	// directly (API keys populate this field; OIDC identities leave it empty).
+	gibsonIdentity.Capabilities = nil
 
 	return gibsonIdentity, nil
-}
-
-// syncCasbin performs an upsert of the identity's capabilities into Casbin.
-//
-// The tenant is extracted from the "tenant_id" claim in the token. If the claim
-// is absent, Casbin sync is skipped with a warning — the tenant may be injected
-// later in the request pipeline by a higher-level interceptor.
-//
-// Errors from Casbin are logged but do not fail authentication.
-func (v *OIDCValidator) syncCasbin(ctx context.Context, identity *Identity, caps []string) {
-	if len(caps) == 0 {
-		return
-	}
-
-	tenantID := identity.Identity.GetStringClaim("tenant_id")
-	if tenantID == "" {
-		slog.WarnContext(ctx, "oidc: skipping casbin sync — tenant_id claim absent",
-			"subject", identity.Subject,
-			"issuer", identity.Issuer,
-		)
-		return
-	}
-
-	// Upsert: remove stale policies first, then add the current set.
-	if err := RemovePoliciesForKey(v.enforcer, identity.Subject); err != nil {
-		slog.ErrorContext(ctx, "oidc: failed to remove stale casbin policies",
-			"subject", identity.Subject,
-			"tenant_id", tenantID,
-			"error", err,
-		)
-		// Continue — adding policies is still worthwhile even if removal fails.
-	}
-
-	if err := AddPoliciesForKey(v.enforcer, identity.Subject, tenantID, caps); err != nil {
-		slog.ErrorContext(ctx, "oidc: failed to add casbin policies",
-			"subject", identity.Subject,
-			"tenant_id", tenantID,
-			"error", err,
-		)
-	}
 }

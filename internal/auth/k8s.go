@@ -176,7 +176,10 @@ func (v *K8sValidator) Authenticate(ctx context.Context, token string) (*Identit
 			identity.Claims["gibson.io/name"] = compName
 		}
 
-		identity.Capabilities = resolveCapabilitiesFromRoles(identity.Roles)
+		// Capabilities are no longer derived from roles — the
+		// declarative-rbac-framework interceptor authorizes via Casbin
+		// using roles loaded from permissions.yaml at startup.
+		identity.Capabilities = nil
 	}
 
 	recordAuthAttempt(ctx, "kubernetes", "success")

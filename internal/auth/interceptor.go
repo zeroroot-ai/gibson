@@ -372,68 +372,10 @@ func extractAndValidateTenant(ctx context.Context, identity *Identity, cfg *Auth
 	return ""
 }
 
-// RequirePermission checks if the authenticated identity has the specified permission.
-//
-// This is a convenience helper that retrieves the identity from context and
-// checks permissions. Note: This uses the Core Identity which has permission
-// information, not the SDK Identity.
-//
-// Returns:
-//   - nil if the identity has the required permission
-//   - gRPC UNAUTHENTICATED status if no identity is present in context
-//   - gRPC PERMISSION_DENIED status if the identity lacks the required permission
-//
-// Example:
-//
-//	if err := auth.RequirePermission(ctx, "execute", "mission"); err != nil {
-//	    return nil, err
-//	}
-func RequirePermission(ctx context.Context, action, resource string) error {
-	// Get the full Gibson Identity with Roles/Permissions
-	identity, ok := GibsonIdentityFromContext(ctx)
-	if !ok {
-		return status.Error(grpccodes.Unauthenticated, "not authenticated")
-	}
-
-	// Check if identity has the required permission
-	if !identity.HasPermission(action, resource) {
-		return status.Errorf(grpccodes.PermissionDenied,
-			"insufficient permissions: requires %s on %s", action, resource)
-	}
-
-	return nil
-}
-
-// RequireRole checks if the authenticated identity has the specified role.
-//
-// This is a convenience helper that retrieves the identity from context and
-// checks role membership.
-//
-// Returns:
-//   - nil if the identity has the required role
-//   - gRPC UNAUTHENTICATED status if no identity is present in context
-//   - gRPC PERMISSION_DENIED status if the identity lacks the required role
-//
-// Example:
-//
-//	if err := auth.RequireRole(ctx, "admin"); err != nil {
-//	    return nil, err
-//	}
-func RequireRole(ctx context.Context, role string) error {
-	// Get the full Gibson Identity with Roles
-	identity, ok := GibsonIdentityFromContext(ctx)
-	if !ok {
-		return status.Error(grpccodes.Unauthenticated, "not authenticated")
-	}
-
-	// Check if identity has the required role
-	if !identity.HasRole(role) {
-		return status.Errorf(grpccodes.PermissionDenied,
-			"missing required role: %s", role)
-	}
-
-	return nil
-}
+// Note: the in-handler role/permission helpers were removed as part of the
+// declarative-rbac-framework spec. All RPC authorization is now enforced
+// by the single RPCAuthzInterceptor via permissions.yaml. Handlers do not
+// perform in-handler role checks any more.
 
 // extractBearerToken extracts the Bearer token from gRPC metadata.
 //
@@ -533,7 +475,7 @@ func (s *authenticatedServerStream) Context() context.Context {
 // permission denied event. If no logger is available in the context, it
 // uses the default slog logger.
 //
-// This function is called by RequirePermission when a permission check fails.
+// This function is called when an authorization check fails.
 func logPermissionDeniedFromContext(ctx context.Context, identity *Identity, action, resource string) {
 	// Try to extract logger from context using a well-known key
 	// For now, use the default slog logger since there's no context-based logger pattern

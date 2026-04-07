@@ -4380,6 +4380,386 @@ func (*TransferOwnershipResponse) Descriptor() ([]byte, []int) {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{70}
 }
 
+// GetAuthSchemaRequest is empty — the schema is identity-agnostic. The
+// interceptor still requires the caller to be authenticated.
+type GetAuthSchemaRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *GetAuthSchemaRequest) Reset() {
+	*x = GetAuthSchemaRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[71]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetAuthSchemaRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAuthSchemaRequest) ProtoMessage() {}
+
+func (x *GetAuthSchemaRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[71]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAuthSchemaRequest.ProtoReflect.Descriptor instead.
+func (*GetAuthSchemaRequest) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{71}
+}
+
+// GetAuthSchemaResponse returns the full authorization schema loaded from
+// the daemon's internal permissions.yaml at startup.
+type GetAuthSchemaResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// schema_version identifies the schema document version. Clients can cache
+	// the response and refresh when the version changes.
+	SchemaVersion string `protobuf:"bytes,1,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
+	// roles lists every role the daemon recognizes, including transitive
+	// permission closures (so clients don't have to walk inheritance).
+	Roles []*AuthRole `protobuf:"bytes,2,rep,name=roles,proto3" json:"roles,omitempty"`
+	// permissions lists every permission the schema defines. Clients use this
+	// to validate that permission names in their own logic are valid.
+	Permissions []*AuthPermission `protobuf:"bytes,3,rep,name=permissions,proto3" json:"permissions,omitempty"`
+	// rpc_requirements maps fully-qualified gRPC method paths (e.g.
+	// "/gibson.daemon.admin.v1.DaemonAdminService/ProvisionTenant") to their
+	// authorization requirements.
+	RpcRequirements map[string]*AuthRpcRequirement `protobuf:"bytes,4,rep,name=rpc_requirements,json=rpcRequirements,proto3" json:"rpc_requirements,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+}
+
+func (x *GetAuthSchemaResponse) Reset() {
+	*x = GetAuthSchemaResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[72]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetAuthSchemaResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAuthSchemaResponse) ProtoMessage() {}
+
+func (x *GetAuthSchemaResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[72]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAuthSchemaResponse.ProtoReflect.Descriptor instead.
+func (*GetAuthSchemaResponse) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{72}
+}
+
+func (x *GetAuthSchemaResponse) GetSchemaVersion() string {
+	if x != nil {
+		return x.SchemaVersion
+	}
+	return ""
+}
+
+func (x *GetAuthSchemaResponse) GetRoles() []*AuthRole {
+	if x != nil {
+		return x.Roles
+	}
+	return nil
+}
+
+func (x *GetAuthSchemaResponse) GetPermissions() []*AuthPermission {
+	if x != nil {
+		return x.Permissions
+	}
+	return nil
+}
+
+func (x *GetAuthSchemaResponse) GetRpcRequirements() map[string]*AuthRpcRequirement {
+	if x != nil {
+		return x.RpcRequirements
+	}
+	return nil
+}
+
+// AuthRole describes a single role in the authorization schema.
+type AuthRole struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// name is the canonical role identifier (e.g. "admin", "platform-operator").
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// description is a human-readable explanation.
+	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	// inherits lists parent roles. A role transitively gains all permissions
+	// granted to its inherited roles.
+	Inherits []string `protobuf:"bytes,3,rep,name=inherits,proto3" json:"inherits,omitempty"`
+	// permissions lists the permissions granted DIRECTLY by this role.
+	Permissions []string `protobuf:"bytes,4,rep,name=permissions,proto3" json:"permissions,omitempty"`
+	// effective_permissions lists the transitively-closed permission set:
+	// direct grants plus everything inherited. Clients use this for
+	// hasPermission checks without walking the inheritance graph.
+	EffectivePermissions []string `protobuf:"bytes,5,rep,name=effective_permissions,json=effectivePermissions,proto3" json:"effective_permissions,omitempty"`
+	// cross_tenant indicates the role operates across all tenants (e.g.
+	// platform-operator, provisioner). Tenant-scoped roles (owner, admin,
+	// operator, viewer) have this set to false.
+	CrossTenant bool `protobuf:"varint,6,opt,name=cross_tenant,json=crossTenant,proto3" json:"cross_tenant,omitempty"`
+}
+
+func (x *AuthRole) Reset() {
+	*x = AuthRole{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[73]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *AuthRole) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthRole) ProtoMessage() {}
+
+func (x *AuthRole) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[73]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthRole.ProtoReflect.Descriptor instead.
+func (*AuthRole) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{73}
+}
+
+func (x *AuthRole) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AuthRole) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *AuthRole) GetInherits() []string {
+	if x != nil {
+		return x.Inherits
+	}
+	return nil
+}
+
+func (x *AuthRole) GetPermissions() []string {
+	if x != nil {
+		return x.Permissions
+	}
+	return nil
+}
+
+func (x *AuthRole) GetEffectivePermissions() []string {
+	if x != nil {
+		return x.EffectivePermissions
+	}
+	return nil
+}
+
+func (x *AuthRole) GetCrossTenant() bool {
+	if x != nil {
+		return x.CrossTenant
+	}
+	return false
+}
+
+// AuthPermission describes a single permission in the authorization schema.
+type AuthPermission struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// name is the canonical permission identifier, always in "resource:action"
+	// form (e.g. "tenants:provision", "missions:execute").
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// resource is the left side of the name (e.g. "tenants").
+	Resource string `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	// action is the right side of the name (e.g. "provision").
+	Action string `protobuf:"bytes,3,opt,name=action,proto3" json:"action,omitempty"`
+	// description is a human-readable explanation.
+	Description string `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
+}
+
+func (x *AuthPermission) Reset() {
+	*x = AuthPermission{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[74]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *AuthPermission) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthPermission) ProtoMessage() {}
+
+func (x *AuthPermission) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[74]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthPermission.ProtoReflect.Descriptor instead.
+func (*AuthPermission) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{74}
+}
+
+func (x *AuthPermission) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AuthPermission) GetResource() string {
+	if x != nil {
+		return x.Resource
+	}
+	return ""
+}
+
+func (x *AuthPermission) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *AuthPermission) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+// AuthRpcRequirement describes the authorization requirement for one RPC.
+type AuthRpcRequirement struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// method is the fully-qualified gRPC method path.
+	Method string `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
+	// required_permissions lists permissions the caller must hold ALL of.
+	// An empty list means "any authenticated caller is sufficient" (used for
+	// GetAuthSchema itself).
+	RequiredPermissions []string `protobuf:"bytes,2,rep,name=required_permissions,json=requiredPermissions,proto3" json:"required_permissions,omitempty"`
+	// tenant_scoped indicates the interceptor passes the caller's tenant
+	// context as the Casbin domain when evaluating this RPC. When false, the
+	// interceptor uses "*" (cross-tenant).
+	TenantScoped bool `protobuf:"varint,3,opt,name=tenant_scoped,json=tenantScoped,proto3" json:"tenant_scoped,omitempty"`
+	// unauthenticated indicates the interceptor skips authorization entirely
+	// for this RPC (used for token-based flows like AcceptInvitation where
+	// the token itself is the proof of authorization).
+	Unauthenticated bool `protobuf:"varint,4,opt,name=unauthenticated,proto3" json:"unauthenticated,omitempty"`
+}
+
+func (x *AuthRpcRequirement) Reset() {
+	*x = AuthRpcRequirement{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[75]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *AuthRpcRequirement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthRpcRequirement) ProtoMessage() {}
+
+func (x *AuthRpcRequirement) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[75]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthRpcRequirement.ProtoReflect.Descriptor instead.
+func (*AuthRpcRequirement) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{75}
+}
+
+func (x *AuthRpcRequirement) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *AuthRpcRequirement) GetRequiredPermissions() []string {
+	if x != nil {
+		return x.RequiredPermissions
+	}
+	return nil
+}
+
+func (x *AuthRpcRequirement) GetTenantScoped() bool {
+	if x != nil {
+		return x.TenantScoped
+	}
+	return false
+}
+
+func (x *AuthRpcRequirement) GetUnauthenticated() bool {
+	if x != nil {
+		return x.Unauthenticated
+	}
+	return false
+}
+
 var File_gibson_daemon_admin_v1_daemon_admin_proto protoreflect.FileDescriptor
 
 var file_gibson_daemon_admin_v1_daemon_admin_proto_rawDesc = []byte{
@@ -4889,7 +5269,67 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_rawDesc = []byte{
 	0x01, 0x28, 0x09, 0x52, 0x0e, 0x6e, 0x65, 0x77, 0x4f, 0x77, 0x6e, 0x65, 0x72, 0x55, 0x73, 0x65,
 	0x72, 0x49, 0x64, 0x22, 0x1b, 0x0a, 0x19, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x65, 0x72, 0x4f,
 	0x77, 0x6e, 0x65, 0x72, 0x73, 0x68, 0x69, 0x70, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
-	0x32, 0xbc, 0x1e, 0x0a, 0x12, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x41, 0x64, 0x6d, 0x69, 0x6e,
+	0x22, 0x16, 0x0a, 0x14, 0x47, 0x65, 0x74, 0x41, 0x75, 0x74, 0x68, 0x53, 0x63, 0x68, 0x65, 0x6d,
+	0x61, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x9f, 0x03, 0x0a, 0x15, 0x47, 0x65, 0x74,
+	0x41, 0x75, 0x74, 0x68, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x12, 0x25, 0x0a, 0x0e, 0x73, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x5f, 0x76, 0x65, 0x72,
+	0x73, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0d, 0x73, 0x63, 0x68, 0x65,
+	0x6d, 0x61, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x36, 0x0a, 0x05, 0x72, 0x6f, 0x6c,
+	0x65, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x20, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f,
+	0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76,
+	0x31, 0x2e, 0x41, 0x75, 0x74, 0x68, 0x52, 0x6f, 0x6c, 0x65, 0x52, 0x05, 0x72, 0x6f, 0x6c, 0x65,
+	0x73, 0x12, 0x48, 0x0a, 0x0b, 0x70, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x73,
+	0x18, 0x03, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x26, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e,
+	0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e,
+	0x41, 0x75, 0x74, 0x68, 0x50, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x0b,
+	0x70, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x12, 0x6d, 0x0a, 0x10, 0x72,
+	0x70, 0x63, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x18,
+	0x04, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x42, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64,
+	0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x47,
+	0x65, 0x74, 0x41, 0x75, 0x74, 0x68, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x2e, 0x52, 0x70, 0x63, 0x52, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x6d,
+	0x65, 0x6e, 0x74, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x0f, 0x72, 0x70, 0x63, 0x52, 0x65,
+	0x71, 0x75, 0x69, 0x72, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x1a, 0x6e, 0x0a, 0x14, 0x52, 0x70,
+	0x63, 0x52, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x45, 0x6e, 0x74,
+	0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x03, 0x6b, 0x65, 0x79, 0x12, 0x40, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20,
+	0x01, 0x28, 0x0b, 0x32, 0x2a, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65,
+	0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x41, 0x75, 0x74,
+	0x68, 0x52, 0x70, 0x63, 0x52, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x52,
+	0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0xd6, 0x01, 0x0a, 0x08, 0x41,
+	0x75, 0x74, 0x68, 0x52, 0x6f, 0x6c, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x12, 0x20, 0x0a, 0x0b, 0x64,
+	0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09,
+	0x52, 0x0b, 0x64, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x1a, 0x0a,
+	0x08, 0x69, 0x6e, 0x68, 0x65, 0x72, 0x69, 0x74, 0x73, 0x18, 0x03, 0x20, 0x03, 0x28, 0x09, 0x52,
+	0x08, 0x69, 0x6e, 0x68, 0x65, 0x72, 0x69, 0x74, 0x73, 0x12, 0x20, 0x0a, 0x0b, 0x70, 0x65, 0x72,
+	0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x18, 0x04, 0x20, 0x03, 0x28, 0x09, 0x52, 0x0b,
+	0x70, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x12, 0x33, 0x0a, 0x15, 0x65,
+	0x66, 0x66, 0x65, 0x63, 0x74, 0x69, 0x76, 0x65, 0x5f, 0x70, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73,
+	0x69, 0x6f, 0x6e, 0x73, 0x18, 0x05, 0x20, 0x03, 0x28, 0x09, 0x52, 0x14, 0x65, 0x66, 0x66, 0x65,
+	0x63, 0x74, 0x69, 0x76, 0x65, 0x50, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x73,
+	0x12, 0x21, 0x0a, 0x0c, 0x63, 0x72, 0x6f, 0x73, 0x73, 0x5f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74,
+	0x18, 0x06, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0b, 0x63, 0x72, 0x6f, 0x73, 0x73, 0x54, 0x65, 0x6e,
+	0x61, 0x6e, 0x74, 0x22, 0x7a, 0x0a, 0x0e, 0x41, 0x75, 0x74, 0x68, 0x50, 0x65, 0x72, 0x6d, 0x69,
+	0x73, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x12, 0x1a, 0x0a, 0x08, 0x72, 0x65, 0x73,
+	0x6f, 0x75, 0x72, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x72, 0x65, 0x73,
+	0x6f, 0x75, 0x72, 0x63, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x20, 0x0a,
+	0x0b, 0x64, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x04, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x0b, 0x64, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x22,
+	0xae, 0x01, 0x0a, 0x12, 0x41, 0x75, 0x74, 0x68, 0x52, 0x70, 0x63, 0x52, 0x65, 0x71, 0x75, 0x69,
+	0x72, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x12, 0x16, 0x0a, 0x06, 0x6d, 0x65, 0x74, 0x68, 0x6f, 0x64,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x6d, 0x65, 0x74, 0x68, 0x6f, 0x64, 0x12, 0x31,
+	0x0a, 0x14, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x5f, 0x70, 0x65, 0x72, 0x6d, 0x69,
+	0x73, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x09, 0x52, 0x13, 0x72, 0x65,
+	0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x50, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e,
+	0x73, 0x12, 0x23, 0x0a, 0x0d, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x73, 0x63, 0x6f, 0x70,
+	0x65, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0c, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74,
+	0x53, 0x63, 0x6f, 0x70, 0x65, 0x64, 0x12, 0x28, 0x0a, 0x0f, 0x75, 0x6e, 0x61, 0x75, 0x74, 0x68,
+	0x65, 0x6e, 0x74, 0x69, 0x63, 0x61, 0x74, 0x65, 0x64, 0x18, 0x04, 0x20, 0x01, 0x28, 0x08, 0x52,
+	0x0f, 0x75, 0x6e, 0x61, 0x75, 0x74, 0x68, 0x65, 0x6e, 0x74, 0x69, 0x63, 0x61, 0x74, 0x65, 0x64,
+	0x32, 0xaa, 0x1f, 0x0a, 0x12, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x41, 0x64, 0x6d, 0x69, 0x6e,
 	0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0x5d, 0x0a, 0x08, 0x53, 0x68, 0x75, 0x74, 0x64,
 	0x6f, 0x77, 0x6e, 0x12, 0x27, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65,
 	0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x68, 0x75,
@@ -5132,22 +5572,29 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_rawDesc = []byte{
 	0x72, 0x73, 0x68, 0x69, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x31, 0x2e, 0x67,
 	0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d,
 	0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x65, 0x72, 0x4f, 0x77,
-	0x6e, 0x65, 0x72, 0x73, 0x68, 0x69, 0x70, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x42,
-	0xe0, 0x01, 0x0a, 0x1a, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64,
-	0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x42, 0x10,
-	0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x50, 0x72, 0x6f, 0x74, 0x6f,
-	0x50, 0x01, 0x5a, 0x35, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x7a,
-	0x65, 0x72, 0x6f, 0x2d, 0x64, 0x61, 0x79, 0x2d, 0x61, 0x69, 0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f,
-	0x6e, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x64, 0x61, 0x65, 0x6d, 0x6f,
-	0x6e, 0x2f, 0x61, 0x70, 0x69, 0x3b, 0x61, 0x70, 0x69, 0xa2, 0x02, 0x03, 0x47, 0x44, 0x41, 0xaa,
-	0x02, 0x16, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e,
-	0x41, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x56, 0x31, 0xca, 0x02, 0x16, 0x47, 0x69, 0x62, 0x73, 0x6f,
-	0x6e, 0x5c, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x5c, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x5c, 0x56,
-	0x31, 0xe2, 0x02, 0x22, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c, 0x44, 0x61, 0x65, 0x6d, 0x6f,
-	0x6e, 0x5c, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x5c, 0x56, 0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65,
-	0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x19, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x3a,
-	0x3a, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x3a, 0x3a, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x3a, 0x3a,
-	0x56, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x6e, 0x65, 0x72, 0x73, 0x68, 0x69, 0x70, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
+	0x6c, 0x0a, 0x0d, 0x47, 0x65, 0x74, 0x41, 0x75, 0x74, 0x68, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61,
+	0x12, 0x2c, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e,
+	0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x41, 0x75, 0x74,
+	0x68, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2d,
+	0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61,
+	0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x41, 0x75, 0x74, 0x68, 0x53,
+	0x63, 0x68, 0x65, 0x6d, 0x61, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x42, 0xe0, 0x01,
+	0x0a, 0x1a, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65,
+	0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x42, 0x10, 0x44, 0x61,
+	0x65, 0x6d, 0x6f, 0x6e, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x50, 0x01,
+	0x5a, 0x35, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x7a, 0x65, 0x72,
+	0x6f, 0x2d, 0x64, 0x61, 0x79, 0x2d, 0x61, 0x69, 0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2f,
+	0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2f,
+	0x61, 0x70, 0x69, 0x3b, 0x61, 0x70, 0x69, 0xa2, 0x02, 0x03, 0x47, 0x44, 0x41, 0xaa, 0x02, 0x16,
+	0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x41, 0x64,
+	0x6d, 0x69, 0x6e, 0x2e, 0x56, 0x31, 0xca, 0x02, 0x16, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c,
+	0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x5c, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x5c, 0x56, 0x31, 0xe2,
+	0x02, 0x22, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x5c,
+	0x41, 0x64, 0x6d, 0x69, 0x6e, 0x5c, 0x56, 0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61,
+	0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x19, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x3a, 0x3a, 0x44,
+	0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x3a, 0x3a, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x3a, 0x3a, 0x56, 0x31,
+	0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -5162,7 +5609,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP() []byte {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescData
 }
 
-var file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 76)
+var file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 82)
 var file_gibson_daemon_admin_v1_daemon_admin_proto_goTypes = []any{
 	(*ShutdownRequest)(nil),                         // 0: gibson.daemon.admin.v1.ShutdownRequest
 	(*ShutdownResponse)(nil),                        // 1: gibson.daemon.admin.v1.ShutdownResponse
@@ -5235,102 +5682,114 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_goTypes = []any{
 	(*ListUserTenantsResponse)(nil),                 // 68: gibson.daemon.admin.v1.ListUserTenantsResponse
 	(*TransferOwnershipRequest)(nil),                // 69: gibson.daemon.admin.v1.TransferOwnershipRequest
 	(*TransferOwnershipResponse)(nil),               // 70: gibson.daemon.admin.v1.TransferOwnershipResponse
-	nil,                                             // 71: gibson.daemon.admin.v1.TenantInfo.ConfigEntry
-	nil,                                             // 72: gibson.daemon.admin.v1.CreateTenantRequest.ConfigEntry
-	nil,                                             // 73: gibson.daemon.admin.v1.UpdateTenantRequest.ConfigEntry
-	nil,                                             // 74: gibson.daemon.admin.v1.GetOnboardingStateResponse.SetupTasksEntry
-	nil,                                             // 75: gibson.daemon.admin.v1.UpdateOnboardingStateRequest.SetupTasksEntry
+	(*GetAuthSchemaRequest)(nil),                    // 71: gibson.daemon.admin.v1.GetAuthSchemaRequest
+	(*GetAuthSchemaResponse)(nil),                   // 72: gibson.daemon.admin.v1.GetAuthSchemaResponse
+	(*AuthRole)(nil),                                // 73: gibson.daemon.admin.v1.AuthRole
+	(*AuthPermission)(nil),                          // 74: gibson.daemon.admin.v1.AuthPermission
+	(*AuthRpcRequirement)(nil),                      // 75: gibson.daemon.admin.v1.AuthRpcRequirement
+	nil,                                             // 76: gibson.daemon.admin.v1.TenantInfo.ConfigEntry
+	nil,                                             // 77: gibson.daemon.admin.v1.CreateTenantRequest.ConfigEntry
+	nil,                                             // 78: gibson.daemon.admin.v1.UpdateTenantRequest.ConfigEntry
+	nil,                                             // 79: gibson.daemon.admin.v1.GetOnboardingStateResponse.SetupTasksEntry
+	nil,                                             // 80: gibson.daemon.admin.v1.UpdateOnboardingStateRequest.SetupTasksEntry
+	nil,                                             // 81: gibson.daemon.admin.v1.GetAuthSchemaResponse.RpcRequirementsEntry
 }
 var file_gibson_daemon_admin_v1_daemon_admin_proto_depIdxs = []int32{
-	71, // 0: gibson.daemon.admin.v1.TenantInfo.config:type_name -> gibson.daemon.admin.v1.TenantInfo.ConfigEntry
-	72, // 1: gibson.daemon.admin.v1.CreateTenantRequest.config:type_name -> gibson.daemon.admin.v1.CreateTenantRequest.ConfigEntry
+	76, // 0: gibson.daemon.admin.v1.TenantInfo.config:type_name -> gibson.daemon.admin.v1.TenantInfo.ConfigEntry
+	77, // 1: gibson.daemon.admin.v1.CreateTenantRequest.config:type_name -> gibson.daemon.admin.v1.CreateTenantRequest.ConfigEntry
 	2,  // 2: gibson.daemon.admin.v1.CreateTenantResponse.tenant:type_name -> gibson.daemon.admin.v1.TenantInfo
 	2,  // 3: gibson.daemon.admin.v1.GetTenantResponse.tenant:type_name -> gibson.daemon.admin.v1.TenantInfo
 	2,  // 4: gibson.daemon.admin.v1.ListTenantsResponse.tenants:type_name -> gibson.daemon.admin.v1.TenantInfo
-	73, // 5: gibson.daemon.admin.v1.UpdateTenantRequest.config:type_name -> gibson.daemon.admin.v1.UpdateTenantRequest.ConfigEntry
+	78, // 5: gibson.daemon.admin.v1.UpdateTenantRequest.config:type_name -> gibson.daemon.admin.v1.UpdateTenantRequest.ConfigEntry
 	2,  // 6: gibson.daemon.admin.v1.UpdateTenantResponse.tenant:type_name -> gibson.daemon.admin.v1.TenantInfo
 	2,  // 7: gibson.daemon.admin.v1.ProvisionTenantResponse.tenant:type_name -> gibson.daemon.admin.v1.TenantInfo
 	16, // 8: gibson.daemon.admin.v1.GetProvisioningStatusResponse.steps:type_name -> gibson.daemon.admin.v1.ProvisionStep
 	2,  // 9: gibson.daemon.admin.v1.UpdateTenantBillingResponse.tenant:type_name -> gibson.daemon.admin.v1.TenantInfo
 	25, // 10: gibson.daemon.admin.v1.GetTenantBillingResponse.usage:type_name -> gibson.daemon.admin.v1.BillingUsage
 	2,  // 11: gibson.daemon.admin.v1.GetTenantByStripeCustomerIdResponse.tenant:type_name -> gibson.daemon.admin.v1.TenantInfo
-	74, // 12: gibson.daemon.admin.v1.GetOnboardingStateResponse.setup_tasks:type_name -> gibson.daemon.admin.v1.GetOnboardingStateResponse.SetupTasksEntry
-	75, // 13: gibson.daemon.admin.v1.UpdateOnboardingStateRequest.setup_tasks:type_name -> gibson.daemon.admin.v1.UpdateOnboardingStateRequest.SetupTasksEntry
+	79, // 12: gibson.daemon.admin.v1.GetOnboardingStateResponse.setup_tasks:type_name -> gibson.daemon.admin.v1.GetOnboardingStateResponse.SetupTasksEntry
+	80, // 13: gibson.daemon.admin.v1.UpdateOnboardingStateRequest.setup_tasks:type_name -> gibson.daemon.admin.v1.UpdateOnboardingStateRequest.SetupTasksEntry
 	45, // 14: gibson.daemon.admin.v1.ListInvitationsResponse.invitations:type_name -> gibson.daemon.admin.v1.InvitationInfo
 	52, // 15: gibson.daemon.admin.v1.ListAPIKeysResponse.keys:type_name -> gibson.daemon.admin.v1.APIKeyInfo
 	58, // 16: gibson.daemon.admin.v1.ListTenantMembersResponse.members:type_name -> gibson.daemon.admin.v1.MemberInfo
 	60, // 17: gibson.daemon.admin.v1.AddTenantMemberResponse.membership:type_name -> gibson.daemon.admin.v1.MembershipInfo
 	60, // 18: gibson.daemon.admin.v1.UpdateMemberRoleResponse.membership:type_name -> gibson.daemon.admin.v1.MembershipInfo
 	60, // 19: gibson.daemon.admin.v1.ListUserTenantsResponse.memberships:type_name -> gibson.daemon.admin.v1.MembershipInfo
-	0,  // 20: gibson.daemon.admin.v1.DaemonAdminService.Shutdown:input_type -> gibson.daemon.admin.v1.ShutdownRequest
-	3,  // 21: gibson.daemon.admin.v1.DaemonAdminService.CreateTenant:input_type -> gibson.daemon.admin.v1.CreateTenantRequest
-	5,  // 22: gibson.daemon.admin.v1.DaemonAdminService.GetTenant:input_type -> gibson.daemon.admin.v1.GetTenantRequest
-	7,  // 23: gibson.daemon.admin.v1.DaemonAdminService.ListTenants:input_type -> gibson.daemon.admin.v1.ListTenantsRequest
-	9,  // 24: gibson.daemon.admin.v1.DaemonAdminService.UpdateTenant:input_type -> gibson.daemon.admin.v1.UpdateTenantRequest
-	11, // 25: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenant:input_type -> gibson.daemon.admin.v1.DeleteTenantRequest
-	13, // 26: gibson.daemon.admin.v1.DaemonAdminService.ProvisionTenant:input_type -> gibson.daemon.admin.v1.ProvisionTenantRequest
-	15, // 27: gibson.daemon.admin.v1.DaemonAdminService.GetProvisioningStatus:input_type -> gibson.daemon.admin.v1.GetProvisioningStatusRequest
-	18, // 28: gibson.daemon.admin.v1.DaemonAdminService.DeprovisionTenant:input_type -> gibson.daemon.admin.v1.DeprovisionTenantRequest
-	20, // 29: gibson.daemon.admin.v1.DaemonAdminService.ImpersonateTenant:input_type -> gibson.daemon.admin.v1.ImpersonateTenantRequest
-	22, // 30: gibson.daemon.admin.v1.DaemonAdminService.UpdateTenantBilling:input_type -> gibson.daemon.admin.v1.UpdateTenantBillingRequest
-	24, // 31: gibson.daemon.admin.v1.DaemonAdminService.GetTenantBilling:input_type -> gibson.daemon.admin.v1.GetTenantBillingRequest
-	27, // 32: gibson.daemon.admin.v1.DaemonAdminService.GetTenantByStripeCustomerId:input_type -> gibson.daemon.admin.v1.GetTenantByStripeCustomerIdRequest
-	29, // 33: gibson.daemon.admin.v1.DaemonAdminService.GetTenantByEmail:input_type -> gibson.daemon.admin.v1.GetTenantByEmailRequest
-	31, // 34: gibson.daemon.admin.v1.DaemonAdminService.GetTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.GetTenantLangfuseCredentialsRequest
-	33, // 35: gibson.daemon.admin.v1.DaemonAdminService.SetTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.SetTenantLangfuseCredentialsRequest
-	35, // 36: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.DeleteTenantLangfuseCredentialsRequest
-	37, // 37: gibson.daemon.admin.v1.DaemonAdminService.GetOnboardingState:input_type -> gibson.daemon.admin.v1.GetOnboardingStateRequest
-	39, // 38: gibson.daemon.admin.v1.DaemonAdminService.UpdateOnboardingState:input_type -> gibson.daemon.admin.v1.UpdateOnboardingStateRequest
-	41, // 39: gibson.daemon.admin.v1.DaemonAdminService.CreateInvitation:input_type -> gibson.daemon.admin.v1.CreateInvitationRequest
-	43, // 40: gibson.daemon.admin.v1.DaemonAdminService.AcceptInvitation:input_type -> gibson.daemon.admin.v1.AcceptInvitationRequest
-	46, // 41: gibson.daemon.admin.v1.DaemonAdminService.ListInvitations:input_type -> gibson.daemon.admin.v1.ListInvitationsRequest
-	48, // 42: gibson.daemon.admin.v1.DaemonAdminService.RevokeInvitation:input_type -> gibson.daemon.admin.v1.RevokeInvitationRequest
-	50, // 43: gibson.daemon.admin.v1.DaemonAdminService.CreateAPIKey:input_type -> gibson.daemon.admin.v1.CreateAPIKeyRequest
-	53, // 44: gibson.daemon.admin.v1.DaemonAdminService.ListAPIKeys:input_type -> gibson.daemon.admin.v1.ListAPIKeysRequest
-	55, // 45: gibson.daemon.admin.v1.DaemonAdminService.RevokeAPIKey:input_type -> gibson.daemon.admin.v1.RevokeAPIKeyRequest
-	57, // 46: gibson.daemon.admin.v1.DaemonAdminService.ListTenantMembers:input_type -> gibson.daemon.admin.v1.ListTenantMembersRequest
-	61, // 47: gibson.daemon.admin.v1.DaemonAdminService.AddTenantMember:input_type -> gibson.daemon.admin.v1.AddTenantMemberRequest
-	63, // 48: gibson.daemon.admin.v1.DaemonAdminService.RemoveTenantMember:input_type -> gibson.daemon.admin.v1.RemoveTenantMemberRequest
-	65, // 49: gibson.daemon.admin.v1.DaemonAdminService.UpdateMemberRole:input_type -> gibson.daemon.admin.v1.UpdateMemberRoleRequest
-	67, // 50: gibson.daemon.admin.v1.DaemonAdminService.ListUserTenants:input_type -> gibson.daemon.admin.v1.ListUserTenantsRequest
-	69, // 51: gibson.daemon.admin.v1.DaemonAdminService.TransferOwnership:input_type -> gibson.daemon.admin.v1.TransferOwnershipRequest
-	1,  // 52: gibson.daemon.admin.v1.DaemonAdminService.Shutdown:output_type -> gibson.daemon.admin.v1.ShutdownResponse
-	4,  // 53: gibson.daemon.admin.v1.DaemonAdminService.CreateTenant:output_type -> gibson.daemon.admin.v1.CreateTenantResponse
-	6,  // 54: gibson.daemon.admin.v1.DaemonAdminService.GetTenant:output_type -> gibson.daemon.admin.v1.GetTenantResponse
-	8,  // 55: gibson.daemon.admin.v1.DaemonAdminService.ListTenants:output_type -> gibson.daemon.admin.v1.ListTenantsResponse
-	10, // 56: gibson.daemon.admin.v1.DaemonAdminService.UpdateTenant:output_type -> gibson.daemon.admin.v1.UpdateTenantResponse
-	12, // 57: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenant:output_type -> gibson.daemon.admin.v1.DeleteTenantResponse
-	14, // 58: gibson.daemon.admin.v1.DaemonAdminService.ProvisionTenant:output_type -> gibson.daemon.admin.v1.ProvisionTenantResponse
-	17, // 59: gibson.daemon.admin.v1.DaemonAdminService.GetProvisioningStatus:output_type -> gibson.daemon.admin.v1.GetProvisioningStatusResponse
-	19, // 60: gibson.daemon.admin.v1.DaemonAdminService.DeprovisionTenant:output_type -> gibson.daemon.admin.v1.DeprovisionTenantResponse
-	21, // 61: gibson.daemon.admin.v1.DaemonAdminService.ImpersonateTenant:output_type -> gibson.daemon.admin.v1.ImpersonateTenantResponse
-	23, // 62: gibson.daemon.admin.v1.DaemonAdminService.UpdateTenantBilling:output_type -> gibson.daemon.admin.v1.UpdateTenantBillingResponse
-	26, // 63: gibson.daemon.admin.v1.DaemonAdminService.GetTenantBilling:output_type -> gibson.daemon.admin.v1.GetTenantBillingResponse
-	28, // 64: gibson.daemon.admin.v1.DaemonAdminService.GetTenantByStripeCustomerId:output_type -> gibson.daemon.admin.v1.GetTenantByStripeCustomerIdResponse
-	30, // 65: gibson.daemon.admin.v1.DaemonAdminService.GetTenantByEmail:output_type -> gibson.daemon.admin.v1.GetTenantByEmailResponse
-	32, // 66: gibson.daemon.admin.v1.DaemonAdminService.GetTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.GetTenantLangfuseCredentialsResponse
-	34, // 67: gibson.daemon.admin.v1.DaemonAdminService.SetTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.SetTenantLangfuseCredentialsResponse
-	36, // 68: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.DeleteTenantLangfuseCredentialsResponse
-	38, // 69: gibson.daemon.admin.v1.DaemonAdminService.GetOnboardingState:output_type -> gibson.daemon.admin.v1.GetOnboardingStateResponse
-	40, // 70: gibson.daemon.admin.v1.DaemonAdminService.UpdateOnboardingState:output_type -> gibson.daemon.admin.v1.UpdateOnboardingStateResponse
-	42, // 71: gibson.daemon.admin.v1.DaemonAdminService.CreateInvitation:output_type -> gibson.daemon.admin.v1.CreateInvitationResponse
-	44, // 72: gibson.daemon.admin.v1.DaemonAdminService.AcceptInvitation:output_type -> gibson.daemon.admin.v1.AcceptInvitationResponse
-	47, // 73: gibson.daemon.admin.v1.DaemonAdminService.ListInvitations:output_type -> gibson.daemon.admin.v1.ListInvitationsResponse
-	49, // 74: gibson.daemon.admin.v1.DaemonAdminService.RevokeInvitation:output_type -> gibson.daemon.admin.v1.RevokeInvitationResponse
-	51, // 75: gibson.daemon.admin.v1.DaemonAdminService.CreateAPIKey:output_type -> gibson.daemon.admin.v1.CreateAPIKeyResponse
-	54, // 76: gibson.daemon.admin.v1.DaemonAdminService.ListAPIKeys:output_type -> gibson.daemon.admin.v1.ListAPIKeysResponse
-	56, // 77: gibson.daemon.admin.v1.DaemonAdminService.RevokeAPIKey:output_type -> gibson.daemon.admin.v1.RevokeAPIKeyResponse
-	59, // 78: gibson.daemon.admin.v1.DaemonAdminService.ListTenantMembers:output_type -> gibson.daemon.admin.v1.ListTenantMembersResponse
-	62, // 79: gibson.daemon.admin.v1.DaemonAdminService.AddTenantMember:output_type -> gibson.daemon.admin.v1.AddTenantMemberResponse
-	64, // 80: gibson.daemon.admin.v1.DaemonAdminService.RemoveTenantMember:output_type -> gibson.daemon.admin.v1.RemoveTenantMemberResponse
-	66, // 81: gibson.daemon.admin.v1.DaemonAdminService.UpdateMemberRole:output_type -> gibson.daemon.admin.v1.UpdateMemberRoleResponse
-	68, // 82: gibson.daemon.admin.v1.DaemonAdminService.ListUserTenants:output_type -> gibson.daemon.admin.v1.ListUserTenantsResponse
-	70, // 83: gibson.daemon.admin.v1.DaemonAdminService.TransferOwnership:output_type -> gibson.daemon.admin.v1.TransferOwnershipResponse
-	52, // [52:84] is the sub-list for method output_type
-	20, // [20:52] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	73, // 20: gibson.daemon.admin.v1.GetAuthSchemaResponse.roles:type_name -> gibson.daemon.admin.v1.AuthRole
+	74, // 21: gibson.daemon.admin.v1.GetAuthSchemaResponse.permissions:type_name -> gibson.daemon.admin.v1.AuthPermission
+	81, // 22: gibson.daemon.admin.v1.GetAuthSchemaResponse.rpc_requirements:type_name -> gibson.daemon.admin.v1.GetAuthSchemaResponse.RpcRequirementsEntry
+	75, // 23: gibson.daemon.admin.v1.GetAuthSchemaResponse.RpcRequirementsEntry.value:type_name -> gibson.daemon.admin.v1.AuthRpcRequirement
+	0,  // 24: gibson.daemon.admin.v1.DaemonAdminService.Shutdown:input_type -> gibson.daemon.admin.v1.ShutdownRequest
+	3,  // 25: gibson.daemon.admin.v1.DaemonAdminService.CreateTenant:input_type -> gibson.daemon.admin.v1.CreateTenantRequest
+	5,  // 26: gibson.daemon.admin.v1.DaemonAdminService.GetTenant:input_type -> gibson.daemon.admin.v1.GetTenantRequest
+	7,  // 27: gibson.daemon.admin.v1.DaemonAdminService.ListTenants:input_type -> gibson.daemon.admin.v1.ListTenantsRequest
+	9,  // 28: gibson.daemon.admin.v1.DaemonAdminService.UpdateTenant:input_type -> gibson.daemon.admin.v1.UpdateTenantRequest
+	11, // 29: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenant:input_type -> gibson.daemon.admin.v1.DeleteTenantRequest
+	13, // 30: gibson.daemon.admin.v1.DaemonAdminService.ProvisionTenant:input_type -> gibson.daemon.admin.v1.ProvisionTenantRequest
+	15, // 31: gibson.daemon.admin.v1.DaemonAdminService.GetProvisioningStatus:input_type -> gibson.daemon.admin.v1.GetProvisioningStatusRequest
+	18, // 32: gibson.daemon.admin.v1.DaemonAdminService.DeprovisionTenant:input_type -> gibson.daemon.admin.v1.DeprovisionTenantRequest
+	20, // 33: gibson.daemon.admin.v1.DaemonAdminService.ImpersonateTenant:input_type -> gibson.daemon.admin.v1.ImpersonateTenantRequest
+	22, // 34: gibson.daemon.admin.v1.DaemonAdminService.UpdateTenantBilling:input_type -> gibson.daemon.admin.v1.UpdateTenantBillingRequest
+	24, // 35: gibson.daemon.admin.v1.DaemonAdminService.GetTenantBilling:input_type -> gibson.daemon.admin.v1.GetTenantBillingRequest
+	27, // 36: gibson.daemon.admin.v1.DaemonAdminService.GetTenantByStripeCustomerId:input_type -> gibson.daemon.admin.v1.GetTenantByStripeCustomerIdRequest
+	29, // 37: gibson.daemon.admin.v1.DaemonAdminService.GetTenantByEmail:input_type -> gibson.daemon.admin.v1.GetTenantByEmailRequest
+	31, // 38: gibson.daemon.admin.v1.DaemonAdminService.GetTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.GetTenantLangfuseCredentialsRequest
+	33, // 39: gibson.daemon.admin.v1.DaemonAdminService.SetTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.SetTenantLangfuseCredentialsRequest
+	35, // 40: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.DeleteTenantLangfuseCredentialsRequest
+	37, // 41: gibson.daemon.admin.v1.DaemonAdminService.GetOnboardingState:input_type -> gibson.daemon.admin.v1.GetOnboardingStateRequest
+	39, // 42: gibson.daemon.admin.v1.DaemonAdminService.UpdateOnboardingState:input_type -> gibson.daemon.admin.v1.UpdateOnboardingStateRequest
+	41, // 43: gibson.daemon.admin.v1.DaemonAdminService.CreateInvitation:input_type -> gibson.daemon.admin.v1.CreateInvitationRequest
+	43, // 44: gibson.daemon.admin.v1.DaemonAdminService.AcceptInvitation:input_type -> gibson.daemon.admin.v1.AcceptInvitationRequest
+	46, // 45: gibson.daemon.admin.v1.DaemonAdminService.ListInvitations:input_type -> gibson.daemon.admin.v1.ListInvitationsRequest
+	48, // 46: gibson.daemon.admin.v1.DaemonAdminService.RevokeInvitation:input_type -> gibson.daemon.admin.v1.RevokeInvitationRequest
+	50, // 47: gibson.daemon.admin.v1.DaemonAdminService.CreateAPIKey:input_type -> gibson.daemon.admin.v1.CreateAPIKeyRequest
+	53, // 48: gibson.daemon.admin.v1.DaemonAdminService.ListAPIKeys:input_type -> gibson.daemon.admin.v1.ListAPIKeysRequest
+	55, // 49: gibson.daemon.admin.v1.DaemonAdminService.RevokeAPIKey:input_type -> gibson.daemon.admin.v1.RevokeAPIKeyRequest
+	57, // 50: gibson.daemon.admin.v1.DaemonAdminService.ListTenantMembers:input_type -> gibson.daemon.admin.v1.ListTenantMembersRequest
+	61, // 51: gibson.daemon.admin.v1.DaemonAdminService.AddTenantMember:input_type -> gibson.daemon.admin.v1.AddTenantMemberRequest
+	63, // 52: gibson.daemon.admin.v1.DaemonAdminService.RemoveTenantMember:input_type -> gibson.daemon.admin.v1.RemoveTenantMemberRequest
+	65, // 53: gibson.daemon.admin.v1.DaemonAdminService.UpdateMemberRole:input_type -> gibson.daemon.admin.v1.UpdateMemberRoleRequest
+	67, // 54: gibson.daemon.admin.v1.DaemonAdminService.ListUserTenants:input_type -> gibson.daemon.admin.v1.ListUserTenantsRequest
+	69, // 55: gibson.daemon.admin.v1.DaemonAdminService.TransferOwnership:input_type -> gibson.daemon.admin.v1.TransferOwnershipRequest
+	71, // 56: gibson.daemon.admin.v1.DaemonAdminService.GetAuthSchema:input_type -> gibson.daemon.admin.v1.GetAuthSchemaRequest
+	1,  // 57: gibson.daemon.admin.v1.DaemonAdminService.Shutdown:output_type -> gibson.daemon.admin.v1.ShutdownResponse
+	4,  // 58: gibson.daemon.admin.v1.DaemonAdminService.CreateTenant:output_type -> gibson.daemon.admin.v1.CreateTenantResponse
+	6,  // 59: gibson.daemon.admin.v1.DaemonAdminService.GetTenant:output_type -> gibson.daemon.admin.v1.GetTenantResponse
+	8,  // 60: gibson.daemon.admin.v1.DaemonAdminService.ListTenants:output_type -> gibson.daemon.admin.v1.ListTenantsResponse
+	10, // 61: gibson.daemon.admin.v1.DaemonAdminService.UpdateTenant:output_type -> gibson.daemon.admin.v1.UpdateTenantResponse
+	12, // 62: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenant:output_type -> gibson.daemon.admin.v1.DeleteTenantResponse
+	14, // 63: gibson.daemon.admin.v1.DaemonAdminService.ProvisionTenant:output_type -> gibson.daemon.admin.v1.ProvisionTenantResponse
+	17, // 64: gibson.daemon.admin.v1.DaemonAdminService.GetProvisioningStatus:output_type -> gibson.daemon.admin.v1.GetProvisioningStatusResponse
+	19, // 65: gibson.daemon.admin.v1.DaemonAdminService.DeprovisionTenant:output_type -> gibson.daemon.admin.v1.DeprovisionTenantResponse
+	21, // 66: gibson.daemon.admin.v1.DaemonAdminService.ImpersonateTenant:output_type -> gibson.daemon.admin.v1.ImpersonateTenantResponse
+	23, // 67: gibson.daemon.admin.v1.DaemonAdminService.UpdateTenantBilling:output_type -> gibson.daemon.admin.v1.UpdateTenantBillingResponse
+	26, // 68: gibson.daemon.admin.v1.DaemonAdminService.GetTenantBilling:output_type -> gibson.daemon.admin.v1.GetTenantBillingResponse
+	28, // 69: gibson.daemon.admin.v1.DaemonAdminService.GetTenantByStripeCustomerId:output_type -> gibson.daemon.admin.v1.GetTenantByStripeCustomerIdResponse
+	30, // 70: gibson.daemon.admin.v1.DaemonAdminService.GetTenantByEmail:output_type -> gibson.daemon.admin.v1.GetTenantByEmailResponse
+	32, // 71: gibson.daemon.admin.v1.DaemonAdminService.GetTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.GetTenantLangfuseCredentialsResponse
+	34, // 72: gibson.daemon.admin.v1.DaemonAdminService.SetTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.SetTenantLangfuseCredentialsResponse
+	36, // 73: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.DeleteTenantLangfuseCredentialsResponse
+	38, // 74: gibson.daemon.admin.v1.DaemonAdminService.GetOnboardingState:output_type -> gibson.daemon.admin.v1.GetOnboardingStateResponse
+	40, // 75: gibson.daemon.admin.v1.DaemonAdminService.UpdateOnboardingState:output_type -> gibson.daemon.admin.v1.UpdateOnboardingStateResponse
+	42, // 76: gibson.daemon.admin.v1.DaemonAdminService.CreateInvitation:output_type -> gibson.daemon.admin.v1.CreateInvitationResponse
+	44, // 77: gibson.daemon.admin.v1.DaemonAdminService.AcceptInvitation:output_type -> gibson.daemon.admin.v1.AcceptInvitationResponse
+	47, // 78: gibson.daemon.admin.v1.DaemonAdminService.ListInvitations:output_type -> gibson.daemon.admin.v1.ListInvitationsResponse
+	49, // 79: gibson.daemon.admin.v1.DaemonAdminService.RevokeInvitation:output_type -> gibson.daemon.admin.v1.RevokeInvitationResponse
+	51, // 80: gibson.daemon.admin.v1.DaemonAdminService.CreateAPIKey:output_type -> gibson.daemon.admin.v1.CreateAPIKeyResponse
+	54, // 81: gibson.daemon.admin.v1.DaemonAdminService.ListAPIKeys:output_type -> gibson.daemon.admin.v1.ListAPIKeysResponse
+	56, // 82: gibson.daemon.admin.v1.DaemonAdminService.RevokeAPIKey:output_type -> gibson.daemon.admin.v1.RevokeAPIKeyResponse
+	59, // 83: gibson.daemon.admin.v1.DaemonAdminService.ListTenantMembers:output_type -> gibson.daemon.admin.v1.ListTenantMembersResponse
+	62, // 84: gibson.daemon.admin.v1.DaemonAdminService.AddTenantMember:output_type -> gibson.daemon.admin.v1.AddTenantMemberResponse
+	64, // 85: gibson.daemon.admin.v1.DaemonAdminService.RemoveTenantMember:output_type -> gibson.daemon.admin.v1.RemoveTenantMemberResponse
+	66, // 86: gibson.daemon.admin.v1.DaemonAdminService.UpdateMemberRole:output_type -> gibson.daemon.admin.v1.UpdateMemberRoleResponse
+	68, // 87: gibson.daemon.admin.v1.DaemonAdminService.ListUserTenants:output_type -> gibson.daemon.admin.v1.ListUserTenantsResponse
+	70, // 88: gibson.daemon.admin.v1.DaemonAdminService.TransferOwnership:output_type -> gibson.daemon.admin.v1.TransferOwnershipResponse
+	72, // 89: gibson.daemon.admin.v1.DaemonAdminService.GetAuthSchema:output_type -> gibson.daemon.admin.v1.GetAuthSchemaResponse
+	57, // [57:90] is the sub-list for method output_type
+	24, // [24:57] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_gibson_daemon_admin_v1_daemon_admin_proto_init() }
@@ -6191,6 +6650,66 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 				return nil
 			}
 		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[71].Exporter = func(v any, i int) any {
+			switch v := v.(*GetAuthSchemaRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[72].Exporter = func(v any, i int) any {
+			switch v := v.(*GetAuthSchemaResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[73].Exporter = func(v any, i int) any {
+			switch v := v.(*AuthRole); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[74].Exporter = func(v any, i int) any {
+			switch v := v.(*AuthPermission); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[75].Exporter = func(v any, i int) any {
+			switch v := v.(*AuthRpcRequirement); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -6198,7 +6717,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_gibson_daemon_admin_v1_daemon_admin_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   76,
+			NumMessages:   82,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

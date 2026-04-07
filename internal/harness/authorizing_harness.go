@@ -77,12 +77,16 @@ func (h *AuthorizingHarness) enforce(ctx context.Context, resource, action strin
 		return nil
 	}
 
-	// Casbin denied (or errored). Check the identity's own Capabilities slice as fallback.
-	// This handles legacy keys and recently-created tenants whose policies may not yet
-	// be present in the Redis-backed policy store.
+	// Casbin denied (or errored). Check the identity's own Capabilities slice
+	// as a fallback for API key callers who carry per-key capability lists.
+	// The RPCAuthzInterceptor handles the primary authorization path via
+	// Casbin; this fallback covers the narrow case where the harness is
+	// called from a context that hasn't been through the interceptor.
 	cap := fmt.Sprintf("%s:%s", resource, action)
-	if identity.HasCapability(cap) || identity.HasCapability("*") {
-		return nil
+	for _, c := range identity.Capabilities {
+		if c == "*" || c == cap {
+			return nil
+		}
 	}
 
 	return status.Errorf(codes.PermissionDenied, "missing capability: %s:%s", resource, action)

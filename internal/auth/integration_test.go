@@ -187,7 +187,7 @@ func TestIntegration_FullAuthFlow(t *testing.T) {
 	require.NotNil(t, authenticator)
 
 	// Set JWKS client to use the TLS test server's client
-	authenticator.sdkValidator.SetJWKSClient(jwksServer.Client())
+	authenticator.validator.SetHTTPClient(jwksServer.Client())
 
 	// Setup test server with auth interceptors
 	grpcServer, listener, _ := setupIntegrationTestServer(t, authConfig, authenticator)
@@ -369,7 +369,7 @@ func TestIntegration_CompositeAuthenticator(t *testing.T) {
 
 	// Set JWKS client to use the TLS test server's client
 	if oidcValidator := composite.GetOIDCValidator(); oidcValidator != nil {
-		oidcValidator.sdkValidator.SetJWKSClient(jwksServer.Client())
+		oidcValidator.validator.SetHTTPClient(jwksServer.Client())
 	}
 
 	ctx := context.Background()

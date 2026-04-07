@@ -10,12 +10,20 @@ import (
 )
 
 // AuditEvent represents an authentication or authorization event for logging.
+//
+// Consumed by both the existing auth interceptor (auth_success, auth_failure,
+// missing_token, localhost_bypass events) AND the new RPC authz interceptor
+// (authz_allow, authz_deny events from the declarative-rbac-framework spec).
+// All events flow through logAuditEvent below, which routes them to the same
+// slog pipeline used for every other audit event in Gibson, so Loki/Grafana
+// queries work unchanged.
 type AuditEvent struct {
 	// Timestamp is when the event occurred.
 	Timestamp time.Time
 
 	// EventType is the type of audit event.
-	// Examples: "auth_success", "auth_failure", "permission_denied", "localhost_bypass"
+	// Examples: "auth_success", "auth_failure", "missing_token",
+	// "localhost_bypass", "authz_allow", "authz_deny".
 	EventType string
 
 	// Method is the gRPC method being called.
@@ -51,6 +59,16 @@ type AuditEvent struct {
 
 	// Success indicates whether the operation succeeded.
 	Success bool
+
+	// PermissionRequired names the specific permission the RPC interceptor
+	// evaluated (e.g. "tenants:provision"). Populated only for authz_allow
+	// and authz_deny events.
+	PermissionRequired string
+
+	// PermissionsGranted is the caller's full effective permission set at
+	// the moment of the decision. Populated only for authz_allow and
+	// authz_deny events so operators can see exactly what the caller held.
+	PermissionsGranted []string
 }
 
 // logAuditEvent logs a structured audit event.
@@ -138,12 +156,21 @@ func logAuditEvent(ctx context.Context, logger *slog.Logger, event *AuditEvent) 
 	if event.Resource != "" {
 		attrs = append(attrs, "resource", event.Resource)
 	}
+	if event.PermissionRequired != "" {
+		attrs = append(attrs, "permission_required", event.PermissionRequired)
+	}
+	if len(event.PermissionsGranted) > 0 {
+		attrs = append(attrs, "permissions_granted", event.PermissionsGranted)
+	}
 
-	// Log at appropriate level based on event type
+	// Log at appropriate level based on event type. authz_allow follows the
+	// auth_success Info routing; authz_deny follows the auth_failure Warn
+	// routing — so existing Loki/Grafana log-level filters keep working
+	// without configuration changes.
 	switch event.EventType {
-	case "auth_success", "localhost_bypass":
+	case "auth_success", "localhost_bypass", "authz_allow":
 		logger.Info("authentication audit event", attrs...)
-	case "auth_failure", "missing_token", "permission_denied":
+	case "auth_failure", "missing_token", "permission_denied", "authz_deny":
 		logger.Warn("authentication audit event", attrs...)
 	default:
 		logger.Info("authentication audit event", attrs...)

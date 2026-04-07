@@ -436,52 +436,12 @@ func TestRoleBinder_Deduplication(t *testing.T) {
 	assert.Contains(t, roles, "developer")
 }
 
-func TestIdentity_HasPermission(t *testing.T) {
-	identity := &Identity{
-		Identity: sdkauth.Identity{Subject: "test-user"},
-		Permissions: []Permission{
-			{Action: "execute", Resource: "mission", Scope: "*"},
-			{Action: "read", Resource: "findings", Scope: "*"},
-			{Action: "*", Resource: "agent", Scope: "test-*"},
-		},
-	}
-
-	tests := []struct {
-		action   string
-		resource string
-		want     bool
-	}{
-		{"execute", "mission", true},
-		{"read", "findings", true},
-		{"write", "agent", true}, // wildcard action
-		{"delete", "agent", true}, // wildcard action
-		{"write", "findings", false},
-		{"execute", "tool", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.action+"_"+tt.resource, func(t *testing.T) {
-			result := identity.HasPermission(tt.action, tt.resource)
-			assert.Equal(t, tt.want, result)
-		})
-	}
-}
-
-func TestIdentity_HasRole(t *testing.T) {
-	identity := &Identity{
-		Roles: []string{"admin", "developer", "security-scanner"},
-	}
-
-	assert.True(t, identity.HasRole("admin"))
-	assert.True(t, identity.HasRole("developer"))
-	assert.True(t, identity.HasRole("security-scanner"))
-	assert.False(t, identity.HasRole("guest"))
-	assert.False(t, identity.HasRole(""))
-
-	// Nil identity
-	var nilIdentity *Identity
-	assert.False(t, nilIdentity.HasRole("admin"))
-}
+// TestIdentity_HasPermission and TestIdentity_HasRole were removed as part of
+// the declarative-rbac-framework spec: the Identity methods they exercised
+// (HasRole, HasPermission, HasCapability) have been deleted. Authorization
+// is now enforced exclusively by the RPCAuthzInterceptor via Casbin policies
+// loaded from permissions.yaml. See rpc_authz_interceptor_test.go for the
+// new test coverage.
 
 func TestIdentity_IsExpired(t *testing.T) {
 	now := time.Now()

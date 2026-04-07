@@ -204,19 +204,14 @@ func (a *APIKeyAuthenticator) CreateKey(
 	}
 
 	// Keys scoped to the system tenant are privileged: they grant access to
-	// platform-hosted shared components visible to all tenants. Only identities
-	// carrying the "platform-operator" role may create them. This prevents
-	// unprivileged tenants from minting keys that can masquerade as or interact
-	// with system-level infrastructure.
-	if tenantID == SystemTenant {
-		caller, ok := GibsonIdentityFromContext(ctx)
-		if !ok || !caller.HasRole("platform-operator") {
-			return "", nil, fmt.Errorf(
-				"creating a key for tenant %q requires the platform-operator role",
-				SystemTenant,
-			)
-		}
-	}
+	// platform-hosted shared components visible to all tenants.
+	//
+	// RPC-level authorization is enforced by the RPCAuthzInterceptor via
+	// permissions.yaml (CreateAPIKey requires apikeys:manage, held by owner,
+	// admin, and platform-operator). This function is also called by non-RPC
+	// code paths that need to mint keys internally (e.g. the provisioner at
+	// tenant creation); those callers must ensure the caller's identity is
+	// appropriate.
 
 	// Generate 32 bytes of cryptographic randomness.
 	randomBytes := make([]byte, apiKeyRandomBytes)
@@ -288,19 +283,11 @@ func (a *APIKeyAuthenticator) CreateKey(
 		return "", nil, fmt.Errorf("failed to store API key hash lookup: %w", err)
 	}
 
-	// Sync Casbin policies for the new key's capabilities if an enforcer is
-	// configured. This is best-effort: a Casbin failure does not roll back the
-	// Redis writes because the key must be usable even when the policy store is
-	// temporarily unavailable. The policies can be recovered via SyncAllPolicies.
-	if a.enforcer != nil && len(record.Capabilities) > 0 {
-		if casbinErr := AddPoliciesForKey(a.enforcer, keyID, tenantID, record.Capabilities); casbinErr != nil {
-			slog.Warn("apikey: failed to sync Casbin policies for new key",
-				"key_id", keyID,
-				"tenant_id", tenantID,
-				"error", casbinErr,
-			)
-		}
-	}
+	// Under the declarative-rbac-framework, per-key Casbin policies are no
+	// longer written. The RPCAuthzInterceptor authorizes via the key's Role
+	// (populated by the authenticator) against YAML-loaded policies. The
+	// key's Capabilities slice is retained for data-scoping in handlers
+	// (allowed_kinds / allowed_names / plugin filters).
 
 	slog.Info("apikey: created new API key",
 		"key_id", keyID,
@@ -399,6 +386,21 @@ func (a *APIKeyAuthenticator) Authenticate(ctx context.Context, token string) (*
 		caps = []string{"*"}
 	}
 
+	// Under the declarative-rbac-framework, the RPCAuthzInterceptor enforces
+	// via the caller's Roles against Casbin policies loaded from
+	// permissions.yaml. API keys are service-to-service credentials that map
+	// to the "admin" role by default — sufficient for the tenant-wide
+	// operations they're typically used for. Keys that need narrower scope
+	// carry Capabilities which are still consulted by handlers for data
+	// filtering (e.g. allowed_kinds / allowed_names / plugin filters).
+	//
+	// The system tenant's first API key (minted by the provisioner at tenant
+	// creation) also gets "owner" so it can transfer ownership or deprovision.
+	roles := []string{"admin"}
+	if record.TenantID == SystemTenant {
+		roles = []string{"platform-operator"}
+	}
+
 	// Build the Identity. Tenant is encoded in Claims["tenant_id"] following
 	// the existing ExtractTenantFromIdentity("tenant_id") convention.
 	identity := &Identity{
@@ -416,7 +418,7 @@ func (a *APIKeyAuthenticator) Authenticate(ctx context.Context, token string) (*
 			ExpiresAt:       time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC),
 			AuthenticatedAt: time.Now().UTC(),
 		},
-		Roles:        []string{},
+		Roles:        roles,
 		Permissions:  permissions,
 		Capabilities: caps,
 	}
@@ -458,19 +460,9 @@ func (a *APIKeyAuthenticator) RevokeKey(ctx context.Context, keyID string) error
 		return fmt.Errorf("failed to update API key record for revocation: %w", err)
 	}
 
-	// Remove all Casbin policies for the revoked key so it can no longer be
-	// used for authorization decisions even if somehow re-activated in Redis.
-	// Best-effort: a Casbin failure is logged but does not cause RevokeKey to
-	// return an error, since the Redis record is already marked revoked.
-	if a.enforcer != nil {
-		if casbinErr := RemovePoliciesForKey(a.enforcer, keyID); casbinErr != nil {
-			slog.Warn("apikey: failed to remove Casbin policies on revocation",
-				"key_id", keyID,
-				"tenant_id", record.TenantID,
-				"error", casbinErr,
-			)
-		}
-	}
+	// Per the declarative-rbac-framework: no per-key Casbin policies are
+	// written at runtime. Revoking a key updates the Redis record status;
+	// the authenticator refuses revoked keys on the next Authenticate call.
 
 	slog.Info("apikey: revoked API key",
 		"key_id", keyID,
@@ -512,92 +504,6 @@ func (a *APIKeyAuthenticator) ListKeys(ctx context.Context, tenantID string) ([]
 	}
 
 	return records, nil
-}
-
-// SyncAllPolicies loads every active API key from Redis across all known tenants
-// and ensures that each key's Casbin policies exist in the enforcer.
-//
-// This is intended for use at daemon startup to reconcile the Casbin policy store
-// with the ground-truth key records in Redis. It is safe to call multiple times;
-// AddPoliciesForKey is idempotent for policies that already exist.
-//
-// Returns a non-nil error only if the initial tenant-set scan fails. Per-key
-// errors are logged and skipped so that a single corrupt record does not block
-// the rest of the sync.
-//
-// No-op if the authenticator has no enforcer configured.
-func (a *APIKeyAuthenticator) SyncAllPolicies(ctx context.Context) error {
-	if a.enforcer == nil {
-		return nil
-	}
-
-	// Scan all apikeys:tenant:* keys to discover every known tenant.
-	pattern := apiKeyTenantSetKeyPrefix + "*"
-	var cursor uint64
-	var tenantSetKeys []string
-	for {
-		keys, nextCursor, err := a.client.Scan(ctx, cursor, pattern, 100).Result()
-		if err != nil {
-			return fmt.Errorf("apikey: SyncAllPolicies: failed to scan tenant sets: %w", err)
-		}
-		tenantSetKeys = append(tenantSetKeys, keys...)
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-
-	synced, skipped := 0, 0
-	for _, tenantSetKey := range tenantSetKeys {
-		tenantID := tenantSetKey[len(apiKeyTenantSetKeyPrefix):]
-
-		keyIDs, err := a.client.SMembers(ctx, tenantSetKey).Result()
-		if err != nil {
-			slog.Warn("apikey: SyncAllPolicies: failed to list keys for tenant",
-				"tenant_id", tenantID,
-				"error", err,
-			)
-			skipped++
-			continue
-		}
-
-		for _, keyID := range keyIDs {
-			record, err := a.fetchRecord(ctx, keyID)
-			if err != nil {
-				slog.Warn("apikey: SyncAllPolicies: skipping key with missing record",
-					"key_id", keyID,
-					"tenant_id", tenantID,
-					"error", err,
-				)
-				skipped++
-				continue
-			}
-
-			// Only sync active keys with explicit capability grants. Inactive keys
-			// have their policies removed on revocation; omit legacy wildcard keys
-			// from Casbin since they were never added there in the first place.
-			if record.Status != apiKeyStatusActive || len(record.Capabilities) == 0 {
-				continue
-			}
-
-			if err := AddPoliciesForKey(a.enforcer, record.KeyID, record.TenantID, record.Capabilities); err != nil {
-				slog.Warn("apikey: SyncAllPolicies: failed to sync policies for key",
-					"key_id", keyID,
-					"tenant_id", tenantID,
-					"error", err,
-				)
-				skipped++
-				continue
-			}
-			synced++
-		}
-	}
-
-	slog.Info("apikey: SyncAllPolicies complete",
-		"synced", synced,
-		"skipped", skipped,
-	)
-	return nil
 }
 
 // fetchRecord retrieves and unmarshals the APIKeyRecord for the given key_id.
@@ -668,7 +574,7 @@ func constantTimeCompareStrings(a, b string) bool {
 // the Gibson Permission slice used by the Identity type.
 //
 // Strings that do not contain a colon separator are silently skipped.
-// A wildcard segment ("*") is preserved as-is and handled by HasPermission.
+// A wildcard segment ("*") is preserved as-is and matched by RoleBinder.
 func parsePermissions(perms []string) []Permission {
 	result := make([]Permission, 0, len(perms))
 	for _, p := range perms {

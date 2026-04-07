@@ -23,6 +23,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/finding"
 
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/metric"
@@ -95,6 +96,49 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		d.logger.Warn(ctx, "auth interceptors not installed - auth mode not configured")
 	}
 
+	// 4. Declarative RBAC interceptor (declarative-rbac-framework spec).
+	//
+	// Loads the authorization schema from the embedded permissions.yaml, builds
+	// an in-memory Casbin enforcer from the role closures, and installs a single
+	// RPCAuthzInterceptor that enforces every gRPC method by looking up
+	// info.FullMethod in the schema. Any unmapped RPC is default-denied at
+	// runtime, and the loader also runs proto coverage verification at startup
+	// so new RPCs added without a YAML entry fail the daemon before serving
+	// traffic.
+	//
+	// This interceptor replaces all hand-rolled role checks that used to live
+	// in the RPC handlers (deleted in tasks 8-11 of this spec). Installed AFTER
+	// the existing auth interceptors so Identity is already populated in ctx.
+	schemaRegistry, schemaEnforcer, err := auth.LoadEmbedded()
+	if err != nil {
+		return fmt.Errorf("load permissions schema: %w", err)
+	}
+	if err := auth.VerifyHelmRoleBindings(schemaRegistry, &d.config.Auth); err != nil {
+		return fmt.Errorf("helm role bindings reference undefined Gibson roles: %w", err)
+	}
+	authzMetricFunc := func(ctx context.Context, decision, method, permission string) {
+		rec := d.GetOTelMetricsRecorder()
+		if rec == nil {
+			return
+		}
+		rec.RecordAuthzDecision(ctx, decision, method, permission)
+	}
+	authzInterceptor, err := auth.NewRPCAuthzInterceptor(
+		schemaRegistry,
+		schemaEnforcer,
+		d.logger.Slog(),
+		observability.SetAuthzAttributes,
+		authzMetricFunc,
+	)
+	if err != nil {
+		return fmt.Errorf("create rpc authz interceptor: %w", err)
+	}
+	unaryInterceptors = append(unaryInterceptors, authzInterceptor.Unary())
+	streamInterceptors = append(streamInterceptors, authzInterceptor.Stream())
+	d.logger.Info(ctx, "declarative RBAC interceptor installed")
+	// schemaRegistry captured for daemonSvc wiring below.
+	authzSchemaRegistry := schemaRegistry
+
 	// Build server options with chained interceptors
 	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
@@ -112,6 +156,10 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		daemonSvc.WithQuotaManager(d.quotaManager)
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
 	}
+	// Wire the authorization schema registry so GetAuthSchema can return
+	// the live schema to callers (declarative-rbac-framework spec).
+	daemonSvc.WithSchemaRegistry(authzSchemaRegistry)
+	d.logger.Info(ctx, "schema registry wired into DaemonServer for GetAuthSchema RPC")
 
 	// Wire TenantService, Provisioner, and BillingStore into DaemonServer.
 	// These enable tenant CRUD, provisioning, and billing RPCs respectively.

@@ -598,25 +598,21 @@ role_bindings:
 
 Handlers can check permissions programmatically:
 
+As of the declarative-rbac-framework spec, handlers do **not** call inline role
+or permission helpers. Authorization is enforced by the `RPCAuthzInterceptor`,
+which reads `internal/auth/permissions.yaml` at startup and rejects any RPC
+whose declared permission isn't satisfied by the caller's roles. To require a
+new permission for a new RPC, add an entry to `permissions.yaml` mapping the
+fully-qualified gRPC method to the permission string — no handler-side code
+change is needed.
+
 ```go
+// Inside a handler — the interceptor has already authorized the call.
 identity, ok := auth.IdentityFromContext(ctx)
 if !ok {
     return status.Error(codes.Unauthenticated, "not authenticated")
 }
-
-// Check specific permission
-if err := auth.RequirePermission(ctx, "execute", "mission"); err != nil {
-    return err  // Returns PERMISSION_DENIED status
-}
-
-// Or manually check
-hasPermission := false
-for _, role := range identity.Roles {
-    if role == "admin" || role == "mission:execute" {
-        hasPermission = true
-        break
-    }
-}
+// Use identity.Roles / identity.Subject for tenant-scoped data filtering only.
 ```
 
 ## Troubleshooting

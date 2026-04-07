@@ -89,7 +89,7 @@ func buildCtx(tenantID string, roles ...string) context.Context {
 
 // permissionsForRoles derives a minimal set of auth.Permission values from
 // the supplied role names, matching the same logic used by the production
-// RoleBinder so that HasRole/HasPermission checks behave consistently.
+// RoleBinder so that interceptor-driven permission checks behave consistently.
 func permissionsForRoles(roles []string) []auth.Permission {
 	var perms []auth.Permission
 	for _, role := range roles {
@@ -133,9 +133,10 @@ func seedTenant(t *testing.T, mr *miniredis.Miniredis, tenantID, displayName str
 // ---------------------------------------------------------------------------
 // CreateTenant — RBAC
 //
-// CreateTenant calls auth.RequireRole(ctx, "platform-operator").  Only
-// identities carrying the "platform-operator" role are permitted.  The
-// tenant-scoped "admin" role does NOT grant cross-tenant operations.
+// CreateTenant is gated by the schema-driven RPCAuthzInterceptor on the
+// tenants:provision permission, which permissions.yaml grants to the
+// platform-operator role only.  The tenant-scoped "admin" role does NOT
+// grant cross-tenant provisioning.
 // ---------------------------------------------------------------------------
 
 func TestTenantService_CreateTenant_RBAC(t *testing.T) {
@@ -179,8 +180,9 @@ func TestTenantService_CreateTenant_RBAC(t *testing.T) {
 // ---------------------------------------------------------------------------
 // UpdateTenant — RBAC
 //
-// UpdateTenant calls auth.RequireRole(ctx, "platform-operator").  Only
-// platform-operators can modify tenant records.
+// UpdateTenant is gated by the schema-driven RPCAuthzInterceptor on the
+// tenants:update permission (granted to platform-operator only by
+// permissions.yaml).
 // ---------------------------------------------------------------------------
 
 func TestTenantService_UpdateTenant_RBAC(t *testing.T) {
@@ -227,8 +229,9 @@ func TestTenantService_UpdateTenant_RBAC(t *testing.T) {
 // ---------------------------------------------------------------------------
 // DeleteTenant — RBAC
 //
-// DeleteTenant calls auth.RequireRole(ctx, "platform-operator").  Only
-// platform-operators can delete tenants.
+// DeleteTenant is gated by the schema-driven RPCAuthzInterceptor on the
+// tenants:delete permission (granted to platform-operator only by
+// permissions.yaml).
 // ---------------------------------------------------------------------------
 
 func TestTenantService_DeleteTenant_RBAC(t *testing.T) {

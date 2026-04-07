@@ -24,7 +24,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -159,9 +158,8 @@ func (s *TenantService) WithQuotaManager(qm *QuotaManager) *TenantService {
 // The tenantID must be URL-safe: only alphanumeric characters and hyphens are
 // allowed.  Returns ErrTenantAlreadyExists if the ID is already taken.
 func (s *TenantService) CreateTenant(ctx context.Context, tenantID, displayName string, config map[string]string) (*TenantRecord, error) {
-	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
-		return nil, err
-	}
+	// Authorization enforced by the gRPC RPCAuthzInterceptor (or by the
+	// caller of this service when invoked internally). See permissions.yaml.
 
 	if err := validateTenantID(tenantID); err != nil {
 		return nil, err
@@ -311,14 +309,8 @@ func (s *TenantService) createTenantInternal(ctx context.Context, tenantID, disp
 //
 // Returns ErrTenantNotFound when no record exists for the given ID.
 func (s *TenantService) GetTenant(ctx context.Context, tenantID string) (*TenantRecord, error) {
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != tenantID {
-		return nil, status.Errorf(codes.PermissionDenied, "access denied: can only view own tenant")
-	}
-
+	// Authorization enforced by the gRPC RPCAuthzInterceptor (or by the
+	// caller of this service when invoked internally). See permissions.yaml.
 	return s.fetchTenant(ctx, tenantID)
 }
 
@@ -357,48 +349,32 @@ func (s *TenantService) fetchTenant(ctx context.Context, tenantID string) (*Tena
 // key is missing (e.g. due to data inconsistency), it is skipped and a warning
 // is logged.
 func (s *TenantService) ListTenants(ctx context.Context) ([]TenantRecord, error) {
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "not authenticated")
-	}
-
-	if identity.HasRole("platform-operator") {
-		// Platform-operators see every tenant in the index.
-		ids, err := s.client.SMembers(ctx, tenantIndexKey).Result()
-		if err != nil {
-			return nil, fmt.Errorf("failed to list tenant IDs from index: %w", err)
-		}
-
-		records := make([]TenantRecord, 0, len(ids))
-		for _, id := range ids {
-			record, err := s.fetchTenant(ctx, id)
-			if err != nil {
-				if errors.Is(err, ErrTenantNotFound) {
-					s.logger.WarnContext(ctx, "tenant index references missing meta key, skipping",
-						slog.String("tenant_id", id),
-					)
-					continue
-				}
-				return nil, fmt.Errorf("failed to fetch tenant %q during list: %w", id, err)
-			}
-			records = append(records, *record)
-		}
-		return records, nil
-	}
-
-	// Non-admin, non-platform-operators see only their own tenant.
-	callerTenant := auth.TenantFromContext(ctx)
-	if callerTenant == "" {
-		return nil, status.Error(codes.PermissionDenied, "no tenant context")
-	}
-	record, err := s.fetchTenant(ctx, callerTenant)
+	// Authorization enforced by the gRPC RPCAuthzInterceptor: the
+	// DaemonAdminService/ListTenants RPC requires the tenants:list-all
+	// permission (platform-operator only). Regular users who want to
+	// enumerate their own tenant memberships call ListUserTenants instead
+	// (which requires tenants:self-read). This service function always
+	// returns the full list; filtering is the interceptor's job.
+	ids, err := s.client.SMembers(ctx, tenantIndexKey).Result()
 	if err != nil {
-		if errors.Is(err, ErrTenantNotFound) {
-			return []TenantRecord{}, nil
-		}
-		return nil, fmt.Errorf("failed to fetch tenant %q during list: %w", callerTenant, err)
+		return nil, fmt.Errorf("failed to list tenant IDs from index: %w", err)
 	}
-	return []TenantRecord{*record}, nil
+
+	records := make([]TenantRecord, 0, len(ids))
+	for _, id := range ids {
+		record, err := s.fetchTenant(ctx, id)
+		if err != nil {
+			if errors.Is(err, ErrTenantNotFound) {
+				s.logger.WarnContext(ctx, "tenant index references missing meta key, skipping",
+					slog.String("tenant_id", id),
+				)
+				continue
+			}
+			return nil, fmt.Errorf("failed to fetch tenant %q during list: %w", id, err)
+		}
+		records = append(records, *record)
+	}
+	return records, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -415,9 +391,8 @@ func (s *TenantService) ListTenants(ctx context.Context) ([]TenantRecord, error)
 //
 // Returns ErrTenantNotFound when no record exists for tenantID.
 func (s *TenantService) UpdateTenant(ctx context.Context, tenantID string, updates map[string]string) (*TenantRecord, error) {
-	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
-		return nil, err
-	}
+	// Authorization enforced by the gRPC RPCAuthzInterceptor (or by the
+	// caller of this service when invoked internally). See permissions.yaml.
 
 	record, err := s.fetchTenant(ctx, tenantID)
 	if err != nil {
@@ -498,9 +473,8 @@ func (s *TenantService) UpdateTenant(ctx context.Context, tenantID string, updat
 //
 // Returns ErrTenantNotFound when no record exists for tenantID.
 func (s *TenantService) DeleteTenant(ctx context.Context, tenantID string) error {
-	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
-		return err
-	}
+	// Authorization enforced by the gRPC RPCAuthzInterceptor (or by the
+	// caller of this service when invoked internally). See permissions.yaml.
 
 	record, err := s.fetchTenant(ctx, tenantID)
 	if err != nil {
@@ -560,14 +534,8 @@ func (s *TenantService) GetTenantQuota(ctx context.Context, tenantID string) (*T
 		return nil, status.Error(codes.Unimplemented, "quota management not configured")
 	}
 
-	// Access control: platform-operator can read any tenant; others only their own.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != tenantID {
-		return nil, status.Errorf(codes.PermissionDenied, "missing required role: platform-operator")
-	}
+	// Authorization enforced by the gRPC RPCAuthzInterceptor (or by the
+	// caller of this service when invoked internally). See permissions.yaml.
 
 	quota, err := s.quotaManager.GetQuota(ctx, tenantID)
 	if err != nil {
@@ -593,9 +561,8 @@ func (s *TenantService) SetTenantQuota(ctx context.Context, tenantID string, quo
 		return status.Error(codes.Unimplemented, "quota management not configured")
 	}
 
-	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
-		return err
-	}
+	// Authorization enforced by the gRPC RPCAuthzInterceptor (or by the
+	// caller of this service when invoked internally). See permissions.yaml.
 
 	if err := s.quotaManager.SetQuota(ctx, tenantID, quota); err != nil {
 		return fmt.Errorf("set quota for tenant %q: %w", tenantID, err)

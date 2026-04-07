@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,6 +39,12 @@ type DaemonServer struct {
 
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface
+
+	// schemaRegistry is the declarative RBAC schema loaded from
+	// permissions.yaml at daemon startup. Used by the GetAuthSchema RPC
+	// handler to return the live schema to the dashboard and other
+	// authenticated callers. Wired in task 7 (daemon grpc.go wiring).
+	schemaRegistry *auth.SchemaRegistry
 
 	// credentialHandler provides secure credential storage for per-tenant credentials
 	credentialHandler *CredentialHandler
@@ -847,6 +855,16 @@ func (s *DaemonServer) WithMembershipStore(ms membership.MembershipStore) *Daemo
 	return s
 }
 
+// WithSchemaRegistry wires the declarative authorization schema registry
+// (loaded from permissions.yaml at daemon startup) so the GetAuthSchema
+// RPC handler can return the live schema to the dashboard.
+// Call this during daemon startup before registering the gRPC server.
+// Added by the declarative-rbac-framework spec.
+func (s *DaemonServer) WithSchemaRegistry(reg *auth.SchemaRegistry) *DaemonServer {
+	s.schemaRegistry = reg
+	return s
+}
+
 // ---------------------------------------------------------------------------
 // provisionerAdapter bridges *provisioner.Provisioner to the DaemonServer's
 // provisioner interface which uses positional arguments and different return
@@ -1318,7 +1336,9 @@ func (s *DaemonServer) ListAgents(ctx context.Context, req *daemonpb.ListAgentsR
 	}
 
 	// Apply capability-based scope filtering when an identity is present.
-	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok && !identity.HasCapability("*") {
+	// Capabilities are set by APIKeyAuthenticator for scoped API keys; the
+	// wildcard "*" grants unrestricted access within the caller's tenant.
+	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok && !slices.Contains(identity.Capabilities, "*") {
 		// Extract allowed_kinds and allowed_names from the identity claims.
 		// These are set by APIKeyAuthenticator for scoped API keys.
 		var allowedKinds, allowedNames []string
@@ -1410,10 +1430,10 @@ func (s *DaemonServer) ListTools(ctx context.Context, req *daemonpb.ListToolsReq
 	s.logger.Debug("tool list request received")
 
 	// Gate the entire tool list on the tools:execute capability when an identity
-	// is present. An identity without this capability should not be able to
-	// discover or invoke tools.
+	// is present. Capabilities are set by APIKeyAuthenticator for scoped API
+	// keys; "*" grants unrestricted access.
 	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
-		if !identity.HasCapability("tools:execute") && !identity.HasCapability("*") {
+		if !slices.Contains(identity.Capabilities, "tools:execute") && !slices.Contains(identity.Capabilities, "*") {
 			s.logger.Debug("tool list denied: identity lacks tools:execute capability",
 				"subject", identity.Subject,
 			)
@@ -1477,10 +1497,10 @@ func (s *DaemonServer) ListPlugins(ctx context.Context, req *daemonpb.ListPlugin
 
 	// When an identity is present and does not hold the wildcard capability,
 	// filter the plugin list to only those the identity is authorised to read.
-	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok && !identity.HasCapability("*") {
+	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok && !slices.Contains(identity.Capabilities, "*") {
 		filtered := plugins[:0]
 		for _, p := range plugins {
-			if identity.HasCapability("plugin:" + p.Name + ":read") {
+			if slices.Contains(identity.Capabilities, "plugin:"+p.Name+":read") {
 				filtered = append(filtered, p)
 			}
 		}
@@ -2931,9 +2951,7 @@ func tenantRecordToProto(r *component.TenantRecord) *TenantInfo {
 // codes.AlreadyExists when the tenant_id is already taken, and
 // codes.InvalidArgument when the tenant_id fails format validation.
 func (s *DaemonServer) CreateTenant(ctx context.Context, req *CreateTenantRequest) (*CreateTenantResponse, error) {
-	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
-		return nil, err
-	}
+	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
 
 	if s.tenantService == nil {
 		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
@@ -3088,9 +3106,7 @@ func (s *DaemonServer) UpdateTenant(ctx context.Context, req *UpdateTenantReques
 // The underlying Redis meta key is retained for audit history.
 // Returns codes.NotFound when the tenant does not exist.
 func (s *DaemonServer) DeleteTenant(ctx context.Context, req *DeleteTenantRequest) (*DeleteTenantResponse, error) {
-	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
-		return nil, err
-	}
+	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
 
 	if s.tenantService == nil {
 		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
@@ -3133,15 +3149,14 @@ func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMem
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id required")
 	}
 
-	// RBAC: platform-operator can see any tenant; owner/admin can see their own.
+	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
+	// (non-cross-tenant callers may only target their own tenant) is
+	// verified here as parameter validation.
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
-	}
-	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != tenantID {
+	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != tenantID {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -3201,10 +3216,8 @@ func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMem
 // Token generation is not yet implemented; a TODO placeholder is returned
 // until the token-issuance service is wired.
 func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error) {
-	// Require platform-operator — this is a cross-tenant privileged operation.
-	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
-		return nil, err
-	}
+	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
+	// This RPC requires the tenants:impersonate permission (platform-operator only).
 
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
@@ -3254,9 +3267,9 @@ func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTe
 // Requires the "platform-operator" role (cross-tenant operation).
 // Returns codes.Unimplemented until the provisioner service has been wired.
 func (s *DaemonServer) ProvisionTenant(ctx context.Context, req *ProvisionTenantRequest) (*ProvisionTenantResponse, error) {
-	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
-		return nil, err
-	}
+	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
+	// This RPC requires the tenants:provision permission (platform-operator or
+	// the dashboard's system-ops provisioner service account).
 
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
@@ -3280,20 +3293,10 @@ func (s *DaemonServer) ProvisionTenant(ctx context.Context, req *ProvisionTenant
 		return nil, status_grpc.Errorf(codes.Internal, "failed to provision tenant: %v", err)
 	}
 
-	// Bootstrap Casbin role hierarchy for the new tenant. This is idempotent —
-	// duplicate policy rules are silently ignored by the Casbin adapter.
-	if s.membershipStore != nil {
-		if concrete, ok := s.membershipStore.(*membership.RedisMembershipStore); ok {
-			if enforcer := concrete.GetEnforcer(); enforcer != nil {
-				if bootstrapErr := membership.BootstrapTenantRoles(enforcer, req.TenantId); bootstrapErr != nil {
-					slog.Warn("failed to bootstrap Casbin roles for tenant",
-						"tenant", req.TenantId,
-						"error", bootstrapErr,
-					)
-				}
-			}
-		}
-	}
+	// Role policies are loaded at daemon startup from permissions.yaml by
+	// the declarative-rbac-framework loader; per-tenant bootstrap is no
+	// longer needed. The tenant's `g` (membership) rules are written by
+	// AddMember below when the owner is recorded in the membership store.
 
 	// Create the owner membership record so the provisioning user is immediately
 	// recognised as the tenant owner. AddMember is idempotent on retry via
@@ -3371,9 +3374,8 @@ func (s *DaemonServer) GetProvisioningStatus(ctx context.Context, req *GetProvis
 // Requires the "platform-operator" role (cross-tenant operation).
 // Returns codes.Unimplemented until the provisioner service has been wired.
 func (s *DaemonServer) DeprovisionTenant(ctx context.Context, req *DeprovisionTenantRequest) (*DeprovisionTenantResponse, error) {
-	if err := auth.RequireRole(ctx, "platform-operator"); err != nil {
-		return nil, err
-	}
+	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
+	// This RPC requires the tenants:deprovision permission.
 
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
@@ -3407,14 +3409,14 @@ func (s *DaemonServer) UpdateTenantBilling(ctx context.Context, req *UpdateTenan
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
 	}
 
+	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
+	// (non-cross-tenant callers may only target their own tenant) is
+	// verified here as parameter validation.
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !identity.HasRole("owner") && !identity.HasRole("platform-operator") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or platform-operator role")
-	}
-	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != req.TenantId {
+	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -3443,14 +3445,14 @@ func (s *DaemonServer) GetTenantBilling(ctx context.Context, req *GetTenantBilli
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
 	}
 
+	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
+	// (non-cross-tenant callers may only target their own tenant) is
+	// verified here as parameter validation.
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !identity.HasRole("owner") && !identity.HasRole("platform-operator") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or platform-operator role")
-	}
-	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != req.TenantId {
+	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -3573,14 +3575,7 @@ func (s *DaemonServer) UpdateOnboardingState(ctx context.Context, req *UpdateOnb
 // "platform-operator" for cross-tenant access.
 // Returns codes.Unimplemented until the invitation service has been wired.
 func (s *DaemonServer) CreateInvitation(ctx context.Context, req *CreateInvitationRequest) (*CreateInvitationResponse, error) {
-	// Check caller has owner or admin role.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
-	}
+	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
 
 	if req.Email == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "email is required")
@@ -3632,14 +3627,7 @@ func (s *DaemonServer) AcceptInvitation(ctx context.Context, req *AcceptInvitati
 // "platform-operator" for cross-tenant access.
 // Returns codes.Unimplemented until the invitation service has been wired.
 func (s *DaemonServer) ListInvitations(ctx context.Context, req *ListInvitationsRequest) (*ListInvitationsResponse, error) {
-	// Check caller has owner or admin role.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
-	}
+	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
 
 	// TODO: Wire to the invitation service once the concrete type is available.
 	if s.invitationStore == nil {
@@ -3675,14 +3663,7 @@ func (s *DaemonServer) ListInvitations(ctx context.Context, req *ListInvitations
 // "platform-operator" for cross-tenant access.
 // Returns codes.Unimplemented until the invitation service has been wired.
 func (s *DaemonServer) RevokeInvitation(ctx context.Context, req *RevokeInvitationRequest) (*RevokeInvitationResponse, error) {
-	// Check caller has owner or admin role.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
-	}
+	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
 
 	if req.Token == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "token is required")
@@ -3713,21 +3694,20 @@ func (s *DaemonServer) RevokeInvitation(ctx context.Context, req *RevokeInvitati
 // "platform-operator" for cross-tenant access.
 // Returns codes.Unimplemented until the API key service has been wired.
 func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
-	// Check caller has owner or admin role.
+	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
+	// (non-cross-tenant callers may only target their own tenant) is
+	// verified here as parameter validation.
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
 	}
 
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
 	}
 
-	// Check caller's tenant matches target tenant (unless platform-operator).
-	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != req.TenantId {
+	// Check caller's tenant matches target tenant (unless cross-tenant capable).
+	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -3766,16 +3746,14 @@ func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest)
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
 	}
 
-	// Check caller has owner or admin role.
+	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
+	// (non-cross-tenant callers may only target their own tenant) is
+	// verified here as parameter validation.
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
-	}
-	// Check caller's tenant matches target tenant (unless platform-operator).
-	if !identity.HasRole("platform-operator") && auth.TenantFromContext(ctx) != req.TenantId {
+	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -3814,14 +3792,7 @@ func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest)
 // "platform-operator" for cross-tenant access.
 // Returns codes.Unimplemented until the API key service has been wired.
 func (s *DaemonServer) RevokeAPIKey(ctx context.Context, req *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error) {
-	// Check caller has owner or admin role.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !identity.HasRole("owner") && !identity.HasRole("admin") && !identity.HasRole("platform-operator") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "requires owner or admin role")
-	}
+	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
 
 	if req.KeyId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "key_id is required")
@@ -4024,12 +3995,14 @@ func (s *DaemonServer) ListUserTenants(ctx context.Context, req *ListUserTenants
 		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
 	}
 
-	// Users may query their own tenants; platform-operators may query any user.
+	// Authorization enforced by the RPCAuthzInterceptor. Users may only
+	// query their OWN tenant memberships unless they are cross-tenant
+	// capable (platform-operator); this is parameter validation.
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
 	}
-	if identity.Subject != req.UserId && !identity.HasRole("platform-operator") {
+	if identity.Subject != req.UserId && !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) {
 		return nil, status_grpc.Error(codes.PermissionDenied, "cannot list tenants for another user")
 	}
 
@@ -4090,6 +4063,92 @@ func (s *DaemonServer) TransferOwnership(ctx context.Context, req *TransferOwner
 	}
 
 	return &TransferOwnershipResponse{}, nil
+}
+
+// GetAuthSchema returns the daemon's live authorization schema loaded from
+// permissions.yaml at startup. Any authenticated caller may call this (the
+// interceptor enforces authentication via the empty required_permissions
+// entry in the YAML). Dashboards and other clients cache the response with
+// TTL and use it to drive UI gating and permission resolution.
+//
+// Added by the declarative-rbac-framework spec.
+func (s *DaemonServer) GetAuthSchema(ctx context.Context, req *GetAuthSchemaRequest) (*GetAuthSchemaResponse, error) {
+	if s.schemaRegistry == nil {
+		// Registry is wired at daemon startup in task 7. If this handler
+		// is reached with a nil registry, the daemon is misconfigured.
+		return nil, status_grpc.Error(codes.Unavailable, "authorization schema not loaded")
+	}
+
+	reg := s.schemaRegistry
+
+	// Build the roles list with transitively-closed permission sets so
+	// clients don't have to walk the inheritance graph.
+	roles := make([]*AuthRole, 0, len(reg.Roles))
+	roleNames := make([]string, 0, len(reg.Roles))
+	for name := range reg.Roles {
+		roleNames = append(roleNames, name)
+	}
+	sort.Strings(roleNames)
+	for _, name := range roleNames {
+		r := reg.Roles[name]
+		// Sort direct permissions and effective permissions for deterministic output.
+		direct := append([]string(nil), r.Permissions...)
+		sort.Strings(direct)
+
+		effectiveSet := reg.RoleClosure[name]
+		effective := make([]string, 0, len(effectiveSet))
+		for p := range effectiveSet {
+			effective = append(effective, p)
+		}
+		sort.Strings(effective)
+
+		roles = append(roles, &AuthRole{
+			Name:                 r.Name,
+			Description:          r.Description,
+			Inherits:             r.Inherits,
+			Permissions:          direct,
+			EffectivePermissions: effective,
+			CrossTenant:          r.CrossTenant,
+		})
+	}
+
+	// Build the permissions list sorted by name for determinism.
+	permNames := make([]string, 0, len(reg.Permissions))
+	for name := range reg.Permissions {
+		permNames = append(permNames, name)
+	}
+	sort.Strings(permNames)
+	perms := make([]*AuthPermission, 0, len(permNames))
+	for _, name := range permNames {
+		p := reg.Permissions[name]
+		perms = append(perms, &AuthPermission{
+			Name:        p.Name,
+			Resource:    p.Resource,
+			Action:      p.Action,
+			Description: p.Description,
+		})
+	}
+
+	// Build the RPC requirements map.
+	rpcReqs := make(map[string]*AuthRpcRequirement, len(reg.RPCRequirements))
+	for method, req := range reg.RPCRequirements {
+		// Sort required_permissions for determinism.
+		required := append([]string(nil), req.RequiredPermissions...)
+		sort.Strings(required)
+		rpcReqs[method] = &AuthRpcRequirement{
+			Method:              req.Method,
+			RequiredPermissions: required,
+			TenantScoped:        req.TenantScoped,
+			Unauthenticated:     req.Unauthenticated,
+		}
+	}
+
+	return &GetAuthSchemaResponse{
+		SchemaVersion:   reg.SchemaVersion,
+		Roles:           roles,
+		Permissions:     perms,
+		RpcRequirements: rpcReqs,
+	}, nil
 }
 
 // membershipToProto converts a domain Membership record to the proto MembershipInfo type.

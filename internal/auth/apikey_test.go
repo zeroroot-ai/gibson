@@ -355,28 +355,12 @@ func adminIdentityContext(roles []string) context.Context {
 
 // TestAPIKeyAuthenticator_SystemTenantRequiresPlatformOperator verifies that
 // creating a key for the reserved SystemTenant ("_system") is rejected when the
-// caller does not hold the "platform-operator" role.  The tenant-scoped "admin"
-// role is NOT sufficient for system-tenant key creation.
-func TestAPIKeyAuthenticator_SystemTenantRequiresPlatformOperator(t *testing.T) {
-	a := newTestAuthenticator(t)
-
-	// No identity in context — must be rejected.
-	_, _, err := a.CreateKey(context.Background(), SystemTenant, nil, nil, nil, "", "")
-	require.Error(t, err, "no identity in context must be rejected")
-	assert.Contains(t, err.Error(), SystemTenant)
-
-	// Identity present but wrong role — must be rejected.
-	ctx := adminIdentityContext([]string{"viewer"})
-	_, _, err = a.CreateKey(ctx, SystemTenant, nil, nil, nil, "", "")
-	require.Error(t, err, "unprivileged role must be rejected")
-	assert.Contains(t, err.Error(), SystemTenant)
-
-	// Tenant-scoped admin — must also be rejected.
-	ctx = adminIdentityContext([]string{"admin"})
-	_, _, err = a.CreateKey(ctx, SystemTenant, nil, nil, nil, "", "")
-	require.Error(t, err, "tenant-scoped admin must be rejected for system tenant")
-	assert.Contains(t, err.Error(), SystemTenant)
-}
+// TestAPIKeyAuthenticator_SystemTenantRequiresPlatformOperator was removed
+// as part of the declarative-rbac-framework spec. The in-function
+// HasRole("platform-operator") check it exercised has been deleted —
+// authorization for CreateAPIKey is now enforced by the RPCAuthzInterceptor
+// via the apikeys:manage permission in permissions.yaml. See
+// rpc_authz_interceptor_test.go for the new coverage.
 
 // TestAPIKeyAuthenticator_SystemTenantAllowedForPlatformOperatorCreate verifies
 // that an identity with the "platform-operator" role can create a key scoped to

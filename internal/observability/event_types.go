@@ -38,6 +38,15 @@ const (
 
 	// Error events
 	EventTypeError EventType = "error"
+
+	// Authorization events emitted by the RPC authz interceptor.
+	// Added by the declarative-rbac-framework spec. These share the same
+	// slog audit pipeline as the existing authentication events in
+	// internal/auth/audit.go, so operators see them in the same Loki query
+	// and the same Grafana dashboard alongside auth_success/auth_failure.
+	// authz_allow routes to slog.Info; authz_deny routes to slog.Warn.
+	EventTypeAuthzAllow EventType = "authz_allow"
+	EventTypeAuthzDeny  EventType = "authz_deny"
 )
 
 // DecisionEventData captures orchestrator decision-making information

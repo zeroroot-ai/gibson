@@ -151,7 +151,10 @@ func (s *RedisMembershipStore) SetEnforcer(e *casbin.Enforcer) {
 
 // GetEnforcer returns the Casbin enforcer attached to this store, or nil if
 // none has been set. Used by callers that need to run Casbin operations
-// (e.g. BootstrapTenantRoles) without taking a separate enforcer dependency.
+// without taking a separate enforcer dependency. Note: under the
+// declarative-rbac-framework, policy rules (`p`) are loaded from
+// permissions.yaml at startup and this enforcer is used only for `g`
+// (membership) rules that track user->role->tenant bindings.
 func (s *RedisMembershipStore) GetEnforcer() *casbin.Enforcer {
 	return s.enforcer
 }

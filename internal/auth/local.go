@@ -139,9 +139,12 @@ func (v *LocalValidator) Authenticate(ctx context.Context, token string) (*Ident
 			ExpiresAt:       time.Now().Add(24 * time.Hour), // Static tokens don't expire
 			AuthenticatedAt: time.Now(),
 		},
-		Roles:        matchedUser.roles,
-		Permissions:  permissions,
-		Capabilities: resolveCapabilitiesFromRoles(matchedUser.roles),
+		Roles:       matchedUser.roles,
+		Permissions: permissions,
+		// Capabilities are no longer derived from roles — the
+		// declarative-rbac-framework interceptor authorizes via Casbin
+		// using roles loaded from permissions.yaml at startup.
+		Capabilities: nil,
 	}
 
 	slog.Debug("local auth: authenticated user",

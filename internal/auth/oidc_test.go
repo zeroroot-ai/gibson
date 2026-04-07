@@ -211,7 +211,7 @@ func TestNewOIDCValidator(t *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, validator)
 				// SDK validator handles JWKS caching internally
-				assert.NotNil(t, validator.sdkValidator)
+				assert.NotNil(t, validator.validator)
 			}
 		})
 	}
@@ -237,7 +237,7 @@ func TestOIDCValidator_Authenticate_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	// Override HTTP client to use test server's client (handles TLS)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	// Create valid token
 	token, err := ti.createToken(jwt.MapClaims{
@@ -279,7 +279,7 @@ func TestOIDCValidator_Authenticate_ExpiredToken(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	// Create expired token (expired 1 minute ago - well beyond clock skew)
 	token, err := ti.createToken(jwt.MapClaims{
@@ -345,7 +345,7 @@ func TestOIDCValidator_Authenticate_InvalidAudience(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	// Create token with wrong audience
 	token, err := ti.createToken(jwt.MapClaims{
@@ -407,7 +407,7 @@ func TestOIDCValidator_Authenticate_MultipleAudiences(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	// Create token with multiple audiences (array format)
 	token, err := ti.createToken(jwt.MapClaims{
@@ -444,7 +444,7 @@ func TestOIDCValidator_ClaimsMapping(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	// Create token with custom claims
 	token, err := ti.createToken(jwt.MapClaims{
@@ -481,7 +481,7 @@ func TestOIDCValidator_GroupsExtraction(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	tests := []struct {
 		name           string
@@ -538,7 +538,7 @@ func TestOIDCValidator_ClockSkewTolerance(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	// Create token that expired 30 seconds ago (within clock skew)
 	token, err := ti.createToken(jwt.MapClaims{
@@ -568,7 +568,7 @@ func TestOIDCValidator_ConcurrentAuthentication(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	// Create valid token
 	token, err := ti.createToken(jwt.MapClaims{
@@ -610,7 +610,7 @@ func TestOIDCValidator_ContextCancellation(t *testing.T) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(t, err)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	token, err := ti.createToken(jwt.MapClaims{})
 	require.NoError(t, err)
@@ -647,7 +647,7 @@ func BenchmarkOIDCValidator_Authenticate(b *testing.B) {
 
 	validator, err := NewOIDCValidator(cfg)
 	require.NoError(b, err)
-	validator.sdkValidator.SetJWKSClient(ti.server.Client())
+	validator.validator.SetHTTPClient(ti.server.Client())
 
 	token, err := ti.createToken(jwt.MapClaims{
 		"sub": "user123",
