@@ -259,14 +259,22 @@ func TestUnaryInterceptor_DeniesTenantScopedRPCWithoutTenant(t *testing.T) {
 
 // --- Cross-tenant flow: provisioner can call ProvisionTenant ----------------
 
+// TestUnaryInterceptor_CrossTenantProvisioner mirrors the dashboard signup
+// flow. A gibson-system-ops Keycloak client service account presents a JWT
+// whose realm_access.roles contains "provisioner". The OIDC validator maps
+// that to the Gibson "provisioner" role via helm oidc[].roleBindings and
+// populates identity.Roles. The interceptor must allow the call based on
+// the YAML role closure alone, without any Casbin g-rule having been added
+// for this subject. (Regression test for the bug where every cross-tenant
+// caller was denied because the interceptor was calling casbin.Enforce
+// which requires a g-rule that no cross-tenant validator ever installs.)
 func TestUnaryInterceptor_CrossTenantProvisioner(t *testing.T) {
 	interceptor, rec := newTestInterceptor(t)
 
-	// system-ops is bound to provisioner in the wildcard domain, mirroring
-	// the dashboard signup flow.
-	interceptor.bindRole(t, "system-ops", "provisioner", "*")
-
-	ctx := ctxWithIdentity("system-ops", []string{"provisioner"}, "")
+	// Intentionally NO bindRole call — the OIDC validator doesn't add
+	// g-rules and neither should the test, so we're exercising the exact
+	// production code path.
+	ctx := ctxWithIdentity("system-ops-uuid", []string{"provisioner"}, "")
 
 	handlerCalled := false
 	handler := func(ctx context.Context, req any) (any, error) {
@@ -286,6 +294,39 @@ func TestUnaryInterceptor_CrossTenantProvisioner(t *testing.T) {
 	}
 	if resp != "provisioned" {
 		t.Error("handler response lost")
+	}
+	if !rec.spanCalls[0].Allowed {
+		t.Error("span call should be allow")
+	}
+}
+
+// TestUnaryInterceptor_K8sServiceAccountPollWork mirrors a gibson-tool-*
+// ServiceAccount calling ComponentService/PollWork. The K8s validator
+// populates identity.Roles=["tool-executor"] via helm kubernetes.roleBindings
+// (with a single entry — the k8s.go dedupe fix ensures deriveComponentRole
+// doesn't append a second copy). The interceptor must allow based on the
+// YAML role closure alone. Regression test for the same cross-tenant
+// casbin.Enforce bug that blocked every worker component from registering.
+func TestUnaryInterceptor_K8sServiceAccountPollWork(t *testing.T) {
+	interceptor, rec := newTestInterceptor(t)
+
+	ctx := ctxWithIdentity("gibson:gibson-tool-httpx", []string{"tool-executor"}, "")
+
+	handlerCalled := false
+	handler := func(ctx context.Context, req any) (any, error) {
+		handlerCalled = true
+		return "polled", nil
+	}
+
+	_, err := interceptor.Unary()(ctx, nil, &grpc.UnaryServerInfo{
+		FullMethod: "/gibson.component.v1.ComponentService/PollWork",
+	}, handler)
+
+	if err != nil {
+		t.Fatalf("tool-executor should be allowed PollWork, got error: %v", err)
+	}
+	if !handlerCalled {
+		t.Error("handler should have been called")
 	}
 	if !rec.spanCalls[0].Allowed {
 		t.Error("span call should be allow")

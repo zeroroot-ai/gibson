@@ -170,8 +170,14 @@ func (v *K8sValidator) Authenticate(ctx context.Context, token string) (*Identit
 		// Auto-assign component role for Gibson-managed ServiceAccounts.
 		// This is additive — existing role bindings still apply. Non-Gibson SAs
 		// are unaffected because deriveComponentRole returns "" for unrecognised names.
+		// Dedupe: helm's kubernetes.roleBindings already maps the gibson-tool-*
+		// / gibson-agent-* / gibson-plugin-* pattern to the same executor role,
+		// so the role binder above usually returns it too. Appending blindly
+		// produced roles=[tool-executor,tool-executor] in audit events.
 		if role, compType, compName := deriveComponentRole(saName); role != "" {
-			identity.Roles = append(identity.Roles, role)
+			if !containsString(identity.Roles, role) {
+				identity.Roles = append(identity.Roles, role)
+			}
 			identity.Claims["gibson.io/type"] = compType
 			identity.Claims["gibson.io/name"] = compName
 		}
@@ -283,4 +289,14 @@ func deriveComponentRole(saName string) (role, compType, compName string) {
 		}
 	}
 	return "", "", ""
+}
+
+// containsString reports whether s is present in slice.
+func containsString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

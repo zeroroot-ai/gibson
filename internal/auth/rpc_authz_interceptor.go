@@ -175,9 +175,39 @@ func (i *RPCAuthzInterceptor) authorize(ctx context.Context, method string) erro
 		}
 	}
 
-	// Resolve the caller's effective permissions (for audit event payload).
-	// Done up-front so deny events include what the caller DID have, which
-	// is the first question every operator asks when debugging a denial.
+	// Resolve the caller's effective permissions directly from the YAML
+	// role closure. This is the single source of truth for "what can this
+	// caller do" and is used for both the audit event payload AND the
+	// enforcement check below.
+	//
+	// We deliberately do NOT call casbin.Enforce(subject, domain, obj, act)
+	// here, even though the enforcer is still available on `i.enforcer`
+	// for future per-tenant use cases. The reason: casbin's matcher relies
+	// on a `g` (grouping) rule linking the request subject UUID to a role
+	// name, and that grouping rule is ONLY populated by the tenant
+	// membership store (internal/membership/store.go) for users who are
+	// members of a specific tenant. Cross-tenant callers — OIDC tokens
+	// carrying a realm role (provisioner, platform-operator), K8s SA
+	// tokens carrying a component role (tool-executor, agent-executor,
+	// plugin-executor), and API keys carrying a default role (admin,
+	// platform-operator) — have their Roles populated by the respective
+	// auth validators BEFORE the authz interceptor runs, but those
+	// validators never call enforcer.AddGroupingPolicy. Asking casbin
+	// about those subjects therefore always returns deny, which is why
+	// every cross-tenant RPC (ProvisionTenant for signup, PollWork /
+	// Heartbeat / RegisterComponent for component workers, every
+	// platform-operator admin call) was failing with
+	// "missing_permission: X" even though the registry closure on the
+	// same identity clearly contains X.
+	//
+	// Since identity.Roles is already populated by the trusted auth
+	// interceptors (OIDC JWT validator, K8s TokenReview, HMAC-verified
+	// API key) before this interceptor runs, and since tenant-scoped
+	// auth uses the role that the membership store resolved for the
+	// *active* tenant (so "alice is admin in tenant-a but not tenant-b"
+	// is honoured at membership-store lookup time, not at enforce
+	// time), the registry closure is both necessary and sufficient for
+	// the per-RPC permission decision made here.
 	grantedSet := i.registry.ResolvePermissions(identity.Roles)
 	granted := make([]string, 0, len(grantedSet))
 	for p := range grantedSet {
@@ -192,26 +222,16 @@ func (i *RPCAuthzInterceptor) authorize(ctx context.Context, method string) erro
 		return nil
 	}
 
-	// Enforce each required permission via Casbin. ANY failure denies.
+	// Enforce each required permission against the closure. ANY failure denies.
 	for _, permName := range req.RequiredPermissions {
-		perm, ok := i.registry.Permissions[permName]
-		if !ok {
+		if _, ok := i.registry.Permissions[permName]; !ok {
 			// Should be impossible — the loader validates this at startup —
 			// but belt-and-suspenders deny if it happens.
 			i.recordDecision(ctx, method, identity.Subject, domain, identity.Roles, false,
 				fmt.Sprintf("internal: permission %q not in registry", permName), withGranted(granted), withPermission(permName))
 			return genericAuthzError()
 		}
-
-		allowed, err := i.enforcer.Enforce(identity.Subject, domain, perm.Resource, perm.Action)
-		if err != nil {
-			// Casbin internal error (e.g. model eval failure). Fail closed
-			// and report the specific error in audit so it can be diagnosed.
-			i.recordDecision(ctx, method, identity.Subject, domain, identity.Roles, false,
-				fmt.Sprintf("casbin_error: %s", err.Error()), withGranted(granted), withPermission(permName))
-			return genericAuthzError()
-		}
-		if !allowed {
+		if _, ok := grantedSet[permName]; !ok {
 			reason := fmt.Sprintf("missing_permission: %s (caller_roles=[%s])", permName, strings.Join(identity.Roles, ","))
 			i.recordDecision(ctx, method, identity.Subject, domain, identity.Roles, false, reason,
 				withGranted(granted), withPermission(permName))
