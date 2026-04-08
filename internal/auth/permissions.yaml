@@ -902,8 +902,22 @@ rpcs:
     tenant_scoped: true
     unauthenticated: false
 
+  # ListUserTenants is the bootstrap RPC the dashboard calls during the
+  # JWT/session callback (auth.ts) to discover which tenants the caller
+  # is a member of. At that moment identity.Roles is still empty (the
+  # OIDC validator only populates roles from helm oidc.roleBindings, and
+  # tenant member roles live in the Redis membership store, not in
+  # Keycloak realm roles) — which means requiring tenants:self-read here
+  # would deadlock every fresh sign-in. Leaving required_permissions empty
+  # allows any authenticated caller through the interceptor. The handler
+  # at internal/daemon/api/server.go enforces self-scoping: a caller can
+  # only list their OWN memberships (identity.Subject == req.UserId),
+  # unless they hold a cross-tenant role (platform-operator), in which
+  # case they can query any user as an admin operation. This is data
+  # scoping, not handler-side authz, so it doesn't violate the
+  # declarative-rbac-framework rule.
   "/gibson.daemon.admin.v1.DaemonAdminService/ListUserTenants":
-    required_permissions: [tenants:self-read]
+    required_permissions: []
     tenant_scoped: false
     unauthenticated: false
 

@@ -352,9 +352,12 @@ func (s *TenantService) ListTenants(ctx context.Context) ([]TenantRecord, error)
 	// Authorization enforced by the gRPC RPCAuthzInterceptor: the
 	// DaemonAdminService/ListTenants RPC requires the tenants:list-all
 	// permission (platform-operator only). Regular users who want to
-	// enumerate their own tenant memberships call ListUserTenants instead
-	// (which requires tenants:self-read). This service function always
-	// returns the full list; filtering is the interceptor's job.
+	// enumerate their own tenant memberships call ListUserTenants
+	// instead, which is the bootstrap RPC called by the dashboard's
+	// JWT callback and therefore has empty required_permissions
+	// (handler-side self-scoping prevents cross-user leaks). This
+	// service function always returns the full list; filtering is the
+	// interceptor's job.
 	ids, err := s.client.SMembers(ctx, tenantIndexKey).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tenant IDs from index: %w", err)
