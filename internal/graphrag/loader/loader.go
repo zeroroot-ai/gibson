@@ -506,6 +506,13 @@ func (l *GraphLoader) loadCertificates(ctx context.Context, execCtx ExecContext,
 	return l.loadProtoNodes(ctx, execCtx, "certificate", protos, nil, "")
 }
 
+// LoadFindings stores a set of Finding protos in the knowledge graph as root nodes
+// attached to the MissionRun identified in execCtx. This is the exported entry point
+// used by the harness GraphRAG bridge to persist agent-submitted findings.
+func (l *GraphLoader) LoadFindings(ctx context.Context, execCtx ExecContext, findings []*graphragpb.Finding) (*LoadResult, error) {
+	return l.loadFindings(ctx, execCtx, findings)
+}
+
 // loadFindings loads Finding protos as root nodes attached to MissionRun.
 func (l *GraphLoader) loadFindings(ctx context.Context, execCtx ExecContext, findings []*graphragpb.Finding) (*LoadResult, error) {
 	protos := make([]protoreflect.ProtoMessage, len(findings))

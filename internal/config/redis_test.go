@@ -127,12 +127,6 @@ core:
   home_dir: ~/.gibson
   parallel_limit: 10
   timeout: 5m
-database:
-  path: ~/.gibson/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
 security:
   encryption_algorithm: aes-256-gcm
   key_derivation: scrypt
@@ -217,12 +211,6 @@ core:
   home_dir: ~/.gibson
   parallel_limit: 10
   timeout: 5m
-database:
-  path: ~/.gibson/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
 security:
   encryption_algorithm: aes-256-gcm
   key_derivation: scrypt
@@ -295,12 +283,6 @@ core:
   home_dir: ~/.gibson
   parallel_limit: 10
   timeout: 5m
-database:
-  path: ~/.gibson/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
 security:
   encryption_algorithm: aes-256-gcm
   key_derivation: scrypt
@@ -405,13 +387,10 @@ activity_logging:
 	require.NoError(t, err)
 	tmpFile.Close()
 
-	// Load config - should succeed and log a warning about deprecated database section
+	// Load config - should fail because the deprecated 'database' section is no longer supported
 	loader := NewConfigLoader(NewValidator())
 	cfg, err := loader.Load(tmpFile.Name())
-	require.NoError(t, err, "Config should load successfully and just warn about deprecated database section")
-	assert.NotNil(t, cfg)
-
-	// Verify Redis config is loaded (database section is ignored)
-	assert.NotEmpty(t, cfg.Redis.URL)
-	assert.Equal(t, "redis://localhost:6379", cfg.Redis.URL)
+	require.Error(t, err, "Config should fail to load when deprecated 'database' section is present")
+	assert.Contains(t, err.Error(), "database")
+	assert.Nil(t, cfg)
 }

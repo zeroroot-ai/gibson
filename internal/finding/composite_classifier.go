@@ -3,7 +3,9 @@ package finding
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 )
@@ -23,6 +25,15 @@ type CompositeClassifier struct {
 	llm       *LLMFindingClassifier
 	threshold float64
 	mu        sync.RWMutex
+
+	// Atomic classification counters — updated on every Classify call.
+	totalClassifications atomic.Int64
+	heuristicOnly        atomic.Int64
+	llmFallback          atomic.Int64
+
+	// Optional metrics hook; called after each classification with (category, path).
+	// "path" is either "heuristic" or "llm". Set via WithClassificationRecorder.
+	classificationRecorder func(ctx context.Context, category, path string)
 }
 
 // NewCompositeClassifier creates a new composite classifier.
@@ -43,6 +54,18 @@ func NewCompositeClassifier(heuristic *HeuristicClassifier, llm *LLMFindingClass
 		llm:       llm,
 		threshold: cfg.confidenceThreshold,
 	}
+}
+
+// WithClassificationRecorder attaches a metrics callback invoked after each
+// Classify call. The function receives (ctx, category, path) where path is
+// either "heuristic" or "llm". Callers typically wire this to
+// OTelMetricsRecorder.RecordClassification to avoid an import cycle.
+// Passing nil is safe (no-op).
+func (cc *CompositeClassifier) WithClassificationRecorder(fn func(ctx context.Context, category, path string)) *CompositeClassifier {
+	cc.mu.Lock()
+	cc.classificationRecorder = fn
+	cc.mu.Unlock()
+	return cc
 }
 
 // WithHeuristicThreshold sets a custom threshold for heuristic confidence.
@@ -84,9 +107,23 @@ func (cc *CompositeClassifier) Classify(ctx context.Context, finding agent.Findi
 		return nil, fmt.Errorf("heuristic classification failed: %w", err)
 	}
 
+	cc.totalClassifications.Add(1)
+
+	// Warn when confidence is below the threshold to assist operators in tuning.
+	if heuristicResult.Confidence < threshold {
+		slog.WarnContext(ctx, "heuristic classification below confidence threshold",
+			slog.String("finding_id", finding.ID.String()),
+			slog.String("finding_title", finding.Title),
+			slog.Float64("confidence", heuristicResult.Confidence),
+			slog.Float64("threshold", threshold),
+		)
+	}
+
 	// If heuristic is confident, use its result
 	if heuristicResult.Confidence >= threshold {
-		// Mark as composite but keep heuristic as primary method
+		cc.heuristicOnly.Add(1)
+		cc.recordClassificationMetric(ctx, string(finding.Category), "heuristic")
+
 		heuristicResult.Method = MethodComposite
 		heuristicResult.Rationale = fmt.Sprintf("Heuristic (%.2f confidence): %s",
 			heuristicResult.Confidence, heuristicResult.Rationale)
@@ -97,11 +134,17 @@ func (cc *CompositeClassifier) Classify(ctx context.Context, finding agent.Findi
 	llmResult, err := cc.llm.Classify(ctx, finding)
 	if err != nil {
 		// If LLM fails, return heuristic result with warning
+		cc.heuristicOnly.Add(1)
+		cc.recordClassificationMetric(ctx, string(finding.Category), "heuristic")
+
 		heuristicResult.Method = MethodComposite
 		heuristicResult.Rationale = fmt.Sprintf("Heuristic fallback (LLM failed): %s",
 			heuristicResult.Rationale)
 		return heuristicResult, nil
 	}
+
+	cc.llmFallback.Add(1)
+	cc.recordClassificationMetric(ctx, string(finding.Category), "llm")
 
 	// Use LLM result but mark as composite
 	llmResult.Method = MethodComposite
@@ -109,6 +152,16 @@ func (cc *CompositeClassifier) Classify(ctx context.Context, finding agent.Findi
 		heuristicResult.Confidence, llmResult.Confidence, llmResult.Rationale)
 
 	return llmResult, nil
+}
+
+// recordClassificationMetric calls the optional metrics hook if set.
+func (cc *CompositeClassifier) recordClassificationMetric(ctx context.Context, category, path string) {
+	cc.mu.RLock()
+	fn := cc.classificationRecorder
+	cc.mu.RUnlock()
+	if fn != nil {
+		fn(ctx, category, path)
+	}
 }
 
 // BulkClassify classifies multiple findings using the composite approach.
@@ -220,17 +273,23 @@ type ClassificationStats struct {
 	HeuristicRate        float64 // Percentage of classifications handled by heuristic
 }
 
-// Stats tracks and returns classification statistics.
-// Note: This is a simple implementation. Production systems might want
-// to track this in a metrics system like Prometheus.
+// Stats returns current classification statistics read from atomic counters.
+// Safe to call concurrently with Classify.
 func (cc *CompositeClassifier) Stats() ClassificationStats {
-	// This is a placeholder. Real implementation would track stats
-	// during Classify calls using atomic counters or metrics system.
+	total := cc.totalClassifications.Load()
+	heuristic := cc.heuristicOnly.Load()
+	llm := cc.llmFallback.Load()
+
+	var rate float64
+	if total > 0 {
+		rate = float64(heuristic) / float64(total)
+	}
+
 	return ClassificationStats{
-		TotalClassifications: 0,
-		HeuristicOnly:        0,
-		LLMFallback:          0,
-		HeuristicRate:        0.0,
+		TotalClassifications: int(total),
+		HeuristicOnly:        int(heuristic),
+		LLMFallback:          int(llm),
+		HeuristicRate:        rate,
 	}
 }
 

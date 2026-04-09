@@ -139,10 +139,10 @@
 //
 // # Structured Logging
 //
-// TracedLogger provides structured logging with automatic trace correlation:
+// Logger provides structured logging with automatic trace correlation:
 //
-//	handler := NewJSONHandler(os.Stdout, slog.LevelInfo)
-//	logger := NewTracedLogger(handler, missionID, agentName)
+//	cfg := Config{Level: slog.LevelInfo, Output: os.Stdout, RedactSensitive: true}
+//	logger := NewLogger(cfg).WithMission(missionID, "").WithAgent(agentName)
 //
 //	// Logs automatically include trace_id, span_id, mission_id, and agent_name
 //	logger.Info(ctx, "Starting reconnaissance",
@@ -332,8 +332,8 @@
 //	meter := mp.Meter("gibson")
 //	recorder := NewOpenTelemetryMetricsRecorder(meter)
 //
-//	handler := NewJSONHandler(os.Stdout, slog.LevelInfo)
-//	logger := NewTracedLogger(handler, missionID, agentName)
+//	cfg := Config{Level: slog.LevelInfo, Output: os.Stdout, RedactSensitive: true}
+//	logger := NewLogger(cfg).WithMission(missionID, "").WithAgent(agentName)
 //
 //	// 4. Create health monitor
 //	monitor := NewHealthMonitor(recorder, logger)

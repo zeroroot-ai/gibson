@@ -3,10 +3,12 @@ package mission
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/checkpoint"
+	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -19,6 +21,7 @@ type ControllerCheckpointMethods struct {
 	store         MissionStore
 	threadManager checkpoint.ThreadManager
 	approvalMgr   checkpoint.ApprovalManager
+	eventBus      events.EventBus // optional; nil means no-op event emission
 
 	// locksMu protects access to the operationLocks map
 	locksMu sync.Mutex
@@ -27,12 +30,15 @@ type ControllerCheckpointMethods struct {
 }
 
 // NewControllerCheckpointMethods creates a new checkpoint methods extension for MissionController.
+//
+// eventBus is optional — pass nil to disable lifecycle event emission.
 func NewControllerCheckpointMethods(
 	checkpointer checkpoint.ThreadedCheckpointer,
 	restorer checkpoint.StateRestorer,
 	store MissionStore,
 	threadManager checkpoint.ThreadManager,
 	approvalMgr checkpoint.ApprovalManager,
+	eventBus events.EventBus,
 ) *ControllerCheckpointMethods {
 	return &ControllerCheckpointMethods{
 		checkpointer:   checkpointer,
@@ -40,6 +46,7 @@ func NewControllerCheckpointMethods(
 		store:          store,
 		threadManager:  threadManager,
 		approvalMgr:    approvalMgr,
+		eventBus:       eventBus,
 		operationLocks: make(map[types.ID]*sync.Mutex),
 	}
 }
@@ -514,32 +521,55 @@ func (c *ControllerCheckpointMethods) AcquireLock(
 	}, nil
 }
 
-// EmitPausedEvent emits an event when a mission is paused with a checkpoint.
-// This can be used by monitoring systems to track mission lifecycle events.
+// EmitPausedEvent emits a mission.paused event to the event bus.
+// Callers should invoke this after a checkpoint has been successfully saved.
+// If the event bus is nil or Publish returns an error, the error is logged as
+// a WARN and the method returns — it must never block mission control flow.
 func (c *ControllerCheckpointMethods) EmitPausedEvent(
 	ctx context.Context,
 	missionID types.ID,
 	checkpointID string,
 ) {
-	// In a production system, this would emit to an event bus or logging system
-	// For now, this is a placeholder for future event emission logic
-	// Example: c.eventBus.Emit(ctx, MissionPausedEvent{MissionID: missionID, CheckpointID: checkpointID})
-	_ = ctx
-	_ = missionID
-	_ = checkpointID
+	if c.eventBus == nil {
+		return
+	}
+	evt := events.Event{
+		Type:      events.EventMissionPaused,
+		MissionID: missionID,
+		Timestamp: time.Now(),
+		Payload:   map[string]any{"checkpoint_id": checkpointID},
+	}
+	if err := c.eventBus.Publish(ctx, evt); err != nil {
+		slog.WarnContext(ctx, "failed to publish mission.paused event",
+			slog.String("mission_id", missionID.String()),
+			slog.String("checkpoint_id", checkpointID),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
-// EmitResumedEvent emits an event when a mission is resumed from a checkpoint.
-// This can be used by monitoring systems to track mission lifecycle events.
+// EmitResumedEvent emits a mission.resumed event to the event bus.
+// Callers should invoke this after a mission has been successfully resumed from
+// a checkpoint. Errors from Publish are logged as WARN and do not propagate.
 func (c *ControllerCheckpointMethods) EmitResumedEvent(
 	ctx context.Context,
 	missionID types.ID,
 	checkpointID string,
 ) {
-	// In a production system, this would emit to an event bus or logging system
-	// For now, this is a placeholder for future event emission logic
-	// Example: c.eventBus.Emit(ctx, MissionResumedEvent{MissionID: missionID, CheckpointID: checkpointID})
-	_ = ctx
-	_ = missionID
-	_ = checkpointID
+	if c.eventBus == nil {
+		return
+	}
+	evt := events.Event{
+		Type:      events.EventMissionResumed,
+		MissionID: missionID,
+		Timestamp: time.Now(),
+		Payload:   map[string]any{"checkpoint_id": checkpointID},
+	}
+	if err := c.eventBus.Publish(ctx, evt); err != nil {
+		slog.WarnContext(ctx, "failed to publish mission.resumed event",
+			slog.String("mission_id", missionID.String()),
+			slog.String("checkpoint_id", checkpointID),
+			slog.String("error", err.Error()),
+		)
+	}
 }

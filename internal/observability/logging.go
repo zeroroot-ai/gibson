@@ -341,39 +341,3 @@ func NewTextHandler(w io.Writer, level slog.Level) slog.Handler {
 	})
 }
 
-// TracedLogger is a backward compatibility alias for Logger.
-// DEPRECATED: Use Logger directly instead.
-type TracedLogger = Logger
-
-// NewTracedLogger creates a new Logger configured for backward compatibility.
-// DEPRECATED: Use NewLogger with WithMission and WithAgent instead.
-//
-// Parameters:
-//   - handler: The slog handler to use
-//   - missionID: The mission identifier
-//   - agentName: The agent name
-//
-// Returns:
-//   - *TracedLogger: A configured logger (alias for *Logger)
-//
-// Example migration:
-//
-//	// Old code:
-//	logger := NewTracedLogger(handler, "mission-123", "agent-name")
-//
-//	// New code:
-//	cfg := Config{Level: slog.LevelInfo, Output: output, RedactSensitive: true}
-//	logger := NewLogger(cfg).WithMission("mission-123", "").WithAgent("agent-name")
-func NewTracedLogger(handler slog.Handler, missionID, agentName string) *TracedLogger {
-	// Extract level and output from handler (best effort)
-	// This is a compatibility shim - the handler is already configured
-	return &Logger{
-		slog:        slog.New(handler),
-		config:      Config{RedactSensitive: true}, // Default to redacting for backward compat
-		missionID:   missionID,
-		agentName:   agentName,
-		component:   "",
-		missionName: "",
-		nodeID:      "",
-	}
-}

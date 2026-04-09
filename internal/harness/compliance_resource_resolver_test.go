@@ -249,3 +249,85 @@ func TestResourceResolver_NilReader(t *testing.T) {
 }
 
 func strptr(s string) *string { return &s }
+
+// --------------------------------------------------------------------------
+// Slot-binding lookup tests (Task 13)
+// --------------------------------------------------------------------------
+
+func TestResolveLLMCall_WithSlotBinding(t *testing.T) {
+	r := &ResourceResolver{}
+
+	bindings := map[string]SlotBinding{
+		"primary": {Provider: "anthropic", ModelID: "claude-3-5-sonnet-20241022"},
+	}
+	ctx := ContextWithSlotBindings(context.Background(), bindings)
+
+	target := LLMTarget{Slot: "primary", Ctx: ctx}
+	res := r.resolveLLMCall(target)
+
+	if res.ResourceType != "llm:anthropic" {
+		t.Errorf("ResourceType = %q, want %q", res.ResourceType, "llm:anthropic")
+	}
+	if res.ResourceURI != "claude-3-5-sonnet-20241022" {
+		t.Errorf("ResourceURI = %q, want %q", res.ResourceURI, "claude-3-5-sonnet-20241022")
+	}
+}
+
+func TestResolveLLMCall_NoSlotBinding_FallsBackToSlotPlaceholder(t *testing.T) {
+	r := &ResourceResolver{}
+
+	// Context has no bindings.
+	target := LLMTarget{Slot: "primary", Ctx: context.Background()}
+	res := r.resolveLLMCall(target)
+
+	if res.ResourceType != "llm:slot:primary" {
+		t.Errorf("ResourceType = %q, want %q", res.ResourceType, "llm:slot:primary")
+	}
+	if res.ResourceURI != "primary" {
+		t.Errorf("ResourceURI = %q, want %q", res.ResourceURI, "primary")
+	}
+}
+
+func TestResolveLLMCall_ProviderAlreadySet_SkipsBindingLookup(t *testing.T) {
+	r := &ResourceResolver{}
+
+	// Provider and ModelID already populated — this is the post-call path.
+	// Even if a binding exists for a different model, the explicit values win.
+	bindings := map[string]SlotBinding{
+		"primary": {Provider: "openai", ModelID: "gpt-4o"},
+	}
+	ctx := ContextWithSlotBindings(context.Background(), bindings)
+
+	target := LLMTarget{
+		Slot:     "primary",
+		Provider: "anthropic",
+		ModelID:  "claude-3-opus-20240229",
+		Ctx:      ctx,
+	}
+	res := r.resolveLLMCall(target)
+
+	if res.ResourceType != "llm:anthropic" {
+		t.Errorf("ResourceType = %q, want %q", res.ResourceType, "llm:anthropic")
+	}
+	if res.ResourceURI != "claude-3-opus-20240229" {
+		t.Errorf("ResourceURI = %q, want %q", res.ResourceURI, "claude-3-opus-20240229")
+	}
+}
+
+func TestSlotBindingsFromContext_NilIfAbsent(t *testing.T) {
+	bindings := SlotBindingsFromContext(context.Background())
+	if bindings != nil {
+		t.Errorf("expected nil bindings, got %v", bindings)
+	}
+}
+
+func TestContextWithSlotBindings_RoundTrip(t *testing.T) {
+	want := map[string]SlotBinding{
+		"analysis": {Provider: "gemini", ModelID: "gemini-1.5-pro"},
+	}
+	ctx := ContextWithSlotBindings(context.Background(), want)
+	got := SlotBindingsFromContext(ctx)
+	if got["analysis"].Provider != "gemini" {
+		t.Errorf("Provider = %q, want %q", got["analysis"].Provider, "gemini")
+	}
+}

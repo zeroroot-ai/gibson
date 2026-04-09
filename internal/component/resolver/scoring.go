@@ -2,6 +2,8 @@ package resolver
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"math"
 
 	"github.com/zero-day-ai/gibson/internal/component"
@@ -87,11 +89,18 @@ type ScoredComponent struct {
 	LocalityScore   float64
 }
 
+const (
+	// maxQueueDepth is the denominator used for normalising Prometheus queue
+	// depth metrics to a [0, 1] load score.
+	maxQueueDepth = 100.0
+)
+
 // DefaultComponentScorer implements ComponentScorer with configurable criteria.
 type DefaultComponentScorer struct {
-	criteria          *ScoringCriteria
-	capabilityMatcher CapabilityMatcher
-	lifecycleManager  component.LifecycleManager
+	criteria           *ScoringCriteria
+	capabilityMatcher  CapabilityMatcher
+	lifecycleManager   component.LifecycleManager
+	prometheusQuerier  PrometheusQuerier // optional; nil uses status-based fallback
 }
 
 // NewComponentScorer creates a new component scorer with the given criteria and dependencies.
@@ -106,6 +115,15 @@ func NewComponentScorer(criteria *ScoringCriteria, lifecycle component.Lifecycle
 		capabilityMatcher: NewCapabilityMatcher(),
 		lifecycleManager:  lifecycle,
 	}
+}
+
+// WithPrometheusQuerier configures the scorer to derive load scores from real
+// Prometheus metrics instead of using the static status-based fallback.
+// The querier is called in scoreLoad with the PromQL query
+// gibson_component_queue_depth{component_id="<id>"}.
+func (s *DefaultComponentScorer) WithPrometheusQuerier(q PrometheusQuerier) *DefaultComponentScorer {
+	s.prometheusQuerier = q
+	return s
 }
 
 // Score calculates a total score for a component.
@@ -294,17 +312,45 @@ func (s *DefaultComponentScorer) scoreHealth(ctx context.Context, comp *componen
 	}
 }
 
-// scoreLoad calculates the load score.
-// This is a placeholder - in a real implementation, this would query metrics
-// or the component's runtime to determine current load.
+// scoreLoad calculates the load score for a component.
+//
+// When a PrometheusQuerier is configured it issues the PromQL query
+//
+//	gibson_component_queue_depth{component_id="<id>"}
+//
+// and maps the queue depth to a [0, 1] score using:
+//
+//	score = max(0, 1 - depth / maxQueueDepth)
+//
+// A depth of 0 → score 1.0 (no load), depth of 100 → score 0.0 (fully loaded).
+// On query error the method logs a WARN and returns 0.5 (neutral).
+//
+// When no querier is configured the method falls back to a static
+// component-status heuristic.
 func (s *DefaultComponentScorer) scoreLoad(ctx context.Context, comp *component.Component) float64 {
-	// TODO: Integrate with metrics system to get actual load
-	// For now, running components get a neutral score, stopped ones get high score
+	if s.prometheusQuerier != nil {
+		query := fmt.Sprintf(`gibson_component_queue_depth{component_id="%d"}`, comp.ID)
+		depth, err := s.prometheusQuerier.QueryInstant(ctx, query)
+		if err != nil {
+			slog.WarnContext(ctx, "load score Prometheus query failed, using neutral score",
+				slog.Int64("component_id", comp.ID),
+				slog.String("error", err.Error()),
+			)
+			return 0.5
+		}
+		score := 1.0 - depth/maxQueueDepth
+		if score < 0 {
+			score = 0
+		}
+		return score
+	}
+
+	// Status-based fallback when no metrics are available.
 	switch comp.Status {
 	case component.ComponentStatusRunning:
-		return 0.5 // Assume moderate load if running
+		return 0.5
 	case component.ComponentStatusStopped, component.ComponentStatusAvailable:
-		return 1.0 // Not running means no load
+		return 1.0
 	default:
 		return 0.5
 	}

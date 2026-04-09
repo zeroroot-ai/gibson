@@ -22,14 +22,17 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -42,12 +45,8 @@ import (
 // ---------------------------------------------------------------------------
 
 // LLMCompleter routes a completion request for a given mission slot to the
-// appropriate LLM provider. The missionID is used to resolve per-tenant
-// slot configuration.
-//
-// TODO: replace call site with harness.Complete once mission context lookup
-// is available (task 5.3). Until then, implementors may use a simple
-// provider-registry lookup keyed by tenant + slot.
+// appropriate LLM provider. The missionID is used to resolve per-mission
+// slot configuration overrides before falling back to tenant-level defaults.
 type LLMCompleter interface {
 	// Complete executes a blocking completion using the named slot.
 	// messagesJSON is a JSON-encoded []llm.Message.
@@ -62,12 +61,20 @@ type LLMCompleter interface {
 
 // FindingSubmitter persists a serialized finding produced by a remote agent.
 // The JSON payload must conform to the agent.Finding schema.
-//
-// TODO: wire to the Neo4j/GraphRAG pipeline in task 5.4+. For now, the
-// InMemoryFindingSubmitter logs and generates a finding_id.
+// When graphLoader is also wired, the finding is additionally stored to Neo4j
+// via LoadFindings for knowledge graph integration.
 type FindingSubmitter interface {
 	// Submit stores the finding and returns a generated finding_id.
 	Submit(ctx context.Context, tenant, workID, findingJSON, severity, title string) (findingID string, err error)
+}
+
+// ResultDiscoveryProcessor processes a DiscoveryResult (proto field 100) extracted
+// from a tool response and persists the discovered entities in Neo4j.
+// It is satisfied by *processor.discoveryProcessor from the graphrag/processor package.
+type ResultDiscoveryProcessor interface {
+	// Process persists all entities in the DiscoveryResult to the knowledge graph.
+	// The execCtx carries mission/agent provenance for the DISCOVERED relationship.
+	Process(ctx context.Context, execCtx loader.ExecContext, discovery *graphragpb.DiscoveryResult) (interface{}, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +223,14 @@ type ComponentServiceServer struct {
 	// stepHintsReporter accepts planning step hints from remote agents.
 	// May be nil; ReportStepHints returns codes.Unimplemented when nil.
 	stepHintsReporter StepHintsReporter
+
+	// discoveryProcessor persists DiscoveryResult (proto field 100) from tool responses to Neo4j.
+	// May be nil; when nil, field-100 discovery data is not stored to the graph.
+	discoveryProcessor ResultDiscoveryProcessor
+
+	// graphLoader persists finding nodes to Neo4j when SubmitFinding succeeds.
+	// May be nil; when nil, findings are only stored via findingSubmitter (not graphed).
+	graphLoader *loader.GraphLoader
 }
 
 // NewComponentServiceServer constructs a ComponentServiceServer with the core
@@ -366,6 +381,23 @@ func (s *ComponentServiceServer) WithTaxonomyProvider(tp TaxonomyProvider) *Comp
 // May be nil; ReportStepHints returns codes.Unimplemented when nil.
 func (s *ComponentServiceServer) WithStepHintsReporter(sr StepHintsReporter) *ComponentServiceServer {
 	s.stepHintsReporter = sr
+	return s
+}
+
+// WithDiscoveryProcessor attaches a ResultDiscoveryProcessor so that SubmitResult
+// automatically persists DiscoveryResult (proto field 100) from tool responses
+// into the Neo4j knowledge graph. When nil, field-100 data is silently skipped.
+func (s *ComponentServiceServer) WithDiscoveryProcessor(dp ResultDiscoveryProcessor) *ComponentServiceServer {
+	s.discoveryProcessor = dp
+	return s
+}
+
+// WithGraphLoader attaches a GraphLoader so that SubmitFinding stores the finding
+// node in the Neo4j knowledge graph in addition to the finding store. This is
+// best-effort: graph storage errors do not fail the RPC. When nil, graph storage
+// is skipped and only the finding store path is used.
+func (s *ComponentServiceServer) WithGraphLoader(gl *loader.GraphLoader) *ComponentServiceServer {
+	s.graphLoader = gl
 	return s
 }
 
@@ -893,7 +925,128 @@ func (s *ComponentServiceServer) SubmitResult(
 		slog.Bool("has_error", result.Error != nil),
 	)
 
+	// Additive side-effect: if the tool response contains a DiscoveryResult (proto field 100)
+	// and a discoveryProcessor is wired, persist the discovered entities to Neo4j.
+	// This runs asynchronously so it never delays the response to the component.
+	if s.discoveryProcessor != nil && len(req.Result) > 0 {
+		if discovery := extractDiscoveryField100(req.Result); discovery != nil {
+			go func() {
+				processCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				execCtx := loader.ExecContext{
+					MissionRunID: req.WorkId, // best-effort: work_id as mission_run scope
+				}
+
+				if _, err := s.discoveryProcessor.Process(processCtx, execCtx, discovery); err != nil {
+					s.logger.WarnContext(processCtx, "submit result: discovery processing failed (best-effort)",
+						slog.String("tenant", tenant),
+						slog.String("work_id", req.WorkId),
+						slog.String("error", err.Error()),
+					)
+				} else {
+					s.logger.DebugContext(processCtx, "submit result: discovery processed",
+						slog.String("tenant", tenant),
+						slog.String("work_id", req.WorkId),
+					)
+				}
+			}()
+		}
+	}
+
 	return &componentpb.SubmitResultResponse{}, nil
+}
+
+// extractDiscoveryField100 parses raw proto bytes and extracts the DiscoveryResult
+// stored at field number 100 (the standard discovery field convention for all
+// Gibson tool responses). Returns nil if field 100 is absent or malformed.
+func extractDiscoveryField100(raw []byte) *graphragpb.DiscoveryResult {
+	const discoveryFieldNumber = 100
+	b := raw
+	for len(b) > 0 {
+		num, typ, n := protowire.ConsumeTag(b)
+		if n < 0 {
+			break
+		}
+		b = b[n:]
+		if num == discoveryFieldNumber && typ == protowire.BytesType {
+			fieldBytes, n := protowire.ConsumeBytes(b)
+			if n < 0 {
+				break
+			}
+			var result graphragpb.DiscoveryResult
+			if err := proto.Unmarshal(fieldBytes, &result); err == nil {
+				return &result
+			}
+			break
+		}
+		// Skip fields that are not field 100.
+		n = protowire.ConsumeFieldValue(num, typ, b)
+		if n < 0 {
+			break
+		}
+		b = b[n:]
+	}
+	return nil
+}
+
+// storeSubmittedFindingToGraph is a best-effort helper that converts a finding JSON
+// payload to a graphragpb.Finding proto and stores it via the GraphLoader. It runs
+// in a goroutine and must never return an error to the caller.
+func (s *ComponentServiceServer) storeSubmittedFindingToGraph(workID, findingID, findingJSON, tenant string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Decode the finding JSON to extract title and severity for proto population.
+	// Use a simple map decode — full agent.Finding parsing is not needed here.
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(findingJSON), &raw); err != nil {
+		s.logger.WarnContext(ctx, "submit finding: failed to decode finding JSON for graph storage",
+			slog.String("finding_id", findingID),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+
+	title, _ := raw["title"].(string)
+	severity, _ := raw["severity"].(string)
+	description, _ := raw["description"].(string)
+	category, _ := raw["category"].(string)
+
+	pbFinding := &graphragpb.Finding{
+		Id:          &findingID,
+		Title:       title,
+		Severity:    severity,
+		Description: &description,
+		Category:    &category,
+	}
+
+	execCtx := loader.ExecContext{
+		MissionRunID: workID,
+	}
+
+	result, err := s.graphLoader.LoadFindings(ctx, execCtx, []*graphragpb.Finding{pbFinding})
+	if err != nil {
+		s.logger.WarnContext(ctx, "submit finding: graph storage failed (best-effort)",
+			slog.String("finding_id", findingID),
+			slog.String("tenant", tenant),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	if result != nil && result.HasErrors() {
+		for _, e := range result.Errors {
+			s.logger.WarnContext(ctx, "submit finding: partial graph storage error",
+				slog.String("finding_id", findingID),
+				slog.String("error", e.Error()),
+			)
+		}
+	}
+
+	s.logger.DebugContext(ctx, "submit finding: finding stored to graph",
+		slog.String("finding_id", findingID),
+		slog.String("tenant", tenant),
+	)
 }
 
 // ---------------------------------------------------------------------------
@@ -915,13 +1068,11 @@ func (s *ComponentServiceServer) SubmitResult(
 //  1. Extract tenant; reject unauthenticated callers.
 //  2. Validate required fields (slot, messages).
 //  3. Marshal req.Messages to JSON for the LLMCompleter interface.
-//  4. Delegate to llmCompleter.Complete which resolves the slot to a provider
+//  4. Resolve mission context so that slot resolution uses per-mission model
+//     configuration rather than tenant-level defaults.
+//  5. Delegate to llmCompleter.Complete which resolves the slot to a provider
 //     and model, forwards the messages, and returns usage metrics.
-//  5. Return the assistant content and token usage to the caller.
-//
-// TODO (task 5.3): look up the work item's mission context so that slot
-// resolution can use per-mission model configuration rather than tenant-level
-// defaults.
+//  6. Return the assistant content and token usage to the caller.
 func (s *ComponentServiceServer) Complete(
 	ctx context.Context,
 	req *componentpb.CompleteRequest,
@@ -1013,11 +1164,11 @@ func (s *ComponentServiceServer) Complete(
 
 // CompleteStream is the server-streaming variant of Complete. It invokes the
 // LLM and sends incremental content deltas to the client as they arrive.
+// Mission context is resolved from the work_id so that slot resolution uses
+// per-mission model configuration rather than tenant-level defaults.
 //
 // The final chunk carries Done=true to signal stream termination. On error
 // mid-stream, the gRPC error status is returned after a best-effort final chunk.
-//
-// TODO (task 5.3): same mission-context lookup as Complete.
 func (s *ComponentServiceServer) CompleteStream(
 	req *componentpb.CompleteStreamRequest,
 	stream grpc.ServerStreamingServer[componentpb.CompleteStreamResponse],
@@ -1346,8 +1497,7 @@ func (s *ComponentServiceServer) QueryPlugin(
 //  3. Delegate to findingSubmitter if wired; otherwise generate a finding_id
 //     and log the payload so that no findings are silently dropped during
 //     the development phase.
-//
-// TODO (task 5.4): wire findingSubmitter to the Neo4j/GraphRAG pipeline.
+//  4. Best-effort: if graphLoader is wired, persist the finding node to Neo4j.
 func (s *ComponentServiceServer) SubmitFinding(
 	ctx context.Context,
 	req *componentpb.SubmitFindingRequest,
@@ -1386,6 +1536,11 @@ func (s *ComponentServiceServer) SubmitFinding(
 			slog.String("work_id", req.WorkId),
 			slog.String("finding_id", findingID),
 		)
+
+		// Best-effort: persist finding node to Neo4j via graphLoader (errors must not fail RPC).
+		if s.graphLoader != nil {
+			go s.storeSubmittedFindingToGraph(req.WorkId, findingID, findingJSON, tenant)
+		}
 
 		return &componentpb.SubmitFindingResponse{FindingId: findingID}, nil
 	}

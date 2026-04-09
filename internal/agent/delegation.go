@@ -2,8 +2,13 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
@@ -173,16 +178,53 @@ func (e *registryToolExecutor) ExecuteTool(ctx context.Context, name string, inp
 		return nil, fmt.Errorf("failed to discover tool %s: %w", name, err)
 	}
 
-	// Tools use proto-based execution, but for delegation harness compatibility
-	// we need to convert map[string]any to proto and back.
-	// For now, we return an error indicating this conversion is not yet implemented.
-	// Full implementation would require:
-	// 1. Get InputMessageType from tool
-	// 2. Create proto message instance
-	// 3. Convert map to proto (using protojson or similar)
-	// 4. Call ExecuteProto
-	// 5. Convert proto output back to map
-	return nil, fmt.Errorf("tool %s discovered but proto-to-map conversion not yet implemented", t.Name())
+	// Convert map[string]any input to the tool's proto input message type.
+	// Steps:
+	//  1. Look up the input message descriptor by its fully-qualified name.
+	//  2. Create a new instance of the input message.
+	//  3. Marshal the input map to JSON, then unmarshal into the proto message.
+	//  4. Call ExecuteProto with the hydrated proto message.
+	//  5. Marshal the proto output to JSON, then decode into map[string]any.
+
+	inputTypeName := t.InputMessageType()
+	if inputTypeName == "" {
+		return nil, fmt.Errorf("tool %s has no InputMessageType", t.Name())
+	}
+
+	// Step 1: look up message type descriptor.
+	msgType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(inputTypeName))
+	if err != nil {
+		return nil, fmt.Errorf("unknown proto type %s for tool %s: %w", inputTypeName, t.Name(), err)
+	}
+
+	// Step 2: create a new proto message instance.
+	protoMsg := msgType.New().Interface()
+
+	// Step 3: marshal input map to JSON, then populate the proto message.
+	jsonBytes, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("tool %s: failed to marshal input to JSON: %w", t.Name(), err)
+	}
+	if err := protojson.Unmarshal(jsonBytes, protoMsg); err != nil {
+		return nil, fmt.Errorf("tool %s: failed to unmarshal input into proto %s: %w", t.Name(), inputTypeName, err)
+	}
+
+	// Step 4: execute the tool.
+	outputProto, err := t.ExecuteProto(ctx, protoMsg)
+	if err != nil {
+		return nil, fmt.Errorf("tool %s execution failed: %w", t.Name(), err)
+	}
+
+	// Step 5: marshal proto output to JSON, then decode into map[string]any.
+	outputJSON, err := protojson.Marshal(outputProto)
+	if err != nil {
+		return nil, fmt.Errorf("tool %s: failed to marshal output proto to JSON: %w", t.Name(), err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(outputJSON, &result); err != nil {
+		return nil, fmt.Errorf("tool %s: failed to decode output JSON to map: %w", t.Name(), err)
+	}
+	return result, nil
 }
 
 // registryPluginExecutor implements PluginExecutor using registry-based discovery

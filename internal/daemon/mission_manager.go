@@ -166,13 +166,20 @@ func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID
 	}
 	def.ID = missionIDTyped
 
-	// Store mission definition in GraphRAG for cross-mission analysis
-	if err := m.storeMissionInGraphRAG(ctx, def); err != nil {
-		m.logger.Warn("failed to store mission in GraphRAG, continuing without graph persistence",
-			"error", err,
-			"mission_id", missionID,
-			"mission_name", def.Name,
-		)
+	// Store mission definition in GraphRAG for cross-mission analysis (non-blocking).
+	// Errors are logged at WARN and must not prevent mission startup.
+	if m.infrastructure != nil && m.infrastructure.graphRAGClient != nil {
+		go func(d *mission.MissionDefinition) {
+			storeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := m.storeMissionInGraphRAG(storeCtx, d); err != nil {
+				m.logger.WarnContext(storeCtx, "failed to store mission definition in GraphRAG (best-effort)",
+					"error", err,
+					"mission_id", missionID,
+					"mission_name", d.Name,
+				)
+			}
+		}(def)
 	}
 
 	// Check if mission ID already exists

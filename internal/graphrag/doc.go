@@ -403,7 +403,7 @@
 //
 // 1. Always use defer store.Close() to ensure cleanup:
 //
-//	store, err := graphrag.NewGraphRAGStore(config, embedder)
+//	store, err := graphrag.NewGraphRAGStoreWithProvider(config, embedder, provider)
 //	if err != nil {
 //	    return err
 //	}

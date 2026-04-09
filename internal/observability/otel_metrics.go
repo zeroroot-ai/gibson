@@ -88,6 +88,7 @@ type OTelMetricsRecorder struct {
 	componentAuthzTotal        metric.Int64Counter
 	componentAuthzFailOpenTotal metric.Int64Counter
 	workTTLExpiredTotal        metric.Int64Counter
+	classificationsTotal       metric.Int64Counter
 
 	// Histograms track distributions of values
 	llmLatencySeconds      metric.Float64Histogram
@@ -303,6 +304,14 @@ func NewOTelMetricsRecorder(mp metric.MeterProvider) (*OTelMetricsRecorder, erro
 		metric.WithDescription("Mission execution duration distribution"),
 		metric.WithUnit("s"),
 		metric.WithExplicitBucketBoundaries(60, 300, 600, 1800, 3600, 7200),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	recorder.classificationsTotal, err = meter.Int64Counter(
+		"gibson.finding.classifications",
+		metric.WithDescription("Total finding classifications by category and path (heuristic or llm)"),
 	)
 	if err != nil {
 		return nil, err
@@ -819,4 +828,20 @@ func (r *OTelMetricsRecorder) RecordWorkTTLExpired(ctx context.Context, componen
 	r.workTTLExpiredTotal.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("component", component),
 	))
+}
+
+// RecordClassification records a single finding classification event.
+// The category is the finding category (e.g. "injection", "authentication").
+// The path is either "heuristic" or "llm" indicating which classifier produced
+// the result. This satisfies Requirement 3.1 of the prod-placeholder-cleanup spec.
+func (r *OTelMetricsRecorder) RecordClassification(ctx context.Context, category, path string) {
+	if r == nil || r.classificationsTotal == nil {
+		return
+	}
+	r.classificationsTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String(MetricAttrCategory, category),
+			attribute.String("classification_path", path),
+		),
+	)
 }

@@ -34,7 +34,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zero-day-ai/sdk v0.65.2
+	github.com/zero-day-ai/sdk v0.66.0
 	go.etcd.io/etcd/client/v3 v3.6.7
 	go.etcd.io/etcd/server/v3 v3.5.5
 	go.opentelemetry.io/otel v1.42.0

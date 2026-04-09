@@ -41,10 +41,6 @@ core:
   home_dir: /tmp/.gibson
   parallel_limit: 10
   timeout: 5m
-database:
-  path: /tmp/.gibson/gibson.db
-  max_connections: 10
-  timeout: 30s
 security:
   encryption_algorithm: aes-256-gcm
   key_derivation: scrypt

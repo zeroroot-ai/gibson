@@ -292,27 +292,8 @@ func buildResults(findings []*finding.EnhancedFinding, opts ExportOptions) []Res
 			result.Locations = buildLocations(f)
 		}
 
-		// Add compliance mappings if present. Per audit-finding-compliance-mappings
-		// task 6, the property is OMITTED when no mappings exist (not an
-		// empty array) so downstream GRC tools can distinguish "not
-		// asserted" from "asserted as none".
-		if len(f.ComplianceMappings) > 0 {
-			mappings := make([]map[string]interface{}, 0, len(f.ComplianceMappings))
-			for _, m := range f.ComplianceMappings {
-				entry := map[string]interface{}{
-					"framework":  m.Framework,
-					"control_id": m.ControlID,
-				}
-				if m.Rationale != "" {
-					entry["rationale"] = m.Rationale
-				}
-				if m.EvidenceRef != "" {
-					entry["evidence_ref"] = m.EvidenceRef
-				}
-				mappings = append(mappings, entry)
-			}
-			result.Properties["compliance_mappings"] = mappings
-		}
+		// NOTE: compliance_mappings will be added here once the ComplianceMappings
+		// field is added to EnhancedFinding (deferred to audit-finding-compliance-mappings spec).
 
 		results = append(results, result)
 	}

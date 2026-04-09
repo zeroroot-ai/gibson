@@ -34,16 +34,16 @@ func TestNewHarnessCallbackService(t *testing.T) {
 	assert.NotNil(t, service.logger)
 }
 
-// TestHarnessCallbackServiceRegisterUnregister tests harness registration.
-func TestHarnessCallbackServiceRegisterUnregister(t *testing.T) {
+// TestHarnessCallbackServiceUnregister tests harness unregistration via activeHarnesses.
+func TestHarnessCallbackServiceUnregister(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	service := NewHarnessCallbackService(logger)
 
-	// Register a harness
+	// Manually store a harness entry to test unregistration
 	taskID := "task-123"
-	service.RegisterHarness(taskID, nil)
+	service.activeHarnesses.Store(taskID, (*DefaultAgentHarness)(nil))
 
-	// Check it's registered (we can try to get it)
+	// Check it's stored
 	_, ok := service.activeHarnesses.Load(taskID)
 	assert.True(t, ok)
 

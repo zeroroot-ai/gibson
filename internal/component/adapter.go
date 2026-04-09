@@ -29,10 +29,6 @@ import (
 // Note: The harness parameter uses any to avoid circular imports between component and harness.
 // The actual implementation expects harness.AgentHarness.
 type CallbackManager interface {
-	// RegisterHarness registers a harness for a task and returns the callback endpoint.
-	// DEPRECATED: Use RegisterHarnessForMission for new code.
-	RegisterHarness(taskID string, harness any) string
-
 	// RegisterHarnessForMission registers a harness for external agent execution within
 	// a mission context and returns the registration key.
 	RegisterHarnessForMission(missionID, agentName string, harness any) string
@@ -562,16 +558,9 @@ func (a *RegistryAdapter) DelegateToAgent(ctx context.Context, name string, task
 		)
 
 		if missionID != "" && agentName != "" {
-			type missionRegistrar interface {
-				RegisterHarnessForMission(missionID, agentName string, harness any) string
-			}
-			if mr, ok := a.callbackManager.(missionRegistrar); ok {
-				registrationKey = mr.RegisterHarnessForMission(missionID, agentName, harness)
-			} else {
-				registrationKey = a.callbackManager.RegisterHarness(task.ID.String(), harness)
-			}
+			registrationKey = a.callbackManager.RegisterHarnessForMission(missionID, agentName, harness)
 		} else {
-			registrationKey = a.callbackManager.RegisterHarness(task.ID.String(), harness)
+			registrationKey = a.callbackManager.RegisterHarnessForMission("", task.ID.String(), harness)
 		}
 
 		defer a.callbackManager.UnregisterHarness(registrationKey)

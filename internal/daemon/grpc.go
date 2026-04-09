@@ -19,15 +19,32 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zero-day-ai/gibson/internal/memory"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 
+	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/missiondraft"
+	"github.com/zero-day-ai/gibson/internal/onboarding"
 	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
 )
+
+// daemonMemoryStore wraps a single DefaultWorkingMemory so ComponentServiceServer
+// can satisfy the memory.MemoryStore interface with a daemon-wide shared instance.
+// Mission-tier and long-term-tier operations are handled by the per-mission
+// MemoryResolver wired separately (compSvc.WithMemoryResolver); only Working() is
+// used from this shared store.
+type daemonMemoryStore struct {
+	working memory.WorkingMemory
+}
+
+func (s *daemonMemoryStore) Working() memory.WorkingMemory { return s.working }
+func (s *daemonMemoryStore) Mission() memory.MissionMemory { return nil }
+func (s *daemonMemoryStore) LongTerm() memory.LongTermMemory { return nil }
 
 // startGRPCServer creates and starts the gRPC server.
 //
@@ -160,6 +177,28 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 				d.logger.Info(ctx, "API key store wired into DaemonServer")
 			}
 
+			// Wire the onboarding store backed by Redis.
+			onboardingStore := onboarding.New(redisClient, d.logger.Slog())
+			daemonSvc.WithOnboardingStore(onboardingStore)
+			d.logger.Info(ctx, "onboarding store wired into DaemonServer")
+
+			// Wire the mission draft store backed by Redis.
+			draftStore := missiondraft.New(redisClient, d.logger.Slog())
+			daemonSvc.WithMissionDraftStore(draftStore)
+			d.logger.Info(ctx, "mission draft store wired into DaemonServer")
+
+			// Wire the impersonation token issuer.
+			// A random signing key is generated when no persistent key is configured.
+			// In production, set the GIBSON_IMPERSONATION_KEY environment variable
+			// or configure security.impersonation_key to avoid token invalidation on restart.
+			var impersonationKey []byte
+			if envKey := os.Getenv("GIBSON_IMPERSONATION_KEY"); envKey != "" {
+				impersonationKey = []byte(envKey)
+			}
+			issuer := impersonation.New(impersonationKey, 15*time.Minute, d.logger.Slog())
+			daemonSvc.WithImpersonationIssuer(issuer)
+			d.logger.Info(ctx, "impersonation issuer wired into DaemonServer")
+
 			// Create and wire the Provisioner.
 			if apiKeyAuth != nil {
 				prov := provisioner.New(
@@ -249,16 +288,53 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 				d.logger.Warn(ctx, "infrastructure not ready; finding submitter not wired (findings will be logged only)")
 			}
 
+			// Build LLM adapter when the infrastructure (registry + slot manager) is ready.
+			// The adapter bridges the narrow LLMCompleter/LLMToolCompleter interfaces to
+			// the full provider resolution chain.
+			var llmAdapter *component.LLMRegistryAdapter
+			if d.infrastructure != nil &&
+				d.infrastructure.llmRegistry != nil &&
+				d.infrastructure.slotManager != nil {
+				llmAdapter = component.NewLLMRegistryAdapter(
+					d.infrastructure.llmRegistry,
+					d.infrastructure.slotManager,
+					d.logger.WithComponent("llm-adapter").Slog(),
+				)
+				d.logger.Info(ctx, "LLM adapter wired into ComponentService")
+			} else {
+				d.logger.Warn(ctx, "LLM adapter not wired: infrastructure or LLM registry not ready; LLM completion RPCs will return Unimplemented")
+			}
+
+			// Build a daemon-wide shared memory store for the working memory tier.
+			// Mission-tier and long-term-tier operations are handled by the per-mission
+			// MemoryResolver (wired below); only Working() is served from this shared store.
+			sharedMemStore := &daemonMemoryStore{
+				working: memory.NewWorkingMemory(100_000),
+			}
+
+			var llmCompleterIface component.LLMCompleter
+			var llmToolCompleterIface component.LLMToolCompleter
+			if llmAdapter != nil {
+				llmCompleterIface = llmAdapter
+				llmToolCompleterIface = llmAdapter
+			}
+
 			compSvc := component.NewComponentServiceServer(
 				compRegistry,
 				compQueue,
 				d.logger.Slog(),
-				nil,                 // llmCompleter: wired in task 5.4
-				nil,                 // memStore:     wired in task 5.4
+				llmCompleterIface,   // LLMRegistryAdapter or nil
+				sharedMemStore,      // daemon-wide shared working memory
 				findingSubmitter,    // GraphRAGFindingSubmitter or nil
 				d.pluginAccessStore, // nil when no KeyProvider configured
 				auditLogger,
 			)
+
+			// Wire LLMToolCompleter for tool-calling and structured output support.
+			if llmToolCompleterIface != nil {
+				compSvc.WithLLMToolCompleter(llmToolCompleterIface)
+				d.logger.Info(ctx, "LLMToolCompleter wired into ComponentService")
+			}
 
 			// Wire MemoryResolver so that MemoryGet/MemorySet/MemorySearch route
 			// mission-tier operations to the per-agent mission namespace.

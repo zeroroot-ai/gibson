@@ -223,6 +223,15 @@ func (m *MockGraphRAGStore) StoreRelationshipOnly(ctx context.Context, rel graph
 	return nil
 }
 
+// TraverseGraph walks the graph from startNodeID following filtered relationships.
+func (m *MockGraphRAGStore) TraverseGraph(ctx context.Context, startNodeID string, maxDepth int, filters graphrag.TraversalFilters) ([]graphrag.GraphNode, error) {
+	if m.ShouldFailQuery {
+		return nil, errors.New("mock traverse error")
+	}
+	// Return empty result by default; callers can configure via QueryResults conversion.
+	return nil, nil
+}
+
 // Compile-time check that MockGraphRAGStore implements graphrag.GraphRAGStore
 var _ graphrag.GraphRAGStore = (*MockGraphRAGStore)(nil)
 

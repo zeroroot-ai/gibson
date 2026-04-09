@@ -15,6 +15,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
+
 // LocalGraphRAGProvider implements GraphRAGProvider using local Neo4j and vector store.
 // Combines graph database operations with vector similarity search for hybrid retrieval.
 //
@@ -491,10 +492,96 @@ func (l *LocalGraphRAGProvider) buildLabelFilter(nodeTypes []graphrag.NodeType) 
 	return labelFilter
 }
 
-// queryNodesFromVectorStore queries nodes from vector store using metadata filters.
-// This is a fallback when Neo4j is unavailable.
+// queryNodesFromVectorStore queries nodes using metadata filters.
+//
+// Primary path: when Neo4j is healthy, this method issues a parameterised Cypher
+// query with WHERE clauses derived from query.Properties, label filters from
+// query.NodeTypes, and optional mission-id scoping.
+//
+// Fallback path: when Neo4j is unavailable but the vector store is present, the
+// method issues a metadata-filtered vector store query using the store's Filters
+// field. This path requires the vector store entries to carry matching metadata
+// keys. When the vector store is also absent the method returns an empty slice
+// (not an error) so callers can degrade gracefully.
 func (l *LocalGraphRAGProvider) queryNodesFromVectorStore(ctx context.Context, query graphrag.NodeQuery) ([]graphrag.GraphNode, error) {
-	// Build metadata filters
+	// Primary: Neo4j path.
+	if l.graphHealthy && l.graphClient != nil {
+		return l.queryNodesWithCypherFilter(ctx, query)
+	}
+
+	// Fallback: vector store with metadata filters.
+	if l.vectorStore != nil {
+		return l.queryNodesFromVectorStoreWithFilters(ctx, query)
+	}
+
+	// No backend available — return empty, not an error.
+	return []graphrag.GraphNode{}, nil
+}
+
+// queryNodesWithCypherFilter builds and executes a parameterised Cypher query
+// from the NodeQuery metadata filters.
+func (l *LocalGraphRAGProvider) queryNodesWithCypherFilter(ctx context.Context, query graphrag.NodeQuery) ([]graphrag.GraphNode, error) {
+	params := make(map[string]any)
+
+	// Build MATCH clause with optional label filter.
+	labelFilter := l.buildLabelFilter(query.NodeTypes)
+	cypher := "MATCH (n" + labelFilter + ")"
+
+	// Build WHERE clauses.
+	whereClauses := make([]string, 0)
+
+	// Property filters use parameterised values to prevent injection.
+	paramIdx := 0
+	for key, value := range query.Properties {
+		paramKey := fmt.Sprintf("prop_%d", paramIdx)
+		whereClauses = append(whereClauses, fmt.Sprintf("n.%s = $%s", key, paramKey))
+		params[paramKey] = value
+		paramIdx++
+	}
+
+	// Mission-ID scoping.
+	if query.MissionID != nil {
+		whereClauses = append(whereClauses, "n.mission_id = $mission_id")
+		params["mission_id"] = query.MissionID.String()
+	}
+
+	if len(whereClauses) > 0 {
+		cypher += " WHERE " + whereClauses[0]
+		for _, clause := range whereClauses[1:] {
+			cypher += " AND " + clause
+		}
+	}
+
+	cypher += " RETURN n"
+	if query.Limit > 0 {
+		cypher += fmt.Sprintf(" LIMIT %d", query.Limit)
+	}
+
+	result, err := l.graphClient.Query(ctx, cypher, params)
+	if err != nil {
+		return nil, graphrag.NewQueryError("failed to execute metadata filter Cypher query", err)
+	}
+
+	nodes := make([]graphrag.GraphNode, 0, len(result.Records))
+	for _, record := range result.Records {
+		nodeData := record["n"]
+		if nodeData == nil {
+			continue
+		}
+		switch n := nodeData.(type) {
+		case dbtype.Node:
+			nodes = append(nodes, l.recordToGraphNodeWithLabels(n.Props, n.Labels))
+		case map[string]any:
+			nodes = append(nodes, l.recordToGraphNode(n))
+		}
+	}
+	return nodes, nil
+}
+
+// queryNodesFromVectorStoreWithFilters queries the vector store using its
+// metadata Filters field. Returns an empty slice when the store returns
+// zero results (not an error).
+func (l *LocalGraphRAGProvider) queryNodesFromVectorStoreWithFilters(ctx context.Context, query graphrag.NodeQuery) ([]graphrag.GraphNode, error) {
 	filters := make(map[string]any)
 	for k, v := range query.Properties {
 		filters[k] = v
@@ -503,15 +590,42 @@ func (l *LocalGraphRAGProvider) queryNodesFromVectorStore(ctx context.Context, q
 		filters["mission_id"] = query.MissionID.String()
 	}
 	if len(query.NodeTypes) > 0 {
-		filters["labels"] = query.NodeTypes
+		// Encode node types as a label filter hint; vector stores that honour this
+		// will further narrow results.
+		labelStrs := make([]string, len(query.NodeTypes))
+		for i, nt := range query.NodeTypes {
+			labelStrs[i] = nt.String()
+		}
+		filters["_node_types"] = labelStrs
 	}
 
-	// Note: This requires a more sophisticated vector store that supports metadata-only queries
-	// For now, this is a placeholder - production code would implement proper metadata filtering
-	return nil, graphrag.NewGraphRAGError(
-		graphrag.ErrCodeProviderUnavailable,
-		"vector store metadata-only queries not yet implemented",
-	)
+	topK := query.Limit
+	if topK <= 0 {
+		topK = 100
+	}
+
+	vq := vector.NewVectorQueryFromText("", topK).WithFilters(filters)
+	// For metadata-only queries the Text field must be non-empty to pass
+	// VectorQuery.Validate; use a placeholder that the store ignores when
+	// TopK-only filtering is the intent.
+	vq.Text = "*"
+
+	results, err := l.vectorStore.Search(ctx, *vq)
+	if err != nil {
+		slog.WarnContext(ctx, "vector store metadata filter search failed",
+			slog.String("error", err.Error()),
+		)
+		return []graphrag.GraphNode{}, nil
+	}
+
+	nodes := make([]graphrag.GraphNode, 0, len(results))
+	for _, r := range results {
+		nodes = append(nodes, graphrag.GraphNode{
+			ID:         types.ID(r.Record.ID),
+			Properties: r.Record.Metadata,
+		})
+	}
+	return nodes, nil
 }
 
 // QueryRelationships retrieves relationships from Neo4j matching the query criteria.

@@ -198,6 +198,16 @@ const (
 	ErrBudgetExceeded types.ErrorCode = "LLM_BUDGET_EXCEEDED"
 )
 
+// Embedding error codes
+const (
+	ErrEmbeddingsNotSupportedCode types.ErrorCode = "LLM_EMBEDDINGS_NOT_SUPPORTED"
+)
+
+// ErrEmbeddingsNotSupported is returned by GetEmbeddingProvider when no registered
+// LLM provider implements the EmbeddingProvider interface with SupportsEmbeddings
+// returning true.
+var ErrEmbeddingsNotSupported = errors.New("no registered LLM provider supports embeddings")
+
 // Structured output error codes
 const (
 	ErrStructuredOutputNotSupported types.ErrorCode = "LLM_STRUCTURED_OUTPUT_NOT_SUPPORTED"

@@ -118,6 +118,11 @@ type GraphRAGStore interface {
 	// Used when both nodes already exist and only a relationship needs to be added.
 	StoreRelationshipOnly(ctx context.Context, rel Relationship) error
 
+	// TraverseGraph walks the graph starting from startNodeID following relationships
+	// that match the provided TraversalFilters. Returns all visited nodes up to
+	// maxDepth hops from the start node.
+	TraverseGraph(ctx context.Context, startNodeID string, maxDepth int, filters TraversalFilters) ([]GraphNode, error)
+
 	// Health returns the current health status of the GraphRAG store.
 	// Aggregates health from provider, embedder, and processor.
 	Health(ctx context.Context) types.HealthStatus
@@ -172,26 +177,6 @@ type DefaultGraphRAGStore struct {
 	config    GraphRAGConfig
 }
 
-// NewGraphRAGStore creates a new GraphRAGStore with the given configuration.
-// DEPRECATED: GraphRAG is now a required core component. Use NewGraphRAGStoreWithProvider instead.
-//
-// This function exists for backwards compatibility but will always return an error
-// directing callers to use the provider injection pattern.
-//
-// Parameters:
-//   - config: GraphRAG configuration
-//   - emb: Embedder for generating embeddings
-//
-// Returns an error directing users to NewGraphRAGStoreWithProvider.
-func NewGraphRAGStore(config GraphRAGConfig, emb embedder.Embedder) (GraphRAGStore, error) {
-	// GraphRAG is a required core component - always require provider injection
-	return nil, NewConfigError(
-		"GraphRAG requires provider injection to avoid import cycles",
-		nil,
-	).WithContext("solution", "Use NewGraphRAGStoreWithProvider() and inject provider created via provider.NewProvider()").
-		WithContext("provider_type", config.Provider).
-		WithContext("neo4j_uri", config.Neo4j.URI)
-}
 
 // Store stores a single graph record (node + relationships).
 // Generates embedding if not provided, then upserts to provider.
@@ -642,6 +627,17 @@ func (s *DefaultGraphRAGStore) StoreRelationshipOnly(ctx context.Context, rel Re
 	}
 
 	return nil
+}
+
+// TraverseGraph walks the graph from startNodeID following relationships that
+// match the provided filters. Delegates to the underlying provider's TraverseGraph
+// which performs the actual Neo4j/Cypher traversal.
+func (s *DefaultGraphRAGStore) TraverseGraph(ctx context.Context, startNodeID string, maxDepth int, filters TraversalFilters) ([]GraphNode, error) {
+	nodes, err := s.provider.TraverseGraph(ctx, startNodeID, maxDepth, filters)
+	if err != nil {
+		return nil, NewQueryError("graph traversal failed", err)
+	}
+	return nodes, nil
 }
 
 // Health returns the current health status of the GraphRAG store.

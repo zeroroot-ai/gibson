@@ -1,13 +1,19 @@
+//go:build integration
+
 package mission
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -204,4 +210,206 @@ func TestCheckpointIntegration_StateRestoration(t *testing.T) {
 
 	_ = checkpoint
 	_ = ctx
+}
+
+// --------------------------------------------------------------------------
+// Real integration tests using miniredis (no t.Skip)
+// --------------------------------------------------------------------------
+
+// redisMissionStore is a minimal Redis-backed MissionStore for integration
+// tests. Only Save, Get, and SaveCheckpoint have real implementations.
+type redisMissionStore struct {
+	client *redis.Client
+}
+
+func (s *redisMissionStore) missionKey(id types.ID) string {
+	return fmt.Sprintf("test:mission:%s", id.String())
+}
+
+func (s *redisMissionStore) Save(ctx context.Context, m *Mission) error {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return s.client.Set(ctx, s.missionKey(m.ID), data, 0).Err()
+}
+
+func (s *redisMissionStore) Get(ctx context.Context, id types.ID) (*Mission, error) {
+	data, err := s.client.Get(ctx, s.missionKey(id)).Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("mission %s not found: %w", id, err)
+	}
+	var m Mission
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (s *redisMissionStore) SaveCheckpoint(ctx context.Context, missionID types.ID, chkpt *MissionCheckpoint) error {
+	m, err := s.Get(ctx, missionID)
+	if err != nil {
+		return err
+	}
+	m.Checkpoint = chkpt
+	return s.Save(ctx, m)
+}
+
+// Stubs for unused MissionStore methods.
+func (s *redisMissionStore) GetByName(_ context.Context, _ string) (*Mission, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *redisMissionStore) List(_ context.Context, _ *MissionFilter) ([]*Mission, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *redisMissionStore) Update(_ context.Context, _ *Mission) error {
+	return errors.New("not implemented")
+}
+func (s *redisMissionStore) UpdateStatus(_ context.Context, _ types.ID, _ MissionStatus) error {
+	return nil
+}
+func (s *redisMissionStore) UpdateProgress(_ context.Context, _ types.ID, _ float64) error {
+	return nil
+}
+func (s *redisMissionStore) Delete(_ context.Context, _ types.ID) error {
+	return errors.New("not implemented")
+}
+func (s *redisMissionStore) GetByTarget(_ context.Context, _ types.ID) ([]*Mission, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *redisMissionStore) GetActive(_ context.Context) ([]*Mission, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *redisMissionStore) Count(_ context.Context, _ *MissionFilter) (int, error) {
+	return 0, errors.New("not implemented")
+}
+func (s *redisMissionStore) GetByNameAndStatus(_ context.Context, _ string, _ MissionStatus) (*Mission, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *redisMissionStore) ListByName(_ context.Context, _ string, _ int) ([]*Mission, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *redisMissionStore) GetLatestByName(_ context.Context, _ string) (*Mission, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *redisMissionStore) IncrementRunNumber(_ context.Context, _ string) (int, error) {
+	return 0, errors.New("not implemented")
+}
+func (s *redisMissionStore) FindOrCreateByName(_ context.Context, m *Mission) (*Mission, bool, error) {
+	return m, true, nil
+}
+func (s *redisMissionStore) CreateDefinition(_ context.Context, _ *MissionDefinition) error {
+	return errors.New("not implemented")
+}
+func (s *redisMissionStore) GetDefinition(_ context.Context, _ string) (*MissionDefinition, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *redisMissionStore) ListDefinitions(_ context.Context) ([]*MissionDefinition, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *redisMissionStore) UpdateDefinition(_ context.Context, _ *MissionDefinition) error {
+	return errors.New("not implemented")
+}
+func (s *redisMissionStore) DeleteDefinition(_ context.Context, _ string) error {
+	return errors.New("not implemented")
+}
+
+var _ MissionStore = (*redisMissionStore)(nil)
+
+// intFindingLister is a simple finding lister for integration tests.
+type intFindingLister struct {
+	ids []types.ID
+}
+
+func (l *intFindingLister) ListByMission(_ context.Context, _ types.ID) ([]types.ID, error) {
+	return l.ids, nil
+}
+
+// newPersistedMission creates a Mission record in the Redis-backed store.
+func newPersistedMission(t *testing.T, store *redisMissionStore) *Mission {
+	t.Helper()
+	now := time.Now()
+	m := &Mission{
+		ID:         types.NewID(),
+		WorkflowID: types.NewID(),
+		Status:     MissionStatusRunning,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		Metrics:    &MissionMetrics{StartedAt: now},
+	}
+	require.NoError(t, store.Save(context.Background(), m))
+	return m
+}
+
+// newThreeNodeMissionState returns a MissionState with 2 completed nodes and 1 pending.
+func newThreeNodeMissionState(missionID types.ID) *MissionState {
+	now := time.Now()
+	return &MissionState{
+		MissionID: missionID,
+		Status:    MissionStatusRunning,
+		StartedAt: now,
+		NodeStates: map[string]*NodeState{
+			"scan": {
+				Status:      NodeStatusCompleted,
+				StartedAt:   &now,
+				CompletedAt: &now,
+			},
+			"enum": {
+				Status:      NodeStatusCompleted,
+				StartedAt:   &now,
+				CompletedAt: &now,
+			},
+			"exploit": {
+				Status: NodeStatusPending,
+			},
+		},
+		Results: map[string]any{},
+	}
+}
+
+// TestCheckpointManager_Integration_RoundTrip verifies that a checkpoint
+// created with Capture is correctly persisted and restored via Restore through
+// an in-process Redis instance.
+//
+//   - CompletedNodes contains exactly the 2 nodes that were marked completed.
+//   - Checksum validates without error (integrity preserved through JSON round-trip).
+//   - FindingIDs length matches the mock lister's return value.
+func TestCheckpointManager_Integration_RoundTrip(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { client.Close() })
+
+	store := &redisMissionStore{client: client}
+	mission := newPersistedMission(t, store)
+
+	findingIDs := []types.ID{types.NewID(), types.NewID()}
+	lister := &intFindingLister{ids: findingIDs}
+
+	manager := NewCheckpointManager(store, lister)
+
+	ctx := context.Background()
+	state := newThreeNodeMissionState(mission.ID)
+
+	// Capture creates and persists the checkpoint via SaveCheckpoint.
+	created, err := manager.Capture(ctx, mission.ID, state)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+
+	// Restore loads the checkpoint from Redis and validates checksum.
+	restored, err := manager.Restore(ctx, mission.ID)
+	require.NoError(t, err)
+	require.NotNil(t, restored, "Restore must return a checkpoint after Capture")
+
+	// CompletedNodes must contain exactly 2 entries.
+	assert.Len(t, restored.CompletedNodes, 2, "CompletedNodes should contain 2 entries")
+	assert.Contains(t, restored.CompletedNodes, "scan")
+	assert.Contains(t, restored.CompletedNodes, "enum")
+
+	// FindingIDs must match the mock lister.
+	assert.Len(t, restored.FindingIDs, 2, "FindingIDs should match the mock lister's return")
+
+	// Checksum must be non-empty and must validate successfully after round-trip.
+	assert.NotEmpty(t, restored.Checksum, "Checksum must be populated")
+	dm := manager.(*DefaultCheckpointManager)
+	assert.NoError(t, dm.validateChecksum(restored), "checksum should be valid after round-trip")
 }

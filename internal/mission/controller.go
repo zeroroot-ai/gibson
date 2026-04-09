@@ -571,12 +571,11 @@ func (c *DefaultMissionController) Resume(ctx context.Context, missionID types.I
 		var result *MissionResult
 		var err error
 
-		// Execute from checkpoint if available, otherwise execute normally
+		// Execute from checkpoint if available, otherwise execute normally.
+		// ExecuteFromCheckpoint pre-marks completed nodes so the scheduler
+		// skips them, enabling the mission to resume from where it paused.
 		if checkpoint != nil {
-			// Note: ExecuteFromCheckpoint is not yet implemented in the orchestrator
-			// For now, we'll execute normally - this is a placeholder for when
-			// the orchestrator supports checkpoint-based execution
-			result, err = c.orchestrator.Execute(execCtx, mission)
+			result, err = c.orchestrator.ExecuteFromCheckpoint(execCtx, mission, checkpoint)
 		} else {
 			result, err = c.orchestrator.Execute(execCtx, mission)
 		}

@@ -3,7 +3,9 @@ package intelligence
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
+	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
@@ -212,6 +214,10 @@ func (c *RiskScoreCalculator) parseAssetData(record *neo4j.Record) assetData {
 }
 
 // calculateScore calculates the risk score using the specified algorithm.
+// After computing the base score it adjusts for attack-path depth by opening
+// a read session and running a shortestPath Cypher query. When no path is
+// found the score is unchanged. On any error the depth adjustment is skipped
+// and a WARN is logged.
 func (c *RiskScoreCalculator) calculateScore(data assetData, algorithm string) sdkgraphrag.AssetRiskScore {
 	var score float64
 	var factors []sdkgraphrag.RiskFactor
@@ -227,6 +233,18 @@ func (c *RiskScoreCalculator) calculateScore(data assetData, algorithm string) s
 
 	// Ensure score is in 0-100 range
 	score = math.Max(0, math.Min(100, score))
+
+	// Attack-path depth adjustment.
+	// Each hop toward an internet-facing endpoint increases risk by 10 %,
+	// with the resulting score capped at 100.
+	if data.assetID != "" && c.driver != nil {
+		ctx := context.Background()
+		depth := c.fetchAttackPathDepth(ctx, data.assetID)
+		if depth > 0 {
+			factor := 1.0 + 0.1*float64(depth)
+			score = math.Min(100, score*factor)
+		}
+	}
 
 	// Determine tier
 	tier := c.scoreTier(score)
@@ -423,10 +441,121 @@ func (c *RiskScoreCalculator) calculatePortfolioRisk(assets []sdkgraphrag.AssetR
 	return score, tier
 }
 
-// Historical scoring would require additional queries to past snapshots
-// This is a placeholder for future implementation
+// fetchHistoricalScores queries RiskSnapshot nodes linked to the asset and
+// returns up to 90 records ordered newest-first.
+//
+// On any Neo4j error the error is logged and an empty slice is returned so
+// that the caller can still produce a valid (though snapshot-less) result.
 func (c *RiskScoreCalculator) fetchHistoricalScores(ctx context.Context, assetID string) []sdkgraphrag.HistoricalRiskScore {
-	// In a full implementation, this would query historical risk snapshots
-	// For now, return empty as this requires additional infrastructure
-	return nil
+	if c.driver == nil {
+		return nil
+	}
+
+	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	const cypher = `MATCH (a {id: $asset_id})<-[:SNAPSHOT_OF]-(s:RiskSnapshot)
+RETURN s.score AS score, s.tier AS tier, s.snapshotted_at AS snapshotted_at
+ORDER BY s.snapshotted_at DESC LIMIT 90`
+
+	raw, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		records, err := tx.Run(ctx, cypher, map[string]any{"asset_id": assetID})
+		if err != nil {
+			return nil, fmt.Errorf("failed to query historical scores: %w", err)
+		}
+
+		var scores []sdkgraphrag.HistoricalRiskScore
+		for records.Next(ctx) {
+			rec := records.Record()
+
+			var score float64
+			if v, ok := rec.Get("score"); ok && v != nil {
+				score, _ = v.(float64)
+			}
+
+			var tier string
+			if v, ok := rec.Get("tier"); ok && v != nil {
+				tier, _ = v.(string)
+			}
+
+			var snapshotAt time.Time
+			if v, ok := rec.Get("snapshotted_at"); ok && v != nil {
+				switch t := v.(type) {
+				case time.Time:
+					snapshotAt = t
+				case int64:
+					snapshotAt = time.UnixMilli(t)
+				}
+			}
+
+			scores = append(scores, sdkgraphrag.HistoricalRiskScore{
+				Score: score,
+				Tier:  tier,
+				Date:  snapshotAt,
+			})
+		}
+		if err := records.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating historical score records: %w", err)
+		}
+		return scores, nil
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "failed to fetch historical risk scores",
+			slog.String("asset_id", assetID),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+
+	if raw == nil {
+		return nil
+	}
+	return raw.([]sdkgraphrag.HistoricalRiskScore)
+}
+
+// fetchAttackPathDepth runs a shortestPath query from the asset to any
+// internet-facing Endpoint via CONNECTS_TO|ROUTES_TO relationships and
+// returns the path length. Returns 0 when no path exists or on error.
+func (c *RiskScoreCalculator) fetchAttackPathDepth(ctx context.Context, assetID string) int {
+	if c.driver == nil {
+		return 0
+	}
+
+	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	const cypher = `MATCH p=shortestPath((a {id: $asset_id})-[:CONNECTS_TO|ROUTES_TO*1..8]->(e:Endpoint {internet_facing: true}))
+RETURN length(p) AS depth`
+
+	raw, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		records, err := tx.Run(ctx, cypher, map[string]any{"asset_id": assetID})
+		if err != nil {
+			return nil, fmt.Errorf("failed to query attack path: %w", err)
+		}
+		if records.Next(ctx) {
+			rec := records.Record()
+			if v, ok := rec.Get("depth"); ok && v != nil {
+				if d, ok := v.(int64); ok {
+					return int(d), nil
+				}
+			}
+		}
+		if err := records.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating attack path records: %w", err)
+		}
+		// No path found.
+		return 0, nil
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "failed to fetch attack path depth",
+			slog.String("asset_id", assetID),
+			slog.String("error", err.Error()),
+		)
+		return 0
+	}
+
+	if raw == nil {
+		return 0
+	}
+	return raw.(int)
 }

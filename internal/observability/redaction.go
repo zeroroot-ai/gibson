@@ -135,8 +135,3 @@ func normalizeFieldName(field string) string {
 	return normalized
 }
 
-// redactSensitiveData is a backward compatibility alias for Redact.
-// DEPRECATED: Use Redact instead.
-func redactSensitiveData(args []any) []any {
-	return Redact(args)
-}

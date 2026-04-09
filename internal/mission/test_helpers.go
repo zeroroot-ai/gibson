@@ -109,3 +109,14 @@ func (m *mockMissionOrchestrator) Execute(ctx context.Context, mission *Mission)
 		Status:    MissionStatusCompleted,
 	}, nil
 }
+
+// ExecuteFromCheckpoint implements MissionOrchestrator for testing.
+// It delegates to Execute for simplicity; tests that need to distinguish
+// checkpoint vs. non-checkpoint execution should use a custom mock.
+func (m *mockMissionOrchestrator) ExecuteFromCheckpoint(ctx context.Context, mission *Mission, checkpoint *MissionCheckpoint) (*MissionResult, error) {
+	return m.Execute(ctx, mission)
+}
+
+func (m *mockMissionOrchestrator) StopMission(ctx context.Context, missionID types.ID) error {
+	return nil
+}

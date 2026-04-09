@@ -20,9 +20,13 @@ import (
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/keycloak"
 	"github.com/zero-day-ai/gibson/internal/membership"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/missiondraft"
+	"github.com/zero-day-ai/gibson/internal/onboarding"
 	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
@@ -167,6 +171,47 @@ type DaemonServer struct {
 	// May be nil; when nil, ListAuditEvents falls back to the Redis audit stream.
 	// Added by authz-06-granular-permissions-teams spec.
 	lokiQuerier audit.LokiQuerier
+
+	// missionDraftStore persists mission YAML drafts per tenant.
+	// May be nil; when nil, SaveMissionDraft/ListMissionDrafts return codes.Unavailable.
+	// Added by prod-unimplemented-apis spec.
+	missionDraftStore missionDraftStoreIface
+
+	// findingStore provides access to findings for export operations.
+	// May be nil; when nil, ExportFindings returns codes.Unavailable.
+	// Added by prod-unimplemented-apis spec.
+	findingStore findingStoreIface
+
+	// quotaStore persists and retrieves per-tenant quota configuration.
+	// May be nil; when nil, GetTenantQuota/SetTenantQuota return codes.Unavailable.
+	// Added by prod-feature-wiring spec.
+	quotaStore quotaStoreIface
+
+	// alertStore persists and retrieves per-user platform alerts.
+	// May be nil; when nil, ListAlerts/MarkAlertRead return codes.Unavailable.
+	// Added by prod-feature-wiring spec.
+	alertStore alertStoreIface
+
+	// conversationStore persists and retrieves chat conversation history.
+	// May be nil; when nil, ListConversations/GetConversation return codes.Unavailable.
+	// Added by prod-feature-wiring spec.
+	conversationStore conversationStoreIface
+}
+
+// missionDraftStoreIface is the narrow interface the DaemonServer uses for
+// mission draft persistence (Save and List). Using an interface allows tests
+// to inject a mock without spinning up Redis.
+type missionDraftStoreIface interface {
+	Save(ctx context.Context, tenantID, name, yaml, draftID string) (string, error)
+	List(ctx context.Context, tenantID string) ([]*missiondraft.MissionDraft, error)
+}
+
+// findingStoreIface is the narrow subset of finding.FindingStore used by ExportFindings.
+// Using an interface avoids importing the finding package in tests that do not exercise it.
+type findingStoreIface interface {
+	// List retrieves findings scoped by mission and optional filter.
+	// Pass a zero-value types.ID to list all findings for the filter.
+	List(ctx context.Context, missionID types.ID, filter *finding.FindingFilter) ([]finding.EnhancedFinding, error)
 }
 
 // MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
@@ -890,6 +935,63 @@ func (s *DaemonServer) WithBillingStore(ts *component.TenantService, qm *compone
 // Call this immediately after NewDaemonServer and before registering the server.
 func (s *DaemonServer) WithAPIKeyStore(a *auth.APIKeyAuthenticator) *DaemonServer {
 	s.apiKeyStore = &apiKeyStoreAdapter{auth: a}
+	return s
+}
+
+// WithOnboardingStore wires a Redis-backed onboarding state store so that
+// GetOnboardingState and UpdateOnboardingState RPCs are backed by durable storage.
+// Call this immediately after NewDaemonServer and before registering the server.
+func (s *DaemonServer) WithOnboardingStore(store *onboarding.RedisOnboardingStore) *DaemonServer {
+	s.onboardingStore = store
+	return s
+}
+
+// WithImpersonationIssuer wires the HMAC-SHA256 JWT issuer so that
+// ImpersonateTenant returns a real signed token instead of an empty string.
+// Call this immediately after NewDaemonServer and before registering the server.
+func (s *DaemonServer) WithImpersonationIssuer(issuer *impersonation.Issuer) *DaemonServer {
+	s.impersonationIssuer = issuer
+	return s
+}
+
+// WithMissionDraftStore wires a Redis-backed mission draft store so that
+// SaveMissionDraft and ListMissionDrafts RPCs are backed by durable storage.
+// Call this immediately after NewDaemonServer and before registering the server.
+func (s *DaemonServer) WithMissionDraftStore(store missionDraftStoreIface) *DaemonServer {
+	s.missionDraftStore = store
+	return s
+}
+
+// WithFindingStore wires the finding store so that the ExportFindings RPC can
+// query and serialize tenant-scoped findings. Call this immediately after
+// NewDaemonServer and before registering the server.
+// Added by prod-unimplemented-apis spec.
+func (s *DaemonServer) WithFindingStore(store findingStoreIface) *DaemonServer {
+	s.findingStore = store
+	return s
+}
+
+// WithQuotaStore wires the Redis-backed quota store so that GetTenantQuota and
+// SetTenantQuota RPCs are backed by durable storage.
+// Added by prod-feature-wiring spec.
+func (s *DaemonServer) WithQuotaStore(store quotaStoreIface) *DaemonServer {
+	s.quotaStore = store
+	return s
+}
+
+// WithAlertStore wires the Redis-backed alert store so that ListAlerts,
+// MarkAlertRead, and MarkAllAlertsRead RPCs are backed by durable storage.
+// Added by prod-feature-wiring spec.
+func (s *DaemonServer) WithAlertStore(store alertStoreIface) *DaemonServer {
+	s.alertStore = store
+	return s
+}
+
+// WithConversationStore wires the Redis-backed conversation store so that
+// ListConversations and GetConversation RPCs are backed by durable storage.
+// Added by prod-feature-wiring spec.
+func (s *DaemonServer) WithConversationStore(store conversationStoreIface) *DaemonServer {
+	s.conversationStore = store
 	return s
 }
 
@@ -3339,12 +3441,30 @@ func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTe
 		"target_tenant", req.TenantId,
 	)
 
-	// TODO: generate a time-limited impersonation token once the token-issuance
-	// service is wired (e.g. a short-lived JWT signed with the platform key,
-	// scoped to req.TenantId, with the caller's subject embedded as the
-	// "impersonator" claim for downstream audit correlation).
+	// Emit audit event for every impersonation attempt regardless of outcome.
+	if s.auditLogger != nil {
+		_ = s.auditLogger.Log(ctx, "tenants:impersonate", "tenant", req.TenantId, map[string]any{
+			"admin_subject": identity.Subject,
+			"admin_email":   identity.Email,
+		})
+	}
+
+	// Issue a signed impersonation token if the issuer is wired.
+	if s.impersonationIssuer == nil {
+		return nil, status_grpc.Errorf(codes.Unimplemented, "impersonation service not configured")
+	}
+
+	token, err := s.impersonationIssuer.IssueToken(ctx, req.TenantId)
+	if err != nil {
+		s.logger.Error("failed to issue impersonation token",
+			"target_tenant", req.TenantId,
+			"error", err,
+		)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to issue impersonation token: %v", err)
+	}
+
 	return &ImpersonateTenantResponse{
-		Token: "",
+		Token: token,
 	}, nil
 }
 

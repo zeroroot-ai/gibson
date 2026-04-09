@@ -511,10 +511,7 @@ func (r *FgaRpcRegistry) populate() {
 	// Auth schema — GetAuthSchema is deleted in task 10 but included here
 	// until proto regeneration removes it. Marked unauthenticated to match
 	// existing permissions.yaml behavior while it still exists.
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetAuthSchema", FgaCheckSpec{
-		Unauthenticated: true,
-		Description:     "Return live authorization schema (deprecated; deleted in authz-03 task 10)",
-	})
+	// GetAuthSchema was removed in authz-03 task 10 and must not appear here.
 
 	// Signup.
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/SignupTenant", FgaCheckSpec{
@@ -601,6 +598,78 @@ func (r *FgaRpcRegistry) populate() {
 	r.add("/gibson.daemon.v1.DaemonService/GetMyPermissions", FgaCheckSpec{
 		Relation:    "member",
 		Description: "Get the caller's permissions summary for the current tenant",
+	})
+
+	// ---------------------------------------------------------------------------
+	// prod-unimplemented-apis: new admin handlers
+	// ---------------------------------------------------------------------------
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetUserProfile", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Get Keycloak user profile (self or tenant admin)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/UpdateUserProfile", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Update Keycloak user profile fields (self or tenant admin)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ResetPassword", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Trigger Keycloak password reset email",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RevokeUserSessions", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Revoke all active Keycloak sessions for a user (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/SuspendMember", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Suspend a tenant member account (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/SaveMissionDraft", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Save a mission YAML draft for a tenant",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListMissionDrafts", FgaCheckSpec{
+		Relation:    "member",
+		Description: "List saved mission YAML drafts for a tenant",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ExportFindings", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Export findings for a tenant in multiple formats",
+	})
+
+	// ---------------------------------------------------------------------------
+	// prod-feature-wiring: new quota, user session, alerts, chat handlers
+	// ---------------------------------------------------------------------------
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetTenantQuota", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Get tenant quota configuration (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/SetTenantQuota", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Set tenant quota configuration (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetUserSessions", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Get active Keycloak sessions for a user (self or admin)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListAlerts", FgaCheckSpec{
+		Relation:    "member",
+		Description: "List platform alerts for a tenant user",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/MarkAlertRead", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Mark a single alert as read",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/MarkAllAlertsRead", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Mark all alerts for a user as read",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListConversations", FgaCheckSpec{
+		Relation:    "member",
+		Description: "List chat conversations for a tenant user",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetConversation", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Get a chat conversation with its message history",
 	})
 
 	// =========================================================================

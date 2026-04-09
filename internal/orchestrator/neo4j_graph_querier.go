@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -29,8 +30,9 @@ var tracer = otel.Tracer("gibson.orchestrator.graph_querier")
 // It provides entity lookup, relationship traversal, pattern matching,
 // and semantic search against the GraphRAG knowledge graph.
 type Neo4jGraphQuerier struct {
-	driver   neo4j.DriverWithContext
-	database string
+	driver            neo4j.DriverWithContext
+	database          string
+	embeddingProvider EmbeddingProvider // optional; nil falls back to text search
 }
 
 // NewNeo4jGraphQuerier creates a new Neo4jGraphQuerier with the given driver.
@@ -42,6 +44,14 @@ func NewNeo4jGraphQuerier(driver neo4j.DriverWithContext, database string) *Neo4
 		driver:   driver,
 		database: database,
 	}
+}
+
+// WithEmbeddingProvider sets an optional EmbeddingProvider on the querier.
+// When set, SemanticSearch uses vector search via db.index.vector.queryNodes.
+// When nil (the default), SemanticSearch falls back to text-based matching.
+func (q *Neo4jGraphQuerier) WithEmbeddingProvider(ep EmbeddingProvider) *Neo4jGraphQuerier {
+	q.embeddingProvider = ep
+	return q
 }
 
 // EntityLookup retrieves entities matching specified criteria.
@@ -550,8 +560,13 @@ func (q *Neo4jGraphQuerier) convertPatternRecords(records []*neo4j.Record, alias
 	return results
 }
 
-// SemanticSearch performs vector similarity search on entity descriptions.
-// Note: This requires entities to have embeddings stored in the graph.
+// SemanticSearch performs similarity search on entity descriptions.
+//
+// When an EmbeddingProvider is configured the search issues a Neo4j vector
+// index query via db.index.vector.queryNodes and returns cosine-similarity
+// scores from the index. If the embedding provider is nil, returns an error,
+// or the Neo4j vector index does not exist, the method falls back to a
+// text-scan Cypher query and logs a WARN.
 func (q *Neo4jGraphQuerier) SemanticSearch(ctx context.Context, query SemanticQuery) ([]EntityMatch, error) {
 	ctx, span := tracer.Start(ctx, "Neo4jGraphQuerier.SemanticSearch",
 		trace.WithAttributes(
@@ -564,12 +579,116 @@ func (q *Neo4jGraphQuerier) SemanticSearch(ctx context.Context, query SemanticQu
 	ctx, cancel := context.WithTimeout(ctx, defaultQueryTimeout)
 	defer cancel()
 
-	// Note: Full semantic search requires vector embeddings and similarity functions.
-	// This is a placeholder that does text-based matching on descriptions.
-	// For production, integrate with Neo4j's vector search or external embedding service.
+	// Set max results
+	maxResults := query.MaxResults
+	if maxResults <= 0 || maxResults > 100 {
+		maxResults = 20
+	}
+
+	// Attempt vector search when an embedding provider is available.
+	if q.embeddingProvider != nil {
+		matches, err := q.vectorSearch(ctx, query, maxResults)
+		if err == nil {
+			return q.filterByMinSimilarity(matches, query.MinSimilarity), nil
+		}
+		// Fall back to text search on any error (missing index, provider failure, etc.)
+		slog.WarnContext(ctx, "vector semantic search failed, falling back to text search",
+			slog.String("reason", err.Error()),
+		)
+	}
+
+	// Text-scan fallback.
+	matches, err := q.textSearch(ctx, query, maxResults)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("semantic search failed: %w", err)
+	}
+	return q.filterByMinSimilarity(matches, query.MinSimilarity), nil
+}
+
+// vectorSearch performs semantic search using Neo4j's vector index.
+// Index name is derived from the first requested entity type, defaulting to
+// "entity_embeddings".
+func (q *Neo4jGraphQuerier) vectorSearch(ctx context.Context, query SemanticQuery, limit int) ([]EntityMatch, error) {
+	vecs, err := q.embeddingProvider.Embed(ctx, []string{query.Query})
+	if err != nil {
+		return nil, fmt.Errorf("embedding provider: %w", err)
+	}
+	if len(vecs) == 0 {
+		return nil, fmt.Errorf("embedding provider returned empty result")
+	}
+	vector := vecs[0]
+
+	indexName := "entity_embeddings"
+	if len(query.EntityTypes) == 1 {
+		indexName = strings.ToLower(query.EntityTypes[0]) + "_embeddings"
+	}
 
 	params := map[string]any{
+		"index_name": indexName,
+		"k":          limit,
+		"vector":     vector,
+	}
+
+	missionFilter := ""
+	if query.MissionRunID != "" {
+		missionFilter = "WHERE n.mission_run_id = $mission_run_id"
+		params["mission_run_id"] = query.MissionRunID
+	}
+
+	cypher := fmt.Sprintf(`
+		CALL db.index.vector.queryNodes($index_name, $k, $vector) YIELD node AS n, score
+		%s
+		RETURN n, labels(n) AS labels, score
+	`, missionFilter)
+
+	session := q.driver.NewSession(ctx, neo4j.SessionConfig{
+		DatabaseName: q.database,
+		AccessMode:   neo4j.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		neoResult, err := tx.Run(ctx, cypher, params)
+		if err != nil {
+			return nil, err
+		}
+		records, err := neoResult.Collect(ctx)
+		if err != nil {
+			return nil, err
+		}
+		matches := q.convertEntityRecords(records)
+		// Scores returned by queryNodes are cosine similarities [0,1]; copy them.
+		for i, rec := range records {
+			if i < len(matches) {
+				if s, ok := rec.Get("score"); ok {
+					if f, ok := s.(float64); ok {
+						matches[i].Score = f
+					}
+				}
+			}
+		}
+		return matches, nil
+	})
+
+	if err != nil {
+		// Detect missing vector index so the caller can fall back gracefully.
+		if strings.Contains(err.Error(), "No procedure with the name") ||
+			strings.Contains(err.Error(), "index does not exist") ||
+			strings.Contains(err.Error(), "There is no such multiToken index") {
+			return nil, fmt.Errorf("vector index unavailable: %w", err)
+		}
+		return nil, err
+	}
+
+	return result.([]EntityMatch), nil
+}
+
+// textSearch performs a text-scan Cypher query against node description fields.
+func (q *Neo4jGraphQuerier) textSearch(ctx context.Context, query SemanticQuery, limit int) ([]EntityMatch, error) {
+	params := map[string]any{
 		"query_text": "%" + query.Query + "%",
+		"limit":      limit,
 	}
 
 	// Build label filter
@@ -577,6 +696,7 @@ func (q *Neo4jGraphQuerier) SemanticSearch(ctx context.Context, query SemanticQu
 	if len(query.EntityTypes) > 0 {
 		labels := make([]string, len(query.EntityTypes))
 		for i, t := range query.EntityTypes {
+			//nolint:staticcheck // strings.Title is acceptable for label capitalization
 			labels[i] = strings.Title(t)
 		}
 		labelFilter = ":" + strings.Join(labels, "|")
@@ -588,13 +708,6 @@ func (q *Neo4jGraphQuerier) SemanticSearch(ctx context.Context, query SemanticQu
 		missionFilter = "AND n.mission_run_id = $mission_run_id"
 		params["mission_run_id"] = query.MissionRunID
 	}
-
-	// Set max results
-	maxResults := query.MaxResults
-	if maxResults <= 0 || maxResults > 100 {
-		maxResults = 20
-	}
-	params["limit"] = maxResults
 
 	cypher := fmt.Sprintf(`
 		MATCH (n%s)
@@ -608,7 +721,6 @@ func (q *Neo4jGraphQuerier) SemanticSearch(ctx context.Context, query SemanticQu
 		LIMIT $limit
 	`, labelFilter, missionFilter)
 
-	// Execute query
 	session := q.driver.NewSession(ctx, neo4j.SessionConfig{
 		DatabaseName: q.database,
 		AccessMode:   neo4j.AccessModeRead,
@@ -620,45 +732,40 @@ func (q *Neo4jGraphQuerier) SemanticSearch(ctx context.Context, query SemanticQu
 		if err != nil {
 			return nil, err
 		}
-
 		records, err := neoResult.Collect(ctx)
 		if err != nil {
 			return nil, err
 		}
-
 		matches := q.convertEntityRecords(records)
-
-		// Apply simple text similarity scoring
 		for i := range matches {
 			matches[i].Score = q.calculateTextSimilarity(query.Query, matches[i].Properties)
 		}
-
 		return matches, nil
 	})
 
 	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("semantic search failed: %w", err)
+		return nil, err
 	}
 
-	matches := result.([]EntityMatch)
-
-	// Filter by minimum similarity
-	if query.MinSimilarity > 0 {
-		filtered := make([]EntityMatch, 0, len(matches))
-		for _, m := range matches {
-			if m.Score >= query.MinSimilarity {
-				filtered = append(filtered, m)
-			}
-		}
-		matches = filtered
-	}
-
-	return matches, nil
+	return result.([]EntityMatch), nil
 }
 
-// calculateTextSimilarity calculates a simple text similarity score.
-// This is a placeholder - production should use proper embeddings.
+// filterByMinSimilarity drops matches whose Score is below the threshold.
+func (q *Neo4jGraphQuerier) filterByMinSimilarity(matches []EntityMatch, min float64) []EntityMatch {
+	if min <= 0 {
+		return matches
+	}
+	filtered := make([]EntityMatch, 0, len(matches))
+	for _, m := range matches {
+		if m.Score >= min {
+			filtered = append(filtered, m)
+		}
+	}
+	return filtered
+}
+
+// calculateTextSimilarity calculates a simple text similarity score based on
+// word overlap between the query and node properties.
 func (q *Neo4jGraphQuerier) calculateTextSimilarity(query string, props map[string]any) float64 {
 	queryLower := strings.ToLower(query)
 	queryWords := strings.Fields(queryLower)
@@ -670,7 +777,6 @@ func (q *Neo4jGraphQuerier) calculateTextSimilarity(query string, props map[stri
 		return 0.5
 	}
 
-	// Check each property for matching words
 	for _, value := range props {
 		if strVal, ok := value.(string); ok {
 			strLower := strings.ToLower(strVal)
@@ -682,12 +788,10 @@ func (q *Neo4jGraphQuerier) calculateTextSimilarity(query string, props map[stri
 		}
 	}
 
-	// Normalize score
 	score := float64(matchCount) / float64(totalWords)
 	if score > 1.0 {
 		score = 1.0
 	}
-
 	return score
 }
 

@@ -13,6 +13,7 @@ import (
 	gibsonLLM "github.com/zero-day-ai/gibson/internal/llm"
 	gibsonMemory "github.com/zero-day-ai/gibson/internal/memory"
 	gibsonTypes "github.com/zero-day-ai/gibson/internal/types"
+	sdkAgent "github.com/zero-day-ai/sdk/agent"
 	"github.com/zero-day-ai/sdk/finding"
 	"github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/llm"
@@ -615,7 +616,8 @@ func TestGibsonHarnessAdapter_TokenUsage(t *testing.T) {
 	assert.Equal(t, 0, tracker.Total().TotalTokens)
 }
 
-// TestGibsonHarnessAdapter_GraphRAG tests that GraphRAG methods return ErrNotImplemented.
+// TestGibsonHarnessAdapter_GraphRAG tests that GraphRAG methods return ErrNotSupported
+// when the inner harness does not implement the graphragProvider interface.
 func TestGibsonHarnessAdapter_GraphRAG(t *testing.T) {
 	ctx := context.Background()
 	inner := &mockInnerHarness{}
@@ -623,22 +625,22 @@ func TestGibsonHarnessAdapter_GraphRAG(t *testing.T) {
 
 	t.Run("QueryGraphRAG", func(t *testing.T) {
 		_, err := adapter.QueryGraphRAG(ctx, graphrag.Query{Text: "test"})
-		assert.ErrorIs(t, err, ErrNotImplemented)
+		assert.ErrorIs(t, err, ErrNotSupported)
 	})
 
 	t.Run("FindSimilarAttacks", func(t *testing.T) {
 		_, err := adapter.FindSimilarAttacks(ctx, "payload", 5)
-		assert.ErrorIs(t, err, ErrNotImplemented)
+		assert.ErrorIs(t, err, ErrNotSupported)
 	})
 
 	t.Run("FindSimilarFindings", func(t *testing.T) {
 		_, err := adapter.FindSimilarFindings(ctx, "finding-1", 5)
-		assert.ErrorIs(t, err, ErrNotImplemented)
+		assert.ErrorIs(t, err, ErrNotSupported)
 	})
 
 	t.Run("StoreGraphNode", func(t *testing.T) {
 		_, err := adapter.StoreGraphNode(ctx, graphrag.GraphNode{Type: "Finding"})
-		assert.ErrorIs(t, err, ErrNotImplemented)
+		assert.ErrorIs(t, err, ErrNotSupported)
 	})
 
 	t.Run("GraphRAGHealth", func(t *testing.T) {
@@ -723,4 +725,180 @@ func TestGibsonHarnessAdapter_SDKInterfaceCompliance(t *testing.T) {
 		Complete(context.Context, string, []llm.Message, ...llm.CompletionOption) (*llm.CompletionResponse, error)
 	})
 	assert.True(t, ok, "adapter must satisfy agent.Harness Complete method signature")
+}
+
+// TestGibsonHarnessAdapter_MissionManagementNotSupported verifies that all mission
+// management methods return ErrNotSupported in the eval adapter.
+func TestGibsonHarnessAdapter_MissionManagementNotSupported(t *testing.T) {
+	ctx := context.Background()
+	inner := &mockInnerHarness{}
+	adapter := NewGibsonHarnessAdapter(inner)
+
+	t.Run("CreateMission", func(t *testing.T) {
+		_, err := adapter.CreateMission(ctx, nil, "", nil)
+		assert.ErrorIs(t, err, ErrNotSupported)
+		assert.Contains(t, err.Error(), "CreateMission")
+	})
+
+	t.Run("RunMission", func(t *testing.T) {
+		err := adapter.RunMission(ctx, "mission-1", nil)
+		assert.ErrorIs(t, err, ErrNotSupported)
+		assert.Contains(t, err.Error(), "RunMission")
+	})
+
+	t.Run("GetMissionStatus", func(t *testing.T) {
+		_, err := adapter.GetMissionStatus(ctx, "mission-1")
+		assert.ErrorIs(t, err, ErrNotSupported)
+		assert.Contains(t, err.Error(), "GetMissionStatus")
+	})
+
+	t.Run("WaitForMission", func(t *testing.T) {
+		_, err := adapter.WaitForMission(ctx, "mission-1", 0)
+		assert.ErrorIs(t, err, ErrNotSupported)
+		assert.Contains(t, err.Error(), "WaitForMission")
+	})
+
+	t.Run("ListMissions", func(t *testing.T) {
+		_, err := adapter.ListMissions(ctx, nil)
+		assert.ErrorIs(t, err, ErrNotSupported)
+		assert.Contains(t, err.Error(), "ListMissions")
+	})
+
+	t.Run("CancelMission", func(t *testing.T) {
+		err := adapter.CancelMission(ctx, "mission-1")
+		assert.ErrorIs(t, err, ErrNotSupported)
+		assert.Contains(t, err.Error(), "CancelMission")
+	})
+
+	t.Run("GetMissionResults", func(t *testing.T) {
+		_, err := adapter.GetMissionResults(ctx, "mission-1")
+		assert.ErrorIs(t, err, ErrNotSupported)
+		assert.Contains(t, err.Error(), "GetMissionResults")
+	})
+}
+
+// TestGibsonHarnessAdapter_CredentialAndProtoOpsNotSupported verifies that credential
+// and proto-based GraphRAG operations return ErrNotSupported.
+func TestGibsonHarnessAdapter_CredentialAndProtoOpsNotSupported(t *testing.T) {
+	ctx := context.Background()
+	inner := &mockInnerHarness{}
+	adapter := NewGibsonHarnessAdapter(inner)
+
+	t.Run("GetCredential", func(t *testing.T) {
+		_, err := adapter.GetCredential(ctx, "cred-name")
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("QueryNodes", func(t *testing.T) {
+		_, err := adapter.QueryNodes(ctx, nil)
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("StoreNode", func(t *testing.T) {
+		_, err := adapter.StoreNode(ctx, nil)
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("QueueToolWork", func(t *testing.T) {
+		_, err := adapter.QueueToolWork(ctx, "tool-name", nil)
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("ToolResults", func(t *testing.T) {
+		ch := adapter.ToolResults(ctx, "job-id")
+		require.NotNil(t, ch)
+		// Channel should be closed immediately (no work enqueued)
+		_, open := <-ch
+		assert.False(t, open, "ToolResults channel should be closed in eval adapter")
+	})
+}
+
+// TestGibsonHarnessAdapter_GraphRAGPartialMethodsNotSupported verifies that
+// StoreSemantic, StoreStructured, QuerySemantic, QueryStructured return ErrNotSupported
+// when the inner harness doesn't implement the graphragProvider interface.
+func TestGibsonHarnessAdapter_GraphRAGPartialMethodsNotSupported(t *testing.T) {
+	ctx := context.Background()
+	inner := &mockInnerHarness{}
+	adapter := NewGibsonHarnessAdapter(inner)
+
+	t.Run("StoreSemantic", func(t *testing.T) {
+		_, err := adapter.StoreSemantic(ctx, graphrag.GraphNode{Type: "Host"})
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("StoreStructured", func(t *testing.T) {
+		_, err := adapter.StoreStructured(ctx, graphrag.GraphNode{Type: "Port"})
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("QuerySemantic", func(t *testing.T) {
+		_, err := adapter.QuerySemantic(ctx, graphrag.Query{Text: "test"})
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("QueryStructured", func(t *testing.T) {
+		_, err := adapter.QueryStructured(ctx, graphrag.Query{Text: "test"})
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("GetAttackChains", func(t *testing.T) {
+		_, err := adapter.GetAttackChains(ctx, "T1190", 3)
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("GetRelatedFindings", func(t *testing.T) {
+		_, err := adapter.GetRelatedFindings(ctx, "finding-1")
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("CreateGraphRelationship", func(t *testing.T) {
+		err := adapter.CreateGraphRelationship(ctx, graphrag.Relationship{})
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("StoreGraphBatch", func(t *testing.T) {
+		_, err := adapter.StoreGraphBatch(ctx, graphrag.Batch{})
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("TraverseGraph", func(t *testing.T) {
+		_, err := adapter.TraverseGraph(ctx, "node-1", graphrag.TraversalOptions{})
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+}
+
+// TestGibsonHarnessAdapter_DelegateToAgent verifies that DelegateToAgent
+// calls the inner harness and converts task/result types correctly.
+func TestGibsonHarnessAdapter_DelegateToAgent(t *testing.T) {
+	ctx := context.Background()
+	inner := &mockInnerHarness{}
+	adapter := NewGibsonHarnessAdapter(inner)
+
+	result, err := adapter.DelegateToAgent(ctx, "security-agent", sdkAgent.Task{
+		ID:      "task-1",
+		Goal:    "scan the target",
+		Context: map[string]any{"target": "example.com"},
+	})
+
+	require.NoError(t, err)
+	// The mock returns a new result with pending status
+	assert.NotEmpty(t, string(result.Status))
+}
+
+// TestGibsonHarnessAdapter_MemoryMissionNil verifies that Mission() returns nil
+// when the inner memory store has no mission memory configured.
+func TestGibsonHarnessAdapter_MemoryMissionNil(t *testing.T) {
+	inner := &mockInnerHarness{}
+	adapter := NewGibsonHarnessAdapter(inner)
+
+	mem := adapter.Memory()
+	require.NotNil(t, mem)
+
+	// Mock returns nil for Mission() — adapter should propagate nil
+	mission := mem.Mission()
+	assert.Nil(t, mission, "Mission() should be nil when inner store has no mission memory")
+
+	// Mock returns nil for LongTerm() — adapter should propagate nil
+	lt := mem.LongTerm()
+	assert.Nil(t, lt, "LongTerm() should be nil when inner store has no long-term memory")
 }

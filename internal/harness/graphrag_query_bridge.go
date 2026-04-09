@@ -575,12 +575,38 @@ func (b *DefaultGraphRAGQueryBridge) Traverse(ctx context.Context, startNodeID s
 		AllowedNodeTypes: nodeTypes,
 	}
 
-	// Execute traversal
-	// Note: The GraphRAGProvider interface has TraverseGraph method
-	// We'll need to access the provider through the store
-	// For now, we'll return an error indicating this needs provider access
-	_ = filters
-	return nil, fmt.Errorf("traverse not yet implemented: requires direct provider access")
+	// Execute traversal via the store's TraverseGraph method.
+	internalNodes, err := b.store.TraverseGraph(ctx, startNodeID, opts.MaxDepth, filters)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("graph traversal failed: %w", err)
+	}
+
+	// Convert internal GraphNode results to SDK TraversalResult.
+	results := make([]sdkgraphrag.TraversalResult, len(internalNodes))
+	for i, n := range internalNodes {
+		nodeType := ""
+		if len(n.Labels) > 0 {
+			nodeType = string(n.Labels[0])
+		}
+		props := make(map[string]any, len(n.Properties))
+		for k, v := range n.Properties {
+			props[k] = v
+		}
+		results[i] = sdkgraphrag.TraversalResult{
+			Node: sdkgraphrag.GraphNode{
+				ID:         n.ID.String(),
+				Type:       nodeType,
+				Properties: props,
+				CreatedAt:  n.CreatedAt,
+				UpdatedAt:  n.UpdatedAt,
+			},
+			Distance: i, // approximate: provider does not return depth per node
+		}
+	}
+
+	span.SetAttributes(attribute.Int("results.count", len(results)))
+	return results, nil
 }
 
 // StoreSemantic stores a node with semantic search capabilities (requires Content).

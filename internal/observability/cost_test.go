@@ -120,11 +120,7 @@ func (m *MockTokenTracker) Reset(scope llm.UsageScope) error {
 
 func TestNewCostTracker(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 
 	tracker := NewCostTracker(mockTracker, logger)
 
@@ -136,11 +132,7 @@ func TestNewCostTracker(t *testing.T) {
 
 func TestCalculateCost(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	tests := []struct {
@@ -229,11 +221,7 @@ func TestRecordCostOnSpan(t *testing.T) {
 	ctx := context.Background()
 
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	// Create a span
@@ -262,11 +250,7 @@ func TestRecordCostOnSpan(t *testing.T) {
 
 func TestGetMissionCost(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	// Create test mission ID
@@ -297,11 +281,7 @@ func TestGetMissionCost(t *testing.T) {
 
 func TestGetMissionCost_InvalidID(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	// Try to get cost with invalid mission ID
@@ -311,11 +291,7 @@ func TestGetMissionCost_InvalidID(t *testing.T) {
 
 func TestGetMissionCost_NoUsage(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	// Create mission ID with no usage
@@ -328,11 +304,7 @@ func TestGetMissionCost_NoUsage(t *testing.T) {
 
 func TestGetAgentCost(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	// Create test mission ID
@@ -365,11 +337,7 @@ func TestGetAgentCost(t *testing.T) {
 
 func TestGetAgentCost_InvalidID(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	// Try to get cost with invalid mission ID
@@ -379,11 +347,7 @@ func TestGetAgentCost_InvalidID(t *testing.T) {
 
 func TestGetAgentCost_NoUsage(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	// Create mission ID with no usage
@@ -396,11 +360,7 @@ func TestGetAgentCost_NoUsage(t *testing.T) {
 
 func TestSetThreshold(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	missionID := types.NewID()
@@ -417,11 +377,7 @@ func TestSetThreshold(t *testing.T) {
 
 func TestSetThreshold_InvalidID(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	// Try to set threshold with invalid mission ID
@@ -431,11 +387,7 @@ func TestSetThreshold_InvalidID(t *testing.T) {
 
 func TestSetThreshold_InvalidValue(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	missionID := types.NewID()
@@ -458,11 +410,7 @@ func TestSetThreshold_InvalidValue(t *testing.T) {
 
 func TestCheckThreshold(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	missionID := types.NewID()
@@ -492,11 +440,7 @@ func TestCheckThreshold(t *testing.T) {
 
 func TestCheckThreshold_NoThresholdSet(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	missionID := types.NewID()
@@ -508,11 +452,7 @@ func TestCheckThreshold_NoThresholdSet(t *testing.T) {
 
 func TestGetThreshold(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	missionID := types.NewID()
@@ -533,11 +473,7 @@ func TestGetThreshold(t *testing.T) {
 
 func TestRemoveThreshold(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	missionID := types.NewID()
@@ -560,11 +496,7 @@ func TestRemoveThreshold(t *testing.T) {
 
 func TestCostTracker_ConcurrentAccess(t *testing.T) {
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	missionID := types.NewID()
@@ -611,11 +543,7 @@ func TestCostTracker_ConcurrentAccess(t *testing.T) {
 func TestCostTracking_Integration(t *testing.T) {
 	// Integration test showing full cost tracking workflow
 	mockTracker := NewMockTokenTracker()
-	logger := NewTracedLogger(
-		NewTextHandler(os.Stdout, slog.LevelDebug),
-		"test-mission",
-		"test-agent",
-	)
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)
 
 	missionID := types.NewID()

@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"regexp"
 	"strings"
@@ -55,9 +54,9 @@ func (l *viperConfigLoader) Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("failed to apply environment variable interpolation: %w", err)
 		}
 
-		// Warn if deprecated database section is present
+		// Fail if deprecated database section is present
 		if _, hasDatabase := interpolatedMap["database"]; hasDatabase {
-			slog.Warn("DEPRECATED: 'database' section in config is deprecated and will be removed in a future version. Please migrate to Redis-based state storage using the 'redis' section.")
+			return nil, fmt.Errorf("configuration error: the top-level 'database' config section is no longer supported; remove it and configure state storage under the 'redis' section instead")
 		}
 	}
 
@@ -109,9 +108,9 @@ func (l *viperConfigLoader) LoadWithDefaults(path string) (*Config, error) {
 			return nil, fmt.Errorf("failed to apply environment variable interpolation: %w", err)
 		}
 
-		// Warn if deprecated database section is present
+		// Fail if deprecated database section is present
 		if _, hasDatabase := interpolatedMap["database"]; hasDatabase {
-			slog.Warn("DEPRECATED: 'database' section in config is deprecated and will be removed in a future version. Please migrate to Redis-based state storage using the 'redis' section.")
+			return nil, fmt.Errorf("configuration error: the top-level 'database' config section is no longer supported; remove it and configure state storage under the 'redis' section instead")
 		}
 	}
 

@@ -574,6 +574,18 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "configured callback service with QueueManager for Redis-based tool execution")
 	}
 
+	// Configure callback service with MissionOperator so agents can create, run,
+	// wait for, list, cancel, and retrieve results of sub-missions via the harness
+	// callback RPC surface. The missionHarnessAdapter lazily resolves the
+	// missionManager on first lifecycle call, so it is safe to wire before
+	// ensureMissionManager() runs.
+	if d.missionStore != nil {
+		missionAdapter := newMissionHarnessAdapter(d)
+		missionOperator := harness.NewMissionOperatorAdapter(missionAdapter)
+		d.callback.SetMissionManager(missionOperator)
+		d.logger.Info(ctx, "configured callback service with MissionOperator adapter")
+	}
+
 	// Configure callback service with authz store for component authorization callbacks.
 	// The adapter bridges mission.MissionAuthzStore → harness.RunAuthzLookup to break
 	// the import cycle (harness→mission→eval→harness).

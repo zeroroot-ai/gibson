@@ -33,8 +33,11 @@ import (
 )
 
 var (
-	// ErrNotImplemented is returned for features not yet implemented in the adapter
-	ErrNotImplemented = errors.New("feature not yet implemented in Gibson harness adapter")
+	// ErrNotSupported is returned for operations not supported in the eval context.
+	// Mission management operations (CreateMission, RunMission, etc.) are intentionally
+	// unsupported during eval runs — use daemon missions for orchestration.
+	// Callers can check with errors.Is(err, eval.ErrNotSupported).
+	ErrNotSupported = errors.New("not supported in eval context")
 )
 
 // GibsonHarnessAdapter adapts Gibson's internal AgentHarness to the SDK's agent.Harness interface.
@@ -153,7 +156,12 @@ func (a *GibsonHarnessAdapter) ListPlugins(ctx context.Context) ([]plugin.Descri
 
 // DelegateToAgent assigns a task to another agent for execution.
 func (a *GibsonHarnessAdapter) DelegateToAgent(ctx context.Context, name string, task agent.Task) (agent.Result, error) {
-	return agent.Result{}, fmt.Errorf("agent delegation not yet implemented in harness adapter")
+	gibsonTask := convertTaskToGibson(task)
+	gibsonResult, err := a.inner.DelegateToAgent(ctx, name, gibsonTask)
+	if err != nil {
+		return agent.Result{}, err
+	}
+	return convertResultToSDK(gibsonResult), nil
 }
 
 // ListAgents returns descriptors for all available agents.
@@ -212,11 +220,19 @@ func (m *memoryStoreAdapter) Working() memory.WorkingMemory {
 }
 
 func (m *memoryStoreAdapter) Mission() memory.MissionMemory {
-	return nil
+	innerMission := m.inner.Mission()
+	if innerMission == nil {
+		return nil
+	}
+	return &missionMemoryAdapter{inner: innerMission}
 }
 
 func (m *memoryStoreAdapter) LongTerm() memory.LongTermMemory {
-	return nil
+	innerLT := m.inner.LongTerm()
+	if innerLT == nil {
+		return nil
+	}
+	return &longTermMemoryAdapter{inner: innerLT}
 }
 
 type workingMemoryAdapter struct {
@@ -254,6 +270,137 @@ func (m *workingMemoryAdapter) Clear(ctx context.Context) error {
 
 func (m *workingMemoryAdapter) Keys(ctx context.Context) ([]string, error) {
 	return m.inner.List(), nil
+}
+
+// missionMemoryAdapter wraps the Gibson internal MissionMemory to implement the SDK memory.MissionMemory interface.
+type missionMemoryAdapter struct {
+	inner gibsonMemory.MissionMemory
+}
+
+func (m *missionMemoryAdapter) Get(ctx context.Context, key string) (*memory.Item, error) {
+	item, err := m.inner.Retrieve(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return &memory.Item{
+		Key:       item.Key,
+		Value:     item.Value,
+		Metadata:  item.Metadata,
+		CreatedAt: item.CreatedAt,
+		UpdatedAt: item.UpdatedAt,
+	}, nil
+}
+
+func (m *missionMemoryAdapter) Set(ctx context.Context, key string, value any, metadata map[string]any) error {
+	return m.inner.Store(ctx, key, value, metadata)
+}
+
+func (m *missionMemoryAdapter) Delete(ctx context.Context, key string) error {
+	return m.inner.Delete(ctx, key)
+}
+
+func (m *missionMemoryAdapter) Search(ctx context.Context, query string, limit int) ([]memory.Result, error) {
+	results, err := m.inner.Search(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]memory.Result, len(results))
+	for i, r := range results {
+		out[i] = memory.Result{
+			Item: memory.Item{
+				Key:       r.Item.Key,
+				Value:     r.Item.Value,
+				Metadata:  r.Item.Metadata,
+				CreatedAt: r.Item.CreatedAt,
+				UpdatedAt: r.Item.UpdatedAt,
+			},
+			Score: r.Score,
+		}
+	}
+	return out, nil
+}
+
+func (m *missionMemoryAdapter) History(ctx context.Context, limit int) ([]memory.Item, error) {
+	items, err := m.inner.History(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]memory.Item, len(items))
+	for i, item := range items {
+		out[i] = memory.Item{
+			Key:       item.Key,
+			Value:     item.Value,
+			Metadata:  item.Metadata,
+			CreatedAt: item.CreatedAt,
+			UpdatedAt: item.UpdatedAt,
+		}
+	}
+	return out, nil
+}
+
+func (m *missionMemoryAdapter) GetPreviousRunValue(ctx context.Context, key string) (any, error) {
+	return m.inner.GetPreviousRunValue(ctx, key)
+}
+
+func (m *missionMemoryAdapter) GetValueHistory(ctx context.Context, key string) ([]memory.HistoricalValue, error) {
+	vals, err := m.inner.GetValueHistory(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]memory.HistoricalValue, len(vals))
+	for i, v := range vals {
+		out[i] = memory.HistoricalValue{
+			Value:     v.Value,
+			RunNumber: v.RunNumber,
+			MissionID: v.MissionID,
+			StoredAt:  v.StoredAt,
+		}
+	}
+	return out, nil
+}
+
+func (m *missionMemoryAdapter) ContinuityMode() memory.MemoryContinuityMode {
+	return memory.MemoryContinuityMode(m.inner.ContinuityMode())
+}
+
+// longTermMemoryAdapter wraps the Gibson internal LongTermMemory to implement the SDK memory.LongTermMemory interface.
+type longTermMemoryAdapter struct {
+	inner gibsonMemory.LongTermMemory
+}
+
+func (l *longTermMemoryAdapter) Store(ctx context.Context, content string, metadata map[string]any) (string, error) {
+	// Gibson's LongTermMemory.Store requires an explicit ID; generate a content-length-based one.
+	// The SDK interface only accepts content + metadata and returns the generated ID.
+	id := fmt.Sprintf("lt-%x", len(content))
+	if err := l.inner.Store(ctx, id, content, metadata); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (l *longTermMemoryAdapter) Search(ctx context.Context, query string, topK int, filters map[string]any) ([]memory.Result, error) {
+	results, err := l.inner.Search(ctx, query, topK, filters)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]memory.Result, len(results))
+	for i, r := range results {
+		out[i] = memory.Result{
+			Item: memory.Item{
+				Key:       r.Item.Key,
+				Value:     r.Item.Value,
+				Metadata:  r.Item.Metadata,
+				CreatedAt: r.Item.CreatedAt,
+				UpdatedAt: r.Item.UpdatedAt,
+			},
+			Score: r.Score,
+		}
+	}
+	return out, nil
+}
+
+func (l *longTermMemoryAdapter) Delete(ctx context.Context, id string) error {
+	return l.inner.Delete(ctx, id)
 }
 
 // Mission returns the current mission context.
@@ -355,56 +502,115 @@ func (a *GibsonHarnessAdapter) ReportStepHints(ctx context.Context, hints *plann
 	return nil
 }
 
+// graphragProvider is a type-assertion interface that matches the GraphRAG methods
+// implemented by DefaultAgentHarness (which are not on the AgentHarness interface).
+type graphragProvider interface {
+	QueryGraphRAG(ctx context.Context, query graphrag.Query) ([]graphrag.Result, error)
+	FindSimilarAttacks(ctx context.Context, content string, topK int) ([]graphrag.AttackPattern, error)
+	FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]graphrag.FindingNode, error)
+	GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]graphrag.AttackChain, error)
+	GetRelatedFindings(ctx context.Context, findingID string) ([]graphrag.FindingNode, error)
+	StoreGraphNode(ctx context.Context, node graphrag.GraphNode) (string, error)
+	CreateGraphRelationship(ctx context.Context, rel graphrag.Relationship) error
+	StoreGraphBatch(ctx context.Context, batch graphrag.Batch) ([]string, error)
+	TraverseGraph(ctx context.Context, startNodeID string, opts graphrag.TraversalOptions) ([]graphrag.TraversalResult, error)
+	StoreSemantic(ctx context.Context, node graphrag.GraphNode) (string, error)
+	StoreStructured(ctx context.Context, node graphrag.GraphNode) (string, error)
+	QuerySemantic(ctx context.Context, query graphrag.Query) ([]graphrag.Result, error)
+	QueryStructured(ctx context.Context, query graphrag.Query) ([]graphrag.Result, error)
+}
+
+// asGraphRAGProvider attempts to cast the inner harness to the graphragProvider interface.
+// Returns nil if the inner harness does not implement these methods.
+func (a *GibsonHarnessAdapter) asGraphRAGProvider() graphragProvider {
+	if p, ok := a.inner.(graphragProvider); ok {
+		return p
+	}
+	return nil
+}
+
 // QueryGraphRAG performs a semantic or hybrid query against the knowledge graph.
 func (a *GibsonHarnessAdapter) QueryGraphRAG(ctx context.Context, query graphrag.Query) ([]graphrag.Result, error) {
-	return nil, ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.QueryGraphRAG(ctx, query)
+	}
+	return nil, fmt.Errorf("%w: QueryGraphRAG requires a connected daemon harness", ErrNotSupported)
 }
 
 // FindSimilarAttacks searches for attack patterns semantically similar to the given content.
 func (a *GibsonHarnessAdapter) FindSimilarAttacks(ctx context.Context, content string, topK int) ([]graphrag.AttackPattern, error) {
-	return nil, ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.FindSimilarAttacks(ctx, content, topK)
+	}
+	return nil, fmt.Errorf("%w: FindSimilarAttacks requires a connected daemon harness", ErrNotSupported)
 }
 
 // FindSimilarFindings searches for findings semantically similar to the referenced finding.
 func (a *GibsonHarnessAdapter) FindSimilarFindings(ctx context.Context, findingID string, topK int) ([]graphrag.FindingNode, error) {
-	return nil, ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.FindSimilarFindings(ctx, findingID, topK)
+	}
+	return nil, fmt.Errorf("%w: FindSimilarFindings requires a connected daemon harness", ErrNotSupported)
 }
 
 // GetAttackChains discovers multi-step attack paths starting from a technique.
 func (a *GibsonHarnessAdapter) GetAttackChains(ctx context.Context, techniqueID string, maxDepth int) ([]graphrag.AttackChain, error) {
-	return nil, ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.GetAttackChains(ctx, techniqueID, maxDepth)
+	}
+	return nil, fmt.Errorf("%w: GetAttackChains requires a connected daemon harness", ErrNotSupported)
 }
 
 // GetRelatedFindings retrieves findings connected via SIMILAR_TO or RELATED_TO relationships.
 func (a *GibsonHarnessAdapter) GetRelatedFindings(ctx context.Context, findingID string) ([]graphrag.FindingNode, error) {
-	return nil, ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.GetRelatedFindings(ctx, findingID)
+	}
+	return nil, fmt.Errorf("%w: GetRelatedFindings requires a connected daemon harness", ErrNotSupported)
 }
 
 // StoreGraphNode stores an arbitrary node in the knowledge graph.
 func (a *GibsonHarnessAdapter) StoreGraphNode(ctx context.Context, node graphrag.GraphNode) (string, error) {
-	return "", ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.StoreGraphNode(ctx, node)
+	}
+	return "", fmt.Errorf("%w: StoreGraphNode requires a connected daemon harness", ErrNotSupported)
 }
 
 // CreateGraphRelationship creates a relationship between two existing nodes.
 func (a *GibsonHarnessAdapter) CreateGraphRelationship(ctx context.Context, rel graphrag.Relationship) error {
-	return ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.CreateGraphRelationship(ctx, rel)
+	}
+	return fmt.Errorf("%w: CreateGraphRelationship requires a connected daemon harness", ErrNotSupported)
 }
 
 // StoreGraphBatch stores multiple nodes and relationships atomically.
 func (a *GibsonHarnessAdapter) StoreGraphBatch(ctx context.Context, batch graphrag.Batch) ([]string, error) {
-	return nil, ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.StoreGraphBatch(ctx, batch)
+	}
+	return nil, fmt.Errorf("%w: StoreGraphBatch requires a connected daemon harness", ErrNotSupported)
 }
 
 // TraverseGraph walks the graph from a starting node following relationships.
 func (a *GibsonHarnessAdapter) TraverseGraph(ctx context.Context, startNodeID string, opts graphrag.TraversalOptions) ([]graphrag.TraversalResult, error) {
-	return nil, ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.TraverseGraph(ctx, startNodeID, opts)
+	}
+	return nil, fmt.Errorf("%w: TraverseGraph requires a connected daemon harness", ErrNotSupported)
 }
 
 // GraphRAGHealth returns the health status of the GraphRAG subsystem.
 func (a *GibsonHarnessAdapter) GraphRAGHealth(ctx context.Context) types.HealthStatus {
+	if h, ok := a.inner.(interface {
+		GraphRAGHealth(ctx context.Context) types.HealthStatus
+	}); ok {
+		return h.GraphRAGHealth(ctx)
+	}
 	return types.HealthStatus{
 		Status:  "unavailable",
-		Message: "GraphRAG not yet integrated with Gibson harness",
+		Message: "GraphRAG health check not available via eval harness adapter",
 	}
 }
 
@@ -631,6 +837,39 @@ func (a *GibsonHarnessAdapter) GetAllRunFindings(ctx context.Context, filter fin
 	return result, nil
 }
 
+// convertTaskToGibson converts an SDK agent.Task to a Gibson internal agent.Task.
+func convertTaskToGibson(t agent.Task) gibsonAgent.Task {
+	return gibsonAgent.Task{
+		ID:          gibsonTypes.NewID(),
+		Name:        t.Goal,
+		Description: t.Goal,
+		Goal:        t.Goal,
+		Context:     t.Context,
+		Input:       t.Context,
+	}
+}
+
+// convertResultToSDK converts a Gibson internal agent.Result to an SDK agent.Result.
+func convertResultToSDK(r gibsonAgent.Result) agent.Result {
+	sdkResult := agent.Result{
+		Status: agent.ResultStatus(r.Status),
+		Output: r.Output,
+	}
+	if r.Error != nil {
+		sdkResult.Error = fmt.Errorf("%s", r.Error.Message)
+		sdkResult.ErrorInfo = &agent.ResultError{
+			Message: r.Error.Message,
+			Code:    r.Error.Code,
+		}
+	}
+	// Copy finding IDs from findings slice
+	sdkResult.Findings = make([]string, len(r.Findings))
+	for i, f := range r.Findings {
+		sdkResult.Findings[i] = string(f.ID)
+	}
+	return sdkResult
+}
+
 // convertFilterToGibson converts SDK finding.Filter to Gibson FindingFilter.
 func convertFilterToGibson(filter finding.Filter) gibsonHarness.FindingFilter {
 	gibsonFilter := gibsonHarness.FindingFilter{}
@@ -647,34 +886,44 @@ func convertFilterToGibson(filter finding.Filter) gibsonHarness.FindingFilter {
 
 // StoreSemantic stores a node with semantic search capabilities (requires Content).
 func (a *GibsonHarnessAdapter) StoreSemantic(ctx context.Context, node graphrag.GraphNode) (string, error) {
-	return "", ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.StoreSemantic(ctx, node)
+	}
+	return "", fmt.Errorf("%w: StoreSemantic requires a connected daemon harness", ErrNotSupported)
 }
 
 // StoreStructured stores a node without semantic search (no embedding required).
 func (a *GibsonHarnessAdapter) StoreStructured(ctx context.Context, node graphrag.GraphNode) (string, error) {
-	return "", ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.StoreStructured(ctx, node)
+	}
+	return "", fmt.Errorf("%w: StoreStructured requires a connected daemon harness", ErrNotSupported)
 }
 
 // QuerySemantic performs a semantic-only query (no structured fallback).
 func (a *GibsonHarnessAdapter) QuerySemantic(ctx context.Context, query graphrag.Query) ([]graphrag.Result, error) {
-	return nil, ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.QuerySemantic(ctx, query)
+	}
+	return nil, fmt.Errorf("%w: QuerySemantic requires a connected daemon harness", ErrNotSupported)
 }
 
 // QueryStructured performs a structured-only query (no vector search).
 func (a *GibsonHarnessAdapter) QueryStructured(ctx context.Context, query graphrag.Query) ([]graphrag.Result, error) {
-	return nil, ErrNotImplemented
+	if p := a.asGraphRAGProvider(); p != nil {
+		return p.QueryStructured(ctx, query)
+	}
+	return nil, fmt.Errorf("%w: QueryStructured requires a connected daemon harness", ErrNotSupported)
 }
 
 // CallToolsParallel executes multiple tool calls concurrently.
 func (a *GibsonHarnessAdapter) CallToolsParallel(ctx context.Context, calls []agent.ToolCall, maxConcurrency int) ([]agent.ToolResult, error) {
-	// Not yet implemented - requires parallel execution support
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("%w: CallToolsParallel not available in eval context", ErrNotSupported)
 }
 
 // CompleteStructured performs a completion with provider-native structured output.
 func (a *GibsonHarnessAdapter) CompleteStructured(ctx context.Context, slot string, messages []llm.Message, schema any) (any, error) {
-	// Not yet implemented - requires structured output support
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("%w: CompleteStructured not available in eval context", ErrNotSupported)
 }
 
 // CompleteStructuredAny is an alias for CompleteStructured for compatibility.
@@ -683,71 +932,71 @@ func (a *GibsonHarnessAdapter) CompleteStructuredAny(ctx context.Context, slot s
 }
 
 // ============================================================================
-// Mission Management Methods (Not Implemented in Eval Adapter)
+// Mission Management Methods (Not Supported in Eval Adapter)
 // ============================================================================
 
 // CreateMission creates a new mission from a workflow definition.
 func (a *GibsonHarnessAdapter) CreateMission(ctx context.Context, workflow any, targetID string, opts *mission.CreateMissionOpts) (*mission.MissionInfo, error) {
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("%w: CreateMission not available in eval context", ErrNotSupported)
 }
 
 // RunMission queues a mission for execution.
 func (a *GibsonHarnessAdapter) RunMission(ctx context.Context, missionID string, opts *mission.RunMissionOpts) error {
-	return ErrNotImplemented
+	return fmt.Errorf("%w: RunMission not available in eval context", ErrNotSupported)
 }
 
 // GetMissionStatus returns the current state of a mission.
 func (a *GibsonHarnessAdapter) GetMissionStatus(ctx context.Context, missionID string) (*mission.MissionStatusInfo, error) {
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("%w: GetMissionStatus not available in eval context", ErrNotSupported)
 }
 
 // WaitForMission blocks until a mission completes or the timeout expires.
 func (a *GibsonHarnessAdapter) WaitForMission(ctx context.Context, missionID string, timeout time.Duration) (*mission.MissionResult, error) {
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("%w: WaitForMission not available in eval context", ErrNotSupported)
 }
 
 // ListMissions returns missions matching the provided filter criteria.
 func (a *GibsonHarnessAdapter) ListMissions(ctx context.Context, filter *mission.MissionFilter) ([]*mission.MissionInfo, error) {
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("%w: ListMissions not available in eval context", ErrNotSupported)
 }
 
 // CancelMission requests cancellation of a running mission.
 func (a *GibsonHarnessAdapter) CancelMission(ctx context.Context, missionID string) error {
-	return ErrNotImplemented
+	return fmt.Errorf("%w: CancelMission not available in eval context", ErrNotSupported)
 }
 
 // GetMissionResults returns the final results of a completed mission.
 func (a *GibsonHarnessAdapter) GetMissionResults(ctx context.Context, missionID string) (*mission.MissionResult, error) {
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("%w: GetMissionResults not available in eval context", ErrNotSupported)
 }
 
 // ============================================================================
-// Credential Operations (Not Implemented in Eval Adapter)
+// Credential Operations (Not Supported in Eval Adapter)
 // ============================================================================
 
 // GetCredential retrieves a credential by name from the credential store.
 func (a *GibsonHarnessAdapter) GetCredential(ctx context.Context, name string) (*types.Credential, error) {
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("%w: GetCredential not available in eval context", ErrNotSupported)
 }
 
 // ============================================================================
-// Proto-Based GraphRAG Operations (Not Implemented in Eval Adapter)
+// Proto-Based GraphRAG Operations (Not Supported in Eval Adapter)
 // ============================================================================
 
 // QueryNodes queries the knowledge graph using proto messages.
 func (a *GibsonHarnessAdapter) QueryNodes(ctx context.Context, query *graphragpb.GraphQuery) ([]*graphragpb.QueryResult, error) {
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("%w: QueryNodes not available in eval context", ErrNotSupported)
 }
 
 // StoreNode stores a graph node using proto message.
 func (a *GibsonHarnessAdapter) StoreNode(ctx context.Context, node *graphragpb.GraphNode) (string, error) {
-	return "", ErrNotImplemented
+	return "", fmt.Errorf("%w: StoreNode not available in eval context", ErrNotSupported)
 }
 
 // QueueToolWork queues multiple tool executions for parallel processing.
-// Not implemented in eval adapter.
+// Not supported in eval adapter.
 func (a *GibsonHarnessAdapter) QueueToolWork(ctx context.Context, toolName string, inputs []proto.Message) (string, error) {
-	return "", ErrNotImplemented
+	return "", fmt.Errorf("%w: QueueToolWork not available in eval context", ErrNotSupported)
 }
 
 // ToolResults returns a channel for receiving results from a queued tool job.

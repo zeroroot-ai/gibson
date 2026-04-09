@@ -6,10 +6,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
 )
+
+// FindingLister retrieves finding IDs for a given mission.
+// Implementations may query Redis, SQL, or any other backing store.
+// The interface is intentionally minimal to prevent coupling to specific store implementations.
+type FindingLister interface {
+	ListByMission(ctx context.Context, missionID types.ID) ([]types.ID, error)
+}
 
 // CheckpointManager manages the lifecycle of mission checkpoints for pause/resume capability.
 // It provides methods to capture workflow state at clean boundaries, restore from saved checkpoints,
@@ -41,13 +49,19 @@ type CheckpointManager interface {
 // DefaultCheckpointManager implements CheckpointManager using the mission store for persistence.
 type DefaultCheckpointManager struct {
 	store                  MissionStore
+	findingLister          FindingLister // optional; nil disables finding ID collection
 	autoCheckpointInterval time.Duration
 }
 
 // NewCheckpointManager creates a new CheckpointManager instance.
-func NewCheckpointManager(store MissionStore) CheckpointManager {
+//
+// findingLister is optional — pass nil to skip finding ID collection during Capture.
+// When non-nil, finding IDs are fetched via ListByMission and embedded in the
+// checkpoint so that a resume knows which findings were already submitted.
+func NewCheckpointManager(store MissionStore, findingLister FindingLister) CheckpointManager {
 	return &DefaultCheckpointManager{
 		store:                  store,
+		findingLister:          findingLister,
 		autoCheckpointInterval: 0, // Auto-checkpoint disabled by default
 	}
 }
@@ -99,10 +113,21 @@ func (m *DefaultCheckpointManager) Capture(ctx context.Context, missionID types.
 		return nil, fmt.Errorf("failed to serialize mission state: %w", err)
 	}
 
-	// Collect finding IDs from mission
+	// Collect finding IDs from the finding lister so the checkpoint knows which
+	// findings were already submitted. A failure here must not abort the checkpoint —
+	// an empty slice is preferable to losing all checkpoint state.
 	findingIDs := make([]types.ID, 0)
-	// Note: Finding IDs would be populated from the finding store in a full implementation
-	// For now, this is a placeholder for the checkpoint structure
+	if m.findingLister != nil {
+		ids, listErr := m.findingLister.ListByMission(ctx, missionID)
+		if listErr != nil {
+			slog.WarnContext(ctx, "failed to collect finding IDs for checkpoint; proceeding with empty list",
+				slog.String("mission_id", missionID.String()),
+				slog.String("error", listErr.Error()),
+			)
+		} else {
+			findingIDs = ids
+		}
+	}
 
 	// Create the checkpoint
 	checkpoint := &MissionCheckpoint{

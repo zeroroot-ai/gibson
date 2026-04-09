@@ -33,7 +33,7 @@ type componentState struct {
 // The monitor is safe for concurrent use and supports dynamic component registration.
 type HealthMonitor struct {
 	metrics    harness.MetricsRecorder
-	logger     *TracedLogger
+	logger     *Logger
 	components map[string]*componentState
 	mu         sync.RWMutex
 }
@@ -46,7 +46,7 @@ type HealthMonitor struct {
 //
 // Returns:
 //   - *HealthMonitor: A configured health monitor ready for use
-func NewHealthMonitor(metrics harness.MetricsRecorder, logger *TracedLogger) *HealthMonitor {
+func NewHealthMonitor(metrics harness.MetricsRecorder, logger *Logger) *HealthMonitor {
 	return &HealthMonitor{
 		metrics:    metrics,
 		logger:     logger,

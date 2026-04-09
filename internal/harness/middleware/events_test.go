@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
+
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -374,5 +376,81 @@ func TestGetStringOrDefault(t *testing.T) {
 				t.Errorf("getStringOrDefault() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// --------------------------------------------------------------------------
+// extractToolName tests
+// --------------------------------------------------------------------------
+
+func TestExtractToolName_CallToolProtoRequest(t *testing.T) {
+	req := &harnesspb.CallToolProtoRequest{Name: "nmap"}
+	got := extractToolName(req)
+	if got != "nmap" {
+		t.Errorf("extractToolName(CallToolProtoRequest) = %q, want %q", got, "nmap")
+	}
+}
+
+func TestExtractToolName_QueueToolWorkRequest(t *testing.T) {
+	req := &harnesspb.QueueToolWorkRequest{ToolName: "nuclei"}
+	got := extractToolName(req)
+	if got != "nuclei" {
+		t.Errorf("extractToolName(QueueToolWorkRequest) = %q, want %q", got, "nuclei")
+	}
+}
+
+func TestExtractToolName_MapFallback_ToolName(t *testing.T) {
+	req := map[string]any{"tool_name": "httpx"}
+	got := extractToolName(req)
+	if got != "httpx" {
+		t.Errorf("extractToolName(map tool_name) = %q, want %q", got, "httpx")
+	}
+}
+
+func TestExtractToolName_MapFallback_Name(t *testing.T) {
+	req := map[string]any{"name": "dnsx"}
+	got := extractToolName(req)
+	if got != "dnsx" {
+		t.Errorf("extractToolName(map name) = %q, want %q", got, "dnsx")
+	}
+}
+
+func TestExtractToolName_Unknown_ReturnsEmpty(t *testing.T) {
+	got := extractToolName("unknown-type")
+	if got != "" {
+		t.Errorf("extractToolName(unknown) = %q, want empty string", got)
+	}
+}
+
+// --------------------------------------------------------------------------
+// extractPluginInfo tests
+// --------------------------------------------------------------------------
+
+func TestExtractPluginInfo_QueryPluginRequest(t *testing.T) {
+	req := &harnesspb.QueryPluginRequest{Name: "gitlab", Method: "list_merge_requests"}
+	name, method := extractPluginInfo(req)
+	if name != "gitlab" {
+		t.Errorf("extractPluginInfo name = %q, want %q", name, "gitlab")
+	}
+	if method != "list_merge_requests" {
+		t.Errorf("extractPluginInfo method = %q, want %q", method, "list_merge_requests")
+	}
+}
+
+func TestExtractPluginInfo_MapFallback(t *testing.T) {
+	req := map[string]any{"plugin_name": "scope", "method": "get_scope"}
+	name, method := extractPluginInfo(req)
+	if name != "scope" {
+		t.Errorf("extractPluginInfo name = %q, want %q", name, "scope")
+	}
+	if method != "get_scope" {
+		t.Errorf("extractPluginInfo method = %q, want %q", method, "get_scope")
+	}
+}
+
+func TestExtractPluginInfo_Unknown_ReturnsEmpty(t *testing.T) {
+	name, method := extractPluginInfo(42)
+	if name != "" || method != "" {
+		t.Errorf("extractPluginInfo(unknown) = (%q, %q), want (\"\", \"\")", name, method)
 	}
 }

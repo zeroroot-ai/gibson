@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
+
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -412,28 +414,41 @@ func getStringOrDefault(m map[string]any, key, defaultVal string) string {
 	return defaultVal
 }
 
-// extractToolName extracts tool name from a tool call request
+// extractToolName extracts the tool name from a tool call request.
+//
+// Priority:
+//  1. *harnesspb.CallToolProtoRequest — use Name field.
+//  2. *harnesspb.QueueToolWorkRequest — use ToolName field.
+//  3. map[string]any — legacy/LLM-tool-call fallback, looks for "tool_name" or "name".
 func extractToolName(req any) string {
-	// Type assertion based on actual request structure
-	// This is a placeholder - actual implementation depends on request type
-	if m, ok := req.(map[string]any); ok {
-		if name, ok := m["tool_name"].(string); ok {
+	switch v := req.(type) {
+	case *harnesspb.CallToolProtoRequest:
+		return v.GetName()
+	case *harnesspb.QueueToolWorkRequest:
+		return v.GetToolName()
+	case map[string]any:
+		if name, ok := v["tool_name"].(string); ok {
 			return name
 		}
-		if name, ok := m["name"].(string); ok {
+		if name, ok := v["name"].(string); ok {
 			return name
 		}
 	}
 	return ""
 }
 
-// extractPluginInfo extracts plugin name and method from a plugin query request
+// extractPluginInfo extracts plugin name and method from a plugin query request.
+//
+// Priority:
+//  1. *harnesspb.QueryPluginRequest — use Name and Method fields.
+//  2. map[string]any — legacy fallback, looks for "plugin_name" and "method".
 func extractPluginInfo(req any) (string, string) {
-	// Type assertion based on actual request structure
-	// This is a placeholder - actual implementation depends on request type
-	if m, ok := req.(map[string]any); ok {
-		pluginName, _ := m["plugin_name"].(string)
-		method, _ := m["method"].(string)
+	switch v := req.(type) {
+	case *harnesspb.QueryPluginRequest:
+		return v.GetName(), v.GetMethod()
+	case map[string]any:
+		pluginName, _ := v["plugin_name"].(string)
+		method, _ := v["method"].(string)
 		return pluginName, method
 	}
 	return "", ""

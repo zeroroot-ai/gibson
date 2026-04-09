@@ -19,6 +19,12 @@ type MissionOrchestrator interface {
 	// Execute runs the mission workflow and manages all orchestration
 	Execute(ctx context.Context, mission *Mission) (*MissionResult, error)
 
+	// ExecuteFromCheckpoint resumes a mission from a saved checkpoint.
+	// Nodes listed in checkpoint.CompletedNodes are pre-marked as completed
+	// before the execution loop starts, causing the scheduler to skip them.
+	// When checkpoint is nil the behaviour is identical to Execute.
+	ExecuteFromCheckpoint(ctx context.Context, mission *Mission, checkpoint *MissionCheckpoint) (*MissionResult, error)
+
 	// StopMission requests the orchestrator to stop executing a mission
 	StopMission(ctx context.Context, missionID types.ID) error
 }

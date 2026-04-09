@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag"
+	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -460,4 +462,177 @@ func TestLocalProvider_TraverseGraph(t *testing.T) {
 		assert.Nil(t, nodes)
 		assert.Contains(t, err.Error(), "unavailable")
 	})
+}
+
+// newConnectedMockProvider creates a LocalGraphRAGProvider wired with a connected
+// MockGraphClient for unit tests that exercise the Cypher path.
+func newConnectedMockProvider(t *testing.T) (*LocalGraphRAGProvider, *graph.MockGraphClient) {
+	t.Helper()
+	config := testConfig()
+	p, err := NewLocalProvider(config)
+	require.NoError(t, err)
+
+	mc := graph.NewMockGraphClient()
+	mc.Connect(context.Background()) //nolint:errcheck // mock never fails
+	p.graphClient = mc
+	p.graphHealthy = true
+	p.initialized = true
+	return p, mc
+}
+
+func TestQueryNodesFromVectorStore_NoFilters(t *testing.T) {
+	p, mc := newConnectedMockProvider(t)
+
+	// Seed an empty result so the mock does not error.
+	mc.SetQueryResults([]graph.QueryResult{
+		{Records: []map[string]any{}, Columns: []string{}},
+	})
+
+	ctx := context.Background()
+	query := graphrag.NewNodeQuery()
+
+	nodes, err := p.queryNodesFromVectorStore(ctx, *query)
+	require.NoError(t, err)
+	assert.Empty(t, nodes)
+
+	// Check the issued Cypher — should be a plain MATCH with no WHERE.
+	calls := mc.GetCallsByMethod("Query")
+	require.Len(t, calls, 1)
+	cypher := calls[0].Args[0].(string)
+	assert.Contains(t, cypher, "MATCH (n)")
+	assert.NotContains(t, cypher, "WHERE")
+}
+
+func TestQueryNodesFromVectorStore_PropertyFilters(t *testing.T) {
+	p, mc := newConnectedMockProvider(t)
+
+	mc.SetQueryResults([]graph.QueryResult{
+		{Records: []map[string]any{}, Columns: []string{}},
+	})
+
+	ctx := context.Background()
+	query := graphrag.NewNodeQuery().
+		WithProperty("status", "open").
+		WithProperty("severity", "high")
+
+	nodes, err := p.queryNodesFromVectorStore(ctx, *query)
+	require.NoError(t, err)
+	assert.Empty(t, nodes)
+
+	calls := mc.GetCallsByMethod("Query")
+	require.Len(t, calls, 1)
+	cypher := calls[0].Args[0].(string)
+	params := calls[0].Args[1].(map[string]any)
+
+	assert.Contains(t, cypher, "WHERE")
+	// Both property filters must be parameterised.
+	assert.Contains(t, cypher, "n.status = $")
+	assert.Contains(t, cypher, "n.severity = $")
+	// Params must carry both values.
+	found := map[string]bool{"open": false, "high": false}
+	for _, v := range params {
+		if s, ok := v.(string); ok {
+			found[s] = true
+		}
+	}
+	assert.True(t, found["open"], "param 'open' missing from Cypher params")
+	assert.True(t, found["high"], "param 'high' missing from Cypher params")
+}
+
+func TestQueryNodesFromVectorStore_MissionIDScoping(t *testing.T) {
+	p, mc := newConnectedMockProvider(t)
+
+	mc.SetQueryResults([]graph.QueryResult{
+		{Records: []map[string]any{}, Columns: []string{}},
+	})
+
+	missionID := types.NewID()
+	ctx := context.Background()
+	query := graphrag.NewNodeQuery().WithMission(missionID)
+
+	_, err := p.queryNodesFromVectorStore(ctx, *query)
+	require.NoError(t, err)
+
+	calls := mc.GetCallsByMethod("Query")
+	require.Len(t, calls, 1)
+	cypher := calls[0].Args[0].(string)
+	params := calls[0].Args[1].(map[string]any)
+
+	assert.Contains(t, cypher, "n.mission_id = $mission_id")
+	assert.Equal(t, missionID.String(), params["mission_id"])
+}
+
+func TestQueryNodesFromVectorStore_LabelFilter(t *testing.T) {
+	p, mc := newConnectedMockProvider(t)
+
+	mc.SetQueryResults([]graph.QueryResult{
+		{Records: []map[string]any{}, Columns: []string{}},
+	})
+
+	ctx := context.Background()
+	query := graphrag.NewNodeQuery().WithNodeTypes(graphrag.NodeType("Finding"))
+
+	_, err := p.queryNodesFromVectorStore(ctx, *query)
+	require.NoError(t, err)
+
+	calls := mc.GetCallsByMethod("Query")
+	require.Len(t, calls, 1)
+	cypher := calls[0].Args[0].(string)
+
+	// Label filter must appear in the MATCH clause.
+	assert.True(t,
+		strings.Contains(cypher, "MATCH (n:Finding)") || strings.Contains(cypher, "(n:Finding"),
+		"expected label filter ':Finding' in Cypher, got: %s", cypher,
+	)
+}
+
+func TestQueryNodesFromVectorStore_NoBackend_ReturnsEmpty(t *testing.T) {
+	config := testConfig()
+	p, err := NewLocalProvider(config)
+	require.NoError(t, err)
+
+	// Neo4j unhealthy, no vector store.
+	p.initialized = true
+	p.graphHealthy = false
+	p.graphClient = nil
+	p.vectorStore = nil
+
+	ctx := context.Background()
+	query := graphrag.NewNodeQuery().WithProperty("key", "value")
+
+	nodes, err := p.queryNodesFromVectorStore(ctx, *query)
+	require.NoError(t, err)
+	assert.Empty(t, nodes, "should return empty slice when no backend available")
+}
+
+func TestQueryNodesFromVectorStore_VectorStoreFallback(t *testing.T) {
+	config := testConfig()
+	p, err := NewLocalProvider(config)
+	require.NoError(t, err)
+
+	mockStore := newMockVectorStore()
+	nodeID := types.NewID()
+	mockStore.records[nodeID.String()] = vector.VectorRecord{
+		ID:        nodeID.String(),
+		Content:   "test node",
+		Embedding: make([]float64, 1536),
+		Metadata: map[string]any{
+			"node_id": nodeID.String(),
+		},
+		CreatedAt: time.Now(),
+	}
+
+	// Neo4j unhealthy, vector store available.
+	p.initialized = true
+	p.graphHealthy = false
+	p.graphClient = nil
+	p.vectorStore = mockStore
+
+	ctx := context.Background()
+	query := graphrag.NewNodeQuery().WithProperty("node_id", nodeID.String())
+
+	nodes, err := p.queryNodesFromVectorStore(ctx, *query)
+	require.NoError(t, err)
+	// Mock returns all records; we expect at least one.
+	assert.GreaterOrEqual(t, len(nodes), 1)
 }

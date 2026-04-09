@@ -289,7 +289,7 @@ func TestPauseWithCheckpoint(t *testing.T) {
 	store := newMockMissionStore()
 
 	// Create controller checkpoint methods
-	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr)
+	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr, nil)
 
 	// Create a test mission
 	missionID := types.NewID()
@@ -337,7 +337,7 @@ func TestResumeFromCheckpoint(t *testing.T) {
 	store := newMockMissionStore()
 
 	// Create controller checkpoint methods
-	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr)
+	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr, nil)
 
 	// Create a test mission
 	missionID := types.NewID()
@@ -389,7 +389,7 @@ func TestDiscoverIncompleteMissions(t *testing.T) {
 	store := newMockMissionStore()
 
 	// Create controller checkpoint methods
-	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr)
+	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr, nil)
 
 	// Create incomplete missions
 	for i := 0; i < 3; i++ {
@@ -444,7 +444,7 @@ func TestAcquireLock(t *testing.T) {
 	store := newMockMissionStore()
 
 	// Create controller checkpoint methods
-	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr)
+	ccm := NewControllerCheckpointMethods(checkpointer, restorer, store, threadManager, approvalMgr, nil)
 
 	missionID := types.NewID()
 

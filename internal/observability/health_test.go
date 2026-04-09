@@ -148,11 +148,8 @@ func (m *HealthMetricsRecorder) Reset() {
 var _ harness.MetricsRecorder = (*HealthMetricsRecorder)(nil)
 
 // Test helper to create a test logger
-func newTestLogger(t *testing.T) *TracedLogger {
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	})
-	return NewTracedLogger(handler, "test-mission", "test-agent")
+func newTestLogger(t *testing.T) *Logger {
+	return NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 }
 
 func TestHealthMonitor_RegisterAndCheckAll(t *testing.T) {

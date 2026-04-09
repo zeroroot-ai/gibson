@@ -8,36 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewGraphRAGStore_AlwaysRequiresProviderInjection(t *testing.T) {
-	// Test that NewGraphRAGStore always returns an error directing to NewGraphRAGStoreWithProvider
-	// GraphRAG is now a required core component
-	config := GraphRAGConfig{
-		Provider: "neo4j",
-		Neo4j: Neo4jConfig{
-			URI:      "bolt://localhost:7687",
-			Username: "neo4j",
-			Password: "password",
-		},
-	}
-	embedder := NewMockEmbedder()
-
-	store, err := NewGraphRAGStore(config, embedder)
-
-	// Should fail with clear error message directing to NewGraphRAGStoreWithProvider
-	require.Error(t, err)
-	require.Nil(t, store)
-
-	// Verify error is a ConfigError
-	var graphErr *GraphRAGError
-	require.ErrorAs(t, err, &graphErr)
-	assert.Equal(t, ErrCodeInvalidConfig, graphErr.Code)
-
-	// Verify error contains helpful context
-	assert.Contains(t, graphErr.Error(), "provider injection")
-	assert.NotNil(t, graphErr.Context["solution"])
-	assert.NotNil(t, graphErr.Context["provider_type"])
-	assert.Equal(t, "neo4j", graphErr.Context["provider_type"])
-}
 
 func TestNewGraphRAGStoreWithProvider_Success(t *testing.T) {
 	// Test that NewGraphRAGStoreWithProvider works with injected provider

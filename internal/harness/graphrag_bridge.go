@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/types"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
 // GraphRAGBridge defines the interface for storing findings to the GraphRAG
@@ -122,22 +124,16 @@ func (e *ConfigError) Error() string {
 // DefaultGraphRAGBridge is the default implementation of GraphRAGBridge.
 // It handles async storage of findings to the GraphRAG knowledge graph,
 // with bounded concurrency and graceful shutdown support.
-//
-// NOTE: Finding storage to the graph is currently a no-op after the taxonomy engine
-// removal. This will be re-implemented using domain types and GraphLoader when
-// Finding domain types are added to the SDK.
 type DefaultGraphRAGBridge struct {
-	logger    *slog.Logger
-	config    GraphRAGBridgeConfig
-	wg        sync.WaitGroup
-	semaphore chan struct{}
+	logger      *slog.Logger
+	config      GraphRAGBridgeConfig
+	wg          sync.WaitGroup
+	semaphore   chan struct{}
+	graphLoader *loader.GraphLoader // may be nil; finding graph storage is skipped when nil
 }
 
 // NewGraphRAGBridge creates a new DefaultGraphRAGBridge with the given dependencies.
 // The semaphore channel is initialized with size MaxConcurrent to limit concurrent operations.
-//
-// NOTE: Finding storage is currently not implemented after the taxonomy engine removal.
-// This will be re-implemented when Finding domain types are added to the SDK.
 //
 // Parameters:
 //   - logger: Logger for diagnostic output (if nil, uses default logger)
@@ -154,6 +150,14 @@ func NewGraphRAGBridge(logger *slog.Logger, config GraphRAGBridgeConfig) *Defaul
 		config:    config,
 		semaphore: make(chan struct{}, config.MaxConcurrent),
 	}
+}
+
+// WithGraphLoader attaches a GraphLoader so that storeToGraphRAG persists finding
+// nodes to the Neo4j knowledge graph. When nil (the default), finding storage
+// to the graph is skipped and findings are only written to the finding store.
+func (b *DefaultGraphRAGBridge) WithGraphLoader(gl *loader.GraphLoader) *DefaultGraphRAGBridge {
+	b.graphLoader = gl
+	return b
 }
 
 // StoreAsync queues a finding for asynchronous storage to GraphRAG.
@@ -221,26 +225,63 @@ func (b *DefaultGraphRAGBridge) Health(ctx context.Context) types.HealthStatus {
 	return types.Healthy("graphrag bridge operational")
 }
 
-// storeToGraphRAG performs the actual storage operation for findings.
-//
-// NOTE: Finding storage is currently a no-op after the taxonomy engine removal.
-// SDK Finding domain types are available, and GraphLoader has loadFindings support.
-// However, this method needs additional work to convert internal agent.Finding to
-// the appropriate proto/SDK format and integrate with the GraphLoader workflow.
-// For now, findings are still stored in SQLite via the finding store - this method
-// would add them to the graph for relationship queries once implemented.
+// storeToGraphRAG converts the agent.Finding to a graphragpb.Finding proto and
+// persists it via GraphLoader.LoadFindings. This is best-effort: errors are logged
+// at WARN level and do not propagate so that the main finding-store path is unaffected.
 func (b *DefaultGraphRAGBridge) storeToGraphRAG(ctx context.Context, finding agent.Finding, missionID types.ID, targetID *types.ID) {
-	// TODO: Implement finding storage using GraphLoader.loadFindings()
-	// Requires:
-	// 1. Convert internal agent.Finding to graphragpb.Finding proto format
-	// 2. Create ExecContext with mission and agent run information
-	// 3. Call GraphLoader.loadFindings() with proper context
-	// 4. Handle LoadResult and errors appropriately
-	b.logger.Debug("finding graph storage not yet implemented (pending GraphLoader integration)",
+	if b.graphLoader == nil {
+		b.logger.Debug("graphrag bridge: graphLoader not wired, skipping finding graph storage",
+			"finding_id", finding.ID,
+		)
+		return
+	}
+
+	// Step 1: Convert agent.Finding to graphragpb.Finding proto format.
+	findingID := string(finding.ID)
+	desc := finding.Description
+	cat := finding.Category
+	pbFinding := &graphragpb.Finding{
+		Id:          &findingID,
+		Title:       finding.Title,
+		Description: &desc,
+		Severity:    string(finding.Severity),
+		Category:    &cat,
+	}
+	if targetID != nil {
+		parentID := string(*targetID)
+		pbFinding.ParentId = &parentID
+	}
+
+	// Step 2: Build ExecContext from available fields.
+	execCtx := loader.ExecContext{
+		MissionID: string(missionID),
+	}
+
+	// Step 3: Call GraphLoader.LoadFindings (best-effort, errors logged at WARN).
+	result, err := b.graphLoader.LoadFindings(ctx, execCtx, []*graphragpb.Finding{pbFinding})
+	if err != nil {
+		b.logger.WarnContext(ctx, "graphrag bridge: finding graph storage failed (best-effort)",
+			"finding_id", finding.ID,
+			"mission_id", missionID,
+			"error", err,
+		)
+		return
+	}
+
+	// Step 4: Log result summary (non-fatal errors captured in LoadResult.Errors).
+	if result != nil && result.HasErrors() {
+		for _, e := range result.Errors {
+			b.logger.WarnContext(ctx, "graphrag bridge: partial finding storage error",
+				"finding_id", finding.ID,
+				"error", e,
+			)
+		}
+	}
+
+	b.logger.DebugContext(ctx, "graphrag bridge: finding stored to graph",
 		"finding_id", finding.ID,
 		"mission_id", missionID,
-		"has_target", targetID != nil,
-		"cwe_count", len(finding.CWE),
+		"nodes_created", result.NodesCreated,
 	)
 }
 

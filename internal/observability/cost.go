@@ -16,7 +16,7 @@ import (
 // with integration to OpenTelemetry spans for cost tracking.
 type CostTracker struct {
 	tokenTracker llm.TokenTracker
-	logger       *TracedLogger
+	logger       *Logger
 	thresholds   map[string]float64 // mission ID -> threshold in USD
 	mu           sync.RWMutex
 }
@@ -30,7 +30,7 @@ type CostTracker struct {
 //
 // Returns:
 //   - *CostTracker: A configured cost tracker ready for use
-func NewCostTracker(tokenTracker llm.TokenTracker, logger *TracedLogger) *CostTracker {
+func NewCostTracker(tokenTracker llm.TokenTracker, logger *Logger) *CostTracker {
 	return &CostTracker{
 		tokenTracker: tokenTracker,
 		logger:       logger,

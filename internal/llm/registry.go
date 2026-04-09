@@ -24,6 +24,11 @@ type LLMRegistry interface {
 	// ListProviders returns the names of all registered providers
 	ListProviders() []string
 
+	// GetEmbeddingProvider returns the first registered provider that implements
+	// EmbeddingProvider and returns SupportsEmbeddings() == true.
+	// Returns ErrEmbeddingsNotSupported if no qualifying provider is found.
+	GetEmbeddingProvider() (EmbeddingProvider, error)
+
 	// Health returns the overall health status of the registry
 	// Health states:
 	// - Healthy: all providers are healthy
@@ -105,6 +110,23 @@ func (r *DefaultLLMRegistry) GetProvider(name string) (LLMProvider, error) {
 	}
 
 	return provider, nil
+}
+
+// GetEmbeddingProvider returns the first registered provider that implements
+// EmbeddingProvider and reports SupportsEmbeddings() == true.
+// Returns ErrEmbeddingsNotSupported when no qualifying provider exists.
+func (r *DefaultLLMRegistry) GetEmbeddingProvider() (EmbeddingProvider, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, p := range r.providers {
+		ep, ok := p.(EmbeddingProvider)
+		if ok && ep.SupportsEmbeddings() {
+			return ep, nil
+		}
+	}
+
+	return nil, ErrEmbeddingsNotSupported
 }
 
 // ListProviders returns the names of all registered providers.

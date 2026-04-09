@@ -118,8 +118,9 @@ type HarnessCallbackService struct {
 	// queueManager provides access to the Redis work queue for parallel tool execution
 	queueManager *QueueManager
 
-	// missionManager provides mission creation and lifecycle operations
-	missionManager MissionCreator
+	// missionManager provides full mission lifecycle operations (create, run, wait, cancel, etc.).
+	// Declared as MissionOperator so the six mission callback stubs can delegate without a cast.
+	missionManager MissionOperator
 
 	// authzStore provides per-run authz state lookup (run_id → user_id, tenant_id).
 	// Required for the Authorize RPC handler. When nil, Authorize returns Unimplemented.
@@ -206,9 +207,10 @@ func WithQueueManager(queueMgr *QueueManager) CallbackServiceOption {
 	}
 }
 
-// WithMissionManager sets the MissionCreator for agent-driven mission creation.
-// When set, agents can create child missions through the CreateMission RPC.
-func WithMissionManager(missionMgr MissionCreator) CallbackServiceOption {
+// WithMissionManager sets the MissionOperator for agent-driven mission lifecycle operations.
+// When set, agents can create, run, wait for, list, cancel, and get results of missions
+// through the corresponding harness callback RPCs.
+func WithMissionManager(missionMgr MissionOperator) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.missionManager = missionMgr
 	}
@@ -283,13 +285,6 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 	return s
 }
 
-// RegisterHarness registers a harness instance for a specific task.
-// This must be called before an agent starts execution so that callbacks
-// can find the correct harness instance.
-func (s *HarnessCallbackService) RegisterHarness(taskID string, harness AgentHarness) {
-	s.activeHarnesses.Store(taskID, harness)
-	s.logger.Debug("registered harness for task", "task_id", taskID)
-}
 
 // UnregisterHarness removes a harness instance when a task completes.
 // This prevents memory leaks from accumulating completed tasks.
@@ -3976,98 +3971,270 @@ func missionStatusToProto(status MissionStatus) harnesspb.MissionStatus {
 	}
 }
 
-// RunMission implements the mission execution RPC.
+// RunMission implements the mission execution RPC by delegating to the MissionOperator.
 func (s *HarnessCallbackService) RunMission(ctx context.Context, req *harnesspb.RunMissionRequest) (*harnesspb.RunMissionResponse, error) {
-	s.logger.Debug("RunMission called",
-		"mission_id", req.Context.MissionId,
-		"agent_name", req.Context.AgentName,
-		"target_mission_id", req.MissionId,
-	)
+	if s.missionManager == nil {
+		return &harnesspb.RunMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: "mission management not configured",
+			},
+		}, nil
+	}
 
-	return &harnesspb.RunMissionResponse{
-		Error: &harnesspb.HarnessError{
-			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-			Message: "mission execution via callback not yet implemented - use CLI or daemon API",
-		},
-	}, nil
+	if req.MissionId == "" {
+		return &harnesspb.RunMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: "mission_id is required",
+			},
+		}, nil
+	}
+
+	if err := s.missionManager.Run(ctx, req.MissionId); err != nil {
+		s.logger.Error("RunMission: failed to run mission", "mission_id", req.MissionId, "error", err)
+		return &harnesspb.RunMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Message: err.Error(),
+			},
+		}, nil
+	}
+
+	s.logger.Info("RunMission: mission started", "mission_id", req.MissionId)
+	return &harnesspb.RunMissionResponse{}, nil
 }
 
-// GetMissionStatus implements the mission status query RPC.
+// GetMissionStatus implements the mission status query RPC by delegating to the MissionOperator.
 func (s *HarnessCallbackService) GetMissionStatus(ctx context.Context, req *harnesspb.GetMissionStatusRequest) (*harnesspb.GetMissionStatusResponse, error) {
-	s.logger.Debug("GetMissionStatus called",
-		"mission_id", req.Context.MissionId,
-		"agent_name", req.Context.AgentName,
-		"target_mission_id", req.MissionId,
-	)
+	if s.missionManager == nil {
+		return &harnesspb.GetMissionStatusResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: "mission management not configured",
+			},
+		}, nil
+	}
+
+	if req.MissionId == "" {
+		return &harnesspb.GetMissionStatusResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: "mission_id is required",
+			},
+		}, nil
+	}
+
+	statusInfo, err := s.missionManager.GetStatus(ctx, req.MissionId)
+	if err != nil {
+		s.logger.Error("GetMissionStatus: failed to get status", "mission_id", req.MissionId, "error", err)
+		return &harnesspb.GetMissionStatusResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Message: err.Error(),
+			},
+		}, nil
+	}
+
+	// Convert finding counts from map[string]int to map[string]int32.
+	findingCounts := make(map[string]int32, len(statusInfo.FindingCounts))
+	for k, v := range statusInfo.FindingCounts {
+		findingCounts[k] = int32(v)
+	}
 
 	return &harnesspb.GetMissionStatusResponse{
-		Error: &harnesspb.HarnessError{
-			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-			Message: "mission status query via callback not yet implemented - use CLI or daemon API",
+		Status: &harnesspb.MissionStatusInfo{
+			Status:        missionStatusToProto(statusInfo.Status),
+			Progress:      statusInfo.Progress,
+			Phase:         statusInfo.Phase,
+			FindingCounts: findingCounts,
+			TokenUsage:    statusInfo.TokenUsage,
+			DurationMs:    statusInfo.Duration.Milliseconds(),
+			Error:         statusInfo.Error,
 		},
 	}, nil
 }
 
-// WaitForMission implements the mission wait RPC.
+// WaitForMission implements the mission wait RPC by delegating to the MissionOperator.
 func (s *HarnessCallbackService) WaitForMission(ctx context.Context, req *harnesspb.WaitForMissionRequest) (*harnesspb.WaitForMissionResponse, error) {
-	s.logger.Debug("WaitForMission called",
-		"mission_id", req.Context.MissionId,
-		"agent_name", req.Context.AgentName,
-		"target_mission_id", req.MissionId,
-		"timeout_ms", req.TimeoutMs,
-	)
+	if s.missionManager == nil {
+		return &harnesspb.WaitForMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: "mission management not configured",
+			},
+		}, nil
+	}
 
+	if req.MissionId == "" {
+		return &harnesspb.WaitForMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: "mission_id is required",
+			},
+		}, nil
+	}
+
+	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
+	result, err := s.missionManager.WaitForCompletion(ctx, req.MissionId, timeout)
+	if err != nil {
+		s.logger.Error("WaitForMission: failed to wait", "mission_id", req.MissionId, "error", err)
+		return &harnesspb.WaitForMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Message: err.Error(),
+			},
+		}, nil
+	}
+
+	s.logger.Info("WaitForMission: mission completed", "mission_id", req.MissionId, "status", result.Status)
 	return &harnesspb.WaitForMissionResponse{
-		Error: &harnesspb.HarnessError{
-			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-			Message: "mission wait via callback not yet implemented - use CLI or daemon API",
+		Result: &harnesspb.MissionResult{
+			MissionId:   result.MissionID,
+			Status:      missionStatusToProto(result.Status),
+			Error:       result.Error,
+			CompletedAt: result.CompletedAt.UnixMilli(),
 		},
 	}, nil
 }
 
-// ListMissions implements the mission listing RPC.
+// ListMissions implements the mission listing RPC by delegating to the MissionOperator.
 func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *harnesspb.ListMissionsRequest) (*harnesspb.ListMissionsResponse, error) {
-	s.logger.Debug("ListMissions called",
-		"mission_id", req.Context.MissionId,
-		"agent_name", req.Context.AgentName,
-	)
+	if s.missionManager == nil {
+		return &harnesspb.ListMissionsResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: "mission management not configured",
+			},
+		}, nil
+	}
 
-	return &harnesspb.ListMissionsResponse{
-		Error: &harnesspb.HarnessError{
-			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-			Message: "mission listing via callback not yet implemented - use CLI or daemon API",
-		},
-	}, nil
+	filter := &MissionFilter{}
+	if req.Filter != nil {
+		filter.Limit = int(req.Filter.Limit)
+		filter.Offset = int(req.Filter.Offset)
+		if req.Filter.Status != harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED {
+			// Map proto MissionStatus enum back to internal string representation.
+			st := MissionStatus(strings.ToLower(strings.TrimPrefix(req.Filter.Status.String(), "MISSION_STATUS_")))
+			filter.Status = &st
+		}
+	}
+
+	records, err := s.missionManager.List(ctx, filter)
+	if err != nil {
+		s.logger.Error("ListMissions: failed to list", "error", err)
+		return &harnesspb.ListMissionsResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Message: err.Error(),
+			},
+		}, nil
+	}
+
+	missions := make([]*harnesspb.MissionInfo, 0, len(records))
+	for _, rec := range records {
+		missions = append(missions, &harnesspb.MissionInfo{
+			Id:     rec.ID.String(),
+			Status: missionStatusToProto(rec.Status),
+		})
+	}
+
+	s.logger.Info("ListMissions: listed missions", "count", len(missions))
+	return &harnesspb.ListMissionsResponse{Missions: missions}, nil
 }
 
-// CancelMission implements the mission cancellation RPC.
+// CancelMission implements the mission cancellation RPC by delegating to the MissionOperator.
 func (s *HarnessCallbackService) CancelMission(ctx context.Context, req *harnesspb.CancelMissionRequest) (*harnesspb.CancelMissionResponse, error) {
-	s.logger.Debug("CancelMission called",
-		"mission_id", req.Context.MissionId,
-		"agent_name", req.Context.AgentName,
-		"target_mission_id", req.MissionId,
-	)
+	if s.missionManager == nil {
+		return &harnesspb.CancelMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: "mission management not configured",
+			},
+		}, nil
+	}
 
-	return &harnesspb.CancelMissionResponse{
-		Error: &harnesspb.HarnessError{
-			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-			Message: "mission cancellation via callback not yet implemented - use CLI or daemon API",
-		},
-	}, nil
+	if req.MissionId == "" {
+		return &harnesspb.CancelMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: "mission_id is required",
+			},
+		}, nil
+	}
+
+	missionID, err := types.ParseID(req.MissionId)
+	if err != nil {
+		return &harnesspb.CancelMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: fmt.Sprintf("invalid mission_id: %v", err),
+			},
+		}, nil
+	}
+
+	if err := s.missionManager.Cancel(ctx, missionID); err != nil {
+		s.logger.Error("CancelMission: failed to cancel", "mission_id", req.MissionId, "error", err)
+		return &harnesspb.CancelMissionResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Message: err.Error(),
+			},
+		}, nil
+	}
+
+	s.logger.Info("CancelMission: mission cancelled", "mission_id", req.MissionId)
+	return &harnesspb.CancelMissionResponse{}, nil
 }
 
-// GetMissionResults implements the mission results retrieval RPC.
+// GetMissionResults implements the mission results retrieval RPC by delegating to the MissionOperator.
 func (s *HarnessCallbackService) GetMissionResults(ctx context.Context, req *harnesspb.GetMissionResultsRequest) (*harnesspb.GetMissionResultsResponse, error) {
-	s.logger.Debug("GetMissionResults called",
-		"mission_id", req.Context.MissionId,
-		"agent_name", req.Context.AgentName,
-		"target_mission_id", req.MissionId,
-	)
+	if s.missionManager == nil {
+		return &harnesspb.GetMissionResultsResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: "mission management not configured",
+			},
+		}, nil
+	}
 
+	if req.MissionId == "" {
+		return &harnesspb.GetMissionResultsResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: "mission_id is required",
+			},
+		}, nil
+	}
+
+	missionID, err := types.ParseID(req.MissionId)
+	if err != nil {
+		return &harnesspb.GetMissionResultsResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: fmt.Sprintf("invalid mission_id: %v", err),
+			},
+		}, nil
+	}
+
+	result, err := s.missionManager.GetResults(ctx, missionID)
+	if err != nil {
+		s.logger.Error("GetMissionResults: failed to get results", "mission_id", req.MissionId, "error", err)
+		return &harnesspb.GetMissionResultsResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Message: err.Error(),
+			},
+		}, nil
+	}
+
+	s.logger.Info("GetMissionResults: results retrieved", "mission_id", req.MissionId, "status", result.Status)
 	return &harnesspb.GetMissionResultsResponse{
-		Error: &harnesspb.HarnessError{
-			Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
-			Message: "mission results retrieval via callback not yet implemented - use CLI or daemon API",
+		Result: &harnesspb.MissionResult{
+			MissionId:   result.MissionID,
+			Status:      missionStatusToProto(result.Status),
+			Error:       result.Error,
+			CompletedAt: result.CompletedAt.UnixMilli(),
 		},
 	}, nil
 }

@@ -66,6 +66,22 @@ const (
 	DaemonAdminService_SetTeamCrosstalk_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/SetTeamCrosstalk"
 	DaemonAdminService_ListAuditEvents_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/ListAuditEvents"
 	DaemonAdminService_BatchGrantComponentAccess_FullMethodName       = "/gibson.daemon.admin.v1.DaemonAdminService/BatchGrantComponentAccess"
+	DaemonAdminService_ResetPassword_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/ResetPassword"
+	DaemonAdminService_RevokeUserSessions_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeUserSessions"
+	DaemonAdminService_SuspendMember_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/SuspendMember"
+	DaemonAdminService_GetUserProfile_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/GetUserProfile"
+	DaemonAdminService_UpdateUserProfile_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/UpdateUserProfile"
+	DaemonAdminService_ExportFindings_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/ExportFindings"
+	DaemonAdminService_SaveMissionDraft_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/SaveMissionDraft"
+	DaemonAdminService_ListMissionDrafts_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/ListMissionDrafts"
+	DaemonAdminService_GetTenantQuota_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/GetTenantQuota"
+	DaemonAdminService_SetTenantQuota_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/SetTenantQuota"
+	DaemonAdminService_GetUserSessions_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/GetUserSessions"
+	DaemonAdminService_ListAlerts_FullMethodName                      = "/gibson.daemon.admin.v1.DaemonAdminService/ListAlerts"
+	DaemonAdminService_MarkAlertRead_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/MarkAlertRead"
+	DaemonAdminService_MarkAllAlertsRead_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/MarkAllAlertsRead"
+	DaemonAdminService_ListConversations_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/ListConversations"
+	DaemonAdminService_GetConversation_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/GetConversation"
 )
 
 // DaemonAdminServiceClient is the client API for DaemonAdminService service.
@@ -200,6 +216,54 @@ type DaemonAdminServiceClient interface {
 	// single RPC call, reducing round-trip count for bulk permission changes.
 	// Requires FGA admin relation on the tenant.
 	BatchGrantComponentAccess(ctx context.Context, in *BatchGrantComponentAccessRequest, opts ...grpc.CallOption) (*BatchGrantComponentAccessResponse, error)
+	// ResetPassword triggers a Keycloak password-reset email for the given address.
+	// Always returns success regardless of whether the email exists, to prevent
+	// email enumeration attacks.
+	ResetPassword(ctx context.Context, in *ResetPasswordRequest, opts ...grpc.CallOption) (*ResetPasswordResponse, error)
+	// RevokeUserSessions revokes one or all active sessions for a user.
+	// Delegates to Keycloak session management and emits a Redis pub/sub event.
+	RevokeUserSessions(ctx context.Context, in *RevokeUserSessionsRequest, opts ...grpc.CallOption) (*RevokeUserSessionsResponse, error)
+	// SuspendMember disables or reactivates a tenant member via Keycloak.
+	// When suspend=true the user is disabled and their FGA tuple is removed.
+	// When suspend=false the user is re-enabled and the tuple is restored.
+	SuspendMember(ctx context.Context, in *SuspendMemberRequest, opts ...grpc.CallOption) (*SuspendMemberResponse, error)
+	// GetUserProfile retrieves a user's profile information from Keycloak.
+	// Accessible by the user themselves or by a tenant admin.
+	GetUserProfile(ctx context.Context, in *GetUserProfileRequest, opts ...grpc.CallOption) (*GetUserProfileResponse, error)
+	// UpdateUserProfile updates mutable profile fields (display_name, avatar_url)
+	// for a user in Keycloak. Email and role changes are not permitted here.
+	UpdateUserProfile(ctx context.Context, in *UpdateUserProfileRequest, opts ...grpc.CallOption) (*UpdateUserProfileResponse, error)
+	// ExportFindings exports findings to the requested format (json, csv, sarif).
+	// The serialized content is returned as bytes in the response.
+	ExportFindings(ctx context.Context, in *ExportFindingsRequest, opts ...grpc.CallOption) (*ExportFindingsResponse, error)
+	// SaveMissionDraft persists a mission YAML draft for later use.
+	// If draft_id is empty a new draft is created; otherwise the existing draft
+	// is updated. Drafts expire automatically after 30 days.
+	SaveMissionDraft(ctx context.Context, in *SaveMissionDraftRequest, opts ...grpc.CallOption) (*SaveMissionDraftResponse, error)
+	// ListMissionDrafts returns all saved mission drafts for a tenant, ordered
+	// by update time descending.
+	ListMissionDrafts(ctx context.Context, in *ListMissionDraftsRequest, opts ...grpc.CallOption) (*ListMissionDraftsResponse, error)
+	// GetTenantQuota retrieves the configured resource quotas for a tenant.
+	// Returns zero values for any quota not explicitly set.
+	// Requires FGA admin relation on the tenant.
+	GetTenantQuota(ctx context.Context, in *GetTenantQuotaRequest, opts ...grpc.CallOption) (*GetTenantQuotaResponse, error)
+	// SetTenantQuota sets or updates the resource quotas for a tenant.
+	// Requires platform-operator role.
+	SetTenantQuota(ctx context.Context, in *SetTenantQuotaRequest, opts ...grpc.CallOption) (*SetTenantQuotaResponse, error)
+	// GetUserSessions returns the active Keycloak sessions for a user.
+	// Accessible by the user themselves or by a tenant admin.
+	GetUserSessions(ctx context.Context, in *GetUserSessionsRequest, opts ...grpc.CallOption) (*GetUserSessionsResponse, error)
+	// ListAlerts returns platform alerts for a tenant user.
+	// Supports filtering to unread-only alerts.
+	ListAlerts(ctx context.Context, in *ListAlertsRequest, opts ...grpc.CallOption) (*ListAlertsResponse, error)
+	// MarkAlertRead marks a single alert as read.
+	MarkAlertRead(ctx context.Context, in *MarkAlertReadRequest, opts ...grpc.CallOption) (*MarkAlertReadResponse, error)
+	// MarkAllAlertsRead marks all alerts for a user as read.
+	MarkAllAlertsRead(ctx context.Context, in *MarkAllAlertsReadRequest, opts ...grpc.CallOption) (*MarkAllAlertsReadResponse, error)
+	// ListConversations returns the conversation history list for a user.
+	ListConversations(ctx context.Context, in *ListConversationsRequest, opts ...grpc.CallOption) (*ListConversationsResponse, error)
+	// GetConversation returns the full message history for a single conversation.
+	GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*GetConversationResponse, error)
 }
 
 type daemonAdminServiceClient struct {
@@ -680,6 +744,166 @@ func (c *daemonAdminServiceClient) BatchGrantComponentAccess(ctx context.Context
 	return out, nil
 }
 
+func (c *daemonAdminServiceClient) ResetPassword(ctx context.Context, in *ResetPasswordRequest, opts ...grpc.CallOption) (*ResetPasswordResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetPasswordResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ResetPassword_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) RevokeUserSessions(ctx context.Context, in *RevokeUserSessionsRequest, opts ...grpc.CallOption) (*RevokeUserSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeUserSessionsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_RevokeUserSessions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) SuspendMember(ctx context.Context, in *SuspendMemberRequest, opts ...grpc.CallOption) (*SuspendMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SuspendMemberResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_SuspendMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GetUserProfile(ctx context.Context, in *GetUserProfileRequest, opts ...grpc.CallOption) (*GetUserProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserProfileResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetUserProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) UpdateUserProfile(ctx context.Context, in *UpdateUserProfileRequest, opts ...grpc.CallOption) (*UpdateUserProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateUserProfileResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_UpdateUserProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ExportFindings(ctx context.Context, in *ExportFindingsRequest, opts ...grpc.CallOption) (*ExportFindingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExportFindingsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ExportFindings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) SaveMissionDraft(ctx context.Context, in *SaveMissionDraftRequest, opts ...grpc.CallOption) (*SaveMissionDraftResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveMissionDraftResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_SaveMissionDraft_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListMissionDrafts(ctx context.Context, in *ListMissionDraftsRequest, opts ...grpc.CallOption) (*ListMissionDraftsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMissionDraftsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListMissionDrafts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GetTenantQuota(ctx context.Context, in *GetTenantQuotaRequest, opts ...grpc.CallOption) (*GetTenantQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTenantQuotaResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetTenantQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) SetTenantQuota(ctx context.Context, in *SetTenantQuotaRequest, opts ...grpc.CallOption) (*SetTenantQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetTenantQuotaResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_SetTenantQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GetUserSessions(ctx context.Context, in *GetUserSessionsRequest, opts ...grpc.CallOption) (*GetUserSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserSessionsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetUserSessions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListAlerts(ctx context.Context, in *ListAlertsRequest, opts ...grpc.CallOption) (*ListAlertsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAlertsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListAlerts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) MarkAlertRead(ctx context.Context, in *MarkAlertReadRequest, opts ...grpc.CallOption) (*MarkAlertReadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MarkAlertReadResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_MarkAlertRead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) MarkAllAlertsRead(ctx context.Context, in *MarkAllAlertsReadRequest, opts ...grpc.CallOption) (*MarkAllAlertsReadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MarkAllAlertsReadResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_MarkAllAlertsRead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListConversations(ctx context.Context, in *ListConversationsRequest, opts ...grpc.CallOption) (*ListConversationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListConversationsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListConversations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*GetConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetConversationResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonAdminServiceServer is the server API for DaemonAdminService service.
 // All implementations must embed UnimplementedDaemonAdminServiceServer
 // for forward compatibility.
@@ -812,6 +1036,54 @@ type DaemonAdminServiceServer interface {
 	// single RPC call, reducing round-trip count for bulk permission changes.
 	// Requires FGA admin relation on the tenant.
 	BatchGrantComponentAccess(context.Context, *BatchGrantComponentAccessRequest) (*BatchGrantComponentAccessResponse, error)
+	// ResetPassword triggers a Keycloak password-reset email for the given address.
+	// Always returns success regardless of whether the email exists, to prevent
+	// email enumeration attacks.
+	ResetPassword(context.Context, *ResetPasswordRequest) (*ResetPasswordResponse, error)
+	// RevokeUserSessions revokes one or all active sessions for a user.
+	// Delegates to Keycloak session management and emits a Redis pub/sub event.
+	RevokeUserSessions(context.Context, *RevokeUserSessionsRequest) (*RevokeUserSessionsResponse, error)
+	// SuspendMember disables or reactivates a tenant member via Keycloak.
+	// When suspend=true the user is disabled and their FGA tuple is removed.
+	// When suspend=false the user is re-enabled and the tuple is restored.
+	SuspendMember(context.Context, *SuspendMemberRequest) (*SuspendMemberResponse, error)
+	// GetUserProfile retrieves a user's profile information from Keycloak.
+	// Accessible by the user themselves or by a tenant admin.
+	GetUserProfile(context.Context, *GetUserProfileRequest) (*GetUserProfileResponse, error)
+	// UpdateUserProfile updates mutable profile fields (display_name, avatar_url)
+	// for a user in Keycloak. Email and role changes are not permitted here.
+	UpdateUserProfile(context.Context, *UpdateUserProfileRequest) (*UpdateUserProfileResponse, error)
+	// ExportFindings exports findings to the requested format (json, csv, sarif).
+	// The serialized content is returned as bytes in the response.
+	ExportFindings(context.Context, *ExportFindingsRequest) (*ExportFindingsResponse, error)
+	// SaveMissionDraft persists a mission YAML draft for later use.
+	// If draft_id is empty a new draft is created; otherwise the existing draft
+	// is updated. Drafts expire automatically after 30 days.
+	SaveMissionDraft(context.Context, *SaveMissionDraftRequest) (*SaveMissionDraftResponse, error)
+	// ListMissionDrafts returns all saved mission drafts for a tenant, ordered
+	// by update time descending.
+	ListMissionDrafts(context.Context, *ListMissionDraftsRequest) (*ListMissionDraftsResponse, error)
+	// GetTenantQuota retrieves the configured resource quotas for a tenant.
+	// Returns zero values for any quota not explicitly set.
+	// Requires FGA admin relation on the tenant.
+	GetTenantQuota(context.Context, *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error)
+	// SetTenantQuota sets or updates the resource quotas for a tenant.
+	// Requires platform-operator role.
+	SetTenantQuota(context.Context, *SetTenantQuotaRequest) (*SetTenantQuotaResponse, error)
+	// GetUserSessions returns the active Keycloak sessions for a user.
+	// Accessible by the user themselves or by a tenant admin.
+	GetUserSessions(context.Context, *GetUserSessionsRequest) (*GetUserSessionsResponse, error)
+	// ListAlerts returns platform alerts for a tenant user.
+	// Supports filtering to unread-only alerts.
+	ListAlerts(context.Context, *ListAlertsRequest) (*ListAlertsResponse, error)
+	// MarkAlertRead marks a single alert as read.
+	MarkAlertRead(context.Context, *MarkAlertReadRequest) (*MarkAlertReadResponse, error)
+	// MarkAllAlertsRead marks all alerts for a user as read.
+	MarkAllAlertsRead(context.Context, *MarkAllAlertsReadRequest) (*MarkAllAlertsReadResponse, error)
+	// ListConversations returns the conversation history list for a user.
+	ListConversations(context.Context, *ListConversationsRequest) (*ListConversationsResponse, error)
+	// GetConversation returns the full message history for a single conversation.
+	GetConversation(context.Context, *GetConversationRequest) (*GetConversationResponse, error)
 	mustEmbedUnimplementedDaemonAdminServiceServer()
 }
 
@@ -962,6 +1234,54 @@ func (UnimplementedDaemonAdminServiceServer) ListAuditEvents(context.Context, *L
 }
 func (UnimplementedDaemonAdminServiceServer) BatchGrantComponentAccess(context.Context, *BatchGrantComponentAccessRequest) (*BatchGrantComponentAccessResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method BatchGrantComponentAccess not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ResetPassword(context.Context, *ResetPasswordRequest) (*ResetPasswordResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetPassword not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) RevokeUserSessions(context.Context, *RevokeUserSessionsRequest) (*RevokeUserSessionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeUserSessions not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) SuspendMember(context.Context, *SuspendMemberRequest) (*SuspendMemberResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SuspendMember not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetUserProfile(context.Context, *GetUserProfileRequest) (*GetUserProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUserProfile not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) UpdateUserProfile(context.Context, *UpdateUserProfileRequest) (*UpdateUserProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateUserProfile not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ExportFindings(context.Context, *ExportFindingsRequest) (*ExportFindingsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExportFindings not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) SaveMissionDraft(context.Context, *SaveMissionDraftRequest) (*SaveMissionDraftResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveMissionDraft not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListMissionDrafts(context.Context, *ListMissionDraftsRequest) (*ListMissionDraftsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMissionDrafts not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetTenantQuota(context.Context, *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTenantQuota not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) SetTenantQuota(context.Context, *SetTenantQuotaRequest) (*SetTenantQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetTenantQuota not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetUserSessions(context.Context, *GetUserSessionsRequest) (*GetUserSessionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUserSessions not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListAlerts(context.Context, *ListAlertsRequest) (*ListAlertsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAlerts not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) MarkAlertRead(context.Context, *MarkAlertReadRequest) (*MarkAlertReadResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MarkAlertRead not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) MarkAllAlertsRead(context.Context, *MarkAllAlertsReadRequest) (*MarkAllAlertsReadResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MarkAllAlertsRead not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListConversations(context.Context, *ListConversationsRequest) (*ListConversationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListConversations not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetConversation(context.Context, *GetConversationRequest) (*GetConversationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetConversation not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) mustEmbedUnimplementedDaemonAdminServiceServer() {}
 func (UnimplementedDaemonAdminServiceServer) testEmbeddedByValue()                            {}
@@ -1830,6 +2150,294 @@ func _DaemonAdminService_BatchGrantComponentAccess_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonAdminService_ResetPassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetPasswordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ResetPassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ResetPassword_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ResetPassword(ctx, req.(*ResetPasswordRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_RevokeUserSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeUserSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).RevokeUserSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_RevokeUserSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).RevokeUserSessions(ctx, req.(*RevokeUserSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_SuspendMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SuspendMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).SuspendMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_SuspendMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).SuspendMember(ctx, req.(*SuspendMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GetUserProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetUserProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetUserProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetUserProfile(ctx, req.(*GetUserProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_UpdateUserProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateUserProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).UpdateUserProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_UpdateUserProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).UpdateUserProfile(ctx, req.(*UpdateUserProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ExportFindings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportFindingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ExportFindings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ExportFindings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ExportFindings(ctx, req.(*ExportFindingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_SaveMissionDraft_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveMissionDraftRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).SaveMissionDraft(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_SaveMissionDraft_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).SaveMissionDraft(ctx, req.(*SaveMissionDraftRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListMissionDrafts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMissionDraftsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListMissionDrafts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListMissionDrafts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListMissionDrafts(ctx, req.(*ListMissionDraftsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GetTenantQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetTenantQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetTenantQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetTenantQuota(ctx, req.(*GetTenantQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_SetTenantQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTenantQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).SetTenantQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_SetTenantQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).SetTenantQuota(ctx, req.(*SetTenantQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GetUserSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetUserSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetUserSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetUserSessions(ctx, req.(*GetUserSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListAlerts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAlertsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListAlerts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListAlerts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListAlerts(ctx, req.(*ListAlertsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_MarkAlertRead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkAlertReadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).MarkAlertRead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_MarkAlertRead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).MarkAlertRead(ctx, req.(*MarkAlertReadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_MarkAllAlertsRead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkAllAlertsReadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).MarkAllAlertsRead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_MarkAllAlertsRead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).MarkAllAlertsRead(ctx, req.(*MarkAllAlertsReadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListConversations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListConversationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListConversations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListConversations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListConversations(ctx, req.(*ListConversationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GetConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetConversation(ctx, req.(*GetConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonAdminService_ServiceDesc is the grpc.ServiceDesc for DaemonAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2024,6 +2632,70 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BatchGrantComponentAccess",
 			Handler:    _DaemonAdminService_BatchGrantComponentAccess_Handler,
+		},
+		{
+			MethodName: "ResetPassword",
+			Handler:    _DaemonAdminService_ResetPassword_Handler,
+		},
+		{
+			MethodName: "RevokeUserSessions",
+			Handler:    _DaemonAdminService_RevokeUserSessions_Handler,
+		},
+		{
+			MethodName: "SuspendMember",
+			Handler:    _DaemonAdminService_SuspendMember_Handler,
+		},
+		{
+			MethodName: "GetUserProfile",
+			Handler:    _DaemonAdminService_GetUserProfile_Handler,
+		},
+		{
+			MethodName: "UpdateUserProfile",
+			Handler:    _DaemonAdminService_UpdateUserProfile_Handler,
+		},
+		{
+			MethodName: "ExportFindings",
+			Handler:    _DaemonAdminService_ExportFindings_Handler,
+		},
+		{
+			MethodName: "SaveMissionDraft",
+			Handler:    _DaemonAdminService_SaveMissionDraft_Handler,
+		},
+		{
+			MethodName: "ListMissionDrafts",
+			Handler:    _DaemonAdminService_ListMissionDrafts_Handler,
+		},
+		{
+			MethodName: "GetTenantQuota",
+			Handler:    _DaemonAdminService_GetTenantQuota_Handler,
+		},
+		{
+			MethodName: "SetTenantQuota",
+			Handler:    _DaemonAdminService_SetTenantQuota_Handler,
+		},
+		{
+			MethodName: "GetUserSessions",
+			Handler:    _DaemonAdminService_GetUserSessions_Handler,
+		},
+		{
+			MethodName: "ListAlerts",
+			Handler:    _DaemonAdminService_ListAlerts_Handler,
+		},
+		{
+			MethodName: "MarkAlertRead",
+			Handler:    _DaemonAdminService_MarkAlertRead_Handler,
+		},
+		{
+			MethodName: "MarkAllAlertsRead",
+			Handler:    _DaemonAdminService_MarkAllAlertsRead_Handler,
+		},
+		{
+			MethodName: "ListConversations",
+			Handler:    _DaemonAdminService_ListConversations_Handler,
+		},
+		{
+			MethodName: "GetConversation",
+			Handler:    _DaemonAdminService_GetConversation_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

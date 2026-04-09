@@ -67,11 +67,10 @@ func createMockSpanContext() context.Context {
 	return trace.ContextWithSpan(context.Background(), span)
 }
 
-func TestNewTracedLogger(t *testing.T) {
+func TestNewLogger_WithMissionAndAgent(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
 
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	require.NotNil(t, logger)
 	assert.Equal(t, "mission-123", logger.missionID)
@@ -81,8 +80,7 @@ func TestNewTracedLogger(t *testing.T) {
 
 func TestTracedLogger_Debug(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelDebug)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Debug(ctx, "debug message", "key", "value")
@@ -96,8 +94,7 @@ func TestTracedLogger_Debug(t *testing.T) {
 
 func TestTracedLogger_Info(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Info(ctx, "info message", "key", "value")
@@ -111,8 +108,7 @@ func TestTracedLogger_Info(t *testing.T) {
 
 func TestTracedLogger_Warn(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelWarn)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelWarn, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Warn(ctx, "warning message", "key", "value")
@@ -126,8 +122,7 @@ func TestTracedLogger_Warn(t *testing.T) {
 
 func TestTracedLogger_Error(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelError)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelError, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Error(ctx, "error message", "key", "value")
@@ -141,8 +136,7 @@ func TestTracedLogger_Error(t *testing.T) {
 
 func TestTracedLogger_WithContext_TraceCorrelation(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	// Create context with mock trace span
 	ctx := createMockSpanContext()
@@ -166,8 +160,7 @@ func TestTracedLogger_WithContext_TraceCorrelation(t *testing.T) {
 
 func TestTracedLogger_WithContext_NoTrace(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	// Use background context without trace
 	ctx := context.Background()
@@ -227,8 +220,7 @@ func TestNewTextHandler(t *testing.T) {
 
 func TestRedactSensitiveData_Prompt(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Info(ctx, "llm call", "prompt", "secret prompt data", "response", "public data")
@@ -242,8 +234,7 @@ func TestRedactSensitiveData_Prompt(t *testing.T) {
 
 func TestRedactSensitiveData_APIKey(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Info(ctx, "api call", "api_key", "sk-1234567890", "endpoint", "/api/v1/test")
@@ -257,8 +248,7 @@ func TestRedactSensitiveData_APIKey(t *testing.T) {
 
 func TestRedactSensitiveData_Secret(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Info(ctx, "config loaded", "secret", "my-secret-value", "name", "config")
@@ -272,8 +262,7 @@ func TestRedactSensitiveData_Secret(t *testing.T) {
 
 func TestRedactSensitiveData_Password(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Info(ctx, "auth attempt", "password", "P@ssw0rd123", "username", "admin")
@@ -287,8 +276,7 @@ func TestRedactSensitiveData_Password(t *testing.T) {
 
 func TestRedactSensitiveData_Token(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Info(ctx, "token refresh", "token", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", "user_id", "user-123")
@@ -302,8 +290,7 @@ func TestRedactSensitiveData_Token(t *testing.T) {
 
 func TestRedactSensitiveData_Credential(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Info(ctx, "creds loaded", "credential", "secret-cred", "service", "database")
@@ -317,8 +304,7 @@ func TestRedactSensitiveData_Credential(t *testing.T) {
 
 func TestRedactSensitiveData_MultipleSensitiveFields(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Info(ctx, "auth flow",
@@ -344,8 +330,7 @@ func TestRedactSensitiveData_MultipleSensitiveFields(t *testing.T) {
 
 func TestRedactSensitiveData_DebugLevel_NoRedaction(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelDebug)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelDebug, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Debug(ctx, "debug info", "prompt", "sensitive prompt", "api_key", "sk-12345")
@@ -360,8 +345,7 @@ func TestRedactSensitiveData_DebugLevel_NoRedaction(t *testing.T) {
 
 func TestRedactSensitiveData_CaseInsensitive(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 
@@ -392,7 +376,7 @@ func TestRedactSensitiveData_CaseInsensitive(t *testing.T) {
 func TestRedactSensitiveData_OddNumberOfArgs(t *testing.T) {
 	// Test that odd number of args doesn't crash
 	args := []any{"key1", "value1", "key2"}
-	result := redactSensitiveData(args)
+	result := Redact(args)
 
 	// Should return args unchanged
 	assert.Equal(t, args, result)
@@ -400,15 +384,14 @@ func TestRedactSensitiveData_OddNumberOfArgs(t *testing.T) {
 
 func TestRedactSensitiveData_EmptyArgs(t *testing.T) {
 	args := []any{}
-	result := redactSensitiveData(args)
+	result := Redact(args)
 
 	assert.Empty(t, result)
 }
 
 func TestRedactSensitiveData_NonStringKeys(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 
@@ -427,13 +410,13 @@ func TestTracedLogger_AllLevelsWithTraceContext(t *testing.T) {
 	tests := []struct {
 		name     string
 		level    slog.Level
-		logFunc  func(*TracedLogger, context.Context, string, ...any)
+		logFunc  func(*Logger, context.Context, string, ...any)
 		levelStr string
 	}{
 		{
 			name:  "debug",
 			level: slog.LevelDebug,
-			logFunc: func(l *TracedLogger, ctx context.Context, msg string, args ...any) {
+			logFunc: func(l *Logger, ctx context.Context, msg string, args ...any) {
 				l.Debug(ctx, msg, args...)
 			},
 			levelStr: "DEBUG",
@@ -441,7 +424,7 @@ func TestTracedLogger_AllLevelsWithTraceContext(t *testing.T) {
 		{
 			name:  "info",
 			level: slog.LevelInfo,
-			logFunc: func(l *TracedLogger, ctx context.Context, msg string, args ...any) {
+			logFunc: func(l *Logger, ctx context.Context, msg string, args ...any) {
 				l.Info(ctx, msg, args...)
 			},
 			levelStr: "INFO",
@@ -449,7 +432,7 @@ func TestTracedLogger_AllLevelsWithTraceContext(t *testing.T) {
 		{
 			name:  "warn",
 			level: slog.LevelWarn,
-			logFunc: func(l *TracedLogger, ctx context.Context, msg string, args ...any) {
+			logFunc: func(l *Logger, ctx context.Context, msg string, args ...any) {
 				l.Warn(ctx, msg, args...)
 			},
 			levelStr: "WARN",
@@ -457,7 +440,7 @@ func TestTracedLogger_AllLevelsWithTraceContext(t *testing.T) {
 		{
 			name:  "error",
 			level: slog.LevelError,
-			logFunc: func(l *TracedLogger, ctx context.Context, msg string, args ...any) {
+			logFunc: func(l *Logger, ctx context.Context, msg string, args ...any) {
 				l.Error(ctx, msg, args...)
 			},
 			levelStr: "ERROR",
@@ -467,8 +450,7 @@ func TestTracedLogger_AllLevelsWithTraceContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buf := &bytes.Buffer{}
-			handler := NewJSONHandler(buf, tt.level)
-			logger := NewTracedLogger(handler, "mission-456", "trace-agent")
+			logger := NewLogger(Config{Level: tt.level, Output: buf, RedactSensitive: true}).WithMission("mission-456", "").WithAgent("trace-agent")
 
 			tt.logFunc(logger, ctx, "trace test", "key", "value")
 
@@ -533,8 +515,7 @@ func TestTextHandler_OutputFormat(t *testing.T) {
 
 func TestRedactSensitiveData_UnderscoreVariations(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 
@@ -562,8 +543,7 @@ func TestRedactSensitiveData_UnderscoreVariations(t *testing.T) {
 
 func TestTracedLogger_PromptsFieldRedaction(t *testing.T) {
 	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := NewTracedLogger(handler, "mission-123", "test-agent")
+	logger := NewLogger(Config{Level: slog.LevelInfo, Output: buf, RedactSensitive: true}).WithMission("mission-123", "").WithAgent("test-agent")
 
 	ctx := context.Background()
 	logger.Info(ctx, "multi prompt", "prompts", []string{"prompt1", "prompt2"}, "count", 2)

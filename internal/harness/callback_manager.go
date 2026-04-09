@@ -260,56 +260,18 @@ func (m *CallbackManager) RegisterHarnessForMission(missionID, agentName string,
 	return key
 }
 
-// RegisterHarness registers a harness for a specific task and returns the
-// callback endpoint that should be passed to the agent.
-//
-// Deprecated: Use RegisterHarnessForMission instead.
-//
-// This method is maintained for backwards compatibility with legacy task-based
-// registration. New code should use RegisterHarnessForMission(missionID, agentName, harness)
-// for external agents to enable proper mission-based harness lookup.
-//
-// Parameters:
-//   - taskID: Unique identifier for the agent task
-//   - harness: The harness instance that will handle callbacks for this task.
-//     Must implement AgentHarness interface; accepts any to satisfy registry.CallbackManager interface.
-//
-// Returns:
-//   - string: The callback endpoint address (e.g., "gibson:50001")
-//
-// The harness must be registered BEFORE the agent execution request is sent,
-// otherwise callbacks will fail with "no active harness for task" errors.
-//
-// Always unregister the harness after task completion to prevent memory leaks:
-//
-//	endpoint := manager.RegisterHarness(taskID, harness)
-//	defer manager.UnregisterHarness(taskID)
-//
-// Thread-safe: Multiple goroutines can register different harnesses concurrently.
-func (m *CallbackManager) RegisterHarness(taskID string, harness any) string {
-	// Type assert to AgentHarness - the registry.CallbackManager interface uses any
-	// to avoid circular imports, but we need the actual AgentHarness type
-	h, ok := harness.(AgentHarness)
-	if !ok {
-		m.logger.Error("harness does not implement AgentHarness interface", "task_id", taskID)
-		return m.CallbackEndpoint()
-	}
-	m.server.RegisterHarness(taskID, h)
-	m.logger.Debug("registered harness for task", "task_id", taskID)
-	return m.CallbackEndpoint()
-}
 
 // UnregisterHarness removes a harness registration when a task completes.
 //
 // Parameters:
-//   - taskID: The task ID that was used in RegisterHarness()
+//   - taskID: The registration key returned by RegisterHarnessForMission.
 //
-// This method should be called in a defer block immediately after RegisterHarness()
+// This method should be called in a defer block immediately after registration
 // to ensure cleanup happens even if the agent execution fails:
 //
-//	endpoint := manager.RegisterHarness(taskID, harness)
-//	defer manager.UnregisterHarness(taskID)
-//	result, err := agent.Execute(ctx, task, endpoint)
+//	key := manager.RegisterHarnessForMission(missionID, agentName, harness)
+//	defer manager.UnregisterHarness(key)
+//	result, err := agent.Execute(ctx, task, callbackEndpoint)
 //
 // Thread-safe: Safe to call from multiple goroutines.
 func (m *CallbackManager) UnregisterHarness(taskID string) {
@@ -541,5 +503,16 @@ func (m *CallbackManager) SetComponentAuthzMetrics(metrics ComponentAuthzMetrics
 	if m.server != nil {
 		m.server.SetComponentAuthzMetrics(metrics)
 		m.logger.Debug("set component authz metrics recorder on callback service")
+	}
+}
+
+// SetMissionManager wires a MissionOperator into the callback service so agents
+// can create, run, wait for, list, cancel, and retrieve results of sub-missions
+// via the harness callback RPC surface.
+// Should be called after NewCallbackManager and before Start().
+func (m *CallbackManager) SetMissionManager(op MissionOperator) {
+	if m.server != nil {
+		m.server.SetMissionManager(op)
+		m.logger.Debug("set mission manager on callback service")
 	}
 }

@@ -121,11 +121,6 @@ func (s *CallbackServer) Stop() {
 	}
 }
 
-// RegisterHarness registers a harness for a specific task ID.
-// This should be called before executing an agent task.
-func (s *CallbackServer) RegisterHarness(taskID string, harness AgentHarness) {
-	s.service.RegisterHarness(taskID, harness)
-}
 
 // UnregisterHarness removes a harness registration when a task completes.
 func (s *CallbackServer) UnregisterHarness(taskID string) {
@@ -173,4 +168,11 @@ func (s *CallbackServer) SetComponentAuthorizer(a authz.Authorizer) {
 // When not set, no authz counters are emitted (no-op). Call after server creation.
 func (s *CallbackServer) SetComponentAuthzMetrics(m ComponentAuthzMetrics) {
 	s.service.componentAuthzMetrics = m
+}
+
+// SetMissionManager wires a MissionOperator into the callback service, enabling
+// agents to create, run, wait for, list, cancel, and retrieve results of
+// sub-missions via the harness callback. Must be called before Start().
+func (s *CallbackServer) SetMissionManager(op MissionOperator) {
+	s.service.missionManager = op
 }

@@ -22,12 +22,6 @@ core:
   timeout: 10m
   debug: true
 
-database:
-  path: /tmp/gibson-test/gibson.db
-  max_connections: 20
-  timeout: 1m
-  wal_mode: true
-  auto_vacuum: false
 
 security:
   encryption_algorithm: aes-256-gcm
@@ -88,12 +82,6 @@ core:
   timeout: 10m
   debug: true
 
-database:
-  path: /tmp/gibson-test/gibson.db
-  max_connections: 20
-  timeout: 1m
-  wal_mode: true
-  auto_vacuum: false
 
 security:
   encryption_algorithm: aes-256-gcm

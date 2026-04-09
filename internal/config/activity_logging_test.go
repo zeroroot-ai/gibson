@@ -299,12 +299,6 @@ core:
   parallel_limit: 10
   timeout: 5m
 
-database:
-  path: /tmp/gibson-test/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
 
 security:
   encryption_algorithm: aes-256-gcm
@@ -353,12 +347,6 @@ core:
   parallel_limit: 10
   timeout: 5m
 
-database:
-  path: /tmp/gibson-test/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
 
 security:
   encryption_algorithm: aes-256-gcm
@@ -402,12 +390,6 @@ core:
   parallel_limit: 10
   timeout: 5m
 
-database:
-  path: /tmp/gibson-test/gibson.db
-  max_connections: 10
-  timeout: 30s
-  wal_mode: true
-  auto_vacuum: true
 
 security:
   encryption_algorithm: aes-256-gcm

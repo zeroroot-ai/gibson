@@ -212,6 +212,35 @@ func (r *ResourceResolver) lookupNodeByURI(ctx context.Context, uri, tenant stri
 	return ""
 }
 
+// SlotBinding holds the resolved provider and model ID for a named LLM slot.
+// It is stored in context under ctxKeySlotBindings so that the compliance
+// resource resolver can produce a concrete "llm:{provider}" resource type
+// for pre-call stamps, satisfying Requirement 8.1.
+type SlotBinding struct {
+	Provider string // e.g., "anthropic", "openai"
+	ModelID  string // e.g., "claude-3-5-sonnet-20241022"
+}
+
+// ctxKeySlotBindingsType is the unexported type for the slot bindings context key.
+type ctxKeySlotBindingsType struct{}
+
+// ctxKeySlotBindings is the context key for map[string]SlotBinding.
+// The harness factory stores slot bindings here at mission start.
+var ctxKeySlotBindings = ctxKeySlotBindingsType{}
+
+// ContextWithSlotBindings returns a new context carrying the supplied slot
+// bindings. Call this from the harness factory after slot resolution.
+func ContextWithSlotBindings(ctx context.Context, bindings map[string]SlotBinding) context.Context {
+	return context.WithValue(ctx, ctxKeySlotBindings, bindings)
+}
+
+// SlotBindingsFromContext retrieves the slot bindings map from context.
+// Returns nil if no bindings were stored.
+func SlotBindingsFromContext(ctx context.Context) map[string]SlotBinding {
+	v, _ := ctx.Value(ctxKeySlotBindings).(map[string]SlotBinding)
+	return v
+}
+
 // LLMTarget is the request shape for resolving an LLM completion call.
 // At pre-call time only Slot is known; the middleware calls ResolveLLMResponse
 // after the completion returns to refine resource_type to "llm:{provider}"
@@ -220,13 +249,18 @@ type LLMTarget struct {
 	Slot     string // slot name declared by the agent (e.g., "primary")
 	Provider string // optional — filled post-call by the middleware
 	ModelID  string // optional — filled post-call by the middleware
+
+	// Ctx carries the calling context so resolveLLMCall can look up
+	// slot bindings for pre-call resolution.
+	Ctx context.Context
 }
 
 // resolveLLMCall stamps resource_type and resource_uri for an LLM call.
-// When only the slot is known (pre-call resolution), stamps a placeholder
-// that ResolveLLMResponse later refines. When Provider and ModelID are
-// already populated (post-call), stamps the canonical values from
-// Requirement 4.7.
+//
+// Resolution order for LLMTarget:
+//  1. Provider and ModelID already set (post-call) → canonical llm:{provider} + modelID.
+//  2. Slot bindings present in context for this slot → use binding (Requirement 8.1).
+//  3. Fallback: "llm:slot:{name}" placeholder to be refined by ResolveLLMResponse.
 func (r *ResourceResolver) resolveLLMCall(request any) ResourceResolution {
 	switch v := request.(type) {
 	case LLMTarget:
@@ -234,6 +268,17 @@ func (r *ResourceResolver) resolveLLMCall(request any) ResourceResolution {
 			return ResourceResolution{
 				ResourceType: "llm:" + v.Provider,
 				ResourceURI:  v.ModelID,
+			}
+		}
+		// Look up slot binding in context.
+		if v.Ctx != nil {
+			if bindings := SlotBindingsFromContext(v.Ctx); bindings != nil {
+				if b, ok := bindings[v.Slot]; ok {
+					return ResourceResolution{
+						ResourceType: "llm:" + b.Provider,
+						ResourceURI:  b.ModelID,
+					}
+				}
 			}
 		}
 		return ResourceResolution{
