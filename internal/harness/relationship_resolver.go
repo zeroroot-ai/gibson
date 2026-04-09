@@ -28,6 +28,59 @@ import (
 	"github.com/zero-day-ai/sdk/graphrag/taxonomy"
 )
 
+// isExecutionNodeType returns true if the node type represents a runtime
+// activity (not a discovered asset). Used to skip DISCOVERED and BELONGS_TO
+// relationship creation for execution-chain nodes.
+//
+// This replaces the removed taxonomy.IsExecutionNodeType — the classification
+// is derived from the "meta" and "execution" categories in core.yaml.
+func isExecutionNodeType(nodeType string) bool {
+	switch nodeType {
+	case sdkgraphrag.NodeTypeMission,
+		sdkgraphrag.NodeTypeMissionRun,
+		sdkgraphrag.NodeTypeAgentRun,
+		sdkgraphrag.NodeTypeToolExecution,
+		sdkgraphrag.NodeTypeLlmCall,
+		sdkgraphrag.NodeTypeComplianceSignal:
+		return true
+	default:
+		return false
+	}
+}
+
+// structuralRelationships is the closed vocabulary of relationship types
+// that CreateStructuralRelationship validates against. Sourced from the
+// generated RelType* constants in the SDK.
+var structuralRelationships = map[string]bool{
+	sdkgraphrag.RelTypeUSEDTOOL:          true,
+	sdkgraphrag.RelTypeDELEGATEDTO:       true,
+	sdkgraphrag.RelTypeEMITTEDSIGNAL:     true,
+	sdkgraphrag.RelTypeTRIGGERED:          true,
+	sdkgraphrag.RelTypeHASSUBDOMAIN:       true,
+	sdkgraphrag.RelTypeRESOLVESTO:         true,
+	sdkgraphrag.RelTypeHASPORT:            true,
+	sdkgraphrag.RelTypeRUNSSERVICE:        true,
+	sdkgraphrag.RelTypeHASENDPOINT:        true,
+	sdkgraphrag.RelTypeUSESTECHNOLOGY:     true,
+	sdkgraphrag.RelTypeSERVESCERTIFICATE:  true,
+	sdkgraphrag.RelTypeAFFECTS:            true,
+	sdkgraphrag.RelTypeHASEVIDENCE:        true,
+	sdkgraphrag.RelTypeUSESTECHNIQUE:      true,
+	sdkgraphrag.RelTypeLEADSTO:            true,
+}
+
+func isValidStructuralRelationship(relType string) bool {
+	return structuralRelationships[relType]
+}
+
+func allowedStructuralRelationships() []string {
+	out := make([]string, 0, len(structuralRelationships))
+	for r := range structuralRelationships {
+		out = append(out, r)
+	}
+	return out
+}
+
 // RelationshipResolver handles all relationship creation in the GraphRAG system.
 // It consolidates relationship logic that was previously scattered across multiple files
 // into a single, taxonomy-driven system.
@@ -132,7 +185,7 @@ func (r *RelationshipResolver) ResolveAndCreate(ctx context.Context, node sdkgra
 	}
 
 	// 2. Create DISCOVERED relationship (for non-execution nodes with agent_run_id)
-	if !taxonomy.IsExecutionNodeType(nodeType) {
+	if !isExecutionNodeType(nodeType) {
 		if err := r.CreateDiscoveredRelationship(ctx, nodeID, nodeType); err != nil {
 			// Only log at debug level - missing agent_run_id is common and expected
 			slog.Debug("discovered relationship skipped or failed",
@@ -154,7 +207,7 @@ func (r *RelationshipResolver) ResolveAndCreate(ctx context.Context, node sdkgra
 	}
 
 	// 3. Create BELONGS_TO relationship (for root nodes with mission_run_id)
-	if taxonomy.IsRootNodeType(nodeType) && !taxonomy.IsExecutionNodeType(nodeType) {
+	if taxonomy.IsRootNodeType(nodeType) && !isExecutionNodeType(nodeType) {
 		if err := r.CreateBelongsToRelationship(ctx, nodeID, nodeType); err != nil {
 			slog.Debug("belongs_to relationship skipped or failed",
 				"node_type", nodeType,
@@ -365,7 +418,7 @@ func (r *RelationshipResolver) CreateDiscoveredRelationship(ctx context.Context,
 	}
 
 	// Don't create DISCOVERED for execution nodes
-	if taxonomy.IsExecutionNodeType(nodeType) {
+	if isExecutionNodeType(nodeType) {
 		return nil
 	}
 
@@ -414,7 +467,7 @@ func (r *RelationshipResolver) CreateBelongsToRelationship(ctx context.Context, 
 	}
 
 	// Only for root nodes that aren't execution types
-	if !taxonomy.IsRootNodeType(nodeType) || taxonomy.IsExecutionNodeType(nodeType) {
+	if !taxonomy.IsRootNodeType(nodeType) || isExecutionNodeType(nodeType) {
 		return nil
 	}
 
@@ -458,9 +511,9 @@ func (r *RelationshipResolver) CreateBelongsToRelationship(ctx context.Context, 
 //   - relType: The relationship type (must be valid structural relationship)
 func (r *RelationshipResolver) CreateStructuralRelationship(ctx context.Context, fromID, toID, relType string) error {
 	// Validate relationship type
-	if !taxonomy.IsValidStructuralRelationship(relType) {
+	if !isValidStructuralRelationship(relType) {
 		return fmt.Errorf("invalid structural relationship type: %s (allowed: %v)",
-			relType, taxonomy.AllowedStructuralRelationships())
+			relType, allowedStructuralRelationships())
 	}
 
 	cypher := fmt.Sprintf(`

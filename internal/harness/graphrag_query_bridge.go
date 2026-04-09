@@ -292,7 +292,7 @@ func (b *DefaultGraphRAGQueryBridge) StoreNode(ctx context.Context, node sdkgrap
 		discoveredRel := sdkgraphrag.Relationship{
 			FromID: agentRunID,
 			ToID:   nodeID,
-			Type:   sdkgraphrag.RelTypeDISCOVERED,
+			Type:   sdkgraphrag.RelTypeUSEDTOOL,
 			Properties: map[string]any{
 				"discovered_at":    time.Now().UTC(),
 				"discovery_method": agentName,
@@ -505,7 +505,7 @@ func (b *DefaultGraphRAGQueryBridge) StoreBatch(ctx context.Context, batch sdkgr
 				discoveredRel := sdkgraphrag.Relationship{
 					FromID: agentRunID,
 					ToID:   nodeIDs[i],
-					Type:   sdkgraphrag.RelTypeDISCOVERED,
+					Type:   sdkgraphrag.RelTypeUSEDTOOL,
 					Properties: map[string]any{
 						"discovered_at":    time.Now().UTC(),
 						"discovery_method": agentName,
@@ -653,7 +653,7 @@ func (b *DefaultGraphRAGQueryBridge) StoreStructured(ctx context.Context, node s
 		discoveredRel := sdkgraphrag.Relationship{
 			FromID: agentRunID,
 			ToID:   nodeID,
-			Type:   sdkgraphrag.RelTypeDISCOVERED,
+			Type:   sdkgraphrag.RelTypeUSEDTOOL,
 			Properties: map[string]any{
 				"discovered_at":    time.Now().UTC(),
 				"discovery_method": agentName,
@@ -1076,28 +1076,28 @@ func (b *DefaultGraphRAGQueryBridge) createHierarchyRelationships(ctx context.Co
 	switch node.Type {
 	case sdkgraphrag.NodeTypePort:
 		// Port references its host via host_id property
-		if hostID, ok := props[sdkgraphrag.PropHostID].(string); ok && hostID != "" {
+		if hostID, ok := props["parent_host_id"].(string); ok && hostID != "" {
 			fromID = hostID
 			relType = sdkgraphrag.RelTypeHASPORT
 		}
 
 	case sdkgraphrag.NodeTypeService:
 		// Service references its port via port_id property
-		if portID, ok := props[sdkgraphrag.PropPortID].(string); ok && portID != "" {
+		if portID, ok := props["parent_port_id"].(string); ok && portID != "" {
 			fromID = portID
 			relType = sdkgraphrag.RelTypeRUNSSERVICE
 		}
 
 	case sdkgraphrag.NodeTypeEndpoint:
 		// Endpoint references its service via service_id property
-		if serviceID, ok := props[sdkgraphrag.PropServiceID].(string); ok && serviceID != "" {
+		if serviceID, ok := props["parent_service_id"].(string); ok && serviceID != "" {
 			fromID = serviceID
 			relType = sdkgraphrag.RelTypeHASENDPOINT
 		}
 
 	case sdkgraphrag.NodeTypeSubdomain:
 		// Subdomain references its parent domain via parent_domain property
-		if parentDomain, ok := props[sdkgraphrag.PropParentDomain].(string); ok && parentDomain != "" {
+		if parentDomain, ok := props["parent_domain_id"].(string); ok && parentDomain != "" {
 			fromID = parentDomain
 			relType = sdkgraphrag.RelTypeHASSUBDOMAIN
 		}
