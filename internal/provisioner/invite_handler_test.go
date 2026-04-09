@@ -53,6 +53,8 @@ func (m *mockKCForInvite) ListOrganizationMembers(_ context.Context, _ string) (
 	return nil, nil
 }
 
+func (m *mockKCForInvite) AssignRealmRole(ctx context.Context, userID, roleName string) error { return nil }
+
 type mockAuthzForInvite struct {
 	writeErr    error
 	writtenTuples []authz.Tuple

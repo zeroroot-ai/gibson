@@ -73,6 +73,8 @@ func (m *mockKCForReconcile) ListOrganizationMembers(_ context.Context, _ string
 	return nil, nil
 }
 
+func (m *mockKCForReconcile) AssignRealmRole(ctx context.Context, userID, roleName string) error { return nil }
+
 // ---------------------------------------------------------------------------
 // Authorizer mock for reconcile tests
 // ---------------------------------------------------------------------------

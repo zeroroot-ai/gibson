@@ -49,6 +49,8 @@ func (m *mockKCForSignup) ListOrganizationMembers(_ context.Context, _ string) (
 	return nil, nil
 }
 
+func (m *mockKCForSignup) AssignRealmRole(ctx context.Context, userID, roleName string) error { return nil }
+
 // ---------------------------------------------------------------------------
 // Authorizer mock
 // ---------------------------------------------------------------------------

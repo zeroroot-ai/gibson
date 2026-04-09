@@ -114,6 +114,11 @@ type KeycloakAdmin interface {
 
 	// ListOrganizationMembers returns all members of an Organization.
 	ListOrganizationMembers(ctx context.Context, orgID string) ([]OrgMemberRepresentation, error)
+
+	// AssignRealmRole assigns a realm-level role (e.g., "owner") to a user.
+	// The signup handler calls this so the user's JWT carries the role claim
+	// that the dashboard's client-side permission check reads.
+	AssignRealmRole(ctx context.Context, userID, roleName string) error
 }
 
 // keycloakAdminClient implements KeycloakAdmin using the internal keycloak.Client.
@@ -591,6 +596,82 @@ func (k *keycloakAdminClient) ListOrganizationMembers(ctx context.Context, orgID
 
 	span.SetAttributes(attribute.Int("keycloak.org.member_count", len(members)))
 	return members, nil
+}
+
+// AssignRealmRole assigns a realm-level role to a user. The Keycloak REST
+// API requires the role's internal UUID, so this method first looks up the
+// role by name, then POSTs the role-mapping.
+//
+// Keycloak REST path:
+//
+//	POST /admin/realms/{realm}/users/{userID}/role-mappings/realm
+//	Body: [{"id": "<roleUUID>", "name": "<roleName>"}]
+func (k *keycloakAdminClient) AssignRealmRole(ctx context.Context, userID, roleName string) error {
+	ctx, span := k.tracer.Start(ctx, "keycloak.AssignRealmRole",
+		trace.WithAttributes(
+			attribute.String("keycloak.realm", k.realm),
+			attribute.String("keycloak.user.id", userID),
+			attribute.String("keycloak.role", roleName),
+		),
+	)
+	defer span.End()
+
+	// Step 1: Look up the role by name to get its UUID.
+	rolePath := fmt.Sprintf("/admin/realms/%s/roles/%s",
+		url.PathEscape(k.realm), url.PathEscape(roleName))
+
+	roleResp, err := k.client.DoAdminRequest(ctx, http.MethodGet, rolePath, nil)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("keycloak.AssignRealmRole: lookup role %q: %w", roleName, err)
+	}
+	defer roleResp.Body.Close()
+
+	if roleResp.StatusCode == http.StatusNotFound {
+		span.SetStatus(codes.Error, "role not found")
+		return fmt.Errorf("keycloak.AssignRealmRole: realm role %q does not exist: %w", roleName, ErrNotFound)
+	}
+	if roleResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(roleResp.Body)
+		err := fmt.Errorf("keycloak.AssignRealmRole: lookup role %q: status %d: %s", roleName, roleResp.StatusCode, body)
+		span.RecordError(err)
+		return err
+	}
+
+	var role struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(roleResp.Body).Decode(&role); err != nil {
+		return fmt.Errorf("keycloak.AssignRealmRole: decode role %q: %w", roleName, err)
+	}
+
+	// Step 2: POST the role mapping.
+	mappingPath := fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/realm",
+		url.PathEscape(k.realm), url.PathEscape(userID))
+
+	mappingBody := []map[string]any{
+		{"id": role.ID, "name": role.Name},
+	}
+
+	mappingResp, err := k.client.DoAdminRequest(ctx, http.MethodPost, mappingPath, mappingBody)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("keycloak.AssignRealmRole: assign %q to user %s: %w", roleName, userID, err)
+	}
+	defer mappingResp.Body.Close()
+
+	if mappingResp.StatusCode != http.StatusNoContent && mappingResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(mappingResp.Body)
+		err := fmt.Errorf("keycloak.AssignRealmRole: unexpected status %d: %s", mappingResp.StatusCode, body)
+		span.RecordError(err)
+		return err
+	}
+
+	span.SetAttributes(attribute.String("keycloak.role.id", role.ID))
+	return nil
 }
 
 // -------------------------------------------------------------------------

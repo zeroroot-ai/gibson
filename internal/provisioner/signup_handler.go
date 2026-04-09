@@ -257,6 +257,21 @@ func (s *SignupHandler) Signup(ctx context.Context, req SignupRequest) (*SignupR
 	}
 
 	// -----------------------------------------------------------------------
+	// Step 5.5: Assign the "owner" realm role so the user's JWT carries the
+	// role claim. The dashboard reads realm_access.roles from the token for
+	// client-side permission checks — without this the user gets 403 on
+	// every data endpoint despite having valid FGA grants.
+	// -----------------------------------------------------------------------
+	if err := s.kc.AssignRealmRole(ctx, userID, "owner"); err != nil {
+		// Non-fatal: FGA tuple (step 6) is the authoritative grant.
+		// Log but don't roll back — user can still use API keys.
+		s.logger.WarnContext(ctx, "failed to assign owner realm role (non-fatal)",
+			slog.String("user_id", userID),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	// -----------------------------------------------------------------------
 	// Step 6: Write the FGA admin tuple.
 	// -----------------------------------------------------------------------
 	tuple := authz.Tuple{

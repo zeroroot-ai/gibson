@@ -62,6 +62,8 @@ func (m *mockKCForRollback) ListOrganizationMembers(_ context.Context, _ string)
 	return nil, errors.New("not implemented")
 }
 
+func (m *mockKCForRollback) AssignRealmRole(ctx context.Context, userID, roleName string) error { return nil }
+
 // mockAuthzForRollback captures Delete calls.
 type mockAuthzForRollback struct {
 	deleteErr     error
