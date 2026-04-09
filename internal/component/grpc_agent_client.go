@@ -10,8 +10,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/types"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 	"github.com/zero-day-ai/sdk/schema"
 )
 

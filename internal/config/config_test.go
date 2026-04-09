@@ -370,7 +370,6 @@ func TestValidation_ParallelLimitTooHigh(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be at most 100")
 }
 
-
 func TestValidation_CoreTimeoutTooLow(t *testing.T) {
 	validator := NewValidator()
 	cfg := DefaultConfig()
@@ -381,7 +380,6 @@ func TestValidation_CoreTimeoutTooLow(t *testing.T) {
 	assert.Contains(t, err.Error(), "timeout")
 	assert.Contains(t, err.Error(), "must be at least 1s")
 }
-
 
 func TestValidation_MultipleErrors(t *testing.T) {
 	validator := NewValidator()

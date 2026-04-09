@@ -49,7 +49,7 @@ func WithDefaultRealmName(name string) AutoProvisionerOption {
 // TenantAutoProvisioner handles automatic tenant creation on first login.
 type TenantAutoProvisioner struct {
 	tenants  *TenantService
-	keycloak *keycloak.Client  // optional, can be nil
+	keycloak *keycloak.Client    // optional, can be nil
 	langfuse LangfuseProvisioner // optional, can be nil
 	plugins  PluginAccessStore   // optional, can be nil
 	logger   *slog.Logger
@@ -141,8 +141,8 @@ func (p *TenantAutoProvisioner) EnsureTenant(ctx context.Context, tenantID strin
 	}
 
 	config := map[string]string{
-		"auto_provisioned":     "true",
-		"keycloak_realm_name":  realmName,
+		"auto_provisioned":    "true",
+		"keycloak_realm_name": realmName,
 	}
 
 	_, err = p.tenants.createTenantInternal(ctx, tenantID, tenantID, config)

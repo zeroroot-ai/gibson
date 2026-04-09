@@ -12,8 +12,6 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/audit"
@@ -21,9 +19,10 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
+	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
+	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 
 	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/metric"
@@ -96,87 +95,25 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		d.logger.Warn(ctx, "auth interceptors not installed - auth mode not configured")
 	}
 
-	// 4. Declarative RBAC interceptor (declarative-rbac-framework spec).
+	// 4. Authorization interceptor — OpenFGA is the sole enforcement backend.
 	//
-	// Loads the authorization schema from the embedded permissions.yaml, builds
-	// an in-memory Casbin enforcer from the role closures, and installs a single
-	// RPCAuthzInterceptor that enforces every gRPC method by looking up
-	// info.FullMethod in the schema. Any unmapped RPC is default-denied at
-	// runtime, and the loader also runs proto coverage verification at startup
-	// so new RPCs added without a YAML entry fail the daemon before serving
-	// traffic.
-	//
-	// This interceptor replaces all hand-rolled role checks that used to live
-	// in the RPC handlers (deleted in tasks 8-11 of this spec). Installed AFTER
-	// the existing auth interceptors so Identity is already populated in ctx,
-	// and after the membership enrichment interceptor so the caller's per-
-	// tenant role from the Redis membership store is already merged into
-	// identity.Roles for tenant-scoped calls.
-	schemaRegistry, schemaEnforcer, err := auth.LoadEmbedded()
-	if err != nil {
-		return fmt.Errorf("load permissions schema: %w", err)
+	// Build FGA registry and validate it against the FGA model.
+	// Called as a startup gate: typos or model drift fail the daemon early.
+	fgaRegistry := auth.NewFgaRpcRegistry()
+	if err := fgaRegistry.Validate(ctx, d.authorizer); err != nil {
+		return fmt.Errorf("fga registry validation failed at startup: %w", err)
 	}
-	if err := auth.VerifyHelmRoleBindings(schemaRegistry, &d.config.Auth); err != nil {
-		return fmt.Errorf("helm role bindings reference undefined Gibson roles: %w", err)
-	}
+	d.logger.Info(ctx, "fga rpc registry validated against authorization model")
 
-	// 4a. Membership enrichment interceptor.
-	//
-	// Bridges Keycloak authentication and the Redis-backed per-tenant
-	// membership store. Fresh tenant users signed up via the dashboard have
-	// an OIDC JWT with no tenant_id claim and no Gibson role mapped via
-	// helm oidc.roleBindings — their Gibson role (owner/admin/operator/
-	// viewer) lives only in the membership store. Without this step, the
-	// RPCAuthzInterceptor would see identity.Roles=[] on every request and
-	// deny everything with "missing_permission: X (caller_roles=[])".
-	//
-	// The interceptor:
-	//   1. If the current tenant in ctx is SystemTenant and the caller
-	//      holds no cross-tenant role, infers the real tenant from the
-	//      user's sole membership (single-tenant-per-user case).
-	//   2. Looks up member(tenant, subject) in the membership store and
-	//      appends the member role to identity.Roles.
-	//
-	// Skips gracefully if identity is missing, the store is nil, or the
-	// lookup returns ErrMemberNotFound — in all of those cases the call
-	// proceeds with its original Roles slice, and the authz interceptor
-	// decides based on whatever was already there.
-	//
-	// Installed BETWEEN the auth interceptor (needs Identity and Tenant
-	// in ctx) and the authz interceptor (consumes identity.Roles).
-	if d.config.Auth.IsAuthEnabled() && d.membershipStore != nil {
-		memEnrich := auth.NewMembershipEnrichmentInterceptor(
-			d.membershipStore,
-			schemaRegistry,
-			d.logger.Slog(),
-		)
-		unaryInterceptors = append(unaryInterceptors, memEnrich.Unary())
-		streamInterceptors = append(streamInterceptors, memEnrich.Stream())
-		d.logger.Info(ctx, "membership enrichment interceptor installed")
-	}
-
-	authzMetricFunc := func(ctx context.Context, decision, method, permission string) {
-		rec := d.GetOTelMetricsRecorder()
-		if rec == nil {
-			return
-		}
-		rec.RecordAuthzDecision(ctx, decision, method, permission)
-	}
-	authzInterceptor, err := auth.NewRPCAuthzInterceptor(
-		schemaRegistry,
-		schemaEnforcer,
+	fgaInterceptor := auth.NewFgaAuthzInterceptor(
+		d.authorizer,
+		fgaRegistry,
 		d.logger.Slog(),
-		observability.SetAuthzAttributes,
-		authzMetricFunc,
+		d.GetOTelMetricsRecorder(),
 	)
-	if err != nil {
-		return fmt.Errorf("create rpc authz interceptor: %w", err)
-	}
-	unaryInterceptors = append(unaryInterceptors, authzInterceptor.Unary())
-	streamInterceptors = append(streamInterceptors, authzInterceptor.Stream())
-	d.logger.Info(ctx, "declarative RBAC interceptor installed")
-	// schemaRegistry captured for daemonSvc wiring below.
-	authzSchemaRegistry := schemaRegistry
+	unaryInterceptors = append(unaryInterceptors, fgaInterceptor.Unary())
+	streamInterceptors = append(streamInterceptors, fgaInterceptor.Stream())
+	d.logger.Info(ctx, "fga authz interceptor installed (fga-only mode)")
 
 	// Build server options with chained interceptors
 	serverOpts := []grpc.ServerOption{
@@ -195,11 +132,6 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		daemonSvc.WithQuotaManager(d.quotaManager)
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
 	}
-	// Wire the authorization schema registry so GetAuthSchema can return
-	// the live schema to callers (declarative-rbac-framework spec).
-	daemonSvc.WithSchemaRegistry(authzSchemaRegistry)
-	d.logger.Info(ctx, "schema registry wired into DaemonServer for GetAuthSchema RPC")
-
 	// Wire TenantService, Provisioner, and BillingStore into DaemonServer.
 	// These enable tenant CRUD, provisioning, and billing RPCs respectively.
 	if d.stateClient != nil {
@@ -238,11 +170,23 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 					d.logger.Slog(),
 				)
 
-				if d.membershipStore != nil {
-					prov.WithMembership(d.membershipStore)
-				}
 				daemonSvc.WithProvisioner(prov)
 				d.logger.Info(ctx, "provisioner wired into DaemonServer")
+
+				// Wire the SignupHandler — requires KeycloakAdmin and the FGA Authorizer.
+				// The KeycloakAdmin is constructed from daemon config; the Authorizer is
+				// always non-nil after initAuthorizer() (noopAuthorizer when disabled).
+				if kcAdmin, kcErr := provisioner.NewKeycloakAdminClient(
+					d.config.Keycloak.Admin,
+					d.logger.Slog(),
+				); kcErr != nil {
+					d.logger.Warn(ctx, "SignupHandler not wired: failed to build Keycloak admin client",
+						"error", kcErr)
+				} else {
+					signupHandler := provisioner.NewSignupHandler(kcAdmin, d.authorizer, prov, d.logger.Slog())
+					daemonSvc.WithSignupHandler(signupHandler)
+					d.logger.Info(ctx, "SignupHandler wired into DaemonServer")
+				}
 			} else {
 				d.logger.Warn(ctx, "provisioner not wired: API key authenticator unavailable")
 			}
@@ -251,11 +195,6 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 			daemonSvc.WithBillingStore(tenantService, d.quotaManager)
 			d.logger.Info(ctx, "billing store wired into DaemonServer")
 
-			// Wire MembershipStore for the membership management RPCs.
-			if d.membershipStore != nil {
-				daemonSvc.WithMembershipStore(d.membershipStore)
-				d.logger.Info(ctx, "membership store wired into DaemonServer")
-			}
 		} else {
 			d.logger.Warn(ctx, "tenant provisioning not wired: Redis client is not standalone mode")
 		}

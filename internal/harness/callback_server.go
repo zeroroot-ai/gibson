@@ -7,6 +7,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	"google.golang.org/grpc"
@@ -153,4 +154,23 @@ func (s *CallbackServer) SetDiscoveryProcessor(processor DiscoveryProcessor) {
 // This must be called before starting the server.
 func (s *CallbackServer) SetQueueManager(queueMgr *QueueManager) {
 	s.service.queueManager = queueMgr
+}
+
+// SetAuthzStore sets the RunAuthzLookup for per-run authz state retrieval.
+// Required for the Authorize RPC handler. When not set, Authorize returns
+// codes.Unimplemented (SDK degrades to allow — rolling upgrade path).
+func (s *CallbackServer) SetAuthzStore(store RunAuthzLookup) {
+	s.service.authzStore = store
+}
+
+// SetComponentAuthorizer sets the FGA Authorizer for component authz decisions.
+// When not set, all active-mission Authorize requests return allowed=true (dev mode).
+func (s *CallbackServer) SetComponentAuthorizer(a authz.Authorizer) {
+	s.service.componentAuthorizer = a
+}
+
+// SetComponentAuthzMetrics wires a metrics recorder into the Authorize handler.
+// When not set, no authz counters are emitted (no-op). Call after server creation.
+func (s *CallbackServer) SetComponentAuthzMetrics(m ComponentAuthzMetrics) {
+	s.service.componentAuthzMetrics = m
 }

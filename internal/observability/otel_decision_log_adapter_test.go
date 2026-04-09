@@ -265,10 +265,10 @@ func TestOTelDecisionLogWriterAdapter_LogAction_ExecuteAgent(t *testing.T) {
 
 	// Create action result
 	action := &orchestrator.ActionResult{
-		Action:          orchestrator.ActionExecuteAgent,
-		AgentExecution:  execution,
-		NewNode:         nil,
-		Error:           nil,
+		Action:         orchestrator.ActionExecuteAgent,
+		AgentExecution: execution,
+		NewNode:        nil,
+		Error:          nil,
 		Metadata: map[string]any{
 			"agent_name": "test-agent",
 		},
@@ -368,7 +368,7 @@ func TestOTelDecisionLogWriterAdapter_LogAction_Complete(t *testing.T) {
 
 	// Create action result
 	action := &orchestrator.ActionResult{
-		Action:     orchestrator.ActionComplete,
+		Action: orchestrator.ActionComplete,
 	}
 
 	// Log action

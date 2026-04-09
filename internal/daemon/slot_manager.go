@@ -28,8 +28,8 @@ import (
 type DaemonSlotManager struct {
 	registry        llm.LLMRegistry
 	logger          *slog.Logger
-	mu              sync.RWMutex          // Protects concurrent access to slot resolution
-	providerEnvVars map[string]string      // Maps provider name to its API key env var name
+	mu              sync.RWMutex      // Protects concurrent access to slot resolution
+	providerEnvVars map[string]string // Maps provider name to its API key env var name
 }
 
 // NewDaemonSlotManager creates a new DaemonSlotManager with the given LLM registry.

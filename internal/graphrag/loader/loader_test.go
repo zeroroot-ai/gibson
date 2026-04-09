@@ -169,7 +169,7 @@ func TestLoadDiscovery_LoadPorts_WithParentRelationship(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, result.NodesCreated) // 1 host + 1 port
+	assert.Equal(t, 2, result.NodesCreated)                  // 1 host + 1 port
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 1) // HAS_PORT relationship
 	assert.False(t, result.HasErrors())
 }
@@ -240,7 +240,7 @@ func TestLoadDiscovery_LoadServices_WithParentRelationship(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 3, result.NodesCreated) // host + port + service
+	assert.Equal(t, 3, result.NodesCreated)                  // host + port + service
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 2) // HAS_PORT + RUNS_SERVICE
 	assert.False(t, result.HasErrors())
 }
@@ -393,7 +393,7 @@ func TestLoadDiscovery_SubdomainsWithParent(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, result.NodesCreated) // domain + subdomain
+	assert.Equal(t, 2, result.NodesCreated)                  // domain + subdomain
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 1) // HAS_SUBDOMAIN
 	assert.False(t, result.HasErrors())
 }
@@ -659,7 +659,7 @@ func TestLoadDiscovery_Evidence(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, result.NodesCreated) // finding + evidence
+	assert.Equal(t, 2, result.NodesCreated)                  // finding + evidence
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 1) // HAS_EVIDENCE
 	assert.False(t, result.HasErrors())
 }
@@ -743,7 +743,7 @@ func TestLoadDiscovery_Endpoints(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 4, result.NodesCreated) // host + port + service + endpoint
+	assert.Equal(t, 4, result.NodesCreated)                  // host + port + service + endpoint
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 3) // HAS_PORT + RUNS_SERVICE + HAS_ENDPOINT
 	assert.False(t, result.HasErrors())
 }
@@ -804,7 +804,7 @@ func TestLoadDiscovery_CustomNodeWithParent(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, result.NodesCreated) // host + custom node
+	assert.Equal(t, 2, result.NodesCreated)                  // host + custom node
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 1) // DETECTED_ON
 	assert.False(t, result.HasErrors())
 
@@ -958,7 +958,7 @@ func TestRelationshipCreation_HostWithPorts(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, result.NodesCreated) // 1 host + 1 port
+	assert.Equal(t, 2, result.NodesCreated)                  // 1 host + 1 port
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 1) // At least HAS_PORT relationship
 	assert.False(t, result.HasErrors())
 
@@ -1279,7 +1279,7 @@ func TestRelationshipCreation_ChainedRelationships(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 4, result.NodesCreated) // host + port + service + endpoint
+	assert.Equal(t, 4, result.NodesCreated)                  // host + port + service + endpoint
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 3) // At least 3 parent relationships
 	assert.False(t, result.HasErrors())
 
@@ -1370,7 +1370,7 @@ func TestRelationshipCreation_MultiplePortsPerHost(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 4, result.NodesCreated) // 1 host + 3 ports
+	assert.Equal(t, 4, result.NodesCreated)                  // 1 host + 3 ports
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 3) // At least 3 HAS_PORT relationships
 	assert.False(t, result.HasErrors())
 
@@ -1446,7 +1446,7 @@ func TestRelationshipCreation_DomainSubdomain(t *testing.T) {
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, result.NodesCreated) // domain + subdomain
+	assert.Equal(t, 2, result.NodesCreated)                  // domain + subdomain
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 1) // At least HAS_SUBDOMAIN relationship
 	assert.False(t, result.HasErrors())
 

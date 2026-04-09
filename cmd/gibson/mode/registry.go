@@ -15,6 +15,12 @@ func init() {
 	Register("gibson config set", Standalone)
 	Register("gibson config validate", Standalone)
 
+	// Authz commands - Direct FGA interaction (standalone, no daemon needed)
+	Register("gibson authz", Standalone)
+	Register("gibson authz check", Standalone)
+	Register("gibson authz write", Standalone)
+	Register("gibson authz model-info", Standalone)
+
 	// Daemon commands - Manages daemon lifecycle
 	Register("gibson daemon", Daemon)
 	Register("gibson daemon start", Daemon)

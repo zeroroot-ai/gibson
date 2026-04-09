@@ -33,21 +33,21 @@ type RedisCredentialDAO struct {
 // credentialDocument represents the JSON structure stored in Redis.
 // Binary encrypted fields are base64-encoded for JSON compatibility.
 type credentialDocument struct {
-	ID                  string                    `json:"id"`
-	Name                string                    `json:"name"`
-	Type                string                    `json:"type"`
-	Provider            string                    `json:"provider,omitempty"`
-	Status              string                    `json:"status"`
-	Description         string                    `json:"description,omitempty"`
-	EncryptedValue      string                    `json:"encrypted_value"`      // base64 encoded
-	EncryptionIV        string                    `json:"encryption_iv"`        // base64 encoded
-	KeyDerivationSalt   string                    `json:"key_derivation_salt"`  // base64 encoded
-	Tags                []string                  `json:"tags,omitempty"`
-	Rotation            types.CredentialRotation  `json:"rotation"`
-	Usage               types.CredentialUsage     `json:"usage"`
-	CreatedAt           int64                     `json:"created_at"` // Unix milliseconds for RediSearch numeric indexing
-	UpdatedAt           int64                     `json:"updated_at"` // Unix milliseconds
-	LastUsed            *int64                    `json:"last_used,omitempty"` // Unix milliseconds, nullable
+	ID                string                   `json:"id"`
+	Name              string                   `json:"name"`
+	Type              string                   `json:"type"`
+	Provider          string                   `json:"provider,omitempty"`
+	Status            string                   `json:"status"`
+	Description       string                   `json:"description,omitempty"`
+	EncryptedValue    string                   `json:"encrypted_value"`     // base64 encoded
+	EncryptionIV      string                   `json:"encryption_iv"`       // base64 encoded
+	KeyDerivationSalt string                   `json:"key_derivation_salt"` // base64 encoded
+	Tags              []string                 `json:"tags,omitempty"`
+	Rotation          types.CredentialRotation `json:"rotation"`
+	Usage             types.CredentialUsage    `json:"usage"`
+	CreatedAt         int64                    `json:"created_at"`          // Unix milliseconds for RediSearch numeric indexing
+	UpdatedAt         int64                    `json:"updated_at"`          // Unix milliseconds
+	LastUsed          *int64                   `json:"last_used,omitempty"` // Unix milliseconds, nullable
 }
 
 // NewRedisCredentialDAO creates a new Redis-based credential DAO.

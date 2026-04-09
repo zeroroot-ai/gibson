@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/casbin/casbin/v2"
+	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/checkpoint"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/events"
@@ -228,6 +229,13 @@ type HarnessConfig struct {
 	// Optional.
 	WorkQueue component.WorkQueue
 
+	// EnvelopeSigner signs AuthzContext payloads that are attached to dispatched
+	// work items. Components verify these signatures via their HMAC secret to
+	// prevent authz context forgery.
+	// When nil, work items are dispatched without an AuthzContext (dev mode).
+	// Optional.
+	EnvelopeSigner *authz.EnvelopeSigner
+
 	// WorkQueueTimeout is the maximum duration to wait for a remote component to
 	// return a WorkResult. Zero defaults to 5 minutes.
 	// Optional.
@@ -247,6 +255,26 @@ type HarnessConfig struct {
 	// (backward-compatible behavior).
 	// Optional.
 	Enforcer *casbin.Enforcer
+
+	// MaxDelegationDepth caps the number of nested DelegateToAgent hops.
+	// When zero, the package default (8) is used. Set via daemon config flag
+	// "harness.max_delegation_depth" for production tuning.
+	// Optional.
+	MaxDelegationDepth int
+
+	// ComplianceSink is the SignalSink that ComplianceMiddleware forwards
+	// compliance signals to. When nil, ComplianceMiddleware is NOT wired
+	// into the harness chain — the chain behaves as if the middleware did
+	// not exist. Set by daemon startup after the discovery processor and
+	// graph reader are ready.
+	// Optional.
+	ComplianceSink SignalSink
+
+	// ComplianceGraphReader is the GraphReader passed into
+	// ComplianceMiddleware for dual-reference resource resolution. May be
+	// nil — the middleware will then stamp URI-only on every signal.
+	// Optional.
+	ComplianceGraphReader GraphReader
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.

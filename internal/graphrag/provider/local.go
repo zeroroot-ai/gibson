@@ -424,7 +424,6 @@ func (l *LocalGraphRAGProvider) queryNodesFromGraph(ctx context.Context, query g
 	return nodes, nil
 }
 
-
 // buildGlobalQuery builds a Cypher query with no mission filtering.
 // Returns nodes across all missions (global query).
 func (l *LocalGraphRAGProvider) buildGlobalQuery(query graphrag.NodeQuery, params map[string]any) string {
@@ -474,7 +473,6 @@ func (l *LocalGraphRAGProvider) buildGlobalQuery(query graphrag.NodeQuery, param
 
 	return cypher
 }
-
 
 // buildLabelFilter builds a Cypher label filter string from node types.
 func (l *LocalGraphRAGProvider) buildLabelFilter(nodeTypes []graphrag.NodeType) string {

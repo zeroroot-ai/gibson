@@ -400,4 +400,3 @@ func TestIntegration_CompositeAuthenticator(t *testing.T) {
 		require.Error(t, err)
 	})
 }
-

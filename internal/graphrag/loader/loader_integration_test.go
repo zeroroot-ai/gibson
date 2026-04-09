@@ -151,7 +151,7 @@ func TestIntegration_ParentRelationshipScoping(t *testing.T) {
 
 	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
 	require.NoError(t, err)
-	assert.Equal(t, 2, result.NodesCreated) // host + port
+	assert.Equal(t, 2, result.NodesCreated)                  // host + port
 	assert.GreaterOrEqual(t, result.RelationshipsCreated, 1) // HAS_PORT
 
 	// Verify relationship query includes mission_run_id scoping

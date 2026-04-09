@@ -13,13 +13,13 @@ import (
 
 // mockMissionGraphManager is a mock implementation of MissionGraphManager for testing
 type mockMissionGraphManager struct {
-	ensureMissionCalls       []ensureMissionCall
-	createMissionRunCalls    []createMissionRunCall
-	updateMissionRunCalls    []updateMissionRunCall
-	nextMissionID            string
-	nextMissionRunID         string
-	ensureMissionErr         error
-	createMissionRunErr      error
+	ensureMissionCalls        []ensureMissionCall
+	createMissionRunCalls     []createMissionRunCall
+	updateMissionRunCalls     []updateMissionRunCall
+	nextMissionID             string
+	nextMissionRunID          string
+	ensureMissionErr          error
+	createMissionRunErr       error
 	updateMissionRunStatusErr error
 }
 
@@ -104,38 +104,38 @@ func TestMissionGraphTracking_ContextInjection(t *testing.T) {
 // mapped to mission run status values
 func TestMissionGraphTracking_StatusMapping(t *testing.T) {
 	testCases := []struct {
-		name             string
-		orchStatus       OrchestratorStatus
+		name              string
+		orchStatus        OrchestratorStatus
 		expectedRunStatus string
 	}{
 		{
-			name:             "completed maps to completed",
-			orchStatus:       StatusCompleted,
+			name:              "completed maps to completed",
+			orchStatus:        StatusCompleted,
 			expectedRunStatus: "completed",
 		},
 		{
-			name:             "failed maps to failed",
-			orchStatus:       StatusFailed,
+			name:              "failed maps to failed",
+			orchStatus:        StatusFailed,
 			expectedRunStatus: "failed",
 		},
 		{
-			name:             "cancelled maps to cancelled",
-			orchStatus:       StatusCancelled,
+			name:              "cancelled maps to cancelled",
+			orchStatus:        StatusCancelled,
 			expectedRunStatus: "cancelled",
 		},
 		{
-			name:             "max iterations maps to failed",
-			orchStatus:       StatusMaxIterations,
+			name:              "max iterations maps to failed",
+			orchStatus:        StatusMaxIterations,
 			expectedRunStatus: "failed",
 		},
 		{
-			name:             "timeout maps to failed",
-			orchStatus:       StatusTimeout,
+			name:              "timeout maps to failed",
+			orchStatus:        StatusTimeout,
 			expectedRunStatus: "failed",
 		},
 		{
-			name:             "budget exceeded maps to failed",
-			orchStatus:       StatusBudgetExceeded,
+			name:              "budget exceeded maps to failed",
+			orchStatus:        StatusBudgetExceeded,
 			expectedRunStatus: "failed",
 		},
 	}

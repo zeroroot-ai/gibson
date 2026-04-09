@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/zero-day-ai/gibson/cmd/gibson/authz"
 	"github.com/zero-day-ai/gibson/cmd/gibson/mode"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/harness"
@@ -116,6 +117,7 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(daemonCmd)
+	rootCmd.AddCommand(authz.Cmd)
 }
 
 var versionCmd = &cobra.Command{

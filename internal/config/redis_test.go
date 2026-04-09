@@ -37,7 +37,7 @@ func TestRedisConfig_ApplyDefaults(t *testing.T) {
 		expected RedisConfig
 	}{
 		{
-			name: "empty config gets all defaults",
+			name:   "empty config gets all defaults",
 			config: RedisConfig{},
 			expected: RedisConfig{
 				URL:            "redis://localhost:6379",

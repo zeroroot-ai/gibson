@@ -51,7 +51,21 @@ const (
 	DaemonAdminService_UpdateMemberRole_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/UpdateMemberRole"
 	DaemonAdminService_ListUserTenants_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/ListUserTenants"
 	DaemonAdminService_TransferOwnership_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/TransferOwnership"
-	DaemonAdminService_GetAuthSchema_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/GetAuthSchema"
+	DaemonAdminService_SignupTenant_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/SignupTenant"
+	DaemonAdminService_InviteMember_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/InviteMember"
+	DaemonAdminService_RemoveMember_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/RemoveMember"
+	DaemonAdminService_ResendInvitation_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/ResendInvitation"
+	DaemonAdminService_ListUserComponentGrants_FullMethodName         = "/gibson.daemon.admin.v1.DaemonAdminService/ListUserComponentGrants"
+	DaemonAdminService_GrantComponentAccess_FullMethodName            = "/gibson.daemon.admin.v1.DaemonAdminService/GrantComponentAccess"
+	DaemonAdminService_RevokeComponentAccess_FullMethodName           = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeComponentAccess"
+	DaemonAdminService_CreateTeam_FullMethodName                      = "/gibson.daemon.admin.v1.DaemonAdminService/CreateTeam"
+	DaemonAdminService_ListTeams_FullMethodName                       = "/gibson.daemon.admin.v1.DaemonAdminService/ListTeams"
+	DaemonAdminService_DeleteTeam_FullMethodName                      = "/gibson.daemon.admin.v1.DaemonAdminService/DeleteTeam"
+	DaemonAdminService_AddUserToTeam_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/AddUserToTeam"
+	DaemonAdminService_RemoveUserFromTeam_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/RemoveUserFromTeam"
+	DaemonAdminService_SetTeamCrosstalk_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/SetTeamCrosstalk"
+	DaemonAdminService_ListAuditEvents_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/ListAuditEvents"
+	DaemonAdminService_BatchGrantComponentAccess_FullMethodName       = "/gibson.daemon.admin.v1.DaemonAdminService/BatchGrantComponentAccess"
 )
 
 // DaemonAdminServiceClient is the client API for DaemonAdminService service.
@@ -134,17 +148,58 @@ type DaemonAdminServiceClient interface {
 	ListUserTenants(ctx context.Context, in *ListUserTenantsRequest, opts ...grpc.CallOption) (*ListUserTenantsResponse, error)
 	// TransferOwnership transfers tenant ownership to another existing member.
 	TransferOwnership(ctx context.Context, in *TransferOwnershipRequest, opts ...grpc.CallOption) (*TransferOwnershipResponse, error)
-	// GetAuthSchema returns the daemon's live authorization schema: roles,
-	// permissions, and the per-RPC requirement map loaded from the daemon's
-	// internal permissions.yaml. Requires any authenticated identity (the
-	// schema is not secret, but unauthenticated enumeration is blocked to
-	// prevent platform attack-surface scraping).
+	// SignupTenant orchestrates the full tenant signup flow: create Keycloak user,
+	// create Keycloak Organization, add user as member, write the first FGA admin
+	// tuple, and provision downstream tenant resources (Langfuse project, etc.).
 	//
-	// Consumed by the dashboard at runtime (cached with TTL) to drive UI
-	// gating via hasPermission / canCallRpc helpers.
+	// This RPC replaces the previous dashboard-side Keycloak admin orchestration
+	// so that admin credentials never leave the daemon pod.
 	//
-	// Added by the declarative-rbac-framework spec.
-	GetAuthSchema(ctx context.Context, in *GetAuthSchemaRequest, opts ...grpc.CallOption) (*GetAuthSchemaResponse, error)
+	// Requires the caller to present a gibson-system-ops service account JWT with
+	// the "provisioner" realm role (tenants:signup permission).
+	//
+	// Added by authz-02-keycloak-organizations spec.
+	SignupTenant(ctx context.Context, in *SignupTenantRequest, opts ...grpc.CallOption) (*SignupTenantResponse, error)
+	// InviteMember creates a Keycloak user, adds them to the org, writes an FGA
+	// tuple, and generates a signed invitation token. Requires FGA admin relation.
+	InviteMember(ctx context.Context, in *InviteMemberRequest, opts ...grpc.CallOption) (*InviteMemberResponse, error)
+	// RemoveMember removes a user from the tenant: deletes the FGA tuple and
+	// removes the Keycloak Organization membership. Requires FGA admin relation.
+	RemoveMember(ctx context.Context, in *RemoveMemberRequest, opts ...grpc.CallOption) (*RemoveMemberResponse, error)
+	// ResendInvitation issues a fresh invitation token for an existing pending user.
+	// Requires FGA admin relation.
+	ResendInvitation(ctx context.Context, in *ResendInvitationRequest, opts ...grpc.CallOption) (*ResendInvitationResponse, error)
+	// ListUserComponentGrants returns the component grants for a user within a tenant.
+	// Accessible by admins (for any user) or members (for themselves).
+	ListUserComponentGrants(ctx context.Context, in *ListUserComponentGrantsRequest, opts ...grpc.CallOption) (*ListUserComponentGrantsResponse, error)
+	// GrantComponentAccess writes an FGA can_<action> tuple for the user on the component.
+	// Requires FGA admin relation.
+	GrantComponentAccess(ctx context.Context, in *GrantComponentAccessRequest, opts ...grpc.CallOption) (*GrantComponentAccessResponse, error)
+	// RevokeComponentAccess deletes the FGA can_<action> tuple for the user on the component.
+	// Requires FGA admin relation.
+	RevokeComponentAccess(ctx context.Context, in *RevokeComponentAccessRequest, opts ...grpc.CallOption) (*RevokeComponentAccessResponse, error)
+	// CreateTeam creates a new team within a tenant. Requires FGA admin relation.
+	CreateTeam(ctx context.Context, in *CreateTeamRequest, opts ...grpc.CallOption) (*CreateTeamResponse, error)
+	// ListTeams returns all teams within a tenant.
+	ListTeams(ctx context.Context, in *ListTeamsRequest, opts ...grpc.CallOption) (*ListTeamsResponse, error)
+	// DeleteTeam permanently removes a team and its FGA relationships.
+	// Requires FGA admin relation.
+	DeleteTeam(ctx context.Context, in *DeleteTeamRequest, opts ...grpc.CallOption) (*DeleteTeamResponse, error)
+	// AddUserToTeam adds a user to a team. Requires FGA admin relation.
+	// The user must already be a member of the parent tenant.
+	AddUserToTeam(ctx context.Context, in *AddUserToTeamRequest, opts ...grpc.CallOption) (*AddUserToTeamResponse, error)
+	// RemoveUserFromTeam removes a user from a team. Requires FGA admin relation.
+	RemoveUserFromTeam(ctx context.Context, in *RemoveUserFromTeamRequest, opts ...grpc.CallOption) (*RemoveUserFromTeamResponse, error)
+	// SetTeamCrosstalk grants team A visibility into team B's data (directional).
+	// Requires FGA admin relation.
+	SetTeamCrosstalk(ctx context.Context, in *SetTeamCrosstalkRequest, opts ...grpc.CallOption) (*SetTeamCrosstalkResponse, error)
+	// ListAuditEvents returns audit events for a tenant, sourced from the daemon's
+	// Redis audit stream. Requires FGA admin relation on the tenant.
+	ListAuditEvents(ctx context.Context, in *ListAuditEventsRequest, opts ...grpc.CallOption) (*ListAuditEventsResponse, error)
+	// BatchGrantComponentAccess applies a list of grant/revoke operations in a
+	// single RPC call, reducing round-trip count for bulk permission changes.
+	// Requires FGA admin relation on the tenant.
+	BatchGrantComponentAccess(ctx context.Context, in *BatchGrantComponentAccessRequest, opts ...grpc.CallOption) (*BatchGrantComponentAccessResponse, error)
 }
 
 type daemonAdminServiceClient struct {
@@ -475,10 +530,150 @@ func (c *daemonAdminServiceClient) TransferOwnership(ctx context.Context, in *Tr
 	return out, nil
 }
 
-func (c *daemonAdminServiceClient) GetAuthSchema(ctx context.Context, in *GetAuthSchemaRequest, opts ...grpc.CallOption) (*GetAuthSchemaResponse, error) {
+func (c *daemonAdminServiceClient) SignupTenant(ctx context.Context, in *SignupTenantRequest, opts ...grpc.CallOption) (*SignupTenantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetAuthSchemaResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_GetAuthSchema_FullMethodName, in, out, cOpts...)
+	out := new(SignupTenantResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_SignupTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) InviteMember(ctx context.Context, in *InviteMemberRequest, opts ...grpc.CallOption) (*InviteMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InviteMemberResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_InviteMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) RemoveMember(ctx context.Context, in *RemoveMemberRequest, opts ...grpc.CallOption) (*RemoveMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveMemberResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_RemoveMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ResendInvitation(ctx context.Context, in *ResendInvitationRequest, opts ...grpc.CallOption) (*ResendInvitationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResendInvitationResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ResendInvitation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListUserComponentGrants(ctx context.Context, in *ListUserComponentGrantsRequest, opts ...grpc.CallOption) (*ListUserComponentGrantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListUserComponentGrantsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListUserComponentGrants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GrantComponentAccess(ctx context.Context, in *GrantComponentAccessRequest, opts ...grpc.CallOption) (*GrantComponentAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GrantComponentAccessResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GrantComponentAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) RevokeComponentAccess(ctx context.Context, in *RevokeComponentAccessRequest, opts ...grpc.CallOption) (*RevokeComponentAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeComponentAccessResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_RevokeComponentAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) CreateTeam(ctx context.Context, in *CreateTeamRequest, opts ...grpc.CallOption) (*CreateTeamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateTeamResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_CreateTeam_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListTeams(ctx context.Context, in *ListTeamsRequest, opts ...grpc.CallOption) (*ListTeamsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTeamsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListTeams_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) DeleteTeam(ctx context.Context, in *DeleteTeamRequest, opts ...grpc.CallOption) (*DeleteTeamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteTeamResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_DeleteTeam_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) AddUserToTeam(ctx context.Context, in *AddUserToTeamRequest, opts ...grpc.CallOption) (*AddUserToTeamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddUserToTeamResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_AddUserToTeam_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) RemoveUserFromTeam(ctx context.Context, in *RemoveUserFromTeamRequest, opts ...grpc.CallOption) (*RemoveUserFromTeamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveUserFromTeamResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_RemoveUserFromTeam_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) SetTeamCrosstalk(ctx context.Context, in *SetTeamCrosstalkRequest, opts ...grpc.CallOption) (*SetTeamCrosstalkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetTeamCrosstalkResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_SetTeamCrosstalk_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListAuditEvents(ctx context.Context, in *ListAuditEventsRequest, opts ...grpc.CallOption) (*ListAuditEventsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAuditEventsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListAuditEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) BatchGrantComponentAccess(ctx context.Context, in *BatchGrantComponentAccessRequest, opts ...grpc.CallOption) (*BatchGrantComponentAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BatchGrantComponentAccessResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_BatchGrantComponentAccess_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -565,17 +760,58 @@ type DaemonAdminServiceServer interface {
 	ListUserTenants(context.Context, *ListUserTenantsRequest) (*ListUserTenantsResponse, error)
 	// TransferOwnership transfers tenant ownership to another existing member.
 	TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error)
-	// GetAuthSchema returns the daemon's live authorization schema: roles,
-	// permissions, and the per-RPC requirement map loaded from the daemon's
-	// internal permissions.yaml. Requires any authenticated identity (the
-	// schema is not secret, but unauthenticated enumeration is blocked to
-	// prevent platform attack-surface scraping).
+	// SignupTenant orchestrates the full tenant signup flow: create Keycloak user,
+	// create Keycloak Organization, add user as member, write the first FGA admin
+	// tuple, and provision downstream tenant resources (Langfuse project, etc.).
 	//
-	// Consumed by the dashboard at runtime (cached with TTL) to drive UI
-	// gating via hasPermission / canCallRpc helpers.
+	// This RPC replaces the previous dashboard-side Keycloak admin orchestration
+	// so that admin credentials never leave the daemon pod.
 	//
-	// Added by the declarative-rbac-framework spec.
-	GetAuthSchema(context.Context, *GetAuthSchemaRequest) (*GetAuthSchemaResponse, error)
+	// Requires the caller to present a gibson-system-ops service account JWT with
+	// the "provisioner" realm role (tenants:signup permission).
+	//
+	// Added by authz-02-keycloak-organizations spec.
+	SignupTenant(context.Context, *SignupTenantRequest) (*SignupTenantResponse, error)
+	// InviteMember creates a Keycloak user, adds them to the org, writes an FGA
+	// tuple, and generates a signed invitation token. Requires FGA admin relation.
+	InviteMember(context.Context, *InviteMemberRequest) (*InviteMemberResponse, error)
+	// RemoveMember removes a user from the tenant: deletes the FGA tuple and
+	// removes the Keycloak Organization membership. Requires FGA admin relation.
+	RemoveMember(context.Context, *RemoveMemberRequest) (*RemoveMemberResponse, error)
+	// ResendInvitation issues a fresh invitation token for an existing pending user.
+	// Requires FGA admin relation.
+	ResendInvitation(context.Context, *ResendInvitationRequest) (*ResendInvitationResponse, error)
+	// ListUserComponentGrants returns the component grants for a user within a tenant.
+	// Accessible by admins (for any user) or members (for themselves).
+	ListUserComponentGrants(context.Context, *ListUserComponentGrantsRequest) (*ListUserComponentGrantsResponse, error)
+	// GrantComponentAccess writes an FGA can_<action> tuple for the user on the component.
+	// Requires FGA admin relation.
+	GrantComponentAccess(context.Context, *GrantComponentAccessRequest) (*GrantComponentAccessResponse, error)
+	// RevokeComponentAccess deletes the FGA can_<action> tuple for the user on the component.
+	// Requires FGA admin relation.
+	RevokeComponentAccess(context.Context, *RevokeComponentAccessRequest) (*RevokeComponentAccessResponse, error)
+	// CreateTeam creates a new team within a tenant. Requires FGA admin relation.
+	CreateTeam(context.Context, *CreateTeamRequest) (*CreateTeamResponse, error)
+	// ListTeams returns all teams within a tenant.
+	ListTeams(context.Context, *ListTeamsRequest) (*ListTeamsResponse, error)
+	// DeleteTeam permanently removes a team and its FGA relationships.
+	// Requires FGA admin relation.
+	DeleteTeam(context.Context, *DeleteTeamRequest) (*DeleteTeamResponse, error)
+	// AddUserToTeam adds a user to a team. Requires FGA admin relation.
+	// The user must already be a member of the parent tenant.
+	AddUserToTeam(context.Context, *AddUserToTeamRequest) (*AddUserToTeamResponse, error)
+	// RemoveUserFromTeam removes a user from a team. Requires FGA admin relation.
+	RemoveUserFromTeam(context.Context, *RemoveUserFromTeamRequest) (*RemoveUserFromTeamResponse, error)
+	// SetTeamCrosstalk grants team A visibility into team B's data (directional).
+	// Requires FGA admin relation.
+	SetTeamCrosstalk(context.Context, *SetTeamCrosstalkRequest) (*SetTeamCrosstalkResponse, error)
+	// ListAuditEvents returns audit events for a tenant, sourced from the daemon's
+	// Redis audit stream. Requires FGA admin relation on the tenant.
+	ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error)
+	// BatchGrantComponentAccess applies a list of grant/revoke operations in a
+	// single RPC call, reducing round-trip count for bulk permission changes.
+	// Requires FGA admin relation on the tenant.
+	BatchGrantComponentAccess(context.Context, *BatchGrantComponentAccessRequest) (*BatchGrantComponentAccessResponse, error)
 	mustEmbedUnimplementedDaemonAdminServiceServer()
 }
 
@@ -682,8 +918,50 @@ func (UnimplementedDaemonAdminServiceServer) ListUserTenants(context.Context, *L
 func (UnimplementedDaemonAdminServiceServer) TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TransferOwnership not implemented")
 }
-func (UnimplementedDaemonAdminServiceServer) GetAuthSchema(context.Context, *GetAuthSchemaRequest) (*GetAuthSchemaResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetAuthSchema not implemented")
+func (UnimplementedDaemonAdminServiceServer) SignupTenant(context.Context, *SignupTenantRequest) (*SignupTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SignupTenant not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) InviteMember(context.Context, *InviteMemberRequest) (*InviteMemberResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InviteMember not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) RemoveMember(context.Context, *RemoveMemberRequest) (*RemoveMemberResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveMember not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ResendInvitation(context.Context, *ResendInvitationRequest) (*ResendInvitationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResendInvitation not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListUserComponentGrants(context.Context, *ListUserComponentGrantsRequest) (*ListUserComponentGrantsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListUserComponentGrants not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GrantComponentAccess(context.Context, *GrantComponentAccessRequest) (*GrantComponentAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GrantComponentAccess not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) RevokeComponentAccess(context.Context, *RevokeComponentAccessRequest) (*RevokeComponentAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeComponentAccess not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) CreateTeam(context.Context, *CreateTeamRequest) (*CreateTeamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateTeam not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListTeams(context.Context, *ListTeamsRequest) (*ListTeamsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTeams not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) DeleteTeam(context.Context, *DeleteTeamRequest) (*DeleteTeamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteTeam not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) AddUserToTeam(context.Context, *AddUserToTeamRequest) (*AddUserToTeamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddUserToTeam not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) RemoveUserFromTeam(context.Context, *RemoveUserFromTeamRequest) (*RemoveUserFromTeamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveUserFromTeam not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) SetTeamCrosstalk(context.Context, *SetTeamCrosstalkRequest) (*SetTeamCrosstalkResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetTeamCrosstalk not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAuditEvents not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) BatchGrantComponentAccess(context.Context, *BatchGrantComponentAccessRequest) (*BatchGrantComponentAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BatchGrantComponentAccess not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) mustEmbedUnimplementedDaemonAdminServiceServer() {}
 func (UnimplementedDaemonAdminServiceServer) testEmbeddedByValue()                            {}
@@ -1282,20 +1560,272 @@ func _DaemonAdminService_TransferOwnership_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DaemonAdminService_GetAuthSchema_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetAuthSchemaRequest)
+func _DaemonAdminService_SignupTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SignupTenantRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).GetAuthSchema(ctx, in)
+		return srv.(DaemonAdminServiceServer).SignupTenant(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DaemonAdminService_GetAuthSchema_FullMethodName,
+		FullMethod: DaemonAdminService_SignupTenant_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).GetAuthSchema(ctx, req.(*GetAuthSchemaRequest))
+		return srv.(DaemonAdminServiceServer).SignupTenant(ctx, req.(*SignupTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_InviteMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InviteMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).InviteMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_InviteMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).InviteMember(ctx, req.(*InviteMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_RemoveMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).RemoveMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_RemoveMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).RemoveMember(ctx, req.(*RemoveMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ResendInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResendInvitationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ResendInvitation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ResendInvitation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ResendInvitation(ctx, req.(*ResendInvitationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListUserComponentGrants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListUserComponentGrantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListUserComponentGrants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListUserComponentGrants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListUserComponentGrants(ctx, req.(*ListUserComponentGrantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GrantComponentAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GrantComponentAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GrantComponentAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GrantComponentAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GrantComponentAccess(ctx, req.(*GrantComponentAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_RevokeComponentAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeComponentAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).RevokeComponentAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_RevokeComponentAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).RevokeComponentAccess(ctx, req.(*RevokeComponentAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_CreateTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTeamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).CreateTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_CreateTeam_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).CreateTeam(ctx, req.(*CreateTeamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListTeams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTeamsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListTeams(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListTeams_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListTeams(ctx, req.(*ListTeamsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_DeleteTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteTeamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).DeleteTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_DeleteTeam_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).DeleteTeam(ctx, req.(*DeleteTeamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_AddUserToTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddUserToTeamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).AddUserToTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_AddUserToTeam_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).AddUserToTeam(ctx, req.(*AddUserToTeamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_RemoveUserFromTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveUserFromTeamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).RemoveUserFromTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_RemoveUserFromTeam_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).RemoveUserFromTeam(ctx, req.(*RemoveUserFromTeamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_SetTeamCrosstalk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTeamCrosstalkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).SetTeamCrosstalk(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_SetTeamCrosstalk_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).SetTeamCrosstalk(ctx, req.(*SetTeamCrosstalkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListAuditEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAuditEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListAuditEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListAuditEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListAuditEvents(ctx, req.(*ListAuditEventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_BatchGrantComponentAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BatchGrantComponentAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).BatchGrantComponentAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_BatchGrantComponentAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).BatchGrantComponentAccess(ctx, req.(*BatchGrantComponentAccessRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1436,8 +1966,64 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DaemonAdminService_TransferOwnership_Handler,
 		},
 		{
-			MethodName: "GetAuthSchema",
-			Handler:    _DaemonAdminService_GetAuthSchema_Handler,
+			MethodName: "SignupTenant",
+			Handler:    _DaemonAdminService_SignupTenant_Handler,
+		},
+		{
+			MethodName: "InviteMember",
+			Handler:    _DaemonAdminService_InviteMember_Handler,
+		},
+		{
+			MethodName: "RemoveMember",
+			Handler:    _DaemonAdminService_RemoveMember_Handler,
+		},
+		{
+			MethodName: "ResendInvitation",
+			Handler:    _DaemonAdminService_ResendInvitation_Handler,
+		},
+		{
+			MethodName: "ListUserComponentGrants",
+			Handler:    _DaemonAdminService_ListUserComponentGrants_Handler,
+		},
+		{
+			MethodName: "GrantComponentAccess",
+			Handler:    _DaemonAdminService_GrantComponentAccess_Handler,
+		},
+		{
+			MethodName: "RevokeComponentAccess",
+			Handler:    _DaemonAdminService_RevokeComponentAccess_Handler,
+		},
+		{
+			MethodName: "CreateTeam",
+			Handler:    _DaemonAdminService_CreateTeam_Handler,
+		},
+		{
+			MethodName: "ListTeams",
+			Handler:    _DaemonAdminService_ListTeams_Handler,
+		},
+		{
+			MethodName: "DeleteTeam",
+			Handler:    _DaemonAdminService_DeleteTeam_Handler,
+		},
+		{
+			MethodName: "AddUserToTeam",
+			Handler:    _DaemonAdminService_AddUserToTeam_Handler,
+		},
+		{
+			MethodName: "RemoveUserFromTeam",
+			Handler:    _DaemonAdminService_RemoveUserFromTeam_Handler,
+		},
+		{
+			MethodName: "SetTeamCrosstalk",
+			Handler:    _DaemonAdminService_SetTeamCrosstalk_Handler,
+		},
+		{
+			MethodName: "ListAuditEvents",
+			Handler:    _DaemonAdminService_ListAuditEvents_Handler,
+		},
+		{
+			MethodName: "BatchGrantComponentAccess",
+			Handler:    _DaemonAdminService_BatchGrantComponentAccess_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

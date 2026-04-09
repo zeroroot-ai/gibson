@@ -37,9 +37,9 @@ type mockInnerHarness struct {
 	getFindingsErr        error
 
 	// Captured call arguments
-	capturedSlot      string
-	capturedMessages  []gibsonLLM.Message
-	capturedTools     []gibsonLLM.ToolDef
+	capturedSlot     string
+	capturedMessages []gibsonLLM.Message
+	capturedTools    []gibsonLLM.ToolDef
 }
 
 func (m *mockInnerHarness) Complete(ctx context.Context, slot string, messages []gibsonLLM.Message, opts ...gibsonHarness.CompletionOption) (*gibsonLLM.CompletionResponse, error) {

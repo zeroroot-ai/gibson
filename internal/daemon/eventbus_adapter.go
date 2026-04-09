@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/events"
+	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // EventBusAdapter adapts the daemon's EventBus to the EventBusPublisher interface

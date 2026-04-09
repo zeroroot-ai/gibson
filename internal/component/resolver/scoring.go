@@ -78,8 +78,8 @@ type ComponentScorer interface {
 
 // ScoredComponent represents a component with its calculated score.
 type ScoredComponent struct {
-	Component      *component.Component
-	Score          float64
+	Component       *component.Component
+	Score           float64
 	CapabilityScore float64
 	VersionScore    float64
 	HealthScore     float64
@@ -89,9 +89,9 @@ type ScoredComponent struct {
 
 // DefaultComponentScorer implements ComponentScorer with configurable criteria.
 type DefaultComponentScorer struct {
-	criteria         *ScoringCriteria
+	criteria          *ScoringCriteria
 	capabilityMatcher CapabilityMatcher
-	lifecycleManager component.LifecycleManager
+	lifecycleManager  component.LifecycleManager
 }
 
 // NewComponentScorer creates a new component scorer with the given criteria and dependencies.
@@ -102,9 +102,9 @@ func NewComponentScorer(criteria *ScoringCriteria, lifecycle component.Lifecycle
 	criteria = criteria.Normalize()
 
 	return &DefaultComponentScorer{
-		criteria:         criteria,
+		criteria:          criteria,
 		capabilityMatcher: NewCapabilityMatcher(),
-		lifecycleManager: lifecycle,
+		lifecycleManager:  lifecycle,
 	}
 }
 
@@ -171,8 +171,8 @@ func (s *DefaultComponentScorer) ScoreMultiple(ctx context.Context, components [
 		}
 
 		results = append(results, ScoredComponent{
-			Component:      comp,
-			Score:          totalScore,
+			Component:       comp,
+			Score:           totalScore,
 			CapabilityScore: capScore,
 			VersionScore:    verScore,
 			HealthScore:     healthScore,

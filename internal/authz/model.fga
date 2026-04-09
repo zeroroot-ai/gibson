@@ -1,0 +1,76 @@
+# Gibson Authorization Model — Phase 4 (authz-04)
+#
+# This file is the single source of truth for the OpenFGA authorization model.
+# It is applied to the FGA server by the gibson-fga-init Kubernetes Job on every
+# helm install/upgrade. Changes here must pass CI (fga-smoke-test.yml) before merge.
+#
+# HISTORY
+# -------
+# authz-01: Introduced base model with user, tenant, component, system_tenant types.
+# authz-04: Added team type with parent/admin/member/can_view_data_from relations.
+#           Extended component type with can_read relation and team member indirection.
+#
+# When extending, add new types after system_tenant. Do NOT rename existing
+# relations or types — doing so breaks existing tuples in the FGA store.
+#
+# MODEL SCOPE
+# -----------
+# user         — a human or service principal identified by UUID
+# tenant       — a Gibson customer organization (slug-addressed)
+# component    — an agent, tool, or plugin registered in the Gibson component registry
+# system_tenant — a singleton object (system_tenant:_system) that models
+#                 cross-tenant platform-operator privilege
+# team         — a subdivision of a tenant for grouping users and controlling data access
+#
+# RELATION SEMANTICS
+# ------------------
+# tenant.admin        → user is an administrator of the tenant
+# tenant.member       → user is a member (includes admin by computed union)
+# component.owner     → a tenant owns this component
+# component.can_execute  → user can run this component (direct grant OR via tenant membership)
+# component.can_configure → user can modify this component's config (direct grant OR via tenant membership)
+# component.can_read  → user can read this component's output/data (direct grant OR via tenant/team membership)
+# system_tenant.platform_operator → user has cross-tenant elevated privilege
+# team.parent         → the tenant this team belongs to
+# team.admin          → user is an admin of the team (or inherits tenant admin)
+# team.member         → user is a member of the team (includes team admins)
+# team.can_view_data_from → team A has crosstalk visibility into team B's data
+#
+# Tuple examples:
+#   user:alice   | admin            | tenant:acme
+#   user:alice   | member           | tenant:acme       (or computed via admin)
+#   tenant:acme  | owner            | component:nmap
+#   user:alice   | can_execute      | component:nmap    (computed: admin→member→can_execute)
+#   user:root    | platform_operator | system_tenant:_system
+#   team:ops     | parent           | tenant:acme
+#   user:alice   | admin            | team:ops
+#   user:bob     | member           | team:ops
+#   team:alpha   | can_view_data_from | team:beta
+
+model
+  schema 1.1
+
+type user
+
+type tenant
+  relations
+    define admin: [user]
+    define member: [user] or admin
+
+type component
+  relations
+    define owner: [tenant]
+    define can_execute: [user, tenant#member, team#member] or admin from owner
+    define can_configure: [user, tenant#member, team#member] or admin from owner
+    define can_read: [user, tenant#member, team#member, team#can_view_data_from] or admin from owner
+
+type system_tenant
+  relations
+    define platform_operator: [user]
+
+type team
+  relations
+    define parent: [tenant]
+    define admin: [user] or admin from parent
+    define member: [user, team#admin]
+    define can_view_data_from: [team]

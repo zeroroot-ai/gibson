@@ -240,6 +240,23 @@ type Manifest struct {
 	Contents     []ContentEntry         `json:"contents,omitempty" yaml:"contents,omitempty"`         // Repository contents (for repository manifests)
 	Discover     bool                   `json:"discover,omitempty" yaml:"discover,omitempty"`         // Auto-discover components in repository
 	Taxonomy     *TaxonomyExtension     `json:"taxonomy,omitempty" yaml:"taxonomy,omitempty"`         // Custom GraphRAG taxonomy extensions
+
+	// SignalTags is an optional opt-in declaration of the free-form tag
+	// keys this component stamps onto compliance signals via
+	// `compliance.WithCustom` (agents) or proto field 99 (tools).
+	// Used by the daemon to log DEBUG warnings when a component emits a
+	// key it did not declare, helping operators catch tag drift.
+	//
+	// Example:
+	//   signal_tags:
+	//     - gitlab_project_id
+	//     - gitlab_branch
+	//     - change_ticket
+	//
+	// Leaving this empty means "no declared tags" — emissions are still
+	// allowed, they just don't get an "expected key" cross-check.
+	// Audit-metadata-riders spec Requirement 7.1.
+	SignalTags []string `json:"signal_tags,omitempty" yaml:"signal_tags,omitempty"`
 }
 
 // BuildConfig contains build configuration for the component.

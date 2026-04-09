@@ -1283,12 +1283,12 @@ func TestOTLPConfig_Validate(t *testing.T) {
 // TestOTLPConfig_YAMLSerialization tests YAML marshaling and unmarshaling.
 func TestOTLPConfig_YAMLSerialization(t *testing.T) {
 	original := OTLPConfig{
-		Endpoint:    "http://otlp.example.com:4318",
-		Headers:     map[string]string{"Authorization": "Bearer token123", "X-Custom": "value"},
-		Compression: "gzip",
-		BatchSize:   1000,
-		BatchTimeout: 10 * time.Second,
-		RetryEnabled: true,
+		Endpoint:             "http://otlp.example.com:4318",
+		Headers:              map[string]string{"Authorization": "Bearer token123", "X-Custom": "value"},
+		Compression:          "gzip",
+		BatchSize:            1000,
+		BatchTimeout:         10 * time.Second,
+		RetryEnabled:         true,
 		RetryInitialInterval: 2 * time.Second,
 		RetryMaxInterval:     60 * time.Second,
 		RetryMaxElapsedTime:  10 * time.Minute,

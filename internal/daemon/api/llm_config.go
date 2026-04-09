@@ -71,37 +71,37 @@ func NewLLMConfigHandlerWithStore(jsonStore JSONStore, credentialHandler *Creden
 // ProviderConfigStored represents the provider configuration stored in Redis.
 // It references credentials by name rather than embedding API keys.
 type ProviderConfigStored struct {
-	Name           string                 `json:"name"`
-	Type           llm.ProviderType       `json:"type"`
-	CredentialName string                 `json:"credential_name"` // Reference to credential by name
-	BaseURL        string                 `json:"base_url,omitempty"`
-	DefaultModel   string                 `json:"default_model"`
+	Name           string                     `json:"name"`
+	Type           llm.ProviderType           `json:"type"`
+	CredentialName string                     `json:"credential_name"` // Reference to credential by name
+	BaseURL        string                     `json:"base_url,omitempty"`
+	DefaultModel   string                     `json:"default_model"`
 	Models         map[string]llm.ModelConfig `json:"models,omitempty"`
-	Options        map[string]interface{} `json:"options,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	Options        map[string]interface{}     `json:"options,omitempty"`
+	CreatedAt      time.Time                  `json:"created_at"`
+	UpdatedAt      time.Time                  `json:"updated_at"`
 }
 
 // ProviderResponse is the response for provider operations.
 type ProviderResponse struct {
-	Name           string                 `json:"name"`
-	Type           llm.ProviderType       `json:"type"`
-	CredentialName string                 `json:"credential_name"`
-	BaseURL        string                 `json:"base_url,omitempty"`
-	DefaultModel   string                 `json:"default_model"`
+	Name           string                     `json:"name"`
+	Type           llm.ProviderType           `json:"type"`
+	CredentialName string                     `json:"credential_name"`
+	BaseURL        string                     `json:"base_url,omitempty"`
+	DefaultModel   string                     `json:"default_model"`
 	Models         map[string]llm.ModelConfig `json:"models,omitempty"`
-	Options        map[string]interface{} `json:"options,omitempty"`
-	IsDefault      bool                   `json:"is_default"`
-	Health         *HealthInfo            `json:"health,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	Options        map[string]interface{}     `json:"options,omitempty"`
+	IsDefault      bool                       `json:"is_default"`
+	Health         *HealthInfo                `json:"health,omitempty"`
+	CreatedAt      time.Time                  `json:"created_at"`
+	UpdatedAt      time.Time                  `json:"updated_at"`
 }
 
 // HealthInfo contains provider health status.
 type HealthInfo struct {
-	State       types.HealthState `json:"state"`
-	LastCheck   time.Time         `json:"last_check"`
-	Message     string            `json:"message,omitempty"`
+	State     types.HealthState `json:"state"`
+	LastCheck time.Time         `json:"last_check"`
+	Message   string            `json:"message,omitempty"`
 }
 
 // ProviderCreateRequest contains the data needed to create a provider config.
@@ -128,10 +128,10 @@ type ProviderUpdateRequest struct {
 
 // TestConnectionResult contains the result of a provider connection test.
 type TestConnectionResult struct {
-	Success   bool          `json:"success"`
-	LatencyMs int64         `json:"latency_ms,omitempty"`
-	Error     string        `json:"error,omitempty"`
-	Model     string        `json:"model_tested,omitempty"`
+	Success   bool   `json:"success"`
+	LatencyMs int64  `json:"latency_ms,omitempty"`
+	Error     string `json:"error,omitempty"`
+	Model     string `json:"model_tested,omitempty"`
 }
 
 // ListProviders returns all configured LLM providers.

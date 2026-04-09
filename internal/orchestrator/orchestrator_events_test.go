@@ -15,8 +15,8 @@ import (
 
 // testEventBus is a mock implementation of events.EventBus for testing
 type testEventBus struct {
-	mu         sync.Mutex
-	published  []events.Event
+	mu          sync.Mutex
+	published   []events.Event
 	subscribers map[string]chan events.Event
 }
 
@@ -108,11 +108,11 @@ func (m *testEventBus) Reset() {
 // TestNodeStartedEvent tests that node.started events are emitted correctly
 func TestNodeStartedEvent(t *testing.T) {
 	tests := []struct {
-		name           string
-		missionID      types.ID
-		nodeID         string
-		nodeType       string
-		expectEvent    bool
+		name            string
+		missionID       types.ID
+		nodeID          string
+		nodeType        string
+		expectEvent     bool
 		validatePayload func(*testing.T, events.Event)
 	}{
 		{
@@ -184,11 +184,11 @@ func TestNodeStartedEvent(t *testing.T) {
 // TestNodeSkippedEvent tests that node.skipped events are emitted correctly
 func TestNodeSkippedEvent(t *testing.T) {
 	tests := []struct {
-		name           string
-		missionID      types.ID
-		nodeID         string
-		skipReason     string
-		expectEvent    bool
+		name            string
+		missionID       types.ID
+		nodeID          string
+		skipReason      string
+		expectEvent     bool
 		validatePayload func(*testing.T, events.Event)
 	}{
 		{

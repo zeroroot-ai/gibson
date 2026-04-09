@@ -588,7 +588,6 @@ func TestEncryptWithVariousKeySizes(t *testing.T) {
 	}
 }
 
-
 // TestEncryptionWithAllZeroPlaintext tests encrypting data that's all zeros
 func TestEncryptionWithAllZeroPlaintext(t *testing.T) {
 	encryptor := NewAESGCMEncryptor()

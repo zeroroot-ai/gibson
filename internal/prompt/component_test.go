@@ -19,12 +19,12 @@ import (
 // mockTool is a basic tool implementation without prompts
 type mockTool struct{}
 
-func (m *mockTool) Name() string                   { return "mock-tool" }
-func (m *mockTool) Description() string            { return "A mock tool" }
-func (m *mockTool) Version() string                { return "1.0.0" }
-func (m *mockTool) Tags() []string                 { return []string{"test"} }
-func (m *mockTool) InputSchema() sdkschema.JSON    { return sdkschema.JSON{} }
-func (m *mockTool) OutputSchema() sdkschema.JSON   { return sdkschema.JSON{} }
+func (m *mockTool) Name() string                 { return "mock-tool" }
+func (m *mockTool) Description() string          { return "A mock tool" }
+func (m *mockTool) Version() string              { return "1.0.0" }
+func (m *mockTool) Tags() []string               { return []string{"test"} }
+func (m *mockTool) InputSchema() sdkschema.JSON  { return sdkschema.JSON{} }
+func (m *mockTool) OutputSchema() sdkschema.JSON { return sdkschema.JSON{} }
 func (m *mockTool) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	return nil, nil
 }

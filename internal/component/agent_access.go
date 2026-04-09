@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/casbin/casbin/v2"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -20,13 +19,13 @@ var (
 
 // AgentAccess represents a tenant's opt-in record for an agent.
 type AgentAccess struct {
-	TenantID       string `json:"tenant_id"`
-	AgentName      string `json:"agent_name"`
-	Enabled        bool   `json:"enabled"`
-	ExecuteEnabled bool   `json:"execute_enabled"`
-	DelegateEnabled bool  `json:"delegate_enabled"`
-	ConfiguredAt   string `json:"configured_at,omitempty"`
-	ConfiguredBy   string `json:"configured_by,omitempty"`
+	TenantID        string `json:"tenant_id"`
+	AgentName       string `json:"agent_name"`
+	Enabled         bool   `json:"enabled"`
+	ExecuteEnabled  bool   `json:"execute_enabled"`
+	DelegateEnabled bool   `json:"delegate_enabled"`
+	ConfiguredAt    string `json:"configured_at,omitempty"`
+	ConfiguredBy    string `json:"configured_by,omitempty"`
 }
 
 // AgentAccessStore manages tenant opt-in for agents.
@@ -40,16 +39,8 @@ type AgentAccessStore interface {
 
 // RedisAgentAccessStore implements AgentAccessStore using Redis for storage.
 type RedisAgentAccessStore struct {
-	client   *redis.Client
-	logger   *slog.Logger
-	enforcer *casbin.Enforcer
-}
-
-// SetEnforcer attaches a Casbin enforcer. When non-nil, Enable and Disable
-// sync Casbin policies so "tenant-admin" subjects gain or lose execute and
-// delegate capabilities for each agent in real time.
-func (s *RedisAgentAccessStore) SetEnforcer(e *casbin.Enforcer) {
-	s.enforcer = e
+	client *redis.Client
+	logger *slog.Logger
 }
 
 // NewRedisAgentAccessStore creates a new store.
@@ -93,8 +84,6 @@ func (s *RedisAgentAccessStore) Enable(ctx context.Context, tenant, agentName, c
 		return fmt.Errorf("store agent access record: %w", err)
 	}
 
-	s.syncCasbinEnable(ctx, tenant, agentName)
-
 	return nil
 }
 
@@ -107,8 +96,6 @@ func (s *RedisAgentAccessStore) Disable(ctx context.Context, tenant, agentName s
 	if err := s.client.Del(ctx, agentAccessKey(tenant, agentName)).Err(); err != nil {
 		return fmt.Errorf("disable agent: %w", err)
 	}
-
-	s.syncCasbinDisable(ctx, tenant, agentName)
 
 	return nil
 }
@@ -177,46 +164,4 @@ func (s *RedisAgentAccessStore) ListTenantAgents(ctx context.Context, tenant str
 	}
 
 	return results, nil
-}
-
-// syncCasbinEnable adds Casbin execute and delegate policies for "tenant-admin".
-func (s *RedisAgentAccessStore) syncCasbinEnable(ctx context.Context, tenant, agentName string) {
-	if s.enforcer == nil {
-		return
-	}
-
-	resource := fmt.Sprintf("agent:%s", agentName)
-
-	if _, err := s.enforcer.AddPolicy("tenant-admin", tenant, resource, "execute"); err != nil {
-		s.logger.WarnContext(ctx, "casbin: failed to add execute policy for agent",
-			slog.String("tenant", tenant),
-			slog.String("agent", agentName),
-			slog.String("error", err.Error()),
-		)
-	}
-
-	if _, err := s.enforcer.AddPolicy("tenant-admin", tenant, resource, "delegate"); err != nil {
-		s.logger.WarnContext(ctx, "casbin: failed to add delegate policy for agent",
-			slog.String("tenant", tenant),
-			slog.String("agent", agentName),
-			slog.String("error", err.Error()),
-		)
-	}
-}
-
-// syncCasbinDisable removes all Casbin policies for "tenant-admin" on this agent.
-func (s *RedisAgentAccessStore) syncCasbinDisable(ctx context.Context, tenant, agentName string) {
-	if s.enforcer == nil {
-		return
-	}
-
-	resource := fmt.Sprintf("agent:%s", agentName)
-
-	if _, err := s.enforcer.RemoveFilteredPolicy(1, tenant, resource); err != nil {
-		s.logger.WarnContext(ctx, "casbin: failed to remove policies for agent",
-			slog.String("tenant", tenant),
-			slog.String("agent", agentName),
-			slog.String("error", err.Error()),
-		)
-	}
 }

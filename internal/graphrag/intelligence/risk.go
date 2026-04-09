@@ -87,22 +87,22 @@ func (c *RiskScoreCalculator) Execute(ctx context.Context, opts sdkgraphrag.Risk
 
 // assetData holds raw data for risk calculation.
 type assetData struct {
-	assetID                string
-	assetName              string
-	criticalFindings       int
-	highFindings           int
-	mediumFindings         int
-	lowFindings            int
-	infoFindings           int
-	openFindings           int
-	avgExposureDays        float64
-	totalPorts             int
-	totalServices          int
-	totalEndpoints         int
-	remediationRate        float64
-	recurrenceCount        int
-	avgCVSSScore           float64
-	historicalScores       []sdkgraphrag.HistoricalRiskScore
+	assetID          string
+	assetName        string
+	criticalFindings int
+	highFindings     int
+	mediumFindings   int
+	lowFindings      int
+	infoFindings     int
+	openFindings     int
+	avgExposureDays  float64
+	totalPorts       int
+	totalServices    int
+	totalEndpoints   int
+	remediationRate  float64
+	recurrenceCount  int
+	avgCVSSScore     float64
+	historicalScores []sdkgraphrag.HistoricalRiskScore
 }
 
 // buildQuery constructs the Cypher query for asset risk data.

@@ -439,9 +439,9 @@ func TestOTelMetricsRecorder_HistogramBuckets(t *testing.T) {
 	ctx := context.Background()
 
 	// Record values that should fall into different buckets
-	recorder.RecordLLMCompletion(ctx, "openai", "gpt-4", "success", 100, 50, 100.0, 0.01)    // 0.1s
-	recorder.RecordLLMCompletion(ctx, "openai", "gpt-4", "success", 100, 50, 2500.0, 0.05)   // 2.5s
-	recorder.RecordLLMCompletion(ctx, "openai", "gpt-4", "success", 100, 50, 15000.0, 0.15)  // 15s
+	recorder.RecordLLMCompletion(ctx, "openai", "gpt-4", "success", 100, 50, 100.0, 0.01)   // 0.1s
+	recorder.RecordLLMCompletion(ctx, "openai", "gpt-4", "success", 100, 50, 2500.0, 0.05)  // 2.5s
+	recorder.RecordLLMCompletion(ctx, "openai", "gpt-4", "success", 100, 50, 15000.0, 0.15) // 15s
 
 	// Collect metrics
 	rm := &metricdata.ResourceMetrics{}
@@ -616,4 +616,118 @@ func TestOTelMetricsRecorder_CostTracking(t *testing.T) {
 
 	assert.True(t, found, "Expected to find cost counter")
 	assert.InDelta(t, 0.15, totalCost, 0.001, "Expected total cost of 0.15")
+}
+
+// TestRecordComponentAuthz verifies that RecordComponentAuthz increments the
+// gibson_component_authz_total counter with the correct labels.
+func TestRecordComponentAuthz(t *testing.T) {
+	reader := metric.NewManualReader()
+	mp := metric.NewMeterProvider(metric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	recorder, err := NewOTelMetricsRecorder(mp)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	recorder.RecordComponentAuthz(ctx, "execute", "allow")
+	recorder.RecordComponentAuthz(ctx, "write", "deny")
+	recorder.RecordComponentAuthz(ctx, "read", "allow")
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(ctx, &rm))
+
+	found := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == "gibson_component_authz_total" {
+				found = true
+				sum, ok := m.Data.(metricdata.Sum[int64])
+				require.True(t, ok)
+				total := int64(0)
+				for _, dp := range sum.DataPoints {
+					total += dp.Value
+				}
+				assert.Equal(t, int64(3), total, "expected 3 total authz decisions")
+			}
+		}
+	}
+	assert.True(t, found, "expected gibson_component_authz_total counter to be registered")
+}
+
+// TestRecordComponentAuthzFailOpen verifies the fail-open counter is incremented.
+func TestRecordComponentAuthzFailOpen(t *testing.T) {
+	reader := metric.NewManualReader()
+	mp := metric.NewMeterProvider(metric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	recorder, err := NewOTelMetricsRecorder(mp)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	recorder.RecordComponentAuthzFailOpen(ctx, "execute")
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(ctx, &rm))
+
+	found := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == "gibson_component_authz_fail_open_total" {
+				found = true
+				sum, ok := m.Data.(metricdata.Sum[int64])
+				require.True(t, ok)
+				total := int64(0)
+				for _, dp := range sum.DataPoints {
+					total += dp.Value
+				}
+				assert.Equal(t, int64(1), total)
+			}
+		}
+	}
+	assert.True(t, found, "expected gibson_component_authz_fail_open_total counter to be registered")
+}
+
+// TestRecordWorkTTLExpired verifies the work TTL expired counter is incremented.
+func TestRecordWorkTTLExpired(t *testing.T) {
+	reader := metric.NewManualReader()
+	mp := metric.NewMeterProvider(metric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	recorder, err := NewOTelMetricsRecorder(mp)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	recorder.RecordWorkTTLExpired(ctx, "tool:nmap")
+	recorder.RecordWorkTTLExpired(ctx, "tool:nmap")
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(ctx, &rm))
+
+	found := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == "gibson_work_ttl_expired_total" {
+				found = true
+				sum, ok := m.Data.(metricdata.Sum[int64])
+				require.True(t, ok)
+				total := int64(0)
+				for _, dp := range sum.DataPoints {
+					total += dp.Value
+				}
+				assert.Equal(t, int64(2), total)
+			}
+		}
+	}
+	assert.True(t, found, "expected gibson_work_ttl_expired_total counter to be registered")
+}
+
+// TestNoopRecordComponentAuthz verifies that no-op recorder methods are safe to call.
+func TestNoopRecordComponentAuthz(t *testing.T) {
+	recorder := NoopMetricsRecorder()
+	ctx := context.Background()
+
+	// These must not panic.
+	recorder.RecordComponentAuthz(ctx, "execute", "allow")
+	recorder.RecordComponentAuthzFailOpen(ctx, "execute")
+	recorder.RecordWorkTTLExpired(ctx, "tool:nmap")
 }

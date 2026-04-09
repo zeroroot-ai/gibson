@@ -9,7 +9,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/attack"
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/crypto"
@@ -19,11 +19,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
 	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/membership"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/payload"
+	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
@@ -90,6 +90,10 @@ type daemonImpl struct {
 
 	// missionRunStore provides access to mission run persistence
 	missionRunStore mission.MissionRunStore
+
+	// missionAuthzStore tracks the owning user per run for component authz callback resolution.
+	// When nil (authz.enabled=false or no Redis), authz state tracking is skipped.
+	missionAuthzStore mission.MissionAuthzStore
 
 	// checkpointStore provides checkpoint persistence for pause/resume
 	checkpointStore mission.CheckpointStore
@@ -164,18 +168,13 @@ type daemonImpl struct {
 	// May be nil when no key provider is set (plugin access RPCs will return Unimplemented).
 	pluginAccessStore component.PluginAccessStore
 
-	// toolAccessStore manages tenant opt-in for tools and syncs Casbin policies.
+	// toolAccessStore manages tenant opt-in for tools.
 	// Initialized when a standalone Redis client is available.
 	toolAccessStore *component.RedisToolAccessStore
 
-	// agentAccessStore manages tenant opt-in for agents and syncs Casbin policies.
+	// agentAccessStore manages tenant opt-in for agents.
 	// Initialized when a standalone Redis client is available.
 	agentAccessStore *component.RedisAgentAccessStore
-
-	// membershipStore manages user-to-tenant membership records with role
-	// hierarchy and optional Casbin policy synchronization.
-	// Initialized when a standalone Redis client is available.
-	membershipStore *membership.RedisMembershipStore
 
 	// quotaManager enforces per-tenant resource quotas (missions, agents, memory).
 	// Initialized after stateClient is available. May be nil until then; quota
@@ -193,6 +192,19 @@ type daemonImpl struct {
 	// onRegistryReady is called during startup before other services are initialized.
 	// This allows CLI to set up verbose logging during startup.
 	onRegistryReady func()
+
+	// authorizer is the authorization service client.
+	// Set during initAuthorizer() in Start(). Always non-nil after startup:
+	// either a real fgaAuthorizer (authz.enabled=true) or a noopAuthorizer
+	// (authz.enabled=false or FGA unreachable in dev mode).
+	authorizer authz.Authorizer
+
+	// envelopeSigner signs AuthzContext payloads attached to dispatched work items.
+	// Created during Start() with a random per-daemon secret. Components verify
+	// signatures via the GIBSON_AUTHZ_HMAC_SECRET env var (populated from this
+	// signer's Secret() method via a ConfigMap or Secret at registration time).
+	// May be nil when authz is disabled.
+	envelopeSigner *authz.EnvelopeSigner
 }
 
 // New creates a new daemon instance with the provided configuration.
@@ -269,8 +281,8 @@ func New(cfg *config.Config, homeDir string) (Daemon, error) {
 	healthState := newHealthStateManager()
 
 	return &daemonImpl{
-		config: cfg,
-		logger: logger,
+		config:          cfg,
+		logger:          logger,
 		registryAdapter: nil, // Created in Start() after registry is available
 		callback:        callbackMgr,
 		eventBus:        eventBus,
@@ -345,14 +357,47 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.missionStore = mission.NewRedisMissionStore(stateClient)
 	d.missionRunStore = mission.NewRedisMissionRunStore(stateClient)
 	d.checkpointStore = mission.NewRedisCheckpointStore(stateClient)
+	d.missionAuthzStore = mission.NewRedisMissionAuthzStore(stateClient.Client())
 	d.targetStore = database.NewRedisTargetDAO(stateClient)
 
 	d.logger.Info(ctx, "Redis stores initialized successfully",
 		"mission_store", "RedisMissionStore",
 		"mission_run_store", "RedisMissionRunStore",
 		"checkpoint_store", "RedisCheckpointStore",
+		"mission_authz_store", "RedisMissionAuthzStore",
 		"target_store", "RedisTargetDAO",
 	)
+
+	// Authorization Service phase — must run AFTER State Client and BEFORE Component Registry.
+	// When authz.enabled=false (default) this is a fast no-op that injects a noopAuthorizer.
+	if err := d.initAuthorizer(ctx); err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to initialize authorization service: %w", err)
+	}
+
+	// Initialize the per-daemon HMAC signer for work envelope AuthzContexts.
+	// The signer uses a randomly generated secret on every daemon start. Components
+	// pick up the secret via the GIBSON_AUTHZ_HMAC_SECRET env var (populated during
+	// component registration in future task). Failure is non-fatal — authz context
+	// signing is degraded to dev mode (no signing) but the daemon continues.
+	if signer, signerErr := authz.NewEnvelopeSigner(); signerErr != nil {
+		d.logger.Warn(ctx, "failed to create envelope HMAC signer; work items will not carry signed AuthzContext",
+			"error", signerErr.Error(),
+		)
+	} else {
+		d.envelopeSigner = signer
+		d.logger.Info(ctx, "initialized envelope HMAC signer for work item AuthzContext signing")
+	}
+
+	// Keycloak Organization reconciliation phase — runs AFTER Authorization Service and
+	// BEFORE Component Registry. When provisioner.reconcile_on_startup=false this is
+	// a fast no-op. A failure in any individual tenant is logged but does NOT abort
+	// startup; only a scan-level error (Redis unreachable) is returned.
+	if d.stateClient != nil {
+		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
+			d.runOrgReconciliation(ctx, redisClient)
+		}
+	}
 
 	// Initialize Redis-backed component registry and registry adapter.
 	// The component registry uses Redis for runtime service discovery (registrations with TTL).
@@ -477,35 +522,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 					d.agentAccessStore = component.NewRedisAgentAccessStore(redisClient, d.logger.Slog())
 					d.logger.Info(ctx, "initialized tool and agent access stores")
 
-					// Initialize membership store for user-to-tenant membership management.
-					d.membershipStore = membership.NewRedisMembershipStore(redisClient, d.logger.Slog())
-					d.logger.Info(ctx, "initialized membership store")
-
-					// Initialize Casbin enforcer for policy-backed access control.
-					// Parse the Redis URL to get host:port for the Casbin adapter; fall back to
-					// the config password if the URL does not embed credentials.
-					// Failure here is non-fatal — stores operate without policy sync.
-					var casbinRedisAddr string
-					if opts, parseErr := goredis.ParseURL(d.config.Redis.URL); parseErr == nil {
-						casbinRedisAddr = opts.Addr
-					}
-					casbinRedisPassword := d.config.Redis.Password
-
-					enforcer, enforcerErr := auth.NewCasbinEnforcer(casbinRedisAddr, casbinRedisPassword)
-					if enforcerErr != nil {
-						d.logger.Warn(ctx, "casbin enforcer init failed, continuing without policy sync",
-							"error", enforcerErr)
-					} else {
-						if pas, ok := d.pluginAccessStore.(*component.RedisPluginAccessStore); ok {
-							pas.SetEnforcer(enforcer)
-						}
-						d.toolAccessStore.SetEnforcer(enforcer)
-						d.agentAccessStore.SetEnforcer(enforcer)
-						if d.membershipStore != nil {
-							d.membershipStore.SetEnforcer(enforcer)
-						}
-						d.logger.Info(ctx, "casbin enforcer wired to plugin, tool, agent access stores, and membership store")
-					}
 				} else {
 					d.logger.Warn(ctx, "plugin access store unavailable: Redis client is not standalone mode")
 				}
@@ -556,6 +572,28 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		queueMgr := harness.NewQueueManagerWithClient(d.infrastructure.redisClient, d.logger.Slog())
 		d.callback.SetQueueManager(queueMgr)
 		d.logger.Info(ctx, "configured callback service with QueueManager for Redis-based tool execution")
+	}
+
+	// Configure callback service with authz store for component authorization callbacks.
+	// The adapter bridges mission.MissionAuthzStore → harness.RunAuthzLookup to break
+	// the import cycle (harness→mission→eval→harness).
+	if d.missionAuthzStore != nil {
+		d.callback.SetAuthzStore(newMissionAuthzStoreAdapter(d.missionAuthzStore))
+		d.logger.Info(ctx, "configured callback service with mission authz store")
+	}
+
+	// Wire the FGA Authorizer into the callback service for component-level authz.
+	// d.authorizer is always non-nil after initAuthorizer(): either real FGA or noop.
+	if d.authorizer != nil {
+		d.callback.SetComponentAuthorizer(d.authorizer)
+		d.logger.Info(ctx, "configured callback service with FGA component authorizer")
+	}
+
+	// Wire the OTel metrics recorder into the Authorize handler so that each
+	// component authz decision increments gibson_component_authz_total.
+	if rec := d.GetOTelMetricsRecorder(); rec != nil {
+		d.callback.SetComponentAuthzMetrics(rec)
+		d.logger.Info(ctx, "configured callback service with component authz metrics recorder")
 	}
 
 	// Perform crash recovery: find any missions that were running when daemon stopped
@@ -736,6 +774,48 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			return sdktypes.NewUnhealthyStatus(status.Message, nil)
 		})
 		d.logger.Debug(ctx, "registered key provider readiness check")
+	}
+
+	// Register FGA readiness check when authorization is enabled.
+	// Uses a 10s TTL cached result to avoid hammering FGA on every scrape.
+	// Returns Degraded (not Unhealthy) so Kubernetes removes the pod from
+	// service endpoints without triggering a restart.
+	if d.config.Authz.Enabled && d.authorizer != nil {
+		a := d.authorizer
+		var (
+			cacheMu      sync.Mutex
+			cachedAt     time.Time
+			cachedResult sdktypes.HealthStatus
+		)
+		const fgaCacheTTL = 10 * time.Second
+
+		d.healthServer.RegisterReadinessCheck("authz_fga", func(ctx context.Context) sdktypes.HealthStatus {
+			cacheMu.Lock()
+			if time.Since(cachedAt) < fgaCacheTTL && !cachedAt.IsZero() {
+				result := cachedResult
+				cacheMu.Unlock()
+				return result
+			}
+			cacheMu.Unlock()
+
+			// Probe FGA: both allowed=true and allowed=false are valid — we only
+			// care that the RPC succeeds, meaning FGA is reachable.
+			_, probeErr := a.Check(ctx, "user:_system", "platform_operator", "system_tenant:_system")
+			var result sdktypes.HealthStatus
+			if authz.IsUnavailable(probeErr) || authz.IsTimeout(probeErr) {
+				result = sdktypes.NewDegradedStatus("authz: FGA unreachable: "+probeErr.Error(), nil)
+			} else {
+				result = sdktypes.NewHealthyStatus("authz: FGA reachable")
+			}
+
+			cacheMu.Lock()
+			cachedAt = time.Now()
+			cachedResult = result
+			cacheMu.Unlock()
+
+			return result
+		})
+		d.logger.Debug(ctx, "registered authz FGA readiness check")
 	}
 
 	// Start the health server (non-blocking)
@@ -1170,4 +1250,48 @@ func (d *daemonImpl) CredentialHandler() *api.CredentialHandler {
 // Returns nil if the LLM config handler was not initialized.
 func (d *daemonImpl) LLMConfigHandler() *api.LLMConfigHandler {
 	return d.llmConfigHandler
+}
+
+// runOrgReconciliation builds an OrgReconciler and calls ReconcileKeycloakOrgs.
+//
+// This is called once during daemon startup, after the Authorization Service
+// phase and before Component Registry. It is a best-effort operation: if the
+// Keycloak admin client cannot be constructed (missing credentials), or if the
+// scan succeeds but individual tenants fail, the daemon continues to start.
+// Only a scan-level failure (Redis unreachable) causes a logged error; even
+// then startup is NOT aborted because the reconciler's return is silently
+// discarded here — callers log the error for operators to action.
+//
+// Timing is logged at INFO so operators can monitor reconcile duration over
+// time.
+func (d *daemonImpl) runOrgReconciliation(ctx context.Context, redisClient *goredis.Client) {
+	start := time.Now()
+
+	kcAdmin, err := provisioner.NewKeycloakAdminClient(d.config.Keycloak.Admin, d.logger.Slog())
+	if err != nil {
+		d.logger.Warn(ctx, "org reconciliation skipped: failed to build Keycloak admin client",
+			"error", err)
+		return
+	}
+
+	scanner := provisioner.NewRedisMembershipScanner(redisClient)
+	reconciler := provisioner.NewOrgReconciler(
+		d.config.Provisioner,
+		scanner,
+		kcAdmin,
+		d.authorizer,
+		d.logger.Slog(),
+	)
+
+	if err := reconciler.ReconcileKeycloakOrgs(ctx); err != nil {
+		d.logger.Error(ctx, "org reconciliation failed",
+			"error", err,
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
+		return
+	}
+
+	d.logger.Info(ctx, "org reconciliation phase complete",
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
 }

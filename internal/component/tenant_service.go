@@ -50,25 +50,25 @@ var (
 // TenantRecord is the canonical representation of a Gibson tenant.
 // It is serialised to JSON and stored at tenant:{tenant_id}:meta.
 type TenantRecord struct {
-	TenantID    string            `json:"tenant_id"`
-	DisplayName string            `json:"display_name"`
+	TenantID    string `json:"tenant_id"`
+	DisplayName string `json:"display_name"`
 	// Status is one of "active", "suspended", "deleted", "provisioning", or "provisioning_failed".
-	Status           string            `json:"status"`
+	Status string `json:"status"`
 	// Tier is the billing tier: "free", "team", "business", or "enterprise".
-	Tier             string            `json:"tier"`
+	Tier string `json:"tier"`
 	// OwnerEmail is the email address of the tenant owner (set during signup).
-	OwnerEmail       string            `json:"owner_email"`
+	OwnerEmail string `json:"owner_email"`
 	// StripeCustomerID is the Stripe customer ID (empty for free tier).
-	StripeCustomerID string            `json:"stripe_customer_id"`
+	StripeCustomerID string `json:"stripe_customer_id"`
 	// StripeSubID is the Stripe subscription ID.
-	StripeSubID      string            `json:"stripe_sub_id"`
+	StripeSubID string `json:"stripe_sub_id"`
 	// BillingAlert is true when the tenant has a payment failure that requires attention.
-	BillingAlert     bool              `json:"billing_alert"`
+	BillingAlert bool `json:"billing_alert"`
 	// KeycloakRealmName is the Keycloak realm for this tenant.
 	KeycloakRealmName string            `json:"keycloak_realm_name"` // Keycloak realm for this tenant
-	Config           map[string]string `json:"config"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
+	Config            map[string]string `json:"config"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
 }
 
 // ---------------------------------------------------------------------------
@@ -636,4 +636,3 @@ func (s *TenantService) GetTenantByStripeCustomer(ctx context.Context, customerI
 
 	return s.fetchTenant(ctx, tenantID)
 }
-

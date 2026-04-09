@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/casbin/casbin/v2"
 )
 
 // OIDCValidator validates OIDC JWT tokens from configured issuers.
@@ -29,9 +27,6 @@ type OIDCValidator struct {
 
 	// roleBinder resolves roles from groups using role bindings
 	roleBinder *RoleBinder
-
-	// enforcer is the optional Casbin enforcer for capability sync
-	enforcer *casbin.Enforcer
 }
 
 // NewOIDCValidator creates a new OIDC validator from Gibson configuration.
@@ -90,19 +85,6 @@ func NewOIDCValidator(cfg *AuthConfig) (*OIDCValidator, error) {
 		issuerConfigs: issuerConfigs,
 		roleBinder:    roleBinder,
 	}, nil
-}
-
-// SetEnforcer attaches a Casbin enforcer to the validator.
-//
-// When set, Authenticate will sync the role-derived capabilities for each
-// authenticated identity into Casbin as policies, using an upsert pattern
-// (remove all existing policies for the subject, then add the new set).
-//
-// This method is safe to call before the validator is used concurrently,
-// but must not be called after Authenticate has started being called on
-// multiple goroutines.
-func (v *OIDCValidator) SetEnforcer(e *casbin.Enforcer) {
-	v.enforcer = e
 }
 
 // Authenticate validates a JWT token and returns the authenticated identity.
@@ -179,5 +161,64 @@ func (v *OIDCValidator) Authenticate(ctx context.Context, tokenString string) (*
 	// directly (API keys populate this field; OIDC identities leave it empty).
 	gibsonIdentity.Capabilities = nil
 
+	// Extract tenant memberships from the JWT.
+	// Prefer the "organizations" claim (Keycloak Organization Membership Mapper,
+	// added by authz-02) over the legacy "tenant_id" claim. After the
+	// Organizations migration completes (authz-07), the legacy claim extraction
+	// will be removed.
+	gibsonIdentity.Tenants = extractOrganizationsClaim(sdkIdentity.Claims)
+	if gibsonIdentity.Tenants == nil {
+		// Fall back to legacy tenant_id claim for pre-migration users.
+		if tenantID, _ := sdkIdentity.Claims["tenant_id"].(string); tenantID != "" {
+			gibsonIdentity.Tenants = []string{tenantID}
+		}
+	}
+
 	return gibsonIdentity, nil
+}
+
+// extractOrganizationsClaim parses the "organizations" claim from JWT claims.
+//
+// Keycloak's Organization Membership Mapper sets this claim as a JSON array
+// of organization aliases (e.g. ["zero-day-ai", "acme-corp"]). This function
+// handles all forms the claim may take:
+//   - Missing: returns nil (no organizations claim present)
+//   - []interface{}: normal JSON array — extract string elements
+//   - []string: already typed — return a copy
+//   - string: single-value form — wrap in slice
+//   - anything else: returns nil with a debug log
+//
+// A nil return means the claim was absent. An empty non-nil slice means the
+// claim was present but the user belongs to zero organizations.
+func extractOrganizationsClaim(claims map[string]any) []string {
+	raw, ok := claims["organizations"]
+	if !ok {
+		return nil
+	}
+
+	switch v := raw.(type) {
+	case []interface{}:
+		tenants := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				tenants = append(tenants, s)
+			}
+		}
+		return tenants // may be empty but non-nil — claim was present
+
+	case []string:
+		result := make([]string, len(v))
+		copy(result, v)
+		return result
+
+	case string:
+		if v == "" {
+			return []string{}
+		}
+		return []string{v}
+
+	default:
+		// Claim present but unrecognized type — treat as absent.
+		return nil
+	}
 }

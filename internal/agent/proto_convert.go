@@ -11,9 +11,9 @@ import (
 // TaskToProto converts a Gibson internal Task to a proto Task message.
 func TaskToProto(task Task) *typespb.Task {
 	protoTask := &typespb.Task{
-		Id:       task.ID.String(),
-		Goal:     task.Goal,
-		Context:  mapToTypedValueMap(task.Context),
+		Id:      task.ID.String(),
+		Goal:    task.Goal,
+		Context: mapToTypedValueMap(task.Context),
 		Metadata: mapToTypedValueMap(map[string]any{
 			"name":        task.Name,
 			"description": task.Description,

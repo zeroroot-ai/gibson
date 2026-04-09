@@ -140,10 +140,10 @@ func (r *DefaultMemoryRecaller) Recall(ctx context.Context, query RecallQuery) (
 			Timestamp: time.Now(),
 			MissionID: types.ID(query.MissionID),
 			Payload: map[string]any{
-				"query":        query.Query,
-				"memory_tier":  query.MemoryTier,
-				"max_results":  maxResults,
-				"has_filters":  len(query.Filters) > 0,
+				"query":       query.Query,
+				"memory_tier": query.MemoryTier,
+				"max_results": maxResults,
+				"has_filters": len(query.Filters) > 0,
 			},
 		})
 	}
@@ -191,13 +191,13 @@ func (r *DefaultMemoryRecaller) Recall(ctx context.Context, query RecallQuery) (
 			Timestamp: time.Now(),
 			MissionID: types.ID(query.MissionID),
 			Payload: map[string]any{
-				"query":                query.Query,
-				"memory_tier":          query.MemoryTier,
-				"mission_results":      len(result.MissionResults),
-				"long_term_results":    len(result.LongTermResults),
-				"total_results":        len(result.MissionResults) + len(result.LongTermResults),
-				"query_time_ms":        result.QueryTimeMs,
-				"formatted_length":     len(result.FormattedContext),
+				"query":             query.Query,
+				"memory_tier":       query.MemoryTier,
+				"mission_results":   len(result.MissionResults),
+				"long_term_results": len(result.LongTermResults),
+				"total_results":     len(result.MissionResults) + len(result.LongTermResults),
+				"query_time_ms":     result.QueryTimeMs,
+				"formatted_length":  len(result.FormattedContext),
 			},
 		})
 	}

@@ -246,9 +246,9 @@ func (s *GraphRAGRunStore) CreateRunWithGraphRAG(ctx context.Context, missionID 
 func (s *GraphRAGRunStore) StoreFindingWithRun(ctx context.Context, findingID, runID types.ID) error {
 	// Create DISCOVERED_IN relationship
 	rel := graphrag.Relationship{
-		FromID:     findingID,
-		ToID:       runID,
-		Type:       graphrag.RelationType("DISCOVERED_IN"),
+		FromID: findingID,
+		ToID:   runID,
+		Type:   graphrag.RelationType("DISCOVERED_IN"),
 		Properties: map[string]any{
 			"discovered_at": time.Now().Format(time.RFC3339),
 		},

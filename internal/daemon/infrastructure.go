@@ -557,17 +557,17 @@ func (d *daemonImpl) initOTelObservability(ctx context.Context) *observability.O
 
 	// Build OTelConfig from daemon configuration
 	cfg := observability.OTelConfig{
-		Enabled:           d.config.OTelObservability.Enabled,
-		Endpoint:          d.config.OTelObservability.Endpoint,
-		Protocol:          d.config.OTelObservability.Protocol,
-		Headers:           d.config.OTelObservability.Headers,
-		ServiceName:       d.config.OTelObservability.ServiceName,
-		ServiceVersion:    version.Version,
-		BatchSize:         d.config.OTelObservability.Batching.MaxSize,
-		BatchTimeout:      d.config.OTelObservability.Batching.Timeout,
-		RetryEnabled:      d.config.OTelObservability.Retry.Enabled,
-		RetryInitial:      d.config.OTelObservability.Retry.InitialInterval,
-		RetryMax:          d.config.OTelObservability.Retry.MaxInterval,
+		Enabled:         d.config.OTelObservability.Enabled,
+		Endpoint:        d.config.OTelObservability.Endpoint,
+		Protocol:        d.config.OTelObservability.Protocol,
+		Headers:         d.config.OTelObservability.Headers,
+		ServiceName:     d.config.OTelObservability.ServiceName,
+		ServiceVersion:  version.Version,
+		BatchSize:       d.config.OTelObservability.Batching.MaxSize,
+		BatchTimeout:    d.config.OTelObservability.Batching.Timeout,
+		RetryEnabled:    d.config.OTelObservability.Retry.Enabled,
+		RetryInitial:    d.config.OTelObservability.Retry.InitialInterval,
+		RetryMax:        d.config.OTelObservability.Retry.MaxInterval,
 		RetryMaxElapsed: d.config.OTelObservability.Retry.MaxElapsedTime,
 		Neo4jBrowserURL: d.config.Observability.Neo4jBrowserURL,
 	}

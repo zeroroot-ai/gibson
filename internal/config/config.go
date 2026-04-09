@@ -12,40 +12,116 @@ import (
 
 // Config is the root configuration for the Gibson Framework.
 type Config struct {
-	Core         CoreConfig              `mapstructure:"core" yaml:"core" validate:"required"`
-	Security     SecurityConfig          `mapstructure:"security" yaml:"security" validate:"required"`
-	LLM          LLMConfig               `mapstructure:"llm" yaml:"llm"`
-	Memory       memory.MemoryConfig     `mapstructure:"memory" yaml:"memory"`
-	Prompt       prompt.PromptConfig     `mapstructure:"prompt" yaml:"prompt"`
-	Logging      LoggingConfig           `mapstructure:"logging" yaml:"logging"`
-	Tracing      TracingConfig           `mapstructure:"tracing" yaml:"tracing"`
-	Metrics      MetricsConfig           `mapstructure:"metrics" yaml:"metrics"`
-	Registration RegistrationConfig      `mapstructure:"registration" yaml:"registration,omitempty"`
-	Registry     RegistryConfig          `mapstructure:"registry" yaml:"registry"`
-	Callback     CallbackConfig          `mapstructure:"callback" yaml:"callback,omitempty"`
-	Daemon       DaemonConfig            `mapstructure:"daemon" yaml:"daemon,omitempty"`
-	Health       HealthConfig            `mapstructure:"health" yaml:"health,omitempty"`
-	Embedder        embedder.EmbedderConfig `mapstructure:"embedder" yaml:"embedder"`
-	Langfuse        LangfuseConfig          `mapstructure:"langfuse" yaml:"langfuse"`
-	GraphRAG        GraphRAGConfig          `mapstructure:"graphrag" yaml:"graphrag"`
-	Redis           RedisConfig             `mapstructure:"redis" yaml:"redis" validate:"required"`
-	Plugins         PluginsConfig           `mapstructure:"plugins" yaml:"plugins,omitempty"`
-	ActivityLogging ActivityLoggingConfig   `mapstructure:"activity_logging" yaml:"activity_logging"`
-	Shutdown        ShutdownConfig          `mapstructure:"shutdown" yaml:"shutdown"`
-	Observability        ObservabilityConfig        `mapstructure:"observability" yaml:"observability"`
-	OTelObservability    OTelObservabilityConfig    `mapstructure:"otel_observability" yaml:"otel_observability"`
-	Auth                 auth.AuthConfig            `mapstructure:"auth" yaml:"auth"`
-	Checkpoint           CheckpointConfig           `mapstructure:"checkpoint" yaml:"checkpoint"`
-	Keycloak             KeycloakConfig             `mapstructure:"keycloak" yaml:"keycloak"`
+	Core              CoreConfig              `mapstructure:"core" yaml:"core" validate:"required"`
+	Security          SecurityConfig          `mapstructure:"security" yaml:"security" validate:"required"`
+	LLM               LLMConfig               `mapstructure:"llm" yaml:"llm"`
+	Memory            memory.MemoryConfig     `mapstructure:"memory" yaml:"memory"`
+	Prompt            prompt.PromptConfig     `mapstructure:"prompt" yaml:"prompt"`
+	Logging           LoggingConfig           `mapstructure:"logging" yaml:"logging"`
+	Tracing           TracingConfig           `mapstructure:"tracing" yaml:"tracing"`
+	Metrics           MetricsConfig           `mapstructure:"metrics" yaml:"metrics"`
+	Registration      RegistrationConfig      `mapstructure:"registration" yaml:"registration,omitempty"`
+	Registry          RegistryConfig          `mapstructure:"registry" yaml:"registry"`
+	Callback          CallbackConfig          `mapstructure:"callback" yaml:"callback,omitempty"`
+	Daemon            DaemonConfig            `mapstructure:"daemon" yaml:"daemon,omitempty"`
+	Health            HealthConfig            `mapstructure:"health" yaml:"health,omitempty"`
+	Embedder          embedder.EmbedderConfig `mapstructure:"embedder" yaml:"embedder"`
+	Langfuse          LangfuseConfig          `mapstructure:"langfuse" yaml:"langfuse"`
+	GraphRAG          GraphRAGConfig          `mapstructure:"graphrag" yaml:"graphrag"`
+	Redis             RedisConfig             `mapstructure:"redis" yaml:"redis" validate:"required"`
+	Plugins           PluginsConfig           `mapstructure:"plugins" yaml:"plugins,omitempty"`
+	ActivityLogging   ActivityLoggingConfig   `mapstructure:"activity_logging" yaml:"activity_logging"`
+	Shutdown          ShutdownConfig          `mapstructure:"shutdown" yaml:"shutdown"`
+	Observability     ObservabilityConfig     `mapstructure:"observability" yaml:"observability"`
+	OTelObservability OTelObservabilityConfig `mapstructure:"otel_observability" yaml:"otel_observability"`
+	Auth              auth.AuthConfig         `mapstructure:"auth" yaml:"auth"`
+	Checkpoint        CheckpointConfig        `mapstructure:"checkpoint" yaml:"checkpoint"`
+	Keycloak          KeycloakConfig          `mapstructure:"keycloak" yaml:"keycloak"`
+	Authz             AuthzConfig             `mapstructure:"authz" yaml:"authz"`
+	Provisioner       ProvisionerConfig       `mapstructure:"provisioner" yaml:"provisioner"`
+}
+
+// ProvisionerConfig controls runtime behaviour of the tenant provisioner.
+//
+// ReconcileOnStartup: when true the daemon runs a one-shot reconciliation on
+// startup that creates Keycloak Organizations and FGA tuples for every tenant
+// that already exists in Redis membership records but is absent from Keycloak.
+// This migration flag defaults to true for spec authz-02 and will be flipped
+// to false in authz-07 once the full cutover is complete.
+//
+// Environment variable override: GIBSON_PROVISIONER_RECONCILE_ON_STARTUP
+type ProvisionerConfig struct {
+	// ReconcileOnStartup triggers one-shot KC org + FGA tuple reconciliation.
+	// Default: true.
+	ReconcileOnStartup bool `mapstructure:"reconcile_on_startup" yaml:"reconcile_on_startup"`
 }
 
 // KeycloakConfig contains settings for the Keycloak Admin REST API client
-// used by the provisioner to create per-tenant realms and OIDC clients.
+// used by the provisioner to create per-tenant Organizations and manage users.
 type KeycloakConfig struct {
-	BaseURL      string `mapstructure:"base_url" yaml:"base_url"`
-	MasterRealm  string `mapstructure:"master_realm" yaml:"master_realm"`
-	ClientID     string `mapstructure:"client_id" yaml:"client_id"`
+	BaseURL      string             `mapstructure:"base_url" yaml:"base_url"`
+	MasterRealm  string             `mapstructure:"master_realm" yaml:"master_realm"`
+	ClientID     string             `mapstructure:"client_id" yaml:"client_id"`
+	ClientSecret string             `mapstructure:"client_secret" yaml:"client_secret"`
+	Admin        KeycloakAdminConfig `mapstructure:"admin" yaml:"admin"`
+}
+
+// KeycloakAdminConfig holds credentials and connection settings for the
+// Keycloak Admin REST API used by the daemon's provisioner package.
+//
+// Two authentication modes are supported (not mutually exclusive —
+// if both are set, client-credentials takes precedence):
+//
+//  1. Client-credentials (recommended for production):
+//     Set ClientID + ClientSecret. The daemon uses the OAuth2 client
+//     credentials grant against Endpoint/realms/Realm/protocol/openid-connect/token.
+//
+//  2. Username + password (suitable for dev/local clusters):
+//     Set Username + Password. The daemon uses a direct password grant.
+//
+// When authz.enabled=true, ValidateKeycloakAdminConfig returns an error
+// if neither mode is sufficiently configured — the daemon must not start
+// with orphaned Organization calls.
+//
+// Environment variable overrides (all GIBSON_KEYCLOAK_ADMIN_* prefix):
+//
+//	GIBSON_KEYCLOAK_ADMIN_ENDPOINT        — base URL (e.g. http://keycloak:8080)
+//	GIBSON_KEYCLOAK_ADMIN_REALM           — target realm (e.g. gibson)
+//	GIBSON_KEYCLOAK_ADMIN_CLIENT_ID       — client credentials: client ID
+//	GIBSON_KEYCLOAK_ADMIN_CLIENT_SECRET   — client credentials: client secret
+//	GIBSON_KEYCLOAK_ADMIN_USERNAME        — password grant: admin username
+//	GIBSON_KEYCLOAK_ADMIN_PASSWORD        — password grant: admin password
+type KeycloakAdminConfig struct {
+	// Endpoint is the base URL of the Keycloak instance.
+	// Example: "http://gibson-keycloak:8080"
+	// Override: GIBSON_KEYCLOAK_ADMIN_ENDPOINT
+	Endpoint string `mapstructure:"endpoint" yaml:"endpoint"`
+
+	// Realm is the Keycloak realm that the daemon manages.
+	// For the SaaS platform this is "gibson"; self-hosted installs may differ.
+	// Override: GIBSON_KEYCLOAK_ADMIN_REALM
+	Realm string `mapstructure:"realm" yaml:"realm"`
+
+	// ClientID is the OIDC client ID for the client-credentials grant.
+	// The service account associated with this client must have the
+	// realm-admin (or manage-realm + manage-users + manage-clients) role.
+	// Override: GIBSON_KEYCLOAK_ADMIN_CLIENT_ID
+	ClientID string `mapstructure:"client_id" yaml:"client_id"`
+
+	// ClientSecret is the OIDC client secret for the client-credentials grant.
+	// Store this value in a Kubernetes Secret and reference it via env var.
+	// Override: GIBSON_KEYCLOAK_ADMIN_CLIENT_SECRET
 	ClientSecret string `mapstructure:"client_secret" yaml:"client_secret"`
+
+	// Username is the Keycloak admin username for the password grant flow.
+	// Not recommended for production; use client-credentials instead.
+	// Override: GIBSON_KEYCLOAK_ADMIN_USERNAME
+	Username string `mapstructure:"username" yaml:"username"`
+
+	// Password is the Keycloak admin password for the password grant flow.
+	// Store this value in a Kubernetes Secret and reference it via env var.
+	// Override: GIBSON_KEYCLOAK_ADMIN_PASSWORD
+	Password string `mapstructure:"password" yaml:"password"`
 }
 
 // PluginsConfig contains configuration for all plugins.
@@ -63,14 +139,13 @@ type CoreConfig struct {
 	Debug         bool          `mapstructure:"debug" yaml:"debug"`
 }
 
-
 // SecurityConfig contains security-related settings.
 type SecurityConfig struct {
-	EncryptionAlgorithm string                     `mapstructure:"encryption_algorithm" yaml:"encryption_algorithm"`
-	KeyDerivation       string                     `mapstructure:"key_derivation" yaml:"key_derivation"`
-	SSLValidation       bool                       `mapstructure:"ssl_validation" yaml:"ssl_validation"`
-	AuditLogging        bool                       `mapstructure:"audit_logging" yaml:"audit_logging"`
-	KeyProvider         *crypto.KeyProviderConfig  `mapstructure:"key_provider" yaml:"key_provider,omitempty"`
+	EncryptionAlgorithm string                    `mapstructure:"encryption_algorithm" yaml:"encryption_algorithm"`
+	KeyDerivation       string                    `mapstructure:"key_derivation" yaml:"key_derivation"`
+	SSLValidation       bool                      `mapstructure:"ssl_validation" yaml:"ssl_validation"`
+	AuditLogging        bool                      `mapstructure:"audit_logging" yaml:"audit_logging"`
+	KeyProvider         *crypto.KeyProviderConfig `mapstructure:"key_provider" yaml:"key_provider,omitempty"`
 }
 
 // LLMConfig contains LLM provider configuration.
@@ -255,12 +330,12 @@ type GraphRAGConfig struct {
 // timeout, pooling, and TLS configuration options.
 type RedisConfig struct {
 	// Basic connection settings
-	URL            string        `mapstructure:"url" yaml:"url"`
-	Password       string        `mapstructure:"password" yaml:"password"`
-	Database       int           `mapstructure:"database" yaml:"database"`
+	URL      string `mapstructure:"url" yaml:"url"`
+	Password string `mapstructure:"password" yaml:"password"`
+	Database int    `mapstructure:"database" yaml:"database"`
 
 	// Connection pooling
-	PoolSize       int           `mapstructure:"pool_size" yaml:"pool_size"`
+	PoolSize int `mapstructure:"pool_size" yaml:"pool_size"`
 
 	// Timeouts
 	ConnectTimeout time.Duration `mapstructure:"connect_timeout" yaml:"connect_timeout"`
@@ -268,21 +343,21 @@ type RedisConfig struct {
 	WriteTimeout   time.Duration `mapstructure:"write_timeout" yaml:"write_timeout"`
 
 	// Retry settings
-	MaxRetries     int           `mapstructure:"max_retries" yaml:"max_retries"`
+	MaxRetries int `mapstructure:"max_retries" yaml:"max_retries"`
 
 	// Cluster mode configuration
-	ClusterMode    bool          `mapstructure:"cluster_mode" yaml:"cluster_mode"`
-	ClusterAddrs   []string      `mapstructure:"cluster_addrs" yaml:"cluster_addrs"`
+	ClusterMode  bool     `mapstructure:"cluster_mode" yaml:"cluster_mode"`
+	ClusterAddrs []string `mapstructure:"cluster_addrs" yaml:"cluster_addrs"`
 
 	// Sentinel mode configuration
-	SentinelMaster string        `mapstructure:"sentinel_master" yaml:"sentinel_master"`
-	SentinelAddrs  []string      `mapstructure:"sentinel_addrs" yaml:"sentinel_addrs"`
+	SentinelMaster string   `mapstructure:"sentinel_master" yaml:"sentinel_master"`
+	SentinelAddrs  []string `mapstructure:"sentinel_addrs" yaml:"sentinel_addrs"`
 
 	// TLS configuration
-	TLSEnabled     bool          `mapstructure:"tls_enabled" yaml:"tls_enabled"`
-	TLSCertFile    string        `mapstructure:"tls_cert_file" yaml:"tls_cert_file"`
-	TLSKeyFile     string        `mapstructure:"tls_key_file" yaml:"tls_key_file"`
-	TLSCAFile      string        `mapstructure:"tls_ca_file" yaml:"tls_ca_file"`
+	TLSEnabled  bool   `mapstructure:"tls_enabled" yaml:"tls_enabled"`
+	TLSCertFile string `mapstructure:"tls_cert_file" yaml:"tls_cert_file"`
+	TLSKeyFile  string `mapstructure:"tls_key_file" yaml:"tls_key_file"`
+	TLSCAFile   string `mapstructure:"tls_ca_file" yaml:"tls_ca_file"`
 }
 
 // ShutdownConfig contains configuration for graceful shutdown behavior.
@@ -551,4 +626,79 @@ func (c *RedisConfig) ApplyDefaults() {
 	if c.MaxRetries == 0 {
 		c.MaxRetries = 3
 	}
+}
+
+// AuthzConfig contains all OpenFGA authorization configuration.
+//
+// When Enabled is false (the default), the daemon wires a no-op Authorizer and
+// never connects to FGA. Flip Enabled to true in dev cluster values to test the
+// FGA integration; production flips happen in authz-02.
+//
+// Example config:
+//
+//	authz:
+//	  enabled: false
+//	  provider: openfga
+//	  require_ready: true
+//	  enforcement_source: fga
+//	  fga:
+//	    endpoint: gibson-fga:8080
+//	    store_id: ""      # resolved from ConfigMap if empty
+//	    model_id: ""      # resolved from ConfigMap if empty
+//	    timeout_ms: 500
+//	    tls:
+//	      enabled: false
+type AuthzConfig struct {
+	// Enabled controls whether FGA is active. Default false (no-op authorizer used).
+	// Override via env: GIBSON_AUTHZ_ENABLED=true
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
+
+	// Provider is the authorization provider name. Only "openfga" is supported.
+	Provider string `mapstructure:"provider" yaml:"provider"`
+
+	// RequireReady controls startup behavior when FGA is unreachable.
+	// true  → daemon fails to start (production-safe, fail-closed)
+	// false → daemon logs WARN and falls back to no-op (dev-mode)
+	RequireReady bool `mapstructure:"require_ready" yaml:"require_ready"`
+
+	// EnforcementSource is retained for config-file backwards compatibility.
+	// After authz-07 the only valid value is "fga"; the daemon ignores any
+	// other value and always uses FGA as the sole authorization backend.
+	// Override via env: GIBSON_AUTHZ_ENFORCEMENT_SOURCE
+	EnforcementSource string `mapstructure:"enforcement_source" yaml:"enforcement_source"`
+
+	// Fga holds OpenFGA-specific settings.
+	Fga FgaClientConfig `mapstructure:"fga" yaml:"fga"`
+}
+
+// FgaClientConfig holds OpenFGA client connection settings.
+type FgaClientConfig struct {
+	// Endpoint is the HTTP endpoint for the OpenFGA server.
+	// Default: "gibson-fga:8080" (in-cluster)
+	// Override via env: GIBSON_AUTHZ_FGA_ENDPOINT
+	Endpoint string `mapstructure:"endpoint" yaml:"endpoint"`
+
+	// StoreID is the OpenFGA store identifier (ULID format).
+	// If empty, resolved at startup from the gibson-fga-config ConfigMap.
+	// Override via env: GIBSON_AUTHZ_FGA_STORE_ID
+	StoreID string `mapstructure:"store_id" yaml:"store_id"`
+
+	// ModelID is the OpenFGA authorization model identifier (ULID format).
+	// If empty, resolved at startup from the gibson-fga-config ConfigMap.
+	// Override via env: GIBSON_AUTHZ_FGA_MODEL_ID
+	ModelID string `mapstructure:"model_id" yaml:"model_id"`
+
+	// TimeoutMs is the per-call timeout in milliseconds.
+	// Default: 500
+	TimeoutMs int `mapstructure:"timeout_ms" yaml:"timeout_ms"`
+
+	// TLS holds TLS configuration for the FGA connection.
+	TLS FgaTLSConfig `mapstructure:"tls" yaml:"tls"`
+}
+
+// FgaTLSConfig holds TLS settings for the FGA client connection.
+type FgaTLSConfig struct {
+	// Enabled controls whether TLS is used when connecting to FGA.
+	// Default: false (in-cluster pod-to-pod traffic is already protected)
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
 }

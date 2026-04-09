@@ -78,14 +78,14 @@ func (f *SimilarTargetFinder) Execute(ctx context.Context, opts sdkgraphrag.Simi
 
 // targetData holds computed features for a target.
 type targetData struct {
-	targetID       string
-	targetName     string
-	technologies   []string
-	ports          []int
-	services       []string
-	vulnTypes      []string
-	findings       []string
-	techniques     []string
+	targetID     string
+	targetName   string
+	technologies []string
+	ports        []int
+	services     []string
+	vulnTypes    []string
+	findings     []string
+	techniques   []string
 }
 
 // getTargetData fetches feature data for a single target.

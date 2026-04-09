@@ -206,12 +206,12 @@ func TestComponentLifecycle_MultiTenantIsolation(t *testing.T) {
 	ctx := context.Background()
 
 	const (
-		kind        = "agent"
-		name        = "dns-recon"
-		consumerA   = "consumer-tenantA"
-		consumerB   = "consumer-tenantB"
-		tenantA     = "tenant-alpha"
-		tenantB     = "tenant-beta"
+		kind      = "agent"
+		name      = "dns-recon"
+		consumerA = "consumer-tenantA"
+		consumerB = "consumer-tenantB"
+		tenantA   = "tenant-alpha"
+		tenantB   = "tenant-beta"
 	)
 
 	// Step 1: Register the same-named agent for both tenants.
@@ -374,10 +374,10 @@ func TestComponentLifecycle_SystemComponents(t *testing.T) {
 	ctx := context.Background()
 
 	const (
-		kind       = "tool"
-		toolName   = "whois-lookup"
-		tenantA    = "tenant-alpha"
-		tenantB    = "tenant-beta"
+		kind     = "tool"
+		toolName = "whois-lookup"
+		tenantA  = "tenant-alpha"
+		tenantB  = "tenant-beta"
 	)
 
 	// Step 1: Register the tool under the _system tenant.
@@ -386,7 +386,7 @@ func TestComponentLifecycle_SystemComponents(t *testing.T) {
 	// at the same layer as production code.
 	const systemTenant = "_system"
 	systemInstanceID, err := env.reg.Register(ctx, systemTenant, kind, toolName, component.ComponentInfo{
-		Version: "1.0.0",
+		Version:  "1.0.0",
 		Metadata: map[string]string{"scope": "global"},
 	})
 	require.NoError(t, err)
@@ -408,7 +408,7 @@ func TestComponentLifecycle_SystemComponents(t *testing.T) {
 
 	// Step 4: Register a tenant-scoped tool under tenant A with the same name.
 	tenantAInstanceID, err := env.reg.Register(ctx, tenantA, kind, toolName, component.ComponentInfo{
-		Version: "2.0.0",
+		Version:  "2.0.0",
 		Metadata: map[string]string{"scope": "tenant-override"},
 	})
 	require.NoError(t, err)

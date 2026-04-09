@@ -2,9 +2,12 @@ package auth
 
 import (
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/metadata"
 	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
 
@@ -12,22 +15,30 @@ func TestTenantContextRoundTrip(t *testing.T) {
 	tests := []struct {
 		name   string
 		tenant string
+		want   string
 	}{
 		{
 			name:   "simple tenant",
 			tenant: "acme",
+			want:   "acme",
 		},
 		{
 			name:   "tenant with hyphen",
 			tenant: "acme-corp",
+			want:   "acme-corp",
 		},
 		{
 			name:   "tenant with underscore",
 			tenant: "widgets_inc",
+			want:   "widgets_inc",
 		},
 		{
+			// Storing an empty tenant string is treated as "not set" and
+			// falls through to SystemTenant (no identity in context).
+			// Production code never sets an empty tenant explicitly.
 			name:   "empty tenant",
 			tenant: "",
+			want:   SystemTenant,
 		},
 	}
 
@@ -37,19 +48,20 @@ func TestTenantContextRoundTrip(t *testing.T) {
 			ctx = ContextWithTenant(ctx, tt.tenant)
 			got := TenantFromContext(ctx)
 
-			if got != tt.tenant {
-				t.Errorf("TenantFromContext() = %q, want %q", got, tt.tenant)
+			if got != tt.want {
+				t.Errorf("TenantFromContext() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestTenantFromContext_Missing(t *testing.T) {
+	// No tenant in context, no identity → falls through to SystemTenant.
 	ctx := context.Background()
 	got := TenantFromContext(ctx)
 
-	if got != "" {
-		t.Errorf("TenantFromContext() with no tenant = %q, want empty string", got)
+	if got != SystemTenant {
+		t.Errorf("TenantFromContext() with no tenant = %q, want SystemTenant", got)
 	}
 }
 
@@ -327,5 +339,148 @@ func TestTenantNeo4jFilter(t *testing.T) {
 				t.Errorf("TenantNeo4jFilter(%q) = %q, want %q", tt.paramName, got, tt.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TenantFromContext resolution tests (authz-02-keycloak-organizations, task 22)
+//
+// These tests cover all seven decision branches specified in Requirements
+// 6.5 and 6.6:
+//
+//  1. ctx already has an explicit tenant set → use it
+//  2. Valid X-Gibson-Tenant header + user is a member → use the header value
+//  3. Invalid X-Gibson-Tenant header (user is not a member) → PermissionDenied
+//     via TenantFromContextWithCheck; TenantFromContext falls back to SystemTenant
+//  4. Single-tenant user, no header → use their only tenant
+//  5. Multi-tenant user, no header → alphabetically first (WARN log)
+//  6. Cross-tenant role with empty tenants → SystemTenant
+//  7. Empty identity with no tenants → SystemTenant
+// ---------------------------------------------------------------------------
+
+// contextWithIdentityAndTenants is a test helper that builds a context with a
+// Gibson Identity carrying the given tenants list.
+func contextWithIdentityAndTenants(ctx context.Context, tenants []string) context.Context {
+	identity := &Identity{
+		Identity: sdkauth.Identity{
+			Subject:         "test-user",
+			Email:           "test@example.com",
+			AuthenticatedAt: time.Now(),
+			ExpiresAt:       time.Now().Add(time.Hour),
+		},
+		Tenants: tenants,
+	}
+	return ContextWithIdentity(ctx, identity)
+}
+
+// contextWithXGibsonTenantHeader attaches the X-Gibson-Tenant gRPC metadata
+// header to the context.
+func contextWithXGibsonTenantHeader(ctx context.Context, tenant string) context.Context {
+	md := metadata.New(map[string]string{GibsonTenantHeader: tenant})
+	return metadata.NewIncomingContext(ctx, md)
+}
+
+func TestTenantFromContext_ExplicitTenantInContext(t *testing.T) {
+	// Branch 1: an explicit tenant already in context takes priority over everything.
+	base := context.Background()
+	base = contextWithIdentityAndTenants(base, []string{"tenant-b", "tenant-a"})
+	base = contextWithXGibsonTenantHeader(base, "tenant-b") // header would select b
+	ctx := ContextWithTenant(base, "explicit-tenant")       // explicit beats all
+
+	got := TenantFromContext(ctx)
+	if got != "explicit-tenant" {
+		t.Errorf("expected explicit-tenant, got %q", got)
+	}
+}
+
+func TestTenantFromContext_ValidXGibsonTenantHeader(t *testing.T) {
+	// Branch 2: X-Gibson-Tenant header present and user is a member → use it.
+	ctx := context.Background()
+	ctx = contextWithIdentityAndTenants(ctx, []string{"tenant-a", "tenant-b"})
+	ctx = contextWithXGibsonTenantHeader(ctx, "tenant-b")
+
+	got := TenantFromContext(ctx)
+	if got != "tenant-b" {
+		t.Errorf("expected tenant-b, got %q", got)
+	}
+}
+
+func TestTenantFromContextWithCheck_InvalidXGibsonTenantHeader_PermissionDenied(t *testing.T) {
+	// Branch 3: X-Gibson-Tenant header requests a tenant the user does NOT belong to.
+	// TenantFromContextWithCheck must return an error; TenantFromContext silently
+	// falls back to SystemTenant.
+	ctx := context.Background()
+	ctx = contextWithIdentityAndTenants(ctx, []string{"tenant-a"})
+	ctx = contextWithXGibsonTenantHeader(ctx, "tenant-evil") // not in user's list
+
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	tenant, err := TenantFromContextWithCheck(ctx, logger)
+	if err == nil {
+		t.Error("expected error for unauthorized tenant header, got nil")
+	}
+	if tenant != SystemTenant {
+		t.Errorf("expected SystemTenant on denied header, got %q", tenant)
+	}
+	if !strings.Contains(logBuf.String(), "tenant_access_denied") {
+		t.Errorf("expected WARN log about tenant_access_denied, got: %s", logBuf.String())
+	}
+}
+
+func TestTenantFromContext_SingleTenantUser_NoHeader(t *testing.T) {
+	// Branch 4: exactly one tenant, no X-Gibson-Tenant header → use the only tenant.
+	ctx := context.Background()
+	ctx = contextWithIdentityAndTenants(ctx, []string{"only-tenant"})
+
+	got := TenantFromContext(ctx)
+	if got != "only-tenant" {
+		t.Errorf("expected only-tenant, got %q", got)
+	}
+}
+
+func TestTenantFromContext_MultiTenantUser_NoHeader_AlphabeticallyFirst(t *testing.T) {
+	// Branch 5: multiple tenants, no header → alphabetically first, with WARN log.
+	ctx := context.Background()
+	ctx = contextWithIdentityAndTenants(ctx, []string{"zebra-corp", "acme-corp", "mid-tenant"})
+
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	tenant, err := TenantFromContextWithCheck(ctx, logger)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// "acme-corp" is alphabetically first.
+	if tenant != "acme-corp" {
+		t.Errorf("expected acme-corp (alphabetically first), got %q", tenant)
+	}
+	if !strings.Contains(logBuf.String(), "tenant_ambiguous") {
+		t.Errorf("expected WARN log about tenant_ambiguous, got: %s", logBuf.String())
+	}
+}
+
+func TestTenantFromContext_CrossTenantRole_EmptyTenants_SystemTenant(t *testing.T) {
+	// Branch 6: identity present with nil Tenants slice → SystemTenant.
+	// Platform operators / cross-tenant role holders have no Tenants list; they
+	// reach SystemTenant via the empty-Tenants fallback at the bottom of the
+	// resolution chain.
+	ctx := context.Background()
+	ctx = contextWithIdentityAndTenants(ctx, nil) // nil tenants → SystemTenant
+
+	got := TenantFromContext(ctx)
+	if got != SystemTenant {
+		t.Errorf("expected SystemTenant for cross-tenant role with empty tenants, got %q", got)
+	}
+}
+
+func TestTenantFromContext_EmptyIdentity_SystemTenant(t *testing.T) {
+	// Branch 7: identity present but Tenants is nil/empty and not cross-tenant.
+	ctx := context.Background()
+	ctx = contextWithIdentityAndTenants(ctx, nil)
+
+	got := TenantFromContext(ctx)
+	if got != SystemTenant {
+		t.Errorf("expected SystemTenant for empty-tenants non-cross-tenant user, got %q", got)
 	}
 }

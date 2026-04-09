@@ -452,7 +452,7 @@ func TestGRPCToolClient_Health_Healthy(t *testing.T) {
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		healthResponse: &commonpb.HealthStatus{
-			Status:     "healthy",
+			Status:    "healthy",
 			Message:   "All systems operational",
 			CheckedAt: now.UnixMilli(),
 		},
@@ -486,7 +486,7 @@ func TestGRPCToolClient_Health_Unhealthy(t *testing.T) {
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		healthResponse: &commonpb.HealthStatus{
-			Status:     "unhealthy",
+			Status:    "unhealthy",
 			Message:   "Database connection failed",
 			CheckedAt: now.UnixMilli(),
 		},
@@ -519,7 +519,7 @@ func TestGRPCToolClient_Health_Degraded(t *testing.T) {
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
 		healthResponse: &commonpb.HealthStatus{
-			Status:     "degraded",
+			Status:    "degraded",
 			Message:   "High latency detected",
 			CheckedAt: now.UnixMilli(),
 		},

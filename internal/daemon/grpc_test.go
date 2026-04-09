@@ -505,28 +505,28 @@ func TestListAgents_WithKindFilter(t *testing.T) {
 // TestHealthStatus_BasedOnInstances tests that health status is correctly determined by instance count.
 func TestHealthStatus_BasedOnInstances(t *testing.T) {
 	tests := []struct {
-		name                   string
-		instances              int
-		expectedStatusHealth   string // GetAgentStatus checks instances
-		expectedActive         bool
+		name                 string
+		instances            int
+		expectedStatusHealth string // GetAgentStatus checks instances
+		expectedActive       bool
 	}{
 		{
-			name:                   "healthy with instances",
-			instances:              5,
-			expectedStatusHealth:   "healthy",
-			expectedActive:         true,
+			name:                 "healthy with instances",
+			instances:            5,
+			expectedStatusHealth: "healthy",
+			expectedActive:       true,
 		},
 		{
-			name:                   "unknown with no instances",
-			instances:              0,
-			expectedStatusHealth:   "unknown",
-			expectedActive:         false,
+			name:                 "unknown with no instances",
+			instances:            0,
+			expectedStatusHealth: "unknown",
+			expectedActive:       false,
 		},
 		{
-			name:                   "healthy with one instance",
-			instances:              1,
-			expectedStatusHealth:   "healthy",
-			expectedActive:         true,
+			name:                 "healthy with one instance",
+			instances:            1,
+			expectedStatusHealth: "healthy",
+			expectedActive:       true,
 		},
 	}
 
@@ -1418,4 +1418,3 @@ func TestBuildAttackOptions_TargetPropagation(t *testing.T) {
 		})
 	}
 }
-

@@ -78,11 +78,11 @@ type ComponentLister interface {
 
 // ToolDescriptor contains metadata about a registered tool.
 type ToolDescriptor struct {
-	Name             string
-	Version          string
-	Description      string
-	Tags             []string
-	InputMessageType string
+	Name              string
+	Version           string
+	Description       string
+	Tags              []string
+	InputMessageType  string
 	OutputMessageType string
 }
 

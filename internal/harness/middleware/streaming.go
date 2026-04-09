@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/llm"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
 	"go.opentelemetry.io/otel/trace"
 )

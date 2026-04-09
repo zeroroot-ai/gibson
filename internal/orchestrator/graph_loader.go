@@ -165,15 +165,15 @@ func (g *GraphLoader) computeDefinitionHash(def *mission.MissionDefinition) (str
 	// Create a canonical representation for hashing
 	// We exclude timestamps and IDs which may vary between loads of the same definition
 	canonical := struct {
-		Name        string                       `json:"name"`
-		Description string                       `json:"description"`
-		Version     string                       `json:"version"`
-		TargetRef   string                       `json:"target_ref"`
+		Name        string                          `json:"name"`
+		Description string                          `json:"description"`
+		Version     string                          `json:"version"`
+		TargetRef   string                          `json:"target_ref"`
 		Nodes       map[string]*mission.MissionNode `json:"nodes"`
-		Edges       []mission.MissionEdge        `json:"edges"`
-		EntryPoints []string                     `json:"entry_points"`
-		ExitPoints  []string                     `json:"exit_points"`
-		Metadata    map[string]any               `json:"metadata"`
+		Edges       []mission.MissionEdge           `json:"edges"`
+		EntryPoints []string                        `json:"entry_points"`
+		ExitPoints  []string                        `json:"exit_points"`
+		Metadata    map[string]any                  `json:"metadata"`
 	}{
 		Name:        def.Name,
 		Description: def.Description,

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -119,6 +120,19 @@ type HarnessCallbackService struct {
 
 	// missionManager provides mission creation and lifecycle operations
 	missionManager MissionCreator
+
+	// authzStore provides per-run authz state lookup (run_id → user_id, tenant_id).
+	// Required for the Authorize RPC handler. When nil, Authorize returns Unimplemented.
+	// Typed as RunAuthzLookup to avoid a circular import (mission→eval→harness).
+	authzStore RunAuthzLookup
+
+	// componentAuthorizer is the FGA-backed authorizer for component authz decisions.
+	// When nil (authz disabled / dev mode), Authorize allows all active-mission requests.
+	componentAuthorizer authz.Authorizer
+
+	// componentAuthzMetrics emits counters for every component Authorize decision.
+	// When nil, metrics are not emitted (no-op).
+	componentAuthzMetrics ComponentAuthzMetrics
 
 	// resolver provides dynamic proto type resolution using FileDescriptorSets
 	resolver protoresolver.ProtoResolver

@@ -295,12 +295,12 @@ func TestWaitForApproval_Timeout(t *testing.T) {
 					Records: []map[string]any{
 						{
 							"a": map[string]any{
-								"id":              approvalID,
-								"mission_id":      missionID,
-								"node_id":         types.NewID().String(),
-								"context":         "test",
-								"timeout_action":  "skip",
-								"requested_at":    time.Now(),
+								"id":                  approvalID,
+								"mission_id":          missionID,
+								"node_id":             types.NewID().String(),
+								"context":             "test",
+								"timeout_action":      "skip",
+								"requested_at":        time.Now(),
 								"timeout_duration_ms": int64(100),
 							},
 						},
@@ -359,23 +359,23 @@ func TestGetPendingApprovals_Success(t *testing.T) {
 				Records: []map[string]any{
 					{
 						"a": map[string]any{
-							"id":              approval1ID,
-							"mission_id":      missionID,
-							"node_id":         types.NewID().String(),
-							"context":         "First approval",
-							"timeout_action":  "reject",
-							"requested_at":    time.Now(),
+							"id":                  approval1ID,
+							"mission_id":          missionID,
+							"node_id":             types.NewID().String(),
+							"context":             "First approval",
+							"timeout_action":      "reject",
+							"requested_at":        time.Now(),
 							"timeout_duration_ms": int64(300000),
 						},
 					},
 					{
 						"a": map[string]any{
-							"id":              approval2ID,
-							"mission_id":      missionID,
-							"node_id":         types.NewID().String(),
-							"context":         "Second approval",
-							"timeout_action":  "skip",
-							"requested_at":    time.Now(),
+							"id":                  approval2ID,
+							"mission_id":          missionID,
+							"node_id":             types.NewID().String(),
+							"context":             "Second approval",
+							"timeout_action":      "skip",
+							"requested_at":        time.Now(),
 							"timeout_duration_ms": int64(600000),
 						},
 					},
@@ -415,12 +415,12 @@ func TestRecordToApprovalRequest_Success(t *testing.T) {
 	now := time.Now()
 
 	data := map[string]any{
-		"id":              approvalID,
-		"mission_id":      missionID,
-		"node_id":         nodeID,
-		"context":         "Test context",
-		"timeout_action":  "reject",
-		"requested_at":    now,
+		"id":                  approvalID,
+		"mission_id":          missionID,
+		"node_id":             nodeID,
+		"context":             "Test context",
+		"timeout_action":      "reject",
+		"requested_at":        now,
 		"timeout_duration_ms": int64(300000),
 	}
 

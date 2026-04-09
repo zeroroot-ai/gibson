@@ -305,10 +305,10 @@ func (m *Neo4jApprovalManager) RespondToApproval(ctx context.Context, approvalID
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: map[string]any{
-				"approval_id":   approvalID,
-				"approved":      response.Approved,
-				"responded_by":  response.RespondedBy,
-				"comment":       response.Comment,
+				"approval_id":  approvalID,
+				"approved":     response.Approved,
+				"responded_by": response.RespondedBy,
+				"comment":      response.Comment,
 			},
 		})
 	}
@@ -500,8 +500,8 @@ type ApprovalResponsePayload struct {
 func (r ApprovalRequest) MarshalJSON() ([]byte, error) {
 	type Alias ApprovalRequest
 	return json.Marshal(&struct {
-		RequestedAt   string `json:"requested_at"`
-		Timeout       string `json:"timeout"`
+		RequestedAt string `json:"requested_at"`
+		Timeout     string `json:"timeout"`
 		*Alias
 	}{
 		RequestedAt: r.RequestedAt.Format(time.RFC3339Nano),

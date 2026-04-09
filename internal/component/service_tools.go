@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zero-day-ai/gibson/internal/auth"
+	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // ToolExecutor dispatches tool execution for streaming and queued operations.
@@ -37,7 +37,7 @@ func (s *ComponentServiceServer) CallToolStream(
 
 	// Send a progress event indicating execution started.
 	if err := stream.Send(&componentpb.CallToolStreamResponse{
-		EventType: "progress",
+		EventType:   "progress",
 		PayloadJson: `{"status":"executing"}`,
 	}); err != nil {
 		return err
@@ -141,10 +141,10 @@ func (s *ComponentServiceServer) ToolResults(
 	for result := range job.results {
 		sent++
 		if err := stream.Send(&componentpb.ToolResultsResponse{
-			Index:     result.index,
+			Index:      result.index,
 			OutputJson: result.outputJSON,
-			Error:     result.err,
-			Done:      sent >= total,
+			Error:      result.err,
+			Done:       sent >= total,
 		}); err != nil {
 			return err
 		}
@@ -169,9 +169,9 @@ type toolJob struct {
 
 // toolJobResult is a single result from a queued tool execution.
 type toolJobResult struct {
-	index     int32
+	index      int32
 	outputJSON string
-	err       *componentpb.ComponentError
+	err        *componentpb.ComponentError
 }
 
 // formatToolError creates a ComponentError from a Go error.

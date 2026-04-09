@@ -248,8 +248,10 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		categoryClassifier:  categoryClassifier,
 		componentRegistry:   f.config.ComponentRegistry,
 		workQueue:           f.config.WorkQueue,
+		envelopeSigner:      f.config.EnvelopeSigner,
 		workQueueTimeout:    f.config.WorkQueueTimeout,
 		pluginAccess:        f.config.PluginAccess,
+		maxDelegationDepth:  f.config.MaxDelegationDepth,
 	}
 
 	// Wrap with AuthorizingHarness if a Casbin enforcer is configured.
@@ -257,6 +259,33 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 	// harness and observability middleware wraps around the authorizing layer.
 	if f.enforcer != nil {
 		harness = NewAuthorizingHarness(harness, f.enforcer)
+	}
+
+	// Wrap with ComplianceMiddleware AFTER AuthorizingHarness so the emitter
+	// sees the authorization decision, and BEFORE the OTel / Langfuse
+	// middleware so the OTel span captures the emit overhead. This is the
+	// insertion order from audit-compliance-emitter requirement 1.2.
+	//
+	// ComplianceMiddleware is skipped when the signal sink is nil (default
+	// in the factory config today — daemon startup wiring lands the sink in
+	// task 10's daemon-level change). A nil sink means "emitter not yet
+	// wired"; once wired, every harness in the factory path gains signal
+	// emission automatically.
+	if f.config.ComplianceSink != nil {
+		cm, err := NewComplianceMiddleware(ComplianceMiddlewareConfig{
+			Inner:       harness,
+			GraphReader: f.config.ComplianceGraphReader,
+			Sink:        f.config.ComplianceSink,
+			Logger:      logger,
+		})
+		if err != nil {
+			logger.Warn("compliance middleware construction failed — emitter disabled",
+				slog.String("error", err.Error()))
+		} else {
+			harness = cm
+			logger.Info("compliance_middleware: emitter active",
+				slog.Int("covered_methods", cm.CoveredMethodCount()))
+		}
 	}
 
 	// Apply middleware if configured

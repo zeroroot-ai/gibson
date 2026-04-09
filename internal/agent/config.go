@@ -93,15 +93,15 @@ func (c AgentConfig) GetBoolSetting(key string, defaultValue bool) bool {
 // AgentDescriptor contains agent metadata.
 // This describes an agent's capabilities and requirements without instantiating it.
 type AgentDescriptor struct {
-	Name           string                    `json:"name"`
-	Version        string                    `json:"version"`
-	Description    string                    `json:"description"`
-	Capabilities   []string                  `json:"capabilities"`
+	Name           string                `json:"name"`
+	Version        string                `json:"version"`
+	Description    string                `json:"description"`
+	Capabilities   []string              `json:"capabilities"`
 	TargetTypes    []types.TargetType    `json:"target_types"`   // Deprecated: use TargetSchemas
-	TargetSchemas  []TargetSchema            `json:"target_schemas"` // New: schema-based target definitions
+	TargetSchemas  []TargetSchema        `json:"target_schemas"` // New: schema-based target definitions
 	TechniqueTypes []types.TechniqueType `json:"technique_types"`
-	Slots          []SlotDefinition          `json:"slots"`
-	IsExternal     bool                      `json:"is_external"` // True if agent runs via gRPC
+	Slots          []SlotDefinition      `json:"slots"`
+	IsExternal     bool                  `json:"is_external"` // True if agent runs via gRPC
 }
 
 // NewAgentDescriptor creates a descriptor from an agent instance

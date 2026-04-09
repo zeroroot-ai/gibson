@@ -115,9 +115,6 @@ func (r *LoadResult) HasErrors() bool {
 	return len(r.Errors) > 0
 }
 
-
-
-
 // buildEntityTypesJSON creates a JSON array of entity types that were written in this discovery.
 // Returns a string in the format: ["host", "port", "service", ...]
 func buildEntityTypesJSON(discovery *graphragpb.DiscoveryResult) string {
@@ -1017,4 +1014,3 @@ func extractProtoID(proto protoreflect.ProtoMessage) string {
 	val := refl.Get(idField)
 	return val.String()
 }
-

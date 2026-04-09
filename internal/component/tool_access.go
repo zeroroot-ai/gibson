@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/casbin/casbin/v2"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -39,16 +38,8 @@ type ToolAccessStore interface {
 
 // RedisToolAccessStore implements ToolAccessStore using Redis for storage.
 type RedisToolAccessStore struct {
-	client   *redis.Client
-	logger   *slog.Logger
-	enforcer *casbin.Enforcer
-}
-
-// SetEnforcer attaches a Casbin enforcer. When non-nil, Enable and Disable
-// sync Casbin policies so "tenant-admin" subjects gain or lose execute
-// capabilities for each tool in real time.
-func (s *RedisToolAccessStore) SetEnforcer(e *casbin.Enforcer) {
-	s.enforcer = e
+	client *redis.Client
+	logger *slog.Logger
 }
 
 // NewRedisToolAccessStore creates a new store.
@@ -91,8 +82,6 @@ func (s *RedisToolAccessStore) Enable(ctx context.Context, tenant, toolName, con
 		return fmt.Errorf("store tool access record: %w", err)
 	}
 
-	s.syncCasbinEnable(ctx, tenant, toolName)
-
 	return nil
 }
 
@@ -105,8 +94,6 @@ func (s *RedisToolAccessStore) Disable(ctx context.Context, tenant, toolName str
 	if err := s.client.Del(ctx, toolAccessKey(tenant, toolName)).Err(); err != nil {
 		return fmt.Errorf("disable tool: %w", err)
 	}
-
-	s.syncCasbinDisable(ctx, tenant, toolName)
 
 	return nil
 }
@@ -175,38 +162,4 @@ func (s *RedisToolAccessStore) ListTenantTools(ctx context.Context, tenant strin
 	}
 
 	return results, nil
-}
-
-// syncCasbinEnable adds a Casbin execute policy for "tenant-admin" on the tool.
-func (s *RedisToolAccessStore) syncCasbinEnable(ctx context.Context, tenant, toolName string) {
-	if s.enforcer == nil {
-		return
-	}
-
-	resource := fmt.Sprintf("tool:%s", toolName)
-
-	if _, err := s.enforcer.AddPolicy("tenant-admin", tenant, resource, "execute"); err != nil {
-		s.logger.WarnContext(ctx, "casbin: failed to add execute policy for tool",
-			slog.String("tenant", tenant),
-			slog.String("tool", toolName),
-			slog.String("error", err.Error()),
-		)
-	}
-}
-
-// syncCasbinDisable removes all Casbin policies for "tenant-admin" on this tool.
-func (s *RedisToolAccessStore) syncCasbinDisable(ctx context.Context, tenant, toolName string) {
-	if s.enforcer == nil {
-		return
-	}
-
-	resource := fmt.Sprintf("tool:%s", toolName)
-
-	if _, err := s.enforcer.RemoveFilteredPolicy(1, tenant, resource); err != nil {
-		s.logger.WarnContext(ctx, "casbin: failed to remove policies for tool",
-			slog.String("tenant", tenant),
-			slog.String("tool", toolName),
-			slog.String("error", err.Error()),
-		)
-	}
 }

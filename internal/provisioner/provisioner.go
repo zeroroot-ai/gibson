@@ -435,12 +435,12 @@ func (p *Provisioner) runStep(ctx context.Context, stepName string, req Provisio
 // Idempotency: if the tenant already exists the step succeeds silently.
 func (p *Provisioner) stepCreateTenant(ctx context.Context, req ProvisionRequest) error {
 	config := map[string]string{
-		"tier":                 req.Tier,
-		"owner_email":          req.OwnerEmail,
-		"stripe_customer_id":   req.StripeCustomerID,
-		"stripe_sub_id":        req.StripeSubID,
-		"provisioning_source":  "saas",
-		"keycloak_realm_name":  req.TenantID,
+		"tier":                req.Tier,
+		"owner_email":         req.OwnerEmail,
+		"stripe_customer_id":  req.StripeCustomerID,
+		"stripe_sub_id":       req.StripeSubID,
+		"provisioning_source": "saas",
+		"keycloak_realm_name": req.TenantID,
 	}
 
 	// Attempt creation.  The underlying TenantService will return

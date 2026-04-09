@@ -256,18 +256,18 @@ func TestShutdownCoordinator_TotalTimeout(t *testing.T) {
 		}
 	}
 	phase1 := &mockPhase{
-		name:    "phase1",
-		timeout: 300 * time.Millisecond,
+		name:      "phase1",
+		timeout:   300 * time.Millisecond,
 		executeFn: contextAwareSleep,
 	}
 	phase2 := &mockPhase{
-		name:    "phase2",
-		timeout: 300 * time.Millisecond,
+		name:      "phase2",
+		timeout:   300 * time.Millisecond,
 		executeFn: contextAwareSleep,
 	}
 	phase3 := &mockPhase{
-		name:    "phase3",
-		timeout: 300 * time.Millisecond,
+		name:      "phase3",
+		timeout:   300 * time.Millisecond,
 		executeFn: contextAwareSleep,
 	}
 

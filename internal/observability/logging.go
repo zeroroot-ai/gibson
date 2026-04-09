@@ -368,12 +368,12 @@ func NewTracedLogger(handler slog.Handler, missionID, agentName string) *TracedL
 	// Extract level and output from handler (best effort)
 	// This is a compatibility shim - the handler is already configured
 	return &Logger{
-		slog:            slog.New(handler),
-		config:          Config{RedactSensitive: true}, // Default to redacting for backward compat
-		missionID:       missionID,
-		agentName:       agentName,
-		component:       "",
-		missionName:     "",
-		nodeID:          "",
+		slog:        slog.New(handler),
+		config:      Config{RedactSensitive: true}, // Default to redacting for backward compat
+		missionID:   missionID,
+		agentName:   agentName,
+		component:   "",
+		missionName: "",
+		nodeID:      "",
 	}
 }

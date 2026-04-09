@@ -166,8 +166,8 @@ func TestNewLLMReflectionEngine(t *testing.T) {
 	mockBus := &MockEventBus{}
 
 	tests := []struct {
-		name    string
-		opts    []ReflectionEngineOption
+		name     string
+		opts     []ReflectionEngineOption
 		wantSlot string
 		wantTemp float64
 	}{
@@ -481,10 +481,10 @@ func TestBuildReflectionUserPrompt(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		scope          ReflectionScope
-		prompt         string
-		checkContains  []string
+		name          string
+		scope         ReflectionScope
+		prompt        string
+		checkContains []string
 	}{
 		{
 			name:   "mission scope",

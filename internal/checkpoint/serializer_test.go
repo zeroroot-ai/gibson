@@ -32,9 +32,9 @@ func createTestExecutionState() *ExecutionState {
 	}
 
 	state.NodeStates["node-2"] = &NodeState{
-		NodeID:      "node-2",
-		Status:      NodeStatusPending,
-		RetryCount:  0,
+		NodeID:     "node-2",
+		Status:     NodeStatusPending,
+		RetryCount: 0,
 	}
 
 	// Add completed results

@@ -455,4 +455,3 @@ func TestQuotaKeyConstants(t *testing.T) {
 	assert.Equal(t, "quota:agents:count", quotaAgentsCountKey)
 	assert.Equal(t, "quota:memory:used_mb", quotaMemoryUsedMBKey)
 }
-

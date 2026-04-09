@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"

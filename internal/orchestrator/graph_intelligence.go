@@ -195,12 +195,12 @@ type Neo4jGraphQueries struct {
 
 // graphQueryMetrics provides Prometheus metrics for graph query operations.
 type graphQueryMetrics struct {
-	queryDuration  *prometheus.HistogramVec
-	contextSize    *prometheus.GaugeVec
-	queriesTotal   *prometheus.CounterVec
-	queryErrors    *prometheus.CounterVec
-	registerer     prometheus.Registerer
-	registered     bool
+	queryDuration *prometheus.HistogramVec
+	contextSize   *prometheus.GaugeVec
+	queriesTotal  *prometheus.CounterVec
+	queryErrors   *prometheus.CounterVec
+	registerer    prometheus.Registerer
+	registered    bool
 }
 
 // newGraphQueryMetrics creates and initializes graph query metrics.
@@ -214,8 +214,8 @@ func newGraphQueryMetrics(registerer prometheus.Registerer) *graphQueryMetrics {
 		registerer: registerer,
 		queryDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name: "gibson_orchestrator_graph_query_duration_seconds",
-				Help: "Duration of graph intelligence queries in seconds",
+				Name:    "gibson_orchestrator_graph_query_duration_seconds",
+				Help:    "Duration of graph intelligence queries in seconds",
 				Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0},
 			},
 			[]string{"query_type"},

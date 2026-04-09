@@ -37,11 +37,11 @@ const (
 	MetricAgentDelegations = "gibson.agent.delegations"
 
 	// Mission metrics
-	MetricMissionStatus    = "gibson.mission.status"
-	MetricMissionDuration  = "gibson.mission.duration"
-	MetricMissionNodes     = "gibson.mission.nodes"
-	MetricMissionsActive   = "gibson.missions.active"
-	MetricMissionsTotal    = "gibson.missions.total"
+	MetricMissionStatus     = "gibson.mission.status"
+	MetricMissionDuration   = "gibson.mission.duration"
+	MetricMissionNodes      = "gibson.mission.nodes"
+	MetricMissionsActive    = "gibson.missions.active"
+	MetricMissionsTotal     = "gibson.missions.total"
 	MetricMissionIterations = "gibson.mission.iterations"
 )
 

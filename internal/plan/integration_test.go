@@ -265,7 +265,7 @@ func (m *MockHarness) AddTool(name, description string) *MockHarness {
 		Name:            name,
 		Description:     description,
 		Tags:            []string{},
-		InputProtoType:  "google.protobuf.Struct",  // Generic proto type for testing
+		InputProtoType:  "google.protobuf.Struct", // Generic proto type for testing
 		OutputProtoType: "google.protobuf.Struct", // Generic proto type for testing
 	}
 	return m

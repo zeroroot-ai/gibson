@@ -6,8 +6,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zero-day-ai/gibson/internal/auth"
+	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // GetCredential retrieves a tenant-scoped credential by name.

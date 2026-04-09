@@ -170,5 +170,3 @@ type Daemon interface {
 	// The daemon implements api.DaemonInterface.Status() which returns api.DaemonStatus.
 	// For internal status queries, use the daemon's status() private method.
 }
-
-

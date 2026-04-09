@@ -259,7 +259,7 @@ func TestHarnessCheckpointMethods_GetPreviousRunCheckpoint(t *testing.T) {
 		currentThreadID := "thread-current"
 		previousThreadID := "thread-previous"
 		currentRun := 2
-		previousRun := 1
+		_ = 1 // previousRun not used directly; GetPreviousRunCheckpoint(1) is called below
 
 		// Create threads with run_number metadata
 		threads := []*checkpoint.Thread{

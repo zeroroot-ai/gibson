@@ -127,13 +127,13 @@ func (v *K8sValidator) Authenticate(ctx context.Context, token string) (*Identit
 
 	// Build claims map
 	claims := map[string]any{
-		"username":        userInfo.Username,
-		"namespace":       namespace,
-		"serviceaccount":  saName,
-		"uid":             userInfo.UID,
-		"groups":          userInfo.Groups,
-		"extra":           userInfo.Extra,
-		"authentication":  "kubernetes",
+		"username":       userInfo.Username,
+		"namespace":      namespace,
+		"serviceaccount": saName,
+		"uid":            userInfo.UID,
+		"groups":         userInfo.Groups,
+		"extra":          userInfo.Extra,
+		"authentication": "kubernetes",
 	}
 
 	// Build identity

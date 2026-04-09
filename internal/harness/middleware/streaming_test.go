@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
-	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	_ "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1" // imported for type registry side effects
 )
 
 // mockStreamSender is a mock implementation of StreamSender for testing

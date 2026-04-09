@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/types"
+	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // EventBus manages event distribution to subscribers.

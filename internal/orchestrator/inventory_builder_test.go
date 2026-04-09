@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 )
 

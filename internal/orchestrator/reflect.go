@@ -279,13 +279,13 @@ func (e *LLMReflectionEngine) Reflect(ctx context.Context, scope ReflectionScope
 			Timestamp: time.Now(),
 			MissionID: types.ID(state.MissionInfo.ID),
 			Payload: map[string]any{
-				"scope":           scope.String(),
-				"success":         true,
-				"issues_count":    len(result.IssuesIdentified),
+				"scope":             scope.String(),
+				"success":           true,
+				"issues_count":      len(result.IssuesIdentified),
 				"suggestions_count": len(result.SuggestedChanges),
-				"confidence":      result.ConfidenceInApproach,
-				"tokens_used":     result.TokensUsed,
-				"duration":        time.Since(startTime).String(),
+				"confidence":        result.ConfidenceInApproach,
+				"tokens_used":       result.TokensUsed,
+				"duration":          time.Since(startTime).String(),
 			},
 		})
 	}

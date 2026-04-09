@@ -69,17 +69,25 @@ type OTelMetricsRecorder struct {
 	meter metric.Meter
 
 	// Counters track cumulative counts
-	llmRequestsTotal      metric.Int64Counter
-	llmTokensTotal        metric.Int64Counter
-	llmCostTotal          metric.Float64Counter
-	toolCallsTotal        metric.Int64Counter
-	findingsTotal         metric.Int64Counter
-	agentExecutionsTotal  metric.Int64Counter
-	missionsTotal         metric.Int64Counter
-	memoryOpsTotal        metric.Int64Counter
-	graphOpsTotal         metric.Int64Counter
-	decisionsTotal        metric.Int64Counter
-	authzDecisionsTotal   metric.Int64Counter
+	llmRequestsTotal     metric.Int64Counter
+	llmTokensTotal       metric.Int64Counter
+	llmCostTotal         metric.Float64Counter
+	toolCallsTotal       metric.Int64Counter
+	findingsTotal        metric.Int64Counter
+	agentExecutionsTotal metric.Int64Counter
+	missionsTotal        metric.Int64Counter
+	memoryOpsTotal       metric.Int64Counter
+	graphOpsTotal        metric.Int64Counter
+	decisionsTotal       metric.Int64Counter
+	authzDecisionsTotal  metric.Int64Counter
+
+	// FGA-specific counters (authz-03).
+	fgaUnavailableTotal metric.Int64Counter
+
+	// Component authz counters (authz-05).
+	componentAuthzTotal        metric.Int64Counter
+	componentAuthzFailOpenTotal metric.Int64Counter
+	workTTLExpiredTotal        metric.Int64Counter
 
 	// Histograms track distributions of values
 	llmLatencySeconds      metric.Float64Histogram
@@ -210,6 +218,46 @@ func NewOTelMetricsRecorder(mp metric.MeterProvider) (*OTelMetricsRecorder, erro
 	recorder.authzDecisionsTotal, err = meter.Int64Counter(
 		"gibson.authz.decisions.total",
 		metric.WithDescription("Total RPC authorization decisions by decision (allow|deny), method, and permission"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// FGA-specific counters (authz-03).
+	recorder.fgaUnavailableTotal, err = meter.Int64Counter(
+		"gibson.authz.fga_unavailable_total",
+		metric.WithDescription("FGA service was unreachable for an authorization check (labeled by method)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Component authz counters (authz-05).
+	// gibson_component_authz_total: every component-level Authorize RPC decision,
+	// labeled by action, decision (allow|deny), and tenant_id.
+	recorder.componentAuthzTotal, err = meter.Int64Counter(
+		"gibson_component_authz_total",
+		metric.WithDescription("Total component-level authorization decisions (allow or deny) via the harness callback RPC"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// gibson_component_authz_fail_open_total: times the SDK allowed an operation
+	// despite the authz service being unreachable (fail-open mode).
+	recorder.componentAuthzFailOpenTotal, err = meter.Int64Counter(
+		"gibson_component_authz_fail_open_total",
+		metric.WithDescription("Total component authz checks allowed due to fail-open policy when the daemon is unreachable"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// gibson_work_ttl_expired_total: work items rejected by the SDK serve loop
+	// because their AuthzContext TTL had elapsed.
+	recorder.workTTLExpiredTotal, err = meter.Int64Counter(
+		"gibson_work_ttl_expired_total",
+		metric.WithDescription("Total work items rejected by the SDK serve loop due to expired AuthzContext TTL"),
 	)
 	if err != nil {
 		return nil, err
@@ -673,4 +721,102 @@ func (r *OTelMetricsRecorder) RecordAuthzDecision(ctx context.Context, decision,
 	}
 
 	r.authzDecisionsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
+}
+
+// RecordFgaUnavailable increments the FGA-unavailable counter.
+// Called when the FGA service cannot be reached for an authorization check.
+//
+// Parameters:
+//   - ctx: gRPC request context
+//   - method: fully-qualified gRPC method path
+func (r *OTelMetricsRecorder) RecordFgaUnavailable(ctx context.Context, method string) {
+	if r == nil || r.fgaUnavailableTotal == nil {
+		return
+	}
+	r.fgaUnavailableTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("method", method),
+	))
+}
+
+// ============================================================================
+// Component authz metrics (authz-05)
+// ============================================================================
+
+// RecordComponentAuthz increments the component-level authz decision counter.
+//
+// Called from the daemon's HarnessCallbackService.Authorize handler after each
+// FGA decision. Labeled by action, decision, and tenant_id so operators can
+// alert on unexpected denial rates or monitor per-tenant authz patterns.
+//
+// Parameters:
+//   - ctx: request context providing tenant_id label
+//   - action: the action string (e.g., "execute", "read", "write")
+//   - decision: "allow" or "deny"
+//
+// Example:
+//
+//	recorder.RecordComponentAuthz(ctx, "execute", "allow")
+//	recorder.RecordComponentAuthz(ctx, "write", "deny")
+func (r *OTelMetricsRecorder) RecordComponentAuthz(ctx context.Context, action, decision string) {
+	if r == nil || r.componentAuthzTotal == nil {
+		return
+	}
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	r.componentAuthzTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("action", action),
+		attribute.String("decision", decision),
+		attribute.String("tenant_id", tenantID),
+	))
+}
+
+// RecordComponentAuthzFailOpen increments the fail-open counter for component authz.
+//
+// Called by the SDK serve loop (or proxy) when the daemon's Authorize RPC is
+// unreachable AND the component is configured with fail-open mode. This counter
+// helps operators detect when fail-open is hiding real authz service outages.
+//
+// Parameters:
+//   - ctx: request context providing tenant_id label
+//   - action: the action that was allowed without a real authz check (e.g., "execute")
+//
+// Example:
+//
+//	recorder.RecordComponentAuthzFailOpen(ctx, "execute")
+func (r *OTelMetricsRecorder) RecordComponentAuthzFailOpen(ctx context.Context, action string) {
+	if r == nil || r.componentAuthzFailOpenTotal == nil {
+		return
+	}
+	tenantID := auth.TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	r.componentAuthzFailOpenTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("action", action),
+		attribute.String("tenant_id", tenantID),
+	))
+}
+
+// RecordWorkTTLExpired increments the work-item TTL-expired counter.
+//
+// Called by the SDK serve loop when a work item's AuthzContext TTL has elapsed.
+// This indicates that work was queued but not consumed before its signing
+// context expired — typically a sign of slow consumers or misconfigured TTLs.
+//
+// Parameters:
+//   - ctx: request context
+//   - component: component name (e.g., "tool:nmap", "plugin:gitlab")
+//
+// Example:
+//
+//	recorder.RecordWorkTTLExpired(ctx, "tool:nmap")
+func (r *OTelMetricsRecorder) RecordWorkTTLExpired(ctx context.Context, component string) {
+	if r == nil || r.workTTLExpiredTotal == nil {
+		return
+	}
+	r.workTTLExpiredTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("component", component),
+	))
 }

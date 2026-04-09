@@ -1125,11 +1125,11 @@ func (a *Actor) requestApproval(ctx context.Context, decision *Decision, mission
 		IsTerminal:   false,
 		TargetNodeID: decision.TargetNodeID,
 		Metadata: map[string]interface{}{
-			"approval_id":   approvalID,
-			"approved":      false,
-			"skip_reason":   skipReason,
-			"responded_by":  response.RespondedBy,
-			"comment":       response.Comment,
+			"approval_id":  approvalID,
+			"approved":     false,
+			"skip_reason":  skipReason,
+			"responded_by": response.RespondedBy,
+			"comment":      response.Comment,
 		},
 	}, nil
 }
@@ -1155,9 +1155,9 @@ func (a *Actor) abort(ctx context.Context, decision *Decision, missionID types.I
 	`
 
 	params := map[string]interface{}{
-		"mission_id":      missionID.String(),
-		"abort_reason":    decision.AbortReason,
-		"abort_severity":  decision.AbortSeverity,
+		"mission_id":     missionID.String(),
+		"abort_reason":   decision.AbortReason,
+		"abort_severity": decision.AbortSeverity,
 	}
 
 	result, err := a.graphClient.Query(ctx, cypher, params)
@@ -1195,9 +1195,9 @@ func (a *Actor) abort(ctx context.Context, decision *Decision, missionID types.I
 		Error:      nil,
 		IsTerminal: true,
 		Metadata: map[string]interface{}{
-			"abort_reason":      decision.AbortReason,
-			"abort_severity":    decision.AbortSeverity,
-			"cleanup_required":  decision.CleanupRequired,
+			"abort_reason":     decision.AbortReason,
+			"abort_severity":   decision.AbortSeverity,
+			"cleanup_required": decision.CleanupRequired,
 		},
 	}, nil
 }
@@ -1360,8 +1360,8 @@ func (a *Actor) rollback(ctx context.Context, decision *Decision, missionID type
 		Error:      nil,
 		IsTerminal: false,
 		Metadata: map[string]interface{}{
-			"checkpoint_id":      checkpointID,
-			"rollback_to_node":   decision.RollbackToNode,
+			"checkpoint_id":       checkpointID,
+			"rollback_to_node":    decision.RollbackToNode,
 			"checkpoint_restored": true,
 		},
 	}, nil
@@ -1468,12 +1468,12 @@ func (a *Actor) reflect(ctx context.Context, decision *Decision, missionID types
 		Error:      nil,
 		IsTerminal: false,
 		Metadata: map[string]interface{}{
-			"scope":                  decision.ReflectionScope,
-			"assessment":             result.Assessment,
-			"issues_count":           len(result.IssuesIdentified),
-			"suggestions_count":      len(result.SuggestedChanges),
-			"confidence_in_approach": result.ConfidenceInApproach,
-			"tokens_used":            result.TokensUsed,
+			"scope":                                  decision.ReflectionScope,
+			"assessment":                             result.Assessment,
+			"issues_count":                           len(result.IssuesIdentified),
+			"suggestions_count":                      len(result.SuggestedChanges),
+			"confidence_in_approach":                 result.ConfidenceInApproach,
+			"tokens_used":                            result.TokensUsed,
 			"does_not_count_against_iteration_limit": true,
 		},
 	}, nil
@@ -1756,10 +1756,10 @@ func (a *Actor) spawnAgentWithEscalation(ctx context.Context, decision *Decision
 
 	// Create spawn decision
 	spawnDecision := &Decision{
-		Reasoning:    fmt.Sprintf("Spawning escalated agent due to: %s", decision.EscalationContext),
-		Action:       ActionSpawnAgent,
-		SpawnConfig:  spawnConfig,
-		Confidence:   decision.Confidence,
+		Reasoning:   fmt.Sprintf("Spawning escalated agent due to: %s", decision.EscalationContext),
+		Action:      ActionSpawnAgent,
+		SpawnConfig: spawnConfig,
+		Confidence:  decision.Confidence,
 	}
 
 	// Spawn the agent
@@ -1834,14 +1834,14 @@ func (a *Actor) buildObservationState(ctx context.Context, missionID types.ID) *
 		MissionInfo: MissionInfo{
 			ID: missionID.String(),
 		},
-		GraphSummary: GraphSummary{},
-		ReadyNodes:   []NodeSummary{},
-		RunningNodes: []NodeSummary{},
-		CompletedNodes: []CompletedNodeSummary{},
-		FailedNodes:  []NodeSummary{},
-		RecentDecisions: []DecisionSummary{},
+		GraphSummary:        GraphSummary{},
+		ReadyNodes:          []NodeSummary{},
+		RunningNodes:        []NodeSummary{},
+		CompletedNodes:      []CompletedNodeSummary{},
+		FailedNodes:         []NodeSummary{},
+		RecentDecisions:     []DecisionSummary{},
 		ResourceConstraints: ResourceConstraints{},
-		ObservedAt:   time.Now(),
+		ObservedAt:          time.Now(),
 	}
 
 	// Query mission info from Neo4j
@@ -1922,12 +1922,12 @@ func (a *Actor) buildObservationState(ctx context.Context, missionID types.ID) *
 
 // NodeExecution represents a completed node execution for observation state.
 type NodeExecution struct {
-	NodeID      string        `json:"node_id"`
-	AgentName   string        `json:"agent_name"`
-	Status      string        `json:"status"`
-	Duration    time.Duration `json:"duration"`
-	OutputKeys  []string      `json:"output_keys"`
-	ErrorBrief  string        `json:"error_brief,omitempty"`
+	NodeID     string        `json:"node_id"`
+	AgentName  string        `json:"agent_name"`
+	Status     string        `json:"status"`
+	Duration   time.Duration `json:"duration"`
+	OutputKeys []string      `json:"output_keys"`
+	ErrorBrief string        `json:"error_brief,omitempty"`
 }
 
 // FindingSummary represents a security finding for observation state.

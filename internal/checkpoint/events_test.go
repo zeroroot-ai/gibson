@@ -12,24 +12,24 @@ import (
 
 func TestLifecycleEventType_String(t *testing.T) {
 	tests := []struct {
-		name     string
+		name      string
 		eventType LifecycleEventType
-		want     string
+		want      string
 	}{
 		{
-			name:     "checkpoint created",
+			name:      "checkpoint created",
 			eventType: EventCheckpointCreated,
-			want:     "checkpoint.created",
+			want:      "checkpoint.created",
 		},
 		{
-			name:     "thread branched",
+			name:      "thread branched",
 			eventType: EventThreadBranched,
-			want:     "thread.branched",
+			want:      "thread.branched",
 		},
 		{
-			name:     "approval approved",
+			name:      "approval approved",
 			eventType: EventApprovalApproved,
-			want:     "approval.approved",
+			want:      "approval.approved",
 		},
 	}
 
@@ -183,9 +183,9 @@ func TestNewThreadCompletedEvent(t *testing.T) {
 
 func TestNewApprovalReceivedEvent(t *testing.T) {
 	tests := []struct {
-		name          string
-		status        ApprovalStatus
-		expectedType  LifecycleEventType
+		name         string
+		status       ApprovalStatus
+		expectedType LifecycleEventType
 	}{
 		{
 			name:         "approved",

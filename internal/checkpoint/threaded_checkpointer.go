@@ -95,7 +95,6 @@ type StateUpdates struct {
 	Metadata map[string]string
 }
 
-
 // CheckpointerConfig defines configuration for the threaded checkpointer.
 type CheckpointerConfig struct {
 	// Serialization options for state serialization
@@ -132,7 +131,7 @@ func DefaultCheckpointerConfig() CheckpointerConfig {
 			Encrypt:  false,
 		},
 		Compression:   DefaultCompressionConfig(),
-		BlobThreshold: 1048576, // 1MB
+		BlobThreshold: 1048576,             // 1MB
 		DefaultTTL:    30 * 24 * time.Hour, // 30 days
 	}
 }

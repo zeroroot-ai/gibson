@@ -47,14 +47,14 @@ type PluginManifest struct {
 
 // RuntimeConfig defines how the component should be executed.
 type RuntimeConfig struct {
-	Type       string            `json:"type" yaml:"type"`                               // go, python, node, docker, binary, http, grpc
-	Entrypoint string            `json:"entrypoint" yaml:"entrypoint"`                   // Executable path or command
-	Args       []string          `json:"args,omitempty" yaml:"args,omitempty"`           // Command-line arguments
-	Env        map[string]string `json:"env,omitempty" yaml:"env,omitempty"`             // Environment variables
-	WorkDir    string            `json:"workdir,omitempty" yaml:"workdir,omitempty"`     // Working directory
-	Port       int               `json:"port,omitempty" yaml:"port,omitempty"`           // Network port for HTTP/gRPC
-	Image      string            `json:"image,omitempty" yaml:"image,omitempty"`         // Docker image for container runtime
-	Volumes    []string          `json:"volumes,omitempty" yaml:"volumes,omitempty"`     // Volume mounts for Docker
+	Type       string            `json:"type" yaml:"type"`                           // go, python, node, docker, binary, http, grpc
+	Entrypoint string            `json:"entrypoint" yaml:"entrypoint"`               // Executable path or command
+	Args       []string          `json:"args,omitempty" yaml:"args,omitempty"`       // Command-line arguments
+	Env        map[string]string `json:"env,omitempty" yaml:"env,omitempty"`         // Environment variables
+	WorkDir    string            `json:"workdir,omitempty" yaml:"workdir,omitempty"` // Working directory
+	Port       int               `json:"port,omitempty" yaml:"port,omitempty"`       // Network port for HTTP/gRPC
+	Image      string            `json:"image,omitempty" yaml:"image,omitempty"`     // Docker image for container runtime
+	Volumes    []string          `json:"volumes,omitempty" yaml:"volumes,omitempty"` // Volume mounts for Docker
 }
 
 // Dependencies defines dependencies required by the component.

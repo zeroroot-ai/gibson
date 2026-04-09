@@ -124,8 +124,8 @@ func TestContentLoggingConfig_ValidateComplexPatterns(t *testing.T) {
 		MaxCompletionLength: 10000,
 		RedactPatterns: []string{
 			`(?i)(api[_-]?key|password|secret|token|bearer)[=:\s]+\S+`, // Case-insensitive with alternation
-			`\b\d{3}-\d{2}-\d{4}\b`,                                     // SSN pattern
-			`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b`,      // Email pattern
+			`\b\d{3}-\d{2}-\d{4}\b`,                               // SSN pattern
+			`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b`, // Email pattern
 		},
 	}
 

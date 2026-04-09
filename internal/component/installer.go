@@ -3,8 +3,8 @@ package component
 import (
 	"context"
 
-	sdkGraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"fmt"
+	sdkGraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"os"
 	"os/exec"
 	"path/filepath"

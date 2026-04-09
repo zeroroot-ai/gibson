@@ -31,9 +31,9 @@ type Service struct {
 	similarity  *SimilarTargetFinder
 
 	// Cache
-	cache     *queryCache
-	cacheTTL  time.Duration
-	cacheMu   sync.RWMutex
+	cache    *queryCache
+	cacheTTL time.Duration
+	cacheMu  sync.RWMutex
 
 	// Circuit breaker
 	failures       int

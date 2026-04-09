@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/casbin/casbin/v2"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/zero-day-ai/gibson/internal/crypto"
@@ -32,15 +31,15 @@ var (
 // explicitly; callers should use EffectiveReadEnabled / EffectiveWriteEnabled
 // (or CheckAccess) rather than reading these fields directly.
 type PluginAccess struct {
-	TenantID      string `json:"tenant_id"`
-	PluginName    string `json:"plugin_name"`
-	Enabled       bool   `json:"enabled"`
-	ReadEnabled   bool   `json:"read_enabled"`
-	WriteEnabled  bool   `json:"write_enabled"`
-	Source        string `json:"source"` // "platform" or "self-hosted"
-	ConfiguredAt  string `json:"configured_at,omitempty"`
-	ConfiguredBy  string `json:"configured_by,omitempty"`
-	HasConfig     bool   `json:"has_config"`
+	TenantID     string `json:"tenant_id"`
+	PluginName   string `json:"plugin_name"`
+	Enabled      bool   `json:"enabled"`
+	ReadEnabled  bool   `json:"read_enabled"`
+	WriteEnabled bool   `json:"write_enabled"`
+	Source       string `json:"source"` // "platform" or "self-hosted"
+	ConfiguredAt string `json:"configured_at,omitempty"`
+	ConfiguredBy string `json:"configured_by,omitempty"`
+	HasConfig    bool   `json:"has_config"`
 }
 
 // EffectiveReadEnabled returns whether the tenant has read access to the plugin,
@@ -159,15 +158,6 @@ type RedisPluginAccessStore struct {
 	keyProvider crypto.KeyProvider
 	registry    ComponentRegistry
 	logger      *slog.Logger
-	enforcer    *casbin.Enforcer // optional; nil disables Casbin sync
-}
-
-// SetEnforcer attaches a Casbin enforcer to the store. When non-nil, calls to
-// Enable, Disable, and SetAccessGranularity will sync Casbin policies so that
-// "tenant-admin" subjects gain or lose read/write capabilities for each plugin
-// in real time. Passing nil disables Casbin sync (safe default).
-func (s *RedisPluginAccessStore) SetEnforcer(e *casbin.Enforcer) {
-	s.enforcer = e
 }
 
 // NewRedisPluginAccessStore creates a new store.
@@ -246,9 +236,6 @@ func (s *RedisPluginAccessStore) Enable(ctx context.Context, tenant, pluginName 
 		}
 	}
 
-	// Sync full read+write Casbin policies (legacy: no granular restrictions).
-	s.syncCasbinEnable(ctx, tenant, pluginName, true, true)
-
 	return nil
 }
 
@@ -269,9 +256,6 @@ func (s *RedisPluginAccessStore) Disable(ctx context.Context, tenant, pluginName
 	if err != nil {
 		return fmt.Errorf("disable plugin: %w", err)
 	}
-
-	// Remove all Casbin policies for this plugin resource and tenant domain.
-	s.syncCasbinDisable(ctx, tenant, pluginName)
 
 	return nil
 }
@@ -326,15 +310,6 @@ func (s *RedisPluginAccessStore) SetAccessGranularity(ctx context.Context, tenan
 		slog.Bool("write_enabled", writeEnabled),
 	)
 
-	// Sync Casbin policies to reflect the new access levels.
-	if readEnabled || writeEnabled {
-		s.syncCasbinEnable(ctx, tenant, pluginName, readEnabled, writeEnabled)
-	} else {
-		// Both disabled — remove all policies (equivalent to a full disable at the
-		// Casbin level even though the Redis record remains for config retention).
-		s.syncCasbinDisable(ctx, tenant, pluginName)
-	}
-
 	return nil
 }
 
@@ -361,58 +336,6 @@ func (s *RedisPluginAccessStore) CheckAccess(ctx context.Context, tenant, plugin
 		return ErrPluginAccessDenied
 	}
 	return nil
-}
-
-// syncCasbinEnable adds Casbin allow policies for the "tenant-admin" role in
-// the tenant domain for the given plugin resource. It is a best-effort
-// operation: errors are logged but never returned to callers.
-func (s *RedisPluginAccessStore) syncCasbinEnable(ctx context.Context, tenant, pluginName string, read, write bool) {
-	if s.enforcer == nil {
-		return
-	}
-
-	resource := fmt.Sprintf("plugin:%s", pluginName)
-
-	if read {
-		if _, err := s.enforcer.AddPolicy("tenant-admin", tenant, resource, "read"); err != nil {
-			s.logger.WarnContext(ctx, "casbin: failed to add read policy for plugin",
-				slog.String("tenant", tenant),
-				slog.String("plugin", pluginName),
-				slog.String("error", err.Error()),
-			)
-		}
-	}
-
-	if write {
-		if _, err := s.enforcer.AddPolicy("tenant-admin", tenant, resource, "write"); err != nil {
-			s.logger.WarnContext(ctx, "casbin: failed to add write policy for plugin",
-				slog.String("tenant", tenant),
-				slog.String("plugin", pluginName),
-				slog.String("error", err.Error()),
-			)
-		}
-	}
-}
-
-// syncCasbinDisable removes all Casbin policies for "tenant-admin" on this
-// plugin resource in the tenant domain. It is a best-effort operation: errors
-// are logged but never returned to callers.
-func (s *RedisPluginAccessStore) syncCasbinDisable(ctx context.Context, tenant, pluginName string) {
-	if s.enforcer == nil {
-		return
-	}
-
-	resource := fmt.Sprintf("plugin:%s", pluginName)
-
-	// RemoveFilteredPolicy(1, ...) removes rows where field[1] (dom) == tenant
-	// AND field[2] (obj) == resource, regardless of subject or action.
-	if _, err := s.enforcer.RemoveFilteredPolicy(1, tenant, resource); err != nil {
-		s.logger.WarnContext(ctx, "casbin: failed to remove policies for plugin",
-			slog.String("tenant", tenant),
-			slog.String("plugin", pluginName),
-			slog.String("error", err.Error()),
-		)
-	}
 }
 
 // GetDecryptedConfig implements PluginAccessStore.

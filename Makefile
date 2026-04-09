@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin test test-coverage test-race lint clean install help proto proto-deps proto-clean
+.PHONY: all build bin test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz
 
 # Go parameters
 GOCMD=go
@@ -127,6 +127,23 @@ deps:
 check: fmt vet lint test-race
 	@echo "All checks passed!"
 
+# Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)
+# Usage:
+#   make check-authz           # unit tests only (no Docker required)
+#   make check-authz INTEGRATION=1  # unit + integration tests (requires Docker)
+check-authz:
+	@echo "Running authz package vet..."
+	$(GOCMD) vet ./internal/authz/... ./internal/daemon/authz_init.go ./cmd/gibson/authz/...
+	@echo "Running authz unit tests (race detector)..."
+	$(GOTEST) -race -count=1 -timeout=2m ./internal/authz/... ./internal/daemon/...
+	@if [ "$(INTEGRATION)" = "1" ]; then \
+		echo "Running authz integration tests (requires Docker for testcontainers)..."; \
+		$(GOTEST) -v -tags integration -count=1 -timeout=5m ./internal/authz/...; \
+	else \
+		echo "Skipping integration tests. Run 'make check-authz INTEGRATION=1' to include them (requires Docker)."; \
+	fi
+	@echo "authz checks passed!"
+
 # Proto generation
 proto-deps:
 	@echo "Installing protoc plugins..."
@@ -160,6 +177,8 @@ help:
 	@echo "  make install       - Install binary to GOPATH/bin"
 	@echo "  make deps          - Download dependencies"
 	@echo "  make check         - Run all checks (fmt, vet, lint, test-race)"
+	@echo "  make check-authz   - Run authz package checks (unit tests + vet)"
+	@echo "  make check-authz INTEGRATION=1 - Include FGA integration tests (requires Docker)"
 	@echo "  make proto         - Generate Go code from proto files"
 	@echo "  make proto-deps    - Install protoc plugins"
 	@echo "  make proto-clean   - Remove generated proto files"

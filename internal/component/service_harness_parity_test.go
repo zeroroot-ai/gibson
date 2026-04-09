@@ -23,10 +23,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/memory"
+	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -209,21 +209,21 @@ type mockWorkingMemory struct {
 	deleted []string
 }
 
-func (m *mockWorkingMemory) Get(_ string) (interface{}, bool)     { return nil, false }
-func (m *mockWorkingMemory) Set(_ string, _ interface{}) error    { return nil }
-func (m *mockWorkingMemory) Delete(key string) bool               { m.deleted = append(m.deleted, key); return true }
-func (m *mockWorkingMemory) Clear()                               {}
-func (m *mockWorkingMemory) List() []string                       { return nil }
-func (m *mockWorkingMemory) TokenCount() int                      { return 0 }
-func (m *mockWorkingMemory) MaxTokens() int                       { return 0 }
+func (m *mockWorkingMemory) Get(_ string) (interface{}, bool)  { return nil, false }
+func (m *mockWorkingMemory) Set(_ string, _ interface{}) error { return nil }
+func (m *mockWorkingMemory) Delete(key string) bool            { m.deleted = append(m.deleted, key); return true }
+func (m *mockWorkingMemory) Clear()                            {}
+func (m *mockWorkingMemory) List() []string                    { return nil }
+func (m *mockWorkingMemory) TokenCount() int                   { return 0 }
+func (m *mockWorkingMemory) MaxTokens() int                    { return 0 }
 
 // mockMemoryStore wraps mockWorkingMemory to satisfy memory.MemoryStore.
 type mockMemoryStore struct {
 	working *mockWorkingMemory
 }
 
-func (s *mockMemoryStore) Working() memory.WorkingMemory { return s.working }
-func (s *mockMemoryStore) Mission() memory.MissionMemory { return nil }
+func (s *mockMemoryStore) Working() memory.WorkingMemory   { return s.working }
+func (s *mockMemoryStore) Mission() memory.MissionMemory   { return nil }
 func (s *mockMemoryStore) LongTerm() memory.LongTermMemory { return nil }
 
 // ---------------------------------------------------------------------------

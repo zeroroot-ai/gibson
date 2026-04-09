@@ -506,7 +506,7 @@ func TestDefaultMemoryRecaller_Recall_PartialFailure(t *testing.T) {
 	// Should not error - partial results are acceptable
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Len(t, result.MissionResults, 0) // Failed
+	assert.Len(t, result.MissionResults, 0)  // Failed
 	assert.Len(t, result.LongTermResults, 1) // Succeeded
 
 	mockMission.AssertExpectations(t)

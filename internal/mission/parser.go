@@ -125,12 +125,12 @@ type yamlConditionData struct {
 
 // yamlWorkspaceData represents workspace configuration from YAML
 type yamlWorkspaceData struct {
-	Repositories      []yamlRepositoryData  `yaml:"repositories,omitempty"`
-	CleanupOnComplete bool                  `yaml:"cleanup_on_complete,omitempty"`
-	UseWorktrees      bool                  `yaml:"use_worktrees,omitempty"`
-	LSPEnabled        bool                  `yaml:"lsp_enabled,omitempty"`
-	LSPTimeout        string                `yaml:"lsp_timeout,omitempty"`
-	BaseDirectory     string                `yaml:"base_directory,omitempty"`
+	Repositories      []yamlRepositoryData `yaml:"repositories,omitempty"`
+	CleanupOnComplete bool                 `yaml:"cleanup_on_complete,omitempty"`
+	UseWorktrees      bool                 `yaml:"use_worktrees,omitempty"`
+	LSPEnabled        bool                 `yaml:"lsp_enabled,omitempty"`
+	LSPTimeout        string               `yaml:"lsp_timeout,omitempty"`
+	BaseDirectory     string               `yaml:"base_directory,omitempty"`
 }
 
 // yamlRepositoryData represents a repository configuration from YAML

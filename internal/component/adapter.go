@@ -92,13 +92,13 @@ type AgentInfo struct {
 
 // ToolInfo provides metadata about a registered tool.
 type ToolInfo struct {
-	Name         string               `json:"name"`
-	Version      string               `json:"version"`
-	Description  string               `json:"description"`
-	Instances    int                  `json:"instances"`
-	Endpoints    []string             `json:"endpoints"`
-	Capabilities *types.Capabilities  `json:"capabilities,omitempty"`
-	Health       string               `json:"health"`
+	Name         string              `json:"name"`
+	Version      string              `json:"version"`
+	Description  string              `json:"description"`
+	Instances    int                 `json:"instances"`
+	Endpoints    []string            `json:"endpoints"`
+	Capabilities *types.Capabilities `json:"capabilities,omitempty"`
+	Health       string              `json:"health"`
 }
 
 // PluginInfo provides metadata about a registered plugin.

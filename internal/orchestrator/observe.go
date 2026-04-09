@@ -18,9 +18,9 @@ import (
 type Observer struct {
 	missionQueries   *queries.MissionQueries
 	executionQueries *queries.ExecutionQueries
-	inventoryBuilder *InventoryBuilder  // Optional - provides component awareness
-	approvalManager  ApprovalManager    // Optional - provides pending approvals
-	reflectionEngine ReflectionEngine   // Optional - provides reflection insights
+	inventoryBuilder *InventoryBuilder // Optional - provides component awareness
+	approvalManager  ApprovalManager   // Optional - provides pending approvals
+	reflectionEngine ReflectionEngine  // Optional - provides reflection insights
 }
 
 // ObserverOption is a functional option for configuring Observer.

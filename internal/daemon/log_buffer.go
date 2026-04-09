@@ -19,8 +19,8 @@ type LogEntry struct {
 type RingBuffer struct {
 	entries []LogEntry
 	size    int
-	head    int  // Points to the next write position
-	count   int  // Number of entries currently stored
+	head    int // Points to the next write position
+	count   int // Number of entries currently stored
 	mu      sync.RWMutex
 }
 

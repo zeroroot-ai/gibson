@@ -611,9 +611,9 @@ func TestPluginAccessStore_StoreConfigSchema_OverwritesPrevious(t *testing.T) {
 
 func TestPluginAccessStoreKeyHelpers(t *testing.T) {
 	tests := []struct {
-		name    string
-		fn      func() string
-		want    string
+		name string
+		fn   func() string
+		want string
 	}{
 		{
 			name: "accessKey",
@@ -702,7 +702,7 @@ func TestMaskString(t *testing.T) {
 		input string
 		want  string
 	}{
-		{input: "short", want: "••••••••"},        // <= 8 chars
+		{input: "short", want: "••••••••"},         // <= 8 chars
 		{input: "12345678", want: "••••••••"},      // exactly 8 chars
 		{input: "123456789", want: "1234••••6789"}, // > 8 chars: first 4 + ••••  + last 4
 		{input: "ghp_supersecrettoken123456", want: "ghp_••••3456"},

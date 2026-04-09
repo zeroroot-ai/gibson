@@ -98,9 +98,9 @@ func TestStateRestorer_RestoreFromCheckpoint_EmptyMemory(t *testing.T) {
 	ctx := context.Background()
 
 	checkpoint := &mission.Checkpoint{
-		MissionID:     types.NewID(),
-		CreatedAt:     time.Now(),
-		CurrentNodeID: "node-1",
+		MissionID:      types.NewID(),
+		CreatedAt:      time.Now(),
+		CurrentNodeID:  "node-1",
 		CompletedNodes: map[string]mission.NodeOutput{},
 		WorkingMemory:  []byte{}, // Empty memory
 		MissionMemory:  []byte{}, // Empty memory

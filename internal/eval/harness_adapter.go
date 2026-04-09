@@ -775,7 +775,9 @@ func (a *GibsonHarnessAdapter) Workspaces() map[string]workspace.Workspace {
 // Delegates to the inner Gibson harness's TaxonomyRegistry implementation.
 func (a *GibsonHarnessAdapter) TaxonomyRegistry() graphrag.TaxonomyIntrospector {
 	// Type assert to access TaxonomyRegistry method from DefaultAgentHarness
-	if h, ok := a.inner.(interface{ TaxonomyRegistry() graphrag.TaxonomyIntrospector }); ok {
+	if h, ok := a.inner.(interface {
+		TaxonomyRegistry() graphrag.TaxonomyIntrospector
+	}); ok {
 		return h.TaxonomyRegistry()
 	}
 	// Return nil if inner harness doesn't implement TaxonomyRegistry
@@ -787,6 +789,13 @@ func (a *GibsonHarnessAdapter) TaxonomyRegistry() graphrag.TaxonomyIntrospector 
 // access to the full knowledge graph intelligence queries.
 func (g *GibsonHarnessAdapter) Intelligence() graphrag.IntelligenceQueries {
 	return &graphrag.NoOpIntelligenceQueries{}
+}
+
+// Authorize is a no-op in the eval harness adapter — eval runs bypass
+// component authz enforcement because they run under direct evaluation
+// context, not via the daemon callback channel.
+func (a *GibsonHarnessAdapter) Authorize(_ context.Context, _, _ string) error {
+	return nil
 }
 
 var _ agent.Harness = (*GibsonHarnessAdapter)(nil)

@@ -87,7 +87,7 @@ func TestInMemoryFindingStore_Get_EmptyStore(t *testing.T) {
 	ctx := context.Background()
 	missionID := types.NewID()
 
-	findings, err := store.Get(ctx, "", missionID,FindingFilter{})
+	findings, err := store.Get(ctx, "", missionID, FindingFilter{})
 	require.NoError(t, err)
 	assert.Empty(t, findings)
 }
@@ -106,7 +106,7 @@ func TestInMemoryFindingStore_Get_NoFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get all findings with no filter
-	findings, err := store.Get(ctx, "", missionID,FindingFilter{})
+	findings, err := store.Get(ctx, "", missionID, FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings, 2)
 }
@@ -129,7 +129,7 @@ func TestInMemoryFindingStore_Get_WithFilter_Severity(t *testing.T) {
 
 	// Filter for high severity
 	filter := NewFindingFilter().WithSeverity(agent.SeverityHigh)
-	findings, err := store.Get(ctx, "", missionID,*filter)
+	findings, err := store.Get(ctx, "", missionID, *filter)
 	require.NoError(t, err)
 	assert.Len(t, findings, 2)
 
@@ -159,7 +159,7 @@ func TestInMemoryFindingStore_Get_WithFilter_Category(t *testing.T) {
 
 	// Filter for injection category
 	filter := NewFindingFilter().WithCategory("injection")
-	findings, err := store.Get(ctx, "", missionID,*filter)
+	findings, err := store.Get(ctx, "", missionID, *filter)
 	require.NoError(t, err)
 	assert.Len(t, findings, 2)
 
@@ -196,7 +196,7 @@ func TestInMemoryFindingStore_Get_WithFilter_MultipleConditions(t *testing.T) {
 		WithCategory("injection").
 		WithMinConfidence(0.8)
 
-	findings, err := store.Get(ctx, "", missionID,*filter)
+	findings, err := store.Get(ctx, "", missionID, *filter)
 	require.NoError(t, err)
 	assert.Len(t, findings, 1)
 	assert.Equal(t, "SQL Injection", findings[0].Title)
@@ -213,7 +213,7 @@ func TestInMemoryFindingStore_Get_NoMatches(t *testing.T) {
 
 	// Filter that matches nothing
 	filter := NewFindingFilter().WithSeverity(agent.SeverityCritical)
-	findings, err := store.Get(ctx, "", missionID,*filter)
+	findings, err := store.Get(ctx, "", missionID, *filter)
 	require.NoError(t, err)
 	assert.Empty(t, findings)
 }
@@ -233,13 +233,13 @@ func TestInMemoryFindingStore_Get_DifferentMissions(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get findings for mission1
-	findings, err := store.Get(ctx, "", mission1,FindingFilter{})
+	findings, err := store.Get(ctx, "", mission1, FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings, 1)
 	assert.Equal(t, "Finding 1", findings[0].Title)
 
 	// Get findings for mission2
-	findings, err = store.Get(ctx, "", mission2,FindingFilter{})
+	findings, err = store.Get(ctx, "", mission2, FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings, 1)
 	assert.Equal(t, "Finding 2", findings[0].Title)
@@ -416,7 +416,7 @@ func TestInMemoryFindingStore_ConcurrentGet(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				findings, err := store.Get(ctx, "", missionID,FindingFilter{})
+				findings, err := store.Get(ctx, "", missionID, FindingFilter{})
 				assert.NoError(t, err)
 				assert.Len(t, findings, 100)
 			}
@@ -455,7 +455,7 @@ func TestInMemoryFindingStore_ConcurrentStoreAndGet(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < operations; j++ {
-				_, err := store.Get(ctx, "", missionID,FindingFilter{})
+				_, err := store.Get(ctx, "", missionID, FindingFilter{})
 				assert.NoError(t, err)
 			}
 		}()
@@ -489,7 +489,7 @@ func TestInMemoryFindingStore_ConcurrentOperations(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
-			_, err := store.Get(ctx, "", missionID,FindingFilter{})
+			_, err := store.Get(ctx, "", missionID, FindingFilter{})
 			assert.NoError(t, err)
 		}
 	}()
@@ -607,7 +607,7 @@ func TestInMemoryFindingStore_ComplexFiltering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := store.Get(ctx, "", missionID,*tt.filter)
+			results, err := store.Get(ctx, "", missionID, *tt.filter)
 			require.NoError(t, err)
 			assert.Len(t, results, tt.expectedCount)
 
@@ -633,7 +633,7 @@ func TestInMemoryFindingStore_ContextCancellation(t *testing.T) {
 	err := store.Store(ctx, "", missionID, finding)
 	require.NoError(t, err) // In-memory store ignores context
 
-	findings, err := store.Get(ctx, "", missionID,FindingFilter{})
+	findings, err := store.Get(ctx, "", missionID, FindingFilter{})
 	require.NoError(t, err) // In-memory store ignores context
 	assert.Len(t, findings, 1)
 }
@@ -648,7 +648,7 @@ func TestInMemoryFindingStore_ImmutabilityOfResults(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get findings
-	findings, err := store.Get(ctx, "", missionID,FindingFilter{})
+	findings, err := store.Get(ctx, "", missionID, FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings, 1)
 
@@ -656,7 +656,7 @@ func TestInMemoryFindingStore_ImmutabilityOfResults(t *testing.T) {
 	findings[0].Title = "Modified Title"
 
 	// Get findings again - should still have original title
-	findings2, err := store.Get(ctx, "", missionID,FindingFilter{})
+	findings2, err := store.Get(ctx, "", missionID, FindingFilter{})
 	require.NoError(t, err)
 	assert.Len(t, findings2, 1)
 

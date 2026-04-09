@@ -157,9 +157,9 @@ func (s *RedisPayloadStore) List(ctx context.Context, filter *PayloadFilter) ([]
 
 	// Execute search
 	searchOpts := &state.SearchOptions{
-		Limit:  filter.Limit,
-		Offset: filter.Offset,
-		SortBy: "created_at",
+		Limit:   filter.Limit,
+		Offset:  filter.Offset,
+		SortBy:  "created_at",
 		SortAsc: false,
 	}
 

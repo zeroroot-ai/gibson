@@ -90,7 +90,7 @@ func TestRedisMissionMemory_Store(t *testing.T) {
 
 	t.Run("store with metadata", func(t *testing.T) {
 		metadata := map[string]any{
-			"source": "api",
+			"source":   "api",
 			"priority": 1,
 		}
 

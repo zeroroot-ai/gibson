@@ -64,6 +64,19 @@ type Identity struct {
 	//
 	// Examples: ["graphrag:write", "plugin:gitlab:read", "missions:execute", "*"]
 	Capabilities []string
+
+	// Tenants are the Keycloak Organization aliases this identity is a member of.
+	//
+	// Populated by the OIDC validator from the JWT's "organizations" claim
+	// (set by the Organization Membership Mapper on the gibson-dashboard client).
+	// For API key identities and non-OIDC callers this is nil.
+	//
+	// This is the single source of truth for "which tenants does this user belong to."
+	//
+	// Nil means the JWT had no organizations claim (pre-migration users,
+	// service accounts, platform operators). An empty non-nil slice means the
+	// claim was present but empty.
+	Tenants []string
 }
 
 // Permission represents a fine-grained authorization grant.

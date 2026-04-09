@@ -8,17 +8,17 @@ import (
 	"log/slog"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
 	"google.golang.org/grpc"
-	grpcmeta "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/codes"
+	grpcmeta "google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/keycloak"
 	"github.com/zero-day-ai/gibson/internal/membership"
@@ -26,7 +26,19 @@ import (
 	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
+	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 )
+
+// authzIface is the narrow subset of authz.Authorizer that the DaemonServer
+// admin handlers use directly. Using an interface rather than the concrete type
+// avoids importing the authz package in tests that don't care about it.
+type authzIface interface {
+	Check(ctx context.Context, user, relation, object string) (bool, error)
+	Write(ctx context.Context, tuples []authz.Tuple) error
+	Delete(ctx context.Context, tuples []authz.Tuple) error
+	ListObjects(ctx context.Context, user, relation, objectType string) ([]string, error)
+	ListUsers(ctx context.Context, objectType, object, relation string) ([]string, error)
+}
 
 // DaemonServer implements the DaemonServiceServer interface.
 //
@@ -39,12 +51,6 @@ type DaemonServer struct {
 
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface
-
-	// schemaRegistry is the declarative RBAC schema loaded from
-	// permissions.yaml at daemon startup. Used by the GetAuthSchema RPC
-	// handler to return the live schema to the dashboard and other
-	// authenticated callers. Wired in task 7 (daemon grpc.go wiring).
-	schemaRegistry *auth.SchemaRegistry
 
 	// credentialHandler provides secure credential storage for per-tenant credentials
 	credentialHandler *CredentialHandler
@@ -120,6 +126,47 @@ type DaemonServer struct {
 	// membershipStore manages user-to-tenant membership records.
 	// May be nil; when nil, membership RPCs return codes.Unavailable.
 	membershipStore membership.MembershipStore
+
+	// signupHandler orchestrates the atomic multi-step tenant signup flow.
+	// May be nil; when nil, SignupTenant returns codes.Unavailable.
+	// Wired via WithSignupHandler during daemon startup.
+	// Added by authz-02-keycloak-organizations spec.
+	signupHandler *provisioner.SignupHandler
+
+	// inviteHandler manages member invitation creation, acceptance, and resend.
+	// May be nil; when nil, InviteMember/ResendInvitation return codes.Unavailable.
+	// Added by authz-04-dashboard-fga-migration spec.
+	inviteHandler *provisioner.InviteHandler
+
+	// grantHandler manages per-user component access grants via FGA.
+	// May be nil; when nil, GrantComponentAccess/RevokeComponentAccess return codes.Unavailable.
+	// Added by authz-04-dashboard-fga-migration spec.
+	grantHandler *provisioner.GrantHandler
+
+	// teamHandler manages team CRUD and crosstalk via FGA + Redis.
+	// May be nil; when nil, team RPCs return codes.Unavailable.
+	// Added by authz-04-dashboard-fga-migration spec.
+	teamHandler *provisioner.TeamHandler
+
+	// authorizer is the FGA Authorizer used by admin handlers that need direct FGA access.
+	// May be nil; when nil, RPCs that require it return codes.Unavailable.
+	// Added by authz-04-dashboard-fga-migration spec.
+	authorizer authzIface
+
+	// keycloakAdmin is the provisioner-level KeycloakAdmin client.
+	// May be nil; when nil, RPCs that require it return codes.Unavailable.
+	// Added by authz-04-dashboard-fga-migration spec.
+	keycloakAdmin provisioner.KeycloakAdmin
+
+	// auditLogger is the Redis-backed audit log reader/writer.
+	// May be nil; when nil, ListAuditEvents falls back to Loki only (or returns Unavailable).
+	// Added by authz-06-granular-permissions-teams spec.
+	auditLogger *audit.AuditLogger
+
+	// lokiQuerier is the Loki HTTP query client for audit events.
+	// May be nil; when nil, ListAuditEvents falls back to the Redis audit stream.
+	// Added by authz-06-granular-permissions-teams spec.
+	lokiQuerier audit.LokiQuerier
 }
 
 // MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
@@ -733,13 +780,13 @@ type ProvisioningStep struct {
 // InvitationRecord is the internal representation of a pending or consumed
 // invitation.  Used by the invitation store interface stub.
 type InvitationRecord struct {
-	Token      string
-	Email      string
-	Roles      []string
-	Status     string
-	InvitedBy  string
-	CreatedAt  string
-	ExpiresAt  string
+	Token     string
+	Email     string
+	Roles     []string
+	Status    string
+	InvitedBy string
+	CreatedAt string
+	ExpiresAt string
 }
 
 // APIKeyRecord is the internal representation of an API key without the secret
@@ -759,14 +806,14 @@ type APIKeyRecord struct {
 // BillingUsageRecord holds current resource consumption metrics for a tenant.
 // Used by the billing store interface stub.
 type BillingUsageRecord struct {
-	MissionsUsed      int32
-	MissionsLimit     int32
-	FindingsUsed      int32
-	FindingsLimit     int32
-	TeamMembers       int32
-	TeamMembersLimit  int32
-	APIKeys           int32
-	APIKeysLimit      int32
+	MissionsUsed     int32
+	MissionsLimit    int32
+	FindingsUsed     int32
+	FindingsLimit    int32
+	TeamMembers      int32
+	TeamMembersLimit int32
+	APIKeys          int32
+	APIKeysLimit     int32
 }
 
 // NewDaemonServer creates a new gRPC server that exposes daemon functionality.
@@ -855,13 +902,56 @@ func (s *DaemonServer) WithMembershipStore(ms membership.MembershipStore) *Daemo
 	return s
 }
 
-// WithSchemaRegistry wires the declarative authorization schema registry
-// (loaded from permissions.yaml at daemon startup) so the GetAuthSchema
-// RPC handler can return the live schema to the dashboard.
-// Call this during daemon startup before registering the gRPC server.
-// Added by the declarative-rbac-framework spec.
-func (s *DaemonServer) WithSchemaRegistry(reg *auth.SchemaRegistry) *DaemonServer {
-	s.schemaRegistry = reg
+// WithSignupHandler wires the SignupHandler so that the SignupTenant RPC
+// delegates to the real signup orchestration pipeline.  Call this immediately
+// after NewDaemonServer and before registering the server.
+//
+// When not called (or called with nil), SignupTenant returns codes.Unavailable.
+// This allows the server to start before the Keycloak admin client is ready
+// (e.g. in dev mode with authz disabled).
+//
+// Added by the authz-02-keycloak-organizations spec.
+func (s *DaemonServer) WithSignupHandler(h *provisioner.SignupHandler) *DaemonServer {
+	s.signupHandler = h
+	return s
+}
+
+// WithInviteHandler wires the InviteHandler so that the InviteMember,
+// ResendInvitation, and AcceptInvitation RPCs are backed by real logic.
+// Added by the authz-04-dashboard-fga-migration spec.
+func (s *DaemonServer) WithInviteHandler(h *provisioner.InviteHandler) *DaemonServer {
+	s.inviteHandler = h
+	return s
+}
+
+// WithGrantHandler wires the GrantHandler so that GrantComponentAccess,
+// RevokeComponentAccess, and ListUserComponentGrants RPCs work.
+// Added by the authz-04-dashboard-fga-migration spec.
+func (s *DaemonServer) WithGrantHandler(h *provisioner.GrantHandler) *DaemonServer {
+	s.grantHandler = h
+	return s
+}
+
+// WithTeamHandler wires the TeamHandler so that team management RPCs work.
+// Added by the authz-04-dashboard-fga-migration spec.
+func (s *DaemonServer) WithTeamHandler(h *provisioner.TeamHandler) *DaemonServer {
+	s.teamHandler = h
+	return s
+}
+
+// WithAuthorizer wires an FGA Authorizer for admin handlers that need direct
+// FGA access (e.g. GetMyPermissions, ListTenantMembers via FGA).
+// Added by the authz-04-dashboard-fga-migration spec.
+func (s *DaemonServer) WithAuthorizer(az authzIface) *DaemonServer {
+	s.authorizer = az
+	return s
+}
+
+// WithKeycloakAdmin wires the provisioner-level KeycloakAdmin client for admin
+// RPCs (InviteMember, RemoveMember, etc.) that need to call Keycloak admin APIs.
+// Added by the authz-04-dashboard-fga-migration spec.
+func (s *DaemonServer) WithKeycloakAdmin(ka provisioner.KeycloakAdmin) *DaemonServer {
+	s.keycloakAdmin = ka
 	return s
 }
 
@@ -2937,10 +3027,10 @@ func tenantRecordToProto(r *component.TenantRecord) *TenantInfo {
 		Tier:             r.Tier,
 		OwnerEmail:       r.OwnerEmail,
 		StripeCustomerId: r.StripeCustomerID,
-		BillingAlert:      r.BillingAlert,
-		Config:    r.Config,
-		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
+		BillingAlert:     r.BillingAlert,
+		Config:           r.Config,
+		CreatedAt:        r.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:        r.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -3156,7 +3246,7 @@ func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMem
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != tenantID {
+	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != tenantID {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -3416,7 +3506,7 @@ func (s *DaemonServer) UpdateTenantBilling(ctx context.Context, req *UpdateTenan
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
+	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -3452,7 +3542,7 @@ func (s *DaemonServer) GetTenantBilling(ctx context.Context, req *GetTenantBilli
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
+	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -3707,7 +3797,7 @@ func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReques
 	}
 
 	// Check caller's tenant matches target tenant (unless cross-tenant capable).
-	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
+	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -3753,7 +3843,7 @@ func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
+	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -4002,7 +4092,7 @@ func (s *DaemonServer) ListUserTenants(ctx context.Context, req *ListUserTenants
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
 	}
-	if identity.Subject != req.UserId && !s.schemaRegistry.IsCrossTenantCaller(identity.Roles) {
+	if identity.Subject != req.UserId && !auth.IsCrossTenantCaller(identity.Roles) {
 		return nil, status_grpc.Error(codes.PermissionDenied, "cannot list tenants for another user")
 	}
 
@@ -4065,92 +4155,6 @@ func (s *DaemonServer) TransferOwnership(ctx context.Context, req *TransferOwner
 	return &TransferOwnershipResponse{}, nil
 }
 
-// GetAuthSchema returns the daemon's live authorization schema loaded from
-// permissions.yaml at startup. Any authenticated caller may call this (the
-// interceptor enforces authentication via the empty required_permissions
-// entry in the YAML). Dashboards and other clients cache the response with
-// TTL and use it to drive UI gating and permission resolution.
-//
-// Added by the declarative-rbac-framework spec.
-func (s *DaemonServer) GetAuthSchema(ctx context.Context, req *GetAuthSchemaRequest) (*GetAuthSchemaResponse, error) {
-	if s.schemaRegistry == nil {
-		// Registry is wired at daemon startup in task 7. If this handler
-		// is reached with a nil registry, the daemon is misconfigured.
-		return nil, status_grpc.Error(codes.Unavailable, "authorization schema not loaded")
-	}
-
-	reg := s.schemaRegistry
-
-	// Build the roles list with transitively-closed permission sets so
-	// clients don't have to walk the inheritance graph.
-	roles := make([]*AuthRole, 0, len(reg.Roles))
-	roleNames := make([]string, 0, len(reg.Roles))
-	for name := range reg.Roles {
-		roleNames = append(roleNames, name)
-	}
-	sort.Strings(roleNames)
-	for _, name := range roleNames {
-		r := reg.Roles[name]
-		// Sort direct permissions and effective permissions for deterministic output.
-		direct := append([]string(nil), r.Permissions...)
-		sort.Strings(direct)
-
-		effectiveSet := reg.RoleClosure[name]
-		effective := make([]string, 0, len(effectiveSet))
-		for p := range effectiveSet {
-			effective = append(effective, p)
-		}
-		sort.Strings(effective)
-
-		roles = append(roles, &AuthRole{
-			Name:                 r.Name,
-			Description:          r.Description,
-			Inherits:             r.Inherits,
-			Permissions:          direct,
-			EffectivePermissions: effective,
-			CrossTenant:          r.CrossTenant,
-		})
-	}
-
-	// Build the permissions list sorted by name for determinism.
-	permNames := make([]string, 0, len(reg.Permissions))
-	for name := range reg.Permissions {
-		permNames = append(permNames, name)
-	}
-	sort.Strings(permNames)
-	perms := make([]*AuthPermission, 0, len(permNames))
-	for _, name := range permNames {
-		p := reg.Permissions[name]
-		perms = append(perms, &AuthPermission{
-			Name:        p.Name,
-			Resource:    p.Resource,
-			Action:      p.Action,
-			Description: p.Description,
-		})
-	}
-
-	// Build the RPC requirements map.
-	rpcReqs := make(map[string]*AuthRpcRequirement, len(reg.RPCRequirements))
-	for method, req := range reg.RPCRequirements {
-		// Sort required_permissions for determinism.
-		required := append([]string(nil), req.RequiredPermissions...)
-		sort.Strings(required)
-		rpcReqs[method] = &AuthRpcRequirement{
-			Method:              req.Method,
-			RequiredPermissions: required,
-			TenantScoped:        req.TenantScoped,
-			Unauthenticated:     req.Unauthenticated,
-		}
-	}
-
-	return &GetAuthSchemaResponse{
-		SchemaVersion:   reg.SchemaVersion,
-		Roles:           roles,
-		Permissions:     perms,
-		RpcRequirements: rpcReqs,
-	}, nil
-}
-
 // membershipToProto converts a domain Membership record to the proto MembershipInfo type.
 func membershipToProto(m *membership.Membership) *MembershipInfo {
 	if m == nil {
@@ -4164,4 +4168,265 @@ func membershipToProto(m *membership.Membership) *MembershipInfo {
 		AddedAt:  m.AddedAt.Format(time.RFC3339),
 		AddedBy:  m.AddedBy,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// SignupTenant — authz-02-keycloak-organizations spec
+// ---------------------------------------------------------------------------
+
+// SignupTenant orchestrates the full tenant signup flow via SignupHandler.
+//
+// It is a thin gRPC adapter that:
+//  1. Guards against a nil signupHandler (returns codes.Unavailable).
+//  2. Maps proto fields to provisioner.SignupRequest.
+//  3. Calls SignupHandler.Signup and maps domain errors to gRPC status codes:
+//     - provisioner.ErrInvalidSignupInput → codes.InvalidArgument
+//     - provisioner.ErrEmailAlreadyExists → codes.AlreadyExists
+//     - provisioner.ErrConflict           → codes.AlreadyExists
+//     - any other error                   → codes.Internal
+//  4. Maps the provisioner.SignupResponse to proto.
+//
+// The caller must present a gibson-system-ops service account JWT with the
+// "provisioner" realm role.  Authorization enforcement (the
+// required_permissions check) is handled by the authz interceptor introduced
+// in authz-03; for the duration of authz-02 the existing auth interceptor
+// provides basic identity verification only.
+func (s *DaemonServer) SignupTenant(ctx context.Context, req *SignupTenantRequest) (*SignupTenantResponse, error) {
+	if s.signupHandler == nil {
+		return nil, status_grpc.Error(codes.Unavailable,
+			"signup handler not configured; authz may be disabled or Keycloak admin credentials are missing")
+	}
+
+	domainReq := provisioner.SignupRequest{
+		Email:       req.GetEmail(),
+		Password:    req.GetPassword(),
+		CompanyName: req.GetCompanyName(),
+		Plan:        req.GetPlan(),
+	}
+
+	resp, err := s.signupHandler.Signup(ctx, domainReq)
+	if err != nil {
+		switch {
+		case errors.Is(err, provisioner.ErrInvalidSignupInput):
+			return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
+		case errors.Is(err, provisioner.ErrEmailAlreadyExists),
+			errors.Is(err, provisioner.ErrConflict):
+			return nil, status_grpc.Error(codes.AlreadyExists, err.Error())
+		default:
+			// Internal error — include a trace ID if one is available so the
+			// caller can share it with support.
+			traceID := extractTraceID(ctx)
+			msg := fmt.Sprintf("signup failed (trace_id=%s): %s", traceID, err.Error())
+			s.logger.ErrorContext(ctx, "SignupTenant internal error",
+				slog.String("trace_id", traceID),
+				slog.String("error", err.Error()),
+			)
+			return nil, status_grpc.Error(codes.Internal, msg)
+		}
+	}
+
+	return &SignupTenantResponse{
+		UserId:            resp.UserID,
+		TenantId:          resp.TenantID,
+		OrganizationAlias: resp.OrganizationAlias,
+		RedirectUrl:       resp.RedirectURL,
+	}, nil
+}
+
+// extractTraceID returns the OTel trace ID from the context as a hex string,
+// or "unknown" when no valid span is present.
+func extractTraceID(ctx context.Context) string {
+	if span := traceSpanFromContext(ctx); span != "" {
+		return span
+	}
+	return "unknown"
+}
+
+// ---------------------------------------------------------------------------
+// Task 9: GetMyPermissions — returns the caller's role, admin flag,
+// component grants, and team memberships for the current tenant.
+// ---------------------------------------------------------------------------
+
+// GetMyPermissions returns a compact permission summary for the authenticated
+// caller within their current tenant.  It is callable by any authenticated user
+// (no admin relation required).  All FGA queries run in parallel to minimise
+// latency.
+func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMyPermissionsRequest) (*daemonpb.GetMyPermissionsResponse, error) {
+	tenantID := req.GetTenantId()
+	if tenantID == "" {
+		tenantID = auth.TenantFromContext(ctx)
+	}
+	if tenantID == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required (or call with a tenant-scoped JWT)")
+	}
+
+	// Resolve the caller's user ID from the auth context.
+	userID := ""
+	if id, ok := auth.GibsonIdentityFromContext(ctx); ok {
+		userID = id.Subject
+	}
+	if userID == "" {
+		return nil, status_grpc.Error(codes.Unauthenticated, "user identity not found in context")
+	}
+
+	if s.authorizer == nil {
+		// No authorizer wired — return a minimal response with member role.
+		return &daemonpb.GetMyPermissionsResponse{
+			TenantId: tenantID,
+			Role:     "member",
+			IsAdmin:  false,
+		}, nil
+	}
+
+	// Run FGA queries in parallel:
+	//   1. Check admin relation on tenant
+	//   2. ListObjects to discover teams the user belongs to
+	//   3. List component grants (if grantHandler is available)
+	type queryResult struct {
+		isAdmin         bool
+		teamIDs         []string
+		componentGrants []provisioner.ComponentGrant
+		err             error
+	}
+
+	resultCh := make(chan queryResult, 1)
+	go func() {
+		var qr queryResult
+
+		// 1. Admin check.
+		isAdmin, err := s.authorizer.Check(ctx,
+			fmt.Sprintf("user:%s", userID),
+			"admin",
+			fmt.Sprintf("tenant:%s", tenantID),
+		)
+		if err != nil {
+			s.logger.WarnContext(ctx, "GetMyPermissions: admin check failed",
+				slog.String("tenant_id", tenantID),
+				slog.String("user_id", userID),
+				slog.String("error", err.Error()),
+			)
+			// Non-fatal: proceed with isAdmin=false.
+		}
+		qr.isAdmin = isAdmin
+
+		// 2. Team memberships via ListObjects.
+		teamIDs, err := s.authorizer.ListObjects(ctx,
+			fmt.Sprintf("user:%s", userID),
+			"member",
+			"team",
+		)
+		if err != nil {
+			s.logger.WarnContext(ctx, "GetMyPermissions: list team objects failed",
+				slog.String("tenant_id", tenantID),
+				slog.String("user_id", userID),
+				slog.String("error", err.Error()),
+			)
+		} else {
+			qr.teamIDs = teamIDs
+		}
+
+		// 3. Component grants (best-effort).
+		if s.grantHandler != nil {
+			grants, err := s.grantHandler.List(ctx, tenantID, userID)
+			if err != nil {
+				s.logger.WarnContext(ctx, "GetMyPermissions: list component grants failed",
+					slog.String("tenant_id", tenantID),
+					slog.String("user_id", userID),
+					slog.String("error", err.Error()),
+				)
+			} else {
+				qr.componentGrants = grants
+			}
+		}
+
+		resultCh <- qr
+	}()
+
+	qr := <-resultCh
+
+	// Determine role string.
+	role := "member"
+	if qr.isAdmin {
+		role = "admin"
+	}
+
+	// Aggregate component grants by component_ref.
+	byRef := make(map[string]*daemonpb.PermissionComponentGrant)
+	for _, g := range qr.componentGrants {
+		if existing, ok := byRef[g.ComponentRef]; ok {
+			existing.Actions = append(existing.Actions, g.Action)
+		} else {
+			byRef[g.ComponentRef] = &daemonpb.PermissionComponentGrant{
+				ComponentRef: g.ComponentRef,
+				Actions:      []string{g.Action},
+			}
+		}
+	}
+	pgrants := make([]*daemonpb.PermissionComponentGrant, 0, len(byRef))
+	for _, pg := range byRef {
+		pgrants = append(pgrants, pg)
+	}
+
+	// Build team memberships — team_name is a best-effort lookup from teamHandler.
+	teamMemberships := make([]*daemonpb.PermissionTeamMembership, 0, len(qr.teamIDs))
+	for _, rawTeamID := range qr.teamIDs {
+		// FGA returns "team:{id}" — strip the prefix.
+		teamID := strings.TrimPrefix(rawTeamID, "team:")
+		if teamID == "" || teamID == rawTeamID {
+			continue
+		}
+
+		// Look up team name via teamHandler (best-effort).
+		teamName := teamID
+		if s.teamHandler != nil {
+			if recs, err := s.teamHandler.List(ctx, tenantID); err == nil {
+				for _, r := range recs {
+					if r.TeamID == teamID {
+						teamName = r.Name
+						break
+					}
+				}
+			}
+		}
+
+		// Check if user is also team admin.
+		isTeamAdmin := false
+		if adminCheck, err := s.authorizer.Check(ctx,
+			fmt.Sprintf("user:%s", userID),
+			"admin",
+			fmt.Sprintf("team:%s", teamID),
+		); err == nil {
+			isTeamAdmin = adminCheck
+		}
+
+		teamMemberships = append(teamMemberships, &daemonpb.PermissionTeamMembership{
+			TeamId:   teamID,
+			TeamName: teamName,
+			IsAdmin:  isTeamAdmin,
+		})
+	}
+
+	return &daemonpb.GetMyPermissionsResponse{
+		TenantId:        tenantID,
+		Role:            role,
+		IsAdmin:         qr.isAdmin,
+		ComponentGrants: pgrants,
+		TeamMemberships: teamMemberships,
+	}, nil
+}
+
+// traceSpanFromContext extracts the trace ID string using the grpc metadata
+// or OTel context.  We keep this local to avoid importing the full OTel trace
+// package just for this one helper.
+func traceSpanFromContext(ctx context.Context) string {
+	if md, ok := grpcmeta.FromIncomingContext(ctx); ok {
+		if vals := md.Get("traceparent"); len(vals) > 0 {
+			// W3C traceparent format: 00-<trace-id>-<span-id>-<flags>
+			parts := strings.SplitN(vals[0], "-", 4)
+			if len(parts) >= 2 {
+				return parts[1]
+			}
+		}
+	}
+	return ""
 }

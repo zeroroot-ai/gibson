@@ -62,6 +62,11 @@ type DefaultMissionController struct {
 	// that have no direct gRPC endpoint.
 	workQueue component.WorkQueue
 
+	// authzStore tracks which user owns each running mission run so that
+	// HarnessCallbackService.Authorize can resolve run_id → (user_id, tenant_id).
+	// When nil, authz state tracking is skipped (dev mode or authz disabled).
+	authzStore MissionAuthzStore
+
 	// logger for structured mission controller logging.
 	logger *slog.Logger
 
@@ -127,6 +132,18 @@ func WithWorkQueue(q component.WorkQueue) ControllerOption {
 func WithControllerLogger(l *slog.Logger) ControllerOption {
 	return func(c *DefaultMissionController) {
 		c.logger = l
+	}
+}
+
+// WithAuthzStore wires the MissionAuthzStore so that the controller records
+// the owning user for each run. This enables HarnessCallbackService.Authorize
+// to resolve run_id → (user_id, tenant_id) during component callbacks.
+//
+// When not set, authz state tracking is silently skipped (dev mode or when
+// authz is disabled via authz.enabled=false).
+func WithAuthzStore(store MissionAuthzStore) ControllerOption {
+	return func(c *DefaultMissionController) {
+		c.authzStore = store
 	}
 }
 
@@ -236,6 +253,24 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 		c.activeRuns[missionID] = runID
 	}
 
+	// Record authz state so that HarnessCallbackService.Authorize can look up
+	// the owning user during component callbacks. Errors are logged but do not
+	// abort the mission start — authz state is advisory.
+	if c.authzStore != nil && !runID.IsZero() {
+		userID := ""
+		tenantID := auth.TenantFromContext(ctx)
+		if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
+			userID = identity.Subject
+		}
+		if putErr := c.authzStore.Put(ctx, runID.String(), userID, tenantID); putErr != nil {
+			c.logger.Warn("mission controller: failed to record authz state on start",
+				slog.String("mission_id", missionID.String()),
+				slog.String("run_id", runID.String()),
+				slog.String("error", putErr.Error()),
+			)
+		}
+	}
+
 	// Build the base execution context.
 	// Propagate any tenant present in the caller's context so that the
 	// orchestrator's harness can use it for ComponentRegistry lookups.
@@ -293,6 +328,28 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 		}()
 
 		result, err := c.orchestrator.Execute(execCtx, mission)
+
+		// Transition authz state so that late-arriving callbacks get a clean
+		// inactive-mission error rather than stale "active" state. Log and
+		// continue on errors — mission lifecycle must not be blocked.
+		if c.authzStore != nil && !runID.IsZero() {
+			bgCtx := context.Background()
+			if err != nil {
+				if markErr := c.authzStore.MarkCancelled(bgCtx, runID.String()); markErr != nil {
+					c.logger.Warn("mission controller: failed to mark authz state cancelled",
+						slog.String("run_id", runID.String()),
+						slog.String("error", markErr.Error()),
+					)
+				}
+			} else {
+				if markErr := c.authzStore.MarkCompleted(bgCtx, runID.String()); markErr != nil {
+					c.logger.Warn("mission controller: failed to mark authz state completed",
+						slog.String("run_id", runID.String()),
+						slog.String("error", markErr.Error()),
+					)
+				}
+			}
+		}
 
 		// Update the run if run store is available
 		if c.runStore != nil && !runID.IsZero() {
@@ -358,6 +415,20 @@ func (c *DefaultMissionController) Stop(ctx context.Context, missionID types.ID)
 			if getErr == nil && run != nil {
 				run.MarkCancelled()
 				c.runStore.Update(ctx, run)
+			}
+		}
+	}
+
+	// Mark authz state cancelled so that late-arriving component callbacks
+	// receive a proper inactive-mission error. Log and continue on failure.
+	if c.authzStore != nil {
+		if runID, hasRun := c.activeRuns[missionID]; hasRun {
+			if markErr := c.authzStore.MarkCancelled(ctx, runID.String()); markErr != nil {
+				c.logger.Warn("mission controller: failed to mark authz state cancelled on stop",
+					slog.String("mission_id", missionID.String()),
+					slog.String("run_id", runID.String()),
+					slog.String("error", markErr.Error()),
+				)
 			}
 		}
 	}

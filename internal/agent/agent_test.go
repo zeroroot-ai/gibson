@@ -40,13 +40,13 @@ func newMockAgent(name string) *mockAgent {
 	}
 }
 
-func (m *mockAgent) Name() string                              { return m.name }
-func (m *mockAgent) Version() string                           { return m.version }
-func (m *mockAgent) Description() string                       { return m.description }
-func (m *mockAgent) Capabilities() []string                    { return m.capabilities }
+func (m *mockAgent) Name() string                          { return m.name }
+func (m *mockAgent) Version() string                       { return m.version }
+func (m *mockAgent) Description() string                   { return m.description }
+func (m *mockAgent) Capabilities() []string                { return m.capabilities }
 func (m *mockAgent) TargetTypes() []types.TargetType       { return m.targetTypes }
 func (m *mockAgent) TechniqueTypes() []types.TechniqueType { return m.techniqueTypes }
-func (m *mockAgent) LLMSlots() []SlotDefinition                { return m.slots }
+func (m *mockAgent) LLMSlots() []SlotDefinition            { return m.slots }
 
 func (m *mockAgent) Execute(ctx context.Context, task Task, harness AgentHarness) (Result, error) {
 	if m.executeFunc != nil {
@@ -809,10 +809,10 @@ type mockExternalAgent struct {
 	healthy bool
 }
 
-func (m *mockExternalAgent) Name() string                        { return m.name }
-func (m *mockExternalAgent) Version() string                     { return "1.0.0" }
-func (m *mockExternalAgent) Description() string                 { return "External agent" }
-func (m *mockExternalAgent) Capabilities() []string              { return []string{} }
+func (m *mockExternalAgent) Name() string                    { return m.name }
+func (m *mockExternalAgent) Version() string                 { return "1.0.0" }
+func (m *mockExternalAgent) Description() string             { return "External agent" }
+func (m *mockExternalAgent) Capabilities() []string          { return []string{} }
 func (m *mockExternalAgent) TargetTypes() []types.TargetType { return []types.TargetType{} }
 func (m *mockExternalAgent) TechniqueTypes() []types.TechniqueType {
 	return []types.TechniqueType{}

@@ -31,9 +31,9 @@ type Subscription struct {
 
 // LogTailer manages log watchers and subscribers for component logs.
 type LogTailer struct {
-	watchers    map[string]*LogWatcher          // componentID -> watcher
-	subscribers map[string][]*Subscription      // componentID -> subscriptions
-	buffers     map[string]*RingBuffer          // componentID -> ring buffer
+	watchers    map[string]*LogWatcher     // componentID -> watcher
+	subscribers map[string][]*Subscription // componentID -> subscriptions
+	buffers     map[string]*RingBuffer     // componentID -> ring buffer
 	bufferSize  int
 	logger      observability.Logger
 	mu          sync.RWMutex

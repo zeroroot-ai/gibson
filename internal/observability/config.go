@@ -220,9 +220,9 @@ func DefaultConfig() Config {
 //
 // Environment variables:
 //   - GIBSON_LOG_LEVEL: Set log level (debug, info, warn, error)
-//     - Case-insensitive
-//     - Invalid values default to Info
-//     - Example: export GIBSON_LOG_LEVEL=debug
+//   - Case-insensitive
+//   - Invalid values default to Info
+//   - Example: export GIBSON_LOG_LEVEL=debug
 //
 // Example:
 //

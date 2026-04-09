@@ -2,8 +2,8 @@ package auth
 
 import (
 	"context"
-	"crypto/rsa"
 	"crypto/ecdsa"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"

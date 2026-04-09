@@ -22,9 +22,9 @@ func TestNewRoleBinder(t *testing.T) {
 
 func TestNewRoleBinderFromConfig(t *testing.T) {
 	config := map[string][]string{
-		"admin-*":     {"admin"},
-		"developers":  {"mission:execute", "findings:read"},
-		"myorg/*:*":   {"ci_runner"},
+		"admin-*":    {"admin"},
+		"developers": {"mission:execute", "findings:read"},
+		"myorg/*:*":  {"ci_runner"},
 	}
 
 	binder := NewRoleBinderFromConfig(config)

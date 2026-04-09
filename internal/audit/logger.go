@@ -117,6 +117,15 @@ type AuditQueryOptions struct {
 	Limit int
 }
 
+// SignalProjector is the narrow interface AuditLogger uses to project each
+// audit entry as a compliance signal. Production passes a function that
+// wraps the ComplianceMiddleware's SignalSink; tests pass fakes.
+//
+// Projection is BEST-EFFORT — failures to project must never fail the
+// Redis Streams write, which is the authoritative legal record
+// (audit-compliance-emitter Requirement 9.4).
+type SignalProjector func(ctx context.Context, entry AuditEntry)
+
 // AuditLogger writes audit entries to tenant-scoped Redis Streams and supports
 // time-bounded, action-prefixed, and actor-scoped queries.
 //
@@ -125,8 +134,9 @@ type AuditQueryOptions struct {
 //
 // AuditLogger is safe for concurrent use.
 type AuditLogger struct {
-	client *state.StateClient
-	logger *slog.Logger
+	client    *state.StateClient
+	logger    *slog.Logger
+	projector SignalProjector // optional; nil-safe
 }
 
 // NewAuditLogger constructs an AuditLogger backed by the provided StateClient.
@@ -139,6 +149,17 @@ func NewAuditLogger(client *state.StateClient, logger *slog.Logger) *AuditLogger
 		client: client,
 		logger: logger.With("component", "audit_logger"),
 	}
+}
+
+// SetSignalProjector installs a SignalProjector. Subsequent Log/LogWithResult
+// calls will invoke the projector after the Redis write succeeds. Nil-safe
+// — passing nil clears the projector.
+//
+// This is the integration seam for audit-compliance-emitter task 12: daemon
+// startup wires the projector to call into ComplianceMiddleware's SignalSink
+// so that every audit log entry also lands as a compliance_signal.
+func (a *AuditLogger) SetSignalProjector(p SignalProjector) {
+	a.projector = p
 }
 
 // Log writes an audit entry with result "success" to the tenant's Redis Stream.
@@ -231,6 +252,20 @@ func (a *AuditLogger) LogWithResult(
 	}).Result()
 	if err != nil {
 		return fmt.Errorf("audit: write entry to stream %s: %w", streamKey, err)
+	}
+
+	// Best-effort projection to the compliance signal pipeline. The Redis
+	// Streams write above is the authoritative legal record — a projection
+	// failure must never affect it (Requirement 9.4).
+	if a.projector != nil {
+		defer func() {
+			if r := recover(); r != nil {
+				a.logger.WarnContext(ctx, "audit: signal projection panicked",
+					slog.Any("panic", r),
+				)
+			}
+		}()
+		a.projector(ctx, entry)
 	}
 
 	return nil

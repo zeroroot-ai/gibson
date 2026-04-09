@@ -17,16 +17,16 @@ import (
 // from mission orchestrator through EventBusAdapter to gRPC stream.
 func TestEventFlow_MissionStarted(t *testing.T) {
 	tests := []struct {
-		name           string
-		payload        events.MissionStartedPayload
-		missionID      types.ID
-		traceID        string
-		spanID         string
-		wantEventType  string
-		wantMissionID  string
-		wantPayload    map[string]interface{}
-		wantTraceID    string
-		wantSpanID     string
+		name          string
+		payload       events.MissionStartedPayload
+		missionID     types.ID
+		traceID       string
+		spanID        string
+		wantEventType string
+		wantMissionID string
+		wantPayload   map[string]interface{}
+		wantTraceID   string
+		wantSpanID    string
 	}{
 		{
 			name: "mission started with full payload",
@@ -136,17 +136,17 @@ func TestEventFlow_MissionStarted(t *testing.T) {
 // and populate the ToolEvent oneof in the proto Event.
 func TestEventFlow_ToolCallStarted(t *testing.T) {
 	tests := []struct {
-		name              string
-		payload           events.ToolCallStartedPayload
-		missionID         types.ID
-		agentName         string
-		traceID           string
-		spanID            string
-		wantEventType     string
-		wantToolName      string
-		wantAgentName     string
-		wantInputSummary  string
-		wantMissionID     string
+		name             string
+		payload          events.ToolCallStartedPayload
+		missionID        types.ID
+		agentName        string
+		traceID          string
+		spanID           string
+		wantEventType    string
+		wantToolName     string
+		wantAgentName    string
+		wantInputSummary string
+		wantMissionID    string
 	}{
 		{
 			name: "tool call with parameters",
@@ -159,15 +159,15 @@ func TestEventFlow_ToolCallStarted(t *testing.T) {
 				},
 				ParameterSize: 3,
 			},
-			missionID:         types.ID("mission-tool-1"),
-			agentName:         "recon-agent",
-			traceID:           "trace-tool-123",
-			spanID:            "span-tool-456",
-			wantEventType:     "tool.started",
-			wantToolName:      "nmap",
-			wantAgentName:     "recon-agent",
-			wantInputSummary:  "parameters: target, ports, flags",
-			wantMissionID:     "mission-tool-1",
+			missionID:        types.ID("mission-tool-1"),
+			agentName:        "recon-agent",
+			traceID:          "trace-tool-123",
+			spanID:           "span-tool-456",
+			wantEventType:    "tool.started",
+			wantToolName:     "nmap",
+			wantAgentName:    "recon-agent",
+			wantInputSummary: "parameters: target, ports, flags",
+			wantMissionID:    "mission-tool-1",
 		},
 		{
 			name: "tool call with no parameters",
@@ -176,13 +176,13 @@ func TestEventFlow_ToolCallStarted(t *testing.T) {
 				Parameters:    nil,
 				ParameterSize: 0,
 			},
-			missionID:         types.ID("mission-tool-2"),
-			agentName:         "basic-agent",
-			wantEventType:     "tool.started",
-			wantToolName:      "whoami",
-			wantAgentName:     "basic-agent",
-			wantInputSummary:  "no parameters",
-			wantMissionID:     "mission-tool-2",
+			missionID:        types.ID("mission-tool-2"),
+			agentName:        "basic-agent",
+			wantEventType:    "tool.started",
+			wantToolName:     "whoami",
+			wantAgentName:    "basic-agent",
+			wantInputSummary: "no parameters",
+			wantMissionID:    "mission-tool-2",
 		},
 	}
 
@@ -250,18 +250,18 @@ func TestEventFlow_ToolCallStarted(t *testing.T) {
 // flow correctly and populate the LLMEvent oneof in the proto Event.
 func TestEventFlow_LLMRequestCompleted(t *testing.T) {
 	tests := []struct {
-		name              string
-		payload           events.LLMRequestCompletedPayload
-		agentName         string
-		traceID           string
-		spanID            string
-		wantEventType     string
-		wantModel         string
-		wantSlot          string
-		wantPromptTokens  int
-		wantOutputTokens  int
-		wantTotalTokens   int
-		wantDurationMs    float64
+		name             string
+		payload          events.LLMRequestCompletedPayload
+		agentName        string
+		traceID          string
+		spanID           string
+		wantEventType    string
+		wantModel        string
+		wantSlot         string
+		wantPromptTokens int
+		wantOutputTokens int
+		wantTotalTokens  int
+		wantDurationMs   float64
 	}{
 		{
 			name: "successful LLM completion",
@@ -274,16 +274,16 @@ func TestEventFlow_LLMRequestCompleted(t *testing.T) {
 				OutputTokens: 500,
 				StopReason:   "end_turn",
 			},
-			agentName:         "analyst-agent",
-			traceID:           "trace-llm-123",
-			spanID:            "span-llm-456",
-			wantEventType:     "llm.request.completed",
-			wantModel:         "claude-3-opus-20240229",
-			wantSlot:          "primary",
-			wantPromptTokens:  1000,
-			wantOutputTokens:  500,
-			wantTotalTokens:   1500,
-			wantDurationMs:    2500, // Duration converted to milliseconds
+			agentName:        "analyst-agent",
+			traceID:          "trace-llm-123",
+			spanID:           "span-llm-456",
+			wantEventType:    "llm.request.completed",
+			wantModel:        "claude-3-opus-20240229",
+			wantSlot:         "primary",
+			wantPromptTokens: 1000,
+			wantOutputTokens: 500,
+			wantTotalTokens:  1500,
+			wantDurationMs:   2500, // Duration converted to milliseconds
 		},
 	}
 

@@ -278,6 +278,18 @@ func locationID(resp *http.Response) string {
 	return parts[len(parts)-1]
 }
 
+// DoAdminRequest is the public façade for doRequest, allowing packages outside
+// the keycloak package (e.g., internal/provisioner) to make authenticated Admin
+// REST API calls without re-implementing the token-refresh logic.
+//
+// method is the HTTP verb (GET, POST, DELETE, …). path must include the leading
+// slash and the full path prefix (e.g., "/admin/realms/gibson/organizations").
+// body is JSON-encoded when non-nil. The caller is responsible for closing the
+// response body.
+func (c *Client) DoAdminRequest(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
+	return c.doRequest(ctx, method, path, body)
+}
+
 // PrimeTokenCache injects a pre-obtained access token into the cache so that
 // integration tests can supply a token acquired via the password grant (e.g.
 // against admin-cli in the master realm) without needing a service-account
@@ -340,12 +352,12 @@ func (c *Client) CreateRealm(ctx context.Context, cfg RealmConfig) error {
 	}
 
 	payload := map[string]interface{}{
-		"realm":               cfg.Name,
-		"displayName":         cfg.DisplayName,
-		"enabled":             cfg.Enabled,
-		"registrationAllowed": cfg.RegistrationAllowed,
-		"loginTheme":          cfg.LoginTheme,
-		"accessTokenLifespan": accessTokenLifespan,
+		"realm":                 cfg.Name,
+		"displayName":           cfg.DisplayName,
+		"enabled":               cfg.Enabled,
+		"registrationAllowed":   cfg.RegistrationAllowed,
+		"loginTheme":            cfg.LoginTheme,
+		"accessTokenLifespan":   accessTokenLifespan,
 		"ssoSessionMaxLifespan": ssoSessionMax,
 	}
 

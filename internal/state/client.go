@@ -51,18 +51,18 @@ func NewStateClient(cfg *Config) (*StateClient, error) {
 	if cfg.ClusterMode {
 		// Cluster mode
 		client = redis.NewClusterClient(&redis.ClusterOptions{
-			Addrs:              cfg.ClusterAddrs,
-			Password:           cfg.Password,
-			PoolSize:           cfg.PoolSize,
-			MinIdleConns:       cfg.MinIdleConns,
-			MaxRetries:         cfg.MaxRetries,
-			DialTimeout:        cfg.DialTimeout,
-			ReadTimeout:        cfg.ReadTimeout,
-			WriteTimeout:       cfg.WriteTimeout,
-			PoolTimeout:        cfg.PoolTimeout,
-			ConnMaxLifetime:    cfg.MaxConnAge,
-			ConnMaxIdleTime:    cfg.IdleTimeout,
-			TLSConfig:          cfg.TLSConfig,
+			Addrs:           cfg.ClusterAddrs,
+			Password:        cfg.Password,
+			PoolSize:        cfg.PoolSize,
+			MinIdleConns:    cfg.MinIdleConns,
+			MaxRetries:      cfg.MaxRetries,
+			DialTimeout:     cfg.DialTimeout,
+			ReadTimeout:     cfg.ReadTimeout,
+			WriteTimeout:    cfg.WriteTimeout,
+			PoolTimeout:     cfg.PoolTimeout,
+			ConnMaxLifetime: cfg.MaxConnAge,
+			ConnMaxIdleTime: cfg.IdleTimeout,
+			TLSConfig:       cfg.TLSConfig,
 		})
 	} else if cfg.SentinelMaster != "" {
 		// Sentinel mode
@@ -134,9 +134,9 @@ func NewStateClient(cfg *Config) (*StateClient, error) {
 
 // Health checks the Redis connection and verifies required modules are loaded.
 // It performs the following checks:
-//   1. Ping to ensure connectivity
-//   2. MODULE LIST to detect RediSearch
-//   3. MODULE LIST to detect RedisJSON
+//  1. Ping to ensure connectivity
+//  2. MODULE LIST to detect RediSearch
+//  3. MODULE LIST to detect RedisJSON
 //
 // Returns ErrConnectionFailed if ping fails.
 // Returns ErrModuleNotAvailable if required modules are missing.

@@ -452,7 +452,7 @@ func TestRedisVectorStore_Search_HybridSearch(t *testing.T) {
 
 	// Hybrid search with text query
 	query := VectorQuery{
-		Text:      "security", // Text component
+		Text:      "security",             // Text component
 		Embedding: makeTestEmbedding(384), // Vector component
 		TopK:      5,
 		MinScore:  0.0,

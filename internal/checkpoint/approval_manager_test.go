@@ -224,7 +224,7 @@ func TestApprovalManagerRedisKeys(t *testing.T) {
 // TestApprovalManagerConfigDefaults verifies config defaults are applied
 func TestApprovalManagerConfigDefaults(t *testing.T) {
 	stateClient := &state.StateClient{} // Minimal mock
-	config := ApprovalConfig{} // Empty config
+	config := ApprovalConfig{}          // Empty config
 
 	manager := NewApprovalManager(nil, nil, stateClient, config)
 

@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 package checkpoint
@@ -287,10 +288,10 @@ func (bm *DefaultBranchManager) MergeBranch(ctx context.Context, branchThreadID 
 
 	// Create a merged checkpoint in the target thread
 	mergedCheckpoint := &Checkpoint{
-		ID:       generateCheckpointID(),
-		ThreadID: targetThreadID,
-		ParentID: latestTargetCheckpoint.ID,
-		Timestamp: time.Now(),
+		ID:               generateCheckpointID(),
+		ThreadID:         targetThreadID,
+		ParentID:         latestTargetCheckpoint.ID,
+		Timestamp:        time.Now(),
 		ExecutionState:   branchState, // Use branch's final state
 		WorkflowSnapshot: latestTargetCheckpoint.WorkflowSnapshot,
 		Metadata: map[string]interface{}{
@@ -395,14 +396,14 @@ func copyNodeStates(m map[string]NodeState) map[string]NodeState {
 	result := make(map[string]NodeState, len(m))
 	for k, v := range m {
 		result[k] = NodeState{
-			NodeID:     v.NodeID,
-			Status:     v.Status,
-			StartTime:  v.StartTime,
-			EndTime:    v.EndTime,
-			Attempts:   v.Attempts,
-			Error:      v.Error,
-			Output:     v.Output,
-			Metadata:   copyMap(v.Metadata),
+			NodeID:    v.NodeID,
+			Status:    v.Status,
+			StartTime: v.StartTime,
+			EndTime:   v.EndTime,
+			Attempts:  v.Attempts,
+			Error:     v.Error,
+			Output:    v.Output,
+			Metadata:  copyMap(v.Metadata),
 		}
 	}
 	return result

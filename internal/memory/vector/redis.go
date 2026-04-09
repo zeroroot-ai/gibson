@@ -449,4 +449,3 @@ func embeddingToFloat32Bytes(embedding []float64) []byte {
 
 	return bytes
 }
-

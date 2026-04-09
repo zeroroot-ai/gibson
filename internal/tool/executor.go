@@ -160,10 +160,10 @@ func (c *CachedResult) IsExpired() bool {
 
 // MemoryToolCache implements ToolCache with in-memory LRU eviction
 type MemoryToolCache struct {
-	mu       sync.RWMutex
-	cache    map[string]*CachedResult
-	maxSize  int
-	lruList  []string // Simple LRU tracking
+	mu      sync.RWMutex
+	cache   map[string]*CachedResult
+	maxSize int
+	lruList []string // Simple LRU tracking
 }
 
 // NewMemoryToolCache creates a new in-memory tool cache

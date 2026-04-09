@@ -10,7 +10,9 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
@@ -26,6 +28,11 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// defaultMaxDelegationDepth is the default cap on the number of nested DelegateToAgent
+// hops allowed before returning delegation_depth_exceeded. Override per-harness via
+// maxDelegationDepth if needed (e.g. via daemon config). Zero means "use this default."
+const defaultMaxDelegationDepth = 8
 
 // DefaultAgentHarness is the production implementation of the AgentHarness interface.
 // It provides agents with access to all framework capabilities including LLM operations,
@@ -114,6 +121,10 @@ type DefaultAgentHarness struct {
 	// rather than a direct gRPC call. Nil means use the existing path.
 	workQueue component.WorkQueue
 
+	// envelopeSigner signs AuthzContext payloads attached to dispatched work items.
+	// When nil, work items are dispatched without an AuthzContext (dev mode).
+	envelopeSigner *authz.EnvelopeSigner
+
 	// workQueueTimeout is the maximum duration to wait for a remote component to
 	// deliver a WorkResult after enqueuing. Defaults to 5 minutes when zero.
 	workQueueTimeout time.Duration
@@ -124,6 +135,11 @@ type DefaultAgentHarness struct {
 	// before dispatching to the _system instance. Nil disables access enforcement
 	// (backward-compatible for deployments that have not yet wired this store).
 	pluginAccess component.PluginAccessStore
+
+	// maxDelegationDepth is the maximum allowed DelegateToAgent nesting depth.
+	// When zero, defaultMaxDelegationDepth (8) is used. The daemon config flag
+	// "harness.max_delegation_depth" can override this per deployment.
+	maxDelegationDepth int
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -962,6 +978,22 @@ func (h *DefaultAgentHarness) callToolViaWorkQueue(
 		workCtx["trace_id"] = spanCtx.TraceID().String()
 	}
 
+	// Attach HMAC-signed AuthzContext if a signer is available.
+	// The run_id is the MissionRunID set on the harness during mission start.
+	// Components verify this context via their shared HMAC secret.
+	if h.envelopeSigner != nil && h.missionCtx.MissionRunID != "" {
+		ac := h.envelopeSigner.Sign(h.missionCtx.MissionRunID, authz.DefaultWorkTTLSeconds)
+		if acJSON, marshalErr := json.Marshal(ac); marshalErr == nil {
+			workCtx[authz.AuthzContextWorkKey] = string(acJSON)
+		} else {
+			h.logger.Warn("failed to marshal AuthzContext for work item, dispatching without authz context",
+				"tool", name,
+				"run_id", h.missionCtx.MissionRunID,
+				"error", marshalErr,
+			)
+		}
+	}
+
 	// Pre-assign a WorkID so we can subscribe for the result by ID. The WorkQueue
 	// preserves an explicitly set WorkID (only auto-generates when WorkID == "").
 	workID := fmt.Sprintf("tool-%s-%d", name, time.Now().UnixNano())
@@ -1097,6 +1129,20 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 	}
 	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
 		workCtx["trace_id"] = spanCtx.TraceID().String()
+	}
+
+	// Attach HMAC-signed AuthzContext for plugin dispatches.
+	if h.envelopeSigner != nil && h.missionCtx.MissionRunID != "" {
+		ac := h.envelopeSigner.Sign(h.missionCtx.MissionRunID, authz.DefaultWorkTTLSeconds)
+		if acJSON, marshalErr := json.Marshal(ac); marshalErr == nil {
+			workCtx[authz.AuthzContextWorkKey] = string(acJSON)
+		} else {
+			h.logger.Warn("failed to marshal AuthzContext for plugin work item, dispatching without authz context",
+				"plugin", name,
+				"run_id", h.missionCtx.MissionRunID,
+				"error", marshalErr,
+			)
+		}
 	}
 
 	// Inject plugin_config for _system plugins so the remote worker has access
@@ -1809,14 +1855,62 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	ctx, span := h.tracer.Start(ctx, "harness.DelegateToAgent")
 	defer span.End()
 
+	// ── Depth cap ───────────────────────────────────────────────────────────
+	// Resolve the effective depth limit: use the harness field when non-zero,
+	// otherwise fall back to the package default.
+	maxDepth := h.maxDelegationDepth
+	if maxDepth <= 0 {
+		maxDepth = defaultMaxDelegationDepth
+	}
+
+	currentDepth := h.missionCtx.DelegationDepth
+	if currentDepth >= maxDepth {
+		return agent.Result{}, fmt.Errorf(
+			"delegation_depth_exceeded: chain length %d > max %d",
+			currentDepth, maxDepth,
+		)
+	}
+
+	// ── Parent-chain push ────────────────────────────────────────────────────
+	// Capture the current agent's run ID *before* building the child context so
+	// that the caller chain reflects the delegation path A→B→C correctly.
+	// This is additive: we do NOT remove existing CurrentAgent handling.
+	parentRunID := h.missionCtx.AgentRunID
+
+	// Read the existing chain from context (may be nil on first hop).
+	existingChain, _ := contextkeys.GetCallerChain(ctx)
+
+	// Build an extended chain: [existing... parentRunID].
+	// Allocate a fresh slice to avoid mutating the ancestor's slice.
+	var newChain []string
+	if len(existingChain) > 0 {
+		newChain = make([]string, len(existingChain), len(existingChain)+1)
+		copy(newChain, existingChain)
+	}
+	if parentRunID != "" {
+		newChain = append(newChain, parentRunID)
+	}
+
+	// Stamp parent identity and chain onto the context that flows into the child.
+	if parentRunID != "" {
+		ctx = contextkeys.WithParentAgentRunID(ctx, parentRunID)
+	}
+	ctx = contextkeys.WithCallerChain(ctx, newChain)
+
 	h.logger.Info("delegating to agent",
 		"agent", name,
 		"task_id", task.ID.String(),
-		"task_name", task.Name)
+		"task_name", task.Name,
+		"parent_agent_run_id", parentRunID,
+		"delegation_depth", currentDepth+1,
+		"caller_chain_len", len(newChain))
 
-	// Update mission context for child agent
+	// ── Child mission context ────────────────────────────────────────────────
+	// Copy the parent mission context, then update the fields that are
+	// child-specific. CurrentAgent is updated (existing behaviour preserved).
 	childMissionCtx := h.missionCtx
 	childMissionCtx.CurrentAgent = name
+	childMissionCtx.DelegationDepth = currentDepth + 1
 
 	// Create child harness for the sub-agent
 	childHarness, err := h.factory(ctx, childMissionCtx, h.targetInfo)
@@ -1872,6 +1966,37 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 			fmt.Sprintf("agent execution failed: %s", name),
 			err,
 		)
+	}
+
+	// ── DELEGATED_TO relationship ────────────────────────────────────────────
+	// Write the DELEGATED_TO edge from the parent agent_run to the child
+	// agent_run so that the knowledge graph reflects the full delegation tree.
+	// The child run ID is read from the child harness's mission context (not
+	// childMissionCtx, which is a value copy). The factory may assign a new
+	// AgentRunID inside the child; we retrieve it via a type assertion.
+	//
+	// Both run IDs must be non-empty, and a GraphRAG query bridge must be
+	// available; otherwise we log a warning and continue (non-fatal).
+	var childRunID string
+	if dah, ok := childHarness.(*DefaultAgentHarness); ok {
+		childRunID = dah.missionCtx.AgentRunID
+	} else {
+		// If childHarness is wrapped (e.g. AuthorizingHarness), fall back to
+		// the ID that was in childMissionCtx before the factory ran.
+		childRunID = childMissionCtx.AgentRunID
+	}
+	if parentRunID != "" && childRunID != "" && h.graphRAGQueryBridge != nil {
+		rel := sdkgraphrag.NewRelationship(parentRunID, childRunID, "DELEGATED_TO")
+		if relErr := h.graphRAGQueryBridge.CreateRelationship(ctx, *rel); relErr != nil {
+			h.logger.Warn("failed to write DELEGATED_TO relationship",
+				"parent_run_id", parentRunID,
+				"child_run_id", childRunID,
+				"error", relErr)
+		}
+	} else if parentRunID != "" && childRunID == "" {
+		h.logger.Debug("skipping DELEGATED_TO edge: child agent_run_id not set on mission context",
+			"parent_run_id", parentRunID,
+			"agent", name)
 	}
 
 	// Submit findings from sub-agent to our finding store

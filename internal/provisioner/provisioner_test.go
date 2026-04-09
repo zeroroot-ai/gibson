@@ -244,13 +244,13 @@ func TestProvisioner_ProvisionTenant_TenantAlreadyExists(t *testing.T) {
 
 	// Pre-seed tenant record.
 	tenants.records["acme"] = map[string]string{
-		"tenant_id":   "acme",
-		"status":      "provisioning",
-		"tier":        "team",
-		"max_agents":  "10",
-		"max_missions": "50",
-		"max_api_keys": "10",
-		"retention_days": "30",
+		"tenant_id":         "acme",
+		"status":            "provisioning",
+		"tier":              "team",
+		"max_agents":        "10",
+		"max_missions":      "50",
+		"max_api_keys":      "10",
+		"retention_days":    "30",
 		"concurrent_agents": "3",
 	}
 

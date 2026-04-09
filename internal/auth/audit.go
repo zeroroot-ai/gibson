@@ -3,11 +3,39 @@ package auth
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/peer"
 )
+
+// AuthSignalProjector is the narrow interface used by logAuditEvent to
+// project each auth audit event as a compliance signal. Production wires
+// a projector that calls into the daemon's ComplianceMiddleware SignalSink.
+// Projection is best-effort — the slog emission must never depend on it.
+type AuthSignalProjector func(ctx context.Context, event *AuditEvent)
+
+var (
+	globalAuthSignalProjector   AuthSignalProjector
+	globalAuthSignalProjectorMu sync.RWMutex
+)
+
+// SetGlobalAuthSignalProjector installs the projector used by logAuditEvent.
+// Pass nil to clear. Called during daemon startup once the compliance
+// middleware sink is ready (audit-compliance-emitter task 13).
+func SetGlobalAuthSignalProjector(p AuthSignalProjector) {
+	globalAuthSignalProjectorMu.Lock()
+	defer globalAuthSignalProjectorMu.Unlock()
+	globalAuthSignalProjector = p
+}
+
+// getAuthSignalProjector returns the currently installed projector or nil.
+func getAuthSignalProjector() AuthSignalProjector {
+	globalAuthSignalProjectorMu.RLock()
+	defer globalAuthSignalProjectorMu.RUnlock()
+	return globalAuthSignalProjector
+}
 
 // AuditEvent represents an authentication or authorization event for logging.
 //
@@ -69,6 +97,15 @@ type AuditEvent struct {
 	// the moment of the decision. Populated only for authz_allow and
 	// authz_deny events so operators can see exactly what the caller held.
 	PermissionsGranted []string
+
+	// FgaRelation is the FGA relation name checked for this authz decision.
+	// Populated by FgaAuthzInterceptor for authz_allow and authz_deny events.
+	FgaRelation string
+
+	// FgaObject is the FGA object string checked for this authz decision.
+	// Format: "tenant:<id>", "system_tenant:_system", "component:<name>".
+	// Populated alongside FgaRelation; empty for Casbin-only decisions.
+	FgaObject string
 }
 
 // logAuditEvent logs a structured audit event.
@@ -162,6 +199,12 @@ func logAuditEvent(ctx context.Context, logger *slog.Logger, event *AuditEvent) 
 	if len(event.PermissionsGranted) > 0 {
 		attrs = append(attrs, "permissions_granted", event.PermissionsGranted)
 	}
+	if event.FgaRelation != "" {
+		attrs = append(attrs, "fga_relation", event.FgaRelation)
+	}
+	if event.FgaObject != "" {
+		attrs = append(attrs, "fga_object", event.FgaObject)
+	}
 
 	// Log at appropriate level based on event type. authz_allow follows the
 	// auth_success Info routing; authz_deny follows the auth_failure Warn
@@ -174,6 +217,22 @@ func logAuditEvent(ctx context.Context, logger *slog.Logger, event *AuditEvent) 
 		logger.Warn("authentication audit event", attrs...)
 	default:
 		logger.Info("authentication audit event", attrs...)
+	}
+
+	// Best-effort projection into the compliance signal pipeline. Wrapped
+	// in defer/recover so a projector panic cannot crash the auth path
+	// (audit-compliance-emitter Requirement 9.4).
+	if p := getAuthSignalProjector(); p != nil {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.WarnContext(ctx, "auth audit signal projection panicked",
+						slog.Any("panic", r),
+					)
+				}
+			}()
+			p(ctx, event)
+		}()
 	}
 }
 

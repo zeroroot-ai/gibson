@@ -11,15 +11,15 @@ import (
 // It tracks the daemon's health state and integrates with the health server
 // to signal when the daemon is shutting down.
 type healthStateManager struct {
-	mu            sync.RWMutex
-	shuttingDown  bool
+	mu             sync.RWMutex
+	shuttingDown   bool
 	shutdownReason string
 }
 
 // newHealthStateManager creates a new health state manager.
 func newHealthStateManager() *healthStateManager {
 	return &healthStateManager{
-		shuttingDown:  false,
+		shuttingDown:   false,
 		shutdownReason: "",
 	}
 }

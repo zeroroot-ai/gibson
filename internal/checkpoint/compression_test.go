@@ -46,10 +46,10 @@ func TestNewZstdCompressor(t *testing.T) {
 
 func TestZstdCompressor_ShouldCompress(t *testing.T) {
 	tests := []struct {
-		name      string
-		config    CompressionConfig
-		size      int
-		expected  bool
+		name     string
+		config   CompressionConfig
+		size     int
+		expected bool
 	}{
 		{
 			name: "enabled and exceeds threshold",

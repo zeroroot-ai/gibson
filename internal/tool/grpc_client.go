@@ -10,8 +10,8 @@ import (
 	toolpb "github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/encoding/protojson"
+	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -124,7 +124,7 @@ func (c *GRPCToolClient) OutputMessageType() string {
 func (c *GRPCToolClient) ExecuteProto(ctx context.Context, input protobuf.Message) (protobuf.Message, error) {
 	// Marshal proto input to JSON
 	marshaler := protojson.MarshalOptions{
-		UseProtoNames: true,
+		UseProtoNames:   true,
 		EmitUnpopulated: false,
 	}
 	inputJSON, err := marshaler.Marshal(input)

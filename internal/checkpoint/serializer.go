@@ -39,10 +39,10 @@ const (
 type formatHeader byte
 
 const (
-	headerRaw                formatHeader = 0x00
-	headerCompressed         formatHeader = 0x01
-	headerEncrypted          formatHeader = 0x02
-	headerCompressedEncrypt  formatHeader = 0x03
+	headerRaw               formatHeader = 0x00
+	headerCompressed        formatHeader = 0x01
+	headerEncrypted         formatHeader = 0x02
+	headerCompressedEncrypt formatHeader = 0x03
 )
 
 // isKnownHeader returns true when b is one of the four defined header values.

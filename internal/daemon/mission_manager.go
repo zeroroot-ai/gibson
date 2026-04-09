@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/mission"
@@ -40,8 +41,8 @@ type missionManager struct {
 	logger          *slog.Logger
 	registry        component.ComponentDiscovery
 	missionStore    mission.MissionStore
-	missionRunStore mission.MissionRunStore   // Stores individual run records
-	checkpointStore mission.CheckpointStore   // Stores mission checkpoints for pause/resume
+	missionRunStore mission.MissionRunStore // Stores individual run records
+	checkpointStore mission.CheckpointStore // Stores mission checkpoints for pause/resume
 	findingStore    finding.FindingStore
 	llmRegistry     llm.LLMRegistry
 	callbackManager *harness.CallbackManager
@@ -55,6 +56,11 @@ type missionManager struct {
 	// graphLoader will store mission definitions in Neo4j for cross-mission analysis
 	// Currently disabled during workflow -> mission migration
 	// graphLoader     *MissionGraphLoader
+
+	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
+	// can resolve run_id → (user_id, tenant_id) during component callbacks.
+	// When nil, authz state tracking is skipped (dev mode or authz disabled).
+	authzStore mission.MissionAuthzStore
 
 	// Track active missions with their contexts and event channels
 	mu             sync.RWMutex
@@ -90,6 +96,7 @@ func newMissionManager(
 	infrastructure *Infrastructure,
 	otelStack *observability.OTelObservabilityStack,
 	eventBus orchestrator.EventBus,
+	authzStore mission.MissionAuthzStore,
 ) *missionManager {
 	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
 	// GraphLoader initialization disabled during workflow -> mission migration
@@ -115,6 +122,7 @@ func newMissionManager(
 		infrastructure:  infrastructure,
 		otelStack:       otelStack,
 		eventBus:        eventBus,
+		authzStore:      authzStore,
 		activeMissions:  make(map[string]*activeMission),
 	}
 }
@@ -328,6 +336,24 @@ func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID
 		missionRun = mission.NewMissionRun(missionRecord.ID, 1)
 		missionRun.MarkStarted()
 		m.logger.Warn("mission run store not available, using ephemeral run")
+	}
+
+	// Record authz state so HarnessCallbackService.Authorize can resolve
+	// run_id → (user_id, tenant_id) during component callbacks. Errors are
+	// logged and do not abort mission start — authz state is advisory.
+	if m.authzStore != nil {
+		userID := ""
+		tenantID := auth.TenantFromContext(ctx)
+		if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
+			userID = identity.Subject
+		}
+		if putErr := m.authzStore.Put(ctx, missionRun.ID.String(), userID, tenantID); putErr != nil {
+			m.logger.Warn("failed to record authz state on mission start",
+				slog.String("mission_id", missionRecord.ID.String()),
+				slog.String("run_id", missionRun.ID.String()),
+				slog.String("error", putErr.Error()),
+			)
+		}
 	}
 
 	// Create event channel for mission updates
@@ -764,6 +790,29 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 			MissionID: missionID,
 			Error:     errorMsg,
 		})
+	}
+
+	// Transition authz state so that late-arriving component callbacks receive a
+	// proper inactive-mission error rather than stale "active" state. Errors are
+	// logged and do not block mission lifecycle cleanup.
+	if m.authzStore != nil && missionRun != nil {
+		bgCtx := context.Background()
+		runIDStr := missionRun.ID.String()
+		if finalStatus == mission.MissionStatusCompleted {
+			if markErr := m.authzStore.MarkCompleted(bgCtx, runIDStr); markErr != nil {
+				m.logger.Warn("failed to mark authz state completed",
+					slog.String("run_id", runIDStr),
+					slog.String("error", markErr.Error()),
+				)
+			}
+		} else {
+			if markErr := m.authzStore.MarkCancelled(bgCtx, runIDStr); markErr != nil {
+				m.logger.Warn("failed to mark authz state cancelled",
+					slog.String("run_id", runIDStr),
+					slog.String("error", markErr.Error()),
+				)
+			}
+		}
 	}
 
 	// Update mission in store

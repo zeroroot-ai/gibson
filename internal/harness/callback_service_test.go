@@ -569,6 +569,10 @@ func (m *mockHarnessWithResolver) TokenUsage() *llm.TokenTracker {
 	return nil
 }
 
+func (m *mockHarnessWithResolver) Checkpoint() CheckpointAccess {
+	return nil
+}
+
 // TestCallToolProto_WithExternalAgentDynamicType tests CallToolProto with a tool
 // that is not in GlobalTypes, using FileDescriptorSet for type resolution.
 func TestCallToolProto_WithExternalAgentDynamicType(t *testing.T) {

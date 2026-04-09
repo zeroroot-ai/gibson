@@ -30,6 +30,11 @@ type MissionContext struct {
 	// TenantID is the tenant identifier for multi-tenant isolation.
 	// Used by the callback harness to prevent cross-tenant access.
 	TenantID string `json:"tenant_id,omitempty"`
+	// DelegationDepth tracks how many delegation hops have occurred to reach
+	// this agent. Zero means this is a top-level agent (no delegation). Each
+	// DelegateToAgent call increments this by one in the child mission context.
+	// Capped at maxDelegationDepth in the harness to prevent runaway chains.
+	DelegationDepth int `json:"delegation_depth,omitempty"`
 }
 
 // NewMissionContext creates a new mission context with the given ID, name, and current agent.
@@ -81,6 +86,12 @@ func (m MissionContext) WithRunNumber(runNumber int) MissionContext {
 // WithTenant sets the tenant ID for cross-tenant access prevention.
 func (m MissionContext) WithTenant(tenantID string) MissionContext {
 	m.TenantID = tenantID
+	return m
+}
+
+// WithDelegationDepth sets the delegation depth for sub-agent execution tracking.
+func (m MissionContext) WithDelegationDepth(depth int) MissionContext {
+	m.DelegationDepth = depth
 	return m
 }
 

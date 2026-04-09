@@ -100,10 +100,10 @@ func NewCheckpointIntegration(
 // A super-step is a complete observe → think → act cycle in the orchestrator.
 //
 // This method:
-//   1. Checks if a checkpoint should be created based on policy
-//   2. Captures current execution state
-//   3. Creates checkpoint asynchronously (non-blocking on success)
-//   4. Logs errors but doesn't fail the mission
+//  1. Checks if a checkpoint should be created based on policy
+//  2. Captures current execution state
+//  3. Creates checkpoint asynchronously (non-blocking on success)
+//  4. Logs errors but doesn't fail the mission
 //
 // Parameters:
 //   - ctx: The execution context (used for timeout/cancellation)

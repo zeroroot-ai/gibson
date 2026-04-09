@@ -17,36 +17,41 @@ import (
 	_ "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
-// TestPermissionsYAMLCoversAllProtoRPCs is the default-deny CI gate. It
-// walks every gRPC method compiled into the daemon (via protoregistry.
-// GlobalFiles) and asserts that every one has an entry in
-// permissions.yaml. A developer who adds a new RPC without updating the
-// YAML will see this test fail with the unmapped method name.
+// TestFgaRegistryCoverAllProtoRPCs is the default-deny CI gate. It walks
+// every gRPC method compiled into the daemon (via protoregistry.GlobalFiles)
+// and asserts that every one has an entry in the FgaRpcRegistry.
+//
+// A developer who adds a new RPC without updating fga_rpc_registry.go will
+// see this test fail with the unmapped method name.
 //
 // Lives in internal/daemon/api (not internal/auth) because internal/auth
 // cannot import internal/daemon/api without an import cycle — the test
 // depends on the proto registrations in the daemon api package.
-func TestPermissionsYAMLCoversAllProtoRPCs(t *testing.T) {
-	reg, _, err := auth.LoadEmbedded()
-	if err != nil {
-		t.Fatalf("LoadEmbedded: %v", err)
-	}
+func TestFgaRegistryCoverAllProtoRPCs(t *testing.T) {
+	reg := auth.NewFgaRpcRegistry()
 
 	methods := discoverGibsonRPCs(t)
 	if len(methods) == 0 {
 		t.Fatal("no gibson.* RPCs discovered — blank imports in proto_coverage_test.go may be wrong")
 	}
 
-	if err := reg.VerifyProtoCoverage(methods); err != nil {
-		t.Errorf("permissions.yaml coverage gap: %v", err)
-		t.Log("every proto RPC must have an entry in permissions.yaml rpcs: map")
+	var missing []string
+	for _, method := range methods {
+		if _, ok := reg.Lookup(method); !ok {
+			missing = append(missing, method)
+		}
+	}
+
+	if len(missing) > 0 {
+		t.Errorf("FGA registry coverage gap — %d RPC(s) not registered:\n  %s\n\nEvery proto RPC must have an entry in internal/auth/fga_rpc_registry.go NewFgaRpcRegistry().",
+			len(missing), strings.Join(missing, "\n  "))
 	}
 }
 
 // coveredProtoPackages is the allowlist of proto packages whose services
 // are actually REGISTERED on the daemon's main gRPC server (see
 // internal/daemon/grpc.go). Only these services are enforced by the
-// RPCAuthzInterceptor and must therefore be mapped in permissions.yaml.
+// FgaAuthzInterceptor and must therefore be mapped in fga_rpc_registry.go.
 //
 // Services NOT in this list are excluded from the coverage check:
 //
@@ -57,7 +62,7 @@ func TestPermissionsYAMLCoversAllProtoRPCs(t *testing.T) {
 //   - gibson.harness.v1.HarnessCallbackService: served by the daemon's
 //     separate callback server (internal/harness/callback_server.go)
 //     which has its own trust model (agents-only) and no
-//     RPCAuthzInterceptor
+//     FgaAuthzInterceptor
 //
 // When a new service is added to the main daemon gRPC server, add its
 // proto package here to extend the coverage gate.
@@ -69,8 +74,7 @@ var coveredProtoPackages = map[string]struct{}{
 
 // discoverGibsonRPCs walks protoregistry.GlobalFiles and returns the
 // fully-qualified gRPC method paths (/package.Service/Method) for every
-// service in coveredProtoPackages. Other gibson.* services (harness
-// callback, client-side protos) are excluded per the allowlist above.
+// service in coveredProtoPackages.
 func discoverGibsonRPCs(t *testing.T) []string {
 	t.Helper()
 
@@ -95,6 +99,5 @@ func discoverGibsonRPCs(t *testing.T) []string {
 	return methods
 }
 
-// silenceUnusedImport is a no-op sink for the strings package; kept because
-// the import is reserved for future use.
+// silenceUnusedImport is a no-op sink; kept because the import is reserved for future use.
 var _ = strings.HasPrefix

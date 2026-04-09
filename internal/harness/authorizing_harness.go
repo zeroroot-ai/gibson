@@ -8,6 +8,7 @@ import (
 	"github.com/casbin/casbin/v2"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -50,13 +51,25 @@ func NewAuthorizingHarness(inner AgentHarness, enforcer *casbin.Enforcer) *Autho
 // It first delegates to the Casbin enforcer for policy evaluation, then falls
 // back to the identity's Capabilities slice if Casbin denies or errors.
 //
-// If no identity is present in the context, enforcement is skipped (returns nil).
-// This preserves backward compatibility for unauthenticated / dev-mode callers.
-func (h *AuthorizingHarness) enforce(ctx context.Context, resource, action string) error {
+// Returns a new context with the authorization decision stamped onto it
+// (under contextkeys.AuthzDecision) so the downstream ComplianceMiddleware
+// can read it when emitting a signal. Callers MUST use the returned ctx
+// when delegating to the inner harness so the decision propagates.
+//
+// If no identity is present in the context, enforcement is skipped and the
+// decision is stamped as "not_checked" (Requirement 7.3).
+func (h *AuthorizingHarness) enforce(ctx context.Context, resource, action string) (context.Context, error) {
+	policyID := fmt.Sprintf("%s.%s", resource, action)
+
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		// No identity — dev mode or pre-auth path. Skip enforcement.
-		return nil
+		ctx = contextkeys.WithAuthzDecision(ctx, contextkeys.AuthzDecisionValue{
+			Decision: DecisionNotChecked,
+			PolicyID: policyID,
+			Reason:   "no identity in context",
+		})
+		return ctx, nil
 	}
 
 	tenant := auth.TenantFromContext(ctx)
@@ -74,22 +87,34 @@ func (h *AuthorizingHarness) enforce(ctx context.Context, resource, action strin
 	}
 
 	if allowed {
-		return nil
+		ctx = contextkeys.WithAuthzDecision(ctx, contextkeys.AuthzDecisionValue{
+			Decision: DecisionAllow,
+			PolicyID: policyID,
+			Reason:   "casbin policy allow",
+		})
+		return ctx, nil
 	}
 
 	// Casbin denied (or errored). Check the identity's own Capabilities slice
 	// as a fallback for API key callers who carry per-key capability lists.
-	// The RPCAuthzInterceptor handles the primary authorization path via
-	// Casbin; this fallback covers the narrow case where the harness is
-	// called from a context that hasn't been through the interceptor.
 	cap := fmt.Sprintf("%s:%s", resource, action)
 	for _, c := range identity.Capabilities {
 		if c == "*" || c == cap {
-			return nil
+			ctx = contextkeys.WithAuthzDecision(ctx, contextkeys.AuthzDecisionValue{
+				Decision: DecisionAllow,
+				PolicyID: policyID,
+				Reason:   "capability fallback allow",
+			})
+			return ctx, nil
 		}
 	}
 
-	return status.Errorf(codes.PermissionDenied, "missing capability: %s:%s", resource, action)
+	ctx = contextkeys.WithAuthzDecision(ctx, contextkeys.AuthzDecisionValue{
+		Decision: DecisionDeny,
+		PolicyID: policyID,
+		Reason:   "no matching policy or capability",
+	})
+	return ctx, status.Errorf(codes.PermissionDenied, "missing capability: %s:%s", resource, action)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -97,35 +122,40 @@ func (h *AuthorizingHarness) enforce(ctx context.Context, resource, action strin
 // ────────────────────────────────────────────────────────────────────────────
 
 func (h *AuthorizingHarness) Complete(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (*llm.CompletionResponse, error) {
-	if err := h.enforce(ctx, "llm", "complete"); err != nil {
+	ctx, err := h.enforce(ctx, "llm", "complete")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.Complete(ctx, slot, messages, opts...)
 }
 
 func (h *AuthorizingHarness) CompleteWithTools(ctx context.Context, slot string, messages []llm.Message, tools []llm.ToolDef, opts ...CompletionOption) (*llm.CompletionResponse, error) {
-	if err := h.enforce(ctx, "llm", "complete"); err != nil {
+	ctx, err := h.enforce(ctx, "llm", "complete")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.CompleteWithTools(ctx, slot, messages, tools, opts...)
 }
 
 func (h *AuthorizingHarness) Stream(ctx context.Context, slot string, messages []llm.Message, opts ...CompletionOption) (<-chan llm.StreamChunk, error) {
-	if err := h.enforce(ctx, "llm", "complete"); err != nil {
+	ctx, err := h.enforce(ctx, "llm", "complete")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.Stream(ctx, slot, messages, opts...)
 }
 
 func (h *AuthorizingHarness) CompleteStructuredAny(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...CompletionOption) (any, error) {
-	if err := h.enforce(ctx, "llm", "complete"); err != nil {
+	ctx, err := h.enforce(ctx, "llm", "complete")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.CompleteStructuredAny(ctx, slot, messages, schemaType, opts...)
 }
 
 func (h *AuthorizingHarness) CompleteStructuredAnyWithUsage(ctx context.Context, slot string, messages []llm.Message, schemaType any, opts ...CompletionOption) (*StructuredCompletionResult, error) {
-	if err := h.enforce(ctx, "llm", "complete"); err != nil {
+	ctx, err := h.enforce(ctx, "llm", "complete")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.CompleteStructuredAnyWithUsage(ctx, slot, messages, schemaType, opts...)
@@ -136,7 +166,8 @@ func (h *AuthorizingHarness) CompleteStructuredAnyWithUsage(ctx context.Context,
 // ────────────────────────────────────────────────────────────────────────────
 
 func (h *AuthorizingHarness) CallToolProto(ctx context.Context, name string, request, response proto.Message) error {
-	if err := h.enforce(ctx, "tools", "execute"); err != nil {
+	ctx, err := h.enforce(ctx, "tools", "execute")
+	if err != nil {
 		return err
 	}
 	return h.inner.CallToolProto(ctx, name, request, response)
@@ -151,21 +182,24 @@ func (h *AuthorizingHarness) ListTools() []ToolDescriptor {
 }
 
 func (h *AuthorizingHarness) GetToolDescriptor(ctx context.Context, name string) (*ToolDescriptor, error) {
-	if err := h.enforce(ctx, "tools", "read"); err != nil {
+	ctx, err := h.enforce(ctx, "tools", "read")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.GetToolDescriptor(ctx, name)
 }
 
 func (h *AuthorizingHarness) GetToolCapabilities(ctx context.Context, toolName string) (*sdktypes.Capabilities, error) {
-	if err := h.enforce(ctx, "tools", "read"); err != nil {
+	ctx, err := h.enforce(ctx, "tools", "read")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.GetToolCapabilities(ctx, toolName)
 }
 
 func (h *AuthorizingHarness) GetAllToolCapabilities(ctx context.Context) (map[string]*sdktypes.Capabilities, error) {
-	if err := h.enforce(ctx, "tools", "read"); err != nil {
+	ctx, err := h.enforce(ctx, "tools", "read")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.GetAllToolCapabilities(ctx)
@@ -180,7 +214,8 @@ func (h *AuthorizingHarness) QueryPlugin(ctx context.Context, name string, metho
 	// Use a compound resource key so per-plugin policies can be expressed:
 	// e.g., "plugin:gitlab:read" grants access only to the gitlab plugin.
 	resource := fmt.Sprintf("plugin:%s", name)
-	if err := h.enforce(ctx, resource, "read"); err != nil {
+	ctx, err := h.enforce(ctx, resource, "read")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.QueryPlugin(ctx, name, method, params)
@@ -197,7 +232,8 @@ func (h *AuthorizingHarness) ListPlugins() []PluginDescriptor {
 // ────────────────────────────────────────────────────────────────────────────
 
 func (h *AuthorizingHarness) DelegateToAgent(ctx context.Context, name string, task agent.Task) (agent.Result, error) {
-	if err := h.enforce(ctx, "agents", "delegate"); err != nil {
+	ctx, err := h.enforce(ctx, "agents", "delegate")
+	if err != nil {
 		return agent.Result{}, err
 	}
 	return h.inner.DelegateToAgent(ctx, name, task)
@@ -214,14 +250,16 @@ func (h *AuthorizingHarness) ListAgents() []AgentDescriptor {
 // ────────────────────────────────────────────────────────────────────────────
 
 func (h *AuthorizingHarness) SubmitFinding(ctx context.Context, finding agent.Finding) error {
-	if err := h.enforce(ctx, "findings", "write"); err != nil {
+	ctx, err := h.enforce(ctx, "findings", "write")
+	if err != nil {
 		return err
 	}
 	return h.inner.SubmitFinding(ctx, finding)
 }
 
 func (h *AuthorizingHarness) GetFindings(ctx context.Context, filter FindingFilter) ([]agent.Finding, error) {
-	if err := h.enforce(ctx, "findings", "read"); err != nil {
+	ctx, err := h.enforce(ctx, "findings", "read")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.GetFindings(ctx, filter)
@@ -259,14 +297,16 @@ func (h *AuthorizingHarness) GetMissionRunHistory(ctx context.Context) ([]Missio
 }
 
 func (h *AuthorizingHarness) GetPreviousRunFindings(ctx context.Context, filter FindingFilter) ([]agent.Finding, error) {
-	if err := h.enforce(ctx, "findings", "read"); err != nil {
+	ctx, err := h.enforce(ctx, "findings", "read")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.GetPreviousRunFindings(ctx, filter)
 }
 
 func (h *AuthorizingHarness) GetAllRunFindings(ctx context.Context, filter FindingFilter) ([]agent.Finding, error) {
-	if err := h.enforce(ctx, "findings", "read"); err != nil {
+	ctx, err := h.enforce(ctx, "findings", "read")
+	if err != nil {
 		return nil, err
 	}
 	return h.inner.GetAllRunFindings(ctx, filter)

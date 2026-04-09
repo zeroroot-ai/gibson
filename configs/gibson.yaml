@@ -884,3 +884,106 @@ callback:
 #   example-plugin:
 #     api_key: "${EXAMPLE_API_KEY}"
 #     endpoint: "https://api.example.com"
+
+# ============================================================================
+# Authorization (OpenFGA) — authz-01 foundation
+# ============================================================================
+# Gibson uses OpenFGA (Google Zanzibar-based) for relationship authorization.
+# Phase 0 (this spec): FGA is deployed but disabled by default (noop authorizer).
+# Phase 1 (authz-02): Flip enabled: true in Kind dev cluster values.
+# Phase 2 (authz-03): gRPC interceptor starts consulting FGA for every RPC.
+#
+# When authz.enabled is false, the daemon wires a no-op Authorizer that
+# permits all checks. Existing behavior is completely unchanged.
+authz:
+  # enabled: controls whether FGA is active.
+  # Override via: GIBSON_AUTHZ_ENABLED=true
+  enabled: ${GIBSON_AUTHZ_ENABLED:-false}
+
+  # provider: authorization backend. Only "openfga" is supported.
+  provider: openfga
+
+  # require_ready: if true and FGA is unreachable, daemon startup fails.
+  # Set to false in dev mode to allow degraded operation (noop fallback).
+  require_ready: true
+
+  # enforcement_source: which authorization backend enforces each RPC.
+  #   "casbin" — legacy Casbin enforcer only.
+  #   "fga"    — OpenFGA only; Casbin is not constructed.
+  #   "dual"   — both run in parallel; Casbin result is authoritative.
+  # Default: "dual" (safe rollout — observe FGA parity before cutover).
+  # Override via: GIBSON_AUTHZ_ENFORCEMENT_SOURCE
+  enforcement_source: "${GIBSON_AUTHZ_ENFORCEMENT_SOURCE:-dual}"
+
+  # reconciler_enabled: run the background FGA<->Redis drift reconciler.
+  # Override via: GIBSON_AUTHZ_RECONCILER_ENABLED
+  reconciler_enabled: true
+
+  # reconciler_interval_seconds: how often the reconciler runs (seconds).
+  # Override via: GIBSON_AUTHZ_RECONCILER_INTERVAL_SECONDS
+  reconciler_interval_seconds: 300
+
+  fga:
+    # endpoint: HTTP endpoint for the OpenFGA server (in-cluster address).
+    # Override via: GIBSON_AUTHZ_FGA_ENDPOINT
+    endpoint: "${GIBSON_AUTHZ_FGA_ENDPOINT:-gibson-fga:8080}"
+
+    # store_id: OpenFGA store ULID. If empty, resolved from gibson-fga-config ConfigMap.
+    # Override via: GIBSON_AUTHZ_FGA_STORE_ID
+    store_id: "${GIBSON_AUTHZ_FGA_STORE_ID:-}"
+
+    # model_id: OpenFGA model ULID. If empty, resolved from gibson-fga-config ConfigMap.
+    # Override via: GIBSON_AUTHZ_FGA_MODEL_ID
+    model_id: "${GIBSON_AUTHZ_FGA_MODEL_ID:-}"
+
+    # timeout_ms: per-call timeout in milliseconds. Default: 500ms.
+    timeout_ms: 500
+
+    tls:
+      # enabled: whether to use TLS for the FGA connection.
+      # Default false — in-cluster traffic is already protected.
+      enabled: false
+
+# ============================================================================
+# Keycloak Admin API — authz-02: Organizations provisioner credentials
+# ============================================================================
+# The daemon uses these credentials to call the Keycloak Admin REST API for
+# per-tenant Organization management (create, add/remove members) and user
+# provisioning during the SignupTenant RPC flow (authz-02).
+#
+# Two authentication modes are supported:
+#   1. Client-credentials (recommended for production):
+#      Set client_id + client_secret. The daemon uses the OAuth2 client
+#      credentials grant against the Keycloak token endpoint.
+#   2. Username + password (suitable for dev/local clusters):
+#      Set username + password. The daemon uses a direct password grant.
+#
+# IMPORTANT: When authz.enabled=true, the daemon will refuse to start if
+# neither auth mode is fully configured (fail-closed behavior).
+#
+# Helm values supply these via the gibson-keycloak-admin-secret Secret.
+keycloak:
+  admin:
+    # endpoint: base URL of the Keycloak instance (same as the OIDC issuer base).
+    # Override via: GIBSON_KEYCLOAK_ADMIN_ENDPOINT
+    endpoint: "${GIBSON_KEYCLOAK_ADMIN_ENDPOINT:-http://gibson-keycloak:8080}"
+
+    # realm: the Keycloak realm that the daemon manages.
+    # Override via: GIBSON_KEYCLOAK_ADMIN_REALM
+    realm: "${GIBSON_KEYCLOAK_ADMIN_REALM:-gibson}"
+
+    # client_id: client-credentials grant client ID (service account).
+    # Override via: GIBSON_KEYCLOAK_ADMIN_CLIENT_ID
+    client_id: "${GIBSON_KEYCLOAK_ADMIN_CLIENT_ID:-}"
+
+    # client_secret: client-credentials grant secret (from K8s Secret mount).
+    # Override via: GIBSON_KEYCLOAK_ADMIN_CLIENT_SECRET
+    client_secret: "${GIBSON_KEYCLOAK_ADMIN_CLIENT_SECRET:-}"
+
+    # username: admin username for the password grant flow (dev/local only).
+    # Override via: GIBSON_KEYCLOAK_ADMIN_USERNAME
+    username: "${GIBSON_KEYCLOAK_ADMIN_USERNAME:-}"
+
+    # password: admin password for the password grant flow (dev/local only).
+    # Override via: GIBSON_KEYCLOAK_ADMIN_PASSWORD
+    password: "${GIBSON_KEYCLOAK_ADMIN_PASSWORD:-}"

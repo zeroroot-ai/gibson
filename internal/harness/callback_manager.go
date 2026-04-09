@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/sdk/protoresolver"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -511,5 +512,34 @@ func (m *CallbackManager) SetProtoResolver(resolver protoresolver.ProtoResolver)
 		defer m.server.service.mu.Unlock()
 		m.server.service.resolver = resolver
 		m.logger.Debug("set proto resolver on callback service")
+	}
+}
+
+// SetAuthzStore wires the RunAuthzLookup into the callback service so that the
+// Authorize RPC handler can look up per-run authz state.
+// Should be called after NewCallbackManager and before Start().
+func (m *CallbackManager) SetAuthzStore(store RunAuthzLookup) {
+	if m.server != nil {
+		m.server.SetAuthzStore(store)
+		m.logger.Debug("set authz store on callback service")
+	}
+}
+
+// SetComponentAuthorizer wires the FGA Authorizer into the callback service for
+// component-level authorization decisions during Authorize RPC calls.
+// Should be called after NewCallbackManager and before Start().
+func (m *CallbackManager) SetComponentAuthorizer(a authz.Authorizer) {
+	if m.server != nil {
+		m.server.SetComponentAuthorizer(a)
+		m.logger.Debug("set component authorizer on callback service")
+	}
+}
+
+// SetComponentAuthzMetrics wires a metrics recorder into the Authorize RPC handler.
+// When not set, no authz counters are emitted. Should be called before Start().
+func (m *CallbackManager) SetComponentAuthzMetrics(metrics ComponentAuthzMetrics) {
+	if m.server != nil {
+		m.server.SetComponentAuthzMetrics(metrics)
+		m.logger.Debug("set component authz metrics recorder on callback service")
 	}
 }

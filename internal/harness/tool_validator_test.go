@@ -38,8 +38,8 @@ func TestNewToolValidator(t *testing.T) {
 
 func TestIsDiscoveryTool(t *testing.T) {
 	tests := []struct {
-		name       string
-		toolName   string
+		name        string
+		toolName    string
 		isDiscovery bool
 	}{
 		{"nmap is discovery", "nmap", true},

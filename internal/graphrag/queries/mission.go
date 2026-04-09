@@ -417,8 +417,8 @@ func (mq *MissionQueries) CreateWorkflowNode(ctx context.Context, node *schema.W
 	`
 
 	params := map[string]any{
-		"id":         node.ID.String(),
-		"mission_id": node.MissionID.String(),
+		"id":           node.ID.String(),
+		"mission_id":   node.MissionID.String(),
 		"type":         string(node.Type),
 		"name":         node.Name,
 		"description":  node.Description,
@@ -728,8 +728,8 @@ func (mq *MissionQueries) CreateMissionRun(ctx context.Context, missionID types.
 
 	params := map[string]any{
 		sdkgraphrag.PropMissionID: missionID.String(),
-		"run_id":     runID.String(),
-		"run_number": runNumber,
+		"run_id":                  runID.String(),
+		"run_number":              runNumber,
 	}
 
 	result, err := mq.client.Query(ctx, cypher, params)

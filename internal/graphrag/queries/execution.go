@@ -192,9 +192,9 @@ func (eq *ExecutionQueries) CreateDecision(ctx context.Context, decision *schema
 	`
 
 	params := map[string]any{
-		"props":      props,
-		"missionId":  decision.MissionID.String(),
-		"tenant_id":  tenantID,
+		"props":     props,
+		"missionId": decision.MissionID.String(),
+		"tenant_id": tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)
@@ -293,8 +293,8 @@ func (eq *ExecutionQueries) GetMissionDecisions(ctx context.Context, missionID s
 	`
 
 	params := map[string]any{
-		"missionId":  missionID,
-		"tenant_id":  tenantID,
+		"missionId": missionID,
+		"tenant_id": tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)

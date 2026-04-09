@@ -91,6 +91,32 @@ Tool workers perform entity extraction tool-side (in the SDK serve loop) and pop
 
 Three auth paths: (1) `gsk_`-prefixed tokens → APIKeyAuthenticator (Redis-backed, for external components/CLI); (2) OIDC JWTs → OIDCValidator (for users via Keycloak); (3) K8s ServiceAccount tokens → K8sValidator (auto-detected, for in-cluster components). Auth modes: `enterprise`, `saas`, `dev`. In enterprise/saas mode, K8s SA auth is auto-detected (no config flag needed). RBAC maps claims to roles/permissions.
 
+### Authorization (`internal/authz/`) — Phase 0 foundation (authz-01)
+
+**Feature flag**: `authz.enabled: false` by default — no existing code path changes until spec authz-02.
+
+The `authz` package implements a stable `Authorizer` interface backed by OpenFGA (Google Zanzibar-based ReBAC). The daemon startup pipeline includes an Authorization Service phase that runs AFTER Redis State Client and BEFORE Component Registry.
+
+Key types:
+- `Authorizer` interface — `Check`, `BatchCheck`, `Write`, `Delete`, `ListObjects`, `ListUsers`, `StoreID`, `ModelID`, `Close`
+- `noopAuthorizer` — always returns `allowed=true`; injected when `authz.enabled=false` or FGA is unreachable in dev mode
+- `fgaAuthorizer` — wraps `github.com/openfga/go-sdk v0.7.5` HTTP client with OTel spans
+- `ResolveStoreAndModelIDs` — 3-source fallback: config file → ConfigMap `gibson/gibson-fga-config` → env vars `GIBSON_AUTHZ_FGA_STORE_ID` / `GIBSON_AUTHZ_FGA_MODEL_ID`
+
+Startup behavior:
+- `authz.enabled=false` → noopAuthorizer, log INFO
+- `authz.enabled=true`, FGA reachable → fgaAuthorizer, log INFO
+- `authz.enabled=true`, FGA unreachable, `require_ready=true` → fail daemon startup (production)
+- `authz.enabled=true`, FGA unreachable, `require_ready=false` → noopAuthorizer, log WARN (dev mode)
+
+FGA HTTP endpoint is `gibson-fga:8080` (not gRPC port 8081). The `/readyz` probe includes an FGA check with 10s TTL caching when `authz.enabled=true`.
+
+Authorization model (`internal/authz/model.fga`): schema 1.1 with types `user`, `tenant`, `component`, `system_tenant`. Provisioned by the `gibson-fga-init` Kubernetes Job on every helm install/upgrade.
+
+CLI: `gibson authz check <user> <relation> <object>`, `gibson authz write <user> <relation> <object>`, `gibson authz model-info`.
+
+Makefile: `make check-authz` (unit), `make check-authz INTEGRATION=1` (requires Docker for testcontainers).
+
 ### Encryption (`internal/crypto/`)
 
 AES-256-GCM for plugin config encryption. `KeyProvider` interface with backends: Kubernetes Secret, HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager. Factory pattern selects provider from config.

@@ -108,6 +108,21 @@ func DefaultConfig() *Config {
 			Local:          nil,
 		},
 		Checkpoint: *DefaultCheckpointConfig(),
+		Authz: AuthzConfig{
+			Enabled:           false, // Disabled by default — flip in dev/prod values
+			Provider:          "openfga",
+			RequireReady:      true,
+			EnforcementSource: "fga", // Only valid value after authz-07
+			Fga: FgaClientConfig{
+				Endpoint:  "gibson-fga:8080",
+				StoreID:   "", // resolved from ConfigMap at startup if empty
+				ModelID:   "", // resolved from ConfigMap at startup if empty
+				TimeoutMs: 500,
+				TLS: FgaTLSConfig{
+					Enabled: false,
+				},
+			},
+		},
 	}
 }
 

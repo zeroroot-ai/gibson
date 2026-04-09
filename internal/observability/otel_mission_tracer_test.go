@@ -269,14 +269,14 @@ func TestOTelMissionTracer_LogAgentExecution(t *testing.T) {
 	}
 
 	agentLog := &AgentExecutionLog{
-		Execution:       execution,
-		AgentName:       "test-agent",
-		Neo4jNodeID:     "neo4j-node-456",
-		ToolCallsCount:  3,
-		FindingsCount:   2,
-		LLMTimeMs:       500,
-		ToolTimeMs:      1000,
-		MemoryOpsCount:  5,
+		Execution:      execution,
+		AgentName:      "test-agent",
+		Neo4jNodeID:    "neo4j-node-456",
+		ToolCallsCount: 3,
+		FindingsCount:  2,
+		LLMTimeMs:      500,
+		ToolTimeMs:     1000,
+		MemoryOpsCount: 5,
 	}
 
 	// Log agent execution

@@ -65,18 +65,18 @@ func BuildDependencyGraph(tree *DependencyTree) *DependencyGraph {
 
 // CycleDetector detects circular dependencies in a dependency graph.
 type CycleDetector struct {
-	graph    *DependencyGraph
-	visited  map[string]bool
-	inStack  map[string]bool
+	graph     *DependencyGraph
+	visited   map[string]bool
+	inStack   map[string]bool
 	cyclePath []string
 }
 
 // NewCycleDetector creates a new cycle detector for the given graph.
 func NewCycleDetector(graph *DependencyGraph) *CycleDetector {
 	return &CycleDetector{
-		graph:    graph,
-		visited:  make(map[string]bool),
-		inStack:  make(map[string]bool),
+		graph:     graph,
+		visited:   make(map[string]bool),
+		inStack:   make(map[string]bool),
 		cyclePath: make([]string, 0),
 	}
 }

@@ -502,15 +502,15 @@ func TestRedisMissionRunStore_CompleteWorkflow(t *testing.T) {
 	// Create and save new run
 	run := NewMissionRun(missionID, nextNum)
 	run.Checkpoint = &MissionCheckpoint{
-		ID:              types.NewID(),
-		Version:         1,
-		WorkflowState:   map[string]any{"step": "init"},
-		CompletedNodes:  []string{},
-		PendingNodes:    []string{"node1"},
-		NodeResults:     map[string]any{},
-		LastNodeID:      "",
-		CheckpointedAt:  time.Now(),
-		Checksum:        "abc123",
+		ID:             types.NewID(),
+		Version:        1,
+		WorkflowState:  map[string]any{"step": "init"},
+		CompletedNodes: []string{},
+		PendingNodes:   []string{"node1"},
+		NodeResults:    map[string]any{},
+		LastNodeID:     "",
+		CheckpointedAt: time.Now(),
+		Checksum:       "abc123",
 	}
 	require.NoError(t, store.Save(ctx, run))
 

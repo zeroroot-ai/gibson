@@ -313,11 +313,11 @@ func NewOrchestrator(observer OrchestratorObserver, thinker OrchestratorThinker,
 		observer:      observer,
 		thinker:       thinker,
 		actor:         actor,
-		maxIterations: 100,                              // Reasonable default to prevent infinite loops
-		maxConcurrent: 10,                               // Default concurrency limit
-		budget:        0,                                // Unlimited by default
-		timeout:       0,                                // No timeout by default
-		runMode:       envRunMode,                       // Default from environment or production
+		maxIterations: 100,        // Reasonable default to prevent infinite loops
+		maxConcurrent: 10,         // Default concurrency limit
+		budget:        0,          // Unlimited by default
+		timeout:       0,          // No timeout by default
+		runMode:       envRunMode, // Default from environment or production
 		logger:        &slogAdapter{slog: slog.Default()},
 		tracer:        trace.NewNoopTracerProvider().Tracer("orchestrator"),
 		metrics:       harness.NewNoOpMetricsRecorder(), // Default to no-op

@@ -11,7 +11,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.3
 	github.com/buckhx/gobert v0.0.0-20190731141805-265756fed232
 	github.com/casbin/casbin/v2 v2.135.0
-	github.com/casbin/redis-adapter/v3 v3.6.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -174,6 +173,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
+	github.com/openfga/go-sdk v0.7.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect

@@ -29,8 +29,8 @@ func (m *mockAuthenticator) Authenticate(ctx context.Context, token string) (*Id
 
 // mockHandler is a test gRPC handler.
 type mockHandler struct {
-	called     bool
-	err        error
+	called      bool
+	err         error
 	capturedCtx context.Context
 }
 
@@ -104,33 +104,33 @@ func TestUnaryAuthInterceptor_DisabledMode_Rejects(t *testing.T) {
 // TestUnaryAuthInterceptor_LocalhostBypass tests localhost bypass functionality.
 func TestUnaryAuthInterceptor_LocalhostBypass(t *testing.T) {
 	tests := []struct {
-		name      string
-		peerAddr  string
+		name         string
+		peerAddr     string
 		shouldBypass bool
 	}{
 		{
-			name:      "IPv4 localhost",
-			peerAddr:  "127.0.0.1:12345",
+			name:         "IPv4 localhost",
+			peerAddr:     "127.0.0.1:12345",
 			shouldBypass: true,
 		},
 		{
-			name:      "IPv6 localhost",
-			peerAddr:  "[::1]:12345",
+			name:         "IPv6 localhost",
+			peerAddr:     "[::1]:12345",
 			shouldBypass: true,
 		},
 		{
-			name:      "localhost hostname",
-			peerAddr:  "localhost:12345",
+			name:         "localhost hostname",
+			peerAddr:     "localhost:12345",
 			shouldBypass: true,
 		},
 		{
-			name:      "remote address",
-			peerAddr:  "192.168.1.100:12345",
+			name:         "remote address",
+			peerAddr:     "192.168.1.100:12345",
 			shouldBypass: false,
 		},
 		{
-			name:      "public IPv6",
-			peerAddr:  "[2001:db8::1]:12345",
+			name:         "public IPv6",
+			peerAddr:     "[2001:db8::1]:12345",
 			shouldBypass: false,
 		},
 	}
@@ -218,24 +218,24 @@ func TestUnaryAuthInterceptor_MissingToken(t *testing.T) {
 // TestUnaryAuthInterceptor_InvalidToken tests invalid token format.
 func TestUnaryAuthInterceptor_InvalidToken(t *testing.T) {
 	tests := []struct {
-		name     string
+		name       string
 		authHeader string
-		wantErr  string
+		wantErr    string
 	}{
 		{
-			name:     "missing Bearer prefix",
+			name:       "missing Bearer prefix",
 			authHeader: "token123",
-			wantErr:  "missing bearer token",
+			wantErr:    "missing bearer token",
 		},
 		{
-			name:     "empty token after Bearer",
+			name:       "empty token after Bearer",
 			authHeader: "Bearer ",
-			wantErr:  "missing bearer token",
+			wantErr:    "missing bearer token",
 		},
 		{
-			name:     "invalid format",
+			name:       "invalid format",
 			authHeader: "Basic dXNlcjpwYXNz",
-			wantErr:  "missing bearer token",
+			wantErr:    "missing bearer token",
 		},
 	}
 
@@ -270,40 +270,40 @@ func TestUnaryAuthInterceptor_InvalidToken(t *testing.T) {
 // TestUnaryAuthInterceptor_AuthenticationFailure tests authentication failure scenarios.
 func TestUnaryAuthInterceptor_AuthenticationFailure(t *testing.T) {
 	tests := []struct {
-		name    string
-		authErr error
+		name     string
+		authErr  error
 		wantCode codes.Code
-		wantMsg string
+		wantMsg  string
 	}{
 		{
-			name:    "token expired",
-			authErr: ErrTokenExpired(),
+			name:     "token expired",
+			authErr:  ErrTokenExpired(),
 			wantCode: codes.Unauthenticated,
-			wantMsg: "token expired",
+			wantMsg:  "token expired",
 		},
 		{
-			name:    "invalid signature",
-			authErr: ErrInvalidSignature(),
+			name:     "invalid signature",
+			authErr:  ErrInvalidSignature(),
 			wantCode: codes.Unauthenticated,
-			wantMsg: "invalid token signature",
+			wantMsg:  "invalid token signature",
 		},
 		{
-			name:    "unknown issuer",
-			authErr: ErrUnknownIssuer("https://unknown.issuer.com"),
+			name:     "unknown issuer",
+			authErr:  ErrUnknownIssuer("https://unknown.issuer.com"),
 			wantCode: codes.Unauthenticated,
-			wantMsg: "unknown token issuer",
+			wantMsg:  "unknown token issuer",
 		},
 		{
-			name:    "audience mismatch",
-			authErr: ErrInvalidAudience("expected", "actual"),
+			name:     "audience mismatch",
+			authErr:  ErrInvalidAudience("expected", "actual"),
 			wantCode: codes.Unauthenticated,
-			wantMsg: "invalid token audience",
+			wantMsg:  "invalid token audience",
 		},
 		{
-			name:    "invalid token",
-			authErr: errInvalidToken,
+			name:     "invalid token",
+			authErr:  errInvalidToken,
 			wantCode: codes.Unauthenticated,
-			wantMsg: "invalid token",
+			wantMsg:  "invalid token",
 		},
 	}
 
@@ -548,7 +548,7 @@ func TestExtractBearerToken(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name: "missing authorization header",
+			name:    "missing authorization header",
 			headers: map[string]string{},
 			want:    "",
 			wantErr: errMissingToken,
@@ -731,13 +731,17 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    "fallback-tenant",
 		},
 		{
-			// Scenario C: enterprise + OIDC WITHOUT tenant claim + NO DefaultTenant → no tenant.
+			// Scenario C: enterprise + OIDC WITHOUT tenant claim + NO DefaultTenant →
+			// After authz-02, TenantFromContext returns SystemTenant when Identity.Tenants
+			// is empty and no ctx tenant is set. The auth interceptor in enterprise mode
+			// does not call ContextWithTenant when no tenant is found, so the
+			// downstream TenantFromContext falls through to SystemTenant.
 			name:          "C: enterprise OIDC without tenant claim, no default",
 			mode:          "enterprise",
 			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
 			tenantClaim:   "tenant_id",
 			defaultTenant: "",
-			wantTenant:    "",
+			wantTenant:    SystemTenant,
 		},
 		{
 			// Scenario D: enterprise + API key identity with tenant claim → claim value wins.
@@ -836,12 +840,13 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 		},
 		{
 			// Scenario C (stream): enterprise + OIDC WITHOUT tenant claim + NO DefaultTenant.
+			// After authz-02, TenantFromContext returns SystemTenant for empty Identity.Tenants.
 			name:          "C: enterprise OIDC without tenant claim, no default",
 			mode:          "enterprise",
 			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
 			tenantClaim:   "tenant_id",
 			defaultTenant: "",
-			wantTenant:    "",
+			wantTenant:    SystemTenant,
 		},
 		{
 			// Scenario D (stream): enterprise + API key identity.

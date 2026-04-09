@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/casbin/casbin/v2"
 	"github.com/redis/go-redis/v9"
 	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
@@ -140,34 +139,17 @@ type APIKeyRecord struct {
 // Thread-safe for concurrent use.
 // Implements the Authenticator interface.
 type APIKeyAuthenticator struct {
-	client   *redis.Client
-	enforcer *casbin.Enforcer
+	client *redis.Client
 }
 
 // NewAPIKeyAuthenticator creates a new authenticator backed by the provided Redis client.
 //
 // The client must be connected and ready; no dial is performed here.
-// To enable Casbin policy synchronisation, call WithEnforcer after construction.
 func NewAPIKeyAuthenticator(client *redis.Client) (*APIKeyAuthenticator, error) {
 	if client == nil {
 		return nil, fmt.Errorf("redis client is nil")
 	}
 	return &APIKeyAuthenticator{client: client}, nil
-}
-
-// WithEnforcer wires a Casbin enforcer into the authenticator so that
-// CreateKey and RevokeKey automatically sync policies to the Casbin store.
-//
-// This method returns the receiver to allow call chaining:
-//
-//	auth, _ := NewAPIKeyAuthenticator(redisClient)
-//	auth.WithEnforcer(enforcer)
-//
-// Calling this with a nil enforcer is a no-op; the authenticator continues to
-// operate without Casbin synchronisation.
-func (a *APIKeyAuthenticator) WithEnforcer(enforcer *casbin.Enforcer) *APIKeyAuthenticator {
-	a.enforcer = enforcer
-	return a
 }
 
 // CreateKey generates a new tenant-scoped API key and persists the record.
@@ -283,10 +265,7 @@ func (a *APIKeyAuthenticator) CreateKey(
 		return "", nil, fmt.Errorf("failed to store API key hash lookup: %w", err)
 	}
 
-	// Under the declarative-rbac-framework, per-key Casbin policies are no
-	// longer written. The RPCAuthzInterceptor authorizes via the key's Role
-	// (populated by the authenticator) against YAML-loaded policies. The
-	// key's Capabilities slice is retained for data-scoping in handlers
+	// The key's Capabilities slice is retained for data-scoping in handlers
 	// (allowed_kinds / allowed_names / plugin filters).
 
 	slog.Info("apikey: created new API key",

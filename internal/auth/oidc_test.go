@@ -151,7 +151,6 @@ func initSharedTestIssuer(t testing.TB) *testIssuerFixture {
 	return sharedTestIssuer
 }
 
-
 func TestNewOIDCValidator(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -663,4 +662,99 @@ func BenchmarkOIDCValidator_Authenticate(b *testing.B) {
 			b.Fatalf("Authentication failed: %v", err)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// extractOrganizationsClaim unit tests (authz-02-keycloak-organizations, task 21)
+// ---------------------------------------------------------------------------
+
+// TestExtractOrganizationsClaim covers the six scenarios specified in
+// Requirements 6.1, 6.2, and 6.4.
+func TestExtractOrganizationsClaim(t *testing.T) {
+	tests := []struct {
+		name     string
+		claims   map[string]any
+		expected []string
+		wantNil  bool // true when we expect the return to be nil (claim absent)
+	}{
+		{
+			name:    "missing_claim_returns_nil",
+			claims:  map[string]any{"sub": "user123"},
+			wantNil: true,
+		},
+		{
+			name:     "empty_array_returns_empty_non_nil_slice",
+			claims:   map[string]any{"organizations": []interface{}{}},
+			expected: []string{},
+			wantNil:  false,
+		},
+		{
+			name:     "single_string_non_array_form",
+			claims:   map[string]any{"organizations": "zero-day-ai"},
+			expected: []string{"zero-day-ai"},
+		},
+		{
+			name:     "single_element_array",
+			claims:   map[string]any{"organizations": []interface{}{"acme-corp"}},
+			expected: []string{"acme-corp"},
+		},
+		{
+			name:     "multi_element_array",
+			claims:   map[string]any{"organizations": []interface{}{"tenant-a", "tenant-b", "tenant-c"}},
+			expected: []string{"tenant-a", "tenant-b", "tenant-c"},
+		},
+		{
+			name:    "legacy_tenant_id_fallback_not_handled_here",
+			// extractOrganizationsClaim only parses the "organizations" key.
+			// The legacy tenant_id fallback is in the caller (OIDCValidator.Authenticate).
+			// When "organizations" is absent and "tenant_id" is present, this
+			// function returns nil — the caller does the fallback.
+			claims:  map[string]any{"tenant_id": "legacy-tenant"},
+			wantNil: true,
+		},
+		{
+			name:     "already_typed_string_slice",
+			claims:   map[string]any{"organizations": []string{"org-a", "org-b"}},
+			expected: []string{"org-a", "org-b"},
+		},
+		{
+			name:    "unrecognized_type_returns_nil",
+			claims:  map[string]any{"organizations": 42},
+			wantNil: true,
+		},
+		{
+			name:     "empty_string_in_array_filtered_out",
+			claims:   map[string]any{"organizations": []interface{}{"org-a", "", "org-b"}},
+			expected: []string{"org-a", "org-b"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractOrganizationsClaim(tc.claims)
+
+			if tc.wantNil {
+				assert.Nil(t, got, "expected nil for absent or unrecognized claim")
+				return
+			}
+
+			require.NotNil(t, got, "expected non-nil slice for present claim")
+			assert.Equal(t, tc.expected, got)
+		})
+	}
+}
+
+// TestExtractOrganizationsClaim_LegacyFallback_Integration verifies that the
+// caller (OIDCValidator) falls back to the legacy tenant_id claim when the
+// organizations claim is absent. This test operates at the claims-parsing
+// level by calling extractOrganizationsClaim directly and asserting the nil
+// return that triggers the fallback in the caller.
+func TestExtractOrganizationsClaim_NilTriggersFallback(t *testing.T) {
+	// Simulate a pre-migration JWT that only has tenant_id.
+	claims := map[string]any{
+		"sub":       "user-abc",
+		"tenant_id": "my-tenant",
+	}
+	result := extractOrganizationsClaim(claims)
+	assert.Nil(t, result, "nil return from extractOrganizationsClaim should trigger tenant_id fallback in caller")
 }

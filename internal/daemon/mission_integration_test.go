@@ -112,11 +112,11 @@ func TestMissionLifecycle(t *testing.T) {
 				Dependencies: []string{"node-1"},
 			},
 			"node-3": {
-				ID:          "node-3",
-				Type:        mission.NodeTypeTool,
-				Description: "Report generation node",
-				ToolName:    "report-gen",
-				ToolInput:   map[string]any{"format": "sarif"},
+				ID:           "node-3",
+				Type:         mission.NodeTypeTool,
+				Description:  "Report generation node",
+				ToolName:     "report-gen",
+				ToolInput:    map[string]any{"format": "sarif"},
 				Dependencies: []string{"node-2"},
 			},
 		},
@@ -167,12 +167,12 @@ func TestMissionEventStreamOrdering(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:        missionID,
-		Name:      "Parallel Workflow Mission",
-		Status:    mission.MissionStatusRunning,
-		TargetID:  types.NewID(),
+		ID:         missionID,
+		Name:       "Parallel Workflow Mission",
+		Status:     mission.MissionStatusRunning,
+		TargetID:   types.NewID(),
 		WorkflowID: types.NewID(),
-		StartedAt: mission.NewUnixTimePtr(&now),
+		StartedAt:  mission.NewUnixTimePtr(&now),
 	}
 
 	def := &mission.MissionDefinition{
@@ -254,12 +254,12 @@ func TestMissionStop(t *testing.T) {
 		missionID := types.NewID()
 		now := time.Now()
 		m := &mission.Mission{
-			ID:        missionID,
-			Name:      "Long Running Mission",
-			Status:    mission.MissionStatusRunning,
-			TargetID:  types.NewID(),
+			ID:         missionID,
+			Name:       "Long Running Mission",
+			Status:     mission.MissionStatusRunning,
+			TargetID:   types.NewID(),
 			WorkflowID: types.NewID(),
-			StartedAt: mission.NewUnixTimePtr(&now),
+			StartedAt:  mission.NewUnixTimePtr(&now),
 		}
 		def := &mission.MissionDefinition{
 			Name:        "Long Running Mission",
@@ -297,12 +297,12 @@ func TestMissionStop(t *testing.T) {
 		missionID := types.NewID()
 		now := time.Now()
 		m := &mission.Mission{
-			ID:        missionID,
-			Name:      "Force Stop Mission",
-			Status:    mission.MissionStatusRunning,
-			TargetID:  types.NewID(),
+			ID:         missionID,
+			Name:       "Force Stop Mission",
+			Status:     mission.MissionStatusRunning,
+			TargetID:   types.NewID(),
 			WorkflowID: types.NewID(),
-			StartedAt: mission.NewUnixTimePtr(&now),
+			StartedAt:  mission.NewUnixTimePtr(&now),
 		}
 		def := &mission.MissionDefinition{
 			Name:        "Force Stop Mission",
@@ -350,12 +350,12 @@ func TestMissionVariables(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:        missionID,
-		Name:      "Variable Substitution Mission",
-		Status:    mission.MissionStatusRunning,
-		TargetID:  types.NewID(),
+		ID:         missionID,
+		Name:       "Variable Substitution Mission",
+		Status:     mission.MissionStatusRunning,
+		TargetID:   types.NewID(),
 		WorkflowID: types.NewID(),
-		StartedAt: mission.NewUnixTimePtr(&now),
+		StartedAt:  mission.NewUnixTimePtr(&now),
 	}
 
 	// Nodes use ${VAR} placeholders in inputs.
@@ -432,10 +432,10 @@ func TestMultipleConcurrentMissions(t *testing.T) {
 	const numMissions = 5
 
 	type bootstrapResult struct {
-		missionID   types.ID
-		runID       string
-		queryCount  int
-		err         error
+		missionID  types.ID
+		runID      string
+		queryCount int
+		err        error
 	}
 
 	results := make([]bootstrapResult, numMissions)
@@ -462,12 +462,12 @@ func TestMultipleConcurrentMissions(t *testing.T) {
 			missionID := types.NewID()
 			now := time.Now()
 			m := &mission.Mission{
-				ID:        missionID,
-				Name:      fmt.Sprintf("Concurrent Mission %d", i),
-				Status:    mission.MissionStatusRunning,
-				TargetID:  types.NewID(),
+				ID:         missionID,
+				Name:       fmt.Sprintf("Concurrent Mission %d", i),
+				Status:     mission.MissionStatusRunning,
+				TargetID:   types.NewID(),
 				WorkflowID: types.NewID(),
-				StartedAt: mission.NewUnixTimePtr(&now),
+				StartedAt:  mission.NewUnixTimePtr(&now),
 			}
 			def := &mission.MissionDefinition{
 				Name:        fmt.Sprintf("Concurrent Mission %d", i),
