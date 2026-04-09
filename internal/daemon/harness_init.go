@@ -141,6 +141,12 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// GraphRAG components
 		GraphRAGBridge:      d.infrastructure.graphRAGBridge,
 		GraphRAGQueryBridge: d.infrastructure.graphRAGQueryBridge,
+
+		// Compliance emitter — wires the ComplianceMiddleware into the
+		// harness chain so every harness call emits a compliance_signal
+		// node to Neo4j. The sink adapts the DiscoveryProcessor.
+		// When nil (no graphRAG available), the middleware is skipped.
+		ComplianceSink: d.infrastructure.complianceSink,
 	}
 
 	// Create the factory

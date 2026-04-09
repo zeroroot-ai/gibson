@@ -74,6 +74,10 @@ type Infrastructure struct {
 	// This enables downstream agents to query discovered hosts, ports, services, etc.
 	discoveryProcessor *discoveryProcessorAdapter
 
+	// complianceSink routes compliance signals through the same
+	// DiscoveryProcessor pipeline. Nil when graphRAG is disabled.
+	complianceSink harness.SignalSink
+
 	// redisClient for tool execution queue management
 	redisClient queue.Client
 }
@@ -179,6 +183,13 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	discoveryProcessorAdapter := &discoveryProcessorAdapter{processor: discoveryProc}
 	d.logger.Info(ctx, "initialized DiscoveryProcessor for automatic discovery storage")
 
+	// Create compliance signal sink that routes signals through the same
+	// DiscoveryProcessor pipeline (audit-compliance-emitter Requirement 6.1).
+	complianceSink := newComplianceSignalSink(discoveryProc, d.logger.Slog())
+	if complianceSink != nil {
+		d.logger.Info(ctx, "initialized compliance signal sink for harness middleware")
+	}
+
 	// Initialize OpenTelemetry observability stack (required for LLM tracing)
 	// This provides unified tracing and metrics to OTLP-compatible backends
 	otelStack := d.initOTelObservability(ctx)
@@ -211,6 +222,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		otelStack:            otelStack,
 		taxonomyRegistry:     taxonomyRegistry,
 		discoveryProcessor:   discoveryProcessorAdapter,
+		complianceSink:       complianceSink,
 		redisClient:          redisClient,
 	}
 	d.infrastructure = infra
