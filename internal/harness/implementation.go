@@ -765,7 +765,7 @@ executeProto:
 				"json", string(jsonBytes))
 
 			// Use resolver to unmarshal JSON into typed proto message
-			dynamicMsg, err := h.resolver.UnmarshalJSON(ctx, inputType, jsonBytes, toolMetadata)
+			dynamicMsg, err := h.resolver.UnmarshalProtoJSON(ctx, inputType, jsonBytes, toolMetadata)
 			if err != nil {
 				h.logger.Error("failed to unmarshal input to typed message via resolver",
 					"tool", name,

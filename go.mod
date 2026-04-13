@@ -21,6 +21,7 @@ require (
 	github.com/hashicorp/vault/api v1.22.0
 	github.com/hashicorp/vault/api/auth/kubernetes v0.10.0
 	github.com/klauspost/compress v1.18.4
+	github.com/lib/pq v1.12.3
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/oklog/ulid/v2 v2.1.1
@@ -34,7 +35,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zero-day-ai/sdk v0.66.0
+	github.com/zero-day-ai/sdk v0.67.0
 	go.etcd.io/etcd/client/v3 v3.6.7
 	go.etcd.io/etcd/server/v3 v3.5.5
 	go.opentelemetry.io/otel v1.42.0
@@ -157,7 +158,6 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/lib/pq v1.12.3 // indirect
 	github.com/lufia/plan9stats v0.0.0-20251013123823-9fd1530e3ec3 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect

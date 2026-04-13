@@ -674,7 +674,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	}
 
 	// Use resolver to unmarshal input JSON into proto message
-	requestMsg, err := s.resolver.UnmarshalJSON(ctx, req.InputType, req.InputJson, toolMetadata)
+	requestMsg, err := s.resolver.UnmarshalProtoJSON(ctx, req.InputType, req.InputJson, toolMetadata)
 	if err != nil {
 		s.logger.Error("failed to resolve and unmarshal input type",
 			"error", err,
