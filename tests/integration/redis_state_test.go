@@ -181,10 +181,10 @@ func TestMissionStoreEndToEnd(t *testing.T) {
 		ID:            types.NewID(),
 		Name:          fmt.Sprintf("test-mission-%d", time.Now().UnixNano()),
 		Description:   "Integration test mission for Redis state storage",
-		Status:        mission.StatusPending,
+		Status:        mission.MissionStatusPending,
 		TargetID:      types.NewID(),
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		CreatedAt:     mission.NewUnixTime(time.Now()),
+		UpdatedAt:     mission.NewUnixTime(time.Now()),
 		Progress:      0.0,
 		FindingsCount: 0,
 	}
@@ -201,13 +201,13 @@ func TestMissionStoreEndToEnd(t *testing.T) {
 	assert.Equal(t, m.Description, retrieved.Description)
 
 	// Update mission status
-	err = store.UpdateStatus(ctx, m.ID, mission.StatusRunning)
+	err = store.UpdateStatus(ctx, m.ID, mission.MissionStatusRunning)
 	require.NoError(t, err, "Failed to update status")
 
 	// Verify status update
 	retrieved, err = store.Get(ctx, m.ID)
 	require.NoError(t, err)
-	assert.Equal(t, mission.StatusRunning, retrieved.Status)
+	assert.Equal(t, mission.MissionStatusRunning, retrieved.Status)
 
 	// Update progress
 	err = store.UpdateProgress(ctx, m.ID, 0.5)
@@ -219,10 +219,10 @@ func TestMissionStoreEndToEnd(t *testing.T) {
 	assert.InDelta(t, 0.5, retrieved.Progress, 0.01)
 
 	// Search missions by name
-	missions, err := store.GetByName(ctx, m.Name)
+	foundMission, err := store.GetByName(ctx, m.Name)
 	require.NoError(t, err, "Failed to search by name")
-	require.Len(t, missions, 1)
-	assert.Equal(t, m.ID, missions[0].ID)
+	require.NotNil(t, foundMission, "expected to find mission by name")
+	assert.Equal(t, m.ID, foundMission.ID)
 
 	// Get active missions
 	active, err := store.GetActive(ctx)
@@ -453,7 +453,7 @@ func TestPayloadStoreWithVersioning(t *testing.T) {
 		Name:        fmt.Sprintf("test-payload-%d", time.Now().UnixNano()),
 		Description: "Test payload for version tracking",
 		Template:    "echo 'version 1'",
-		Version:     1,
+		Version:     "1",
 		Enabled:     true,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -465,14 +465,14 @@ func TestPayloadStoreWithVersioning(t *testing.T) {
 
 	// Update payload
 	p.Template = "echo 'version 2'"
-	p.Version = 2
+	p.Version = "2"
 	p.UpdatedAt = time.Now()
 	err = store.Update(ctx, p)
 	require.NoError(t, err)
 
 	// Update again
 	p.Template = "echo 'version 3'"
-	p.Version = 3
+	p.Version = "3"
 	p.UpdatedAt = time.Now()
 	err = store.Update(ctx, p)
 	require.NoError(t, err)
@@ -480,7 +480,7 @@ func TestPayloadStoreWithVersioning(t *testing.T) {
 	// Get current version
 	retrieved, err := store.Get(ctx, p.ID)
 	require.NoError(t, err)
-	assert.Equal(t, 3, retrieved.Version)
+	assert.Equal(t, "3", retrieved.Version)
 	assert.Equal(t, "echo 'version 3'", retrieved.Template)
 
 	// Get version history
@@ -532,13 +532,12 @@ func TestMissionMemoryWithSearch(t *testing.T) {
 	}
 
 	// Retrieve individual entry
-	var value string
-	err := mem.Retrieve(ctx, "target_ip", &value)
+	item, err := mem.Retrieve(ctx, "target_ip")
 	require.NoError(t, err)
-	assert.Equal(t, "192.168.1.100", value)
+	assert.Equal(t, "192.168.1.100", item.Value)
 
 	// List all keys
-	keys, err := mem.ListKeys(ctx)
+	keys, err := mem.Keys(ctx)
 	require.NoError(t, err)
 	assert.Len(t, keys, 5)
 
@@ -552,9 +551,9 @@ func TestMissionMemoryWithSearch(t *testing.T) {
 	// Verify correct entry found
 	found := false
 	for _, r := range results {
-		if r.Key == "web_framework" {
+		if r.Item.Key == "web_framework" {
 			found = true
-			assert.Equal(t, "Django 3.2", r.Value)
+			assert.Equal(t, "Django 3.2", r.Item.Value)
 			break
 		}
 	}
@@ -569,11 +568,11 @@ func TestMissionMemoryWithSearch(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify isolation
-	keys, err = mem.ListKeys(ctx)
+	keys, err = mem.Keys(ctx)
 	require.NoError(t, err)
 	assert.Len(t, keys, 5, "Original mission should still have 5 keys")
 
-	keys, err = otherMem.ListKeys(ctx)
+	keys, err = otherMem.Keys(ctx)
 	require.NoError(t, err)
 	assert.Len(t, keys, 1, "Other mission should have 1 key")
 
@@ -581,7 +580,7 @@ func TestMissionMemoryWithSearch(t *testing.T) {
 	err = mem.Clear(ctx)
 	require.NoError(t, err)
 
-	keys, err = mem.ListKeys(ctx)
+	keys, err = mem.Keys(ctx)
 	require.NoError(t, err)
 	assert.Len(t, keys, 0, "Memory should be cleared")
 }
@@ -872,9 +871,9 @@ func TestAtomicityFindOrCreate(t *testing.T) {
 					ID:          types.NewID(),
 					Name:        missionName,
 					Description: "Concurrent create test",
-					Status:      mission.StatusPending,
-					CreatedAt:   time.Now(),
-					UpdatedAt:   time.Now(),
+					Status:      mission.MissionStatusPending,
+					CreatedAt:   mission.NewUnixTime(time.Now()),
+					UpdatedAt:   mission.NewUnixTime(time.Now()),
 				}
 			})
 
@@ -927,7 +926,7 @@ func TestAtomicityCascadeDelete(t *testing.T) {
 		ID:          types.NewID(),
 		Name:        fmt.Sprintf("cascade-test-%d", time.Now().UnixNano()),
 		Description: "Cascade delete test",
-		Status:      mission.StatusRunning,
+		Status:      mission.MissionStatusRunning,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -1016,7 +1015,7 @@ func TestAtomicityCascadeDelete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, events, 0, "All events should be deleted")
 
-	keys, err = mem.ListKeys(ctx)
+	keys, err = mem.Keys(ctx)
 	require.NoError(t, err)
 	assert.Len(t, keys, 0, "All memory entries should be deleted")
 

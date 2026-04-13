@@ -158,12 +158,12 @@ type SteeringMessage struct {
 
 // StreamEventFilter provides filtering options for stream event queries
 type StreamEventFilter struct {
-	EventTypes []string  // Filter by event types
-	FromSeq    int64     // Filter events with sequence >= FromSeq
-	ToSeq      int64     // Filter events with sequence <= ToSeq
-	FromTime   time.Time // Filter events with timestamp >= FromTime
-	ToTime     time.Time // Filter events with timestamp <= ToTime
-	Limit      int       // Maximum number of events to return
+	EventTypes []StreamEventType // Filter by event types
+	FromSeq    int64             // Filter events with sequence >= FromSeq
+	ToSeq      int64             // Filter events with sequence <= ToSeq
+	FromTime   time.Time         // Filter events with timestamp >= FromTime
+	ToTime     time.Time         // Filter events with timestamp <= ToTime
+	Limit      int               // Maximum number of events to return
 }
 
 // SessionDAO defines the interface for agent session data access

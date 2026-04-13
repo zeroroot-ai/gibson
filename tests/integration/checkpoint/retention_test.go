@@ -119,7 +119,7 @@ func TestRetention_All(t *testing.T) {
 	}
 
 	// Apply retention for failed mission
-	err := policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusFailed)
+	err = policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusFailed)
 	require.NoError(t, err)
 
 	// All checkpoints should remain
@@ -162,7 +162,7 @@ func TestRetention_ErrorOnly(t *testing.T) {
 	}
 
 	// For completed mission with error_only, should keep only final
-	err := policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusCompleted)
+	err = policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusCompleted)
 	require.NoError(t, err)
 
 	list, err := store.ListByThread(ctx, threadID, checkpoint.HistoryOptions{})
@@ -224,7 +224,7 @@ func TestRetention_MaxCount(t *testing.T) {
 	}
 
 	// Apply retention with MaxCount=5
-	err := policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusCompleted)
+	err = policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusCompleted)
 	require.NoError(t, err)
 
 	// Should only have 5 checkpoints remaining
@@ -357,7 +357,7 @@ func TestRetention_RunningMissionProtection(t *testing.T) {
 	}
 
 	// Apply retention for RUNNING mission
-	err := policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusRunning)
+	err = policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusRunning)
 	require.NoError(t, err)
 
 	// All checkpoints should remain (running missions are protected)
@@ -415,7 +415,7 @@ func TestRetention_LabeledMode(t *testing.T) {
 	}
 
 	// Apply retention for completed mission
-	err := policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusCompleted)
+	err = policy.ApplyRetention(ctx, threadID, checkpoint.MissionStatusCompleted)
 	require.NoError(t, err)
 
 	// Should keep labeled checkpoints + final checkpoint

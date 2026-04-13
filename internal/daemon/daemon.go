@@ -2,12 +2,14 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
 	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
@@ -205,6 +207,12 @@ type daemonImpl struct {
 	// signer's Secret() method via a ConfigMap or Secret at registration time).
 	// May be nil when authz is disabled.
 	envelopeSigner *authz.EnvelopeSigner
+
+	// dashboardDB is the connection pool for the shared dashboard PostgreSQL instance.
+	// It is used to read and write the tenant_provisioning table. May be nil when
+	// no DashboardPostgresConfig is provided or when the connection fails at startup
+	// (degraded mode — provisioning unavailable but missions/tools/agents continue).
+	dashboardDB *sql.DB
 }
 
 // New creates a new daemon instance with the provided configuration.
@@ -389,15 +397,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "initialized envelope HMAC signer for work item AuthzContext signing")
 	}
 
-	// Keycloak Organization reconciliation phase — runs AFTER Authorization Service and
-	// BEFORE Component Registry. When provisioner.reconcile_on_startup=false this is
-	// a fast no-op. A failure in any individual tenant is logged but does NOT abort
-	// startup; only a scan-level error (Redis unreachable) is returned.
-	if d.stateClient != nil {
-		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
-			d.runOrgReconciliation(ctx, redisClient)
-		}
-	}
+	// Dashboard PostgreSQL connection pool — runs AFTER Authorization Service and
+	// BEFORE Component Registry. A connection failure is non-fatal: the daemon
+	// continues with provisioning degraded (new signups cannot complete) but
+	// missions, tools, and agents are unaffected.
+	d.initDashboardPostgres(ctx)
 
 	// Initialize Redis-backed component registry and registry adapter.
 	// The component registry uses Redis for runtime service discovery (registrations with TTL).
@@ -1029,6 +1033,97 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 
 	// Clear gRPC server reference (already stopped by DrainPhase)
 	d.grpcServer = nil
+
+	// Close dashboard PostgreSQL connection pool.
+	if d.dashboardDB != nil {
+		d.logger.Info(ctx, "closing dashboard PostgreSQL connection pool")
+		if err := d.dashboardDB.Close(); err != nil {
+			d.logger.Warn(ctx, "error closing dashboard PostgreSQL pool", "error", err)
+		}
+		d.dashboardDB = nil
+	}
+}
+
+// initDashboardPostgres establishes the dashboard PostgreSQL connection pool and
+// runs the tenant_provisioning schema migration.
+//
+// Failure is non-fatal: the daemon logs an error and continues with dashboardDB=nil.
+// Provisioning RPCs will return an appropriate error when dashboardDB is nil.
+func (d *daemonImpl) initDashboardPostgres(ctx context.Context) {
+	pgCfg := d.config.DashboardPostgres
+
+	// Skip if no host is configured — the feature is not enabled.
+	if pgCfg.Host == "" {
+		d.logger.Info(ctx, "dashboard PostgreSQL not configured, provisioning state store unavailable")
+		return
+	}
+
+	// Apply defaults.
+	if pgCfg.Port == 0 {
+		pgCfg.Port = 5432
+	}
+	if pgCfg.SSLMode == "" {
+		pgCfg.SSLMode = "disable"
+	}
+	if pgCfg.MaxConns == 0 {
+		pgCfg.MaxConns = 5
+	}
+	if pgCfg.Database == "" {
+		pgCfg.Database = "gibson_dashboard"
+	}
+
+	dsn := fmt.Sprintf(
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
+		pgCfg.Host,
+		pgCfg.Port,
+		pgCfg.Database,
+		pgCfg.Username,
+		pgCfg.Password,
+		pgCfg.SSLMode,
+	)
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		d.logger.Error(ctx, "dashboard PostgreSQL: failed to open connection pool (provisioning degraded)",
+			"error", err,
+			"host", pgCfg.Host,
+		)
+		return
+	}
+
+	db.SetMaxOpenConns(pgCfg.MaxConns)
+
+	// Verify connectivity with a short timeout.
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(pingCtx); err != nil {
+		_ = db.Close()
+		d.logger.Error(ctx, "dashboard PostgreSQL: ping failed (provisioning degraded)",
+			"error", err,
+			"host", pgCfg.Host,
+		)
+		return
+	}
+
+	d.logger.Info(ctx, "dashboard PostgreSQL: connection pool established",
+		"host", pgCfg.Host,
+		"port", pgCfg.Port,
+		"database", pgCfg.Database,
+		"max_conns", pgCfg.MaxConns,
+	)
+
+	// Run idempotent schema migration.
+	if err := provisioner.RunMigrations(ctx, db); err != nil {
+		d.logger.Error(ctx, "dashboard PostgreSQL: schema migration failed (provisioning degraded)",
+			"error", err,
+		)
+		_ = db.Close()
+		return
+	}
+
+	d.logger.Info(ctx, "dashboard PostgreSQL: schema migration completed")
+	d.dashboardDB = db
 }
 
 // status returns the current daemon status and health information.
@@ -1264,46 +1359,3 @@ func (d *daemonImpl) LLMConfigHandler() *api.LLMConfigHandler {
 	return d.llmConfigHandler
 }
 
-// runOrgReconciliation builds an OrgReconciler and calls ReconcileKeycloakOrgs.
-//
-// This is called once during daemon startup, after the Authorization Service
-// phase and before Component Registry. It is a best-effort operation: if the
-// Keycloak admin client cannot be constructed (missing credentials), or if the
-// scan succeeds but individual tenants fail, the daemon continues to start.
-// Only a scan-level failure (Redis unreachable) causes a logged error; even
-// then startup is NOT aborted because the reconciler's return is silently
-// discarded here — callers log the error for operators to action.
-//
-// Timing is logged at INFO so operators can monitor reconcile duration over
-// time.
-func (d *daemonImpl) runOrgReconciliation(ctx context.Context, redisClient *goredis.Client) {
-	start := time.Now()
-
-	kcAdmin, err := provisioner.NewKeycloakAdminClient(d.config.Keycloak.Admin, d.logger.Slog())
-	if err != nil {
-		d.logger.Warn(ctx, "org reconciliation skipped: failed to build Keycloak admin client",
-			"error", err)
-		return
-	}
-
-	scanner := provisioner.NewRedisMembershipScanner(redisClient)
-	reconciler := provisioner.NewOrgReconciler(
-		d.config.Provisioner,
-		scanner,
-		kcAdmin,
-		d.authorizer,
-		d.logger.Slog(),
-	)
-
-	if err := reconciler.ReconcileKeycloakOrgs(ctx); err != nil {
-		d.logger.Error(ctx, "org reconciliation failed",
-			"error", err,
-			"duration_ms", time.Since(start).Milliseconds(),
-		)
-		return
-	}
-
-	d.logger.Info(ctx, "org reconciliation phase complete",
-		"duration_ms", time.Since(start).Milliseconds(),
-	)
-}

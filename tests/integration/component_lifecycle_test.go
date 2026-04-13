@@ -5,17 +5,23 @@ package integration
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/provisioner"
 )
 
 // ---------------------------------------------------------------------------
@@ -54,21 +60,78 @@ func newComponentTestEnv(t *testing.T) *componentTestEnv {
 	}
 }
 
-// newAuthEnv creates a fresh miniredis-backed APIKeyAuthenticator.
-// The client is cleaned up automatically via t.Cleanup.
-func newAuthEnv(t *testing.T) (*auth.APIKeyAuthenticator, *miniredis.Miniredis) {
+// newAuthDB starts a Postgres container, runs migrations, and returns an
+// APIKeyAuthenticator backed by it. The container is terminated via cleanup.
+func newAuthDB(t *testing.T) (*auth.APIKeyAuthenticator, func()) {
 	t.Helper()
+	ctx := context.Background()
 
-	mr := miniredis.RunT(t)
+	provider, err := testcontainers.ProviderDocker.GetProvider()
+	if err != nil {
+		t.Skipf("Docker not available, skipping test: %v", err)
+		return nil, func() {}
+	}
+	if healthErr := provider.Health(ctx); healthErr != nil {
+		t.Skipf("Docker not running, skipping test: %v", healthErr)
+		return nil, func() {}
+	}
 
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
+	const (
+		pgUser     = "testuser"
+		pgPassword = "testpassword"
+		pgDB       = "testdb"
+	)
 
-	a, err := auth.NewAPIKeyAuthenticator(client)
-	require.NoError(t, err)
+	req := testcontainers.ContainerRequest{
+		Image: "postgres:15-alpine",
+		Env: map[string]string{
+			"POSTGRES_USER":     pgUser,
+			"POSTGRES_PASSWORD": pgPassword,
+			"POSTGRES_DB":       pgDB,
+		},
+		ExposedPorts: []string{"5432/tcp"},
+		WaitingFor: wait.ForAll(
+			wait.ForLog("database system is ready to accept connections"),
+			wait.ForListeningPort("5432/tcp"),
+		),
+	}
+
+	pgC, startErr := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	require.NoError(t, startErr, "failed to start Postgres container")
+
+	cleanup := func() {
+		if termErr := pgC.Terminate(ctx); termErr != nil {
+			t.Logf("warning: failed to terminate Postgres container: %v", termErr)
+		}
+	}
+
+	host, hostErr := pgC.Host(ctx)
+	require.NoError(t, hostErr)
+
+	mappedPort, portErr := pgC.MappedPort(ctx, "5432")
+	require.NoError(t, portErr)
+
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		host, mappedPort.Port(), pgUser, pgPassword, pgDB)
+
+	db, openErr := sql.Open("postgres", dsn)
+	require.NoError(t, openErr)
+	t.Cleanup(func() { _ = db.Close() })
+
+	require.Eventually(t, func() bool {
+		return db.PingContext(ctx) == nil
+	}, 30*time.Second, 200*time.Millisecond, "Postgres did not become ready in time")
+
+	require.NoError(t, provisioner.RunMigrations(ctx, db))
+
+	a, authErr := auth.NewAPIKeyAuthenticator(db)
+	require.NoError(t, authErr)
 	require.NotNil(t, a)
 
-	return a, mr
+	return a, cleanup
 }
 
 // ---------------------------------------------------------------------------
@@ -293,16 +356,14 @@ func TestComponentLifecycle_MultiTenantIsolation(t *testing.T) {
 // authenticated, the resulting Identity is used to inject tenant context via
 // ContextWithTenant, and the registry enforces that scoping.
 func TestComponentLifecycle_APIKeyToTenantFlow(t *testing.T) {
-	// Each service gets its own miniredis to reflect real deployment topology
-	// (auth service ↔ registry may share Redis but are logically separate).
-	// For this integration test we colocate them on the same instance for simplicity.
-	mr := miniredis.RunT(t)
+	// API keys are now Postgres-backed; spin up a container for the authenticator.
+	authenticator, authCleanup := newAuthDB(t)
+	defer authCleanup()
 
-	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	// The component registry continues to use Redis.
+	mr := newComponentTestEnv(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: mr.mr.Addr()})
 	t.Cleanup(func() { _ = redisClient.Close() })
-
-	authenticator, err := auth.NewAPIKeyAuthenticator(redisClient)
-	require.NoError(t, err)
 
 	reg := component.NewRedisComponentRegistry(redisClient, 30*time.Second)
 

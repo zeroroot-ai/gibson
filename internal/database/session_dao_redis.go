@@ -420,7 +420,7 @@ func (dao *RedisSessionDAO) GetStreamEvents(ctx context.Context, sessionID types
 		if len(filter.EventTypes) > 0 {
 			matchesType := false
 			for _, eventType := range filter.EventTypes {
-				if string(event.EventType) == eventType {
+				if event.EventType == eventType {
 					matchesType = true
 					break
 				}

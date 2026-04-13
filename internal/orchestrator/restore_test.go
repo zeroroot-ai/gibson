@@ -260,10 +260,10 @@ func TestStateRestorer_ValidateCheckpointWithDefinition(t *testing.T) {
 	def := &mission.MissionDefinition{
 		Name:        "test-mission",
 		Description: "Test mission for validation",
-		Nodes: []*mission.NodeDefinition{
-			{ID: "node-1", Name: "Node 1", Type: "agent"},
-			{ID: "node-2", Name: "Node 2", Type: "agent"},
-			{ID: "node-3", Name: "Node 3", Type: "agent"},
+		Nodes: map[string]*mission.MissionNode{
+			"node-1": {ID: "node-1", Name: "Node 1", Type: mission.NodeTypeAgent},
+			"node-2": {ID: "node-2", Name: "Node 2", Type: mission.NodeTypeAgent},
+			"node-3": {ID: "node-3", Name: "Node 3", Type: mission.NodeTypeAgent},
 		},
 	}
 

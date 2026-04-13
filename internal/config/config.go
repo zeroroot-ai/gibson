@@ -10,6 +10,51 @@ import (
 	"github.com/zero-day-ai/gibson/internal/prompt"
 )
 
+// DashboardPostgresConfig holds connection settings for the shared dashboard
+// PostgreSQL instance. The daemon uses this database to read and write the
+// tenant_provisioning table. It is the same PostgreSQL instance that the
+// dashboard's Better Auth server uses for user/session/organisation data.
+//
+// This is a separate instance from the Langfuse PostgreSQL instance.
+//
+// Environment variable overrides (all GIBSON_DASHBOARD_POSTGRES_* prefix):
+//
+//	GIBSON_DASHBOARD_POSTGRES_HOST       — server hostname (default: dashboard-postgresql)
+//	GIBSON_DASHBOARD_POSTGRES_PORT       — TCP port (default: 5432)
+//	GIBSON_DASHBOARD_POSTGRES_DATABASE   — database name (default: gibson_dashboard)
+//	GIBSON_DASHBOARD_POSTGRES_USERNAME   — user name
+//	GIBSON_DASHBOARD_POSTGRES_PASSWORD   — password (keep in K8s Secret)
+//	GIBSON_DASHBOARD_POSTGRES_SSL_MODE   — sslmode value (default: disable)
+//	GIBSON_DASHBOARD_POSTGRES_MAX_CONNS  — connection pool size (default: 5)
+type DashboardPostgresConfig struct {
+	// Host is the PostgreSQL server hostname or IP address.
+	// Default: "dashboard-postgresql"
+	Host string `mapstructure:"host" yaml:"host"`
+
+	// Port is the TCP port PostgreSQL listens on.
+	// Default: 5432
+	Port int `mapstructure:"port" yaml:"port"`
+
+	// Database is the name of the database to connect to.
+	// Default: "gibson_dashboard"
+	Database string `mapstructure:"database" yaml:"database"`
+
+	// Username is the PostgreSQL role used to authenticate.
+	Username string `mapstructure:"username" yaml:"username"`
+
+	// Password is the PostgreSQL password. Store in a Kubernetes Secret.
+	Password string `mapstructure:"password" yaml:"password"`
+
+	// SSLMode controls the SSL/TLS negotiation mode.
+	// Valid values: disable, require, verify-ca, verify-full.
+	// Default: "disable" (suitable for in-cluster communication).
+	SSLMode string `mapstructure:"ssl_mode" yaml:"ssl_mode"`
+
+	// MaxConns is the maximum number of open connections in the pool.
+	// Default: 5
+	MaxConns int `mapstructure:"max_conns" yaml:"max_conns"`
+}
+
 // Config is the root configuration for the Gibson Framework.
 type Config struct {
 	Core              CoreConfig              `mapstructure:"core" yaml:"core" validate:"required"`
@@ -36,92 +81,19 @@ type Config struct {
 	OTelObservability OTelObservabilityConfig `mapstructure:"otel_observability" yaml:"otel_observability"`
 	Auth              auth.AuthConfig         `mapstructure:"auth" yaml:"auth"`
 	Checkpoint        CheckpointConfig        `mapstructure:"checkpoint" yaml:"checkpoint"`
-	Keycloak          KeycloakConfig          `mapstructure:"keycloak" yaml:"keycloak"`
 	Authz             AuthzConfig             `mapstructure:"authz" yaml:"authz"`
 	Provisioner       ProvisionerConfig       `mapstructure:"provisioner" yaml:"provisioner"`
+	DashboardPostgres DashboardPostgresConfig `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
 }
 
 // ProvisionerConfig controls runtime behaviour of the tenant provisioner.
 //
-// ReconcileOnStartup: when true the daemon runs a one-shot reconciliation on
-// startup that creates Keycloak Organizations and FGA tuples for every tenant
-// that already exists in Redis membership records but is absent from Keycloak.
-// This migration flag defaults to true for spec authz-02 and will be flipped
-// to false in authz-07 once the full cutover is complete.
-//
 // Environment variable override: GIBSON_PROVISIONER_RECONCILE_ON_STARTUP
 type ProvisionerConfig struct {
-	// ReconcileOnStartup triggers one-shot KC org + FGA tuple reconciliation.
-	// Default: true.
+	// ReconcileOnStartup is deprecated and has no effect.
+	// Previously triggered one-shot Keycloak org + FGA tuple reconciliation.
+	// Default: false.
 	ReconcileOnStartup bool `mapstructure:"reconcile_on_startup" yaml:"reconcile_on_startup"`
-}
-
-// KeycloakConfig contains settings for the Keycloak Admin REST API client
-// used by the provisioner to create per-tenant Organizations and manage users.
-type KeycloakConfig struct {
-	BaseURL      string             `mapstructure:"base_url" yaml:"base_url"`
-	MasterRealm  string             `mapstructure:"master_realm" yaml:"master_realm"`
-	ClientID     string             `mapstructure:"client_id" yaml:"client_id"`
-	ClientSecret string             `mapstructure:"client_secret" yaml:"client_secret"`
-	Admin        KeycloakAdminConfig `mapstructure:"admin" yaml:"admin"`
-}
-
-// KeycloakAdminConfig holds credentials and connection settings for the
-// Keycloak Admin REST API used by the daemon's provisioner package.
-//
-// Two authentication modes are supported (not mutually exclusive —
-// if both are set, client-credentials takes precedence):
-//
-//  1. Client-credentials (recommended for production):
-//     Set ClientID + ClientSecret. The daemon uses the OAuth2 client
-//     credentials grant against Endpoint/realms/Realm/protocol/openid-connect/token.
-//
-//  2. Username + password (suitable for dev/local clusters):
-//     Set Username + Password. The daemon uses a direct password grant.
-//
-// When authz.enabled=true, ValidateKeycloakAdminConfig returns an error
-// if neither mode is sufficiently configured — the daemon must not start
-// with orphaned Organization calls.
-//
-// Environment variable overrides (all GIBSON_KEYCLOAK_ADMIN_* prefix):
-//
-//	GIBSON_KEYCLOAK_ADMIN_ENDPOINT        — base URL (e.g. http://keycloak:8080)
-//	GIBSON_KEYCLOAK_ADMIN_REALM           — target realm (e.g. gibson)
-//	GIBSON_KEYCLOAK_ADMIN_CLIENT_ID       — client credentials: client ID
-//	GIBSON_KEYCLOAK_ADMIN_CLIENT_SECRET   — client credentials: client secret
-//	GIBSON_KEYCLOAK_ADMIN_USERNAME        — password grant: admin username
-//	GIBSON_KEYCLOAK_ADMIN_PASSWORD        — password grant: admin password
-type KeycloakAdminConfig struct {
-	// Endpoint is the base URL of the Keycloak instance.
-	// Example: "http://gibson-keycloak:8080"
-	// Override: GIBSON_KEYCLOAK_ADMIN_ENDPOINT
-	Endpoint string `mapstructure:"endpoint" yaml:"endpoint"`
-
-	// Realm is the Keycloak realm that the daemon manages.
-	// For the SaaS platform this is "gibson"; self-hosted installs may differ.
-	// Override: GIBSON_KEYCLOAK_ADMIN_REALM
-	Realm string `mapstructure:"realm" yaml:"realm"`
-
-	// ClientID is the OIDC client ID for the client-credentials grant.
-	// The service account associated with this client must have the
-	// realm-admin (or manage-realm + manage-users + manage-clients) role.
-	// Override: GIBSON_KEYCLOAK_ADMIN_CLIENT_ID
-	ClientID string `mapstructure:"client_id" yaml:"client_id"`
-
-	// ClientSecret is the OIDC client secret for the client-credentials grant.
-	// Store this value in a Kubernetes Secret and reference it via env var.
-	// Override: GIBSON_KEYCLOAK_ADMIN_CLIENT_SECRET
-	ClientSecret string `mapstructure:"client_secret" yaml:"client_secret"`
-
-	// Username is the Keycloak admin username for the password grant flow.
-	// Not recommended for production; use client-credentials instead.
-	// Override: GIBSON_KEYCLOAK_ADMIN_USERNAME
-	Username string `mapstructure:"username" yaml:"username"`
-
-	// Password is the Keycloak admin password for the password grant flow.
-	// Store this value in a Kubernetes Secret and reference it via env var.
-	// Override: GIBSON_KEYCLOAK_ADMIN_PASSWORD
-	Password string `mapstructure:"password" yaml:"password"`
 }
 
 // PluginsConfig contains configuration for all plugins.

@@ -342,7 +342,7 @@ func (s *RedisFindingStore) ListBySeverity(ctx context.Context, severity agent.F
 	return findings, nil
 }
 
-// Search performs full-text search on findings using RediSearch.
+// SearchRaw performs full-text search on findings using RediSearch with a raw query string.
 // Searches across title (weight 3.0), description (2.0), and remediation (1.0).
 // Returns results sorted by relevance with optional score information.
 //
@@ -352,7 +352,7 @@ func (s *RedisFindingStore) ListBySeverity(ctx context.Context, severity agent.F
 //   - TAG filters: "@severity:{critical} @status:{open}"
 //   - Numeric ranges: "@risk_score:[7.0 10.0]"
 //   - Combinations: "authentication @severity:{high|critical}"
-func (s *RedisFindingStore) Search(ctx context.Context, query string, opts *state.SearchOptions) (*state.SearchResult, error) {
+func (s *RedisFindingStore) SearchRaw(ctx context.Context, query string, opts *state.SearchOptions) (*state.SearchResult, error) {
 	if opts == nil {
 		opts = &state.SearchOptions{
 			Limit:      50,

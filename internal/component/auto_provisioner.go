@@ -1,7 +1,7 @@
 package component
 
 // auto_provisioner.go implements TenantAutoProvisioner, which handles automatic
-// tenant creation on first OIDC login.
+// tenant creation on first login.
 //
 // When a token arrives whose tenant claim value does not match any existing
 // tenant, EnsureTenant creates the tenant record in Redis.  A distributed lock
@@ -9,10 +9,6 @@ package component
 //
 // The Langfuse project creation step is always best-effort: a failure is logged
 // as a warning and does not prevent the tenant from being usable.
-//
-// Keycloak realm creation runs before the tenant record is written.  On-prem
-// deployments set skipRealmCreation=true (the realm is pre-configured by the
-// operator); SaaS deployments create a dedicated realm per tenant.
 
 import (
 	"context"
@@ -20,8 +16,6 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-
-	"github.com/zero-day-ai/gibson/internal/keycloak"
 )
 
 // LangfuseProvisioner creates Langfuse projects for tenants.
@@ -33,38 +27,22 @@ type LangfuseProvisioner interface {
 // AutoProvisionerOption is a functional option for TenantAutoProvisioner.
 type AutoProvisionerOption func(*TenantAutoProvisioner)
 
-// WithSkipRealmCreation disables Keycloak realm creation during auto-provisioning.
-// Use this for on-prem deployments where the realm is pre-configured by the operator.
-func WithSkipRealmCreation(skip bool) AutoProvisionerOption {
-	return func(p *TenantAutoProvisioner) { p.skipRealmCreation = skip }
-}
-
-// WithDefaultRealmName sets a fixed realm name for all tenants.
-// For on-prem deployments this is typically "gibson"; for SaaS it is left empty
-// so that each tenant gets a realm named after its tenant ID.
-func WithDefaultRealmName(name string) AutoProvisionerOption {
-	return func(p *TenantAutoProvisioner) { p.defaultRealmName = name }
-}
-
 // TenantAutoProvisioner handles automatic tenant creation on first login.
 type TenantAutoProvisioner struct {
 	tenants  *TenantService
-	keycloak *keycloak.Client    // optional, can be nil
 	langfuse LangfuseProvisioner // optional, can be nil
 	plugins  PluginAccessStore   // optional, can be nil
 	logger   *slog.Logger
-
-	// Configuration
-	skipRealmCreation bool   // true for on-prem (realm already exists)
-	defaultRealmName  string // on-prem: "gibson"; SaaS: "" (derived from tenant ID)
 }
 
 // NewTenantAutoProvisioner creates a new auto-provisioner.
-// kc, langfuse, and plugins are optional — pass nil when not needed.
-// Use AutoProvisionerOption values to configure on-prem vs SaaS behaviour.
+// langfuse and plugins are optional — pass nil when not needed.
+// The kc parameter is accepted but ignored; it is retained for call-site
+// compatibility during the Better Auth migration and will be removed in a
+// follow-up cleanup.
 func NewTenantAutoProvisioner(
 	tenants *TenantService,
-	kc *keycloak.Client,
+	kc interface{}, // deprecated: ignored; was *keycloak.Client
 	langfuse LangfuseProvisioner,
 	plugins PluginAccessStore,
 	logger *slog.Logger,
@@ -75,7 +53,6 @@ func NewTenantAutoProvisioner(
 	}
 	p := &TenantAutoProvisioner{
 		tenants:  tenants,
-		keycloak: kc,
 		langfuse: langfuse,
 		plugins:  plugins,
 		logger:   logger,
@@ -124,25 +101,8 @@ func (p *TenantAutoProvisioner) EnsureTenant(ctx context.Context, tenantID strin
 	// Create the tenant.  Display name defaults to the claim value.
 	p.logger.Info("auto-provisioning new tenant", "tenant_id", tenantID)
 
-	// Determine which Keycloak realm this tenant maps to.  SaaS: one realm per
-	// tenant (realm name == tenant ID).  On-prem: a single shared realm whose
-	// name is set by the operator via WithDefaultRealmName.
-	realmName := tenantID
-	if p.defaultRealmName != "" {
-		realmName = p.defaultRealmName
-	}
-
-	// Create the Keycloak realm before writing the tenant record so that the
-	// realm is ready by the time the first user token arrives.
-	if !p.skipRealmCreation && p.keycloak != nil {
-		if err := p.createKeycloakRealm(ctx, tenantID, realmName); err != nil {
-			return fmt.Errorf("creating Keycloak realm: %w", err)
-		}
-	}
-
 	config := map[string]string{
-		"auto_provisioned":    "true",
-		"keycloak_realm_name": realmName,
+		"auto_provisioned": "true",
 	}
 
 	_, err = p.tenants.createTenantInternal(ctx, tenantID, tenantID, config)
@@ -182,78 +142,6 @@ func (p *TenantAutoProvisioner) waitForProvisioning(ctx context.Context, tenantI
 		}
 	}
 	return fmt.Errorf("timeout waiting for tenant %q provisioning", tenantID)
-}
-
-// createKeycloakRealm provisions a Keycloak realm for the given tenant.
-//
-// Steps performed (all idempotent — 409 responses are treated as success by the
-// Keycloak client):
-//  1. Create the realm.
-//  2. Create the "gibson-dashboard" OIDC client.
-//  3. Create default realm roles: owner, admin, operator, viewer.
-//  4. Add a hardcoded tenant_id claim mapper so every token carries the tenant ID.
-//
-// Role and mapper failures are non-fatal: they are logged as warnings and do not
-// block tenant creation, since the realm itself is the critical resource.
-func (p *TenantAutoProvisioner) createKeycloakRealm(ctx context.Context, tenantID, realmName string) error {
-	// Step 1: create the realm (409 = already exists = OK, handled by client).
-	if err := p.keycloak.CreateRealm(ctx, keycloak.RealmConfig{
-		Name:        realmName,
-		DisplayName: tenantID,
-		Enabled:     true,
-	}); err != nil {
-		return fmt.Errorf("creating realm %q: %w", realmName, err)
-	}
-
-	// Step 2: create the dashboard OIDC client.
-	clientUUID, err := p.keycloak.CreateOIDCClient(ctx, realmName, keycloak.OIDCClientConfig{
-		ClientID:     "gibson-dashboard",
-		RedirectURIs: []string{"*"}, // Narrowed at deploy time via Helm values.
-	})
-	if err != nil {
-		// Non-fatal — client may already exist or will be configured separately.
-		p.logger.Warn("failed to create OIDC client during auto-provisioning",
-			"realm", realmName,
-			"error", err,
-		)
-	}
-
-	// Step 3: create standard Gibson realm roles.
-	for _, role := range []string{"owner", "admin", "operator", "viewer"} {
-		if err := p.keycloak.CreateRealmRole(ctx, realmName, role, "Gibson "+role+" role"); err != nil {
-			p.logger.Warn("failed to create realm role during auto-provisioning",
-				"realm", realmName,
-				"role", role,
-				"error", err,
-			)
-		}
-	}
-
-	// Step 4: attach a hardcoded tenant_id claim to the dashboard client so every
-	// JWT issued by this realm carries the tenant identity.
-	if clientUUID != "" {
-		mapper := keycloak.ProtocolMapperConfig{
-			Name:           "tenant_id",
-			Protocol:       "openid-connect",
-			ProtocolMapper: "oidc-hardcoded-claim-mapper",
-			Config: map[string]string{
-				"claim.name":           "tenant_id",
-				"claim.value":          tenantID,
-				"jsonType.label":       "String",
-				"id.token.claim":       "true",
-				"access.token.claim":   "true",
-				"userinfo.token.claim": "true",
-			},
-		}
-		if err := p.keycloak.AddProtocolMapper(ctx, realmName, clientUUID, mapper); err != nil {
-			p.logger.Warn("failed to add tenant_id protocol mapper during auto-provisioning",
-				"realm", realmName,
-				"error", err,
-			)
-		}
-	}
-
-	return nil
 }
 
 // isErrTenantNotFound reports whether err wraps ErrTenantNotFound.

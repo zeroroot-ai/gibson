@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -273,6 +274,44 @@ func (r *DefaultToolRegistry) Metrics(name string) (ToolMetrics, error) {
 
 	// Return a copy to prevent external modification
 	return *metrics, nil
+}
+
+// mapExecutor is a private interface for tools that support map-based execution.
+// This is used by DefaultToolRegistry.Execute for legacy compatibility.
+type mapExecutor interface {
+	Execute(ctx context.Context, input map[string]any) (map[string]any, error)
+}
+
+// Execute runs a registered tool by name with map-based input and output.
+// The tool must implement the mapExecutor interface (i.e. have an Execute method
+// with signature Execute(ctx, map[string]any) (map[string]any, error)).
+// Metrics are recorded for each execution.
+func (r *DefaultToolRegistry) Execute(ctx context.Context, name string, input map[string]any) (map[string]any, error) {
+	t, err := r.Get(name)
+	if err != nil {
+		return nil, err
+	}
+
+	executor, ok := t.(mapExecutor)
+	if !ok {
+		return nil, types.NewError(ErrToolInvalidInput, fmt.Sprintf("tool %q does not support map-based execution", name))
+	}
+
+	start := time.Now()
+	output, execErr := executor.Execute(ctx, input)
+	duration := time.Since(start)
+
+	r.mu.Lock()
+	if m, exists := r.metrics[name]; exists {
+		if execErr != nil {
+			m.RecordFailure(duration)
+		} else {
+			m.RecordSuccess(duration)
+		}
+	}
+	r.mu.Unlock()
+
+	return output, execErr
 }
 
 // containsTag checks if a tag exists in a slice of tags

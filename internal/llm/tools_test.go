@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/schema"
+	"github.com/zero-day-ai/sdk/schema"
 )
 
 func TestToolDef_Validate(t *testing.T) {
@@ -20,7 +20,7 @@ func TestToolDef_Validate(t *testing.T) {
 			tool: ToolDef{
 				Name:        "get_weather",
 				Description: "Get weather information",
-				Parameters: schema.JSONSchema{
+				Parameters: schema.JSON{
 					Type: "object",
 				},
 			},
@@ -30,7 +30,7 @@ func TestToolDef_Validate(t *testing.T) {
 			name: "missing name",
 			tool: ToolDef{
 				Description: "Get weather information",
-				Parameters:  schema.JSONSchema{Type: "object"},
+				Parameters:  schema.JSON{Type: "object"},
 			},
 			expectErr: true,
 			errMsg:    "tool name is required",
@@ -39,7 +39,7 @@ func TestToolDef_Validate(t *testing.T) {
 			name: "missing description",
 			tool: ToolDef{
 				Name:       "get_weather",
-				Parameters: schema.JSONSchema{Type: "object"},
+				Parameters: schema.JSON{Type: "object"},
 			},
 			expectErr: true,
 			errMsg:    "tool description is required",
@@ -49,7 +49,7 @@ func TestToolDef_Validate(t *testing.T) {
 			tool: ToolDef{
 				Name:        "get_weather",
 				Description: "Get weather information",
-				Parameters: schema.JSONSchema{
+				Parameters: schema.JSON{
 					Type: "string",
 				},
 			},
@@ -61,7 +61,7 @@ func TestToolDef_Validate(t *testing.T) {
 			tool: ToolDef{
 				Name:        "get_weather",
 				Description: "Get weather information",
-				Parameters:  schema.JSONSchema{},
+				Parameters:  schema.JSON{},
 			},
 			expectErr: false,
 		},
@@ -292,12 +292,13 @@ func TestToolResult_Validate(t *testing.T) {
 }
 
 func TestNewToolDef(t *testing.T) {
-	params := schema.NewObjectSchema(
-		map[string]schema.SchemaField{
-			"location": schema.NewStringField("The location"),
+	params := schema.JSON{
+		Type: "object",
+		Properties: map[string]schema.JSON{
+			"location": {Type: "string", Description: "The location"},
 		},
-		[]string{"location"},
-	)
+		Required: []string{"location"},
+	}
 
 	tool := NewToolDef("get_weather", "Get weather information", params)
 
@@ -309,9 +310,9 @@ func TestNewToolDef(t *testing.T) {
 
 func TestNewToolDef_EnsuresObjectType(t *testing.T) {
 	// Create a schema without Type set
-	params := schema.JSONSchema{
-		Properties: map[string]schema.SchemaField{
-			"location": schema.NewStringField("The location"),
+	params := schema.JSON{
+		Properties: map[string]schema.JSON{
+			"location": {Type: "string", Description: "The location"},
 		},
 	}
 

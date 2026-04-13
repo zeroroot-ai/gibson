@@ -440,7 +440,7 @@ func (p *Provisioner) stepCreateTenant(ctx context.Context, req ProvisionRequest
 		"stripe_customer_id":  req.StripeCustomerID,
 		"stripe_sub_id":       req.StripeSubID,
 		"provisioning_source": "saas",
-		"keycloak_realm_name": req.TenantID,
+		"realm_name": req.TenantID,
 	}
 
 	// Attempt creation.  The underlying TenantService will return

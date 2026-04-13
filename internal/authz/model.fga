@@ -9,27 +9,32 @@
 # authz-01: Introduced base model with user, tenant, component, system_tenant types.
 # authz-04: Added team type with parent/admin/member/can_view_data_from relations.
 #           Extended component type with can_read relation and team member indirection.
+# agent-auth: Added agent_principal type for Agent Auth Protocol per-agent grants.
+#             Extended component can_execute/can_configure/can_read to accept agent_principal.
 #
 # When extending, add new types after system_tenant. Do NOT rename existing
 # relations or types — doing so breaks existing tuples in the FGA store.
 #
 # MODEL SCOPE
 # -----------
-# user         — a human or service principal identified by UUID
-# tenant       — a Gibson customer organization (slug-addressed)
-# component    — an agent, tool, or plugin registered in the Gibson component registry
-# system_tenant — a singleton object (system_tenant:_system) that models
-#                 cross-tenant platform-operator privilege
-# team         — a subdivision of a tenant for grouping users and controlling data access
+# user            — a human or service principal identified by UUID
+# tenant          — a Gibson customer organization (slug-addressed)
+# agent_principal — a per-agent identity for scoped capability grants (Agent Auth Protocol)
+# component       — an agent, tool, or plugin registered in the Gibson component registry
+# system_tenant   — a singleton object (system_tenant:_system) that models
+#                   cross-tenant platform-operator privilege
+# team            — a subdivision of a tenant for grouping users and controlling data access
 #
 # RELATION SEMANTICS
 # ------------------
 # tenant.admin        → user is an administrator of the tenant
 # tenant.member       → user is a member (includes admin by computed union)
+# agent_principal.owner      → user that owns/created this agent principal
+# agent_principal.belongs_to → tenant this agent principal is scoped to
 # component.owner     → a tenant owns this component
-# component.can_execute  → user can run this component (direct grant OR via tenant membership)
-# component.can_configure → user can modify this component's config (direct grant OR via tenant membership)
-# component.can_read  → user can read this component's output/data (direct grant OR via tenant/team membership)
+# component.can_execute  → user/agent_principal can run this component (direct grant OR via tenant membership)
+# component.can_configure → user/agent_principal can modify this component's config (direct grant OR via tenant membership)
+# component.can_read  → user/agent_principal can read this component's output/data (direct grant OR via tenant/team membership)
 # system_tenant.platform_operator → user has cross-tenant elevated privilege
 # team.parent         → the tenant this team belongs to
 # team.admin          → user is an admin of the team (or inherits tenant admin)
@@ -46,6 +51,9 @@
 #   user:alice   | admin            | team:ops
 #   user:bob     | member           | team:ops
 #   team:alpha   | can_view_data_from | team:beta
+#   user:alice        | owner      | agent_principal:agent-abc-123
+#   tenant:acme       | belongs_to | agent_principal:agent-abc-123
+#   agent_principal:agent-abc-123 | can_execute | component:nmap   (direct per-agent grant)
 
 model
   schema 1.1
@@ -57,12 +65,17 @@ type tenant
     define admin: [user]
     define member: [user] or admin
 
+type agent_principal
+  relations
+    define owner: [user]
+    define belongs_to: [tenant]
+
 type component
   relations
     define owner: [tenant]
-    define can_execute: [user, tenant#member, team#member] or admin from owner
-    define can_configure: [user, tenant#member, team#member] or admin from owner
-    define can_read: [user, tenant#member, team#member, team#can_view_data_from] or admin from owner
+    define can_execute: [user, agent_principal, tenant#member, team#member] or admin from owner
+    define can_configure: [user, agent_principal, tenant#member, team#member] or admin from owner
+    define can_read: [user, agent_principal, tenant#member, team#member, team#can_view_data_from] or admin from owner
 
 type system_tenant
   relations

@@ -5,19 +5,36 @@ import (
 	"time"
 )
 
+// BetterAuthConfig holds configuration for the Better Auth session token validator.
+//
+// The Secret is the shared BETTER_AUTH_SECRET that was used to sign session tokens
+// in the dashboard's Better Auth server. It must match exactly.
+//
+// When Enabled is false the BetterAuthValidator is not added to the authenticator
+// chain even if Secret is set.
+type BetterAuthConfig struct {
+	// Enabled controls whether Better Auth session token validation is active.
+	// Default: false
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
+
+	// Secret is the HMAC-SHA256 signing secret shared between the dashboard
+	// Better Auth server and the daemon.
+	// Override: BETTER_AUTH_SECRET env var is handled in the loader.
+	Secret string `mapstructure:"secret" yaml:"secret"`
+}
+
 // AuthConfig contains authentication and authorization configuration.
 //
 // This configuration is loaded from gibson.yaml and supports multiple
 // deployment models through the Mode field:
-//   - "dev": Static tokens for testing
-//   - "enterprise": OIDC validation with config-based RBAC, single or multi-team
-//   - "saas": OIDC + tenant isolation + database-based RBAC
+//   - "dev": API key / K8s SA / Better Auth / Agent Auth JWT
+//   - "enterprise": API key / K8s SA / Better Auth / Agent Auth JWT
+//   - "saas": API key / K8s SA / Better Auth / Agent Auth JWT
+//
+// The 4-path interceptor (Task 10) handles routing between these methods.
 type AuthConfig struct {
 	// Mode specifies the authentication deployment model.
-	// Valid values:
-	//   - "dev": Static tokens for local development
-	//   - "enterprise": Customer IdP (Okta, Azure AD, Keycloak) with OIDC validation
-	//   - "saas": Multi-tenant with tenant isolation via claims
+	// Valid values: "dev", "enterprise", "saas"
 	// Required: auth mode must be explicitly configured.
 	Mode string `mapstructure:"mode" yaml:"mode"`
 
@@ -48,72 +65,20 @@ type AuthConfig struct {
 	// Default: 30s
 	ClockSkew time.Duration `mapstructure:"clock_skew" yaml:"clock_skew"`
 
-	// OIDC contains OpenID Connect provider configurations.
-	// Multiple providers can be configured for federation (Okta, GitHub Actions, GitLab CI).
-	// Tokens are matched to providers by their issuer claim.
-	// Required for "enterprise" and "saas" modes.
-	OIDC []OIDCIssuerConfig `mapstructure:"oidc" yaml:"oidc"`
-
 	// Kubernetes enables validation of Kubernetes ServiceAccount tokens.
 	// Used for in-cluster workloads (ArgoCD, Tekton, etc).
 	// Optional - only enabled when configured.
 	Kubernetes *K8sAuthConfig `mapstructure:"kubernetes" yaml:"kubernetes,omitempty"`
 
-	// Local enables static token authentication for local development.
-	// Required for "dev" mode, ignored in other modes.
-	// NOT FOR PRODUCTION - tokens are stored in plaintext config.
-	// Optional - only enabled when configured.
-	Local *LocalAuthConfig `mapstructure:"local" yaml:"local,omitempty"`
+	// BetterAuth configures HMAC-SHA256 session token validation for Better Auth
+	// sessions issued by the dashboard.
+	// Optional — omit when not using the dashboard's Better Auth integration.
+	BetterAuth BetterAuthConfig `mapstructure:"better_auth" yaml:"better_auth,omitempty"`
 
 	// AutoProvisionTenants controls whether new tenants are automatically created
-	// when an OIDC token contains a tenant claim value that doesn't match any existing tenant.
+	// when a token contains a tenant claim value that doesn't match any existing tenant.
 	// Default: true for "enterprise" mode, false for "saas" mode.
 	AutoProvisionTenants *bool `mapstructure:"auto_provision_tenants" yaml:"auto_provision_tenants,omitempty"`
-}
-
-// OIDCIssuerConfig configures an OpenID Connect identity provider.
-//
-// Each issuer represents a trusted OIDC provider (Okta, Auth0, GitHub Actions, etc).
-// Tokens from the issuer are validated using JWKS endpoint public keys.
-type OIDCIssuerConfig struct {
-	// Issuer is the OIDC issuer URL (must match token's iss claim).
-	// Examples: "https://company.okta.com", "https://token.actions.githubusercontent.com"
-	// Required
-	Issuer string `mapstructure:"issuer" yaml:"issuer" validate:"required,url"`
-
-	// Audience is the expected audience value (aud claim).
-	// Tokens without matching audience are rejected.
-	// Examples: "gibson-prod", "sts.amazonaws.com"
-	// Optional - if empty, audience is not validated.
-	Audience string `mapstructure:"audience" yaml:"audience"`
-
-	// JWKSEndpoint overrides automatic JWKS discovery.
-	// By default, Gibson fetches JWKS from {issuer}/.well-known/jwks.json
-	// Only needed for non-standard OIDC implementations.
-	// Optional
-	JWKSEndpoint string `mapstructure:"jwks_endpoint" yaml:"jwks_endpoint,omitempty"`
-
-	// JWKSTTL is how long to cache JWKS responses before refreshing.
-	// Reduces load on identity provider and improves auth performance.
-	// Default: 1h
-	JWKSTTL time.Duration `mapstructure:"jwks_ttl" yaml:"jwks_ttl"`
-
-	// ClaimsMapping maps token claim names to Identity fields.
-	// Allows normalization of provider-specific claim names.
-	// Examples:
-	//   {"groups": "groups"} - standard OIDC groups claim
-	//   {"repository": "repo", "ref": "branch"} - GitHub Actions claims
-	//   {"project_path": "project"} - GitLab CI claims
-	// Optional - defaults to standard OIDC claim names
-	ClaimsMapping map[string]string `mapstructure:"claims_mapping" yaml:"claims_mapping,omitempty"`
-
-	// RoleBindings maps claim values to Gibson roles.
-	// Keys are claim values (or patterns), values are lists of role names.
-	// Examples:
-	//   {"security-admins": ["admin"]} - group to role
-	//   {"myorg/infra:refs/heads/main": ["mission:execute"]} - repo/branch to role
-	// Supports wildcard matching in keys.
-	RoleBindings map[string][]string `mapstructure:"role_bindings" yaml:"role_bindings,omitempty"`
 }
 
 // K8sAuthConfig configures Kubernetes ServiceAccount token validation.
@@ -137,28 +102,6 @@ type K8sAuthConfig struct {
 	// Useful for out-of-cluster testing.
 	// Optional - defaults to in-cluster config when running in K8s.
 	KubeconfigPath string `mapstructure:"kubeconfig_path" yaml:"kubeconfig_path,omitempty"`
-}
-
-// LocalAuthConfig enables static token authentication for development.
-//
-// WARNING: This stores tokens in plaintext configuration.
-// NEVER use in production - for local development only.
-type LocalAuthConfig struct {
-	// Users defines static token-to-identity mappings.
-	Users []LocalUser `mapstructure:"users" yaml:"users"`
-}
-
-// LocalUser represents a static token identity for local development.
-type LocalUser struct {
-	// Name is a human-readable identifier for this user.
-	Name string `mapstructure:"name" yaml:"name"`
-
-	// Token is the bearer token value to match.
-	// WARNING: Stored in plaintext - development only!
-	Token string `mapstructure:"token" yaml:"token"`
-
-	// Roles are the Gibson roles granted to this token.
-	Roles []string `mapstructure:"roles" yaml:"roles"`
 }
 
 // IsAuthEnabled returns true if authentication should be enforced.
@@ -195,13 +138,6 @@ func (c *AuthConfig) ApplyDefaults() {
 	if c.ClockSkew == 0 {
 		c.ClockSkew = 30 * time.Second
 	}
-
-	// Apply defaults to OIDC issuers
-	for i := range c.OIDC {
-		if c.OIDC[i].JWKSTTL == 0 {
-			c.OIDC[i].JWKSTTL = 1 * time.Hour
-		}
-	}
 }
 
 // Validate checks that the configuration is valid.
@@ -219,18 +155,6 @@ func (c *AuthConfig) Validate() error {
 
 	if !validModes[c.Mode] {
 		return fmt.Errorf("invalid auth mode %q: must be one of: dev, enterprise, saas", c.Mode)
-	}
-
-	// Validate mode-specific requirements
-	switch c.Mode {
-	case "dev":
-		if c.Local == nil || len(c.Local.Users) == 0 {
-			return fmt.Errorf("auth mode %q requires local.users configuration", c.Mode)
-		}
-	case "enterprise", "saas":
-		if len(c.OIDC) == 0 {
-			return fmt.Errorf("auth mode %q requires at least one OIDC issuer", c.Mode)
-		}
 	}
 
 	return nil

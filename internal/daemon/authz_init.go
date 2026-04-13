@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/config"
@@ -36,10 +37,13 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 	)
 
 	// Resolve store/model IDs from config → ConfigMap → env vars.
-	storeID, modelID, err := authz.ResolveStoreAndModelIDs(ctx, authz.IDConfig{
+	// ResolveWithRetry polls with exponential backoff for up to 5 minutes so
+	// the daemon does not depend on the FGA init job completing before pod start.
+	// The daemon remains healthy (serving /healthz) throughout the wait.
+	storeID, modelID, err := authz.ResolveWithRetry(ctx, authz.IDConfig{
 		StoreID: cfg.Fga.StoreID,
 		ModelID: cfg.Fga.ModelID,
-	}, nil) // nil → auto-detect in-cluster config
+	}, nil, d.logger.Slog(), 5*time.Minute) // nil → auto-detect in-cluster config
 	if err != nil {
 		return d.handleAuthzFailure(ctx, cfg, fmt.Errorf("authorization service: failed to resolve IDs: %w", err))
 	}

@@ -579,8 +579,8 @@ func TestRedisPromptStore_ComplexPromptData(t *testing.T) {
 		},
 		Examples: []Example{
 			{
-				Variables: map[string]any{"name": "Alice", "age": 30},
-				Expected:  "Hello Alice, you are 30 years old",
+				Input:  `{"name": "Alice", "age": 30}`,
+				Output: "Hello Alice, you are 30 years old",
 			},
 		},
 		Priority: 100,

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/schema"
+	"github.com/zero-day-ai/sdk/schema"
 )
 
 func TestToSchemaTools(t *testing.T) {
@@ -32,9 +32,9 @@ func TestToSchemaTools(t *testing.T) {
 				{
 					Name:        "get_weather",
 					Description: "Get the current weather for a location",
-					Parameters: schema.JSONSchema{
+					Parameters: schema.JSON{
 						Type: "object",
-						Properties: map[string]schema.SchemaField{
+						Properties: map[string]schema.JSON{
 							"location": {
 								Type:        "string",
 								Description: "The city and state, e.g. San Francisco, CA",
@@ -42,7 +42,7 @@ func TestToSchemaTools(t *testing.T) {
 							"unit": {
 								Type:        "string",
 								Description: "Temperature unit",
-								Enum:        []string{"celsius", "fahrenheit"},
+								Enum:        []any{"celsius", "fahrenheit"},
 							},
 						},
 						Required: []string{"location"},
@@ -55,9 +55,9 @@ func TestToSchemaTools(t *testing.T) {
 					Function: &llms.FunctionDefinition{
 						Name:        "get_weather",
 						Description: "Get the current weather for a location",
-						Parameters: schema.JSONSchema{
+						Parameters: schema.JSON{
 							Type: "object",
-							Properties: map[string]schema.SchemaField{
+							Properties: map[string]schema.JSON{
 								"location": {
 									Type:        "string",
 									Description: "The city and state, e.g. San Francisco, CA",
@@ -65,7 +65,7 @@ func TestToSchemaTools(t *testing.T) {
 								"unit": {
 									Type:        "string",
 									Description: "Temperature unit",
-									Enum:        []string{"celsius", "fahrenheit"},
+									Enum:        []any{"celsius", "fahrenheit"},
 								},
 							},
 							Required: []string{"location"},
@@ -80,14 +80,14 @@ func TestToSchemaTools(t *testing.T) {
 				{
 					Name:        "get_weather",
 					Description: "Get weather",
-					Parameters: schema.JSONSchema{
+					Parameters: schema.JSON{
 						Type: "object",
 					},
 				},
 				{
 					Name:        "search_web",
 					Description: "Search the web",
-					Parameters: schema.JSONSchema{
+					Parameters: schema.JSON{
 						Type: "object",
 					},
 				},
@@ -98,7 +98,7 @@ func TestToSchemaTools(t *testing.T) {
 					Function: &llms.FunctionDefinition{
 						Name:        "get_weather",
 						Description: "Get weather",
-						Parameters: schema.JSONSchema{
+						Parameters: schema.JSON{
 							Type: "object",
 						},
 					},
@@ -108,7 +108,7 @@ func TestToSchemaTools(t *testing.T) {
 					Function: &llms.FunctionDefinition{
 						Name:        "search_web",
 						Description: "Search the web",
-						Parameters: schema.JSONSchema{
+						Parameters: schema.JSON{
 							Type: "object",
 						},
 					},
@@ -155,7 +155,7 @@ func TestBuildCallOptionsWithTools(t *testing.T) {
 				{
 					Name:        "test_tool",
 					Description: "Test tool",
-					Parameters: schema.JSONSchema{
+					Parameters: schema.JSON{
 						Type: "object",
 					},
 				},

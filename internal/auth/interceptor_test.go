@@ -2,8 +2,10 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,16 +17,58 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// mockAuthenticator is a test implementation of Authenticator.
-type mockAuthenticator struct {
+// ---------------------------------------------------------------------------
+// Mock validators
+// ---------------------------------------------------------------------------
+
+// mockBetterAuthValidator is a test implementation of betterAuthValidatorIface.
+// Most existing interceptor tests route through the default (Better Auth) path
+// since the test tokens don't carry a gsk_ prefix or agent+jwt header.
+type mockBetterAuthValidator struct {
 	authenticateFn func(ctx context.Context, token string) (*Identity, error)
 }
 
-func (m *mockAuthenticator) Authenticate(ctx context.Context, token string) (*Identity, error) {
+func (m *mockBetterAuthValidator) Authenticate(ctx context.Context, token string) (*Identity, error) {
 	if m.authenticateFn != nil {
 		return m.authenticateFn(ctx, token)
 	}
 	return nil, errInvalidToken
+}
+
+// mockAPIKeyValidator is a test implementation of apiKeyValidatorIface.
+type mockAPIKeyValidator struct {
+	authenticateFn func(ctx context.Context, token string) (*Identity, error)
+}
+
+func (m *mockAPIKeyValidator) Authenticate(ctx context.Context, token string) (*Identity, error) {
+	if m.authenticateFn != nil {
+		return m.authenticateFn(ctx, token)
+	}
+	return nil, errInvalidToken
+}
+
+// mockK8sValidator is a test implementation of k8sValidatorIface.
+type mockK8sValidator struct {
+	authenticateFn func(ctx context.Context, token string) (*Identity, error)
+}
+
+func (m *mockK8sValidator) Authenticate(ctx context.Context, token string) (*Identity, error) {
+	if m.authenticateFn != nil {
+		return m.authenticateFn(ctx, token)
+	}
+	return nil, errInvalidToken
+}
+
+// mockAgentJWTValidator is a test implementation of AgentJWTValidator.
+type mockAgentJWTValidator struct {
+	verifyFn func(ctx context.Context, tokenStr, expectedAud string) (*AgentAuthClaims, error)
+}
+
+func (m *mockAgentJWTValidator) VerifyAgentJWT(ctx context.Context, tokenStr, expectedAud string) (*AgentAuthClaims, error) {
+	if m.verifyFn != nil {
+		return m.verifyFn(ctx, tokenStr, expectedAud)
+	}
+	return nil, fmt.Errorf("agentauth: mock not configured")
 }
 
 // mockHandler is a test gRPC handler.
@@ -61,13 +105,46 @@ func (m *mockStreamHandler) handle(srv any, stream grpc.ServerStream) error {
 	return m.err
 }
 
-// TestUnaryAuthInterceptor_EmptyMode_Rejects tests that requests are rejected when auth mode is empty.
+// mockAddr implements net.Addr for testing.
+type mockAddr struct {
+	addr string
+}
+
+func (m *mockAddr) Network() string {
+	return "tcp"
+}
+
+func (m *mockAddr) String() string {
+	return m.addr
+}
+
+// ---------------------------------------------------------------------------
+// Interceptor constructor helpers for tests
+//
+// newTestUnary / newTestStream construct the 4-path interceptor using only the
+// Better Auth mock validator for the default path. Used by tests that care only
+// about interceptor plumbing (mode checks, localhost bypass, tenant extraction)
+// and not about which auth path was taken.
+// ---------------------------------------------------------------------------
+
+func newTestUnary(ba betterAuthValidatorIface, cfg *AuthConfig, logger *slog.Logger) grpc.UnaryServerInterceptor {
+	return buildUnaryInterceptor(nil, nil, nil, ba, cfg, logger)
+}
+
+func newTestStream(ba betterAuthValidatorIface, cfg *AuthConfig, logger *slog.Logger) grpc.StreamServerInterceptor {
+	return buildStreamInterceptor(nil, nil, nil, ba, cfg, logger)
+}
+
+// ---------------------------------------------------------------------------
+// Mode / disabled tests
+// ---------------------------------------------------------------------------
+
 func TestUnaryAuthInterceptor_EmptyMode_Rejects(t *testing.T) {
-	auth := &mockAuthenticator{}
+	ba := &mockBetterAuthValidator{}
 	cfg := &AuthConfig{Mode: ""}
 	logger := slog.Default()
 
-	interceptor := UnaryAuthInterceptor(auth, cfg, logger)
+	interceptor := newTestUnary(ba, cfg, logger)
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -81,13 +158,12 @@ func TestUnaryAuthInterceptor_EmptyMode_Rejects(t *testing.T) {
 	assert.False(t, handler.called, "handler should not be called when auth mode is empty")
 }
 
-// TestUnaryAuthInterceptor_DisabledMode_Rejects tests that "disabled" mode is rejected.
 func TestUnaryAuthInterceptor_DisabledMode_Rejects(t *testing.T) {
-	auth := &mockAuthenticator{}
+	ba := &mockBetterAuthValidator{}
 	cfg := &AuthConfig{Mode: "disabled"}
 	logger := slog.Default()
 
-	interceptor := UnaryAuthInterceptor(auth, cfg, logger)
+	interceptor := newTestUnary(ba, cfg, logger)
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -101,7 +177,10 @@ func TestUnaryAuthInterceptor_DisabledMode_Rejects(t *testing.T) {
 	assert.False(t, handler.called, "handler should not be called when auth mode is disabled")
 }
 
-// TestUnaryAuthInterceptor_LocalhostBypass tests localhost bypass functionality.
+// ---------------------------------------------------------------------------
+// Localhost bypass tests
+// ---------------------------------------------------------------------------
+
 func TestUnaryAuthInterceptor_LocalhostBypass(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -137,19 +216,18 @@ func TestUnaryAuthInterceptor_LocalhostBypass(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			auth := &mockAuthenticator{}
+			ba := &mockBetterAuthValidator{}
 			cfg := &AuthConfig{
 				Mode:           "enterprise",
 				TrustLocalhost: true,
 			}
 			logger := slog.Default()
 
-			interceptor := UnaryAuthInterceptor(auth, cfg, logger)
+			interceptor := newTestUnary(ba, cfg, logger)
 
 			handler := &mockHandler{}
 			info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
-			// Create context with peer information
 			p := &peer.Peer{
 				Addr: &mockAddr{addr: tt.peerAddr},
 			}
@@ -158,19 +236,15 @@ func TestUnaryAuthInterceptor_LocalhostBypass(t *testing.T) {
 			resp, err := interceptor(ctx, "request", info, handler.handle)
 
 			if tt.shouldBypass {
-				// Should succeed without token
 				require.NoError(t, err)
 				assert.Equal(t, "response", resp)
 				assert.True(t, handler.called)
 
-				// Verify localhost identity was injected (check captured context from handler)
-				// NOTE: IdentityFromContext returns SDK Identity, not Gibson Identity with Roles
 				identity, ok := IdentityFromContext(handler.capturedCtx)
 				require.True(t, ok, "localhost identity should be in context")
 				assert.Equal(t, "localhost", identity.Subject)
 				assert.Equal(t, "internal", identity.Issuer)
 			} else {
-				// Should fail without token
 				require.Error(t, err)
 				assert.Equal(t, codes.Unauthenticated, status.Code(err))
 				assert.False(t, handler.called)
@@ -179,31 +253,20 @@ func TestUnaryAuthInterceptor_LocalhostBypass(t *testing.T) {
 	}
 }
 
-// mockAddr implements net.Addr for testing.
-type mockAddr struct {
-	addr string
-}
+// ---------------------------------------------------------------------------
+// Missing / invalid token tests
+// ---------------------------------------------------------------------------
 
-func (m *mockAddr) Network() string {
-	return "tcp"
-}
-
-func (m *mockAddr) String() string {
-	return m.addr
-}
-
-// TestUnaryAuthInterceptor_MissingToken tests missing bearer token error.
 func TestUnaryAuthInterceptor_MissingToken(t *testing.T) {
-	auth := &mockAuthenticator{}
+	ba := &mockBetterAuthValidator{}
 	cfg := &AuthConfig{Mode: "enterprise"}
 	logger := slog.Default()
 
-	interceptor := UnaryAuthInterceptor(auth, cfg, logger)
+	interceptor := newTestUnary(ba, cfg, logger)
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
-	// Context without authorization metadata
 	ctx := context.Background()
 
 	resp, err := interceptor(ctx, "request", info, handler.handle)
@@ -215,7 +278,6 @@ func TestUnaryAuthInterceptor_MissingToken(t *testing.T) {
 	assert.False(t, handler.called, "handler should not be called when token is missing")
 }
 
-// TestUnaryAuthInterceptor_InvalidToken tests invalid token format.
 func TestUnaryAuthInterceptor_InvalidToken(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -241,16 +303,15 @@ func TestUnaryAuthInterceptor_InvalidToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			auth := &mockAuthenticator{}
+			ba := &mockBetterAuthValidator{}
 			cfg := &AuthConfig{Mode: "enterprise"}
 			logger := slog.Default()
 
-			interceptor := UnaryAuthInterceptor(auth, cfg, logger)
+			interceptor := newTestUnary(ba, cfg, logger)
 
 			handler := &mockHandler{}
 			info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
-			// Context with invalid authorization metadata
 			md := metadata.New(map[string]string{
 				"authorization": tt.authHeader,
 			})
@@ -267,7 +328,10 @@ func TestUnaryAuthInterceptor_InvalidToken(t *testing.T) {
 	}
 }
 
-// TestUnaryAuthInterceptor_AuthenticationFailure tests authentication failure scenarios.
+// ---------------------------------------------------------------------------
+// Authentication failure mapping tests
+// ---------------------------------------------------------------------------
+
 func TestUnaryAuthInterceptor_AuthenticationFailure(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -309,7 +373,7 @@ func TestUnaryAuthInterceptor_AuthenticationFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			auth := &mockAuthenticator{
+			ba := &mockBetterAuthValidator{
 				authenticateFn: func(ctx context.Context, token string) (*Identity, error) {
 					return nil, tt.authErr
 				},
@@ -317,12 +381,11 @@ func TestUnaryAuthInterceptor_AuthenticationFailure(t *testing.T) {
 			cfg := &AuthConfig{Mode: "enterprise"}
 			logger := slog.Default()
 
-			interceptor := UnaryAuthInterceptor(auth, cfg, logger)
+			interceptor := newTestUnary(ba, cfg, logger)
 
 			handler := &mockHandler{}
 			info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
-			// Context with valid Bearer token format
 			md := metadata.New(map[string]string{
 				"authorization": "Bearer test-token",
 			})
@@ -339,7 +402,10 @@ func TestUnaryAuthInterceptor_AuthenticationFailure(t *testing.T) {
 	}
 }
 
-// TestUnaryAuthInterceptor_SuccessfulAuth tests successful authentication flow.
+// ---------------------------------------------------------------------------
+// Successful authentication
+// ---------------------------------------------------------------------------
+
 func TestUnaryAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	expectedIdentity := &Identity{
 		Identity: sdkauth.Identity{
@@ -352,7 +418,7 @@ func TestUnaryAuthInterceptor_SuccessfulAuth(t *testing.T) {
 		Permissions: []Permission{{Action: "execute", Resource: "mission", Scope: "*"}},
 	}
 
-	auth := &mockAuthenticator{
+	ba := &mockBetterAuthValidator{
 		authenticateFn: func(ctx context.Context, token string) (*Identity, error) {
 			assert.Equal(t, "test-token-123", token)
 			return expectedIdentity, nil
@@ -361,12 +427,11 @@ func TestUnaryAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	cfg := &AuthConfig{Mode: "enterprise"}
 	logger := slog.Default()
 
-	interceptor := UnaryAuthInterceptor(auth, cfg, logger)
+	interceptor := newTestUnary(ba, cfg, logger)
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
-	// Context with valid Bearer token
 	md := metadata.New(map[string]string{
 		"authorization": "Bearer test-token-123",
 	})
@@ -378,24 +443,24 @@ func TestUnaryAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	assert.Equal(t, "response", resp)
 	assert.True(t, handler.called)
 
-	// Verify identity was injected into context (check captured context from handler)
-	// NOTE: IdentityFromContext returns SDK Identity, not Gibson Identity with Roles
 	identity, ok := IdentityFromContext(handler.capturedCtx)
 	require.True(t, ok, "identity should be in context")
 	assert.Equal(t, expectedIdentity.Subject, identity.Subject)
 	assert.Equal(t, expectedIdentity.Issuer, identity.Issuer)
 	assert.Equal(t, expectedIdentity.Email, identity.Email)
 	assert.Equal(t, expectedIdentity.Groups, identity.Groups)
-	// Roles are not available via IdentityFromContext (returns SDK Identity only)
 }
 
-// TestStreamAuthInterceptor_EmptyMode_Rejects tests stream auth rejects when auth mode is empty.
+// ---------------------------------------------------------------------------
+// Stream interceptor tests
+// ---------------------------------------------------------------------------
+
 func TestStreamAuthInterceptor_EmptyMode_Rejects(t *testing.T) {
-	auth := &mockAuthenticator{}
+	ba := &mockBetterAuthValidator{}
 	cfg := &AuthConfig{Mode: ""}
 	logger := slog.Default()
 
-	interceptor := StreamAuthInterceptor(auth, cfg, logger)
+	interceptor := newTestStream(ba, cfg, logger)
 
 	streamHandler := &mockStreamHandler{}
 	info := &grpc.StreamServerInfo{FullMethod: "/test.Service/StreamMethod"}
@@ -411,13 +476,12 @@ func TestStreamAuthInterceptor_EmptyMode_Rejects(t *testing.T) {
 	assert.False(t, streamHandler.called, "handler should not be called when auth mode is empty")
 }
 
-// TestStreamAuthInterceptor_DisabledMode_Rejects tests stream auth rejects "disabled" mode.
 func TestStreamAuthInterceptor_DisabledMode_Rejects(t *testing.T) {
-	auth := &mockAuthenticator{}
+	ba := &mockBetterAuthValidator{}
 	cfg := &AuthConfig{Mode: "disabled"}
 	logger := slog.Default()
 
-	interceptor := StreamAuthInterceptor(auth, cfg, logger)
+	interceptor := newTestStream(ba, cfg, logger)
 
 	streamHandler := &mockStreamHandler{}
 	info := &grpc.StreamServerInfo{FullMethod: "/test.Service/StreamMethod"}
@@ -433,13 +497,12 @@ func TestStreamAuthInterceptor_DisabledMode_Rejects(t *testing.T) {
 	assert.False(t, streamHandler.called, "handler should not be called when auth mode is disabled")
 }
 
-// TestStreamAuthInterceptor_MissingToken tests stream auth with missing token.
 func TestStreamAuthInterceptor_MissingToken(t *testing.T) {
-	auth := &mockAuthenticator{}
+	ba := &mockBetterAuthValidator{}
 	cfg := &AuthConfig{Mode: "enterprise"}
 	logger := slog.Default()
 
-	interceptor := StreamAuthInterceptor(auth, cfg, logger)
+	interceptor := newTestStream(ba, cfg, logger)
 
 	streamHandler := &mockStreamHandler{}
 	info := &grpc.StreamServerInfo{FullMethod: "/test.Service/StreamMethod"}
@@ -455,7 +518,6 @@ func TestStreamAuthInterceptor_MissingToken(t *testing.T) {
 	assert.False(t, streamHandler.called)
 }
 
-// TestStreamAuthInterceptor_SuccessfulAuth tests successful stream authentication.
 func TestStreamAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	expectedIdentity := &Identity{
 		Identity: sdkauth.Identity{
@@ -465,7 +527,7 @@ func TestStreamAuthInterceptor_SuccessfulAuth(t *testing.T) {
 		Roles: []string{"admin"},
 	}
 
-	auth := &mockAuthenticator{
+	ba := &mockBetterAuthValidator{
 		authenticateFn: func(ctx context.Context, token string) (*Identity, error) {
 			return expectedIdentity, nil
 		},
@@ -473,12 +535,11 @@ func TestStreamAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	cfg := &AuthConfig{Mode: "enterprise"}
 	logger := slog.Default()
 
-	interceptor := StreamAuthInterceptor(auth, cfg, logger)
+	interceptor := newTestStream(ba, cfg, logger)
 
 	streamHandler := &mockStreamHandler{}
 	info := &grpc.StreamServerInfo{FullMethod: "/test.Service/StreamMethod"}
 
-	// Context with valid Bearer token
 	md := metadata.New(map[string]string{
 		"authorization": "Bearer stream-token",
 	})
@@ -491,7 +552,10 @@ func TestStreamAuthInterceptor_SuccessfulAuth(t *testing.T) {
 	assert.True(t, streamHandler.called)
 }
 
-// TestContextWithIdentity tests identity context injection and extraction.
+// ---------------------------------------------------------------------------
+// Context injection helpers
+// ---------------------------------------------------------------------------
+
 func TestContextWithIdentity(t *testing.T) {
 	identity := &Identity{
 		Identity: sdkauth.Identity{
@@ -502,20 +566,15 @@ func TestContextWithIdentity(t *testing.T) {
 		Roles: []string{"admin"},
 	}
 
-	// Test injection
 	ctx := ContextWithIdentity(context.Background(), identity)
 
-	// Test extraction
-	// NOTE: IdentityFromContext returns SDK Identity, not Gibson Identity with Roles
 	extracted, ok := IdentityFromContext(ctx)
 	require.True(t, ok)
 	assert.Equal(t, identity.Subject, extracted.Subject)
 	assert.Equal(t, identity.Issuer, extracted.Issuer)
 	assert.Equal(t, identity.Email, extracted.Email)
-	// Roles are not available via IdentityFromContext (returns SDK Identity only)
 }
 
-// TestIdentityFromContext_NoIdentity tests extraction when no identity is present.
 func TestIdentityFromContext_NoIdentity(t *testing.T) {
 	ctx := context.Background()
 
@@ -524,14 +583,10 @@ func TestIdentityFromContext_NoIdentity(t *testing.T) {
 	assert.Nil(t, identity)
 }
 
-// TestRequirePermission / TestRequireRole / TestRequirePermission_NoIdentity /
-// TestRequireRole_NoIdentity were removed as part of the
-// declarative-rbac-framework spec. The helper functions they exercised
-// (RequirePermission, RequireRole) have been deleted. Authorization is now
-// enforced exclusively by the RPCAuthzInterceptor via Casbin policies loaded
-// from permissions.yaml. See rpc_authz_interceptor_test.go for coverage.
+// ---------------------------------------------------------------------------
+// extractBearerToken tests
+// ---------------------------------------------------------------------------
 
-// TestExtractBearerToken tests bearer token extraction.
 func TestExtractBearerToken(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -589,7 +644,10 @@ func TestExtractBearerToken(t *testing.T) {
 	}
 }
 
-// TestCheckLocalhostBypassWithAddr tests localhost detection.
+// ---------------------------------------------------------------------------
+// checkLocalhostBypassWithAddr tests
+// ---------------------------------------------------------------------------
+
 func TestCheckLocalhostBypassWithAddr(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -651,7 +709,6 @@ func TestCheckLocalhostBypassWithAddr(t *testing.T) {
 	}
 }
 
-// TestCheckLocalhostBypassWithAddr_NoPeer tests localhost bypass without peer context.
 func TestCheckLocalhostBypassWithAddr_NoPeer(t *testing.T) {
 	ctx := context.Background()
 
@@ -662,7 +719,10 @@ func TestCheckLocalhostBypassWithAddr_NoPeer(t *testing.T) {
 	assert.Empty(t, addr)
 }
 
-// mockStreamHandlerWithCtx is a gRPC stream handler that captures the stream context.
+// ---------------------------------------------------------------------------
+// mockStreamHandlerWithCtx captures the stream context for tenant assertions.
+// ---------------------------------------------------------------------------
+
 type mockStreamHandlerWithCtx struct {
 	called      bool
 	err         error
@@ -675,7 +735,10 @@ func (m *mockStreamHandlerWithCtx) handle(srv any, stream grpc.ServerStream) err
 	return m.err
 }
 
-// newOIDCIdentity builds an OIDC Identity with optional claims for use in tenant tests.
+// ---------------------------------------------------------------------------
+// Tenant extraction helpers for tests
+// ---------------------------------------------------------------------------
+
 func newOIDCIdentity(issuer string, claims map[string]any) *Identity {
 	return &Identity{
 		Identity: sdkauth.Identity{
@@ -688,7 +751,6 @@ func newOIDCIdentity(issuer string, claims map[string]any) *Identity {
 	}
 }
 
-// newBearerContext wraps a background context with an "authorization: Bearer <token>" metadata header.
 func newBearerContext(token string) context.Context {
 	md := metadata.New(map[string]string{
 		"authorization": "Bearer " + token,
@@ -696,8 +758,10 @@ func newBearerContext(token string) context.Context {
 	return metadata.NewIncomingContext(context.Background(), md)
 }
 
-// TestUnaryAuthInterceptor_EnterpriseTenantExtraction covers the five enterprise/saas
-// multi-tenancy scenarios introduced by the interceptor fix.
+// ---------------------------------------------------------------------------
+// Enterprise/SaaS tenant extraction tests
+// ---------------------------------------------------------------------------
+
 func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 	const oidcIssuer = "https://idp.example.com"
 
@@ -731,11 +795,8 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    "fallback-tenant",
 		},
 		{
-			// Scenario C: enterprise + OIDC WITHOUT tenant claim + NO DefaultTenant →
-			// After authz-02, TenantFromContext returns SystemTenant when Identity.Tenants
-			// is empty and no ctx tenant is set. The auth interceptor in enterprise mode
-			// does not call ContextWithTenant when no tenant is found, so the
-			// downstream TenantFromContext falls through to SystemTenant.
+			// Scenario C: enterprise + OIDC WITHOUT tenant claim + NO DefaultTenant.
+			// After authz-02, TenantFromContext returns SystemTenant when no tenant set.
 			name:          "C: enterprise OIDC without tenant claim, no default",
 			mode:          "enterprise",
 			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
@@ -769,7 +830,7 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockAuth := &mockAuthenticator{
+			ba := &mockBetterAuthValidator{
 				authenticateFn: func(ctx context.Context, token string) (*Identity, error) {
 					return tt.identity, nil
 				},
@@ -781,7 +842,7 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			}
 			logger := slog.Default()
 
-			interceptor := UnaryAuthInterceptor(mockAuth, cfg, logger)
+			interceptor := newTestUnary(ba, cfg, logger)
 
 			handler := &mockHandler{}
 			info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -805,8 +866,6 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 	}
 }
 
-// TestStreamAuthInterceptor_EnterpriseTenantExtraction covers the enterprise/saas
-// multi-tenancy scenarios for streaming RPCs (mirrors the unary tests for scenarios A and B).
 func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 	const oidcIssuer = "https://idp.example.com"
 
@@ -819,7 +878,6 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 		wantTenant    string
 	}{
 		{
-			// Scenario A (stream): enterprise + OIDC WITH tenant claim → claim value wins.
 			name: "A: enterprise OIDC with tenant claim",
 			mode: "enterprise",
 			identity: newOIDCIdentity(oidcIssuer, map[string]any{
@@ -830,7 +888,6 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    "team-alpha",
 		},
 		{
-			// Scenario B (stream): enterprise + OIDC WITHOUT tenant claim + DefaultTenant set.
 			name:          "B: enterprise OIDC without tenant claim, default tenant set",
 			mode:          "enterprise",
 			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
@@ -839,8 +896,6 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    "fallback-tenant",
 		},
 		{
-			// Scenario C (stream): enterprise + OIDC WITHOUT tenant claim + NO DefaultTenant.
-			// After authz-02, TenantFromContext returns SystemTenant for empty Identity.Tenants.
 			name:          "C: enterprise OIDC without tenant claim, no default",
 			mode:          "enterprise",
 			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
@@ -849,7 +904,6 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    SystemTenant,
 		},
 		{
-			// Scenario D (stream): enterprise + API key identity.
 			name: "D: enterprise API key with tenant claim",
 			mode: "enterprise",
 			identity: newOIDCIdentity(apiKeyIssuer, map[string]any{
@@ -860,7 +914,6 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    "api-tenant",
 		},
 		{
-			// Scenario E (stream): saas mode with OIDC tenant claim.
 			name: "E: saas OIDC with tenant claim",
 			mode: "saas",
 			identity: newOIDCIdentity(oidcIssuer, map[string]any{
@@ -874,7 +927,7 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockAuth := &mockAuthenticator{
+			ba := &mockBetterAuthValidator{
 				authenticateFn: func(ctx context.Context, token string) (*Identity, error) {
 					return tt.identity, nil
 				},
@@ -886,7 +939,7 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			}
 			logger := slog.Default()
 
-			interceptor := StreamAuthInterceptor(mockAuth, cfg, logger)
+			interceptor := newTestStream(ba, cfg, logger)
 
 			streamHandler := &mockStreamHandlerWithCtx{}
 			info := &grpc.StreamServerInfo{FullMethod: "/test.Service/StreamMethod"}
@@ -904,7 +957,10 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 	}
 }
 
-// TestToGRPCStatus tests error code mapping.
+// ---------------------------------------------------------------------------
+// toGRPCStatus tests
+// ---------------------------------------------------------------------------
+
 func TestToGRPCStatus(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -967,6 +1023,374 @@ func TestToGRPCStatus(t *testing.T) {
 				assert.Equal(t, tt.wantCode, status.Code(grpcErr))
 				assert.Contains(t, grpcErr.Error(), tt.wantMsg)
 			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4-path routing tests
+// ---------------------------------------------------------------------------
+
+// fakeAgentJWTToken constructs a minimal three-part JWT string with an agent+jwt
+// header, so IsAgentAuthJWT returns true. The payload and signature parts are
+// placeholder values — the mock verifier does not perform any crypto.
+func fakeAgentJWTToken() string {
+	// base64url({"typ":"agent+jwt","alg":"EdDSA"})
+	hdr := "eyJ0eXAiOiJhZ2VudCtqd3QiLCJhbGciOiJFZERTQSJ9"
+	return hdr + ".cGF5bG9hZA.c2ln"
+}
+
+// fakeK8sToken constructs a three-part dot-separated string that is NOT an
+// agent+jwt, triggering the K8s SA token path (isK8sToken returns true for any
+// three-part token that is not an agent+jwt or gsk_ token).
+func fakeK8sToken() string {
+	return "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJzeXN0ZW06c2VydmljZWFjY291bnQ6ZGVmYXVsdDpteS1zYSJ9.c2ln"
+}
+
+// TestRouteAuth_APIKeyPath verifies that gsk_-prefixed tokens route to APIKeyAuthenticator.
+func TestRouteAuth_APIKeyPath(t *testing.T) {
+	expectedIdentity := &Identity{
+		Identity: sdkauth.Identity{Subject: "gsk_tenant_abc123", Issuer: "apikey"},
+		Roles:    []string{"admin"},
+	}
+
+	apiKeys := &mockAPIKeyValidator{
+		authenticateFn: func(ctx context.Context, token string) (*Identity, error) {
+			assert.Equal(t, "gsk_tenant_abc123def456", token)
+			return expectedIdentity, nil
+		},
+	}
+	ba := &mockBetterAuthValidator{
+		authenticateFn: func(_ context.Context, _ string) (*Identity, error) {
+			t.Fatal("BetterAuth must not be called for gsk_ tokens")
+			return nil, nil
+		},
+	}
+
+	cfg := &AuthConfig{Mode: "enterprise"}
+	interceptor := buildUnaryInterceptor(apiKeys, nil, nil, ba, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+	ctx := newBearerContext("gsk_tenant_abc123def456")
+
+	resp, err := interceptor(ctx, "req", info, handler.handle)
+	require.NoError(t, err)
+	assert.Equal(t, "response", resp)
+	assert.True(t, handler.called)
+
+	got, ok := GibsonIdentityFromContext(handler.capturedCtx)
+	require.True(t, ok)
+	assert.Equal(t, expectedIdentity.Subject, got.Subject)
+}
+
+// TestRouteAuth_APIKeyPath_ValidatorNil checks that a gsk_ token with no
+// configured API key validator returns Unauthenticated.
+func TestRouteAuth_APIKeyPath_ValidatorNil(t *testing.T) {
+	ba := &mockBetterAuthValidator{}
+	cfg := &AuthConfig{Mode: "enterprise"}
+	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+	ctx := newBearerContext("gsk_tenant_notconfigured")
+
+	_, err := interceptor(ctx, "req", info, handler.handle)
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	assert.False(t, handler.called)
+}
+
+// TestRouteAuth_AgentJWTPath verifies that agent+jwt tokens route to AgentJWTValidator.
+func TestRouteAuth_AgentJWTPath(t *testing.T) {
+	const ownerUserID = "user-owner-123"
+	const tenantID = "acme"
+	const agentID = "agent-abc"
+	const hostID = "host-xyz"
+
+	agentValidator := &mockAgentJWTValidator{
+		verifyFn: func(ctx context.Context, tokenStr, expectedAud string) (*AgentAuthClaims, error) {
+			return &AgentAuthClaims{
+				AgentID:     agentID,
+				HostID:      hostID,
+				TenantID:    tenantID,
+				OwnerUserID: ownerUserID,
+				ExpiresAt:   time.Now().Add(time.Minute),
+			}, nil
+		},
+	}
+	ba := &mockBetterAuthValidator{
+		authenticateFn: func(_ context.Context, _ string) (*Identity, error) {
+			t.Fatal("BetterAuth must not be called for agent+jwt tokens")
+			return nil, nil
+		},
+	}
+
+	cfg := &AuthConfig{Mode: "enterprise"}
+	interceptor := buildUnaryInterceptor(nil, nil, agentValidator, ba, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+	ctx := newBearerContext(fakeAgentJWTToken())
+
+	resp, err := interceptor(ctx, "req", info, handler.handle)
+	require.NoError(t, err)
+	assert.Equal(t, "response", resp)
+	assert.True(t, handler.called)
+
+	// Agent Auth JWT sets Subject to the owner's user ID, not the agent ID.
+	got, ok := GibsonIdentityFromContext(handler.capturedCtx)
+	require.True(t, ok)
+	assert.Equal(t, ownerUserID, got.Subject, "Subject must be the owner user ID")
+	assert.Equal(t, "agent-auth", got.Issuer)
+	assert.Equal(t, agentID, got.Claims["agent_id"])
+	assert.Equal(t, hostID, got.Claims["host_id"])
+}
+
+// TestRouteAuth_AgentJWTPath_VerifyError checks that a failed JWT verification
+// returns Unauthenticated.
+func TestRouteAuth_AgentJWTPath_VerifyError(t *testing.T) {
+	agentValidator := &mockAgentJWTValidator{
+		verifyFn: func(_ context.Context, _, _ string) (*AgentAuthClaims, error) {
+			return nil, fmt.Errorf("agentauth: VerifyAgentJWT: signature verification failed")
+		},
+	}
+	ba := &mockBetterAuthValidator{}
+	cfg := &AuthConfig{Mode: "enterprise"}
+	interceptor := buildUnaryInterceptor(nil, nil, agentValidator, ba, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+	ctx := newBearerContext(fakeAgentJWTToken())
+
+	_, err := interceptor(ctx, "req", info, handler.handle)
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err), "non-AuthError becomes Internal")
+	assert.False(t, handler.called)
+}
+
+// TestRouteAuth_K8sPath verifies that compact JWTs (not agent+jwt) route to
+// K8sValidator when k8s is non-nil.
+func TestRouteAuth_K8sPath(t *testing.T) {
+	expectedIdentity := &Identity{
+		Identity: sdkauth.Identity{Subject: "default:my-sa", Issuer: "kubernetes"},
+		Roles:    []string{"tool-executor"},
+	}
+
+	k8s := &mockK8sValidator{
+		authenticateFn: func(_ context.Context, _ string) (*Identity, error) {
+			return expectedIdentity, nil
+		},
+	}
+	ba := &mockBetterAuthValidator{
+		authenticateFn: func(_ context.Context, _ string) (*Identity, error) {
+			t.Fatal("BetterAuth must not be called for K8s SA tokens when k8s validator is present")
+			return nil, nil
+		},
+	}
+
+	cfg := &AuthConfig{Mode: "enterprise"}
+	interceptor := buildUnaryInterceptor(nil, k8s, nil, ba, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+	ctx := newBearerContext(fakeK8sToken())
+
+	resp, err := interceptor(ctx, "req", info, handler.handle)
+	require.NoError(t, err)
+	assert.Equal(t, "response", resp)
+	assert.True(t, handler.called)
+
+	got, ok := GibsonIdentityFromContext(handler.capturedCtx)
+	require.True(t, ok)
+	assert.Equal(t, expectedIdentity.Subject, got.Subject)
+}
+
+// TestRouteAuth_K8sPath_NilK8sValidator checks that when k8s is nil, a compact
+// JWT (not agent+jwt) falls through to the BetterAuth path.
+func TestRouteAuth_K8sPath_NilK8sValidator(t *testing.T) {
+	expectedIdentity := &Identity{
+		Identity: sdkauth.Identity{Subject: "ba-user", Issuer: "better-auth"},
+	}
+	ba := &mockBetterAuthValidator{
+		authenticateFn: func(_ context.Context, _ string) (*Identity, error) {
+			return expectedIdentity, nil
+		},
+	}
+
+	cfg := &AuthConfig{Mode: "enterprise"}
+	// k8s is nil — K8s path disabled; token falls through to Better Auth
+	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+	ctx := newBearerContext(fakeK8sToken())
+
+	resp, err := interceptor(ctx, "req", info, handler.handle)
+	require.NoError(t, err)
+	assert.Equal(t, "response", resp)
+	assert.True(t, handler.called)
+}
+
+// TestRouteAuth_BetterAuthPath verifies that plain tokens route to BetterAuthValidator.
+func TestRouteAuth_BetterAuthPath(t *testing.T) {
+	expectedIdentity := &Identity{
+		Identity: sdkauth.Identity{Subject: "user-456", Issuer: "better-auth"},
+		Tenants:  []string{"acme"},
+	}
+
+	ba := &mockBetterAuthValidator{
+		authenticateFn: func(ctx context.Context, token string) (*Identity, error) {
+			assert.Equal(t, "plain-session-token.signature", token)
+			return expectedIdentity, nil
+		},
+	}
+	cfg := &AuthConfig{Mode: "enterprise"}
+	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+	ctx := newBearerContext("plain-session-token.signature")
+
+	resp, err := interceptor(ctx, "req", info, handler.handle)
+	require.NoError(t, err)
+	assert.Equal(t, "response", resp)
+	assert.True(t, handler.called)
+
+	got, ok := GibsonIdentityFromContext(handler.capturedCtx)
+	require.True(t, ok)
+	assert.Equal(t, expectedIdentity.Subject, got.Subject)
+}
+
+// TestRouteAuth_BetterAuthPath_ValidatorNil checks that a missing BetterAuth
+// validator returns Unauthenticated for plain tokens.
+func TestRouteAuth_BetterAuthPath_ValidatorNil(t *testing.T) {
+	cfg := &AuthConfig{Mode: "enterprise"}
+	interceptor := buildUnaryInterceptor(nil, nil, nil, nil, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+	ctx := newBearerContext("plain-session-token.signature")
+
+	_, err := interceptor(ctx, "req", info, handler.handle)
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	assert.False(t, handler.called)
+}
+
+// TestRouteAuth_EmptyToken verifies that an empty (missing) token returns Unauthenticated.
+func TestRouteAuth_EmptyToken(t *testing.T) {
+	ba := &mockBetterAuthValidator{}
+	cfg := &AuthConfig{Mode: "enterprise"}
+	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+	ctx := context.Background() // no authorization metadata
+
+	_, err := interceptor(ctx, "req", info, handler.handle)
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	assert.False(t, handler.called)
+}
+
+// TestRouteAuth_TrustLocalhost verifies that the localhost bypass fires before
+// token routing and creates a synthetic platform-operator identity.
+func TestRouteAuth_TrustLocalhost(t *testing.T) {
+	ba := &mockBetterAuthValidator{
+		authenticateFn: func(_ context.Context, _ string) (*Identity, error) {
+			t.Fatal("BetterAuth must not be called when localhost bypass fires")
+			return nil, nil
+		},
+	}
+	cfg := &AuthConfig{
+		Mode:           "enterprise",
+		TrustLocalhost: true,
+	}
+	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
+
+	handler := &mockHandler{}
+	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+
+	p := &peer.Peer{Addr: &mockAddr{addr: "127.0.0.1:54321"}}
+	ctx := peer.NewContext(context.Background(), p)
+	// No authorization header — localhost bypass must fire before token extraction.
+
+	resp, err := interceptor(ctx, "req", info, handler.handle)
+	require.NoError(t, err)
+	assert.Equal(t, "response", resp)
+	assert.True(t, handler.called)
+
+	got, ok := GibsonIdentityFromContext(handler.capturedCtx)
+	require.True(t, ok)
+	assert.Equal(t, "localhost", got.Subject)
+	assert.Equal(t, "internal", got.Issuer)
+	assert.Contains(t, got.Roles, "platform-operator")
+}
+
+// TestAgentClaimsToIdentity verifies that the owner user ID becomes the Subject
+// and that the agent/host IDs are preserved as audit claims.
+func TestAgentClaimsToIdentity(t *testing.T) {
+	claims := &AgentAuthClaims{
+		AgentID:     "agent-abc",
+		HostID:      "host-xyz",
+		TenantID:    "acme",
+		OwnerUserID: "user-owner-456",
+		ExpiresAt:   time.Now().Add(time.Minute),
+	}
+
+	identity := agentClaimsToIdentity(claims)
+
+	assert.Equal(t, "user-owner-456", identity.Subject, "Subject must be owner user ID")
+	assert.Equal(t, "agent-auth", identity.Issuer)
+	assert.Equal(t, []string{"acme"}, identity.Tenants)
+	assert.Equal(t, "agent-abc", identity.Claims["agent_id"])
+	assert.Equal(t, "host-xyz", identity.Claims["host_id"])
+}
+
+// TestIsAgentAuthJWT verifies header-based detection of Agent Auth JWTs.
+func TestIsAgentAuthJWT(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		want  bool
+	}{
+		{
+			name:  "agent+jwt EdDSA",
+			token: fakeAgentJWTToken(),
+			want:  true,
+		},
+		{
+			name: "host+jwt EdDSA",
+			// base64url({"typ":"host+jwt","alg":"EdDSA"})
+			token: "eyJ0eXAiOiJob3N0K2p3dCIsImFsZyI6IkVkRFNBIn0.cGF5bG9hZA.c2ln",
+			want:  true,
+		},
+		{
+			name:  "gsk_ API key",
+			token: "gsk_tenant_abc123",
+			want:  false,
+		},
+		{
+			name:  "compact RS256 JWT (K8s SA style)",
+			token: fakeK8sToken(),
+			want:  false,
+		},
+		{
+			name:  "plain session token",
+			token: "plain-session-token.signature",
+			want:  false,
+		},
+		{
+			name:  "empty string",
+			token: "",
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsAgentAuthJWT(tt.token))
 		})
 	}
 }

@@ -28,6 +28,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -231,6 +232,11 @@ type ComponentServiceServer struct {
 	// graphLoader persists finding nodes to Neo4j when SubmitFinding succeeds.
 	// May be nil; when nil, findings are only stored via findingSubmitter (not graphed).
 	graphLoader *loader.GraphLoader
+
+	// authorizer writes and deletes FGA relationship tuples for component ownership.
+	// May be nil; when nil (noop/disabled mode), all FGA writes are skipped silently.
+	// Set via WithAuthorizer. Added by agent-auth-fga-integration spec (task 3).
+	authorizer authz.Authorizer
 }
 
 // NewComponentServiceServer constructs a ComponentServiceServer with the core
@@ -398,6 +404,21 @@ func (s *ComponentServiceServer) WithDiscoveryProcessor(dp ResultDiscoveryProces
 // is skipped and only the finding store path is used.
 func (s *ComponentServiceServer) WithGraphLoader(gl *loader.GraphLoader) *ComponentServiceServer {
 	s.graphLoader = gl
+	return s
+}
+
+// WithAuthorizer wires an FGA Authorizer so that RegisterComponent writes a
+// component ownership tuple ("tenant:<slug> owner component:<name>") on
+// successful registration. The tuple enables the FGA computed relation
+// "admin from owner" to propagate tenant-level permissions to all components
+// owned by that tenant without requiring per-component grants.
+//
+// When az is nil or authz is disabled (noop mode), all FGA writes are silently
+// skipped — registration never fails due to FGA unavailability.
+//
+// Added by the agent-auth-fga-integration spec (task 3).
+func (s *ComponentServiceServer) WithAuthorizer(az authz.Authorizer) *ComponentServiceServer {
+	s.authorizer = az
 	return s
 }
 
@@ -623,6 +644,25 @@ func (s *ComponentServiceServer) RegisterComponent(
 				slog.String("error", err.Error()),
 			)
 			// Non-fatal: registration succeeds even if schema storage fails.
+		}
+	}
+
+	// Write FGA component ownership tuple so the "admin from owner" computed
+	// relation fires: any tenant admin automatically has full access to all
+	// components owned by that tenant without per-component grants.
+	// Best-effort: a failed write is logged as WARN and never fails registration.
+	if s.authorizer != nil {
+		if err := s.authorizer.Write(ctx, []authz.Tuple{{
+			User:     "tenant:" + tenant,
+			Relation: "owner",
+			Object:   "component:" + req.Name,
+		}}); err != nil {
+			s.logger.WarnContext(ctx, "register component: failed to write FGA ownership tuple",
+				slog.String("component", req.Name),
+				slog.String("tenant", tenant),
+				slog.String("error", err.Error()),
+			)
+			// Non-fatal: registration succeeds even if FGA write fails.
 		}
 	}
 

@@ -64,8 +64,8 @@ type TenantRecord struct {
 	StripeSubID string `json:"stripe_sub_id"`
 	// BillingAlert is true when the tenant has a payment failure that requires attention.
 	BillingAlert bool `json:"billing_alert"`
-	// KeycloakRealmName is the Keycloak realm for this tenant.
-	KeycloakRealmName string            `json:"keycloak_realm_name"` // Keycloak realm for this tenant
+	// RealmName is the identity provider realm for this tenant.
+	RealmName string            `json:"realm_name"`
 	Config            map[string]string `json:"config"`
 	CreatedAt         time.Time         `json:"created_at"`
 	UpdatedAt         time.Time         `json:"updated_at"`
@@ -189,8 +189,8 @@ func (s *TenantService) CreateTenant(ctx context.Context, tenantID, displayName 
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if realmName, ok := config["keycloak_realm_name"]; ok {
-		record.KeycloakRealmName = realmName
+	if realmName, ok := config["realm_name"]; ok {
+		record.RealmName = realmName
 	}
 
 	data, err := json.Marshal(record)
@@ -268,8 +268,8 @@ func (s *TenantService) createTenantInternal(ctx context.Context, tenantID, disp
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if realmName, ok := config["keycloak_realm_name"]; ok {
-		record.KeycloakRealmName = realmName
+	if realmName, ok := config["realm_name"]; ok {
+		record.RealmName = realmName
 	}
 
 	data, err := json.Marshal(record)

@@ -7,22 +7,25 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
+	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	grpcmeta "google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zero-day-ai/gibson/internal/agentauth"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
-	"github.com/zero-day-ai/gibson/internal/keycloak"
 	"github.com/zero-day-ai/gibson/internal/membership"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
@@ -72,10 +75,6 @@ type DaemonServer struct {
 	// tenantService manages tenant CRUD operations backed by Redis.
 	// May be nil; when nil, tenant management RPCs return codes.Unavailable.
 	tenantService *component.TenantService
-
-	// keycloak is the Keycloak Admin REST API client used for member queries.
-	// May be nil; when nil, ListTenantMembers returns codes.Unavailable.
-	keycloak *keycloak.Client
 
 	// provisioner handles full tenant provisioning (namespace, RBAC, API key).
 	// May be nil; wired via WithProvisioner() during daemon startup.
@@ -131,11 +130,15 @@ type DaemonServer struct {
 	// May be nil; when nil, membership RPCs return codes.Unavailable.
 	membershipStore membership.MembershipStore
 
-	// signupHandler orchestrates the atomic multi-step tenant signup flow.
-	// May be nil; when nil, SignupTenant returns codes.Unavailable.
-	// Wired via WithSignupHandler during daemon startup.
-	// Added by authz-02-keycloak-organizations spec.
-	signupHandler *provisioner.SignupHandler
+	// signupStateStore provides CRUD operations for provisioning state.
+	// May be nil; when nil, InitiateSignup returns codes.Unavailable.
+	// Wired via WithSignupStateStore during daemon startup.
+	// Added by signup-flow-v2 spec; migrated to ProvisioningStateStore interface (better-auth).
+	signupStateStore provisioner.ProvisioningStateStore
+
+	// redisForSignup is the Redis client used to XADD signup events to the
+	// signup:events:stream. Wired via WithSignupStateStore alongside signupStateStore.
+	redisForSignup goredis.UniversalClient
 
 	// inviteHandler manages member invitation creation, acceptance, and resend.
 	// May be nil; when nil, InviteMember/ResendInvitation return codes.Unavailable.
@@ -156,11 +159,6 @@ type DaemonServer struct {
 	// May be nil; when nil, RPCs that require it return codes.Unavailable.
 	// Added by authz-04-dashboard-fga-migration spec.
 	authorizer authzIface
-
-	// keycloakAdmin is the provisioner-level KeycloakAdmin client.
-	// May be nil; when nil, RPCs that require it return codes.Unavailable.
-	// Added by authz-04-dashboard-fga-migration spec.
-	keycloakAdmin provisioner.KeycloakAdmin
 
 	// auditLogger is the Redis-backed audit log reader/writer.
 	// May be nil; when nil, ListAuditEvents falls back to Loki only (or returns Unavailable).
@@ -196,6 +194,11 @@ type DaemonServer struct {
 	// May be nil; when nil, ListConversations/GetConversation return codes.Unavailable.
 	// Added by prod-feature-wiring spec.
 	conversationStore conversationStoreIface
+
+	// agentAuthService handles the Agent Auth Protocol gRPC RPCs.
+	// May be nil; when nil, Agent Auth RPCs return codes.Unavailable.
+	// Added by agent-auth-fga-integration spec.
+	agentAuthService *agentauth.AgentAuthService
 }
 
 // missionDraftStoreIface is the narrow interface the DaemonServer uses for
@@ -904,14 +907,6 @@ func (s *DaemonServer) WithTenantService(ts *component.TenantService) *DaemonSer
 	return s
 }
 
-// WithKeycloakClient attaches a Keycloak Admin REST API client so that
-// ListTenantMembers can query live user data from Keycloak. Call this
-// immediately after NewDaemonServer and before registering the server.
-func (s *DaemonServer) WithKeycloakClient(kc *keycloak.Client) *DaemonServer {
-	s.keycloak = kc
-	return s
-}
-
 // WithProvisioner attaches a Provisioner so that ProvisionTenant,
 // GetProvisioningStatus, and DeprovisionTenant RPCs are backed by the real
 // provisioning pipeline.  Call this immediately after NewDaemonServer and
@@ -995,6 +990,14 @@ func (s *DaemonServer) WithConversationStore(store conversationStoreIface) *Daem
 	return s
 }
 
+// WithAgentAuthService wires the AgentAuthService so that the Agent Auth
+// Protocol RPCs are backed by Postgres storage and FGA authorization.
+// Added by agent-auth-fga-integration spec.
+func (s *DaemonServer) WithAgentAuthService(svc *agentauth.AgentAuthService) *DaemonServer {
+	s.agentAuthService = svc
+	return s
+}
+
 // WithMembershipStore wires the membership store so that the membership RPCs
 // (AddTenantMember, RemoveTenantMember, UpdateMemberRole, ListUserTenants,
 // TransferOwnership) are backed by durable Redis storage.
@@ -1004,17 +1007,17 @@ func (s *DaemonServer) WithMembershipStore(ms membership.MembershipStore) *Daemo
 	return s
 }
 
-// WithSignupHandler wires the SignupHandler so that the SignupTenant RPC
-// delegates to the real signup orchestration pipeline.  Call this immediately
-// after NewDaemonServer and before registering the server.
+// WithSignupStateStore wires the SignupStateStore and the Redis client used by
+// the InitiateSignup RPC to persist signup state and publish the first pipeline
+// event. Call this immediately after NewDaemonServer and before registering
+// the server.
 //
-// When not called (or called with nil), SignupTenant returns codes.Unavailable.
-// This allows the server to start before the Keycloak admin client is ready
-// (e.g. in dev mode with authz disabled).
+// When not called (or called with nil), InitiateSignup returns codes.Unavailable.
 //
-// Added by the authz-02-keycloak-organizations spec.
-func (s *DaemonServer) WithSignupHandler(h *provisioner.SignupHandler) *DaemonServer {
-	s.signupHandler = h
+// Added by the signup-flow-v2 spec.
+func (s *DaemonServer) WithSignupStateStore(store provisioner.ProvisioningStateStore, rc goredis.UniversalClient) *DaemonServer {
+	s.signupStateStore = store
+	s.redisForSignup = rc
 	return s
 }
 
@@ -1046,14 +1049,6 @@ func (s *DaemonServer) WithTeamHandler(h *provisioner.TeamHandler) *DaemonServer
 // Added by the authz-04-dashboard-fga-migration spec.
 func (s *DaemonServer) WithAuthorizer(az authzIface) *DaemonServer {
 	s.authorizer = az
-	return s
-}
-
-// WithKeycloakAdmin wires the provisioner-level KeycloakAdmin client for admin
-// RPCs (InviteMember, RemoveMember, etc.) that need to call Keycloak admin APIs.
-// Added by the authz-04-dashboard-fga-migration spec.
-func (s *DaemonServer) WithKeycloakAdmin(ka provisioner.KeycloakAdmin) *DaemonServer {
-	s.keycloakAdmin = ka
 	return s
 }
 
@@ -3165,8 +3160,8 @@ func (s *DaemonServer) CreateTenant(ctx context.Context, req *CreateTenantReques
 	if req.Tier != "" {
 		cfg["tier"] = req.Tier
 	}
-	if _, ok := cfg["keycloak_realm_name"]; !ok {
-		cfg["keycloak_realm_name"] = req.TenantId
+	if _, ok := cfg["realm_name"]; !ok {
+		cfg["realm_name"] = req.TenantId
 	}
 
 	record, err := s.tenantService.CreateTenant(ctx, req.TenantId, req.DisplayName, cfg)
@@ -3332,10 +3327,6 @@ func (s *DaemonServer) DeleteTenant(ctx context.Context, req *DeleteTenantReques
 // or "admin" may query their own tenant. Returns codes.Unavailable when no
 // Keycloak client has been wired.
 func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMembersRequest) (*ListTenantMembersResponse, error) {
-	if s.keycloak == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "keycloak client not configured")
-	}
-
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id required")
@@ -3352,50 +3343,9 @@ func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMem
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
-	// Determine realm name from tenant record; default to tenant ID.
-	realmName := tenantID
-	if s.tenantService != nil {
-		record, err := s.tenantService.GetTenant(ctx, tenantID)
-		if err == nil && record.KeycloakRealmName != "" {
-			realmName = record.KeycloakRealmName
-		}
-	}
-
-	// Query Keycloak for all users in the realm.
-	users, err := s.keycloak.ListUsers(ctx, realmName, keycloak.ListUsersOpts{Max: 100})
-	if err != nil {
-		return nil, status_grpc.Errorf(codes.Internal, "querying keycloak users: %v", err)
-	}
-
-	// Map each Keycloak user to MemberInfo, enriching with roles and last session.
-	members := make([]*MemberInfo, 0, len(users))
-	for _, u := range users {
-		roles, _ := s.keycloak.GetUserRealmRoles(ctx, realmName, u.ID)
-		roleNames := make([]string, 0, len(roles))
-		for _, r := range roles {
-			roleNames = append(roleNames, r.Name)
-		}
-
-		sessions, _ := s.keycloak.GetUserSessions(ctx, realmName, u.ID)
-		var lastLogin string
-		if len(sessions) > 0 {
-			lastLogin = time.Unix(sessions[0].LastAccess/1000, 0).UTC().Format(time.RFC3339)
-		}
-
-		members = append(members, &MemberInfo{
-			Subject:    u.ID,
-			Email:      u.Email,
-			Name:       strings.TrimSpace(u.FirstName + " " + u.LastName),
-			Roles:      roleNames,
-			Groups:     []string{},
-			LastLogin:  lastLogin,
-			LoginCount: 0,
-		})
-	}
-
-	return &ListTenantMembersResponse{
-		Members: members,
-	}, nil
+	// Member listing via Better Auth is not yet implemented in the daemon.
+	// The dashboard queries Better Auth directly for user data.
+	return nil, status_grpc.Error(codes.Unimplemented, "ListTenantMembers: member listing has moved to the dashboard layer (Better Auth)")
 }
 
 // ImpersonateTenant issues a short-lived context token scoped to the target
@@ -3405,8 +3355,7 @@ func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMem
 // The caller's identity is extracted from the request context and written to
 // the structured audit log so every impersonation event is traceable.
 //
-// Token generation is not yet implemented; a TODO placeholder is returned
-// until the token-issuance service is wired.
+// Returns codes.Unimplemented if the impersonation issuer is not configured.
 func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error) {
 	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
 	// This RPC requires the tenants:impersonate permission (platform-operator only).
@@ -3544,12 +3493,76 @@ func (s *DaemonServer) ProvisionTenant(ctx context.Context, req *ProvisionTenant
 	return &ProvisionTenantResponse{Tenant: tenantInfo, ApiKey: apiKey}, nil
 }
 
-// GetProvisioningStatus queries the provisioning progress for a tenant.
+// GetProvisioningStatus queries the provisioning progress for a tenant or signup.
 //
-// Returns codes.Unimplemented until the provisioner service has been wired.
+// When req.UserId is non-empty the handler queries signup:{userId}:state (the
+// async pipeline written by SignupPipeline). When req.TenantId is provided the
+// existing synchronous provisioner path is used. UserId takes priority when
+// both are provided.
+//
+// Returns codes.Unimplemented until the provisioner service has been wired
+// (tenant_id path only — the userId path only needs signupStateStore).
 func (s *DaemonServer) GetProvisioningStatus(ctx context.Context, req *GetProvisioningStatusRequest) (*GetProvisioningStatusResponse, error) {
+	// ---------------------------------------------------------------------------
+	// userId path — queries signup:{userId}:state Redis HASH written by the
+	// async signup pipeline (signup-flow-v2). UserId takes priority over TenantId.
+	// ---------------------------------------------------------------------------
+	if req.UserId != "" {
+		if s.signupStateStore == nil {
+			// signupStateStore not yet wired — return not_found gracefully.
+			return &GetProvisioningStatusResponse{
+				Status: "not_found",
+			}, nil
+		}
+
+		state, err := s.signupStateStore.Get(ctx, req.UserId)
+		if err != nil {
+			s.logger.Error("failed to get signup state", "user_id", req.UserId, "error", err)
+			return nil, status_grpc.Errorf(codes.Internal, "failed to get signup state: %v", err)
+		}
+		if state == nil {
+			return &GetProvisioningStatusResponse{
+				Status: "not_found",
+			}, nil
+		}
+
+		// Map the three pipeline steps to ProvisionStep messages using the
+		// display labels defined in the design doc.
+		stepDefs := []struct {
+			key   string
+			label string
+		}{
+			{"org", "Creating organization"},
+			{"fga", "Setting up permissions"},
+			{"provision", "Provisioning workspace"},
+		}
+
+		protoSteps := make([]*ProvisionStep, 0, len(stepDefs))
+		for _, sd := range stepDefs {
+			stepStatus := "pending"
+			if state.StepStatuses != nil {
+				if v, ok := state.StepStatuses[sd.key]; ok {
+					stepStatus = v
+				}
+			}
+			protoSteps = append(protoSteps, &ProvisionStep{
+				Name:   sd.key,
+				Status: stepStatus,
+			})
+		}
+
+		return &GetProvisioningStatusResponse{
+			TenantId: state.TenantID,
+			Status:   state.Status,
+			Steps:    protoSteps,
+		}, nil
+	}
+
+	// ---------------------------------------------------------------------------
+	// tenantId path — existing behaviour, unchanged.
+	// ---------------------------------------------------------------------------
 	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id or user_id is required")
 	}
 
 	if s.provisioner == nil {
@@ -4197,17 +4210,10 @@ func (s *DaemonServer) UpdateMemberRole(ctx context.Context, req *UpdateMemberRo
 // Users may list their own tenants (identity.Subject == req.UserId).
 // Platform operators may query any user.
 func (s *DaemonServer) ListUserTenants(ctx context.Context, req *ListUserTenantsRequest) (*ListUserTenantsResponse, error) {
-	if s.membershipStore == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
-	}
-
 	if req.UserId == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
 	}
 
-	// Authorization enforced by the RPCAuthzInterceptor. Users may only
-	// query their OWN tenant memberships unless they are cross-tenant
-	// capable (platform-operator); this is parameter validation.
 	identity, ok := auth.GibsonIdentityFromContext(ctx)
 	if !ok {
 		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
@@ -4216,19 +4222,47 @@ func (s *DaemonServer) ListUserTenants(ctx context.Context, req *ListUserTenants
 		return nil, status_grpc.Error(codes.PermissionDenied, "cannot list tenants for another user")
 	}
 
-	memberships, err := s.membershipStore.ListUserTenants(ctx, req.UserId)
-	if err != nil {
-		return nil, status_grpc.Errorf(codes.Internal, "list user tenants: %v", err)
+	// Use FGA ListObjects to find all tenants where this user has the member relation.
+	// This replaces the old Redis membership store query.
+	if s.authorizer != nil {
+		tenants, err := s.authorizer.ListObjects(ctx, "user:"+req.UserId, "member", "tenant")
+		if err != nil {
+			s.logger.WarnContext(ctx, "FGA ListObjects failed for ListUserTenants, falling back to JWT tenants",
+				"user_id", req.UserId, "error", err)
+		} else {
+			infos := make([]*MembershipInfo, 0, len(tenants))
+			for _, t := range tenants {
+				// t is "tenant:slug" — strip the prefix
+				tenantID := t
+				if len(t) > 7 && t[:7] == "tenant:" {
+					tenantID = t[7:]
+				}
+				// Check if admin or member
+				role := "member"
+				isAdmin, _ := s.authorizer.Check(ctx, "user:"+req.UserId, "admin", "tenant:"+tenantID)
+				if isAdmin {
+					role = "admin"
+				}
+				infos = append(infos, &MembershipInfo{
+					TenantId: tenantID,
+					UserId:   req.UserId,
+					Role:     role,
+				})
+			}
+			return &ListUserTenantsResponse{Memberships: infos}, nil
+		}
 	}
 
-	infos := make([]*MembershipInfo, 0, len(memberships))
-	for i := range memberships {
-		infos = append(infos, membershipToProto(&memberships[i]))
+	// Fallback: derive tenants from the JWT organizations claim.
+	infos := make([]*MembershipInfo, 0, len(identity.Tenants))
+	for _, t := range identity.Tenants {
+		infos = append(infos, &MembershipInfo{
+			TenantId: t,
+			UserId:   req.UserId,
+			Role:     "member",
+		})
 	}
-
-	return &ListUserTenantsResponse{
-		Memberships: infos,
-	}, nil
+	return &ListUserTenantsResponse{Memberships: infos}, nil
 }
 
 // TransferOwnership transfers tenant ownership from the caller to another
@@ -4291,65 +4325,162 @@ func membershipToProto(m *membership.Membership) *MembershipInfo {
 }
 
 // ---------------------------------------------------------------------------
-// SignupTenant — authz-02-keycloak-organizations spec
+// InitiateSignup — signup-flow-v2 spec
 // ---------------------------------------------------------------------------
 
-// SignupTenant orchestrates the full tenant signup flow via SignupHandler.
-//
-// It is a thin gRPC adapter that:
-//  1. Guards against a nil signupHandler (returns codes.Unavailable).
-//  2. Maps proto fields to provisioner.SignupRequest.
-//  3. Calls SignupHandler.Signup and maps domain errors to gRPC status codes:
-//     - provisioner.ErrInvalidSignupInput → codes.InvalidArgument
-//     - provisioner.ErrEmailAlreadyExists → codes.AlreadyExists
-//     - provisioner.ErrConflict           → codes.AlreadyExists
-//     - any other error                   → codes.Internal
-//  4. Maps the provisioner.SignupResponse to proto.
-//
-// The caller must present a gibson-system-ops service account JWT with the
-// "provisioner" realm role.  Authorization enforcement (the
-// required_permissions check) is handled by the authz interceptor introduced
-// in authz-03; for the duration of authz-02 the existing auth interceptor
-// provides basic identity verification only.
-func (s *DaemonServer) SignupTenant(ctx context.Context, req *SignupTenantRequest) (*SignupTenantResponse, error) {
-	if s.signupHandler == nil {
-		return nil, status_grpc.Error(codes.Unavailable,
-			"signup handler not configured; authz may be disabled or Keycloak admin credentials are missing")
-	}
+// adminEmailRE is a permissive email regex used only for the InitiateSignup
+// pre-validation. Definitive validation was already done by Keycloak when the
+// dashboard created the user — this is a belt-and-suspenders check.
+var adminEmailRE = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
-	domainReq := provisioner.SignupRequest{
-		Email:       req.GetEmail(),
-		Password:    req.GetPassword(),
-		CompanyName: req.GetCompanyName(),
-		Plan:        req.GetPlan(),
-	}
+// adminValidPlans is the set of billing plans accepted by InitiateSignup.
+// Kept in sync with the frontend plan selection and provisioner's tier limits.
+var adminValidPlans = map[string]bool{
+	"free":       true,
+	"indie":      true,
+	"pro":        true,
+	"team":       true,
+	"business":   true,
+	"enterprise": true,
+}
 
-	resp, err := s.signupHandler.Signup(ctx, domainReq)
-	if err != nil {
+// adminSlugify converts a company name to a URL-safe lowercase slug for use as
+// a Keycloak org alias, FGA tenant object, and Redis key prefix.
+//
+// Rules:
+//   - Lowercase all characters.
+//   - Replace spaces and underscores with hyphens.
+//   - Remove all characters that are not [a-z0-9-].
+//   - Collapse consecutive hyphens to a single hyphen.
+//   - Trim leading/trailing hyphens.
+//   - Truncate to 48 characters.
+func adminSlugify(name string) string {
+	var b strings.Builder
+	prev := '-'
+	for _, r := range strings.ToLower(name) {
 		switch {
-		case errors.Is(err, provisioner.ErrInvalidSignupInput):
-			return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
-		case errors.Is(err, provisioner.ErrEmailAlreadyExists),
-			errors.Is(err, provisioner.ErrConflict):
-			return nil, status_grpc.Error(codes.AlreadyExists, err.Error())
-		default:
-			// Internal error — include a trace ID if one is available so the
-			// caller can share it with support.
-			traceID := extractTraceID(ctx)
-			msg := fmt.Sprintf("signup failed (trace_id=%s): %s", traceID, err.Error())
-			s.logger.ErrorContext(ctx, "SignupTenant internal error",
-				slog.String("trace_id", traceID),
-				slog.String("error", err.Error()),
-			)
-			return nil, status_grpc.Error(codes.Internal, msg)
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prev = r
+		case r == ' ' || r == '_' || r == '-':
+			if prev != '-' {
+				b.WriteByte('-')
+				prev = '-'
+			}
+		case unicode.IsLetter(r):
+			// Non-ASCII letter: skip (keeps slug ASCII-safe).
 		}
 	}
+	slug := strings.Trim(b.String(), "-")
+	if len(slug) > 48 {
+		slug = slug[:48]
+		slug = strings.TrimRight(slug, "-")
+	}
+	return slug
+}
 
-	return &SignupTenantResponse{
-		UserId:            resp.UserID,
-		TenantId:          resp.TenantID,
-		OrganizationAlias: resp.OrganizationAlias,
-		RedirectUrl:       resp.RedirectURL,
+// InitiateSignup is the async signup entry point called by the dashboard after
+// it has created the Keycloak user directly.
+//
+// Handler logic:
+//  1. Validate user_id non-empty, email format, company_name non-empty, plan in validPlans.
+//  2. Slugify company_name → tenantId.
+//  3. Write signup:{userId}:state HASH with initial fields via SignupStateStore.Create.
+//  4. XADD signup.requested event to signup:events:stream.
+//  5. Return InitiateSignupResponse immediately (target: under 100ms).
+//
+// The password is NOT present in this RPC — it was validated by Keycloak during
+// the dashboard's direct user creation call and never leaves the dashboard pod.
+func (s *DaemonServer) InitiateSignup(ctx context.Context, req *InitiateSignupRequest) (*InitiateSignupResponse, error) {
+	if s.signupStateStore == nil || s.redisForSignup == nil {
+		return nil, status_grpc.Error(codes.Unavailable,
+			"signup state store not configured; Redis may be unavailable")
+	}
+
+	// --- Input validation ---
+	if req.GetUserId() == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
+	}
+	if !adminEmailRE.MatchString(req.GetEmail()) {
+		return nil, status_grpc.Error(codes.InvalidArgument, "email is invalid")
+	}
+	if strings.TrimSpace(req.GetCompanyName()) == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "company_name is required")
+	}
+	if !adminValidPlans[req.GetPlan()] {
+		return nil, status_grpc.Error(codes.InvalidArgument,
+			fmt.Sprintf("plan %q is not valid; must be one of: free, indie, pro, team, business, enterprise", req.GetPlan()))
+	}
+
+	userID := req.GetUserId()
+	tenantID := adminSlugify(req.GetCompanyName())
+	if tenantID == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "company_name produces an empty tenant ID after slugification")
+	}
+
+	s.logger.InfoContext(ctx, "InitiateSignup: persisting signup request",
+		slog.String("user_id", userID),
+		slog.String("tenant_id", tenantID),
+		slog.String("plan", req.GetPlan()),
+	)
+
+	// --- Persist initial signup state ---
+	now := time.Now().Unix()
+	state := provisioner.SignupState{
+		Status:      "requested",
+		Email:       req.GetEmail(),
+		CompanyName: req.GetCompanyName(),
+		TenantID:    tenantID,
+		Plan:        req.GetPlan(),
+		CurrentStep: "",
+		StepStatuses: map[string]string{
+			"org":       "pending",
+			"fga":       "pending",
+			"provision": "pending",
+		},
+		CreatedAt: now,
+	}
+	if err := s.signupStateStore.Create(ctx, userID, state); err != nil {
+		traceID := extractTraceID(ctx)
+		s.logger.ErrorContext(ctx, "InitiateSignup: failed to persist state",
+			slog.String("user_id", userID),
+			slog.String("trace_id", traceID),
+			slog.String("error", err.Error()),
+		)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to persist signup state (trace_id=%s)", traceID)
+	}
+
+	// --- Emit signup.requested event to the pipeline stream ---
+	xaddArgs := &goredis.XAddArgs{
+		Stream: provisioner.SignupStreamKey,
+		Values: map[string]interface{}{
+			"event_type":   string(provisioner.EventSignupRequested),
+			"user_id":      userID,
+			"tenant_id":    tenantID,
+			"timestamp_ms": fmt.Sprintf("%d", time.Now().UnixMilli()),
+		},
+	}
+	if _, err := s.redisForSignup.XAdd(ctx, xaddArgs).Result(); err != nil {
+		// Log but do not fail — the pipeline's XAUTOCLAIM / pending re-queue
+		// mechanism will pick up orphaned signups on the next poll. The state
+		// is already persisted; the event is the only missing piece.
+		traceID := extractTraceID(ctx)
+		s.logger.ErrorContext(ctx, "InitiateSignup: failed to publish stream event",
+			slog.String("user_id", userID),
+			slog.String("trace_id", traceID),
+			slog.String("error", err.Error()),
+		)
+	}
+
+	s.logger.InfoContext(ctx, "InitiateSignup: completed",
+		slog.String("user_id", userID),
+		slog.String("tenant_id", tenantID),
+	)
+
+	return &InitiateSignupResponse{
+		SignupId: userID,
+		TenantId: tenantID,
+		Status:   "provisioning",
 	}, nil
 }
 

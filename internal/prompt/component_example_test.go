@@ -8,25 +8,21 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/prompt"
-	"github.com/zero-day-ai/gibson/internal/schema"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"google.golang.org/protobuf/proto"
 )
 
 // Example tool that implements ToolWithPrompt
 type PortScannerTool struct{}
 
-func (t *PortScannerTool) Name() string        { return "port-scanner" }
-func (t *PortScannerTool) Description() string { return "Scans network ports" }
-func (t *PortScannerTool) Version() string     { return "1.0.0" }
-func (t *PortScannerTool) Tags() []string      { return []string{"network", "recon"} }
-func (t *PortScannerTool) InputSchema() schema.JSONSchema {
-	return schema.JSONSchema{}
-}
-func (t *PortScannerTool) OutputSchema() schema.JSONSchema {
-	return schema.JSONSchema{}
-}
-func (t *PortScannerTool) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
+func (t *PortScannerTool) Name() string              { return "port-scanner" }
+func (t *PortScannerTool) Description() string       { return "Scans network ports" }
+func (t *PortScannerTool) Version() string           { return "1.0.0" }
+func (t *PortScannerTool) Tags() []string            { return []string{"network", "recon"} }
+func (t *PortScannerTool) InputMessageType() string  { return "" }
+func (t *PortScannerTool) OutputMessageType() string { return "" }
+func (t *PortScannerTool) ExecuteProto(_ context.Context, _ proto.Message) (proto.Message, error) {
 	return nil, nil
 }
 func (t *PortScannerTool) Health(ctx context.Context) types.HealthStatus {

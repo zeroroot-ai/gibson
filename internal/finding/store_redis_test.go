@@ -576,7 +576,7 @@ func TestRedisFindingStore_Search(t *testing.T) {
 			WithScores: true,
 		}
 
-		result, err := store.Search(ctx, "SQL", opts)
+		result, err := store.SearchRaw(ctx, "SQL", opts)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(result.Documents), 2) // Should find at least 2 SQL-related findings
 	})
@@ -597,7 +597,7 @@ func TestRedisFindingStore_Search(t *testing.T) {
 		query := "@severity:{critical}"
 		opts := &state.SearchOptions{Limit: 10}
 
-		result, err := store.Search(ctx, query, opts)
+		result, err := store.SearchRaw(ctx, query, opts)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(result.Documents), 1)
 	})
@@ -618,7 +618,7 @@ func TestRedisFindingStore_Search(t *testing.T) {
 		query := "authentication @severity:{critical}"
 		opts := &state.SearchOptions{Limit: 10}
 
-		result, err := store.Search(ctx, query, opts)
+		result, err := store.SearchRaw(ctx, query, opts)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(result.Documents), 1)
 	})
@@ -811,6 +811,6 @@ func BenchmarkRedisFindingStore_Search(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = store.Search(ctx, "SQL injection", opts)
+		_, _ = store.SearchRaw(ctx, "SQL injection", opts)
 	}
 }

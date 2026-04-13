@@ -244,9 +244,6 @@ func TestBlobStore_ShouldStoreAsBlob(t *testing.T) {
 	}
 	defer cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-
 	cfg := state.DefaultConfig()
 	cfg.URL = fmt.Sprintf("redis://%s", client.Options().Addr)
 	stateClient, err := state.NewStateClient(cfg)

@@ -19,6 +19,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -257,6 +258,21 @@ func (m *MockHarness) Metrics() harness.MetricsRecorder {
 // TokenUsage implements harness.AgentHarness
 func (m *MockHarness) TokenUsage() *llm.TokenTracker {
 	return nil
+}
+
+// Checkpoint implements harness.AgentHarness
+func (m *MockHarness) Checkpoint() harness.CheckpointAccess {
+	return nil
+}
+
+// GetToolCapabilities implements harness.AgentHarness
+func (m *MockHarness) GetToolCapabilities(ctx context.Context, toolName string) (*sdktypes.Capabilities, error) {
+	return nil, errors.New("GetToolCapabilities not implemented in mock")
+}
+
+// GetAllToolCapabilities implements harness.AgentHarness
+func (m *MockHarness) GetAllToolCapabilities(ctx context.Context) (map[string]*sdktypes.Capabilities, error) {
+	return nil, errors.New("GetAllToolCapabilities not implemented in mock")
 }
 
 // AddTool adds a tool to the mock harness

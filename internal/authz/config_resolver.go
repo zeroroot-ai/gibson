@@ -3,7 +3,9 @@ package authz
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -100,6 +102,67 @@ func ResolveStoreAndModelIDs(ctx context.Context, cfg IDConfig, k8sClient kubern
 	}
 
 	return storeID, modelID, nil
+}
+
+// ResolveWithRetry polls for FGA store/model IDs with exponential backoff.
+// Used during daemon startup to wait for the FGA init job to complete.
+//
+// The function calls ResolveStoreAndModelIDs in a loop, starting at a 2s
+// interval and doubling up to a 15s maximum interval. It returns as soon as
+// both IDs are non-empty.
+//
+// Returns an error only if ctx is cancelled or maxWait is exceeded. When
+// maxWait is exceeded the last error from ResolveStoreAndModelIDs is returned.
+// If logger is nil, retry logs are suppressed.
+func ResolveWithRetry(ctx context.Context, cfg IDConfig, k8sClient kubernetes.Interface, logger *slog.Logger, maxWait time.Duration) (storeID, modelID string, err error) {
+	const (
+		minInterval = 2 * time.Second
+		maxInterval = 15 * time.Second
+	)
+
+	deadline := time.Now().Add(maxWait)
+	interval := minInterval
+	attempt := 0
+
+	for {
+		attempt++
+		storeID, modelID, err = ResolveStoreAndModelIDs(ctx, cfg, k8sClient)
+		if err == nil {
+			return storeID, modelID, nil
+		}
+
+		if logger != nil {
+			logger.Info("authz: waiting for FGA ConfigMap",
+				"attempt", attempt,
+				"error", err,
+				"retry_in", interval,
+			)
+		}
+
+		// Check deadline before sleeping so we return promptly on expiry.
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return "", "", fmt.Errorf("authz: FGA IDs not available after %s (%d attempts): %w", maxWait, attempt, err)
+		}
+
+		// Sleep for min(interval, remaining), then back off.
+		sleep := interval
+		if sleep > remaining {
+			sleep = remaining
+		}
+
+		select {
+		case <-ctx.Done():
+			return "", "", fmt.Errorf("authz: context cancelled while waiting for FGA IDs: %w", ctx.Err())
+		case <-time.After(sleep):
+		}
+
+		// Exponential backoff capped at maxInterval.
+		interval *= 2
+		if interval > maxInterval {
+			interval = maxInterval
+		}
+	}
 }
 
 // resolveFromConfigMap reads the FGA store and model IDs from the

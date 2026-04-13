@@ -15,7 +15,7 @@ import (
 // calling compliance.WithCustom with three custom keys results in those
 // keys appearing in the emitted signal's custom bag in Neo4j.
 func TestMetadataRiders_GitlabAgent_WorkedExample(t *testing.T) {
-	t.Skip("TODO: wire up in-process daemon + minimal gitlab-agent stub")
+	t.Skip("requires in-process daemon + minimal gitlab-agent stub — not yet available")
 	ctx := context.Background()
 	_ = ctx
 }

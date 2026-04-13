@@ -2,21 +2,19 @@
 //
 // InviteHandler orchestrates the member invitation flow:
 //
-//  1. Create a Keycloak user with REQUIRED_ACTION for password-set on first login.
-//  2. Add the new user to the Keycloak Organization for the tenant.
-//  3. Write an FGA tuple granting the invited role (admin → admin relation,
+//  1. Write an FGA tuple granting the invited role (admin → admin relation,
 //     others → member relation) on the tenant.
-//  4. Generate a signed JWT invitation token, store it in Redis with TTL.
-//  5. Return the token and invite URL to the caller.
+//  2. Generate a signed JWT invitation token, store it in Redis with TTL.
+//  3. Return the token and invite URL to the caller.
 //
 // Accept validates the token, marks it consumed in Redis, and returns the
-// Keycloak set-password URL so the frontend can redirect the invited user.
+// information needed to complete signup via Better Auth.
 //
-// Resend issues a fresh token for an existing pending user without touching
-// the Keycloak user record itself.
+// Resend issues a fresh token for an existing pending invitation.
 //
-// Atomicity: any failure in steps 1-4 triggers rollback in reverse order
-// using the same Rollback helper from authz-02.
+// User account creation is handled by Better Auth in the dashboard. The invite
+// token is used after the user signs up to link their Better Auth account to
+// the tenant with the pre-provisioned FGA role.
 //
 // Email delivery is OUT OF SCOPE: the token is returned to the admin for
 // manual sharing or later email integration.
@@ -34,7 +32,6 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/keycloak"
 )
 
 // ---------------------------------------------------------------------------
@@ -62,11 +59,9 @@ var (
 // InviteRequest carries the parameters for a member invitation.
 type InviteRequest struct {
 	TenantID string
-	// OrgID is the Keycloak Organization UUID for the tenant (fetched by the caller).
-	OrgID   string
-	Email   string
-	Role    string // "owner", "admin", "operator", "viewer"
-	Message string
+	Email    string
+	Role     string // "owner", "admin", "operator", "viewer"
+	Message  string
 }
 
 // Invitation is the result of a successful InviteHandler.Invite call.
@@ -91,7 +86,6 @@ type AcceptResult struct {
 type invitationRecord struct {
 	UserID   string    `json:"user_id"`
 	TenantID string    `json:"tenant_id"`
-	OrgID    string    `json:"org_id"`
 	Role     string    `json:"role"`
 	Email    string    `json:"email"`
 	Consumed bool      `json:"consumed"`
@@ -113,7 +107,6 @@ type invitationClaims struct {
 
 // InviteHandler orchestrates member invitation creation, acceptance, and resend.
 type InviteHandler struct {
-	kc         KeycloakAdmin
 	authz      authz.Authorizer
 	redis      *redis.Client
 	signingKey []byte
@@ -130,16 +123,15 @@ type InviteHandlerConfig struct {
 }
 
 // NewInviteHandler constructs an InviteHandler.
+// The kc parameter is accepted but ignored for backward-compatibility with
+// existing call sites during the Better Auth migration; pass nil.
 func NewInviteHandler(
-	kc KeycloakAdmin,
+	kc interface{}, // deprecated: ignored; was KeycloakAdmin
 	az authz.Authorizer,
 	redisClient *redis.Client,
 	cfg InviteHandlerConfig,
 	logger *slog.Logger,
 ) (*InviteHandler, error) {
-	if kc == nil {
-		return nil, fmt.Errorf("invite_handler: KeycloakAdmin is required")
-	}
 	if az == nil {
 		return nil, fmt.Errorf("invite_handler: Authorizer is required")
 	}
@@ -157,7 +149,6 @@ func NewInviteHandler(
 		logger = slog.Default()
 	}
 	return &InviteHandler{
-		kc:         kc,
 		authz:      az,
 		redis:      redisClient,
 		signingKey: cfg.SigningKey,
@@ -167,9 +158,12 @@ func NewInviteHandler(
 	}, nil
 }
 
-// Invite creates a new Keycloak user (pending password set), adds them to the
-// tenant org, writes the FGA membership tuple, and returns a signed invitation
-// token. On any failure the operation is rolled back.
+// Invite writes an FGA pre-authorization tuple for the invited email and returns
+// a signed invitation token. The invited user must sign up via Better Auth and
+// then Accept the invitation token to complete their tenant membership.
+//
+// Note: the FGA tuple uses a placeholder "invite:{email}" subject. On Accept,
+// callers should re-write the tuple with the actual Better Auth user UUID.
 func (h *InviteHandler) Invite(ctx context.Context, req InviteRequest) (*Invitation, error) {
 	if req.TenantID == "" || req.Email == "" || req.Role == "" {
 		return nil, fmt.Errorf("%w: tenant_id, email, and role are required", ErrInvalidSignupInput)
@@ -181,54 +175,19 @@ func (h *InviteHandler) Invite(ctx context.Context, req InviteRequest) (*Invitat
 		return nil, fmt.Errorf("%w: role must be one of owner/admin/operator/viewer", ErrInvalidSignupInput)
 	}
 
-	// Step 1: create a Keycloak user. Use VERIFY_EMAIL + UPDATE_PASSWORD required actions
-	// so the invited user must set a password on first login.
-	userCfg := keycloak.UserConfig{
-		Email:           req.Email,
-		Username:        req.Email,
-		Enabled:         true,
-		RequiredActions: []string{"UPDATE_PASSWORD"},
-	}
-	var userID string
-	var rollbackNeeded []func()
+	// Use a stable invite-scoped placeholder so FGA tuples can be looked up
+	// before the user completes Better Auth signup.
+	userID := fmt.Sprintf("invite:%s", req.Email)
 
-	userID, err := h.kc.CreateUser(ctx, userCfg)
-	if err != nil {
-		if errors.Is(err, ErrConflict) {
-			return nil, fmt.Errorf("%w: email %s", ErrUserAlreadyMember, req.Email)
-		}
-		return nil, fmt.Errorf("invite: create keycloak user: %w", err)
-	}
-	rollbackNeeded = append(rollbackNeeded, func() {
-		if delErr := h.kc.DeleteUser(ctx, userID); delErr != nil && !errors.Is(delErr, ErrNotFound) {
-			h.logger.ErrorContext(ctx, "invite rollback: failed to delete user",
-				slog.String("user_id", userID), slog.String("error", delErr.Error()))
-		}
-	})
-
-	// Step 2: add to Keycloak Organization (if orgID provided).
-	if req.OrgID != "" {
-		if err := h.kc.AddOrganizationMember(ctx, req.OrgID, userID); err != nil {
-			h.runRollbacks(rollbackNeeded)
-			return nil, fmt.Errorf("invite: add org member: %w", err)
-		}
-		rollbackNeeded = append(rollbackNeeded, func() {
-			if delErr := h.kc.RemoveOrganizationMember(ctx, req.OrgID, userID); delErr != nil && !errors.Is(delErr, ErrNotFound) {
-				h.logger.ErrorContext(ctx, "invite rollback: failed to remove org member",
-					slog.String("user_id", userID), slog.String("error", delErr.Error()))
-			}
-		})
-	}
-
-	// Step 3: write FGA tuple. Admin role gets "admin" relation; others get "member".
+	// Write FGA pre-authorization tuple. Admin role gets "admin" relation; others "member".
 	fgaRelation := roleToFGARelation(req.Role)
 	tuple := authz.Tuple{
 		User:     fmt.Sprintf("user:%s", userID),
 		Relation: fgaRelation,
 		Object:   fmt.Sprintf("tenant:%s", req.TenantID),
 	}
+	var rollbackNeeded []func()
 	if err := h.authz.Write(ctx, []authz.Tuple{tuple}); err != nil {
-		h.runRollbacks(rollbackNeeded)
 		return nil, fmt.Errorf("invite: write FGA tuple: %w", err)
 	}
 	rollbackNeeded = append(rollbackNeeded, func() {
@@ -263,7 +222,6 @@ func (h *InviteHandler) Invite(ctx context.Context, req InviteRequest) (*Invitat
 	rec := invitationRecord{
 		UserID:   userID,
 		TenantID: req.TenantID,
-		OrgID:    req.OrgID,
 		Role:     req.Role,
 		Email:    req.Email,
 		Consumed: false,
@@ -367,9 +325,9 @@ func (h *InviteHandler) Accept(ctx context.Context, tokenStr string) (*AcceptRes
 	}, nil
 }
 
-// Resend issues a new invitation token for an existing pending user without
-// changing the Keycloak user or FGA state.
-func (h *InviteHandler) Resend(ctx context.Context, tenantID, userID, orgID, email, role string) (*Invitation, error) {
+// Resend issues a new invitation token for an existing pending invite without
+// changing the FGA state.
+func (h *InviteHandler) Resend(ctx context.Context, tenantID, userID, email, role string) (*Invitation, error) {
 	if tenantID == "" || userID == "" {
 		return nil, fmt.Errorf("%w: tenant_id and user_id are required for resend", ErrInvalidSignupInput)
 	}
@@ -397,7 +355,6 @@ func (h *InviteHandler) Resend(ctx context.Context, tenantID, userID, orgID, ema
 	rec := invitationRecord{
 		UserID:   userID,
 		TenantID: tenantID,
-		OrgID:    orgID,
 		Role:     role,
 		Email:    email,
 		Consumed: false,

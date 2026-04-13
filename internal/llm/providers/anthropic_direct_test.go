@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/schema"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/schema"
 )
 
 func TestAnthropicDirectClient_CompleteWithForcedTool(t *testing.T) {
@@ -23,9 +23,9 @@ func TestAnthropicDirectClient_CompleteWithForcedTool(t *testing.T) {
 	tool := llm.ToolDef{
 		Name:        "test_response",
 		Description: "Provide a structured response",
-		Parameters: schema.JSONSchema{
+		Parameters: schema.JSON{
 			Type: "object",
-			Properties: map[string]schema.SchemaField{
+			Properties: map[string]schema.JSON{
 				"message": {
 					Type:        "string",
 					Description: "A test message",

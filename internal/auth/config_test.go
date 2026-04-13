@@ -15,30 +15,19 @@ func TestAuthConfig_Validate_ValidModes(t *testing.T) {
 		cfg  AuthConfig
 	}{
 		{
-			name: "dev mode with local users",
+			name: "dev mode",
 			mode: "dev",
-			cfg: AuthConfig{
-				Mode: "dev",
-				Local: &LocalAuthConfig{
-					Users: []LocalUser{{Name: "test", Token: "tok", Roles: []string{"admin"}}},
-				},
-			},
+			cfg:  AuthConfig{Mode: "dev"},
 		},
 		{
-			name: "enterprise mode with OIDC",
+			name: "enterprise mode",
 			mode: "enterprise",
-			cfg: AuthConfig{
-				Mode: "enterprise",
-				OIDC: []OIDCIssuerConfig{{Issuer: "https://issuer.example.com"}},
-			},
+			cfg:  AuthConfig{Mode: "enterprise"},
 		},
 		{
-			name: "saas mode with OIDC",
+			name: "saas mode",
 			mode: "saas",
-			cfg: AuthConfig{
-				Mode: "saas",
-				OIDC: []OIDCIssuerConfig{{Issuer: "https://issuer.example.com"}},
-			},
+			cfg:  AuthConfig{Mode: "saas"},
 		},
 	}
 

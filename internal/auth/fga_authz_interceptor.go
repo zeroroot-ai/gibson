@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -170,6 +171,12 @@ func (i *FgaAuthzInterceptor) checkInternal(ctx context.Context, req any, fullMe
 	}
 
 	// Step 4: derive user.
+	// K8s ServiceAccount subjects (format "namespace:sa-name") are authorized
+	// by K8s role bindings, not FGA. Skip FGA for these — they've already
+	// passed the K8s authenticator + role check.
+	if identity.Issuer == "kubernetes" || strings.Contains(identity.Subject, ":") {
+		return nil
+	}
 	user := "user:" + identity.Subject
 
 	// Step 5: derive object.

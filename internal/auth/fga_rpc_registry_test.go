@@ -43,7 +43,6 @@ func TestFgaRpcRegistry_PlatformOperatorMethods(t *testing.T) {
 	r := NewFgaRpcRegistry()
 
 	platformOpMethods := []string{
-		"/gibson.daemon.admin.v1.DaemonAdminService/SignupTenant",
 		"/gibson.daemon.admin.v1.DaemonAdminService/ListTenants",
 		"/gibson.daemon.admin.v1.DaemonAdminService/Shutdown",
 	}

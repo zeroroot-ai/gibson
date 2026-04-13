@@ -106,14 +106,6 @@ func (s *DaemonServer) listTenantMembersFromFGA(ctx context.Context, tenantID st
 				Role:   entry.role,
 				Status: MemberStatus_MEMBER_STATUS_ACTIVE,
 			}
-			// Attempt Keycloak enrichment if keycloakAdmin is available.
-			if s.keycloakAdmin != nil {
-				// ListOrganizationMembers returns a flat list; we need user lookup.
-				// For now we don't have a GetUser by ID method on KeycloakAdmin.
-				// The enrichment is a best-effort: set email if available.
-				// Real enrichment requires a GetUserByID method added in a future spec.
-				_ = s.keycloakAdmin // suppress unused warning for now
-			}
 			mu.Lock()
 			members[idx] = m
 			mu.Unlock()
@@ -147,20 +139,8 @@ func (s *DaemonServer) InviteMember(ctx context.Context, req *InviteMemberReques
 
 	roleStr := memberRoleToString(req.GetRole())
 
-	// Fetch the Keycloak Organization ID for the tenant.
-	// If keycloakAdmin is available and GetOrganizationByAlias exists, use it.
-	// Otherwise pass empty orgID (inviteHandler will skip the org step).
-	var orgID string
-	if s.keycloakAdmin != nil {
-		org, err := s.keycloakAdmin.GetOrganizationByAlias(ctx, tenantID)
-		if err == nil && org != nil {
-			orgID = org.ID
-		}
-	}
-
 	inv, err := s.inviteHandler.Invite(ctx, provisioner.InviteRequest{
 		TenantID: tenantID,
-		OrgID:    orgID,
 		Email:    req.GetEmail(),
 		Role:     roleStr,
 		Message:  req.GetMessage(),
@@ -202,14 +182,6 @@ func (s *DaemonServer) RemoveMember(ctx context.Context, req *RemoveMemberReques
 		}})
 	}
 
-	// Remove Keycloak org membership if keycloakAdmin is available.
-	if s.keycloakAdmin != nil {
-		org, err := s.keycloakAdmin.GetOrganizationByAlias(ctx, tenantID)
-		if err == nil && org != nil {
-			_ = s.keycloakAdmin.RemoveOrganizationMember(ctx, org.ID, userID)
-		}
-	}
-
 	s.logger.InfoContext(ctx, "member removed",
 		slog.String("tenant_id", tenantID),
 		slog.String("user_id", userID),
@@ -233,16 +205,9 @@ func (s *DaemonServer) ResendInvitation(ctx context.Context, req *ResendInvitati
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id and user_id are required")
 	}
 
-	// Fetch org and user metadata for resend.
-	var orgID, email, role string
-	if s.keycloakAdmin != nil {
-		org, err := s.keycloakAdmin.GetOrganizationByAlias(ctx, tenantID)
-		if err == nil && org != nil {
-			orgID = org.ID
-		}
-	}
+	var email, role string
 
-	inv, err := s.inviteHandler.Resend(ctx, tenantID, req.GetUserId(), orgID, email, role)
+	inv, err := s.inviteHandler.Resend(ctx, tenantID, req.GetUserId(), email, role)
 	if err != nil {
 		return nil, mapProvisionerError(err)
 	}

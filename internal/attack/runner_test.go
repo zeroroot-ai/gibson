@@ -30,6 +30,19 @@ func (m *MockMissionOrchestrator) Execute(ctx context.Context, missionObj *missi
 	return args.Get(0).(*mission.MissionResult), args.Error(1)
 }
 
+func (m *MockMissionOrchestrator) ExecuteFromCheckpoint(ctx context.Context, missionObj *mission.Mission, checkpoint *mission.MissionCheckpoint) (*mission.MissionResult, error) {
+	args := m.Called(ctx, missionObj, checkpoint)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*mission.MissionResult), args.Error(1)
+}
+
+func (m *MockMissionOrchestrator) StopMission(ctx context.Context, missionID types.ID) error {
+	args := m.Called(ctx, missionID)
+	return args.Error(0)
+}
+
 // MockComponentDiscovery and MockAgent are defined in agent_test.go and reused here
 
 type MockPayloadRegistry struct {

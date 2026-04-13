@@ -2,8 +2,12 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -23,38 +27,146 @@ var (
 	tracer = otel.Tracer("gibson.auth")
 )
 
-// UnaryAuthInterceptor creates a gRPC unary server interceptor that enforces authentication.
+// ---------------------------------------------------------------------------
+// AgentAuthClaims — verified claims from an Agent Auth JWT
 //
-// The interceptor behavior depends on the authentication mode:
-//   - "dev": Use local token validation with static tokens
-//   - "enterprise" or "saas": Use OIDC validation
+// Defined here (rather than importing agentauth) to avoid an import cycle.
+// The daemon wires an AgentJWTValidator adapter that wraps agentauth.JWTVerifier
+// and returns *AgentAuthClaims so the auth interceptor never imports agentauth.
+// ---------------------------------------------------------------------------
+
+// AgentAuthClaims contains the verified claims from an agent+jwt or host+jwt token.
+// All fields are guaranteed non-empty after successful verification.
+type AgentAuthClaims struct {
+	// AgentID is the agent that presented this token (JWT sub).
+	AgentID string
+
+	// HostID is the host the agent is registered under (JWT iss).
+	HostID string
+
+	// TenantID is sourced from the agent's store record (not the JWT).
+	TenantID string
+
+	// OwnerUserID is the user who owns this agent (sourced from the store).
+	// The interceptor sets Identity.Subject to this value so that the FGA
+	// interceptor checks the owner's permissions, not the agent's.
+	OwnerUserID string
+
+	// ExpiresAt is when the token expires (JWT exp).
+	ExpiresAt time.Time
+}
+
+// ---------------------------------------------------------------------------
+// Internal validator interfaces
 //
-// In SaaS mode, after authentication:
-//   - Extracts tenant ID from identity using TenantClaim configuration
-//   - If no tenant found and no DefaultTenant configured, returns PermissionDenied
-//   - Injects tenant into context for downstream handlers
+// These narrow interfaces allow the concrete validator types to be used in
+// production code while enabling lightweight mocks in unit tests. All four
+// concrete types satisfy their respective interface automatically.
+// ---------------------------------------------------------------------------
+
+// apiKeyValidatorIface is the narrow contract for API key auth.
+type apiKeyValidatorIface interface {
+	Authenticate(ctx context.Context, token string) (*Identity, error)
+}
+
+// k8sValidatorIface is the narrow contract for K8s SA token auth.
+type k8sValidatorIface interface {
+	Authenticate(ctx context.Context, token string) (*Identity, error)
+}
+
+// AgentJWTValidator is the interface the interceptor uses to verify Agent Auth JWTs.
 //
-// When trust_localhost is enabled and the peer address is localhost (127.0.0.1 or ::1),
-// authentication is bypassed and a synthetic "localhost" identity is injected.
+// The daemon wires this with an adapter that wraps agentauth.JWTVerifier and
+// converts agentauth.AgentClaims → auth.AgentAuthClaims so that the auth
+// package never needs to import agentauth directly.
 //
-// The interceptor returns gRPC status codes:
-//   - codes.Unauthenticated: Missing or invalid token
-//   - codes.PermissionDenied: Valid token but missing tenant in SaaS mode
+// Exported so the daemon package can implement the adapter.
+type AgentJWTValidator interface {
+	VerifyAgentJWT(ctx context.Context, tokenStr, expectedAud string) (*AgentAuthClaims, error)
+}
+
+// betterAuthValidatorIface is the narrow contract for Better Auth HMAC-SHA256 tokens.
+type betterAuthValidatorIface interface {
+	Authenticate(ctx context.Context, token string) (*Identity, error)
+}
+
+// ---------------------------------------------------------------------------
+// Agent Auth JWT header detection (no crypto, no external deps)
+// ---------------------------------------------------------------------------
+
+// jwtHeader is the minimal JOSE header decoded during fast-path detection.
+type jwtHeader struct {
+	Typ string `json:"typ"`
+	Alg string `json:"alg"`
+}
+
+// IsAgentAuthJWT reports whether token looks like an Agent Auth JWT by inspecting
+// only the header. Returns true for tokens whose typ is "agent+jwt" or "host+jwt"
+// with alg "EdDSA".
 //
-// Thread Safety:
-// The interceptor is safe for concurrent use. The Authenticator implementation
-// must also be thread-safe.
+// This is a fast structural check — it does NOT verify the signature or any
+// claims. A true result only means the token should be routed to the Agent Auth
+// verification path.
 //
-// Parameters:
-//   - auth: Authenticator implementation for token validation
-//   - cfg: Authentication configuration
-//   - logger: Structured logger for audit events
+// Duplicated from agentauth.IsAgentAuthJWT to avoid an import cycle.
+func IsAgentAuthJWT(token string) bool {
+	parts := strings.SplitN(token, ".", 3)
+	if len(parts) != 3 {
+		return false
+	}
+	b, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+	var hdr jwtHeader
+	if err := json.Unmarshal(b, &hdr); err != nil {
+		return false
+	}
+	return (hdr.Typ == "agent+jwt" || hdr.Typ == "host+jwt") && hdr.Alg == "EdDSA"
+}
+
+// ---------------------------------------------------------------------------
+// UnaryAuthInterceptor — 4-path routing
+// ---------------------------------------------------------------------------
+
+// UnaryAuthInterceptor returns a gRPC unary interceptor that authenticates
+// requests using one of four methods:
 //
-// Returns:
-//   - grpc.UnaryServerInterceptor: Interceptor function for gRPC server
-func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logger) grpc.UnaryServerInterceptor {
+//  1. gsk_ prefix     → APIKeyAuthenticator (Postgres lookup)
+//  2. agent+jwt       → AgentJWTValidator (Ed25519 verify)
+//  3. K8s SA JWT      → K8sValidator (TokenReview) — only when k8s is non-nil
+//  4. Otherwise       → BetterAuthValidator (HMAC-SHA256)
+//
+// The function accepts concrete validator types. Pass nil for k8s when K8s
+// authentication is not configured (e.g., outside a Kubernetes cluster).
+//
+// Agent Auth JWTs set Identity.Subject to the agent's owner user ID so that the
+// downstream FGA interceptor checks the owner's permissions, not the agent's.
+//
+// The trust_localhost bypass in AuthConfig creates a synthetic platform-operator
+// identity for requests from 127.0.0.1 or ::1 without requiring a token.
+func UnaryAuthInterceptor(
+	apiKeys *APIKeyAuthenticator,
+	k8s *K8sValidator,
+	agentJWT AgentJWTValidator,
+	ba *BetterAuthValidator,
+	cfg *AuthConfig,
+	logger *slog.Logger,
+) grpc.UnaryServerInterceptor {
+	return buildUnaryInterceptor(apiKeys, k8s, agentJWT, ba, cfg, logger)
+}
+
+// buildUnaryInterceptor constructs the interceptor from the narrow interfaces
+// so that unit tests can supply lightweight mocks.
+func buildUnaryInterceptor(
+	apiKeys apiKeyValidatorIface,
+	k8s k8sValidatorIface,
+	agentJWT AgentJWTValidator,
+	ba betterAuthValidatorIface,
+	cfg *AuthConfig,
+	logger *slog.Logger,
+) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		// Start tracing span for authentication
 		ctx, span := tracer.Start(ctx, "gibson.auth.authenticate",
 			oteltrace.WithSpanKind(oteltrace.SpanKindServer),
 			oteltrace.WithAttributes(
@@ -65,16 +177,14 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 		)
 		defer span.End()
 
-		// Determine effective mode
 		mode := cfg.Mode
 
-		// Reject requests when auth mode is not configured
 		if mode == "" || mode == "disabled" {
 			span.SetAttributes(attribute.String("auth.result", "rejected_no_config"))
 			return nil, status.Error(grpccodes.Unauthenticated, "authentication required")
 		}
 
-		// Check for localhost bypass
+		// Localhost bypass — must come before token extraction.
 		if cfg.TrustLocalhost {
 			if identity, bypassed, peerAddr := checkLocalhostBypassWithAddr(ctx, logger, info.FullMethod); bypassed {
 				span.SetAttributes(
@@ -84,22 +194,11 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 				)
 				logLocalhostBypass(ctx, logger, info.FullMethod, peerAddr)
 				ctx = ContextWithIdentity(ctx, identity)
-
-				// Inject tenant in SaaS mode
-				if mode == "saas" {
-					tenant := extractAndValidateTenant(ctx, identity, cfg, span)
-					if tenant != "" {
-						ctx = ContextWithTenant(ctx, tenant)
-					}
-				} else if cfg.DefaultTenant != "" {
-					ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
-				}
-
+				ctx = injectTenant(ctx, identity, cfg, mode, span)
 				return handler(ctx, req)
 			}
 		}
 
-		// Extract Bearer token from metadata
 		token, err := extractBearerToken(ctx)
 		if err != nil {
 			span.RecordError(err)
@@ -109,8 +208,7 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 			return nil, status.Error(grpccodes.Unauthenticated, "missing bearer token")
 		}
 
-		// Authenticate the token (works for dev, enterprise, and saas modes)
-		identity, err := auth.Authenticate(ctx, token)
+		identity, err := routeAuth(ctx, token, info.FullMethod, apiKeys, k8s, agentJWT, ba)
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "authentication failed")
@@ -119,90 +217,53 @@ func UnaryAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logg
 			return nil, toGRPCStatus(err)
 		}
 
-		// Log successful authentication with audit trail
 		logAuthSuccess(ctx, logger, info.FullMethod, identity)
-
-		// Set trace attributes for successful authentication
-		span.SetStatus(codes.Ok, "authentication successful")
-		span.SetAttributes(
-			attribute.String("auth.result", "success"),
-			attribute.String("auth.subject", identity.Subject),
-			attribute.String("auth.issuer", identity.Issuer),
-			attribute.StringSlice("auth.roles", identity.Roles),
-			attribute.StringSlice("auth.groups", identity.Groups),
-			attribute.Int("auth.permissions_count", len(identity.Permissions)),
-		)
-		if identity.Email != "" {
-			span.SetAttributes(attribute.String("auth.email", identity.Email))
-		}
-
-		// Inject identity into context (using SDK auth package)
+		setAuthSpanAttributes(span, identity)
 		ctx = ContextWithIdentity(ctx, identity)
-
-		// Handle tenant extraction.
-		//
-		// SaaS mode: tenant is mandatory. Extract from identity claims (API keys
-		// always carry tenant_id; OIDC tokens carry it via TenantClaim). If no
-		// tenant is found, deny access with PermissionDenied.
-		//
-		// Enterprise mode: attempt to extract tenant from identity claims for ALL
-		// identity types (API keys carry tenant_id in Claims; OIDC tokens carry it
-		// via TenantClaim). If no claim is present, fall back to DefaultTenant.
-		// This ensures OIDC-authenticated requests in enterprise mode are scoped to
-		// the correct tenant when the IdP embeds tenant_id in the token.
-		//
-		// Dev mode: fall back to DefaultTenant if configured.
-		if mode == "saas" {
-			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
-			if tenant == "" {
-				// No tenant found and no default - deny access
-				span.SetAttributes(attribute.String("auth.result", "no_tenant"))
-				logMissingTenant(ctx, logger, info.FullMethod, identity)
-				return nil, status.Error(grpccodes.PermissionDenied, "no tenant identifier found in token")
-			}
-			ctx = ContextWithTenant(ctx, tenant)
-		} else if mode == "enterprise" {
-			// All identity types in enterprise mode attempt claim-based extraction,
-			// falling back to DefaultTenant when no claim is present.
-			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
-			if tenant != "" {
-				ctx = ContextWithTenant(ctx, tenant)
-			}
-		} else if cfg.DefaultTenant != "" {
-			// For dev mode, inject default tenant if configured.
-			ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
-			span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
+		ctx = injectTenant(ctx, identity, cfg, mode, span)
+		if mode == "saas" && TenantFromContext(ctx) == "" {
+			span.SetAttributes(attribute.String("auth.result", "no_tenant"))
+			logMissingTenant(ctx, logger, info.FullMethod, identity)
+			return nil, status.Error(grpccodes.PermissionDenied, "no tenant identifier found in token")
 		}
 
-		// Continue with the request
 		return handler(ctx, req)
 	}
 }
 
-// StreamAuthInterceptor creates a gRPC stream server interceptor that enforces authentication.
-//
-// The interceptor performs the same authentication checks as UnaryAuthInterceptor but
-// for streaming RPCs. Authentication is performed once when the stream is established.
-//
-// The authenticated Identity and Tenant (in SaaS mode) are injected into the stream
-// context and available for the lifetime of the stream.
-//
-// Thread Safety:
-// The interceptor is safe for concurrent use. The Authenticator implementation
-// must also be thread-safe.
-//
-// Parameters:
-//   - auth: Authenticator implementation for token validation
-//   - cfg: Authentication configuration
-//   - logger: Structured logger for audit events
-//
-// Returns:
-//   - grpc.StreamServerInterceptor: Interceptor function for gRPC server
-func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Logger) grpc.StreamServerInterceptor {
+// ---------------------------------------------------------------------------
+// StreamAuthInterceptor — same 4-path logic for streaming RPCs
+// ---------------------------------------------------------------------------
+
+// StreamAuthInterceptor returns a gRPC stream interceptor that authenticates
+// requests using the same four-path logic as UnaryAuthInterceptor.
+// Authentication is performed once when the stream is established; the
+// authenticated Identity and Tenant are injected into the stream context for
+// the duration of the stream.
+func StreamAuthInterceptor(
+	apiKeys *APIKeyAuthenticator,
+	k8s *K8sValidator,
+	agentJWT AgentJWTValidator,
+	ba *BetterAuthValidator,
+	cfg *AuthConfig,
+	logger *slog.Logger,
+) grpc.StreamServerInterceptor {
+	return buildStreamInterceptor(apiKeys, k8s, agentJWT, ba, cfg, logger)
+}
+
+// buildStreamInterceptor constructs the stream interceptor from the narrow
+// interfaces so that unit tests can supply lightweight mocks.
+func buildStreamInterceptor(
+	apiKeys apiKeyValidatorIface,
+	k8s k8sValidatorIface,
+	agentJWT AgentJWTValidator,
+	ba betterAuthValidatorIface,
+	cfg *AuthConfig,
+	logger *slog.Logger,
+) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		ctx := ss.Context()
 
-		// Start tracing span for stream authentication
 		ctx, span := tracer.Start(ctx, "gibson.auth.authenticate.stream",
 			oteltrace.WithSpanKind(oteltrace.SpanKindServer),
 			oteltrace.WithAttributes(
@@ -214,16 +275,13 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 		)
 		defer span.End()
 
-		// Determine effective mode
 		mode := cfg.Mode
 
-		// Reject requests when auth mode is not configured
 		if mode == "" || mode == "disabled" {
 			span.SetAttributes(attribute.String("auth.result", "rejected_no_config"))
 			return status.Error(grpccodes.Unauthenticated, "authentication required")
 		}
 
-		// Check for localhost bypass
 		if cfg.TrustLocalhost {
 			if identity, bypassed, peerAddr := checkLocalhostBypassWithAddr(ctx, logger, info.FullMethod); bypassed {
 				span.SetAttributes(
@@ -233,22 +291,11 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 				)
 				logLocalhostBypass(ctx, logger, info.FullMethod, peerAddr)
 				ctx = ContextWithIdentity(ctx, identity)
-
-				// Inject tenant in SaaS mode
-				if mode == "saas" {
-					tenant := extractAndValidateTenant(ctx, identity, cfg, span)
-					if tenant != "" {
-						ctx = ContextWithTenant(ctx, tenant)
-					}
-				} else if cfg.DefaultTenant != "" {
-					ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
-				}
-
+				ctx = injectTenant(ctx, identity, cfg, mode, span)
 				return handler(srv, &authenticatedServerStream{ServerStream: ss, ctx: ctx})
 			}
 		}
 
-		// Extract Bearer token from metadata
 		token, err := extractBearerToken(ctx)
 		if err != nil {
 			span.RecordError(err)
@@ -258,8 +305,7 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 			return status.Error(grpccodes.Unauthenticated, "missing bearer token")
 		}
 
-		// Authenticate the token (works for dev, enterprise, and saas modes)
-		identity, err := auth.Authenticate(ctx, token)
+		identity, err := routeAuth(ctx, token, info.FullMethod, apiKeys, k8s, agentJWT, ba)
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "authentication failed")
@@ -268,76 +314,129 @@ func StreamAuthInterceptor(auth Authenticator, cfg *AuthConfig, logger *slog.Log
 			return toGRPCStatus(err)
 		}
 
-		// Log successful authentication with audit trail
 		logAuthSuccess(ctx, logger, info.FullMethod, identity)
-
-		// Set trace attributes for successful authentication
-		span.SetStatus(codes.Ok, "authentication successful")
-		span.SetAttributes(
-			attribute.String("auth.result", "success"),
-			attribute.String("auth.subject", identity.Subject),
-			attribute.String("auth.issuer", identity.Issuer),
-			attribute.StringSlice("auth.roles", identity.Roles),
-			attribute.StringSlice("auth.groups", identity.Groups),
-			attribute.Int("auth.permissions_count", len(identity.Permissions)),
-		)
-		if identity.Email != "" {
-			span.SetAttributes(attribute.String("auth.email", identity.Email))
-		}
-
-		// Inject identity into context (using SDK auth package)
+		setAuthSpanAttributes(span, identity)
 		ctx = ContextWithIdentity(ctx, identity)
-
-		// Handle tenant extraction.
-		//
-		// SaaS mode: tenant is mandatory. Extract from identity claims (API keys
-		// always carry tenant_id; OIDC tokens carry it via TenantClaim). If no
-		// tenant is found, deny access with PermissionDenied.
-		//
-		// Enterprise mode: attempt to extract tenant from identity claims for ALL
-		// identity types (API keys carry tenant_id in Claims; OIDC tokens carry it
-		// via TenantClaim). If no claim is present, fall back to DefaultTenant.
-		// This ensures OIDC-authenticated requests in enterprise mode are scoped to
-		// the correct tenant when the IdP embeds tenant_id in the token.
-		//
-		// Dev mode: fall back to DefaultTenant if configured.
-		if mode == "saas" {
-			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
-			if tenant == "" {
-				// No tenant found and no default - deny access
-				span.SetAttributes(attribute.String("auth.result", "no_tenant"))
-				logMissingTenant(ctx, logger, info.FullMethod, identity)
-				return status.Error(grpccodes.PermissionDenied, "no tenant identifier found in token")
-			}
-			ctx = ContextWithTenant(ctx, tenant)
-		} else if mode == "enterprise" {
-			// All identity types in enterprise mode attempt claim-based extraction,
-			// falling back to DefaultTenant when no claim is present.
-			tenant := extractAndValidateTenant(ctx, identity, cfg, span)
-			if tenant != "" {
-				ctx = ContextWithTenant(ctx, tenant)
-			}
-		} else if cfg.DefaultTenant != "" {
-			// For dev mode, inject default tenant if configured.
-			ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
-			span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
+		ctx = injectTenant(ctx, identity, cfg, mode, span)
+		if mode == "saas" && TenantFromContext(ctx) == "" {
+			span.SetAttributes(attribute.String("auth.result", "no_tenant"))
+			logMissingTenant(ctx, logger, info.FullMethod, identity)
+			return status.Error(grpccodes.PermissionDenied, "no tenant identifier found in token")
 		}
 
-		// Continue with the stream using the authenticated context
 		return handler(srv, &authenticatedServerStream{ServerStream: ss, ctx: ctx})
 	}
 }
 
-// convertToSDKIdentity converts a Gibson Core Identity to an SDK Identity.
+// ---------------------------------------------------------------------------
+// 4-path routing core
+// ---------------------------------------------------------------------------
+
+// routeAuth dispatches the token to the correct validator based on its shape.
 //
-// Since Gibson Identity embeds sdkauth.Identity, this is a simple dereference
-// of the embedded field.
+// Detection order (each check is O(1) before any crypto):
+//  1. "gsk_" prefix        → API key path (Postgres hash lookup)
+//  2. IsAgentAuthJWT()     → Agent Auth JWT path (Ed25519, header decode only)
+//  3. isK8sToken() + k8s   → Kubernetes SA path (TokenReview)
+//  4. default              → Better Auth path (HMAC-SHA256)
+//
+// There is no fallthrough: each branch either returns an Identity or an error.
+// When a validator is nil the token is treated as invalid for that path to
+// prevent a nil dereference.
+func routeAuth(
+	ctx context.Context,
+	token string,
+	fullMethod string,
+	apiKeys apiKeyValidatorIface,
+	k8s k8sValidatorIface,
+	agentJWT AgentJWTValidator,
+	ba betterAuthValidatorIface,
+) (*Identity, error) {
+	switch {
+	case strings.HasPrefix(token, "gsk_"):
+		if apiKeys == nil {
+			return nil, ErrInvalidToken(fmt.Errorf("API key authentication not configured"))
+		}
+		return apiKeys.Authenticate(ctx, token)
+
+	case IsAgentAuthJWT(token):
+		if agentJWT == nil {
+			return nil, ErrInvalidToken(fmt.Errorf("agent auth JWT verification not configured"))
+		}
+		claims, err := agentJWT.VerifyAgentJWT(ctx, token, fullMethod)
+		if err != nil {
+			return nil, err
+		}
+		return agentClaimsToIdentity(claims), nil
+
+	case k8s != nil && isK8sToken(token):
+		return k8s.Authenticate(ctx, token)
+
+	default:
+		if ba == nil {
+			return nil, ErrInvalidToken(fmt.Errorf("Better Auth validation not configured"))
+		}
+		return ba.Authenticate(ctx, token)
+	}
+}
+
+// agentClaimsToIdentity converts verified AgentAuthClaims into a Gibson Identity.
+//
+// The Identity's Subject is set to the agent's owner user ID (not the agent ID)
+// so that the downstream FGA interceptor checks the owner's permissions. The
+// agent inherits its owner's access transparently. Agent-specific metadata
+// (agent_id, host_id) is preserved in Claims for audit purposes.
+func agentClaimsToIdentity(claims *AgentAuthClaims) *Identity {
+	return &Identity{
+		Identity: sdkauth.Identity{
+			Subject:         claims.OwnerUserID,
+			Issuer:          "agent-auth",
+			ExpiresAt:       claims.ExpiresAt,
+			AuthenticatedAt: time.Now(),
+			Claims: map[string]any{
+				"agent_id": claims.AgentID,
+				"host_id":  claims.HostID,
+			},
+		},
+		Tenants: []string{claims.TenantID},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tenant injection helper
+// ---------------------------------------------------------------------------
+
+// injectTenant extracts the tenant from the identity and injects it into the
+// context. The behaviour depends on the auth mode:
+//
+//   - saas: inject if found; caller must reject if empty after this call.
+//   - enterprise: inject if found; fall back to DefaultTenant.
+//   - dev (or other): inject DefaultTenant if configured.
+func injectTenant(ctx context.Context, identity *Identity, cfg *AuthConfig, mode string, span oteltrace.Span) context.Context {
+	switch mode {
+	case "saas", "enterprise":
+		tenant := extractAndValidateTenant(ctx, identity, cfg, span)
+		if tenant != "" {
+			ctx = ContextWithTenant(ctx, tenant)
+		}
+	default:
+		if cfg.DefaultTenant != "" {
+			ctx = ContextWithTenant(ctx, cfg.DefaultTenant)
+			span.SetAttributes(attribute.String("auth.tenant", cfg.DefaultTenant))
+		}
+	}
+	return ctx
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+// convertToSDKIdentity converts a Gibson Core Identity to an SDK Identity.
 func convertToSDKIdentity(coreIdentity *Identity) *sdkauth.Identity {
 	if coreIdentity == nil {
 		return nil
 	}
-
-	// Return a pointer to the embedded SDK Identity
 	return &coreIdentity.Identity
 }
 
@@ -348,7 +447,6 @@ func convertToSDKIdentity(coreIdentity *Identity) *sdkauth.Identity {
 //   - The default tenant if configured and no tenant in claims
 //   - Empty string if no tenant found and no default configured
 func extractAndValidateTenant(ctx context.Context, identity *Identity, cfg *AuthConfig, span oteltrace.Span) string {
-	// Extract tenant from identity using configured claim name
 	tenant := ExtractTenantFromIdentity(identity, cfg.TenantClaim)
 
 	if tenant != "" {
@@ -359,7 +457,6 @@ func extractAndValidateTenant(ctx context.Context, identity *Identity, cfg *Auth
 		return tenant
 	}
 
-	// Fall back to default tenant if configured
 	if cfg.DefaultTenant != "" {
 		span.SetAttributes(
 			attribute.String("auth.tenant", cfg.DefaultTenant),
@@ -368,7 +465,6 @@ func extractAndValidateTenant(ctx context.Context, identity *Identity, cfg *Auth
 		return cfg.DefaultTenant
 	}
 
-	// No tenant found and no default
 	return ""
 }
 
@@ -394,22 +490,34 @@ func extractBearerToken(ctx context.Context) (string, error) {
 		return "", errMissingToken
 	}
 
-	// Use the first authorization header
 	authHeader := authHeaders[0]
 
-	// Check for Bearer prefix
 	const bearerPrefix = "Bearer "
 	if !strings.HasPrefix(authHeader, bearerPrefix) {
 		return "", errInvalidToken
 	}
 
-	// Extract token after "Bearer " prefix
 	token := strings.TrimPrefix(authHeader, bearerPrefix)
 	if token == "" {
 		return "", errInvalidToken
 	}
 
 	return token, nil
+}
+
+// isK8sToken reports whether a token looks like a Kubernetes ServiceAccount JWT.
+//
+// K8s SA tokens are compact JWTs with three base64url-encoded parts separated
+// by ".". This is a fast structural check — it does NOT verify the signature or
+// decode any claims. The actual validation is performed by the TokenReview API
+// inside K8sValidator.Authenticate.
+//
+// Agent Auth JWTs are also compact JWTs, but are detected first by IsAgentAuthJWT
+// (which inspects the "typ" header), so any JWT reaching this check is not an
+// Agent Auth JWT.
+func isK8sToken(token string) bool {
+	parts := strings.SplitN(token, ".", 3)
+	return len(parts) == 3 && parts[0] != "" && parts[1] != "" && parts[2] != ""
 }
 
 // checkLocalhostBypassWithAddr checks if the request is from localhost and returns a synthetic identity.
@@ -424,11 +532,8 @@ func checkLocalhostBypassWithAddr(ctx context.Context, logger *slog.Logger, meth
 		return nil, false, ""
 	}
 
-	// Extract IP address from peer
 	addr := p.Addr.String()
 
-	// Check for localhost addresses (IPv4 and IPv6)
-	// Formats: "127.0.0.1:port", "[::1]:port", "localhost:port"
 	isLocalhost := strings.HasPrefix(addr, "127.0.0.1:") ||
 		strings.HasPrefix(addr, "[::1]:") ||
 		strings.HasPrefix(addr, "localhost:")
@@ -437,7 +542,6 @@ func checkLocalhostBypassWithAddr(ctx context.Context, logger *slog.Logger, meth
 		return nil, false, ""
 	}
 
-	// Create synthetic localhost identity with platform-operator permissions
 	identity := &Identity{
 		Identity: sdkauth.Identity{
 			Subject:         "localhost",
@@ -457,8 +561,6 @@ func checkLocalhostBypassWithAddr(ctx context.Context, logger *slog.Logger, meth
 }
 
 // authenticatedServerStream wraps grpc.ServerStream to override the context.
-//
-// This allows us to inject the authenticated identity into the stream context.
 type authenticatedServerStream struct {
 	grpc.ServerStream
 	ctx context.Context
@@ -469,20 +571,26 @@ func (s *authenticatedServerStream) Context() context.Context {
 	return s.ctx
 }
 
-// logPermissionDeniedFromContext logs a permission denied event.
-//
-// This helper extracts a logger from context (if available) and logs the
-// permission denied event. If no logger is available in the context, it
-// uses the default slog logger.
-//
-// This function is called when an authorization check fails.
+// logPermissionDeniedFromContext logs a permission denied event using the default logger.
 func logPermissionDeniedFromContext(ctx context.Context, identity *Identity, action, resource string) {
-	// Try to extract logger from context using a well-known key
-	// For now, use the default slog logger since there's no context-based logger pattern
 	logger := slog.Default()
-
-	// Log the permission denied event
 	logPermissionDenied(ctx, logger, identity, action, resource)
+}
+
+// setAuthSpanAttributes sets the standard auth success attributes on a span.
+func setAuthSpanAttributes(span oteltrace.Span, identity *Identity) {
+	span.SetStatus(codes.Ok, "authentication successful")
+	span.SetAttributes(
+		attribute.String("auth.result", "success"),
+		attribute.String("auth.subject", identity.Subject),
+		attribute.String("auth.issuer", identity.Issuer),
+		attribute.StringSlice("auth.roles", identity.Roles),
+		attribute.StringSlice("auth.groups", identity.Groups),
+		attribute.Int("auth.permissions_count", len(identity.Permissions)),
+	)
+	if identity.Email != "" {
+		span.SetAttributes(attribute.String("auth.email", identity.Email))
+	}
 }
 
 // toGRPCStatus converts an authentication error to a gRPC status error.
@@ -496,7 +604,6 @@ func toGRPCStatus(err error) error {
 		return nil
 	}
 
-	// Map auth errors to gRPC status codes
 	switch {
 	case IsTokenExpiredError(err):
 		return status.Error(grpccodes.Unauthenticated, "token expired")

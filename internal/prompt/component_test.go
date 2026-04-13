@@ -11,7 +11,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
-	sdkschema "github.com/zero-day-ai/sdk/schema"
+	"google.golang.org/protobuf/proto"
 )
 
 // Mock implementations for testing
@@ -19,13 +19,13 @@ import (
 // mockTool is a basic tool implementation without prompts
 type mockTool struct{}
 
-func (m *mockTool) Name() string                 { return "mock-tool" }
-func (m *mockTool) Description() string          { return "A mock tool" }
-func (m *mockTool) Version() string              { return "1.0.0" }
-func (m *mockTool) Tags() []string               { return []string{"test"} }
-func (m *mockTool) InputSchema() sdkschema.JSON  { return sdkschema.JSON{} }
-func (m *mockTool) OutputSchema() sdkschema.JSON { return sdkschema.JSON{} }
-func (m *mockTool) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
+func (m *mockTool) Name() string              { return "mock-tool" }
+func (m *mockTool) Description() string       { return "A mock tool" }
+func (m *mockTool) Version() string           { return "1.0.0" }
+func (m *mockTool) Tags() []string            { return []string{"test"} }
+func (m *mockTool) InputMessageType() string  { return "" }
+func (m *mockTool) OutputMessageType() string { return "" }
+func (m *mockTool) ExecuteProto(_ context.Context, _ proto.Message) (proto.Message, error) {
 	return nil, nil
 }
 func (m *mockTool) Health(ctx context.Context) types.HealthStatus {

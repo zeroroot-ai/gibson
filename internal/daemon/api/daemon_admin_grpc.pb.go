@@ -51,7 +51,7 @@ const (
 	DaemonAdminService_UpdateMemberRole_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/UpdateMemberRole"
 	DaemonAdminService_ListUserTenants_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/ListUserTenants"
 	DaemonAdminService_TransferOwnership_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/TransferOwnership"
-	DaemonAdminService_SignupTenant_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/SignupTenant"
+	DaemonAdminService_InitiateSignup_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/InitiateSignup"
 	DaemonAdminService_InviteMember_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/InviteMember"
 	DaemonAdminService_RemoveMember_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/RemoveMember"
 	DaemonAdminService_ResendInvitation_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/ResendInvitation"
@@ -82,6 +82,16 @@ const (
 	DaemonAdminService_MarkAllAlertsRead_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/MarkAllAlertsRead"
 	DaemonAdminService_ListConversations_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/ListConversations"
 	DaemonAdminService_GetConversation_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/GetConversation"
+	DaemonAdminService_RegisterAgentAuth_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/RegisterAgentAuth"
+	DaemonAdminService_ExecuteAgentCapability_FullMethodName          = "/gibson.daemon.admin.v1.DaemonAdminService/ExecuteAgentCapability"
+	DaemonAdminService_ListAgentCapabilities_FullMethodName           = "/gibson.daemon.admin.v1.DaemonAdminService/ListAgentCapabilities"
+	DaemonAdminService_GetAgentAuthStatus_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/GetAgentAuthStatus"
+	DaemonAdminService_RevokeAgentAuth_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeAgentAuth"
+	DaemonAdminService_ListAgentAuthAgents_FullMethodName             = "/gibson.daemon.admin.v1.DaemonAdminService/ListAgentAuthAgents"
+	DaemonAdminService_CreateHostRegistrationToken_FullMethodName     = "/gibson.daemon.admin.v1.DaemonAdminService/CreateHostRegistrationToken"
+	DaemonAdminService_ListComponentGrants_FullMethodName             = "/gibson.daemon.admin.v1.DaemonAdminService/ListComponentGrants"
+	DaemonAdminService_BatchGrantComponentAccessV2_FullMethodName     = "/gibson.daemon.admin.v1.DaemonAdminService/BatchGrantComponentAccessV2"
+	DaemonAdminService_ListAuditLog_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/ListAuditLog"
 )
 
 // DaemonAdminServiceClient is the client API for DaemonAdminService service.
@@ -164,23 +174,22 @@ type DaemonAdminServiceClient interface {
 	ListUserTenants(ctx context.Context, in *ListUserTenantsRequest, opts ...grpc.CallOption) (*ListUserTenantsResponse, error)
 	// TransferOwnership transfers tenant ownership to another existing member.
 	TransferOwnership(ctx context.Context, in *TransferOwnershipRequest, opts ...grpc.CallOption) (*TransferOwnershipResponse, error)
-	// SignupTenant orchestrates the full tenant signup flow: create Keycloak user,
-	// create Keycloak Organization, add user as member, write the first FGA admin
-	// tuple, and provision downstream tenant resources (Langfuse project, etc.).
+	// InitiateSignup is called after the dashboard has created the identity
+	// provider user. It records the signup request in Redis and emits a
+	// signup.requested event to the async provisioning pipeline. The password is
+	// NOT included — it was already validated by the identity provider.
 	//
-	// This RPC replaces the previous dashboard-side Keycloak admin orchestration
-	// so that admin credentials never leave the daemon pod.
+	// The RPC completes in under 100ms (Redis writes only) and returns immediately
+	// with the tenant ID and a "provisioning" status. The dashboard then polls
+	// GetProvisioningStatus until provisioning completes.
 	//
-	// Requires the caller to present a gibson-system-ops service account JWT with
-	// the "provisioner" realm role (tenants:signup permission).
-	//
-	// Added by authz-02-keycloak-organizations spec.
-	SignupTenant(ctx context.Context, in *SignupTenantRequest, opts ...grpc.CallOption) (*SignupTenantResponse, error)
-	// InviteMember creates a Keycloak user, adds them to the org, writes an FGA
-	// tuple, and generates a signed invitation token. Requires FGA admin relation.
+	// Added by signup-flow-v2 spec.
+	InitiateSignup(ctx context.Context, in *InitiateSignupRequest, opts ...grpc.CallOption) (*InitiateSignupResponse, error)
+	// InviteMember creates a user in the identity provider, adds them to the org,
+	// writes an FGA tuple, and generates a signed invitation token. Requires FGA admin relation.
 	InviteMember(ctx context.Context, in *InviteMemberRequest, opts ...grpc.CallOption) (*InviteMemberResponse, error)
 	// RemoveMember removes a user from the tenant: deletes the FGA tuple and
-	// removes the Keycloak Organization membership. Requires FGA admin relation.
+	// removes the organization membership. Requires FGA admin relation.
 	RemoveMember(ctx context.Context, in *RemoveMemberRequest, opts ...grpc.CallOption) (*RemoveMemberResponse, error)
 	// ResendInvitation issues a fresh invitation token for an existing pending user.
 	// Requires FGA admin relation.
@@ -216,22 +225,22 @@ type DaemonAdminServiceClient interface {
 	// single RPC call, reducing round-trip count for bulk permission changes.
 	// Requires FGA admin relation on the tenant.
 	BatchGrantComponentAccess(ctx context.Context, in *BatchGrantComponentAccessRequest, opts ...grpc.CallOption) (*BatchGrantComponentAccessResponse, error)
-	// ResetPassword triggers a Keycloak password-reset email for the given address.
+	// ResetPassword triggers a password-reset email for the given address.
 	// Always returns success regardless of whether the email exists, to prevent
 	// email enumeration attacks.
 	ResetPassword(ctx context.Context, in *ResetPasswordRequest, opts ...grpc.CallOption) (*ResetPasswordResponse, error)
 	// RevokeUserSessions revokes one or all active sessions for a user.
-	// Delegates to Keycloak session management and emits a Redis pub/sub event.
+	// Delegates to the identity provider session management and emits a Redis pub/sub event.
 	RevokeUserSessions(ctx context.Context, in *RevokeUserSessionsRequest, opts ...grpc.CallOption) (*RevokeUserSessionsResponse, error)
-	// SuspendMember disables or reactivates a tenant member via Keycloak.
+	// SuspendMember disables or reactivates a tenant member in the identity provider.
 	// When suspend=true the user is disabled and their FGA tuple is removed.
 	// When suspend=false the user is re-enabled and the tuple is restored.
 	SuspendMember(ctx context.Context, in *SuspendMemberRequest, opts ...grpc.CallOption) (*SuspendMemberResponse, error)
-	// GetUserProfile retrieves a user's profile information from Keycloak.
+	// GetUserProfile retrieves a user's profile information from the identity provider.
 	// Accessible by the user themselves or by a tenant admin.
 	GetUserProfile(ctx context.Context, in *GetUserProfileRequest, opts ...grpc.CallOption) (*GetUserProfileResponse, error)
 	// UpdateUserProfile updates mutable profile fields (display_name, avatar_url)
-	// for a user in Keycloak. Email and role changes are not permitted here.
+	// for a user. Email and role changes are not permitted here.
 	UpdateUserProfile(ctx context.Context, in *UpdateUserProfileRequest, opts ...grpc.CallOption) (*UpdateUserProfileResponse, error)
 	// ExportFindings exports findings to the requested format (json, csv, sarif).
 	// The serialized content is returned as bytes in the response.
@@ -250,7 +259,7 @@ type DaemonAdminServiceClient interface {
 	// SetTenantQuota sets or updates the resource quotas for a tenant.
 	// Requires platform-operator role.
 	SetTenantQuota(ctx context.Context, in *SetTenantQuotaRequest, opts ...grpc.CallOption) (*SetTenantQuotaResponse, error)
-	// GetUserSessions returns the active Keycloak sessions for a user.
+	// GetUserSessions returns the active sessions for a user.
 	// Accessible by the user themselves or by a tenant admin.
 	GetUserSessions(ctx context.Context, in *GetUserSessionsRequest, opts ...grpc.CallOption) (*GetUserSessionsResponse, error)
 	// ListAlerts returns platform alerts for a tenant user.
@@ -264,6 +273,40 @@ type DaemonAdminServiceClient interface {
 	ListConversations(ctx context.Context, in *ListConversationsRequest, opts ...grpc.CallOption) (*ListConversationsResponse, error)
 	// GetConversation returns the full message history for a single conversation.
 	GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*GetConversationResponse, error)
+	// RegisterAgentAuth registers a new agent and its host, resolves FGA-backed
+	// capability grants for the agent owner, and writes the grant records.
+	// Requires FGA admin relation on the tenant.
+	RegisterAgentAuth(ctx context.Context, in *RegisterAgentAuthRequest, opts ...grpc.CallOption) (*RegisterAgentAuthResponse, error)
+	// ExecuteAgentCapability checks FGA for the requested capability execution
+	// and records an audit event. Actual component dispatch is a future concern.
+	// Requires FGA member relation on the tenant.
+	ExecuteAgentCapability(ctx context.Context, in *ExecuteAgentCapabilityRequest, opts ...grpc.CallOption) (*ExecuteAgentCapabilityResponse, error)
+	// ListAgentCapabilities returns all capabilities available to a given user
+	// by querying FGA and the component registry.
+	// Requires FGA member relation on the tenant.
+	ListAgentCapabilities(ctx context.Context, in *ListAgentCapabilitiesRequest, opts ...grpc.CallOption) (*ListAgentCapabilitiesResponse, error)
+	// GetAgentAuthStatus returns the current status and grants for an agent.
+	// Requires FGA member relation on the tenant.
+	GetAgentAuthStatus(ctx context.Context, in *GetAgentAuthStatusRequest, opts ...grpc.CallOption) (*GetAgentAuthStatusResponse, error)
+	// RevokeAgentAuth sets the agent's status to revoked and revokes all grants.
+	// Requires FGA admin relation on the tenant.
+	RevokeAgentAuth(ctx context.Context, in *RevokeAgentAuthRequest, opts ...grpc.CallOption) (*RevokeAgentAuthResponse, error)
+	// ListAgentAuthAgents returns a paginated list of agents for a tenant.
+	// Requires FGA admin relation on the tenant.
+	ListAgentAuthAgents(ctx context.Context, in *ListAgentAuthAgentsRequest, opts ...grpc.CallOption) (*ListAgentAuthAgentsResponse, error)
+	// CreateHostRegistrationToken issues a single-use API key for host registration.
+	// Requires FGA admin relation on the tenant.
+	CreateHostRegistrationToken(ctx context.Context, in *CreateHostRegistrationTokenRequest, opts ...grpc.CallOption) (*CreateHostRegistrationTokenResponse, error)
+	// ListComponentGrants returns FGA component grants for all users in a tenant.
+	// Best-effort: enumerates FGA tuples directly. Requires admin relation on the tenant.
+	ListComponentGrants(ctx context.Context, in *ListComponentGrantsRequest, opts ...grpc.CallOption) (*ListComponentGrantsResponse, error)
+	// BatchGrantComponentAccessV2 applies a list of per-principal grant/revoke
+	// operations across any component for any user or team.
+	// Requires FGA admin relation on the tenant.
+	BatchGrantComponentAccessV2(ctx context.Context, in *BatchGrantComponentAccessV2Request, opts ...grpc.CallOption) (*BatchGrantComponentAccessV2Response, error)
+	// ListAuditLog returns Postgres-backed audit log entries for a tenant.
+	// Requires FGA admin relation on the tenant.
+	ListAuditLog(ctx context.Context, in *ListAuditLogRequest, opts ...grpc.CallOption) (*ListAuditLogResponse, error)
 }
 
 type daemonAdminServiceClient struct {
@@ -594,10 +637,10 @@ func (c *daemonAdminServiceClient) TransferOwnership(ctx context.Context, in *Tr
 	return out, nil
 }
 
-func (c *daemonAdminServiceClient) SignupTenant(ctx context.Context, in *SignupTenantRequest, opts ...grpc.CallOption) (*SignupTenantResponse, error) {
+func (c *daemonAdminServiceClient) InitiateSignup(ctx context.Context, in *InitiateSignupRequest, opts ...grpc.CallOption) (*InitiateSignupResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SignupTenantResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_SignupTenant_FullMethodName, in, out, cOpts...)
+	out := new(InitiateSignupResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_InitiateSignup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -904,6 +947,106 @@ func (c *daemonAdminServiceClient) GetConversation(ctx context.Context, in *GetC
 	return out, nil
 }
 
+func (c *daemonAdminServiceClient) RegisterAgentAuth(ctx context.Context, in *RegisterAgentAuthRequest, opts ...grpc.CallOption) (*RegisterAgentAuthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterAgentAuthResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_RegisterAgentAuth_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ExecuteAgentCapability(ctx context.Context, in *ExecuteAgentCapabilityRequest, opts ...grpc.CallOption) (*ExecuteAgentCapabilityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExecuteAgentCapabilityResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ExecuteAgentCapability_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListAgentCapabilities(ctx context.Context, in *ListAgentCapabilitiesRequest, opts ...grpc.CallOption) (*ListAgentCapabilitiesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentCapabilitiesResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListAgentCapabilities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GetAgentAuthStatus(ctx context.Context, in *GetAgentAuthStatusRequest, opts ...grpc.CallOption) (*GetAgentAuthStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAgentAuthStatusResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetAgentAuthStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) RevokeAgentAuth(ctx context.Context, in *RevokeAgentAuthRequest, opts ...grpc.CallOption) (*RevokeAgentAuthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeAgentAuthResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_RevokeAgentAuth_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListAgentAuthAgents(ctx context.Context, in *ListAgentAuthAgentsRequest, opts ...grpc.CallOption) (*ListAgentAuthAgentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentAuthAgentsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListAgentAuthAgents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) CreateHostRegistrationToken(ctx context.Context, in *CreateHostRegistrationTokenRequest, opts ...grpc.CallOption) (*CreateHostRegistrationTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateHostRegistrationTokenResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_CreateHostRegistrationToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListComponentGrants(ctx context.Context, in *ListComponentGrantsRequest, opts ...grpc.CallOption) (*ListComponentGrantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListComponentGrantsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListComponentGrants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) BatchGrantComponentAccessV2(ctx context.Context, in *BatchGrantComponentAccessV2Request, opts ...grpc.CallOption) (*BatchGrantComponentAccessV2Response, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BatchGrantComponentAccessV2Response)
+	err := c.cc.Invoke(ctx, DaemonAdminService_BatchGrantComponentAccessV2_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListAuditLog(ctx context.Context, in *ListAuditLogRequest, opts ...grpc.CallOption) (*ListAuditLogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAuditLogResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListAuditLog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonAdminServiceServer is the server API for DaemonAdminService service.
 // All implementations must embed UnimplementedDaemonAdminServiceServer
 // for forward compatibility.
@@ -984,23 +1127,22 @@ type DaemonAdminServiceServer interface {
 	ListUserTenants(context.Context, *ListUserTenantsRequest) (*ListUserTenantsResponse, error)
 	// TransferOwnership transfers tenant ownership to another existing member.
 	TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error)
-	// SignupTenant orchestrates the full tenant signup flow: create Keycloak user,
-	// create Keycloak Organization, add user as member, write the first FGA admin
-	// tuple, and provision downstream tenant resources (Langfuse project, etc.).
+	// InitiateSignup is called after the dashboard has created the identity
+	// provider user. It records the signup request in Redis and emits a
+	// signup.requested event to the async provisioning pipeline. The password is
+	// NOT included — it was already validated by the identity provider.
 	//
-	// This RPC replaces the previous dashboard-side Keycloak admin orchestration
-	// so that admin credentials never leave the daemon pod.
+	// The RPC completes in under 100ms (Redis writes only) and returns immediately
+	// with the tenant ID and a "provisioning" status. The dashboard then polls
+	// GetProvisioningStatus until provisioning completes.
 	//
-	// Requires the caller to present a gibson-system-ops service account JWT with
-	// the "provisioner" realm role (tenants:signup permission).
-	//
-	// Added by authz-02-keycloak-organizations spec.
-	SignupTenant(context.Context, *SignupTenantRequest) (*SignupTenantResponse, error)
-	// InviteMember creates a Keycloak user, adds them to the org, writes an FGA
-	// tuple, and generates a signed invitation token. Requires FGA admin relation.
+	// Added by signup-flow-v2 spec.
+	InitiateSignup(context.Context, *InitiateSignupRequest) (*InitiateSignupResponse, error)
+	// InviteMember creates a user in the identity provider, adds them to the org,
+	// writes an FGA tuple, and generates a signed invitation token. Requires FGA admin relation.
 	InviteMember(context.Context, *InviteMemberRequest) (*InviteMemberResponse, error)
 	// RemoveMember removes a user from the tenant: deletes the FGA tuple and
-	// removes the Keycloak Organization membership. Requires FGA admin relation.
+	// removes the organization membership. Requires FGA admin relation.
 	RemoveMember(context.Context, *RemoveMemberRequest) (*RemoveMemberResponse, error)
 	// ResendInvitation issues a fresh invitation token for an existing pending user.
 	// Requires FGA admin relation.
@@ -1036,22 +1178,22 @@ type DaemonAdminServiceServer interface {
 	// single RPC call, reducing round-trip count for bulk permission changes.
 	// Requires FGA admin relation on the tenant.
 	BatchGrantComponentAccess(context.Context, *BatchGrantComponentAccessRequest) (*BatchGrantComponentAccessResponse, error)
-	// ResetPassword triggers a Keycloak password-reset email for the given address.
+	// ResetPassword triggers a password-reset email for the given address.
 	// Always returns success regardless of whether the email exists, to prevent
 	// email enumeration attacks.
 	ResetPassword(context.Context, *ResetPasswordRequest) (*ResetPasswordResponse, error)
 	// RevokeUserSessions revokes one or all active sessions for a user.
-	// Delegates to Keycloak session management and emits a Redis pub/sub event.
+	// Delegates to the identity provider session management and emits a Redis pub/sub event.
 	RevokeUserSessions(context.Context, *RevokeUserSessionsRequest) (*RevokeUserSessionsResponse, error)
-	// SuspendMember disables or reactivates a tenant member via Keycloak.
+	// SuspendMember disables or reactivates a tenant member in the identity provider.
 	// When suspend=true the user is disabled and their FGA tuple is removed.
 	// When suspend=false the user is re-enabled and the tuple is restored.
 	SuspendMember(context.Context, *SuspendMemberRequest) (*SuspendMemberResponse, error)
-	// GetUserProfile retrieves a user's profile information from Keycloak.
+	// GetUserProfile retrieves a user's profile information from the identity provider.
 	// Accessible by the user themselves or by a tenant admin.
 	GetUserProfile(context.Context, *GetUserProfileRequest) (*GetUserProfileResponse, error)
 	// UpdateUserProfile updates mutable profile fields (display_name, avatar_url)
-	// for a user in Keycloak. Email and role changes are not permitted here.
+	// for a user. Email and role changes are not permitted here.
 	UpdateUserProfile(context.Context, *UpdateUserProfileRequest) (*UpdateUserProfileResponse, error)
 	// ExportFindings exports findings to the requested format (json, csv, sarif).
 	// The serialized content is returned as bytes in the response.
@@ -1070,7 +1212,7 @@ type DaemonAdminServiceServer interface {
 	// SetTenantQuota sets or updates the resource quotas for a tenant.
 	// Requires platform-operator role.
 	SetTenantQuota(context.Context, *SetTenantQuotaRequest) (*SetTenantQuotaResponse, error)
-	// GetUserSessions returns the active Keycloak sessions for a user.
+	// GetUserSessions returns the active sessions for a user.
 	// Accessible by the user themselves or by a tenant admin.
 	GetUserSessions(context.Context, *GetUserSessionsRequest) (*GetUserSessionsResponse, error)
 	// ListAlerts returns platform alerts for a tenant user.
@@ -1084,6 +1226,40 @@ type DaemonAdminServiceServer interface {
 	ListConversations(context.Context, *ListConversationsRequest) (*ListConversationsResponse, error)
 	// GetConversation returns the full message history for a single conversation.
 	GetConversation(context.Context, *GetConversationRequest) (*GetConversationResponse, error)
+	// RegisterAgentAuth registers a new agent and its host, resolves FGA-backed
+	// capability grants for the agent owner, and writes the grant records.
+	// Requires FGA admin relation on the tenant.
+	RegisterAgentAuth(context.Context, *RegisterAgentAuthRequest) (*RegisterAgentAuthResponse, error)
+	// ExecuteAgentCapability checks FGA for the requested capability execution
+	// and records an audit event. Actual component dispatch is a future concern.
+	// Requires FGA member relation on the tenant.
+	ExecuteAgentCapability(context.Context, *ExecuteAgentCapabilityRequest) (*ExecuteAgentCapabilityResponse, error)
+	// ListAgentCapabilities returns all capabilities available to a given user
+	// by querying FGA and the component registry.
+	// Requires FGA member relation on the tenant.
+	ListAgentCapabilities(context.Context, *ListAgentCapabilitiesRequest) (*ListAgentCapabilitiesResponse, error)
+	// GetAgentAuthStatus returns the current status and grants for an agent.
+	// Requires FGA member relation on the tenant.
+	GetAgentAuthStatus(context.Context, *GetAgentAuthStatusRequest) (*GetAgentAuthStatusResponse, error)
+	// RevokeAgentAuth sets the agent's status to revoked and revokes all grants.
+	// Requires FGA admin relation on the tenant.
+	RevokeAgentAuth(context.Context, *RevokeAgentAuthRequest) (*RevokeAgentAuthResponse, error)
+	// ListAgentAuthAgents returns a paginated list of agents for a tenant.
+	// Requires FGA admin relation on the tenant.
+	ListAgentAuthAgents(context.Context, *ListAgentAuthAgentsRequest) (*ListAgentAuthAgentsResponse, error)
+	// CreateHostRegistrationToken issues a single-use API key for host registration.
+	// Requires FGA admin relation on the tenant.
+	CreateHostRegistrationToken(context.Context, *CreateHostRegistrationTokenRequest) (*CreateHostRegistrationTokenResponse, error)
+	// ListComponentGrants returns FGA component grants for all users in a tenant.
+	// Best-effort: enumerates FGA tuples directly. Requires admin relation on the tenant.
+	ListComponentGrants(context.Context, *ListComponentGrantsRequest) (*ListComponentGrantsResponse, error)
+	// BatchGrantComponentAccessV2 applies a list of per-principal grant/revoke
+	// operations across any component for any user or team.
+	// Requires FGA admin relation on the tenant.
+	BatchGrantComponentAccessV2(context.Context, *BatchGrantComponentAccessV2Request) (*BatchGrantComponentAccessV2Response, error)
+	// ListAuditLog returns Postgres-backed audit log entries for a tenant.
+	// Requires FGA admin relation on the tenant.
+	ListAuditLog(context.Context, *ListAuditLogRequest) (*ListAuditLogResponse, error)
 	mustEmbedUnimplementedDaemonAdminServiceServer()
 }
 
@@ -1190,8 +1366,8 @@ func (UnimplementedDaemonAdminServiceServer) ListUserTenants(context.Context, *L
 func (UnimplementedDaemonAdminServiceServer) TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TransferOwnership not implemented")
 }
-func (UnimplementedDaemonAdminServiceServer) SignupTenant(context.Context, *SignupTenantRequest) (*SignupTenantResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SignupTenant not implemented")
+func (UnimplementedDaemonAdminServiceServer) InitiateSignup(context.Context, *InitiateSignupRequest) (*InitiateSignupResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InitiateSignup not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) InviteMember(context.Context, *InviteMemberRequest) (*InviteMemberResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method InviteMember not implemented")
@@ -1282,6 +1458,36 @@ func (UnimplementedDaemonAdminServiceServer) ListConversations(context.Context, 
 }
 func (UnimplementedDaemonAdminServiceServer) GetConversation(context.Context, *GetConversationRequest) (*GetConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversation not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) RegisterAgentAuth(context.Context, *RegisterAgentAuthRequest) (*RegisterAgentAuthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterAgentAuth not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ExecuteAgentCapability(context.Context, *ExecuteAgentCapabilityRequest) (*ExecuteAgentCapabilityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExecuteAgentCapability not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListAgentCapabilities(context.Context, *ListAgentCapabilitiesRequest) (*ListAgentCapabilitiesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAgentCapabilities not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetAgentAuthStatus(context.Context, *GetAgentAuthStatusRequest) (*GetAgentAuthStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAgentAuthStatus not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) RevokeAgentAuth(context.Context, *RevokeAgentAuthRequest) (*RevokeAgentAuthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeAgentAuth not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListAgentAuthAgents(context.Context, *ListAgentAuthAgentsRequest) (*ListAgentAuthAgentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAgentAuthAgents not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) CreateHostRegistrationToken(context.Context, *CreateHostRegistrationTokenRequest) (*CreateHostRegistrationTokenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateHostRegistrationToken not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListComponentGrants(context.Context, *ListComponentGrantsRequest) (*ListComponentGrantsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListComponentGrants not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) BatchGrantComponentAccessV2(context.Context, *BatchGrantComponentAccessV2Request) (*BatchGrantComponentAccessV2Response, error) {
+	return nil, status.Error(codes.Unimplemented, "method BatchGrantComponentAccessV2 not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListAuditLog(context.Context, *ListAuditLogRequest) (*ListAuditLogResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAuditLog not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) mustEmbedUnimplementedDaemonAdminServiceServer() {}
 func (UnimplementedDaemonAdminServiceServer) testEmbeddedByValue()                            {}
@@ -1880,20 +2086,20 @@ func _DaemonAdminService_TransferOwnership_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DaemonAdminService_SignupTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SignupTenantRequest)
+func _DaemonAdminService_InitiateSignup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InitiateSignupRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).SignupTenant(ctx, in)
+		return srv.(DaemonAdminServiceServer).InitiateSignup(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DaemonAdminService_SignupTenant_FullMethodName,
+		FullMethod: DaemonAdminService_InitiateSignup_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).SignupTenant(ctx, req.(*SignupTenantRequest))
+		return srv.(DaemonAdminServiceServer).InitiateSignup(ctx, req.(*InitiateSignupRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2438,6 +2644,186 @@ func _DaemonAdminService_GetConversation_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonAdminService_RegisterAgentAuth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterAgentAuthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).RegisterAgentAuth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_RegisterAgentAuth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).RegisterAgentAuth(ctx, req.(*RegisterAgentAuthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ExecuteAgentCapability_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExecuteAgentCapabilityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ExecuteAgentCapability(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ExecuteAgentCapability_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ExecuteAgentCapability(ctx, req.(*ExecuteAgentCapabilityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListAgentCapabilities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentCapabilitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListAgentCapabilities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListAgentCapabilities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListAgentCapabilities(ctx, req.(*ListAgentCapabilitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GetAgentAuthStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAgentAuthStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetAgentAuthStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetAgentAuthStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetAgentAuthStatus(ctx, req.(*GetAgentAuthStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_RevokeAgentAuth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeAgentAuthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).RevokeAgentAuth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_RevokeAgentAuth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).RevokeAgentAuth(ctx, req.(*RevokeAgentAuthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListAgentAuthAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentAuthAgentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListAgentAuthAgents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListAgentAuthAgents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListAgentAuthAgents(ctx, req.(*ListAgentAuthAgentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_CreateHostRegistrationToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateHostRegistrationTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).CreateHostRegistrationToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_CreateHostRegistrationToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).CreateHostRegistrationToken(ctx, req.(*CreateHostRegistrationTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListComponentGrants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListComponentGrantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListComponentGrants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListComponentGrants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListComponentGrants(ctx, req.(*ListComponentGrantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_BatchGrantComponentAccessV2_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BatchGrantComponentAccessV2Request)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).BatchGrantComponentAccessV2(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_BatchGrantComponentAccessV2_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).BatchGrantComponentAccessV2(ctx, req.(*BatchGrantComponentAccessV2Request))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListAuditLog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAuditLogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListAuditLog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListAuditLog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListAuditLog(ctx, req.(*ListAuditLogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonAdminService_ServiceDesc is the grpc.ServiceDesc for DaemonAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2574,8 +2960,8 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DaemonAdminService_TransferOwnership_Handler,
 		},
 		{
-			MethodName: "SignupTenant",
-			Handler:    _DaemonAdminService_SignupTenant_Handler,
+			MethodName: "InitiateSignup",
+			Handler:    _DaemonAdminService_InitiateSignup_Handler,
 		},
 		{
 			MethodName: "InviteMember",
@@ -2696,6 +3082,46 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetConversation",
 			Handler:    _DaemonAdminService_GetConversation_Handler,
+		},
+		{
+			MethodName: "RegisterAgentAuth",
+			Handler:    _DaemonAdminService_RegisterAgentAuth_Handler,
+		},
+		{
+			MethodName: "ExecuteAgentCapability",
+			Handler:    _DaemonAdminService_ExecuteAgentCapability_Handler,
+		},
+		{
+			MethodName: "ListAgentCapabilities",
+			Handler:    _DaemonAdminService_ListAgentCapabilities_Handler,
+		},
+		{
+			MethodName: "GetAgentAuthStatus",
+			Handler:    _DaemonAdminService_GetAgentAuthStatus_Handler,
+		},
+		{
+			MethodName: "RevokeAgentAuth",
+			Handler:    _DaemonAdminService_RevokeAgentAuth_Handler,
+		},
+		{
+			MethodName: "ListAgentAuthAgents",
+			Handler:    _DaemonAdminService_ListAgentAuthAgents_Handler,
+		},
+		{
+			MethodName: "CreateHostRegistrationToken",
+			Handler:    _DaemonAdminService_CreateHostRegistrationToken_Handler,
+		},
+		{
+			MethodName: "ListComponentGrants",
+			Handler:    _DaemonAdminService_ListComponentGrants_Handler,
+		},
+		{
+			MethodName: "BatchGrantComponentAccessV2",
+			Handler:    _DaemonAdminService_BatchGrantComponentAccessV2_Handler,
+		},
+		{
+			MethodName: "ListAuditLog",
+			Handler:    _DaemonAdminService_ListAuditLog_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

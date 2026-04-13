@@ -33,6 +33,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/component"
@@ -674,6 +675,12 @@ func (t *mockTool) Execute(ctx context.Context, input map[string]any) (map[strin
 
 func (t *mockTool) Health(ctx context.Context) types.HealthStatus {
 	return types.Healthy("mock tool is healthy")
+}
+
+func (t *mockTool) InputMessageType() string  { return "" }
+func (t *mockTool) OutputMessageType() string { return "" }
+func (t *mockTool) ExecuteProto(ctx context.Context, input proto.Message) (proto.Message, error) {
+	return nil, fmt.Errorf("mockTool: proto execution not supported; use Execute instead")
 }
 
 // mockExternalTool implements ExternalToolClient for testing

@@ -1,11 +1,10 @@
-// Package auth provides OpenID Connect (OIDC) authentication and authorization for Gibson.
+// Package auth provides authentication for Gibson's gRPC server.
 //
-// This package implements enterprise-grade authentication with support for:
-//   - Multi-provider OIDC federation (Okta, Azure AD, Google Workspace)
-//   - CI/CD workload identity (GitHub Actions, GitLab CI, ArgoCD)
+// This package implements authentication with support for:
+//   - API key tokens (gsk_-prefixed, Postgres-backed)
 //   - Kubernetes ServiceAccount token validation via TokenReview API
-//   - Claims-to-roles mapping for flexible authorization
-//   - Local development mode with static tokens
+//   - Better Auth HMAC-SHA256 session tokens from the dashboard
+//   - Agent Auth JWTs (Task 10)
 //
 // # Architecture
 //
@@ -13,59 +12,45 @@
 //
 //   - auth.go: Core Authenticator interface and Identity types
 //   - config.go: Configuration types for YAML/Viper integration
-//   - oidc.go: OIDC token validation using JWKS
+//   - apikey.go: API key authentication (gsk_-prefixed tokens, Postgres-backed)
+//   - better_auth.go: Better Auth HMAC-SHA256 session token validation
+//   - k8s.go: Kubernetes TokenReview validation
 //   - jwks.go: JWKS caching with TTL and background refresh
-//   - claims.go: Claims extraction and normalization
 //   - roles.go: Role binding evaluation and permission computation
 //   - interceptor.go: gRPC interceptors for authentication enforcement
-//   - k8s.go: Kubernetes TokenReview validation
-//   - local.go: Static token authentication for development
 //   - errors.go: Auth-specific errors with gRPC status codes
 //   - metrics.go: Prometheus metrics for observability
 //
 // # Authentication Flow
 //
 //  1. gRPC interceptor extracts Bearer token from metadata
-//  2. Token passed to Authenticator.Authenticate()
-//  3. Authenticator matches token issuer to configuration
-//  4. Token signature validated using cached JWKS
-//  5. Claims extracted and mapped to Identity
-//  6. Role bindings evaluated to determine permissions
-//  7. Identity injected into request context
-//  8. Handlers use IdentityFromContext() to access authenticated identity
+//  2. Token routed to the appropriate authenticator based on token format
+//  3. Token validated and claims extracted
+//  4. Identity injected into request context
+//  5. Handlers use IdentityFromContext() to access authenticated identity
 //
 // # Configuration
 //
 // Authentication is configured in gibson.yaml:
 //
 //	auth:
-//	  enabled: true
+//	  mode: enterprise
 //	  trust_localhost: false
 //	  clock_skew: 30s
-//	  oidc:
-//	    - issuer: https://company.okta.com
-//	      audience: gibson-prod
-//	      jwks_ttl: 1h
-//	      claims_mapping:
-//	        groups: groups
-//	      role_bindings:
-//	        "security-team": ["mission:execute"]
-//	    - issuer: https://token.actions.githubusercontent.com
-//	      claims_mapping:
-//	        repository: repo
-//	        ref: branch
-//	      role_bindings:
-//	        "myorg/infra:refs/heads/main": ["mission:execute"]
+//	  kubernetes:
+//	    enabled: true
+//	  better_auth:
+//	    enabled: true
+//	    secret: ${BETTER_AUTH_SECRET}
 //
 // # Usage
 //
 // Authentication is enforced via gRPC interceptors:
 //
 //	// In daemon gRPC server setup
-//	auth := auth.NewOIDCValidator(cfg.Auth)
 //	srv := grpc.NewServer(
-//	    grpc.UnaryInterceptor(auth.UnaryAuthInterceptor(auth, &cfg.Auth)),
-//	    grpc.StreamInterceptor(auth.StreamAuthInterceptor(auth, &cfg.Auth)),
+//	    grpc.UnaryInterceptor(auth.UnaryAuthInterceptor(authenticator, &cfg.Auth, logger)),
+//	    grpc.StreamInterceptor(auth.StreamAuthInterceptor(authenticator, &cfg.Auth, logger)),
 //	)
 //
 // Authorization is enforced by the RPCAuthzInterceptor via permissions.yaml,
@@ -77,10 +62,7 @@
 //	    if !ok {
 //	        return nil, status.Error(codes.Unauthenticated, "not authenticated")
 //	    }
-//	    // identity.Subject, identity.Roles are data; the interceptor has
-//	    // already authorized this call.
-//
-//	    // ... execute mission
+//	    // identity.Subject for audit, identity.Roles as data, etc.
 //	}
 //
 // # Thread Safety
@@ -89,16 +71,8 @@
 // The JWKS cache uses sync.RWMutex for thread-safe access.
 // Identity instances are immutable after creation.
 //
-// # Performance
-//
-// JWKS responses are cached with configurable TTL (default 1 hour).
-// Token validation completes in < 5ms with cached JWKS.
-// Auth interceptor adds < 1ms to request latency for valid tokens.
-//
 // # Security
 //
 // Tokens are NEVER logged, even at debug level.
-// JWKS fetching requires HTTPS (no plaintext allowed).
 // Clock skew tolerance is configurable (default 30s).
-// Audience validation prevents token misuse across services.
 package auth

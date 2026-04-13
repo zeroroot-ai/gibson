@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/agentauth"
 	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
@@ -96,17 +98,16 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 			"mode", d.config.Auth.Mode,
 		)
 
-		authenticator, err := d.createAuthenticator(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to create authenticator: %w", err)
+		apiKeyAuth, k8sValidator, jwtVerifier, baValidator, buildErr := d.buildAuthValidators(ctx)
+		if buildErr != nil {
+			return fmt.Errorf("failed to build auth validators: %w", buildErr)
 		}
 
-		unaryInterceptors = append(unaryInterceptors, auth.UnaryAuthInterceptor(authenticator, &d.config.Auth, d.logger.Slog()))
-		streamInterceptors = append(streamInterceptors, auth.StreamAuthInterceptor(authenticator, &d.config.Auth, d.logger.Slog()))
+		unaryInterceptors = append(unaryInterceptors, auth.UnaryAuthInterceptor(apiKeyAuth, k8sValidator, jwtVerifier, baValidator, &d.config.Auth, d.logger.Slog()))
+		streamInterceptors = append(streamInterceptors, auth.StreamAuthInterceptor(apiKeyAuth, k8sValidator, jwtVerifier, baValidator, &d.config.Auth, d.logger.Slog()))
 
 		d.logger.Info(ctx, "auth interceptors installed",
 			"trust_localhost", d.config.Auth.TrustLocalhost,
-			"oidc_issuers", len(d.config.Auth.OIDC),
 		)
 	} else {
 		d.logger.Warn(ctx, "auth interceptors not installed - auth mode not configured")
@@ -145,6 +146,10 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	// Create and register daemon service.
 	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
+	if d.authorizer != nil {
+		daemonSvc.WithAuthorizer(d.authorizer)
+		d.logger.Info(ctx, "FGA authorizer wired into DaemonServer for admin RPCs")
+	}
 	if d.quotaManager != nil {
 		daemonSvc.WithQuotaManager(d.quotaManager)
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
@@ -164,17 +169,66 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 
 			// Create APIKeyAuthenticator for provisioner's key generation and
 			// the CreateAPIKey/ListAPIKeys/RevokeAPIKey RPCs.
-			apiKeyAuth, akErr := auth.NewAPIKeyAuthenticator(redisClient)
-			if akErr != nil {
-				d.logger.Warn(ctx, "failed to create API key authenticator for provisioner", "error", akErr)
+			// API keys are now stored in the dashboard Postgres instance.
+			var apiKeyAuth *auth.APIKeyAuthenticator
+			if d.dashboardDB != nil {
+				var akErr error
+				apiKeyAuth, akErr = auth.NewAPIKeyAuthenticator(d.dashboardDB)
+				if akErr != nil {
+					d.logger.Warn(ctx, "failed to create API key authenticator for provisioner", "error", akErr)
+				}
+			} else {
+				d.logger.Warn(ctx, "API key authenticator not wired: dashboard Postgres unavailable")
 			}
 
 			// Wire the API key store so that the key management RPCs are
-			// backed by Redis.  This must be done before registering the
+			// backed by Postgres. This must be done before registering the
 			// gRPC server so that the RPCs are available immediately.
 			if apiKeyAuth != nil {
 				daemonSvc.WithAPIKeyStore(apiKeyAuth)
-				d.logger.Info(ctx, "API key store wired into DaemonServer")
+				d.logger.Info(ctx, "API key store wired into DaemonServer (Postgres-backed)")
+			}
+
+			// Wire the AgentAuthService for the Agent Auth Protocol RPCs.
+			// Requires dashboardDB (for store + apiKeys) and the FGA authorizer.
+			// The component registry is needed for FGABridge capability resolution.
+			if d.dashboardDB != nil && apiKeyAuth != nil && d.authorizer != nil {
+				agentStore := agentauth.NewAgentAuthStore(d.dashboardDB)
+				auditWriter := audit.NewWriter(d.dashboardDB, d.logger.Slog())
+				auditWriter.Start(ctx)
+				auditQuery := audit.NewQuery(d.dashboardDB)
+
+				// ComponentRegistry for FGABridge: use a placeholder that resolves from
+				// the compRegistry built later in startGRPCServer. Because compRegistry is
+				// constructed below (after this block), we pass a lazy wrapper around the
+				// daemon's component registry when available, or fall back to an
+				// empty no-op registry here and re-wire after construction.
+				// For now, we build the bridge with what's available; compRegistry will be
+				// set in the ComponentService wiring below via WithFGABridge if needed.
+				fgaBridge := agentauth.NewFGABridge(d.authorizer, d.compRegistry, d.logger.Slog())
+
+				// Build a work-queue dispatcher so that ExecuteAgentCapability
+				// routes capability invocations to the target component's Redis
+				// stream and waits for the result, following the same pattern
+				// used by the harness for tool/plugin dispatch.
+				agentAuthDispatcher := newWorkQueueDispatcher(
+					component.NewRedisWorkQueue(d.stateClient.Client()),
+				)
+
+				agentAuthSvc := agentauth.NewAgentAuthService(agentauth.AgentAuthServiceConfig{
+					Store:       agentStore,
+					FGABridge:   fgaBridge,
+					Authorizer:  d.authorizer,
+					APIKeys:     apiKeyAuth,
+					AuditWriter: auditWriter,
+					AuditQuery:  auditQuery,
+					Dispatcher:  agentAuthDispatcher,
+					Logger:      d.logger.Slog(),
+				})
+				daemonSvc.WithAgentAuthService(agentAuthSvc)
+				d.logger.Info(ctx, "AgentAuthService wired into DaemonServer")
+			} else {
+				d.logger.Warn(ctx, "AgentAuthService not wired: requires dashboardDB, apiKeyAuth, and authorizer")
 			}
 
 			// Wire the onboarding store backed by Redis.
@@ -212,19 +266,42 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 				daemonSvc.WithProvisioner(prov)
 				d.logger.Info(ctx, "provisioner wired into DaemonServer")
 
-				// Wire the SignupHandler — requires KeycloakAdmin and the FGA Authorizer.
-				// The KeycloakAdmin is constructed from daemon config; the Authorizer is
-				// always non-nil after initAuthorizer() (noopAuthorizer when disabled).
-				if kcAdmin, kcErr := provisioner.NewKeycloakAdminClient(
-					d.config.Keycloak.Admin,
-					d.logger.Slog(),
-				); kcErr != nil {
-					d.logger.Warn(ctx, "SignupHandler not wired: failed to build Keycloak admin client",
-						"error", kcErr)
+				// Wire the SignupStateStore for the async InitiateSignup RPC.
+				// Better Auth migration: provisioning state is now Postgres-backed via
+				// PgProvisioningStore. dashboardDB is non-nil when the Postgres connection
+				// pool initialised successfully in initDashboardPostgres; the daemon falls
+				// back to a degraded (nil store) mode when Postgres is unavailable.
+				var signupStore provisioner.ProvisioningStateStore
+				if d.dashboardDB != nil {
+					signupStore = provisioner.NewPgProvisioningStore(d.dashboardDB)
+					daemonSvc.WithSignupStateStore(signupStore, d.stateClient.Client())
+					d.logger.Info(ctx, "PgProvisioningStore wired into DaemonServer")
 				} else {
-					signupHandler := provisioner.NewSignupHandler(kcAdmin, d.authorizer, prov, d.logger.Slog())
-					daemonSvc.WithSignupHandler(signupHandler)
-					d.logger.Info(ctx, "SignupHandler wired into DaemonServer")
+					d.logger.Warn(ctx, "SignupStateStore not wired: dashboard Postgres unavailable")
+				}
+
+				// Start the async SignupPipeline consumer group. It subscribes to
+				// signup:events:stream and drives FGAHandler → ProvisionHandler.
+				// Better Auth migration: KC admin client removed; org creation is now
+				// handled in the dashboard before InitiateSignup is called.
+				if signupStore != nil {
+					signupPipeline := provisioner.NewSignupPipeline(
+						d.stateClient.Client(),
+						d.authorizer,
+						prov,
+						signupStore,
+						d.logger.Slog(),
+					)
+					go func() {
+						if err := signupPipeline.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+							d.logger.Error(ctx, "signup pipeline exited with error",
+								"error", err)
+						}
+					}()
+					d.logger.Info(ctx, "signup pipeline started",
+						"stream", provisioner.SignupStreamKey,
+						"group", provisioner.SignupConsumerGroup,
+					)
 				}
 			} else {
 				d.logger.Warn(ctx, "provisioner not wired: API key authenticator unavailable")
@@ -350,6 +427,15 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 				d.logger.Info(ctx, "quota manager wired into ComponentService for agent quota enforcement")
 			}
 
+			// Wire the FGA authorizer so RegisterComponent writes component
+			// ownership tuples. This enables the "admin from owner" computed
+			// relation: tenant admins automatically have access to all
+			// components owned by their tenant. The authorizer is always
+			// non-nil here (noop when authz.enabled=false), so the nil guard
+			// inside WithAuthorizer / RegisterComponent handles the disabled case.
+			compSvc.WithAuthorizer(d.authorizer)
+			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
+
 			componentpb.RegisterComponentServiceServer(srv, compSvc)
 			d.logger.Info(ctx, "ComponentService initialized",
 				"registry_ttl", "30s",
@@ -374,64 +460,133 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	return nil
 }
 
-// createAuthenticator creates an authenticator based on the auth configuration.
+// agentJWTAdapter wraps agentauth.JWTVerifier to satisfy auth.AgentJWTValidator.
 //
-// This method creates a composite authenticator that supports multiple
-// authentication methods:
-//   - API key authenticator for "gsk_"-prefixed tokens (enterprise/saas modes, requires Redis)
-//   - OIDC validator for OIDC issuers (Okta, Azure AD, GitHub Actions, GitLab CI)
-//   - K8s validator for Kubernetes ServiceAccount tokens
-//   - Local validator for static tokens (development only)
+// The adapter converts agentauth.AgentClaims → auth.AgentAuthClaims so that the
+// auth package never imports agentauth (which would create an import cycle).
+type agentJWTAdapter struct {
+	inner *agentauth.JWTVerifier
+}
+
+// VerifyAgentJWT implements auth.AgentJWTValidator.
+func (a *agentJWTAdapter) VerifyAgentJWT(ctx context.Context, tokenStr, expectedAud string) (*auth.AgentAuthClaims, error) {
+	claims, err := a.inner.VerifyAgentJWT(ctx, tokenStr, expectedAud)
+	if err != nil {
+		return nil, err
+	}
+	return &auth.AgentAuthClaims{
+		AgentID:     claims.AgentID,
+		HostID:      claims.HostID,
+		TenantID:    claims.TenantID,
+		OwnerUserID: claims.OwnerUserID,
+		ExpiresAt:   claims.ExpiresAt,
+	}, nil
+}
+
+// buildAuthValidators constructs the four authentication validators used by the
+// 4-path interceptor.
 //
-// Token routing: "gsk_"-prefixed tokens are handled exclusively by the API key
-// authenticator. All other tokens fall through the OIDC → K8s → Local chain.
-func (d *daemonImpl) createAuthenticator(ctx context.Context) (auth.Authenticator, error) {
-	// Attempt to create an API key authenticator for enterprise/saas modes.
-	// This requires a standalone *redis.Client (not cluster/ring mode).
-	// If Redis is unavailable or in cluster mode, API key auth is silently skipped.
-	var apiKeyAuth *auth.APIKeyAuthenticator
+// Validators are constructed on a best-effort basis: if a dependency (Postgres,
+// K8s config, Better Auth secret) is unavailable the corresponding validator is
+// nil and its path is effectively disabled. The interceptor handles nil validators
+// gracefully (API keys and Better Auth fall through to the default path when their
+// validator is nil, K8s is explicitly guarded).
+//
+// Returns:
+//
+//	apiKeyAuth  — Postgres-backed API key authenticator (nil when dashboardDB unavailable)
+//	k8sAuth     — Kubernetes TokenReview authenticator (nil when K8s is not configured)
+//	jwtVerifier — Ed25519 Agent Auth JWT verifier adapter (nil when dashboardDB unavailable)
+//	baValidator — HMAC-SHA256 Better Auth validator (nil when secret is not configured)
+func (d *daemonImpl) buildAuthValidators(ctx context.Context) (
+	apiKeyAuth *auth.APIKeyAuthenticator,
+	k8sAuth *auth.K8sValidator,
+	jwtValidator auth.AgentJWTValidator,
+	baValidator *auth.BetterAuthValidator,
+	err error,
+) {
 	mode := d.config.Auth.Mode
-	if (mode == "enterprise" || mode == "saas") && d.stateClient != nil {
-		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
-			var err error
-			apiKeyAuth, err = auth.NewAPIKeyAuthenticator(redisClient)
-			if err != nil {
-				// Non-fatal: log and proceed without API key support
-				d.logger.Warn(ctx, "failed to create API key authenticator, continuing without it",
-					"error", err,
-				)
-			}
+
+	// --- Path 1: API key (gsk_ prefix) ---
+	// Postgres-backed; requires dashboardDB.
+	if (mode == "enterprise" || mode == "saas") && d.dashboardDB != nil {
+		apiKeyAuth, err = auth.NewAPIKeyAuthenticator(d.dashboardDB)
+		if err != nil {
+			d.logger.Warn(ctx, "failed to create API key authenticator, continuing without it",
+				"error", err,
+			)
+			apiKeyAuth = nil
+			err = nil // non-fatal
 		} else {
-			d.logger.Info(ctx, "Redis client is not standalone mode; API key authentication unavailable")
+			d.logger.Info(ctx, "API key authenticator initialised (gsk_ path)")
+		}
+	} else if mode == "enterprise" || mode == "saas" {
+		d.logger.Warn(ctx, "API key auth unavailable: dashboard Postgres not initialised")
+	}
+
+	// --- Path 2: Agent Auth JWT (agent+jwt / host+jwt) ---
+	// Requires dashboardDB for agent record lookup and Redis for replay prevention.
+	// Wrapped in agentJWTAdapter to satisfy auth.AgentJWTValidator without
+	// introducing an import cycle between auth and agentauth packages.
+	if d.dashboardDB != nil && d.stateClient != nil {
+		agentStore := agentauth.NewAgentAuthStore(d.dashboardDB)
+		inner := agentauth.NewJWTVerifier(agentStore, d.stateClient.Client())
+		jwtValidator = &agentJWTAdapter{inner: inner}
+		d.logger.Info(ctx, "agent auth JWT verifier initialised (agent+jwt path)")
+	} else {
+		d.logger.Warn(ctx, "agent auth JWT verifier unavailable: dashboard Postgres or Redis not initialised")
+	}
+
+	// --- Path 3: Kubernetes SA token ---
+	// Only created when K8s auth is configured; always nil in non-K8s environments.
+	if d.config.Auth.Kubernetes != nil && d.config.Auth.Kubernetes.Enabled {
+		k8sAuth, err = auth.NewK8sValidator(d.config.Auth.Kubernetes)
+		if err != nil {
+			d.logger.Warn(ctx, "failed to create K8s validator, continuing without it",
+				"error", err,
+			)
+			k8sAuth = nil
+			err = nil // non-fatal
+		} else {
+			d.logger.Info(ctx, "K8s SA token validator initialised")
 		}
 	}
 
-	// Create composite authenticator that supports multiple auth methods
-	authenticator, err := auth.NewCompositeAuthenticator(&d.config.Auth, apiKeyAuth)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create authenticator: %w", err)
+	// --- Path 4: Better Auth (HMAC-SHA256, default path) ---
+	// Requires BETTER_AUTH_SECRET in config. If the secret is absent the default
+	// path is disabled and unauthenticated requests will fail at the interceptor.
+	if d.config.Auth.BetterAuth.Secret != "" {
+		baValidator, err = auth.NewBetterAuthValidator(d.config.Auth.BetterAuth.Secret)
+		if err != nil {
+			// The only reason NewBetterAuthValidator can fail is an empty secret,
+			// which we already guarded against above. Log and treat as non-fatal.
+			d.logger.Warn(ctx, "failed to create Better Auth validator, continuing without it",
+				"error", err,
+			)
+			baValidator = nil
+			err = nil
+		} else {
+			d.logger.Info(ctx, "Better Auth validator initialised (default path)")
+		}
+	} else {
+		d.logger.Warn(ctx, "Better Auth validator unavailable: auth.better_auth_secret not configured")
 	}
 
-	// Log what authentication methods are enabled
-	var methods []string
+	methods := make([]string, 0, 4)
 	if apiKeyAuth != nil {
 		methods = append(methods, "apikey(gsk_)")
 	}
-	if len(d.config.Auth.OIDC) > 0 {
-		methods = append(methods, fmt.Sprintf("oidc(%d issuers)", len(d.config.Auth.OIDC)))
+	if jwtValidator != nil {
+		methods = append(methods, "agent-auth-jwt")
 	}
-	if d.config.Auth.Kubernetes != nil && d.config.Auth.Kubernetes.Enabled {
-		methods = append(methods, "kubernetes")
+	if k8sAuth != nil {
+		methods = append(methods, "k8s-sa")
 	}
-	if d.config.Auth.Local != nil && len(d.config.Auth.Local.Users) > 0 {
-		methods = append(methods, fmt.Sprintf("local(%d users)", len(d.config.Auth.Local.Users)))
+	if baValidator != nil {
+		methods = append(methods, "better-auth")
 	}
-
-	d.logger.Info(ctx, "composite authenticator created",
-		"methods", methods,
-		"note", "gsk_ tokens routed to API key authenticator; others: OIDC → K8s → Local")
-
-	return authenticator, nil
+	d.logger.Info(ctx, "auth validators built", "active_methods", methods)
+	return apiKeyAuth, k8sAuth, jwtValidator, baValidator, nil
 }
 
 // Implementation of api.DaemonInterface for delegation from gRPC server.

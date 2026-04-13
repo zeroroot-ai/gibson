@@ -408,13 +408,10 @@ func parseComponentDependency(depStr string) (component.ComponentKind, string, s
 }
 
 // ResolveFromWorkflow builds a dependency tree from a workflow YAML file path.
-// Implementation stub - will be implemented in subsequent task.
-func (r *resolver) ResolveFromWorkflow(ctx context.Context, workflowPath string) (*DependencyTree, error) {
-	// TODO: Implement in Task 5
-	// 1. Load and parse workflow YAML file
-	// 2. Create mission definition adapter
-	// 3. Call ResolveFromMission
-	return nil, nil
+//
+// Not yet implemented. Call ResolveFromMission with a parsed mission definition instead.
+func (r *resolver) ResolveFromWorkflow(_ context.Context, workflowPath string) (*DependencyTree, error) {
+	return nil, fmt.Errorf("ResolveFromWorkflow: not yet implemented (workflow path: %s)", workflowPath)
 }
 
 // ValidateState checks the current state of all components in the dependency tree.
@@ -673,9 +670,8 @@ func (r *resolver) EnsureRunning(ctx context.Context, tree *DependencyTree) erro
 }
 
 // getCachedManifest retrieves a manifest from cache or loads it via the manifest loader.
-// This helper method will be used by ResolveFromMission to avoid repeated manifest loads.
+// This helper avoids repeated manifest loads by caching results keyed on kind and name.
 func (r *resolver) getCachedManifest(ctx context.Context, kind component.ComponentKind, name string) (*component.Manifest, error) {
-	// TODO: Will be used in Task 4
 	// Check cache first
 	key := manifestCacheKey(kind, name)
 	if cached, ok := r.manifestCache.Load(key); ok {

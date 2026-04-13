@@ -30,7 +30,7 @@ type mockToolServiceServer struct {
 	descriptor      *toolpb.GetDescriptorResponse
 	executeResponse *toolpb.ExecuteResponse
 	executeError    error
-	healthResponse  *commonpb.HealthStatus
+	healthResponse  *toolpb.HealthResponse
 	healthError     error
 }
 
@@ -51,15 +51,17 @@ func (m *mockToolServiceServer) Execute(ctx context.Context, req *toolpb.Execute
 	return m.executeResponse, nil
 }
 
-func (m *mockToolServiceServer) Health(ctx context.Context, req *toolpb.HealthRequest) (*commonpb.HealthStatus, error) {
+func (m *mockToolServiceServer) Health(ctx context.Context, req *toolpb.HealthRequest) (*toolpb.HealthResponse, error) {
 	if m.healthError != nil {
 		return nil, m.healthError
 	}
 	if m.healthResponse == nil {
-		return &commonpb.HealthStatus{
-			Status:    "healthy",
-			Message:   "OK",
-			CheckedAt: time.Now().UnixMilli(),
+		return &toolpb.HealthResponse{
+			Status: &commonpb.HealthStatus{
+				Status:    "healthy",
+				Message:   "OK",
+				CheckedAt: time.Now().UnixMilli(),
+			},
 		}, nil
 	}
 	return m.healthResponse, nil
@@ -120,7 +122,8 @@ func createTestClient(t *testing.T, lis *bufconn.Listener) *GRPCToolClient {
 	descriptor, err := client.GetDescriptor(descCtx, &toolpb.GetDescriptorRequest{})
 	require.NoError(t, err)
 
-	// TODO: Once SDK task 1.3 is complete, use descriptor.GetInputMessageType() and descriptor.GetOutputMessageType()
+	// Use proto Struct as the default message type. When the SDK exposes
+	// GetInputMessageType/GetOutputMessageType on descriptors, switch to those.
 	inputMsgType := "google.protobuf.Struct"
 	outputMsgType := "google.protobuf.Struct"
 
@@ -451,10 +454,12 @@ func TestGRPCToolClient_Health_Healthy(t *testing.T) {
 			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		healthResponse: &commonpb.HealthStatus{
-			Status:    "healthy",
-			Message:   "All systems operational",
-			CheckedAt: now.UnixMilli(),
+		healthResponse: &toolpb.HealthResponse{
+			Status: &commonpb.HealthStatus{
+				Status:    "healthy",
+				Message:   "All systems operational",
+				CheckedAt: now.UnixMilli(),
+			},
 		},
 	}
 
@@ -485,10 +490,12 @@ func TestGRPCToolClient_Health_Unhealthy(t *testing.T) {
 			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		healthResponse: &commonpb.HealthStatus{
-			Status:    "unhealthy",
-			Message:   "Database connection failed",
-			CheckedAt: now.UnixMilli(),
+		healthResponse: &toolpb.HealthResponse{
+			Status: &commonpb.HealthStatus{
+				Status:    "unhealthy",
+				Message:   "Database connection failed",
+				CheckedAt: now.UnixMilli(),
+			},
 		},
 	}
 
@@ -518,10 +525,12 @@ func TestGRPCToolClient_Health_Degraded(t *testing.T) {
 			InputSchema:  &commonpb.JSONSchema{Json: inputSchemaJSON},
 			OutputSchema: &commonpb.JSONSchema{Json: outputSchemaJSON},
 		},
-		healthResponse: &commonpb.HealthStatus{
-			Status:    "degraded",
-			Message:   "High latency detected",
-			CheckedAt: now.UnixMilli(),
+		healthResponse: &toolpb.HealthResponse{
+			Status: &commonpb.HealthStatus{
+				Status:    "degraded",
+				Message:   "High latency detected",
+				CheckedAt: now.UnixMilli(),
+			},
 		},
 	}
 

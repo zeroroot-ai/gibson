@@ -352,33 +352,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
-	// Apply Keycloak.Admin config interpolation.
-	// The top-level keycloak section (base_url, master_realm, client_id, client_secret)
-	// is handled by Viper unmarshalling automatically. The nested admin sub-struct
-	// requires explicit interpolation for GIBSON_KEYCLOAK_ADMIN_* env vars.
-	if keycloak, ok := interpolated["keycloak"].(map[string]interface{}); ok {
-		if admin, ok := keycloak["admin"].(map[string]interface{}); ok {
-			if v, ok := admin["endpoint"].(string); ok {
-				cfg.Keycloak.Admin.Endpoint = interpolateString(v)
-			}
-			if v, ok := admin["realm"].(string); ok {
-				cfg.Keycloak.Admin.Realm = interpolateString(v)
-			}
-			if v, ok := admin["client_id"].(string); ok {
-				cfg.Keycloak.Admin.ClientID = interpolateString(v)
-			}
-			if v, ok := admin["client_secret"].(string); ok {
-				cfg.Keycloak.Admin.ClientSecret = interpolateString(v)
-			}
-			if v, ok := admin["username"].(string); ok {
-				cfg.Keycloak.Admin.Username = interpolateString(v)
-			}
-			if v, ok := admin["password"].(string); ok {
-				cfg.Keycloak.Admin.Password = interpolateString(v)
-			}
-		}
-	}
-
 	// Apply Checkpoint config interpolation
 	if checkpoint, ok := interpolated["checkpoint"].(map[string]interface{}); ok {
 		if keyPrefix, ok := checkpoint["key_prefix"].(string); ok {

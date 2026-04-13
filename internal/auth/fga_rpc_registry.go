@@ -392,8 +392,8 @@ func (r *FgaRpcRegistry) populate() {
 		Description: "Full tenant provisioning flow (platform operator only)",
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetProvisioningStatus", FgaCheckSpec{
-		Relation:    "member",
-		Description: "Query provisioning status (caller must be tenant member or platform_operator)",
+		Unauthenticated: true, // Called during signup before tenant/FGA tuple exists — JWT is sufficient
+		Description:     "Query provisioning status",
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/DeprovisionTenant", FgaCheckSpec{
 		Relation:    "platform_operator",
@@ -500,8 +500,8 @@ func (r *FgaRpcRegistry) populate() {
 		Description: "Update member role within caller's tenant (admin only)",
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListUserTenants", FgaCheckSpec{
-		Relation:    "member",
-		Description: "List tenants the caller belongs to",
+		Unauthenticated: true, // Self-query: any authenticated user can list their own tenants. Auth is on the JWT, not FGA.
+		Description:     "List tenants the caller belongs to",
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/TransferOwnership", FgaCheckSpec{
 		Relation:    "admin",
@@ -514,10 +514,13 @@ func (r *FgaRpcRegistry) populate() {
 	// GetAuthSchema was removed in authz-03 task 10 and must not appear here.
 
 	// Signup.
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/SignupTenant", FgaCheckSpec{
-		Relation:    "platform_operator",
-		ObjectFrom:  constObject("system_tenant:_system"),
-		Description: "Orchestrate full tenant signup flow (called by gibson-system-ops)",
+	// InitiateSignup is called by the dashboard after KC user creation (signup-flow-v2).
+	// The service account is authenticated by KC client_credentials — the JWT itself
+	// proves the caller is system-ops. FGA is not needed here; the auth interceptor
+	// already verified the JWT and extracted the "provisioner" role.
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/InitiateSignup", FgaCheckSpec{
+		Unauthenticated: true,
+		Description:     "Initiate async tenant provisioning after KC user creation (called by gibson-system-ops)",
 	})
 
 	// ---------------------------------------------------------------------------
@@ -595,9 +598,12 @@ func (r *FgaRpcRegistry) populate() {
 	// ---------------------------------------------------------------------------
 	// authz-04: GetMyPermissions on DaemonService (non-admin, any authenticated user)
 	// ---------------------------------------------------------------------------
+	// GetMyPermissions is called by the dashboard during session setup.
+	// Any authenticated user can query their own permissions — the handler
+	// scopes results to the caller's identity internally.
 	r.add("/gibson.daemon.v1.DaemonService/GetMyPermissions", FgaCheckSpec{
-		Relation:    "member",
-		Description: "Get the caller's permissions summary for the current tenant",
+		Unauthenticated: true,
+		Description:     "Get the caller's permissions summary for the current tenant",
 	})
 
 	// ---------------------------------------------------------------------------
@@ -605,19 +611,19 @@ func (r *FgaRpcRegistry) populate() {
 	// ---------------------------------------------------------------------------
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetUserProfile", FgaCheckSpec{
 		Relation:    "member",
-		Description: "Get Keycloak user profile (self or tenant admin)",
+		Description: "Get user profile (self or tenant admin)",
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/UpdateUserProfile", FgaCheckSpec{
 		Relation:    "member",
-		Description: "Update Keycloak user profile fields (self or tenant admin)",
+		Description: "Update user profile fields (self or tenant admin)",
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ResetPassword", FgaCheckSpec{
 		Relation:    "member",
-		Description: "Trigger Keycloak password reset email",
+		Description: "Trigger password reset email",
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RevokeUserSessions", FgaCheckSpec{
 		Relation:    "admin",
-		Description: "Revoke all active Keycloak sessions for a user (admin only)",
+		Description: "Revoke all active sessions for a user (admin only)",
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/SuspendMember", FgaCheckSpec{
 		Relation:    "admin",
@@ -649,7 +655,7 @@ func (r *FgaRpcRegistry) populate() {
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetUserSessions", FgaCheckSpec{
 		Relation:    "member",
-		Description: "Get active Keycloak sessions for a user (self or admin)",
+		Description: "Get active sessions for a user (self or admin)",
 	})
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListAlerts", FgaCheckSpec{
 		Relation:    "member",
@@ -670,6 +676,50 @@ func (r *FgaRpcRegistry) populate() {
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetConversation", FgaCheckSpec{
 		Relation:    "member",
 		Description: "Get a chat conversation with its message history",
+	})
+
+	// ---------------------------------------------------------------------------
+	// agent-auth-fga-integration: Agent Auth Protocol RPCs
+	// ---------------------------------------------------------------------------
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RegisterAgentAuth", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Register a new agent and host pair with FGA-resolved capability grants (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ExecuteAgentCapability", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Execute a capability on behalf of an agent (FGA-checked per-capability)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListAgentCapabilities", FgaCheckSpec{
+		Relation:    "member",
+		Description: "List FGA-resolved capabilities available to a user",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetAgentAuthStatus", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Get the current status and grants for an agent",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RevokeAgentAuth", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Revoke an agent and all its capability grants (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListAgentAuthAgents", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "List registered agents for a tenant (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/CreateHostRegistrationToken", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Issue a single-use host registration API key (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListComponentGrants", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Enumerate FGA component grants for all users in a tenant (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/BatchGrantComponentAccessV2", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Bulk grant or revoke component access for any principal (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListAuditLog", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Query Postgres audit log entries for a tenant (admin only)",
 	})
 
 	// =========================================================================

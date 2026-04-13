@@ -103,9 +103,7 @@ func DefaultConfig() *Config {
 			Enabled:        false, // Disabled by default for backward compatibility
 			TrustLocalhost: false,
 			ClockSkew:      30 * time.Second,
-			OIDC:           []auth.OIDCIssuerConfig{},
 			Kubernetes:     nil,
-			Local:          nil,
 		},
 		Checkpoint: *DefaultCheckpointConfig(),
 		Authz: AuthzConfig{
