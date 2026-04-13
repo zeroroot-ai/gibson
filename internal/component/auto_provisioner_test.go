@@ -46,7 +46,7 @@ func newTestAutoProvisioner(t *testing.T) (*TenantAutoProvisioner, *TenantServic
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	svc := NewTenantService(client, logger, nil)
-	prov := NewTenantAutoProvisioner(svc, nil, nil, nil, logger)
+	prov := NewTenantAutoProvisioner(svc, nil, nil, logger)
 	return prov, svc, mr
 }
 
@@ -109,7 +109,7 @@ func TestTenantAutoProvisioner_EnsureTenant_CallsLangfuse(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	svc := NewTenantService(client, logger, nil)
 	lf := &fakeLangfuse{}
-	prov := NewTenantAutoProvisioner(svc, nil, lf, nil, logger)
+	prov := NewTenantAutoProvisioner(svc, lf, nil, logger)
 
 	err := prov.EnsureTenant(context.Background(), "wayne-enterprises")
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestTenantAutoProvisioner_EnsureTenant_LangfuseFailureIsNonFatal(t *testing
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	svc := NewTenantService(client, logger, nil)
 	lf := &fakeLangfuse{retErr: errors.New("langfuse unavailable")}
-	prov := NewTenantAutoProvisioner(svc, nil, lf, nil, logger)
+	prov := NewTenantAutoProvisioner(svc, lf, nil, logger)
 
 	// Despite Langfuse failing, EnsureTenant must succeed.
 	err := prov.EnsureTenant(context.Background(), "stark-industries")

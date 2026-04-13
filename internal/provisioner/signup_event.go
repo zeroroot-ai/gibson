@@ -65,7 +65,7 @@ const (
 // by PgProvisioningStore.Get(). Fields map to table columns.
 //
 // The OrgID and RetryCountOrg fields have been removed:
-//   - OrgID: Keycloak org creation is no longer a daemon pipeline step.
+//   - OrgID: org creation is no longer a daemon pipeline step.
 //     Better Auth creates the organisation in the dashboard.
 //   - RetryCountOrg: the org step no longer exists, so its retry counter
 //     is also gone.

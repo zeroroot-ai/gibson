@@ -7,9 +7,9 @@
 // from signup_pipeline.go's processMessage loop.
 //
 // Better Auth migration changes:
-//   - handleOrg has been removed. Better Auth creates the Keycloak / Better Auth
-//     organisation in the dashboard before calling InitiateSignup, so the daemon
-//     no longer needs to perform org creation.
+//   - handleOrg has been removed. Better Auth creates the user organisation in
+//     the dashboard before calling InitiateSignup, so the daemon no longer needs
+//     to perform org creation.
 //   - handleFGA now consumes EventSignupRequested (was EventSignupOrgCreated).
 //     The idempotency check is unchanged; the step_statuses["fga"] guard still
 //     prevents double-execution on retry.

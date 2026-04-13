@@ -1,19 +1,16 @@
 package auth
 
 // crossTenantRoles is the set of role names that are permitted to operate
-// across tenant boundaries. These are service-account / infrastructure roles
-// whose privileges span all tenants. Normal user roles (owner, admin,
-// operator, viewer) are intentionally absent.
+// across tenant boundaries. These are infrastructure roles whose privileges
+// span all tenants.
 //
-// Cross-tenant detection is handled by checking the caller's roles against
-// this fixed list. Normal user roles (owner, admin, operator, viewer) are
-// intentionally absent.
+// Only platform-operator (daemon) has cross-tenant access. The dashboard uses
+// platform-service which forwards user context via x-gibson-user-id metadata
+// and is NOT cross-tenant — it operates on behalf of a specific user's tenant.
+//
+// Normal user roles (owner, admin, operator, viewer) are intentionally absent.
 var crossTenantRoles = map[string]struct{}{
 	"platform-operator": {},
-	"provisioner":       {},
-	"tool-executor":     {},
-	"agent-executor":    {},
-	"plugin-executor":   {},
 }
 
 // IsCrossTenantCaller returns true if any of the supplied role names is a

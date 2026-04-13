@@ -15,11 +15,10 @@
 //   - apikey.go: API key authentication (gsk_-prefixed tokens, Postgres-backed)
 //   - better_auth.go: Better Auth HMAC-SHA256 session token validation
 //   - k8s.go: Kubernetes TokenReview validation
-//   - jwks.go: JWKS caching with TTL and background refresh
 //   - roles.go: Role binding evaluation and permission computation
 //   - interceptor.go: gRPC interceptors for authentication enforcement
 //   - errors.go: Auth-specific errors with gRPC status codes
-//   - metrics.go: Prometheus metrics for observability
+//   - metrics.go: OpenTelemetry metrics for observability
 //
 // # Authentication Flow
 //
@@ -68,7 +67,6 @@
 // # Thread Safety
 //
 // All authenticator implementations are safe for concurrent use.
-// The JWKS cache uses sync.RWMutex for thread-safe access.
 // Identity instances are immutable after creation.
 //
 // # Security

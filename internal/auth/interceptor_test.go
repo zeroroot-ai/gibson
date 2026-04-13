@@ -47,17 +47,6 @@ func (m *mockAPIKeyValidator) Authenticate(ctx context.Context, token string) (*
 	return nil, errInvalidToken
 }
 
-// mockK8sValidator is a test implementation of k8sValidatorIface.
-type mockK8sValidator struct {
-	authenticateFn func(ctx context.Context, token string) (*Identity, error)
-}
-
-func (m *mockK8sValidator) Authenticate(ctx context.Context, token string) (*Identity, error) {
-	if m.authenticateFn != nil {
-		return m.authenticateFn(ctx, token)
-	}
-	return nil, errInvalidToken
-}
 
 // mockAgentJWTValidator is a test implementation of AgentJWTValidator.
 type mockAgentJWTValidator struct {
@@ -128,11 +117,11 @@ func (m *mockAddr) String() string {
 // ---------------------------------------------------------------------------
 
 func newTestUnary(ba betterAuthValidatorIface, cfg *AuthConfig, logger *slog.Logger) grpc.UnaryServerInterceptor {
-	return buildUnaryInterceptor(nil, nil, nil, ba, cfg, logger)
+	return buildUnaryInterceptor(nil, nil, ba, cfg, logger)
 }
 
 func newTestStream(ba betterAuthValidatorIface, cfg *AuthConfig, logger *slog.Logger) grpc.StreamServerInterceptor {
-	return buildStreamInterceptor(nil, nil, nil, ba, cfg, logger)
+	return buildStreamInterceptor(nil, nil, ba, cfg, logger)
 }
 
 // ---------------------------------------------------------------------------
@@ -739,7 +728,7 @@ func (m *mockStreamHandlerWithCtx) handle(srv any, stream grpc.ServerStream) err
 // Tenant extraction helpers for tests
 // ---------------------------------------------------------------------------
 
-func newOIDCIdentity(issuer string, claims map[string]any) *Identity {
+func newTestIdentity(issuer string, claims map[string]any) *Identity {
 	return &Identity{
 		Identity: sdkauth.Identity{
 			Subject: "user@example.com",
@@ -763,7 +752,7 @@ func newBearerContext(token string) context.Context {
 // ---------------------------------------------------------------------------
 
 func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
-	const oidcIssuer = "https://idp.example.com"
+	const testIssuer = "https://idp.example.com"
 
 	tests := []struct {
 		name          string
@@ -775,10 +764,10 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 		wantErr       bool
 	}{
 		{
-			// Scenario A: enterprise + OIDC WITH tenant claim → claim value wins.
-			name: "A: enterprise OIDC with tenant claim",
+			// Scenario A: enterprise + user session WITH tenant claim → claim value wins.
+			name: "A: enterprise session with tenant claim",
 			mode: "enterprise",
-			identity: newOIDCIdentity(oidcIssuer, map[string]any{
+			identity: newTestIdentity(testIssuer, map[string]any{
 				"tenant_id": "team-alpha",
 			}),
 			tenantClaim:   "tenant_id",
@@ -786,20 +775,20 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    "team-alpha",
 		},
 		{
-			// Scenario B: enterprise + OIDC WITHOUT tenant claim + DefaultTenant set → fallback.
-			name:          "B: enterprise OIDC without tenant claim, default tenant set",
+			// Scenario B: enterprise + user session WITHOUT tenant claim + DefaultTenant set → fallback.
+			name:          "B: enterprise session without tenant claim, default tenant set",
 			mode:          "enterprise",
-			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
+			identity:      newTestIdentity(testIssuer, map[string]any{}),
 			tenantClaim:   "tenant_id",
 			defaultTenant: "fallback-tenant",
 			wantTenant:    "fallback-tenant",
 		},
 		{
-			// Scenario C: enterprise + OIDC WITHOUT tenant claim + NO DefaultTenant.
+			// Scenario C: enterprise + user session WITHOUT tenant claim + NO DefaultTenant.
 			// After authz-02, TenantFromContext returns SystemTenant when no tenant set.
-			name:          "C: enterprise OIDC without tenant claim, no default",
+			name:          "C: enterprise session without tenant claim, no default",
 			mode:          "enterprise",
-			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
+			identity:      newTestIdentity(testIssuer, map[string]any{}),
 			tenantClaim:   "tenant_id",
 			defaultTenant: "",
 			wantTenant:    SystemTenant,
@@ -808,7 +797,7 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			// Scenario D: enterprise + API key identity with tenant claim → claim value wins.
 			name: "D: enterprise API key with tenant claim",
 			mode: "enterprise",
-			identity: newOIDCIdentity(apiKeyIssuer, map[string]any{
+			identity: newTestIdentity(apiKeyIssuer, map[string]any{
 				"tenant_id": "api-tenant",
 			}),
 			tenantClaim:   "tenant_id",
@@ -816,10 +805,10 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    "api-tenant",
 		},
 		{
-			// Scenario E: saas mode with OIDC tenant claim → claim value (unchanged behaviour).
-			name: "E: saas OIDC with tenant claim",
+			// Scenario E: saas mode with tenant claim → claim value (unchanged behaviour).
+			name: "E: saas session with tenant claim",
 			mode: "saas",
-			identity: newOIDCIdentity(oidcIssuer, map[string]any{
+			identity: newTestIdentity(testIssuer, map[string]any{
 				"tenant_id": "saas-tenant",
 			}),
 			tenantClaim:   "tenant_id",
@@ -867,7 +856,7 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 }
 
 func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
-	const oidcIssuer = "https://idp.example.com"
+	const testIssuer = "https://idp.example.com"
 
 	tests := []struct {
 		name          string
@@ -878,9 +867,9 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 		wantTenant    string
 	}{
 		{
-			name: "A: enterprise OIDC with tenant claim",
+			name: "A: enterprise session with tenant claim",
 			mode: "enterprise",
-			identity: newOIDCIdentity(oidcIssuer, map[string]any{
+			identity: newTestIdentity(testIssuer, map[string]any{
 				"tenant_id": "team-alpha",
 			}),
 			tenantClaim:   "tenant_id",
@@ -888,17 +877,17 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    "team-alpha",
 		},
 		{
-			name:          "B: enterprise OIDC without tenant claim, default tenant set",
+			name:          "B: enterprise session without tenant claim, default tenant set",
 			mode:          "enterprise",
-			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
+			identity:      newTestIdentity(testIssuer, map[string]any{}),
 			tenantClaim:   "tenant_id",
 			defaultTenant: "fallback-tenant",
 			wantTenant:    "fallback-tenant",
 		},
 		{
-			name:          "C: enterprise OIDC without tenant claim, no default",
+			name:          "C: enterprise session without tenant claim, no default",
 			mode:          "enterprise",
-			identity:      newOIDCIdentity(oidcIssuer, map[string]any{}),
+			identity:      newTestIdentity(testIssuer, map[string]any{}),
 			tenantClaim:   "tenant_id",
 			defaultTenant: "",
 			wantTenant:    SystemTenant,
@@ -906,7 +895,7 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 		{
 			name: "D: enterprise API key with tenant claim",
 			mode: "enterprise",
-			identity: newOIDCIdentity(apiKeyIssuer, map[string]any{
+			identity: newTestIdentity(apiKeyIssuer, map[string]any{
 				"tenant_id": "api-tenant",
 			}),
 			tenantClaim:   "tenant_id",
@@ -914,9 +903,9 @@ func TestStreamAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 			wantTenant:    "api-tenant",
 		},
 		{
-			name: "E: saas OIDC with tenant claim",
+			name: "E: saas session with tenant claim",
 			mode: "saas",
-			identity: newOIDCIdentity(oidcIssuer, map[string]any{
+			identity: newTestIdentity(testIssuer, map[string]any{
 				"tenant_id": "saas-tenant",
 			}),
 			tenantClaim:   "tenant_id",
@@ -1068,7 +1057,7 @@ func TestRouteAuth_APIKeyPath(t *testing.T) {
 	}
 
 	cfg := &AuthConfig{Mode: "enterprise"}
-	interceptor := buildUnaryInterceptor(apiKeys, nil, nil, ba, cfg, slog.Default())
+	interceptor := buildUnaryInterceptor(apiKeys, nil, ba, cfg, slog.Default())
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -1089,7 +1078,7 @@ func TestRouteAuth_APIKeyPath(t *testing.T) {
 func TestRouteAuth_APIKeyPath_ValidatorNil(t *testing.T) {
 	ba := &mockBetterAuthValidator{}
 	cfg := &AuthConfig{Mode: "enterprise"}
-	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
+	interceptor := buildUnaryInterceptor(nil, nil, ba, cfg, slog.Default())
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -1127,7 +1116,7 @@ func TestRouteAuth_AgentJWTPath(t *testing.T) {
 	}
 
 	cfg := &AuthConfig{Mode: "enterprise"}
-	interceptor := buildUnaryInterceptor(nil, nil, agentValidator, ba, cfg, slog.Default())
+	interceptor := buildUnaryInterceptor(nil, agentValidator, ba, cfg, slog.Default())
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -1157,7 +1146,7 @@ func TestRouteAuth_AgentJWTPath_VerifyError(t *testing.T) {
 	}
 	ba := &mockBetterAuthValidator{}
 	cfg := &AuthConfig{Mode: "enterprise"}
-	interceptor := buildUnaryInterceptor(nil, nil, agentValidator, ba, cfg, slog.Default())
+	interceptor := buildUnaryInterceptor(nil, agentValidator, ba, cfg, slog.Default())
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -1167,69 +1156,6 @@ func TestRouteAuth_AgentJWTPath_VerifyError(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, codes.Internal, status.Code(err), "non-AuthError becomes Internal")
 	assert.False(t, handler.called)
-}
-
-// TestRouteAuth_K8sPath verifies that compact JWTs (not agent+jwt) route to
-// K8sValidator when k8s is non-nil.
-func TestRouteAuth_K8sPath(t *testing.T) {
-	expectedIdentity := &Identity{
-		Identity: sdkauth.Identity{Subject: "default:my-sa", Issuer: "kubernetes"},
-		Roles:    []string{"tool-executor"},
-	}
-
-	k8s := &mockK8sValidator{
-		authenticateFn: func(_ context.Context, _ string) (*Identity, error) {
-			return expectedIdentity, nil
-		},
-	}
-	ba := &mockBetterAuthValidator{
-		authenticateFn: func(_ context.Context, _ string) (*Identity, error) {
-			t.Fatal("BetterAuth must not be called for K8s SA tokens when k8s validator is present")
-			return nil, nil
-		},
-	}
-
-	cfg := &AuthConfig{Mode: "enterprise"}
-	interceptor := buildUnaryInterceptor(nil, k8s, nil, ba, cfg, slog.Default())
-
-	handler := &mockHandler{}
-	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
-	ctx := newBearerContext(fakeK8sToken())
-
-	resp, err := interceptor(ctx, "req", info, handler.handle)
-	require.NoError(t, err)
-	assert.Equal(t, "response", resp)
-	assert.True(t, handler.called)
-
-	got, ok := GibsonIdentityFromContext(handler.capturedCtx)
-	require.True(t, ok)
-	assert.Equal(t, expectedIdentity.Subject, got.Subject)
-}
-
-// TestRouteAuth_K8sPath_NilK8sValidator checks that when k8s is nil, a compact
-// JWT (not agent+jwt) falls through to the BetterAuth path.
-func TestRouteAuth_K8sPath_NilK8sValidator(t *testing.T) {
-	expectedIdentity := &Identity{
-		Identity: sdkauth.Identity{Subject: "ba-user", Issuer: "better-auth"},
-	}
-	ba := &mockBetterAuthValidator{
-		authenticateFn: func(_ context.Context, _ string) (*Identity, error) {
-			return expectedIdentity, nil
-		},
-	}
-
-	cfg := &AuthConfig{Mode: "enterprise"}
-	// k8s is nil — K8s path disabled; token falls through to Better Auth
-	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
-
-	handler := &mockHandler{}
-	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
-	ctx := newBearerContext(fakeK8sToken())
-
-	resp, err := interceptor(ctx, "req", info, handler.handle)
-	require.NoError(t, err)
-	assert.Equal(t, "response", resp)
-	assert.True(t, handler.called)
 }
 
 // TestRouteAuth_BetterAuthPath verifies that plain tokens route to BetterAuthValidator.
@@ -1246,7 +1172,7 @@ func TestRouteAuth_BetterAuthPath(t *testing.T) {
 		},
 	}
 	cfg := &AuthConfig{Mode: "enterprise"}
-	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
+	interceptor := buildUnaryInterceptor(nil, nil, ba, cfg, slog.Default())
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -1266,7 +1192,7 @@ func TestRouteAuth_BetterAuthPath(t *testing.T) {
 // validator returns Unauthenticated for plain tokens.
 func TestRouteAuth_BetterAuthPath_ValidatorNil(t *testing.T) {
 	cfg := &AuthConfig{Mode: "enterprise"}
-	interceptor := buildUnaryInterceptor(nil, nil, nil, nil, cfg, slog.Default())
+	interceptor := buildUnaryInterceptor(nil, nil, nil, cfg, slog.Default())
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -1282,7 +1208,7 @@ func TestRouteAuth_BetterAuthPath_ValidatorNil(t *testing.T) {
 func TestRouteAuth_EmptyToken(t *testing.T) {
 	ba := &mockBetterAuthValidator{}
 	cfg := &AuthConfig{Mode: "enterprise"}
-	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
+	interceptor := buildUnaryInterceptor(nil, nil, ba, cfg, slog.Default())
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
@@ -1307,7 +1233,7 @@ func TestRouteAuth_TrustLocalhost(t *testing.T) {
 		Mode:           "enterprise",
 		TrustLocalhost: true,
 	}
-	interceptor := buildUnaryInterceptor(nil, nil, nil, ba, cfg, slog.Default())
+	interceptor := buildUnaryInterceptor(nil, nil, ba, cfg, slog.Default())
 
 	handler := &mockHandler{}
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}

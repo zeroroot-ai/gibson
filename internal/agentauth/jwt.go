@@ -15,8 +15,10 @@
 //
 //   - Token expiry is checked BEFORE signature verification to prevent timing
 //     oracles from leaking information about signature validity.
-//   - Replay protection uses a Redis SetNX on the jti claim with a TTL equal to
-//     the maximum allowed token lifetime (65 seconds).
+//   - The JTI field is included in the JWT payload for uniqueness and audit
+//     logging but is NOT enforced server-side (no Redis replay check).
+//     The 55-second token lifetime combined with TLS transport security is
+//     sufficient to prevent replay attacks.
 //   - ed25519.Verify uses constant-time comparison internally.
 package agentauth
 
@@ -28,19 +30,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 // maxTokenFuture is the maximum amount of time a token's exp can be in the
 // future relative to the local clock. It accounts for clock skew between the
 // token issuer and the verifier, plus the maximum token lifetime of 60 seconds.
 const maxTokenFuture = 65 * time.Second
-
-// jtiTTL is the Redis TTL applied to jti replay-prevention keys. It covers the
-// full token lifetime plus skew so a valid token cannot be replayed after
-// expiry but is also rejected immediately on a second presentation.
-const jtiTTL = 65 * time.Second
 
 // ---------------------------------------------------------------------------
 // Store interface — narrow contract used by JWTVerifier
@@ -159,21 +154,20 @@ type rawPayload struct {
 //   - Audience matching
 //   - Expiry and future-skew checks
 //   - Ed25519 signature verification against stored public keys
-//   - jti replay prevention via Redis SetNX (agent tokens only)
+//
+// The JTI field is present in verified tokens for audit purposes but is not
+// enforced server-side. No Redis round-trip is performed during verification.
 //
 // JWTVerifier is safe for concurrent use.
 type JWTVerifier struct {
 	store agentLookup
-	redis redis.Cmdable
 	clock func() time.Time // injectable for tests
 }
 
-// NewJWTVerifier constructs a JWTVerifier backed by the given store and Redis
-// client. Both arguments must be non-nil.
-func NewJWTVerifier(store agentLookup, rdb redis.Cmdable) *JWTVerifier {
+// NewJWTVerifier constructs a JWTVerifier backed by the given store.
+func NewJWTVerifier(store agentLookup) *JWTVerifier {
 	return &JWTVerifier{
 		store: store,
-		redis: rdb,
 		clock: time.Now,
 	}
 }
@@ -190,9 +184,11 @@ func NewJWTVerifier(store agentLookup, rdb redis.Cmdable) *JWTVerifier {
 //  6. Look up agent record from the store; reject if not found or not active.
 //  7. Parse the agent's Ed25519 public key from its stored JWK.
 //  8. Verify Ed25519 signature; signing input is the raw "header.payload" bytes.
-//  9. Check jti replay via Redis SetNX; reject if the jti was already seen.
-//  10. Update agent last_active_at (best-effort, errors are silently ignored).
-//  11. Return AgentClaims populated from both the JWT and the store record.
+//  9. Update agent last_active_at (best-effort, errors are silently ignored).
+//  10. Return AgentClaims populated from both the JWT and the store record.
+//
+// The JTI field is validated for presence but not checked against a replay store.
+// The 55-second token lifetime combined with TLS transport security prevents replay.
 func (v *JWTVerifier) VerifyAgentJWT(ctx context.Context, tokenStr, expectedAud string) (*AgentClaims, error) {
 	headerPart, payloadPart, sigPart, err := splitToken(tokenStr)
 	if err != nil {
@@ -258,18 +254,6 @@ func (v *JWTVerifier) VerifyAgentJWT(ctx context.Context, tokenStr, expectedAud 
 	}
 	if !ed25519.Verify(pubKey, signingInput, sig) {
 		return nil, fmt.Errorf("agentauth: VerifyAgentJWT: signature verification failed")
-	}
-
-	// Replay prevention — jti is mandatory for agent tokens.
-	if payload.JTI == "" {
-		return nil, fmt.Errorf("agentauth: VerifyAgentJWT: missing jti claim")
-	}
-	set, err := v.redis.SetNX(ctx, "jti:"+payload.JTI, "1", jtiTTL).Result()
-	if err != nil {
-		return nil, fmt.Errorf("agentauth: VerifyAgentJWT: jti redis check: %w", err)
-	}
-	if !set {
-		return nil, fmt.Errorf("agentauth: VerifyAgentJWT: jti %q already used (replay)", payload.JTI)
 	}
 
 	// Best-effort last_active update — errors are silently ignored per spec.

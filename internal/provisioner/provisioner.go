@@ -124,7 +124,7 @@ type ProvisionRequest struct {
 	DisplayName      string
 	Tier             string
 	OwnerEmail       string
-	OwnerUserID      string // Keycloak user ID; when set, provisioner creates owner membership
+	OwnerUserID      string // Better Auth user ID; when set, provisioner creates owner membership
 	StripeCustomerID string
 	StripeSubID      string
 }

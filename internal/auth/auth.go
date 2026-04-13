@@ -16,7 +16,7 @@ var gibsonIdentityCtxKey = gibsonIdentityKey{}
 // Authenticator validates tokens and returns identity information.
 //
 // This interface abstracts the authentication mechanism to support
-// multiple authentication strategies (OIDC, K8s TokenReview, static tokens).
+// multiple authentication strategies (Better Auth sessions, K8s TokenReview, API keys).
 //
 // Implementations must be safe for concurrent use.
 type Authenticator interface {
@@ -65,17 +65,16 @@ type Identity struct {
 	// Examples: ["graphrag:write", "plugin:gitlab:read", "missions:execute", "*"]
 	Capabilities []string
 
-	// Tenants are the Keycloak Organization aliases this identity is a member of.
+	// Tenants are the organization slugs this identity is a member of.
 	//
-	// Populated by the OIDC validator from the JWT's "organizations" claim
-	// (set by the Organization Membership Mapper on the gibson-dashboard client).
-	// For API key identities and non-OIDC callers this is nil.
+	// Populated by BetterAuthValidator from the session payload's
+	// "activeOrganizationId" field, and by the agent-auth path from the
+	// owner's organization. For K8s ServiceAccount identities this is nil.
 	//
 	// This is the single source of truth for "which tenants does this user belong to."
 	//
-	// Nil means the JWT had no organizations claim (pre-migration users,
-	// service accounts, platform operators). An empty non-nil slice means the
-	// claim was present but empty.
+	// Nil means no organization context was present (service accounts, platform
+	// operators). A single-entry slice is the common case for user sessions.
 	Tenants []string
 }
 

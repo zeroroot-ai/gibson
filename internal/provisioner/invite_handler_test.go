@@ -52,7 +52,7 @@ func (m *mockAuthzForInvite) Close() error    { return nil }
 
 func newTestInviteHandler(t *testing.T, az authz.Authorizer, rc *redis.Client) *InviteHandler {
 	t.Helper()
-	h, err := NewInviteHandler(nil, az, rc, InviteHandlerConfig{
+	h, err := NewInviteHandler(az, rc, InviteHandlerConfig{
 		SigningKey: []byte("test-signing-key-32-bytes-long!!"),
 		BaseURL:   "https://app.example.com",
 		TokenTTL:  24 * time.Hour,
@@ -190,7 +190,7 @@ func TestInviteHandler_Accept_ExpiredToken(t *testing.T) {
 	rc := newMiniRedis(t)
 
 	// Use a very short TTL to simulate expiry.
-	h, err := NewInviteHandler(nil, az, rc, InviteHandlerConfig{
+	h, err := NewInviteHandler(az, rc, InviteHandlerConfig{
 		SigningKey: []byte("test-signing-key-32-bytes-long!!"),
 		BaseURL:   "https://app.example.com",
 		TokenTTL:  1 * time.Millisecond,
@@ -245,7 +245,6 @@ func TestInviteHandler_Resend_Success(t *testing.T) {
 func TestNewInviteHandler_NilKeyRejected(t *testing.T) {
 	rc := newMiniRedis(t)
 	_, err := NewInviteHandler(
-		nil,
 		&mockAuthzForInvite{},
 		rc,
 		InviteHandlerConfig{SigningKey: []byte("short")}, // too short

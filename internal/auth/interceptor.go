@@ -69,11 +69,6 @@ type apiKeyValidatorIface interface {
 	Authenticate(ctx context.Context, token string) (*Identity, error)
 }
 
-// k8sValidatorIface is the narrow contract for K8s SA token auth.
-type k8sValidatorIface interface {
-	Authenticate(ctx context.Context, token string) (*Identity, error)
-}
-
 // AgentJWTValidator is the interface the interceptor uses to verify Agent Auth JWTs.
 //
 // The daemon wires this with an adapter that wraps agentauth.JWTVerifier and
@@ -132,13 +127,10 @@ func IsAgentAuthJWT(token string) bool {
 // UnaryAuthInterceptor returns a gRPC unary interceptor that authenticates
 // requests using one of four methods:
 //
-//  1. gsk_ prefix     → APIKeyAuthenticator (Postgres lookup)
-//  2. agent+jwt       → AgentJWTValidator (Ed25519 verify)
-//  3. K8s SA JWT      → K8sValidator (TokenReview) — only when k8s is non-nil
-//  4. Otherwise       → BetterAuthValidator (HMAC-SHA256)
-//
-// The function accepts concrete validator types. Pass nil for k8s when K8s
-// authentication is not configured (e.g., outside a Kubernetes cluster).
+//  1. SPIFFE peer cert SAN → spiffeToIdentity (TLS peer cert, no token)
+//  2. gsk_ prefix          → APIKeyAuthenticator (Postgres lookup)
+//  3. agent+jwt            → AgentJWTValidator (Ed25519 verify)
+//  4. Otherwise            → BetterAuthValidator (HMAC-SHA256)
 //
 // Agent Auth JWTs set Identity.Subject to the agent's owner user ID so that the
 // downstream FGA interceptor checks the owner's permissions, not the agent's.
@@ -147,20 +139,18 @@ func IsAgentAuthJWT(token string) bool {
 // identity for requests from 127.0.0.1 or ::1 without requiring a token.
 func UnaryAuthInterceptor(
 	apiKeys *APIKeyAuthenticator,
-	k8s *K8sValidator,
 	agentJWT AgentJWTValidator,
 	ba *BetterAuthValidator,
 	cfg *AuthConfig,
 	logger *slog.Logger,
 ) grpc.UnaryServerInterceptor {
-	return buildUnaryInterceptor(apiKeys, k8s, agentJWT, ba, cfg, logger)
+	return buildUnaryInterceptor(apiKeys, agentJWT, ba, cfg, logger)
 }
 
 // buildUnaryInterceptor constructs the interceptor from the narrow interfaces
 // so that unit tests can supply lightweight mocks.
 func buildUnaryInterceptor(
 	apiKeys apiKeyValidatorIface,
-	k8s k8sValidatorIface,
 	agentJWT AgentJWTValidator,
 	ba betterAuthValidatorIface,
 	cfg *AuthConfig,
@@ -199,6 +189,24 @@ func buildUnaryInterceptor(
 			}
 		}
 
+		// Path 1: SPIFFE — check TLS peer cert SAN before any token extraction.
+		// In-cluster workloads present mTLS with a SPIFFE SVID; no bearer token needed.
+		if spiffeID, ok := extractSPIFFEID(ctx); ok {
+			identity, err := spiffeToIdentity(spiffeID)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, "unknown spiffe id")
+				span.SetAttributes(attribute.String("auth.result", "failure"))
+				logAuthFailure(ctx, logger, info.FullMethod, err.Error())
+				return nil, toGRPCStatus(err)
+			}
+			logAuthSuccess(ctx, logger, info.FullMethod, identity)
+			setAuthSpanAttributes(span, identity)
+			ctx = ContextWithIdentity(ctx, identity)
+			ctx = injectTenant(ctx, identity, cfg, mode, span)
+			return handler(ctx, req)
+		}
+
 		token, err := extractBearerToken(ctx)
 		if err != nil {
 			span.RecordError(err)
@@ -208,7 +216,7 @@ func buildUnaryInterceptor(
 			return nil, status.Error(grpccodes.Unauthenticated, "missing bearer token")
 		}
 
-		identity, err := routeAuth(ctx, token, info.FullMethod, apiKeys, k8s, agentJWT, ba)
+		identity, err := routeAuth(ctx, token, info.FullMethod, apiKeys, agentJWT, ba)
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "authentication failed")
@@ -236,26 +244,24 @@ func buildUnaryInterceptor(
 // ---------------------------------------------------------------------------
 
 // StreamAuthInterceptor returns a gRPC stream interceptor that authenticates
-// requests using the same four-path logic as UnaryAuthInterceptor.
+// requests using the same routing logic as UnaryAuthInterceptor.
 // Authentication is performed once when the stream is established; the
 // authenticated Identity and Tenant are injected into the stream context for
 // the duration of the stream.
 func StreamAuthInterceptor(
 	apiKeys *APIKeyAuthenticator,
-	k8s *K8sValidator,
 	agentJWT AgentJWTValidator,
 	ba *BetterAuthValidator,
 	cfg *AuthConfig,
 	logger *slog.Logger,
 ) grpc.StreamServerInterceptor {
-	return buildStreamInterceptor(apiKeys, k8s, agentJWT, ba, cfg, logger)
+	return buildStreamInterceptor(apiKeys, agentJWT, ba, cfg, logger)
 }
 
 // buildStreamInterceptor constructs the stream interceptor from the narrow
 // interfaces so that unit tests can supply lightweight mocks.
 func buildStreamInterceptor(
 	apiKeys apiKeyValidatorIface,
-	k8s k8sValidatorIface,
 	agentJWT AgentJWTValidator,
 	ba betterAuthValidatorIface,
 	cfg *AuthConfig,
@@ -296,6 +302,23 @@ func buildStreamInterceptor(
 			}
 		}
 
+		// Path 1: SPIFFE — check TLS peer cert SAN before any token extraction.
+		if spiffeID, ok := extractSPIFFEID(ctx); ok {
+			identity, err := spiffeToIdentity(spiffeID)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, "unknown spiffe id")
+				span.SetAttributes(attribute.String("auth.result", "failure"))
+				logAuthFailure(ctx, logger, info.FullMethod, err.Error())
+				return toGRPCStatus(err)
+			}
+			logAuthSuccess(ctx, logger, info.FullMethod, identity)
+			setAuthSpanAttributes(span, identity)
+			ctx = ContextWithIdentity(ctx, identity)
+			ctx = injectTenant(ctx, identity, cfg, mode, span)
+			return handler(srv, &authenticatedServerStream{ServerStream: ss, ctx: ctx})
+		}
+
 		token, err := extractBearerToken(ctx)
 		if err != nil {
 			span.RecordError(err)
@@ -305,7 +328,7 @@ func buildStreamInterceptor(
 			return status.Error(grpccodes.Unauthenticated, "missing bearer token")
 		}
 
-		identity, err := routeAuth(ctx, token, info.FullMethod, apiKeys, k8s, agentJWT, ba)
+		identity, err := routeAuth(ctx, token, info.FullMethod, apiKeys, agentJWT, ba)
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "authentication failed")
@@ -335,10 +358,12 @@ func buildStreamInterceptor(
 // routeAuth dispatches the token to the correct validator based on its shape.
 //
 // Detection order (each check is O(1) before any crypto):
-//  1. "gsk_" prefix        → API key path (Postgres hash lookup)
-//  2. IsAgentAuthJWT()     → Agent Auth JWT path (Ed25519, header decode only)
-//  3. isK8sToken() + k8s   → Kubernetes SA path (TokenReview)
-//  4. default              → Better Auth path (HMAC-SHA256)
+//  1. "gsk_" prefix    → API key path (Postgres hash lookup)
+//  2. IsAgentAuthJWT() → Agent Auth JWT path (Ed25519, header decode only)
+//  3. default          → Better Auth path (HMAC-SHA256)
+//
+// SPIFFE auth is handled upstream in the interceptor (before token extraction)
+// and never reaches this function.
 //
 // There is no fallthrough: each branch either returns an Identity or an error.
 // When a validator is nil the token is treated as invalid for that path to
@@ -348,7 +373,6 @@ func routeAuth(
 	token string,
 	fullMethod string,
 	apiKeys apiKeyValidatorIface,
-	k8s k8sValidatorIface,
 	agentJWT AgentJWTValidator,
 	ba betterAuthValidatorIface,
 ) (*Identity, error) {
@@ -368,9 +392,6 @@ func routeAuth(
 			return nil, err
 		}
 		return agentClaimsToIdentity(claims), nil
-
-	case k8s != nil && isK8sToken(token):
-		return k8s.Authenticate(ctx, token)
 
 	default:
 		if ba == nil {
@@ -503,21 +524,6 @@ func extractBearerToken(ctx context.Context) (string, error) {
 	}
 
 	return token, nil
-}
-
-// isK8sToken reports whether a token looks like a Kubernetes ServiceAccount JWT.
-//
-// K8s SA tokens are compact JWTs with three base64url-encoded parts separated
-// by ".". This is a fast structural check — it does NOT verify the signature or
-// decode any claims. The actual validation is performed by the TokenReview API
-// inside K8sValidator.Authenticate.
-//
-// Agent Auth JWTs are also compact JWTs, but are detected first by IsAgentAuthJWT
-// (which inspects the "typ" header), so any JWT reaching this check is not an
-// Agent Auth JWT.
-func isK8sToken(token string) bool {
-	parts := strings.SplitN(token, ".", 3)
-	return len(parts) == 3 && parts[0] != "" && parts[1] != "" && parts[2] != ""
 }
 
 // checkLocalhostBypassWithAddr checks if the request is from localhost and returns a synthetic identity.

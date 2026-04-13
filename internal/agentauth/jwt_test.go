@@ -12,8 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -168,33 +166,18 @@ func (tp tokenParts) token() string {
 }
 
 // ---------------------------------------------------------------------------
-// miniredis fixture
-// ---------------------------------------------------------------------------
-
-// setupRedis starts a miniredis instance and returns a redis.Client backed by it.
-// The instance and client are cleaned up when the test finishes.
-func setupRedis(t *testing.T) (*miniredis.Miniredis, redis.Cmdable) {
-	t.Helper()
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	return mr, rdb
-}
-
-// ---------------------------------------------------------------------------
 // VerifyAgentJWT — happy path
 // ---------------------------------------------------------------------------
 
 func TestVerifyAgentJWT_ValidToken(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "tenant-acme",
 		UserID: "user-bob", Status: "active", PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-abc", now, now.Add(30*time.Second))
 
@@ -219,14 +202,13 @@ func TestVerifyAgentJWT_ValidToken(t *testing.T) {
 
 func TestVerifyAgentJWT_ExpiredToken(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
 		PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	past := time.Now().Add(-120 * time.Second)
 	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-exp", past, past.Add(30*time.Second))
 
@@ -237,14 +219,13 @@ func TestVerifyAgentJWT_ExpiredToken(t *testing.T) {
 
 func TestVerifyAgentJWT_WrongAudience(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
 		PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildAgentToken(priv, "agent-001", "host-001", "wrong-aud", "jti-aud", now, now.Add(30*time.Second))
 
@@ -256,14 +237,13 @@ func TestVerifyAgentJWT_WrongAudience(t *testing.T) {
 func TestVerifyAgentJWT_WrongSignature(t *testing.T) {
 	pub, _ := genKeyPair(t)
 	_, wrongPriv := genKeyPair(t) // sign with a different key
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
 		PublicKeyJWK: pubKeyToJWK(pub), // registered key differs from signing key
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildAgentToken(wrongPriv, "agent-001", "host-001", "gibson-daemon", "jti-sig", now, now.Add(30*time.Second))
 
@@ -272,37 +252,31 @@ func TestVerifyAgentJWT_WrongSignature(t *testing.T) {
 	assert.Contains(t, err.Error(), "signature verification failed")
 }
 
-func TestVerifyAgentJWT_ReplayedJTI(t *testing.T) {
+// TestVerifyAgentJWT_SameJTI verifies that the same JTI can be presented multiple
+// times — JTI replay is not enforced server-side (no Redis round-trip).
+func TestVerifyAgentJWT_SameJTI(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	mr, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
 		PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 
-	// First presentation must succeed.
-	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-replay", now, now.Add(30*time.Second))
+	// Both presentations must succeed — JTI replay is not enforced.
+	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-same", now, now.Add(30*time.Second))
 	_, err := v.VerifyAgentJWT(context.Background(), tp.token(), "gibson-daemon")
 	require.NoError(t, err, "first presentation should succeed")
 
-	// Advance miniredis clock by 1 second (token still valid for ~29 more seconds).
-	mr.FastForward(time.Second)
-
-	// Second presentation of the same jti must be rejected even with a freshly
-	// signed token using the same jti value.
-	tp2 := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-replay", now, now.Add(30*time.Second))
+	tp2 := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-same", now, now.Add(30*time.Second))
 	_, err = v.VerifyAgentJWT(context.Background(), tp2.token(), "gibson-daemon")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "replay")
+	require.NoError(t, err, "second presentation with same JTI should also succeed (no replay enforcement)")
 }
 
 func TestVerifyAgentJWT_MalformedToken_TwoParts(t *testing.T) {
-	_, rdb := setupRedis(t)
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 
 	_, err := v.VerifyAgentJWT(context.Background(), "header.payload", "gibson-daemon")
 	require.Error(t, err)
@@ -310,24 +284,21 @@ func TestVerifyAgentJWT_MalformedToken_TwoParts(t *testing.T) {
 }
 
 func TestVerifyAgentJWT_MalformedToken_EmptyString(t *testing.T) {
-	_, rdb := setupRedis(t)
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 
 	_, err := v.VerifyAgentJWT(context.Background(), "", "gibson-daemon")
 	require.Error(t, err)
 }
 
 func TestVerifyAgentJWT_MalformedToken_BadBase64Header(t *testing.T) {
-	_, rdb := setupRedis(t)
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 
 	_, err := v.VerifyAgentJWT(context.Background(), "!!!.payload.sig", "gibson-daemon")
 	require.Error(t, err)
 }
 
 func TestVerifyAgentJWT_MalformedToken_BadJSONHeader(t *testing.T) {
-	_, rdb := setupRedis(t)
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 
 	badHdr := base64.RawURLEncoding.EncodeToString([]byte("not-json"))
 	_, err := v.VerifyAgentJWT(context.Background(), badHdr+".payload.sig", "gibson-daemon")
@@ -345,8 +316,7 @@ func TestVerifyAgentJWT_NonEdDSAAlgorithm(t *testing.T) {
 	token := base64.RawURLEncoding.EncodeToString(hdrBytes) + "." +
 		base64.RawURLEncoding.EncodeToString(payBytes) + ".fakesig"
 
-	_, rdb := setupRedis(t)
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 
 	_, err := v.VerifyAgentJWT(context.Background(), token, "gibson-daemon")
 	require.Error(t, err)
@@ -355,14 +325,13 @@ func TestVerifyAgentJWT_NonEdDSAAlgorithm(t *testing.T) {
 
 func TestVerifyAgentJWT_FutureTooFar(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
 		PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	// exp is 200 seconds in the future — exceeds the 65-second maxTokenFuture cap.
 	now := time.Now()
 	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-future",
@@ -375,9 +344,8 @@ func TestVerifyAgentJWT_FutureTooFar(t *testing.T) {
 
 func TestVerifyAgentJWT_UnknownAgent(t *testing.T) {
 	_, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	// Empty store — no agents registered.
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 
 	now := time.Now()
 	tp := buildAgentToken(priv, "agent-nobody", "host-001", "gibson-daemon", "jti-unk",
@@ -390,14 +358,13 @@ func TestVerifyAgentJWT_UnknownAgent(t *testing.T) {
 
 func TestVerifyAgentJWT_InactiveAgent(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-revoked", HostID: "host-001", TenantID: "t", Status: "revoked",
 		PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildAgentToken(priv, "agent-revoked", "host-001", "gibson-daemon", "jti-rev",
 		now, now.Add(30*time.Second))
@@ -407,32 +374,33 @@ func TestVerifyAgentJWT_InactiveAgent(t *testing.T) {
 	assert.Contains(t, err.Error(), "status")
 }
 
+// TestVerifyAgentJWT_MissingJTI verifies that tokens without a JTI field are
+// accepted. JTI is present in the JWT payload for logging but is not enforced.
 func TestVerifyAgentJWT_MissingJTI(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
 		PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	// buildToken with an empty jti omits the field from the payload JSON.
 	tp := buildToken(priv, "agent+jwt", "agent-001", "host-001", "gibson-daemon", "", now, now.Add(30*time.Second))
 
-	_, err := v.VerifyAgentJWT(context.Background(), tp.token(), "gibson-daemon")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "jti")
+	// JTI is not enforced — missing JTI should succeed.
+	claims, err := v.VerifyAgentJWT(context.Background(), tp.token(), "gibson-daemon")
+	require.NoError(t, err)
+	assert.Empty(t, claims.JTI, "JTI should be empty when not present in token")
 }
 
 func TestVerifyAgentJWT_StoreError(t *testing.T) {
 	_, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.getAgentErr = fmt.Errorf("database is down")
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-err",
 		now, now.Add(30*time.Second))
@@ -446,7 +414,6 @@ func TestVerifyAgentJWT_StoreError(t *testing.T) {
 // update failure does not propagate as an error from VerifyAgentJWT.
 func TestVerifyAgentJWT_UpdateLastActiveErrorIgnored(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
@@ -454,7 +421,7 @@ func TestVerifyAgentJWT_UpdateLastActiveErrorIgnored(t *testing.T) {
 	})
 	store.updateErr = fmt.Errorf("transient DB error")
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-upd",
 		now, now.Add(30*time.Second))
@@ -469,7 +436,6 @@ func TestVerifyAgentJWT_UpdateLastActiveErrorIgnored(t *testing.T) {
 
 func TestVerifyHostJWT_ValidToken(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addHost(&Host{
 		ID:           "host-thumbprint-001",
@@ -479,7 +445,7 @@ func TestVerifyHostJWT_ValidToken(t *testing.T) {
 		PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildHostToken(priv, "host-thumbprint-001", "gibson-daemon", now, now.Add(30*time.Second))
 
@@ -499,11 +465,10 @@ func TestVerifyHostJWT_ValidToken(t *testing.T) {
 
 func TestVerifyHostJWT_ExpiredToken(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addHost(&Host{ID: "host-001", TenantID: "t", Status: "active", PublicKeyJWK: pubKeyToJWK(pub)})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	past := time.Now().Add(-120 * time.Second)
 	tp := buildHostToken(priv, "host-001", "gibson-daemon", past, past.Add(30*time.Second))
 
@@ -514,11 +479,10 @@ func TestVerifyHostJWT_ExpiredToken(t *testing.T) {
 
 func TestVerifyHostJWT_WrongAudience(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addHost(&Host{ID: "host-001", TenantID: "t", Status: "active", PublicKeyJWK: pubKeyToJWK(pub)})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildHostToken(priv, "host-001", "wrong-aud", now, now.Add(30*time.Second))
 
@@ -530,11 +494,10 @@ func TestVerifyHostJWT_WrongAudience(t *testing.T) {
 func TestVerifyHostJWT_WrongSignature(t *testing.T) {
 	pub, _ := genKeyPair(t)
 	_, wrongPriv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addHost(&Host{ID: "host-001", TenantID: "t", Status: "active", PublicKeyJWK: pubKeyToJWK(pub)})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildHostToken(wrongPriv, "host-001", "gibson-daemon", now, now.Add(30*time.Second))
 
@@ -545,9 +508,8 @@ func TestVerifyHostJWT_WrongSignature(t *testing.T) {
 
 func TestVerifyHostJWT_UnknownHost(t *testing.T) {
 	_, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 	now := time.Now()
 	tp := buildHostToken(priv, "host-nobody", "gibson-daemon", now, now.Add(30*time.Second))
 
@@ -565,8 +527,7 @@ func TestVerifyHostJWT_NonEdDSAAlgorithm(t *testing.T) {
 	token := base64.RawURLEncoding.EncodeToString(hdrBytes) + "." +
 		base64.RawURLEncoding.EncodeToString(payBytes) + ".fakesig"
 
-	_, rdb := setupRedis(t)
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 
 	_, err := v.VerifyHostJWT(context.Background(), token, "gibson-daemon")
 	require.Error(t, err)
@@ -575,11 +536,10 @@ func TestVerifyHostJWT_NonEdDSAAlgorithm(t *testing.T) {
 
 func TestVerifyHostJWT_WrongTyp(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addHost(&Host{ID: "host-001", TenantID: "t", Status: "active", PublicKeyJWK: pubKeyToJWK(pub)})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	// Build an agent+jwt and attempt to verify it as a host+jwt.
 	now := time.Now()
 	tp := buildAgentToken(priv, "host-001", "host-001", "gibson-daemon", "jti-typ", now, now.Add(30*time.Second))
@@ -730,7 +690,6 @@ func TestSplitToken_FourDotsPassesAtSplitStage(t *testing.T) {
 
 func TestVerifyAgentJWT_ClockInjection(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
@@ -739,7 +698,7 @@ func TestVerifyAgentJWT_ClockInjection(t *testing.T) {
 
 	// Freeze the verifier's clock at t0.
 	t0 := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
-	v := &JWTVerifier{store: store, redis: rdb, clock: func() time.Time { return t0 }}
+	v := &JWTVerifier{store: store, clock: func() time.Time { return t0 }}
 
 	// Token issued at t0, expires at t0+30s — valid from the frozen perspective.
 	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-clk",
@@ -763,8 +722,7 @@ func TestVerifyAgentJWT_ClockInjection(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewJWTVerifier_NotNil(t *testing.T) {
-	_, rdb := setupRedis(t)
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 	require.NotNil(t, v)
 	require.NotNil(t, v.clock)
 }
@@ -775,14 +733,13 @@ func TestNewJWTVerifier_NotNil(t *testing.T) {
 
 func TestVerifyAgentJWT_TamperedPayload(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
 		PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-tamp",
 		now, now.Add(30*time.Second))
@@ -809,14 +766,13 @@ func TestVerifyAgentJWT_TamperedPayload(t *testing.T) {
 
 func TestVerifyAgentJWT_ConcurrentSafety(t *testing.T) {
 	pub, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 	store := newFakeStore()
 	store.addAgent(&Agent{
 		ID: "agent-001", HostID: "host-001", TenantID: "t", Status: "active",
 		PublicKeyJWK: pubKeyToJWK(pub),
 	})
 
-	v := NewJWTVerifier(store, rdb)
+	v := NewJWTVerifier(store)
 	now := time.Now()
 
 	const goroutines = 20
@@ -846,9 +802,8 @@ func TestVerifyAgentJWT_ConcurrentSafety(t *testing.T) {
 
 func TestVerifyHostJWT_RejectsAgentToken(t *testing.T) {
 	_, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 	now := time.Now()
 	tp := buildAgentToken(priv, "agent-001", "host-001", "gibson-daemon", "jti-x",
 		now, now.Add(30*time.Second))
@@ -861,9 +816,8 @@ func TestVerifyHostJWT_RejectsAgentToken(t *testing.T) {
 
 func TestVerifyAgentJWT_RejectsHostToken(t *testing.T) {
 	_, priv := genKeyPair(t)
-	_, rdb := setupRedis(t)
 
-	v := NewJWTVerifier(newFakeStore(), rdb)
+	v := NewJWTVerifier(newFakeStore())
 	now := time.Now()
 	tp := buildHostToken(priv, "host-001", "gibson-daemon", now, now.Add(30*time.Second))
 

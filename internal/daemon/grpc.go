@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/agentauth"
 	"github.com/zero-day-ai/gibson/internal/attack"
@@ -33,6 +36,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // daemonMemoryStore wraps a single DefaultWorkingMemory so ComponentServiceServer
@@ -98,13 +102,13 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 			"mode", d.config.Auth.Mode,
 		)
 
-		apiKeyAuth, k8sValidator, jwtVerifier, baValidator, buildErr := d.buildAuthValidators(ctx)
+		apiKeyAuth, jwtVerifier, baValidator, buildErr := d.buildAuthValidators(ctx)
 		if buildErr != nil {
 			return fmt.Errorf("failed to build auth validators: %w", buildErr)
 		}
 
-		unaryInterceptors = append(unaryInterceptors, auth.UnaryAuthInterceptor(apiKeyAuth, k8sValidator, jwtVerifier, baValidator, &d.config.Auth, d.logger.Slog()))
-		streamInterceptors = append(streamInterceptors, auth.StreamAuthInterceptor(apiKeyAuth, k8sValidator, jwtVerifier, baValidator, &d.config.Auth, d.logger.Slog()))
+		unaryInterceptors = append(unaryInterceptors, auth.UnaryAuthInterceptor(apiKeyAuth, jwtVerifier, baValidator, &d.config.Auth, d.logger.Slog()))
+		streamInterceptors = append(streamInterceptors, auth.StreamAuthInterceptor(apiKeyAuth, jwtVerifier, baValidator, &d.config.Auth, d.logger.Slog()))
 
 		d.logger.Info(ctx, "auth interceptors installed",
 			"trust_localhost", d.config.Auth.TrustLocalhost,
@@ -113,7 +117,13 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		d.logger.Warn(ctx, "auth interceptors not installed - auth mode not configured")
 	}
 
-	// 4. Authorization interceptor — OpenFGA is the sole enforcement backend.
+	// 4. User context forwarding — extracts x-gibson-user-id and x-gibson-tenant
+	// from gRPC metadata for callers with the platform-service role (dashboard).
+	// Must run after auth (identity available) and before FGA (tenant context needed).
+	unaryInterceptors = append(unaryInterceptors, auth.UserContextInterceptor())
+	streamInterceptors = append(streamInterceptors, auth.UserContextStreamInterceptor())
+
+	// 5. Authorization interceptor — OpenFGA is the sole enforcement backend.
 	//
 	// Build FGA registry and validate it against the FGA model.
 	// Called as a startup gate: typos or model drift fail the daemon early.
@@ -137,6 +147,34 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 		grpc.ChainStreamInterceptor(streamInterceptors...),
+	}
+
+	// SPIFFE mTLS — initialize X509Source and configure TLS when SPIFFE is configured.
+	// tls.VerifyClientCertIfGiven allows both mTLS clients (in-cluster SPIFFE workloads)
+	// and standard TLS clients (Agent Auth, API key, Better Auth) to connect.
+	if d.config.Auth.SPIFFE != nil && d.config.Auth.SPIFFE.WorkloadAPISocket != "" {
+		socketAddr := "unix://" + d.config.Auth.SPIFFE.WorkloadAPISocket
+		x509Source, sourceErr := workloadapi.NewX509Source(ctx,
+			workloadapi.WithClientOptions(
+				workloadapi.WithAddr(socketAddr),
+			),
+		)
+		if sourceErr != nil {
+			d.logger.Warn(ctx, "failed to initialize SPIFFE X509Source; running without mTLS",
+				"socket", d.config.Auth.SPIFFE.WorkloadAPISocket,
+				"error", sourceErr,
+			)
+		} else {
+			tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeAny())
+			tlsCfg.ClientAuth = tls.VerifyClientCertIfGiven
+			serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+			// Store source on daemon for graceful shutdown close.
+			d.spiffeX509Source = x509Source
+			d.logger.Info(ctx, "SPIFFE mTLS configured on gRPC server",
+				"socket", d.config.Auth.SPIFFE.WorkloadAPISocket,
+				"trust_domain", d.config.Auth.SPIFFE.TrustDomain,
+			)
+		}
 	}
 
 	// Create gRPC server with options
@@ -483,31 +521,27 @@ func (a *agentJWTAdapter) VerifyAgentJWT(ctx context.Context, tokenStr, expected
 	}, nil
 }
 
-// buildAuthValidators constructs the four authentication validators used by the
-// 4-path interceptor.
+// buildAuthValidators constructs the authentication validators used by the
+// interceptor. SPIFFE auth is handled at the TLS layer (no validator needed here).
 //
 // Validators are constructed on a best-effort basis: if a dependency (Postgres,
-// K8s config, Better Auth secret) is unavailable the corresponding validator is
-// nil and its path is effectively disabled. The interceptor handles nil validators
-// gracefully (API keys and Better Auth fall through to the default path when their
-// validator is nil, K8s is explicitly guarded).
+// Better Auth secret) is unavailable the corresponding validator is nil and its
+// path is effectively disabled. The interceptor handles nil validators gracefully.
 //
 // Returns:
 //
 //	apiKeyAuth  — Postgres-backed API key authenticator (nil when dashboardDB unavailable)
-//	k8sAuth     — Kubernetes TokenReview authenticator (nil when K8s is not configured)
 //	jwtVerifier — Ed25519 Agent Auth JWT verifier adapter (nil when dashboardDB unavailable)
 //	baValidator — HMAC-SHA256 Better Auth validator (nil when secret is not configured)
 func (d *daemonImpl) buildAuthValidators(ctx context.Context) (
 	apiKeyAuth *auth.APIKeyAuthenticator,
-	k8sAuth *auth.K8sValidator,
 	jwtValidator auth.AgentJWTValidator,
 	baValidator *auth.BetterAuthValidator,
 	err error,
 ) {
 	mode := d.config.Auth.Mode
 
-	// --- Path 1: API key (gsk_ prefix) ---
+	// --- Path 1 (token): API key (gsk_ prefix) ---
 	// Postgres-backed; requires dashboardDB.
 	if (mode == "enterprise" || mode == "saas") && d.dashboardDB != nil {
 		apiKeyAuth, err = auth.NewAPIKeyAuthenticator(d.dashboardDB)
@@ -524,35 +558,20 @@ func (d *daemonImpl) buildAuthValidators(ctx context.Context) (
 		d.logger.Warn(ctx, "API key auth unavailable: dashboard Postgres not initialised")
 	}
 
-	// --- Path 2: Agent Auth JWT (agent+jwt / host+jwt) ---
-	// Requires dashboardDB for agent record lookup and Redis for replay prevention.
+	// --- Path 2 (token): Agent Auth JWT (agent+jwt / host+jwt) ---
+	// Requires dashboardDB for agent record lookup.
 	// Wrapped in agentJWTAdapter to satisfy auth.AgentJWTValidator without
 	// introducing an import cycle between auth and agentauth packages.
-	if d.dashboardDB != nil && d.stateClient != nil {
+	if d.dashboardDB != nil {
 		agentStore := agentauth.NewAgentAuthStore(d.dashboardDB)
-		inner := agentauth.NewJWTVerifier(agentStore, d.stateClient.Client())
+		inner := agentauth.NewJWTVerifier(agentStore)
 		jwtValidator = &agentJWTAdapter{inner: inner}
 		d.logger.Info(ctx, "agent auth JWT verifier initialised (agent+jwt path)")
 	} else {
-		d.logger.Warn(ctx, "agent auth JWT verifier unavailable: dashboard Postgres or Redis not initialised")
+		d.logger.Warn(ctx, "agent auth JWT verifier unavailable: dashboard Postgres not initialised")
 	}
 
-	// --- Path 3: Kubernetes SA token ---
-	// Only created when K8s auth is configured; always nil in non-K8s environments.
-	if d.config.Auth.Kubernetes != nil && d.config.Auth.Kubernetes.Enabled {
-		k8sAuth, err = auth.NewK8sValidator(d.config.Auth.Kubernetes)
-		if err != nil {
-			d.logger.Warn(ctx, "failed to create K8s validator, continuing without it",
-				"error", err,
-			)
-			k8sAuth = nil
-			err = nil // non-fatal
-		} else {
-			d.logger.Info(ctx, "K8s SA token validator initialised")
-		}
-	}
-
-	// --- Path 4: Better Auth (HMAC-SHA256, default path) ---
+	// --- Path 3 (token): Better Auth (HMAC-SHA256, default path) ---
 	// Requires BETTER_AUTH_SECRET in config. If the secret is absent the default
 	// path is disabled and unauthenticated requests will fail at the interceptor.
 	if d.config.Auth.BetterAuth.Secret != "" {
@@ -573,20 +592,18 @@ func (d *daemonImpl) buildAuthValidators(ctx context.Context) (
 	}
 
 	methods := make([]string, 0, 4)
+	methods = append(methods, "spiffe(mtls)")
 	if apiKeyAuth != nil {
 		methods = append(methods, "apikey(gsk_)")
 	}
 	if jwtValidator != nil {
 		methods = append(methods, "agent-auth-jwt")
 	}
-	if k8sAuth != nil {
-		methods = append(methods, "k8s-sa")
-	}
 	if baValidator != nil {
 		methods = append(methods, "better-auth")
 	}
 	d.logger.Info(ctx, "auth validators built", "active_methods", methods)
-	return apiKeyAuth, k8sAuth, jwtValidator, baValidator, nil
+	return apiKeyAuth, jwtValidator, baValidator, nil
 }
 
 // Implementation of api.DaemonInterface for delegation from gRPC server.

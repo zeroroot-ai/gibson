@@ -37,12 +37,8 @@ type TenantAutoProvisioner struct {
 
 // NewTenantAutoProvisioner creates a new auto-provisioner.
 // langfuse and plugins are optional — pass nil when not needed.
-// The kc parameter is accepted but ignored; it is retained for call-site
-// compatibility during the Better Auth migration and will be removed in a
-// follow-up cleanup.
 func NewTenantAutoProvisioner(
 	tenants *TenantService,
-	kc interface{}, // deprecated: ignored; was *keycloak.Client
 	langfuse LangfuseProvisioner,
 	plugins PluginAccessStore,
 	logger *slog.Logger,

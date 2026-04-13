@@ -23,15 +23,36 @@ type BetterAuthConfig struct {
 	Secret string `mapstructure:"secret" yaml:"secret"`
 }
 
+// SPIFFEConfig configures SPIFFE/SPIRE workload identity for in-cluster components.
+//
+// When configured, the daemon obtains its own SVID from the SPIRE Workload API
+// and uses it for mTLS on the gRPC server. In-cluster callers (dashboard, tools,
+// agents, plugins) authenticate by presenting their SPIFFE SVIDs in the TLS handshake.
+type SPIFFEConfig struct {
+	// TrustDomain is the SPIFFE trust domain (e.g., "gibson.io").
+	// All SPIFFE IDs authenticated by this daemon must be under this trust domain.
+	TrustDomain string `mapstructure:"trust_domain" yaml:"trust_domain"`
+
+	// WorkloadAPISocket is the path to the SPIRE Agent Workload API socket.
+	// Default: "/run/spire/sockets/agent.sock"
+	WorkloadAPISocket string `mapstructure:"workload_api_socket" yaml:"workload_api_socket"`
+
+	// InfrastructureIDs lists the SPIFFE IDs that bypass OpenFGA authorization.
+	// These are platform services (dashboard, daemon) that need system-wide access.
+	// Default: ["spiffe://gibson.io/platform/dashboard", "spiffe://gibson.io/platform/daemon"]
+	InfrastructureIDs []string `mapstructure:"infrastructure_ids" yaml:"infrastructure_ids,omitempty"`
+}
+
 // AuthConfig contains authentication and authorization configuration.
 //
 // This configuration is loaded from gibson.yaml and supports multiple
 // deployment models through the Mode field:
-//   - "dev": API key / K8s SA / Better Auth / Agent Auth JWT
-//   - "enterprise": API key / K8s SA / Better Auth / Agent Auth JWT
-//   - "saas": API key / K8s SA / Better Auth / Agent Auth JWT
+//   - "dev": API key / Better Auth / Agent Auth JWT
+//   - "enterprise": API key / Better Auth / Agent Auth JWT / SPIFFE
+//   - "saas": API key / Better Auth / Agent Auth JWT / SPIFFE
 //
-// The 4-path interceptor (Task 10) handles routing between these methods.
+// In-cluster workloads authenticate via SPIFFE mTLS (Path 1). External callers
+// use one of the token-based paths.
 type AuthConfig struct {
 	// Mode specifies the authentication deployment model.
 	// Valid values: "dev", "enterprise", "saas"
@@ -65,10 +86,11 @@ type AuthConfig struct {
 	// Default: 30s
 	ClockSkew time.Duration `mapstructure:"clock_skew" yaml:"clock_skew"`
 
-	// Kubernetes enables validation of Kubernetes ServiceAccount tokens.
-	// Used for in-cluster workloads (ArgoCD, Tekton, etc).
-	// Optional - only enabled when configured.
-	Kubernetes *K8sAuthConfig `mapstructure:"kubernetes" yaml:"kubernetes,omitempty"`
+	// SPIFFE configures SPIFFE/SPIRE workload identity for mTLS authentication.
+	// When set, the daemon initialises an X509Source from the Workload API socket
+	// and configures the gRPC server with mTLS using tls.VerifyClientCertIfGiven.
+	// Optional — when absent the daemon runs without SPIFFE TLS.
+	SPIFFE *SPIFFEConfig `mapstructure:"spiffe" yaml:"spiffe,omitempty"`
 
 	// BetterAuth configures HMAC-SHA256 session token validation for Better Auth
 	// sessions issued by the dashboard.
@@ -79,29 +101,6 @@ type AuthConfig struct {
 	// when a token contains a tenant claim value that doesn't match any existing tenant.
 	// Default: true for "enterprise" mode, false for "saas" mode.
 	AutoProvisionTenants *bool `mapstructure:"auto_provision_tenants" yaml:"auto_provision_tenants,omitempty"`
-}
-
-// K8sAuthConfig configures Kubernetes ServiceAccount token validation.
-//
-// Uses the Kubernetes TokenReview API to validate tokens issued by
-// the Kubernetes API server. Requires access to the K8s API.
-type K8sAuthConfig struct {
-	// Enabled controls whether K8s token validation is active.
-	// Default: false
-	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
-
-	// RoleBindings maps service account identities to Gibson roles.
-	// Keys are in format "namespace:serviceaccount" (supports wildcards).
-	// Examples:
-	//   {"ci-cd:security-scanner": ["mission:execute"]}
-	//   {"ci-cd:*": ["findings:read"]} - all SAs in ci-cd namespace
-	//   {"*:admin": ["admin"]} - admin SA in any namespace
-	RoleBindings map[string][]string `mapstructure:"role_bindings" yaml:"role_bindings,omitempty"`
-
-	// KubeconfigPath overrides automatic in-cluster config detection.
-	// Useful for out-of-cluster testing.
-	// Optional - defaults to in-cluster config when running in K8s.
-	KubeconfigPath string `mapstructure:"kubeconfig_path" yaml:"kubeconfig_path,omitempty"`
 }
 
 // IsAuthEnabled returns true if authentication should be enforced.

@@ -9,7 +9,6 @@
 //     directly with the FGA tuple write.
 //   - EventSignupRequested now routes to handleFGA (not handleOrg).
 //   - EventSignupOrgCreated has been removed.
-//   - The kc KeycloakAdmin field and parameter are gone.
 //   - The store field is now typed as ProvisioningStateStore (interface) rather
 //     than *SignupStateStore (concrete Redis type), enabling the Postgres backend.
 //

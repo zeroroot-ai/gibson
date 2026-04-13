@@ -136,16 +136,6 @@ func ErrJWKSFetchFailed(issuer string, err error) error {
 	}
 }
 
-// ErrK8sAPIError is returned when Kubernetes TokenReview API call fails.
-func ErrK8sAPIError(err error) error {
-	return &AuthError{
-		Code:    codes.Unavailable,
-		Message: "kubernetes tokenreview api error",
-		Reason:  "k8s_api_error",
-		Err:     err,
-	}
-}
-
 // ErrInvalidToken is returned when a token is structurally invalid.
 func ErrInvalidToken(err error) error {
 	return &AuthError{

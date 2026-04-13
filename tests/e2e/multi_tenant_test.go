@@ -205,7 +205,7 @@ func TestAutoProvisioning_E2E(t *testing.T) {
 	logger := quietLogger()
 
 	svc := component.NewTenantService(client, logger, nil)
-	prov := component.NewTenantAutoProvisioner(svc, nil, nil, nil, logger)
+	prov := component.NewTenantAutoProvisioner(svc, nil, nil, logger)
 
 	ctx := context.Background()
 
@@ -259,7 +259,7 @@ func TestConcurrentAutoProvisioning_E2E(t *testing.T) {
 	logger := quietLogger()
 
 	svc := component.NewTenantService(client, logger, nil)
-	prov := component.NewTenantAutoProvisioner(svc, nil, nil, nil, logger)
+	prov := component.NewTenantAutoProvisioner(svc, nil, nil, logger)
 
 	const numGoroutines = 10
 	errs := make([]error, numGoroutines)

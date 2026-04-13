@@ -251,3 +251,13 @@ func TenantScopedRedisKey(tenant, key string) string {
 func TenantNeo4jFilter(paramName string) string {
 	return fmt.Sprintf("n.tenant_id = $%s", paramName)
 }
+
+// containsString reports whether s is present in slice.
+func containsString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}

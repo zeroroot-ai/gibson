@@ -8,7 +8,7 @@
 // machine without a live Redis instance.
 //
 // Better Auth migration changes:
-//   - The "org" step and kc KeycloakAdmin dependency have been removed.
+//   - The "org" step and its former KeycloakAdmin dependency have been removed.
 //   - EventSignupRequested routes directly to handleFGA.
 //   - The store is now ProvisioningStateStore (interface).
 //     Tests use memProvisioningStore (defined in signup_handlers_test.go).

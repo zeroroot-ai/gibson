@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -171,10 +170,10 @@ func (i *FgaAuthzInterceptor) checkInternal(ctx context.Context, req any, fullMe
 	}
 
 	// Step 4: derive user.
-	// K8s ServiceAccount subjects (format "namespace:sa-name") are authorized
-	// by K8s role bindings, not FGA. Skip FGA for these — they've already
-	// passed the K8s authenticator + role check.
-	if identity.Issuer == "kubernetes" || strings.Contains(identity.Subject, ":") {
+	// Infrastructure SPIFFE IDs (platform/dashboard, platform/daemon) bypass FGA —
+	// they are on the hardcoded allowlist in spiffeFGABypass. All other identities
+	// (component SPIFFE IDs, API keys, Agent Auth, Better Auth) go through FGA.
+	if spiffeFGABypass[identity.Subject] {
 		return nil
 	}
 	user := "user:" + identity.Subject

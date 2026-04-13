@@ -10,7 +10,7 @@
 //   - handleFGA now consumes signup.requested events (not signup.org_created).
 //   - The store field is typed as ProvisioningStateStore (interface); tests use
 //     an in-memory stub rather than a miniredis-backed SignupStateStore.
-//   - The kc KeycloakAdmin parameter has been removed from NewSignupPipeline.
+//   - The kc parameter (formerly KeycloakAdmin) has been removed from NewSignupPipeline.
 package provisioner
 
 import (

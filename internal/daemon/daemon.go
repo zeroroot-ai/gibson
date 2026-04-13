@@ -213,6 +213,17 @@ type daemonImpl struct {
 	// no DashboardPostgresConfig is provided or when the connection fails at startup
 	// (degraded mode — provisioning unavailable but missions/tools/agents continue).
 	dashboardDB *sql.DB
+
+	// spiffeX509Source is the SPIFFE Workload API X.509 SVID source used by the
+	// gRPC server for mTLS. It must be closed on daemon shutdown to release the
+	// socket connection. Nil when SPIFFE is not configured.
+	spiffeX509Source spiffeX509Closer
+}
+
+// spiffeX509Closer is the narrow interface for closing an X.509 source on shutdown.
+// workloadapi.X509Source satisfies this interface.
+type spiffeX509Closer interface {
+	Close() error
 }
 
 // New creates a new daemon instance with the provided configuration.
@@ -1041,6 +1052,15 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 			d.logger.Warn(ctx, "error closing dashboard PostgreSQL pool", "error", err)
 		}
 		d.dashboardDB = nil
+	}
+
+	// Close SPIFFE X509Source to release the Workload API socket connection.
+	if d.spiffeX509Source != nil {
+		d.logger.Info(ctx, "closing SPIFFE X509Source")
+		if err := d.spiffeX509Source.Close(); err != nil {
+			d.logger.Warn(ctx, "error closing SPIFFE X509Source", "error", err)
+		}
+		d.spiffeX509Source = nil
 	}
 }
 

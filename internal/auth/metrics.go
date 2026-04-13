@@ -13,16 +13,12 @@ import (
 // Metric name constants for authentication observability.
 const (
 	// MetricAuthAttempts counts authentication attempts by issuer and result.
-	// Labels: issuer (oidc issuer URL, "kubernetes", "local"), result (success, failure, error)
+	// Labels: issuer ("better-auth", "kubernetes", "api-key", "composite"), result (success, failure, error)
 	MetricAuthAttempts = "gibson.auth.attempts"
 
 	// MetricAuthLatency measures authentication latency by issuer.
-	// Labels: issuer (oidc issuer URL, "kubernetes", "local")
+	// Labels: issuer ("better-auth", "kubernetes", "api-key", "composite")
 	MetricAuthLatency = "gibson.auth.latency"
-
-	// MetricJWKSCacheHits counts JWKS cache hits and misses.
-	// Labels: issuer (oidc issuer URL), hit (true, false)
-	MetricJWKSCacheHits = "gibson.auth.jwks_cache"
 
 	// MetricAuthPermissionDenied counts permission denied events.
 	// Labels: action, resource
@@ -33,7 +29,6 @@ const (
 type authMetrics struct {
 	attempts         metric.Int64Counter
 	latency          metric.Float64Histogram
-	jwksCacheHits    metric.Int64Counter
 	permissionDenied metric.Int64Counter
 }
 
@@ -70,16 +65,6 @@ func initMetrics() *authMetrics {
 			slog.Error("failed to create auth latency metric", "error", err)
 		}
 
-		// JWKS cache hits counter
-		jwksCacheHits, err := meter.Int64Counter(
-			MetricJWKSCacheHits,
-			metric.WithDescription("JWKS cache hits and misses by issuer"),
-			metric.WithUnit("{hits}"),
-		)
-		if err != nil {
-			slog.Error("failed to create jwks cache metric", "error", err)
-		}
-
 		// Permission denied counter
 		permissionDenied, err := meter.Int64Counter(
 			MetricAuthPermissionDenied,
@@ -93,7 +78,6 @@ func initMetrics() *authMetrics {
 		metricsInstance = &authMetrics{
 			attempts:         attempts,
 			latency:          latency,
-			jwksCacheHits:    jwksCacheHits,
 			permissionDenied: permissionDenied,
 		}
 	})
@@ -105,7 +89,7 @@ func initMetrics() *authMetrics {
 //
 // Parameters:
 //   - ctx: Context for recording (can be background)
-//   - issuer: Issuer name (OIDC URL, "kubernetes", "local", "composite")
+//   - issuer: Issuer name ("better-auth", "kubernetes", "api-key", "composite")
 //   - result: Result of attempt ("success", "failure", "error")
 func recordAuthAttempt(ctx context.Context, issuer, result string) {
 	m := initMetrics()
@@ -125,7 +109,7 @@ func recordAuthAttempt(ctx context.Context, issuer, result string) {
 //
 // Parameters:
 //   - ctx: Context for recording (can be background)
-//   - issuer: Issuer name (OIDC URL, "kubernetes", "local", "composite")
+//   - issuer: Issuer name ("better-auth", "kubernetes", "api-key", "composite")
 //   - latencyMs: Latency in milliseconds
 func recordAuthLatency(ctx context.Context, issuer string, latencyMs float64) {
 	m := initMetrics()
@@ -136,26 +120,6 @@ func recordAuthLatency(ctx context.Context, issuer string, latencyMs float64) {
 	m.latency.Record(ctx, latencyMs,
 		metric.WithAttributes(
 			attribute.String("issuer", issuer),
-		),
-	)
-}
-
-// recordJWKSCacheHit records a JWKS cache hit or miss.
-//
-// Parameters:
-//   - ctx: Context for recording (can be background)
-//   - issuer: OIDC issuer URL
-//   - hit: true for cache hit, false for cache miss
-func recordJWKSCacheHit(ctx context.Context, issuer string, hit bool) {
-	m := initMetrics()
-	if m.jwksCacheHits == nil {
-		return
-	}
-
-	m.jwksCacheHits.Add(ctx, 1,
-		metric.WithAttributes(
-			attribute.String("issuer", issuer),
-			attribute.Bool("hit", hit),
 		),
 	)
 }

@@ -123,10 +123,7 @@ type InviteHandlerConfig struct {
 }
 
 // NewInviteHandler constructs an InviteHandler.
-// The kc parameter is accepted but ignored for backward-compatibility with
-// existing call sites during the Better Auth migration; pass nil.
 func NewInviteHandler(
-	kc interface{}, // deprecated: ignored; was KeycloakAdmin
 	az authz.Authorizer,
 	redisClient *redis.Client,
 	cfg InviteHandlerConfig,
@@ -300,16 +297,15 @@ func (h *InviteHandler) Accept(ctx context.Context, tokenStr string) (*AcceptRes
 		ttlRemaining = 5 * time.Minute // fallback: keep consumed record briefly
 	}
 	if err := h.redis.Set(ctx, redisKey, updated, ttlRemaining).Err(); err != nil {
-		// Non-fatal: the acceptance flow already succeeded at the FGA/KC level.
+		// Non-fatal: the acceptance flow already succeeded at the FGA level.
 		h.logger.WarnContext(ctx, "accept: failed to mark invitation consumed",
 			slog.String("user_id", rec.UserID), slog.String("error", err.Error()))
 	}
 
-	// Build the Keycloak set-password URL. The invited user's browser will be
-	// redirected here to set their password via the Keycloak login flow.
-	// The format is: {kc_base}/realms/{realm}/login-actions/authenticate
-	// In practice the frontend handles this redirect; we return the user_id and
-	// role so the caller can construct the appropriate URL.
+	// Build the Better Auth login URL. The invited user's browser will be
+	// redirected here to sign in (or sign up) via the dashboard Better Auth flow.
+	// The frontend handles the actual redirect; we return the URL so the caller
+	// can forward it to the user.
 	passwordSetURL := fmt.Sprintf("%s/login?hint=%s", h.baseURL, rec.Email)
 
 	h.logger.InfoContext(ctx, "invitation accepted",
