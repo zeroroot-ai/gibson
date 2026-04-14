@@ -7,13 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 
-	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	grpcmeta "google.golang.org/grpc/metadata"
@@ -23,14 +20,12 @@ import (
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/membership"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
 	"github.com/zero-day-ai/gibson/internal/onboarding"
-	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
@@ -72,18 +67,6 @@ type DaemonServer struct {
 	// May be nil; when nil, quota checks are skipped.
 	quotaManager MissionQuotaChecker
 
-	// tenantService manages tenant CRUD operations backed by Redis.
-	// May be nil; when nil, tenant management RPCs return codes.Unavailable.
-	tenantService *component.TenantService
-
-	// provisioner handles full tenant provisioning (namespace, RBAC, API key).
-	// May be nil; wired via WithProvisioner() during daemon startup.
-	provisioner interface {
-		ProvisionTenant(ctx context.Context, tenantID, displayName, tier, ownerEmail, stripeCustomerID, stripeSubID string) (tenantJSON string, apiKey string, err error)
-		GetProvisioningStatus(ctx context.Context, tenantID string) (status string, steps []ProvisioningStep, err error)
-		DeprovisionTenant(ctx context.Context, tenantID string) error
-	}
-
 	// invitationStore manages team invitations.
 	// May be nil; wired when the invitation service is available.
 	// TODO: replace with concrete type once invitation package is introduced.
@@ -111,14 +94,6 @@ type DaemonServer struct {
 		UpdateState(ctx context.Context, tenantID, currentStep string, completedSteps []string, setupTasks map[string]string) error
 	}
 
-	// billingStore manages tenant billing records.
-	// May be nil; wired when the billing service is available.
-	// TODO: replace with concrete type once billing package is introduced.
-	billingStore interface {
-		GetBilling(ctx context.Context, tenantID string) (tier, stripeCustomerID string, billingAlert bool, usage BillingUsageRecord, err error)
-		UpdateBilling(ctx context.Context, tenantID, tier, stripeCustomerID, stripeSubID string, billingAlert bool) (*component.TenantRecord, error)
-	}
-
 	// impersonationIssuer issues short-lived impersonation tokens.
 	// May be nil; wired when the impersonation service is available.
 	// TODO: replace with concrete type once impersonation package is introduced.
@@ -129,31 +104,6 @@ type DaemonServer struct {
 	// membershipStore manages user-to-tenant membership records.
 	// May be nil; when nil, membership RPCs return codes.Unavailable.
 	membershipStore membership.MembershipStore
-
-	// signupStateStore provides CRUD operations for provisioning state.
-	// May be nil; when nil, InitiateSignup returns codes.Unavailable.
-	// Wired via WithSignupStateStore during daemon startup.
-	// Added by signup-flow-v2 spec; migrated to ProvisioningStateStore interface (better-auth).
-	signupStateStore provisioner.ProvisioningStateStore
-
-	// redisForSignup is the Redis client used to XADD signup events to the
-	// signup:events:stream. Wired via WithSignupStateStore alongside signupStateStore.
-	redisForSignup goredis.UniversalClient
-
-	// inviteHandler manages member invitation creation, acceptance, and resend.
-	// May be nil; when nil, InviteMember/ResendInvitation return codes.Unavailable.
-	// Added by authz-04-dashboard-fga-migration spec.
-	inviteHandler *provisioner.InviteHandler
-
-	// grantHandler manages per-user component access grants via FGA.
-	// May be nil; when nil, GrantComponentAccess/RevokeComponentAccess return codes.Unavailable.
-	// Added by authz-04-dashboard-fga-migration spec.
-	grantHandler *provisioner.GrantHandler
-
-	// teamHandler manages team CRUD and crosstalk via FGA + Redis.
-	// May be nil; when nil, team RPCs return codes.Unavailable.
-	// Added by authz-04-dashboard-fga-migration spec.
-	teamHandler *provisioner.TeamHandler
 
 	// authorizer is the FGA Authorizer used by admin handlers that need direct FGA access.
 	// May be nil; when nil, RPCs that require it return codes.Unavailable.
@@ -898,33 +848,6 @@ func (s *DaemonServer) WithQuotaManager(qm MissionQuotaChecker) *DaemonServer {
 	return s
 }
 
-// WithTenantService attaches a TenantService so that tenant management RPCs
-// (CreateTenant, GetTenant, ListTenants, UpdateTenant, DeleteTenant) are
-// backed by durable Redis storage.  Call this immediately after NewDaemonServer
-// and before registering the server.
-func (s *DaemonServer) WithTenantService(ts *component.TenantService) *DaemonServer {
-	s.tenantService = ts
-	return s
-}
-
-// WithProvisioner attaches a Provisioner so that ProvisionTenant,
-// GetProvisioningStatus, and DeprovisionTenant RPCs are backed by the real
-// provisioning pipeline.  Call this immediately after NewDaemonServer and
-// before registering the server.
-func (s *DaemonServer) WithProvisioner(p *provisioner.Provisioner) *DaemonServer {
-	s.provisioner = &provisionerAdapter{p: p}
-	return s
-}
-
-// WithBillingStore attaches a billing store backed by TenantService and
-// QuotaManager so that GetTenantBilling and UpdateTenantBilling RPCs return
-// real data.  Call this immediately after NewDaemonServer and before
-// registering the server.
-func (s *DaemonServer) WithBillingStore(ts *component.TenantService, qm *component.QuotaManager) *DaemonServer {
-	s.billingStore = &billingStoreAdapter{tenants: ts, quotas: qm}
-	return s
-}
-
 // WithAPIKeyStore wires the API key authenticator so that CreateAPIKey,
 // ListAPIKeys, and RevokeAPIKey RPCs operate against Redis-backed storage.
 // Call this immediately after NewDaemonServer and before registering the server.
@@ -1007,148 +930,12 @@ func (s *DaemonServer) WithMembershipStore(ms membership.MembershipStore) *Daemo
 	return s
 }
 
-// WithSignupStateStore wires the SignupStateStore and the Redis client used by
-// the InitiateSignup RPC to persist signup state and publish the first pipeline
-// event. Call this immediately after NewDaemonServer and before registering
-// the server.
-//
-// When not called (or called with nil), InitiateSignup returns codes.Unavailable.
-//
-// Added by the signup-flow-v2 spec.
-func (s *DaemonServer) WithSignupStateStore(store provisioner.ProvisioningStateStore, rc goredis.UniversalClient) *DaemonServer {
-	s.signupStateStore = store
-	s.redisForSignup = rc
-	return s
-}
-
-// WithInviteHandler wires the InviteHandler so that the InviteMember,
-// ResendInvitation, and AcceptInvitation RPCs are backed by real logic.
-// Added by the authz-04-dashboard-fga-migration spec.
-func (s *DaemonServer) WithInviteHandler(h *provisioner.InviteHandler) *DaemonServer {
-	s.inviteHandler = h
-	return s
-}
-
-// WithGrantHandler wires the GrantHandler so that GrantComponentAccess,
-// RevokeComponentAccess, and ListUserComponentGrants RPCs work.
-// Added by the authz-04-dashboard-fga-migration spec.
-func (s *DaemonServer) WithGrantHandler(h *provisioner.GrantHandler) *DaemonServer {
-	s.grantHandler = h
-	return s
-}
-
-// WithTeamHandler wires the TeamHandler so that team management RPCs work.
-// Added by the authz-04-dashboard-fga-migration spec.
-func (s *DaemonServer) WithTeamHandler(h *provisioner.TeamHandler) *DaemonServer {
-	s.teamHandler = h
-	return s
-}
-
 // WithAuthorizer wires an FGA Authorizer for admin handlers that need direct
 // FGA access (e.g. GetMyPermissions, ListTenantMembers via FGA).
 // Added by the authz-04-dashboard-fga-migration spec.
 func (s *DaemonServer) WithAuthorizer(az authzIface) *DaemonServer {
 	s.authorizer = az
 	return s
-}
-
-// ---------------------------------------------------------------------------
-// provisionerAdapter bridges *provisioner.Provisioner to the DaemonServer's
-// provisioner interface which uses positional arguments and different return
-// types.
-// ---------------------------------------------------------------------------
-
-type provisionerAdapter struct {
-	p *provisioner.Provisioner
-}
-
-func (a *provisionerAdapter) ProvisionTenant(ctx context.Context, tenantID, displayName, tier, ownerEmail, stripeCustomerID, stripeSubID string) (string, string, error) {
-	result, err := a.p.ProvisionTenant(ctx, provisioner.ProvisionRequest{
-		TenantID:         tenantID,
-		DisplayName:      displayName,
-		Tier:             tier,
-		OwnerEmail:       ownerEmail,
-		StripeCustomerID: stripeCustomerID,
-		StripeSubID:      stripeSubID,
-	})
-	if err != nil {
-		return "", "", err
-	}
-	return result.TenantID, result.APIKey, nil
-}
-
-func (a *provisionerAdapter) GetProvisioningStatus(ctx context.Context, tenantID string) (string, []ProvisioningStep, error) {
-	ps, err := a.p.GetProvisioningStatus(ctx, tenantID)
-	if err != nil {
-		return "", nil, err
-	}
-	steps := make([]ProvisioningStep, len(ps.Steps))
-	for i, s := range ps.Steps {
-		steps[i] = ProvisioningStep{
-			Name:      s.Name,
-			Status:    s.Status,
-			Error:     s.Error,
-			Timestamp: s.Timestamp.Format(time.RFC3339),
-		}
-	}
-	return ps.Status, steps, nil
-}
-
-func (a *provisionerAdapter) DeprovisionTenant(ctx context.Context, tenantID string) error {
-	return a.p.DeprovisionTenant(ctx, tenantID)
-}
-
-// ---------------------------------------------------------------------------
-// billingStoreAdapter composes TenantService and QuotaManager to satisfy the
-// billingStore interface.
-// ---------------------------------------------------------------------------
-
-type billingStoreAdapter struct {
-	tenants *component.TenantService
-	quotas  *component.QuotaManager
-}
-
-func (a *billingStoreAdapter) GetBilling(ctx context.Context, tenantID string) (string, string, bool, BillingUsageRecord, error) {
-	record, err := a.tenants.GetTenant(ctx, tenantID)
-	if err != nil {
-		return "", "", false, BillingUsageRecord{}, err
-	}
-
-	var usage BillingUsageRecord
-	if a.quotas != nil {
-		quota, qErr := a.quotas.GetQuota(ctx, tenantID)
-		if qErr == nil && quota != nil {
-			usage.MissionsLimit = int32(quota.MaxMissions)
-			usage.FindingsLimit = int32(quota.MaxFindings)
-			// TeamMembersLimit and APIKeysLimit come from tenant config
-		}
-	}
-
-	// Read limits from tenant config where quota doesn't track them
-	if record.Config != nil {
-		if v, ok := record.Config["max_api_keys"]; ok {
-			if n, err := parseInt32(v); err == nil {
-				usage.APIKeysLimit = n
-			}
-		}
-	}
-
-	return record.Tier, record.StripeCustomerID, record.BillingAlert, usage, nil
-}
-
-func (a *billingStoreAdapter) UpdateBilling(ctx context.Context, tenantID, tier, stripeCustomerID, stripeSubID string, billingAlert bool) (*component.TenantRecord, error) {
-	updates := make(map[string]string)
-	if tier != "" {
-		updates["tier"] = tier
-	}
-	if stripeCustomerID != "" {
-		updates["stripe_customer_id"] = stripeCustomerID
-	}
-	if stripeSubID != "" {
-		updates["stripe_sub_id"] = stripeSubID
-	}
-	updates["billing_alert"] = fmt.Sprintf("%t", billingAlert)
-	return a.tenants.UpdateTenant(ctx, tenantID, updates)
 }
 
 // ---------------------------------------------------------------------------
@@ -1201,13 +988,6 @@ func (a *apiKeyStoreAdapter) List(ctx context.Context, tenantID string) ([]APIKe
 // policies.  The revoked record is retained for audit purposes.
 func (a *apiKeyStoreAdapter) Revoke(ctx context.Context, keyID string) error {
 	return a.auth.RevokeKey(ctx, keyID)
-}
-
-// parseInt32 is a small helper for parsing int32 from string config values.
-func parseInt32(s string) (int32, error) {
-	var n int32
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
 }
 
 // containsString reports whether needle is present in the haystack slice.
@@ -3108,213 +2888,12 @@ func (s *DaemonServer) DeleteTenantLangfuseCredentials(ctx context.Context, req 
 // ---------------------------------------------------------------------------
 // Tenant management RPCs
 //
-// NOTE: The proto-generated request/response types referenced below
-// (CreateTenantRequest, TenantInfo, MemberInfo, etc.) are defined in
-// daemon.proto and will be present in daemon.pb.go after `make proto` is run.
+// CreateTenant, GetTenant, ListTenants, UpdateTenant, DeleteTenant have been
+// removed. Tenant lifecycle is now the sole responsibility of the standalone
+// gibson-tenant-operator (see core/tenant-operator/). The daemon no longer
+// stores tenant records itself; the corresponding proto RPCs fall through to
+// the Unimplemented* server stubs.
 // ---------------------------------------------------------------------------
-
-// tenantRecordToProto converts a component.TenantRecord to the proto TenantInfo
-// message.  member_count is not stored on TenantRecord; callers that need an
-// accurate count should populate it separately.
-func tenantRecordToProto(r *component.TenantRecord) *TenantInfo {
-	return &TenantInfo{
-		TenantId:         r.TenantID,
-		DisplayName:      r.DisplayName,
-		Status:           r.Status,
-		Tier:             r.Tier,
-		OwnerEmail:       r.OwnerEmail,
-		StripeCustomerId: r.StripeCustomerID,
-		BillingAlert:     r.BillingAlert,
-		Config:           r.Config,
-		CreatedAt:        r.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:        r.UpdatedAt.UTC().Format(time.RFC3339),
-	}
-}
-
-// CreateTenant creates a new tenant record backed by Redis.
-//
-// Requires the "platform-operator" role (cross-tenant operation).
-// Returns codes.Unavailable when no TenantService has been wired,
-// codes.AlreadyExists when the tenant_id is already taken, and
-// codes.InvalidArgument when the tenant_id fails format validation.
-func (s *DaemonServer) CreateTenant(ctx context.Context, req *CreateTenantRequest) (*CreateTenantResponse, error) {
-	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
-
-	if s.tenantService == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
-	}
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// Merge proto fields into the config map so TenantService persists them
-	// and writes reverse-lookup indices (email, Stripe).
-	cfg := req.Config
-	if cfg == nil {
-		cfg = make(map[string]string)
-	}
-	if req.OwnerEmail != "" {
-		cfg["owner_email"] = req.OwnerEmail
-	}
-	if req.Tier != "" {
-		cfg["tier"] = req.Tier
-	}
-	if _, ok := cfg["realm_name"]; !ok {
-		cfg["realm_name"] = req.TenantId
-	}
-
-	record, err := s.tenantService.CreateTenant(ctx, req.TenantId, req.DisplayName, cfg)
-	if err != nil {
-		if errors.Is(err, component.ErrTenantAlreadyExists) {
-			return nil, status_grpc.Errorf(codes.AlreadyExists, "tenant %q already exists", req.TenantId)
-		}
-		if errors.Is(err, component.ErrInvalidTenantID) {
-			return nil, status_grpc.Errorf(codes.InvalidArgument, "%v", err)
-		}
-		s.logger.Error("failed to create tenant", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to create tenant: %v", err)
-	}
-
-	s.logger.Info("tenant created via RPC",
-		"tenant_id", req.TenantId,
-		"display_name", req.DisplayName,
-	)
-
-	return &CreateTenantResponse{
-		Tenant: tenantRecordToProto(record),
-	}, nil
-}
-
-// GetTenant retrieves a single tenant by ID.
-//
-// Callers with "platform-operator" may retrieve any tenant.
-// All other authenticated callers may only retrieve their own tenant.
-// Returns codes.NotFound when the tenant does not exist.
-func (s *DaemonServer) GetTenant(ctx context.Context, req *GetTenantRequest) (*GetTenantResponse, error) {
-	if s.tenantService == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
-	}
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	record, err := s.tenantService.GetTenant(ctx, req.TenantId)
-	if err != nil {
-		if errors.Is(err, component.ErrTenantNotFound) {
-			return nil, status_grpc.Errorf(codes.NotFound, "tenant %q not found", req.TenantId)
-		}
-		s.logger.Error("failed to get tenant", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to get tenant: %v", err)
-	}
-
-	return &GetTenantResponse{
-		Tenant: tenantRecordToProto(record),
-	}, nil
-}
-
-// ListTenants returns tenants visible to the caller.
-//
-// Requires the "platform-operator" role to list all tenants.
-// All other authenticated callers receive only their own tenant record.
-func (s *DaemonServer) ListTenants(ctx context.Context, req *ListTenantsRequest) (*ListTenantsResponse, error) {
-	if s.tenantService == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
-	}
-
-	records, err := s.tenantService.ListTenants(ctx)
-	if err != nil {
-		s.logger.Error("failed to list tenants", "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to list tenants: %v", err)
-	}
-
-	tenants := make([]*TenantInfo, 0, len(records))
-	for i := range records {
-		tenants = append(tenants, tenantRecordToProto(&records[i]))
-	}
-
-	return &ListTenantsResponse{
-		Tenants: tenants,
-	}, nil
-}
-
-// UpdateTenant applies field-level updates to an existing tenant.
-//
-// Requires the "platform-operator" role (cross-tenant operation).
-// Non-empty fields in the request replace the corresponding stored values.
-// Config entries are merged into the existing config map.
-// Returns codes.NotFound when the tenant does not exist.
-func (s *DaemonServer) UpdateTenant(ctx context.Context, req *UpdateTenantRequest) (*UpdateTenantResponse, error) {
-	if s.tenantService == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
-	}
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// Build the updates map from proto request fields.
-	// TenantService.UpdateTenant merges these into the stored record.
-	updates := make(map[string]string)
-	if req.DisplayName != "" {
-		updates["display_name"] = req.DisplayName
-	}
-	if req.Status != "" {
-		updates["status"] = req.Status
-	}
-	if req.Tier != "" {
-		updates["tier"] = req.Tier
-	}
-	for k, v := range req.Config {
-		updates[k] = v
-	}
-
-	record, err := s.tenantService.UpdateTenant(ctx, req.TenantId, updates)
-	if err != nil {
-		if errors.Is(err, component.ErrTenantNotFound) {
-			return nil, status_grpc.Errorf(codes.NotFound, "tenant %q not found", req.TenantId)
-		}
-		s.logger.Error("failed to update tenant", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to update tenant: %v", err)
-	}
-
-	s.logger.Info("tenant updated via RPC", "tenant_id", req.TenantId)
-
-	return &UpdateTenantResponse{
-		Tenant: tenantRecordToProto(record),
-	}, nil
-}
-
-// DeleteTenant soft-deletes a tenant by marking its status as "deleted" and
-// removing it from the active tenant index.
-//
-// Requires the "platform-operator" role (cross-tenant operation).
-// The underlying Redis meta key is retained for audit history.
-// Returns codes.NotFound when the tenant does not exist.
-func (s *DaemonServer) DeleteTenant(ctx context.Context, req *DeleteTenantRequest) (*DeleteTenantResponse, error) {
-	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
-
-	if s.tenantService == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
-	}
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	if err := s.tenantService.DeleteTenant(ctx, req.TenantId); err != nil {
-		if errors.Is(err, component.ErrTenantNotFound) {
-			return nil, status_grpc.Errorf(codes.NotFound, "tenant %q not found", req.TenantId)
-		}
-		s.logger.Error("failed to delete tenant", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to delete tenant: %v", err)
-	}
-
-	s.logger.Info("tenant soft-deleted via RPC", "tenant_id", req.TenantId)
-
-	return &DeleteTenantResponse{}, nil
-}
 
 // ---------------------------------------------------------------------------
 // Membership / Impersonation RPCs
@@ -3370,20 +2949,6 @@ func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTe
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "not authenticated")
 	}
 
-	// Verify the target tenant exists when TenantService is available.
-	if s.tenantService != nil {
-		if _, err := s.tenantService.GetTenant(ctx, req.TenantId); err != nil {
-			if errors.Is(err, component.ErrTenantNotFound) {
-				return nil, status_grpc.Errorf(codes.NotFound, "tenant %q not found", req.TenantId)
-			}
-			s.logger.Error("failed to verify target tenant for impersonation",
-				"tenant_id", req.TenantId,
-				"error", err,
-			)
-			return nil, status_grpc.Errorf(codes.Internal, "failed to verify target tenant: %v", err)
-		}
-	}
-
 	s.logger.Info("tenant impersonation started",
 		"admin_subject", identity.Subject,
 		"admin_email", identity.Email,
@@ -3418,322 +2983,10 @@ func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTe
 }
 
 // ---------------------------------------------------------------------------
-// Provisioning RPCs
+// Provisioning, Billing, and Tenant lookup RPCs have been removed.
+// Tenant lifecycle and billing now live in gibson-tenant-operator.
+// The proto methods remain (they fall through to the Unimplemented* stubs).
 // ---------------------------------------------------------------------------
-
-// ProvisionTenant triggers full tenant provisioning (namespace, RBAC, API key).
-//
-// Requires the "platform-operator" role (cross-tenant operation).
-// Returns codes.Unimplemented until the provisioner service has been wired.
-func (s *DaemonServer) ProvisionTenant(ctx context.Context, req *ProvisionTenantRequest) (*ProvisionTenantResponse, error) {
-	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
-	// This RPC requires the tenants:provision permission (platform-operator or
-	// the dashboard's system-ops provisioner service account).
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	if s.provisioner == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "provisioner not configured")
-	}
-
-	_, apiKey, err := s.provisioner.ProvisionTenant(
-		ctx,
-		req.TenantId,
-		req.DisplayName,
-		req.Tier,
-		req.OwnerEmail,
-		req.StripeCustomerId,
-		req.StripeSubId,
-	)
-	if err != nil {
-		s.logger.Error("failed to provision tenant", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to provision tenant: %v", err)
-	}
-
-	// Role policies are loaded at daemon startup from permissions.yaml by
-	// the declarative-rbac-framework loader; per-tenant bootstrap is no
-	// longer needed. The tenant's `g` (membership) rules are written by
-	// AddMember below when the owner is recorded in the membership store.
-
-	// Create the owner membership record so the provisioning user is immediately
-	// recognised as the tenant owner. AddMember is idempotent on retry via
-	// ErrAlreadyMember — we log and continue rather than failing the RPC.
-	if s.membershipStore != nil && req.OwnerEmail != "" {
-		// Use the Keycloak user ID from gRPC metadata if provided; fall back to
-		// email as user ID for backward compat.
-		ownerUserID := req.OwnerEmail
-		if md, ok := grpcmeta.FromIncomingContext(ctx); ok {
-			if vals := md.Get("x-owner-user-id"); len(vals) > 0 && vals[0] != "" {
-				ownerUserID = vals[0]
-			}
-		}
-		if addErr := s.membershipStore.AddMember(ctx, req.TenantId, ownerUserID, req.OwnerEmail, "owner", "provisioner"); addErr != nil {
-			if !errors.Is(addErr, membership.ErrAlreadyMember) {
-				slog.Warn("failed to create owner membership",
-					"tenant", req.TenantId,
-					"email", req.OwnerEmail,
-					"user_id", ownerUserID,
-					"error", addErr,
-				)
-			}
-		}
-	}
-
-	// Fetch the freshly-created tenant record for the response.
-	var tenantInfo *TenantInfo
-	if s.tenantService != nil {
-		if record, fetchErr := s.tenantService.GetTenant(ctx, req.TenantId); fetchErr == nil {
-			tenantInfo = tenantRecordToProto(record)
-		}
-	}
-
-	s.logger.Info("tenant provisioned via RPC", "tenant_id", req.TenantId)
-	return &ProvisionTenantResponse{Tenant: tenantInfo, ApiKey: apiKey}, nil
-}
-
-// GetProvisioningStatus queries the provisioning progress for a tenant or signup.
-//
-// When req.UserId is non-empty the handler queries signup:{userId}:state (the
-// async pipeline written by SignupPipeline). When req.TenantId is provided the
-// existing synchronous provisioner path is used. UserId takes priority when
-// both are provided.
-//
-// Returns codes.Unimplemented until the provisioner service has been wired
-// (tenant_id path only — the userId path only needs signupStateStore).
-func (s *DaemonServer) GetProvisioningStatus(ctx context.Context, req *GetProvisioningStatusRequest) (*GetProvisioningStatusResponse, error) {
-	// ---------------------------------------------------------------------------
-	// userId path — queries signup:{userId}:state Redis HASH written by the
-	// async signup pipeline (signup-flow-v2). UserId takes priority over TenantId.
-	// ---------------------------------------------------------------------------
-	if req.UserId != "" {
-		if s.signupStateStore == nil {
-			// signupStateStore not yet wired — return not_found gracefully.
-			return &GetProvisioningStatusResponse{
-				Status: "not_found",
-			}, nil
-		}
-
-		state, err := s.signupStateStore.Get(ctx, req.UserId)
-		if err != nil {
-			s.logger.Error("failed to get signup state", "user_id", req.UserId, "error", err)
-			return nil, status_grpc.Errorf(codes.Internal, "failed to get signup state: %v", err)
-		}
-		if state == nil {
-			return &GetProvisioningStatusResponse{
-				Status: "not_found",
-			}, nil
-		}
-
-		// Map the three pipeline steps to ProvisionStep messages using the
-		// display labels defined in the design doc.
-		stepDefs := []struct {
-			key   string
-			label string
-		}{
-			{"org", "Creating organization"},
-			{"fga", "Setting up permissions"},
-			{"provision", "Provisioning workspace"},
-		}
-
-		protoSteps := make([]*ProvisionStep, 0, len(stepDefs))
-		for _, sd := range stepDefs {
-			stepStatus := "pending"
-			if state.StepStatuses != nil {
-				if v, ok := state.StepStatuses[sd.key]; ok {
-					stepStatus = v
-				}
-			}
-			protoSteps = append(protoSteps, &ProvisionStep{
-				Name:   sd.key,
-				Status: stepStatus,
-			})
-		}
-
-		return &GetProvisioningStatusResponse{
-			TenantId: state.TenantID,
-			Status:   state.Status,
-			Steps:    protoSteps,
-		}, nil
-	}
-
-	// ---------------------------------------------------------------------------
-	// tenantId path — existing behaviour, unchanged.
-	// ---------------------------------------------------------------------------
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id or user_id is required")
-	}
-
-	if s.provisioner == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "provisioner not configured")
-	}
-
-	provStatus, steps, err := s.provisioner.GetProvisioningStatus(ctx, req.TenantId)
-	if err != nil {
-		s.logger.Error("failed to get provisioning status", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to get provisioning status: %v", err)
-	}
-
-	protoSteps := make([]*ProvisionStep, 0, len(steps))
-	for _, step := range steps {
-		protoSteps = append(protoSteps, &ProvisionStep{
-			Name:      step.Name,
-			Status:    step.Status,
-			Error:     step.Error,
-			Timestamp: step.Timestamp,
-		})
-	}
-
-	return &GetProvisioningStatusResponse{
-		TenantId: req.TenantId,
-		Status:   provStatus,
-		Steps:    protoSteps,
-	}, nil
-}
-
-// DeprovisionTenant tears down all resources associated with a tenant.
-//
-// Requires the "platform-operator" role (cross-tenant operation).
-// Returns codes.Unimplemented until the provisioner service has been wired.
-func (s *DaemonServer) DeprovisionTenant(ctx context.Context, req *DeprovisionTenantRequest) (*DeprovisionTenantResponse, error) {
-	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
-	// This RPC requires the tenants:deprovision permission.
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	if s.provisioner == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "provisioner not configured")
-	}
-
-	if err := s.provisioner.DeprovisionTenant(ctx, req.TenantId); err != nil {
-		s.logger.Error("failed to deprovision tenant", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to deprovision tenant: %v", err)
-	}
-
-	s.logger.Info("tenant deprovisioned via RPC", "tenant_id", req.TenantId)
-	return &DeprovisionTenantResponse{}, nil
-}
-
-// ---------------------------------------------------------------------------
-// Billing RPCs
-// ---------------------------------------------------------------------------
-
-// UpdateTenantBilling updates billing fields (tier, Stripe IDs, billing alert)
-// on a tenant record.
-//
-// Requires "platform-operator" for cross-tenant access or "owner" for the
-// caller's own tenant.  Returns codes.Unimplemented until the billing service
-// has been wired.
-func (s *DaemonServer) UpdateTenantBilling(ctx context.Context, req *UpdateTenantBillingRequest) (*UpdateTenantBillingResponse, error) {
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
-	// (non-cross-tenant callers may only target their own tenant) is
-	// verified here as parameter validation.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
-		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
-	}
-
-	if s.billingStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "billing service not configured")
-	}
-
-	record, err := s.billingStore.UpdateBilling(ctx, req.TenantId, req.Tier, req.StripeCustomerId, req.StripeSubId, req.BillingAlert)
-	if err != nil {
-		s.logger.Error("failed to update tenant billing", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to update tenant billing: %v", err)
-	}
-
-	s.logger.Info("tenant billing updated via RPC", "tenant_id", req.TenantId)
-	return &UpdateTenantBillingResponse{Tenant: tenantRecordToProto(record)}, nil
-}
-
-// GetTenantBilling returns billing details and current usage metrics for a
-// tenant.
-//
-// Requires "platform-operator" for cross-tenant access or "owner" for the
-// caller's own tenant.  Returns codes.Unimplemented until the billing service
-// has been wired.
-func (s *DaemonServer) GetTenantBilling(ctx context.Context, req *GetTenantBillingRequest) (*GetTenantBillingResponse, error) {
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
-	// (non-cross-tenant callers may only target their own tenant) is
-	// verified here as parameter validation.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
-		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
-	}
-
-	if s.billingStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "billing service not configured")
-	}
-
-	tier, stripeCustomerID, billingAlert, usage, err := s.billingStore.GetBilling(ctx, req.TenantId)
-	if err != nil {
-		s.logger.Error("failed to get tenant billing", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to get tenant billing: %v", err)
-	}
-
-	return &GetTenantBillingResponse{
-		Tier:             tier,
-		StripeCustomerId: stripeCustomerID,
-		BillingAlert:     billingAlert,
-		Usage: &BillingUsage{
-			MissionsUsed:     usage.MissionsUsed,
-			MissionsLimit:    usage.MissionsLimit,
-			FindingsUsed:     usage.FindingsUsed,
-			FindingsLimit:    usage.FindingsLimit,
-			TeamMembers:      usage.TeamMembers,
-			TeamMembersLimit: usage.TeamMembersLimit,
-			ApiKeys:          usage.APIKeys,
-			ApiKeysLimit:     usage.APIKeysLimit,
-		},
-	}, nil
-}
-
-// GetTenantByStripeCustomerId resolves a Stripe customer ID to the tenant that
-// owns it, using the reverse-mapping index maintained by TenantService.
-func (s *DaemonServer) GetTenantByStripeCustomerId(ctx context.Context, req *GetTenantByStripeCustomerIdRequest) (*GetTenantByStripeCustomerIdResponse, error) {
-	if s.tenantService == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "tenant service not configured")
-	}
-	if req.StripeCustomerId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "stripe_customer_id is required")
-	}
-	record, err := s.tenantService.GetTenantByStripeCustomer(ctx, req.StripeCustomerId)
-	if err != nil {
-		if errors.Is(err, component.ErrTenantNotFound) {
-			return nil, status_grpc.Errorf(codes.NotFound, "no tenant for stripe customer %q", req.StripeCustomerId)
-		}
-		s.logger.Error("failed to get tenant by stripe customer", "stripe_customer_id", req.StripeCustomerId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to get tenant by stripe customer: %v", err)
-	}
-	return &GetTenantByStripeCustomerIdResponse{
-		Tenant: tenantRecordToProto(record),
-	}, nil
-}
-
-// GetTenantByEmail is no longer supported in the single-realm Keycloak model.
-// The email→tenant reverse mapping has been removed; tenant resolution now
-// happens via the shared "gibson" realm using the tenant_id token claim.
-func (s *DaemonServer) GetTenantByEmail(_ context.Context, _ *GetTenantByEmailRequest) (*GetTenantByEmailResponse, error) {
-	return nil, status_grpc.Errorf(codes.Unimplemented, "GetTenantByEmail is not supported in single-realm mode")
-}
 
 // ---------------------------------------------------------------------------
 // Onboarding RPCs
@@ -4325,173 +3578,10 @@ func membershipToProto(m *membership.Membership) *MembershipInfo {
 }
 
 // ---------------------------------------------------------------------------
-// InitiateSignup — signup-flow-v2 spec
+// InitiateSignup has been removed. Signup is now owned by the
+// gibson-tenant-operator saga (Tenant CRD reconciler).
+// The proto RPC falls through to the UnimplementedDaemonAdminServiceServer stub.
 // ---------------------------------------------------------------------------
-
-// adminEmailRE is a permissive email regex used only for the InitiateSignup
-// pre-validation. Definitive validation was already done by Keycloak when the
-// dashboard created the user — this is a belt-and-suspenders check.
-var adminEmailRE = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
-
-// adminValidPlans is the set of billing plans accepted by InitiateSignup.
-// Kept in sync with the frontend plan selection and provisioner's tier limits.
-var adminValidPlans = map[string]bool{
-	"free":       true,
-	"indie":      true,
-	"pro":        true,
-	"team":       true,
-	"business":   true,
-	"enterprise": true,
-}
-
-// adminSlugify converts a company name to a URL-safe lowercase slug for use as
-// a Keycloak org alias, FGA tenant object, and Redis key prefix.
-//
-// Rules:
-//   - Lowercase all characters.
-//   - Replace spaces and underscores with hyphens.
-//   - Remove all characters that are not [a-z0-9-].
-//   - Collapse consecutive hyphens to a single hyphen.
-//   - Trim leading/trailing hyphens.
-//   - Truncate to 48 characters.
-func adminSlugify(name string) string {
-	var b strings.Builder
-	prev := '-'
-	for _, r := range strings.ToLower(name) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			prev = r
-		case r == ' ' || r == '_' || r == '-':
-			if prev != '-' {
-				b.WriteByte('-')
-				prev = '-'
-			}
-		case unicode.IsLetter(r):
-			// Non-ASCII letter: skip (keeps slug ASCII-safe).
-		}
-	}
-	slug := strings.Trim(b.String(), "-")
-	if len(slug) > 48 {
-		slug = slug[:48]
-		slug = strings.TrimRight(slug, "-")
-	}
-	return slug
-}
-
-// InitiateSignup is the async signup entry point called by the dashboard after
-// it has created the Keycloak user directly.
-//
-// Handler logic:
-//  1. Validate user_id non-empty, email format, company_name non-empty, plan in validPlans.
-//  2. Slugify company_name → tenantId.
-//  3. Write signup:{userId}:state HASH with initial fields via SignupStateStore.Create.
-//  4. XADD signup.requested event to signup:events:stream.
-//  5. Return InitiateSignupResponse immediately (target: under 100ms).
-//
-// The password is NOT present in this RPC — it was validated by Keycloak during
-// the dashboard's direct user creation call and never leaves the dashboard pod.
-func (s *DaemonServer) InitiateSignup(ctx context.Context, req *InitiateSignupRequest) (*InitiateSignupResponse, error) {
-	if s.signupStateStore == nil || s.redisForSignup == nil {
-		return nil, status_grpc.Error(codes.Unavailable,
-			"signup state store not configured; Redis may be unavailable")
-	}
-
-	// --- Input validation ---
-	if req.GetUserId() == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
-	}
-	if !adminEmailRE.MatchString(req.GetEmail()) {
-		return nil, status_grpc.Error(codes.InvalidArgument, "email is invalid")
-	}
-	if strings.TrimSpace(req.GetCompanyName()) == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "company_name is required")
-	}
-	if !adminValidPlans[req.GetPlan()] {
-		return nil, status_grpc.Error(codes.InvalidArgument,
-			fmt.Sprintf("plan %q is not valid; must be one of: free, indie, pro, team, business, enterprise", req.GetPlan()))
-	}
-
-	userID := req.GetUserId()
-	tenantID := adminSlugify(req.GetCompanyName())
-	if tenantID == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "company_name produces an empty tenant ID after slugification")
-	}
-
-	s.logger.InfoContext(ctx, "InitiateSignup: persisting signup request",
-		slog.String("user_id", userID),
-		slog.String("tenant_id", tenantID),
-		slog.String("plan", req.GetPlan()),
-	)
-
-	// --- Persist initial signup state ---
-	now := time.Now().Unix()
-	state := provisioner.SignupState{
-		Status:      "requested",
-		Email:       req.GetEmail(),
-		CompanyName: req.GetCompanyName(),
-		TenantID:    tenantID,
-		Plan:        req.GetPlan(),
-		CurrentStep: "",
-		StepStatuses: map[string]string{
-			"org":       "pending",
-			"fga":       "pending",
-			"provision": "pending",
-		},
-		CreatedAt: now,
-	}
-	if err := s.signupStateStore.Create(ctx, userID, state); err != nil {
-		traceID := extractTraceID(ctx)
-		s.logger.ErrorContext(ctx, "InitiateSignup: failed to persist state",
-			slog.String("user_id", userID),
-			slog.String("trace_id", traceID),
-			slog.String("error", err.Error()),
-		)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to persist signup state (trace_id=%s)", traceID)
-	}
-
-	// --- Emit signup.requested event to the pipeline stream ---
-	xaddArgs := &goredis.XAddArgs{
-		Stream: provisioner.SignupStreamKey,
-		Values: map[string]interface{}{
-			"event_type":   string(provisioner.EventSignupRequested),
-			"user_id":      userID,
-			"tenant_id":    tenantID,
-			"timestamp_ms": fmt.Sprintf("%d", time.Now().UnixMilli()),
-		},
-	}
-	if _, err := s.redisForSignup.XAdd(ctx, xaddArgs).Result(); err != nil {
-		// Log but do not fail — the pipeline's XAUTOCLAIM / pending re-queue
-		// mechanism will pick up orphaned signups on the next poll. The state
-		// is already persisted; the event is the only missing piece.
-		traceID := extractTraceID(ctx)
-		s.logger.ErrorContext(ctx, "InitiateSignup: failed to publish stream event",
-			slog.String("user_id", userID),
-			slog.String("trace_id", traceID),
-			slog.String("error", err.Error()),
-		)
-	}
-
-	s.logger.InfoContext(ctx, "InitiateSignup: completed",
-		slog.String("user_id", userID),
-		slog.String("tenant_id", tenantID),
-	)
-
-	return &InitiateSignupResponse{
-		SignupId: userID,
-		TenantId: tenantID,
-		Status:   "provisioning",
-	}, nil
-}
-
-// extractTraceID returns the OTel trace ID from the context as a hex string,
-// or "unknown" when no valid span is present.
-func extractTraceID(ctx context.Context) string {
-	if span := traceSpanFromContext(ctx); span != "" {
-		return span
-	}
-	return "unknown"
-}
 
 // ---------------------------------------------------------------------------
 // Task 9: GetMyPermissions — returns the caller's role, admin flag,
@@ -4529,140 +3619,35 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 		}, nil
 	}
 
-	// Run FGA queries in parallel:
-	//   1. Check admin relation on tenant
-	//   2. ListObjects to discover teams the user belongs to
-	//   3. List component grants (if grantHandler is available)
-	type queryResult struct {
-		isAdmin         bool
-		teamIDs         []string
-		componentGrants []provisioner.ComponentGrant
-		err             error
+	// Admin check against FGA.
+	isAdmin, err := s.authorizer.Check(ctx,
+		fmt.Sprintf("user:%s", userID),
+		"admin",
+		fmt.Sprintf("tenant:%s", tenantID),
+	)
+	if err != nil {
+		s.logger.WarnContext(ctx, "GetMyPermissions: admin check failed",
+			slog.String("tenant_id", tenantID),
+			slog.String("user_id", userID),
+			slog.String("error", err.Error()),
+		)
+		// Non-fatal: proceed with isAdmin=false.
 	}
 
-	resultCh := make(chan queryResult, 1)
-	go func() {
-		var qr queryResult
-
-		// 1. Admin check.
-		isAdmin, err := s.authorizer.Check(ctx,
-			fmt.Sprintf("user:%s", userID),
-			"admin",
-			fmt.Sprintf("tenant:%s", tenantID),
-		)
-		if err != nil {
-			s.logger.WarnContext(ctx, "GetMyPermissions: admin check failed",
-				slog.String("tenant_id", tenantID),
-				slog.String("user_id", userID),
-				slog.String("error", err.Error()),
-			)
-			// Non-fatal: proceed with isAdmin=false.
-		}
-		qr.isAdmin = isAdmin
-
-		// 2. Team memberships via ListObjects.
-		teamIDs, err := s.authorizer.ListObjects(ctx,
-			fmt.Sprintf("user:%s", userID),
-			"member",
-			"team",
-		)
-		if err != nil {
-			s.logger.WarnContext(ctx, "GetMyPermissions: list team objects failed",
-				slog.String("tenant_id", tenantID),
-				slog.String("user_id", userID),
-				slog.String("error", err.Error()),
-			)
-		} else {
-			qr.teamIDs = teamIDs
-		}
-
-		// 3. Component grants (best-effort).
-		if s.grantHandler != nil {
-			grants, err := s.grantHandler.List(ctx, tenantID, userID)
-			if err != nil {
-				s.logger.WarnContext(ctx, "GetMyPermissions: list component grants failed",
-					slog.String("tenant_id", tenantID),
-					slog.String("user_id", userID),
-					slog.String("error", err.Error()),
-				)
-			} else {
-				qr.componentGrants = grants
-			}
-		}
-
-		resultCh <- qr
-	}()
-
-	qr := <-resultCh
-
-	// Determine role string.
 	role := "member"
-	if qr.isAdmin {
+	if isAdmin {
 		role = "admin"
 	}
 
-	// Aggregate component grants by component_ref.
-	byRef := make(map[string]*daemonpb.PermissionComponentGrant)
-	for _, g := range qr.componentGrants {
-		if existing, ok := byRef[g.ComponentRef]; ok {
-			existing.Actions = append(existing.Actions, g.Action)
-		} else {
-			byRef[g.ComponentRef] = &daemonpb.PermissionComponentGrant{
-				ComponentRef: g.ComponentRef,
-				Actions:      []string{g.Action},
-			}
-		}
-	}
-	pgrants := make([]*daemonpb.PermissionComponentGrant, 0, len(byRef))
-	for _, pg := range byRef {
-		pgrants = append(pgrants, pg)
-	}
-
-	// Build team memberships — team_name is a best-effort lookup from teamHandler.
-	teamMemberships := make([]*daemonpb.PermissionTeamMembership, 0, len(qr.teamIDs))
-	for _, rawTeamID := range qr.teamIDs {
-		// FGA returns "team:{id}" — strip the prefix.
-		teamID := strings.TrimPrefix(rawTeamID, "team:")
-		if teamID == "" || teamID == rawTeamID {
-			continue
-		}
-
-		// Look up team name via teamHandler (best-effort).
-		teamName := teamID
-		if s.teamHandler != nil {
-			if recs, err := s.teamHandler.List(ctx, tenantID); err == nil {
-				for _, r := range recs {
-					if r.TeamID == teamID {
-						teamName = r.Name
-						break
-					}
-				}
-			}
-		}
-
-		// Check if user is also team admin.
-		isTeamAdmin := false
-		if adminCheck, err := s.authorizer.Check(ctx,
-			fmt.Sprintf("user:%s", userID),
-			"admin",
-			fmt.Sprintf("team:%s", teamID),
-		); err == nil {
-			isTeamAdmin = adminCheck
-		}
-
-		teamMemberships = append(teamMemberships, &daemonpb.PermissionTeamMembership{
-			TeamId:   teamID,
-			TeamName: teamName,
-			IsAdmin:  isTeamAdmin,
-		})
-	}
-
+	// Component grants and team memberships were previously sourced from the
+	// provisioner package; those features now live in the tenant-operator
+	// control plane. Returning empty slices keeps the proto response valid.
 	return &daemonpb.GetMyPermissionsResponse{
 		TenantId:        tenantID,
 		Role:            role,
-		IsAdmin:         qr.isAdmin,
-		ComponentGrants: pgrants,
-		TeamMemberships: teamMemberships,
+		IsAdmin:         isAdmin,
+		ComponentGrants: nil,
+		TeamMemberships: nil,
 	}, nil
 }
 

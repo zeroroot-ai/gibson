@@ -360,70 +360,11 @@ func (r *FgaRpcRegistry) populate() {
 		Description: "Graceful daemon shutdown (platform operator only)",
 	})
 
-	// Tenant management.
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/CreateTenant", FgaCheckSpec{
-		Relation:    "platform_operator",
-		ObjectFrom:  constObject("system_tenant:_system"),
-		Description: "Create a new tenant (platform operator only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetTenant", FgaCheckSpec{
-		Relation:    "member",
-		Description: "Get tenant record (caller must be tenant member or platform_operator)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListTenants", FgaCheckSpec{
-		Relation:    "platform_operator",
-		ObjectFrom:  constObject("system_tenant:_system"),
-		Description: "List all tenants (platform operator only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/UpdateTenant", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Update tenant settings (tenant admin or platform_operator)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/DeleteTenant", FgaCheckSpec{
-		Relation:    "platform_operator",
-		ObjectFrom:  constObject("system_tenant:_system"),
-		Description: "Delete a tenant (platform operator only)",
-	})
-
-	// Provisioning.
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ProvisionTenant", FgaCheckSpec{
-		Relation:    "platform_operator",
-		ObjectFrom:  constObject("system_tenant:_system"),
-		Description: "Full tenant provisioning flow (platform operator only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetProvisioningStatus", FgaCheckSpec{
-		Unauthenticated: true, // Called during signup before tenant/FGA tuple exists — JWT is sufficient
-		Description:     "Query provisioning status",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/DeprovisionTenant", FgaCheckSpec{
-		Relation:    "platform_operator",
-		ObjectFrom:  constObject("system_tenant:_system"),
-		Description: "Tear down all tenant resources (platform operator only)",
-	})
+	// Tenant impersonation (tenant CRUD and lookup moved to gibson-tenant-operator).
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ImpersonateTenant", FgaCheckSpec{
 		Relation:    "platform_operator",
 		ObjectFrom:  constObject("system_tenant:_system"),
 		Description: "Request impersonation token for tenant (platform operator only)",
-	})
-
-	// Billing.
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/UpdateTenantBilling", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Update billing fields on tenant (tenant admin or platform_operator)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetTenantBilling", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Query billing information for tenant (tenant admin or platform_operator)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetTenantByStripeCustomerId", FgaCheckSpec{
-		Relation:    "platform_operator",
-		ObjectFrom:  constObject("system_tenant:_system"),
-		Description: "Look up tenant by Stripe customer ID (platform operator only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetTenantByEmail", FgaCheckSpec{
-		Relation:    "platform_operator",
-		ObjectFrom:  constObject("system_tenant:_system"),
-		Description: "Look up tenant by owner email (platform operator only)",
 	})
 
 	// Observability.
@@ -508,91 +449,12 @@ func (r *FgaRpcRegistry) populate() {
 		Description: "Transfer tenant ownership (current owner only)",
 	})
 
-	// Auth schema — GetAuthSchema is deleted in task 10 but included here
-	// until proto regeneration removes it. Marked unauthenticated to match
-	// existing permissions.yaml behavior while it still exists.
-	// GetAuthSchema was removed in authz-03 task 10 and must not appear here.
-
-	// Signup.
-	// InitiateSignup is called by the dashboard after KC user creation (signup-flow-v2).
-	// The service account is authenticated by KC client_credentials — the JWT itself
-	// proves the caller is system-ops. FGA is not needed here; the auth interceptor
-	// already verified the JWT and extracted the "provisioner" role.
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/InitiateSignup", FgaCheckSpec{
-		Unauthenticated: true,
-		Description:     "Initiate async tenant provisioning after KC user creation (called by gibson-system-ops)",
-	})
-
 	// ---------------------------------------------------------------------------
-	// authz-04: Member management RPCs
-	// ---------------------------------------------------------------------------
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/InviteMember", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Invite a new member to the tenant (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RemoveMember", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Remove a member from the tenant (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ResendInvitation", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Resend invitation token to a pending member (admin only)",
-	})
-
-	// ---------------------------------------------------------------------------
-	// authz-04: Component grant RPCs
-	// ---------------------------------------------------------------------------
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListUserComponentGrants", FgaCheckSpec{
-		Relation:    "member",
-		Description: "List component grants for a user within the tenant",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GrantComponentAccess", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Grant a user access to a component action (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RevokeComponentAccess", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Revoke a user's access to a component action (admin only)",
-	})
-
-	// ---------------------------------------------------------------------------
-	// authz-04: Team management RPCs
-	// ---------------------------------------------------------------------------
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/CreateTeam", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Create a new team within the tenant (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListTeams", FgaCheckSpec{
-		Relation:    "member",
-		Description: "List teams within the tenant",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/DeleteTeam", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Delete a team and its FGA relationships (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/AddUserToTeam", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Add a user to a team (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RemoveUserFromTeam", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Remove a user from a team (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/SetTeamCrosstalk", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Set or clear team crosstalk visibility (admin only)",
-	})
-
-	// ---------------------------------------------------------------------------
-	// authz-06: Audit log and batch grant RPCs
+	// authz-06: Audit log RPC
 	// ---------------------------------------------------------------------------
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListAuditEvents", FgaCheckSpec{
 		Relation:    "admin",
 		Description: "List audit events for the tenant (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/BatchGrantComponentAccess", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Batch grant or revoke component access for a user (admin only)",
 	})
 
 	// ---------------------------------------------------------------------------

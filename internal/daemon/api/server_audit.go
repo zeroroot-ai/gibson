@@ -29,7 +29,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
-	"github.com/zero-day-ai/gibson/internal/provisioner"
 )
 
 // ---------------------------------------------------------------------------
@@ -205,67 +204,9 @@ func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCu
 }
 
 // ---------------------------------------------------------------------------
-// BatchGrantComponentAccess handler
+// BatchGrantComponentAccess has been removed along with the provisioner
+// package. The proto RPC falls through to the Unimplemented* stub.
 // ---------------------------------------------------------------------------
-
-// BatchGrantComponentAccess applies a batch of grant/revoke operations for a
-// single user in one RPC call.  The caller is authorized once as tenant admin;
-// individual changes are applied by GrantHandler.BatchGrant.  Per-change
-// failures are collected without aborting the batch.
-func (s *DaemonServer) BatchGrantComponentAccess(ctx context.Context, req *BatchGrantComponentAccessRequest) (*BatchGrantComponentAccessResponse, error) {
-	tenantID := req.GetTenantId()
-	if tenantID == "" {
-		tenantID = auth.TenantFromContext(ctx)
-	}
-	if tenantID == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
-	}
-	if req.GetUserId() == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
-	}
-	if len(req.GetChanges()) == 0 {
-		return &BatchGrantComponentAccessResponse{}, nil
-	}
-
-	if s.grantHandler == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "grant handler not configured")
-	}
-
-	// Authorize caller once.
-	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
-		return nil, err
-	}
-
-	// Convert proto changes to domain BatchChange.
-	changes := make([]provisioner.BatchChange, 0, len(req.GetChanges()))
-	for _, c := range req.GetChanges() {
-		op := "grant"
-		if c.GetOperation() == Operation_OPERATION_REVOKE {
-			op = "revoke"
-		}
-		changes = append(changes, provisioner.BatchChange{
-			ComponentRef: c.GetComponentRef(),
-			Action:       c.GetAction(),
-			Operation:    op,
-		})
-	}
-
-	granted, revoked, errs := s.grantHandler.BatchGrant(ctx, tenantID, req.GetUserId(), changes)
-
-	s.logger.InfoContext(ctx, "batch component access applied",
-		slog.String("tenant_id", tenantID),
-		slog.String("user_id", req.GetUserId()),
-		slog.Int("granted", granted),
-		slog.Int("revoked", revoked),
-		slog.Int("errors", len(errs)),
-	)
-
-	return &BatchGrantComponentAccessResponse{
-		Granted: int32(granted),
-		Revoked: int32(revoked),
-		Errors:  errs,
-	}, nil
-}
 
 // ---------------------------------------------------------------------------
 // Authorization helper

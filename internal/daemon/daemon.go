@@ -25,7 +25,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/payload"
-	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
@@ -1133,16 +1132,9 @@ func (d *daemonImpl) initDashboardPostgres(ctx context.Context) {
 		"max_conns", pgCfg.MaxConns,
 	)
 
-	// Run idempotent schema migration.
-	if err := provisioner.RunMigrations(ctx, db); err != nil {
-		d.logger.Error(ctx, "dashboard PostgreSQL: schema migration failed (provisioning degraded)",
-			"error", err,
-		)
-		_ = db.Close()
-		return
-	}
-
-	d.logger.Info(ctx, "dashboard PostgreSQL: schema migration completed")
+	// Schema migrations for provisioning tables now live in the standalone
+	// gibson-tenant-operator. The daemon simply relies on whatever schema
+	// the operator has provisioned.
 	d.dashboardDB = db
 }
 

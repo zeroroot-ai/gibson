@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,7 +31,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
 	"github.com/zero-day-ai/gibson/internal/onboarding"
-	"github.com/zero-day-ai/gibson/internal/provisioner"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
@@ -192,36 +190,28 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		daemonSvc.WithQuotaManager(d.quotaManager)
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
 	}
-	// Wire TenantService, Provisioner, and BillingStore into DaemonServer.
-	// These enable tenant CRUD, provisioning, and billing RPCs respectively.
+	// Wire daemon dependencies that require the Redis state client.
+	// Tenant lifecycle (create/provision/deprovision) has moved out of the daemon
+	// to the standalone gibson-tenant-operator; this block only wires the
+	// remaining runtime services (AgentAuth, onboarding, mission drafts,
+	// impersonation, and the API key store).
 	if d.stateClient != nil {
 		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
-			auditLogger := audit.NewAuditLogger(d.stateClient, d.logger.Slog())
+			_ = redisClient // retained for future wiring
 
-			tenantService := component.NewTenantService(redisClient, d.logger.Slog(), auditLogger)
-			if d.quotaManager != nil {
-				tenantService.WithQuotaManager(d.quotaManager)
-			}
-			daemonSvc.WithTenantService(tenantService)
-			d.logger.Info(ctx, "tenant service wired into DaemonServer")
-
-			// Create APIKeyAuthenticator for provisioner's key generation and
-			// the CreateAPIKey/ListAPIKeys/RevokeAPIKey RPCs.
-			// API keys are now stored in the dashboard Postgres instance.
+			// Create APIKeyAuthenticator for the CreateAPIKey/ListAPIKeys/RevokeAPIKey RPCs.
+			// API keys are stored in the dashboard Postgres instance.
 			var apiKeyAuth *auth.APIKeyAuthenticator
 			if d.dashboardDB != nil {
 				var akErr error
 				apiKeyAuth, akErr = auth.NewAPIKeyAuthenticator(d.dashboardDB)
 				if akErr != nil {
-					d.logger.Warn(ctx, "failed to create API key authenticator for provisioner", "error", akErr)
+					d.logger.Warn(ctx, "failed to create API key authenticator", "error", akErr)
 				}
 			} else {
 				d.logger.Warn(ctx, "API key authenticator not wired: dashboard Postgres unavailable")
 			}
 
-			// Wire the API key store so that the key management RPCs are
-			// backed by Postgres. This must be done before registering the
-			// gRPC server so that the RPCs are available immediately.
 			if apiKeyAuth != nil {
 				daemonSvc.WithAPIKeyStore(apiKeyAuth)
 				d.logger.Info(ctx, "API key store wired into DaemonServer (Postgres-backed)")
@@ -229,26 +219,14 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 
 			// Wire the AgentAuthService for the Agent Auth Protocol RPCs.
 			// Requires dashboardDB (for store + apiKeys) and the FGA authorizer.
-			// The component registry is needed for FGABridge capability resolution.
 			if d.dashboardDB != nil && apiKeyAuth != nil && d.authorizer != nil {
 				agentStore := agentauth.NewAgentAuthStore(d.dashboardDB)
 				auditWriter := audit.NewWriter(d.dashboardDB, d.logger.Slog())
 				auditWriter.Start(ctx)
 				auditQuery := audit.NewQuery(d.dashboardDB)
 
-				// ComponentRegistry for FGABridge: use a placeholder that resolves from
-				// the compRegistry built later in startGRPCServer. Because compRegistry is
-				// constructed below (after this block), we pass a lazy wrapper around the
-				// daemon's component registry when available, or fall back to an
-				// empty no-op registry here and re-wire after construction.
-				// For now, we build the bridge with what's available; compRegistry will be
-				// set in the ComponentService wiring below via WithFGABridge if needed.
 				fgaBridge := agentauth.NewFGABridge(d.authorizer, d.compRegistry, d.logger.Slog())
 
-				// Build a work-queue dispatcher so that ExecuteAgentCapability
-				// routes capability invocations to the target component's Redis
-				// stream and waits for the result, following the same pattern
-				// used by the harness for tool/plugin dispatch.
 				agentAuthDispatcher := newWorkQueueDispatcher(
 					component.NewRedisWorkQueue(d.stateClient.Client()),
 				)
@@ -280,9 +258,6 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 			d.logger.Info(ctx, "mission draft store wired into DaemonServer")
 
 			// Wire the impersonation token issuer.
-			// A random signing key is generated when no persistent key is configured.
-			// In production, set the GIBSON_IMPERSONATION_KEY environment variable
-			// or configure security.impersonation_key to avoid token invalidation on restart.
 			var impersonationKey []byte
 			if envKey := os.Getenv("GIBSON_IMPERSONATION_KEY"); envKey != "" {
 				impersonationKey = []byte(envKey)
@@ -291,69 +266,11 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 			daemonSvc.WithImpersonationIssuer(issuer)
 			d.logger.Info(ctx, "impersonation issuer wired into DaemonServer")
 
-			// Create and wire the Provisioner.
-			if apiKeyAuth != nil {
-				prov := provisioner.New(
-					redisClient,
-					&tenantCreatorAdapter{svc: tenantService},
-					&apiKeyCreatorAdapter{auth: apiKeyAuth},
-					nil,
-					d.logger.Slog(),
-				)
-
-				daemonSvc.WithProvisioner(prov)
-				d.logger.Info(ctx, "provisioner wired into DaemonServer")
-
-				// Wire the SignupStateStore for the async InitiateSignup RPC.
-				// Better Auth migration: provisioning state is now Postgres-backed via
-				// PgProvisioningStore. dashboardDB is non-nil when the Postgres connection
-				// pool initialised successfully in initDashboardPostgres; the daemon falls
-				// back to a degraded (nil store) mode when Postgres is unavailable.
-				var signupStore provisioner.ProvisioningStateStore
-				if d.dashboardDB != nil {
-					signupStore = provisioner.NewPgProvisioningStore(d.dashboardDB)
-					daemonSvc.WithSignupStateStore(signupStore, d.stateClient.Client())
-					d.logger.Info(ctx, "PgProvisioningStore wired into DaemonServer")
-				} else {
-					d.logger.Warn(ctx, "SignupStateStore not wired: dashboard Postgres unavailable")
-				}
-
-				// Start the async SignupPipeline consumer group. It subscribes to
-				// signup:events:stream and drives FGAHandler → ProvisionHandler.
-				// Better Auth migration: KC admin client removed; org creation is now
-				// handled in the dashboard before InitiateSignup is called.
-				if signupStore != nil {
-					signupPipeline := provisioner.NewSignupPipeline(
-						d.stateClient.Client(),
-						d.authorizer,
-						prov,
-						signupStore,
-						d.logger.Slog(),
-					)
-					go func() {
-						if err := signupPipeline.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-							d.logger.Error(ctx, "signup pipeline exited with error",
-								"error", err)
-						}
-					}()
-					d.logger.Info(ctx, "signup pipeline started",
-						"stream", provisioner.SignupStreamKey,
-						"group", provisioner.SignupConsumerGroup,
-					)
-				}
-			} else {
-				d.logger.Warn(ctx, "provisioner not wired: API key authenticator unavailable")
-			}
-
-			// Wire BillingStore (composed from TenantService + QuotaManager).
-			daemonSvc.WithBillingStore(tenantService, d.quotaManager)
-			d.logger.Info(ctx, "billing store wired into DaemonServer")
-
 		} else {
-			d.logger.Warn(ctx, "tenant provisioning not wired: Redis client is not standalone mode")
+			d.logger.Warn(ctx, "daemon runtime services not wired: Redis client is not standalone mode")
 		}
 	} else {
-		d.logger.Warn(ctx, "tenant provisioning not wired: stateClient is nil")
+		d.logger.Warn(ctx, "daemon runtime services not wired: stateClient is nil")
 	}
 
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
@@ -1937,32 +1854,3 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 	}, nil
 }
 
-// tenantCreatorAdapter wraps *component.TenantService to satisfy the
-// provisioner.TenantCreator interface, which returns (interface{}, error)
-// rather than (*component.TenantRecord, error).
-type tenantCreatorAdapter struct {
-	svc *component.TenantService
-}
-
-func (a *tenantCreatorAdapter) CreateTenant(ctx context.Context, tenantID, displayName string, config map[string]string) (interface{}, error) {
-	return a.svc.CreateTenant(ctx, tenantID, displayName, config)
-}
-
-func (a *tenantCreatorAdapter) GetTenant(ctx context.Context, tenantID string) (interface{}, error) {
-	return a.svc.GetTenant(ctx, tenantID)
-}
-
-func (a *tenantCreatorAdapter) UpdateTenant(ctx context.Context, tenantID string, updates map[string]string) (interface{}, error) {
-	return a.svc.UpdateTenant(ctx, tenantID, updates)
-}
-
-// apiKeyCreatorAdapter wraps *auth.APIKeyAuthenticator to satisfy the
-// provisioner.APIKeyCreator interface, which returns (rawKey, interface{}, error)
-// rather than (rawKey, *auth.APIKeyRecord, error).
-type apiKeyCreatorAdapter struct {
-	auth *auth.APIKeyAuthenticator
-}
-
-func (a *apiKeyCreatorAdapter) CreateKey(ctx context.Context, tenantID string, allowedKinds, allowedNames []string, capabilities []string, name, createdBy string) (string, interface{}, error) {
-	return a.auth.CreateKey(ctx, tenantID, allowedKinds, allowedNames, capabilities, name, createdBy)
-}
