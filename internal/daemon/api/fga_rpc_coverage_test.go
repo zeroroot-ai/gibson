@@ -24,7 +24,8 @@ import (
 // RPC without adding a registry entry will see this test fail with the unmapped
 // method name, matching the existing permissions.yaml CI gate contract.
 func TestFgaRpcRegistryCoversAllProtoRPCs(t *testing.T) {
-	registry := auth.NewFgaRpcRegistry()
+	registry, regErr := auth.LoadRegistry(auth.EmbeddedRpcRegistry, "")
+	require.NoError(t, regErr)
 
 	// discoverGibsonRPCs is already defined in proto_coverage_test.go in this
 	// package and returns the same method list used by the permissions.yaml test.
@@ -49,7 +50,8 @@ func TestFgaRpcRegistryCoversAllProtoRPCs(t *testing.T) {
 // non-unauthenticated entry has a non-empty Relation, which is required for
 // the interceptor to construct a valid FGA Check call.
 func TestFgaRpcRegistryAuthenticatedEntriesHaveRelations(t *testing.T) {
-	registry := auth.NewFgaRpcRegistry()
+	registry, regErr := auth.LoadRegistry(auth.EmbeddedRpcRegistry, "")
+	require.NoError(t, regErr)
 
 	for _, method := range registry.Methods() {
 		spec, _ := registry.Lookup(method)
@@ -64,7 +66,8 @@ func TestFgaRpcRegistryAuthenticatedEntriesHaveRelations(t *testing.T) {
 // marked Unauthenticated do not accidentally have a relation set, which would
 // silently confuse the interceptor.
 func TestFgaRpcRegistryNoUnauthenticatedMethodsHaveRelations(t *testing.T) {
-	registry := auth.NewFgaRpcRegistry()
+	registry, regErr := auth.LoadRegistry(auth.EmbeddedRpcRegistry, "")
+	require.NoError(t, regErr)
 
 	for _, method := range registry.Methods() {
 		spec, _ := registry.Lookup(method)

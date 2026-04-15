@@ -123,9 +123,18 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 
 	// 5. Authorization interceptor — OpenFGA is the sole enforcement backend.
 	//
-	// Build FGA registry and validate it against the FGA model.
-	// Called as a startup gate: typos or model drift fail the daemon early.
-	fgaRegistry := auth.NewFgaRpcRegistry()
+	// Load FGA registry from the embedded YAML
+	// (core/gibson/internal/auth/rpc_registry.yaml). Operators may override
+	// via GIBSON_AUTHZ_RPC_REGISTRY_PATH (typically wired through the Helm
+	// value gibson.authz.rpcRegistry.override). A missing or invalid override
+	// fails boot loudly — there is NO silent fallback to the embedded default.
+	fgaRegistry, err := auth.LoadRegistry(
+		auth.EmbeddedRpcRegistry,
+		os.Getenv("GIBSON_AUTHZ_RPC_REGISTRY_PATH"),
+	)
+	if err != nil {
+		return fmt.Errorf("rpc registry load: %w", err)
+	}
 	if err := fgaRegistry.Validate(ctx, d.authorizer); err != nil {
 		return fmt.Errorf("fga registry validation failed at startup: %w", err)
 	}

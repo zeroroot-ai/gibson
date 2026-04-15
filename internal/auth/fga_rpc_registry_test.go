@@ -8,14 +8,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewFgaRpcRegistry_Compiles(t *testing.T) {
-	r := NewFgaRpcRegistry()
-	require.NotNil(t, r)
+// mustLoadRegistry is the in-package test helper that replaces the old
+// hand-coded registry constructor (removed in spec 21-yaml-rpc-authz-registry,
+// task 4). All test sites use this so a future signature change to
+// LoadRegistry only touches one line.
+func mustLoadRegistry(tb testing.TB) *FgaRpcRegistry {
+	tb.Helper()
+	r, err := LoadRegistry(EmbeddedRpcRegistry, "")
+	require.NoError(tb, err)
+	require.NotNil(tb, r)
+	return r
+}
+
+func TestLoadRegistry_FromEmbeddedYAML_Compiles(t *testing.T) {
+	r := mustLoadRegistry(t)
 	assert.Greater(t, len(r.entries), 0, "registry must have at least one entry")
 }
 
 func TestFgaRpcRegistry_Lookup_Found(t *testing.T) {
-	r := NewFgaRpcRegistry()
+	r := mustLoadRegistry(t)
 
 	spec, ok := r.Lookup("/gibson.daemon.v1.DaemonService/ListMissions")
 	require.True(t, ok)
@@ -24,7 +35,7 @@ func TestFgaRpcRegistry_Lookup_Found(t *testing.T) {
 }
 
 func TestFgaRpcRegistry_Lookup_Unauthenticated(t *testing.T) {
-	r := NewFgaRpcRegistry()
+	r := mustLoadRegistry(t)
 
 	spec, ok := r.Lookup("/gibson.daemon.v1.DaemonService/Ping")
 	require.True(t, ok)
@@ -33,14 +44,14 @@ func TestFgaRpcRegistry_Lookup_Unauthenticated(t *testing.T) {
 }
 
 func TestFgaRpcRegistry_Lookup_NotFound(t *testing.T) {
-	r := NewFgaRpcRegistry()
+	r := mustLoadRegistry(t)
 
 	_, ok := r.Lookup("/nonexistent.Service/Method")
 	assert.False(t, ok)
 }
 
 func TestFgaRpcRegistry_PlatformOperatorMethods(t *testing.T) {
-	r := NewFgaRpcRegistry()
+	r := mustLoadRegistry(t)
 
 	platformOpMethods := []string{
 		"/gibson.daemon.admin.v1.DaemonAdminService/ImpersonateTenant",
@@ -58,7 +69,7 @@ func TestFgaRpcRegistry_PlatformOperatorMethods(t *testing.T) {
 }
 
 func TestFgaRpcRegistry_TenantScopedMethods(t *testing.T) {
-	r := NewFgaRpcRegistry()
+	r := mustLoadRegistry(t)
 
 	// Methods without an explicit ObjectFrom should use tenantFromCtx (nil ObjectFrom)
 	spec, ok := r.Lookup("/gibson.daemon.v1.DaemonService/RunMission")
@@ -69,7 +80,7 @@ func TestFgaRpcRegistry_TenantScopedMethods(t *testing.T) {
 }
 
 func TestFgaRpcRegistry_Methods_Sorted(t *testing.T) {
-	r := NewFgaRpcRegistry()
+	r := mustLoadRegistry(t)
 	methods := r.Methods()
 	require.NotEmpty(t, methods)
 
@@ -115,7 +126,7 @@ func TestTenantFromCtx(t *testing.T) {
 }
 
 func TestFgaRpcRegistry_ValidateCoverage(t *testing.T) {
-	r := NewFgaRpcRegistry()
+	r := mustLoadRegistry(t)
 
 	// All registered methods should pass coverage check.
 	err := r.ValidateCoverage(r.Methods())
@@ -128,7 +139,7 @@ func TestFgaRpcRegistry_ValidateCoverage(t *testing.T) {
 }
 
 func TestFgaRpcRegistry_ValidateNoStaleEntries(t *testing.T) {
-	r := NewFgaRpcRegistry()
+	r := mustLoadRegistry(t)
 
 	// All methods in the registry exist in the known list.
 	err := r.ValidateNoStaleEntries(r.Methods())
@@ -142,12 +153,12 @@ func TestFgaRpcRegistry_ValidateNoStaleEntries(t *testing.T) {
 func TestFgaRpcRegistry_NoDuplicates(t *testing.T) {
 	// Verify that NewFgaRpcRegistry doesn't panic (duplicate detection via panic in add()).
 	assert.NotPanics(t, func() {
-		NewFgaRpcRegistry()
+		mustLoadRegistry(t)
 	})
 }
 
 func TestFgaRpcRegistry_AllAuthenticatedEntriesHaveRelation(t *testing.T) {
-	r := NewFgaRpcRegistry()
+	r := mustLoadRegistry(t)
 	for method, spec := range r.entries {
 		if !spec.Unauthenticated {
 			assert.NotEmpty(t, spec.Relation,
@@ -156,9 +167,3 @@ func TestFgaRpcRegistry_AllAuthenticatedEntriesHaveRelation(t *testing.T) {
 	}
 }
 
-func TestFgaRpcRegistry_AcceptInvitationIsUnauthenticated(t *testing.T) {
-	r := NewFgaRpcRegistry()
-	spec, ok := r.Lookup("/gibson.daemon.admin.v1.DaemonAdminService/AcceptInvitation")
-	require.True(t, ok)
-	assert.True(t, spec.Unauthenticated)
-}

@@ -28,7 +28,8 @@ import (
 // cannot import internal/daemon/api without an import cycle — the test
 // depends on the proto registrations in the daemon api package.
 func TestFgaRegistryCoverAllProtoRPCs(t *testing.T) {
-	reg := auth.NewFgaRpcRegistry()
+	reg, regErr := auth.LoadRegistry(auth.EmbeddedRpcRegistry, "")
+	if regErr != nil { t.Fatalf("load registry: %v", regErr) }
 
 	methods := discoverGibsonRPCs(t)
 	if len(methods) == 0 {
@@ -43,7 +44,7 @@ func TestFgaRegistryCoverAllProtoRPCs(t *testing.T) {
 	}
 
 	if len(missing) > 0 {
-		t.Errorf("FGA registry coverage gap — %d RPC(s) not registered:\n  %s\n\nEvery proto RPC must have an entry in internal/auth/fga_rpc_registry.go NewFgaRpcRegistry().",
+		t.Errorf("FGA registry coverage gap — %d RPC(s) not registered:\n  %s\n\nEvery proto RPC must have an entry in internal/auth/rpc_registry.yaml.",
 			len(missing), strings.Join(missing, "\n  "))
 	}
 }

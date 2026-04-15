@@ -38,7 +38,7 @@ PROTO_DIR=api/proto
 PROTO_OUT=api/gen/proto
 
 # Buf code generation (uses local buf.yaml + buf.gen.yaml in this directory)
-DASHBOARD_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../../enterprise/dashboard)
+DASHBOARD_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../../enterprise/platform/dashboard)
 BUF := npx --prefix $(DASHBOARD_DIR) buf
 
 # Default target
@@ -136,6 +136,8 @@ check-authz:
 	$(GOCMD) vet ./internal/authz/... ./internal/daemon/authz_init.go ./cmd/gibson/authz/...
 	@echo "Running authz unit tests (race detector)..."
 	$(GOTEST) -race -count=1 -timeout=2m ./internal/authz/... ./internal/daemon/...
+	@echo "Running RPC registry drift gate (audit build tag)..."
+	$(GOTEST) -tags audit -count=1 -timeout=1m ./internal/auth/... ./internal/daemon/api/...
 	@if [ "$(INTEGRATION)" = "1" ]; then \
 		echo "Running authz integration tests (requires Docker for testcontainers)..."; \
 		$(GOTEST) -v -tags integration -count=1 -timeout=5m ./internal/authz/...; \

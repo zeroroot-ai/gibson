@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,12 +10,12 @@ import (
 )
 
 // EnforcementMode is retained for backwards-compatible config parsing only.
-// After authz-07, OpenFGA is the sole enforcement backend regardless of this value.
-// The field is read but ignored at daemon startup.
+// OpenFGA is the sole enforcement backend regardless of this value; the field
+// is read but ignored at daemon startup.
 type EnforcementMode string
 
 const (
-	// EnforcementFga is the only supported mode after authz-07.
+	// EnforcementFga is the only supported mode.
 	EnforcementFga EnforcementMode = "fga"
 )
 
@@ -34,7 +33,7 @@ type FgaCheckSpec struct {
 	ObjectFrom ObjectDeriver
 
 	// Unauthenticated, when true, bypasses all authorization checks. Used for
-	// token-based flows (AcceptInvitation) or health endpoints.
+	// self-query RPCs keyed off JWT identity or health endpoints.
 	Unauthenticated bool
 
 	// Description is a human-readable explanation. Surfaced in audit events as
@@ -47,10 +46,12 @@ type FgaRpcRegistry struct {
 	entries map[string]FgaCheckSpec
 }
 
-// NewFgaRpcRegistry constructs the registry and populates entries for every
-// current daemon gRPC method. Every registered RPC must have an entry; the
-// reflection-based CI test enforces 100% coverage.
-func NewFgaRpcRegistry() *FgaRpcRegistry {
+// newFgaRpcRegistryGoLegacy builds the registry the old way (Go-coded
+// populate()) so the parity test (rpc_registry_parity_test.go) can compare
+// the YAML-built and Go-built registries on every CI run. Unexported because
+// no production caller should ever use it; will be deleted in task 9 once
+// parity has been demonstrated over a full release cycle.
+func newFgaRpcRegistryGoLegacy() *FgaRpcRegistry {
 	r := &FgaRpcRegistry{
 		entries: make(map[string]FgaCheckSpec),
 	}
@@ -174,31 +175,6 @@ func (r *FgaRpcRegistry) ValidateNoStaleEntries(knownMethods []string) error {
 		"fga registry: %d stale entry(s) reference methods that no longer exist on the server: %s",
 		len(stale), strings.Join(stale, ", "),
 	)
-}
-
-// --- Helper constructors for ObjectDeriver ---
-
-// constObject returns an ObjectDeriver that always returns the given string.
-// Used for cross-tenant or system-level RPCs whose object is always fixed.
-func constObject(s string) ObjectDeriver {
-	return func(_ any, _ context.Context) (string, error) {
-		return s, nil
-	}
-}
-
-// tenantFromCtx returns an ObjectDeriver that constructs "tenant:{tenantID}" from
-// the request context. This is the default for tenant-scoped RPCs.
-func tenantFromCtx() ObjectDeriver {
-	return func(_ any, ctx context.Context) (string, error) {
-		if ctx == nil {
-			return "", errors.New("fga: nil context in tenantFromCtx")
-		}
-		tenant := TenantFromContext(ctx)
-		if tenant == "" {
-			return "", fmt.Errorf("fga: no tenant in context")
-		}
-		return "tenant:" + tenant, nil
-	}
 }
 
 // populate registers entries for every daemon gRPC method.
@@ -391,24 +367,6 @@ func (r *FgaRpcRegistry) populate() {
 		Description: "Advance onboarding state for tenant (admin only)",
 	})
 
-	// Invitations.
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/CreateInvitation", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Issue team invitation (tenant admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/AcceptInvitation", FgaCheckSpec{
-		Unauthenticated: true,
-		Description:     "Accept team invitation via self-contained token",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListInvitations", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "List pending invitations (tenant admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RevokeInvitation", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Revoke a pending invitation (tenant admin only)",
-	})
-
 	// API key management.
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/CreateAPIKey", FgaCheckSpec{
 		Relation:    "admin",
@@ -423,34 +381,8 @@ func (r *FgaRpcRegistry) populate() {
 		Description: "Revoke API key within caller's tenant (admin only)",
 	})
 
-	// Membership management.
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListTenantMembers", FgaCheckSpec{
-		Relation:    "member",
-		Description: "List members of caller's tenant",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/AddTenantMember", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Add a user to caller's tenant (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RemoveTenantMember", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Remove a user from caller's tenant (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/UpdateMemberRole", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Update member role within caller's tenant (admin only)",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListUserTenants", FgaCheckSpec{
-		Unauthenticated: true, // Self-query: any authenticated user can list their own tenants. Auth is on the JWT, not FGA.
-		Description:     "List tenants the caller belongs to",
-	})
-	r.add("/gibson.daemon.admin.v1.DaemonAdminService/TransferOwnership", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Transfer tenant ownership (current owner only)",
-	})
-
 	// ---------------------------------------------------------------------------
-	// authz-06: Audit log RPC
+	// Audit log RPC
 	// ---------------------------------------------------------------------------
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListAuditEvents", FgaCheckSpec{
 		Relation:    "admin",
@@ -458,7 +390,7 @@ func (r *FgaRpcRegistry) populate() {
 	})
 
 	// ---------------------------------------------------------------------------
-	// authz-04: GetMyPermissions on DaemonService (non-admin, any authenticated user)
+	// GetMyPermissions on DaemonService (non-admin, any authenticated user)
 	// ---------------------------------------------------------------------------
 	// GetMyPermissions is called by the dashboard during session setup.
 	// Any authenticated user can query their own permissions — the handler

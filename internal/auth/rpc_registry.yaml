@@ -1,0 +1,502 @@
+# rpc_registry.yaml — canonical FGA authz mapping for every daemon gRPC method.
+#
+# This file is the SOURCE OF TRUTH for daemon authorization. It is embedded in
+# the binary at build time via //go:embed (rpc_registry_embed.go) and loaded
+# at startup by auth.LoadRegistry. The CI drift gate
+# (registry_drift_test.go, build tag `audit`) asserts every registered RPC
+# has an entry here and rejects any stale entry; default-deny means a missing
+# entry blocks the RPC at runtime.
+#
+# Operators may override this file at runtime via the env var
+# GIBSON_AUTHZ_RPC_REGISTRY_PATH (Helm wires this from
+# `gibson.authz.rpcRegistry.override`). An invalid override fails boot
+# loudly — there is no silent fallback. See enterprise/docs/AUTH.md §4.5.
+#
+# Schema:
+#   - method:           required, gRPC FullMethod string ("/pkg.Service/Method")
+#   - relation:         required unless unauthenticated=true; FGA relation
+#   - object_from:      named resolver — see KnownObjectResolvers() in
+#                       object_resolvers.go; today: tenant_from_context,
+#                       system_tenant, component_system. Add a new resolver in
+#                       Go FIRST (object_resolvers.go), then reference its
+#                       name here.
+#   - object:           literal "<type>:<id>" (mutually exclusive with object_from)
+#   - unauthenticated:  bool; if true, relation/object/object_from MUST be empty
+#   - description:      human-readable explanation (surfaced in audit events
+#                       as PermissionRequired so existing dashboards stay informative)
+#
+# Entries WITHOUT object/object_from fall back to "tenant:" + tenant in
+# context — the existing default for tenant-scoped RPCs.
+
+version: 1
+
+entries:
+  # ===========================================================================
+  # gibson.daemon.v1.DaemonService — primary client-facing API
+  # ===========================================================================
+
+  # Connect / Ping / GetMyPermissions — health/identity, no FGA gate.
+  - method: /gibson.daemon.v1.DaemonService/Connect
+    unauthenticated: true
+    description: WebSocket connect to daemon
+  - method: /gibson.daemon.v1.DaemonService/Ping
+    unauthenticated: true
+    description: Daemon liveness check
+  - method: /gibson.daemon.v1.DaemonService/GetMyPermissions
+    unauthenticated: true
+    description: Get the caller's permissions summary for the current tenant
+
+  # Status / Subscribe — tenant-scoped reads.
+  - method: /gibson.daemon.v1.DaemonService/Status
+    relation: member
+    description: Get daemon status within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/Subscribe
+    relation: member
+    description: Subscribe to daemon events within caller's tenant
+
+  # Mission lifecycle (member).
+  - method: /gibson.daemon.v1.DaemonService/RunMission
+    relation: member
+    description: Start a mission run within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/StopMission
+    relation: member
+    description: Stop a running mission within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/CreateMission
+    relation: member
+    description: Create a mission definition within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/ListMissions
+    relation: member
+    description: List missions within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/PauseMission
+    relation: member
+    description: Pause a mission within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/ResumeMission
+    relation: member
+    description: Resume a paused mission within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/GetMissionHistory
+    relation: member
+    description: Retrieve mission run history within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/GetMissionCheckpoints
+    relation: member
+    description: Retrieve mission checkpoints within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/InstallMission
+    relation: admin
+    description: Install a mission definition into a tenant (admin only)
+  - method: /gibson.daemon.v1.DaemonService/UninstallMission
+    relation: admin
+    description: Uninstall a mission definition from a tenant (admin only)
+  - method: /gibson.daemon.v1.DaemonService/ListMissionDefinitions
+    relation: member
+    description: List installed mission definitions within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/UpdateMission
+    relation: member
+    description: Update a mission definition within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/ResolveMissionDependencies
+    relation: member
+    description: Resolve mission dependency graph within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/ValidateMissionDependencies
+    relation: member
+    description: Validate mission dependencies within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/EnsureDependenciesRunning
+    relation: member
+    description: Ensure mission dependencies are running within caller's tenant
+
+  # Component listing (member).
+  - method: /gibson.daemon.v1.DaemonService/ListAgents
+    relation: member
+    description: List agents visible to caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/GetAgentStatus
+    relation: member
+    description: Get agent status within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/ListTools
+    relation: member
+    description: List tools visible to caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/ListPlugins
+    relation: member
+    description: List plugins visible to caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/QueryPlugin
+    relation: member
+    description: Query a plugin within caller's tenant
+
+  # Component lifecycle (admin).
+  - method: /gibson.daemon.v1.DaemonService/StartComponent
+    relation: admin
+    description: Start a component within caller's tenant (admin only)
+  - method: /gibson.daemon.v1.DaemonService/StopComponent
+    relation: admin
+    description: Stop a component within caller's tenant (admin only)
+  - method: /gibson.daemon.v1.DaemonService/InstallComponent
+    relation: admin
+    description: Install a component into caller's tenant (admin only)
+  - method: /gibson.daemon.v1.DaemonService/InstallAllComponent
+    relation: admin
+    description: Install all components into caller's tenant (admin only)
+  - method: /gibson.daemon.v1.DaemonService/UninstallComponent
+    relation: admin
+    description: Uninstall a component from caller's tenant (admin only)
+  - method: /gibson.daemon.v1.DaemonService/UpdateComponent
+    relation: admin
+    description: Update a component within caller's tenant (admin only)
+  - method: /gibson.daemon.v1.DaemonService/BuildComponent
+    relation: admin
+    description: Build a component image within caller's tenant (admin only)
+  - method: /gibson.daemon.v1.DaemonService/ShowComponent
+    relation: member
+    description: Show component details within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/GetComponentLogs
+    relation: member
+    description: Stream component logs within caller's tenant
+
+  # ===========================================================================
+  # gibson.daemon.admin.v1.DaemonAdminService — privileged admin API
+  # ===========================================================================
+
+  # Daemon control — platform operator, scoped to the system tenant.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/Shutdown
+    relation: platform_operator
+    object: system_tenant:_system
+    description: Graceful daemon shutdown (platform operator only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ImpersonateTenant
+    relation: platform_operator
+    object: system_tenant:_system
+    description: Request impersonation token for tenant (platform operator only)
+
+  # Observability — tenant Langfuse credentials.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetTenantLangfuseCredentials
+    relation: member
+    description: Retrieve Langfuse credentials for tenant
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/SetTenantLangfuseCredentials
+    relation: admin
+    description: Store Langfuse credentials for tenant (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/DeleteTenantLangfuseCredentials
+    relation: admin
+    description: Delete Langfuse credentials for tenant (admin only)
+
+  # Onboarding.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetOnboardingState
+    relation: member
+    description: Query onboarding progress for tenant
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/UpdateOnboardingState
+    relation: admin
+    description: Advance onboarding state for tenant (admin only)
+
+  # API key management.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/CreateAPIKey
+    relation: admin
+    description: Create API key within caller's tenant (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListAPIKeys
+    relation: member
+    description: List API keys within caller's tenant
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/RevokeAPIKey
+    relation: admin
+    description: Revoke API key within caller's tenant (admin only)
+
+  # Audit log.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListAuditEvents
+    relation: admin
+    description: List audit events for the tenant (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListAuditLog
+    relation: admin
+    description: Query Postgres audit log entries for a tenant (admin only)
+
+  # User profile / sessions.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetUserProfile
+    relation: member
+    description: Get user profile (self or tenant admin)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/UpdateUserProfile
+    relation: member
+    description: Update user profile fields (self or tenant admin)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ResetPassword
+    relation: member
+    description: Trigger password reset email
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/RevokeUserSessions
+    relation: admin
+    description: Revoke all active sessions for a user (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/SuspendMember
+    relation: admin
+    description: Suspend a tenant member account (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetUserSessions
+    relation: member
+    description: Get active sessions for a user (self or admin)
+
+  # Mission drafts / findings export.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/SaveMissionDraft
+    relation: member
+    description: Save a mission YAML draft for a tenant
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListMissionDrafts
+    relation: member
+    description: List saved mission YAML drafts for a tenant
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ExportFindings
+    relation: member
+    description: Export findings for a tenant in multiple formats
+
+  # Quotas.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetTenantQuota
+    relation: admin
+    description: Get tenant quota configuration (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/SetTenantQuota
+    relation: admin
+    description: Set tenant quota configuration (admin only)
+
+  # Alerts.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListAlerts
+    relation: member
+    description: List platform alerts for a tenant user
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/MarkAlertRead
+    relation: member
+    description: Mark a single alert as read
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/MarkAllAlertsRead
+    relation: member
+    description: Mark all alerts for a user as read
+
+  # Chat conversations.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListConversations
+    relation: member
+    description: List chat conversations for a tenant user
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetConversation
+    relation: member
+    description: Get a chat conversation with its message history
+
+  # Agent Auth Protocol.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/RegisterAgentAuth
+    relation: admin
+    description: Register a new agent and host pair with FGA-resolved capability grants (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ExecuteAgentCapability
+    relation: member
+    description: Execute a capability on behalf of an agent (FGA-checked per-capability)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListAgentCapabilities
+    relation: member
+    description: List FGA-resolved capabilities available to a user
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetAgentAuthStatus
+    relation: member
+    description: Get the current status and grants for an agent
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/RevokeAgentAuth
+    relation: admin
+    description: Revoke an agent and all its capability grants (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListAgentAuthAgents
+    relation: admin
+    description: List registered agents for a tenant (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/CreateHostRegistrationToken
+    relation: admin
+    description: Issue a single-use host registration API key (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListComponentGrants
+    relation: admin
+    description: Enumerate FGA component grants for all users in a tenant (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/BatchGrantComponentAccessV2
+    relation: admin
+    description: Bulk grant or revoke component access for any principal (admin only)
+
+  # ===========================================================================
+  # gibson.component.v1.ComponentService — agents, tools, plugins
+  # ===========================================================================
+  # All entries scoped to component:_system. Most use can_execute; plugin
+  # configure mutations require can_configure.
+
+  - method: /gibson.component.v1.ComponentService/RegisterComponent
+    relation: can_execute
+    object_from: component_system
+    description: Register a component with the daemon
+  - method: /gibson.component.v1.ComponentService/Heartbeat
+    relation: can_execute
+    object_from: component_system
+    description: Component heartbeat
+  - method: /gibson.component.v1.ComponentService/PollWork
+    relation: can_execute
+    object_from: component_system
+    description: Long-poll for tool work
+  - method: /gibson.component.v1.ComponentService/SubmitResult
+    relation: can_execute
+    object_from: component_system
+    description: Submit tool execution result
+  - method: /gibson.component.v1.ComponentService/Complete
+    relation: can_execute
+    object_from: component_system
+    description: Harness LLM completion (unary)
+  - method: /gibson.component.v1.ComponentService/CompleteStream
+    relation: can_execute
+    object_from: component_system
+    description: Harness LLM completion (streaming)
+  - method: /gibson.component.v1.ComponentService/CallTool
+    relation: can_execute
+    object_from: component_system
+    description: Harness tool call (unary)
+  - method: /gibson.component.v1.ComponentService/QueryPlugin
+    relation: can_execute
+    object_from: component_system
+    description: Harness plugin query
+  - method: /gibson.component.v1.ComponentService/SubmitFinding
+    relation: can_execute
+    object_from: component_system
+    description: Submit security finding
+  - method: /gibson.component.v1.ComponentService/MemoryGet
+    relation: can_execute
+    object_from: component_system
+    description: Read from mission memory
+  - method: /gibson.component.v1.ComponentService/MemorySet
+    relation: can_execute
+    object_from: component_system
+    description: Write to mission memory
+  - method: /gibson.component.v1.ComponentService/MemorySearch
+    relation: can_execute
+    object_from: component_system
+    description: Search mission memory
+  - method: /gibson.component.v1.ComponentService/MemoryDelete
+    relation: can_execute
+    object_from: component_system
+    description: Delete a mission memory entry
+  - method: /gibson.component.v1.ComponentService/MemoryClear
+    relation: can_execute
+    object_from: component_system
+    description: Clear all mission memory
+  - method: /gibson.component.v1.ComponentService/MemoryKeys
+    relation: can_execute
+    object_from: component_system
+    description: List mission memory keys
+  - method: /gibson.component.v1.ComponentService/MemoryHistory
+    relation: can_execute
+    object_from: component_system
+    description: Get mission memory history
+  - method: /gibson.component.v1.ComponentService/MemoryGetPreviousRunValue
+    relation: can_execute
+    object_from: component_system
+    description: Get memory value from previous run
+  - method: /gibson.component.v1.ComponentService/MemoryGetValueHistory
+    relation: can_execute
+    object_from: component_system
+    description: Get full history of a memory key's values
+  - method: /gibson.component.v1.ComponentService/ListAvailablePlugins
+    relation: can_execute
+    object_from: component_system
+    description: List available plugins
+  - method: /gibson.component.v1.ComponentService/EnablePlugin
+    relation: can_configure
+    object_from: component_system
+    description: Enable a plugin (configure permission required)
+  - method: /gibson.component.v1.ComponentService/DisablePlugin
+    relation: can_configure
+    object_from: component_system
+    description: Disable a plugin (configure permission required)
+  - method: /gibson.component.v1.ComponentService/UpdatePluginConfig
+    relation: can_configure
+    object_from: component_system
+    description: Update plugin configuration
+  - method: /gibson.component.v1.ComponentService/GetPluginConfig
+    relation: can_execute
+    object_from: component_system
+    description: Read plugin configuration
+  - method: /gibson.component.v1.ComponentService/TestPluginConnection
+    relation: can_configure
+    object_from: component_system
+    description: Test plugin connection
+  - method: /gibson.component.v1.ComponentService/ListTenantPlugins
+    relation: can_execute
+    object_from: component_system
+    description: List tenant-scoped plugins
+  - method: /gibson.component.v1.ComponentService/CompleteWithTools
+    relation: can_execute
+    object_from: component_system
+    description: LLM completion with tool use
+  - method: /gibson.component.v1.ComponentService/CompleteStructured
+    relation: can_execute
+    object_from: component_system
+    description: LLM structured completion
+  - method: /gibson.component.v1.ComponentService/CallToolStream
+    relation: can_execute
+    object_from: component_system
+    description: Harness streaming tool call
+  - method: /gibson.component.v1.ComponentService/QueueToolWork
+    relation: can_execute
+    object_from: component_system
+    description: Queue tool work via Redis
+  - method: /gibson.component.v1.ComponentService/ToolResults
+    relation: can_execute
+    object_from: component_system
+    description: Stream tool results
+  - method: /gibson.component.v1.ComponentService/ListTools
+    relation: can_execute
+    object_from: component_system
+    description: List registered tools
+  - method: /gibson.component.v1.ComponentService/DelegateToAgent
+    relation: can_execute
+    object_from: component_system
+    description: Delegate a sub-task to another agent
+  - method: /gibson.component.v1.ComponentService/ListAgents
+    relation: can_execute
+    object_from: component_system
+    description: List registered agents
+  - method: /gibson.component.v1.ComponentService/QueryNodes
+    relation: can_execute
+    object_from: component_system
+    description: Query GraphRAG knowledge graph nodes
+  - method: /gibson.component.v1.ComponentService/StoreNode
+    relation: can_execute
+    object_from: component_system
+    description: Store a GraphRAG node
+  - method: /gibson.component.v1.ComponentService/FindSimilarAttacks
+    relation: can_execute
+    object_from: component_system
+    description: Find similar attacks in knowledge graph
+  - method: /gibson.component.v1.ComponentService/GetAttackChains
+    relation: can_execute
+    object_from: component_system
+    description: Get attack chains from knowledge graph
+  - method: /gibson.component.v1.ComponentService/FindSimilarFindings
+    relation: can_execute
+    object_from: component_system
+    description: Find similar findings in knowledge graph
+  - method: /gibson.component.v1.ComponentService/GetRelatedFindings
+    relation: can_execute
+    object_from: component_system
+    description: Get related findings from knowledge graph
+  - method: /gibson.component.v1.ComponentService/GetFindings
+    relation: can_execute
+    object_from: component_system
+    description: Get findings from GraphRAG
+  - method: /gibson.component.v1.ComponentService/GetRunFindings
+    relation: can_execute
+    object_from: component_system
+    description: Get findings for a specific run
+  - method: /gibson.component.v1.ComponentService/CreateMission
+    relation: can_execute
+    object_from: component_system
+    description: Create a sub-mission (agent delegation)
+  - method: /gibson.component.v1.ComponentService/RunMission
+    relation: can_execute
+    object_from: component_system
+    description: Run a mission (agent delegation)
+  - method: /gibson.component.v1.ComponentService/GetMissionStatus
+    relation: can_execute
+    object_from: component_system
+    description: Get mission status (agent delegation)
+  - method: /gibson.component.v1.ComponentService/WaitMission
+    relation: can_execute
+    object_from: component_system
+    description: Wait for mission completion
+  - method: /gibson.component.v1.ComponentService/ListMissions
+    relation: can_execute
+    object_from: component_system
+    description: List missions (agent delegation)
+  - method: /gibson.component.v1.ComponentService/CancelMission
+    relation: can_execute
+    object_from: component_system
+    description: Cancel a running mission
+  - method: /gibson.component.v1.ComponentService/GetMissionResults
+    relation: can_execute
+    object_from: component_system
+    description: Get results for a completed mission
+  - method: /gibson.component.v1.ComponentService/GetCredential
+    relation: can_execute
+    object_from: component_system
+    description: Retrieve an encrypted credential for agent use
+  - method: /gibson.component.v1.ComponentService/GetTaxonomySchema
+    relation: can_execute
+    object_from: component_system
+    description: Get taxonomy schema for entity extraction
+  - method: /gibson.component.v1.ComponentService/GetMissionRunHistory
+    relation: can_execute
+    object_from: component_system
+    description: Get mission run history
+  - method: /gibson.component.v1.ComponentService/ReportStepHints
+    relation: can_execute
+    object_from: component_system
+    description: Report step hints from an agent
