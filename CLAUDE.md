@@ -185,6 +185,15 @@ Pay attention to these when refactoring — they look load-bearing but generally
 | `internal/cutover/v4/` | Audit-foundation migration used by the `gibson cutover-v4` CLI | Keep until all deployments have cut over; then remove alongside the CLI command. |
 | Stub RPCs in `server_prod_handlers.go` (ResetPassword, RevokeUserSessions, SuspendMember, Get/UpdateUserProfile, ExportFindings, mission drafts, GetUserSessions, Alerts, Conversations) | Intentional — tracked under `prod-unimplemented-apis` and `prod-feature-wiring` specs; test-enforced to return non-Unimplemented | Implement per-spec; don't delete. |
 
+## Tracked Security Advisories (awaiting upstream fix)
+
+Dependabot advisories against this module that have no patched release available yet. Revisit when the upstream target ships.
+
+| Advisory | Severity | Current pin | Target pin | Trigger |
+|---|---|---|---|---|
+| [GHSA-x744-4wpc-v9h2](https://github.com/advisories/GHSA-x744-4wpc-v9h2) — Moby AuthZ plugin bypass via oversized request bodies | HIGH | `github.com/docker/docker v28.5.2+incompatible` (indirect) | `v29.3.1+incompatible` (unreleased as of 2026-04-15) | `go get github.com/docker/docker@latest` once 29.3.1 ships |
+| [GHSA-pxq6-2prw-chj9](https://github.com/advisories/GHSA-pxq6-2prw-chj9) — Moby plugin privilege off-by-one | MEDIUM | `github.com/docker/docker v28.5.2+incompatible` (indirect) | `v29.3.1+incompatible` | same as above |
+
 ## Critical Rules
 
 - **GitHub-only imports.** No `replace` directives to local paths, no `file://` refs. Local replace causes proto descriptor mismatches and daemon panics. Use `go work` if you must iterate on the SDK locally.
