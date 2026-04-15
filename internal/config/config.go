@@ -82,18 +82,7 @@ type Config struct {
 	Auth              auth.AuthConfig         `mapstructure:"auth" yaml:"auth"`
 	Checkpoint        CheckpointConfig        `mapstructure:"checkpoint" yaml:"checkpoint"`
 	Authz             AuthzConfig             `mapstructure:"authz" yaml:"authz"`
-	Provisioner       ProvisionerConfig       `mapstructure:"provisioner" yaml:"provisioner"`
 	DashboardPostgres DashboardPostgresConfig `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
-}
-
-// ProvisionerConfig controls runtime behaviour of the tenant provisioner.
-//
-// Environment variable override: GIBSON_PROVISIONER_RECONCILE_ON_STARTUP
-type ProvisionerConfig struct {
-	// ReconcileOnStartup is deprecated and has no effect.
-	// Previously triggered one-shot Keycloak org + FGA tuple reconciliation.
-	// Default: false.
-	ReconcileOnStartup bool `mapstructure:"reconcile_on_startup" yaml:"reconcile_on_startup"`
 }
 
 // PluginsConfig contains configuration for all plugins.
@@ -603,8 +592,8 @@ func (c *RedisConfig) ApplyDefaults() {
 // AuthzConfig contains all OpenFGA authorization configuration.
 //
 // When Enabled is false (the default), the daemon wires a no-op Authorizer and
-// never connects to FGA. Flip Enabled to true in dev cluster values to test the
-// FGA integration; production flips happen in authz-02.
+// never connects to FGA. Flip Enabled to true in cluster values to enable the
+// FGA integration.
 //
 // Example config:
 //
@@ -634,8 +623,8 @@ type AuthzConfig struct {
 	RequireReady bool `mapstructure:"require_ready" yaml:"require_ready"`
 
 	// EnforcementSource is retained for config-file backwards compatibility.
-	// After authz-07 the only valid value is "fga"; the daemon ignores any
-	// other value and always uses FGA as the sole authorization backend.
+	// The only valid value is "fga"; the daemon ignores any other value and
+	// always uses FGA as the sole authorization backend.
 	// Override via env: GIBSON_AUTHZ_ENFORCEMENT_SOURCE
 	EnforcementSource string `mapstructure:"enforcement_source" yaml:"enforcement_source"`
 
