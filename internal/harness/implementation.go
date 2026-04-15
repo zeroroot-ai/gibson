@@ -1981,8 +1981,8 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	if dah, ok := childHarness.(*DefaultAgentHarness); ok {
 		childRunID = dah.missionCtx.AgentRunID
 	} else {
-		// If childHarness is wrapped (e.g. AuthorizingHarness), fall back to
-		// the ID that was in childMissionCtx before the factory ran.
+		// If childHarness is wrapped by middleware, fall back to the ID that
+		// was in childMissionCtx before the factory ran.
 		childRunID = childMissionCtx.AgentRunID
 	}
 	if parentRunID != "" && childRunID != "" && h.graphRAGQueryBridge != nil {

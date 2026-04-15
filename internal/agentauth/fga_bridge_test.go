@@ -476,10 +476,10 @@ func TestCheckExecution_EmptyComponentRef_ReturnsError(t *testing.T) {
 
 func TestParseComponentRef(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
-		wantName  string
-		wantOK    bool
+		name     string
+		input    string
+		wantName string
+		wantOK   bool
 	}{
 		{
 			name:     "valid component ref",

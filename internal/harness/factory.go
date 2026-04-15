@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/casbin/casbin/v2"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -58,8 +57,7 @@ type HarnessFactoryInterface interface {
 // It provides a production-ready implementation of the factory pattern for creating
 // agent harnesses with proper dependency injection and state management.
 type DefaultHarnessFactory struct {
-	config   HarnessConfig
-	enforcer *casbin.Enforcer
+	config HarnessConfig
 }
 
 // NewHarnessFactory creates a new DefaultHarnessFactory with the given configuration.
@@ -88,8 +86,7 @@ func NewHarnessFactory(config HarnessConfig) (*DefaultHarnessFactory, error) {
 	}
 
 	return &DefaultHarnessFactory{
-		config:   config,
-		enforcer: config.Enforcer,
+		config: config,
 	}, nil
 }
 
@@ -254,17 +251,9 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		maxDelegationDepth:  f.config.MaxDelegationDepth,
 	}
 
-	// Wrap with AuthorizingHarness if a Casbin enforcer is configured.
-	// This must happen before middleware so that capability checks run on the inner
-	// harness and observability middleware wraps around the authorizing layer.
-	if f.enforcer != nil {
-		harness = NewAuthorizingHarness(harness, f.enforcer)
-	}
-
-	// Wrap with ComplianceMiddleware AFTER AuthorizingHarness so the emitter
-	// sees the authorization decision, and BEFORE the OTel / Langfuse
-	// middleware so the OTel span captures the emit overhead. This is the
-	// insertion order from audit-compliance-emitter requirement 1.2.
+	// Wrap with ComplianceMiddleware BEFORE the OTel / Langfuse middleware so
+	// the OTel span captures the emit overhead. This is the insertion order
+	// from audit-compliance-emitter requirement 1.2.
 	//
 	// ComplianceMiddleware is skipped when the signal sink is nil (default
 	// in the factory config today — daemon startup wiring lands the sink in

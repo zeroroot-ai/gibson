@@ -340,4 +340,3 @@ func NewTextHandler(w io.Writer, level slog.Level) slog.Handler {
 		Level: level,
 	})
 }
-

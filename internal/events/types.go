@@ -14,13 +14,13 @@ type EventType string
 // Mission Lifecycle Events
 // These events track the overall mission execution lifecycle.
 const (
-	EventMissionStarted  EventType = "mission.started"
-	EventMissionProgress EventType = "mission.progress"
-	EventMissionNode     EventType = "mission.node"
+	EventMissionStarted   EventType = "mission.started"
+	EventMissionProgress  EventType = "mission.progress"
+	EventMissionNode      EventType = "mission.node"
 	EventMissionCompleted EventType = "mission.completed"
-	EventMissionFailed   EventType = "mission.failed"
-	EventMissionPaused   EventType = "mission.paused"
-	EventMissionResumed  EventType = "mission.resumed"
+	EventMissionFailed    EventType = "mission.failed"
+	EventMissionPaused    EventType = "mission.paused"
+	EventMissionResumed   EventType = "mission.resumed"
 )
 
 // Node Execution Events

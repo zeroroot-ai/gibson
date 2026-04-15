@@ -438,10 +438,9 @@ func TestRoleBinder_Deduplication(t *testing.T) {
 
 // TestIdentity_HasPermission and TestIdentity_HasRole were removed as part of
 // the declarative-rbac-framework spec: the Identity methods they exercised
-// (HasRole, HasPermission, HasCapability) have been deleted. Authorization
-// is now enforced exclusively by the RPCAuthzInterceptor via Casbin policies
-// loaded from permissions.yaml. See rpc_authz_interceptor_test.go for the
-// new test coverage.
+// (HasRole, HasPermission, HasCapability) have been deleted. Authorization is
+// now enforced exclusively by the gRPC FGA interceptor — see
+// fga_authz_interceptor.go and fga_rpc_registry.go for the new coverage.
 
 func TestIdentity_IsExpired(t *testing.T) {
 	now := time.Now()

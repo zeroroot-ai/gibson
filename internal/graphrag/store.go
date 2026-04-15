@@ -177,7 +177,6 @@ type DefaultGraphRAGStore struct {
 	config    GraphRAGConfig
 }
 
-
 // Store stores a single graph record (node + relationships).
 // Generates embedding if not provided, then upserts to provider.
 func (s *DefaultGraphRAGStore) Store(ctx context.Context, record GraphRecord) error {

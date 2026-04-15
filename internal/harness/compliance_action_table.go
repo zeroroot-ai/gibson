@@ -13,17 +13,17 @@ package harness
 const (
 	// --- Actions (compliance_signal.action) ---
 
-	ActionToolCall          = "tool_call"
-	ActionLLMCall           = "llm_call"
-	ActionMemoryRead        = "memory_read"
-	ActionMemoryWrite       = "memory_write"
-	ActionGraphRead         = "graph_read"
-	ActionGraphWrite        = "graph_write"
-	ActionPluginQuery       = "plugin_query"
-	ActionDelegate          = "delegate"
-	ActionFindingSubmit     = "finding_submit"
-	ActionAuthzDecision     = "authz_decision"
-	ActionMissionLifecycle  = "mission_lifecycle"
+	ActionToolCall         = "tool_call"
+	ActionLLMCall          = "llm_call"
+	ActionMemoryRead       = "memory_read"
+	ActionMemoryWrite      = "memory_write"
+	ActionGraphRead        = "graph_read"
+	ActionGraphWrite       = "graph_write"
+	ActionPluginQuery      = "plugin_query"
+	ActionDelegate         = "delegate"
+	ActionFindingSubmit    = "finding_submit"
+	ActionAuthzDecision    = "authz_decision"
+	ActionMissionLifecycle = "mission_lifecycle"
 
 	// --- Effects (compliance_signal.effect) ---
 
@@ -47,11 +47,11 @@ type HarnessMethod string
 
 const (
 	// LLM methods
-	MethodComplete                        HarnessMethod = "Complete"
-	MethodCompleteWithTools               HarnessMethod = "CompleteWithTools"
-	MethodStream                          HarnessMethod = "Stream"
-	MethodCompleteStructuredAny           HarnessMethod = "CompleteStructuredAny"
-	MethodCompleteStructuredAnyWithUsage  HarnessMethod = "CompleteStructuredAnyWithUsage"
+	MethodComplete                       HarnessMethod = "Complete"
+	MethodCompleteWithTools              HarnessMethod = "CompleteWithTools"
+	MethodStream                         HarnessMethod = "Stream"
+	MethodCompleteStructuredAny          HarnessMethod = "CompleteStructuredAny"
+	MethodCompleteStructuredAnyWithUsage HarnessMethod = "CompleteStructuredAnyWithUsage"
 
 	// Tool methods
 	MethodCallToolProto          HarnessMethod = "CallToolProto"
@@ -61,16 +61,16 @@ const (
 	MethodGetAllToolCapabilities HarnessMethod = "GetAllToolCapabilities"
 
 	// Plugin methods
-	MethodQueryPlugin  HarnessMethod = "QueryPlugin"
-	MethodListPlugins  HarnessMethod = "ListPlugins"
+	MethodQueryPlugin HarnessMethod = "QueryPlugin"
+	MethodListPlugins HarnessMethod = "ListPlugins"
 
 	// Sub-agent methods
 	MethodDelegateToAgent HarnessMethod = "DelegateToAgent"
 	MethodListAgents      HarnessMethod = "ListAgents"
 
 	// Findings methods
-	MethodSubmitFinding         HarnessMethod = "SubmitFinding"
-	MethodGetFindings           HarnessMethod = "GetFindings"
+	MethodSubmitFinding          HarnessMethod = "SubmitFinding"
+	MethodGetFindings            HarnessMethod = "GetFindings"
 	MethodGetPreviousRunFindings HarnessMethod = "GetPreviousRunFindings"
 	MethodGetAllRunFindings      HarnessMethod = "GetAllRunFindings"
 

@@ -34,16 +34,16 @@ type alertStoreIface interface {
 
 // storedAlert is the JSON-serializable alert record persisted in Redis.
 type storedAlert struct {
-	ID           string `json:"id"`
-	TenantID     string `json:"tenant_id"`
-	UserID       string `json:"user_id"`
-	Title        string `json:"title"`
-	Body         string `json:"body"`
-	Severity     string `json:"severity"`
-	Read         bool   `json:"read"`
-	CreatedAtUnix int64 `json:"created_at_unix"`
-	Source       string `json:"source"`
-	SourceID     string `json:"source_id"`
+	ID            string `json:"id"`
+	TenantID      string `json:"tenant_id"`
+	UserID        string `json:"user_id"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
+	Severity      string `json:"severity"`
+	Read          bool   `json:"read"`
+	CreatedAtUnix int64  `json:"created_at_unix"`
+	Source        string `json:"source"`
+	SourceID      string `json:"source_id"`
 }
 
 // redisAlertStore implements alertStoreIface using a raw Redis client.

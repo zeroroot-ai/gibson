@@ -53,9 +53,9 @@ const (
 // ---------------------------------------------------------------------------
 
 var (
-	metricsOnce        sync.Once
-	auditEventsTotal   *prometheus.CounterVec
-	auditDroppedTotal  prometheus.Counter
+	metricsOnce       sync.Once
+	auditEventsTotal  *prometheus.CounterVec
+	auditDroppedTotal prometheus.Counter
 )
 
 // initMetrics registers the Prometheus counters once per process lifetime
@@ -94,9 +94,9 @@ func initMetrics() {
 type Event struct {
 	TenantID   string
 	ActorID    string
-	ActorType  string          // "user", "agent", "system"
-	Action     string          // e.g. "grant_created", "agent_registered", "capability_executed"
-	TargetType string          // e.g. "component", "agent", "team", "user"
+	ActorType  string // "user", "agent", "system"
+	Action     string // e.g. "grant_created", "agent_registered", "capability_executed"
+	TargetType string // e.g. "component", "agent", "team", "user"
 	TargetID   string
 	Decision   string          // "allow", "deny", or "" for non-authz events
 	Metadata   json.RawMessage // stored verbatim in the JSONB column

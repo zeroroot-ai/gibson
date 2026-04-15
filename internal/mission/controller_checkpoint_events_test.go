@@ -15,9 +15,9 @@ import (
 
 // mockEventBus captures published events for assertions.
 type mockEventBus struct {
-	mu       sync.Mutex
+	mu        sync.Mutex
 	published []events.Event
-	err      error // if non-nil, Publish returns this error
+	err       error // if non-nil, Publish returns this error
 }
 
 func (m *mockEventBus) Publish(_ context.Context, evt events.Event) error {

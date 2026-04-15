@@ -3,7 +3,8 @@
 // Package harness — graphrag_bridge_integration_test.go
 //
 // Integration test for the full finding pipeline:
-//   storeToGraphRAG → GraphLoader.LoadFindings → graph node persisted
+//
+//	storeToGraphRAG → GraphLoader.LoadFindings → graph node persisted
 //
 // Uses the mock GraphClient from internal/graphrag/graph to verify that a
 // Finding node is passed to the graph after bridge.StoreAsync is called.

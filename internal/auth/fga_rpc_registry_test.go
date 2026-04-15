@@ -166,4 +166,3 @@ func TestFgaRpcRegistry_AllAuthenticatedEntriesHaveRelation(t *testing.T) {
 		}
 	}
 }
-

@@ -32,8 +32,7 @@ const (
 )
 
 // FgaAuthzInterceptor is the single gRPC authorization interceptor that
-// consults OpenFGA for every RPC's authorization decision. It is the
-// replacement for the legacy Casbin RPCAuthzInterceptor.
+// consults OpenFGA for every RPC's authorization decision.
 //
 // The 9-step flow (per design.md Component 1):
 //  1. Extract identity from ctx; if nil AND not Unauthenticated → deny.

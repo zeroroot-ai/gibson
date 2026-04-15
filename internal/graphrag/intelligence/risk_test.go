@@ -61,9 +61,9 @@ func TestCalculateScore_NoDepthAdjustment(t *testing.T) {
 // used in calculateScore: factor = 1.0 + 0.1*depth, final score capped at 100.
 func TestCalculateScore_DepthFactor_Formula(t *testing.T) {
 	tests := []struct {
-		depth          int
-		baseScore      float64
-		expectedScore  float64
+		depth         int
+		baseScore     float64
+		expectedScore float64
 	}{
 		{0, 50.0, 50.0},   // no path, score unchanged
 		{1, 50.0, 55.0},   // 50 * 1.1 = 55
@@ -115,14 +115,14 @@ func TestCalculateScore_Algorithms(t *testing.T) {
 	c := riskCalcNilDriver()
 
 	data := assetData{
-		assetID:         "asset-alg",
-		assetName:       "alg-host",
+		assetID:          "asset-alg",
+		assetName:        "alg-host",
 		criticalFindings: 2,
 		highFindings:     3,
 		mediumFindings:   5,
-		avgCVSSScore:    7.5,
-		openFindings:    8,
-		avgExposureDays: 45,
+		avgCVSSScore:     7.5,
+		openFindings:     8,
+		avgExposureDays:  45,
 	}
 
 	algorithms := []string{"weighted_findings", "cvss_aggregate", "exposure_time"}

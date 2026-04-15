@@ -12,10 +12,12 @@ package api
 //   - SaveMissionDraft
 //   - ListMissionDrafts
 //
-// Note: RPCs that previously delegated to Keycloak (ResetPassword,
-// RevokeUserSessions, SuspendMember, GetUserProfile, UpdateUserProfile) now
+// Note: the user/session/profile RPCs (ResetPassword, RevokeUserSessions,
+// SuspendMember, GetUserProfile, UpdateUserProfile) currently delegate to
+// the dashboard layer (Better Auth). ResetPassword always returns success,
+// SuspendMember manages the FGA member tuple, and the remaining three
 // return codes.Unimplemented until a Better Auth–backed implementation is
-// wired. The FGA tuple management in SuspendMember is preserved.
+// wired here.
 
 import (
 	"context"
@@ -259,4 +261,3 @@ func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *ListMissionDr
 
 	return &ListMissionDraftsResponse{Drafts: pbDrafts}, nil
 }
-

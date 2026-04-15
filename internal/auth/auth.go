@@ -38,7 +38,9 @@ type Authenticator interface {
 // This extends the SDK Identity type with Gibson-specific authorization fields.
 // The SDK Identity contains the base authentication information (subject, issuer,
 // groups, claims, expiry), while Gibson adds resolved roles, permissions, and
-// Casbin-backed capability grants.
+// API-key capability grants. Authorization decisions themselves are made by the
+// gRPC FGA interceptor against OpenFGA; the fields on this struct are DATA
+// consumed by that interceptor and by handlers for data scoping.
 //
 // Identity is immutable after creation and safe to pass across goroutines.
 type Identity struct {
@@ -56,8 +58,10 @@ type Identity struct {
 	// These are computed from Roles using permission mapping.
 	Permissions []Permission
 
-	// Capabilities are the Casbin resource:action grants assigned to this identity.
-	// For API keys these are sourced from the APIKeyRecord.Capabilities field.
+	// Capabilities are the API-key resource:action grants assigned to this identity.
+	// They are sourced from the APIKeyRecord.Capabilities field on API-key auth
+	// and are consulted by handlers for data-scoping decisions. Authorization
+	// for gRPC RPCs themselves is made by the FGA interceptor, not from this slice.
 	// An empty slice should be treated as ["*"] (unrestricted) by callers; the
 	// APIKeyAuthenticator normalises this on every Authenticate call so that
 	// legacy keys created before capability support was added retain full access.
@@ -98,11 +102,11 @@ type Permission struct {
 
 // Note: HasPermission, HasCapability, and HasRole methods were removed as
 // part of the declarative-rbac-framework spec. Authorization is enforced
-// exclusively by the RPCAuthzInterceptor against Casbin policies loaded
-// from permissions.yaml. The Identity struct still carries Roles,
-// Permissions, and Capabilities as DATA fields — consumed by the
-// interceptor (for Casbin subject lookup) and by handlers (for data
-// scoping via slices.Contains on Capabilities).
+// exclusively by the gRPC FGA interceptor against OpenFGA (see
+// internal/auth/fga_authz_interceptor.go and fga_rpc_registry.go). The
+// Identity struct still carries Roles, Permissions, and Capabilities as
+// DATA fields — consumed by handlers for data scoping via slices.Contains
+// on Capabilities.
 
 // ContextWithIdentity stores a Gibson Identity in the context.
 //

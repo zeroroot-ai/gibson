@@ -1,7 +1,6 @@
 // Package api — server_audit.go
 //
-// This file implements the audit log and batch grant RPC handlers introduced in
-// authz-06-granular-permissions-teams:
+// This file implements the audit log and batch grant RPC handlers:
 //
 //   - ListAuditEvents — queries the Redis audit stream (with optional Loki fallthrough)
 //   - BatchGrantComponentAccess — bulk grant/revoke in a single RPC
@@ -217,7 +216,7 @@ func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCu
 func (s *DaemonServer) requireTenantAdmin(ctx context.Context, tenantID string) error {
 	if s.authorizer == nil {
 		// When authz is disabled (noopAuthorizer not wired), allow through.
-		// The FGA interceptor from authz-03 handles enforcement when enabled.
+		// The FGA interceptor handles enforcement when enabled.
 		return nil
 	}
 

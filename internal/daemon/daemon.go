@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	goredis "github.com/redis/go-redis/v9"
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
@@ -1370,4 +1370,3 @@ func (d *daemonImpl) CredentialHandler() *api.CredentialHandler {
 func (d *daemonImpl) LLMConfigHandler() *api.LLMConfigHandler {
 	return d.llmConfigHandler
 }
-

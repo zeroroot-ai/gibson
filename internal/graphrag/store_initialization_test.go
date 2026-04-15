@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 func TestNewGraphRAGStoreWithProvider_Success(t *testing.T) {
 	// Test that NewGraphRAGStoreWithProvider works with injected provider
 	config := GraphRAGConfig{

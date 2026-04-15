@@ -21,7 +21,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/provisioner"
 )
 
 // ---------------------------------------------------------------------------
@@ -125,7 +124,31 @@ func newAuthDB(t *testing.T) (*auth.APIKeyAuthenticator, func()) {
 		return db.PingContext(ctx) == nil
 	}, 30*time.Second, 200*time.Millisecond, "Postgres did not become ready in time")
 
-	require.NoError(t, provisioner.RunMigrations(ctx, db))
+	// Inline DDL for the api_keys table. Historically this was done via
+	// provisioner.RunMigrations, but the provisioner package has moved into the
+	// tenant-operator. The integration test only needs the schema local to the
+	// APIKeyAuthenticator under test, so the DDL is inlined here.
+	const apiKeysDDL = `
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_id         TEXT PRIMARY KEY,
+    tenant_id      TEXT NOT NULL,
+    key_hash       TEXT NOT NULL UNIQUE,
+    name           TEXT NOT NULL DEFAULT '',
+    created_by     TEXT NOT NULL DEFAULT '',
+    allowed_kinds  TEXT[] NOT NULL DEFAULT '{}',
+    allowed_names  TEXT[] NOT NULL DEFAULT '{}',
+    capabilities   TEXT[] NOT NULL DEFAULT '{}',
+    status         TEXT NOT NULL DEFAULT 'active',
+    max_uses       INTEGER,
+    use_count      INTEGER NOT NULL DEFAULT 0,
+    expires_at     TIMESTAMPTZ,
+    last_used_at   TIMESTAMPTZ,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id);
+`
+	_, ddlErr := db.ExecContext(ctx, apiKeysDDL)
+	require.NoError(t, ddlErr, "failed to create api_keys table")
 
 	a, authErr := auth.NewAPIKeyAuthenticator(db)
 	require.NoError(t, authErr)

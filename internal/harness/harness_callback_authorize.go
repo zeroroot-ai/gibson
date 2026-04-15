@@ -90,8 +90,8 @@ func WithComponentAuthorizer(a authz.Authorizer) CallbackServiceOption {
 //  6. Emit audit event with decision.
 func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.AuthorizeRequest) (*harnesspb.AuthorizeResponse, error) {
 	if s.authzStore == nil {
-		// No store configured — pre-authz-05 daemon; return Unimplemented so the
-		// SDK degrades to allow (rolling-upgrade path).
+		// No store configured; return Unimplemented so the SDK degrades to
+		// allow (rolling-upgrade path).
 		return nil, status.Errorf(codes.Unimplemented, "authorize: authz store not configured")
 	}
 
@@ -217,7 +217,7 @@ func deriveFGAObject(resource string) string {
 }
 
 // emitComponentAuthzAudit logs a structured audit record for the component authz decision.
-// This provides the component_authz_decision audit trail required by spec authz-05.
+// This provides the component_authz_decision audit trail.
 //
 // Fields are logged at INFO level. The trace_id is included for cross-system correlation.
 func (s *HarnessCallbackService) emitComponentAuthzAudit(

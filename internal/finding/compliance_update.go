@@ -142,10 +142,10 @@ func UpdateComplianceMappings(
 	if logger != nil {
 		// Fire-and-log: audit log failures do not block the update.
 		_ = logger.Log(ctx, "finding.compliance_mappings.update", "finding", req.FindingID, map[string]any{
-			"mode":       req.Mode.String(),
-			"before":     before,
-			"after":      f.ComplianceMappings,
-			"tenant_id":  tenantID,
+			"mode":      req.Mode.String(),
+			"before":    before,
+			"after":     f.ComplianceMappings,
+			"tenant_id": tenantID,
 		})
 	}
 

@@ -5,7 +5,7 @@ package impersonation
 // The issued token carries the following claims:
 //
 //	sub:          target tenant ID
-//	impersonator: Keycloak subject of the admin who requested the token
+//	impersonator: user subject of the admin who requested the token
 //	iat:          issued-at Unix timestamp
 //	exp:          expiry Unix timestamp (iat + ttl, clamped to max 1 hour)
 //	typ:          "impersonation"
@@ -40,7 +40,7 @@ const (
 type impersonationClaims struct {
 	jwtv5.RegisteredClaims
 
-	// Impersonator is the Keycloak subject of the operator who issued the token.
+	// Impersonator is the user subject of the operator who issued the token.
 	Impersonator string `json:"impersonator"`
 
 	// Typ identifies the token as an impersonation token.

@@ -110,9 +110,9 @@ func newCheckpointTestMission() *Mission {
 func newCheckpointTestState(missionID types.ID) *MissionState {
 	now := time.Now()
 	return &MissionState{
-		MissionID:  missionID,
-		Status:     MissionStatusRunning,
-		StartedAt:  now,
+		MissionID: missionID,
+		Status:    MissionStatusRunning,
+		StartedAt: now,
 		NodeStates: map[string]*NodeState{
 			"node1": {
 				Status:      NodeStatusCompleted,

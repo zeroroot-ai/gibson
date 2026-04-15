@@ -1,8 +1,7 @@
 // Package api — server_user.go
 //
-// GetUserSessions — previously returned Keycloak sessions; now returns
-// Unimplemented since session management has moved to the dashboard layer
-// (Better Auth).
+// GetUserSessions returns Unimplemented; session management lives in the
+// dashboard layer (Better Auth).
 package api
 
 import (

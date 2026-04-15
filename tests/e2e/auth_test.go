@@ -222,8 +222,8 @@ func TestAuthMode_Dev(t *testing.T) {
 }
 
 // TestAuthMode_Enterprise verifies enterprise mode with OIDC validation.
-// Note: This test uses mock OIDC tokens for simplicity. Full integration
-// tests with real Keycloak are in the SDK integration tests.
+// Note: This test uses mock OIDC tokens for simplicity. The example issuer
+// URLs below are illustrative — any OIDC-compliant IdP works.
 func TestAuthMode_Enterprise_Config(t *testing.T) {
 	t.Parallel()
 
@@ -232,7 +232,7 @@ func TestAuthMode_Enterprise_Config(t *testing.T) {
 		Mode: "enterprise",
 		OIDC: []auth.OIDCIssuerConfig{
 			{
-				Issuer:   "https://keycloak.example.com/realms/gibson",
+				Issuer:   "https://oidc.example.com/realms/gibson",
 				Audience: "gibson-api",
 			},
 		},
@@ -477,7 +477,7 @@ func TestAuthMode_LocalhostBypass_Config(t *testing.T) {
 		TrustLocalhost: true,
 		OIDC: []auth.OIDCIssuerConfig{
 			{
-				Issuer:   "https://keycloak.example.com",
+				Issuer:   "https://oidc.example.com",
 				Audience: "gibson-api",
 			},
 		},

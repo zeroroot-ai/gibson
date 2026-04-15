@@ -15,7 +15,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-
 // LocalGraphRAGProvider implements GraphRAGProvider using local Neo4j and vector store.
 // Combines graph database operations with vector similarity search for hybrid retrieval.
 //

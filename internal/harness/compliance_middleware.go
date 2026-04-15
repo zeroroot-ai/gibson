@@ -57,8 +57,9 @@ const systemSentinel = "_system"
 // per-method interceptors in compliance_middleware_methods.go.
 //
 // Per Requirement 1.1, ComplianceMiddleware implements AgentHarness and is
-// composed into the harness chain AFTER AuthorizingHarness and BEFORE the
-// OTel wrapper.
+// composed into the harness chain BEFORE the OTel wrapper so OTel spans
+// capture emit overhead. Authorization decisions arrive on context from the
+// gRPC FGA interceptor — see stampAuthzDecision below.
 type ComplianceMiddleware struct {
 	inner AgentHarness
 
@@ -94,13 +95,13 @@ type ComplianceMiddlewareConfig struct {
 	Inner         AgentHarness
 	GraphReader   GraphReader
 	Sink          SignalSink
-	Resolver      *ResourceResolver // optional; constructed from GraphReader if nil
-	Merger        *TagMerger        // optional; constructed from defaults if nil
-	ActionTable   ActionTable       // optional; DefaultActionTable if nil
-	Clock         Clock             // optional; RealClock if nil
-	Logger        *slog.Logger      // optional; slog.Default if nil
-	Metrics       *ComplianceMetrics // optional; NewComplianceMetrics if nil
-	FailBufferCap int               // 0 → DefaultFailBufferCap
+	Resolver      *ResourceResolver       // optional; constructed from GraphReader if nil
+	Merger        *TagMerger              // optional; constructed from defaults if nil
+	ActionTable   ActionTable             // optional; DefaultActionTable if nil
+	Clock         Clock                   // optional; RealClock if nil
+	Logger        *slog.Logger            // optional; slog.Default if nil
+	Metrics       *ComplianceMetrics      // optional; NewComplianceMetrics if nil
+	FailBufferCap int                     // 0 → DefaultFailBufferCap
 	RuleEvaluator ComplianceRuleEvaluator // optional; no control_ids if nil
 }
 
@@ -448,8 +449,8 @@ func (m *ComplianceMiddleware) stampTraceID(ctx context.Context, sig *taxonomypb
 	sig.TraceId = &tid
 }
 
-// stampAuthzDecision reads the decision the AuthorizingHarness stamped onto
-// context (via the contextkey added in task 11) and copies it onto the signal.
+// stampAuthzDecision reads the decision the FGA gRPC interceptor stamped onto
+// context and copies it onto the signal.
 // Per Requirement 7.3, missing decisions default to "not_checked".
 func (m *ComplianceMiddleware) stampAuthzDecision(ctx context.Context, sig *taxonomypb.ComplianceSignal) {
 	dec, ok := contextkeys.GetAuthzDecision(ctx)

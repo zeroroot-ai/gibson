@@ -11,11 +11,11 @@ import (
 
 // fakeOverlayLoader is a deterministic in-memory ruleOverlayLoader.
 type fakeOverlayLoader struct {
-	mu        sync.Mutex
-	tenants   []string
-	overlays  map[string][]taxonomy.Rule
-	listErr   error
-	loadErr   map[string]error
+	mu       sync.Mutex
+	tenants  []string
+	overlays map[string][]taxonomy.Rule
+	listErr  error
+	loadErr  map[string]error
 }
 
 func (f *fakeOverlayLoader) ListTenants(ctx context.Context) ([]string, error) {
@@ -120,11 +120,11 @@ func TestRuleRegistry_BrokenOverlayDoesNotAffectOthers(t *testing.T) {
 
 func TestIsReservedRuleID(t *testing.T) {
 	cases := map[string]bool{
-		"PLATFORM.X":       true,
-		"_system.Y":        true,
-		"SYSTEM.Z":         true,
-		"MYCORP.CUSTOM":    false,
-		"SOC2.CC7.1":       false,
+		"PLATFORM.X":         true,
+		"_system.Y":          true,
+		"SYSTEM.Z":           true,
+		"MYCORP.CUSTOM":      false,
+		"SOC2.CC7.1":         false,
 		"platform.lowercase": false, // case sensitive
 	}
 	for id, want := range cases {

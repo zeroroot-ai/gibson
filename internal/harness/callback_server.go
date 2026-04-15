@@ -121,7 +121,6 @@ func (s *CallbackServer) Stop() {
 	}
 }
 
-
 // UnregisterHarness removes a harness registration when a task completes.
 func (s *CallbackServer) UnregisterHarness(taskID string) {
 	s.service.UnregisterHarness(taskID)

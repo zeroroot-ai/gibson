@@ -111,9 +111,9 @@ func (*noopInnerHarness) SubmitFinding(context.Context, agent.Finding) error {
 func (*noopInnerHarness) GetFindings(context.Context, FindingFilter) ([]agent.Finding, error) {
 	return nil, nil
 }
-func (*noopInnerHarness) Memory() memory.MemoryStore          { return nil }
-func (*noopInnerHarness) MissionID() types.ID                 { return "" }
-func (*noopInnerHarness) Mission() MissionContext             { return MissionContext{} }
+func (*noopInnerHarness) Memory() memory.MemoryStore { return nil }
+func (*noopInnerHarness) MissionID() types.ID        { return "" }
+func (*noopInnerHarness) Mission() MissionContext    { return MissionContext{} }
 func (*noopInnerHarness) MissionExecutionContext() MissionExecutionContextSDK {
 	return MissionExecutionContextSDK{}
 }
@@ -126,12 +126,12 @@ func (*noopInnerHarness) GetPreviousRunFindings(context.Context, FindingFilter) 
 func (*noopInnerHarness) GetAllRunFindings(context.Context, FindingFilter) ([]agent.Finding, error) {
 	return nil, nil
 }
-func (*noopInnerHarness) Target() TargetInfo              { return TargetInfo{} }
-func (*noopInnerHarness) Checkpoint() CheckpointAccess    { return nil }
-func (*noopInnerHarness) Tracer() trace.Tracer            { return nil }
-func (*noopInnerHarness) Logger() *slog.Logger            { return slog.Default() }
-func (*noopInnerHarness) Metrics() MetricsRecorder        { return nil }
-func (*noopInnerHarness) TokenUsage() *llm.TokenTracker   { return nil }
+func (*noopInnerHarness) Target() TargetInfo            { return TargetInfo{} }
+func (*noopInnerHarness) Checkpoint() CheckpointAccess  { return nil }
+func (*noopInnerHarness) Tracer() trace.Tracer          { return nil }
+func (*noopInnerHarness) Logger() *slog.Logger          { return slog.Default() }
+func (*noopInnerHarness) Metrics() MetricsRecorder      { return nil }
+func (*noopInnerHarness) TokenUsage() *llm.TokenTracker { return nil }
 
 func TestComplianceMiddleware_IdentityStamping_Full(t *testing.T) {
 	sink := &fakeSink{}
@@ -199,7 +199,7 @@ func TestComplianceMiddleware_AuthzDecisionCapture(t *testing.T) {
 	ctx := contextkeys.WithAuthzDecision(context.Background(), contextkeys.AuthzDecisionValue{
 		Decision: DecisionAllow,
 		PolicyID: "tools.execute",
-		Reason:   "casbin policy allow",
+		Reason:   "fga policy allow",
 	})
 
 	sip := m.beginSignal(ctx, MethodCallToolProto, ToolCallTarget{Name: "nmap"})

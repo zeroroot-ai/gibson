@@ -95,9 +95,9 @@ const (
 	// CallerComponentVersion stores the version of the calling component.
 	CallerComponentVersion Key = "gibson.caller_component_version"
 
-	// AuthzDecision stores the authorization decision made by
-	// AuthorizingHarness for the current harness call, so the
-	// ComplianceMiddleware can read it when stamping the signal.
+	// AuthzDecision stores the authorization decision made by the gRPC FGA
+	// interceptor for the current request, so the ComplianceMiddleware can
+	// read it when stamping the signal.
 	// Added by audit-compliance-emitter task 11.
 	AuthzDecision Key = "gibson.authz_decision"
 )

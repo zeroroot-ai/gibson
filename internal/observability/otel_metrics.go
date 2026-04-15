@@ -81,14 +81,14 @@ type OTelMetricsRecorder struct {
 	decisionsTotal       metric.Int64Counter
 	authzDecisionsTotal  metric.Int64Counter
 
-	// FGA-specific counters (authz-03).
+	// FGA-specific counters.
 	fgaUnavailableTotal metric.Int64Counter
 
-	// Component authz counters (authz-05).
-	componentAuthzTotal        metric.Int64Counter
+	// Component authz counters.
+	componentAuthzTotal         metric.Int64Counter
 	componentAuthzFailOpenTotal metric.Int64Counter
-	workTTLExpiredTotal        metric.Int64Counter
-	classificationsTotal       metric.Int64Counter
+	workTTLExpiredTotal         metric.Int64Counter
+	classificationsTotal        metric.Int64Counter
 
 	// Histograms track distributions of values
 	llmLatencySeconds      metric.Float64Histogram
@@ -224,7 +224,7 @@ func NewOTelMetricsRecorder(mp metric.MeterProvider) (*OTelMetricsRecorder, erro
 		return nil, err
 	}
 
-	// FGA-specific counters (authz-03).
+	// FGA-specific counters.
 	recorder.fgaUnavailableTotal, err = meter.Int64Counter(
 		"gibson.authz.fga_unavailable_total",
 		metric.WithDescription("FGA service was unreachable for an authorization check (labeled by method)"),
@@ -233,7 +233,7 @@ func NewOTelMetricsRecorder(mp metric.MeterProvider) (*OTelMetricsRecorder, erro
 		return nil, err
 	}
 
-	// Component authz counters (authz-05).
+	// Component authz counters.
 	// gibson_component_authz_total: every component-level Authorize RPC decision,
 	// labeled by action, decision (allow|deny), and tenant_id.
 	recorder.componentAuthzTotal, err = meter.Int64Counter(
@@ -748,7 +748,7 @@ func (r *OTelMetricsRecorder) RecordFgaUnavailable(ctx context.Context, method s
 }
 
 // ============================================================================
-// Component authz metrics (authz-05)
+// Component authz metrics
 // ============================================================================
 
 // RecordComponentAuthz increments the component-level authz decision counter.

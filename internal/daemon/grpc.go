@@ -46,8 +46,8 @@ type daemonMemoryStore struct {
 	working memory.WorkingMemory
 }
 
-func (s *daemonMemoryStore) Working() memory.WorkingMemory { return s.working }
-func (s *daemonMemoryStore) Mission() memory.MissionMemory { return nil }
+func (s *daemonMemoryStore) Working() memory.WorkingMemory   { return s.working }
+func (s *daemonMemoryStore) Mission() memory.MissionMemory   { return nil }
 func (s *daemonMemoryStore) LongTerm() memory.LongTermMemory { return nil }
 
 // startGRPCServer creates and starts the gRPC server.
@@ -1862,4 +1862,3 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		CreatedAt:   m.CreatedAt.Time,
 	}, nil
 }
-

@@ -29,7 +29,9 @@ import (
 // depends on the proto registrations in the daemon api package.
 func TestFgaRegistryCoverAllProtoRPCs(t *testing.T) {
 	reg, regErr := auth.LoadRegistry(auth.EmbeddedRpcRegistry, "")
-	if regErr != nil { t.Fatalf("load registry: %v", regErr) }
+	if regErr != nil {
+		t.Fatalf("load registry: %v", regErr)
+	}
 
 	methods := discoverGibsonRPCs(t)
 	if len(methods) == 0 {

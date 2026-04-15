@@ -109,7 +109,7 @@ func DefaultConfig() *Config {
 			Enabled:           false, // Disabled by default — flip in dev/prod values
 			Provider:          "openfga",
 			RequireReady:      true,
-			EnforcementSource: "fga", // Only valid value after authz-07
+			EnforcementSource: "fga", // Only valid value
 			Fga: FgaClientConfig{
 				Endpoint:  "gibson-fga:8080",
 				StoreID:   "", // resolved from ConfigMap at startup if empty

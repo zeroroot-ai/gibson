@@ -49,13 +49,13 @@ func validMessagesJSON() string {
 // ---------------------------------------------------------------------------
 
 type mockLLMProvider struct {
-	name           string
-	models         []llm.ModelInfo
-	modelsErr      error
-	completeResp   *llm.CompletionResponse
-	completeErr    error
-	streamChunks   []llm.StreamChunk
-	streamErr      error
+	name             string
+	models           []llm.ModelInfo
+	modelsErr        error
+	completeResp     *llm.CompletionResponse
+	completeErr      error
+	streamChunks     []llm.StreamChunk
+	streamErr        error
 	toolCompleteResp *llm.CompletionResponse
 	toolCompleteErr  error
 }
@@ -144,8 +144,8 @@ func (r *mockLLMRegistry) Health(_ context.Context) types.HealthStatus {
 // ---------------------------------------------------------------------------
 
 type mockSlotManager struct {
-	provider llm.LLMProvider
-	model    llm.ModelInfo
+	provider   llm.LLMProvider
+	model      llm.ModelInfo
 	resolveErr error
 }
 

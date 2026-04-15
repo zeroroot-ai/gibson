@@ -97,10 +97,10 @@ const (
 
 // DefaultComponentScorer implements ComponentScorer with configurable criteria.
 type DefaultComponentScorer struct {
-	criteria           *ScoringCriteria
-	capabilityMatcher  CapabilityMatcher
-	lifecycleManager   component.LifecycleManager
-	prometheusQuerier  PrometheusQuerier // optional; nil uses status-based fallback
+	criteria          *ScoringCriteria
+	capabilityMatcher CapabilityMatcher
+	lifecycleManager  component.LifecycleManager
+	prometheusQuerier PrometheusQuerier // optional; nil uses status-based fallback
 }
 
 // NewComponentScorer creates a new component scorer with the given criteria and dependencies.

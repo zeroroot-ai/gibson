@@ -12,9 +12,9 @@ import (
 
 // trackingOrchestrator records which Execute path was taken.
 type trackingOrchestrator struct {
-	executeCount             int
+	executeCount               int
 	executeFromCheckpointCount int
-	lastCheckpoint           *MissionCheckpoint
+	lastCheckpoint             *MissionCheckpoint
 }
 
 func (t *trackingOrchestrator) Execute(_ context.Context, _ *Mission) (*MissionResult, error) {

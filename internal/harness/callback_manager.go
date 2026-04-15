@@ -260,7 +260,6 @@ func (m *CallbackManager) RegisterHarnessForMission(missionID, agentName string,
 	return key
 }
 
-
 // UnregisterHarness removes a harness registration when a task completes.
 //
 // Parameters:

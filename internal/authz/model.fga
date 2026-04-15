@@ -1,16 +1,8 @@
-# Gibson Authorization Model — Phase 4 (authz-04)
+# Gibson Authorization Model
 #
 # This file is the single source of truth for the OpenFGA authorization model.
 # It is applied to the FGA server by the gibson-fga-init Kubernetes Job on every
 # helm install/upgrade. Changes here must pass CI (fga-smoke-test.yml) before merge.
-#
-# HISTORY
-# -------
-# authz-01: Introduced base model with user, tenant, component, system_tenant types.
-# authz-04: Added team type with parent/admin/member/can_view_data_from relations.
-#           Extended component type with can_read relation and team member indirection.
-# agent-auth: Added agent_principal type for Agent Auth Protocol per-agent grants.
-#             Extended component can_execute/can_configure/can_read to accept agent_principal.
 #
 # When extending, add new types after system_tenant. Do NOT rename existing
 # relations or types — doing so breaks existing tuples in the FGA store.

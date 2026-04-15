@@ -285,7 +285,6 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 	return s
 }
 
-
 // UnregisterHarness removes a harness instance when a task completes.
 // This prevents memory leaks from accumulating completed tasks.
 func (s *HarnessCallbackService) UnregisterHarness(taskID string) {

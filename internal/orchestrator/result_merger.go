@@ -170,16 +170,16 @@ func (m *ResultMerger) calculateRecencyScore(ts, now time.Time) float64 {
 // Findings are most important; hosts and ports are less so.
 func (m *ResultMerger) calculateImportanceScore(entityType string) float64 {
 	scores := map[string]float64{
-		"finding":   0.95,
-		"vuln":      0.90,
-		"service":   0.75,
-		"endpoint":  0.70,
-		"domain":    0.65,
-		"port":      0.60,
-		"host":      0.55,
-		"ip":        0.55,
-		"network":   0.50,
-		"memory":    0.50,
+		"finding":  0.95,
+		"vuln":     0.90,
+		"service":  0.75,
+		"endpoint": 0.70,
+		"domain":   0.65,
+		"port":     0.60,
+		"host":     0.55,
+		"ip":       0.55,
+		"network":  0.50,
+		"memory":   0.50,
 	}
 	if score, ok := scores[entityType]; ok {
 		return score

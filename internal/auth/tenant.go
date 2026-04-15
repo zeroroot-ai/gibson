@@ -27,17 +27,17 @@ const GibsonTenantHeader = "x-gibson-tenant"
 //
 //  2. X-Gibson-Tenant gRPC metadata header from the dashboard:
 //     - If the header is present AND the identity's Tenants list contains the
-//       requested tenant → use it.
+//     requested tenant → use it.
 //     - If the header is present BUT the identity does NOT contain the tenant →
-//       still return SystemTenant (the caller cannot spoof access; downstream
-//       authz will deny them). A WARN is logged.
+//     still return SystemTenant (the caller cannot spoof access; downstream
+//     authz will deny them). A WARN is logged.
 //
 //  3. Identity.Tenants single-entry fast path:
 //     - Exactly one tenant in Tenants → use it.
 //
 //  4. Identity.Tenants multi-entry fallback:
 //     - Multiple tenants and no header → use the alphabetically-first one.
-//       A WARN is logged so operators can see the ambiguity.
+//     A WARN is logged so operators can see the ambiguity.
 //
 //  5. Cross-tenant role holders with empty Tenants → return SystemTenant.
 //

@@ -43,9 +43,10 @@ import (
 var integTestLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 // newIntegServer builds a DaemonServer with all new stores wired using miniredis.
-// Keycloak is intentionally nil — the handlers under test either skip Keycloak
-// (ResetPassword success-only path) or return Unavailable before reaching it,
-// which is acceptable since we only need to rule out Unimplemented.
+// The user/session/profile RPCs currently delegate to the dashboard layer
+// (Better Auth) and return Unimplemented for the mutation paths; this helper
+// exists to verify the non-user-admin RPCs (mission drafts, findings export)
+// are properly wired.
 func newIntegServer(t *testing.T) *DaemonServer {
 	t.Helper()
 	mr := miniredis.RunT(t)
@@ -102,9 +103,9 @@ func (f *integMockFindingStore) List(_ context.Context, _ types.ID, _ *finding.F
 func TestNewRPCsNotUnimplemented(t *testing.T) {
 	ctx := context.Background()
 
-	// ResetPassword: no Keycloak needed; the handler returns success even
-	// without it, so the only way to get Unimplemented is if the handler
-	// is not declared at all.
+	// ResetPassword: handler always returns success (Better Auth in the
+	// dashboard handles the actual reset); no backend dependency in the
+	// daemon. Only way to get Unimplemented is if the handler is unregistered.
 	t.Run("ResetPassword", func(t *testing.T) {
 		srv := newIntegServer(t)
 		resp, err := srv.ResetPassword(ctx, &ResetPasswordRequest{Email: "test@example.com"})
@@ -112,9 +113,10 @@ func TestNewRPCsNotUnimplemented(t *testing.T) {
 		assert.True(t, resp.Success)
 	})
 
-	// RevokeUserSessions: Keycloak is nil, so the expected flow is
-	// Unauthenticated (auth context missing) or Unavailable — neither of
-	// those is Unimplemented.
+	// RevokeUserSessions: currently returns Unimplemented because session
+	// management has moved to the dashboard layer (Better Auth). The test
+	// below is retained as a marker until the dashboard-backed implementation
+	// lands.
 	t.Run("RevokeUserSessions", func(t *testing.T) {
 		srv := newIntegServer(t)
 		_, err := srv.RevokeUserSessions(ctx, &RevokeUserSessionsRequest{
@@ -127,8 +129,9 @@ func TestNewRPCsNotUnimplemented(t *testing.T) {
 		}
 	})
 
-	// SuspendMember: requires auth identity in context — will return
-	// Unavailable (no Keycloak) but NOT Unimplemented.
+	// SuspendMember: manages only the FGA member tuple — the user account
+	// itself is disabled by Better Auth in the dashboard. Must not return
+	// Unimplemented.
 	t.Run("SuspendMember", func(t *testing.T) {
 		srv := newIntegServer(t)
 		_, err := srv.SuspendMember(ctx, &SuspendMemberRequest{
@@ -140,7 +143,7 @@ func TestNewRPCsNotUnimplemented(t *testing.T) {
 		}
 	})
 
-	// GetUserProfile: Keycloak nil → Unavailable is expected, not Unimplemented.
+	// GetUserProfile: currently returns Unimplemented pending dashboard-backed impl.
 	t.Run("GetUserProfile", func(t *testing.T) {
 		srv := newIntegServer(t)
 		_, err := srv.GetUserProfile(ctx, &GetUserProfileRequest{TenantId: "t1", UserId: "u1"})

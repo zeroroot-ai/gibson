@@ -255,9 +255,9 @@ func (s *AgentAuthService) RegisterAgentAuth(
 
 	// Emit audit event.
 	meta, _ := json.Marshal(map[string]any{
-		"agent_name":     agentName,
-		"agent_mode":     mode,
-		"bootstrap_type": bootstrapType,
+		"agent_name":       agentName,
+		"agent_mode":       mode,
+		"bootstrap_type":   bootstrapType,
 		"capability_count": len(caps),
 	})
 	s.auditWriter.Log(audit.Event{
@@ -563,8 +563,8 @@ func (s *AgentAuthService) CreateHostRegistrationToken(
 	rawKey, record, err := s.apiKeys.CreateKey(
 		ctx,
 		tenantID,
-		[]string{"host"},  // AllowedKinds: host registrations only
-		[]string{},        // AllowedNames: no restriction
+		[]string{"host"},          // AllowedKinds: host registrations only
+		[]string{},                // AllowedNames: no restriction
 		[]string{"register:host"}, // Capabilities
 		name,
 		createdBy,

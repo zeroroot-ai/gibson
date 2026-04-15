@@ -54,14 +54,14 @@ const validMissionID = "01234567-89ab-cdef-0123-456789abcdef"
 // ---------------------------------------------------------------------------
 
 type cbMockMissionOperator struct {
-	runErr    error
-	statusInfo *MissionStatusInfo
-	statusErr  error
-	waitResult *MissionResultInfo
-	waitErr    error
-	listRecords []*MissionRecord
-	listErr     error
-	cancelErr   error
+	runErr        error
+	statusInfo    *MissionStatusInfo
+	statusErr     error
+	waitResult    *MissionResultInfo
+	waitErr       error
+	listRecords   []*MissionRecord
+	listErr       error
+	cancelErr     error
 	getResultInfo *MissionResultInfo
 	getResultErr  error
 	createInfo    *MissionInfo

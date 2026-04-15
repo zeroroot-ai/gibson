@@ -89,21 +89,21 @@ type captureAgent struct {
 	name string
 
 	// captured on Execute
-	mu              sync.Mutex
-	capturedChain   []string
-	capturedDepth   int
-	capturedParent  string
+	mu             sync.Mutex
+	capturedChain  []string
+	capturedDepth  int
+	capturedParent string
 }
 
-func (a *captureAgent) Name() string        { return a.name }
-func (a *captureAgent) Version() string     { return "0.0.1" }
-func (a *captureAgent) Description() string { return "capture agent for delegation tests" }
-func (a *captureAgent) Capabilities() []string { return nil }
-func (a *captureAgent) TargetTypes() []component.TargetType { return nil }
-func (a *captureAgent) TechniqueTypes() []component.TechniqueType { return nil }
-func (a *captureAgent) LLMSlots() []agent.SlotDefinition { return nil }
+func (a *captureAgent) Name() string                                                { return a.name }
+func (a *captureAgent) Version() string                                             { return "0.0.1" }
+func (a *captureAgent) Description() string                                         { return "capture agent for delegation tests" }
+func (a *captureAgent) Capabilities() []string                                      { return nil }
+func (a *captureAgent) TargetTypes() []component.TargetType                         { return nil }
+func (a *captureAgent) TechniqueTypes() []component.TechniqueType                   { return nil }
+func (a *captureAgent) LLMSlots() []agent.SlotDefinition                            { return nil }
 func (a *captureAgent) Initialize(ctx context.Context, cfg agent.AgentConfig) error { return nil }
-func (a *captureAgent) Shutdown(ctx context.Context) error { return nil }
+func (a *captureAgent) Shutdown(ctx context.Context) error                          { return nil }
 func (a *captureAgent) Health(ctx context.Context) types.HealthStatus {
 	return types.Healthy("ok")
 }
@@ -444,7 +444,7 @@ func TestDelegateToAgent_ExistingDelegationTestsUnbroken(t *testing.T) {
 
 	registry := &delegationRegistryAdapter{
 		agents: map[string]*captureAgent{
-			"recon_agent":  reconAgent,
+			"recon_agent":   reconAgent,
 			"exploit_agent": exploitAgent,
 		},
 	}

@@ -33,21 +33,21 @@ type conversationStoreIface interface {
 
 // storedConversation is the JSON-serializable conversation metadata in Redis.
 type storedConversation struct {
-	ID           string `json:"id"`
-	TenantID     string `json:"tenant_id"`
-	UserID       string `json:"user_id"`
-	Title        string `json:"title"`
-	CreatedAtUnix int64 `json:"created_at_unix"`
-	UpdatedAtUnix int64 `json:"updated_at_unix"`
-	MessageCount  int32 `json:"message_count"`
+	ID            string `json:"id"`
+	TenantID      string `json:"tenant_id"`
+	UserID        string `json:"user_id"`
+	Title         string `json:"title"`
+	CreatedAtUnix int64  `json:"created_at_unix"`
+	UpdatedAtUnix int64  `json:"updated_at_unix"`
+	MessageCount  int32  `json:"message_count"`
 }
 
 // storedMessage is a single message stored in the conversation message list.
 type storedMessage struct {
-	ID           string `json:"id"`
-	Role         string `json:"role"`
-	Content      string `json:"content"`
-	CreatedAtUnix int64 `json:"created_at_unix"`
+	ID            string `json:"id"`
+	Role          string `json:"role"`
+	Content       string `json:"content"`
+	CreatedAtUnix int64  `json:"created_at_unix"`
 }
 
 // redisConversationStore implements conversationStoreIface using a raw Redis client.

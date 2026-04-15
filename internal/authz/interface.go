@@ -4,10 +4,6 @@
 // behind a mockable interface, keeping all FGA-specific code isolated from the
 // rest of the daemon. When authz.enabled is false in config, a no-op implementation
 // is injected instead.
-//
-// Phase 0 (authz-01): Infrastructure — FGA is wired up but no request path uses it yet.
-// Phase 1 (authz-03): The gRPC interceptor will consult Authorizer for every RPC.
-// Phase 2 (authz-05): The harness Authorize method exposes authz to agents/tools/plugins.
 package authz
 
 import "context"

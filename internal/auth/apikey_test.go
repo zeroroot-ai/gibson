@@ -80,8 +80,8 @@ func TestParsePermissions(t *testing.T) {
 	perms := parsePermissions([]string{
 		"execute:mission",
 		"read:finding",
-		"no-colon",   // invalid — no colon
-		":empty-action", // invalid — empty action
+		"no-colon",        // invalid — no colon
+		":empty-action",   // invalid — empty action
 		"empty-resource:", // invalid — empty resource
 		"*:*",
 	})

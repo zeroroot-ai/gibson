@@ -134,4 +134,3 @@ func normalizeFieldName(field string) string {
 	normalized = strings.ReplaceAll(normalized, "_", "")
 	return normalized
 }
-

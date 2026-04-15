@@ -57,7 +57,7 @@ const (
 //	method     - fully-qualified gRPC method path from info.FullMethod
 //	subject    - Identity.Subject from the authenticated caller (empty for
 //	             unauthenticated RPCs)
-//	tenant     - the tenant domain passed to Casbin ("*" for cross-tenant)
+//	tenant     - the tenant scope of the authz check ("*" for cross-tenant)
 //	permission - the permission evaluated (empty when no permissions are
 //	             required, e.g. for GetAuthSchema)
 //	allowed    - the final decision: true for authz_allow, false for authz_deny

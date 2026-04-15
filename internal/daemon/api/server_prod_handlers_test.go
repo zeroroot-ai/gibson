@@ -4,9 +4,13 @@ package api
 // methods added by the prod-unimplemented-apis spec.
 //
 // Strategy:
-//   - Input validation cases do NOT need Keycloak / stores — verify
-//     codes.InvalidArgument for missing required fields.
-//   - Nil-store cases verify codes.Unavailable when the store is not wired.
+//   - Input validation cases verify codes.InvalidArgument for missing
+//     required fields.
+//   - The user/session/profile RPCs now delegate to the dashboard layer
+//     (Better Auth) and return codes.Unimplemented for the mutation paths
+//     they have not yet been rewired for. See the per-RPC comments below.
+//   - Nil-store cases verify codes.Unavailable when a mission / findings
+//     store is not wired.
 //   - Success cases use lightweight mock helpers where applicable.
 
 import (
@@ -52,9 +56,9 @@ func grpcCode(err error) codes.Code {
 // ---------------------------------------------------------------------------
 
 type mockDraftStore struct {
-	saveErr   error
-	savedID   string
-	listErr   error
+	saveErr    error
+	savedID    string
+	listErr    error
 	listDrafts []*missiondraft.MissionDraft
 }
 
@@ -98,12 +102,13 @@ func TestResetPassword_MissingEmail_InvalidArgument(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
-func TestResetPassword_NilKeycloak_ReturnsSuccess(t *testing.T) {
-	// When Keycloak is not configured, handler must still return success (no leaking).
+func TestResetPassword_ReturnsSuccess(t *testing.T) {
+	// Handler always returns Success=true to prevent email enumeration. The
+	// actual reset flow is handled by Better Auth in the dashboard.
 	srv := blankServer()
 	resp, err := srv.ResetPassword(context.Background(), &ResetPasswordRequest{Email: "user@example.com"})
 	require.NoError(t, err)
-	assert.True(t, resp.Success, "must return success=true even without Keycloak")
+	assert.True(t, resp.Success, "must return success=true regardless of backend")
 }
 
 // ---------------------------------------------------------------------------
@@ -128,14 +133,15 @@ func TestRevokeUserSessions_MissingUserID_InvalidArgument(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
-func TestRevokeUserSessions_NilKeycloak_Unavailable(t *testing.T) {
+func TestRevokeUserSessions_Unimplemented(t *testing.T) {
+	// Session revocation moved to the dashboard layer (Better Auth); handler
+	// returns Unimplemented after validating required fields.
 	srv := blankServer()
 	_, err := srv.RevokeUserSessions(context.Background(), &RevokeUserSessionsRequest{
 		TenantId: "tenant-1",
 		UserId:   "user-1",
 	})
-	// Unauthenticated because no identity in context, before keycloak nil check.
-	assert.Contains(t, []codes.Code{codes.Unauthenticated, codes.Unavailable}, grpcCode(err))
+	assert.Equal(t, codes.Unimplemented, grpcCode(err))
 }
 
 // ---------------------------------------------------------------------------
@@ -162,14 +168,19 @@ func TestSuspendMember_MissingUserID_InvalidArgument(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
-func TestSuspendMember_NilKeycloak_Unavailable(t *testing.T) {
+func TestSuspendMember_NoAuthorizer_SucceedsWithoutFGATupleChange(t *testing.T) {
+	// SuspendMember manages only the FGA member tuple — the user account
+	// itself is disabled by Better Auth in the dashboard. With no authorizer
+	// wired, the handler still succeeds and returns the new status string
+	// (the authorizer block is a no-op when s.authorizer is nil).
 	srv := blankServer()
-	_, err := srv.SuspendMember(context.Background(), &SuspendMemberRequest{
+	resp, err := srv.SuspendMember(context.Background(), &SuspendMemberRequest{
 		TenantId: "tenant-1",
 		UserId:   "user-1",
 		Suspend:  true,
 	})
-	assert.Equal(t, codes.Unavailable, grpcCode(err))
+	require.NoError(t, err)
+	assert.Equal(t, "suspended", resp.NewStatus)
 }
 
 // ---------------------------------------------------------------------------
@@ -188,10 +199,11 @@ func TestGetUserProfile_MissingUserID_InvalidArgument(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
-func TestGetUserProfile_NilKeycloak_Unavailable(t *testing.T) {
+func TestGetUserProfile_Unimplemented(t *testing.T) {
+	// Profile management moved to the dashboard layer (Better Auth).
 	srv := blankServer()
 	_, err := srv.GetUserProfile(context.Background(), &GetUserProfileRequest{TenantId: "t1", UserId: "u1"})
-	assert.Equal(t, codes.Unavailable, grpcCode(err))
+	assert.Equal(t, codes.Unimplemented, grpcCode(err))
 }
 
 // ---------------------------------------------------------------------------
@@ -204,10 +216,11 @@ func TestUpdateUserProfile_MissingTenantID_InvalidArgument(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
-func TestUpdateUserProfile_NilKeycloak_Unavailable(t *testing.T) {
+func TestUpdateUserProfile_Unimplemented(t *testing.T) {
+	// Profile management moved to the dashboard layer (Better Auth).
 	srv := blankServer()
 	_, err := srv.UpdateUserProfile(context.Background(), &UpdateUserProfileRequest{TenantId: "t1", UserId: "u1"})
-	assert.Equal(t, codes.Unavailable, grpcCode(err))
+	assert.Equal(t, codes.Unimplemented, grpcCode(err))
 }
 
 // ---------------------------------------------------------------------------

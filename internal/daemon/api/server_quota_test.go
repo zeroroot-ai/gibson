@@ -14,9 +14,9 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockQuotaStore struct {
-	getErr  error
-	setErr  error
-	stored  *storedQuota
+	getErr error
+	setErr error
+	stored *storedQuota
 }
 
 func (m *mockQuotaStore) GetQuota(_ context.Context, _ string) (*storedQuota, error) {

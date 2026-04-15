@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc/metadata"
 	sdkauth "github.com/zero-day-ai/sdk/auth"
+	"google.golang.org/grpc/metadata"
 )
 
 func TestTenantContextRoundTrip(t *testing.T) {
@@ -343,10 +343,9 @@ func TestTenantNeo4jFilter(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TenantFromContext resolution tests (authz-02-keycloak-organizations, task 22)
+// TenantFromContext resolution tests
 //
-// These tests cover all seven decision branches specified in Requirements
-// 6.5 and 6.6:
+// These tests cover all seven decision branches:
 //
 //  1. ctx already has an explicit tenant set → use it
 //  2. Valid X-Gibson-Tenant header + user is a member → use the header value

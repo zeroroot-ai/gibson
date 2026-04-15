@@ -104,7 +104,7 @@ type AuditEvent struct {
 
 	// FgaObject is the FGA object string checked for this authz decision.
 	// Format: "tenant:<id>", "system_tenant:_system", "component:<name>".
-	// Populated alongside FgaRelation; empty for Casbin-only decisions.
+	// Populated alongside FgaRelation.
 	FgaObject string
 }
 

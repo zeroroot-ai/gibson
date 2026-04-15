@@ -47,7 +47,6 @@ func (m *mockAPIKeyValidator) Authenticate(ctx context.Context, token string) (*
 	return nil, errInvalidToken
 }
 
-
 // mockAgentJWTValidator is a test implementation of AgentJWTValidator.
 type mockAgentJWTValidator struct {
 	verifyFn func(ctx context.Context, tokenStr, expectedAud string) (*AgentAuthClaims, error)
@@ -785,7 +784,7 @@ func TestUnaryAuthInterceptor_EnterpriseTenantExtraction(t *testing.T) {
 		},
 		{
 			// Scenario C: enterprise + user session WITHOUT tenant claim + NO DefaultTenant.
-			// After authz-02, TenantFromContext returns SystemTenant when no tenant set.
+			// TenantFromContext returns SystemTenant when no tenant is set.
 			name:          "C: enterprise session without tenant claim, no default",
 			mode:          "enterprise",
 			identity:      newTestIdentity(testIssuer, map[string]any{}),

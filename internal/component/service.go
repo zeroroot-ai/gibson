@@ -449,7 +449,7 @@ func (s *ComponentServiceServer) RegisterComponent(
 	// When an authenticated identity is present in the context, validate that the
 	// registering component's Kind and Name are permitted by the identity's
 	// allowed_kinds / allowed_names claims, and that the identity holds the
-	// "components:register" Casbin capability. Identities without these claims
+	// "components:register" API-key capability. Identities without these claims
 	// (empty slice = unrestricted) pass through.
 	//
 	// When no identity is present we skip all checks to preserve backward

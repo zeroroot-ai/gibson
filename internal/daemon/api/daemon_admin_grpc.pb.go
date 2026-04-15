@@ -26,19 +26,9 @@ const (
 	DaemonAdminService_DeleteTenantLangfuseCredentials_FullMethodName = "/gibson.daemon.admin.v1.DaemonAdminService/DeleteTenantLangfuseCredentials"
 	DaemonAdminService_GetOnboardingState_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/GetOnboardingState"
 	DaemonAdminService_UpdateOnboardingState_FullMethodName           = "/gibson.daemon.admin.v1.DaemonAdminService/UpdateOnboardingState"
-	DaemonAdminService_CreateInvitation_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/CreateInvitation"
-	DaemonAdminService_AcceptInvitation_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/AcceptInvitation"
-	DaemonAdminService_ListInvitations_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/ListInvitations"
-	DaemonAdminService_RevokeInvitation_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeInvitation"
 	DaemonAdminService_CreateAPIKey_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/CreateAPIKey"
 	DaemonAdminService_ListAPIKeys_FullMethodName                     = "/gibson.daemon.admin.v1.DaemonAdminService/ListAPIKeys"
 	DaemonAdminService_RevokeAPIKey_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeAPIKey"
-	DaemonAdminService_ListTenantMembers_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/ListTenantMembers"
-	DaemonAdminService_AddTenantMember_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/AddTenantMember"
-	DaemonAdminService_RemoveTenantMember_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/RemoveTenantMember"
-	DaemonAdminService_UpdateMemberRole_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/UpdateMemberRole"
-	DaemonAdminService_ListUserTenants_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/ListUserTenants"
-	DaemonAdminService_TransferOwnership_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/TransferOwnership"
 	DaemonAdminService_ListAuditEvents_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/ListAuditEvents"
 	DaemonAdminService_ResetPassword_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/ResetPassword"
 	DaemonAdminService_RevokeUserSessions_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeUserSessions"
@@ -97,32 +87,12 @@ type DaemonAdminServiceClient interface {
 	GetOnboardingState(ctx context.Context, in *GetOnboardingStateRequest, opts ...grpc.CallOption) (*GetOnboardingStateResponse, error)
 	// UpdateOnboardingState advances or modifies the onboarding state.
 	UpdateOnboardingState(ctx context.Context, in *UpdateOnboardingStateRequest, opts ...grpc.CallOption) (*UpdateOnboardingStateResponse, error)
-	// CreateInvitation issues a new team invitation.
-	CreateInvitation(ctx context.Context, in *CreateInvitationRequest, opts ...grpc.CallOption) (*CreateInvitationResponse, error)
-	// AcceptInvitation redeems an invitation token.
-	AcceptInvitation(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*AcceptInvitationResponse, error)
-	// ListInvitations returns the list of invitations for the caller's tenant.
-	ListInvitations(ctx context.Context, in *ListInvitationsRequest, opts ...grpc.CallOption) (*ListInvitationsResponse, error)
-	// RevokeInvitation cancels a pending invitation.
-	RevokeInvitation(ctx context.Context, in *RevokeInvitationRequest, opts ...grpc.CallOption) (*RevokeInvitationResponse, error)
 	// CreateAPIKey issues a new API key for a tenant.
 	CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error)
 	// ListAPIKeys returns API key metadata (never raw key values).
 	ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error)
 	// RevokeAPIKey permanently revokes an API key.
 	RevokeAPIKey(ctx context.Context, in *RevokeAPIKeyRequest, opts ...grpc.CallOption) (*RevokeAPIKeyResponse, error)
-	// ListTenantMembers returns all members of a tenant.
-	ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error)
-	// AddTenantMember adds a user to a tenant with the specified role.
-	AddTenantMember(ctx context.Context, in *AddTenantMemberRequest, opts ...grpc.CallOption) (*AddTenantMemberResponse, error)
-	// RemoveTenantMember removes a user from a tenant.
-	RemoveTenantMember(ctx context.Context, in *RemoveTenantMemberRequest, opts ...grpc.CallOption) (*RemoveTenantMemberResponse, error)
-	// UpdateMemberRole changes the role of an existing tenant member.
-	UpdateMemberRole(ctx context.Context, in *UpdateMemberRoleRequest, opts ...grpc.CallOption) (*UpdateMemberRoleResponse, error)
-	// ListUserTenants returns all tenants a given user belongs to.
-	ListUserTenants(ctx context.Context, in *ListUserTenantsRequest, opts ...grpc.CallOption) (*ListUserTenantsResponse, error)
-	// TransferOwnership transfers tenant ownership to another existing member.
-	TransferOwnership(ctx context.Context, in *TransferOwnershipRequest, opts ...grpc.CallOption) (*TransferOwnershipResponse, error)
 	// ListAuditEvents returns audit events for a tenant, sourced from the daemon's
 	// Redis audit stream. Requires FGA admin relation on the tenant.
 	ListAuditEvents(ctx context.Context, in *ListAuditEventsRequest, opts ...grpc.CallOption) (*ListAuditEventsResponse, error)
@@ -288,46 +258,6 @@ func (c *daemonAdminServiceClient) UpdateOnboardingState(ctx context.Context, in
 	return out, nil
 }
 
-func (c *daemonAdminServiceClient) CreateInvitation(ctx context.Context, in *CreateInvitationRequest, opts ...grpc.CallOption) (*CreateInvitationResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateInvitationResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_CreateInvitation_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) AcceptInvitation(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*AcceptInvitationResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AcceptInvitationResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_AcceptInvitation_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) ListInvitations(ctx context.Context, in *ListInvitationsRequest, opts ...grpc.CallOption) (*ListInvitationsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListInvitationsResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_ListInvitations_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) RevokeInvitation(ctx context.Context, in *RevokeInvitationRequest, opts ...grpc.CallOption) (*RevokeInvitationResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RevokeInvitationResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_RevokeInvitation_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *daemonAdminServiceClient) CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateAPIKeyResponse)
@@ -352,66 +282,6 @@ func (c *daemonAdminServiceClient) RevokeAPIKey(ctx context.Context, in *RevokeA
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RevokeAPIKeyResponse)
 	err := c.cc.Invoke(ctx, DaemonAdminService_RevokeAPIKey_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListTenantMembersResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_ListTenantMembers_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) AddTenantMember(ctx context.Context, in *AddTenantMemberRequest, opts ...grpc.CallOption) (*AddTenantMemberResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AddTenantMemberResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_AddTenantMember_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) RemoveTenantMember(ctx context.Context, in *RemoveTenantMemberRequest, opts ...grpc.CallOption) (*RemoveTenantMemberResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RemoveTenantMemberResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_RemoveTenantMember_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) UpdateMemberRole(ctx context.Context, in *UpdateMemberRoleRequest, opts ...grpc.CallOption) (*UpdateMemberRoleResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpdateMemberRoleResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_UpdateMemberRole_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) ListUserTenants(ctx context.Context, in *ListUserTenantsRequest, opts ...grpc.CallOption) (*ListUserTenantsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListUserTenantsResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_ListUserTenants_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) TransferOwnership(ctx context.Context, in *TransferOwnershipRequest, opts ...grpc.CallOption) (*TransferOwnershipResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(TransferOwnershipResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_TransferOwnership_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -717,32 +587,12 @@ type DaemonAdminServiceServer interface {
 	GetOnboardingState(context.Context, *GetOnboardingStateRequest) (*GetOnboardingStateResponse, error)
 	// UpdateOnboardingState advances or modifies the onboarding state.
 	UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error)
-	// CreateInvitation issues a new team invitation.
-	CreateInvitation(context.Context, *CreateInvitationRequest) (*CreateInvitationResponse, error)
-	// AcceptInvitation redeems an invitation token.
-	AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error)
-	// ListInvitations returns the list of invitations for the caller's tenant.
-	ListInvitations(context.Context, *ListInvitationsRequest) (*ListInvitationsResponse, error)
-	// RevokeInvitation cancels a pending invitation.
-	RevokeInvitation(context.Context, *RevokeInvitationRequest) (*RevokeInvitationResponse, error)
 	// CreateAPIKey issues a new API key for a tenant.
 	CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error)
 	// ListAPIKeys returns API key metadata (never raw key values).
 	ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error)
 	// RevokeAPIKey permanently revokes an API key.
 	RevokeAPIKey(context.Context, *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error)
-	// ListTenantMembers returns all members of a tenant.
-	ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error)
-	// AddTenantMember adds a user to a tenant with the specified role.
-	AddTenantMember(context.Context, *AddTenantMemberRequest) (*AddTenantMemberResponse, error)
-	// RemoveTenantMember removes a user from a tenant.
-	RemoveTenantMember(context.Context, *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error)
-	// UpdateMemberRole changes the role of an existing tenant member.
-	UpdateMemberRole(context.Context, *UpdateMemberRoleRequest) (*UpdateMemberRoleResponse, error)
-	// ListUserTenants returns all tenants a given user belongs to.
-	ListUserTenants(context.Context, *ListUserTenantsRequest) (*ListUserTenantsResponse, error)
-	// TransferOwnership transfers tenant ownership to another existing member.
-	TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error)
 	// ListAuditEvents returns audit events for a tenant, sourced from the daemon's
 	// Redis audit stream. Requires FGA admin relation on the tenant.
 	ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error)
@@ -859,18 +709,6 @@ func (UnimplementedDaemonAdminServiceServer) GetOnboardingState(context.Context,
 func (UnimplementedDaemonAdminServiceServer) UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateOnboardingState not implemented")
 }
-func (UnimplementedDaemonAdminServiceServer) CreateInvitation(context.Context, *CreateInvitationRequest) (*CreateInvitationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateInvitation not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method AcceptInvitation not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) ListInvitations(context.Context, *ListInvitationsRequest) (*ListInvitationsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListInvitations not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) RevokeInvitation(context.Context, *RevokeInvitationRequest) (*RevokeInvitationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RevokeInvitation not implemented")
-}
 func (UnimplementedDaemonAdminServiceServer) CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateAPIKey not implemented")
 }
@@ -879,24 +717,6 @@ func (UnimplementedDaemonAdminServiceServer) ListAPIKeys(context.Context, *ListA
 }
 func (UnimplementedDaemonAdminServiceServer) RevokeAPIKey(context.Context, *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RevokeAPIKey not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListTenantMembers not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) AddTenantMember(context.Context, *AddTenantMemberRequest) (*AddTenantMemberResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method AddTenantMember not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) RemoveTenantMember(context.Context, *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RemoveTenantMember not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) UpdateMemberRole(context.Context, *UpdateMemberRoleRequest) (*UpdateMemberRoleResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpdateMemberRole not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) ListUserTenants(context.Context, *ListUserTenantsRequest) (*ListUserTenantsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListUserTenants not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) TransferOwnership(context.Context, *TransferOwnershipRequest) (*TransferOwnershipResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method TransferOwnership not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAuditEvents not implemented")
@@ -1126,78 +946,6 @@ func _DaemonAdminService_UpdateOnboardingState_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DaemonAdminService_CreateInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateInvitationRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).CreateInvitation(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_CreateInvitation_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).CreateInvitation(ctx, req.(*CreateInvitationRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_AcceptInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AcceptInvitationRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).AcceptInvitation(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_AcceptInvitation_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).AcceptInvitation(ctx, req.(*AcceptInvitationRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_ListInvitations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListInvitationsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).ListInvitations(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_ListInvitations_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).ListInvitations(ctx, req.(*ListInvitationsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_RevokeInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RevokeInvitationRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).RevokeInvitation(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_RevokeInvitation_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).RevokeInvitation(ctx, req.(*RevokeInvitationRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _DaemonAdminService_CreateAPIKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateAPIKeyRequest)
 	if err := dec(in); err != nil {
@@ -1248,114 +996,6 @@ func _DaemonAdminService_RevokeAPIKey_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonAdminServiceServer).RevokeAPIKey(ctx, req.(*RevokeAPIKeyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_ListTenantMembers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListTenantMembersRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).ListTenantMembers(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_ListTenantMembers_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).ListTenantMembers(ctx, req.(*ListTenantMembersRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_AddTenantMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AddTenantMemberRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).AddTenantMember(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_AddTenantMember_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).AddTenantMember(ctx, req.(*AddTenantMemberRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_RemoveTenantMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RemoveTenantMemberRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).RemoveTenantMember(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_RemoveTenantMember_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).RemoveTenantMember(ctx, req.(*RemoveTenantMemberRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_UpdateMemberRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpdateMemberRoleRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).UpdateMemberRole(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_UpdateMemberRole_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).UpdateMemberRole(ctx, req.(*UpdateMemberRoleRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_ListUserTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListUserTenantsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).ListUserTenants(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_ListUserTenants_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).ListUserTenants(ctx, req.(*ListUserTenantsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_TransferOwnership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(TransferOwnershipRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).TransferOwnership(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_TransferOwnership_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).TransferOwnership(ctx, req.(*TransferOwnershipRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1882,22 +1522,6 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DaemonAdminService_UpdateOnboardingState_Handler,
 		},
 		{
-			MethodName: "CreateInvitation",
-			Handler:    _DaemonAdminService_CreateInvitation_Handler,
-		},
-		{
-			MethodName: "AcceptInvitation",
-			Handler:    _DaemonAdminService_AcceptInvitation_Handler,
-		},
-		{
-			MethodName: "ListInvitations",
-			Handler:    _DaemonAdminService_ListInvitations_Handler,
-		},
-		{
-			MethodName: "RevokeInvitation",
-			Handler:    _DaemonAdminService_RevokeInvitation_Handler,
-		},
-		{
 			MethodName: "CreateAPIKey",
 			Handler:    _DaemonAdminService_CreateAPIKey_Handler,
 		},
@@ -1908,30 +1532,6 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokeAPIKey",
 			Handler:    _DaemonAdminService_RevokeAPIKey_Handler,
-		},
-		{
-			MethodName: "ListTenantMembers",
-			Handler:    _DaemonAdminService_ListTenantMembers_Handler,
-		},
-		{
-			MethodName: "AddTenantMember",
-			Handler:    _DaemonAdminService_AddTenantMember_Handler,
-		},
-		{
-			MethodName: "RemoveTenantMember",
-			Handler:    _DaemonAdminService_RemoveTenantMember_Handler,
-		},
-		{
-			MethodName: "UpdateMemberRole",
-			Handler:    _DaemonAdminService_UpdateMemberRole_Handler,
-		},
-		{
-			MethodName: "ListUserTenants",
-			Handler:    _DaemonAdminService_ListUserTenants_Handler,
-		},
-		{
-			MethodName: "TransferOwnership",
-			Handler:    _DaemonAdminService_TransferOwnership_Handler,
 		},
 		{
 			MethodName: "ListAuditEvents",

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,7 +21,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
-	"github.com/zero-day-ai/gibson/internal/membership"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
 	"github.com/zero-day-ai/gibson/internal/onboarding"
@@ -67,16 +65,6 @@ type DaemonServer struct {
 	// May be nil; when nil, quota checks are skipped.
 	quotaManager MissionQuotaChecker
 
-	// invitationStore manages team invitations.
-	// May be nil; wired when the invitation service is available.
-	// TODO: replace with concrete type once invitation package is introduced.
-	invitationStore interface {
-		Create(ctx context.Context, tenantID, email string, roles []string, message string, expiresInHours int32) (token, link string, err error)
-		Accept(ctx context.Context, token, displayName string) (tenantID string, roles []string, err error)
-		List(ctx context.Context, tenantID string, page, limit int32) (invitations []InvitationRecord, total int32, err error)
-		Revoke(ctx context.Context, tenantID, token string) error
-	}
-
 	// apiKeyStore manages tenant API keys.
 	// May be nil; wired when the API key service is available.
 	// TODO: replace with concrete type once apikey package is introduced.
@@ -101,28 +89,20 @@ type DaemonServer struct {
 		IssueToken(ctx context.Context, tenantID string) (token string, err error)
 	}
 
-	// membershipStore manages user-to-tenant membership records.
-	// May be nil; when nil, membership RPCs return codes.Unavailable.
-	membershipStore membership.MembershipStore
-
 	// authorizer is the FGA Authorizer used by admin handlers that need direct FGA access.
 	// May be nil; when nil, RPCs that require it return codes.Unavailable.
-	// Added by authz-04-dashboard-fga-migration spec.
 	authorizer authzIface
 
 	// auditLogger is the Redis-backed audit log reader/writer.
 	// May be nil; when nil, ListAuditEvents falls back to Loki only (or returns Unavailable).
-	// Added by authz-06-granular-permissions-teams spec.
 	auditLogger *audit.AuditLogger
 
 	// lokiQuerier is the Loki HTTP query client for audit events.
 	// May be nil; when nil, ListAuditEvents falls back to the Redis audit stream.
-	// Added by authz-06-granular-permissions-teams spec.
 	lokiQuerier audit.LokiQuerier
 
 	// missionDraftStore persists mission YAML drafts per tenant.
 	// May be nil; when nil, SaveMissionDraft/ListMissionDrafts return codes.Unavailable.
-	// Added by prod-unimplemented-apis spec.
 	missionDraftStore missionDraftStoreIface
 
 	// findingStore provides access to findings for export operations.
@@ -775,18 +755,6 @@ type ProvisioningStep struct {
 	Timestamp string
 }
 
-// InvitationRecord is the internal representation of a pending or consumed
-// invitation.  Used by the invitation store interface stub.
-type InvitationRecord struct {
-	Token     string
-	Email     string
-	Roles     []string
-	Status    string
-	InvitedBy string
-	CreatedAt string
-	ExpiresAt string
-}
-
 // APIKeyRecord is the internal representation of an API key without the secret
 // value.  Used by the API key store interface stub.
 type APIKeyRecord struct {
@@ -921,18 +889,8 @@ func (s *DaemonServer) WithAgentAuthService(svc *agentauth.AgentAuthService) *Da
 	return s
 }
 
-// WithMembershipStore wires the membership store so that the membership RPCs
-// (AddTenantMember, RemoveTenantMember, UpdateMemberRole, ListUserTenants,
-// TransferOwnership) are backed by durable Redis storage.
-// Call this immediately after NewDaemonServer and before registering the server.
-func (s *DaemonServer) WithMembershipStore(ms membership.MembershipStore) *DaemonServer {
-	s.membershipStore = ms
-	return s
-}
-
 // WithAuthorizer wires an FGA Authorizer for admin handlers that need direct
-// FGA access (e.g. GetMyPermissions, ListTenantMembers via FGA).
-// Added by the authz-04-dashboard-fga-migration spec.
+// FGA access (e.g. GetMyPermissions).
 func (s *DaemonServer) WithAuthorizer(az authzIface) *DaemonServer {
 	s.authorizer = az
 	return s
@@ -984,8 +942,8 @@ func (a *apiKeyStoreAdapter) List(ctx context.Context, tenantID string) ([]APIKe
 	return records, nil
 }
 
-// Revoke marks the given key as revoked in Redis and removes its Casbin
-// policies.  The revoked record is retained for audit purposes.
+// Revoke marks the given key as revoked in Redis. The revoked record is
+// retained for audit purposes.
 func (a *apiKeyStoreAdapter) Revoke(ctx context.Context, keyID string) error {
 	return a.auth.RevokeKey(ctx, keyID)
 }
@@ -2896,36 +2854,8 @@ func (s *DaemonServer) DeleteTenantLangfuseCredentials(ctx context.Context, req 
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Membership / Impersonation RPCs
+// Impersonation RPCs
 // ---------------------------------------------------------------------------
-
-// ListTenantMembers returns the set of users registered in the tenant's
-// Keycloak realm, along with their assigned realm roles and last session info.
-//
-// Callers with "platform-operator" may query any tenant. Callers with "owner"
-// or "admin" may query their own tenant. Returns codes.Unavailable when no
-// Keycloak client has been wired.
-func (s *DaemonServer) ListTenantMembers(ctx context.Context, req *ListTenantMembersRequest) (*ListTenantMembersResponse, error) {
-	tenantID := req.GetTenantId()
-	if tenantID == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id required")
-	}
-
-	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
-	// (non-cross-tenant callers may only target their own tenant) is
-	// verified here as parameter validation.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != tenantID {
-		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
-	}
-
-	// Member listing via Better Auth is not yet implemented in the daemon.
-	// The dashboard queries Better Auth directly for user data.
-	return nil, status_grpc.Error(codes.Unimplemented, "ListTenantMembers: member listing has moved to the dashboard layer (Better Auth)")
-}
 
 // ImpersonateTenant issues a short-lived context token scoped to the target
 // tenant for platform-operator use.
@@ -3039,125 +2969,6 @@ func (s *DaemonServer) UpdateOnboardingState(ctx context.Context, req *UpdateOnb
 
 	s.logger.Info("onboarding state updated via RPC", "tenant_id", req.TenantId)
 	return &UpdateOnboardingStateResponse{}, nil
-}
-
-// ---------------------------------------------------------------------------
-// Invitation RPCs
-// ---------------------------------------------------------------------------
-
-// CreateInvitation issues a new team invitation for the caller's tenant.
-//
-// Requires "owner" or "admin" role within the caller's own tenant, or
-// "platform-operator" for cross-tenant access.
-// Returns codes.Unimplemented until the invitation service has been wired.
-func (s *DaemonServer) CreateInvitation(ctx context.Context, req *CreateInvitationRequest) (*CreateInvitationResponse, error) {
-	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
-
-	if req.Email == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "email is required")
-	}
-
-	// TODO: Wire to the invitation service once the concrete type is available.
-	if s.invitationStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "invitation service not configured")
-	}
-
-	tenantID := auth.TenantFromContext(ctx)
-	token, link, err := s.invitationStore.Create(ctx, tenantID, req.Email, req.Roles, req.Message, req.ExpiresInHours)
-	if err != nil {
-		s.logger.Error("failed to create invitation", "tenant_id", tenantID, "email", req.Email, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to create invitation: %v", err)
-	}
-
-	s.logger.Info("invitation created via RPC", "tenant_id", tenantID, "email", req.Email)
-	return &CreateInvitationResponse{Token: token, InvitationLink: link}, nil
-}
-
-// AcceptInvitation redeems an invitation token and adds the caller to the
-// tenant.
-//
-// Returns codes.Unimplemented until the invitation service has been wired.
-func (s *DaemonServer) AcceptInvitation(ctx context.Context, req *AcceptInvitationRequest) (*AcceptInvitationResponse, error) {
-	if req.Token == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "token is required")
-	}
-
-	// TODO: Wire to the invitation service once the concrete type is available.
-	if s.invitationStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "invitation service not configured")
-	}
-
-	tenantID, roles, err := s.invitationStore.Accept(ctx, req.Token, req.DisplayName)
-	if err != nil {
-		s.logger.Error("failed to accept invitation", "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to accept invitation: %v", err)
-	}
-
-	s.logger.Info("invitation accepted via RPC", "tenant_id", tenantID)
-	return &AcceptInvitationResponse{TenantId: tenantID, Roles: roles}, nil
-}
-
-// ListInvitations returns all invitations for the caller's tenant.
-//
-// Requires "owner" or "admin" role within the caller's own tenant, or
-// "platform-operator" for cross-tenant access.
-// Returns codes.Unimplemented until the invitation service has been wired.
-func (s *DaemonServer) ListInvitations(ctx context.Context, req *ListInvitationsRequest) (*ListInvitationsResponse, error) {
-	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
-
-	// TODO: Wire to the invitation service once the concrete type is available.
-	if s.invitationStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "invitation service not configured")
-	}
-
-	tenantID := auth.TenantFromContext(ctx)
-	records, total, err := s.invitationStore.List(ctx, tenantID, req.Page, req.Limit)
-	if err != nil {
-		s.logger.Error("failed to list invitations", "tenant_id", tenantID, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to list invitations: %v", err)
-	}
-
-	infos := make([]*InvitationInfo, 0, len(records))
-	for _, rec := range records {
-		infos = append(infos, &InvitationInfo{
-			Token:     rec.Token,
-			Email:     rec.Email,
-			Roles:     rec.Roles,
-			Status:    rec.Status,
-			InvitedBy: rec.InvitedBy,
-			CreatedAt: rec.CreatedAt,
-			ExpiresAt: rec.ExpiresAt,
-		})
-	}
-
-	return &ListInvitationsResponse{Invitations: infos, Total: total}, nil
-}
-
-// RevokeInvitation cancels a pending invitation by token.
-//
-// Requires "owner" or "admin" role within the caller's own tenant, or
-// "platform-operator" for cross-tenant access.
-// Returns codes.Unimplemented until the invitation service has been wired.
-func (s *DaemonServer) RevokeInvitation(ctx context.Context, req *RevokeInvitationRequest) (*RevokeInvitationResponse, error) {
-	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
-
-	if req.Token == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "token is required")
-	}
-
-	// TODO: Wire to the invitation service once the concrete type is available.
-	if s.invitationStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "invitation service not configured")
-	}
-
-	tenantID := auth.TenantFromContext(ctx)
-	if err := s.invitationStore.Revoke(ctx, tenantID, req.Token); err != nil {
-		s.logger.Error("failed to revoke invitation", "tenant_id", tenantID, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to revoke invitation: %v", err)
-	}
-
-	s.logger.Info("invitation revoked via RPC", "tenant_id", tenantID)
-	return &RevokeInvitationResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -3286,295 +3097,6 @@ func (s *DaemonServer) RevokeAPIKey(ctx context.Context, req *RevokeAPIKeyReques
 
 	s.logger.Info("API key revoked via RPC", "key_id", req.KeyId)
 	return &RevokeAPIKeyResponse{}, nil
-}
-
-// ---------------------------------------------------------------------------
-// Membership RPCs
-// ---------------------------------------------------------------------------
-
-// AddTenantMember adds a user to a tenant with the specified role.
-//
-// The caller must be a member of the tenant with at least the admin role and
-// may only assign roles equal to or lower in privilege than their own.
-func (s *DaemonServer) AddTenantMember(ctx context.Context, req *AddTenantMemberRequest) (*AddTenantMemberResponse, error) {
-	if s.membershipStore == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
-	}
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
-	}
-	if req.UserId == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
-	}
-	if req.Role == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "role is required")
-	}
-
-	// Get caller identity.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
-	}
-
-	// Allow bootstrap: when a tenant has zero members, the first AddMember
-	// call (owner) is permitted without an existing membership check.  This
-	// is the signup path — the dashboard provisions the tenant then adds the
-	// first owner before anyone is a member yet.
-	members, listErr := s.membershipStore.ListTenantMembers(ctx, req.TenantId)
-	isBootstrap := listErr == nil && len(members) == 0 && req.Role == "owner"
-
-	if !isBootstrap {
-		// Verify the caller is a member of the tenant with at least admin role.
-		callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
-		if err != nil {
-			return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
-		}
-
-		if membership.RoleLevel(callerMember.Role) > membership.RoleLevel("admin") {
-			return nil, status_grpc.Error(codes.PermissionDenied, "admin role required to manage team")
-		}
-
-		// Enforce role hierarchy: callers cannot grant a role higher than their own.
-		if !membership.CanAssignRole(callerMember.Role, req.Role) {
-			return nil, status_grpc.Errorf(codes.PermissionDenied, "cannot assign role %s (your role: %s)", req.Role, callerMember.Role)
-		}
-	}
-
-	if err := s.membershipStore.AddMember(ctx, req.TenantId, req.UserId, req.Email, req.Role, identity.Subject); err != nil {
-		if errors.Is(err, membership.ErrAlreadyMember) {
-			return nil, status_grpc.Error(codes.AlreadyExists, err.Error())
-		}
-		if errors.Is(err, membership.ErrInvalidRole) {
-			return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
-		}
-		return nil, status_grpc.Errorf(codes.Internal, "add member: %v", err)
-	}
-
-	m, _ := s.membershipStore.GetMember(ctx, req.TenantId, req.UserId)
-	return &AddTenantMemberResponse{
-		Membership: membershipToProto(m),
-	}, nil
-}
-
-// RemoveTenantMember removes a user from a tenant.
-//
-// The caller must hold at least the admin role within the tenant.
-// The tenant owner cannot be removed; ownership must first be transferred.
-func (s *DaemonServer) RemoveTenantMember(ctx context.Context, req *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error) {
-	if s.membershipStore == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
-	}
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
-	}
-	if req.UserId == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
-	}
-
-	// Get caller identity.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
-	}
-
-	// Verify the caller is a member of the tenant with at least admin role.
-	callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
-	if err != nil {
-		return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
-	}
-
-	if membership.RoleLevel(callerMember.Role) > membership.RoleLevel("admin") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "admin role required to manage team")
-	}
-
-	if err := s.membershipStore.RemoveMember(ctx, req.TenantId, req.UserId); err != nil {
-		if errors.Is(err, membership.ErrMemberNotFound) {
-			return nil, status_grpc.Error(codes.NotFound, err.Error())
-		}
-		if errors.Is(err, membership.ErrCannotRemoveOwner) {
-			return nil, status_grpc.Error(codes.FailedPrecondition, err.Error())
-		}
-		return nil, status_grpc.Errorf(codes.Internal, "remove member: %v", err)
-	}
-
-	return &RemoveTenantMemberResponse{}, nil
-}
-
-// UpdateMemberRole changes the role of an existing tenant member.
-//
-// The caller must hold at least the admin role and may only assign roles equal
-// to or lower in privilege than their own.
-func (s *DaemonServer) UpdateMemberRole(ctx context.Context, req *UpdateMemberRoleRequest) (*UpdateMemberRoleResponse, error) {
-	if s.membershipStore == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
-	}
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
-	}
-	if req.UserId == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
-	}
-	if req.NewRole == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "new_role is required")
-	}
-
-	// Get caller identity.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
-	}
-
-	// Verify the caller is a member of the tenant with at least admin role.
-	callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
-	if err != nil {
-		return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
-	}
-
-	if membership.RoleLevel(callerMember.Role) > membership.RoleLevel("admin") {
-		return nil, status_grpc.Error(codes.PermissionDenied, "admin role required to manage team")
-	}
-
-	// Enforce role hierarchy: callers cannot grant a role higher than their own.
-	if !membership.CanAssignRole(callerMember.Role, req.NewRole) {
-		return nil, status_grpc.Errorf(codes.PermissionDenied, "cannot assign role %s (your role: %s)", req.NewRole, callerMember.Role)
-	}
-
-	if err := s.membershipStore.UpdateRole(ctx, req.TenantId, req.UserId, req.NewRole, identity.Subject); err != nil {
-		if errors.Is(err, membership.ErrMemberNotFound) {
-			return nil, status_grpc.Error(codes.NotFound, err.Error())
-		}
-		if errors.Is(err, membership.ErrInvalidRole) {
-			return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
-		}
-		return nil, status_grpc.Errorf(codes.Internal, "update role: %v", err)
-	}
-
-	m, _ := s.membershipStore.GetMember(ctx, req.TenantId, req.UserId)
-	return &UpdateMemberRoleResponse{
-		Membership: membershipToProto(m),
-	}, nil
-}
-
-// ListUserTenants returns all tenants the specified user belongs to.
-//
-// Users may list their own tenants (identity.Subject == req.UserId).
-// Platform operators may query any user.
-func (s *DaemonServer) ListUserTenants(ctx context.Context, req *ListUserTenantsRequest) (*ListUserTenantsResponse, error) {
-	if req.UserId == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "user_id is required")
-	}
-
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
-	}
-	if identity.Subject != req.UserId && !auth.IsCrossTenantCaller(identity.Roles) {
-		return nil, status_grpc.Error(codes.PermissionDenied, "cannot list tenants for another user")
-	}
-
-	// Use FGA ListObjects to find all tenants where this user has the member relation.
-	// This replaces the old Redis membership store query.
-	if s.authorizer != nil {
-		tenants, err := s.authorizer.ListObjects(ctx, "user:"+req.UserId, "member", "tenant")
-		if err != nil {
-			s.logger.WarnContext(ctx, "FGA ListObjects failed for ListUserTenants, falling back to JWT tenants",
-				"user_id", req.UserId, "error", err)
-		} else {
-			infos := make([]*MembershipInfo, 0, len(tenants))
-			for _, t := range tenants {
-				// t is "tenant:slug" — strip the prefix
-				tenantID := t
-				if len(t) > 7 && t[:7] == "tenant:" {
-					tenantID = t[7:]
-				}
-				// Check if admin or member
-				role := "member"
-				isAdmin, _ := s.authorizer.Check(ctx, "user:"+req.UserId, "admin", "tenant:"+tenantID)
-				if isAdmin {
-					role = "admin"
-				}
-				infos = append(infos, &MembershipInfo{
-					TenantId: tenantID,
-					UserId:   req.UserId,
-					Role:     role,
-				})
-			}
-			return &ListUserTenantsResponse{Memberships: infos}, nil
-		}
-	}
-
-	// Fallback: derive tenants from the JWT organizations claim.
-	infos := make([]*MembershipInfo, 0, len(identity.Tenants))
-	for _, t := range identity.Tenants {
-		infos = append(infos, &MembershipInfo{
-			TenantId: t,
-			UserId:   req.UserId,
-			Role:     "member",
-		})
-	}
-	return &ListUserTenantsResponse{Memberships: infos}, nil
-}
-
-// TransferOwnership transfers tenant ownership from the caller to another
-// existing member of the tenant.
-//
-// Only the current tenant owner may invoke this RPC.
-func (s *DaemonServer) TransferOwnership(ctx context.Context, req *TransferOwnershipRequest) (*TransferOwnershipResponse, error) {
-	if s.membershipStore == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "membership service not configured")
-	}
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
-	}
-	if req.NewOwnerUserId == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "new_owner_user_id is required")
-	}
-
-	// Get caller identity.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
-		return nil, status_grpc.Error(codes.Unauthenticated, "authentication required")
-	}
-
-	// Verify the caller is the current owner.
-	callerMember, err := s.membershipStore.GetMember(ctx, req.TenantId, identity.Subject)
-	if err != nil {
-		return nil, status_grpc.Errorf(codes.PermissionDenied, "not a member of tenant %s", req.TenantId)
-	}
-	if callerMember.Role != "owner" {
-		return nil, status_grpc.Error(codes.PermissionDenied, "only the tenant owner can transfer ownership")
-	}
-
-	if err := s.membershipStore.TransferOwnership(ctx, req.TenantId, identity.Subject, req.NewOwnerUserId, identity.Subject); err != nil {
-		if errors.Is(err, membership.ErrMemberNotFound) {
-			return nil, status_grpc.Error(codes.NotFound, err.Error())
-		}
-		if errors.Is(err, membership.ErrNotOwner) {
-			return nil, status_grpc.Error(codes.PermissionDenied, err.Error())
-		}
-		return nil, status_grpc.Errorf(codes.Internal, "transfer ownership: %v", err)
-	}
-
-	return &TransferOwnershipResponse{}, nil
-}
-
-// membershipToProto converts a domain Membership record to the proto MembershipInfo type.
-func membershipToProto(m *membership.Membership) *MembershipInfo {
-	if m == nil {
-		return nil
-	}
-	return &MembershipInfo{
-		TenantId: m.TenantID,
-		UserId:   m.UserID,
-		Email:    m.Email,
-		Role:     m.Role,
-		AddedAt:  m.AddedAt.Format(time.RFC3339),
-		AddedBy:  m.AddedBy,
-	}
 }
 
 // ---------------------------------------------------------------------------
