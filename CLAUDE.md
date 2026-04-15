@@ -1,190 +1,222 @@
-# CLAUDE.md
+# CLAUDE.md — `core/gibson/`
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working inside the Gibson daemon. Keep this file in sync with the code; it is the first thing the agent reads before editing this module.
 
 ## Project Overview
 
-Gibson is a Kubernetes-native AI agent framework for autonomous security operations. This is the core daemon/orchestrator — a Go binary providing a gRPC server (:50002), CLI, DAG-based mission orchestration, multi-provider LLM abstraction, and a component registry for agents, tools, and plugins.
+Gibson is the Kubernetes-native AI-agent orchestration **daemon** — a single Go 1.25 binary that exposes gRPC (`:50002`), runs mission DAGs, brokers multi-provider LLM calls, manages a Redis-backed component registry (agents/tools/plugins), and persists discoveries into a Neo4j knowledge graph. All components connect **into** this daemon; agents never touch Redis / Neo4j / LLM providers directly.
 
 ## Build & Test
 
 ```bash
-make bin                    # Build → bin/gibson (CGO_ENABLED=0, ldflags inject Version/GitCommit/BuildTime)
-make test                   # Unit tests
-make test-race              # Tests with race detection
-make test-coverage          # Coverage with 90% threshold (scripts/check-coverage.sh enforces)
+make bin                    # bin/gibson (CGO_ENABLED=0, ldflags inject Version/GitCommit/BuildTime)
+make test / test-race       # unit / race
+make test-coverage          # enforces 90% via scripts/check-coverage.sh
 make lint                   # golangci-lint
 make check                  # fmt + vet + lint + test-race (pre-commit gate)
-make proto                  # protoc: api/proto/*.proto → api/gen/proto/ (needs protoc-gen-go, protoc-gen-go-grpc)
-make proto-clean            # Remove generated .pb.go files
-make tidy                   # go mod tidy
-make install                # Build + install to GOPATH/bin
-
-# Single test
-go test -v -run TestSpecificName ./internal/path/...
+make proto / proto-clean    # regenerate local daemon proto via Buf
+make check-authz [INTEGRATION=1]   # authz tests, +Docker for FGA testcontainers
+go test -v -run TestName ./internal/path/...
 ```
 
-**Test file conventions**: `*_test.go` (unit), `*_integration_test.go` (testcontainers for Redis/Neo4j), `*_e2e_test.go` (end-to-end). Uses `testify/assert`. Mocks live near implementations (e.g., `internal/component/build/mock.go`).
+Test file conventions: `*_test.go` (unit), `*_integration_test.go` (testcontainers for Redis / Neo4j / FGA), `*_e2e_test.go`. `testify/assert`. Mocks live beside the code they mock.
 
-## Architecture
+## Directory Map (AI reference)
 
-### Command Mode System (`cmd/gibson/mode/`)
+```
+cmd/gibson/          CLI entry (cobra). root.go, daemon.go, config.go, cutover_v4.go, authz/, mode/, internal/ (output/err helpers), templates/, testdata/
+internal/
+  daemon/            Lifecycle: daemon.go (New/Start), grpc.go, infrastructure.go, signals.go, checkpoint_manager.go, eventbus*.go, event_stream_redis.go, credential_store.go, health_state.go
+  daemon/api/        DaemonServer impl for BOTH DaemonService (proto in SDK) + DaemonAdminService (proto local). server.go (~3000 LOC) + split handlers: server_{agentauth,alerts,audit,chat,quota,user,prod_handlers}.go, findings_export.go, credentials.go
+  daemon/api/gibson/daemon/admin/v1/   daemon_admin.proto — the ONLY proto file owned by this module
+  orchestrator/      Mission DAG executor: act / think / observe / recall / reflect stages, decision logic, error recovery, embedding cache
+  mission/           YAML parse + validate + load, MissionService, Redis stores (definitions, runs, events), checkpoint codec/manager, inline_processor (inline:// targets), controller state machine
+  missiondraft/      Redis-backed 30-day mission YAML drafts
+  checkpoint/        Mission pause/resume: codec, retention, blob store (Redis + optional S3)
+  harness/           AgentHarness interface + CallbackServer (HarnessCallbackService gRPC), HarnessFactory, OTel middleware, compliance middleware
+  component/         Redis component registry (30s TTL), lifecycle, load balancer (RoundRobin/Random/LeastConnection), circuit breaker, gRPC pool + per-kind clients (agent/tool/plugin), PluginAccessStore, ToolAccessStore, AgentAccessStore, quota
+  agent/             Agent descriptor introspection, stream manager
+  tool/              Tool metadata, registry helpers
+  plugin/            Plugin metadata, registry helpers
+  agentauth/         Agent Auth Protocol: mint agent JWTs, FGA capability grant bridge
+  auth/              5-path authN: API key (gsk_), OIDC JWT (any compliant IdP), K8s SA, SPIFFE/SPIRE, Better Auth session tokens (better_auth.go); FGA gRPC interceptor + fga_rpc_registry.go declarative RPC→(type,relation) map; audit.go
+  authz/             OpenFGA HTTP client wrapper, noopAuthorizer, envelope HMAC signer, model.fga (schema 1.1)
+  llm/               Slot resolver, provider registry (Anthropic/OpenAI/Gemini/Ollama), rate limiter, pricing, embedding provider + cache, JSON extractor, tool-use tracker, error recovery
+  memory/            3-tier: working (in-process), mission (Redis), longterm (vector store); MemoryFactory, TracedMemoryManager, embedder/ (OpenAI/Ollama/local), token counting
+  graphrag/          Neo4j GraphStore (+ traced), loader/ (persist DiscoveryResult protos), processor/ (DiscoveryProcessor handles tool proto field 100), intelligence/ (graph queries for agent context), schema/, query.go, graph_bootstrap.go
+  neo4j/             Thin Neo4j client + schema migration runner
+  finding/           Finding persistence, lifecycle, evidence tracking
+  crypto/            AES-256-GCM + KeyProvider: k8s secret / Vault / AWS SM / Azure KV / GCP SM (factory)
+  config/            Loader, schema, validation, env var substitution `${VAR:-default}`
+  state/             Redis client wrapper, TenantScopedStore (tenant-prefixed keys)
+  database/          Redis DAOs (TargetDAO, CredentialDAO, …)
+  events/            In-process pub/sub primitives (bus lives in internal/daemon)
+  observability/     slog logger, OTel stack (tracer/meter/logger providers), OTLP exporters, attributes helpers
+  audit/             Audit writer, Loki client, Redis audit stream consumers
+  impersonation/     Tenant impersonation token issuer (platform-operator only)
+  onboarding/        Redis-backed tenant onboarding state
+  guardrail/         Policy/compliance gates enforced inside the mission loop
+  contextkeys/       Shared ctx keys (AgentRunID, ToolExecutionID, MissionRunID, AgentName, MissionID) — exists to break import cycles
+  schema/            Shared mission / graphrag schema types (task, result, finding, target, endpoint)
+  types/             Core domain types (Mission, Target, Agent, Task, Result, Finding)
+  plan/              Mission planning helpers used by orchestrator
+  prompt/            Prompt template management
+  payload/           Compliance payload definitions
+  attack/            Ad-hoc attack runner (outside mission DAG)
+  eval/              Agent/mission evaluation harness (lightly integrated)
+  cutover/v4/        V4 audit-foundation migration support (legacy, still referenced by CLI cutover_v4.go)
+  testing/           Test fixtures shared across packages
+  version/           Build-time version info (set via ldflags)
+pkg/version/         Same version pkg re-exported for external consumers
+api/                 (no .proto here; intentionally empty placeholder — the repo's proto lives under internal/daemon/api/…)
+sdk/                 Shared graphrag + manifest helpers used by this daemon and SDK tests
+models/huggingface/  Embedding model metadata
+configs/             gibson.yaml template
+scripts/             check-coverage.sh etc.
+tests/               integration + e2e tests (cross-package)
+```
 
-CLI commands are classified into execution modes in `mode/registry.go`:
-- **Standalone** (`version`, `config`, `plugin init`): No daemon connection needed
-- **Daemon** (`daemon start/stop/status`): Manages daemon lifecycle
-- **Client** (default): Connects to running daemon via gRPC
+## Daemon Startup Pipeline (`internal/daemon/daemon.go` → `Start()`)
 
-`root.go` uses the mode to determine initialization strategy — standalone commands skip daemon setup entirely, client commands discover the daemon via Redis registration, daemon commands start the full server.
+Phased init — later phases depend on earlier. Reordering is breaking.
 
-### Daemon Startup Pipeline (`internal/daemon/`)
+1. **State client (Redis)** — REQUIRED. Retry loop; initialises Redis event stream.
+2. **Authorizer** — OpenFGA client or noop (see Authz table below).
+3. **Dashboard Postgres pool** — optional; non-fatal if missing (used for audit_log reads, tenant state).
+4. **Component registry + lifecycle** — Redis, 30 s TTL heartbeat. Registry adapter wires discovery callbacks.
+5. **Mission stack** — `MissionService`, `MissionStore`, `MissionRunStore`, `EventStore`, `InlineConfigProcessor`, `CheckpointManager`.
+6. **Quota manager** — per-tenant caps (missions / agents / findings).
+7. **Infrastructure bundle** — DAG executor, finding store, LLM registry, memory factory, harness factory, OTel stack, GraphRAG store + discovery processor.
+8. **Credential store** — KeyProvider + CredentialDAO (optional; enabled if `security.key_provider` set).
+9. **Access stores** — Tool / Agent / Plugin opt-in (Redis).
+10. **gRPC server** (`grpc.go`) — auth interceptors (conditional on `auth.IsAuthEnabled()`), FGA interceptor (conditional on authz.enabled), SPIFFE mTLS (optional), registers DaemonService + DaemonAdminService + ComponentService + HarnessCallbackService, Redis daemon registration for CLI discovery.
+11. **Event bus** — in-process pub/sub + per-tenant Redis Streams bridge.
+12. **Health server** on `:8080` — `/healthz` liveness, `/readyz` readiness (FGA probe with 10 s TTL cache when authz enabled).
+13. **Signal handler** — 4-phase graceful shutdown: PreShutdown → Checkpoint (save active missions to Redis via `DaemonMissionCheckpointer`) → Wait (drain) → Terminate.
 
-`daemon.New()` constructs; `daemon.Start()` performs phased initialization:
-1. **State Client** (Redis) — always required
-2. **Component Registry/Lifecycle** — etcd-backed, 30-second TTL heartbeat
-3. **Mission services** — Store, RunStore, Installer, Service
-4. **Infrastructure** — OTel, GraphRAG (Neo4j), LLM registry, findings
-5. **Harness Factory** with middleware chain
-6. **gRPC Server** — registers DaemonService + ComponentService, optional auth interceptors
-7. **Event Bus** + Redis daemon registration for client discovery
-8. **Health server** — `/healthz` (liveness) + `/readyz` (readiness) on :8080
+## gRPC Surface
 
-### Graceful Shutdown
+Two Gibson-owned services plus one re-exported SDK service plus the harness callback service. **Public** = on the main daemon port; **Admin** = same port but FGA-gated to platform-operator role.
 
-`SignalHandler` runs 4 phases on SIGTERM: PreShutdown (stop accepting missions) → Checkpoint (save active missions to Redis via `DaemonMissionCheckpointer`) → Wait (drain in-flight ops) → Terminate. This enables pause/resume across pod restarts.
+| Service | Proto source | Purpose |
+|---|---|---|
+| `gibson.daemon.v1.DaemonService` | **SDK** (`sdk/api/gen/gibson/daemon/v1`, alias `daemonpb`) | Public mission / component / agent control plane. RPCs: Connect, Ping, Status, RunMission (stream), StopMission, Pause/ResumeMission, List/Get Mission{History,Checkpoints}, ListAgents, GetAgentStatus, ListTools, ListPlugins, QueryPlugin, Subscribe (stream), Start/StopComponent, Install/Uninstall/Update/CreateMission, ListMissionDefinitions, Show/Build/Update/UninstallComponent, GetComponentLogs (stream), InstallAllComponent, GetMyPermissions |
+| `gibson.daemon.admin.v1.DaemonAdminService` | **Local** (`internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto`) | Privileged ops: Shutdown, ImpersonateTenant, {Get,Set,Delete}TenantLangfuseCredentials, {Get,Update}OnboardingState, {Create,List,Revoke}APIKey, ListAuditEvents, agent-auth (RegisterAgentAuth, ExecuteAgentCapability, GetAgentAuthStatus, RevokeAgentAuth, ListAgentAuthAgents, ListAgentCapabilities, CreateHostRegistrationToken, ListComponentGrants, BatchGrantComponentAccessV2, ListAuditLog), tenant quota/sessions/alerts/conversations, findings export, mission drafts, user-profile RPCs (ResetPassword / RevokeUserSessions / SuspendMember — some stubbed, see Implementation Status below). |
+| `gibson.component.v1.ComponentService` | SDK | `RegisterComponent`, `PollWork` (stream), `SubmitResult`, heartbeat. Called by every agent / tool / plugin. |
+| `gibson.harness.v1.HarnessCallbackService` | SDK | Agent → daemon callbacks: `ExecuteLLM`, `SubmitFinding`, `Store/GetMemory`, `ExecuteTool`, `QueryPlugin`, `GetCredential`. Runs on `:50001` via `harness.CallbackManager`. |
 
-### Multi-Tenancy
+**Implementation status within DaemonAdminService** — core admin RPCs (authz, audit, API keys, impersonation, Langfuse creds, agent-auth, onboarding) are fully wired. The `prod-unimplemented-apis` / `prod-feature-wiring` spec tracked stubs are in `server_prod_handlers.go` (ResetPassword, RevokeUserSessions, SuspendMember, Get/UpdateUserProfile, ExportFindings, SaveMissionDraft/ListMissionDrafts, GetUserSessions, Alerts, Conversations) — they return valid empty/stub responses and are enforced by `TestNewRPCsNotUnimplemented` (`server_integration_test.go`) to never emit `codes.Unimplemented`.
 
-Components are scoped to tenants. The **system tenant** (`_system`) hosts platform plugins available to all tenants. `ComponentService` extracts tenant from auth context via `auth.TenantFromContext()`. Registry has four discovery methods: `Discover`, `DiscoverAll`, `DiscoverTenantOnly`, `DiscoverSystemOnly`.
+## Feature Catalog — what's wired and where
 
-### Component Lifecycle (`internal/component/`)
+| Feature | Primary pkg | Wired-in status | Key deps |
+|---|---|---|---|
+| Mission orchestration (DAG act/think/observe/recall/reflect) | `internal/orchestrator/` + `internal/mission/` | ✅ Active | Redis, LLM, harness, GraphRAG |
+| Mission pause/resume | `internal/mission/checkpoint*.go` + `internal/checkpoint/` | ✅ Active | Redis + optional S3 blob store |
+| Component registry + load balancing | `internal/component/` | ✅ Active | Redis, component gRPC |
+| Agent harness (unified capability API) | `internal/harness/` | ✅ Active | LLM registry, memory, finding store, plugin access |
+| 3-tier memory | `internal/memory/` | ✅ Active | Redis + vector store + embedder |
+| LLM multi-provider slot resolution | `internal/llm/` | ✅ Active | provider API keys |
+| GraphRAG ingest (proto field 100 → Neo4j) | `internal/graphrag/` | ✅ Active | Neo4j |
+| GraphRAG intelligence queries (agent recall) | `internal/graphrag/intelligence/` | ✅ Active | Neo4j |
+| 4-path authN (apikey / OIDC / K8s SA / SPIFFE) | `internal/auth/` | ✅ Active | Redis (apikey store), OIDC issuer, SPIRE (optional) |
+| OpenFGA authZ | `internal/authz/` + `internal/auth/fga_authz_interceptor.go` | ✅ Active | FGA HTTP `gibson-fga:8080` |
+| Agent Auth Protocol (JWT mint + FGA bridge) | `internal/agentauth/` | ✅ Active (dispatch of `ExecuteAgentCapability` is a thin stub — FGA check works, execution forwarding is minimal) | FGA |
+| Plugin config encryption (AES-256-GCM) | `internal/crypto/` | ✅ Active if `security.key_provider` set | k8s/Vault/AWS/Azure/GCP |
+| Event streaming (`Subscribe` RPC) | `internal/daemon/eventbus*.go` + `internal/events/` | ✅ Active | Redis Streams (optional; in-process fallback) |
+| Audit logging | `internal/audit/` | ✅ Wired, low usage | Redis stream + Loki + Postgres |
+| Health probes | `internal/daemon/health_state.go` + SDK `healthhttp` | ✅ Active | FGA (for `/readyz` if authz on) |
+| Observability (logs / traces / metrics) | `internal/observability/` | ✅ Active | OTLP collector (optional) |
+| Tenant impersonation | `internal/impersonation/` | ✅ Active, minimal callers | FGA role check |
+| Onboarding state | `internal/onboarding/` | ✅ Active, minimal callers | Redis |
+| Guardrails | `internal/guardrail/` | ✅ Active inside mission loop | — |
+| Eval harness | `internal/eval/` | ⚠️ Lightly integrated; only orchestrator touches it | — |
+| Ad-hoc attack runner | `internal/attack/` | ⚠️ Called outside mission DAG; niche | — |
+| V4 cutover / migration | `internal/cutover/v4/` | ⚠️ Kept for backward-compat; invoked only by CLI `cutover_v4.go` | — |
 
-Components (agents/tools/plugins) register via `RegisterComponent` RPC. The registry uses **30-second TTL** — components must heartbeat to stay alive. Work dispatch uses long-polling via `PollWork`. Results return via `SubmitResult`. A `LoadBalancer` wraps the registry with strategies: RoundRobin, Random, LeastConnection.
+## CLI (`cmd/gibson/`)
 
-### Harness (`internal/harness/`)
+Commands are classified in `cmd/gibson/mode/registry.go`:
 
-The `AgentHarness` interface is the single API agents use for all capabilities. It's built by `HarnessFactory` with dependency injection of three proxy interfaces:
-- **LLMCompleter**: Routes completions to the correct provider per mission slot
-- **FindingSubmitter**: Persists findings through the pipeline
-- **PluginAccessStore**: Manages encrypted per-tenant plugin configuration
+- **Standalone** (no daemon conn): `version`, `completion`, `config {show,get,set,validate}`, `authz {check,write,model-info}`
+- **Daemon** (lifecycle): `daemon {start,stop,status,restart}`
+- **Client** (default): every other command talks to the running daemon via gRPC (discovered through Redis registration). `cutover_v4` is a client-mode legacy migration command.
 
-Unconnected proxies return `codes.Unimplemented` until wired. The harness wraps with `OTelHarnessMiddleware` for automatic tracing.
+Global flags: `--home`, `--config`, `--verbose`, `--output-format`.
 
-### Memory System (`internal/memory/`)
+## Authorization (OpenFGA) — Startup Behaviour Matrix
 
-Three-tier, coordinated by `MemoryManager`:
-- **Working** — ephemeral, in-process (per-execution)
-- **Mission** — Redis-backed (persistent within mission lifetime)
-- **LongTerm** — vector store (semantic search over discoveries)
+| `authz.enabled` | FGA reachable | `require_ready` | Result |
+|---|---|---|---|
+| false | — | — | noop authorizer, INFO log |
+| true | yes | — | FGA authorizer, INFO log |
+| true | no | true | daemon fails to start (production) |
+| true | no | false | noop authorizer, WARN log (dev) |
 
-`MemoryFactory` creates managers with pre-initialized Redis + vector store. `TracedMemoryManager` wraps all access with OTel spans.
+- FGA endpoint is **HTTP** at `gibson-fga:8080` (not gRPC 8081).
+- Per-RPC `(object_type, relation)` mapping is declarative in `internal/auth/fga_rpc_registry.go`; changes to that map are load-bearing — `fga_rpc_coverage_test.go` asserts every RPC has a rule.
+- `internal/authz/model.fga` is schema 1.1 with types `user`, `tenant`, `component`, `system_tenant`. Provisioned by the `gibson-fga-init` k8s Job on helm install/upgrade.
+- Store/model IDs resolved in order: config file → ConfigMap `gibson/gibson-fga-config` → env `GIBSON_AUTHZ_FGA_STORE_ID` / `..._MODEL_ID`.
 
-### LLM Abstraction (`internal/llm/`)
+## Multi-Tenancy Rules
 
-Agents declare **LLM slots** with requirements (context window, features like `tool_use`/`vision`/`json_mode`). The daemon resolves slots to actual providers (Anthropic, OpenAI, Gemini, Ollama) at runtime. Agents never hardcode a specific model.
-
-### Discovery Processing (`internal/graphrag/processor/`)
-
-Tool workers perform entity extraction tool-side (in the SDK serve loop) and populate proto field 100 (`DiscoveryResult`) on their response before returning results. The daemon does **not** run any extraction logic itself. When it receives a tool response with field 100 populated, `DiscoveryProcessor` delegates to `GraphLoader.LoadDiscovery()` to persist the proto entities (hosts, ports, services, endpoints, domains, findings, etc.) into Neo4j with mission scoping and provenance tracking.
-
-### Authentication (`internal/auth/`)
-
-Three auth paths: (1) `gsk_`-prefixed tokens → APIKeyAuthenticator (Redis-backed, for external components/CLI); (2) OIDC JWTs → OIDCValidator (for users via Keycloak); (3) K8s ServiceAccount tokens → K8sValidator (auto-detected, for in-cluster components). Auth modes: `enterprise`, `saas`, `dev`. In enterprise/saas mode, K8s SA auth is auto-detected (no config flag needed). RBAC maps claims to roles/permissions.
-
-### Authorization (`internal/authz/`) — Phase 0 foundation (authz-01)
-
-**Feature flag**: `authz.enabled: false` by default — no existing code path changes until spec authz-02.
-
-The `authz` package implements a stable `Authorizer` interface backed by OpenFGA (Google Zanzibar-based ReBAC). The daemon startup pipeline includes an Authorization Service phase that runs AFTER Redis State Client and BEFORE Component Registry.
-
-Key types:
-- `Authorizer` interface — `Check`, `BatchCheck`, `Write`, `Delete`, `ListObjects`, `ListUsers`, `StoreID`, `ModelID`, `Close`
-- `noopAuthorizer` — always returns `allowed=true`; injected when `authz.enabled=false` or FGA is unreachable in dev mode
-- `fgaAuthorizer` — wraps `github.com/openfga/go-sdk v0.7.5` HTTP client with OTel spans
-- `ResolveStoreAndModelIDs` — 3-source fallback: config file → ConfigMap `gibson/gibson-fga-config` → env vars `GIBSON_AUTHZ_FGA_STORE_ID` / `GIBSON_AUTHZ_FGA_MODEL_ID`
-
-Startup behavior:
-- `authz.enabled=false` → noopAuthorizer, log INFO
-- `authz.enabled=true`, FGA reachable → fgaAuthorizer, log INFO
-- `authz.enabled=true`, FGA unreachable, `require_ready=true` → fail daemon startup (production)
-- `authz.enabled=true`, FGA unreachable, `require_ready=false` → noopAuthorizer, log WARN (dev mode)
-
-FGA HTTP endpoint is `gibson-fga:8080` (not gRPC port 8081). The `/readyz` probe includes an FGA check with 10s TTL caching when `authz.enabled=true`.
-
-Authorization model (`internal/authz/model.fga`): schema 1.1 with types `user`, `tenant`, `component`, `system_tenant`. Provisioned by the `gibson-fga-init` Kubernetes Job on every helm install/upgrade.
-
-CLI: `gibson authz check <user> <relation> <object>`, `gibson authz write <user> <relation> <object>`, `gibson authz model-info`.
-
-Makefile: `make check-authz` (unit), `make check-authz INTEGRATION=1` (requires Docker for testcontainers).
-
-### Encryption (`internal/crypto/`)
-
-AES-256-GCM for plugin config encryption. `KeyProvider` interface with backends: Kubernetes Secret, HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager. Factory pattern selects provider from config.
-
-### Context Keys (`internal/contextkeys/`)
-
-Shared context keys avoid circular imports: `AgentRunID`, `ToolExecutionID`, `MissionRunID`, `AgentName`, `MissionID`. Set during mission execution, consumed by harness, GraphRAG, and observability packages.
+- `_system` is the platform-tenant; hosts plugins available to every tenant.
+- `ComponentService` reads tenant from auth metadata via `auth.TenantFromContext()`.
+- Registry exposes `Discover`, `DiscoverAll`, `DiscoverTenantOnly`, `DiscoverSystemOnly` — pick deliberately; `DiscoverAll` leaks system components into tenant listings.
+- **Tenant create/provision/deprovision is NOT in this daemon.** It moved to the external `gibson-tenant-operator`. Gibson is a read-consumer of tenant state. Do not add tenant lifecycle RPCs here.
 
 ## Proto / Generated Code
 
-Gibson owns one proto file: the daemon gRPC API surface.
+This module owns **exactly one** proto file:
 
-**Proto source:** `internal/daemon/api/gibson/daemon/v1/daemon.proto` (package `gibson.daemon.v1`)
-**Generated Go:** `internal/daemon/api/daemon.pb.go` + `daemon_grpc.pb.go`
+- `internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto` — package `gibson.daemon.admin.v1`, `go_package` points back into `internal/daemon/api`, so the generated `daemon_admin.pb.go` + `daemon_admin_grpc.pb.go` live alongside `server.go`.
 
-**Buf configuration** — this repo has its own `buf.yaml` and `buf.gen.yaml` at the repo root:
-```bash
-buf lint                   # Lint daemon proto (STANDARD ruleset, zero exceptions)
-buf generate               # Regenerate daemon Go code
-```
+Everything else (`gibson.daemon.v1`, `gibson.component.v1`, `gibson.harness.v1`, `gibson.agent.v1`, `gibson.tool.v1`, `gibson.plugin.v1`, `gibson.graphrag.v1`, `gibson.types.v1`, `gibson.common.v1`, `gibson.workflow.v1`, `taxonomy.v1`, `intelligence.v1`, tool-specific `toolspb`) is **consumed** from the SDK (`github.com/zero-day-ai/sdk/api/gen/...`). Gibson imports those generated Go types — never hand-writes them, never duplicates the proto files here.
 
-**SDK proto imports** — Gibson imports generated Go types from the SDK. Package mapping:
+`make proto` runs `npx --prefix ../../enterprise/dashboard buf generate`, so the dashboard sibling checkout must exist. `buf lint` uses the STANDARD ruleset, no exceptions. When you add an admin RPC: regenerate Go here, then regenerate TypeScript in the dashboard repo.
 
-| SDK Package | Import Path | Alias | Types |
-|-------------|------------|-------|-------|
-| `gibson.agent.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1` | `agentpb` | AgentService client, GetDescriptorResponse, ExecuteRequest/Response |
-| `gibson.tool.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1` | `toolpb` | ToolService client, ExecuteRequest/Response |
-| `gibson.plugin.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1` | `pluginpb` | PluginService client, InitializeRequest/Response |
-| `gibson.harness.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1` | `harnesspb` | HarnessCallbackService, LLM/memory/validation types |
-| `gibson.types.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/types/v1` | `typespb` | Task, Result, Finding, enums |
-| `gibson.common.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/common/v1` | `commonpb` | TypedValue, TypedMap, ErrorCode, HealthStatus |
-| `gibson.component.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/component/v1` | `componentpb` | ComponentService types |
-| `gibson.graphrag.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1` | `graphragpb` | GraphQuery, GraphNode, DiscoveryResult |
-| `gibson.workflow.v1` | `github.com/zero-day-ai/sdk/api/gen/gibson/workflow/v1` | `workflowpb` | WorkflowDefinition |
-| `taxonomy.v1` | `github.com/zero-day-ai/sdk/api/gen/taxonomy/v1` | `taxonomypb` | CoreNodeType, CoreRelationType |
-| `intelligence.v1` | `github.com/zero-day-ai/sdk/api/gen/intelligence/v1` | `intelligencepb` | IntelligenceService types |
-| toolspb | `github.com/zero-day-ai/sdk/api/gen/toolspb` | `toolspb` | Nmap/Httpx/Nuclei protobuf types for extraction |
+## Dead / Legacy Code (verified 2026-04-15)
 
-**NEVER import tool, plugin, or agent Go modules in Gibson's go.mod.** Gibson depends ONLY on the SDK (plus third-party libs). Tool protobuf types for extraction come from the SDK's `toolspb` package, not from individual tool repos.
+Pay attention to these when refactoring — they look load-bearing but generally aren't. Confirm with grep before deleting; some are kept intentionally.
 
-**NEVER hand-write proto message types or gRPC service stubs.** Always generate from `.proto` files using `buf generate`.
-
-**When adding new RPCs to daemon.proto:** regenerate Go code here, then regenerate TypeScript in the dashboard repo.
+| Path | Reality | Recommendation |
+|---|---|---|
+| `internal/util/` | Only `paths.go` + test | Keep; used by config loader |
+| `internal/cutover/v4/` | Audit-foundation migration used by the `gibson cutover-v4` CLI | Keep until all deployments have cut over; then remove alongside the CLI command. |
+| Stub RPCs in `server_prod_handlers.go` (ResetPassword, RevokeUserSessions, SuspendMember, Get/UpdateUserProfile, ExportFindings, mission drafts, GetUserSessions, Alerts, Conversations) | Intentional — tracked under `prod-unimplemented-apis` and `prod-feature-wiring` specs; test-enforced to return non-Unimplemented | Implement per-spec; don't delete. |
 
 ## Critical Rules
 
-- **NEVER use local file includes for anything** — all includes, imports, references, and dependencies must point to GitHub (e.g., `github.com/zero-day-ai/...`). No local `replace` directives, no local file paths in imports, no local file:// references. GitHub only.
+- **GitHub-only imports.** No `replace` directives to local paths, no `file://` refs. Local replace causes proto descriptor mismatches and daemon panics. Use `go work` if you must iterate on the SDK locally.
+- **No tool / plugin / agent modules in `go.mod`.** Gibson depends on the SDK only. Tool proto types for extraction come from the SDK's `toolspb`.
+- **Proto field 100** in every tool response is reserved for `gibson.graphrag.v1.DiscoveryResult`. Do not repurpose it.
+- **`component.yaml`** defines agent/tool/plugin metadata for registry discovery — loadable without booting the binary.
+- **Never hand-write proto message types or gRPC stubs.** Always `buf generate`.
+- **GitOps for Kubernetes.** No `kubectl patch`, no live ConfigMap edits, no ad-hoc mutation — go through Helm values / manifest commits unless the session is explicitly authorised for a one-off.
+- **Do not add tenant lifecycle RPCs here.** Those belong to `gibson-tenant-operator`.
+- **Structured logging with `log/slog`** + context propagation; no `fmt.Println` in daemon paths.
+- **`CGO_ENABLED=0`** for all builds; Go 1.25.
 
-## Key Conventions
+## Configuration (`configs/gibson.yaml` or `~/.gibson/config.yaml`)
 
-- **Go 1.25**, `CGO_ENABLED=0` for all builds
-- **No local `replace` in go.mod** — causes proto descriptor mismatches and daemon panics. Use `go work` for local SDK development.
-- **No tool/plugin/agent dependencies in go.mod** — Gibson only depends on the SDK. Tool proto types come from SDK's `toolspb`.
-- **Proto field 100** in tool responses is always reserved for `gibson.graphrag.v1.DiscoveryResult`
-- **`component.yaml`** defines tool/plugin/agent metadata for registry discovery
-- **Environment variable substitution** in config: `${VAR:-default}` syntax
-- Structured logging with `log/slog`; context propagation for tracing
-- Proto source: `internal/daemon/api/gibson/daemon/v1/daemon.proto` → generated: `internal/daemon/api/`
+Key sections: `core` (home/data/cache dirs, parallel_limit), `security` (encryption algo, `key_provider` = k8s/vault/aws/azure/gcp), `llm` (default_provider + providers), `memory` (embedder + vector store), `logging`, `tracing`, `metrics`, `registry`, `callback`, `daemon` (grpc addr), `health`, `redis` (REQUIRED), `plugins`, `auth` (OIDC issuers, K8s SA, SPIFFE, better-auth, local users), `authz` (FGA store/model IDs, `require_ready`), `checkpoint` (redis or s3 blob backend), `observability` / `otel_observability`, `dashboard_postgres` (optional; non-fatal if missing). Env var substitution: `${VAR:-default}`.
 
-## Configuration
+## Infrastructure Dependencies
 
-Primary: `configs/gibson.yaml` or `~/.gibson/config.yaml`. Key sections: core (home/data/cache dirs), security (encryption, key provider), auth (OIDC issuers, K8s, local users), components (gRPC/callback addresses), inference (LLM slots/limits), observability (log level, OTLP exporters).
+- **Redis** — required. state, queues, mission memory, daemon registration, plugin/credential storage, component registry, event streams, audit stream.
+- **Neo4j 5.x** — GraphRAG knowledge graph (only required if GraphRAG is exercised).
+- **OpenFGA** — authZ (HTTP `gibson-fga:8080`); required when `authz.enabled=true && authz.require_ready=true`.
+- **PostgreSQL** (dashboard DB) — optional; audit_log reads, tenant state. Non-fatal if missing.
+- **ClickHouse** — only via Langfuse (not a direct dep).
+- **SPIRE** — optional; workload identity for daemon-to-daemon mTLS.
+- **OTLP collector** — optional; falls back to stdio logging.
 
-## Infrastructure
+Redis key patterns: `plugin-access:tenant:name`, `plugin-config:tenant:name`, `plugin-schema:name`, `mission:run:*`, `component:registry:*`, `audit:stream:<tenant>`.
 
-- **Redis** — state, queues, mission memory, daemon registration, plugin config storage
-- **Neo4j 5.x** — GraphRAG knowledge graph
-- **etcd** — component registry, service discovery (30s TTL heartbeat)
-- **PostgreSQL/ClickHouse** — Langfuse persistence/analytics
+## Secrets & Pre-commit
 
-Redis key patterns: `plugin-access:tenant:name`, `plugin-config:tenant:name`, `plugin-schema:name`, `mission:run:*`.
+Pre-commit runs gitleaks + large-file + private-key checks (`.pre-commit-config.yaml`, `.gitleaks.toml` at repo root). `.env.local`, `.env.production`, `.env.staging` are gitignored and path-blocked — use `.env.example`. Don't allow-list findings; fix the content.
+
+## Spec Workflow
+
+This module drives design via `.spec-workflow/` at the repo root (requirements / design / tasks). Active specs touching this daemon currently include the FGA authZ migration, `prod-unimplemented-apis`, `prod-feature-wiring`, agent-auth FGA integration, and auth refactor. Completed specs are not retained as documents — shipped code and commit history are the source of truth.
