@@ -9,6 +9,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
+	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
@@ -266,6 +267,16 @@ type HarnessConfig struct {
 	// nil — the middleware will then stamp URI-only on every signal.
 	// Optional.
 	ComplianceGraphReader GraphReader
+
+	// SandboxedExecutor dispatches sandboxed tool calls into Setec microVMs
+	// via gRPC. When set, CallToolProto consults its registry BEFORE the
+	// local/ComponentRegistry/RegistryAdapter paths — any tool whose name is
+	// registered in the executor is routed through Setec. Other tools take
+	// the existing paths unchanged.
+	// When nil, sandboxed dispatch is disabled (no behavior change for
+	// existing deployments).
+	// Optional.
+	SandboxedExecutor *sandboxed.Executor
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.

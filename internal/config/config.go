@@ -83,6 +83,7 @@ type Config struct {
 	Checkpoint        CheckpointConfig        `mapstructure:"checkpoint" yaml:"checkpoint"`
 	Authz             AuthzConfig             `mapstructure:"authz" yaml:"authz"`
 	DashboardPostgres DashboardPostgresConfig `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
+	Sandbox           SandboxConfig           `mapstructure:"sandbox" yaml:"sandbox,omitempty"`
 }
 
 // PluginsConfig contains configuration for all plugins.

@@ -178,6 +178,7 @@ The naming overlap is unfortunate but the concepts are unrelated. Do not conflat
 | Tenant impersonation | `internal/impersonation/` | ✅ Active, minimal callers | FGA role check |
 | Onboarding state | `internal/onboarding/` | ✅ Active, minimal callers | Redis |
 | Guardrails | `internal/guardrail/` | ✅ Active inside mission loop | — |
+| Sandboxed tool execution (Setec microVM dispatch) | `internal/harness/sandboxed/` + `internal/daemon/sandboxed_setec_adapter.go` (build tag `setec_integration`) | ⚠️ Code in place; enable by building with `-tags=setec_integration` and wiring config per `opensource/setec/development/k3s/README.md` | Setec gRPC frontend (private repo at time of writing) |
 | Eval harness | `internal/eval/` | ⚠️ Lightly integrated; only orchestrator touches it | — |
 | V4 cutover / migration | `internal/cutover/v4/` | ⚠️ Kept for backward-compat; invoked only by CLI `cutover_v4.go` | — |
 

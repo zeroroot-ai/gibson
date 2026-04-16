@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
+	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
@@ -140,6 +141,11 @@ type DefaultAgentHarness struct {
 	// When zero, defaultMaxDelegationDepth (8) is used. The daemon config flag
 	// "harness.max_delegation_depth" can override this per deployment.
 	maxDelegationDepth int
+
+	// sandboxedExecutor dispatches tool calls into Setec microVM sandboxes
+	// via gRPC. Consulted BEFORE any local/component-registry path in
+	// CallToolProto; nil disables sandboxed dispatch entirely.
+	sandboxedExecutor *sandboxed.Executor
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -565,6 +571,16 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		"tool", name,
 		"input_type", string(request.ProtoReflect().Descriptor().FullName()),
 		"output_type", string(response.ProtoReflect().Descriptor().FullName()))
+
+	// ── Path 0: Sandboxed executor ───────────────────────────────────────────
+	// Runs BEFORE any local/registry path so sandboxing is the more-specific
+	// routing decision. A registry miss falls through silently — the soft-miss
+	// error code is internal to the executor and never surfaces to the caller.
+	if h.sandboxedExecutor != nil {
+		if _, ok := h.sandboxedExecutor.Registry().Lookup(name); ok {
+			return h.sandboxedExecutor.Execute(ctx, name, request, response)
+		}
+	}
 
 	// ── Path 1: Local tool registry ──────────────────────────────────────────
 	t, err := h.toolRegistry.Get(name)

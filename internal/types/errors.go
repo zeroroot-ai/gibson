@@ -54,6 +54,17 @@ const (
 	CREDENTIAL_EXPIRED   ErrorCode = "CREDENTIAL_EXPIRED"
 )
 
+// Sandbox error codes — sandboxed tool execution path (SandboxedToolExecutor).
+const (
+	SANDBOX_TOOL_NOT_REGISTERED ErrorCode = "SANDBOX_TOOL_NOT_REGISTERED"
+	SANDBOX_LAUNCH_FAILED       ErrorCode = "SANDBOX_LAUNCH_FAILED"
+	SANDBOX_WAIT_TIMEOUT        ErrorCode = "SANDBOX_WAIT_TIMEOUT"
+	SANDBOX_NON_ZERO_EXIT       ErrorCode = "SANDBOX_NON_ZERO_EXIT"
+	SANDBOX_OUTPUT_MALFORMED    ErrorCode = "SANDBOX_OUTPUT_MALFORMED"
+	SANDBOX_INPUT_TOO_LARGE     ErrorCode = "SANDBOX_INPUT_TOO_LARGE"
+	SANDBOX_STREAM_LOGS_FAILED  ErrorCode = "SANDBOX_STREAM_LOGS_FAILED"
+)
+
 // GibsonError represents a structured error with error code, message, and optional cause.
 // It supports error wrapping and retryability hints for error handling logic.
 type GibsonError struct {
