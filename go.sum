@@ -695,8 +695,8 @@ github.com/yuin/gopher-lua v1.1.1 h1:kYKnWBjvbNP4XLT3+bPEwAXJx262OhaHDWDVOPjL46M
 github.com/yuin/gopher-lua v1.1.1/go.mod h1:GBR0iDaNXjAgGg9zfCvksxSRnQx76gclCIb7kdAd1Pw=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-github.com/zero-day-ai/sdk v0.69.1 h1:fVaEKqSuuvREj9nuW6EbRdP4W1I0mg25TIlYjYu603A=
-github.com/zero-day-ai/sdk v0.69.1/go.mod h1:hFgxyOb3Cr8McpRRZljTPcp4GxmTEfdpAUbVLcggJuU=
+github.com/zero-day-ai/sdk v0.70.1 h1:vX/MK4yvGZwdbqKNrv2clj/pKbLJ7FufdlINnrZ6JnQ=
+github.com/zero-day-ai/sdk v0.70.1/go.mod h1:hFgxyOb3Cr8McpRRZljTPcp4GxmTEfdpAUbVLcggJuU=
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.etcd.io/bbolt v1.3.6/go.mod h1:qXsaaIqmgQH0T+OPdb99Bf+PKfBBQVAdyD6TY9G8XM4=
 go.etcd.io/bbolt v1.3.11 h1:yGEzV1wPz2yVCLsD8ZAiGHhHVlczyC9d1rP43/VCRJ0=
