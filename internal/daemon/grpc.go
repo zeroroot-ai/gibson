@@ -20,9 +20,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/mission"
@@ -281,6 +283,21 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
 	api.RegisterDaemonAdminServiceServer(srv, daemonSvc)
+
+	// Register IntelligenceService for cross-mission analytics RPCs
+	// (GetRecurringVulnerabilities, GetRemediationMetrics, GetAssetRiskScore,
+	// GetAttackPatterns, GetSimilarTargets). The SDK's
+	// platformIntelligenceProxy is the canonical client; agents and operators
+	// reach this endpoint indirectly via SDK PlatformHarness.
+	// Per spec productionize-graph-intelligence Task 2, this fills the
+	// long-missing daemon-side endpoint that the SDK proxy was always
+	// degrading against (Unimplemented fallback).
+	if d.infrastructure != nil && d.infrastructure.intelligenceService != nil {
+		intelligencepb.RegisterIntelligenceServiceServer(srv, intelligence.NewGRPCServer(d.infrastructure.intelligenceService))
+		d.logger.Info(ctx, "registered IntelligenceService gRPC endpoint")
+	} else {
+		d.logger.Warn(ctx, "IntelligenceService gRPC endpoint not registered: intelligence service unavailable (likely no neo4j driver)")
+	}
 
 	// Initialize and register the ComponentService on the same gRPC port.
 	//

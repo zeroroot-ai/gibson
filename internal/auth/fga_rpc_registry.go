@@ -265,6 +265,31 @@ func (r *FgaRpcRegistry) populate() {
 		Description: "Ensure mission dependencies are running within caller's tenant",
 	})
 
+	// intelligence.v1.IntelligenceService — cross-mission analytics RPCs.
+	// All five queries read aggregate finding/technique/asset data scoped to
+	// the caller's tenant; same `member` relation used for mission-data reads.
+	// Per spec productionize-graph-intelligence Task 2.
+	r.add("/intelligence.v1.IntelligenceService/GetRecurringVulnerabilities", FgaCheckSpec{
+		Relation:    "member",
+		Description: "List vulnerabilities recurring across missions within caller's tenant",
+	})
+	r.add("/intelligence.v1.IntelligenceService/GetRemediationMetrics", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Compute remediation metrics across missions within caller's tenant",
+	})
+	r.add("/intelligence.v1.IntelligenceService/GetAssetRiskScore", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Compute asset risk scores from historical findings within caller's tenant",
+	})
+	r.add("/intelligence.v1.IntelligenceService/GetAttackPatterns", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Identify successful attack-technique sequences within caller's tenant",
+	})
+	r.add("/intelligence.v1.IntelligenceService/GetSimilarTargets", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Find targets similar to a reference within caller's tenant",
+	})
+
 	// Component listing.
 	r.add("/gibson.daemon.v1.DaemonService/ListAgents", FgaCheckSpec{
 		Relation:    "member",

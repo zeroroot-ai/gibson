@@ -101,6 +101,26 @@ entries:
     relation: member
     description: Ensure mission dependencies are running within caller's tenant
 
+  # intelligence.v1.IntelligenceService — cross-mission analytics RPCs
+  # (productionize-graph-intelligence Task 2). All five queries read aggregate
+  # finding/technique/asset data scoped to caller's tenant; same `member`
+  # relation as mission-data reads.
+  - method: /intelligence.v1.IntelligenceService/GetRecurringVulnerabilities
+    relation: member
+    description: List vulnerabilities recurring across missions within caller's tenant
+  - method: /intelligence.v1.IntelligenceService/GetRemediationMetrics
+    relation: member
+    description: Compute remediation metrics across missions within caller's tenant
+  - method: /intelligence.v1.IntelligenceService/GetAssetRiskScore
+    relation: member
+    description: Compute asset risk scores from historical findings within caller's tenant
+  - method: /intelligence.v1.IntelligenceService/GetAttackPatterns
+    relation: member
+    description: Identify successful attack-technique sequences within caller's tenant
+  - method: /intelligence.v1.IntelligenceService/GetSimilarTargets
+    relation: member
+    description: Find targets similar to a reference within caller's tenant
+
   # Component listing (member).
   - method: /gibson.daemon.v1.DaemonService/ListAgents
     relation: member

@@ -9,6 +9,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
+	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
 	"github.com/zero-day-ai/gibson/internal/graphrag/provider"
@@ -62,6 +63,12 @@ type Infrastructure struct {
 
 	// graphRAGQueryBridge for querying the knowledge graph
 	graphRAGQueryBridge harness.GraphRAGQueryBridge
+
+	// intelligenceService provides cross-mission analytics queries
+	// (recurring vulnerabilities, remediation metrics, asset risk scores,
+	// attack patterns, similar targets). Wrapped by intelligence.NewGRPCServer
+	// for the IntelligenceService gRPC endpoint.
+	intelligenceService *intelligence.Service
 
 	// otelStack holds the unified OTel observability stack (nil when disabled)
 	otelStack *observability.OTelObservabilityStack
@@ -190,6 +197,20 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		d.logger.Info(ctx, "initialized compliance signal sink for harness middleware")
 	}
 
+	// Create cross-mission analytics service backed by the same Neo4j driver.
+	// Wrapped by intelligence.NewGRPCServer in grpc.go for the
+	// IntelligenceService gRPC endpoint (per spec productionize-graph-intelligence).
+	var intelligenceService *intelligence.Service
+	if graphRAGClient != nil && graphRAGClient.Driver() != nil {
+		intelligenceService = intelligence.NewService(intelligence.ServiceConfig{
+			Driver: graphRAGClient.Driver(),
+			Logger: d.logger.Slog(),
+		})
+		d.logger.Info(ctx, "initialized cross-mission intelligence service")
+	} else {
+		d.logger.Warn(ctx, "cross-mission intelligence service disabled: neo4j driver unavailable")
+	}
+
 	// Initialize OpenTelemetry observability stack (required for LLM tracing)
 	// This provides unified tracing and metrics to OTLP-compatible backends
 	otelStack := d.initOTelObservability(ctx)
@@ -224,6 +245,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		discoveryProcessor:   discoveryProcessorAdapter,
 		complianceSink:       complianceSink,
 		redisClient:          redisClient,
+		intelligenceService:  intelligenceService,
 	}
 	d.infrastructure = infra
 
