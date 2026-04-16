@@ -650,9 +650,6 @@ func TestEventFlow_NoUnknownEvents(t *testing.T) {
 		{events.EventLLMRequestFailed, events.LLMRequestFailedPayload{Model: "test", SlotName: "primary", Error: "test"}},
 		{events.EventFindingDiscovered, events.FindingDiscoveredPayload{FindingID: types.ID("f1"), Title: "test", Severity: "low"}},
 		{events.EventFindingSubmitted, events.FindingSubmittedPayload{FindingID: types.ID("f1"), Title: "test", Severity: "low"}},
-		{events.EventAttackStarted, events.AttackStartedPayload{AttackID: types.ID("a1"), AgentName: "test"}},
-		{events.EventAttackCompleted, events.AttackCompletedPayload{AttackID: types.ID("a1")}},
-		{events.EventAttackFailed, events.AttackFailedPayload{AttackID: types.ID("a1"), Error: "test"}},
 	}
 
 	// Publish all test events
@@ -684,8 +681,7 @@ func TestEventFlow_NoUnknownEvents(t *testing.T) {
 				receivedEvent.ToolEvent != nil ||
 				receivedEvent.LLMEvent != nil ||
 				receivedEvent.FindingEvent != nil ||
-				receivedEvent.AgentEvent != nil ||
-				receivedEvent.AttackEvent != nil
+				receivedEvent.AgentEvent != nil
 
 			assert.True(t, hasOneof,
 				"Event should have at least one oneof field populated for type: %s", receivedEvent.EventType)

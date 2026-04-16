@@ -610,41 +610,6 @@ func TestEventDataEncoding(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestAttackEventStreaming
-// ---------------------------------------------------------------------------
-
-// TestAttackEventStreaming verifies that attack lifecycle events (started,
-// completed) are published and delivered with the correct attack ID.
-func TestAttackEventStreaming(t *testing.T) {
-	res, _ := newTestRedisEventStream(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	tenant := "attack-events-tenant"
-
-	ch, err := res.SubscribeStream(ctx, tenant,
-		[]string{"attack.started", "attack.completed"}, "")
-	require.NoError(t, err)
-	time.Sleep(50 * time.Millisecond)
-
-	attackID := "atk-001"
-	require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewAttackStartedEvent(attackID)))
-	require.NoError(t, res.PublishEvent(ctx, tenant, daemon.NewAttackCompletedEvent(attackID, true)))
-
-	for _, wantType := range []string{"attack.started", "attack.completed"} {
-		select {
-		case e, ok := <-ch:
-			require.True(t, ok)
-			assert.Equal(t, wantType, e.EventType)
-			if e.AttackEvent != nil {
-				assert.Equal(t, attackID, e.AttackEvent.AttackID)
-			}
-		case <-time.After(500 * time.Millisecond):
-			t.Fatalf("timeout waiting for %s", wantType)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
 // TestPingConnectBasicGRPC
 // ---------------------------------------------------------------------------
 

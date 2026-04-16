@@ -9,7 +9,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/types"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // EventBus manages event distribution to subscribers.
@@ -400,39 +399,3 @@ func NewAgentUnregisteredEvent(agentID, agentName string) api.EventData {
 	}
 }
 
-// NewAttackStartedEvent creates an attack started event.
-func NewAttackStartedEvent(attackID string) api.EventData {
-	return api.EventData{
-		EventType: "attack.started",
-		Timestamp: time.Now(),
-		Source:    "daemon",
-		AttackEvent: &api.AttackEventData{
-			EventType: "attack.started",
-			Timestamp: time.Now(),
-			AttackID:  attackID,
-			Message:   "Attack started",
-		},
-	}
-}
-
-// NewAttackCompletedEvent creates an attack completed event.
-func NewAttackCompletedEvent(attackID string, success bool) api.EventData {
-	status := "failed"
-	if success {
-		status = "success"
-	}
-	return api.EventData{
-		EventType: "attack.completed",
-		Timestamp: time.Now(),
-		Source:    "daemon",
-		AttackEvent: &api.AttackEventData{
-			EventType: "attack.completed",
-			Timestamp: time.Now(),
-			AttackID:  attackID,
-			Message:   "Attack completed",
-			Result: &daemonpb.OperationResult{
-				Status: status,
-			},
-		},
-	}
-}

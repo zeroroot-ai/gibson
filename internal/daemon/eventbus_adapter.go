@@ -8,7 +8,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/events"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // EventBusAdapter adapts the daemon's EventBus to the EventBusPublisher interface
@@ -437,40 +436,6 @@ func convertToAPIEventData(event interface{}) api.EventData {
 	// - Iteration, Action, TargetNodeID, TargetAgentName, Confidence
 	// - Reasoning (truncated to 500 chars), TokensUsed, Latency
 	// - For approval events: ApprovalID, Risk, Timeout
-
-	// Attack events (for standalone attack command)
-	case events.AttackStartedPayload:
-		result.AttackEvent = &api.AttackEventData{
-			EventType: string(ev.Type),
-			Timestamp: ev.Timestamp,
-			AttackID:  string(payload.AttackID),
-			Message:   "Attack started",
-		}
-
-	case events.AttackCompletedPayload:
-		status := "failed"
-		if payload.Success {
-			status = "success"
-		}
-		result.AttackEvent = &api.AttackEventData{
-			EventType: string(ev.Type),
-			Timestamp: ev.Timestamp,
-			AttackID:  string(payload.AttackID),
-			Message:   "Attack completed",
-			Result: &daemonpb.OperationResult{
-				Status:     status,
-				DurationMs: payload.Duration.Milliseconds(),
-			},
-		}
-
-	case events.AttackFailedPayload:
-		result.AttackEvent = &api.AttackEventData{
-			EventType: string(ev.Type),
-			Timestamp: ev.Timestamp,
-			AttackID:  string(payload.AttackID),
-			Error:     payload.Error,
-			Message:   "Attack failed",
-		}
 
 	default:
 		// For unknown payload types, preserve the event but mark it as unstructured

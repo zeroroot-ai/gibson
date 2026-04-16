@@ -24,7 +24,6 @@ type mockDaemon struct {
 	runMissionFn                  func(ctx context.Context, workflowPath string, missionID string, variables map[string]string, memoryContinuity string) (<-chan MissionEventData, error)
 	stopMissionFn                 func(ctx context.Context, missionID string, force bool) error
 	listMissionsFn                func(ctx context.Context, activeOnly bool, statusFilter, namePattern string, limit, offset int) ([]MissionData, int, error)
-	runAttackFn                   func(ctx context.Context, req AttackRequest) (<-chan AttackEventData, error)
 	subscribeFn                   func(ctx context.Context, eventTypes []string, missionID string) (<-chan EventData, error)
 	startComponentFn              func(ctx context.Context, kind string, name string) (StartComponentResult, error)
 	stopComponentFn               func(ctx context.Context, kind string, name string, force bool) (StopComponentResult, error)
@@ -110,13 +109,6 @@ func (m *mockDaemon) ListMissions(ctx context.Context, activeOnly bool, statusFi
 		return m.listMissionsFn(ctx, activeOnly, statusFilter, namePattern, limit, offset)
 	}
 	return nil, 0, nil
-}
-
-func (m *mockDaemon) RunAttack(ctx context.Context, req AttackRequest) (<-chan AttackEventData, error) {
-	if m.runAttackFn != nil {
-		return m.runAttackFn(ctx, req)
-	}
-	return nil, nil
 }
 
 func (m *mockDaemon) Subscribe(ctx context.Context, eventTypes []string, missionID string) (<-chan EventData, error) {

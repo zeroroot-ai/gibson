@@ -10,7 +10,6 @@ import (
 
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/config"
@@ -19,18 +18,14 @@ import (
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/database"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
-	"github.com/zero-day-ai/gibson/internal/payload"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
 	healthhttp "github.com/zero-day-ai/sdk/health/http"
 	sdktypes "github.com/zero-day-ai/sdk/types"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // targetStore is an interface for target data access
@@ -130,9 +125,6 @@ type daemonImpl struct {
 
 	// grpcAddr is the address the gRPC server listens on (added in Phase 3)
 	grpcAddr string
-
-	// attackRunner executes ad-hoc attacks
-	attackRunner attack.AttackRunner
 
 	// redisDaemonInfo provides Redis-based daemon discovery and registration
 	redisDaemonInfo *RedisDaemonInfo
@@ -312,7 +304,6 @@ func New(cfg *config.Config, homeDir string) (Daemon, error) {
 		agentState:      make(map[string]*AgentRuntimeState),
 		grpcServer:      nil,         // Created in Start()
 		grpcAddr:        grpcAddr,    // Configurable via config file or environment variable
-		attackRunner:    nil,         // Created in Start() after registry is available
 		healthState:     healthState, // Health state manager for shutdown coordination
 		startTime:       time.Time{}, // Set when Start() is called
 	}, nil
@@ -654,71 +645,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	} else {
 		d.logger.Warn(ctx, "mission checkpointer not initialized - state client not available")
 	}
-
-	// Initialize attack runner with required dependencies
-	d.logger.Info(ctx, "initializing attack runner")
-
-	// Create mission orchestrator if GraphRAG is available
-	var orch mission.MissionOrchestrator
-	if d.infrastructure.graphRAGClient != nil {
-		// Create GraphLoader for storing mission definitions in Neo4j
-		missionGraphLoader := orchestrator.NewGraphLoader(d.infrastructure.graphRAGClient, d.logger.Slog())
-
-		// Get tracer from OTel stack or use noop
-		var tracer trace.Tracer
-		if d.infrastructure.otelStack != nil && d.infrastructure.otelStack.TracerProvider != nil {
-			tracer = d.infrastructure.otelStack.TracerProvider.Tracer("gibson-orchestrator")
-		} else {
-			tracer = trace.NewNoopTracerProvider().Tracer("orchestrator")
-		}
-
-		// Create DiscoveryProcessor for processing agent output discoveries
-		graphLoader := loader.NewGraphLoader(d.infrastructure.graphRAGClient)
-		discoveryProc := processor.NewDiscoveryProcessor(graphLoader, d.infrastructure.graphRAGClient, d.logger.Slog())
-		discoveryProcessorAdapter := &discoveryProcessorAdapter{processor: discoveryProc}
-
-		cfg := orchestrator.Config{
-			GraphRAGClient:     d.infrastructure.graphRAGClient,
-			HarnessFactory:     d.infrastructure.harnessFactory,
-			Logger:             d.logger.WithComponent("orchestrator"),
-			Tracer:             tracer,
-			EventBus:           NewOrchestratorEventBusAdapterWithRedis(d.eventBus, d.redisEventStream, d.registryTenant),
-			MaxIterations:      100,
-			MaxConcurrent:      10,
-			ThinkerMaxRetries:  3,
-			ThinkerTemperature: 0.2,
-			GraphLoader:        missionGraphLoader,
-			Registry:           d.registryAdapter,         // For component discovery and validation
-			DecisionLogWriter:  nil,                       // OTel adapter created per-mission in mission_manager.go
-			DiscoveryProcessor: discoveryProcessorAdapter, // Process agent output discoveries to Neo4j
-		}
-
-		var err error
-		orch, err = orchestrator.NewMissionAdapter(cfg)
-		if err != nil {
-			d.logger.Error(ctx, "failed to create orchestrator", "error", err)
-			return fmt.Errorf("failed to create orchestrator: %w", err)
-		}
-		d.logger.Info(ctx, "Using orchestrator for attack runner")
-	} else {
-		d.logger.Error(ctx, "GraphRAG not available, cannot create attack runner")
-		return fmt.Errorf("GraphRAG (Neo4j) is required for attack runner but not configured")
-	}
-
-	// Create payload registry with Redis store (required)
-	redisStore := payload.NewRedisPayloadStore(d.stateClient)
-	payloadRegistry := payload.NewPayloadRegistryWithStore(redisStore, payload.DefaultRegistryConfig())
-	d.logger.Info(ctx, "using Redis payload store")
-
-	d.attackRunner = attack.NewAttackRunner(
-		orch,
-		d.registryAdapter,
-		payloadRegistry,
-		d.missionStore,
-		d.infrastructure.findingStore,
-		attack.WithLogger(d.logger.Slog()),
-	)
-	d.logger.Info(ctx, "initialized attack runner")
 
 	// Start callback server
 	if d.config.Callback.Enabled {

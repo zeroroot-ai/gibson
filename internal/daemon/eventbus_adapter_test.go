@@ -528,66 +528,6 @@ func TestConvertToAPIEventData(t *testing.T) {
 			},
 		},
 		{
-			name: "AttackStartedPayload",
-			event: events.Event{
-				Type:      events.EventAttackStarted,
-				Timestamp: now,
-				Payload: events.AttackStartedPayload{
-					AttackID:   types.ID("attack-999"),
-					TargetName: "test-target",
-					AgentName:  testAgentName,
-				},
-			},
-			validate: func(t *testing.T, result api.EventData) {
-				assert.Equal(t, "attack.started", result.EventType)
-				assert.NotNil(t, result.AttackEvent)
-				assert.Equal(t, "attack-999", result.AttackEvent.AttackID)
-				assert.Equal(t, "Attack started", result.AttackEvent.Message)
-			},
-		},
-		{
-			name: "AttackCompletedPayload",
-			event: events.Event{
-				Type:      events.EventAttackCompleted,
-				Timestamp: now,
-				Payload: events.AttackCompletedPayload{
-					AttackID:     types.ID("attack-999"),
-					Duration:     3 * time.Minute,
-					FindingCount: 8,
-					Success:      true,
-				},
-			},
-			validate: func(t *testing.T, result api.EventData) {
-				assert.Equal(t, "attack.completed", result.EventType)
-				assert.NotNil(t, result.AttackEvent)
-				assert.Equal(t, "attack-999", result.AttackEvent.AttackID)
-				assert.Equal(t, "Attack completed", result.AttackEvent.Message)
-				assert.NotNil(t, result.AttackEvent.Result)
-				assert.Equal(t, "success", result.AttackEvent.Result.Status)
-				assert.Equal(t, int64(180000), result.AttackEvent.Result.DurationMs) // 3 minutes in ms
-			},
-		},
-		{
-			name: "AttackFailedPayload",
-			event: events.Event{
-				Type:      events.EventAttackFailed,
-				Timestamp: now,
-				Payload: events.AttackFailedPayload{
-					AttackID:     types.ID("attack-999"),
-					Error:        "target unreachable",
-					Duration:     1 * time.Minute,
-					FindingCount: 0,
-				},
-			},
-			validate: func(t *testing.T, result api.EventData) {
-				assert.Equal(t, "attack.failed", result.EventType)
-				assert.NotNil(t, result.AttackEvent)
-				assert.Equal(t, "attack-999", result.AttackEvent.AttackID)
-				assert.Equal(t, "target unreachable", result.AttackEvent.Error)
-				assert.Equal(t, "Attack failed", result.AttackEvent.Message)
-			},
-		},
-		{
 			name: "non-Event type (fallback)",
 			event: struct {
 				Name  string

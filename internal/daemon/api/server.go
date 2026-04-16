@@ -200,9 +200,6 @@ type DaemonInterface interface {
 	// ListMissions returns mission list
 	ListMissions(ctx context.Context, activeOnly bool, statusFilter, namePattern string, limit, offset int) ([]MissionData, int, error)
 
-	// RunAttack executes an attack and returns an event channel
-	RunAttack(ctx context.Context, req AttackRequest) (<-chan AttackEventData, error)
-
 	// Subscribe establishes an event stream
 	Subscribe(ctx context.Context, eventTypes []string, missionID string) (<-chan EventData, error)
 
@@ -363,28 +360,6 @@ type MissionEventData struct {
 	Payload   map[string]interface{} // Additional payload data (workflow_name, duration, status, etc.)
 }
 
-// AttackRequest represents an attack request.
-type AttackRequest struct {
-	Target        string
-	TargetName    string
-	AttackType    string
-	AgentID       string
-	PayloadFilter string
-	Options       map[string]string
-}
-
-// AttackEventData represents attack event data from the daemon.
-type AttackEventData struct {
-	EventType string
-	Timestamp time.Time
-	AttackID  string
-	Message   string
-	Data      string
-	Error     string
-	Finding   *FindingData
-	Result    *daemonpb.OperationResult
-}
-
 // FindingData represents finding information.
 type FindingData struct {
 	ID          string
@@ -405,7 +380,6 @@ type EventData struct {
 	Data              string
 	Metadata          map[string]interface{} // Additional metadata (e.g., trace_id, span_id, parent_span_id)
 	MissionEvent      *MissionEventData
-	AttackEvent       *AttackEventData
 	AgentEvent        *AgentEventData
 	FindingEvent      *FindingEventData
 	ToolEvent         *ToolEventData
@@ -1533,31 +1507,6 @@ func (s *DaemonServer) Subscribe(req *daemonpb.SubscribeRequest, stream grpc.Ser
 						Message:   event.MissionEvent.Message,
 						Data:      StringToTypedMap(event.MissionEvent.Data),
 						Error:     event.MissionEvent.Error,
-					},
-				}
-			} else if event.AttackEvent != nil {
-				var finding *daemonpb.FindingInfo
-				if event.AttackEvent.Finding != nil {
-					finding = &daemonpb.FindingInfo{
-						Id:          event.AttackEvent.Finding.ID,
-						Title:       event.AttackEvent.Finding.Title,
-						Severity:    event.AttackEvent.Finding.Severity,
-						Category:    event.AttackEvent.Finding.Category,
-						Description: event.AttackEvent.Finding.Description,
-						Technique:   event.AttackEvent.Finding.Technique,
-						Evidence:    event.AttackEvent.Finding.Evidence,
-						Timestamp:   event.AttackEvent.Finding.Timestamp.Unix(),
-					}
-				}
-				protoEvent.Event = &daemonpb.SubscribeResponse_AttackEvent{
-					AttackEvent: &daemonpb.AttackEvent{
-						EventType: event.AttackEvent.EventType,
-						Timestamp: event.AttackEvent.Timestamp.Unix(),
-						AttackId:  event.AttackEvent.AttackID,
-						Message:   event.AttackEvent.Message,
-						Data:      StringToTypedMap(event.AttackEvent.Data),
-						Error:     event.AttackEvent.Error,
-						Finding:   finding,
 					},
 				}
 			} else if event.AgentEvent != nil {

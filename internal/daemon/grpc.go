@@ -9,15 +9,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/agentauth"
-	"github.com/zero-day-ai/gibson/internal/attack"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
@@ -958,226 +955,6 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 
 // ListMissions returns mission list.
 
-// RunAttack executes an attack and returns an event channel.
-func (d *daemonImpl) RunAttack(ctx context.Context, req api.AttackRequest) (<-chan api.AttackEventData, error) {
-	d.logger.Info(ctx, "RunAttack called",
-		"target", req.Target,
-		"attack_type", req.AttackType,
-		"agent_id", req.AgentID)
-
-	// Validate request
-	if err := d.validateAttackRequest(req); err != nil {
-		d.logger.Error(ctx, "invalid attack request", "error", err)
-		return nil, fmt.Errorf("invalid attack request: %w", err)
-	}
-
-	// Check if attack runner is available
-	if d.attackRunner == nil {
-		d.logger.Error(ctx, "attack runner not initialized")
-		return nil, fmt.Errorf("attack execution not available: runner not initialized")
-	}
-
-	// Convert API request to attack options
-	attackOpts, err := d.buildAttackOptions(req)
-	if err != nil {
-		d.logger.Error(ctx, "failed to build attack options", "error", err)
-		return nil, fmt.Errorf("failed to build attack options: %w", err)
-	}
-
-	// Create event channel for streaming attack progress
-	eventChan := make(chan api.AttackEventData, 100)
-
-	// Execute attack in goroutine
-	go func() {
-		defer close(eventChan)
-
-		// Generate unique attack ID
-		attackID := types.NewID().String()
-
-		// Send attack started event with resolved target URL
-		eventChan <- api.AttackEventData{
-			EventType: "attack.started",
-			Timestamp: time.Now(),
-			AttackID:  attackID,
-			Message:   fmt.Sprintf("Starting attack on %s with agent %s", attackOpts.TargetURL, req.AgentID),
-		}
-
-		d.logger.Info(ctx, "executing attack",
-			"attack_id", attackID,
-			"target_url", attackOpts.TargetURL,
-			"target_name", attackOpts.TargetName,
-			"agent", attackOpts.AgentName)
-
-		// Execute attack through runner
-		result, err := d.attackRunner.Run(ctx, attackOpts)
-		if err != nil {
-			d.logger.Error(ctx, "attack execution failed", "error", err, "attack_id", attackID)
-			eventChan <- api.AttackEventData{
-				EventType: "attack.failed",
-				Timestamp: time.Now(),
-				AttackID:  attackID,
-				Message:   "Attack execution failed",
-				Error:     err.Error(),
-			}
-			return
-		}
-
-		// Send progress events for findings
-		for _, f := range result.Findings {
-			eventChan <- api.AttackEventData{
-				EventType: "attack.finding",
-				Timestamp: time.Now(),
-				AttackID:  attackID,
-				Message:   fmt.Sprintf("Found %s severity finding: %s", f.Severity, f.Title),
-				Finding: &api.FindingData{
-					ID:          f.ID.String(),
-					Title:       f.Title,
-					Severity:    string(f.Severity),
-					Category:    f.Category,
-					Description: f.Description,
-					Technique:   "", // Not available in EnhancedFinding
-					Evidence:    formatEvidence(f.Evidence),
-					Timestamp:   f.CreatedAt,
-				},
-			}
-		}
-
-		// Send attack completed event with typed OperationResult
-		now := time.Now()
-		startTime := now.Add(-result.Duration)
-
-		// Create typed operation result
-		operationResult := &daemonpb.OperationResult{
-			Status:        string(result.Status),
-			DurationMs:    result.Duration.Milliseconds(),
-			StartedAt:     startTime.UnixMilli(),
-			CompletedAt:   now.UnixMilli(),
-			TurnsUsed:     int32(result.TurnsUsed),
-			TokensUsed:    result.TokensUsed,
-			FindingsCount: int32(len(result.Findings)),
-		}
-
-		// Populate severity counts from FindingsBySeverity map
-		if count, ok := result.FindingsBySeverity["critical"]; ok {
-			operationResult.CriticalCount = int32(count)
-		}
-		if count, ok := result.FindingsBySeverity["high"]; ok {
-			operationResult.HighCount = int32(count)
-		}
-		if count, ok := result.FindingsBySeverity["medium"]; ok {
-			operationResult.MediumCount = int32(count)
-		}
-		if count, ok := result.FindingsBySeverity["low"]; ok {
-			operationResult.LowCount = int32(count)
-		}
-
-		// Add error information if present
-		if result.Error != nil {
-			operationResult.ErrorMessage = result.Error.Error()
-		}
-
-		eventChan <- api.AttackEventData{
-			EventType: "attack.completed",
-			Timestamp: now,
-			AttackID:  attackID,
-			Message:   fmt.Sprintf("Attack completed: %d findings discovered", len(result.Findings)),
-			Data:      "", // Empty - using typed Result now
-			Result:    operationResult,
-		}
-
-		d.logger.Info(ctx, "attack completed",
-			"attack_id", attackID,
-			"status", result.Status,
-			"findings", len(result.Findings),
-			"duration", result.Duration)
-	}()
-
-	return eventChan, nil
-}
-
-// validateAttackRequest validates the attack request parameters.
-func (d *daemonImpl) validateAttackRequest(req api.AttackRequest) error {
-	// Require either target or target_name
-	if req.Target == "" && req.TargetName == "" {
-		return fmt.Errorf("either target or target_name is required")
-	}
-
-	// Don't allow both to be set (user should choose one approach)
-	if req.Target != "" && req.TargetName != "" {
-		return fmt.Errorf("cannot specify both target and target_name")
-	}
-
-	if req.AgentID == "" {
-		return fmt.Errorf("agent ID is required")
-	}
-
-	return nil
-}
-
-// buildAttackOptions converts API AttackRequest to internal AttackOptions.
-func (d *daemonImpl) buildAttackOptions(req api.AttackRequest) (*attack.AttackOptions, error) {
-	opts := attack.NewAttackOptions()
-
-	// Target resolution: stored targets only (security guardrail)
-	if req.TargetName == "" {
-		return nil, fmt.Errorf("target name is required: use 'gibson target add' to create a target, then reference it with --target <name>")
-	}
-
-	// Look up target from database by name
-	target, err := d.targetStore.GetByName(context.Background(), req.TargetName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to lookup target '%s': %w", req.TargetName, err)
-	}
-
-	// Extract URL from connection JSON (optional for some target types like 'network')
-	targetURL := target.GetURL()
-
-	// Set target options from stored target
-	opts.TargetID = target.ID
-	opts.TargetName = target.Name
-	opts.TargetURL = targetURL // May be empty for non-URL-based targets (e.g., network)
-	opts.TargetType = types.TargetType(target.Type)
-
-	// Set credential if target has one configured
-	if target.CredentialID != nil {
-		opts.Credential = target.CredentialID.String()
-	}
-
-	opts.AgentName = req.AgentID
-
-	// Apply payload filter if specified
-	if req.PayloadFilter != "" {
-		opts.PayloadCategory = req.PayloadFilter
-	}
-
-	// Apply additional options from the options map
-	if req.Options != nil {
-		if maxTurns, ok := req.Options["max_turns"]; ok {
-			var turns int
-			fmt.Sscanf(maxTurns, "%d", &turns)
-			opts.MaxTurns = turns
-		}
-
-		if timeout, ok := req.Options["timeout"]; ok {
-			var duration time.Duration
-			duration, err := time.ParseDuration(timeout)
-			if err == nil {
-				opts.Timeout = duration
-			}
-		}
-
-		if verbose, ok := req.Options["verbose"]; ok && verbose == "true" {
-			opts.Verbose = true
-		}
-
-		if dryRun, ok := req.Options["dry_run"]; ok && dryRun == "true" {
-			opts.DryRun = true
-		}
-	}
-
-	return opts, nil
-}
-
 // Subscribe establishes an event stream.
 //
 // When redisEventStream is available it uses Redis Streams (XREAD BLOCK) as
@@ -1246,18 +1023,6 @@ func (d *daemonImpl) publishEvent(ctx context.Context, event api.EventData) {
 			d.logger.Warn(ctx, "failed to publish to redis stream", "error", err, "event_type", event.EventType)
 		}
 	}
-}
-
-// formatEvidence converts a slice of Evidence to a string representation.
-func formatEvidence(evidence []agent.Evidence) string {
-	if len(evidence) == 0 {
-		return ""
-	}
-	var parts []string
-	for _, e := range evidence {
-		parts = append(parts, fmt.Sprintf("[%s] %s", e.Type, e.Description))
-	}
-	return strings.Join(parts, "; ")
 }
 
 // StartComponent is not supported; component lifecycle management has been removed.

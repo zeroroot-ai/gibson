@@ -113,14 +113,6 @@ const (
 	EventSystemDaemonStarted       EventType = "system.daemon_started"
 )
 
-// Attack Events
-// These events track attack execution via the attack command.
-const (
-	EventAttackStarted   EventType = "attack.started"
-	EventAttackCompleted EventType = "attack.completed"
-	EventAttackFailed    EventType = "attack.failed"
-)
-
 // Approval Events
 // These events track human approval requests for sensitive operations.
 const (
@@ -638,25 +630,3 @@ type DaemonStartedPayload struct {
 	ListenAddress string `json:"listen_address,omitempty"`
 }
 
-// AttackStartedPayload contains data for attack.started events.
-type AttackStartedPayload struct {
-	AttackID   types.ID `json:"attack_id"`
-	TargetName string   `json:"target_name,omitempty"`
-	AgentName  string   `json:"agent_name"`
-}
-
-// AttackCompletedPayload contains data for attack.completed events.
-type AttackCompletedPayload struct {
-	AttackID     types.ID      `json:"attack_id"`
-	Duration     time.Duration `json:"duration"`
-	FindingCount int           `json:"finding_count"`
-	Success      bool          `json:"success"`
-}
-
-// AttackFailedPayload contains data for attack.failed events.
-type AttackFailedPayload struct {
-	AttackID     types.ID      `json:"attack_id"`
-	Error        string        `json:"error"`
-	Duration     time.Duration `json:"duration"`
-	FindingCount int           `json:"finding_count"`
-}
