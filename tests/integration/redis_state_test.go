@@ -20,7 +20,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/payload"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -426,75 +425,6 @@ func TestSearchQuality(t *testing.T) {
 	for _, doc := range testDocs {
 		store.Delete(ctx, doc.ID)
 	}
-}
-
-// TestPayloadStoreWithVersioning tests PayloadStore version history.
-func TestPayloadStoreWithVersioning(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-
-	rc := setupRedisStack(ctx, t)
-	if rc == nil {
-		return
-	}
-	defer rc.cleanup(ctx, t)
-
-	client := newTestStateClient(t, rc.url, testKeyPrefix)
-	defer client.Close()
-
-	require.NoError(t, client.EnsureIndexes(ctx))
-
-	store := payload.NewRedisPayloadStore(client)
-	defer cleanupKeys(ctx, t, client, "gibson:payload:*")
-
-	// Create payload
-	p := &payload.Payload{
-		ID:          types.NewID(),
-		Name:        fmt.Sprintf("test-payload-%d", time.Now().UnixNano()),
-		Description: "Test payload for version tracking",
-		Template:    "echo 'version 1'",
-		Version:     "1",
-		Enabled:     true,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-
-	// Save initial version
-	err := store.Save(ctx, p)
-	require.NoError(t, err)
-
-	// Update payload
-	p.Template = "echo 'version 2'"
-	p.Version = "2"
-	p.UpdatedAt = time.Now()
-	err = store.Update(ctx, p)
-	require.NoError(t, err)
-
-	// Update again
-	p.Template = "echo 'version 3'"
-	p.Version = "3"
-	p.UpdatedAt = time.Now()
-	err = store.Update(ctx, p)
-	require.NoError(t, err)
-
-	// Get current version
-	retrieved, err := store.Get(ctx, p.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "3", retrieved.Version)
-	assert.Equal(t, "echo 'version 3'", retrieved.Template)
-
-	// Get version history
-	history, err := store.GetVersionHistory(ctx, p.ID)
-	require.NoError(t, err)
-	assert.Len(t, history, 3, "Expected 3 versions in history")
-
-	// Verify versions are in order
-	assert.Equal(t, 1, history[0].Version)
-	assert.Equal(t, 2, history[1].Version)
-	assert.Equal(t, 3, history[2].Version)
-
-	// Cleanup
-	store.Delete(ctx, p.ID)
 }
 
 // TestMissionMemoryWithSearch tests mission-scoped memory with full-text search.

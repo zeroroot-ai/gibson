@@ -206,12 +206,6 @@ func BuildObservationPrompt(state *ObservationState) string {
 		}
 	}
 
-	// Payload context (if available) - show available attack payloads
-	if state.PayloadContext != "" {
-		sb.WriteString(state.PayloadContext)
-		sb.WriteString("\n")
-	}
-
 	// Recalled context (if available) - show memory query results
 	if state.RecalledContext != "" {
 		sb.WriteString("## Recalled Context\n")

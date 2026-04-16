@@ -133,11 +133,6 @@ type ObservationState struct {
 	// Optional - only populated when dependency data is available
 	WorkflowDAG *WorkflowDAG `json:"workflow_dag,omitempty"`
 
-	// PayloadContext contains formatted payload availability information
-	// This provides agents with awareness of available attack payloads
-	// Optional - only populated when payload store is configured
-	PayloadContext string `json:"payload_context,omitempty"`
-
 	// RecalledContext contains formatted memory query results from recall action
 	// This is injected by the recall handler when inject_into_context is true
 	RecalledContext string `json:"recalled_context,omitempty"`
