@@ -2,42 +2,26 @@
 
 // Package daemon — Setec gRPC client adapter for the sandboxed tool executor.
 //
-// # Why this is behind a build tag
+// This file wraps Setec's generated `SandboxServiceClient` to satisfy the
+// internal `sandboxed.SandboxClient` interface. The sandboxed package has
+// zero Setec imports — this file is the single point of contact.
 //
-// At the time this file was written, the Setec open-source project is still
-// a private GitHub repo (github.com/zero-day-ai/setec). Gibson's CLAUDE.md
-// forbids `replace` directives pointing at local paths, so we cannot add a
-// `require github.com/zero-day-ai/setec` to gibson's go.mod that resolves to
-// the local checkout — it would need public-module accessibility or private-
-// repo auth configured against GOPROXY/sumdb.
+// Build tag `setec_integration` keeps this out of the default build so
+// gibson compiles even if the setec module is unavailable. Enable with:
 //
-// When Setec goes public (or when GOPRIVATE + GitHub PAT are wired into the
-// dev/CI environment), enable this file with the `-tags=setec_integration`
-// build flag. At that point also:
+//     go build -tags=setec_integration ./...
+//     go test  -tags=setec_integration ./...
 //
-//  1. Add to `enterprise/deploy/helm/gibson/` the chart values and Secret
-//     mount per the spec's Requirement 7.1.
-//  2. Wire `SetecSandboxedExecutor` into `harness_init.go` HarnessConfig.
-//  3. Update `go.mod` with `go get github.com/zero-day-ai/setec@<rev>`.
-//
-// # Contract
-//
-// This file implements `sandboxed.SandboxClient` (the minimal gRPC surface
-// the executor needs) by wrapping Setec's generated `SandboxServiceClient`.
-// The sandboxed package itself has zero Setec imports — the adapter is the
-// single point of contact.
-//
-// # Construction
+// # Wiring
 //
 // `NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer, logger)` dials
-// the Setec frontend with mTLS using the existing `component.TLSConfig`
-// helper, builds the client, wires up a `sandboxed.Executor`, and returns it.
-// The daemon's `harness_init.go` calls this during infrastructure
-// initialization and passes the result into `HarnessConfig.SandboxedExecutor`.
-//
-// On dial/TLS failure, construction logs a WARN and returns (nil, err) —
-// per design Requirement 5.4, the daemon continues startup and individual
-// tool calls fail at invocation time rather than blocking daemon startup.
+// the Setec frontend with mTLS using `component.TLSConfig.BuildTLSConfig()`,
+// builds the client, wires a `sandboxed.Executor`, and returns it. Returns
+// (nil, nil) when cfg.Enabled is false so the daemon can unconditionally
+// call this during infrastructure init. On dial/TLS failure, returns
+// (nil, err) — per design Requirement 5.4 the daemon LOGS the warning and
+// continues startup; per-call failures surface at tool invocation time
+// rather than blocking daemon start.
 
 package daemon
 
@@ -45,21 +29,19 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	setecv1 "github.com/zero-day-ai/setec/api/grpc/v1alpha1"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 )
 
 // NewSetecSandboxedExecutor constructs a sandboxed.Executor backed by a real
-// Setec gRPC client. Returns (nil, nil) when cfg.Sandbox.Enabled is false so
-// the caller can unconditionally assign the result into HarnessConfig.
+// Setec gRPC client.
 func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger) (*sandboxed.Executor, error) {
 	if !cfg.Enabled {
 		return nil, nil
@@ -94,20 +76,19 @@ func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, lo
 type setecClient struct{ inner setecv1.SandboxServiceClient }
 
 func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (sandboxed.LaunchResponse, error) {
-	env := make([]*setecv1.EnvVar, 0, len(req.Env))
-	for k, v := range req.Env {
-		env = append(env, &setecv1.EnvVar{Name: k, Value: v})
-	}
-	resp, err := c.inner.Launch(ctx, &setecv1.LaunchRequest{
+	pbReq := &setecv1.LaunchRequest{
 		Image:   req.Image,
 		Command: req.Command,
-		Env:     env,
+		Env:     req.Env,
 		Resources: &setecv1.Resources{
-			Vcpu:   req.VCPU,
+			Vcpu:   uint32(req.VCPU),
 			Memory: req.Memory,
 		},
-		LifecycleTimeout: durationFromDuration(req.Timeout),
-	})
+	}
+	if req.Timeout > 0 {
+		pbReq.Lifecycle = &setecv1.Lifecycle{Timeout: req.Timeout.String()}
+	}
+	resp, err := c.inner.Launch(ctx, pbReq)
 	if err != nil {
 		return sandboxed.LaunchResponse{}, err
 	}
@@ -151,17 +132,8 @@ func (s *setecLogStream) Recv() ([]byte, error) {
 }
 
 func (s *setecLogStream) Close() error {
-	// Cancel underlying stream by closing send side; Setec's StreamLogs is
-	// server-streaming so client has no send side — canceling the context
-	// in the caller is the real close. This is a best-effort no-op.
-	return nil
-}
-
-// durationFromDuration is a placeholder for whichever duration representation
-// the regenerated Setec proto uses (durationpb.Duration vs string). Fill in
-// once the import builds. TODO when enabling this file.
-func durationFromDuration(d time.Duration) interface{} {
-	// Replace with proper durationpb/seconds conversion when wiring this in.
-	_ = d
+	// Server-streaming RPC — client cancels via context. No explicit close
+	// on the stream handle; the executor cancels the parent context when
+	// the call completes, which closes the underlying HTTP/2 stream.
 	return nil
 }

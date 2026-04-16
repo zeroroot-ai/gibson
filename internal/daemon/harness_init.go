@@ -118,6 +118,35 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		ComplianceSink: d.infrastructure.complianceSink,
 	}
 
+	// Sandboxed tool executor (Setec microVM dispatch) — constructed only
+	// when sandbox.enabled=true in config AND gibson was built with
+	// -tags=setec_integration. The no-op constructor for the un-tagged
+	// build returns (nil, nil) so config.Sandbox.Enabled=true without the
+	// tag logs a warning and continues; per-call failures surface at
+	// tool invocation time (design Requirement 5.4).
+	if d.config.Sandbox.Enabled {
+		sandboxTracer := func() trace.Tracer {
+			if d.infrastructure != nil && d.infrastructure.otelStack != nil {
+				return d.infrastructure.otelStack.TracerProvider.Tracer("gibson.sandboxed")
+			}
+			return nil
+		}()
+		sandboxLogger := d.logger.WithComponent("sandboxed").Slog()
+		execer, err := NewSetecSandboxedExecutor(d.config.Sandbox, sandboxTracer, sandboxLogger)
+		if err != nil {
+			d.logger.Warn(ctx, "sandboxed tool executor construction failed; continuing without sandboxed dispatch",
+				"error", err)
+		} else if execer == nil {
+			d.logger.Warn(ctx, "sandbox.enabled=true but setec_integration build tag is not set; sandboxed tool calls will fail at invocation time (rebuild with -tags=setec_integration to enable)")
+		} else {
+			config.SandboxedExecutor = execer
+			d.logger.Info(ctx, "sandboxed tool executor wired",
+				"setec_address", d.config.Sandbox.Setec.Address,
+				"tenant", d.config.Sandbox.Setec.Tenant,
+				"tool_count", execer.Registry().Size())
+		}
+	}
+
 	// Create the factory
 	factory, err := harness.NewHarnessFactory(config)
 	if err != nil {
