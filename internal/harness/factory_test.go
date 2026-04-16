@@ -146,7 +146,6 @@ func TestNewHarnessFactory_Success(t *testing.T) {
 	// Verify defaults were applied
 	storedConfig := factory.Config()
 	assert.NotNil(t, storedConfig.LLMRegistry)
-	assert.NotNil(t, storedConfig.ToolRegistry)
 	assert.NotNil(t, storedConfig.PluginRegistry)
 	assert.NotNil(t, storedConfig.Logger)
 	assert.NotNil(t, storedConfig.FindingStore)
@@ -182,7 +181,6 @@ func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 
 	// Verify all defaults were applied
 	assert.NotNil(t, storedConfig.LLMRegistry, "LLMRegistry should be defaulted")
-	assert.NotNil(t, storedConfig.ToolRegistry, "ToolRegistry should be defaulted")
 	assert.NotNil(t, storedConfig.PluginRegistry, "PluginRegistry should be defaulted")
 	assert.NotNil(t, storedConfig.Logger, "Logger should be defaulted")
 	assert.NotNil(t, storedConfig.FindingStore, "FindingStore should be defaulted")
@@ -252,7 +250,6 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	// Verify all provided values are preserved
 	assert.NotNil(t, storedConfig.SlotManager)
 	assert.NotNil(t, storedConfig.LLMRegistry)
-	assert.NotNil(t, storedConfig.ToolRegistry)
 	assert.NotNil(t, storedConfig.PluginRegistry)
 	assert.NotNil(t, storedConfig.FindingStore)
 	assert.NotNil(t, storedConfig.Metrics)

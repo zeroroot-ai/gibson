@@ -7,7 +7,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -49,9 +48,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		}
 	}
 
-	// Create tool registry
-	toolRegistry := tool.NewToolRegistry()
-
 	// Build a Redis-backed WorkQueue for remote component dispatch.
 	// This enables the harness to route tool/plugin calls to pull-based workers
 	// (components registered in ComponentRegistry without a direct gRPC endpoint).
@@ -68,7 +64,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		SlotManager: d.infrastructure.slotManager,
 
 		// Component registries
-		ToolRegistry:   toolRegistry,
 		PluginRegistry: nil,
 		PluginAccess:   d.pluginAccessStore, // nil when no KeyProvider configured; harness skips opt-in checks
 

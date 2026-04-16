@@ -58,9 +58,6 @@ func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 	if config.LLMRegistry == nil {
 		t.Error("expected LLMRegistry to be defaulted")
 	}
-	if config.ToolRegistry == nil {
-		t.Error("expected ToolRegistry to be defaulted")
-	}
 	if config.PluginRegistry == nil {
 		t.Error("expected PluginRegistry to be defaulted")
 	}

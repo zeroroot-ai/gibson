@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zero-day-ai/gibson/internal/tool"
 	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	toolpb "github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1"
@@ -73,13 +74,16 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 		return fmt.Errorf("unexpected harness type")
 	}
 
-	tool, err := defaultHarness.toolRegistry.Get(req.Name)
-	if err != nil && defaultHarness.registryAdapter != nil {
-		// Try remote discovery
-		tool, err = defaultHarness.registryAdapter.DiscoverTool(ctx, req.Name)
+	var resolvedTool tool.Tool
+	var resolveErr error
+	if defaultHarness.registryAdapter != nil {
+		resolvedTool, resolveErr = defaultHarness.registryAdapter.DiscoverTool(ctx, req.Name)
+	} else {
+		resolveErr = fmt.Errorf("registry adapter not configured")
 	}
 
-	if err != nil {
+	if resolveErr != nil {
+		err := resolveErr
 		s.logger.Error("failed to resolve tool endpoint", "error", err, "tool", req.Name)
 
 		errEvent := &harnesspb.CallToolProtoStreamResponse{
@@ -112,7 +116,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 	}
 
 	var conn *grpc.ClientConn
-	if ct, ok := tool.(connTool); ok {
+	if ct, ok := resolvedTool.(connTool); ok {
 		conn = ct.GetConn()
 	} else {
 		// Tool is local - not yet supported for streaming
