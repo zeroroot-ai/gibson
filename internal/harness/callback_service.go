@@ -22,8 +22,6 @@ import (
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
-	// Import toolspb to register proto message types for CallToolProto reflection
-	_ "github.com/zero-day-ai/sdk/api/gen/toolspb"
 	sdkfinding "github.com/zero-day-ai/sdk/finding"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/protoresolver"
