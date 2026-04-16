@@ -218,7 +218,7 @@ This module owns **exactly one** proto file:
 
 - `internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto` — package `gibson.daemon.admin.v1`, `go_package` points back into `internal/daemon/api`, so the generated `daemon_admin.pb.go` + `daemon_admin_grpc.pb.go` live alongside `server.go`.
 
-Everything else (`gibson.daemon.v1`, `gibson.component.v1`, `gibson.harness.v1`, `gibson.agent.v1`, `gibson.tool.v1`, `gibson.plugin.v1`, `gibson.graphrag.v1`, `gibson.types.v1`, `gibson.common.v1`, `gibson.workflow.v1`, `taxonomy.v1`, `intelligence.v1`, tool-specific `toolspb`) is **consumed** from the SDK (`github.com/zero-day-ai/sdk/api/gen/...`). Gibson imports those generated Go types — never hand-writes them, never duplicates the proto files here.
+Everything else (`gibson.daemon.v1`, `gibson.component.v1`, `gibson.harness.v1`, `gibson.agent.v1`, `gibson.tool.v1`, `gibson.plugin.v1`, `gibson.graphrag.v1`, `gibson.types.v1`, `gibson.common.v1`, `gibson.workflow.v1`, `taxonomy.v1`, `intelligence.v1`) is **consumed** from the SDK (`github.com/zero-day-ai/sdk/api/gen/...`). Gibson imports those generated Go types — never hand-writes them, never duplicates the proto files here. The SDK has zero tool-specific knowledge per spec `decouple-sdk-from-tool-protos`; tool message types are resolved at runtime via `FileDescriptorSet` metadata flowing through `sdk/protoresolver`, and tool-specific recovery hints are registered by `internal/harness/toolerr_defaults.go` here in gibson.
 
 `make proto` runs `npx --prefix ../../enterprise/dashboard buf generate`, so the dashboard sibling checkout must exist. `buf lint` uses the STANDARD ruleset, no exceptions. When you add an admin RPC: regenerate Go here, then regenerate TypeScript in the dashboard repo.
 
@@ -244,7 +244,7 @@ Dependabot advisories against this module that have no patched release available
 ## Critical Rules
 
 - **GitHub-only imports.** No `replace` directives to local paths, no `file://` refs. Local replace causes proto descriptor mismatches and daemon panics. Use `go work` if you must iterate on the SDK locally.
-- **No tool / plugin / agent modules in `go.mod`.** Gibson depends on the SDK only. Tool proto types for extraction come from the SDK's `toolspb`.
+- **No tool / plugin / agent modules in `go.mod`.** Gibson depends on the SDK only. Tool proto types are resolved dynamically at runtime via `sdk/protoresolver` from FileDescriptorSet metadata sent by the tool itself — gibson does NOT compile-time-import any tool's wire bindings (the old SDK `toolspb` package was deleted under spec `decouple-sdk-from-tool-protos`).
 - **Proto field 100** in every tool response is reserved for `gibson.graphrag.v1.DiscoveryResult`. Do not repurpose it.
 - **`component.yaml`** defines agent/tool/plugin metadata for registry discovery — loadable without booting the binary.
 - **Never hand-write proto message types or gRPC stubs.** Always `buf generate`.
@@ -275,4 +275,4 @@ Pre-commit runs gitleaks + large-file + private-key checks (`.pre-commit-config.
 
 ## Spec Workflow
 
-This module drives design via `.spec-workflow/` at the repo root (requirements / design / tasks). Active specs touching this daemon currently include the FGA authZ migration, `prod-unimplemented-apis`, `prod-feature-wiring`, agent-auth FGA integration, and auth refactor. Recently completed: `remove-attack-payload-subsystem` (deleted the ad-hoc one-off attack runner and payload templates that missions superseded) and `productionize-graph-intelligence` (wired the orchestrator's `WithGraphQueries`, registered the `IntelligenceService` gRPC endpoint, and added the cross-mission learning data-flow documented above). Completed specs are not retained as documents — shipped code and commit history are the source of truth.
+This module drives design via `.spec-workflow/` at the repo root (requirements / design / tasks). Active specs touching this daemon currently include the FGA authZ migration, `prod-unimplemented-apis`, `prod-feature-wiring`, agent-auth FGA integration, and auth refactor. Recently completed: `remove-attack-payload-subsystem` (deleted the ad-hoc one-off attack runner and payload templates that missions superseded), `productionize-graph-intelligence` (wired the orchestrator's `WithGraphQueries`, registered the `IntelligenceService` gRPC endpoint, and added the cross-mission learning data-flow documented above), and `decouple-sdk-from-tool-protos` (deleted the SDK's `toolspb` package + tool-specific recovery defaults; gibson now hosts all tool-specific knowledge in `internal/harness/toolerr_defaults.go`). Completed specs are not retained as documents — shipped code and commit history are the source of truth.
