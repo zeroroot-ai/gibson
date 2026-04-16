@@ -87,14 +87,14 @@ Phased init — later phases depend on earlier. Reordering is breaking.
 7. **Infrastructure bundle** — DAG executor, finding store, LLM registry, memory factory, harness factory, OTel stack, GraphRAG store + discovery processor.
 8. **Credential store** — KeyProvider + CredentialDAO (optional; enabled if `security.key_provider` set).
 9. **Access stores** — Tool / Agent / Plugin opt-in (Redis).
-10. **gRPC server** (`grpc.go`) — auth interceptors (conditional on `auth.IsAuthEnabled()`), FGA interceptor (conditional on authz.enabled), SPIFFE mTLS (optional), registers DaemonService + DaemonAdminService + ComponentService + HarnessCallbackService, Redis daemon registration for CLI discovery.
+10. **gRPC server** (`grpc.go`) — auth interceptors (conditional on `auth.IsAuthEnabled()`), FGA interceptor (conditional on authz.enabled), SPIFFE mTLS (optional), registers DaemonService + DaemonAdminService + ComponentService + HarnessCallbackService + IntelligenceService (when GraphRAG driver is live), Redis daemon registration for CLI discovery.
 11. **Event bus** — in-process pub/sub + per-tenant Redis Streams bridge.
 12. **Health server** on `:8080` — `/healthz` liveness, `/readyz` readiness (FGA probe with 10 s TTL cache when authz enabled).
 13. **Signal handler** — 4-phase graceful shutdown: PreShutdown → Checkpoint (save active missions to Redis via `DaemonMissionCheckpointer`) → Wait (drain) → Terminate.
 
 ## gRPC Surface
 
-Two Gibson-owned services plus one re-exported SDK service plus the harness callback service. **Public** = on the main daemon port; **Admin** = same port but FGA-gated to platform-operator role.
+Two Gibson-owned services plus two re-exported SDK services plus the harness callback service. **Public** = on the main daemon port; **Admin** = same port but FGA-gated to platform-operator role.
 
 | Service | Proto source | Purpose |
 |---|---|---|
@@ -102,6 +102,54 @@ Two Gibson-owned services plus one re-exported SDK service plus the harness call
 | `gibson.daemon.admin.v1.DaemonAdminService` | **Local** (`internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto`) | Privileged ops: Shutdown, ImpersonateTenant, {Get,Set,Delete}TenantLangfuseCredentials, {Get,Update}OnboardingState, {Create,List,Revoke}APIKey, ListAuditEvents, agent-auth (RegisterAgentAuth, ExecuteAgentCapability, GetAgentAuthStatus, RevokeAgentAuth, ListAgentAuthAgents, ListAgentCapabilities, CreateHostRegistrationToken, ListComponentGrants, BatchGrantComponentAccessV2, ListAuditLog), tenant quota/sessions/alerts/conversations, findings export, mission drafts, user-profile RPCs (ResetPassword / RevokeUserSessions / SuspendMember — some stubbed, see Implementation Status below). |
 | `gibson.component.v1.ComponentService` | SDK | `RegisterComponent`, `PollWork` (stream), `SubmitResult`, heartbeat. Called by every agent / tool / plugin. |
 | `gibson.harness.v1.HarnessCallbackService` | SDK | Agent → daemon callbacks: `ExecuteLLM`, `SubmitFinding`, `Store/GetMemory`, `ExecuteTool`, `QueryPlugin`, `GetCredential`. Runs on `:50001` via `harness.CallbackManager`. |
+| `intelligence.v1.IntelligenceService` | SDK | Cross-mission analytics RPCs (`GetRecurringVulnerabilities`, `GetRemediationMetrics`, `GetAssetRiskScore`, `GetAttackPatterns`, `GetSimilarTargets`). Server-side adapter at `internal/graphrag/intelligence/grpc.go` wraps `intelligence.Service`. Skipped when GraphRAG/Neo4j unavailable. Wired under spec `productionize-graph-intelligence`. |
+
+## Mission, Orchestrator, Intelligence — How It All Fits
+
+Gibson has four conceptual layers in the operational stack. They are easy to confuse — especially since the Attack* terminology shows up in three of them with three different meanings. Read this section before editing any of these areas.
+
+**The four layers:**
+
+- **Mission DAG** (`internal/mission/`, `internal/graphrag/schema/mission.go`) — the operational unit. A mission is a parameterised YAML workflow targeting a specific system, declaring agents/nodes and their dependencies. Today's canonical orchestration shape; replaces the deleted single-attack runner (see historical note below).
+- **Orchestrator** (`internal/orchestrator/`) — the DAG executor that runs a mission. Decision loop is Observe → Think → Act → (optional Recall / Reflect). The Observer collects state into an `ObservationState`; the Thinker calls the LLM with the formatted prompt to choose next nodes; the Actor dispatches via the harness.
+- **Intelligence layer** (`internal/graphrag/intelligence/` + `internal/orchestrator/graph_intelligence.go`) — cross-mission analytics queries on the knowledge graph. Five aggregate queries (`GetRecurringVulnerabilities`, `GetRemediationMetrics`, `GetAssetRiskScore`, `GetAttackPatterns`, `GetSimilarTargets`) plus four per-target queries (`GetTargetHistory`, `GetPriorFindings`, `GetKnownEntities`, `GetSuccessfulPatterns`). All Cypher; all read-only; cached + circuit-breaker protected.
+- **Knowledge graph** (Neo4j, accessed via `internal/graphrag/`) — storage for all mission outcomes. Every mission's `DiscoveryProcessor` writes Mission, Technique, Finding, Host, Port, Service, Endpoint nodes plus relationships during execution. Over time Neo4j accumulates the data the intelligence layer queries.
+
+**The cross-mission learning loop:**
+
+```mermaid
+graph LR
+    M1[Mission #1] -->|DiscoveryProcessor| KG[(Neo4j Knowledge Graph)]
+    M1 -->|Findings| KG
+    M1 -->|Techniques used| KG
+    KG -->|Path A: Observer.Observe| M2[Mission #2]
+    KG -->|Path B: IntelligenceService| OPS[Operator/Dashboard]
+    KG -->|Path C: Harness query| AGENT[Agent inside Mission #2]
+    M2 -->|better LLM decisions| KG
+```
+
+**Three intelligence access paths** — same data, different consumer:
+
+| Path | Consumer | Flow | Use case |
+|---|---|---|---|
+| **A** Decision-time prompt enrichment | `Observer.Observe()` during each mission step | `Observer → GraphQueries → Neo4jGraphQueries → Neo4j` | Automatic; populates `ObservationState.GraphContext` and renders a `=== GRAPH INTELLIGENCE (Prior Knowledge) ===` section in the LLM prompt. No agent action required. |
+| **B** Cross-mission analytics RPC | Operator / dashboard / agent calling `intelligencepb.IntelligenceServiceClient` (typically via SDK `PlatformHarness`) | `Caller → SDK platformIntelligenceProxy → IntelligenceService gRPC → daemon → intelligence.Service → Neo4j` | Strategic queries: "what vulnerabilities recur across our portfolio?", "what are the top 10 highest-risk assets?", "find targets similar to this one." |
+| **C** Per-finding agent query | Agent calling `harness.FindSimilarAttacks` / `GetAttackChains` / `FindSimilarFindings` / `GetRelatedFindings` mid-reasoning | `Agent → harness.implementation → graphRAGQueryBridge → HarnessCallbackService gRPC → daemon → graphrag store → Neo4j` | Tactical queries inside an agent's loop: "have we seen something like this finding before?", "what attack chains start from this technique?" |
+
+All three paths were productionized under spec `productionize-graph-intelligence`. Before that spec, Path A's Observer wiring was missing (`WithGraphQueries` didn't exist), Path B's daemon-side gRPC server was unregistered (every SDK proxy call hit the `Unimplemented`-degradation fallback), and Path C was wired but undiscovered (no in-tree agent invoked it).
+
+**Historical note — old single-attack runner vs. the surviving `Attack*` types:**
+
+The spec `remove-attack-payload-subsystem` (commits a1596f1, 8da4897, fc51b46, fc8f442, f957171) deleted `internal/attack/` (the ad-hoc one-off attack runner) and `internal/payload/` (parameterised attack templates). Those were the **old model** that missions superseded — they ran a single attack against a single target without any DAG / orchestration / cross-mission learning. The `gibson.daemon.v1.AttackEvent` proto message was removed from the SDK in lockstep (field 6 reserved in `Event` and `SubscribeResponse`).
+
+The surviving `Attack*` types live in **completely different protos** and describe **graph-derived attack-pattern analytics**, not running attacks:
+
+- `intelligence.v1.AttackPattern`, `intelligence.v1.TechniqueInChain` — patterns identified by `GetAttackPatterns` analyzing successful technique sequences across completed missions.
+- `gibson.harness.v1.AttackPattern`, `gibson.harness.v1.AttackChain`, `gibson.harness.v1.AttackStep` — per-finding query responses returned by `FindSimilarAttacks` / `GetAttackChains` to inquiring agents.
+- `gibson.types.v1.MitreMapping.mitre_attack` field on findings — MITRE ATT&CK technique categorisation metadata.
+- `taxonomy/core.yaml` `ATTACK TYPES` section — MITRE ATT&CK technique enum used for finding categorisation.
+
+The naming overlap is unfortunate but the concepts are unrelated. Do not conflate them. When in doubt: anything in `internal/attack/` would have been the runner (deleted); anything with `Attack` in the name living in `intelligence.v1`, `gibson.harness.v1`, or the MITRE taxonomy is graph intelligence and stays.
 
 **Implementation status within DaemonAdminService** — core admin RPCs (authz, audit, API keys, impersonation, Langfuse creds, agent-auth, onboarding) are fully wired. The `prod-unimplemented-apis` / `prod-feature-wiring` spec tracked stubs are in `server_prod_handlers.go` (ResetPassword, RevokeUserSessions, SuspendMember, Get/UpdateUserProfile, ExportFindings, SaveMissionDraft/ListMissionDrafts, GetUserSessions, Alerts, Conversations) — they return valid empty/stub responses and are enforced by `TestNewRPCsNotUnimplemented` (`server_integration_test.go`) to never emit `codes.Unimplemented`.
 
@@ -116,7 +164,9 @@ Two Gibson-owned services plus one re-exported SDK service plus the harness call
 | 3-tier memory | `internal/memory/` | ✅ Active | Redis + vector store + embedder |
 | LLM multi-provider slot resolution | `internal/llm/` | ✅ Active | provider API keys |
 | GraphRAG ingest (proto field 100 → Neo4j) | `internal/graphrag/` | ✅ Active | Neo4j |
-| GraphRAG intelligence queries (agent recall) | `internal/graphrag/intelligence/` | ✅ Active | Neo4j |
+| GraphRAG intelligence queries (per-finding agent recall — Path C) | `internal/graphrag/intelligence/` + `internal/harness/graphrag_query_bridge.go` | ✅ Active | Neo4j |
+| Orchestrator graph intelligence (decision-prompt enrichment — Path A) | `internal/orchestrator/graph_intelligence.go` + `Observer.observeGraphContext` | ✅ Active (wired under `productionize-graph-intelligence`) | Neo4j |
+| IntelligenceService gRPC (cross-mission analytics — Path B) | `internal/graphrag/intelligence/grpc.go` | ✅ Active (registered under `productionize-graph-intelligence`) | Neo4j |
 | 4-path authN (apikey / OIDC / K8s SA / SPIFFE) | `internal/auth/` | ✅ Active | Redis (apikey store), OIDC issuer, SPIRE (optional) |
 | OpenFGA authZ | `internal/authz/` + `internal/auth/fga_authz_interceptor.go` | ✅ Active | FGA HTTP `gibson-fga:8080` |
 | Agent Auth Protocol (JWT mint + FGA bridge) | `internal/agentauth/` | ✅ Active (dispatch of `ExecuteAgentCapability` is a thin stub — FGA check works, execution forwarding is minimal) | FGA |
@@ -225,4 +275,4 @@ Pre-commit runs gitleaks + large-file + private-key checks (`.pre-commit-config.
 
 ## Spec Workflow
 
-This module drives design via `.spec-workflow/` at the repo root (requirements / design / tasks). Active specs touching this daemon currently include the FGA authZ migration, `prod-unimplemented-apis`, `prod-feature-wiring`, agent-auth FGA integration, and auth refactor. Recently completed: `remove-attack-payload-subsystem` (deleted the ad-hoc one-off attack runner and payload templates that missions superseded). Completed specs are not retained as documents — shipped code and commit history are the source of truth.
+This module drives design via `.spec-workflow/` at the repo root (requirements / design / tasks). Active specs touching this daemon currently include the FGA authZ migration, `prod-unimplemented-apis`, `prod-feature-wiring`, agent-auth FGA integration, and auth refactor. Recently completed: `remove-attack-payload-subsystem` (deleted the ad-hoc one-off attack runner and payload templates that missions superseded) and `productionize-graph-intelligence` (wired the orchestrator's `WithGraphQueries`, registered the `IntelligenceService` gRPC endpoint, and added the cross-mission learning data-flow documented above). Completed specs are not retained as documents — shipped code and commit history are the source of truth.

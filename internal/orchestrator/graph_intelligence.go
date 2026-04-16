@@ -1,3 +1,24 @@
+// Package orchestrator — graph_intelligence.go.
+//
+// GraphQueries is the orchestrator's read-only interface to the cross-mission
+// knowledge graph. The Observer calls these methods during Observe() to enrich
+// each LLM decision prompt with target history, prior findings, known
+// entities, and historically successful attack patterns. This is "Path A" in
+// the three intelligence access paths documented in core/gibson/CLAUDE.md
+// § "Mission, Orchestrator, Intelligence".
+//
+// Spec lineage:
+//   - orchestrator-graph-intelligence implemented the GraphQueries interface
+//     and the Neo4jGraphQueries Cypher backend (this file).
+//   - productionize-graph-intelligence wired WithGraphQueries into the
+//     Observer factory and the daemon's two NewObserver call sites
+//     (mission_manager.go, adapter.go), and integrated observeGraphContext
+//     into Observe() so this code is actually consumed in production.
+//   - cross-mission-intelligence owns the broader catalogue of analytics
+//     queries (additional RPCs beyond the existing five on
+//     intelligence.v1.IntelligenceService).
+//   - agent-query-adoption owns getting agents to call the harness
+//     intelligence methods (Path C — separate consumer of the same graph).
 package orchestrator
 
 import (
