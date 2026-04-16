@@ -8,7 +8,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/attribute"
@@ -19,6 +22,39 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
+
+// fakeDiscovery is a file-local mock of component.ComponentDiscovery that
+// serves a single tool through DiscoverTool. Used by the three tracing tests
+// below to exercise CallToolProto's dispatch via the ComponentRegistry path
+// (Path 2) now that the in-process tool registry has been removed.
+type fakeDiscovery struct {
+	tool tool.Tool
+}
+
+func (f *fakeDiscovery) DiscoverTool(_ context.Context, name string) (tool.Tool, error) {
+	if f.tool != nil && f.tool.Name() == name {
+		return f.tool, nil
+	}
+	return nil, &component.ToolNotFoundError{Name: name}
+}
+func (f *fakeDiscovery) DiscoverAgent(_ context.Context, _ string) (agent.Agent, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeDiscovery) DiscoverPlugin(_ context.Context, _ string) (plugin.Plugin, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeDiscovery) ListAgents(_ context.Context) ([]component.AgentInfo, error) {
+	return nil, nil
+}
+func (f *fakeDiscovery) ListTools(_ context.Context) ([]component.ToolInfo, error) {
+	return nil, nil
+}
+func (f *fakeDiscovery) ListPlugins(_ context.Context) ([]component.PluginInfo, error) {
+	return nil, nil
+}
+func (f *fakeDiscovery) DelegateToAgent(_ context.Context, _ string, _ agent.Task, _ agent.AgentHarness) (agent.Result, error) {
+	return agent.Result{}, errors.New("not implemented")
+}
 
 // TestCallToolProto_TracingAttributes verifies that tool execution creates spans
 // with the required attributes: tool.name, tool.input_size, tool.duration_ms, tool.status
@@ -42,19 +78,16 @@ func TestCallToolProto_TracingAttributes(t *testing.T) {
 		},
 	}
 
-	// Create tool registry and register mock tool
-	toolRegistry := tool.NewToolRegistry()
-	err := toolRegistry.RegisterInternal(mockTool)
-	require.NoError(t, err)
+	discovery := &fakeDiscovery{tool: mockTool}
 
 	// Create harness with tracer
 	llmRegistry := llm.NewLLMRegistry()
 	slotManager := llm.NewSlotManager(llmRegistry)
 
 	cfg := &HarnessConfig{
-		SlotManager:  slotManager,
-		ToolRegistry: toolRegistry,
-		Tracer:       tracer,
+		SlotManager:     slotManager,
+		RegistryAdapter: discovery,
+		Tracer:          tracer,
 	}
 	cfg.ApplyDefaults()
 
@@ -129,19 +162,16 @@ func TestCallToolProto_TracingError(t *testing.T) {
 		},
 	}
 
-	// Create tool registry and register mock tool
-	toolRegistry := tool.NewToolRegistry()
-	err := toolRegistry.RegisterInternal(mockTool)
-	require.NoError(t, err)
+	discovery := &fakeDiscovery{tool: mockTool}
 
 	// Create harness with tracer
 	llmRegistry := llm.NewLLMRegistry()
 	slotManager := llm.NewSlotManager(llmRegistry)
 
 	cfg := &HarnessConfig{
-		SlotManager:  slotManager,
-		ToolRegistry: toolRegistry,
-		Tracer:       tracer,
+		SlotManager:     slotManager,
+		RegistryAdapter: discovery,
+		Tracer:          tracer,
 	}
 	cfg.ApplyDefaults()
 
@@ -204,18 +234,15 @@ func TestCallToolProto_TracingWithNoopTracer(t *testing.T) {
 		},
 	}
 
-	// Create tool registry and register mock tool
-	toolRegistry := tool.NewToolRegistry()
-	err := toolRegistry.RegisterInternal(mockTool)
-	require.NoError(t, err)
+	discovery := &fakeDiscovery{tool: mockTool}
 
 	// Create harness WITHOUT tracer (will default to no-op)
 	llmRegistry := llm.NewLLMRegistry()
 	slotManager := llm.NewSlotManager(llmRegistry)
 
 	cfg := &HarnessConfig{
-		SlotManager:  slotManager,
-		ToolRegistry: toolRegistry,
+		SlotManager:     slotManager,
+		RegistryAdapter: discovery,
 		// Tracer is nil - will use no-op tracer
 	}
 	cfg.ApplyDefaults()

@@ -197,7 +197,6 @@ func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 	llmReg := llm.NewLLMRegistry()
 	slotMgr := llm.NewSlotManager(llmReg)
-	toolReg := tool.NewToolRegistry()
 	pluginReg := plugin.NewPluginRegistry(nil)
 	findingStore := NewInMemoryFindingStore()
 	metrics := NewNoOpMetricsRecorder()
@@ -206,7 +205,6 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 	config := HarnessConfig{
 		SlotManager:    slotMgr,
 		LLMRegistry:    llmReg,
-		ToolRegistry:   toolReg,
 		PluginRegistry: pluginReg,
 		FindingStore:   findingStore,
 		Metrics:        metrics,
@@ -221,7 +219,6 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 	// Verify provided values were preserved
 	assert.Equal(t, slotMgr, storedConfig.SlotManager)
 	assert.Equal(t, llmReg, storedConfig.LLMRegistry)
-	assert.Equal(t, toolReg, storedConfig.ToolRegistry)
 	assert.Equal(t, pluginReg, storedConfig.PluginRegistry)
 	assert.Equal(t, findingStore, storedConfig.FindingStore)
 	assert.Equal(t, metrics, storedConfig.Metrics)
@@ -238,7 +235,6 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	config := HarnessConfig{
 		SlotManager:         llm.NewSlotManager(llm.NewLLMRegistry()),
 		LLMRegistry:         llm.NewLLMRegistry(),
-		ToolRegistry:        tool.NewToolRegistry(),
 		PluginRegistry:      plugin.NewPluginRegistry(nil),
 		FindingStore:        NewInMemoryFindingStore(),
 		Metrics:             NewNoOpMetricsRecorder(),

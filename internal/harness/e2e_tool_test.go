@@ -499,7 +499,6 @@ func createHarnessWithResolver(t *testing.T, mockRegistry component.ComponentDis
 
 	// Create minimal harness with resolver
 	harness := &DefaultAgentHarness{
-		toolRegistry:    tool.NewToolRegistry(),
 		pluginRegistry:  plugin.NewPluginRegistry(nil), // nil event bus for testing
 		registryAdapter: mockRegistry,
 		resolver:        resolver,
