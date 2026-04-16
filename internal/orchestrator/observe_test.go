@@ -39,6 +39,105 @@ func TestObserver_NewObserver(t *testing.T) {
 	})
 }
 
+// stubGraphQueries is a minimal in-memory GraphQueries used by wiring tests.
+type stubGraphQueries struct {
+	hist     *TargetHistory
+	findings []HistoricalFinding
+	entities []EntitySummary
+	patterns []AttackPattern
+}
+
+func (s *stubGraphQueries) GetTargetHistory(ctx context.Context, targetID string) (*TargetHistory, error) {
+	return s.hist, nil
+}
+func (s *stubGraphQueries) GetPriorFindings(ctx context.Context, domain string, limit int) ([]HistoricalFinding, error) {
+	return s.findings, nil
+}
+func (s *stubGraphQueries) GetKnownEntities(ctx context.Context, targetID string) ([]EntitySummary, error) {
+	return s.entities, nil
+}
+func (s *stubGraphQueries) GetSuccessfulPatterns(ctx context.Context, targetType string) ([]AttackPattern, error) {
+	return s.patterns, nil
+}
+
+// TestObserver_WithGraphQueries verifies the WithGraphQueries functional option
+// wires a GraphQueries dependency into the Observer and that the no-op fallback
+// (no option passed) leaves the field nil. Per spec productionize-graph-intelligence,
+// these were the missing wiring confirmations from orchestrator-graph-intelligence
+// Task 7.
+func TestObserver_WithGraphQueries(t *testing.T) {
+	t.Run("WithGraphQueries populates the field", func(t *testing.T) {
+		stub := &stubGraphQueries{}
+		observer := NewObserver(&queries.MissionQueries{}, &queries.ExecutionQueries{},
+			WithGraphQueries(stub),
+		)
+		if observer.graphQueries == nil {
+			t.Fatal("expected graphQueries to be populated by WithGraphQueries")
+		}
+		if observer.graphQueries != stub {
+			t.Error("expected graphQueries to be the same instance passed in")
+		}
+	})
+
+	t.Run("no option leaves graphQueries nil so observeGraphContext is a no-op", func(t *testing.T) {
+		observer := NewObserver(&queries.MissionQueries{}, &queries.ExecutionQueries{})
+		if observer.graphQueries != nil {
+			t.Fatal("expected graphQueries to be nil when WithGraphQueries is not passed")
+		}
+		// observeGraphContext must be safe to call with nil graphQueries; this is
+		// the production-side fallback when the GraphRAG client doesn't expose
+		// a live Neo4j driver.
+		state := &ObservationState{MissionInfo: MissionInfo{ID: "m1", TargetRef: "example.com"}}
+		observer.observeGraphContext(context.Background(), state)
+		if state.GraphContext != nil {
+			t.Error("expected GraphContext to remain nil when graphQueries is nil")
+		}
+	})
+
+	t.Run("observeGraphContext skips when target ref is empty", func(t *testing.T) {
+		stub := &stubGraphQueries{
+			hist: &TargetHistory{TargetID: "should-not-appear", PreviousScanCount: 5},
+		}
+		observer := NewObserver(&queries.MissionQueries{}, &queries.ExecutionQueries{},
+			WithGraphQueries(stub),
+		)
+		state := &ObservationState{MissionInfo: MissionInfo{ID: "m1" /* TargetRef intentionally empty */}}
+		observer.observeGraphContext(context.Background(), state)
+		if state.GraphContext != nil {
+			t.Error("expected GraphContext to remain nil when TargetRef is empty (e.g., orchestration mission)")
+		}
+	})
+
+	t.Run("observeGraphContext populates GraphContext when wired and target ref present", func(t *testing.T) {
+		stub := &stubGraphQueries{
+			hist:     &TargetHistory{TargetID: "example.com", PreviousScanCount: 3, TotalFindings: 7},
+			findings: []HistoricalFinding{{ID: "f1", Title: "SQLi", Severity: "high", Category: "injection"}},
+			entities: []EntitySummary{{ID: "e1", Type: "host", Identifier: "example.com"}},
+			patterns: []AttackPattern{{TechniqueID: "T1190", TechniqueName: "Exploit Public-Facing App", SuccessRate: 0.4, SampleCount: 5}},
+		}
+		observer := NewObserver(&queries.MissionQueries{}, &queries.ExecutionQueries{},
+			WithGraphQueries(stub),
+		)
+		state := &ObservationState{MissionInfo: MissionInfo{ID: "m1", TargetRef: "example.com"}}
+		observer.observeGraphContext(context.Background(), state)
+		if state.GraphContext == nil {
+			t.Fatal("expected GraphContext to be populated")
+		}
+		if state.GraphContext.TargetHistory == nil || state.GraphContext.TargetHistory.PreviousScanCount != 3 {
+			t.Errorf("expected TargetHistory with PreviousScanCount=3, got %+v", state.GraphContext.TargetHistory)
+		}
+		if len(state.GraphContext.PriorFindings) != 1 {
+			t.Errorf("expected 1 prior finding, got %d", len(state.GraphContext.PriorFindings))
+		}
+		if len(state.GraphContext.KnownEntities) != 1 {
+			t.Errorf("expected 1 known entity, got %d", len(state.GraphContext.KnownEntities))
+		}
+		if len(state.GraphContext.SuccessfulPatterns) != 1 {
+			t.Errorf("expected 1 attack pattern, got %d", len(state.GraphContext.SuccessfulPatterns))
+		}
+	})
+}
+
 // TestObservationState_FormatForPrompt tests prompt formatting
 func TestObservationState_FormatForPrompt(t *testing.T) {
 	t.Run("formats complete observation state", func(t *testing.T) {

@@ -587,11 +587,25 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		inventory = nil // Continue without inventory
 	}
 
-	// Create orchestrator components
-	// Pass inventoryBuilder to Observer so it can include available components in observations
-	observer := orchestrator.NewObserver(missionQueries, executionQueries,
+	// Create orchestrator components.
+	// Pass inventoryBuilder to Observer so it can include available components in observations.
+	// Wire WithGraphQueries when the GraphRAG client exposes a live Neo4j driver so the
+	// Observer can enrich each LLM decision prompt with cross-mission graph intelligence
+	// (target history, prior findings, known entities, successful attack patterns). Per
+	// spec productionize-graph-intelligence, falls back to no graph context when the
+	// driver is unavailable (e.g., GraphRAG-disabled deployments or test mocks).
+	observerOpts := []orchestrator.ObserverOption{
 		orchestrator.WithInventoryBuilder(inventoryBuilder),
-	)
+	}
+	if graphClient != nil && graphClient.Driver() != nil {
+		observerOpts = append(observerOpts, orchestrator.WithGraphQueries(
+			orchestrator.NewNeo4jGraphQueries(graphClient.Driver(), m.logger),
+		))
+	} else {
+		m.logger.Warn("graph intelligence disabled for mission: graphrag client does not expose a live neo4j driver",
+			"mission_id", missionID)
+	}
+	observer := orchestrator.NewObserver(missionQueries, executionQueries, observerOpts...)
 	thinker := orchestrator.NewThinker(llmClient,
 		orchestrator.WithMaxRetries(3),
 		orchestrator.WithThinkerTemperature(0.2),

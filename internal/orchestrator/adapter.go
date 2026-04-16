@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
@@ -244,10 +245,23 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 		inventoryBuilder = NewInventoryBuilder(m.config.Registry)
 	}
 
-	// Create Observer with inventory builder for component awareness in observations
-	observer := NewObserver(missionQueries, executionQueries,
+	// Create Observer with inventory builder for component awareness in observations.
+	// Wire WithGraphQueries when the GraphRAG client exposes a live Neo4j driver so the
+	// Observer can enrich each LLM decision prompt with cross-mission graph intelligence.
+	// Per spec productionize-graph-intelligence, falls back to no graph context when the
+	// driver is unavailable.
+	observerOpts := []ObserverOption{
 		WithInventoryBuilder(inventoryBuilder),
-	)
+	}
+	if neo4jClient, ok := m.config.GraphRAGClient.(*graph.Neo4jClient); ok && neo4jClient.Driver() != nil {
+		observerOpts = append(observerOpts, WithGraphQueries(
+			NewNeo4jGraphQueries(neo4jClient.Driver(), m.config.Logger.Slog()),
+		))
+	} else {
+		m.config.Logger.Slog().Warn("graph intelligence disabled for mission: graphrag client does not expose a live neo4j driver",
+			"mission_id", mis.ID.String())
+	}
+	observer := NewObserver(missionQueries, executionQueries, observerOpts...)
 
 	// Create harness for this mission
 	// Use the harness factory to create an appropriate harness

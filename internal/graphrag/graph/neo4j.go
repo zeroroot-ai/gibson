@@ -31,6 +31,14 @@ func NewNeo4jClient(config GraphClientConfig) (*Neo4jClient, error) {
 	}, nil
 }
 
+// Driver returns the underlying neo4j.DriverWithContext after Connect has
+// succeeded, or nil before connection is established. Exposed so callers that
+// need direct driver access (e.g., orchestrator graph intelligence) can build
+// query helpers without re-establishing a connection.
+func (c *Neo4jClient) Driver() neo4j.DriverWithContext {
+	return c.driver
+}
+
 // Connect establishes a connection to the Neo4j database.
 // Uses exponential backoff for connection retries.
 func (c *Neo4jClient) Connect(ctx context.Context) error {

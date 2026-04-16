@@ -21,6 +21,7 @@ type Observer struct {
 	inventoryBuilder *InventoryBuilder // Optional - provides component awareness
 	approvalManager  ApprovalManager   // Optional - provides pending approvals
 	reflectionEngine ReflectionEngine  // Optional - provides reflection insights
+	graphQueries     GraphQueries      // Optional - provides cross-mission graph intelligence
 }
 
 // ObserverOption is a functional option for configuring Observer.
@@ -54,6 +55,25 @@ func WithObserverApprovalManager(am ApprovalManager) ObserverOption {
 func WithObserverReflectionEngine(re ReflectionEngine) ObserverOption {
 	return func(o *Observer) {
 		o.reflectionEngine = re
+	}
+}
+
+// WithGraphQueries configures the Observer to enrich observations with
+// cross-mission graph intelligence: target history, prior findings on related
+// targets, known entities discovered in earlier scans, and attack patterns
+// that have been historically successful for the target type. The Observer
+// calls these queries during Observe() and attaches the results to
+// ObservationState.GraphContext for inclusion in the decision prompt.
+//
+// If not provided, observations skip graph intelligence enrichment.
+//
+// Per spec productionize-graph-intelligence, this option closes the
+// orchestrator-side intelligence loop that was implemented under
+// orchestrator-graph-intelligence but never wired into the Observer or its
+// daemon construction sites.
+func WithGraphQueries(gq GraphQueries) ObserverOption {
+	return func(o *Observer) {
+		o.graphQueries = gq
 	}
 }
 
@@ -145,6 +165,14 @@ type ObservationState struct {
 	// This alerts the orchestrator to operations awaiting human review
 	PendingApprovals []ApprovalSummary `json:"pending_approvals,omitempty"`
 
+	// GraphContext contains cross-mission graph intelligence: target history,
+	// prior findings, known entities, and historically successful attack
+	// patterns. Populated only when the Observer was configured with
+	// WithGraphQueries(...) and the mission has a target ref. Graph query
+	// failures degrade gracefully — partial GraphContext is retained and
+	// observation continues.
+	GraphContext *GraphContext `json:"graph_context,omitempty"`
+
 	// Timestamp when this observation was captured
 	ObservedAt time.Time `json:"observed_at"`
 }
@@ -157,6 +185,10 @@ type MissionInfo struct {
 	Status      string    `json:"status"`
 	StartedAt   time.Time `json:"started_at"`
 	TimeElapsed string    `json:"time_elapsed"`
+	// TargetRef is the reference to the target system (domain, IP, etc.) the
+	// mission is scanning. Empty for orchestration / discovery missions
+	// without a specific target. Used by graph intelligence enrichment.
+	TargetRef string `json:"target_ref,omitempty"`
 }
 
 // GraphSummary provides high-level statistics about the attack graph state
@@ -400,6 +432,12 @@ func (o *Observer) Observe(ctx context.Context, missionID string) (*ObservationS
 		}
 	}
 
+	// 7b. Enrich with cross-mission graph intelligence if GraphQueries is configured.
+	// This populates state.GraphContext with target history, prior findings, known
+	// entities, and successful attack patterns. Graceful degradation: per-query
+	// failures log a WARN and partial context is retained.
+	o.observeGraphContext(ctx, state)
+
 	// 8. Query recent reflection insights if reflection engine is configured
 	if o.reflectionEngine != nil {
 		insights, err := o.reflectionEngine.GetRecentInsights(ctx, missionID, 3)
@@ -439,6 +477,7 @@ func (o *Observer) observeMission(ctx context.Context, missionID types.ID, state
 		Name:      mission.Name,
 		Objective: mission.Objective,
 		Status:    mission.Status.String(),
+		TargetRef: mission.TargetRef,
 	}
 
 	if mission.StartedAt != nil {
@@ -448,6 +487,70 @@ func (o *Observer) observeMission(ctx context.Context, missionID types.ID, state
 	}
 
 	return nil
+}
+
+// observeGraphContext queries the cross-mission knowledge graph for
+// historical context about the mission's target. It runs the four
+// GraphQueries methods concurrently with per-call timeouts (delegated to
+// the underlying GraphQueries implementation), aggregates results into
+// state.GraphContext, and degrades gracefully on per-query failures.
+//
+// Skipped entirely when the Observer has no graphQueries dependency or
+// when the mission has no TargetRef (e.g., orchestration / discovery
+// missions without a specific target).
+//
+// Per spec productionize-graph-intelligence, this is the missing
+// integration step that makes the orchestrator-graph-intelligence
+// implementation actually consumed in production.
+func (o *Observer) observeGraphContext(ctx context.Context, state *ObservationState) {
+	if o.graphQueries == nil {
+		return
+	}
+	targetRef := state.MissionInfo.TargetRef
+	if targetRef == "" {
+		return
+	}
+
+	start := time.Now()
+	gc := &GraphContext{}
+
+	// Each call logs a WARN on failure; partial GraphContext is retained.
+	if hist, err := o.graphQueries.GetTargetHistory(ctx, targetRef); err != nil {
+		slog.Warn("graph intelligence: GetTargetHistory failed",
+			"error", err, "mission_id", state.MissionInfo.ID, "target_ref", targetRef)
+	} else if hist != nil {
+		gc.TargetHistory = hist
+	}
+
+	if findings, err := o.graphQueries.GetPriorFindings(ctx, targetRef, 50); err != nil {
+		slog.Warn("graph intelligence: GetPriorFindings failed",
+			"error", err, "mission_id", state.MissionInfo.ID, "target_ref", targetRef)
+	} else {
+		gc.PriorFindings = findings
+		if len(findings) >= 50 {
+			gc.Truncated = true
+		}
+	}
+
+	if entities, err := o.graphQueries.GetKnownEntities(ctx, targetRef); err != nil {
+		slog.Warn("graph intelligence: GetKnownEntities failed",
+			"error", err, "mission_id", state.MissionInfo.ID, "target_ref", targetRef)
+	} else {
+		gc.KnownEntities = entities
+	}
+
+	// Pass empty target type — the GraphQueries implementation falls back
+	// to broad pattern queries when target type is unknown. Future work can
+	// pull target type from the resolved target entity.
+	if patterns, err := o.graphQueries.GetSuccessfulPatterns(ctx, ""); err != nil {
+		slog.Warn("graph intelligence: GetSuccessfulPatterns failed",
+			"error", err, "mission_id", state.MissionInfo.ID, "target_ref", targetRef)
+	} else {
+		gc.SuccessfulPatterns = patterns
+	}
+
+	gc.QueryDuration = time.Since(start)
+	state.GraphContext = gc
 }
 
 // observeStats retrieves mission execution statistics
@@ -752,6 +855,69 @@ func (s *ObservationState) FormatForPrompt() string {
 		sb.WriteString(fmt.Sprintf("Nodes Available for Retry: %d\n", s.ResourceConstraints.RemainingRetries))
 	}
 	sb.WriteString("\n")
+
+	// Cross-mission graph intelligence (if available). Always emit the section
+	// when GraphContext is set so the LLM sees a consistent prompt structure;
+	// "no prior knowledge" is a valid signal too.
+	if s.GraphContext != nil {
+		sb.WriteString("=== GRAPH INTELLIGENCE (Prior Knowledge) ===\n")
+		gc := s.GraphContext
+		hasAny := gc.TargetHistory != nil || len(gc.PriorFindings) > 0 || len(gc.KnownEntities) > 0 || len(gc.SuccessfulPatterns) > 0
+		if !hasAny {
+			sb.WriteString("No prior knowledge available for this target.\n")
+		} else {
+			if gc.TargetHistory != nil {
+				th := gc.TargetHistory
+				sb.WriteString(fmt.Sprintf("Target History: %d previous scans, %d total findings (critical=%d high=%d medium=%d low=%d)\n",
+					th.PreviousScanCount, th.TotalFindings, th.CriticalCount, th.HighCount, th.MediumCount, th.LowCount))
+				if th.LastScanDate != nil {
+					sb.WriteString(fmt.Sprintf("Last Scan: %s\n", th.LastScanDate.Format(time.RFC3339)))
+				}
+			}
+			if len(gc.PriorFindings) > 0 {
+				sb.WriteString(fmt.Sprintf("Prior Findings (top %d", len(gc.PriorFindings)))
+				if gc.Truncated {
+					sb.WriteString(", truncated")
+				}
+				sb.WriteString("):\n")
+				maxShow := len(gc.PriorFindings)
+				if maxShow > 5 {
+					maxShow = 5
+				}
+				for i := 0; i < maxShow; i++ {
+					f := gc.PriorFindings[i]
+					sb.WriteString(fmt.Sprintf("- [%s/%s] %s\n", f.Severity, f.Category, f.Title))
+				}
+				if len(gc.PriorFindings) > maxShow {
+					sb.WriteString(fmt.Sprintf("- (and %d more)\n", len(gc.PriorFindings)-maxShow))
+				}
+			}
+			if len(gc.KnownEntities) > 0 {
+				sb.WriteString(fmt.Sprintf("Known Entities: %d (sample by type:", len(gc.KnownEntities)))
+				typeCounts := map[string]int{}
+				for _, e := range gc.KnownEntities {
+					typeCounts[e.Type]++
+				}
+				for t, c := range typeCounts {
+					sb.WriteString(fmt.Sprintf(" %s=%d", t, c))
+				}
+				sb.WriteString(")\n")
+			}
+			if len(gc.SuccessfulPatterns) > 0 {
+				sb.WriteString("Successful Attack Patterns for this Target Type:\n")
+				maxPat := len(gc.SuccessfulPatterns)
+				if maxPat > 5 {
+					maxPat = 5
+				}
+				for i := 0; i < maxPat; i++ {
+					p := gc.SuccessfulPatterns[i]
+					sb.WriteString(fmt.Sprintf("- %s (%s) — success_rate=%.0f%% across %d samples\n",
+						p.TechniqueID, p.TechniqueName, p.SuccessRate*100, p.SampleCount))
+				}
+			}
+		}
+		sb.WriteString("\n")
+	}
 
 	// Tool capabilities (if available)
 	if s.ComponentInventory != nil {
