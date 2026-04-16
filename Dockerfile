@@ -46,9 +46,6 @@ RUN apk add --no-cache ca-certificates
 # Copy gibson binary from builder
 COPY --from=builder /out/gibson /usr/local/bin/gibson
 
-# Copy default configuration
-COPY --from=builder /workspace/configs/gibson.yaml /etc/gibson/gibson.yaml
-
 # Create gibson home directory
 RUN mkdir -p /root/.gibson && chmod -R 755 /root/.gibson
 
