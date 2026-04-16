@@ -1,57 +1,27 @@
-// Package tool provides the core tool abstraction for the Gibson Framework.
+// Package tool defines the Gibson daemon's internal Tool interface and
+// associated metadata types.
 //
-// Tools are atomic, stateless operations that serve as building blocks for agent
-// capabilities. The package supports both internal (native Go) and external (gRPC)
-// tool implementations, with built-in metrics tracking and health monitoring.
+// Tools are atomic, stateless operations that serve as building blocks for
+// agent capabilities. Every tool runs out-of-process — the daemon has no
+// in-process tool registry; tool execution is dispatched to remote components
+// via the component registry (grpc endpoint or Redis work queue) or into a
+// Setec microVM sandbox. See core/gibson/internal/harness for dispatch
+// implementation.
 //
-// # Core Concepts
+// # Types
 //
-// Tool: An interface representing an executable operation with well-defined schemas
-// for input validation and output structure.
+//   - Tool — the interface every Gibson tool implements (proto in, proto
+//     out, plus Name/Version/Description/Tags/Health).
+//   - ToolDescriptor — metadata describing a registered tool.
+//   - ToolMetrics — execution statistics.
 //
-// ToolRegistry: A centralized registry managing tool lifecycle (registration,
-// discovery, execution) with thread-safe operations and metrics collection.
+// # Invariants (architecture rules)
 //
-// ToolMetrics: Execution statistics tracking for monitoring and observability,
-// including success/failure rates and duration metrics.
-//
-// # Usage Example
-//
-//	// Create a registry
-//	registry := tool.NewToolRegistry()
-//
-//	// Register an internal tool
-//	myTool := &MyTool{} // implements Tool interface with ExecuteProto
-//	if err := registry.RegisterInternal(myTool); err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	// Get the tool and execute it with proto messages
-//	ctx := context.Background()
-//	tool, err := registry.Get("my-tool")
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	// Execute with proto message (type depends on tool's InputMessageType)
-//	protoInput := &pb.MyToolRequest{Param: "value"}
-//	protoOutput, err := tool.ExecuteProto(ctx, protoInput)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	// Check metrics
-//	metrics, _ := registry.Metrics("my-tool")
-//	fmt.Printf("Success rate: %.2f%%\n", metrics.SuccessRate()*100)
-//
-// # Thread Safety
-//
-// All registry operations are thread-safe and can be called concurrently from
-// multiple goroutines. Metrics are updated atomically during tool execution.
-//
-// # External Tools
-//
-// External tools are implemented via gRPC and can run as separate services.
-// The GRPCToolClient provides transparent integration with the same Tool interface.
-// Full gRPC implementation will be available after proto code generation.
+// The Gibson daemon never compile-time-imports any specific tool's Go
+// bindings. Tool message types are resolved at runtime via FileDescriptorSet
+// metadata flowing through sdk/protoresolver (the two-tier resolver: global
+// proto registry first, then dynamic descriptors from the wire). Any future
+// change that would introduce an in-process tool registry or statically
+// linked tool code violates the decouple-sdk-from-tool-protos spec and the
+// remove-local-tool-registry spec that followed it.
 package tool
