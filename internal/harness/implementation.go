@@ -533,21 +533,14 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 // ────────────────────────────────────────────────────────────────────────────
 
 // getToolMetadata extracts metadata (including FileDescriptorSet) from a tool.
-// Supports GRPCToolClient and RedisToolProxy.
+// Currently only the remote gRPC tool client carries metadata; in-process
+// tools return nil.
 func getToolMetadata(t tool.Tool) map[string]string {
-	// Check if tool is GRPCToolClient
 	if grpcClient, ok := t.(*component.GRPCToolClient); ok {
 		if md := grpcClient.Metadata(); md != nil {
 			return md
 		}
 	}
-
-	// Check if tool is RedisToolProxy
-	if redisProxy, ok := t.(*RedisToolProxy); ok {
-		return redisProxy.Metadata()
-	}
-
-	// No metadata available
 	return nil
 }
 
