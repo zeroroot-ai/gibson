@@ -58,8 +58,7 @@ type DefaultAgentHarness struct {
 	slotManager llm.SlotManager
 	llmRegistry llm.LLMRegistry
 
-	// Tool and plugin registries
-	toolRegistry   tool.ToolRegistry
+	// Plugin registry
 	pluginRegistry plugin.PluginRegistry
 
 	// Registry adapter for unified component discovery via the component registry
@@ -533,37 +532,32 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 // ────────────────────────────────────────────────────────────────────────────
 
 // getToolMetadata extracts metadata (including FileDescriptorSet) from a tool.
-// Supports GRPCToolClient and RedisToolProxy.
+// Currently only the remote gRPC tool client carries metadata; in-process
+// tools return nil.
 func getToolMetadata(t tool.Tool) map[string]string {
-	// Check if tool is GRPCToolClient
 	if grpcClient, ok := t.(*component.GRPCToolClient); ok {
 		if md := grpcClient.Metadata(); md != nil {
 			return md
 		}
 	}
-
-	// Check if tool is RedisToolProxy
-	if redisProxy, ok := t.(*RedisToolProxy); ok {
-		return redisProxy.Metadata()
-	}
-
-	// No metadata available
 	return nil
 }
 
-// CallToolProto executes a registered tool using proto message input/output.
-// This is the preferred method for tools with proto schemas, providing type safety
-// and schema validation at the protocol level.
+// CallToolProto executes a tool using proto message input/output.
 //
-// Discovery order:
-//  1. Local tool registry (in-process tools registered at startup)
+// Dispatch order:
+//  1. Sandboxed executor — when the tool is registered in the Sandboxed tool
+//     registry, the call is dispatched into a Setec microVM via gRPC.
 //  2. ComponentRegistry (Redis-backed, tenant-scoped) — if configured:
 //     a. Component has grpc_endpoint metadata → call directly via registryAdapter
 //     b. No grpc_endpoint → enqueue work via WorkQueue and wait for result
-//  3. RegistryAdapter fallback — used when ComponentRegistry is not configured or
-//     did not find the tool (e.g. tools registered directly without ComponentService)
+//  3. RegistryAdapter fallback — used when ComponentRegistry is not configured
+//     or returned no instances (e.g. tools registered directly without
+//     ComponentService).
+//
+// All dispatch paths route to out-of-process tool implementations. Tools are
+// never compiled into the Gibson daemon.
 func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, request proto.Message, response proto.Message) error {
-	// Create span for distributed tracing
 	ctx, span := h.tracer.Start(ctx, "harness.CallToolProto")
 	defer span.End()
 
@@ -572,22 +566,16 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		"input_type", string(request.ProtoReflect().Descriptor().FullName()),
 		"output_type", string(response.ProtoReflect().Descriptor().FullName()))
 
-	// ── Path 0: Sandboxed executor ───────────────────────────────────────────
-	// Runs BEFORE any local/registry path so sandboxing is the more-specific
-	// routing decision. A registry miss falls through silently — the soft-miss
-	// error code is internal to the executor and never surfaces to the caller.
+	// ── Sandboxed executor (Setec microVM) ───────────────────────────────────
+	// Runs before the remote-registry paths so sandbox registration is the
+	// more-specific routing decision. A registry miss falls through silently.
 	if h.sandboxedExecutor != nil {
 		if _, ok := h.sandboxedExecutor.Registry().Lookup(name); ok {
 			return h.sandboxedExecutor.Execute(ctx, name, request, response)
 		}
 	}
 
-	// ── Path 1: Local tool registry ──────────────────────────────────────────
-	t, err := h.toolRegistry.Get(name)
-	if err == nil {
-		// Found locally — fall through to the proto execution block below.
-		goto executeProto
-	}
+	var t tool.Tool
 
 	// ── Path 2: ComponentRegistry (Redis-backed, tenant-scoped) ──────────────
 	if h.componentRegistry != nil {
@@ -660,14 +648,13 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 
 			remoteTool, discErr := h.registryAdapter.DiscoverTool(ctx, name)
 			if discErr != nil {
-				h.logger.Error("tool not found (local, component registry, or registry adapter)",
+				h.logger.Error("tool not found (component registry or registry adapter)",
 					"tool", name,
-					"local_error", err,
 					"discovery_error", discErr)
 				return types.WrapError(
 					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("tool not found: %s (local: %v, remote: %v)", name, err, discErr),
-					err,
+					fmt.Sprintf("tool not found: %s (%v)", name, discErr),
+					discErr,
 				)
 			}
 
@@ -677,13 +664,11 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 				"version", remoteTool.Version(),
 				"discovery", "registry_adapter")
 		} else {
-			h.logger.Error("tool not found and no discovery path available",
-				"tool", name,
-				"error", err)
+			h.logger.Error("tool not found and no discovery path available", "tool", name)
 			return types.WrapError(
 				ErrHarnessToolExecutionFailed,
-				fmt.Sprintf("tool not found: %s", name),
-				err,
+				fmt.Sprintf("tool not found: %s (no discovery path)", name),
+				nil,
 			)
 		}
 	}
@@ -1279,161 +1264,93 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 	return output, nil
 }
 
-// ListTools returns descriptors for all registered tools.
+// ListTools returns descriptors for all tools discoverable via the
+// component registry adapter. In-process tool registration was removed; all
+// tools run as separate processes and are surfaced through RegistryAdapter.
 func (h *DefaultAgentHarness) ListTools() []ToolDescriptor {
-	// Get local tools from registry
-	localToolDescriptors := h.toolRegistry.List()
-
-	// Convert from tool.ToolDescriptor to harness.ToolDescriptor
-	descriptors := make([]ToolDescriptor, 0, len(localToolDescriptors))
-	for _, t := range localToolDescriptors {
+	descriptors := []ToolDescriptor{}
+	if h.registryAdapter == nil {
+		return descriptors
+	}
+	ctx := context.Background()
+	remoteTools, err := h.registryAdapter.ListTools(ctx)
+	if err != nil {
+		h.logger.Warn("failed to list remote tools", "error", err)
+		return descriptors
+	}
+	for _, remoteTool := range remoteTools {
 		descriptors = append(descriptors, ToolDescriptor{
-			Name:            t.Name,
-			Description:     t.Description,
-			Version:         t.Version,
-			Tags:            t.Tags,
-			InputProtoType:  t.InputMessageType,
-			OutputProtoType: t.OutputMessageType,
-			// InputSchema and OutputSchema are legacy fields, left empty for now
-			// They can be populated by calling GetToolDescriptor() which fetches from the tool
+			Name:        remoteTool.Name,
+			Description: remoteTool.Description,
+			Version:     remoteTool.Version,
+			Tags:        []string{},
+			// InputSchema / OutputSchema require a per-tool descriptor fetch
+			// which is expensive; callers that need schemas use
+			// GetToolDescriptor(ctx, name).
 		})
 	}
-
-	// If registry adapter is available, add remote tools
-	if h.registryAdapter != nil {
-		ctx := context.Background()
-		remoteTools, err := h.registryAdapter.ListTools(ctx)
-		if err != nil {
-			h.logger.Warn("failed to list remote tools",
-				"error", err)
-			// Continue with just local tools
-		} else {
-			// Add remote tools to the list
-			// Use a map to deduplicate by name (local takes precedence)
-			localNames := make(map[string]struct{})
-			for _, desc := range descriptors {
-				localNames[desc.Name] = struct{}{}
-			}
-
-			// Add remote tools that don't exist locally
-			for _, remoteTool := range remoteTools {
-				if _, exists := localNames[remoteTool.Name]; !exists {
-					descriptors = append(descriptors, ToolDescriptor{
-						Name:        remoteTool.Name,
-						Description: remoteTool.Description,
-						Version:     remoteTool.Version,
-						Tags:        []string{}, // Remote tool info doesn't include tags
-						// Note: InputSchema and OutputSchema would require fetching descriptor
-						// from each tool, which is expensive. Leave empty for now.
-					})
-				}
-			}
-		}
-	}
-
 	return descriptors
 }
 
 // GetToolDescriptor returns the descriptor for a specific tool by name.
-// This retrieves tool metadata including output schema with taxonomy mappings
-// for entity extraction.
+// Resolves through the component registry adapter — in-process tool lookup
+// was removed.
 func (h *DefaultAgentHarness) GetToolDescriptor(ctx context.Context, name string) (*ToolDescriptor, error) {
-	// Create span for distributed tracing
 	ctx, span := h.tracer.Start(ctx, "harness.GetToolDescriptor")
 	defer span.End()
 
-	// Try to get tool from local registry first
-	t, err := h.toolRegistry.Get(name)
-	if err == nil {
-		// Use FromTool helper which handles both proto and legacy tools
-		desc := FromTool(t)
-		return &desc, nil
+	if h.registryAdapter == nil {
+		return nil, types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("tool not found: %s (no registry adapter configured)", name),
+			nil,
+		)
 	}
-
-	// Tool not found locally - try to discover via registry adapter
-	if h.registryAdapter != nil {
-		h.logger.Debug("tool not found locally, attempting remote discovery for descriptor",
-			"tool", name)
-
-		remoteTool, discErr := h.registryAdapter.DiscoverTool(ctx, name)
-		if discErr != nil {
-			h.logger.Error("tool not found (local or remote)",
-				"tool", name,
-				"local_error", err,
-				"discovery_error", discErr)
-			return nil, types.WrapError(
-				ErrHarnessToolExecutionFailed,
-				fmt.Sprintf("tool not found: %s", name),
-				err,
-			)
-		}
-
-		// Build descriptor from discovered remote tool using FromTool helper
-		desc := FromTool(remoteTool)
-		return &desc, nil
+	remoteTool, err := h.registryAdapter.DiscoverTool(ctx, name)
+	if err != nil {
+		h.logger.Error("tool not found via registry adapter", "tool", name, "error", err)
+		return nil, types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("tool not found: %s", name),
+			err,
+		)
 	}
-
-	// No registry adapter available
-	return nil, types.WrapError(
-		ErrHarnessToolExecutionFailed,
-		fmt.Sprintf("tool not found: %s", name),
-		err,
-	)
+	desc := FromTool(remoteTool)
+	return &desc, nil
 }
 
-// GetToolCapabilities retrieves runtime capabilities for a specific registered tool.
-// Returns nil if the tool doesn't implement CapabilityProvider.
+// GetToolCapabilities retrieves runtime capabilities for a specific tool.
+// Resolves through the component registry adapter. Returns nil if the tool
+// doesn't implement CapabilityProvider.
 func (h *DefaultAgentHarness) GetToolCapabilities(ctx context.Context, toolName string) (*sdktypes.Capabilities, error) {
-	// Create span for distributed tracing
 	ctx, span := h.tracer.Start(ctx, "harness.GetToolCapabilities")
 	defer span.End()
 
 	h.logger.Debug("retrieving capabilities for tool", "tool", toolName)
 
-	// Try to get tool from local registry first
-	t, err := h.toolRegistry.Get(toolName)
+	if h.registryAdapter == nil {
+		return nil, types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("tool not found: %s (no registry adapter configured)", toolName),
+			nil,
+		)
+	}
+	t, err := h.registryAdapter.DiscoverTool(ctx, toolName)
 	if err != nil {
-		// Tool not found locally - try to discover via registry adapter
-		if h.registryAdapter != nil {
-			h.logger.Debug("tool not found locally, attempting remote discovery for capabilities",
-				"tool", toolName)
-
-			remoteTool, discErr := h.registryAdapter.DiscoverTool(ctx, toolName)
-			if discErr != nil {
-				h.logger.Error("tool not found (local or remote)",
-					"tool", toolName,
-					"local_error", err,
-					"discovery_error", discErr)
-				return nil, types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("tool not found: %s", toolName),
-					err,
-				)
-			}
-
-			// Use discovered remote tool
-			t = remoteTool
-		} else {
-			// No registry adapter, can't discover remotely
-			h.logger.Error("tool not found locally and no registry adapter available",
-				"tool", toolName,
-				"error", err)
-			return nil, types.WrapError(
-				ErrHarnessToolExecutionFailed,
-				fmt.Sprintf("tool not found: %s", toolName),
-				err,
-			)
-		}
+		h.logger.Error("tool not found via registry adapter", "tool", toolName, "error", err)
+		return nil, types.WrapError(
+			ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("tool not found: %s", toolName),
+			err,
+		)
 	}
 
-	// Check if tool implements CapabilityProvider
 	type capabilityProvider interface {
 		Capabilities(ctx context.Context) *sdktypes.Capabilities
 	}
 
 	if provider, ok := t.(capabilityProvider); ok {
-		caps := provider.Capabilities(ctx)
-		if caps != nil {
+		if caps := provider.Capabilities(ctx); caps != nil {
 			h.logger.Debug("retrieved capabilities for tool",
 				"tool", toolName,
 				"has_root", caps.HasRoot,
@@ -1444,49 +1361,45 @@ func (h *DefaultAgentHarness) GetToolCapabilities(ctx context.Context, toolName 
 		}
 	}
 
-	// Tool doesn't implement CapabilityProvider or returned nil
-	h.logger.Debug("tool does not provide capabilities",
-		"tool", toolName)
+	h.logger.Debug("tool does not provide capabilities", "tool", toolName)
 	return nil, nil
 }
 
 // GetAllToolCapabilities returns capabilities for all registered tools.
 // Tools that don't implement CapabilityProvider are excluded from the result.
 func (h *DefaultAgentHarness) GetAllToolCapabilities(ctx context.Context) (map[string]*sdktypes.Capabilities, error) {
-	// Create span for distributed tracing
 	ctx, span := h.tracer.Start(ctx, "harness.GetAllToolCapabilities")
 	defer span.End()
 
 	h.logger.Debug("retrieving capabilities for all tools")
 
-	// Get all tool descriptors from local registry
-	toolDescriptors := h.toolRegistry.List()
-
 	result := make(map[string]*sdktypes.Capabilities)
+	if h.registryAdapter == nil {
+		return result, nil
+	}
 
-	// Query each tool for capabilities
-	for _, desc := range toolDescriptors {
-		// Get the tool instance
-		t, err := h.toolRegistry.Get(desc.Name)
+	type capabilityProvider interface {
+		Capabilities(ctx context.Context) *sdktypes.Capabilities
+	}
+
+	remoteTools, err := h.registryAdapter.ListTools(ctx)
+	if err != nil {
+		h.logger.Warn("failed to list remote tools for capabilities", "error", err)
+		return result, nil
+	}
+	for _, remoteTool := range remoteTools {
+		t, err := h.registryAdapter.DiscoverTool(ctx, remoteTool.Name)
 		if err != nil {
-			h.logger.Warn("failed to get tool from registry",
-				"tool", desc.Name,
+			h.logger.Warn("failed to discover remote tool",
+				"tool", remoteTool.Name,
 				"error", err)
 			continue
 		}
-
-		// Check if tool implements CapabilityProvider
-		// Use SDK helper to safely check and retrieve capabilities
-		type capabilityProvider interface {
-			Capabilities(ctx context.Context) *sdktypes.Capabilities
-		}
-
 		if provider, ok := t.(capabilityProvider); ok {
-			caps := provider.Capabilities(ctx)
-			if caps != nil {
-				result[desc.Name] = caps
+			if caps := provider.Capabilities(ctx); caps != nil {
+				result[remoteTool.Name] = caps
 				h.logger.Debug("retrieved capabilities for tool",
-					"tool", desc.Name,
+					"tool", remoteTool.Name,
 					"has_root", caps.HasRoot,
 					"has_sudo", caps.HasSudo,
 					"can_raw_socket", caps.CanRawSocket,
@@ -1495,54 +1408,8 @@ func (h *DefaultAgentHarness) GetAllToolCapabilities(ctx context.Context) (map[s
 		}
 	}
 
-	// If registry adapter is available, query remote tools as well
-	if h.registryAdapter != nil {
-		remoteTools, err := h.registryAdapter.ListTools(ctx)
-		if err != nil {
-			h.logger.Warn("failed to list remote tools for capabilities",
-				"error", err)
-			// Continue with just local tools
-		} else {
-			// Query remote tools for capabilities
-			for _, remoteTool := range remoteTools {
-				// Skip if already have local tool with same name
-				if _, exists := result[remoteTool.Name]; exists {
-					continue
-				}
-
-				// Discover the remote tool
-				t, err := h.registryAdapter.DiscoverTool(ctx, remoteTool.Name)
-				if err != nil {
-					h.logger.Warn("failed to discover remote tool",
-						"tool", remoteTool.Name,
-						"error", err)
-					continue
-				}
-
-				// Check if remote tool implements CapabilityProvider
-				type capabilityProvider interface {
-					Capabilities(ctx context.Context) *sdktypes.Capabilities
-				}
-
-				if provider, ok := t.(capabilityProvider); ok {
-					caps := provider.Capabilities(ctx)
-					if caps != nil {
-						result[remoteTool.Name] = caps
-						h.logger.Debug("retrieved capabilities for remote tool",
-							"tool", remoteTool.Name,
-							"has_root", caps.HasRoot,
-							"has_sudo", caps.HasSudo,
-							"can_raw_socket", caps.CanRawSocket,
-							"blocked_args_count", len(caps.BlockedArgs))
-					}
-				}
-			}
-		}
-	}
-
 	h.logger.Info("retrieved tool capabilities",
 		"tools_with_capabilities", len(result))
-
 	return result, nil
 }
 

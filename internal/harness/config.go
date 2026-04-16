@@ -13,7 +13,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
-	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/protoresolver"
 	"go.opentelemetry.io/otel/trace"
@@ -31,7 +30,6 @@ import (
 //
 // Optional fields (will use defaults if nil):
 //   - LLMRegistry: Uses empty registry if nil (no providers available)
-//   - ToolRegistry: Uses empty registry if nil (no tools available)
 //   - PluginRegistry: Uses empty registry if nil (no plugins available)
 //   - MemoryManager: Uses in-memory implementation if nil
 //   - Tracer: Uses no-op tracer if nil
@@ -49,11 +47,6 @@ type HarnessConfig struct {
 	// Required for translating agent slot definitions into concrete provider/model pairs.
 	// This is the only required field - harness creation will fail if nil.
 	SlotManager llm.SlotManager
-
-	// ToolRegistry provides access to registered tools.
-	// Used for tool execution operations (CallTool, ListTools).
-	// Optional: defaults to empty registry (no tools available).
-	ToolRegistry tool.ToolRegistry
 
 	// ProtoResolver provides dynamic proto type resolution for tool execution.
 	// Used to convert structpb.Struct inputs to typed proto messages using FileDescriptorSets.
@@ -307,7 +300,6 @@ func (c *HarnessConfig) Validate() error {
 //
 // Default implementations:
 //   - LLMRegistry: NewLLMRegistry() (empty registry)
-//   - ToolRegistry: NewToolRegistry() (empty registry)
 //   - ProtoResolver: NewDefaultProtoResolver() (default resolver with standard config)
 //   - PluginRegistry: NewPluginRegistry() (empty registry)
 //   - Tracer: trace.NewNoopTracerProvider().Tracer("gibson.harness")
@@ -323,10 +315,6 @@ func (c *HarnessConfig) Validate() error {
 func (c *HarnessConfig) ApplyDefaults() {
 	if c.LLMRegistry == nil {
 		c.LLMRegistry = llm.NewLLMRegistry()
-	}
-
-	if c.ToolRegistry == nil {
-		c.ToolRegistry = tool.NewToolRegistry()
 	}
 
 	if c.ProtoResolver == nil {

@@ -601,13 +601,6 @@ func setupTestHarness(t *testing.T, mockResponses []string) (AgentHarness, *Harn
 	// Create slot manager
 	slotManager := llm.NewSlotManager(llmRegistry)
 
-	// Create tool registry and register tools
-	toolRegistry := tool.NewToolRegistry()
-	err = toolRegistry.RegisterInternal(NewHTTPRequestTool())
-	require.NoError(t, err)
-	err = toolRegistry.RegisterInternal(NewCodeAnalysisTool())
-	require.NoError(t, err)
-
 	// Create plugin registry and register plugins
 	pluginRegistry := plugin.NewPluginRegistry(nil)
 	err = pluginRegistry.Register(NewVulnDBPlugin(), plugin.PluginConfig{})
@@ -633,14 +626,18 @@ func setupTestHarness(t *testing.T, mockResponses []string) (AgentHarness, *Harn
 	// Create finding store
 	findingStore := NewInMemoryFindingStore()
 
-	// Create registry adapter for agent delegation
-	registryAdapter := &mockRegistryAdapter{}
+	// Create registry adapter — serves tools via ComponentRegistry discovery
+	// path. Tools are registered here instead of the removed in-process registry.
+	registryAdapter := newMockRegistryAdapter()
+	httpTool := NewHTTPRequestTool()
+	codeTool := NewCodeAnalysisTool()
+	registryAdapter.tools[httpTool.Name()] = httpTool
+	registryAdapter.tools[codeTool.Name()] = codeTool
 
 	// Create harness configuration
 	config := HarnessConfig{
 		LLMRegistry:     llmRegistry,
 		SlotManager:     slotManager,
-		ToolRegistry:    toolRegistry,
 		PluginRegistry:  pluginRegistry,
 		RegistryAdapter: registryAdapter,
 		MemoryManager:   memoryManager,
@@ -1394,7 +1391,6 @@ func TestIntegration_CompleteWithTools(t *testing.T) {
 	require.NoError(t, err)
 
 	slotManager := llm.NewSlotManager(llmRegistry)
-	toolRegistry := tool.NewToolRegistry()
 	pluginRegistry := plugin.NewPluginRegistry(nil)
 
 	// Use file-based DB (WAL mode requires a file, not :memory:)
@@ -1416,7 +1412,6 @@ func TestIntegration_CompleteWithTools(t *testing.T) {
 	config := HarnessConfig{
 		LLMRegistry:    llmRegistry,
 		SlotManager:    slotManager,
-		ToolRegistry:   toolRegistry,
 		PluginRegistry: pluginRegistry,
 		MemoryManager:  memoryManager,
 		FindingStore:   findingStore,
@@ -1622,47 +1617,6 @@ func TestCallTool_RemoteTool(t *testing.T) {
 
 	// Verify metrics were recorded
 	assert.NotNil(t, config.Metrics)
-}
-
-// TestCallTool_LocalTakesPrecedence tests that local tools take precedence over remote
-func TestCallTool_LocalTakesPrecedence(t *testing.T) {
-	ctx := context.Background()
-
-	// Create local tool
-	localTool := &mockDiscoveryTool{
-		name:    "shared_tool",
-		version: "1.0.0",
-		executeFn: func(ctx context.Context, input map[string]any) (map[string]any, error) {
-			return map[string]any{"source": "local"}, nil
-		},
-	}
-
-	// Create remote tool with same name
-	remoteTool := &mockDiscoveryTool{
-		name:    "shared_tool",
-		version: "2.0.0",
-		executeFn: func(ctx context.Context, input map[string]any) (map[string]any, error) {
-			return map[string]any{"source": "remote"}, nil
-		},
-	}
-
-	// Setup test harness
-	h, _, _ := setupTestHarness(t, []string{})
-
-	// Register local tool
-	defaultHarness := h.(*DefaultAgentHarness)
-	err := defaultHarness.toolRegistry.RegisterInternal(localTool)
-	require.NoError(t, err)
-
-	// Create mock registry adapter with remote tool
-	mockAdapter := newMockRegistryAdapter()
-	mockAdapter.tools["shared_tool"] = remoteTool
-	defaultHarness.registryAdapter = mockAdapter
-
-	// Call the tool - local should be used
-	result, err := h.CallTool(ctx, "shared_tool", map[string]any{})
-	require.NoError(t, err)
-	assert.Equal(t, "local", result["source"])
 }
 
 // TestQueryPlugin_RemotePlugin tests discovering and querying a remote plugin
