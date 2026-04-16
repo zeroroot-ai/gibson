@@ -61,8 +61,6 @@ internal/
   types/             Core domain types (Mission, Target, Agent, Task, Result, Finding)
   plan/              Mission planning helpers used by orchestrator
   prompt/            Prompt template management
-  payload/           Compliance payload definitions
-  attack/            Ad-hoc attack runner (outside mission DAG)
   eval/              Agent/mission evaluation harness (lightly integrated)
   cutover/v4/        V4 audit-foundation migration support (legacy, still referenced by CLI cutover_v4.go)
   testing/           Test fixtures shared across packages
@@ -131,7 +129,6 @@ Two Gibson-owned services plus one re-exported SDK service plus the harness call
 | Onboarding state | `internal/onboarding/` | ✅ Active, minimal callers | Redis |
 | Guardrails | `internal/guardrail/` | ✅ Active inside mission loop | — |
 | Eval harness | `internal/eval/` | ⚠️ Lightly integrated; only orchestrator touches it | — |
-| Ad-hoc attack runner | `internal/attack/` | ⚠️ Called outside mission DAG; niche | — |
 | V4 cutover / migration | `internal/cutover/v4/` | ⚠️ Kept for backward-compat; invoked only by CLI `cutover_v4.go` | — |
 
 ## CLI (`cmd/gibson/`)
@@ -228,4 +225,4 @@ Pre-commit runs gitleaks + large-file + private-key checks (`.pre-commit-config.
 
 ## Spec Workflow
 
-This module drives design via `.spec-workflow/` at the repo root (requirements / design / tasks). Active specs touching this daemon currently include the FGA authZ migration, `prod-unimplemented-apis`, `prod-feature-wiring`, agent-auth FGA integration, and auth refactor. Completed specs are not retained as documents — shipped code and commit history are the source of truth.
+This module drives design via `.spec-workflow/` at the repo root (requirements / design / tasks). Active specs touching this daemon currently include the FGA authZ migration, `prod-unimplemented-apis`, `prod-feature-wiring`, agent-auth FGA integration, and auth refactor. Recently completed: `remove-attack-payload-subsystem` (deleted the ad-hoc one-off attack runner and payload templates that missions superseded). Completed specs are not retained as documents — shipped code and commit history are the source of truth.
