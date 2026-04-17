@@ -270,6 +270,15 @@ type HarnessConfig struct {
 	// existing deployments).
 	// Optional.
 	SandboxedExecutor *sandboxed.Executor
+
+	// ToolRunnerEnabled routes tool dispatch through a single
+	// ComponentRegistry lookup keyed by DispatchMode. When true, the
+	// legacy sandboxed.Registry-first dual lookup is bypassed — entries
+	// with DispatchMode=SANDBOXED dispatch via SandboxedExecutor using
+	// the image/env/resources carried on the registry entry. When false,
+	// the legacy path is preserved.
+	// Optional; defaults to false.
+	ToolRunnerEnabled bool
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.

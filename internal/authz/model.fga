@@ -46,6 +46,17 @@
 #   user:alice        | owner      | agent_principal:agent-abc-123
 #   tenant:acme       | belongs_to | agent_principal:agent-abc-123
 #   agent_principal:agent-abc-123 | can_execute | component:nmap   (direct per-agent grant)
+#   agent_principal:agent-abc-123 | cannot_invoke      | component:gitlab-plugin  (per-agent DENY override)
+#   component:nmap-agent          | can_be_invoked_by  | component:scan-controller (explicit component→component invocation grant)
+
+# Cross-component relations (added for capability-manifest-rpc):
+#   agent_principal.cannot_invoke    → explicit DENY on (agent, target_component); overrides positive can_execute.
+#   component.can_be_invoked_by      → explicit ALLOW enabling the manifest builder to surface
+#                                      component→component "may invoke" rules without enumerating
+#                                      every (source, target) pair via Check.
+# The effective cross-component rule resolution lives in FGABridge.ResolveCrossComponentRules:
+#   DENY if cannot_invoke is true; else ALLOW if can_execute or can_be_invoked_by is true;
+#   else absent (the default can_execute check remains the gate).
 
 model
   schema 1.1
@@ -61,6 +72,7 @@ type agent_principal
   relations
     define owner: [user]
     define belongs_to: [tenant]
+    define cannot_invoke: [component]
 
 type component
   relations
@@ -68,6 +80,7 @@ type component
     define can_execute: [user, agent_principal, tenant#member, team#member] or admin from owner
     define can_configure: [user, agent_principal, tenant#member, team#member] or admin from owner
     define can_read: [user, agent_principal, tenant#member, team#member, team#can_view_data_from] or admin from owner
+    define can_be_invoked_by: [agent_principal, component]
 
 type system_tenant
   relations

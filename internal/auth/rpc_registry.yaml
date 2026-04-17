@@ -137,6 +137,12 @@ entries:
   - method: /gibson.daemon.v1.DaemonService/QueryPlugin
     relation: member
     description: Query a plugin within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/GetCapabilityManifest
+    relation: member
+    description: Fetch signed capability manifest for caller's tenant (admin role additionally required for impersonation, enforced in-handler)
+  - method: /gibson.daemon.v1.DaemonService/WatchManifestInvalidations
+    relation: member
+    description: Stream manifest invalidation events for caller's tenant
 
   # Component lifecycle (admin).
   - method: /gibson.daemon.v1.DaemonService/StartComponent

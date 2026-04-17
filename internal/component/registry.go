@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+
+	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 const (
@@ -20,9 +22,22 @@ const (
 	systemTenant = "_system"
 )
 
+// SandboxResources is the Go-side mirror of componentpb.Resources carried
+// inside a ComponentInfo entry for sandboxed tools.
+type SandboxResources struct {
+	VCPU   int32  `json:"vcpu,omitempty"`
+	Memory string `json:"memory,omitempty"`
+}
+
 // ComponentInfo describes a running instance of a component registered in the registry.
 // Each instance is stored as a JSON-serialized value under a TTL-bound Redis key,
 // providing automatic deregistration when an instance stops refreshing its heartbeat.
+//
+// DispatchMode and the sandboxed-dispatch fields were added under the
+// gibson-tool-runner spec. Plugin/agent entries written before that spec
+// serialize without these fields — new fields carry `omitempty` tags so
+// round-trips remain clean. Entries discovered without a dispatch_mode are
+// treated as DISPATCH_MODE_UNSPECIFIED (misconfiguration).
 type ComponentInfo struct {
 	Kind          string            `json:"kind"`
 	Name          string            `json:"name"`
@@ -32,6 +47,23 @@ type ComponentInfo struct {
 	Metadata      map[string]string `json:"metadata"`
 	StartedAt     time.Time         `json:"started_at"`
 	LastHeartbeat time.Time         `json:"last_heartbeat"`
+
+	// DispatchMode identifies how harness.CallToolProto should route calls
+	// looked up against this entry. Zero value (UNSPECIFIED) is invalid.
+	DispatchMode componentpb.DispatchMode `json:"dispatch_mode,omitempty"`
+
+	// Sandboxed-dispatch fields — populated only when DispatchMode ==
+	// DISPATCH_MODE_SANDBOXED. Plugin/agent entries leave these zero.
+	Image                 string                   `json:"image,omitempty"`
+	Command               []string                 `json:"command,omitempty"`
+	Env                   map[string]string        `json:"env,omitempty"`
+	Resources             SandboxResources         `json:"resources,omitempty"`
+	DefaultTimeoutSeconds int32                    `json:"default_timeout_seconds,omitempty"`
+	InputSchemaJSON       []byte                   `json:"input_schema_json,omitempty"`
+	OutputProtoType       string                   `json:"output_proto_type,omitempty"`
+	DefaultParseQuality   componentpb.ParseQuality `json:"default_parse_quality,omitempty"`
+	Description           string                   `json:"description,omitempty"`
+	Tags                  []string                 `json:"tags,omitempty"`
 }
 
 // ComponentRegistry provides service-discovery for Gibson components.

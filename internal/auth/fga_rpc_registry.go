@@ -307,6 +307,14 @@ func (r *FgaRpcRegistry) populate() {
 		Relation:    "member",
 		Description: "List plugins visible to caller's tenant",
 	})
+	r.add("/gibson.daemon.v1.DaemonService/GetCapabilityManifest", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Fetch signed capability manifest for caller's tenant (admin role additionally required for impersonation, enforced in-handler)",
+	})
+	r.add("/gibson.daemon.v1.DaemonService/WatchManifestInvalidations", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Stream manifest invalidation events for caller's tenant",
+	})
 	r.add("/gibson.daemon.v1.DaemonService/QueryPlugin", FgaCheckSpec{
 		Relation:    "member",
 		Description: "Query a plugin within caller's tenant",
@@ -366,6 +374,13 @@ func (r *FgaRpcRegistry) populate() {
 		Relation:    "platform_operator",
 		ObjectFrom:  constObject("system_tenant:_system"),
 		Description: "Request impersonation token for tenant (platform operator only)",
+	})
+
+	// Tool catalog (sandboxed-tool registry refresh).
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/RefreshToolCatalog", FgaCheckSpec{
+		Relation:    "platform_operator",
+		ObjectFrom:  constObject("system_tenant:_system"),
+		Description: "Trigger immediate sandboxed-tool catalog refresh (platform operator only)",
 	})
 
 	// Observability.

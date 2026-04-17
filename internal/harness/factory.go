@@ -249,6 +249,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		pluginAccess:        f.config.PluginAccess,
 		maxDelegationDepth:  f.config.MaxDelegationDepth,
 		sandboxedExecutor:   f.config.SandboxedExecutor,
+		toolRunnerEnabled:   f.config.ToolRunnerEnabled,
 	}
 
 	// Wrap with ComplianceMiddleware BEFORE the OTel / Langfuse middleware so
