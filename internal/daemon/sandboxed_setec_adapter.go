@@ -34,18 +34,21 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	setecv1 "github.com/zero-day-ai/setec/api/grpc/v1alpha1"
 
 	"github.com/zero-day-ai/gibson/internal/config"
+	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
+	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 )
 
-// NewSetecSandboxedExecutor constructs a sandboxed.Executor backed by a real
-// Setec gRPC client.
-func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger) (*sandboxed.Executor, error) {
-	if !cfg.Enabled {
-		return nil, nil
-	}
+// NewSetecSandboxClient dials Setec with mTLS and returns a bare
+// sandboxed.SandboxClient — useful for callers that need the Launch
+// surface without also pulling in the full sandboxed.Executor. The daemon
+// catalog refresher uses this to drive `gibson-runner --list-tools`
+// microVM launches on its own schedule.
+func NewSetecSandboxClient(cfg config.SandboxConfig) (sandboxed.SandboxClient, error) {
 	tlsCfg, err := cfg.Setec.MTLS.BuildTLSConfig()
 	if err != nil {
 		return nil, fmt.Errorf("build setec mTLS config: %w", err)
@@ -57,19 +60,49 @@ func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, lo
 	if err != nil {
 		return nil, fmt.Errorf("dial setec %s: %w", cfg.Setec.Address, err)
 	}
-	reg, err := sandboxed.NewRegistryFromConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("build sandbox tool registry: %w", err)
+	return &setecClient{inner: setecv1.NewSandboxServiceClient(conn)}, nil
+}
+
+// NewSetecSandboxedExecutor constructs a sandboxed.Executor backed by a real
+// Setec gRPC client.
+//
+// `discoveryProc` is optional. When non-nil, the sandboxed executor extracts
+// field-100 DiscoveryResult from successful tool responses and persists them
+// to Neo4j asynchronously, matching the live-callback path's behavior at
+// core/gibson/internal/harness/callback_service.go:727.
+func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, discoveryProc processor.DiscoveryProcessor) (*sandboxed.Executor, error) {
+	if !cfg.Enabled {
+		return nil, nil
 	}
-	client := &setecClient{inner: setecv1.NewSandboxServiceClient(conn)}
+	client, err := NewSetecSandboxClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	var sbxDiscovery sandboxed.DiscoveryProcessor
+	if discoveryProc != nil {
+		sbxDiscovery = &sandboxedDiscoveryAdapter{inner: discoveryProc}
+	}
 	return sandboxed.New(sandboxed.Config{
-		Client:      client,
-		Registry:    reg,
-		Tracer:      tracer,
-		Logger:      logger,
-		Tenant:      cfg.Setec.Tenant,
-		CallTimeout: cfg.Setec.CallTimeout,
+		Client:             client,
+		Tracer:             tracer,
+		Logger:             logger,
+		Tenant:             cfg.Setec.Tenant,
+		CallTimeout:        cfg.Setec.CallTimeout,
+		DiscoveryProcessor: sbxDiscovery,
 	})
+}
+
+// sandboxedDiscoveryAdapter widens processor.DiscoveryProcessor's
+// (*ProcessResult, error) return to the (interface{}, error) signature the
+// sandboxed package's local DiscoveryProcessor interface declares. The
+// sandboxed package deliberately keeps its interface narrow to avoid
+// importing processor; this adapter is the single point of contact.
+type sandboxedDiscoveryAdapter struct {
+	inner processor.DiscoveryProcessor
+}
+
+func (a *sandboxedDiscoveryAdapter) Process(ctx context.Context, execCtx loader.ExecContext, discovery *graphragpb.DiscoveryResult) (interface{}, error) {
+	return a.inner.Process(ctx, execCtx, discovery)
 }
 
 // setecClient adapts setecv1.SandboxServiceClient to sandboxed.SandboxClient.

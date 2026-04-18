@@ -18,6 +18,11 @@ RUN apk add --no-cache git ca-certificates
 
 WORKDIR /workspace
 
+# Optional Go build tags. Leave empty for the default daemon; set to
+# `setec_integration` (or a comma-separated list) to compile in the Setec
+# gRPC adapter for sandboxed tool dispatch.
+ARG BUILD_TAGS=""
+
 # Copy dependency manifests first for better layer caching
 COPY go.mod go.sum ./
 
@@ -30,10 +35,11 @@ COPY . .
 # Build static binary with CGO disabled
 ENV CGO_ENABLED=0
 
-RUN go build \
-    -ldflags="-s -w" \
-    -o /out/gibson \
-    ./cmd/gibson
+RUN if [ -n "$BUILD_TAGS" ]; then \
+        go build -tags="$BUILD_TAGS" -ldflags="-s -w" -o /out/gibson ./cmd/gibson; \
+    else \
+        go build -ldflags="-s -w" -o /out/gibson ./cmd/gibson; \
+    fi
 
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine

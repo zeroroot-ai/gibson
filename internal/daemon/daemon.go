@@ -209,6 +209,12 @@ type daemonImpl struct {
 	// gRPC server for mTLS. It must be closed on daemon shutdown to release the
 	// socket connection. Nil when SPIFFE is not configured.
 	spiffeX509Source spiffeX509Closer
+
+	// toolCatalogRefresher periodically launches gibson-runner --list-tools
+	// in a Setec microVM and writes the resulting catalog to ComponentRegistry.
+	// Nil when ToolRunner.Enabled is false. Started asynchronously during
+	// daemon.Start so startup does not block on Setec health.
+	toolCatalogRefresher *CatalogRefresher
 }
 
 // spiffeX509Closer is the narrow interface for closing an X.509 source on shutdown.
@@ -468,6 +474,18 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	}
 	d.infrastructure = infra
 	d.logger.Info(ctx, "infrastructure components initialized")
+
+	// Catalog refresher: when toolRunner.enabled, start the goroutine that
+	// periodically launches gibson-runner --list-tools via Setec and writes
+	// ComponentRegistry entries. Runs asynchronously so daemon startup is
+	// never blocked on Setec being healthy. See gibson-tool-runner spec
+	// Requirements 2 + 3 for the full contract.
+	if d.config.ToolRunner.Enabled {
+		if err := d.startToolCatalogRefresher(ctx); err != nil {
+			d.logger.Warn(ctx, "tool catalog refresher failed to start; sandboxed-tool catalog will not be dynamic",
+				"error", err)
+		}
+	}
 
 	// Configure callback service with TracerProvider for proxy span creation (from OTel stack)
 	if infra.otelStack != nil && infra.otelStack.TracerProvider != nil {
@@ -1289,6 +1307,22 @@ func (d *daemonImpl) RequestShutdown(ctx context.Context, force bool, timeoutSec
 // Returns nil if the credential handler was not initialized (missing key provider).
 func (d *daemonImpl) CredentialHandler() *api.CredentialHandler {
 	return d.credentialHandler
+}
+
+// RefreshToolCatalog signals the catalog refresher on this replica to
+// immediately poll every configured gibson-tool-runner image for --list-tools
+// output. When the refresher is not running (feature flag off, or this
+// replica is not the refresh leader), returns queued=false with a
+// human-readable message rather than an error — the admin caller always
+// wants to know the outcome without interpreting gRPC status codes.
+func (d *daemonImpl) RefreshToolCatalog(ctx context.Context) (bool, string, error) {
+	if d.toolCatalogRefresher == nil {
+		return false, "tool catalog refresher is not running on this replica (tool_runner.enabled=false or follower)", nil
+	}
+	if err := d.toolCatalogRefresher.RefreshNow(ctx); err != nil {
+		return false, err.Error(), nil
+	}
+	return true, "refresh signal queued; next tick will ingest the latest --list-tools output from every configured runner image", nil
 }
 
 // LLMConfigHandler returns the LLM config handler for dashboard API operations.

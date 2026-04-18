@@ -16,6 +16,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/agentauth"
+	"github.com/zero-day-ai/gibson/internal/manifest"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
@@ -129,6 +130,16 @@ type DaemonServer struct {
 	// May be nil; when nil, Agent Auth RPCs return codes.Unavailable.
 	// Added by agent-auth-fga-integration spec.
 	agentAuthService *agentauth.AgentAuthService
+
+	// manifestBuilder builds signed capability manifests for GetCapabilityManifest.
+	// May be nil; when nil, GetCapabilityManifest returns codes.Unavailable.
+	// Added by capability-manifest-rpc spec.
+	manifestBuilder manifest.Builder
+
+	// manifestWatchHub multiplexes a single Redis psubscribe across all
+	// connected WatchManifestInvalidations streams. May be nil; when nil,
+	// that RPC returns codes.Unavailable.
+	manifestWatchHub *manifest.WatchHub
 }
 
 // missionDraftStoreIface is the narrow interface the DaemonServer uses for
@@ -268,6 +279,12 @@ type DaemonInterface interface {
 
 	// RequestShutdown requests graceful shutdown of the daemon
 	RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error
+
+	// RefreshToolCatalog signals the catalog refresher to immediately
+	// poll runner images. Returns (queued, message, error): queued is
+	// true if the signal was accepted by this replica's refresher;
+	// false if the refresher is not running on this replica.
+	RefreshToolCatalog(ctx context.Context) (queued bool, message string, err error)
 }
 
 // DaemonStatus represents daemon status information.
@@ -2810,6 +2827,19 @@ func (s *DaemonServer) DeleteTenantLangfuseCredentials(ctx context.Context, req 
 // tenant for platform-operator use.
 //
 // Requires the "platform-operator" role (cross-tenant god-mode operation).
+// RefreshToolCatalog triggers an immediate sandboxed-tool catalog refresh
+// on this daemon replica. Authorisation gated by the FGA RPC registry
+// (platform-operator only). Accepts an optional "force" flag; refresher
+// coalesces back-to-back calls so the flag is advisory.
+func (s *DaemonServer) RefreshToolCatalog(ctx context.Context, req *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error) {
+	queued, msg, err := s.daemon.RefreshToolCatalog(ctx)
+	if err != nil {
+		s.logger.Error("tool catalog refresh signal failed", "error", err)
+		return nil, status_grpc.Errorf(codes.Internal, "refresh tool catalog: %v", err)
+	}
+	return &RefreshToolCatalogResponse{Queued: queued, Message: msg}, nil
+}
+
 // The caller's identity is extracted from the request context and written to
 // the structured audit log so every impersonation event is traceable.
 //

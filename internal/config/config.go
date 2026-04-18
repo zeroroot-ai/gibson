@@ -84,6 +84,25 @@ type Config struct {
 	Authz             AuthzConfig             `mapstructure:"authz" yaml:"authz"`
 	DashboardPostgres DashboardPostgresConfig `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
 	Sandbox           SandboxConfig           `mapstructure:"sandbox" yaml:"sandbox,omitempty"`
+	ToolRunner        ToolRunnerConfig        `mapstructure:"tool_runner" yaml:"tool_runner,omitempty"`
+}
+
+// ToolRunnerConfig governs the daemon's catalog refresher: which
+// gibson-tool-runner images to poll for --list-tools and how often. When
+// disabled, the daemon falls back to static sandbox.tools.* config.
+//
+// Added under the gibson-tool-runner spec as a feature-flagged
+// introduction; removal of the static sandbox.tools path (task 16) flips
+// this default to enabled.
+type ToolRunnerConfig struct {
+	// Enabled turns on the dynamic catalog refresh path. Default false.
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
+	// Images is the list of gibson-tool-runner OCI references to poll.
+	// Earlier entries win for duplicate tool names (stable-over-experimental).
+	Images []string `mapstructure:"images" yaml:"images,omitempty"`
+	// RefreshInterval is the cadence between catalog refresh ticks. Zero
+	// uses the in-code 10-minute default.
+	RefreshInterval time.Duration `mapstructure:"refresh_interval" yaml:"refresh_interval,omitempty"`
 }
 
 // PluginsConfig contains configuration for all plugins.

@@ -56,6 +56,7 @@ const (
 	DaemonAdminService_ListComponentGrants_FullMethodName             = "/gibson.daemon.admin.v1.DaemonAdminService/ListComponentGrants"
 	DaemonAdminService_BatchGrantComponentAccessV2_FullMethodName     = "/gibson.daemon.admin.v1.DaemonAdminService/BatchGrantComponentAccessV2"
 	DaemonAdminService_ListAuditLog_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/ListAuditLog"
+	DaemonAdminService_RefreshToolCatalog_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/RefreshToolCatalog"
 )
 
 // DaemonAdminServiceClient is the client API for DaemonAdminService service.
@@ -178,6 +179,13 @@ type DaemonAdminServiceClient interface {
 	// ListAuditLog returns Postgres-backed audit log entries for a tenant.
 	// Requires FGA admin relation on the tenant.
 	ListAuditLog(ctx context.Context, in *ListAuditLogRequest, opts ...grpc.CallOption) (*ListAuditLogResponse, error)
+	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
+	// catalog. Bypasses the scheduled interval — useful for CI to publish a
+	// new tool-runner image and immediately surface its parsers to the
+	// orchestrator. Only works on the replica currently holding the refresh
+	// leader lease; followers accept the call but defer to the leader's
+	// next scheduled tick. Requires the platform-operator FGA role.
+	RefreshToolCatalog(ctx context.Context, in *RefreshToolCatalogRequest, opts ...grpc.CallOption) (*RefreshToolCatalogResponse, error)
 }
 
 type daemonAdminServiceClient struct {
@@ -558,6 +566,16 @@ func (c *daemonAdminServiceClient) ListAuditLog(ctx context.Context, in *ListAud
 	return out, nil
 }
 
+func (c *daemonAdminServiceClient) RefreshToolCatalog(ctx context.Context, in *RefreshToolCatalogRequest, opts ...grpc.CallOption) (*RefreshToolCatalogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshToolCatalogResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_RefreshToolCatalog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonAdminServiceServer is the server API for DaemonAdminService service.
 // All implementations must embed UnimplementedDaemonAdminServiceServer
 // for forward compatibility.
@@ -678,6 +696,13 @@ type DaemonAdminServiceServer interface {
 	// ListAuditLog returns Postgres-backed audit log entries for a tenant.
 	// Requires FGA admin relation on the tenant.
 	ListAuditLog(context.Context, *ListAuditLogRequest) (*ListAuditLogResponse, error)
+	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
+	// catalog. Bypasses the scheduled interval — useful for CI to publish a
+	// new tool-runner image and immediately surface its parsers to the
+	// orchestrator. Only works on the replica currently holding the refresh
+	// leader lease; followers accept the call but defer to the leader's
+	// next scheduled tick. Requires the platform-operator FGA role.
+	RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error)
 	mustEmbedUnimplementedDaemonAdminServiceServer()
 }
 
@@ -798,6 +823,9 @@ func (UnimplementedDaemonAdminServiceServer) BatchGrantComponentAccessV2(context
 }
 func (UnimplementedDaemonAdminServiceServer) ListAuditLog(context.Context, *ListAuditLogRequest) (*ListAuditLogResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAuditLog not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RefreshToolCatalog not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) mustEmbedUnimplementedDaemonAdminServiceServer() {}
 func (UnimplementedDaemonAdminServiceServer) testEmbeddedByValue()                            {}
@@ -1486,6 +1514,24 @@ func _DaemonAdminService_ListAuditLog_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonAdminService_RefreshToolCatalog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshToolCatalogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).RefreshToolCatalog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_RefreshToolCatalog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).RefreshToolCatalog(ctx, req.(*RefreshToolCatalogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonAdminService_ServiceDesc is the grpc.ServiceDesc for DaemonAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1640,6 +1686,10 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAuditLog",
 			Handler:    _DaemonAdminService_ListAuditLog_Handler,
+		},
+		{
+			MethodName: "RefreshToolCatalog",
+			Handler:    _DaemonAdminService_RefreshToolCatalog_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -17,8 +18,41 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+
+	"github.com/zero-day-ai/gibson/internal/contextkeys"
+	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
+
+// DiscoveryProcessor processes proto DiscoveryResult from tool responses.
+// The executor invokes Process asynchronously after a successful tool call so
+// discoveries produced in sandboxed microVMs land in the knowledge graph with
+// the same semantics as the live-callback path (see
+// core/gibson/internal/harness/callback_service.go:727 for the reference
+// implementation). The interface is declared locally to avoid importing the
+// harness package (which would create an import cycle — harness imports
+// sandboxed, not the other way around).
+type DiscoveryProcessor interface {
+	Process(ctx context.Context, execCtx loader.ExecContext, discovery *graphragpb.DiscoveryResult) (interface{}, error)
+}
+
+// discoveryProcessTimeout bounds each asynchronous DiscoveryProcessor.Process
+// invocation. Matches the callback path's budget so operators see identical
+// behavior regardless of dispatch mode.
+const discoveryProcessTimeout = 30 * time.Second
+
+// ctxStringValue reads a string-typed context key that has no dedicated
+// accessor in the contextkeys package. Returns "" if missing.
+func ctxStringValue(ctx context.Context, key contextkeys.Key) string {
+	if v := ctx.Value(key); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
 
 // Environment variables injected into every sandbox launch. The tool-runner
 // OCI image reads these via sdk/toolrunner.
@@ -78,25 +112,27 @@ type LogStream interface {
 }
 
 // Executor is the sandboxed-tool dispatch engine. It is safe for concurrent
-// use: per-call state lives on the stack of Execute.
+// use: per-call state lives on the stack of ExecuteWithSpec.
 type Executor struct {
-	client      SandboxClient
-	registry    *Registry
-	tracer      trace.Tracer
-	logger      *slog.Logger
-	tenant      string
-	callTimeout time.Duration
+	client             SandboxClient
+	tracer             trace.Tracer
+	logger             *slog.Logger
+	tenant             string
+	callTimeout        time.Duration
+	discoveryProcessor DiscoveryProcessor // optional; nil disables graph persistence
 }
 
 // Config is the constructor input for the executor. All fields are required
 // except Tracer (no-op used when nil) and Logger (slog.Default when nil).
+// DiscoveryProcessor is optional — when nil, field-100 DiscoveryResult
+// extraction is skipped entirely and no warning is logged per-call.
 type Config struct {
-	Client      SandboxClient
-	Registry    *Registry
-	Tracer      trace.Tracer
-	Logger      *slog.Logger
-	Tenant      string
-	CallTimeout time.Duration // defaults to 5m when zero
+	Client             SandboxClient
+	Tracer             trace.Tracer
+	Logger             *slog.Logger
+	Tenant             string
+	CallTimeout        time.Duration // defaults to 5m when zero
+	DiscoveryProcessor DiscoveryProcessor
 }
 
 // New constructs an Executor. Returns a clear error on misconfiguration so
@@ -104,9 +140,6 @@ type Config struct {
 func New(cfg Config) (*Executor, error) {
 	if cfg.Client == nil {
 		return nil, errors.New("sandboxed.New: Client is required")
-	}
-	if cfg.Registry == nil {
-		return nil, errors.New("sandboxed.New: Registry is required")
 	}
 	if cfg.Tenant == "" {
 		return nil, errors.New("sandboxed.New: Tenant is required")
@@ -121,38 +154,30 @@ func New(cfg Config) (*Executor, error) {
 		cfg.CallTimeout = 5 * time.Minute
 	}
 	return &Executor{
-		client:      cfg.Client,
-		registry:    cfg.Registry,
-		tracer:      cfg.Tracer,
-		logger:      cfg.Logger,
-		tenant:      cfg.Tenant,
-		callTimeout: cfg.CallTimeout,
+		client:             cfg.Client,
+		tracer:             cfg.Tracer,
+		logger:             cfg.Logger,
+		tenant:             cfg.Tenant,
+		callTimeout:        cfg.CallTimeout,
+		discoveryProcessor: cfg.DiscoveryProcessor,
 	}, nil
 }
 
-// Registry exposes the executor's tool registry for lookups from the harness
-// dispatch decision point.
-func (e *Executor) Registry() *Registry {
-	return e.registry
-}
-
-// Execute dispatches a single tool invocation through Setec. The request and
-// response must be non-nil proto.Message values matching the tool's declared
-// InputMessageType / OutputMessageType. Returns types.GibsonError with a
-// SANDBOX_* code on any failure.
-func (e *Executor) Execute(ctx context.Context, toolName string, request, response proto.Message) error {
+// ExecuteWithSpec dispatches a single tool invocation using the provided
+// ToolSpec. Used by the unified dispatch path in harness.CallToolProto
+// once the catalog refresher is populating ComponentRegistry entries with
+// per-tool image/command/env/resources metadata. Spec precedence:
+// caller-provided spec over any internal registry entry.
+func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec ToolSpec, request, response proto.Message) error {
 	ctx, span := e.tracer.Start(ctx, "harness.sandboxed.execute")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("gibson.tool.name", toolName),
 		attribute.String("setec.tenant", e.tenant),
 	)
-
-	spec, ok := e.registry.Lookup(toolName)
-	if !ok {
-		// Soft miss — caller falls through to other dispatch paths.
+	if spec.Image == "" {
 		return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
-			fmt.Sprintf("tool %q not registered for sandboxed execution", toolName), nil)
+			fmt.Sprintf("tool %q: empty image in ToolSpec", toolName), nil)
 	}
 
 	// 1. Marshal + size-check + b64 encode request.
@@ -250,7 +275,64 @@ func (e *Executor) Execute(ctx context.Context, toolName string, request, respon
 		return types.WrapError(types.SANDBOX_OUTPUT_MALFORMED,
 			fmt.Sprintf("tool %q sandbox output protojson unmarshal", toolName), err)
 	}
+
+	// Async discovery persistence. Mirrors core/gibson/internal/harness/
+	// callback_service.go:727 so sandboxed-path discoveries land in Neo4j with
+	// identical semantics to the callback-dispatched tools. Non-blocking: the
+	// caller returns immediately; processing errors are logged, never
+	// propagated. Skipped when no DiscoveryProcessor is wired (GraphRAG off).
+	if e.discoveryProcessor != nil {
+		if pbDiscovery := sdkgraphrag.ExtractDiscovery(response); pbDiscovery != nil {
+			execCtx := loader.ExecContext{
+				MissionRunID:    contextkeys.GetMissionRunID(ctx),
+				MissionID:       ctxStringValue(ctx, contextkeys.MissionID),
+				AgentName:       ctxStringValue(ctx, contextkeys.AgentName),
+				AgentRunID:      contextkeys.GetAgentRunID(ctx),
+				ToolExecutionID: contextkeys.GetToolExecutionID(ctx),
+			}
+			go e.processDiscoveryAsync(toolName, execCtx, pbDiscovery)
+		}
+	}
+
 	return nil
+}
+
+// processDiscoveryAsync runs DiscoveryProcessor.Process in a detached context
+// with the same 30s timeout the callback path uses. Panics are recovered so a
+// buggy parser cannot crash the daemon. Errors are logged, never returned.
+func (e *Executor) processDiscoveryAsync(toolName string, execCtx loader.ExecContext, discovery *graphragpb.DiscoveryResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.logger.Error("sandboxed discovery processor panicked",
+				"tool", toolName,
+				"mission_run_id", execCtx.MissionRunID,
+				"panic", r,
+				"stack", string(debug.Stack()),
+				"dispatch_path", "sandboxed",
+			)
+		}
+	}()
+
+	processCtx, cancel := context.WithTimeout(context.Background(), discoveryProcessTimeout)
+	defer cancel()
+
+	result, err := e.discoveryProcessor.Process(processCtx, execCtx, discovery)
+	if err != nil {
+		e.logger.ErrorContext(processCtx, "failed to process discovery",
+			"error", err,
+			"tool", toolName,
+			"mission_run_id", execCtx.MissionRunID,
+			"dispatch_path", "sandboxed",
+		)
+		return
+	}
+	if result != nil {
+		e.logger.DebugContext(processCtx, "discovery processed successfully",
+			"tool", toolName,
+			"mission_run_id", execCtx.MissionRunID,
+			"dispatch_path", "sandboxed",
+		)
+	}
 }
 
 // streamLogsAsync consumes the sandbox log stream, mirrors each chunk to the

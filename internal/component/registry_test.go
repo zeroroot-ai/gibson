@@ -2,6 +2,7 @@ package component
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // newTestRegistry creates a RedisComponentRegistry backed by a fresh miniredis
@@ -583,4 +586,81 @@ func TestScanPattern(t *testing.T) {
 		got := scanPattern(tt.tenant, tt.kind, tt.name, tt.instanceID)
 		assert.Equal(t, tt.want, got)
 	}
+}
+
+// TestComponentInfo_LegacyEntryRoundTrip ensures a pre-spec-era plugin/agent
+// entry (no new dispatch fields) round-trips through JSON cleanly — no errors
+// on unmarshal, no zero-value spam on marshal (thanks to omitempty tags).
+func TestComponentInfo_LegacyEntryRoundTrip(t *testing.T) {
+	legacy := []byte(`{
+		"kind": "plugin",
+		"name": "slack-notifier",
+		"version": "1.2.0",
+		"instance_id": "uuid-1",
+		"tenant_id": "acme",
+		"metadata": {"endpoint": "localhost:5001"},
+		"started_at": "2026-04-17T00:00:00Z",
+		"last_heartbeat": "2026-04-17T00:00:30Z"
+	}`)
+
+	var info ComponentInfo
+	require.NoError(t, json.Unmarshal(legacy, &info))
+	assert.Equal(t, "plugin", info.Kind)
+	assert.Equal(t, "slack-notifier", info.Name)
+	assert.Equal(t, componentpb.DispatchMode_DISPATCH_MODE_UNSPECIFIED, info.DispatchMode,
+		"legacy entries have no dispatch_mode field; must decode to UNSPECIFIED")
+	assert.Empty(t, info.Image)
+	assert.Empty(t, info.Command)
+	assert.Equal(t, int32(0), info.Resources.VCPU)
+
+	out, err := json.Marshal(info)
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), "dispatch_mode")
+	assert.NotContains(t, string(out), `"image"`)
+}
+
+// TestComponentInfo_SandboxedEntryRoundTrip verifies a sandboxed-tool entry
+// carries all new fields through marshal/unmarshal without loss.
+func TestComponentInfo_SandboxedEntryRoundTrip(t *testing.T) {
+	orig := ComponentInfo{
+		Kind:          "tool",
+		Name:          "nmap",
+		Version:       "0.1.0",
+		InstanceID:    "catalog",
+		TenantID:      "_system",
+		Metadata:      map[string]string{"source": "gibson-tool-runner"},
+		StartedAt:     time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC),
+		LastHeartbeat: time.Date(2026, 4, 17, 12, 5, 0, 0, time.UTC),
+		DispatchMode:  componentpb.DispatchMode_DISPATCH_MODE_SANDBOXED,
+		Image:         "ghcr.io/zero-day-ai/gibson-tool-runner@sha256:deadbeef",
+		Command:       []string{"/gibson-runner"},
+		Env:           map[string]string{"GIBSON_TOOL_NAME": "nmap"},
+		Resources: SandboxResources{
+			VCPU:   2,
+			Memory: "512Mi",
+		},
+		DefaultTimeoutSeconds: 300,
+		InputSchemaJSON:       []byte(`{"type":"object","properties":{"target":{"type":"string"}}}`),
+		OutputProtoType:       "gibson.tool.nmap.v1.ExecuteResponse",
+		DefaultParseQuality:   componentpb.ParseQuality_PARSE_QUALITY_STRUCTURED,
+		Description:           "TCP/UDP port scanner with service/OS detection.",
+		Tags:                  []string{"recon", "network"},
+	}
+
+	raw, err := json.Marshal(orig)
+	require.NoError(t, err)
+
+	var got ComponentInfo
+	require.NoError(t, json.Unmarshal(raw, &got))
+	assert.Equal(t, orig.DispatchMode, got.DispatchMode)
+	assert.Equal(t, orig.Image, got.Image)
+	assert.Equal(t, orig.Command, got.Command)
+	assert.Equal(t, orig.Env, got.Env)
+	assert.Equal(t, orig.Resources, got.Resources)
+	assert.Equal(t, orig.DefaultTimeoutSeconds, got.DefaultTimeoutSeconds)
+	assert.Equal(t, orig.InputSchemaJSON, got.InputSchemaJSON)
+	assert.Equal(t, orig.OutputProtoType, got.OutputProtoType)
+	assert.Equal(t, orig.DefaultParseQuality, got.DefaultParseQuality)
+	assert.Equal(t, orig.Description, got.Description)
+	assert.Equal(t, orig.Tags, got.Tags)
 }

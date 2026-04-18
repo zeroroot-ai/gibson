@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/memory"
@@ -111,6 +112,12 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// node to Neo4j. The sink adapts the DiscoveryProcessor.
 		// When nil (no graphRAG available), the middleware is skipped.
 		ComplianceSink: d.infrastructure.complianceSink,
+
+		// ToolRunnerEnabled flips CallToolProto's sandboxed lookup path
+		// from static sandbox.Registry to dynamic ComponentRegistry
+		// driven by the catalog refresher. Gated by the same flag that
+		// starts the refresher goroutine.
+		ToolRunnerEnabled: d.config.ToolRunner.Enabled,
 	}
 
 	// Sandboxed tool executor (Setec microVM dispatch) — constructed only
@@ -127,7 +134,14 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			return nil
 		}()
 		sandboxLogger := d.logger.WithComponent("sandboxed").Slog()
-		execer, err := NewSetecSandboxedExecutor(d.config.Sandbox, sandboxTracer, sandboxLogger)
+		// Pass the infrastructure's DiscoveryProcessor so sandboxed tool
+		// responses populate the knowledge graph alongside live-callback tools.
+		// nil when GraphRAG is disabled; sandboxed.Executor tolerates nil.
+		var sbxDiscovery processor.DiscoveryProcessor
+		if d.infrastructure != nil && d.infrastructure.discoveryProcessor != nil {
+			sbxDiscovery = d.infrastructure.discoveryProcessor.processor
+		}
+		execer, err := NewSetecSandboxedExecutor(d.config.Sandbox, sandboxTracer, sandboxLogger, sbxDiscovery)
 		if err != nil {
 			d.logger.Warn(ctx, "sandboxed tool executor construction failed; continuing without sandboxed dispatch",
 				"error", err)
@@ -138,7 +152,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			d.logger.Info(ctx, "sandboxed tool executor wired",
 				"setec_address", d.config.Sandbox.Setec.Address,
 				"tenant", d.config.Sandbox.Setec.Tenant,
-				"tool_count", execer.Registry().Size())
+				"catalog_source", "component_registry")
 		}
 	}
 

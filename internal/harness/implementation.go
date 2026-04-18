@@ -19,6 +19,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
+	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
@@ -145,6 +146,13 @@ type DefaultAgentHarness struct {
 	// via gRPC. Consulted BEFORE any local/component-registry path in
 	// CallToolProto; nil disables sandboxed dispatch entirely.
 	sandboxedExecutor *sandboxed.Executor
+
+	// toolRunnerEnabled gates the unified ComponentRegistry-driven
+	// dispatch path. When true, CallToolProto looks up the tool in
+	// ComponentRegistry first and dispatches by DispatchMode. When
+	// false, the legacy sandboxed.Registry + ComponentRegistry dual
+	// lookup is used. Flipped per deployment via tool_runner.enabled.
+	toolRunnerEnabled bool
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -566,12 +574,23 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		"input_type", string(request.ProtoReflect().Descriptor().FullName()),
 		"output_type", string(response.ProtoReflect().Descriptor().FullName()))
 
-	// ── Sandboxed executor (Setec microVM) ───────────────────────────────────
-	// Runs before the remote-registry paths so sandbox registration is the
-	// more-specific routing decision. A registry miss falls through silently.
-	if h.sandboxedExecutor != nil {
-		if _, ok := h.sandboxedExecutor.Registry().Lookup(name); ok {
-			return h.sandboxedExecutor.Execute(ctx, name, request, response)
+	// ── Unified ComponentRegistry dispatch ────────────────────────────────
+	// Single lookup; route by dispatch_mode. DispatchMode=SANDBOXED
+	// entries dispatch via SandboxedExecutor with per-call ToolSpec
+	// sourced from the entry; plugin/agent entries fall through to the
+	// existing gRPC dispatch paths below. Post-task-16, this is the only
+	// sandboxed-dispatch path — the legacy static sandboxed.Registry
+	// fallback was removed.
+	if h.componentRegistry != nil {
+		if spec, found, err := h.lookupSandboxedToolSpec(ctx, name); err != nil {
+			h.logger.Warn("component registry sandboxed lookup errored, falling through",
+				"tool", name, "error", err)
+		} else if found {
+			if h.sandboxedExecutor == nil {
+				return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
+					fmt.Sprintf("tool %q dispatch_mode=SANDBOXED but no sandboxed executor wired", name), nil)
+			}
+			return h.sandboxedExecutor.ExecuteWithSpec(ctx, name, spec, request, response)
 		}
 	}
 
@@ -2878,4 +2897,44 @@ func (h *DefaultAgentHarness) Close(ctx context.Context) error {
 
 	h.logger.Debug("harness closed successfully")
 	return nil
+}
+
+// lookupSandboxedToolSpec resolves a tool name against the ComponentRegistry
+// as a sandboxed entry. Returns (spec, true, nil) when an entry exists with
+// DispatchMode=SANDBOXED; (_, false, nil) when no sandboxed entry is
+// registered; and (_, _, err) only on a Redis/registry failure. Used by
+// the unified dispatch path in CallToolProto when toolRunnerEnabled=true.
+func (h *DefaultAgentHarness) lookupSandboxedToolSpec(ctx context.Context, name string) (sandboxed.ToolSpec, bool, error) {
+	// Sandboxed tool entries are written under the _system tenant so
+	// every caller can discover them regardless of their own tenant.
+	instances, err := h.componentRegistry.DiscoverSystemOnly(ctx, "tool", name)
+	if err != nil {
+		return sandboxed.ToolSpec{}, false, err
+	}
+	for _, info := range instances {
+		if info.DispatchMode != componentpb.DispatchMode_DISPATCH_MODE_SANDBOXED {
+			continue
+		}
+		return sandboxed.ToolSpec{
+			Image:   info.Image,
+			Command: append([]string(nil), info.Command...),
+			Env:     copyStringMap(info.Env),
+			VCPU:    info.Resources.VCPU,
+			Memory:  info.Resources.Memory,
+		}, true, nil
+	}
+	return sandboxed.ToolSpec{}, false, nil
+}
+
+// copyStringMap returns a defensive copy of a string-to-string map so the
+// returned ToolSpec is independent of the ComponentInfo reference.
+func copyStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

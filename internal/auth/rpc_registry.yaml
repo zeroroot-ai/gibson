@@ -137,6 +137,12 @@ entries:
   - method: /gibson.daemon.v1.DaemonService/QueryPlugin
     relation: member
     description: Query a plugin within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/GetCapabilityManifest
+    relation: member
+    description: Fetch signed capability manifest for caller's tenant (admin role additionally required for impersonation, enforced in-handler)
+  - method: /gibson.daemon.v1.DaemonService/WatchManifestInvalidations
+    relation: member
+    description: Stream manifest invalidation events for caller's tenant
 
   # Component lifecycle (admin).
   - method: /gibson.daemon.v1.DaemonService/StartComponent
@@ -180,6 +186,10 @@ entries:
     relation: platform_operator
     object: system_tenant:_system
     description: Request impersonation token for tenant (platform operator only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/RefreshToolCatalog
+    relation: platform_operator
+    object: system_tenant:_system
+    description: Trigger immediate sandboxed-tool catalog refresh (platform operator only)
 
   # Observability — tenant Langfuse credentials.
   - method: /gibson.daemon.admin.v1.DaemonAdminService/GetTenantLangfuseCredentials
