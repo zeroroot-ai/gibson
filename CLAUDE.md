@@ -41,7 +41,7 @@ internal/
   agentauth/         Agent Auth Protocol: mint agent JWTs, FGA capability grant bridge
   auth/              5-path authN: API key (gsk_), OIDC JWT (any compliant IdP), K8s SA, SPIFFE/SPIRE, Better Auth session tokens (better_auth.go); FGA gRPC interceptor + fga_rpc_registry.go declarative RPC→(type,relation) map; audit.go
   authz/             OpenFGA HTTP client wrapper, noopAuthorizer, envelope HMAC signer, model.fga (schema 1.1)
-  llm/               Slot resolver, provider registry (Anthropic/OpenAI/Gemini/Ollama), rate limiter, pricing, embedding provider + cache, JSON extractor, tool-use tracker, error recovery
+  llm/               Slot resolver, provider registry (Anthropic/OpenAI/Gemini/Ollama + Bedrock/Cloudflare/Cohere/ERNIE/HuggingFace/Llamafile/Local/Maritaca/Mistral/WatsonX — 14 total, see `providers/` + `docs/byok-providers.md`), rate limiter, pricing (with SelfHosted/Unknown flags), embedding provider + cache, JSON extractor, tool-use tracker, error recovery. Each provider exposes `CredentialSchema()` consumed by the `GetSupportedProviders` admin RPC so the dashboard renders forms dynamically.
   memory/            3-tier: working (in-process), mission (Redis), longterm (vector store); MemoryFactory, TracedMemoryManager, embedder/ (OpenAI/Ollama/local), token counting
   graphrag/          Neo4j GraphStore (+ traced), loader/ (persist DiscoveryResult protos), processor/ (DiscoveryProcessor handles tool proto field 100), intelligence/ (graph queries for agent context), schema/, query.go, graph_bootstrap.go
   neo4j/             Thin Neo4j client + schema migration runner

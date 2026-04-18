@@ -433,3 +433,32 @@ func BenchmarkRedactToken(b *testing.B) {
 		RedactToken(token)
 	}
 }
+
+func TestRedact_LLMProviderCredentialKeys(t *testing.T) {
+	// Every credential key any provider consumes must be redacted by the
+	// logger. This mirrors providers.redactCredentialKeys().
+	secrets := []string{
+		"aws_access_key_id", "aws_secret_access_key", "aws_session_token",
+		"cloudflare_account_id", "cloudflare_api_token",
+		"cohere_api_key",
+		"ernie_access_key", "ernie_secret_key",
+		"huggingface_api_token",
+		"mistral_api_key",
+		"maritaca_api_key",
+		"watsonx_api_key", "watsonx_project_id",
+	}
+	for _, key := range secrets {
+		t.Run(key, func(t *testing.T) {
+			args := []any{key, "cred-value-xyz", "unrelated", "ok"}
+			got := Redact(args)
+			// Find the pair and assert value is redacted.
+			for i := 0; i < len(got); i += 2 {
+				if got[i] == key {
+					if got[i+1] != "[REDACTED]" {
+						t.Fatalf("expected redaction for %q, got %v", key, got[i+1])
+					}
+				}
+			}
+		})
+	}
+}
