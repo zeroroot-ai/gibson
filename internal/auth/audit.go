@@ -106,6 +106,36 @@ type AuditEvent struct {
 	// Format: "tenant:<id>", "system_tenant:_system", "component:<name>".
 	// Populated alongside FgaRelation.
 	FgaObject string
+
+	// ActionClass is the per-action classification for catalog-gated
+	// authorization decisions ("read" | "write" | "execute"). Populated
+	// by the FGA interceptor when the RPC's relation is a catalog relation
+	// (can_read / can_configure / can_execute) or a component-scope grant
+	// (component_*_enabled). Empty for non-catalog RPCs.
+	// Spec: agent-authoring-and-tenant-entitlements R11 AC 2.
+	ActionClass string
+
+	// ComponentScope is the agent_principal id carried in the caller's
+	// agent+jwt for agent-auth RPCs. Empty for user-authenticated RPCs.
+	// Populated by the interceptor's R2 two-check path so audit trails
+	// preserve the component_scope for later forensic review.
+	// Spec: agent-authoring-and-tenant-entitlements R11 AC 2.
+	ComponentScope string
+
+	// ScopeType classifies tuple-write audit events by the deny-scope
+	// layer they targeted: "tenant" | "team" | "user" | "component" |
+	// "feature". Populated for tuple-change events emitted alongside
+	// WriteAccessTuples / Write calls; empty for authz decisions.
+	// Spec: agent-authoring-and-tenant-entitlements R11 AC 1.
+	ScopeType string
+
+	// DenyingGates enumerates the FGA tuples whose presence is causing
+	// a current deny, for UI reason-display. Populated on authz_deny
+	// events where the daemon can cheaply enumerate the most likely
+	// culprit(s). Empty when gate enumeration isn't possible (eg the
+	// FGA call itself errored).
+	// Spec: agent-authoring-and-tenant-entitlements R11 AC 2.
+	DenyingGates []string
 }
 
 // logAuditEvent logs a structured audit event.
