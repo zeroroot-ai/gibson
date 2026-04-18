@@ -67,6 +67,16 @@ type tenant
   relations
     define admin: [user]
     define member: [user] or admin
+    # Informational feature-availability flags written by the tenant-operator
+    # from the resolved plan. These are self-referential (tenant:X#has_Y@tenant:X)
+    # and gate UI affordances only; they do not participate in catalog
+    # access checks. Spec: agent-authoring-and-tenant-entitlements R4, R7.
+    define has_sso: [tenant]
+    define has_audit_logs: [tenant]
+    define has_compliance_exports: [tenant]
+    define has_dedicated_slack: [tenant]
+    define has_dedicated_tenant: [tenant]
+    define has_private_registry: [tenant]
 
 type agent_principal
   relations
@@ -77,9 +87,60 @@ type agent_principal
 type component
   relations
     define owner: [tenant]
-    define can_execute: [user, agent_principal, tenant#member, team#member] or admin from owner
-    define can_configure: [user, agent_principal, tenant#member, team#member] or admin from owner
-    define can_read: [user, agent_principal, tenant#member, team#member, team#can_view_data_from] or admin from owner
+    # Ownership / publication scope (agent-authoring-and-tenant-entitlements R3):
+    # platform_enabled — item is in the system-tenant's public catalog
+    # tenant_published — item is in its owning tenant's private registry (org+ plans only)
+    # tenant_enabled   — a given tenant has this item available (seeded per-tenant by operator)
+    define platform_enabled: [system_tenant]
+    define tenant_published: [tenant]
+    define tenant_enabled: [tenant]
+    # Tenant-level per-action denies — tenant-admin wholesale kill switches.
+    define tenant_read_disabled: [tenant]
+    define tenant_write_disabled: [tenant]
+    define tenant_execute_disabled: [tenant]
+    # Team-level per-action denies via team membership. Subject is team#member,
+    # so a user in any team with a given deny set loses that action.
+    define team_read_disabled: [team#member]
+    define team_write_disabled: [team#member]
+    define team_execute_disabled: [team#member]
+    # User-level per-action denies — personal opt-out on My access UI.
+    define user_read_disabled: [user]
+    define user_write_disabled: [user]
+    define user_execute_disabled: [user]
+    # Component-scope per-action grants for agent_principal narrowing
+    # (owner approves at agent install time). Default absent = denied.
+    define component_read_enabled: [agent_principal]
+    define component_write_enabled: [agent_principal]
+    define component_execute_enabled: [agent_principal]
+    # Effective per-action evaluators — existing relation names preserved so
+    # call sites keep compiling. Each layers the ownership/scope gate onto
+    # the direct grant set and subtracts every matching deny relation.
+    # Deny-wins composition; denies are union-subtracted (union of any deny
+    # at any layer => overall deny at that action class).
+    # any_execute_deny / any_write_deny / any_read_deny collect all per-action
+    # denies across scopes so the user-facing relations need a single `but not`.
+    define any_execute_deny: tenant_execute_disabled or team_execute_disabled or user_execute_disabled
+    define any_write_deny: tenant_write_disabled or team_write_disabled or user_write_disabled
+    define any_read_deny: tenant_read_disabled or team_read_disabled or user_read_disabled
+    # owner-side direct/role grant (pre-gate).
+    define direct_execute: [user, agent_principal, tenant#member, team#member] or admin from owner
+    define direct_configure: [user, agent_principal, tenant#member, team#member] or admin from owner
+    define direct_read: [user, agent_principal, tenant#member, team#member, team#can_view_data_from] or admin from owner
+    # ownership gate: visible iff published to the caller's scope AND tenant_enabled.
+    define in_tenant_catalog: (platform_enabled or tenant_published) and tenant_enabled
+    # Effective per-action evaluators. Preserving the existing relation names
+    # means legacy Check(subject, can_read, component) call sites pick up the
+    # deny-wins composition automatically.
+    define can_execute: (direct_execute and in_tenant_catalog) but not any_execute_deny
+    define can_configure: (direct_configure and in_tenant_catalog) but not any_write_deny
+    define can_read: (direct_read and in_tenant_catalog) but not any_read_deny
+    # Component-scope effective relations — evaluated when the caller is an
+    # agent_principal. Each requires both the owner-side action (via can_*)
+    # AND the per-component grant tuple. component_scope JWT claim narrowing
+    # (R2) is enforced at the interceptor against these relations.
+    define can_read_as_component: can_read and component_read_enabled
+    define can_write_as_component: can_configure and component_write_enabled
+    define can_execute_as_component: can_execute and component_execute_enabled
     define can_be_invoked_by: [agent_principal, component]
 
 type system_tenant
