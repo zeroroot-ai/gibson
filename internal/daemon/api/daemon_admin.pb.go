@@ -7,11 +7,10 @@
 package api
 
 import (
-	reflect "reflect"
-	sync "sync"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
 )
 
 const (
@@ -5946,6 +5945,376 @@ func (x *RefreshToolCatalogResponse) GetMessage() string {
 	return ""
 }
 
+// GetSupportedProvidersRequest has no fields; it's a capability query.
+type GetSupportedProvidersRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *GetSupportedProvidersRequest) Reset() {
+	*x = GetSupportedProvidersRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[90]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetSupportedProvidersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSupportedProvidersRequest) ProtoMessage() {}
+
+func (x *GetSupportedProvidersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[90]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSupportedProvidersRequest.ProtoReflect.Descriptor instead.
+func (*GetSupportedProvidersRequest) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{90}
+}
+
+// GetSupportedProvidersResponse lists every provider type the daemon can
+// construct, with per-provider credential schemas and default model
+// catalogues. The dashboard renders its provider-config form from this
+// response — one entry per provider in the type dropdown, one form field
+// per CredentialField under the selected entry.
+type GetSupportedProvidersResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// providers is the ordered list of provider descriptors.
+	Providers []*ProviderDescriptor `protobuf:"bytes,1,rep,name=providers,proto3" json:"providers,omitempty"`
+}
+
+func (x *GetSupportedProvidersResponse) Reset() {
+	*x = GetSupportedProvidersResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[91]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetSupportedProvidersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSupportedProvidersResponse) ProtoMessage() {}
+
+func (x *GetSupportedProvidersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[91]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSupportedProvidersResponse.ProtoReflect.Descriptor instead.
+func (*GetSupportedProvidersResponse) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{91}
+}
+
+func (x *GetSupportedProvidersResponse) GetProviders() []*ProviderDescriptor {
+	if x != nil {
+		return x.Providers
+	}
+	return nil
+}
+
+// ProviderDescriptor describes a single LLM provider type Gibson can
+// construct — type identifier, human-facing metadata, credential form
+// schema, and default model catalogue. Mirrors
+// `internal/llm/providers.ProviderDescriptor` 1:1.
+type ProviderDescriptor struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// type is the provider type identifier (e.g. "bedrock", "openai").
+	Type string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	// display_name is the human-facing label shown in the dashboard dropdown
+	// (e.g. "AWS Bedrock", "Anthropic (Claude)").
+	DisplayName string `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	// docs_url points at the upstream provider's credential/setup docs.
+	DocsUrl string `protobuf:"bytes,3,opt,name=docs_url,json=docsUrl,proto3" json:"docs_url,omitempty"`
+	// self_hosted is true for providers running on operator-controlled
+	// infrastructure (Ollama, Llamafile, Local) — the dashboard can omit
+	// test-connection buttons and bill-tracking warnings for these.
+	SelfHosted bool `protobuf:"varint,4,opt,name=self_hosted,json=selfHosted,proto3" json:"self_hosted,omitempty"`
+	// credentials is the form schema — one CredentialField per input the
+	// operator must supply in the dashboard form.
+	Credentials []*CredentialField `protobuf:"bytes,5,rep,name=credentials,proto3" json:"credentials,omitempty"`
+	// default_models is the catalogue the provider would report from
+	// Models(), so the dashboard can populate a model picker without
+	// constructing the provider.
+	DefaultModels []*ModelDescriptor `protobuf:"bytes,6,rep,name=default_models,json=defaultModels,proto3" json:"default_models,omitempty"`
+}
+
+func (x *ProviderDescriptor) Reset() {
+	*x = ProviderDescriptor{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[92]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ProviderDescriptor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProviderDescriptor) ProtoMessage() {}
+
+func (x *ProviderDescriptor) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[92]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProviderDescriptor.ProtoReflect.Descriptor instead.
+func (*ProviderDescriptor) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{92}
+}
+
+func (x *ProviderDescriptor) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *ProviderDescriptor) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *ProviderDescriptor) GetDocsUrl() string {
+	if x != nil {
+		return x.DocsUrl
+	}
+	return ""
+}
+
+func (x *ProviderDescriptor) GetSelfHosted() bool {
+	if x != nil {
+		return x.SelfHosted
+	}
+	return false
+}
+
+func (x *ProviderDescriptor) GetCredentials() []*CredentialField {
+	if x != nil {
+		return x.Credentials
+	}
+	return nil
+}
+
+func (x *ProviderDescriptor) GetDefaultModels() []*ModelDescriptor {
+	if x != nil {
+		return x.DefaultModels
+	}
+	return nil
+}
+
+// CredentialField describes a single credential input in the provider-config
+// form. Mirrors `internal/llm.CredentialField` 1:1.
+type CredentialField struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// key is the ProviderConfig.Extra map key the daemon resolver reads (or
+	// the typed field name: "api_key", "base_url").
+	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// label is the human-facing form label.
+	Label string `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	// required flags the field as mandatory for successful construction.
+	Required bool `protobuf:"varint,3,opt,name=required,proto3" json:"required,omitempty"`
+	// secret tells the dashboard to render a password input and mask the
+	// value in any logs or audit records.
+	Secret bool `protobuf:"varint,4,opt,name=secret,proto3" json:"secret,omitempty"`
+	// placeholder is an example value shown in the empty input.
+	Placeholder string `protobuf:"bytes,5,opt,name=placeholder,proto3" json:"placeholder,omitempty"`
+	// help is a short description rendered beneath the field (Markdown-free).
+	Help string `protobuf:"bytes,6,opt,name=help,proto3" json:"help,omitempty"`
+}
+
+func (x *CredentialField) Reset() {
+	*x = CredentialField{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[93]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *CredentialField) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CredentialField) ProtoMessage() {}
+
+func (x *CredentialField) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[93]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CredentialField.ProtoReflect.Descriptor instead.
+func (*CredentialField) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{93}
+}
+
+func (x *CredentialField) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *CredentialField) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *CredentialField) GetRequired() bool {
+	if x != nil {
+		return x.Required
+	}
+	return false
+}
+
+func (x *CredentialField) GetSecret() bool {
+	if x != nil {
+		return x.Secret
+	}
+	return false
+}
+
+func (x *CredentialField) GetPlaceholder() string {
+	if x != nil {
+		return x.Placeholder
+	}
+	return ""
+}
+
+func (x *CredentialField) GetHelp() string {
+	if x != nil {
+		return x.Help
+	}
+	return ""
+}
+
+// ModelDescriptor describes a single model in a provider's catalogue.
+// Mirrors `internal/llm.ModelInfo` shape.
+type ModelDescriptor struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// name is the model identifier passed through to the provider.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// context_window is the maximum tokens the model can process.
+	ContextWindow int32 `protobuf:"varint,2,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
+	// max_output is the maximum tokens the model can generate.
+	MaxOutput int32 `protobuf:"varint,3,opt,name=max_output,json=maxOutput,proto3" json:"max_output,omitempty"`
+	// features lists the capabilities this model supports
+	// (chat, streaming, tools, vision, json_mode).
+	Features []string `protobuf:"bytes,4,rep,name=features,proto3" json:"features,omitempty"`
+}
+
+func (x *ModelDescriptor) Reset() {
+	*x = ModelDescriptor{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[94]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ModelDescriptor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelDescriptor) ProtoMessage() {}
+
+func (x *ModelDescriptor) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[94]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelDescriptor.ProtoReflect.Descriptor instead.
+func (*ModelDescriptor) Descriptor() ([]byte, []int) {
+	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{94}
+}
+
+func (x *ModelDescriptor) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ModelDescriptor) GetContextWindow() int32 {
+	if x != nil {
+		return x.ContextWindow
+	}
+	return 0
+}
+
+func (x *ModelDescriptor) GetMaxOutput() int32 {
+	if x != nil {
+		return x.MaxOutput
+	}
+	return 0
+}
+
+func (x *ModelDescriptor) GetFeatures() []string {
+	if x != nil {
+		return x.Features
+	}
+	return nil
+}
+
 var File_gibson_daemon_admin_v1_daemon_admin_proto protoreflect.FileDescriptor
 
 var file_gibson_daemon_admin_v1_daemon_admin_proto_rawDesc = []byte{
@@ -6647,8 +7016,54 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_rawDesc = []byte{
 	0x74, 0x61, 0x6c, 0x6f, 0x67, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x16, 0x0a,
 	0x06, 0x71, 0x75, 0x65, 0x75, 0x65, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x06, 0x71,
 	0x75, 0x65, 0x75, 0x65, 0x64, 0x12, 0x18, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65,
-	0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x32,
-	0xcd, 0x24, 0x0a, 0x12, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x53,
+	0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x22,
+	0x1e, 0x0a, 0x1c, 0x47, 0x65, 0x74, 0x53, 0x75, 0x70, 0x70, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x50,
+	0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22,
+	0x69, 0x0a, 0x1d, 0x47, 0x65, 0x74, 0x53, 0x75, 0x70, 0x70, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x50,
+	0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x12, 0x48, 0x0a, 0x09, 0x70, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x18, 0x01, 0x20,
+	0x03, 0x28, 0x0b, 0x32, 0x2a, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65,
+	0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x50, 0x72, 0x6f,
+	0x76, 0x69, 0x64, 0x65, 0x72, 0x44, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x6f, 0x72, 0x52,
+	0x09, 0x70, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x22, 0xa2, 0x02, 0x0a, 0x12, 0x50,
+	0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x44, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x6f,
+	0x72, 0x12, 0x12, 0x0a, 0x04, 0x74, 0x79, 0x70, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x04, 0x74, 0x79, 0x70, 0x65, 0x12, 0x21, 0x0a, 0x0c, 0x64, 0x69, 0x73, 0x70, 0x6c, 0x61, 0x79,
+	0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x64, 0x69, 0x73,
+	0x70, 0x6c, 0x61, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x19, 0x0a, 0x08, 0x64, 0x6f, 0x63, 0x73,
+	0x5f, 0x75, 0x72, 0x6c, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x64, 0x6f, 0x63, 0x73,
+	0x55, 0x72, 0x6c, 0x12, 0x1f, 0x0a, 0x0b, 0x73, 0x65, 0x6c, 0x66, 0x5f, 0x68, 0x6f, 0x73, 0x74,
+	0x65, 0x64, 0x18, 0x04, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x73, 0x65, 0x6c, 0x66, 0x48, 0x6f,
+	0x73, 0x74, 0x65, 0x64, 0x12, 0x49, 0x0a, 0x0b, 0x63, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69,
+	0x61, 0x6c, 0x73, 0x18, 0x05, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x27, 0x2e, 0x67, 0x69, 0x62, 0x73,
+	0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e,
+	0x76, 0x31, 0x2e, 0x43, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x46, 0x69, 0x65,
+	0x6c, 0x64, 0x52, 0x0b, 0x63, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x73, 0x12,
+	0x4e, 0x0a, 0x0e, 0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x5f, 0x6d, 0x6f, 0x64, 0x65, 0x6c,
+	0x73, 0x18, 0x06, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x27, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e,
+	0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31,
+	0x2e, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x44, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x6f, 0x72,
+	0x52, 0x0d, 0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x73, 0x22,
+	0xa3, 0x01, 0x0a, 0x0f, 0x43, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x46, 0x69,
+	0x65, 0x6c, 0x64, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
+	0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x6c, 0x61, 0x62, 0x65, 0x6c, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x6c, 0x61, 0x62, 0x65, 0x6c, 0x12, 0x1a, 0x0a, 0x08, 0x72,
+	0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x08, 0x52, 0x08, 0x72,
+	0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x12, 0x16, 0x0a, 0x06, 0x73, 0x65, 0x63, 0x72, 0x65,
+	0x74, 0x18, 0x04, 0x20, 0x01, 0x28, 0x08, 0x52, 0x06, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x12,
+	0x20, 0x0a, 0x0b, 0x70, 0x6c, 0x61, 0x63, 0x65, 0x68, 0x6f, 0x6c, 0x64, 0x65, 0x72, 0x18, 0x05,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x70, 0x6c, 0x61, 0x63, 0x65, 0x68, 0x6f, 0x6c, 0x64, 0x65,
+	0x72, 0x12, 0x12, 0x0a, 0x04, 0x68, 0x65, 0x6c, 0x70, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x04, 0x68, 0x65, 0x6c, 0x70, 0x22, 0x87, 0x01, 0x0a, 0x0f, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x44,
+	0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x6f, 0x72, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d,
+	0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x12, 0x25, 0x0a,
+	0x0e, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x5f, 0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0d, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x57, 0x69,
+	0x6e, 0x64, 0x6f, 0x77, 0x12, 0x1d, 0x0a, 0x0a, 0x6d, 0x61, 0x78, 0x5f, 0x6f, 0x75, 0x74, 0x70,
+	0x75, 0x74, 0x18, 0x03, 0x20, 0x01, 0x28, 0x05, 0x52, 0x09, 0x6d, 0x61, 0x78, 0x4f, 0x75, 0x74,
+	0x70, 0x75, 0x74, 0x12, 0x1a, 0x0a, 0x08, 0x66, 0x65, 0x61, 0x74, 0x75, 0x72, 0x65, 0x73, 0x18,
+	0x04, 0x20, 0x03, 0x28, 0x09, 0x52, 0x08, 0x66, 0x65, 0x61, 0x74, 0x75, 0x72, 0x65, 0x73, 0x32,
+	0xd4, 0x25, 0x0a, 0x12, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x53,
 	0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0x5d, 0x0a, 0x08, 0x53, 0x68, 0x75, 0x74, 0x64, 0x6f,
 	0x77, 0x6e, 0x12, 0x27, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d,
 	0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x68, 0x75, 0x74,
@@ -6940,22 +7355,31 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_rawDesc = []byte{
 	0x61, 0x6c, 0x6f, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x32, 0x2e, 0x67, 0x69,
 	0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69,
 	0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x52, 0x65, 0x66, 0x72, 0x65, 0x73, 0x68, 0x54, 0x6f, 0x6f, 0x6c,
-	0x43, 0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x42,
-	0xe0, 0x01, 0x0a, 0x1a, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64,
-	0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x42, 0x10,
-	0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x50, 0x72, 0x6f, 0x74, 0x6f,
-	0x50, 0x01, 0x5a, 0x35, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x7a,
-	0x65, 0x72, 0x6f, 0x2d, 0x64, 0x61, 0x79, 0x2d, 0x61, 0x69, 0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f,
-	0x6e, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x64, 0x61, 0x65, 0x6d, 0x6f,
-	0x6e, 0x2f, 0x61, 0x70, 0x69, 0x3b, 0x61, 0x70, 0x69, 0xa2, 0x02, 0x03, 0x47, 0x44, 0x41, 0xaa,
-	0x02, 0x16, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e,
-	0x41, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x56, 0x31, 0xca, 0x02, 0x16, 0x47, 0x69, 0x62, 0x73, 0x6f,
+	0x43, 0x61, 0x74, 0x61, 0x6c, 0x6f, 0x67, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
+	0x84, 0x01, 0x0a, 0x15, 0x47, 0x65, 0x74, 0x53, 0x75, 0x70, 0x70, 0x6f, 0x72, 0x74, 0x65, 0x64,
+	0x50, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x12, 0x34, 0x2e, 0x67, 0x69, 0x62, 0x73,
+	0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e,
+	0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x75, 0x70, 0x70, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x50,
+	0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x35, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e,
+	0x61, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x75, 0x70, 0x70,
+	0x6f, 0x72, 0x74, 0x65, 0x64, 0x50, 0x72, 0x6f, 0x76, 0x69, 0x64, 0x65, 0x72, 0x73, 0x52, 0x65,
+	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x42, 0xe0, 0x01, 0x0a, 0x1a, 0x63, 0x6f, 0x6d, 0x2e, 0x67,
+	0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x61, 0x64, 0x6d,
+	0x69, 0x6e, 0x2e, 0x76, 0x31, 0x42, 0x10, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x41, 0x64, 0x6d,
+	0x69, 0x6e, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x50, 0x01, 0x5a, 0x35, 0x67, 0x69, 0x74, 0x68, 0x75,
+	0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x7a, 0x65, 0x72, 0x6f, 0x2d, 0x64, 0x61, 0x79, 0x2d, 0x61,
+	0x69, 0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61,
+	0x6c, 0x2f, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2f, 0x61, 0x70, 0x69, 0x3b, 0x61, 0x70, 0x69,
+	0xa2, 0x02, 0x03, 0x47, 0x44, 0x41, 0xaa, 0x02, 0x16, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e,
+	0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2e, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x2e, 0x56, 0x31, 0xca,
+	0x02, 0x16, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x5c,
+	0x41, 0x64, 0x6d, 0x69, 0x6e, 0x5c, 0x56, 0x31, 0xe2, 0x02, 0x22, 0x47, 0x69, 0x62, 0x73, 0x6f,
 	0x6e, 0x5c, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x5c, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x5c, 0x56,
-	0x31, 0xe2, 0x02, 0x22, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c, 0x44, 0x61, 0x65, 0x6d, 0x6f,
-	0x6e, 0x5c, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x5c, 0x56, 0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65,
-	0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x19, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x3a,
-	0x3a, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x3a, 0x3a, 0x41, 0x64, 0x6d, 0x69, 0x6e, 0x3a, 0x3a,
-	0x56, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x19,
+	0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x3a, 0x3a, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x3a, 0x3a,
+	0x41, 0x64, 0x6d, 0x69, 0x6e, 0x3a, 0x3a, 0x56, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x33,
 }
 
 var (
@@ -6970,7 +7394,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP() []byte {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescData
 }
 
-var file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 93)
+var file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 98)
 var file_gibson_daemon_admin_v1_daemon_admin_proto_goTypes = []any{
 	(*ShutdownRequest)(nil),                         // 0: gibson.daemon.admin.v1.ShutdownRequest
 	(*ShutdownResponse)(nil),                        // 1: gibson.daemon.admin.v1.ShutdownResponse
@@ -7062,15 +7486,20 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_goTypes = []any{
 	(*ListAuditLogResponse)(nil),                    // 87: gibson.daemon.admin.v1.ListAuditLogResponse
 	(*RefreshToolCatalogRequest)(nil),               // 88: gibson.daemon.admin.v1.RefreshToolCatalogRequest
 	(*RefreshToolCatalogResponse)(nil),              // 89: gibson.daemon.admin.v1.RefreshToolCatalogResponse
-	nil,                                             // 90: gibson.daemon.admin.v1.GetOnboardingStateResponse.SetupTasksEntry
-	nil,                                             // 91: gibson.daemon.admin.v1.UpdateOnboardingStateRequest.SetupTasksEntry
-	nil,                                             // 92: gibson.daemon.admin.v1.AuditEvent.DetailsEntry
+	(*GetSupportedProvidersRequest)(nil),            // 90: gibson.daemon.admin.v1.GetSupportedProvidersRequest
+	(*GetSupportedProvidersResponse)(nil),           // 91: gibson.daemon.admin.v1.GetSupportedProvidersResponse
+	(*ProviderDescriptor)(nil),                      // 92: gibson.daemon.admin.v1.ProviderDescriptor
+	(*CredentialField)(nil),                         // 93: gibson.daemon.admin.v1.CredentialField
+	(*ModelDescriptor)(nil),                         // 94: gibson.daemon.admin.v1.ModelDescriptor
+	nil,                                             // 95: gibson.daemon.admin.v1.GetOnboardingStateResponse.SetupTasksEntry
+	nil,                                             // 96: gibson.daemon.admin.v1.UpdateOnboardingStateRequest.SetupTasksEntry
+	nil,                                             // 97: gibson.daemon.admin.v1.AuditEvent.DetailsEntry
 }
 var file_gibson_daemon_admin_v1_daemon_admin_proto_depIdxs = []int32{
-	90, // 0: gibson.daemon.admin.v1.GetOnboardingStateResponse.setup_tasks:type_name -> gibson.daemon.admin.v1.GetOnboardingStateResponse.SetupTasksEntry
-	91, // 1: gibson.daemon.admin.v1.UpdateOnboardingStateRequest.setup_tasks:type_name -> gibson.daemon.admin.v1.UpdateOnboardingStateRequest.SetupTasksEntry
+	95, // 0: gibson.daemon.admin.v1.GetOnboardingStateResponse.setup_tasks:type_name -> gibson.daemon.admin.v1.GetOnboardingStateResponse.SetupTasksEntry
+	96, // 1: gibson.daemon.admin.v1.UpdateOnboardingStateRequest.setup_tasks:type_name -> gibson.daemon.admin.v1.UpdateOnboardingStateRequest.SetupTasksEntry
 	16, // 2: gibson.daemon.admin.v1.ListAPIKeysResponse.keys:type_name -> gibson.daemon.admin.v1.APIKeyInfo
-	92, // 3: gibson.daemon.admin.v1.AuditEvent.details:type_name -> gibson.daemon.admin.v1.AuditEvent.DetailsEntry
+	97, // 3: gibson.daemon.admin.v1.AuditEvent.details:type_name -> gibson.daemon.admin.v1.AuditEvent.DetailsEntry
 	21, // 4: gibson.daemon.admin.v1.ListAuditEventsResponse.events:type_name -> gibson.daemon.admin.v1.AuditEvent
 	31, // 5: gibson.daemon.admin.v1.GetUserProfileResponse.profile:type_name -> gibson.daemon.admin.v1.UserProfileData
 	31, // 6: gibson.daemon.admin.v1.UpdateUserProfileResponse.profile:type_name -> gibson.daemon.admin.v1.UserProfileData
@@ -7091,87 +7520,92 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_depIdxs = []int32{
 	80, // 21: gibson.daemon.admin.v1.ListComponentGrantsResponse.grants:type_name -> gibson.daemon.admin.v1.AgentComponentGrant
 	82, // 22: gibson.daemon.admin.v1.BatchGrantComponentAccessV2Request.changes:type_name -> gibson.daemon.admin.v1.GrantChangeV2
 	86, // 23: gibson.daemon.admin.v1.ListAuditLogResponse.entries:type_name -> gibson.daemon.admin.v1.AuditLogEntry
-	0,  // 24: gibson.daemon.admin.v1.DaemonAdminService.Shutdown:input_type -> gibson.daemon.admin.v1.ShutdownRequest
-	2,  // 25: gibson.daemon.admin.v1.DaemonAdminService.ImpersonateTenant:input_type -> gibson.daemon.admin.v1.ImpersonateTenantRequest
-	4,  // 26: gibson.daemon.admin.v1.DaemonAdminService.GetTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.GetTenantLangfuseCredentialsRequest
-	6,  // 27: gibson.daemon.admin.v1.DaemonAdminService.SetTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.SetTenantLangfuseCredentialsRequest
-	8,  // 28: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.DeleteTenantLangfuseCredentialsRequest
-	10, // 29: gibson.daemon.admin.v1.DaemonAdminService.GetOnboardingState:input_type -> gibson.daemon.admin.v1.GetOnboardingStateRequest
-	12, // 30: gibson.daemon.admin.v1.DaemonAdminService.UpdateOnboardingState:input_type -> gibson.daemon.admin.v1.UpdateOnboardingStateRequest
-	14, // 31: gibson.daemon.admin.v1.DaemonAdminService.CreateAPIKey:input_type -> gibson.daemon.admin.v1.CreateAPIKeyRequest
-	17, // 32: gibson.daemon.admin.v1.DaemonAdminService.ListAPIKeys:input_type -> gibson.daemon.admin.v1.ListAPIKeysRequest
-	19, // 33: gibson.daemon.admin.v1.DaemonAdminService.RevokeAPIKey:input_type -> gibson.daemon.admin.v1.RevokeAPIKeyRequest
-	22, // 34: gibson.daemon.admin.v1.DaemonAdminService.ListAuditEvents:input_type -> gibson.daemon.admin.v1.ListAuditEventsRequest
-	24, // 35: gibson.daemon.admin.v1.DaemonAdminService.ResetPassword:input_type -> gibson.daemon.admin.v1.ResetPasswordRequest
-	26, // 36: gibson.daemon.admin.v1.DaemonAdminService.RevokeUserSessions:input_type -> gibson.daemon.admin.v1.RevokeUserSessionsRequest
-	28, // 37: gibson.daemon.admin.v1.DaemonAdminService.SuspendMember:input_type -> gibson.daemon.admin.v1.SuspendMemberRequest
-	30, // 38: gibson.daemon.admin.v1.DaemonAdminService.GetUserProfile:input_type -> gibson.daemon.admin.v1.GetUserProfileRequest
-	33, // 39: gibson.daemon.admin.v1.DaemonAdminService.UpdateUserProfile:input_type -> gibson.daemon.admin.v1.UpdateUserProfileRequest
-	36, // 40: gibson.daemon.admin.v1.DaemonAdminService.ExportFindings:input_type -> gibson.daemon.admin.v1.ExportFindingsRequest
-	38, // 41: gibson.daemon.admin.v1.DaemonAdminService.SaveMissionDraft:input_type -> gibson.daemon.admin.v1.SaveMissionDraftRequest
-	40, // 42: gibson.daemon.admin.v1.DaemonAdminService.ListMissionDrafts:input_type -> gibson.daemon.admin.v1.ListMissionDraftsRequest
-	44, // 43: gibson.daemon.admin.v1.DaemonAdminService.GetTenantQuota:input_type -> gibson.daemon.admin.v1.GetTenantQuotaRequest
-	46, // 44: gibson.daemon.admin.v1.DaemonAdminService.SetTenantQuota:input_type -> gibson.daemon.admin.v1.SetTenantQuotaRequest
-	49, // 45: gibson.daemon.admin.v1.DaemonAdminService.GetUserSessions:input_type -> gibson.daemon.admin.v1.GetUserSessionsRequest
-	52, // 46: gibson.daemon.admin.v1.DaemonAdminService.ListAlerts:input_type -> gibson.daemon.admin.v1.ListAlertsRequest
-	54, // 47: gibson.daemon.admin.v1.DaemonAdminService.MarkAlertRead:input_type -> gibson.daemon.admin.v1.MarkAlertReadRequest
-	56, // 48: gibson.daemon.admin.v1.DaemonAdminService.MarkAllAlertsRead:input_type -> gibson.daemon.admin.v1.MarkAllAlertsReadRequest
-	60, // 49: gibson.daemon.admin.v1.DaemonAdminService.ListConversations:input_type -> gibson.daemon.admin.v1.ListConversationsRequest
-	62, // 50: gibson.daemon.admin.v1.DaemonAdminService.GetConversation:input_type -> gibson.daemon.admin.v1.GetConversationRequest
-	65, // 51: gibson.daemon.admin.v1.DaemonAdminService.RegisterAgentAuth:input_type -> gibson.daemon.admin.v1.RegisterAgentAuthRequest
-	67, // 52: gibson.daemon.admin.v1.DaemonAdminService.ExecuteAgentCapability:input_type -> gibson.daemon.admin.v1.ExecuteAgentCapabilityRequest
-	75, // 53: gibson.daemon.admin.v1.DaemonAdminService.ListAgentCapabilities:input_type -> gibson.daemon.admin.v1.ListAgentCapabilitiesRequest
-	69, // 54: gibson.daemon.admin.v1.DaemonAdminService.GetAgentAuthStatus:input_type -> gibson.daemon.admin.v1.GetAgentAuthStatusRequest
-	71, // 55: gibson.daemon.admin.v1.DaemonAdminService.RevokeAgentAuth:input_type -> gibson.daemon.admin.v1.RevokeAgentAuthRequest
-	73, // 56: gibson.daemon.admin.v1.DaemonAdminService.ListAgentAuthAgents:input_type -> gibson.daemon.admin.v1.ListAgentAuthAgentsRequest
-	77, // 57: gibson.daemon.admin.v1.DaemonAdminService.CreateHostRegistrationToken:input_type -> gibson.daemon.admin.v1.CreateHostRegistrationTokenRequest
-	79, // 58: gibson.daemon.admin.v1.DaemonAdminService.ListComponentGrants:input_type -> gibson.daemon.admin.v1.ListComponentGrantsRequest
-	83, // 59: gibson.daemon.admin.v1.DaemonAdminService.BatchGrantComponentAccessV2:input_type -> gibson.daemon.admin.v1.BatchGrantComponentAccessV2Request
-	85, // 60: gibson.daemon.admin.v1.DaemonAdminService.ListAuditLog:input_type -> gibson.daemon.admin.v1.ListAuditLogRequest
-	88, // 61: gibson.daemon.admin.v1.DaemonAdminService.RefreshToolCatalog:input_type -> gibson.daemon.admin.v1.RefreshToolCatalogRequest
-	1,  // 62: gibson.daemon.admin.v1.DaemonAdminService.Shutdown:output_type -> gibson.daemon.admin.v1.ShutdownResponse
-	3,  // 63: gibson.daemon.admin.v1.DaemonAdminService.ImpersonateTenant:output_type -> gibson.daemon.admin.v1.ImpersonateTenantResponse
-	5,  // 64: gibson.daemon.admin.v1.DaemonAdminService.GetTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.GetTenantLangfuseCredentialsResponse
-	7,  // 65: gibson.daemon.admin.v1.DaemonAdminService.SetTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.SetTenantLangfuseCredentialsResponse
-	9,  // 66: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.DeleteTenantLangfuseCredentialsResponse
-	11, // 67: gibson.daemon.admin.v1.DaemonAdminService.GetOnboardingState:output_type -> gibson.daemon.admin.v1.GetOnboardingStateResponse
-	13, // 68: gibson.daemon.admin.v1.DaemonAdminService.UpdateOnboardingState:output_type -> gibson.daemon.admin.v1.UpdateOnboardingStateResponse
-	15, // 69: gibson.daemon.admin.v1.DaemonAdminService.CreateAPIKey:output_type -> gibson.daemon.admin.v1.CreateAPIKeyResponse
-	18, // 70: gibson.daemon.admin.v1.DaemonAdminService.ListAPIKeys:output_type -> gibson.daemon.admin.v1.ListAPIKeysResponse
-	20, // 71: gibson.daemon.admin.v1.DaemonAdminService.RevokeAPIKey:output_type -> gibson.daemon.admin.v1.RevokeAPIKeyResponse
-	23, // 72: gibson.daemon.admin.v1.DaemonAdminService.ListAuditEvents:output_type -> gibson.daemon.admin.v1.ListAuditEventsResponse
-	25, // 73: gibson.daemon.admin.v1.DaemonAdminService.ResetPassword:output_type -> gibson.daemon.admin.v1.ResetPasswordResponse
-	27, // 74: gibson.daemon.admin.v1.DaemonAdminService.RevokeUserSessions:output_type -> gibson.daemon.admin.v1.RevokeUserSessionsResponse
-	29, // 75: gibson.daemon.admin.v1.DaemonAdminService.SuspendMember:output_type -> gibson.daemon.admin.v1.SuspendMemberResponse
-	32, // 76: gibson.daemon.admin.v1.DaemonAdminService.GetUserProfile:output_type -> gibson.daemon.admin.v1.GetUserProfileResponse
-	34, // 77: gibson.daemon.admin.v1.DaemonAdminService.UpdateUserProfile:output_type -> gibson.daemon.admin.v1.UpdateUserProfileResponse
-	37, // 78: gibson.daemon.admin.v1.DaemonAdminService.ExportFindings:output_type -> gibson.daemon.admin.v1.ExportFindingsResponse
-	39, // 79: gibson.daemon.admin.v1.DaemonAdminService.SaveMissionDraft:output_type -> gibson.daemon.admin.v1.SaveMissionDraftResponse
-	42, // 80: gibson.daemon.admin.v1.DaemonAdminService.ListMissionDrafts:output_type -> gibson.daemon.admin.v1.ListMissionDraftsResponse
-	45, // 81: gibson.daemon.admin.v1.DaemonAdminService.GetTenantQuota:output_type -> gibson.daemon.admin.v1.GetTenantQuotaResponse
-	47, // 82: gibson.daemon.admin.v1.DaemonAdminService.SetTenantQuota:output_type -> gibson.daemon.admin.v1.SetTenantQuotaResponse
-	50, // 83: gibson.daemon.admin.v1.DaemonAdminService.GetUserSessions:output_type -> gibson.daemon.admin.v1.GetUserSessionsResponse
-	53, // 84: gibson.daemon.admin.v1.DaemonAdminService.ListAlerts:output_type -> gibson.daemon.admin.v1.ListAlertsResponse
-	55, // 85: gibson.daemon.admin.v1.DaemonAdminService.MarkAlertRead:output_type -> gibson.daemon.admin.v1.MarkAlertReadResponse
-	57, // 86: gibson.daemon.admin.v1.DaemonAdminService.MarkAllAlertsRead:output_type -> gibson.daemon.admin.v1.MarkAllAlertsReadResponse
-	61, // 87: gibson.daemon.admin.v1.DaemonAdminService.ListConversations:output_type -> gibson.daemon.admin.v1.ListConversationsResponse
-	63, // 88: gibson.daemon.admin.v1.DaemonAdminService.GetConversation:output_type -> gibson.daemon.admin.v1.GetConversationResponse
-	66, // 89: gibson.daemon.admin.v1.DaemonAdminService.RegisterAgentAuth:output_type -> gibson.daemon.admin.v1.RegisterAgentAuthResponse
-	68, // 90: gibson.daemon.admin.v1.DaemonAdminService.ExecuteAgentCapability:output_type -> gibson.daemon.admin.v1.ExecuteAgentCapabilityResponse
-	76, // 91: gibson.daemon.admin.v1.DaemonAdminService.ListAgentCapabilities:output_type -> gibson.daemon.admin.v1.ListAgentCapabilitiesResponse
-	70, // 92: gibson.daemon.admin.v1.DaemonAdminService.GetAgentAuthStatus:output_type -> gibson.daemon.admin.v1.GetAgentAuthStatusResponse
-	72, // 93: gibson.daemon.admin.v1.DaemonAdminService.RevokeAgentAuth:output_type -> gibson.daemon.admin.v1.RevokeAgentAuthResponse
-	74, // 94: gibson.daemon.admin.v1.DaemonAdminService.ListAgentAuthAgents:output_type -> gibson.daemon.admin.v1.ListAgentAuthAgentsResponse
-	78, // 95: gibson.daemon.admin.v1.DaemonAdminService.CreateHostRegistrationToken:output_type -> gibson.daemon.admin.v1.CreateHostRegistrationTokenResponse
-	81, // 96: gibson.daemon.admin.v1.DaemonAdminService.ListComponentGrants:output_type -> gibson.daemon.admin.v1.ListComponentGrantsResponse
-	84, // 97: gibson.daemon.admin.v1.DaemonAdminService.BatchGrantComponentAccessV2:output_type -> gibson.daemon.admin.v1.BatchGrantComponentAccessV2Response
-	87, // 98: gibson.daemon.admin.v1.DaemonAdminService.ListAuditLog:output_type -> gibson.daemon.admin.v1.ListAuditLogResponse
-	89, // 99: gibson.daemon.admin.v1.DaemonAdminService.RefreshToolCatalog:output_type -> gibson.daemon.admin.v1.RefreshToolCatalogResponse
-	62, // [62:100] is the sub-list for method output_type
-	24, // [24:62] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	92, // 24: gibson.daemon.admin.v1.GetSupportedProvidersResponse.providers:type_name -> gibson.daemon.admin.v1.ProviderDescriptor
+	93, // 25: gibson.daemon.admin.v1.ProviderDescriptor.credentials:type_name -> gibson.daemon.admin.v1.CredentialField
+	94, // 26: gibson.daemon.admin.v1.ProviderDescriptor.default_models:type_name -> gibson.daemon.admin.v1.ModelDescriptor
+	0,  // 27: gibson.daemon.admin.v1.DaemonAdminService.Shutdown:input_type -> gibson.daemon.admin.v1.ShutdownRequest
+	2,  // 28: gibson.daemon.admin.v1.DaemonAdminService.ImpersonateTenant:input_type -> gibson.daemon.admin.v1.ImpersonateTenantRequest
+	4,  // 29: gibson.daemon.admin.v1.DaemonAdminService.GetTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.GetTenantLangfuseCredentialsRequest
+	6,  // 30: gibson.daemon.admin.v1.DaemonAdminService.SetTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.SetTenantLangfuseCredentialsRequest
+	8,  // 31: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenantLangfuseCredentials:input_type -> gibson.daemon.admin.v1.DeleteTenantLangfuseCredentialsRequest
+	10, // 32: gibson.daemon.admin.v1.DaemonAdminService.GetOnboardingState:input_type -> gibson.daemon.admin.v1.GetOnboardingStateRequest
+	12, // 33: gibson.daemon.admin.v1.DaemonAdminService.UpdateOnboardingState:input_type -> gibson.daemon.admin.v1.UpdateOnboardingStateRequest
+	14, // 34: gibson.daemon.admin.v1.DaemonAdminService.CreateAPIKey:input_type -> gibson.daemon.admin.v1.CreateAPIKeyRequest
+	17, // 35: gibson.daemon.admin.v1.DaemonAdminService.ListAPIKeys:input_type -> gibson.daemon.admin.v1.ListAPIKeysRequest
+	19, // 36: gibson.daemon.admin.v1.DaemonAdminService.RevokeAPIKey:input_type -> gibson.daemon.admin.v1.RevokeAPIKeyRequest
+	22, // 37: gibson.daemon.admin.v1.DaemonAdminService.ListAuditEvents:input_type -> gibson.daemon.admin.v1.ListAuditEventsRequest
+	24, // 38: gibson.daemon.admin.v1.DaemonAdminService.ResetPassword:input_type -> gibson.daemon.admin.v1.ResetPasswordRequest
+	26, // 39: gibson.daemon.admin.v1.DaemonAdminService.RevokeUserSessions:input_type -> gibson.daemon.admin.v1.RevokeUserSessionsRequest
+	28, // 40: gibson.daemon.admin.v1.DaemonAdminService.SuspendMember:input_type -> gibson.daemon.admin.v1.SuspendMemberRequest
+	30, // 41: gibson.daemon.admin.v1.DaemonAdminService.GetUserProfile:input_type -> gibson.daemon.admin.v1.GetUserProfileRequest
+	33, // 42: gibson.daemon.admin.v1.DaemonAdminService.UpdateUserProfile:input_type -> gibson.daemon.admin.v1.UpdateUserProfileRequest
+	36, // 43: gibson.daemon.admin.v1.DaemonAdminService.ExportFindings:input_type -> gibson.daemon.admin.v1.ExportFindingsRequest
+	38, // 44: gibson.daemon.admin.v1.DaemonAdminService.SaveMissionDraft:input_type -> gibson.daemon.admin.v1.SaveMissionDraftRequest
+	40, // 45: gibson.daemon.admin.v1.DaemonAdminService.ListMissionDrafts:input_type -> gibson.daemon.admin.v1.ListMissionDraftsRequest
+	44, // 46: gibson.daemon.admin.v1.DaemonAdminService.GetTenantQuota:input_type -> gibson.daemon.admin.v1.GetTenantQuotaRequest
+	46, // 47: gibson.daemon.admin.v1.DaemonAdminService.SetTenantQuota:input_type -> gibson.daemon.admin.v1.SetTenantQuotaRequest
+	49, // 48: gibson.daemon.admin.v1.DaemonAdminService.GetUserSessions:input_type -> gibson.daemon.admin.v1.GetUserSessionsRequest
+	52, // 49: gibson.daemon.admin.v1.DaemonAdminService.ListAlerts:input_type -> gibson.daemon.admin.v1.ListAlertsRequest
+	54, // 50: gibson.daemon.admin.v1.DaemonAdminService.MarkAlertRead:input_type -> gibson.daemon.admin.v1.MarkAlertReadRequest
+	56, // 51: gibson.daemon.admin.v1.DaemonAdminService.MarkAllAlertsRead:input_type -> gibson.daemon.admin.v1.MarkAllAlertsReadRequest
+	60, // 52: gibson.daemon.admin.v1.DaemonAdminService.ListConversations:input_type -> gibson.daemon.admin.v1.ListConversationsRequest
+	62, // 53: gibson.daemon.admin.v1.DaemonAdminService.GetConversation:input_type -> gibson.daemon.admin.v1.GetConversationRequest
+	65, // 54: gibson.daemon.admin.v1.DaemonAdminService.RegisterAgentAuth:input_type -> gibson.daemon.admin.v1.RegisterAgentAuthRequest
+	67, // 55: gibson.daemon.admin.v1.DaemonAdminService.ExecuteAgentCapability:input_type -> gibson.daemon.admin.v1.ExecuteAgentCapabilityRequest
+	75, // 56: gibson.daemon.admin.v1.DaemonAdminService.ListAgentCapabilities:input_type -> gibson.daemon.admin.v1.ListAgentCapabilitiesRequest
+	69, // 57: gibson.daemon.admin.v1.DaemonAdminService.GetAgentAuthStatus:input_type -> gibson.daemon.admin.v1.GetAgentAuthStatusRequest
+	71, // 58: gibson.daemon.admin.v1.DaemonAdminService.RevokeAgentAuth:input_type -> gibson.daemon.admin.v1.RevokeAgentAuthRequest
+	73, // 59: gibson.daemon.admin.v1.DaemonAdminService.ListAgentAuthAgents:input_type -> gibson.daemon.admin.v1.ListAgentAuthAgentsRequest
+	77, // 60: gibson.daemon.admin.v1.DaemonAdminService.CreateHostRegistrationToken:input_type -> gibson.daemon.admin.v1.CreateHostRegistrationTokenRequest
+	79, // 61: gibson.daemon.admin.v1.DaemonAdminService.ListComponentGrants:input_type -> gibson.daemon.admin.v1.ListComponentGrantsRequest
+	83, // 62: gibson.daemon.admin.v1.DaemonAdminService.BatchGrantComponentAccessV2:input_type -> gibson.daemon.admin.v1.BatchGrantComponentAccessV2Request
+	85, // 63: gibson.daemon.admin.v1.DaemonAdminService.ListAuditLog:input_type -> gibson.daemon.admin.v1.ListAuditLogRequest
+	88, // 64: gibson.daemon.admin.v1.DaemonAdminService.RefreshToolCatalog:input_type -> gibson.daemon.admin.v1.RefreshToolCatalogRequest
+	90, // 65: gibson.daemon.admin.v1.DaemonAdminService.GetSupportedProviders:input_type -> gibson.daemon.admin.v1.GetSupportedProvidersRequest
+	1,  // 66: gibson.daemon.admin.v1.DaemonAdminService.Shutdown:output_type -> gibson.daemon.admin.v1.ShutdownResponse
+	3,  // 67: gibson.daemon.admin.v1.DaemonAdminService.ImpersonateTenant:output_type -> gibson.daemon.admin.v1.ImpersonateTenantResponse
+	5,  // 68: gibson.daemon.admin.v1.DaemonAdminService.GetTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.GetTenantLangfuseCredentialsResponse
+	7,  // 69: gibson.daemon.admin.v1.DaemonAdminService.SetTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.SetTenantLangfuseCredentialsResponse
+	9,  // 70: gibson.daemon.admin.v1.DaemonAdminService.DeleteTenantLangfuseCredentials:output_type -> gibson.daemon.admin.v1.DeleteTenantLangfuseCredentialsResponse
+	11, // 71: gibson.daemon.admin.v1.DaemonAdminService.GetOnboardingState:output_type -> gibson.daemon.admin.v1.GetOnboardingStateResponse
+	13, // 72: gibson.daemon.admin.v1.DaemonAdminService.UpdateOnboardingState:output_type -> gibson.daemon.admin.v1.UpdateOnboardingStateResponse
+	15, // 73: gibson.daemon.admin.v1.DaemonAdminService.CreateAPIKey:output_type -> gibson.daemon.admin.v1.CreateAPIKeyResponse
+	18, // 74: gibson.daemon.admin.v1.DaemonAdminService.ListAPIKeys:output_type -> gibson.daemon.admin.v1.ListAPIKeysResponse
+	20, // 75: gibson.daemon.admin.v1.DaemonAdminService.RevokeAPIKey:output_type -> gibson.daemon.admin.v1.RevokeAPIKeyResponse
+	23, // 76: gibson.daemon.admin.v1.DaemonAdminService.ListAuditEvents:output_type -> gibson.daemon.admin.v1.ListAuditEventsResponse
+	25, // 77: gibson.daemon.admin.v1.DaemonAdminService.ResetPassword:output_type -> gibson.daemon.admin.v1.ResetPasswordResponse
+	27, // 78: gibson.daemon.admin.v1.DaemonAdminService.RevokeUserSessions:output_type -> gibson.daemon.admin.v1.RevokeUserSessionsResponse
+	29, // 79: gibson.daemon.admin.v1.DaemonAdminService.SuspendMember:output_type -> gibson.daemon.admin.v1.SuspendMemberResponse
+	32, // 80: gibson.daemon.admin.v1.DaemonAdminService.GetUserProfile:output_type -> gibson.daemon.admin.v1.GetUserProfileResponse
+	34, // 81: gibson.daemon.admin.v1.DaemonAdminService.UpdateUserProfile:output_type -> gibson.daemon.admin.v1.UpdateUserProfileResponse
+	37, // 82: gibson.daemon.admin.v1.DaemonAdminService.ExportFindings:output_type -> gibson.daemon.admin.v1.ExportFindingsResponse
+	39, // 83: gibson.daemon.admin.v1.DaemonAdminService.SaveMissionDraft:output_type -> gibson.daemon.admin.v1.SaveMissionDraftResponse
+	42, // 84: gibson.daemon.admin.v1.DaemonAdminService.ListMissionDrafts:output_type -> gibson.daemon.admin.v1.ListMissionDraftsResponse
+	45, // 85: gibson.daemon.admin.v1.DaemonAdminService.GetTenantQuota:output_type -> gibson.daemon.admin.v1.GetTenantQuotaResponse
+	47, // 86: gibson.daemon.admin.v1.DaemonAdminService.SetTenantQuota:output_type -> gibson.daemon.admin.v1.SetTenantQuotaResponse
+	50, // 87: gibson.daemon.admin.v1.DaemonAdminService.GetUserSessions:output_type -> gibson.daemon.admin.v1.GetUserSessionsResponse
+	53, // 88: gibson.daemon.admin.v1.DaemonAdminService.ListAlerts:output_type -> gibson.daemon.admin.v1.ListAlertsResponse
+	55, // 89: gibson.daemon.admin.v1.DaemonAdminService.MarkAlertRead:output_type -> gibson.daemon.admin.v1.MarkAlertReadResponse
+	57, // 90: gibson.daemon.admin.v1.DaemonAdminService.MarkAllAlertsRead:output_type -> gibson.daemon.admin.v1.MarkAllAlertsReadResponse
+	61, // 91: gibson.daemon.admin.v1.DaemonAdminService.ListConversations:output_type -> gibson.daemon.admin.v1.ListConversationsResponse
+	63, // 92: gibson.daemon.admin.v1.DaemonAdminService.GetConversation:output_type -> gibson.daemon.admin.v1.GetConversationResponse
+	66, // 93: gibson.daemon.admin.v1.DaemonAdminService.RegisterAgentAuth:output_type -> gibson.daemon.admin.v1.RegisterAgentAuthResponse
+	68, // 94: gibson.daemon.admin.v1.DaemonAdminService.ExecuteAgentCapability:output_type -> gibson.daemon.admin.v1.ExecuteAgentCapabilityResponse
+	76, // 95: gibson.daemon.admin.v1.DaemonAdminService.ListAgentCapabilities:output_type -> gibson.daemon.admin.v1.ListAgentCapabilitiesResponse
+	70, // 96: gibson.daemon.admin.v1.DaemonAdminService.GetAgentAuthStatus:output_type -> gibson.daemon.admin.v1.GetAgentAuthStatusResponse
+	72, // 97: gibson.daemon.admin.v1.DaemonAdminService.RevokeAgentAuth:output_type -> gibson.daemon.admin.v1.RevokeAgentAuthResponse
+	74, // 98: gibson.daemon.admin.v1.DaemonAdminService.ListAgentAuthAgents:output_type -> gibson.daemon.admin.v1.ListAgentAuthAgentsResponse
+	78, // 99: gibson.daemon.admin.v1.DaemonAdminService.CreateHostRegistrationToken:output_type -> gibson.daemon.admin.v1.CreateHostRegistrationTokenResponse
+	81, // 100: gibson.daemon.admin.v1.DaemonAdminService.ListComponentGrants:output_type -> gibson.daemon.admin.v1.ListComponentGrantsResponse
+	84, // 101: gibson.daemon.admin.v1.DaemonAdminService.BatchGrantComponentAccessV2:output_type -> gibson.daemon.admin.v1.BatchGrantComponentAccessV2Response
+	87, // 102: gibson.daemon.admin.v1.DaemonAdminService.ListAuditLog:output_type -> gibson.daemon.admin.v1.ListAuditLogResponse
+	89, // 103: gibson.daemon.admin.v1.DaemonAdminService.RefreshToolCatalog:output_type -> gibson.daemon.admin.v1.RefreshToolCatalogResponse
+	91, // 104: gibson.daemon.admin.v1.DaemonAdminService.GetSupportedProviders:output_type -> gibson.daemon.admin.v1.GetSupportedProvidersResponse
+	66, // [66:105] is the sub-list for method output_type
+	27, // [27:66] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_gibson_daemon_admin_v1_daemon_admin_proto_init() }
@@ -8260,6 +8694,66 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 				return nil
 			}
 		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[90].Exporter = func(v any, i int) any {
+			switch v := v.(*GetSupportedProvidersRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[91].Exporter = func(v any, i int) any {
+			switch v := v.(*GetSupportedProvidersResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[92].Exporter = func(v any, i int) any {
+			switch v := v.(*ProviderDescriptor); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[93].Exporter = func(v any, i int) any {
+			switch v := v.(*CredentialField); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[94].Exporter = func(v any, i int) any {
+			switch v := v.(*ModelDescriptor); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -8267,7 +8761,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_gibson_daemon_admin_v1_daemon_admin_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   93,
+			NumMessages:   98,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

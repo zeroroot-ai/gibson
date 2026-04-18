@@ -8,7 +8,6 @@ package api
 
 import (
 	context "context"
-
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -58,6 +57,7 @@ const (
 	DaemonAdminService_BatchGrantComponentAccessV2_FullMethodName     = "/gibson.daemon.admin.v1.DaemonAdminService/BatchGrantComponentAccessV2"
 	DaemonAdminService_ListAuditLog_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/ListAuditLog"
 	DaemonAdminService_RefreshToolCatalog_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/RefreshToolCatalog"
+	DaemonAdminService_GetSupportedProviders_FullMethodName           = "/gibson.daemon.admin.v1.DaemonAdminService/GetSupportedProviders"
 )
 
 // DaemonAdminServiceClient is the client API for DaemonAdminService service.
@@ -187,6 +187,14 @@ type DaemonAdminServiceClient interface {
 	// leader lease; followers accept the call but defer to the leader's
 	// next scheduled tick. Requires the platform-operator FGA role.
 	RefreshToolCatalog(ctx context.Context, in *RefreshToolCatalogRequest, opts ...grpc.CallOption) (*RefreshToolCatalogResponse, error)
+	// GetSupportedProviders returns the full list of LLM provider types the
+	// daemon can construct, with per-provider credential schemas and default
+	// model catalogues. The dashboard consumes this to render the Settings >
+	// Providers form dynamically — no hard-coded frontend provider list,
+	// no drift between daemon and UI. Read-only; all metadata is built from
+	// in-process provider descriptors (no network calls). Requires any
+	// authenticated tenant member role.
+	GetSupportedProviders(ctx context.Context, in *GetSupportedProvidersRequest, opts ...grpc.CallOption) (*GetSupportedProvidersResponse, error)
 }
 
 type daemonAdminServiceClient struct {
@@ -577,6 +585,16 @@ func (c *daemonAdminServiceClient) RefreshToolCatalog(ctx context.Context, in *R
 	return out, nil
 }
 
+func (c *daemonAdminServiceClient) GetSupportedProviders(ctx context.Context, in *GetSupportedProvidersRequest, opts ...grpc.CallOption) (*GetSupportedProvidersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSupportedProvidersResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetSupportedProviders_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonAdminServiceServer is the server API for DaemonAdminService service.
 // All implementations must embed UnimplementedDaemonAdminServiceServer
 // for forward compatibility.
@@ -704,6 +722,14 @@ type DaemonAdminServiceServer interface {
 	// leader lease; followers accept the call but defer to the leader's
 	// next scheduled tick. Requires the platform-operator FGA role.
 	RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error)
+	// GetSupportedProviders returns the full list of LLM provider types the
+	// daemon can construct, with per-provider credential schemas and default
+	// model catalogues. The dashboard consumes this to render the Settings >
+	// Providers form dynamically — no hard-coded frontend provider list,
+	// no drift between daemon and UI. Read-only; all metadata is built from
+	// in-process provider descriptors (no network calls). Requires any
+	// authenticated tenant member role.
+	GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error)
 	mustEmbedUnimplementedDaemonAdminServiceServer()
 }
 
@@ -827,6 +853,9 @@ func (UnimplementedDaemonAdminServiceServer) ListAuditLog(context.Context, *List
 }
 func (UnimplementedDaemonAdminServiceServer) RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RefreshToolCatalog not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSupportedProviders not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) mustEmbedUnimplementedDaemonAdminServiceServer() {}
 func (UnimplementedDaemonAdminServiceServer) testEmbeddedByValue()                            {}
@@ -1533,6 +1562,24 @@ func _DaemonAdminService_RefreshToolCatalog_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonAdminService_GetSupportedProviders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSupportedProvidersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetSupportedProviders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetSupportedProviders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetSupportedProviders(ctx, req.(*GetSupportedProvidersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonAdminService_ServiceDesc is the grpc.ServiceDesc for DaemonAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1691,6 +1738,10 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RefreshToolCatalog",
 			Handler:    _DaemonAdminService_RefreshToolCatalog_Handler,
+		},
+		{
+			MethodName: "GetSupportedProviders",
+			Handler:    _DaemonAdminService_GetSupportedProviders_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
