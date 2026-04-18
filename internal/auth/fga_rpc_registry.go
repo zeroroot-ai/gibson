@@ -349,6 +349,14 @@ func (r *FgaRpcRegistry) populate() {
 		Description: "Trigger immediate sandboxed-tool catalog refresh (platform operator only)",
 	})
 
+	// LLM provider introspection. Any authenticated tenant member can fetch
+	// the provider descriptor catalogue — it contains no secrets, only the
+	// form schema needed to render the Settings > Providers dropdown.
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetSupportedProviders", FgaCheckSpec{
+		Relation:    "member",
+		Description: "List supported LLM provider types and their credential schemas",
+	})
+
 	// Observability.
 	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetTenantLangfuseCredentials", FgaCheckSpec{
 		Relation:    "member",

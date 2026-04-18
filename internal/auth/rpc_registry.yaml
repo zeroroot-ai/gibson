@@ -164,6 +164,9 @@ entries:
     relation: platform_operator
     object: system_tenant:_system
     description: Trigger immediate sandboxed-tool catalog refresh (platform operator only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetSupportedProviders
+    relation: member
+    description: List supported LLM provider types and their credential schemas
 
   # Observability — tenant Langfuse credentials.
   - method: /gibson.daemon.admin.v1.DaemonAdminService/GetTenantLangfuseCredentials
