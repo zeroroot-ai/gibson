@@ -20,6 +20,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/reconciler"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -825,6 +826,19 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		podNamespace = "default"
 	}
 	validateNetworkPolicies(d.logger, podNamespace, d.config.Auth.Mode == "saas")
+
+	// Start the catalog-fan-out reconciler — ensures every platform_enabled
+	// catalog item has a tenant_enabled tuple on every existing tenant so
+	// new marketplace publishes propagate without a Tenant-CR edit. Runs
+	// best-effort; failures are logged, not fatal. Spec R4 AC 7.
+	if d.authorizer != nil {
+		fanout := reconciler.NewCatalogFanout(reconciler.CatalogFanoutConfig{
+			Authorizer: d.authorizer,
+			Logger:     d.logger.Slog(),
+		})
+		go fanout.Run(internalCtx)
+		d.logger.Info(ctx, "catalog fan-out reconciler started (60s interval)")
+	}
 
 	// Setup signal handler for graceful shutdown
 	d.logger.Info(ctx, "setting up signal handler for graceful shutdown")

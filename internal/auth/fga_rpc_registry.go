@@ -797,6 +797,52 @@ func (r *FgaRpcRegistry) populate() {
 		ObjectFrom:  constObject("component:_system"),
 		Description: "Report step hints from an agent",
 	})
+
+	// ---------------------------------------------------------------------
+	// DiscoveryService — read-only introspection for gibson-mcp + dashboard.
+	// Every RPC gates on tenant#member since they surface tenant-scoped
+	// catalog state. The handler itself enforces the scope+action semantics;
+	// this registry entry just ensures the caller belongs to the tenant.
+	// Spec: agent-authoring-and-tenant-entitlements R6 AC 2.
+	// ---------------------------------------------------------------------
+	discoveryRPCs := []string{
+		"/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI",
+		"/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins",
+		"/gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin",
+		"/gibson.daemon.discovery.v1.DiscoveryService/ListTools",
+		"/gibson.daemon.discovery.v1.DiscoveryService/DescribeTool",
+		"/gibson.daemon.discovery.v1.DiscoveryService/ListAgents",
+		"/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent",
+		"/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots",
+		"/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces",
+		"/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent",
+		"/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability",
+	}
+	for _, method := range discoveryRPCs {
+		r.add(method, FgaCheckSpec{
+			Relation:    "member",
+			Description: "DiscoveryService: " + method[len("/gibson.daemon.discovery.v1.DiscoveryService/"):],
+		})
+	}
+
+	// ---------------------------------------------------------------------
+	// Entitlement admin RPCs — called by the tenant-operator through the
+	// dashboard's SPIFFE admin provisioning routes. Gate on the tenant
+	// admin relation so the interceptor rejects misrouted browser traffic
+	// (which should never hit DaemonAdminService anyway). Spec R4/R12.
+	// ---------------------------------------------------------------------
+	entitlementRPCs := []string{
+		"/gibson.daemon.admin.v1.DaemonAdminService/WriteAccessTuples",
+		"/gibson.daemon.admin.v1.DaemonAdminService/UpsertTenantQuota",
+		"/gibson.daemon.admin.v1.DaemonAdminService/ListFeatureTuples",
+		"/gibson.daemon.admin.v1.DaemonAdminService/SeedCatalogTenantEnabled",
+	}
+	for _, method := range entitlementRPCs {
+		r.add(method, FgaCheckSpec{
+			Relation:    "admin",
+			Description: "Entitlement admin RPC: " + method[len("/gibson.daemon.admin.v1.DaemonAdminService/"):],
+		})
+	}
 }
 
 // add registers a single entry, panicking on duplicate to catch programming errors.

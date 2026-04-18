@@ -58,6 +58,10 @@ const (
 	DaemonAdminService_ListAuditLog_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/ListAuditLog"
 	DaemonAdminService_RefreshToolCatalog_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/RefreshToolCatalog"
 	DaemonAdminService_GetSupportedProviders_FullMethodName           = "/gibson.daemon.admin.v1.DaemonAdminService/GetSupportedProviders"
+	DaemonAdminService_WriteAccessTuples_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/WriteAccessTuples"
+	DaemonAdminService_UpsertTenantQuota_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/UpsertTenantQuota"
+	DaemonAdminService_ListFeatureTuples_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/ListFeatureTuples"
+	DaemonAdminService_SeedCatalogTenantEnabled_FullMethodName        = "/gibson.daemon.admin.v1.DaemonAdminService/SeedCatalogTenantEnabled"
 )
 
 // DaemonAdminServiceClient is the client API for DaemonAdminService service.
@@ -195,6 +199,26 @@ type DaemonAdminServiceClient interface {
 	// in-process provider descriptors (no network calls). Requires any
 	// authenticated tenant member role.
 	GetSupportedProviders(ctx context.Context, in *GetSupportedProvidersRequest, opts ...grpc.CallOption) (*GetSupportedProvidersResponse, error)
+	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
+	// an authenticated caller. The daemon validates that every tuple's subject
+	// matches the tenant scope implied by the interceptor; cross-tenant writes
+	// are denied even for platform-operator callers.
+	WriteAccessTuples(ctx context.Context, in *WriteAccessTuplesRequest, opts ...grpc.CallOption) (*WriteAccessTuplesResponse, error)
+	// UpsertTenantQuota writes the tenant's runtime quota record (seats,
+	// concurrent_agents, storage_gb, retention_days, sandbox_launches_per_month)
+	// to Postgres. Called by the operator's reconcile loop after resolving the
+	// plan from the canonical plan registry.
+	UpsertTenantQuota(ctx context.Context, in *UpsertTenantQuotaRequest, opts ...grpc.CallOption) (*UpsertTenantQuotaResponse, error)
+	// ListFeatureTuples enumerates the tenant:X#has_*@tenant:X informational
+	// tuples currently set on a given tenant. Consumed by the operator during
+	// reconcile to diff against the plan's desired set.
+	ListFeatureTuples(ctx context.Context, in *ListFeatureTuplesRequest, opts ...grpc.CallOption) (*ListFeatureTuplesResponse, error)
+	// SeedCatalogTenantEnabled writes a tenant_enabled tuple on every catalog
+	// item currently carrying a platform_enabled tuple on system_tenant:_system.
+	// Idempotent; called by the operator on first reconcile of a newly-created
+	// tenant and by a background reconciler when new platform-catalog items are
+	// published.
+	SeedCatalogTenantEnabled(ctx context.Context, in *SeedCatalogTenantEnabledRequest, opts ...grpc.CallOption) (*SeedCatalogTenantEnabledResponse, error)
 }
 
 type daemonAdminServiceClient struct {
@@ -595,6 +619,46 @@ func (c *daemonAdminServiceClient) GetSupportedProviders(ctx context.Context, in
 	return out, nil
 }
 
+func (c *daemonAdminServiceClient) WriteAccessTuples(ctx context.Context, in *WriteAccessTuplesRequest, opts ...grpc.CallOption) (*WriteAccessTuplesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WriteAccessTuplesResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_WriteAccessTuples_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) UpsertTenantQuota(ctx context.Context, in *UpsertTenantQuotaRequest, opts ...grpc.CallOption) (*UpsertTenantQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpsertTenantQuotaResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_UpsertTenantQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ListFeatureTuples(ctx context.Context, in *ListFeatureTuplesRequest, opts ...grpc.CallOption) (*ListFeatureTuplesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListFeatureTuplesResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListFeatureTuples_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) SeedCatalogTenantEnabled(ctx context.Context, in *SeedCatalogTenantEnabledRequest, opts ...grpc.CallOption) (*SeedCatalogTenantEnabledResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SeedCatalogTenantEnabledResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_SeedCatalogTenantEnabled_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonAdminServiceServer is the server API for DaemonAdminService service.
 // All implementations must embed UnimplementedDaemonAdminServiceServer
 // for forward compatibility.
@@ -730,6 +794,26 @@ type DaemonAdminServiceServer interface {
 	// in-process provider descriptors (no network calls). Requires any
 	// authenticated tenant member role.
 	GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error)
+	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
+	// an authenticated caller. The daemon validates that every tuple's subject
+	// matches the tenant scope implied by the interceptor; cross-tenant writes
+	// are denied even for platform-operator callers.
+	WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error)
+	// UpsertTenantQuota writes the tenant's runtime quota record (seats,
+	// concurrent_agents, storage_gb, retention_days, sandbox_launches_per_month)
+	// to Postgres. Called by the operator's reconcile loop after resolving the
+	// plan from the canonical plan registry.
+	UpsertTenantQuota(context.Context, *UpsertTenantQuotaRequest) (*UpsertTenantQuotaResponse, error)
+	// ListFeatureTuples enumerates the tenant:X#has_*@tenant:X informational
+	// tuples currently set on a given tenant. Consumed by the operator during
+	// reconcile to diff against the plan's desired set.
+	ListFeatureTuples(context.Context, *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error)
+	// SeedCatalogTenantEnabled writes a tenant_enabled tuple on every catalog
+	// item currently carrying a platform_enabled tuple on system_tenant:_system.
+	// Idempotent; called by the operator on first reconcile of a newly-created
+	// tenant and by a background reconciler when new platform-catalog items are
+	// published.
+	SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error)
 	mustEmbedUnimplementedDaemonAdminServiceServer()
 }
 
@@ -856,6 +940,18 @@ func (UnimplementedDaemonAdminServiceServer) RefreshToolCatalog(context.Context,
 }
 func (UnimplementedDaemonAdminServiceServer) GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSupportedProviders not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WriteAccessTuples not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) UpsertTenantQuota(context.Context, *UpsertTenantQuotaRequest) (*UpsertTenantQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpsertTenantQuota not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListFeatureTuples(context.Context, *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListFeatureTuples not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SeedCatalogTenantEnabled not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) mustEmbedUnimplementedDaemonAdminServiceServer() {}
 func (UnimplementedDaemonAdminServiceServer) testEmbeddedByValue()                            {}
@@ -1580,6 +1676,78 @@ func _DaemonAdminService_GetSupportedProviders_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonAdminService_WriteAccessTuples_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WriteAccessTuplesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).WriteAccessTuples(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_WriteAccessTuples_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).WriteAccessTuples(ctx, req.(*WriteAccessTuplesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_UpsertTenantQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpsertTenantQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).UpsertTenantQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_UpsertTenantQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).UpsertTenantQuota(ctx, req.(*UpsertTenantQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ListFeatureTuples_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListFeatureTuplesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListFeatureTuples(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListFeatureTuples_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListFeatureTuples(ctx, req.(*ListFeatureTuplesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_SeedCatalogTenantEnabled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SeedCatalogTenantEnabledRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).SeedCatalogTenantEnabled(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_SeedCatalogTenantEnabled_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).SeedCatalogTenantEnabled(ctx, req.(*SeedCatalogTenantEnabledRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonAdminService_ServiceDesc is the grpc.ServiceDesc for DaemonAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1742,6 +1910,22 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSupportedProviders",
 			Handler:    _DaemonAdminService_GetSupportedProviders_Handler,
+		},
+		{
+			MethodName: "WriteAccessTuples",
+			Handler:    _DaemonAdminService_WriteAccessTuples_Handler,
+		},
+		{
+			MethodName: "UpsertTenantQuota",
+			Handler:    _DaemonAdminService_UpsertTenantQuota_Handler,
+		},
+		{
+			MethodName: "ListFeatureTuples",
+			Handler:    _DaemonAdminService_ListFeatureTuples_Handler,
+		},
+		{
+			MethodName: "SeedCatalogTenantEnabled",
+			Handler:    _DaemonAdminService_SeedCatalogTenantEnabled_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

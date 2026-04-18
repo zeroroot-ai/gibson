@@ -15,6 +15,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zero-day-ai/gibson/internal/agentauth"
+	discoverysvc "github.com/zero-day-ai/gibson/internal/api/discovery"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
@@ -23,6 +24,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
+	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 
@@ -194,6 +196,10 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		daemonSvc.WithAuthorizer(d.authorizer)
 		d.logger.Info(ctx, "FGA authorizer wired into DaemonServer for admin RPCs")
 	}
+	if d.dashboardDB != nil {
+		daemonSvc.WithDashboardDB(d.dashboardDB)
+		d.logger.Info(ctx, "dashboard Postgres pool wired into DaemonServer for entitlements RPCs")
+	}
 	if d.quotaManager != nil {
 		daemonSvc.WithQuotaManager(d.quotaManager)
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
@@ -283,6 +289,19 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
 	api.RegisterDaemonAdminServiceServer(srv, daemonSvc)
+
+	// Register DiscoveryService — the read-only introspection surface
+	// consumed by opensource/adk/cmd/gibson-mcp and the dashboard's
+	// permissions-bridge migration. Wiring only depends on the authorizer
+	// and component registry, so it comes up even when state/runtime
+	// services are still bootstrapping.
+	if d.authorizer != nil && d.compRegistry != nil {
+		discoverySrv := discoverysvc.NewServer(d.authorizer, d.compRegistry, d.logger.Slog())
+		discoverypb.RegisterDiscoveryServiceServer(srv, discoverySrv)
+		d.logger.Info(ctx, "registered DiscoveryService gRPC endpoint")
+	} else {
+		d.logger.Warn(ctx, "DiscoveryService not registered: authorizer or compRegistry unavailable")
+	}
 
 	// Register IntelligenceService for cross-mission analytics RPCs
 	// (GetRecurringVulnerabilities, GetRemediationMetrics, GetAssetRiskScore,

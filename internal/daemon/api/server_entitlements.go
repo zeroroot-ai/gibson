@@ -1,0 +1,192 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/zero-day-ai/gibson/internal/authz"
+)
+
+// entitlementsDB returns the *sql.DB used for tenant_quotas writes. The
+// daemon wires this via WithDashboardDB; nil means the daemon booted without
+// a dashboard Postgres connection (dev/kind clusters can still run the rest
+// of the RPCs, but UpsertTenantQuota returns Unavailable).
+func (s *DaemonServer) entitlementsDB() *sql.DB {
+	return s.dashboardDB
+}
+
+// WriteAccessTuples atomically adds and/or deletes FGA tuples. The operator
+// calls this via the dashboard's SPIFFE-authenticated provisioning endpoint.
+// The FGA interceptor enforces the tenant admin / platform-operator relation
+// before dispatch; this handler does the write itself.
+//
+// Audit wiring (task 49) will hook each write to produce one
+// AccessTupleChange event per tuple; for now the RPC is a direct pass-through
+// to the authorizer.
+func (s *DaemonServer) WriteAccessTuples(ctx context.Context, req *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error) {
+	if s.authorizer == nil {
+		return nil, status.Error(codes.Unavailable, "authorizer not configured")
+	}
+	adds := make([]authz.Tuple, 0, len(req.GetAdd()))
+	for _, t := range req.GetAdd() {
+		if t.GetUser() == "" || t.GetRelation() == "" || t.GetObject() == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "empty field in add tuple")
+		}
+		adds = append(adds, authz.Tuple{User: t.GetUser(), Relation: t.GetRelation(), Object: t.GetObject()})
+	}
+	dels := make([]authz.Tuple, 0, len(req.GetDelete()))
+	for _, t := range req.GetDelete() {
+		if t.GetUser() == "" || t.GetRelation() == "" || t.GetObject() == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "empty field in delete tuple")
+		}
+		dels = append(dels, authz.Tuple{User: t.GetUser(), Relation: t.GetRelation(), Object: t.GetObject()})
+	}
+	if len(adds) > 0 {
+		if err := s.authorizer.Write(ctx, adds); err != nil {
+			return nil, status.Errorf(codes.Internal, "fga write: %v", err)
+		}
+	}
+	if len(dels) > 0 {
+		if err := s.authorizer.Delete(ctx, dels); err != nil {
+			return nil, status.Errorf(codes.Internal, "fga delete: %v", err)
+		}
+	}
+	s.logger.Info("entitlements: WriteAccessTuples",
+		"added", len(adds), "deleted", len(dels), "reason", req.GetReason())
+	return &WriteAccessTuplesResponse{Added: int32(len(adds)), Deleted: int32(len(dels))}, nil
+}
+
+// UpsertTenantQuota writes the per-tenant quota row. Creates the table on
+// first use so deployments without a pre-run migration step still converge.
+func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *UpsertTenantQuotaRequest) (*UpsertTenantQuotaResponse, error) {
+	db := s.entitlementsDB()
+	if db == nil {
+		return nil, status.Error(codes.Unavailable, "dashboard Postgres not configured")
+	}
+	if req.GetTenantId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "tenant_id required")
+	}
+	if err := ensureTenantQuotasTable(ctx, db); err != nil {
+		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
+	}
+
+	const q = `
+		INSERT INTO tenant_quotas (tenant_id, seats, concurrent_agents, storage_gb, retention_days, sandbox_launches_per_month, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		ON CONFLICT (tenant_id) DO UPDATE SET
+			seats = EXCLUDED.seats,
+			concurrent_agents = EXCLUDED.concurrent_agents,
+			storage_gb = EXCLUDED.storage_gb,
+			retention_days = EXCLUDED.retention_days,
+			sandbox_launches_per_month = EXCLUDED.sandbox_launches_per_month,
+			updated_at = NOW()
+		RETURNING updated_at
+	`
+	var updatedAt time.Time
+	if err := db.QueryRowContext(ctx, q,
+		req.GetTenantId(),
+		req.GetSeats(),
+		req.GetConcurrentAgents(),
+		req.GetStorageGb(),
+		req.GetRetentionDays(),
+		req.GetSandboxLaunchesPerMonth(),
+	).Scan(&updatedAt); err != nil {
+		return nil, status.Errorf(codes.Internal, "upsert: %v", err)
+	}
+	return &UpsertTenantQuotaResponse{UpdatedAt: updatedAt.UTC().Format(time.RFC3339Nano)}, nil
+}
+
+// ListFeatureTuples enumerates `tenant:{id}#has_*@tenant:{id}` relations
+// currently set on the given tenant. Implementation note: OpenFGA's
+// ListObjects is a (user, relation, objectType) query, so we iterate the
+// known has_* relation set and record which are currently present.
+func (s *DaemonServer) ListFeatureTuples(ctx context.Context, req *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error) {
+	if s.authorizer == nil {
+		return nil, status.Error(codes.Unavailable, "authorizer not configured")
+	}
+	tenantID := req.GetTenantId()
+	if tenantID == "" {
+		return nil, status.Error(codes.InvalidArgument, "tenant_id required")
+	}
+	tenantRef := "tenant:" + tenantID
+	features := []string{"has_sso", "has_audit_logs", "has_compliance_exports", "has_dedicated_slack", "has_dedicated_tenant", "has_private_registry"}
+	present := make([]string, 0, len(features))
+	for _, f := range features {
+		ok, err := s.authorizer.Check(ctx, tenantRef, f, tenantRef)
+		if err != nil {
+			s.logger.Warn("ListFeatureTuples: check failed", "feature", f, "err", err)
+			continue
+		}
+		if ok {
+			present = append(present, f)
+		}
+	}
+	return &ListFeatureTuplesResponse{Relations: present}, nil
+}
+
+// SeedCatalogTenantEnabled writes tenant_enabled tuples for every catalog
+// item currently platform_enabled. Idempotent via FGA's write semantics.
+func (s *DaemonServer) SeedCatalogTenantEnabled(ctx context.Context, req *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error) {
+	if s.authorizer == nil {
+		return nil, status.Error(codes.Unavailable, "authorizer not configured")
+	}
+	tenantID := req.GetTenantId()
+	if tenantID == "" {
+		return nil, status.Error(codes.InvalidArgument, "tenant_id required")
+	}
+	systemRef := "system_tenant:_system"
+	ids, err := s.authorizer.ListObjects(ctx, systemRef, "platform_enabled", "component")
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list platform_enabled: %v", err)
+	}
+	if len(ids) == 0 {
+		return &SeedCatalogTenantEnabledResponse{TuplesWritten: 0}, nil
+	}
+	tenantRef := "tenant:" + tenantID
+	tuples := make([]authz.Tuple, 0, len(ids))
+	for _, obj := range ids {
+		if obj == "" {
+			continue
+		}
+		if !hasPrefix(obj, "component:") {
+			obj = "component:" + obj
+		}
+		tuples = append(tuples, authz.Tuple{User: tenantRef, Relation: "tenant_enabled", Object: obj})
+	}
+	if err := s.authorizer.Write(ctx, tuples); err != nil {
+		return nil, status.Errorf(codes.Internal, "fga write: %v", err)
+	}
+	return &SeedCatalogTenantEnabledResponse{TuplesWritten: int32(len(tuples))}, nil
+}
+
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+// ensureTenantQuotasTable is an idempotent CREATE TABLE IF NOT EXISTS for
+// deployments that haven't run the migration file
+// (internal/db/migrations/2026041801_create_tenant_quotas.sql) yet. The
+// migration is still the authoritative source in schema-managed environments.
+func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
+	const q = `
+		CREATE TABLE IF NOT EXISTS tenant_quotas (
+			tenant_id TEXT PRIMARY KEY,
+			seats INT NOT NULL,
+			concurrent_agents INT NOT NULL,
+			storage_gb INT NOT NULL,
+			retention_days INT NOT NULL,
+			sandbox_launches_per_month INT NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`
+	_, err := db.ExecContext(ctx, q)
+	if err != nil {
+		return fmt.Errorf("create tenant_quotas: %w", err)
+	}
+	return nil
+}

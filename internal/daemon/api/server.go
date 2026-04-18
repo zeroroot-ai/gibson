@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -94,6 +95,12 @@ type DaemonServer struct {
 	// authorizer is the FGA Authorizer used by admin handlers that need direct FGA access.
 	// May be nil; when nil, RPCs that require it return codes.Unavailable.
 	authorizer authzIface
+
+	// dashboardDB is the shared-dashboard Postgres pool used by the
+	// entitlements handlers (UpsertTenantQuota in particular). Wired via
+	// WithDashboardDB by the daemon; nil in dev/kind when the Postgres
+	// connection couldn't be established.
+	dashboardDB *sql.DB
 
 	// auditLogger is the Redis-backed audit log reader/writer.
 	// May be nil; when nil, ListAuditEvents falls back to Loki only (or returns Unavailable).
@@ -724,6 +731,14 @@ func (s *DaemonServer) WithAgentAuthService(svc *agentauth.AgentAuthService) *Da
 // FGA access (e.g. GetMyPermissions).
 func (s *DaemonServer) WithAuthorizer(az authzIface) *DaemonServer {
 	s.authorizer = az
+	return s
+}
+
+// WithDashboardDB wires the shared-dashboard Postgres pool used by the
+// entitlements handlers (UpsertTenantQuota writes the tenant_quotas row
+// there). May be nil; handlers that require it return Unavailable.
+func (s *DaemonServer) WithDashboardDB(db *sql.DB) *DaemonServer {
+	s.dashboardDB = db
 	return s
 }
 
