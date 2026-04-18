@@ -186,6 +186,10 @@ entries:
     relation: platform_operator
     object: system_tenant:_system
     description: Request impersonation token for tenant (platform operator only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/RefreshToolCatalog
+    relation: platform_operator
+    object: system_tenant:_system
+    description: Trigger immediate sandboxed-tool catalog refresh (platform operator only)
 
   # Observability — tenant Langfuse credentials.
   - method: /gibson.daemon.admin.v1.DaemonAdminService/GetTenantLangfuseCredentials
