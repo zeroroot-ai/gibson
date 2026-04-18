@@ -8,18 +8,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSerializeWorkflowState(t *testing.T) {
+func TestSerializeMissionState(t *testing.T) {
 	t.Run("valid state", func(t *testing.T) {
 		state := map[string]any{
-			"workflow_id": "test-id",
-			"status":      "running",
+			"mission_definition_id": "test-id",
+			"status":                "running",
 			"node_states": map[string]any{
 				"node1": "completed",
 				"node2": "pending",
 			},
 		}
 
-		data, err := SerializeWorkflowState(state)
+		data, err := SerializeMissionState(state)
 		require.NoError(t, err)
 		assert.NotEmpty(t, data)
 
@@ -32,64 +32,64 @@ func TestSerializeWorkflowState(t *testing.T) {
 	})
 
 	t.Run("nil state", func(t *testing.T) {
-		_, err := SerializeWorkflowState(nil)
+		_, err := SerializeMissionState(nil)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "workflow state cannot be nil")
+		assert.Contains(t, err.Error(), "mission state cannot be nil")
 	})
 
 	t.Run("empty state", func(t *testing.T) {
 		state := map[string]any{}
-		data, err := SerializeWorkflowState(state)
+		data, err := SerializeMissionState(state)
 		require.NoError(t, err)
 		assert.NotEmpty(t, data)
 	})
 }
 
-func TestDeserializeWorkflowState(t *testing.T) {
+func TestDeserializeMissionState(t *testing.T) {
 	t.Run("valid data", func(t *testing.T) {
 		original := map[string]any{
-			"workflow_id": "test-id",
-			"status":      "running",
+			"mission_definition_id": "test-id",
+			"status":                "running",
 			"node_states": map[string]any{
 				"node1": "completed",
 			},
 		}
 
 		// Serialize first
-		data, err := SerializeWorkflowState(original)
+		data, err := SerializeMissionState(original)
 		require.NoError(t, err)
 
 		// Deserialize
-		restored, err := DeserializeWorkflowState(data)
+		restored, err := DeserializeMissionState(data)
 		require.NoError(t, err)
-		assert.Equal(t, original["workflow_id"], restored["workflow_id"])
+		assert.Equal(t, original["mission_definition_id"], restored["mission_definition_id"])
 		assert.Equal(t, original["status"], restored["status"])
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		_, err := DeserializeWorkflowState([]byte("invalid json"))
+		_, err := DeserializeMissionState([]byte("invalid json"))
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unmarshal")
 	})
 
 	t.Run("empty data", func(t *testing.T) {
-		_, err := DeserializeWorkflowState([]byte{})
+		_, err := DeserializeMissionState([]byte{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot be empty")
 	})
 
 	t.Run("newer version", func(t *testing.T) {
 		data := []byte(`{"version": 999, "data": {}}`)
-		_, err := DeserializeWorkflowState(data)
+		_, err := DeserializeMissionState(data)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "newer than supported")
 	})
 }
 
-func TestSerializeDeserializeWorkflowState_RoundTrip(t *testing.T) {
+func TestSerializeDeserializeMissionState_RoundTrip(t *testing.T) {
 	original := map[string]any{
-		"workflow_id": "test-workflow-id",
-		"status":      "running",
+		"mission_definition_id": "test-mission-id",
+		"status":                "running",
 		"node_states": map[string]any{
 			"node1": map[string]any{
 				"status":      "completed",
@@ -105,15 +105,15 @@ func TestSerializeDeserializeWorkflowState_RoundTrip(t *testing.T) {
 	}
 
 	// Serialize
-	data, err := SerializeWorkflowState(original)
+	data, err := SerializeMissionState(original)
 	require.NoError(t, err)
 
 	// Deserialize
-	restored, err := DeserializeWorkflowState(data)
+	restored, err := DeserializeMissionState(data)
 	require.NoError(t, err)
 
 	// Verify all fields
-	assert.Equal(t, original["workflow_id"], restored["workflow_id"])
+	assert.Equal(t, original["mission_definition_id"], restored["mission_definition_id"])
 	assert.Equal(t, original["status"], restored["status"])
 	assert.Equal(t, original["started_at"], restored["started_at"])
 
@@ -206,8 +206,8 @@ func TestValidateChecksum(t *testing.T) {
 func TestComputeChecksum_Consistency(t *testing.T) {
 	// Create state map
 	stateMap := map[string]any{
-		"workflow_id": "test-id",
-		"status":      "running",
+		"mission_definition_id": "test-id",
+		"status":                "running",
 		"node_states": map[string]any{
 			"node1": map[string]any{
 				"status":       "completed",
@@ -221,7 +221,7 @@ func TestComputeChecksum_Consistency(t *testing.T) {
 	// Serialize multiple times and verify checksums match
 	checksums := make([]string, 3)
 	for i := 0; i < 3; i++ {
-		data, err := SerializeWorkflowState(stateMap)
+		data, err := SerializeMissionState(stateMap)
 		require.NoError(t, err)
 		checksums[i] = ComputeChecksum(data)
 	}

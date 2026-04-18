@@ -35,7 +35,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zero-day-ai/sdk v0.72.0
+	github.com/zero-day-ai/sdk v0.73.1
 	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
 	go.etcd.io/etcd/client/v3 v3.6.7
 	go.etcd.io/etcd/server/v3 v3.5.5

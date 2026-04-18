@@ -19,13 +19,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 	t.Run("create first run", func(t *testing.T) {
 		missionName := "test-mission-" + types.NewID().String()[:8]
 		mission := &Mission{
-			ID:          types.NewID(),
-			Description: "First run test",
-			Status:      MissionStatusPending,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "First run test",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 
 		err := linker.CreateRun(ctx, missionName, mission)
@@ -52,13 +52,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 
 		// Create first run
 		firstMission := &Mission{
-			ID:          types.NewID(),
-			Description: "First run",
-			Status:      MissionStatusCompleted,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "First run",
+			Status:              MissionStatusCompleted,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		completedAt := time.Now()
 		firstMission.CompletedAt = &completedAt
@@ -68,13 +68,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 
 		// Create second run
 		secondMission := &Mission{
-			ID:          types.NewID(),
-			Description: "Second run",
-			Status:      MissionStatusPending,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now().Add(1 * time.Second),
-			UpdatedAt:   time.Now().Add(1 * time.Second),
+			ID:                  types.NewID(),
+			Description:         "Second run",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now().Add(1 * time.Second),
+			UpdatedAt:           time.Now().Add(1 * time.Second),
 		}
 
 		err = linker.CreateRun(ctx, missionName, secondMission)
@@ -104,13 +104,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 		// Create 3 runs
 		for i := 1; i <= 3; i++ {
 			mission := &Mission{
-				ID:          types.NewID(),
-				Description: "Run " + string(rune(i)),
-				Status:      MissionStatusCompleted,
-				TargetID:    types.NewID(),
-				WorkflowID:  types.NewID(),
-				CreatedAt:   time.Now().Add(time.Duration(i) * time.Second),
-				UpdatedAt:   time.Now().Add(time.Duration(i) * time.Second),
+				ID:                  types.NewID(),
+				Description:         "Run " + string(rune(i)),
+				Status:              MissionStatusCompleted,
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
+				CreatedAt:           time.Now().Add(time.Duration(i) * time.Second),
+				UpdatedAt:           time.Now().Add(time.Duration(i) * time.Second),
 			}
 			completedAt := time.Now()
 			mission.CompletedAt = &completedAt
@@ -131,13 +131,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 
 		// Create a running mission
 		runningMission := &Mission{
-			ID:          types.NewID(),
-			Description: "Running mission",
-			Status:      MissionStatusRunning,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "Running mission",
+			Status:              MissionStatusRunning,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		startedAt := time.Now()
 		runningMission.StartedAt = &startedAt
@@ -147,13 +147,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 
 		// Try to create another run with the same name
 		newMission := &Mission{
-			ID:          types.NewID(),
-			Description: "New mission",
-			Status:      MissionStatusPending,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "New mission",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 
 		err = linker.CreateRun(ctx, missionName, newMission)
@@ -167,13 +167,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 
 		// Create a paused mission
 		pausedMission := &Mission{
-			ID:          types.NewID(),
-			Description: "Paused mission",
-			Status:      MissionStatusPaused,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "Paused mission",
+			Status:              MissionStatusPaused,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		startedAt := time.Now()
 		pausedMission.StartedAt = &startedAt
@@ -183,13 +183,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 
 		// Try to create another run with the same name
 		newMission := &Mission{
-			ID:          types.NewID(),
-			Description: "New mission",
-			Status:      MissionStatusPending,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "New mission",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 
 		err = linker.CreateRun(ctx, missionName, newMission)
@@ -203,13 +203,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 
 		// Create a completed mission
 		completedMission := &Mission{
-			ID:          types.NewID(),
-			Description: "Completed mission",
-			Status:      MissionStatusCompleted,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "Completed mission",
+			Status:              MissionStatusCompleted,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		completedAt := time.Now()
 		completedMission.CompletedAt = &completedAt
@@ -219,13 +219,13 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 
 		// Create another run (should succeed)
 		newMission := &Mission{
-			ID:          types.NewID(),
-			Description: "New mission",
-			Status:      MissionStatusPending,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now().Add(1 * time.Second),
-			UpdatedAt:   time.Now().Add(1 * time.Second),
+			ID:                  types.NewID(),
+			Description:         "New mission",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now().Add(1 * time.Second),
+			UpdatedAt:           time.Now().Add(1 * time.Second),
 		}
 
 		err = linker.CreateRun(ctx, missionName, newMission)
@@ -240,12 +240,12 @@ func TestMissionRunLinker_CreateRun(t *testing.T) {
 
 	t.Run("error when name is empty", func(t *testing.T) {
 		mission := &Mission{
-			ID:         types.NewID(),
-			Status:     MissionStatusPending,
-			TargetID:   types.NewID(),
-			WorkflowID: types.NewID(),
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+			ID:                  types.NewID(),
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 
 		err := linker.CreateRun(ctx, "", mission)
@@ -267,13 +267,13 @@ func TestMissionRunLinker_GetRunHistory(t *testing.T) {
 		missionIDs := make([]types.ID, 3)
 		for i := 0; i < 3; i++ {
 			mission := &Mission{
-				ID:          types.NewID(),
-				Description: "Run " + string(rune(i+1)),
-				Status:      MissionStatusCompleted,
-				TargetID:    types.NewID(),
-				WorkflowID:  types.NewID(),
-				CreatedAt:   time.Now().Add(time.Duration(i) * time.Second),
-				UpdatedAt:   time.Now().Add(time.Duration(i) * time.Second),
+				ID:                  types.NewID(),
+				Description:         "Run " + string(rune(i+1)),
+				Status:              MissionStatusCompleted,
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
+				CreatedAt:           time.Now().Add(time.Duration(i) * time.Second),
+				UpdatedAt:           time.Now().Add(time.Duration(i) * time.Second),
 			}
 			completedAt := time.Now()
 			mission.CompletedAt = &completedAt
@@ -306,13 +306,13 @@ func TestMissionRunLinker_GetRunHistory(t *testing.T) {
 		var previousID *types.ID
 		for i := 0; i < 3; i++ {
 			mission := &Mission{
-				ID:          types.NewID(),
-				Description: "Run " + string(rune(i+1)),
-				Status:      MissionStatusCompleted,
-				TargetID:    types.NewID(),
-				WorkflowID:  types.NewID(),
-				CreatedAt:   time.Now().Add(time.Duration(i) * time.Second),
-				UpdatedAt:   time.Now().Add(time.Duration(i) * time.Second),
+				ID:                  types.NewID(),
+				Description:         "Run " + string(rune(i+1)),
+				Status:              MissionStatusCompleted,
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
+				CreatedAt:           time.Now().Add(time.Duration(i) * time.Second),
+				UpdatedAt:           time.Now().Add(time.Duration(i) * time.Second),
 			}
 			completedAt := time.Now()
 			mission.CompletedAt = &completedAt
@@ -365,14 +365,14 @@ func TestMissionRunLinker_GetRunHistory(t *testing.T) {
 		completedTime := createdTime.Add(5 * time.Minute)
 
 		mission := &Mission{
-			ID:          types.NewID(),
-			Description: "Test mission",
-			Status:      MissionStatusCompleted,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   createdTime,
-			UpdatedAt:   createdTime,
-			CompletedAt: &completedTime,
+			ID:                  types.NewID(),
+			Description:         "Test mission",
+			Status:              MissionStatusCompleted,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           createdTime,
+			UpdatedAt:           createdTime,
+			CompletedAt:         &completedTime,
 		}
 
 		err := linker.CreateRun(ctx, missionName, mission)
@@ -404,13 +404,13 @@ func TestMissionRunLinker_GetLatestRun(t *testing.T) {
 		var latestID types.ID
 		for i := 0; i < 3; i++ {
 			mission := &Mission{
-				ID:          types.NewID(),
-				Description: "Run " + string(rune(i+1)),
-				Status:      MissionStatusCompleted,
-				TargetID:    types.NewID(),
-				WorkflowID:  types.NewID(),
-				CreatedAt:   time.Now().Add(time.Duration(i) * time.Second),
-				UpdatedAt:   time.Now().Add(time.Duration(i) * time.Second),
+				ID:                  types.NewID(),
+				Description:         "Run " + string(rune(i+1)),
+				Status:              MissionStatusCompleted,
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
+				CreatedAt:           time.Now().Add(time.Duration(i) * time.Second),
+				UpdatedAt:           time.Now().Add(time.Duration(i) * time.Second),
 			}
 			completedAt := time.Now()
 			mission.CompletedAt = &completedAt
@@ -451,13 +451,13 @@ func TestMissionRunLinker_GetActiveRun(t *testing.T) {
 
 		// Create a running mission
 		runningMission := &Mission{
-			ID:          types.NewID(),
-			Description: "Running mission",
-			Status:      MissionStatusRunning,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "Running mission",
+			Status:              MissionStatusRunning,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		startedAt := time.Now()
 		runningMission.StartedAt = &startedAt
@@ -477,13 +477,13 @@ func TestMissionRunLinker_GetActiveRun(t *testing.T) {
 
 		// Create a paused mission
 		pausedMission := &Mission{
-			ID:          types.NewID(),
-			Description: "Paused mission",
-			Status:      MissionStatusPaused,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "Paused mission",
+			Status:              MissionStatusPaused,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		startedAt := time.Now()
 		pausedMission.StartedAt = &startedAt
@@ -503,13 +503,13 @@ func TestMissionRunLinker_GetActiveRun(t *testing.T) {
 
 		// Create a paused mission first
 		pausedMission := &Mission{
-			ID:          types.NewID(),
-			Description: "Paused mission",
-			Status:      MissionStatusPaused,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "Paused mission",
+			Status:              MissionStatusPaused,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		startedAt := time.Now()
 		pausedMission.StartedAt = &startedAt
@@ -526,13 +526,13 @@ func TestMissionRunLinker_GetActiveRun(t *testing.T) {
 
 		// Create a running mission
 		runningMission := &Mission{
-			ID:          types.NewID(),
-			Description: "Running mission",
-			Status:      MissionStatusRunning,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now().Add(1 * time.Second),
-			UpdatedAt:   time.Now().Add(1 * time.Second),
+			ID:                  types.NewID(),
+			Description:         "Running mission",
+			Status:              MissionStatusRunning,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now().Add(1 * time.Second),
+			UpdatedAt:           time.Now().Add(1 * time.Second),
 		}
 		startedAt2 := time.Now()
 		runningMission.StartedAt = &startedAt2
@@ -552,13 +552,13 @@ func TestMissionRunLinker_GetActiveRun(t *testing.T) {
 
 		// Create a completed mission
 		completedMission := &Mission{
-			ID:          types.NewID(),
-			Description: "Completed mission",
-			Status:      MissionStatusCompleted,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "Completed mission",
+			Status:              MissionStatusCompleted,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		completedAt := time.Now()
 		completedMission.CompletedAt = &completedAt
@@ -596,13 +596,13 @@ func TestMissionRunLinker_EdgeCases(t *testing.T) {
 		missionName := "test-mission-" + types.NewID().String()[:8]
 
 		mission := &Mission{
-			ID:          types.NewID(),
-			Description: "First run",
-			Status:      MissionStatusCompleted,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Description:         "First run",
+			Status:              MissionStatusCompleted,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		completedAt := time.Now()
 		mission.CompletedAt = &completedAt
@@ -635,13 +635,13 @@ func TestMissionRunLinker_EdgeCases(t *testing.T) {
 
 		for i, status := range statuses {
 			mission := &Mission{
-				ID:          types.NewID(),
-				Description: "Run with status " + string(status),
-				Status:      status,
-				TargetID:    types.NewID(),
-				WorkflowID:  types.NewID(),
-				CreatedAt:   time.Now().Add(time.Duration(i) * time.Second),
-				UpdatedAt:   time.Now().Add(time.Duration(i) * time.Second),
+				ID:                  types.NewID(),
+				Description:         "Run with status " + string(status),
+				Status:              status,
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
+				CreatedAt:           time.Now().Add(time.Duration(i) * time.Second),
+				UpdatedAt:           time.Now().Add(time.Duration(i) * time.Second),
 			}
 			completedAt := time.Now()
 			mission.CompletedAt = &completedAt

@@ -87,7 +87,7 @@
 //		MissionID: missionID,
 //		Payload: events.MissionStartedPayload{
 //			MissionID:    missionID,
-//			WorkflowName: "security-scan",
+//			MissionName: "security-scan",
 //			NodeCount:    5,
 //		},
 //	})

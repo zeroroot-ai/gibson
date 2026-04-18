@@ -43,9 +43,9 @@ func addMissionBootstrapMocks(mockClient *graph.MockGraphClient) {
 	})
 }
 
-// TestGraphBootstrapper_Bootstrap_SimpleWorkflow tests bootstrapping a simple 2-node workflow with one dependency.
+// TestGraphBootstrapper_Bootstrap_SimpleMission tests bootstrapping a simple 2-node mission with one dependency.
 // This verifies that missions and nodes are created correctly, and dependency relationships are established.
-func TestGraphBootstrapper_Bootstrap_SimpleWorkflow(t *testing.T) {
+func TestGraphBootstrapper_Bootstrap_SimpleMission(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.Default()
 
@@ -93,19 +93,19 @@ func TestGraphBootstrapper_Bootstrap_SimpleWorkflow(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:          missionID,
-		Name:        "Test Mission",
-		Description: "Test mission for bootstrapper",
-		Status:      mission.MissionStatusRunning,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		StartedAt:   mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Test Mission",
+		Description:         "Test mission for bootstrapper",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with 2 nodes: node-2 depends on node-1
 	def := &mission.MissionDefinition{
 		Name:        "Test Mission",
-		Description: "Test mission workflow. This validates bootstrapping.",
+		Description: "Test mission. This validates bootstrapping.",
 		Nodes: map[string]*mission.MissionNode{
 			"node-1": {
 				ID:          "node-1",
@@ -148,7 +148,7 @@ func TestGraphBootstrapper_Bootstrap_SimpleWorkflow(t *testing.T) {
 	assert.Len(t, calls, 5, "Should have executed 5 queries (create mission + create run + 2 nodes + 1 dependency)")
 }
 
-// TestGraphBootstrapper_Bootstrap_NoDependencies tests bootstrapping a workflow where all nodes have no dependencies.
+// TestGraphBootstrapper_Bootstrap_NoDependencies tests bootstrapping a mission where all nodes have no dependencies.
 // All nodes should be created with status "ready" since they can execute immediately.
 func TestGraphBootstrapper_Bootstrap_NoDependencies(t *testing.T) {
 	ctx := context.Background()
@@ -198,13 +198,13 @@ func TestGraphBootstrapper_Bootstrap_NoDependencies(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:          missionID,
-		Name:        "Parallel Mission",
-		Description: "Mission with parallel nodes",
-		Status:      mission.MissionStatusRunning,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		StartedAt:   mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Parallel Mission",
+		Description:         "Mission with parallel nodes",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with 3 nodes, none with dependencies
@@ -280,19 +280,19 @@ func TestGraphBootstrapper_Bootstrap_CreateMissionError(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:          missionID,
-		Name:        "Test Mission",
-		Description: "Test mission",
-		Status:      mission.MissionStatusRunning,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		StartedAt:   mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Test Mission",
+		Description:         "Test mission",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	// Create simple mission definition
 	def := &mission.MissionDefinition{
 		Name:        "Test Mission",
-		Description: "Test workflow.",
+		Description: "Test mission.",
 		Nodes: map[string]*mission.MissionNode{
 			"node-1": {
 				ID:           "node-1",
@@ -313,8 +313,8 @@ func TestGraphBootstrapper_Bootstrap_CreateMissionError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to create mission in graph", "Error should mention mission creation failure")
 }
 
-// TestGraphBootstrapper_Bootstrap_CreateWorkflowNodeError tests that Bootstrap propagates errors from CreateWorkflowNode.
-func TestGraphBootstrapper_Bootstrap_CreateWorkflowNodeError(t *testing.T) {
+// TestGraphBootstrapper_Bootstrap_CreateMissionNodeError tests that Bootstrap propagates errors from CreateMissionNode.
+func TestGraphBootstrapper_Bootstrap_CreateMissionNodeError(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.Default()
 
@@ -323,7 +323,7 @@ func TestGraphBootstrapper_Bootstrap_CreateWorkflowNodeError(t *testing.T) {
 	err := mockClient.Connect(ctx)
 	require.NoError(t, err)
 
-	// Configure mock to succeed for Mission and MissionRun but fail for workflow node creation
+	// Configure mock to succeed for Mission and MissionRun but fail for mission node creation
 	addMissionBootstrapMocks(mockClient)
 	// Return empty result for node creation (simulates failure)
 	mockClient.AddQueryResult(graph.QueryResult{
@@ -337,19 +337,19 @@ func TestGraphBootstrapper_Bootstrap_CreateWorkflowNodeError(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:          missionID,
-		Name:        "Test Mission",
-		Description: "Test mission",
-		Status:      mission.MissionStatusRunning,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		StartedAt:   mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Test Mission",
+		Description:         "Test mission",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with one node
 	def := &mission.MissionDefinition{
 		Name:        "Test Mission",
-		Description: "Test workflow.",
+		Description: "Test mission.",
 		Nodes: map[string]*mission.MissionNode{
 			"node-1": {
 				ID:           "node-1",
@@ -362,16 +362,16 @@ func TestGraphBootstrapper_Bootstrap_CreateWorkflowNodeError(t *testing.T) {
 		},
 	}
 
-	// Bootstrap should fail with error from CreateWorkflowNode
+	// Bootstrap should fail with error from CreateMissionNode
 	run := createTestMissionRun(m.ID)
 	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
 	_ = result // Bootstrap result contains MissionRunID
-	require.Error(t, err, "Bootstrap should return error when CreateWorkflowNode fails")
-	assert.Contains(t, err.Error(), "failed to create workflow node", "Error should mention workflow node creation failure")
+	require.Error(t, err, "Bootstrap should return error when CreateMissionNode fails")
+	assert.Contains(t, err.Error(), "failed to create mission node", "Error should mention mission node creation failure")
 	assert.Contains(t, err.Error(), "node-1", "Error should include the node ID that failed")
 }
 
-// TestGraphBootstrapper_Bootstrap_ComplexDAG tests bootstrapping a more complex workflow with multiple dependencies.
+// TestGraphBootstrapper_Bootstrap_ComplexDAG tests bootstrapping a more complex mission with multiple dependencies.
 func TestGraphBootstrapper_Bootstrap_ComplexDAG(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.Default()
@@ -404,13 +404,13 @@ func TestGraphBootstrapper_Bootstrap_ComplexDAG(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:          missionID,
-		Name:        "Complex Mission",
-		Description: "Mission with complex DAG",
-		Status:      mission.MissionStatusRunning,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		StartedAt:   mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Complex Mission",
+		Description:         "Mission with complex DAG",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with complex DAG:
@@ -419,7 +419,7 @@ func TestGraphBootstrapper_Bootstrap_ComplexDAG(t *testing.T) {
 	// node-4 depends on both node-2 and node-3
 	def := &mission.MissionDefinition{
 		Name:        "Complex Mission",
-		Description: "Complex DAG workflow.",
+		Description: "Complex DAG mission.",
 		Nodes: map[string]*mission.MissionNode{
 			"node-1": {
 				ID:           "node-1",
@@ -491,13 +491,13 @@ func TestGraphBootstrapper_Bootstrap_MissionWithToolNode(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:          missionID,
-		Name:        "Tool Mission",
-		Description: "Mission with tool node",
-		Status:      mission.MissionStatusRunning,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		StartedAt:   mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Tool Mission",
+		Description:         "Mission with tool node",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with a tool node
@@ -554,13 +554,13 @@ func TestGraphBootstrapper_Bootstrap_MissionWithRetryPolicy(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:          missionID,
-		Name:        "Retry Mission",
-		Description: "Mission with retry policy",
-		Status:      mission.MissionStatusRunning,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		StartedAt:   mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Retry Mission",
+		Description:         "Mission with retry policy",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with a node that has a retry policy
@@ -624,13 +624,13 @@ func TestGraphBootstrapper_Bootstrap_DependencyNotFound(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:          missionID,
-		Name:        "Invalid Mission",
-		Description: "Mission with invalid dependency",
-		Status:      mission.MissionStatusRunning,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		StartedAt:   mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Invalid Mission",
+		Description:         "Mission with invalid dependency",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with a node that references non-existent dependency
@@ -665,13 +665,13 @@ func TestGraphBootstrapper_ConvertToSchemaMission(t *testing.T) {
 	targetID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:           missionID,
-		Name:         "Test Mission",
-		Description:  "Test mission description",
-		Status:       mission.MissionStatusRunning,
-		TargetID:     targetID,
-		WorkflowJSON: `{"name": "test", "nodes": []}`,
-		StartedAt:    mission.NewUnixTimePtr(&now),
+		ID:                    missionID,
+		Name:                  "Test Mission",
+		Description:           "Test mission description",
+		Status:                mission.MissionStatusRunning,
+		TargetID:              targetID,
+		MissionDefinitionJSON: `{"name": "test", "nodes": []}`,
+		StartedAt:             mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition

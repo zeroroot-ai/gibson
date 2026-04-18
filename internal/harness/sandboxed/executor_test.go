@@ -409,7 +409,6 @@ func TestExecute_DiscoveryProcessor_ErrorLoggedNotReturned(t *testing.T) {
 	}
 }
 
-
 func TestExecute_DiscoveryProcessor_NilSkips(t *testing.T) {
 	client := &mockClient{
 		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {

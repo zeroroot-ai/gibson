@@ -27,9 +27,9 @@ func TestFullEventFlowSequence(t *testing.T) {
 			Timestamp: time.Now(),
 			MissionID: missionID,
 			Payload: events.MissionStartedPayload{
-				MissionID:    missionID,
-				WorkflowName: "test-workflow",
-				NodeCount:    3,
+				MissionID:   missionID,
+				MissionName: "test-mission",
+				NodeCount:   3,
 			},
 		},
 		// 2. First node starts

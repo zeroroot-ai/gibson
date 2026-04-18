@@ -12,10 +12,10 @@ import (
 type DecisionAction string
 
 const (
-	// ActionExecuteAgent runs the specified workflow node/agent
+	// ActionExecuteAgent runs the specified mission node/agent
 	ActionExecuteAgent DecisionAction = "execute_agent"
 
-	// ActionSkipAgent skips execution of a workflow node
+	// ActionSkipAgent skips execution of a mission node
 	ActionSkipAgent DecisionAction = "skip_agent"
 
 	// ActionModifyParams modifies parameters for a target node before execution
@@ -24,13 +24,13 @@ const (
 	// ActionRetry retries execution of a failed node
 	ActionRetry DecisionAction = "retry"
 
-	// ActionSpawnAgent dynamically creates and adds a new node to the workflow
+	// ActionSpawnAgent dynamically creates and adds a new node to the mission
 	ActionSpawnAgent DecisionAction = "spawn_agent"
 
-	// ActionComplete marks the workflow as complete and stops orchestration
+	// ActionComplete marks the mission as complete and stops orchestration
 	ActionComplete DecisionAction = "complete"
 
-	// ActionRequestApproval pauses workflow for human approval before sensitive operations
+	// ActionRequestApproval pauses mission for human approval before sensitive operations
 	ActionRequestApproval DecisionAction = "request_approval"
 
 	// ActionAbort immediately stops execution due to safety violation
@@ -39,7 +39,7 @@ const (
 	// ActionEscalate formally escalates to humans or specialist agents
 	ActionEscalate DecisionAction = "escalate"
 
-	// ActionRollback reverts workflow state to a previous checkpoint
+	// ActionRollback reverts mission state to a previous checkpoint
 	ActionRollback DecisionAction = "rollback"
 
 	// ActionReflect pauses for self-evaluation of current strategy
@@ -81,7 +81,7 @@ type Decision struct {
 	// Action is what the orchestrator should do
 	Action DecisionAction `json:"action"`
 
-	// TargetNodeID is which workflow node to act on (if applicable)
+	// TargetNodeID is which mission node to act on (if applicable)
 	// Required for: execute_agent, skip_agent, modify_params, retry
 	TargetNodeID string `json:"target_node_id,omitempty"`
 
@@ -97,7 +97,7 @@ type Decision struct {
 	// certainty in this decision
 	Confidence float64 `json:"confidence"`
 
-	// StopReason explains why the workflow is complete
+	// StopReason explains why the mission is complete
 	// Required for: complete action
 	StopReason string `json:"stop_reason,omitempty"`
 
@@ -170,7 +170,7 @@ type Decision struct {
 	InjectIntoContext bool `json:"inject_into_context,omitempty"`
 }
 
-// SpawnNodeConfig contains configuration for dynamically spawning a new workflow node
+// SpawnNodeConfig contains configuration for dynamically spawning a new mission node
 type SpawnNodeConfig struct {
 	// AgentName is the type of agent to spawn (must exist in registry)
 	AgentName string `json:"agent_name"`

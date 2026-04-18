@@ -35,16 +35,16 @@ type MissionOperator interface {
 
 // CreateMissionRequest contains parameters for creating a new mission.
 type CreateMissionRequest struct {
-	WorkflowJSON    string
-	WorkflowID      types.ID
-	TargetID        types.ID
-	ParentMissionID *types.ID
-	ParentDepth     int
-	Name            string
-	Description     string
-	Constraints     *MissionConstraints
-	Metadata        map[string]any
-	Tags            []string
+	MissionDefinitionJSON string
+	MissionDefinitionID   types.ID
+	TargetID              types.ID
+	ParentMissionID       *types.ID
+	ParentDepth           int
+	Name                  string
+	Description           string
+	Constraints           *MissionConstraints
+	Metadata              map[string]any
+	Tags                  []string
 }
 
 // MissionConstraints limits mission execution.
@@ -79,13 +79,13 @@ type MissionStatusInfo struct {
 
 // MissionResultInfo mirrors mission.MissionResult fields needed by harness.
 type MissionResultInfo struct {
-	MissionID      string
-	Status         MissionStatus
-	Metrics        *MissionMetricsInfo
-	FindingIDs     []string
-	WorkflowResult map[string]any
-	Error          string
-	CompletedAt    time.Time
+	MissionID     string
+	Status        MissionStatus
+	Metrics       *MissionMetricsInfo
+	FindingIDs    []string
+	MissionResult map[string]any
+	Error         string
+	CompletedAt   time.Time
 }
 
 // MissionMetricsInfo mirrors mission.MissionMetrics fields.

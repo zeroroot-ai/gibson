@@ -14,34 +14,11 @@ func setupTestController(t *testing.T) MissionController {
 
 	db := setupTestDB(t)
 	store := NewDBMissionStore(db)
-	service := NewMissionService(store, nil, nil)
+	service := NewMissionService(store, nil)
 	// Use mock orchestrator instead of real implementation
 	orchestrator := &mockMissionOrchestrator{}
 
 	return NewMissionController(store, service, orchestrator)
-}
-
-func TestDefaultMissionController_Create(t *testing.T) {
-	controller := setupTestController(t)
-	ctx := context.Background()
-
-	config := &MissionConfig{
-		Name:        "test-mission",
-		Description: "Test mission",
-		Target: MissionTargetConfig{
-			Reference: "target-1",
-		},
-		Workflow: MissionWorkflowConfig{
-			Reference: "workflow-1",
-		},
-	}
-
-	mission, err := controller.Create(ctx, config)
-	// May fail without full implementation, but structure is correct
-	if err == nil {
-		assert.NotNil(t, mission)
-		assert.Equal(t, config.Name, mission.Name)
-	}
 }
 
 func TestDefaultMissionController_GetAndList(t *testing.T) {
@@ -56,7 +33,7 @@ func TestDefaultMissionController_GetAndList(t *testing.T) {
 	require.NoError(t, err)
 
 	// Re-create controller with same store
-	service := NewMissionService(store, nil, nil)
+	service := NewMissionService(store, nil)
 	orchestrator := &mockMissionOrchestrator{}
 	controller = NewMissionController(store, service, orchestrator)
 
@@ -76,7 +53,7 @@ func TestDefaultMissionController_GetAndList(t *testing.T) {
 func TestDefaultMissionController_StartAndStop(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewDBMissionStore(db)
-	service := NewMissionService(store, nil, nil)
+	service := NewMissionService(store, nil)
 	orchestrator := &mockMissionOrchestrator{}
 	controller := NewMissionController(store, service, orchestrator)
 	ctx := context.Background()
@@ -105,7 +82,7 @@ func TestDefaultMissionController_StartAndStop(t *testing.T) {
 func TestDefaultMissionController_PauseAndResume(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewDBMissionStore(db)
-	service := NewMissionService(store, nil, nil)
+	service := NewMissionService(store, nil)
 	orchestrator := &mockMissionOrchestrator{}
 	controller := NewMissionController(store, service, orchestrator)
 	ctx := context.Background()
@@ -129,7 +106,7 @@ func TestDefaultMissionController_PauseAndResume(t *testing.T) {
 func TestDefaultMissionController_Delete(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewDBMissionStore(db)
-	service := NewMissionService(store, nil, nil)
+	service := NewMissionService(store, nil)
 	orchestrator := &mockMissionOrchestrator{}
 	controller := NewMissionController(store, service, orchestrator)
 	ctx := context.Background()
@@ -161,7 +138,7 @@ func TestDefaultMissionController_Delete(t *testing.T) {
 func TestDefaultMissionController_GetProgress(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewDBMissionStore(db)
-	service := NewMissionService(store, nil, nil)
+	service := NewMissionService(store, nil)
 	orchestrator := &mockMissionOrchestrator{}
 	controller := NewMissionController(store, service, orchestrator)
 	ctx := context.Background()

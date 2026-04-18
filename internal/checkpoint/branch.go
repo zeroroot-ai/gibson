@@ -117,12 +117,12 @@ func (bm *DefaultBranchManager) CreateBranch(ctx context.Context, sourceCheckpoi
 	// Create new checkpoint in the branched thread
 	branchPoint := time.Now()
 	newCheckpoint := &Checkpoint{
-		ID:               generateCheckpointID(),
-		ThreadID:         branchThread.ID,
-		ParentID:         sourceCheckpointID,
-		Timestamp:        branchPoint,
-		ExecutionState:   executionState,
-		WorkflowSnapshot: sourceCheckpoint.WorkflowSnapshot, // Copy workflow definition
+		ID:              generateCheckpointID(),
+		ThreadID:        branchThread.ID,
+		ParentID:        sourceCheckpointID,
+		Timestamp:       branchPoint,
+		ExecutionState:  executionState,
+		MissionSnapshot: sourceCheckpoint.MissionSnapshot, // Copy mission definition
 		Metadata: map[string]interface{}{
 			"branch_source":    sourceCheckpointID,
 			"branch_timestamp": branchPoint,
@@ -211,7 +211,7 @@ func (bm *DefaultBranchManager) PrepareReplay(ctx context.Context, checkpointID 
 		return nil, fmt.Errorf("failed to restore execution state: %w", err)
 	}
 
-	// Analyze workflow to determine replay nodes
+	// Analyze mission to determine replay nodes
 	var nodesSkipped []string
 	var nodesToReplay []string
 	var startNode string
@@ -288,12 +288,12 @@ func (bm *DefaultBranchManager) MergeBranch(ctx context.Context, branchThreadID 
 
 	// Create a merged checkpoint in the target thread
 	mergedCheckpoint := &Checkpoint{
-		ID:               generateCheckpointID(),
-		ThreadID:         targetThreadID,
-		ParentID:         latestTargetCheckpoint.ID,
-		Timestamp:        time.Now(),
-		ExecutionState:   branchState, // Use branch's final state
-		WorkflowSnapshot: latestTargetCheckpoint.WorkflowSnapshot,
+		ID:              generateCheckpointID(),
+		ThreadID:        targetThreadID,
+		ParentID:        latestTargetCheckpoint.ID,
+		Timestamp:       time.Now(),
+		ExecutionState:  branchState, // Use branch's final state
+		MissionSnapshot: latestTargetCheckpoint.MissionSnapshot,
 		Metadata: map[string]interface{}{
 			"merged_from_branch": branchThreadID,
 			"merge_timestamp":    time.Now(),
@@ -313,17 +313,17 @@ func (bm *DefaultBranchManager) MergeBranch(ctx context.Context, branchThreadID 
 func ApplyUpdates(state *ExecutionState, updates *StateUpdates) *ExecutionState {
 	// Create a deep copy of the state to maintain immutability
 	newState := &ExecutionState{
-		ThreadID:    state.ThreadID,
-		WorkflowID:  state.WorkflowID,
-		CurrentNode: state.CurrentNode,
-		Status:      state.Status,
-		Variables:   copyMap(state.Variables),
-		ToolResults: copyToolResults(state.ToolResults),
-		Memory:      copyMap(state.Memory),
-		NodeStates:  copyNodeStates(state.NodeStates),
-		StartTime:   state.StartTime,
-		EndTime:     state.EndTime,
-		Error:       state.Error,
+		ThreadID:            state.ThreadID,
+		MissionDefinitionID: state.MissionDefinitionID,
+		CurrentNode:         state.CurrentNode,
+		Status:              state.Status,
+		Variables:           copyMap(state.Variables),
+		ToolResults:         copyToolResults(state.ToolResults),
+		Memory:              copyMap(state.Memory),
+		NodeStates:          copyNodeStates(state.NodeStates),
+		StartTime:           state.StartTime,
+		EndTime:             state.EndTime,
+		Error:               state.Error,
 	}
 
 	// Apply variable updates

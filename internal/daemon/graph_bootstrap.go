@@ -43,7 +43,7 @@ func NewGraphBootstrapper(client graph.GraphClient, logger *slog.Logger) *GraphB
 //
 // Parameters:
 //   - m: The mission state from SQLite
-//   - def: The mission definition containing workflow metadata
+//   - def: The mission definition containing mission metadata
 //
 // Returns a schema.Mission ready for insertion into Neo4j.
 func convertToSchemaMission(m *mission.Mission, def *mission.MissionDefinition) *schema.Mission {
@@ -66,8 +66,8 @@ func convertToSchemaMission(m *mission.Mission, def *mission.MissionDefinition) 
 		targetRef = string(m.TargetID)
 	}
 
-	// Use WorkflowJSON as YAML source (it contains the original workflow definition)
-	yamlSource := m.WorkflowJSON
+	// Use MissionDefinitionJSON as YAML source (it contains the original mission definition)
+	yamlSource := m.MissionDefinitionJSON
 	if yamlSource == "" {
 		yamlSource = "{}" // Empty JSON object as fallback
 	}
@@ -112,28 +112,28 @@ func convertToSchemaMission(m *mission.Mission, def *mission.MissionDefinition) 
 	return schemaMission
 }
 
-// convertToSchemaNode converts a MissionNode from the workflow definition to a schema.WorkflowNode
+// convertToSchemaNode converts a MissionNode from the mission definition to a schema.MissionNode
 // for insertion into the Neo4j graph. This handles the data mapping between mission definitions
 // and the graph schema.
 //
 // Parameters:
 //   - missionID: The ID of the parent mission (stable SQLite ID)
-//   - nodeDef: The node definition from the mission workflow
+//   - nodeDef: The node definition from the mission
 //   - hasDependencies: Whether this node has dependencies (determines initial status)
 //
 // Returns:
-//   - *schema.WorkflowNode: A workflow node ready for insertion into Neo4j
+//   - *schema.MissionNode: A mission node ready for insertion into Neo4j
 //
 // The function generates a new unique ID for the node, determines the node type (agent or tool),
 // and sets up all execution parameters including timeout, retry policy, and task configuration.
 // Nodes with dependencies start in "pending" status, while nodes without dependencies (entry points)
 // start in "ready" status.
-func convertToSchemaNode(missionID types.ID, nodeDef *mission.MissionNode, hasDependencies bool) *schema.WorkflowNode {
-	// Generate a new unique ID for this workflow node instance
+func convertToSchemaNode(missionID types.ID, nodeDef *mission.MissionNode, hasDependencies bool) *schema.MissionNode {
+	// Generate a new unique ID for this mission node instance
 	nodeID := types.NewID()
 
 	// Determine the node type and create the appropriate schema node
-	var node *schema.WorkflowNode
+	var node *schema.MissionNode
 	switch nodeDef.Type {
 	case mission.NodeTypeAgent:
 		// Create an agent node with agent name
@@ -225,12 +225,12 @@ func convertToSchemaNode(missionID types.ID, nodeDef *mission.MissionNode, hasDe
 	// Nodes without dependencies are entry points and can start immediately (ready)
 	// Nodes with dependencies must wait for their dependencies to complete (pending)
 	if hasDependencies {
-		node.Status = schema.WorkflowNodeStatusPending
+		node.Status = schema.MissionNodeStatusPending
 	} else {
-		node.Status = schema.WorkflowNodeStatusReady
+		node.Status = schema.MissionNodeStatusReady
 	}
 
-	// Mark as static workflow node (not dynamically spawned)
+	// Mark as static mission node (not dynamically spawned)
 	node.IsDynamic = false
 	// SpawnedBy is intentionally left empty for static nodes
 	// Only dynamic nodes spawned at runtime will have this field set
@@ -240,15 +240,15 @@ func convertToSchemaNode(missionID types.ID, nodeDef *mission.MissionNode, hasDe
 
 // Bootstrap creates the complete mission graph structure in Neo4j.
 // This includes the Mission node (with full SQLite metadata), MissionRun node,
-// all WorkflowNodes, and their dependency relationships.
+// all MissionNodes, and their dependency relationships.
 //
-// The method is idempotent for Mission/WorkflowNodes - calling it multiple times is safe.
+// The method is idempotent for Mission/MissionNodes - calling it multiple times is safe.
 // However, each call creates a NEW MissionRun node to track individual executions.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeouts
 //   - m: The mission state from SQLite (has stable ID across runs)
-//   - def: The mission definition containing workflow structure
+//   - def: The mission definition containing mission structure
 //   - run: The mission run from SQLite (unique per execution)
 //
 // Returns:
@@ -258,10 +258,10 @@ func convertToSchemaNode(missionID types.ID, nodeDef *mission.MissionNode, hasDe
 // The bootstrap process follows these steps:
 //  1. Create/ensure the Mission node with full SQLite metadata (uses stable SQLite ID)
 //  2. Create a new MissionRun node linked to Mission (uses SQLite run ID)
-//  3. Create all WorkflowNodes and link them to Mission
+//  3. Create all MissionNodes and link them to Mission
 //  4. Create dependency relationships between nodes based on DependsOn fields
 //
-// All operations use MERGE for Mission/WorkflowNodes to ensure idempotency.
+// All operations use MERGE for Mission/MissionNodes to ensure idempotency.
 // MissionRuns always use CREATE to ensure each execution is tracked uniquely.
 func (b *GraphBootstrapper) Bootstrap(ctx context.Context, m *mission.Mission, def *mission.MissionDefinition, run *mission.MissionRun) (*BootstrapResult, error) {
 	// Create MissionQueries instance for graph operations
@@ -295,7 +295,7 @@ func (b *GraphBootstrapper) Bootstrap(ctx context.Context, m *mission.Mission, d
 		"mission_run_id", run.ID,
 		"run_number", run.RunNumber)
 
-	// Step 3: Create WorkflowNodes and build ID mapping
+	// Step 3: Create MissionNodes and build ID mapping
 	// Map YAML node IDs to generated types.IDs for dependency creation
 	nodeIDMap := make(map[string]types.ID)
 
@@ -307,20 +307,20 @@ func (b *GraphBootstrapper) Bootstrap(ctx context.Context, m *mission.Mission, d
 		schemaNode := convertToSchemaNode(m.ID, nodeDef, hasDependencies)
 
 		// Create node in graph
-		if err := missionQueries.CreateWorkflowNode(ctx, schemaNode); err != nil {
-			return nil, fmt.Errorf("failed to create workflow node %s: %w", nodeDef.ID, err)
+		if err := missionQueries.CreateMissionNode(ctx, schemaNode); err != nil {
+			return nil, fmt.Errorf("failed to create mission node %s: %w", nodeDef.ID, err)
 		}
 
 		// Store mapping for dependency creation
 		nodeIDMap[nodeDef.ID] = schemaNode.ID
 
-		b.logger.Debug("created workflow node in graph",
+		b.logger.Debug("created mission node in graph",
 			"node_yaml_id", nodeDef.ID,
 			"node_graph_id", schemaNode.ID,
 			"node_type", nodeDef.Type)
 	}
 
-	b.logger.Info("created workflow nodes in graph",
+	b.logger.Info("created mission nodes in graph",
 		"mission_id", m.ID,
 		"node_count", len(def.Nodes))
 

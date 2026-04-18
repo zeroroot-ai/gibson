@@ -12,14 +12,14 @@ import (
 // TestMission_WithTenant verifies the WithTenant method sets the TenantID correctly
 func TestMission_WithTenant(t *testing.T) {
 	m := &Mission{
-		ID:          types.NewID(),
-		Name:        "Test Mission",
-		Description: "Test Description",
-		Status:      MissionStatusPending,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		CreatedAt:   NewUnixTimeNow(),
-		UpdatedAt:   NewUnixTimeNow(),
+		ID:                  types.NewID(),
+		Name:                "Test Mission",
+		Description:         "Test Description",
+		Status:              MissionStatusPending,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	// Set tenant ID
@@ -31,14 +31,14 @@ func TestMission_WithTenant(t *testing.T) {
 // TestMission_TenantSerialization verifies JSON serialization with TenantID
 func TestMission_TenantSerialization(t *testing.T) {
 	m := &Mission{
-		ID:          types.NewID(),
-		Name:        "Test Mission",
-		Description: "Test Description",
-		Status:      MissionStatusPending,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		CreatedAt:   NewUnixTimeNow(),
-		UpdatedAt:   NewUnixTimeNow(),
+		ID:                  types.NewID(),
+		Name:                "Test Mission",
+		Description:         "Test Description",
+		Status:              MissionStatusPending,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 	m = m.WithTenant("tenant-456")
 
@@ -61,7 +61,7 @@ func TestMission_BackwardCompatibility(t *testing.T) {
 	// Create valid UUIDs for testing
 	missionID := types.NewID()
 	targetID := types.NewID()
-	workflowID := types.NewID()
+	missionDefinitionID := types.NewID()
 
 	// Simulate old JSON without tenant_id field
 	oldJSON := `{
@@ -70,7 +70,7 @@ func TestMission_BackwardCompatibility(t *testing.T) {
 		"description": "Old Description",
 		"status": "pending",
 		"target_id": "` + string(targetID) + `",
-		"workflow_id": "` + string(workflowID) + `",
+		"mission_definition_id": "` + string(missionDefinitionID) + `",
 		"progress": 0,
 		"findings_count": 0,
 		"run_number": 0,
@@ -96,14 +96,14 @@ func TestMission_BackwardCompatibility(t *testing.T) {
 func TestMission_OmitemptyBehavior(t *testing.T) {
 	// Mission without TenantID should not include tenant_id in JSON
 	m := &Mission{
-		ID:          types.NewID(),
-		Name:        "Test Mission",
-		Description: "Test Description",
-		Status:      MissionStatusPending,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		CreatedAt:   NewUnixTimeNow(),
-		UpdatedAt:   NewUnixTimeNow(),
+		ID:                  types.NewID(),
+		Name:                "Test Mission",
+		Description:         "Test Description",
+		Status:              MissionStatusPending,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	data, err := json.Marshal(m)
@@ -136,14 +136,14 @@ func TestMission_MethodChaining(t *testing.T) {
 	parentID := types.NewID()
 
 	m := &Mission{
-		ID:          types.NewID(),
-		Name:        "Test Mission",
-		Description: "Test Description",
-		Status:      MissionStatusPending,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		CreatedAt:   NewUnixTimeNow(),
-		UpdatedAt:   NewUnixTimeNow(),
+		ID:                  types.NewID(),
+		Name:                "Test Mission",
+		Description:         "Test Description",
+		Status:              MissionStatusPending,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	// Chain methods

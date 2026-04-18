@@ -75,7 +75,7 @@ func ExampleMockApprovalService_autoDeny() {
 }
 
 // ExampleMockApprovalService_manualApproval demonstrates how to simulate
-// manual approval workflows in tests by explicitly submitting decisions.
+// manual approval missions in tests by explicitly submitting decisions.
 func ExampleMockApprovalService_manualApproval() {
 	// Create a mock approval service that requires manual decisions
 	mock := plan.NewMockApprovalService()

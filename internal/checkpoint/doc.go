@@ -13,7 +13,7 @@
 //   - Checkpoints: Immutable snapshots of complete mission state at a point in time
 //   - Threads: Branching execution paths enabling parallel exploration and what-if scenarios
 //   - ExecutionState: Serializable state representation for persistence and recovery
-//   - ApprovalState: Human-in-the-loop approval workflow state
+//   - ApprovalState: Human-in-the-loop approval mission state
 //
 // # Checkpoint Structure
 //
@@ -25,7 +25,7 @@
 //   - Working and mission memory snapshots
 //   - Conversation history for LLM context reconstruction
 //   - Findings discovered up to this point
-//   - Approval workflow state if waiting for human input
+//   - Approval mission state if waiting for human input
 //   - Integrity checksums and encryption metadata
 //
 // # Threading Model

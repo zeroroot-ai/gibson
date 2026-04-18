@@ -18,16 +18,16 @@ type checkpointEnvelope struct {
 	// Version is the codec version used to serialize this checkpoint
 	Version int `json:"version"`
 
-	// Data contains the serialized workflow state
+	// Data contains the serialized mission state
 	Data map[string]any `json:"data"`
 }
 
-// SerializeWorkflowState serializes a workflow state map to JSON bytes with version information.
+// SerializeMissionState serializes a mission state map to JSON bytes with version information.
 // The state is wrapped in an envelope that includes the codec version for future compatibility.
 // Returns the serialized bytes or an error if serialization fails.
-func SerializeWorkflowState(state map[string]any) ([]byte, error) {
+func SerializeMissionState(state map[string]any) ([]byte, error) {
 	if state == nil {
-		return nil, fmt.Errorf("workflow state cannot be nil")
+		return nil, fmt.Errorf("mission state cannot be nil")
 	}
 
 	// Wrap state in versioned envelope
@@ -39,16 +39,16 @@ func SerializeWorkflowState(state map[string]any) ([]byte, error) {
 	// Serialize to JSON with consistent formatting
 	data, err := json.Marshal(envelope)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal workflow state: %w", err)
+		return nil, fmt.Errorf("failed to marshal mission state: %w", err)
 	}
 
 	return data, nil
 }
 
-// DeserializeWorkflowState deserializes JSON bytes back into a workflow state map.
+// DeserializeMissionState deserializes JSON bytes back into a mission state map.
 // It validates the version and extracts the state data from the envelope.
-// Returns the workflow state map or an error if deserialization fails or version is incompatible.
-func DeserializeWorkflowState(data []byte) (map[string]any, error) {
+// Returns the mission state map or an error if deserialization fails or version is incompatible.
+func DeserializeMissionState(data []byte) (map[string]any, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("checkpoint data cannot be empty")
 	}

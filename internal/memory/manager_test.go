@@ -315,7 +315,7 @@ func TestMemoryManager_MultipleMissions(t *testing.T) {
 	assert.Equal(t, "value2", item2.Value)
 }
 
-// TestMemoryManager_Integration tests a complete workflow across all memory tiers.
+// TestMemoryManager_Integration tests a complete mission across all memory tiers.
 func TestMemoryManager_Integration(t *testing.T) {
 	db, cleanup := setupManagerTestDB(t)
 	defer cleanup()

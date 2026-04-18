@@ -436,17 +436,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.logTailer = NewLogTailer(ctx, 10000, *d.logger)
 	d.logger.Info(ctx, "initialized log tailer")
 
-	// Initialize mission service with inline config processor support
-	// Note: MissionStore implements WorkflowCreator (has CreateDefinition method)
-	// and targetStore implements TargetCreator (has Create method)
-	missionService := mission.NewMissionService(d.missionStore, nil, nil) // No workflow/finding stores for now
+	// Initialize mission service — reference-only after spec mission-api-only-cleanup.
+	// Missions reference a registered target and mission definition by ID; inline
+	// construction and YAML parsing are no longer supported.
+	missionService := mission.NewMissionService(d.missionStore, nil) // finding store wired later if configured
 	missionService.SetTargetStore(d.targetStore)
-
-	// Create inline config processor using the target store and mission store
-	inlineProcessor := mission.NewInlineConfigProcessor(d.targetStore, d.missionStore)
-	missionService.SetInlineProcessor(inlineProcessor)
 	d.missionService = missionService
-	d.logger.Info(ctx, "initialized mission service with inline config processor")
+	d.logger.Info(ctx, "initialized mission service (reference-only)")
 
 	// Initialize QuotaManager for per-tenant resource enforcement.
 	// The TenantScopedStore wraps stateClient so that all quota counters are

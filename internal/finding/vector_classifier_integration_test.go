@@ -121,7 +121,7 @@ func TestVectorClassifier_RealEmbeddings_SemanticMatching(t *testing.T) {
 }
 
 // TestVectorClassifier_RealEmbeddings_BootstrapAndClassify tests the full
-// workflow of bootstrapping from DefaultRegistry and then classifying findings.
+// mission of bootstrapping from DefaultRegistry and then classifying findings.
 func TestVectorClassifier_RealEmbeddings_BootstrapAndClassify(t *testing.T) {
 	ctx := context.Background()
 

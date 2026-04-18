@@ -14,7 +14,7 @@ const (
 	// SourceMissionExplicit indicates the dependency was explicitly listed in the mission dependencies section
 	SourceMissionExplicit DependencySource = "mission_explicit"
 
-	// SourceMissionNode indicates the dependency was referenced by a mission node (agent/tool in a workflow step)
+	// SourceMissionNode indicates the dependency was referenced by a mission node (agent/tool in a mission step)
 	SourceMissionNode DependencySource = "mission_node"
 
 	// SourceManifest indicates the dependency came from a component's manifest dependencies.components section

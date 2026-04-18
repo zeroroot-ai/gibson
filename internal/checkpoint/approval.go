@@ -7,12 +7,12 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// ApprovalState captures the state of a human-in-the-loop approval workflow.
+// ApprovalState captures the state of a human-in-the-loop approval mission.
 // When a mission requires human approval before proceeding (e.g., before running
 // a destructive action or exploit), execution pauses and creates a checkpoint
 // with ApprovalState populated.
 //
-// The approval workflow:
+// The approval mission:
 //  1. Agent requests approval with details and proposed actions
 //  2. Execution pauses, checkpoint created with ApprovalState
 //  3. Human reviews request via UI/API
@@ -25,7 +25,7 @@ type ApprovalState struct {
 	// RequestID is a unique identifier for this approval request.
 	RequestID string `json:"request_id" msgpack:"request_id"`
 
-	// NodeID is the workflow node that requested approval.
+	// NodeID is the mission node that requested approval.
 	NodeID string `json:"node_id" msgpack:"node_id"`
 
 	// RequestedAt is when the approval was requested.

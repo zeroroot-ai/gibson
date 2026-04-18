@@ -330,12 +330,12 @@ func newPersistedMission(t *testing.T, store *redisMissionStore) *Mission {
 	t.Helper()
 	now := time.Now()
 	m := &Mission{
-		ID:         types.NewID(),
-		WorkflowID: types.NewID(),
-		Status:     MissionStatusRunning,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		Metrics:    &MissionMetrics{StartedAt: now},
+		ID:                  types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		Status:              MissionStatusRunning,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+		Metrics:             &MissionMetrics{StartedAt: now},
 	}
 	require.NoError(t, store.Save(context.Background(), m))
 	return m

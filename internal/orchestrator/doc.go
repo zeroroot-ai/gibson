@@ -1,20 +1,20 @@
 // Package orchestrator provides the decision-making types and schema for
-// Gibson's LLM-driven workflow orchestration.
+// Gibson's LLM-driven mission orchestration.
 //
 // The orchestrator uses structured output from an LLM to make intelligent
-// decisions about workflow execution. The Decision type represents the output
+// decisions about mission execution. The Decision type represents the output
 // of the orchestrator's reasoning process.
 //
 // # Decision Actions
 //
 // The orchestrator can take several types of actions:
 //
-//   - execute_agent: Run a specific workflow node/agent
-//   - skip_agent: Skip execution of a workflow node
+//   - execute_agent: Run a specific mission node/agent
+//   - skip_agent: Skip execution of a mission node
 //   - modify_params: Modify parameters for a target node before execution
 //   - retry: Retry execution of a failed node
-//   - spawn_agent: Dynamically create and add a new node to the workflow
-//   - complete: Mark the workflow as complete and stop orchestration
+//   - spawn_agent: Dynamically create and add a new node to the mission
+//   - complete: Mark the mission as complete and stop orchestration
 //
 // # JSON Schema
 //
@@ -38,7 +38,7 @@
 //	}
 //
 //	if decision.IsTerminal() {
-//	    log.Printf("Workflow complete: %s", decision.StopReason)
+//	    log.Printf("Mission complete: %s", decision.StopReason)
 //	    return nil
 //	}
 //
@@ -46,7 +46,7 @@
 //	case orchestrator.ActionExecuteAgent:
 //	    return executor.RunNode(decision.TargetNodeID)
 //	case orchestrator.ActionSpawnAgent:
-//	    return workflow.AddNode(decision.SpawnConfig)
+//	    return mission.AddNode(decision.SpawnConfig)
 //	// ... handle other actions
 //	}
 //

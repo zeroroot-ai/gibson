@@ -14,8 +14,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
 	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
-	workflowpb "github.com/zero-day-ai/sdk/api/gen/gibson/workflow/v1"
 )
 
 // MissionAdapter adapts the orchestrator to the mission.MissionOrchestrator interface.
@@ -81,18 +81,18 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 	var def *mission.MissionDefinition
 	var err error
 
-	if mis.WorkflowJSON != "" {
+	if mis.MissionDefinitionJSON != "" {
 		// Parse mission definition from inline JSON
 		def = &mission.MissionDefinition{}
-		if err = json.Unmarshal([]byte(mis.WorkflowJSON), def); err != nil {
+		if err = json.Unmarshal([]byte(mis.MissionDefinitionJSON), def); err != nil {
 			return nil, fmt.Errorf("failed to parse mission definition: %w", err)
 		}
-	} else if mis.WorkflowID != "" {
+	} else if mis.MissionDefinitionID != "" {
 		// For now, we need the definition JSON to be present
 		// In a future enhancement, we could load from the mission definition store
-		return nil, fmt.Errorf("mission definition loading from WorkflowID not yet implemented in adapter")
+		return nil, fmt.Errorf("mission definition loading from MissionDefinitionID not yet implemented in adapter")
 	} else {
-		return nil, fmt.Errorf("no mission definition available (neither WorkflowID nor WorkflowJSON)")
+		return nil, fmt.Errorf("no mission definition available (neither MissionDefinitionID nor MissionDefinitionJSON)")
 	}
 
 	// Store mission definition in Neo4j graph for state tracking
@@ -413,22 +413,22 @@ func (m *MissionAdapter) convertResult(mis *mission.Mission, orchResult *Orchest
 	// Set result completion time
 	result.CompletedAt = completedAt
 
-	// Convert orchestrator result to workflow result map
+	// Convert orchestrator result to mission result map
 	if orchResult.FinalState != nil {
-		workflowResultMap := make(map[string]any)
-		workflowResultMap["status"] = string(orchResult.Status)
-		workflowResultMap["total_iterations"] = orchResult.TotalIterations
-		workflowResultMap["total_decisions"] = orchResult.TotalDecisions
-		workflowResultMap["total_tokens"] = orchResult.TotalTokensUsed
-		workflowResultMap["completed_nodes"] = orchResult.CompletedNodes
-		workflowResultMap["failed_nodes"] = orchResult.FailedNodes
-		workflowResultMap["duration"] = orchResult.Duration.String()
+		missionResultMap := make(map[string]any)
+		missionResultMap["status"] = string(orchResult.Status)
+		missionResultMap["total_iterations"] = orchResult.TotalIterations
+		missionResultMap["total_decisions"] = orchResult.TotalDecisions
+		missionResultMap["total_tokens"] = orchResult.TotalTokensUsed
+		missionResultMap["completed_nodes"] = orchResult.CompletedNodes
+		missionResultMap["failed_nodes"] = orchResult.FailedNodes
+		missionResultMap["duration"] = orchResult.Duration.String()
 
 		if orchResult.StopReason != "" {
-			workflowResultMap["stop_reason"] = orchResult.StopReason
+			missionResultMap["stop_reason"] = orchResult.StopReason
 		}
 
-		result.WorkflowResult = workflowResultMap
+		result.MissionResult = missionResultMap
 	}
 
 	return result
@@ -454,16 +454,16 @@ func (m *MissionAdapter) convertErrorToResult(mis *mission.Mission, orchResult *
 
 	// If we have partial orchestrator results, include them
 	if orchResult != nil {
-		workflowResultMap := make(map[string]any)
-		workflowResultMap["status"] = "failed"
-		workflowResultMap["total_iterations"] = orchResult.TotalIterations
-		workflowResultMap["total_decisions"] = orchResult.TotalDecisions
-		workflowResultMap["total_tokens"] = orchResult.TotalTokensUsed
-		workflowResultMap["completed_nodes"] = orchResult.CompletedNodes
-		workflowResultMap["failed_nodes"] = orchResult.FailedNodes
-		workflowResultMap["duration"] = orchResult.Duration.String()
-		workflowResultMap["error"] = err.Error()
-		result.WorkflowResult = workflowResultMap
+		missionResultMap := make(map[string]any)
+		missionResultMap["status"] = "failed"
+		missionResultMap["total_iterations"] = orchResult.TotalIterations
+		missionResultMap["total_decisions"] = orchResult.TotalDecisions
+		missionResultMap["total_tokens"] = orchResult.TotalTokensUsed
+		missionResultMap["completed_nodes"] = orchResult.CompletedNodes
+		missionResultMap["failed_nodes"] = orchResult.FailedNodes
+		missionResultMap["duration"] = orchResult.Duration.String()
+		missionResultMap["error"] = err.Error()
+		result.MissionResult = missionResultMap
 	}
 
 	return result
@@ -559,14 +559,14 @@ func (m *MissionAdapter) parseCheckpointState(checkpoint *mission.MissionCheckpo
 
 	state := make(map[string]any)
 
-	// Extract workflow state
-	if checkpoint.WorkflowState != nil {
-		stateBytes, err := json.Marshal(checkpoint.WorkflowState)
+	// Extract mission state
+	if checkpoint.MissionState != nil {
+		stateBytes, err := json.Marshal(checkpoint.MissionState)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal workflow state: %w", err)
+			return nil, fmt.Errorf("failed to marshal mission state: %w", err)
 		}
 		if err := json.Unmarshal(stateBytes, &state); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal workflow state: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal mission state: %w", err)
 		}
 	}
 
@@ -577,13 +577,13 @@ func (m *MissionAdapter) parseCheckpointState(checkpoint *mission.MissionCheckpo
 	return state, nil
 }
 
-// ExecuteProto executes a mission using a proto WorkflowDefinition instead of MissionDefinition.
-// This provides type-safe workflow execution with proto enum validation and oneof accessors.
-func (m *MissionAdapter) ExecuteProto(ctx context.Context, mis *mission.Mission, workflowDef *workflowpb.WorkflowDefinition) (*mission.MissionResult, error) {
-	// Convert proto WorkflowDefinition to internal MissionDefinition
-	def, err := protoWorkflowToMissionDefinition(workflowDef)
+// ExecuteProto executes a mission using a proto MissionDefinition instead of MissionDefinition.
+// This provides type-safe mission execution with proto enum validation and oneof accessors.
+func (m *MissionAdapter) ExecuteProto(ctx context.Context, mis *mission.Mission, missionDef *missionpb.MissionDefinition) (*mission.MissionResult, error) {
+	// Convert proto MissionDefinition to internal MissionDefinition
+	def, err := protoMissionToMissionDefinition(missionDef)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert proto workflow to mission definition: %w", err)
+		return nil, fmt.Errorf("failed to convert proto mission to mission definition: %w", err)
 	}
 
 	// Store converted definition in mission for existing Execute method
@@ -591,17 +591,17 @@ func (m *MissionAdapter) ExecuteProto(ctx context.Context, mis *mission.Mission,
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal mission definition: %w", err)
 	}
-	mis.WorkflowJSON = string(defJSON)
+	mis.MissionDefinitionJSON = string(defJSON)
 
 	// Use existing Execute method
 	return m.Execute(ctx, mis)
 }
 
-// protoWorkflowToMissionDefinition converts a proto WorkflowDefinition to internal MissionDefinition.
+// protoMissionToMissionDefinition converts a proto MissionDefinition to internal MissionDefinition.
 // This function uses proto enum types and oneof accessors as specified in Phase 3 requirements.
-func protoWorkflowToMissionDefinition(proto *workflowpb.WorkflowDefinition) (*mission.MissionDefinition, error) {
+func protoMissionToMissionDefinition(proto *missionpb.MissionDefinition) (*mission.MissionDefinition, error) {
 	if proto == nil {
-		return nil, fmt.Errorf("proto workflow definition is nil")
+		return nil, fmt.Errorf("proto mission definition is nil")
 	}
 
 	// Convert proto nodes to mission nodes
@@ -665,9 +665,9 @@ func protoWorkflowToMissionDefinition(proto *workflowpb.WorkflowDefinition) (*mi
 	return def, nil
 }
 
-// protoNodeToMissionNode converts a proto WorkflowNode to internal MissionNode.
+// protoNodeToMissionNode converts a proto MissionNode to internal MissionNode.
 // Uses proto enum types and oneof accessors for type-safe node configuration.
-func protoNodeToMissionNode(nodeID string, protoNode *workflowpb.WorkflowNode) (*mission.MissionNode, error) {
+func protoNodeToMissionNode(nodeID string, protoNode *missionpb.MissionNode) (*mission.MissionNode, error) {
 	if protoNode == nil {
 		return nil, fmt.Errorf("proto node is nil")
 	}
@@ -675,17 +675,17 @@ func protoNodeToMissionNode(nodeID string, protoNode *workflowpb.WorkflowNode) (
 	// Convert node type enum to internal type
 	var nodeType mission.NodeType
 	switch protoNode.Type {
-	case workflowpb.NodeType_NODE_TYPE_AGENT:
+	case missionpb.NodeType_NODE_TYPE_AGENT:
 		nodeType = mission.NodeTypeAgent
-	case workflowpb.NodeType_NODE_TYPE_TOOL:
+	case missionpb.NodeType_NODE_TYPE_TOOL:
 		nodeType = mission.NodeTypeTool
-	case workflowpb.NodeType_NODE_TYPE_PLUGIN:
+	case missionpb.NodeType_NODE_TYPE_PLUGIN:
 		nodeType = mission.NodeTypePlugin
-	case workflowpb.NodeType_NODE_TYPE_CONDITION:
+	case missionpb.NodeType_NODE_TYPE_CONDITION:
 		nodeType = mission.NodeTypeCondition
-	case workflowpb.NodeType_NODE_TYPE_PARALLEL:
+	case missionpb.NodeType_NODE_TYPE_PARALLEL:
 		nodeType = mission.NodeTypeParallel
-	case workflowpb.NodeType_NODE_TYPE_JOIN:
+	case missionpb.NodeType_NODE_TYPE_JOIN:
 		nodeType = mission.NodeTypeJoin
 	default:
 		return nil, fmt.Errorf("unknown node type: %v", protoNode.Type)
@@ -712,11 +712,11 @@ func protoNodeToMissionNode(nodeID string, protoNode *workflowpb.WorkflowNode) (
 
 		// Convert backoff strategy enum
 		switch protoNode.RetryPolicy.BackoffStrategy {
-		case workflowpb.BackoffStrategy_BACKOFF_STRATEGY_CONSTANT:
+		case missionpb.BackoffStrategy_BACKOFF_STRATEGY_CONSTANT:
 			node.RetryPolicy.BackoffStrategy = mission.BackoffConstant
-		case workflowpb.BackoffStrategy_BACKOFF_STRATEGY_LINEAR:
+		case missionpb.BackoffStrategy_BACKOFF_STRATEGY_LINEAR:
 			node.RetryPolicy.BackoffStrategy = mission.BackoffLinear
-		case workflowpb.BackoffStrategy_BACKOFF_STRATEGY_EXPONENTIAL:
+		case missionpb.BackoffStrategy_BACKOFF_STRATEGY_EXPONENTIAL:
 			node.RetryPolicy.BackoffStrategy = mission.BackoffExponential
 		}
 

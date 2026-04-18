@@ -11,7 +11,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// Example demonstrating execution tracking workflow
+// Example demonstrating execution tracking mission
 func Example_executionTracking() {
 	// Setup Neo4j client
 	config := graph.GraphClientConfig{

@@ -92,3 +92,14 @@ type team
     define admin: [user] or admin from parent
     define member: [user, team#admin]
     define can_view_data_from: [team]
+
+# mission_definition — per-tenant container for structured mission definitions
+# registered via gibson.daemon.v1.DaemonService/CreateMissionDefinition. The
+# per-tenant singleton object is addressed as `mission_definition:_tenant_<slug>`
+# and checked by the CreateMissionDefinition RPC authz rule. `writer` is granted
+# only to users who are admin of the parent tenant — no direct user grants
+# intended; contribute via tenant admin membership only.
+type mission_definition
+  relations
+    define parent: [tenant]
+    define writer: admin from parent

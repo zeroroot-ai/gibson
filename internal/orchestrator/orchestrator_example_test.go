@@ -76,7 +76,7 @@ func ExampleOrchestratorResult() {
 		Duration:        5 * time.Minute,
 		CompletedNodes:  18,
 		FailedNodes:     2,
-		StopReason:      "all workflow nodes completed successfully",
+		StopReason:      "all mission nodes completed successfully",
 	}
 
 	// Display results

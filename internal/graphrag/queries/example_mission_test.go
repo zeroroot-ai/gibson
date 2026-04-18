@@ -114,7 +114,7 @@ func ExampleMissionQueries_dependencies() {
 	// Check if all dependencies are completed
 	allCompleted := true
 	for _, dep := range deps {
-		if dep.Status != schema.WorkflowNodeStatusCompleted {
+		if dep.Status != schema.MissionNodeStatusCompleted {
 			allCompleted = false
 			break
 		}

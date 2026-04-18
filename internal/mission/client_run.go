@@ -18,7 +18,7 @@ type MissionStatusInfo struct {
 	// Progress is the completion percentage (0.0 to 1.0).
 	Progress float64
 
-	// Phase is the current workflow phase or step name.
+	// Phase is the current mission phase or step name.
 	Phase string
 
 	// FindingCounts maps finding severity levels to counts.
@@ -237,12 +237,12 @@ func (c *MissionClient) WaitForCompletion(ctx context.Context, missionID string,
 
 				// Build and return mission result
 				result := &MissionResult{
-					MissionID:      mission.ID,
-					Status:         mission.Status,
-					Metrics:        mission.Metrics,
-					FindingIDs:     []types.ID{}, // Would need to query finding store for full list
-					WorkflowResult: map[string]any{},
-					Error:          mission.Error,
+					MissionID:     mission.ID,
+					Status:        mission.Status,
+					Metrics:       mission.Metrics,
+					FindingIDs:    []types.ID{}, // Would need to query finding store for full list
+					MissionResult: map[string]any{},
+					Error:         mission.Error,
 				}
 
 				if !mission.CompletedAt.IsNil() {
@@ -253,7 +253,7 @@ func (c *MissionClient) WaitForCompletion(ctx context.Context, missionID string,
 
 				// Add checkpoint results if available
 				if mission.Checkpoint != nil && mission.Checkpoint.NodeResults != nil {
-					result.WorkflowResult = mission.Checkpoint.NodeResults
+					result.MissionResult = mission.Checkpoint.NodeResults
 				}
 
 				return result, nil

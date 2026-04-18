@@ -14,13 +14,13 @@ import (
 // These methods implement the MissionManager interface from the SDK,
 // allowing agents to create and manage child missions autonomously.
 
-// CreateMission creates a new mission from a workflow definition.
-// The workflow parameter should be a Gibson workflow.Workflow instance.
+// CreateMission creates a new mission from a mission definition.
+// The mission parameter should be a Gibson mission.Mission instance.
 // Returns mission metadata including the assigned mission ID.
 //
 // This method:
 //  1. Checks spawn limits to prevent runaway mission creation
-//  2. Validates the workflow and target ID
+//  2. Validates the mission and target ID
 //  3. Creates the mission via the MissionClient
 //  4. Tracks lineage by setting the parent mission ID
 //
@@ -39,15 +39,15 @@ func (h *DefaultAgentHarness) CreateMission(ctx context.Context, wf any, targetI
 		)
 	}
 
-	// Serialize workflow to JSON
-	// We accept workflow as `any` to avoid import cycles, and serialize it
-	workflowJSON, err := json.Marshal(wf)
+	// Serialize mission to JSON
+	// We accept mission as `any` to avoid import cycles, and serialize it
+	missionDefinitionJSON, err := json.Marshal(wf)
 	if err != nil {
-		h.logger.Error("failed to serialize workflow",
+		h.logger.Error("failed to serialize mission",
 			"error", err)
 		return nil, types.WrapError(
 			ErrHarnessInvalidConfig,
-			"failed to serialize workflow",
+			"failed to serialize mission",
 			err,
 		)
 	}
@@ -79,11 +79,11 @@ func (h *DefaultAgentHarness) CreateMission(ctx context.Context, wf any, targetI
 
 	// Build CreateMissionRequest for the client
 	req := &CreateMissionRequest{
-		WorkflowJSON:    string(workflowJSON),
-		WorkflowID:      types.NewID(), // Generate new workflow ID
-		TargetID:        parsedTargetID,
-		ParentMissionID: &h.missionCtx.ID,
-		ParentDepth:     GetMissionDepth(ctx, h.missionClient, h.missionCtx.ID),
+		MissionDefinitionJSON: string(missionDefinitionJSON),
+		MissionDefinitionID:   types.NewID(), // Generate new mission ID
+		TargetID:              parsedTargetID,
+		ParentMissionID:       &h.missionCtx.ID,
+		ParentDepth:           GetMissionDepth(ctx, h.missionClient, h.missionCtx.ID),
 	}
 
 	// Apply options if provided
@@ -323,7 +323,7 @@ func toSDKMissionResult(result *MissionResultInfo) *sdkmission.MissionResult {
 	sdkResult := &sdkmission.MissionResult{
 		MissionID:   result.MissionID,
 		Status:      sdkmission.MissionStatus(result.Status),
-		Output:      result.WorkflowResult,
+		Output:      result.MissionResult,
 		Error:       result.Error,
 		CompletedAt: result.CompletedAt,
 	}
@@ -476,7 +476,7 @@ func (h *DefaultAgentHarness) CancelMission(ctx context.Context, missionID strin
 }
 
 // GetMissionResults returns the results of a completed mission, including
-// findings and workflow execution output.
+// findings and mission execution output.
 //
 // This method should be called on missions in a terminal state (completed,
 // failed, or cancelled). For non-terminal missions, it returns the current
@@ -486,7 +486,7 @@ func (h *DefaultAgentHarness) CancelMission(ctx context.Context, missionID strin
 //   - Final mission status
 //   - Execution metrics (duration, token usage, etc.)
 //   - Findings discovered during execution
-//   - Workflow execution output data
+//   - Mission execution output data
 //   - Error message if the mission failed
 //
 // Returns an error if:
@@ -622,7 +622,7 @@ func toSDKMissionResultFromHarness(result *MissionResultInfo) *sdkmission.Missio
 	sdkResult := &sdkmission.MissionResult{
 		MissionID:   result.MissionID,
 		Status:      sdkmission.MissionStatus(result.Status),
-		Output:      result.WorkflowResult,
+		Output:      result.MissionResult,
 		Error:       result.Error,
 		CompletedAt: result.CompletedAt,
 	}

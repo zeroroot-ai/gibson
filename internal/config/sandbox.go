@@ -25,10 +25,10 @@ type SandboxConfig struct {
 // SandboxSetecConfig describes how to reach and authenticate to the Setec
 // frontend that this daemon dispatches sandboxed tool calls into.
 type SandboxSetecConfig struct {
-	Address     string                 `mapstructure:"address" yaml:"address"`
-	Tenant      string                 `mapstructure:"tenant" yaml:"tenant"`
-	CallTimeout time.Duration          `mapstructure:"call_timeout" yaml:"call_timeout"`
-	MTLS        component.TLSConfig    `mapstructure:"mtls" yaml:"mtls"`
+	Address     string              `mapstructure:"address" yaml:"address"`
+	Tenant      string              `mapstructure:"tenant" yaml:"tenant"`
+	CallTimeout time.Duration       `mapstructure:"call_timeout" yaml:"call_timeout"`
+	MTLS        component.TLSConfig `mapstructure:"mtls" yaml:"mtls"`
 }
 
 // SandboxToolConfig / SandboxToolResources were removed under the

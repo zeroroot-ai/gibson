@@ -21,11 +21,11 @@ const (
 	// ErrMissionTargetNotFound indicates the target was not found.
 	ErrMissionTargetNotFound MissionErrorCode = "target_not_found"
 
-	// ErrMissionWorkflowNotFound indicates the workflow was not found.
-	ErrMissionWorkflowNotFound MissionErrorCode = "workflow_not_found"
+	// ErrMissionMissionNotFound indicates the mission was not found.
+	ErrMissionMissionNotFound MissionErrorCode = "mission_not_found"
 
-	// ErrMissionWorkflowFailed indicates workflow execution failed.
-	ErrMissionWorkflowFailed MissionErrorCode = "workflow_failed"
+	// ErrMissionMissionFailed indicates mission execution failed.
+	ErrMissionMissionFailed MissionErrorCode = "mission_failed"
 
 	// ErrMissionConstraint indicates a constraint was violated.
 	ErrMissionConstraint MissionErrorCode = "constraint_violated"
@@ -142,19 +142,19 @@ func NewTargetNotFoundError(targetID string) *MissionError {
 		WithContext("target_id", targetID)
 }
 
-// NewWorkflowNotFoundError creates a workflow not found error.
-func NewWorkflowNotFoundError(workflowID string) *MissionError {
-	return NewMissionError(ErrMissionWorkflowNotFound, fmt.Sprintf("workflow not found: %s", workflowID)).
-		WithContext("workflow_id", workflowID)
+// NewMissionNotFoundError creates a mission not found error.
+func NewMissionNotFoundError(missionDefinitionID string) *MissionError {
+	return NewMissionError(ErrMissionMissionNotFound, fmt.Sprintf("mission not found: %s", missionDefinitionID)).
+		WithContext("mission_definition_id", missionDefinitionID)
 }
 
-// NewWorkflowFailedError creates a workflow execution failed error.
-func NewWorkflowFailedError(workflowID string, cause error) *MissionError {
+// NewMissionFailedError creates a mission execution failed error.
+func NewMissionFailedError(missionDefinitionID string, cause error) *MissionError {
 	return WrapMissionError(
-		ErrMissionWorkflowFailed,
-		fmt.Sprintf("workflow execution failed: %s", workflowID),
+		ErrMissionMissionFailed,
+		fmt.Sprintf("mission execution failed: %s", missionDefinitionID),
 		cause,
-	).WithContext("workflow_id", workflowID)
+	).WithContext("mission_definition_id", missionDefinitionID)
 }
 
 // NewConstraintViolationError creates a constraint violation error.

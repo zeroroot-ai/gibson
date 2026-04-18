@@ -34,7 +34,7 @@ type CheckpointEvent struct {
 	// Type indicates the kind of event triggering checkpoint consideration.
 	Type CheckpointEventType
 
-	// NodeID is the workflow node associated with this event.
+	// NodeID is the mission node associated with this event.
 	NodeID string
 
 	// Timestamp is when the event occurred.

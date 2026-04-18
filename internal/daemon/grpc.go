@@ -573,7 +573,7 @@ func (d *daemonImpl) updateAgentHeartbeat(agentName string) {
 // This should be called when a task is assigned to or completed by an agent.
 //
 // Integration points (to be implemented in future):
-//   - In orchestrator when assigning workflow nodes to agents
+//   - In orchestrator when assigning mission nodes to agents
 //   - In attack runner when starting agent operations
 //   - When tasks complete (set to empty string to clear)
 func (d *daemonImpl) setAgentCurrentTask(agentName string, taskID string) {
@@ -861,9 +861,11 @@ func (d *daemonImpl) QueryPlugin(ctx context.Context, name, method string, param
 	return result, nil
 }
 
-// RunMission starts a mission and returns an event channel.
-func (d *daemonImpl) RunMission(ctx context.Context, workflowPath string, missionID string, variables map[string]string, memoryContinuity string) (<-chan api.MissionEventData, error) {
-	return d.RunMissionWithManager(ctx, workflowPath, missionID, variables, memoryContinuity)
+// RunMission starts a mission by reference and returns an event channel.
+// The mission definition and target must already be registered — inline
+// construction and YAML paths were removed under spec mission-api-only-cleanup.
+func (d *daemonImpl) RunMission(ctx context.Context, missionDefinitionID string, targetID string, variables map[string]string, memoryContinuity string) (<-chan api.MissionEventData, error) {
+	return d.RunMissionWithManager(ctx, missionDefinitionID, targetID, variables, memoryContinuity)
 }
 
 // StopMission stops a running mission.
@@ -1238,30 +1240,6 @@ func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string
 	return []api.CheckpointData{checkpoint}, nil
 }
 
-// InstallComponent is not supported; component installation has been removed.
-func (d *daemonImpl) InstallComponent(ctx context.Context, kind string, url string, branch string, tag string, force bool, skipBuild bool, verbose bool) (api.InstallComponentResult, error) {
-	d.logger.Warn(ctx, "InstallComponent called but component installer has been removed", "kind", kind, "url", url)
-	return api.InstallComponentResult{}, fmt.Errorf("component installation is not available")
-}
-
-// InstallAllComponent is not supported; component installation has been removed.
-func (d *daemonImpl) InstallAllComponent(ctx context.Context, kind string, url string, branch string, tag string, force bool, skipBuild bool, verbose bool) (api.InstallAllComponentResult, error) {
-	d.logger.Warn(ctx, "InstallAllComponent called but component installer has been removed", "kind", kind, "url", url)
-	return api.InstallAllComponentResult{}, fmt.Errorf("component installation is not available")
-}
-
-// UninstallComponent is not supported; component installation has been removed.
-func (d *daemonImpl) UninstallComponent(ctx context.Context, kind string, name string, force bool) error {
-	d.logger.Warn(ctx, "UninstallComponent called but component installer has been removed", "kind", kind, "name", name)
-	return fmt.Errorf("component installation is not available")
-}
-
-// UpdateComponent is not supported; component installation has been removed.
-func (d *daemonImpl) UpdateComponent(ctx context.Context, kind string, name string, restart bool, skipBuild bool, verbose bool) (api.UpdateComponentResult, error) {
-	d.logger.Warn(ctx, "UpdateComponent called but component installer has been removed", "kind", kind, "name", name)
-	return api.UpdateComponentResult{}, fmt.Errorf("component installation is not available")
-}
-
 // BuildComponent is not supported; component store has been removed.
 func (d *daemonImpl) BuildComponent(ctx context.Context, kind string, name string) (api.BuildComponentResult, error) {
 	d.logger.Warn(ctx, "BuildComponent called but component store has been removed", "kind", kind, "name", name)
@@ -1448,18 +1426,6 @@ func (d *daemonImpl) getComponentLogsSimple(ctx context.Context, componentName s
 	return logChan, nil
 }
 
-// InstallMission installs a mission from a git repository.
-func (d *daemonImpl) InstallMission(ctx context.Context, url string, branch string, tag string, force bool, yes bool, timeoutMs int64) (api.InstallMissionResult, error) {
-	d.logger.Warn(ctx, "InstallMission called but mission installer has been removed", "url", url)
-	return api.InstallMissionResult{}, fmt.Errorf("mission installation is not available")
-}
-
-// UninstallMission is not supported; mission installer has been removed.
-func (d *daemonImpl) UninstallMission(ctx context.Context, name string, force bool) error {
-	d.logger.Warn(ctx, "UninstallMission called but mission installer has been removed", "name", name)
-	return fmt.Errorf("mission installation is not available")
-}
-
 // ListMissionDefinitions returns all installed mission definitions.
 func (d *daemonImpl) ListMissionDefinitions(ctx context.Context, limit int, offset int) ([]api.MissionDefinitionData, int, error) {
 	d.logger.Debug(ctx, "ListMissionDefinitions called", "limit", limit, "offset", offset)
@@ -1503,126 +1469,48 @@ func (d *daemonImpl) ListMissionDefinitions(ctx context.Context, limit int, offs
 	return result, total, nil
 }
 
-// UpdateMission is not supported; mission installer has been removed.
-func (d *daemonImpl) UpdateMission(ctx context.Context, name string, timeoutMs int64) (api.UpdateMissionResult, error) {
-	d.logger.Warn(ctx, "UpdateMission called but mission installer has been removed", "name", name)
-	return api.UpdateMissionResult{}, fmt.Errorf("mission installation is not available")
-}
-
-// ResolveMissionDependencies is not supported; dependency resolver has been removed.
-func (d *daemonImpl) ResolveMissionDependencies(ctx context.Context, missionPath string) (api.DependencyTreeData, error) {
-	d.logger.Warn(ctx, "ResolveMissionDependencies called but dependency resolver has been removed", "mission_path", missionPath)
-	return api.DependencyTreeData{}, fmt.Errorf("dependency resolver is not available")
-}
-
-// ValidateMissionDependencies is not supported; dependency resolver has been removed.
-func (d *daemonImpl) ValidateMissionDependencies(ctx context.Context, missionPath string) (api.ValidationResultData, error) {
-	d.logger.Warn(ctx, "ValidateMissionDependencies called but dependency resolver has been removed", "mission_path", missionPath)
-	return api.ValidationResultData{}, fmt.Errorf("dependency resolver is not available")
-}
-
-// EnsureMissionDependencies is not supported; dependency resolver has been removed.
-func (d *daemonImpl) EnsureMissionDependencies(ctx context.Context, missionPath string) error {
-	d.logger.Warn(ctx, "EnsureMissionDependencies called but dependency resolver has been removed", "mission_path", missionPath)
-	return fmt.Errorf("dependency resolver is not available")
-}
-
-// CreateMission creates a new mission with target and workflow configuration.
-// Supports both referenced and inline target/workflow configurations.
+// CreateMission creates a new mission by reference. The mission definition
+// and target must already be registered (via CreateMissionDefinition and the
+// target API respectively). Inline construction was removed under spec
+// mission-api-only-cleanup.
 func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionData) (api.CreateMissionResultData, error) {
 	d.logger.Info(ctx, "CreateMission called",
 		"name", req.Name,
-		"has_target_id", req.TargetID != "",
-		"has_inline_target", req.InlineTarget != nil,
-		"has_workflow_id", req.WorkflowID != "",
-		"has_inline_workflow", req.InlineWorkflow != nil,
+		"target_id", req.TargetID,
+		"mission_definition_id", req.MissionDefinitionID,
 	)
 
-	// Build MissionConfig from API request
-	missionConfig := &mission.MissionConfig{
-		Name:        req.Name,
-		Description: req.Description,
-	}
-
-	// Handle target configuration
-	if req.TargetID != "" {
-		missionConfig.Target.Reference = req.TargetID
-	} else if req.InlineTarget != nil {
-		// Convert API inline target to mission inline target config
-		seeds := make([]*mission.TargetSeedConfig, len(req.InlineTarget.Seeds))
-		for i, s := range req.InlineTarget.Seeds {
-			seeds[i] = &mission.TargetSeedConfig{
-				Value: s.Value,
-				Type:  s.Type,
-				Scope: s.Scope,
-			}
-		}
-		missionConfig.Target.Inline = &mission.InlineTargetConfig{
-			Seeds:    seeds,
-			Profile:  req.InlineTarget.Profile,
-			Depth:    req.InlineTarget.Depth,
-			Excluded: req.InlineTarget.Excluded,
-			Metadata: req.InlineTarget.Metadata,
-		}
-	} else {
-		d.logger.Error(ctx, "no target configuration provided")
-		return api.CreateMissionResultData{}, fmt.Errorf("target configuration is required (target_id or inline_target)")
-	}
-
-	// Handle workflow configuration
-	if req.WorkflowID != "" {
-		missionConfig.Workflow.Reference = req.WorkflowID
-	} else if req.InlineWorkflow != nil {
-		// Convert API inline workflow to mission inline workflow config
-		nodes := make([]*mission.WorkflowNodeConfig, len(req.InlineWorkflow.Nodes))
-		for i, n := range req.InlineWorkflow.Nodes {
-			// Convert map[string]any to map[string]string for config
-			var config map[string]string
-			if n.Config != nil {
-				config = make(map[string]string, len(n.Config))
-				for k, v := range n.Config {
-					if str, ok := v.(string); ok {
-						config[k] = str
-					} else {
-						config[k] = fmt.Sprintf("%v", v)
-					}
-				}
-			}
-			nodes[i] = &mission.WorkflowNodeConfig{
-				ID:        n.ID,
-				Type:      n.Type,
-				Name:      n.Name,
-				DependsOn: n.DependsOn,
-				Config:    config,
-			}
-		}
-		edges := make([]*mission.WorkflowEdgeConfig, len(req.InlineWorkflow.Edges))
-		for i, e := range req.InlineWorkflow.Edges {
-			edges[i] = &mission.WorkflowEdgeConfig{
-				From:      e.From,
-				To:        e.To,
-				Condition: e.Condition,
-			}
-		}
-		missionConfig.Workflow.Inline = &mission.InlineWorkflowConfig{
-			Name:     req.InlineWorkflow.Name,
-			Nodes:    nodes,
-			Edges:    edges,
-			Metadata: req.InlineWorkflow.Metadata,
-		}
-	} else {
-		d.logger.Error(ctx, "no workflow configuration provided")
-		return api.CreateMissionResultData{}, fmt.Errorf("workflow configuration is required (workflow_id or inline_workflow)")
-	}
-
-	// Initialize mission service if needed
 	if d.missionService == nil {
 		d.logger.Error(ctx, "mission service not available")
 		return api.CreateMissionResultData{}, fmt.Errorf("mission service not initialized")
 	}
 
-	// Create mission using the service
-	m, err := d.missionService.CreateFromConfig(ctx, missionConfig)
+	if req.Name == "" {
+		return api.CreateMissionResultData{}, fmt.Errorf("mission name is required")
+	}
+	if req.TargetID == "" {
+		return api.CreateMissionResultData{}, fmt.Errorf("target_id is required")
+	}
+	if req.MissionDefinitionID == "" {
+		return api.CreateMissionResultData{}, fmt.Errorf("mission_definition_id is required")
+	}
+
+	targetID, err := types.ParseID(req.TargetID)
+	if err != nil {
+		return api.CreateMissionResultData{}, fmt.Errorf("invalid target_id: %w", err)
+	}
+	missionDefinitionID, err := types.ParseID(req.MissionDefinitionID)
+	if err != nil {
+		return api.CreateMissionResultData{}, fmt.Errorf("invalid mission_definition_id: %w", err)
+	}
+
+	m, err := d.missionService.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		Name:                req.Name,
+		Description:         req.Description,
+		TargetID:            targetID,
+		MissionDefinitionID: missionDefinitionID,
+		Metadata:            req.Metadata,
+	})
 	if err != nil {
 		d.logger.Error(ctx, "failed to create mission", "error", err, "name", req.Name)
 		return api.CreateMissionResultData{}, fmt.Errorf("failed to create mission: %w", err)
@@ -1631,16 +1519,67 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 	d.logger.Info(ctx, "mission created successfully",
 		"mission_id", m.ID.String(),
 		"target_id", m.TargetID.String(),
-		"workflow_id", m.WorkflowID.String(),
+		"mission_definition_id", m.MissionDefinitionID.String(),
 	)
 
 	return api.CreateMissionResultData{
-		MissionID:   m.ID.String(),
-		TargetID:    m.TargetID.String(),
-		WorkflowID:  m.WorkflowID.String(),
-		Name:        m.Name,
-		Description: m.Description,
-		Status:      string(m.Status),
-		CreatedAt:   m.CreatedAt.Time,
+		MissionID:           m.ID.String(),
+		TargetID:            m.TargetID.String(),
+		MissionDefinitionID: m.MissionDefinitionID.String(),
+		Name:                m.Name,
+		Description:         m.Description,
+		Status:              string(m.Status),
+		CreatedAt:           m.CreatedAt.Time,
+	}, nil
+}
+
+// CreateMissionDefinition registers a structured mission definition with the
+// daemon. This is the API-only replacement for the removed InstallMission RPC;
+// no git cloning, no YAML parsing, no dependency resolution — just validate and
+// persist.
+func (d *daemonImpl) CreateMissionDefinition(ctx context.Context, req api.CreateMissionDefinitionData) (api.CreateMissionDefinitionResultData, error) {
+	if req.Definition == nil {
+		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("definition is required")
+	}
+	def := req.Definition
+	if def.Name == "" {
+		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("definition name is required")
+	}
+
+	if d.missionStore == nil {
+		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("mission store not initialized")
+	}
+
+	if def.ID.IsZero() {
+		def.ID = types.NewID()
+	}
+	if def.CreatedAt.IsZero() {
+		def.CreatedAt = time.Now()
+	}
+	if def.Nodes == nil {
+		def.Nodes = make(map[string]*mission.MissionNode)
+	}
+
+	if err := d.missionStore.CreateDefinition(ctx, def); err != nil {
+		d.logger.Error(ctx, "failed to create mission definition", "error", err, "name", def.Name)
+		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("failed to create mission definition: %w", err)
+	}
+
+	d.logger.Info(ctx, "mission definition registered",
+		"mission_definition_id", def.ID.String(),
+		"name", def.Name,
+	)
+
+	return api.CreateMissionDefinitionResultData{
+		MissionDefinitionID: def.ID.String(),
+		Info: api.MissionDefinitionData{
+			Name:        def.Name,
+			Version:     def.Version,
+			Description: def.Description,
+			Source:      def.Source,
+			InstalledAt: def.InstalledAt,
+			UpdatedAt:   def.InstalledAt,
+			NodeCount:   len(def.Nodes),
+		},
 	}, nil
 }

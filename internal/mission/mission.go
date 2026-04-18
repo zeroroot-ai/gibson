@@ -194,7 +194,7 @@ func (s MissionStatus) CanTransitionTo(target MissionStatus) bool {
 }
 
 // Mission represents a complete security testing mission.
-// A mission coordinates the execution of a workflow against a target,
+// A mission coordinates execution against a target,
 // aggregating findings and enforcing constraints throughout execution.
 type Mission struct {
 	// ID is the unique identifier for this mission.
@@ -216,12 +216,12 @@ type Mission struct {
 	// TargetID references the target being tested.
 	TargetID types.ID `json:"target_id"`
 
-	// WorkflowID references the workflow being executed.
-	WorkflowID types.ID `json:"workflow_id"`
+	// MissionDefinitionID references the mission being executed.
+	MissionDefinitionID types.ID `json:"mission_definition_id"`
 
-	// WorkflowJSON contains the workflow definition in JSON/YAML format.
-	// This is optional - if not provided, the workflow must be loaded via WorkflowID.
-	WorkflowJSON string `json:"workflow_json,omitempty"`
+	// MissionDefinitionJSON contains the mission definition in JSON/YAML format.
+	// This is optional - if not provided, the mission must be loaded via MissionDefinitionID.
+	MissionDefinitionJSON string `json:"mission_definition_json,omitempty"`
 
 	// Constraints define execution boundaries for the mission.
 	Constraints *MissionConstraints `json:"constraints,omitempty"`
@@ -237,8 +237,8 @@ type Mission struct {
 	// This provides quick access to finding count without loading full metrics.
 	FindingsCount int `json:"findings_count"`
 
-	// AgentAssignments maps workflow node IDs to assigned agent component names.
-	// This tracks which agents are assigned to execute which workflow nodes.
+	// AgentAssignments maps mission node IDs to assigned agent component names.
+	// This tracks which agents are assigned to execute which mission nodes.
 	AgentAssignments map[string]string `json:"agent_assignments,omitempty"`
 
 	// Metadata provides generic key-value storage for mission-specific data.
@@ -249,7 +249,7 @@ type Mission struct {
 	Checkpoint *MissionCheckpoint `json:"checkpoint,omitempty"`
 
 	// RunNumber is the sequential run number for missions with the same name.
-	// This allows multiple runs of the same mission workflow to be tracked.
+	// This allows multiple runs of the same mission to be tracked.
 	RunNumber int `json:"run_number"`
 
 	// PreviousRunID links to the previous run of this mission (for run history).
@@ -299,7 +299,7 @@ type Mission struct {
 // MissionMetrics tracks mission execution statistics.
 // These metrics are updated throughout execution to provide real-time progress information.
 type MissionMetrics struct {
-	// TotalNodes is the total number of nodes in the workflow.
+	// TotalNodes is the total number of nodes in the mission.
 	TotalNodes int `json:"total_nodes"`
 
 	// CompletedNodes is the number of nodes that have completed execution.
@@ -340,8 +340,8 @@ type MissionCheckpoint struct {
 	// Version is the checkpoint format version for compatibility.
 	Version int `json:"version"`
 
-	// WorkflowState contains the DAG execution state.
-	WorkflowState map[string]any `json:"workflow_state"`
+	// MissionState contains the DAG execution state.
+	MissionState map[string]any `json:"mission_state"`
 
 	// CompletedNodes lists nodes that have completed execution.
 	CompletedNodes []string `json:"completed_nodes"`
@@ -380,10 +380,10 @@ type MissionProgress struct {
 	// PercentComplete is the completion percentage (0-100).
 	PercentComplete float64 `json:"percent_complete"`
 
-	// CompletedNodes is the number of completed workflow nodes.
+	// CompletedNodes is the number of completed mission nodes.
 	CompletedNodes int `json:"completed_nodes"`
 
-	// TotalNodes is the total number of workflow nodes.
+	// TotalNodes is the total number of mission nodes.
 	TotalNodes int `json:"total_nodes"`
 
 	// RunningNodes lists nodes currently executing.
@@ -415,8 +415,8 @@ type MissionResult struct {
 	// Full findings are stored in the finding store.
 	FindingIDs []types.ID `json:"finding_ids"`
 
-	// WorkflowResult contains the workflow execution result.
-	WorkflowResult map[string]any `json:"workflow_result"`
+	// MissionResult contains the mission execution result.
+	MissionResult map[string]any `json:"mission_result"`
 
 	// Error contains error message if mission failed.
 	Error string `json:"error,omitempty"`
@@ -436,8 +436,8 @@ func (m *Mission) Validate() error {
 	if m.TargetID.IsZero() {
 		return fmt.Errorf("target ID is required")
 	}
-	if m.WorkflowID.IsZero() {
-		return fmt.Errorf("workflow ID is required")
+	if m.MissionDefinitionID.IsZero() {
+		return fmt.Errorf("mission ID is required")
 	}
 	if m.Status == "" {
 		return fmt.Errorf("mission status is required")
@@ -482,7 +482,7 @@ func (m *Mission) GetProgress() *MissionProgress {
 
 	if m.Checkpoint != nil {
 		progress.PendingNodes = m.Checkpoint.PendingNodes
-		// Running nodes would be derived from workflow state
+		// Running nodes would be derived from mission state
 		progress.RunningNodes = []string{}
 	}
 

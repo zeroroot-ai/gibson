@@ -105,9 +105,9 @@ func TestIntegration_StoreFindingAndQuery(t *testing.T) {
 	}
 }
 
-// TestIntegration_AttackPatternWorkflow tests the complete attack pattern
-// storage and retrieval workflow.
-func TestIntegration_AttackPatternWorkflow(t *testing.T) {
+// TestIntegration_AttackPatternMission tests the complete attack pattern
+// storage and retrieval mission.
+func TestIntegration_AttackPatternMission(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup components

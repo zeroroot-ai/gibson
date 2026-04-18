@@ -20,7 +20,7 @@ type FindingLister interface {
 }
 
 // CheckpointManager manages the lifecycle of mission checkpoints for pause/resume capability.
-// It provides methods to capture workflow state at clean boundaries, restore from saved checkpoints,
+// It provides methods to capture mission state at clean boundaries, restore from saved checkpoints,
 // and manage checkpoint integrity through cryptographic checksums.
 type CheckpointManager interface {
 	// Capture creates a checkpoint from current execution state.
@@ -41,7 +41,7 @@ type CheckpointManager interface {
 
 	// SetAutoCheckpointInterval configures periodic automatic checkpointing.
 	// When set to a non-zero duration, the manager will trigger checkpoint captures
-	// at the specified interval during workflow execution.
+	// at the specified interval during mission execution.
 	// Setting to 0 disables automatic checkpointing.
 	SetAutoCheckpointInterval(interval time.Duration)
 }
@@ -133,7 +133,7 @@ func (m *DefaultCheckpointManager) Capture(ctx context.Context, missionID types.
 	checkpoint := &MissionCheckpoint{
 		ID:              types.NewID(),
 		Version:         1, // Current checkpoint format version
-		WorkflowState:   missionStateData,
+		MissionState:    missionStateData,
 		CompletedNodes:  completedNodes,
 		PendingNodes:    pendingNodes,
 		NodeResults:     nodeResults,
@@ -281,7 +281,7 @@ func (m *DefaultCheckpointManager) computeChecksum(checkpoint *MissionCheckpoint
 	checksumData := struct {
 		ID              types.ID
 		Version         int
-		WorkflowState   map[string]any
+		MissionState    map[string]any
 		CompletedNodes  []string
 		PendingNodes    []string
 		NodeResults     map[string]any
@@ -292,7 +292,7 @@ func (m *DefaultCheckpointManager) computeChecksum(checkpoint *MissionCheckpoint
 	}{
 		ID:              checkpoint.ID,
 		Version:         checkpoint.Version,
-		WorkflowState:   checkpoint.WorkflowState,
+		MissionState:    checkpoint.MissionState,
 		CompletedNodes:  checkpoint.CompletedNodes,
 		PendingNodes:    checkpoint.PendingNodes,
 		NodeResults:     checkpoint.NodeResults,
@@ -343,9 +343,9 @@ func (m *DefaultCheckpointManager) validateChecksum(checkpoint *MissionCheckpoin
 //
 // This is used as a fallback recovery mechanism when checkpoint data is corrupted but findings
 // data is still intact. The recovered checkpoint is marked as partial and may not capture all
-// workflow state, but allows the mission to resume rather than start over.
+// mission state, but allows the mission to resume rather than start over.
 func (m *DefaultCheckpointManager) RecoverFromFindings(ctx context.Context, missionID types.ID) (*MissionCheckpoint, error) {
-	// Get the mission to access workflow information
+	// Get the mission to access mission information
 	mission, err := m.store.Get(ctx, missionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mission for recovery: %w", err)
@@ -363,7 +363,7 @@ func (m *DefaultCheckpointManager) RecoverFromFindings(ctx context.Context, miss
 	recoveredCheckpoint := &MissionCheckpoint{
 		ID:              types.NewID(),
 		Version:         1,
-		WorkflowState:   make(map[string]any),
+		MissionState:    make(map[string]any),
 		CompletedNodes:  []string{}, // No nodes marked complete - will restart from beginning
 		PendingNodes:    []string{}, // Will be populated by orchestrator on resume
 		NodeResults:     make(map[string]any),
@@ -375,9 +375,9 @@ func (m *DefaultCheckpointManager) RecoverFromFindings(ctx context.Context, miss
 	}
 
 	// Add metadata to indicate this is a recovered checkpoint
-	recoveredCheckpoint.WorkflowState["recovered"] = true
-	recoveredCheckpoint.WorkflowState["recovery_reason"] = "checkpoint_corruption"
-	recoveredCheckpoint.WorkflowState["original_workflow_id"] = mission.WorkflowID.String()
+	recoveredCheckpoint.MissionState["recovered"] = true
+	recoveredCheckpoint.MissionState["recovery_reason"] = "checkpoint_corruption"
+	recoveredCheckpoint.MissionState["original_mission_id"] = mission.MissionDefinitionID.String()
 
 	// Compute checksum for the recovered checkpoint
 	checksum, err := m.computeChecksum(recoveredCheckpoint)

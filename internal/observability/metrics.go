@@ -453,8 +453,8 @@ func (r *OpenTelemetryMetricsRecorder) RecordMissionStarted(missionID string) {
 // Parameters:
 //   - missionID: The unique mission identifier
 //   - durationSecs: Total duration in seconds
-//   - completedNodes: Number of workflow nodes completed
-//   - failedNodes: Number of workflow nodes failed
+//   - completedNodes: Number of mission nodes completed
+//   - failedNodes: Number of mission nodes failed
 //   - iterations: Total orchestration loop iterations
 //
 // Example:

@@ -98,8 +98,8 @@ type MissionFilter struct {
 	// TargetID filters by target
 	TargetID *types.ID
 
-	// WorkflowID filters by workflow
-	WorkflowID *types.ID
+	// MissionDefinitionID filters by mission
+	MissionDefinitionID *types.ID
 
 	// CreatedAfter filters missions created after this time
 	CreatedAfter *time.Time
@@ -137,9 +137,9 @@ func (f *MissionFilter) WithTarget(targetID types.ID) *MissionFilter {
 	return f
 }
 
-// WithWorkflow filters by workflow ID.
-func (f *MissionFilter) WithWorkflow(workflowID types.ID) *MissionFilter {
-	f.WorkflowID = &workflowID
+// WithMission filters by mission ID.
+func (f *MissionFilter) WithMission(missionDefinitionID types.ID) *MissionFilter {
+	f.MissionDefinitionID = &missionDefinitionID
 	return f
 }
 

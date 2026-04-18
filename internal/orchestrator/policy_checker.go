@@ -13,10 +13,10 @@ type PolicyChecker interface {
 	ShouldExecute(ctx context.Context, agentName string) (bool, string)
 }
 
-// PolicySource provides access to data policies defined in workflow YAML.
-// This interface is typically implemented by the workflow configuration parser.
+// PolicySource provides access to data policies defined in mission YAML.
+// This interface is typically implemented by the mission configuration parser.
 type PolicySource interface {
-	// GetDataPolicy retrieves the data policy for a specific agent in the workflow.
+	// GetDataPolicy retrieves the data policy for a specific agent in the mission.
 	// Returns nil if no policy is defined (defaults will be applied).
 	GetDataPolicy(agentName string) (*DataPolicy, error)
 }
@@ -60,7 +60,7 @@ func NewPolicyChecker(source PolicySource, store NodeStore, logger *slog.Logger)
 //
 // The reason string is non-empty only when returning false (skip execution).
 func (pc *policyChecker) ShouldExecute(ctx context.Context, agentName string) (bool, string) {
-	// Retrieve the data policy for this agent from the workflow configuration
+	// Retrieve the data policy for this agent from the mission configuration
 	policy, err := pc.policySource.GetDataPolicy(agentName)
 	if err != nil {
 		// If policy retrieval fails, log warning and default to executing

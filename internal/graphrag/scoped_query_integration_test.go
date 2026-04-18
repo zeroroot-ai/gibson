@@ -246,7 +246,7 @@ func TestIntegration_ScopedGraphRAGQueries(t *testing.T) {
 }
 
 // TestIntegration_ScopedQueryWithRunMetadata tests that nodes with run metadata
-// can be created and stored correctly, validating the run metadata workflow.
+// can be created and stored correctly, validating the run metadata mission.
 func TestIntegration_ScopedQueryWithRunMetadata(t *testing.T) {
 	missionName := "metadata-test-mission"
 	missionID := types.NewID()

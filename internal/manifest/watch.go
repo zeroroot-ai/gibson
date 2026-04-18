@@ -23,10 +23,10 @@ type WatchHub struct {
 	heartbeatInterval time.Duration
 	perClientBuffer   int
 
-	mu      sync.Mutex
+	mu        sync.Mutex
 	perTenant map[string]map[chan *manifestpb.ManifestInvalidationEvent]struct{}
-	started bool
-	stopCh  chan struct{}
+	started   bool
+	stopCh    chan struct{}
 }
 
 // NewWatchHub constructs a WatchHub. Caller must invoke Start before
@@ -172,10 +172,10 @@ func (h *WatchHub) dispatch(channel, payload string) {
 		return
 	}
 	ev := &manifestpb.ManifestInvalidationEvent{
-		EventType:  manifestpb.ManifestInvalidationEvent_EVENT_TYPE_INVALIDATED,
-		TenantId:   tenantID,
-		Reason:     payload,
-		EmittedAt:  timestamppb.Now(),
+		EventType: manifestpb.ManifestInvalidationEvent_EVENT_TYPE_INVALIDATED,
+		TenantId:  tenantID,
+		Reason:    payload,
+		EmittedAt: timestamppb.Now(),
 	}
 
 	h.mu.Lock()

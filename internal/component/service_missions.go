@@ -19,7 +19,7 @@ func (s *ComponentServiceServer) CreateMission(ctx context.Context, req *compone
 	if s.missionMgr == nil {
 		return nil, status.Error(codes.Unimplemented, "mission management not configured")
 	}
-	missionJSON, err := s.missionMgr.CreateMission(ctx, tenant, req.GetWorkflowJson(), req.GetTargetId(), req.GetOptsJson())
+	missionJSON, err := s.missionMgr.CreateMission(ctx, tenant, req.GetMissionDefinitionJson(), req.GetTargetId(), req.GetOptsJson())
 	if err != nil {
 		s.logger.Error("CreateMission failed", "tenant", tenant, "error", err)
 		return nil, status.Errorf(codes.Internal, "create failed: %v", err)

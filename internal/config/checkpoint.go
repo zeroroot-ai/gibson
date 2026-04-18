@@ -7,7 +7,7 @@ import (
 
 // CheckpointConfig contains configuration for the checkpointing system.
 // This controls checkpoint creation, serialization, compression, encryption,
-// retention, and human-in-the-loop approval workflows.
+// retention, and human-in-the-loop approval missions.
 type CheckpointConfig struct {
 	// Core settings
 	Enabled        bool   `mapstructure:"enabled" yaml:"enabled"`

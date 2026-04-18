@@ -1,6 +1,6 @@
 // Package queries provides high-level query interfaces for Gibson graph operations.
 // ExecutionQueries handles execution tracking including agent executions, decisions,
-// and tool invocations within the orchestrator workflow.
+// and tool invocations within the orchestrator mission.
 package queries
 
 import (
@@ -39,9 +39,9 @@ func NewExecutionQueries(client graph.GraphClient) *ExecutionQueries {
 	}
 }
 
-// CreateAgentExecution creates an agent execution node and links it to the workflow node.
+// CreateAgentExecution creates an agent execution node and links it to the mission node.
 // The execution is validated before creation and linked via :EXECUTES relationship.
-// Returns an error if validation fails or if the workflow node doesn't exist.
+// Returns an error if validation fails or if the mission node doesn't exist.
 func (eq *ExecutionQueries) CreateAgentExecution(ctx context.Context, exec *schema.AgentExecution) error {
 	tenantID, err := tenantFromCtx(ctx)
 	if err != nil {
@@ -65,13 +65,13 @@ func (eq *ExecutionQueries) CreateAgentExecution(ctx context.Context, exec *sche
 			"failed to convert execution to properties", err)
 	}
 
-	// Create execution node and link to workflow node in a single query
+	// Create execution node and link to mission node in a single query
 	// This ensures atomicity and prevents orphaned execution nodes
 	cypher := `
 		CREATE (e:AgentExecution)
 		SET e = $props
 		WITH e
-		MATCH (n:WorkflowNode {id: $nodeId})
+		MATCH (n:MissionNode {id: $nodeId})
 		WHERE n.tenant_id = $tenant_id
 		CREATE (e)-[:EXECUTES]->(n)
 		RETURN e.id as id
@@ -79,20 +79,20 @@ func (eq *ExecutionQueries) CreateAgentExecution(ctx context.Context, exec *sche
 
 	params := map[string]any{
 		"props":     props,
-		"nodeId":    exec.WorkflowNodeID,
+		"nodeId":    exec.MissionNodeID,
 		"tenant_id": tenantID,
 	}
 
 	result, err := eq.client.Query(ctx, cypher, params)
 	if err != nil {
 		return types.WrapError(graph.ErrCodeGraphNodeCreateFailed,
-			fmt.Sprintf("failed to create agent execution for node %s", exec.WorkflowNodeID), err)
+			fmt.Sprintf("failed to create agent execution for node %s", exec.MissionNodeID), err)
 	}
 
-	// Verify that the workflow node exists
+	// Verify that the mission node exists
 	if len(result.Records) == 0 {
 		return types.NewError(graph.ErrCodeGraphNodeNotFound,
-			fmt.Sprintf("workflow node %s not found", exec.WorkflowNodeID))
+			fmt.Sprintf("mission node %s not found", exec.MissionNodeID))
 	}
 
 	return nil
@@ -323,7 +323,7 @@ func (eq *ExecutionQueries) GetMissionDecisions(ctx context.Context, missionID s
 	return decisions, nil
 }
 
-// GetNodeExecutions retrieves all execution attempts for a workflow node.
+// GetNodeExecutions retrieves all execution attempts for a mission node.
 // This is useful for tracking retry attempts and execution history.
 // Results are ordered by attempt number ascending.
 func (eq *ExecutionQueries) GetNodeExecutions(ctx context.Context, nodeID string) ([]*schema.AgentExecution, error) {
@@ -337,7 +337,7 @@ func (eq *ExecutionQueries) GetNodeExecutions(ctx context.Context, nodeID string
 	}
 
 	cypher := `
-		MATCH (e:AgentExecution)-[:EXECUTES]->(n:WorkflowNode {id: $nodeId})
+		MATCH (e:AgentExecution)-[:EXECUTES]->(n:MissionNode {id: $nodeId})
 		WHERE n.tenant_id = $tenant_id
 		RETURN e
 		ORDER BY e.attempt ASC, e.started_at ASC

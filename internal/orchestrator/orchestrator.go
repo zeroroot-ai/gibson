@@ -131,7 +131,7 @@ type OrchestratorActor interface {
 
 // Orchestrator implements the main Observe → Think → Act control loop.
 // It coordinates the observer, thinker, and actor components to autonomously
-// execute mission workflows based on LLM reasoning.
+// execute missions based on LLM reasoning.
 type Orchestrator struct {
 	observer         OrchestratorObserver
 	thinker          OrchestratorThinker
@@ -351,10 +351,10 @@ type OrchestratorResult struct {
 	// Duration is the total time spent in orchestration
 	Duration time.Duration
 
-	// CompletedNodes is the number of workflow nodes that completed
+	// CompletedNodes is the number of mission nodes that completed
 	CompletedNodes int
 
-	// FailedNodes is the number of workflow nodes that failed
+	// FailedNodes is the number of mission nodes that failed
 	FailedNodes int
 
 	// Error contains any fatal error that occurred
@@ -507,16 +507,16 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 
 		// 2. CHECK TERMINATION CONDITIONS
 
-		// Check if workflow is naturally complete (no work left)
+		// Check if mission is naturally complete (no work left)
 		if len(state.ReadyNodes) == 0 && len(state.RunningNodes) == 0 {
-			o.logger.Info(ctx, "workflow naturally complete", "iteration", iteration)
+			o.logger.Info(ctx, "mission naturally complete", "iteration", iteration)
 			result.Status = StatusCompleted
 			result.TotalIterations = iteration + 1
 			result.CompletedNodes = len(state.CompletedNodes)
 			result.FailedNodes = len(state.FailedNodes)
 			result.Duration = time.Since(startTime)
 			result.TotalTokensUsed = totalTokens
-			result.StopReason = "all workflow nodes completed or no more work available"
+			result.StopReason = "all mission nodes completed or no more work available"
 			o.recordMissionCompleted(result)
 			return result, nil
 		}
@@ -647,7 +647,7 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			})
 		}
 
-		// 6. CHECK TERMINAL - Did this action end the workflow?
+		// 6. CHECK TERMINAL - Did this action end the mission?
 		if actionResult.IsTerminal {
 			o.logger.Info(ctx, "terminal action executed", "iteration", iteration+1)
 			result.Status = StatusCompleted
@@ -752,7 +752,7 @@ func (o *Orchestrator) logAction(ctx context.Context, action *ActionResult, iter
 					MissionID: parsedMissionID,
 					Payload: events.NodeCompletedPayload{
 						MissionID: parsedMissionID,
-						NodeID:    exec.WorkflowNodeID,
+						NodeID:    exec.MissionNodeID,
 						Duration:  exec.Duration(),
 					},
 				})
@@ -764,7 +764,7 @@ func (o *Orchestrator) logAction(ctx context.Context, action *ActionResult, iter
 					MissionID: parsedMissionID,
 					Payload: events.NodeFailedPayload{
 						MissionID: parsedMissionID,
-						NodeID:    exec.WorkflowNodeID,
+						NodeID:    exec.MissionNodeID,
 						Error:     exec.Error,
 						Duration:  exec.Duration(),
 					},

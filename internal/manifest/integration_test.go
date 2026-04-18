@@ -88,12 +88,12 @@ func TestIntegration_FullPipeline(t *testing.T) {
 
 	stubAuth := &stubAuthorizer{
 		listObjects: map[string][]string{
-			"user:alice|can_execute|component":     {"component:nmap"},
-			"user:alice|can_read|component":        {"component:gitlab"},
-			"user:alice|can_configure|component":   nil,
-			"agent_principal:A|cannot_invoke|component": {"component:gitlab"},
+			"user:alice|can_execute|component":              {"component:nmap"},
+			"user:alice|can_read|component":                 {"component:gitlab"},
+			"user:alice|can_configure|component":            nil,
+			"agent_principal:A|cannot_invoke|component":     {"component:gitlab"},
 			"agent_principal:A|can_be_invoked_by|component": nil,
-			"user:alice|can_be_invoked_by|component": nil,
+			"user:alice|can_be_invoked_by|component":        nil,
 		},
 	}
 	observedAuth := NewFGAObserver(stubAuth, notifier, nil)
@@ -197,14 +197,14 @@ func TestIntegration_AgentPrincipalCrossDeny(t *testing.T) {
 
 	stubAuth := &stubAuthorizer{
 		listObjects: map[string][]string{
-			"user:owner|can_execute|component":                  {"component:gitlab"},
-			"user:owner|can_read|component":                     nil,
-			"user:owner|can_configure|component":                nil,
-			"agent_principal:A|can_execute|component":           {"component:gitlab"},
-			"agent_principal:A|can_read|component":              nil,
-			"agent_principal:A|can_configure|component":         nil,
-			"agent_principal:A|cannot_invoke|component":         {"component:gitlab"},
-			"agent_principal:A|can_be_invoked_by|component":     nil,
+			"user:owner|can_execute|component":              {"component:gitlab"},
+			"user:owner|can_read|component":                 nil,
+			"user:owner|can_configure|component":            nil,
+			"agent_principal:A|can_execute|component":       {"component:gitlab"},
+			"agent_principal:A|can_read|component":          nil,
+			"agent_principal:A|can_configure|component":     nil,
+			"agent_principal:A|cannot_invoke|component":     {"component:gitlab"},
+			"agent_principal:A|can_be_invoked_by|component": nil,
 		},
 	}
 	reg := &stubRegistry{infos: []component.ComponentInfo{

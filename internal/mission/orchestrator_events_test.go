@@ -14,7 +14,7 @@ func TestMissionOrchestrator_EmitsProgressEvents(t *testing.T) {
 
 // TestMissionOrchestrator_EmitsFailedEvents verifies that failed events are emitted
 func TestMissionOrchestrator_EmitsFailedEvents(t *testing.T) {
-	t.Skip("Skipping - requires workflow executor to trigger parsing errors")
+	t.Skip("Skipping - requires mission executor to trigger parsing errors")
 }
 
 // TestMissionOrchestrator_EmitsCancelledEvents verifies that cancelled events are emitted
@@ -29,7 +29,7 @@ func TestMissionOrchestrator_EventOrderAndTiming(t *testing.T) {
 
 // TestMissionOrchestrator_FailedEventWithError verifies error information in failed events
 func TestMissionOrchestrator_FailedEventWithError(t *testing.T) {
-	t.Skip("Skipping - requires workflow executor to trigger failure paths")
+	t.Skip("Skipping - requires mission executor to trigger failure paths")
 }
 
 // TestMissionOrchestrator_MultipleSubscribers verifies multiple subscribers receive events

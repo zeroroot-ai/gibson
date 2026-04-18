@@ -36,8 +36,8 @@ func setupIntegrationDB(t *testing.T) (*database.DB, func()) {
 	return db, cleanup
 }
 
-// TestMemoryIntegration_FullWorkflow tests the complete memory system workflow.
-func TestMemoryIntegration_FullWorkflow(t *testing.T) {
+// TestMemoryIntegration_FullMission tests the complete memory system mission.
+func TestMemoryIntegration_FullMission(t *testing.T) {
 	db, cleanup := setupIntegrationDB(t)
 	defer cleanup()
 

@@ -129,9 +129,9 @@ func convertToAPIEventData(event interface{}) api.EventData {
 			MissionID: string(ev.MissionID),
 			Message:   "Mission started",
 			Payload: map[string]interface{}{
-				"workflow_name": payload.WorkflowName,
-				"target_id":     string(payload.TargetID),
-				"node_count":    payload.NodeCount,
+				"mission_name": payload.MissionName,
+				"target_id":    string(payload.TargetID),
+				"node_count":   payload.NodeCount,
 			},
 		}
 

@@ -31,10 +31,10 @@ func TestEventFlow_MissionStarted(t *testing.T) {
 		{
 			name: "mission started with full payload",
 			payload: events.MissionStartedPayload{
-				MissionID:    types.ID("mission-123"),
-				WorkflowName: "test-workflow",
-				TargetID:     types.ID("target-456"),
-				NodeCount:    5,
+				MissionID:   types.ID("mission-123"),
+				MissionName: "test-mission",
+				TargetID:    types.ID("target-456"),
+				NodeCount:   5,
 			},
 			missionID:     types.ID("mission-123"),
 			traceID:       "trace-abc-123",
@@ -42,9 +42,9 @@ func TestEventFlow_MissionStarted(t *testing.T) {
 			wantEventType: "mission.started",
 			wantMissionID: "mission-123",
 			wantPayload: map[string]interface{}{
-				"workflow_name": "test-workflow",
-				"target_id":     "target-456",
-				"node_count":    5,
+				"mission_name": "test-mission",
+				"target_id":    "target-456",
+				"node_count":   5,
 			},
 			wantTraceID: "trace-abc-123",
 			wantSpanID:  "span-def-456",
@@ -59,9 +59,9 @@ func TestEventFlow_MissionStarted(t *testing.T) {
 			wantEventType: "mission.started",
 			wantMissionID: "mission-min",
 			wantPayload: map[string]interface{}{
-				"workflow_name": "",
-				"target_id":     "",
-				"node_count":    1,
+				"mission_name": "",
+				"target_id":    "",
+				"node_count":   1,
 			},
 		},
 	}
@@ -121,7 +121,7 @@ func TestEventFlow_MissionStarted(t *testing.T) {
 				assert.Equal(t, "Mission started", receivedEvent.MissionEvent.Message)
 
 				// Verify payload contents
-				assert.Equal(t, tt.wantPayload["workflow_name"], receivedEvent.MissionEvent.Payload["workflow_name"])
+				assert.Equal(t, tt.wantPayload["mission_name"], receivedEvent.MissionEvent.Payload["mission_name"])
 				assert.Equal(t, tt.wantPayload["target_id"], receivedEvent.MissionEvent.Payload["target_id"])
 				assert.Equal(t, tt.wantPayload["node_count"], receivedEvent.MissionEvent.Payload["node_count"])
 

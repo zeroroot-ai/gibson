@@ -73,7 +73,7 @@ type InProgressNodeState struct {
 	RetryCount int `json:"retry_count"`
 }
 
-// DAGTraversalState captures the position in the workflow DAG for resumption.
+// DAGTraversalState captures the position in the mission DAG for resumption.
 // It tracks which nodes are pending, the current branch being executed,
 // and any parallel execution state.
 type DAGTraversalState struct {

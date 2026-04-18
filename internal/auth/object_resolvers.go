@@ -58,6 +58,23 @@ func tenantFromCtx() ObjectDeriver {
 	}
 }
 
+// missionDefinitionFromCtx returns an ObjectDeriver that constructs
+// "mission_definition:_tenant_{tenantID}" from the request context. It maps
+// to the per-tenant singleton mission_definition container defined in
+// model.fga — the FGA authorization target for CreateMissionDefinition.
+func missionDefinitionFromCtx() ObjectDeriver {
+	return func(_ any, ctx context.Context) (string, error) {
+		if ctx == nil {
+			return "", errors.New("fga: nil context in missionDefinitionFromCtx")
+		}
+		tenant := TenantFromContext(ctx)
+		if tenant == "" {
+			return "", fmt.Errorf("fga: no tenant in context")
+		}
+		return "mission_definition:_tenant_" + tenant, nil
+	}
+}
+
 // Named registry --------------------------------------------------------------
 
 var (
@@ -125,4 +142,9 @@ func init() {
 	// ComponentService RPCs scoped to the well-known system component
 	// (every harness-callback / poll / submit-result entry uses this).
 	RegisterObjectResolver("component_system", constObject("component:_system"))
+
+	// CreateMissionDefinition is checked against the per-tenant mission_definition
+	// singleton container (mission_definition:_tenant_<tenant>), with the writer
+	// relation computed from tenant admin membership (see model.fga).
+	RegisterObjectResolver("mission_definition_from_context", missionDefinitionFromCtx())
 }

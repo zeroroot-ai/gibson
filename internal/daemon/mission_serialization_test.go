@@ -91,12 +91,12 @@ func TestMissionSerializationRoundTrip(t *testing.T) {
 
 	// Simulate what happens during mission pause:
 	// 1. Mission definition is serialized to JSON for storage
-	workflowJSON, err := json.Marshal(original)
+	missionDefinitionJSON, err := json.Marshal(original)
 	require.NoError(t, err)
-	require.NotEmpty(t, workflowJSON)
+	require.NotEmpty(t, missionDefinitionJSON)
 
 	// 2. During resume, we parse the JSON back
-	parsed, err := mission.ParseDefinitionFromJSON(workflowJSON)
+	parsed, err := mission.ParseDefinitionFromJSON(missionDefinitionJSON)
 	require.NoError(t, err, "ParseDefinitionFromJSON should succeed")
 	require.NotNil(t, parsed, "Parsed definition should not be nil")
 
@@ -197,10 +197,10 @@ func TestMissionSerializationWithComplexStructures(t *testing.T) {
 	}
 
 	// Serialize and deserialize
-	workflowJSON, err := json.Marshal(original)
+	missionDefinitionJSON, err := json.Marshal(original)
 	require.NoError(t, err)
 
-	parsed, err := mission.ParseDefinitionFromJSON(workflowJSON)
+	parsed, err := mission.ParseDefinitionFromJSON(missionDefinitionJSON)
 	require.NoError(t, err)
 	require.NotNil(t, parsed)
 

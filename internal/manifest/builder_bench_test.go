@@ -19,9 +19,9 @@ func benchBuilder(b *testing.B, componentCount, denyRuleCount int) {
 	// agent_principal subset has can_execute + cannot_invoke for the
 	// denyRuleCount targets.
 	listObjects := map[string][]string{
-		"user:alice|can_execute|component":     nil,
-		"user:alice|can_read|component":        nil,
-		"user:alice|can_configure|component":   nil,
+		"user:alice|can_execute|component":              nil,
+		"user:alice|can_read|component":                 nil,
+		"user:alice|can_configure|component":            nil,
 		"agent_principal:A|cannot_invoke|component":     nil,
 		"agent_principal:A|can_be_invoked_by|component": nil,
 	}
@@ -63,9 +63,9 @@ func benchBuilder(b *testing.B, componentCount, denyRuleCount int) {
 	b.ReportMetric(nsPerOp/1e6, "ms/op")
 }
 
-func BenchmarkBuilderBuild_10Components_0Rules(b *testing.B)      { benchBuilder(b, 10, 0) }
-func BenchmarkBuilderBuild_50Components_100Rules(b *testing.B)    { benchBuilder(b, 50, 100) }
-func BenchmarkBuilderBuild_200Components_1000Rules(b *testing.B)  { benchBuilder(b, 200, 1000) }
+func BenchmarkBuilderBuild_10Components_0Rules(b *testing.B)     { benchBuilder(b, 10, 0) }
+func BenchmarkBuilderBuild_50Components_100Rules(b *testing.B)   { benchBuilder(b, 50, 100) }
+func BenchmarkBuilderBuild_200Components_1000Rules(b *testing.B) { benchBuilder(b, 200, 1000) }
 
 // Smoke test (not a benchmark) that asserts the 50-component / 100-rule
 // configuration finishes well within the 100ms target. Runs in normal

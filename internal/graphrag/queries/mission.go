@@ -44,7 +44,7 @@ func NewMissionQueries(client graph.GraphClient) *MissionQueries {
 
 // CreateMission creates or updates a mission node in the graph.
 // Uses MERGE on ID for idempotency - the SQLite mission ID is stable (same across runs).
-// All runs of the same workflow share one Mission node in Neo4j with the same stable ID.
+// All runs of the same mission share one Mission node in Neo4j with the same stable ID.
 // On create, sets all properties. On match, updates status and latest run info.
 // Returns an error if validation fails or if the database operation fails.
 func (mq *MissionQueries) CreateMission(ctx context.Context, m *schema.Mission) error {
@@ -59,7 +59,7 @@ func (mq *MissionQueries) CreateMission(ctx context.Context, m *schema.Mission) 
 	}
 
 	// Build Cypher query with MERGE on ID (SQLite mission ID is stable across runs)
-	// This ensures all runs of the same workflow share one Mission node
+	// This ensures all runs of the same mission share one Mission node
 	cypher := `
 		MERGE (m:Mission {id: $id})
 		ON CREATE SET
@@ -136,10 +136,10 @@ func (mq *MissionQueries) GetMission(ctx context.Context, missionID types.ID) (*
 	return recordToMission(result.Records[0]["m"])
 }
 
-// GetMissionNodes retrieves all workflow nodes for a mission.
-func (mq *MissionQueries) GetMissionNodes(ctx context.Context, missionID types.ID) ([]*schema.WorkflowNode, error) {
+// GetMissionNodes retrieves all mission nodes for a mission.
+func (mq *MissionQueries) GetMissionNodes(ctx context.Context, missionID types.ID) ([]*schema.MissionNode, error) {
 	cypher := `
-		MATCH (n:WorkflowNode)-[:PART_OF]->(m:Mission {id: $mission_id})
+		MATCH (n:MissionNode)-[:PART_OF]->(m:Mission {id: $mission_id})
 		RETURN properties(n) as n
 		ORDER BY n.created_at
 	`
@@ -153,11 +153,11 @@ func (mq *MissionQueries) GetMissionNodes(ctx context.Context, missionID types.I
 		return nil, err
 	}
 
-	nodes := make([]*schema.WorkflowNode, 0, len(result.Records))
+	nodes := make([]*schema.MissionNode, 0, len(result.Records))
 	for _, record := range result.Records {
-		node, err := recordToWorkflowNode(record["n"])
+		node, err := recordToMissionNode(record["n"])
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse workflow node: %w", err)
+			return nil, fmt.Errorf("failed to parse mission node: %w", err)
 		}
 		nodes = append(nodes, node)
 	}
@@ -194,10 +194,10 @@ func (mq *MissionQueries) GetMissionDecisions(ctx context.Context, missionID typ
 	return decisions, nil
 }
 
-// GetNodeExecutions retrieves all executions for a specific workflow node.
+// GetNodeExecutions retrieves all executions for a specific mission node.
 func (mq *MissionQueries) GetNodeExecutions(ctx context.Context, nodeID types.ID) ([]*schema.AgentExecution, error) {
 	cypher := `
-		MATCH (e:AgentExecution)-[:EXECUTES]->(n:WorkflowNode {id: $node_id})
+		MATCH (e:AgentExecution)-[:EXECUTES]->(n:MissionNode {id: $node_id})
 		RETURN properties(e) as e
 		ORDER BY e.started_at
 	`
@@ -223,14 +223,14 @@ func (mq *MissionQueries) GetNodeExecutions(ctx context.Context, nodeID types.ID
 	return executions, nil
 }
 
-// GetReadyNodes returns workflow nodes that are ready to execute.
+// GetReadyNodes returns mission nodes that are ready to execute.
 // A node is ready if all its dependencies have status "completed".
-func (mq *MissionQueries) GetReadyNodes(ctx context.Context, missionID types.ID) ([]*schema.WorkflowNode, error) {
+func (mq *MissionQueries) GetReadyNodes(ctx context.Context, missionID types.ID) ([]*schema.MissionNode, error) {
 	cypher := `
-		MATCH (n:WorkflowNode)-[:PART_OF]->(m:Mission {id: $mission_id})
+		MATCH (n:MissionNode)-[:PART_OF]->(m:Mission {id: $mission_id})
 		WHERE n.status = 'ready'
 		AND NOT EXISTS {
-			MATCH (n)-[:DEPENDS_ON]->(dep:WorkflowNode)
+			MATCH (n)-[:DEPENDS_ON]->(dep:MissionNode)
 			WHERE dep.status <> 'completed'
 		}
 		RETURN properties(n) as n
@@ -246,11 +246,11 @@ func (mq *MissionQueries) GetReadyNodes(ctx context.Context, missionID types.ID)
 		return nil, err
 	}
 
-	nodes := make([]*schema.WorkflowNode, 0, len(result.Records))
+	nodes := make([]*schema.MissionNode, 0, len(result.Records))
 	for _, record := range result.Records {
-		node, err := recordToWorkflowNode(record["n"])
+		node, err := recordToMissionNode(record["n"])
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse workflow node: %w", err)
+			return nil, fmt.Errorf("failed to parse mission node: %w", err)
 		}
 		nodes = append(nodes, node)
 	}
@@ -259,9 +259,9 @@ func (mq *MissionQueries) GetReadyNodes(ctx context.Context, missionID types.ID)
 }
 
 // GetNodeDependencies returns the nodes that a given node depends on.
-func (mq *MissionQueries) GetNodeDependencies(ctx context.Context, nodeID types.ID) ([]*schema.WorkflowNode, error) {
+func (mq *MissionQueries) GetNodeDependencies(ctx context.Context, nodeID types.ID) ([]*schema.MissionNode, error) {
 	cypher := `
-		MATCH (n:WorkflowNode {id: $node_id})-[:DEPENDS_ON]->(dep:WorkflowNode)
+		MATCH (n:MissionNode {id: $node_id})-[:DEPENDS_ON]->(dep:MissionNode)
 		RETURN properties(dep) as dep
 		ORDER BY dep.created_at
 	`
@@ -275,9 +275,9 @@ func (mq *MissionQueries) GetNodeDependencies(ctx context.Context, nodeID types.
 		return nil, err
 	}
 
-	nodes := make([]*schema.WorkflowNode, 0, len(result.Records))
+	nodes := make([]*schema.MissionNode, 0, len(result.Records))
 	for _, record := range result.Records {
-		node, err := recordToWorkflowNode(record["dep"])
+		node, err := recordToMissionNode(record["dep"])
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse dependency node: %w", err)
 		}
@@ -293,8 +293,8 @@ func (mq *MissionQueries) GetNodeDependencies(ctx context.Context, nodeID types.
 // Nodes with no dependencies will have an empty slice in the map.
 func (mq *MissionQueries) GetMissionNodeDependencies(ctx context.Context, missionID types.ID) (map[string][]string, error) {
 	cypher := `
-		MATCH (n:WorkflowNode)-[:PART_OF]->(m:Mission {id: $mission_id})
-		OPTIONAL MATCH (n)-[:DEPENDS_ON]->(dep:WorkflowNode)
+		MATCH (n:MissionNode)-[:PART_OF]->(m:Mission {id: $mission_id})
+		OPTIONAL MATCH (n)-[:DEPENDS_ON]->(dep:MissionNode)
 		RETURN n.id as node_id, collect(dep.id) as dependencies
 	`
 
@@ -331,15 +331,15 @@ func (mq *MissionQueries) GetMissionNodeDependencies(ctx context.Context, missio
 	return depMap, nil
 }
 
-// CreateNodeDependency creates a DEPENDS_ON relationship between two workflow nodes.
+// CreateNodeDependency creates a DEPENDS_ON relationship between two mission nodes.
 // The relationship direction is: (fromNodeID)-[:DEPENDS_ON]->(toNodeID), meaning
 // fromNodeID depends on toNodeID (fromNodeID must wait for toNodeID to complete).
 // Uses MERGE for idempotency - safe to call multiple times with same nodes.
 // Returns an error if either node is not found.
 func (mq *MissionQueries) CreateNodeDependency(ctx context.Context, fromNodeID, toNodeID types.ID) error {
 	cypher := `
-		MATCH (from:WorkflowNode {id: $from_id})
-		MATCH (to:WorkflowNode {id: $to_id})
+		MATCH (from:MissionNode {id: $from_id})
+		MATCH (to:MissionNode {id: $to_id})
 		MERGE (from)-[:DEPENDS_ON]->(to)
 		RETURN count(*) as count
 	`
@@ -364,18 +364,18 @@ func (mq *MissionQueries) CreateNodeDependency(ctx context.Context, fromNodeID, 
 	return nil
 }
 
-// CreateWorkflowNode creates a new workflow node and links it to its mission.
+// CreateMissionNode creates a new mission node and links it to its mission.
 // Uses MERGE for idempotency and creates the PART_OF relationship in the same query.
 // Returns an error if validation fails or if the mission doesn't exist.
-func (mq *MissionQueries) CreateWorkflowNode(ctx context.Context, node *schema.WorkflowNode) error {
+func (mq *MissionQueries) CreateMissionNode(ctx context.Context, node *schema.MissionNode) error {
 	if node == nil {
-		return types.NewError(graph.ErrCodeGraphInvalidQuery, "workflow node cannot be nil")
+		return types.NewError(graph.ErrCodeGraphInvalidQuery, "mission node cannot be nil")
 	}
 
 	// Validate node before creating
 	if err := node.Validate(); err != nil {
 		return types.WrapError(graph.ErrCodeGraphInvalidQuery,
-			"invalid workflow node", err)
+			"invalid mission node", err)
 	}
 
 	// Serialize JSON fields
@@ -391,11 +391,11 @@ func (mq *MissionQueries) CreateWorkflowNode(ctx context.Context, node *schema.W
 			"failed to marshal retry policy", err)
 	}
 
-	// Create workflow node with MERGE for idempotency
+	// Create mission node with MERGE for idempotency
 	// Also creates PART_OF relationship to mission in the same query
 	// Match Mission by ID (stable SQLite ID)
 	cypher := `
-		MERGE (n:WorkflowNode {id: $id})
+		MERGE (n:MissionNode {id: $id})
 		SET n.mission_id = $mission_id,
 			n.type = $type,
 			n.name = $name,
@@ -437,7 +437,7 @@ func (mq *MissionQueries) CreateWorkflowNode(ctx context.Context, node *schema.W
 	result, err := mq.client.Query(ctx, cypher, params)
 	if err != nil {
 		return types.WrapError(graph.ErrCodeGraphNodeCreateFailed,
-			fmt.Sprintf("failed to create workflow node %s", node.ID), err)
+			fmt.Sprintf("failed to create mission node %s", node.ID), err)
 	}
 
 	// Verify that the mission exists
@@ -465,7 +465,7 @@ type MissionStats struct {
 func (mq *MissionQueries) GetMissionStats(ctx context.Context, missionID types.ID) (*MissionStats, error) {
 	cypher := `
 		MATCH (m:Mission {id: $mission_id})
-		OPTIONAL MATCH (n:WorkflowNode)-[:PART_OF]->(m)
+		OPTIONAL MATCH (n:MissionNode)-[:PART_OF]->(m)
 		OPTIONAL MATCH (d:Decision)-[:PART_OF]->(m)
 		OPTIONAL MATCH (e:AgentExecution)-[:EXECUTES]->(n)
 		RETURN
@@ -554,10 +554,10 @@ func recordToMission(data any) (*schema.Mission, error) {
 	return mission, nil
 }
 
-func recordToWorkflowNode(data any) (*schema.WorkflowNode, error) {
+func recordToMissionNode(data any) (*schema.MissionNode, error) {
 	n, ok := data.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("invalid workflow node data type: %T", data)
+		return nil, fmt.Errorf("invalid mission node data type: %T", data)
 	}
 
 	id, err := types.ParseID(n["id"].(string))
@@ -570,13 +570,13 @@ func recordToWorkflowNode(data any) (*schema.WorkflowNode, error) {
 		return nil, fmt.Errorf("invalid mission ID: %w", err)
 	}
 
-	node := &schema.WorkflowNode{
+	node := &schema.MissionNode{
 		ID:          id,
 		MissionID:   missionID,
-		Type:        schema.WorkflowNodeType(n["type"].(string)),
+		Type:        schema.MissionNodeType(n["type"].(string)),
 		Name:        n["name"].(string),
 		Description: n["description"].(string),
-		Status:      schema.WorkflowNodeStatus(n["status"].(string)),
+		Status:      schema.MissionNodeStatus(n["status"].(string)),
 		IsDynamic:   n["is_dynamic"].(bool),
 		TaskConfig:  make(map[string]any),
 	}
@@ -810,14 +810,14 @@ func recordToAgentExecution(data any) (*schema.AgentExecution, error) {
 
 	attempt, _ := toInt64(e["attempt"])
 	exec := &schema.AgentExecution{
-		ID:             id,
-		WorkflowNodeID: e["workflow_node_id"].(string),
-		MissionID:      missionID,
-		Status:         schema.ExecutionStatus(e["status"].(string)),
-		Attempt:        int(attempt),
-		Error:          "",
-		ConfigUsed:     make(map[string]any),
-		Result:         make(map[string]any),
+		ID:            id,
+		MissionNodeID: e["mission_node_id"].(string),
+		MissionID:     missionID,
+		Status:        schema.ExecutionStatus(e["status"].(string)),
+		Attempt:       int(attempt),
+		Error:         "",
+		ConfigUsed:    make(map[string]any),
+		Result:        make(map[string]any),
 	}
 
 	if startedAt, ok := e["started_at"].(time.Time); ok {

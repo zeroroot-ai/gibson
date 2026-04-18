@@ -12,15 +12,15 @@ import (
 func TestMissionLineageFields(t *testing.T) {
 	t.Run("root mission has nil parent and depth 0", func(t *testing.T) {
 		mission := &Mission{
-			ID:          types.NewID(),
-			Name:        "Root Mission",
-			Description: "A root mission",
-			Status:      MissionStatusPending,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
-			Depth:       0,
+			ID:                  types.NewID(),
+			Name:                "Root Mission",
+			Description:         "A root mission",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
+			Depth:               0,
 		}
 
 		assert.Nil(t, mission.ParentMissionID, "root mission should have nil parent")
@@ -34,14 +34,14 @@ func TestMissionLineageFields(t *testing.T) {
 		parentDepth := 0
 
 		mission := &Mission{
-			ID:          types.NewID(),
-			Name:        "Child Mission",
-			Description: "A child mission",
-			Status:      MissionStatusPending,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Name:                "Child Mission",
+			Description:         "A child mission",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		mission.WithParent(parentID, parentDepth)
 
@@ -57,24 +57,24 @@ func TestMissionLineageFields(t *testing.T) {
 		parentID := types.NewID()
 
 		parent := &Mission{
-			ID:         parentID,
-			Name:       "Parent Mission",
-			Status:     MissionStatusPending,
-			TargetID:   types.NewID(),
-			WorkflowID: types.NewID(),
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+			ID:                  parentID,
+			Name:                "Parent Mission",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		parent.WithParent(grandparentID, 0) // Parent is depth 1
 
 		grandchild := &Mission{
-			ID:         types.NewID(),
-			Name:       "Grandchild Mission",
-			Status:     MissionStatusPending,
-			TargetID:   types.NewID(),
-			WorkflowID: types.NewID(),
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+			ID:                  types.NewID(),
+			Name:                "Grandchild Mission",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		grandchild.WithParent(parent.ID, parent.Depth) // Grandchild is depth 2
 
@@ -87,13 +87,13 @@ func TestMissionLineageFields(t *testing.T) {
 		parentID := types.NewID()
 
 		mission := (&Mission{
-			ID:         types.NewID(),
-			Name:       "Chained Mission",
-			Status:     MissionStatusPending,
-			TargetID:   types.NewID(),
-			WorkflowID: types.NewID(),
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+			ID:                  types.NewID(),
+			Name:                "Chained Mission",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}).WithParent(parentID, 0)
 
 		assert.NotNil(t, mission, "chained method should return mission")
@@ -106,14 +106,14 @@ func TestMissionLineageFields(t *testing.T) {
 func TestMissionBackwardCompatibility(t *testing.T) {
 	t.Run("mission without lineage fields validates correctly", func(t *testing.T) {
 		mission := &Mission{
-			ID:          types.NewID(),
-			Name:        "Legacy Mission",
-			Description: "Created before lineage support",
-			Status:      MissionStatusPending,
-			TargetID:    types.NewID(),
-			WorkflowID:  types.NewID(),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:                  types.NewID(),
+			Name:                "Legacy Mission",
+			Description:         "Created before lineage support",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 			// ParentMissionID and Depth not set (defaults: nil and 0)
 		}
 
@@ -145,14 +145,14 @@ func TestMissionBackwardCompatibility(t *testing.T) {
 func TestMissionJSONSerialization(t *testing.T) {
 	t.Run("root mission omits parent_mission_id in JSON", func(t *testing.T) {
 		mission := &Mission{
-			ID:         types.NewID(),
-			Name:       "Root",
-			Status:     MissionStatusPending,
-			TargetID:   types.NewID(),
-			WorkflowID: types.NewID(),
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
-			Depth:      0,
+			ID:                  types.NewID(),
+			Name:                "Root",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
+			Depth:               0,
 		}
 
 		// JSON marshaling would omit parent_mission_id due to omitempty tag
@@ -163,13 +163,13 @@ func TestMissionJSONSerialization(t *testing.T) {
 	t.Run("child mission includes parent_mission_id in JSON", func(t *testing.T) {
 		parentID := types.NewID()
 		mission := &Mission{
-			ID:         types.NewID(),
-			Name:       "Child",
-			Status:     MissionStatusPending,
-			TargetID:   types.NewID(),
-			WorkflowID: types.NewID(),
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+			ID:                  types.NewID(),
+			Name:                "Child",
+			Status:              MissionStatusPending,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
 		}
 		mission.WithParent(parentID, 0)
 

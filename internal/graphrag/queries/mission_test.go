@@ -234,7 +234,7 @@ func TestMissionQueries_GetNodeExecutions(t *testing.T) {
 			{
 				"e": map[string]any{
 					"id":               exec1ID.String(),
-					"workflow_node_id": nodeID.String(),
+					"mission_node_id":  nodeID.String(),
 					"mission_id":       missionID.String(),
 					"status":           "completed",
 					"started_at":       now,
@@ -251,7 +251,7 @@ func TestMissionQueries_GetNodeExecutions(t *testing.T) {
 			{
 				"e": map[string]any{
 					"id":               exec2ID.String(),
-					"workflow_node_id": nodeID.String(),
+					"mission_node_id":  nodeID.String(),
 					"mission_id":       missionID.String(),
 					"status":           "running",
 					"started_at":       now.Add(10 * time.Second),
@@ -321,7 +321,7 @@ func TestMissionQueries_GetReadyNodes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
 	assert.Equal(t, readyNodeID, nodes[0].ID)
-	assert.Equal(t, schema.WorkflowNodeStatusReady, nodes[0].Status)
+	assert.Equal(t, schema.MissionNodeStatusReady, nodes[0].Status)
 }
 
 // TestMissionQueries_GetNodeDependencies tests retrieving node dependencies.
@@ -376,7 +376,7 @@ func TestMissionQueries_GetNodeDependencies(t *testing.T) {
 	require.Len(t, deps, 2)
 	assert.Equal(t, dep1ID, deps[0].ID)
 	assert.Equal(t, dep2ID, deps[1].ID)
-	assert.Equal(t, schema.WorkflowNodeStatusCompleted, deps[0].Status)
+	assert.Equal(t, schema.MissionNodeStatusCompleted, deps[0].Status)
 }
 
 // TestMissionQueries_GetMissionStats tests computing mission statistics.
@@ -720,7 +720,7 @@ func TestMissionQueries_CreateMission(t *testing.T) {
 		Objective:   "Test objective",
 		TargetRef:   "target-123",
 		Status:      schema.MissionStatusPending,
-		YAMLSource:  "workflow: test",
+		YAMLSource:  "mission: test",
 		CreatedAt:   now,
 		StartedAt:   nil,
 	}
@@ -775,7 +775,7 @@ func TestMissionQueries_CreateMission_Idempotent(t *testing.T) {
 		Objective:   "Test objective",
 		TargetRef:   "target-123",
 		Status:      schema.MissionStatusPending,
-		YAMLSource:  "workflow: test",
+		YAMLSource:  "mission: test",
 		CreatedAt:   now,
 	}
 
@@ -825,7 +825,7 @@ func TestMissionQueries_CreateMission_WithStartedAt(t *testing.T) {
 		Objective:   "Test objective",
 		TargetRef:   "target-123",
 		Status:      schema.MissionStatusRunning,
-		YAMLSource:  "workflow: test",
+		YAMLSource:  "mission: test",
 		CreatedAt:   now,
 		StartedAt:   &startedAt,
 	}
@@ -840,8 +840,8 @@ func TestMissionQueries_CreateMission_WithStartedAt(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestMissionQueries_CreateWorkflowNode tests creating a workflow node.
-func TestMissionQueries_CreateWorkflowNode(t *testing.T) {
+// TestMissionQueries_CreateMissionNode tests creating a mission node.
+func TestMissionQueries_CreateMissionNode(t *testing.T) {
 	mock := graph.NewMockGraphClient()
 	ctx := context.Background()
 
@@ -854,14 +854,14 @@ func TestMissionQueries_CreateWorkflowNode(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 
-	node := &schema.WorkflowNode{
+	node := &schema.MissionNode{
 		ID:          nodeID,
 		MissionID:   missionID,
-		Type:        schema.WorkflowNodeTypeAgent,
+		Type:        schema.MissionNodeTypeAgent,
 		Name:        "test-node",
 		Description: "Test node description",
 		AgentName:   "test-agent",
-		Status:      schema.WorkflowNodeStatusPending,
+		Status:      schema.MissionNodeStatusPending,
 		Timeout:     5 * time.Minute,
 		TaskConfig:  map[string]any{"key": "value"},
 		IsDynamic:   false,
@@ -876,15 +876,15 @@ func TestMissionQueries_CreateWorkflowNode(t *testing.T) {
 		},
 	})
 
-	err = mq.CreateWorkflowNode(ctx, node)
+	err = mq.CreateMissionNode(ctx, node)
 	require.NoError(t, err)
 
 	// Verify query was called
 	assert.Greater(t, mock.CallCount(), 0)
 }
 
-// TestMissionQueries_CreateWorkflowNode_NilNode tests error handling for nil node.
-func TestMissionQueries_CreateWorkflowNode_NilNode(t *testing.T) {
+// TestMissionQueries_CreateMissionNode_NilNode tests error handling for nil node.
+func TestMissionQueries_CreateMissionNode_NilNode(t *testing.T) {
 	mock := graph.NewMockGraphClient()
 	ctx := context.Background()
 
@@ -894,13 +894,13 @@ func TestMissionQueries_CreateWorkflowNode_NilNode(t *testing.T) {
 
 	mq := NewMissionQueries(mock)
 
-	err = mq.CreateWorkflowNode(ctx, nil)
+	err = mq.CreateMissionNode(ctx, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "workflow node cannot be nil")
+	assert.Contains(t, err.Error(), "mission node cannot be nil")
 }
 
-// TestMissionQueries_CreateWorkflowNode_MissionNotFound tests error when mission doesn't exist.
-func TestMissionQueries_CreateWorkflowNode_MissionNotFound(t *testing.T) {
+// TestMissionQueries_CreateMissionNode_MissionNotFound tests error when mission doesn't exist.
+func TestMissionQueries_CreateMissionNode_MissionNotFound(t *testing.T) {
 	mock := graph.NewMockGraphClient()
 	ctx := context.Background()
 
@@ -912,14 +912,14 @@ func TestMissionQueries_CreateWorkflowNode_MissionNotFound(t *testing.T) {
 	nodeID := types.NewID()
 	missionID := types.NewID()
 
-	node := &schema.WorkflowNode{
+	node := &schema.MissionNode{
 		ID:          nodeID,
 		MissionID:   missionID,
-		Type:        schema.WorkflowNodeTypeAgent,
+		Type:        schema.MissionNodeTypeAgent,
 		Name:        "test-node",
 		Description: "Test node",
 		AgentName:   "test-agent",
-		Status:      schema.WorkflowNodeStatusPending,
+		Status:      schema.MissionNodeStatusPending,
 		Timeout:     5 * time.Minute,
 		TaskConfig:  map[string]any{},
 		IsDynamic:   false,
@@ -932,7 +932,7 @@ func TestMissionQueries_CreateWorkflowNode_MissionNotFound(t *testing.T) {
 		Records: []map[string]any{},
 	})
 
-	err = mq.CreateWorkflowNode(ctx, node)
+	err = mq.CreateMissionNode(ctx, node)
 	require.Error(t, err)
 
 	// Verify it's a typed error with correct code
@@ -943,8 +943,8 @@ func TestMissionQueries_CreateWorkflowNode_MissionNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), missionID.String())
 }
 
-// TestMissionQueries_CreateWorkflowNode_Idempotent tests MERGE idempotency.
-func TestMissionQueries_CreateWorkflowNode_Idempotent(t *testing.T) {
+// TestMissionQueries_CreateMissionNode_Idempotent tests MERGE idempotency.
+func TestMissionQueries_CreateMissionNode_Idempotent(t *testing.T) {
 	mock := graph.NewMockGraphClient()
 	ctx := context.Background()
 
@@ -957,14 +957,14 @@ func TestMissionQueries_CreateWorkflowNode_Idempotent(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 
-	node := &schema.WorkflowNode{
+	node := &schema.MissionNode{
 		ID:          nodeID,
 		MissionID:   missionID,
-		Type:        schema.WorkflowNodeTypeAgent,
+		Type:        schema.MissionNodeTypeAgent,
 		Name:        "test-node",
 		Description: "Test node",
 		AgentName:   "test-agent",
-		Status:      schema.WorkflowNodeStatusPending,
+		Status:      schema.MissionNodeStatusPending,
 		Timeout:     5 * time.Minute,
 		TaskConfig:  map[string]any{"key": "value"},
 		IsDynamic:   false,
@@ -979,11 +979,11 @@ func TestMissionQueries_CreateWorkflowNode_Idempotent(t *testing.T) {
 		},
 	})
 
-	err = mq.CreateWorkflowNode(ctx, node)
+	err = mq.CreateMissionNode(ctx, node)
 	require.NoError(t, err)
 
 	// Second call - updates node, should not error (MERGE)
-	node.Status = schema.WorkflowNodeStatusReady
+	node.Status = schema.MissionNodeStatusReady
 	node.UpdatedAt = now.Add(time.Minute)
 
 	mock.AddQueryResult(graph.QueryResult{
@@ -992,12 +992,12 @@ func TestMissionQueries_CreateWorkflowNode_Idempotent(t *testing.T) {
 		},
 	})
 
-	err = mq.CreateWorkflowNode(ctx, node)
-	require.NoError(t, err, "MERGE should make CreateWorkflowNode idempotent")
+	err = mq.CreateMissionNode(ctx, node)
+	require.NoError(t, err, "MERGE should make CreateMissionNode idempotent")
 }
 
-// TestMissionQueries_CreateWorkflowNode_WithRetryPolicy tests creating node with retry policy.
-func TestMissionQueries_CreateWorkflowNode_WithRetryPolicy(t *testing.T) {
+// TestMissionQueries_CreateMissionNode_WithRetryPolicy tests creating node with retry policy.
+func TestMissionQueries_CreateMissionNode_WithRetryPolicy(t *testing.T) {
 	mock := graph.NewMockGraphClient()
 	ctx := context.Background()
 
@@ -1017,14 +1017,14 @@ func TestMissionQueries_CreateWorkflowNode_WithRetryPolicy(t *testing.T) {
 		MaxBackoff: 30 * time.Second,
 	}
 
-	node := &schema.WorkflowNode{
+	node := &schema.MissionNode{
 		ID:          nodeID,
 		MissionID:   missionID,
-		Type:        schema.WorkflowNodeTypeTool,
+		Type:        schema.MissionNodeTypeTool,
 		Name:        "test-tool-node",
 		Description: "Test tool node",
 		ToolName:    "test-tool",
-		Status:      schema.WorkflowNodeStatusPending,
+		Status:      schema.MissionNodeStatusPending,
 		Timeout:     2 * time.Minute,
 		RetryPolicy: retryPolicy,
 		TaskConfig:  map[string]any{"input": "test"},
@@ -1039,12 +1039,12 @@ func TestMissionQueries_CreateWorkflowNode_WithRetryPolicy(t *testing.T) {
 		},
 	})
 
-	err = mq.CreateWorkflowNode(ctx, node)
+	err = mq.CreateMissionNode(ctx, node)
 	require.NoError(t, err)
 }
 
-// TestMissionQueries_CreateWorkflowNode_DynamicNode tests creating a dynamic node.
-func TestMissionQueries_CreateWorkflowNode_DynamicNode(t *testing.T) {
+// TestMissionQueries_CreateMissionNode_DynamicNode tests creating a dynamic node.
+func TestMissionQueries_CreateMissionNode_DynamicNode(t *testing.T) {
 	mock := graph.NewMockGraphClient()
 	ctx := context.Background()
 
@@ -1058,14 +1058,14 @@ func TestMissionQueries_CreateWorkflowNode_DynamicNode(t *testing.T) {
 	parentNodeID := types.NewID()
 	now := time.Now()
 
-	node := &schema.WorkflowNode{
+	node := &schema.MissionNode{
 		ID:          nodeID,
 		MissionID:   missionID,
-		Type:        schema.WorkflowNodeTypeAgent,
+		Type:        schema.MissionNodeTypeAgent,
 		Name:        "dynamic-node",
 		Description: "Dynamically spawned node",
 		AgentName:   "spawned-agent",
-		Status:      schema.WorkflowNodeStatusPending,
+		Status:      schema.MissionNodeStatusPending,
 		Timeout:     5 * time.Minute,
 		TaskConfig:  map[string]any{},
 		IsDynamic:   true,
@@ -1080,7 +1080,7 @@ func TestMissionQueries_CreateWorkflowNode_DynamicNode(t *testing.T) {
 		},
 	})
 
-	err = mq.CreateWorkflowNode(ctx, node)
+	err = mq.CreateMissionNode(ctx, node)
 	require.NoError(t, err)
 }
 

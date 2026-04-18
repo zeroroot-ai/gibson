@@ -7,7 +7,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// ApprovalService defines the interface for managing approval workflows
+// ApprovalService defines the interface for managing approval missions
 // in the Gibson framework. It handles requesting approvals for high-risk
 // steps, retrieving pending approvals, and submitting decisions.
 type ApprovalService interface {

@@ -423,7 +423,7 @@ func (t *OTelMissionTracer) LogAgentExecution(ctx context.Context, missionSpan *
 	// Set agent execution attributes
 	attrs := []attribute.KeyValue{
 		attribute.String(GibsonAgentName, log.AgentName),
-		attribute.String(GibsonAgentWorkflowNodeID, exec.WorkflowNodeID),
+		attribute.String(GibsonAgentMissionNodeID, exec.MissionNodeID),
 		attribute.Int(GibsonAgentAttempt, exec.Attempt),
 		attribute.String(GibsonAgentStatus, exec.Status.String()),
 		attribute.String("tenant_id", tenantID),
@@ -468,7 +468,7 @@ func (t *OTelMissionTracer) LogAgentExecution(ctx context.Context, missionSpan *
 	slog.Debug("logged agent execution",
 		"execution_id", exec.ID.String(),
 		"agent_name", log.AgentName,
-		"workflow_node_id", exec.WorkflowNodeID,
+		"mission_node_id", exec.MissionNodeID,
 	)
 
 	return spanCtx, agentSpan, nil

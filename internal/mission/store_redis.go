@@ -263,10 +263,10 @@ func (s *RedisMissionStore) buildSearchQuery(filter *MissionFilter) string {
 		conditions = append(conditions, fmt.Sprintf("@target_id:{%s}", escapedTargetID))
 	}
 
-	// WorkflowID filter (TAG field)
-	if filter.WorkflowID != nil {
-		escapedWorkflowID := state.EscapeTag(filter.WorkflowID.String())
-		conditions = append(conditions, fmt.Sprintf("@workflow_id:{%s}", escapedWorkflowID))
+	// MissionDefinitionID filter (TAG field)
+	if filter.MissionDefinitionID != nil {
+		escapedMissionID := state.EscapeTag(filter.MissionDefinitionID.String())
+		conditions = append(conditions, fmt.Sprintf("@mission_definition_id:{%s}", escapedMissionID))
 	}
 
 	// CreatedAfter filter (NUMERIC range)

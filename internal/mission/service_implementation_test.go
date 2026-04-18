@@ -11,22 +11,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// mockWorkflowStore is a mock implementation of WorkflowStore for testing
-type mockWorkflowStore struct {
-	workflows map[types.ID]interface{}
-	getError  error
-}
-
-func (m *mockWorkflowStore) Get(ctx context.Context, id types.ID) (interface{}, error) {
-	if m.getError != nil {
-		return nil, m.getError
-	}
-	if wf, ok := m.workflows[id]; ok {
-		return wf, nil
-	}
-	return nil, NewNotFoundError(id.String())
-}
-
 // mockFindingStore is a mock implementation of FindingStore for testing
 type mockFindingStore struct {
 	findings       map[types.ID][]interface{}
@@ -55,99 +39,6 @@ func (m *mockFindingStore) CountBySeverity(ctx context.Context, missionID types.
 	return make(map[string]int), nil
 }
 
-func TestDefaultMissionService_LoadWorkflow(t *testing.T) {
-	db := setupTestDB(t)
-	store := NewDBMissionStore(db)
-
-	t.Run("load from inline definition", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
-		ctx := context.Background()
-
-		inlineWorkflow := &InlineWorkflowConfig{
-			Agents: []string{"agent1", "agent2"},
-		}
-
-		config := &MissionWorkflowConfig{
-			Inline: inlineWorkflow,
-		}
-
-		result, err := service.LoadWorkflow(ctx, config)
-		require.NoError(t, err)
-		assert.Equal(t, inlineWorkflow, result)
-	})
-
-	t.Run("load from workflow store by reference", func(t *testing.T) {
-		workflowID := types.NewID()
-		expectedWorkflow := map[string]interface{}{"name": "test-workflow"}
-
-		mockStore := &mockWorkflowStore{
-			workflows: map[types.ID]interface{}{
-				workflowID: expectedWorkflow,
-			},
-		}
-
-		service := NewMissionService(store, mockStore, nil)
-		ctx := context.Background()
-
-		config := &MissionWorkflowConfig{
-			Reference: workflowID.String(),
-		}
-
-		result, err := service.LoadWorkflow(ctx, config)
-		require.NoError(t, err)
-		assert.Equal(t, expectedWorkflow, result)
-	})
-
-	t.Run("error when workflow store not configured", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
-		ctx := context.Background()
-
-		config := &MissionWorkflowConfig{
-			Reference: types.NewID().String(),
-		}
-
-		_, err := service.LoadWorkflow(ctx, config)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "workflow store not configured")
-	})
-
-	t.Run("error when workflow not found", func(t *testing.T) {
-		mockStore := &mockWorkflowStore{
-			workflows: make(map[types.ID]interface{}),
-		}
-
-		service := NewMissionService(store, mockStore, nil)
-		ctx := context.Background()
-
-		config := &MissionWorkflowConfig{
-			Reference: types.NewID().String(),
-		}
-
-		_, err := service.LoadWorkflow(ctx, config)
-		assert.Error(t, err)
-	})
-
-	t.Run("error when config is nil", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
-		ctx := context.Background()
-
-		_, err := service.LoadWorkflow(ctx, nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "workflow config is required")
-	})
-
-	t.Run("error when neither reference nor inline provided", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
-		ctx := context.Background()
-
-		config := &MissionWorkflowConfig{}
-
-		_, err := service.LoadWorkflow(ctx, config)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "must specify either 'reference' or 'inline'")
-	})
-}
-
 func TestDefaultMissionService_AggregateFindings(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewDBMissionStore(db)
@@ -165,7 +56,7 @@ func TestDefaultMissionService_AggregateFindings(t *testing.T) {
 			},
 		}
 
-		service := NewMissionService(store, nil, mockStore)
+		service := NewMissionService(store, mockStore)
 		ctx := context.Background()
 
 		findings, err := service.AggregateFindings(ctx, missionID)
@@ -179,7 +70,7 @@ func TestDefaultMissionService_AggregateFindings(t *testing.T) {
 			findings: make(map[types.ID][]interface{}),
 		}
 
-		service := NewMissionService(store, nil, mockStore)
+		service := NewMissionService(store, mockStore)
 		ctx := context.Background()
 
 		findings, err := service.AggregateFindings(ctx, types.NewID())
@@ -188,7 +79,7 @@ func TestDefaultMissionService_AggregateFindings(t *testing.T) {
 	})
 
 	t.Run("error when finding store not configured", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
+		service := NewMissionService(store, nil)
 		ctx := context.Background()
 
 		_, err := service.AggregateFindings(ctx, types.NewID())
@@ -201,7 +92,7 @@ func TestDefaultMissionService_AggregateFindings(t *testing.T) {
 			findings: make(map[types.ID][]interface{}),
 		}
 
-		service := NewMissionService(store, nil, mockStore)
+		service := NewMissionService(store, mockStore)
 		ctx := context.Background()
 
 		_, err := service.AggregateFindings(ctx, types.ID(""))
@@ -232,7 +123,7 @@ func TestDefaultMissionService_GetSummary(t *testing.T) {
 			},
 		}
 
-		service := NewMissionService(store, nil, mockStore)
+		service := NewMissionService(store, mockStore)
 
 		summary, err := service.GetSummary(ctx, mission.ID)
 		require.NoError(t, err)
@@ -248,7 +139,7 @@ func TestDefaultMissionService_GetSummary(t *testing.T) {
 		err := store.Save(ctx, mission)
 		require.NoError(t, err)
 
-		service := NewMissionService(store, nil, nil)
+		service := NewMissionService(store, nil)
 
 		summary, err := service.GetSummary(ctx, mission.ID)
 		require.NoError(t, err)
@@ -259,14 +150,14 @@ func TestDefaultMissionService_GetSummary(t *testing.T) {
 	})
 
 	t.Run("error when mission not found", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
+		service := NewMissionService(store, nil)
 
 		_, err := service.GetSummary(ctx, types.NewID())
 		assert.Error(t, err)
 	})
 
 	t.Run("error when mission ID is zero", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
+		service := NewMissionService(store, nil)
 
 		_, err := service.GetSummary(ctx, types.ID(""))
 		assert.Error(t, err)
@@ -280,7 +171,7 @@ func TestDefaultMissionService_ValidateMission_Constraints(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("valid constraints", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
+		service := NewMissionService(store, nil)
 
 		mission := createTestMission(t)
 		mission.Constraints = &MissionConstraints{
@@ -296,7 +187,7 @@ func TestDefaultMissionService_ValidateMission_Constraints(t *testing.T) {
 	})
 
 	t.Run("error when max_duration too short", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
+		service := NewMissionService(store, nil)
 
 		mission := createTestMission(t)
 		mission.Constraints = &MissionConstraints{
@@ -309,7 +200,7 @@ func TestDefaultMissionService_ValidateMission_Constraints(t *testing.T) {
 	})
 
 	t.Run("max_findings zero is valid (means unlimited)", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
+		service := NewMissionService(store, nil)
 
 		mission := createTestMission(t)
 		mission.Constraints = &MissionConstraints{
@@ -322,7 +213,7 @@ func TestDefaultMissionService_ValidateMission_Constraints(t *testing.T) {
 	})
 
 	t.Run("error when max_cost too low", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
+		service := NewMissionService(store, nil)
 
 		mission := createTestMission(t)
 		mission.Constraints = &MissionConstraints{
@@ -335,7 +226,7 @@ func TestDefaultMissionService_ValidateMission_Constraints(t *testing.T) {
 	})
 
 	t.Run("error when max_tokens too low", func(t *testing.T) {
-		service := NewMissionService(store, nil, nil)
+		service := NewMissionService(store, nil)
 
 		mission := createTestMission(t)
 		mission.Constraints = &MissionConstraints{
@@ -345,43 +236,5 @@ func TestDefaultMissionService_ValidateMission_Constraints(t *testing.T) {
 		err := service.ValidateMission(ctx, mission)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "max_tokens too low")
-	})
-}
-
-func TestDefaultMissionService_ValidateMission_Workflow(t *testing.T) {
-	db := setupTestDB(t)
-	store := NewDBMissionStore(db)
-	ctx := context.Background()
-
-	t.Run("workflow exists in store", func(t *testing.T) {
-		workflowID := types.NewID()
-		mockStore := &mockWorkflowStore{
-			workflows: map[types.ID]interface{}{
-				workflowID: map[string]interface{}{"name": "test"},
-			},
-		}
-
-		service := NewMissionService(store, mockStore, nil)
-
-		mission := createTestMission(t)
-		mission.WorkflowID = workflowID
-
-		err := service.ValidateMission(ctx, mission)
-		assert.NoError(t, err)
-	})
-
-	t.Run("error when workflow not found", func(t *testing.T) {
-		mockStore := &mockWorkflowStore{
-			workflows: make(map[types.ID]interface{}),
-		}
-
-		service := NewMissionService(store, mockStore, nil)
-
-		mission := createTestMission(t)
-		mission.WorkflowID = types.NewID()
-
-		err := service.ValidateMission(ctx, mission)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "workflow validation failed")
 	})
 }

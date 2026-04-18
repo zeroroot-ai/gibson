@@ -57,7 +57,7 @@ type ExecutionState struct {
 	// Used to reconstruct conversation context when resuming.
 	ConversationHistory []llm.Message `json:"conversation_history,omitempty" msgpack:"conversation_history,omitempty"`
 
-	// DAGState captures the current position in the workflow DAG.
+	// DAGState captures the current position in the mission DAG.
 	// Enables resuming from the exact point of interruption.
 	DAGState *DAGTraversalState `json:"dag_state,omitempty" msgpack:"dag_state,omitempty"`
 
@@ -65,7 +65,7 @@ type ExecutionState struct {
 	// Full finding data is stored separately in the findings store.
 	Findings []types.ID `json:"findings,omitempty" msgpack:"findings,omitempty"`
 
-	// ApprovalState captures approval workflow state if waiting for approval.
+	// ApprovalState captures approval mission state if waiting for approval.
 	// Nil if not awaiting approval.
 	ApprovalState *ApprovalState `json:"approval_state,omitempty" msgpack:"approval_state,omitempty"`
 

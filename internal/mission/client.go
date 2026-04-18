@@ -53,7 +53,7 @@ type CreateMissionRequest struct {
 // This interface allows the client to interact with the orchestrator for
 // mission lifecycle operations like execution and stopping.
 type OrchestratorInterface interface {
-	// Execute runs the mission workflow and manages all orchestration
+	// Execute runs the mission and manages all orchestration
 	Execute(ctx context.Context, mission *Mission) (*MissionResult, error)
 
 	// StopMission requests the orchestrator to stop executing a mission
@@ -161,8 +161,8 @@ func (c *MissionClient) SetTempDir(tempDir string) {
 //
 // The method performs the following steps:
 // 1. Validates the request parameters
-// 2. Generates a unique mission ID and workflow ID
-// 3. Serializes the workflow definition to JSON
+// 2. Generates a unique mission ID and mission ID
+// 3. Serializes the mission definition to JSON
 // 4. Creates the mission entity with lineage tracking
 // 5. Persists to the store
 // 6. Returns mission information
@@ -225,22 +225,22 @@ func (c *MissionClient) Create(ctx context.Context, req *CreateMissionRequest) (
 	// Create mission entity
 	now := time.Now()
 	mission := &Mission{
-		ID:               missionID,
-		Name:             name,
-		Description:      description,
-		Status:           MissionStatusPending,
-		TargetID:         req.TargetID,
-		WorkflowID:       req.Definition.ID,
-		WorkflowJSON:     definitionJSON,
-		Constraints:      req.Constraints,
-		Metadata:         req.Metadata,
-		ParentMissionID:  req.ParentMissionID,
-		Depth:            depth,
-		CreatedAt:        NewUnixTime(now),
-		UpdatedAt:        NewUnixTime(now),
-		FindingsCount:    0,
-		Progress:         0.0,
-		AgentAssignments: make(map[string]string),
+		ID:                    missionID,
+		Name:                  name,
+		Description:           description,
+		Status:                MissionStatusPending,
+		TargetID:              req.TargetID,
+		MissionDefinitionID:   req.Definition.ID,
+		MissionDefinitionJSON: definitionJSON,
+		Constraints:           req.Constraints,
+		Metadata:              req.Metadata,
+		ParentMissionID:       req.ParentMissionID,
+		Depth:                 depth,
+		CreatedAt:             NewUnixTime(now),
+		UpdatedAt:             NewUnixTime(now),
+		FindingsCount:         0,
+		Progress:              0.0,
+		AgentAssignments:      make(map[string]string),
 	}
 
 	// Validate mission before saving
@@ -322,7 +322,7 @@ func (c *MissionClient) serializeDefinition(def *MissionDefinition) (string, err
 }
 
 // List returns missions matching the provided filter.
-// This method supports filtering by status, target ID, workflow ID, creation date range,
+// This method supports filtering by status, target ID, mission ID, creation date range,
 // and text search. Pagination is supported via Limit and Offset parameters.
 //
 // If no filter is provided, returns all missions with default pagination (limit 100).
@@ -515,14 +515,14 @@ func (c *MissionClient) cleanupMissionResources(ctx context.Context, missionID t
 }
 
 // GetResults returns the results of a completed mission, including findings
-// and workflow execution output. This method should only be called on missions
+// and mission execution output. This method should only be called on missions
 // that are in a terminal state (completed, failed, or cancelled).
 //
 // The returned MissionResult contains:
 // - Final mission status
 // - Execution metrics (duration, token usage, etc.)
 // - Finding IDs (full findings are stored separately in the finding store)
-// - Workflow execution result (output data)
+// - Mission execution result (output data)
 // - Error message if the mission failed
 //
 // Returns an error if the mission does not exist. Returns partial results
@@ -559,16 +559,16 @@ func (c *MissionClient) GetResults(ctx context.Context, missionID types.ID) (*Mi
 		result.CompletedAt = *mission.CompletedAt.Time
 	}
 
-	// Parse workflow result from JSON if available
-	if mission.WorkflowJSON != "" {
-		var workflowResult map[string]any
-		if err := json.Unmarshal([]byte(mission.WorkflowJSON), &workflowResult); err != nil {
-			c.logger.WarnContext(ctx, "failed to parse workflow result JSON",
+	// Parse mission result from JSON if available
+	if mission.MissionDefinitionJSON != "" {
+		var missionResult map[string]any
+		if err := json.Unmarshal([]byte(mission.MissionDefinitionJSON), &missionResult); err != nil {
+			c.logger.WarnContext(ctx, "failed to parse mission result JSON",
 				slog.String("mission_id", missionID.String()),
 				slog.String("error", err.Error()))
-			// Don't fail the entire request, just skip workflow result
+			// Don't fail the entire request, just skip mission result
 		} else {
-			result.WorkflowResult = workflowResult
+			result.MissionResult = missionResult
 		}
 	}
 

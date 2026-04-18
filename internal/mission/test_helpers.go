@@ -7,39 +7,39 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// Mock workflow types for testing (workflow package was removed)
+// Mock mission types for testing (mission package was removed)
 // These are shared across all test files in the mission package.
 
-type mockWorkflowNodeType string
-type mockWorkflowStatus string
+type mockMissionNodeType string
+type mockMissionStatus string
 type mockNodeStatus string
 
 const (
-	mockNodeTypeAgent         mockWorkflowNodeType = "agent"
-	mockNodeTypeTool          mockWorkflowNodeType = "tool"
-	mockWorkflowStatusRunning mockWorkflowStatus   = "running"
-	mockNodeStatusCompleted   mockNodeStatus       = "completed"
-	mockNodeStatusPending     mockNodeStatus       = "pending"
+	mockNodeTypeAgent        mockMissionNodeType = "agent"
+	mockNodeTypeTool         mockMissionNodeType = "tool"
+	mockMissionStatusRunning mockMissionStatus   = "running"
+	mockNodeStatusCompleted  mockNodeStatus      = "completed"
+	mockNodeStatusPending    mockNodeStatus      = "pending"
 )
 
-type mockWorkflowNode struct {
+type mockMissionNode struct {
 	ID        string
 	Name      string
-	Type      mockWorkflowNodeType
+	Type      mockMissionNodeType
 	AgentName string
 }
 
-type mockWorkflowEdge struct {
+type mockMissionEdge struct {
 	From string
 	To   string
 }
 
-type mockWorkflow struct {
+type mockMission struct {
 	ID          types.ID
 	Name        string
 	Description string
-	Nodes       map[string]*mockWorkflowNode
-	Edges       []mockWorkflowEdge
+	Nodes       map[string]*mockMissionNode
+	Edges       []mockMissionEdge
 	EntryPoints []string
 	ExitPoints  []string
 	Metadata    map[string]any
@@ -58,33 +58,33 @@ type mockNodeState struct {
 	Result *mockNodeResult
 }
 
-type mockWorkflowState struct {
-	WorkflowID types.ID
-	Status     mockWorkflowStatus
-	StartedAt  time.Time
-	NodeStates map[string]*mockNodeState
+type mockMissionState struct {
+	MissionDefinitionID types.ID
+	Status              mockMissionStatus
+	StartedAt           time.Time
+	NodeStates          map[string]*mockNodeState
 }
 
-func newMockWorkflowState(wf *mockWorkflow) *mockWorkflowState {
+func newMockMissionState(wf *mockMission) *mockMissionState {
 	states := make(map[string]*mockNodeState)
 	for id := range wf.Nodes {
 		states[id] = &mockNodeState{
 			Status: mockNodeStatusPending,
 		}
 	}
-	return &mockWorkflowState{
-		WorkflowID: wf.ID,
-		Status:     mockWorkflowStatusRunning,
-		StartedAt:  time.Now(),
-		NodeStates: states,
+	return &mockMissionState{
+		MissionDefinitionID: wf.ID,
+		Status:              mockMissionStatusRunning,
+		StartedAt:           time.Now(),
+		NodeStates:          states,
 	}
 }
 
-func (s *mockWorkflowState) MarkNodeStarted(nodeID string) {
+func (s *mockMissionState) MarkNodeStarted(nodeID string) {
 	// No-op for tests
 }
 
-func (s *mockWorkflowState) MarkNodeCompleted(nodeID string, result *mockNodeResult) {
+func (s *mockMissionState) MarkNodeCompleted(nodeID string, result *mockNodeResult) {
 	if state, ok := s.NodeStates[nodeID]; ok {
 		state.Status = mockNodeStatusCompleted
 		state.Result = result

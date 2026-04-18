@@ -249,11 +249,11 @@ func TestOTelDecisionLogWriterAdapter_LogAction_ExecuteAgent(t *testing.T) {
 
 	// Create agent execution
 	execution := &schema.AgentExecution{
-		ID:             types.NewID(),
-		WorkflowNodeID: "node-123",
-		Attempt:        1,
-		Status:         schema.ExecutionStatusCompleted,
-		StartedAt:      time.Now(),
+		ID:            types.NewID(),
+		MissionNodeID: "node-123",
+		Attempt:       1,
+		Status:        schema.ExecutionStatusCompleted,
+		StartedAt:     time.Now(),
 		Result: map[string]any{
 			"tool_calls_count": 3,
 			"findings_count":   2,
@@ -317,7 +317,7 @@ func TestOTelDecisionLogWriterAdapter_LogAction_SpawnAgent(t *testing.T) {
 	defer adapter.Close(context.Background(), nil)
 
 	// Create new node
-	newNode := &schema.WorkflowNode{
+	newNode := &schema.MissionNode{
 		ID:        types.NewID(),
 		AgentName: "spawned-agent",
 	}
@@ -516,11 +516,11 @@ func TestOTelDecisionLogWriterAdapter_GetAgentSpan(t *testing.T) {
 	// Create and log agent execution
 	executionID := types.NewID()
 	execution := &schema.AgentExecution{
-		ID:             executionID,
-		WorkflowNodeID: "node-123",
-		Attempt:        1,
-		Status:         schema.ExecutionStatusCompleted,
-		StartedAt:      time.Now(),
+		ID:            executionID,
+		MissionNodeID: "node-123",
+		Attempt:       1,
+		Status:        schema.ExecutionStatusCompleted,
+		StartedAt:     time.Now(),
 	}
 
 	action := &orchestrator.ActionResult{
@@ -675,11 +675,11 @@ func TestOTelDecisionLogWriterAdapter_ThreadSafety(t *testing.T) {
 			defer wg.Done()
 
 			execution := &schema.AgentExecution{
-				ID:             types.NewID(),
-				WorkflowNodeID: "node-123",
-				Attempt:        1,
-				Status:         schema.ExecutionStatusCompleted,
-				StartedAt:      time.Now(),
+				ID:            types.NewID(),
+				MissionNodeID: "node-123",
+				Attempt:       1,
+				Status:        schema.ExecutionStatusCompleted,
+				StartedAt:     time.Now(),
 			}
 
 			action := &orchestrator.ActionResult{

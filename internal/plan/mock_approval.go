@@ -10,7 +10,7 @@ import (
 )
 
 // MockApprovalService is a test implementation of ApprovalService that provides
-// configurable behavior for testing approval workflows without requiring real
+// configurable behavior for testing approval missions without requiring real
 // human interaction or external services.
 type MockApprovalService struct {
 	mu              sync.RWMutex
@@ -198,7 +198,7 @@ func (m *MockApprovalService) SubmitDecision(ctx context.Context, requestID type
 // Test helper methods
 
 // SetDecision directly sets a decision for a request ID without validation.
-// This is a test helper that bypasses normal workflow for setting up test scenarios.
+// This is a test helper that bypasses normal mission for setting up test scenarios.
 func (m *MockApprovalService) SetDecision(requestID types.ID, decision ApprovalDecision) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -228,7 +228,7 @@ func (m *MockApprovalService) ClearAll() {
 }
 
 // PendingCount returns the number of pending approval requests.
-// Useful for test assertions about workflow state.
+// Useful for test assertions about mission state.
 func (m *MockApprovalService) PendingCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

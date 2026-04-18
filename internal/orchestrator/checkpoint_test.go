@@ -91,7 +91,7 @@ func TestCreateCheckpoint(t *testing.T) {
 				m.queryFunc = func(ctx context.Context, cypher string, params map[string]any) (graph.QueryResult, error) {
 					callCount++
 					if callCount == 1 {
-						// First call: get workflow nodes
+						// First call: get mission nodes
 						return graph.QueryResult{
 							Records: []map[string]any{
 								{
@@ -136,7 +136,7 @@ func TestCreateCheckpoint(t *testing.T) {
 				m.queryFunc = func(ctx context.Context, cypher string, params map[string]any) (graph.QueryResult, error) {
 					callCount++
 					if callCount == 1 {
-						// First call: get workflow nodes (return empty for simplicity)
+						// First call: get mission nodes (return empty for simplicity)
 						return graph.QueryResult{Records: []map[string]any{}}, nil
 					}
 					// Final call: create checkpoint
@@ -426,7 +426,7 @@ func TestCreateImplicitCheckpoint(t *testing.T) {
 				m.queryFunc = func(ctx context.Context, cypher string, params map[string]any) (graph.QueryResult, error) {
 					callCount++
 					if callCount == 1 {
-						// First call: get workflow nodes
+						// First call: get mission nodes
 						return graph.QueryResult{
 							Records: []map[string]any{
 								{
@@ -516,7 +516,7 @@ func TestCheckpointLifecycle(t *testing.T) {
 			queries = append(queries, cypher)
 
 			// Simulate different responses based on query pattern
-			if checkpointContains(cypher, "MATCH (n:WorkflowNode)") && checkpointContains(cypher, "RETURN n.id") {
+			if checkpointContains(cypher, "MATCH (n:MissionNode)") && checkpointContains(cypher, "RETURN n.id") {
 				// Get nodes for checkpoint
 				return graph.QueryResult{
 					Records: []map[string]any{

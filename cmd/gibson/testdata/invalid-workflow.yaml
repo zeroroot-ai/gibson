@@ -1,7 +1,0 @@
-name: Invalid Workflow
-description: This workflow has invalid YAML syntax
-nodes:
-  - id: broken-node
-    type: agent
-    invalid yaml structure
-    no colon here

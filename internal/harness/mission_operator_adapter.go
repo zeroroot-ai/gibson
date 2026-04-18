@@ -54,14 +54,14 @@ type MissionClientIface interface {
 // MissionClientCreateRequest maps from harness.CreateMissionRequest to the
 // mission-package create request without importing the mission package.
 type MissionClientCreateRequest struct {
-	WorkflowJSON    string
-	Name            string
-	Description     string
-	TargetID        types.ID
-	ParentMissionID *types.ID
-	ParentDepth     int
-	Tags            []string
-	Metadata        map[string]any
+	MissionDefinitionJSON string
+	Name                  string
+	Description           string
+	TargetID              types.ID
+	ParentMissionID       *types.ID
+	ParentDepth           int
+	Tags                  []string
+	Metadata              map[string]any
 }
 
 // MissionClientInfo is the create-response from the mission package.
@@ -83,12 +83,12 @@ type MissionClientStatusInfo struct {
 
 // MissionClientResult mirrors mission.MissionResult fields needed here.
 type MissionClientResult struct {
-	MissionID      string
-	Status         string
-	FindingIDs     []string
-	WorkflowResult map[string]any
-	Error          string
-	CompletedAt    time.Time
+	MissionID     string
+	Status        string
+	FindingIDs    []string
+	MissionResult map[string]any
+	Error         string
+	CompletedAt   time.Time
 }
 
 // MissionClientRecord mirrors mission.Mission fields needed for listing.
@@ -133,14 +133,14 @@ func (a *MissionOperatorAdapter) CreateMission(ctx context.Context, req *CreateM
 	}
 
 	clientReq := &MissionClientCreateRequest{
-		WorkflowJSON:    req.WorkflowJSON,
-		Name:            req.Name,
-		Description:     req.Description,
-		TargetID:        req.TargetID,
-		ParentMissionID: req.ParentMissionID,
-		ParentDepth:     req.ParentDepth,
-		Tags:            req.Tags,
-		Metadata:        req.Metadata,
+		MissionDefinitionJSON: req.MissionDefinitionJSON,
+		Name:                  req.Name,
+		Description:           req.Description,
+		TargetID:              req.TargetID,
+		ParentMissionID:       req.ParentMissionID,
+		ParentDepth:           req.ParentDepth,
+		Tags:                  req.Tags,
+		Metadata:              req.Metadata,
 	}
 
 	info, err := a.client.CreateMission(ctx, clientReq)
@@ -237,11 +237,11 @@ func (a *MissionOperatorAdapter) toResultInfo(r *MissionClientResult) *MissionRe
 		return &MissionResultInfo{}
 	}
 	return &MissionResultInfo{
-		MissionID:      r.MissionID,
-		Status:         MissionStatus(r.Status),
-		FindingIDs:     r.FindingIDs,
-		WorkflowResult: r.WorkflowResult,
-		Error:          r.Error,
-		CompletedAt:    r.CompletedAt,
+		MissionID:     r.MissionID,
+		Status:        MissionStatus(r.Status),
+		FindingIDs:    r.FindingIDs,
+		MissionResult: r.MissionResult,
+		Error:         r.Error,
+		CompletedAt:   r.CompletedAt,
 	}
 }

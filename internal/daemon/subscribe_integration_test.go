@@ -11,7 +11,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 )
 
-// TestSubscribeIntegration tests the full subscription workflow including
+// TestSubscribeIntegration tests the full subscription mission including
 // daemon method delegation to event bus.
 func TestSubscribeIntegration(t *testing.T) {
 	logger := slog.Default()

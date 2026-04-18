@@ -24,7 +24,7 @@ const (
 	// ReflectionScopeRecentDecisions evaluates recent orchestrator decisions
 	ReflectionScopeRecentDecisions ReflectionScope = "recent_decisions"
 
-	// ReflectionScopeSpecificNode evaluates a specific workflow node
+	// ReflectionScopeSpecificNode evaluates a specific mission node
 	ReflectionScopeSpecificNode ReflectionScope = "specific_node"
 )
 
@@ -493,7 +493,7 @@ func (e *LLMReflectionEngine) GetRecentInsights(ctx context.Context, missionID s
 func buildReflectionSystemPrompt() string {
 	return `You are Gibson's Strategic Evaluator, responsible for self-reflection on mission orchestration decisions.
 
-Your role is to critically assess the current approach, identify potential problems, and suggest improvements. You have complete visibility into the mission state, workflow progress, and recent decisions.
+Your role is to critically assess the current approach, identify potential problems, and suggest improvements. You have complete visibility into the mission state, mission progress, and recent decisions.
 
 ## Evaluation Criteria
 
@@ -562,7 +562,7 @@ func buildReflectionUserPrompt(scope ReflectionScope, prompt string, state *Obse
 	case ReflectionScopeRecentDecisions:
 		sb.WriteString("Evaluate the **recent orchestrator decisions** and their effectiveness.\n\n")
 	case ReflectionScopeSpecificNode:
-		sb.WriteString("Evaluate a **specific workflow node** and related decisions.\n\n")
+		sb.WriteString("Evaluate a **specific mission node** and related decisions.\n\n")
 	default:
 		sb.WriteString("Evaluate the current approach.\n\n")
 	}

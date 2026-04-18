@@ -203,7 +203,7 @@ func NewThinker(llmClient LLMClient, options ...ThinkerOption) *Thinker {
 // Think analyzes the current observation state and produces a decision.
 //
 // The thinking process:
-//  1. Build a comprehensive prompt with workflow state, context, and constraints
+//  1. Build a comprehensive prompt with mission state, context, and constraints
 //  2. Call the LLM with structured output schema for Decision
 //  3. Parse the response into a Decision struct
 //  4. Validate the decision is properly formed
@@ -383,7 +383,7 @@ func (t *Thinker) buildSystemPrompt() string {
 	return SystemPrompt
 }
 
-// buildPrompt constructs the detailed prompt with workflow state and context.
+// buildPrompt constructs the detailed prompt with mission state and context.
 func (t *Thinker) buildPrompt(state *ObservationState, attemptNum int) (string, error) {
 	var b strings.Builder
 
@@ -466,7 +466,7 @@ func DecisionJSONSchema() map[string]interface{} {
 			},
 			"target_node_id": map[string]interface{}{
 				"type":        "string",
-				"description": "Which workflow node to act on (required for most actions)",
+				"description": "Which mission node to act on (required for most actions)",
 			},
 			"modifications": map[string]interface{}{
 				"type":        "object",
@@ -501,7 +501,7 @@ func DecisionJSONSchema() map[string]interface{} {
 			},
 			"stop_reason": map[string]interface{}{
 				"type":        "string",
-				"description": "Explanation for why workflow is complete (required for complete action)",
+				"description": "Explanation for why mission is complete (required for complete action)",
 			},
 		},
 		"required": []string{"reasoning", "action", "confidence"},

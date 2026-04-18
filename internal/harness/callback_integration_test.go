@@ -404,9 +404,9 @@ func TestMissionManagementCallbackIntegration(t *testing.T) {
 		defer createCancel()
 
 		createReq := &harnesspb.CreateMissionRequest{
-			TargetId:     "target-456",
-			Name:         "sub-mission-test",
-			WorkflowJson: []byte(`{"name": "test-workflow"}`),
+			TargetId:              "target-456",
+			Name:                  "sub-mission-test",
+			MissionDefinitionJson: []byte(`{"name": "test-mission"}`),
 		}
 
 		createResp, err := client.CreateMission(createCtx, createReq)

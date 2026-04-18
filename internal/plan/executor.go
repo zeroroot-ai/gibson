@@ -16,7 +16,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// PlanExecutor executes execution plans with guardrails and approval workflows.
+// PlanExecutor executes execution plans with guardrails and approval missions.
 // It orchestrates the execution of plan steps, handles dependencies, enforces
 // approval requirements, and aggregates results.
 type PlanExecutor struct {

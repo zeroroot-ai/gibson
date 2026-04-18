@@ -9,14 +9,14 @@ import (
 
 // SystemPrompt establishes the orchestrator's role and capabilities.
 // This is the core instruction set that guides the LLM in making intelligent
-// orchestration decisions about workflow execution.
+// orchestration decisions about mission execution.
 const SystemPrompt = `You are Gibson's Mission Orchestrator - the brain that coordinates
 penetration testing missions. You make intelligent decisions about what to execute next
 based on the current state of the knowledge graph.
 
 ## Your Role
 - Analyze graph state to understand what has been discovered
-- Decide which workflow nodes to execute next
+- Decide which mission nodes to execute next
 - Modify parameters based on discoveries
 - Handle failures gracefully
 - Know when the mission objective is complete
@@ -33,12 +33,12 @@ Respond with a JSON Decision object. Always include reasoning.
 
 ## Decision Actions Available
 
-1. **execute_agent** - Run the specified workflow node/agent
+1. **execute_agent** - Run the specified mission node/agent
    - Use when a node is ready (dependencies satisfied)
    - Requires: target_node_id
    - Consider: Is this the highest priority node?
 
-2. **skip_agent** - Skip execution of a workflow node
+2. **skip_agent** - Skip execution of a mission node
    - Use when a node is no longer needed based on findings
    - Requires: target_node_id
    - Reasoning: Explain why skipping is appropriate
@@ -53,12 +53,12 @@ Respond with a JSON Decision object. Always include reasoning.
    - Requires: target_node_id
    - Consider: Retry policies, error type, remaining attempts
 
-5. **spawn_agent** - Dynamically create and add a new node to the workflow
+5. **spawn_agent** - Dynamically create and add a new node to the mission
    - Use SPARINGLY - only when truly needed
    - Requires: spawn_config (agent_name, description, task_config, depends_on)
    - Example: Spawn specialized agent after discovering unexpected vulnerability
 
-6. **complete** - Mark the workflow as complete and stop orchestration
+6. **complete** - Mark the mission as complete and stop orchestration
    - Use when the mission objective is achieved
    - Requires: stop_reason
    - Consider: Are all critical paths explored?
@@ -84,7 +84,7 @@ Respond with a JSON Decision object. Always include reasoning.
    - If level=senior_agent/specialist: Spawns agent with escalation metadata
    - Example: Escalate potential zero-day to security team
 
-10. **rollback** - Revert workflow to a previous checkpoint
+10. **rollback** - Revert mission to a previous checkpoint
     - Use when current approach triggered defenses or failed
     - Requires: checkpoint_id OR rollback_to_node (revert to before that node)
     - Resets rolled-back nodes to "pending" status
@@ -373,10 +373,10 @@ func BuildObservationPrompt(state *ObservationState) string {
 		}
 	}
 
-	// Workflow structure
-	if state.WorkflowDAG != nil {
-		dag := state.WorkflowDAG
-		sb.WriteString("## Workflow Structure\n")
+	// Mission structure
+	if state.MissionDAG != nil {
+		dag := state.MissionDAG
+		sb.WriteString("## Mission Structure\n")
 		sb.WriteString(fmt.Sprintf("Total nodes: %d\n", dag.TotalNodes))
 
 		if len(dag.EntryPoints) > 0 {
@@ -497,7 +497,7 @@ func BuildDecisionSchema() string {
 		"$schema": "http://json-schema.org/draft-07/schema#",
 		"type":    "object",
 		"title":   "Orchestrator Decision",
-		"description": "The orchestrator's decision about what to execute next in the workflow. " +
+		"description": "The orchestrator's decision about what to execute next in the mission. " +
 			"Must include reasoning, action, and confidence. Additional fields depend on the action type.",
 		"required": []string{"reasoning", "action", "confidence"},
 		"properties": map[string]interface{}{
@@ -528,7 +528,7 @@ func BuildDecisionSchema() string {
 			},
 			"target_node_id": map[string]interface{}{
 				"type": "string",
-				"description": "The workflow node ID to act upon. " +
+				"description": "The mission node ID to act upon. " +
 					"Required for: execute_agent, skip_agent, modify_params, retry",
 			},
 			"modifications": map[string]interface{}{
@@ -540,7 +540,7 @@ func BuildDecisionSchema() string {
 			},
 			"spawn_config": map[string]interface{}{
 				"type":        "object",
-				"description": "Configuration for spawning a new workflow node. Required for: spawn_agent action.",
+				"description": "Configuration for spawning a new mission node. Required for: spawn_agent action.",
 				"required":    []string{"agent_name", "description", "task_config", "depends_on"},
 				"properties": map[string]interface{}{
 					"agent_name": map[string]interface{}{
@@ -575,7 +575,7 @@ func BuildDecisionSchema() string {
 			},
 			"stop_reason": map[string]interface{}{
 				"type": "string",
-				"description": "Explanation of why the workflow is being marked complete. " +
+				"description": "Explanation of why the mission is being marked complete. " +
 					"Required for: complete action. " +
 					"Should explain that the objective was achieved.",
 				"minLength": 20,
@@ -865,7 +865,7 @@ func FormatCompleteExample() string {
 func FormatSpawnExample() string {
 	example := map[string]interface{}{
 		"reasoning": "Recon discovered an unexpected GraphQL endpoint at /graphql. " +
-			"This was not part of the original workflow. " +
+			"This was not part of the original mission. " +
 			"GraphQL often has introspection vulnerabilities. " +
 			"Spawning a specialized GraphQL introspection agent to explore this attack surface.",
 		"action":     "spawn_agent",

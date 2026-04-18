@@ -95,10 +95,15 @@ func (d *daemonImpl) ensureMissionManager() error {
 	return nil
 }
 
-// RunMissionWithManager starts a mission using the mission manager.
-// This is the implementation for the DaemonInterface.RunMission method.
-func (d *daemonImpl) RunMissionWithManager(ctx context.Context, workflowPath string, missionID string, variables map[string]string, memoryContinuity string) (<-chan api.MissionEventData, error) {
-	d.logger.Info(ctx, "RunMission called", "workflow_path", workflowPath, "mission_id", missionID, "memory_continuity", memoryContinuity)
+// RunMissionWithManager starts a mission by reference using the mission manager.
+// This is the implementation for the DaemonInterface.RunMission method. Inline
+// construction and YAML file paths were removed under spec mission-api-only-cleanup.
+func (d *daemonImpl) RunMissionWithManager(ctx context.Context, missionDefinitionID string, targetID string, variables map[string]string, memoryContinuity string) (<-chan api.MissionEventData, error) {
+	d.logger.Info(ctx, "RunMission called",
+		"mission_definition_id", missionDefinitionID,
+		"target_id", targetID,
+		"memory_continuity", memoryContinuity,
+	)
 
 	// Initialize mission manager if not already done
 	if err := d.ensureMissionManager(); err != nil {
@@ -107,13 +112,20 @@ func (d *daemonImpl) RunMissionWithManager(ctx context.Context, workflowPath str
 	}
 
 	// Delegate to mission manager
-	eventChan, err := d.missionManager.Run(ctx, workflowPath, missionID, variables, memoryContinuity)
+	eventChan, err := d.missionManager.Run(ctx, missionDefinitionID, targetID, variables, memoryContinuity)
 	if err != nil {
-		d.logger.Error(ctx, "failed to start mission", "error", err, "workflow_path", workflowPath)
+		d.logger.Error(ctx, "failed to start mission",
+			"error", err,
+			"mission_definition_id", missionDefinitionID,
+			"target_id", targetID,
+		)
 		return nil, err
 	}
 
-	d.logger.Info(ctx, "mission started successfully", "mission_id", missionID)
+	d.logger.Info(ctx, "mission started successfully",
+		"mission_definition_id", missionDefinitionID,
+		"target_id", targetID,
+	)
 	return eventChan, nil
 }
 

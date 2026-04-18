@@ -234,8 +234,8 @@ func TestApprovalManagerConfigDefaults(t *testing.T) {
 	assert.Equal(t, "gibson", manager.config.KeyPrefix)
 }
 
-// TestApprovalWorkflow demonstrates the complete approval workflow
-func TestApprovalWorkflow(t *testing.T) {
+// TestApprovalMission demonstrates the complete approval mission
+func TestApprovalMission(t *testing.T) {
 	t.Skip("Requires full integration test with Redis")
 
 	// This test would demonstrate:
@@ -246,7 +246,7 @@ func TestApprovalWorkflow(t *testing.T) {
 	// 5. CancelApproval - cancels pending approval
 	// 6. ListPendingApprovals - lists all pending
 
-	// Example workflow:
+	// Example mission:
 	/*
 		ctx := context.Background()
 		manager := setupTestApprovalManager(t)
@@ -308,8 +308,8 @@ func TestTimeoutHandling(t *testing.T) {
 	// 5. Event is emitted
 }
 
-// TestModificationWorkflow demonstrates approval with modifications
-func TestModificationWorkflow(t *testing.T) {
+// TestModificationMission demonstrates approval with modifications
+func TestModificationMission(t *testing.T) {
 	t.Skip("Requires full integration test with Redis")
 
 	// This test would demonstrate:

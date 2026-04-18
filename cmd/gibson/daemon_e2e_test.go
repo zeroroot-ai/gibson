@@ -19,7 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestDaemonStartStatusStop tests the full CLI workflow.
+// TestDaemonStartStatusStop tests the full CLI sequence.
 //
 // This end-to-end test verifies:
 // 1. gibson daemon start - starts the daemon (blocks, so we run in background)

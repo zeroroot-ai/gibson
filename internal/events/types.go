@@ -24,7 +24,7 @@ const (
 )
 
 // Node Execution Events
-// These events track individual workflow node execution within a mission.
+// These events track individual mission node execution within a mission.
 const (
 	EventNodeStarted   EventType = "node.started"
 	EventNodeCompleted EventType = "node.completed"
@@ -137,7 +137,7 @@ const (
 )
 
 // Rollback Events
-// These events track checkpoint creation and workflow rollback.
+// These events track checkpoint creation and mission rollback.
 const (
 	EventCheckpointCreated EventType = "checkpoint.created"
 	EventRollbackStarted   EventType = "rollback.started"
@@ -247,10 +247,10 @@ func (f *Filter) Matches(event Event) bool {
 
 // MissionStartedPayload contains data for mission.started events.
 type MissionStartedPayload struct {
-	MissionID    types.ID `json:"mission_id"`
-	WorkflowName string   `json:"workflow_name,omitempty"`
-	TargetID     types.ID `json:"target_id,omitempty"`
-	NodeCount    int      `json:"node_count"`
+	MissionID   types.ID `json:"mission_id"`
+	MissionName string   `json:"mission_name,omitempty"`
+	TargetID    types.ID `json:"target_id,omitempty"`
+	NodeCount   int      `json:"node_count"`
 }
 
 // MissionProgressPayload contains data for mission.progress events.
@@ -629,4 +629,3 @@ type DaemonStartedPayload struct {
 	DataDir       string `json:"data_dir,omitempty"`
 	ListenAddress string `json:"listen_address,omitempty"`
 }
-

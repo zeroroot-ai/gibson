@@ -4,7 +4,7 @@
 //
 // The queries package abstracts Neo4j Cypher queries into type-safe Go methods,
 // providing a clean interface for interacting with the Gibson graph database.
-// Each query struct focuses on a specific domain (execution, mission, workflow).
+// Each query struct focuses on a specific domain (execution, mission, mission).
 //
 // # ExecutionQueries
 //
@@ -19,7 +19,7 @@
 //
 // The execution tracking creates the following relationships:
 //
-//	AgentExecution -[:EXECUTES]-> WorkflowNode
+//	AgentExecution -[:EXECUTES]-> MissionNode
 //	AgentExecution -[:PRODUCED]-> Finding
 //	AgentExecution -[:USED_TOOL]-> ToolExecution
 //	Mission -[:HAS_DECISION]-> Decision
@@ -88,7 +88,7 @@
 //
 //   - Batch operations: LinkExecutionToFindings uses UNWIND for efficient batch linking
 //   - Atomic operations: CreateAgentExecution creates node and relationship atomically
-//   - Indexed queries: All queries use indexed fields (id, workflow_node_id) for fast lookups
+//   - Indexed queries: All queries use indexed fields (id, mission_node_id) for fast lookups
 //   - Read vs Write: Query method automatically selects appropriate transaction type
 //
 // # Observability Integration

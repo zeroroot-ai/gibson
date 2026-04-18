@@ -462,7 +462,7 @@ func TestDefaultBuildExecutor_Test_Context(t *testing.T) {
 	assert.False(t, result.Success)
 }
 
-// TestDefaultBuildExecutor_Integration tests a complete build workflow.
+// TestDefaultBuildExecutor_Integration tests a complete build mission.
 func TestDefaultBuildExecutor_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")

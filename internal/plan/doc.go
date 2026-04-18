@@ -1,6 +1,6 @@
 // Package plan provides execution plan generation, risk assessment, and execution
 // capabilities for the Gibson AI agent framework. It enables safe, controlled, and
-// auditable execution of multi-step operations with approval workflows and guardrail
+// auditable execution of multi-step operations with approval missions and guardrail
 // integration.
 //
 // # Overview
@@ -11,7 +11,7 @@
 //
 //   - ExecutionPlan generation from agent tasks
 //   - Risk assessment for individual steps and entire plans
-//   - Approval workflows for high-risk operations
+//   - Approval missions for high-risk operations
 //   - Step execution with guardrail integration
 //   - Comprehensive error handling and result tracking
 //
@@ -25,7 +25,7 @@
 //
 //   - PlanGenerator: Creates execution plans from high-level tasks
 //   - RiskAssessor: Evaluates steps and plans for risk levels
-//   - ApprovalService: Manages approval workflows for high-risk steps
+//   - ApprovalService: Manages approval missions for high-risk steps
 //   - PlanExecutor: Orchestrates plan execution with guardrails
 //
 // Plans integrate deeply with the Gibson harness to execute tools, plugins, and
@@ -96,7 +96,7 @@
 // Custom rules can be added via WithRule to implement domain-specific risk logic.
 // Risk assessments produce a RiskLevel and explanatory rationale for each step.
 //
-// # Approval Workflows
+// # Approval Missions
 //
 // The ApprovalService interface manages human-in-the-loop approval for high-risk
 // operations. When a step requires approval:
@@ -177,7 +177,7 @@
 //	fmt.Printf("Plan risk: %s, requires approval: %t\n",
 //		summary.OverallLevel, summary.ApprovalRequired)
 //
-// Approval Workflow:
+// Approval Mission:
 //
 //	// Create a mock approval service for testing
 //	approvalService := plan.NewMockApprovalService()

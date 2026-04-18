@@ -665,8 +665,8 @@ func TestMetricNameConstants(t *testing.T) {
 	}
 }
 
-// TestIntegration_FullWorkflow tests a complete metrics workflow.
-func TestIntegration_FullWorkflow(t *testing.T) {
+// TestIntegration_FullMission tests a complete metrics mission.
+func TestIntegration_FullMission(t *testing.T) {
 	// Initialize metrics provider
 	cfg := MetricsConfig{
 		Enabled:  true,
@@ -686,7 +686,7 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	meter := provider.Meter("gibson")
 	recorder := NewOpenTelemetryMetricsRecorder(meter)
 
-	// Simulate a complete agent execution workflow
+	// Simulate a complete agent execution mission
 	// 1. LLM completion for task planning
 	recorder.RecordLLMCompletion(
 		"primary",

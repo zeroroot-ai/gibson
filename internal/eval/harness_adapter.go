@@ -935,8 +935,8 @@ func (a *GibsonHarnessAdapter) CompleteStructuredAny(ctx context.Context, slot s
 // Mission Management Methods (Not Supported in Eval Adapter)
 // ============================================================================
 
-// CreateMission creates a new mission from a workflow definition.
-func (a *GibsonHarnessAdapter) CreateMission(ctx context.Context, workflow any, targetID string, opts *mission.CreateMissionOpts) (*mission.MissionInfo, error) {
+// CreateMission creates a new mission from a mission definition.
+func (a *GibsonHarnessAdapter) CreateMission(ctx context.Context, mission any, targetID string, opts *mission.CreateMissionOpts) (*mission.MissionInfo, error) {
 	return nil, fmt.Errorf("%w: CreateMission not available in eval context", ErrNotSupported)
 }
 

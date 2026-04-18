@@ -1,7 +1,7 @@
 //go:build skip_old_tests
 // +build skip_old_tests
 
-// NOTE: This file contains tests for the old workflow-based API which has been removed.
+// NOTE: This file contains tests for the old mission-based API which has been removed.
 // These tests need to be rewritten for the new mission definition API.
 // Use -tags=skip_old_tests to run these (they will fail).
 
@@ -25,18 +25,18 @@ import (
 func createTestMissionWithStatus(status MissionStatus) *Mission {
 	now := time.Now()
 	targetID := types.NewID()
-	workflowID := types.NewID()
+	missionDefinitionID := types.NewID()
 
 	mission := &Mission{
-		ID:          types.NewID(),
-		Name:        "test-mission",
-		Description: "Test mission",
-		Status:      status,
-		TargetID:    targetID,
-		WorkflowID:  workflowID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Progress:    0.0,
+		ID:                  types.NewID(),
+		Name:                "test-mission",
+		Description:         "Test mission",
+		Status:              status,
+		TargetID:            targetID,
+		MissionDefinitionID: missionDefinitionID,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+		Progress:            0.0,
 	}
 
 	if status == MissionStatusRunning {
@@ -293,10 +293,10 @@ func TestMissionClientCreate_Success(t *testing.T) {
 
 	client := NewMissionClient(store, orchestrator)
 
-	// Create workflow
-	wf := &mockWorkflow{
-		Name: "test-workflow",
-		Nodes: map[string]*mockWorkflowNode{
+	// Create mission
+	wf := &mockMission{
+		Name: "test-mission",
+		Nodes: map[string]*mockMissionNode{
 			"node1": {
 				ID:   "node1",
 				Type: mockNodeTypeAgent,
@@ -307,7 +307,7 @@ func TestMissionClientCreate_Success(t *testing.T) {
 	// Create request
 	targetID := types.NewID()
 	req := &CreateMissionRequest{
-		Workflow:    wf,
+		Mission:     wf,
 		TargetID:    targetID,
 		Name:        "test-mission",
 		Description: "Test mission description",
@@ -353,10 +353,10 @@ func TestMissionClientCreate_WithParent(t *testing.T) {
 
 	client := NewMissionClient(store, orchestrator)
 
-	// Create workflow
-	wf := &mockWorkflow{
-		Name: "child-workflow",
-		Nodes: map[string]*mockWorkflowNode{
+	// Create mission
+	wf := &mockMission{
+		Name: "child-mission",
+		Nodes: map[string]*mockMissionNode{
 			"node1": {ID: "node1", Type: mockNodeTypeAgent},
 		},
 	}
@@ -364,7 +364,7 @@ func TestMissionClientCreate_WithParent(t *testing.T) {
 	// Create request with parent
 	parentID := types.NewID()
 	req := &CreateMissionRequest{
-		Workflow:        wf,
+		Mission:         wf,
 		TargetID:        types.NewID(),
 		ParentMissionID: &parentID,
 		ParentDepth:     0, // Parent is root
@@ -396,17 +396,17 @@ func TestMissionClientCreate_AutoGenerateName(t *testing.T) {
 
 	client := NewMissionClient(store, orchestrator)
 
-	// Create workflow with name
-	wf := &mockWorkflow{
-		Name: "auto-workflow",
-		Nodes: map[string]*mockWorkflowNode{
+	// Create mission with name
+	wf := &mockMission{
+		Name: "auto-mission",
+		Nodes: map[string]*mockMissionNode{
 			"node1": {ID: "node1", Type: mockNodeTypeAgent},
 		},
 	}
 
 	// Create request without name
 	req := &CreateMissionRequest{
-		Workflow: wf,
+		Mission:  wf,
 		TargetID: types.NewID(),
 	}
 
@@ -416,9 +416,9 @@ func TestMissionClientCreate_AutoGenerateName(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	// Verify name was auto-generated from workflow
-	if mission.Name != "auto-workflow" {
-		t.Errorf("expected name='auto-workflow', got %s", mission.Name)
+	// Verify name was auto-generated from mission
+	if mission.Name != "auto-mission" {
+		t.Errorf("expected name='auto-mission', got %s", mission.Name)
 	}
 }
 
@@ -441,17 +441,17 @@ func TestMissionClientCreate_ValidationErrors(t *testing.T) {
 			wantErr: "request cannot be nil",
 		},
 		{
-			name: "nil workflow",
+			name: "nil mission",
 			req: &CreateMissionRequest{
 				TargetID: types.NewID(),
 			},
-			wantErr: "workflow cannot be nil",
+			wantErr: "mission cannot be nil",
 		},
 		{
 			name: "zero target ID",
 			req: &CreateMissionRequest{
-				Workflow: &mockWorkflow{
-					Nodes: map[string]*mockWorkflowNode{
+				Mission: &mockMission{
+					Nodes: map[string]*mockMissionNode{
 						"node1": {ID: "node1", Type: mockNodeTypeAgent},
 					},
 				},
@@ -459,20 +459,20 @@ func TestMissionClientCreate_ValidationErrors(t *testing.T) {
 			wantErr: "target ID is required",
 		},
 		{
-			name: "empty workflow nodes",
+			name: "empty mission nodes",
 			req: &CreateMissionRequest{
-				Workflow: &mockWorkflow{
-					Nodes: map[string]*mockWorkflowNode{},
+				Mission: &mockMission{
+					Nodes: map[string]*mockMissionNode{},
 				},
 				TargetID: types.NewID(),
 			},
-			wantErr: "workflow must contain at least one node",
+			wantErr: "mission must contain at least one node",
 		},
 		{
 			name: "depth limit exceeded",
 			req: &CreateMissionRequest{
-				Workflow: &mockWorkflow{
-					Nodes: map[string]*mockWorkflowNode{
+				Mission: &mockMission{
+					Nodes: map[string]*mockMissionNode{
 						"node1": {ID: "node1", Type: mockNodeTypeAgent},
 					},
 				},
@@ -508,8 +508,8 @@ func TestMissionClientCreate_ConstraintValidation(t *testing.T) {
 
 	// Create request with invalid constraints
 	req := &CreateMissionRequest{
-		Workflow: &mockWorkflow{
-			Nodes: map[string]*mockWorkflowNode{
+		Mission: &mockMission{
+			Nodes: map[string]*mockMissionNode{
 				"node1": {ID: "node1", Type: mockNodeTypeAgent},
 			},
 		},
@@ -1026,15 +1026,15 @@ func TestMissionClient_GetResults(t *testing.T) {
 			missionID: types.NewID(),
 			setupMocks: func(store *mockMissionStore) {
 				mission := createTestMissionWithStatus(MissionStatusCompleted)
-				mission.WorkflowJSON = `{"output": "test result"}`
+				mission.MissionDefinitionJSON = `{"output": "test result"}`
 				store.getResult = mission
 			},
 			wantErr: false,
 			validate: func(t *testing.T, result *MissionResult) {
 				assert.Equal(t, MissionStatusCompleted, result.Status)
 				assert.NotNil(t, result.Metrics)
-				assert.NotEmpty(t, result.WorkflowResult)
-				assert.Equal(t, "test result", result.WorkflowResult["output"])
+				assert.NotEmpty(t, result.MissionResult)
+				assert.Equal(t, "test result", result.MissionResult["output"])
 			},
 		},
 		{
@@ -1052,16 +1052,16 @@ func TestMissionClient_GetResults(t *testing.T) {
 			},
 		},
 		{
-			name:      "get results with invalid workflow JSON",
+			name:      "get results with invalid mission JSON",
 			missionID: types.NewID(),
 			setupMocks: func(store *mockMissionStore) {
 				mission := createTestMissionWithStatus(MissionStatusCompleted)
-				mission.WorkflowJSON = `{invalid json}`
+				mission.MissionDefinitionJSON = `{invalid json}`
 				store.getResult = mission
 			},
 			wantErr: false,
 			validate: func(t *testing.T, result *MissionResult) {
-				// Should succeed but workflow result will be nil
+				// Should succeed but mission result will be nil
 				assert.Equal(t, MissionStatusCompleted, result.Status)
 			},
 		},
@@ -1171,27 +1171,27 @@ func TestMissionClient_ConcurrentOperations(t *testing.T) {
 	})
 }
 
-// TestMissionClient_SerializeWorkflow tests workflow serialization.
-func TestMissionClient_SerializeWorkflow(t *testing.T) {
+// TestMissionClient_SerializeMission tests mission serialization.
+func TestMissionClient_SerializeMission(t *testing.T) {
 	t.Run("successful serialization", func(t *testing.T) {
 		store := &mockMissionStore{}
 		orch := &mockMissionOrchestrator{}
 		client := NewMissionClient(store, orch)
 
-		wf := &mockWorkflow{
-			Name: "test-workflow",
-			Nodes: map[string]*mockWorkflowNode{
+		wf := &mockMission{
+			Name: "test-mission",
+			Nodes: map[string]*mockMissionNode{
 				"node1": {ID: "node1", Type: mockNodeTypeAgent},
 			},
 		}
 
-		result, err := client.serializeWorkflow(wf)
+		result, err := client.serializeMission(wf)
 
 		assert.NoError(t, err)
 		assert.NotEmpty(t, result)
 
 		// Verify it's valid JSON
-		var parsed mockWorkflow
+		var parsed mockMission
 		err = json.Unmarshal([]byte(result), &parsed)
 		assert.NoError(t, err)
 		assert.Equal(t, wf.Name, parsed.Name)

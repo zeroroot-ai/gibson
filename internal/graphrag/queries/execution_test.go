@@ -158,14 +158,14 @@ func TestGetNodeExecutions(t *testing.T) {
 			Records: []map[string]any{
 				{
 					"e": map[string]any{
-						"id":               types.NewID().String(),
-						"workflow_node_id": nodeID,
-						"mission_id":       missionID.String(),
-						"status":           string(schema.ExecutionStatusCompleted),
-						"started_at":       time.Now().Format(time.RFC3339),
-						"attempt":          float64(1),
-						"created_at":       time.Now().Format(time.RFC3339),
-						"updated_at":       time.Now().Format(time.RFC3339),
+						"id":              types.NewID().String(),
+						"mission_node_id": nodeID,
+						"mission_id":      missionID.String(),
+						"status":          string(schema.ExecutionStatusCompleted),
+						"started_at":      time.Now().Format(time.RFC3339),
+						"attempt":         float64(1),
+						"created_at":      time.Now().Format(time.RFC3339),
+						"updated_at":      time.Now().Format(time.RFC3339),
 					},
 				},
 			},

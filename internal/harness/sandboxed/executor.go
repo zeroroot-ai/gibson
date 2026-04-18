@@ -83,13 +83,13 @@ type SandboxClient interface {
 // LaunchRequest is the data the executor passes to Setec's Launch RPC.
 // Adapters map it onto Setec's generated proto.
 type LaunchRequest struct {
-	Image    string
-	Command  []string
-	Env      map[string]string
-	VCPU     int32
-	Memory   string
-	Tenant   string // informational; tenancy is resolved by Setec from client cert CN
-	Timeout  time.Duration
+	Image   string
+	Command []string
+	Env     map[string]string
+	VCPU    int32
+	Memory  string
+	Tenant  string // informational; tenancy is resolved by Setec from client cert CN
+	Timeout time.Duration
 }
 
 // LaunchResponse is the executor-facing result of Launch.
@@ -391,11 +391,11 @@ func extractOutputMarker(buf []byte) (string, bool) {
 // the oldest bytes. Not suitable for large-throughput use — 1 MiB cap is
 // sized for tool-sized outputs, not streaming workloads.
 type ring struct {
-	mu    sync.Mutex
-	data  []byte
-	cap   int
-	over  bool // true once we've wrapped past cap
-	wpos  int
+	mu   sync.Mutex
+	data []byte
+	cap  int
+	over bool // true once we've wrapped past cap
+	wpos int
 }
 
 func newRing(capacity int) *ring {

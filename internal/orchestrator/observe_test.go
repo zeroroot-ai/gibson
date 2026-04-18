@@ -212,7 +212,7 @@ func TestObservationState_FormatForPrompt(t *testing.T) {
 		// Verify all sections are present
 		expectedSections := []string{
 			"=== MISSION CONTEXT ===",
-			"=== WORKFLOW PROGRESS ===",
+			"=== MISSION PROGRESS ===",
 			"=== RESOURCE CONSTRAINTS ===",
 			"=== READY NODES (Can Execute Now) ===",
 			"=== RUNNING NODES ===",
@@ -443,17 +443,17 @@ func TestObservationState_FormatForPrompt(t *testing.T) {
 
 // TestHelperFunctions tests utility helper functions
 func TestHelperFunctions(t *testing.T) {
-	t.Run("nodeToSummary converts workflow node", func(t *testing.T) {
+	t.Run("nodeToSummary converts mission node", func(t *testing.T) {
 		id := types.NewID()
 		missionID := types.NewID()
-		node := &schema.WorkflowNode{
+		node := &schema.MissionNode{
 			ID:          id,
 			MissionID:   missionID,
-			Type:        schema.WorkflowNodeTypeAgent,
+			Type:        schema.MissionNodeTypeAgent,
 			Name:        "test_node",
 			Description: "Test node description",
 			AgentName:   "test_agent",
-			Status:      schema.WorkflowNodeStatusReady,
+			Status:      schema.MissionNodeStatusReady,
 			IsDynamic:   true,
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),

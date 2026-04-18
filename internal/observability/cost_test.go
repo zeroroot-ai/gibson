@@ -541,7 +541,7 @@ func TestCostTracker_ConcurrentAccess(t *testing.T) {
 }
 
 func TestCostTracking_Integration(t *testing.T) {
-	// Integration test showing full cost tracking workflow
+	// Integration test showing full cost tracking mission
 	mockTracker := NewMockTokenTracker()
 	logger := NewLogger(Config{Level: slog.LevelDebug, Output: os.Stdout, RedactSensitive: true}).WithMission("test-mission", "").WithAgent("test-agent")
 	tracker := NewCostTracker(mockTracker, logger)

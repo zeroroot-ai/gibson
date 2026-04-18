@@ -21,7 +21,7 @@ type ApprovalRequest struct {
 	// MissionID is the mission this approval belongs to
 	MissionID string
 
-	// NodeID is the workflow node that triggered the approval
+	// NodeID is the mission node that triggered the approval
 	NodeID string
 
 	// Context is a human-readable description of what needs approval
@@ -121,7 +121,7 @@ func (m *Neo4jApprovalManager) CreateRequest(ctx context.Context, req ApprovalRe
 	// Create approval node in Neo4j
 	cypher := `
 		MATCH (m:Mission {id: $mission_id})
-		MATCH (n:WorkflowNode {id: $node_id})
+		MATCH (n:MissionNode {id: $node_id})
 		CREATE (a:ApprovalRequest {
 			id: $id,
 			mission_id: $mission_id,

@@ -509,7 +509,7 @@ func TestBuildReflectionUserPrompt(t *testing.T) {
 			scope:  ReflectionScopeSpecificNode,
 			prompt: "",
 			checkContains: []string{
-				"specific workflow node",
+				"specific mission node",
 			},
 		},
 		{

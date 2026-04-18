@@ -8,8 +8,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/manifest"
-	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -102,7 +102,7 @@ func (s *DaemonServer) resolveManifestSubject(id *auth.Identity, req *manifestpb
 
 	return manifest.ManifestSubject{
 		Type:     manifest.SubjectTypeUser,
-		ID:      id.Subject,
+		ID:       id.Subject,
 		TenantID: tenantID,
 	}, nil
 }

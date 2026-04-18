@@ -3881,13 +3881,13 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 
 	// Create mission request
 	createReq := &CreateMissionRequest{
-		WorkflowJSON:    string(req.WorkflowJson),
-		TargetID:        targetID,
-		ParentMissionID: parentMissionID,
-		Name:            req.Name,
-		Constraints:     constraints,
-		Metadata:        metadata,
-		Tags:            req.Tags,
+		MissionDefinitionJSON: string(req.MissionDefinitionJson),
+		TargetID:              targetID,
+		ParentMissionID:       parentMissionID,
+		Name:                  req.Name,
+		Constraints:           constraints,
+		Metadata:              metadata,
+		Tags:                  req.Tags,
 	}
 
 	// Create the mission through the manager

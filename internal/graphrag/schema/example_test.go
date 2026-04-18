@@ -176,7 +176,7 @@ func ExampleToolExecution_failure() {
 	// Is Complete: true
 }
 
-// Example demonstrates a complete orchestrator workflow.
+// Example demonstrates a complete orchestrator mission.
 func Example() {
 	missionID := types.NewID()
 

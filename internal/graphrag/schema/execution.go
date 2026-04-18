@@ -57,7 +57,7 @@ const (
 	DecisionActionSkipAgent DecisionAction = "skip_agent"
 	// DecisionActionModifyParams indicates the orchestrator modified agent parameters
 	DecisionActionModifyParams DecisionAction = "modify_params"
-	// DecisionActionComplete indicates the orchestrator completed the workflow
+	// DecisionActionComplete indicates the orchestrator completed the mission
 	DecisionActionComplete DecisionAction = "complete"
 	// DecisionActionSpawnAgent indicates the orchestrator spawned a new dynamic agent
 	DecisionActionSpawnAgent DecisionAction = "spawn_agent"
@@ -75,8 +75,8 @@ type AgentExecution struct {
 	// ID is the unique identifier for this execution
 	ID types.ID `json:"id"`
 
-	// WorkflowNodeID is the ID of the workflow node being executed
-	WorkflowNodeID string `json:"workflow_node_id"`
+	// MissionNodeID is the ID of the mission node being executed
+	MissionNodeID string `json:"mission_node_id"`
 
 	// MissionID is the ID of the parent mission
 	MissionID types.ID `json:"mission_id"`
@@ -123,19 +123,19 @@ type AgentExecution struct {
 
 // NewAgentExecution creates a new AgentExecution with the given parameters.
 // The status is set to running, attempt is set to 1, and timestamps are initialized.
-func NewAgentExecution(workflowNodeID string, missionID types.ID) *AgentExecution {
+func NewAgentExecution(missionNodeID string, missionID types.ID) *AgentExecution {
 	now := time.Now()
 	return &AgentExecution{
-		ID:             types.NewID(),
-		WorkflowNodeID: workflowNodeID,
-		MissionID:      missionID,
-		Status:         ExecutionStatusRunning,
-		StartedAt:      now,
-		Attempt:        1,
-		ConfigUsed:     make(map[string]any),
-		Result:         make(map[string]any),
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:            types.NewID(),
+		MissionNodeID: missionNodeID,
+		MissionID:     missionID,
+		Status:        ExecutionStatusRunning,
+		StartedAt:     now,
+		Attempt:       1,
+		ConfigUsed:    make(map[string]any),
+		Result:        make(map[string]any),
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 }
 
@@ -253,8 +253,8 @@ func (ae *AgentExecution) Validate() error {
 	if err := ae.ID.Validate(); err != nil {
 		return fmt.Errorf("invalid agent execution ID: %w", err)
 	}
-	if ae.WorkflowNodeID == "" {
-		return fmt.Errorf("workflow_node_id is required")
+	if ae.MissionNodeID == "" {
+		return fmt.Errorf("mission_node_id is required")
 	}
 	if err := ae.MissionID.Validate(); err != nil {
 		return fmt.Errorf("invalid mission_id: %w", err)
@@ -303,7 +303,7 @@ type Decision struct {
 	// Action is the decision action taken
 	Action DecisionAction `json:"action"`
 
-	// TargetNodeID is the workflow node affected by this decision
+	// TargetNodeID is the mission node affected by this decision
 	TargetNodeID string `json:"target_node_id,omitempty"`
 
 	// Reasoning contains the chain-of-thought explanation
@@ -365,7 +365,7 @@ func (d *Decision) WithID(id types.ID) *Decision {
 	return d
 }
 
-// WithTargetNode sets the target workflow node ID.
+// WithTargetNode sets the target mission node ID.
 // Returns the decision for method chaining.
 func (d *Decision) WithTargetNode(nodeID string) *Decision {
 	d.TargetNodeID = nodeID

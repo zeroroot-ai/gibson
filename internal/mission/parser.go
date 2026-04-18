@@ -11,7 +11,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/types"
-	workflowpb "github.com/zero-day-ai/sdk/api/gen/gibson/workflow/v1"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 )
@@ -144,7 +144,7 @@ type yamlRepositoryData struct {
 }
 
 // ParseDefinition parses a mission definition from a YAML file.
-// It supports both mission.yaml (new) and workflow.yaml (legacy) file names.
+// It supports both mission.yaml (new) and mission.yaml (legacy) file names.
 //
 // Parameters:
 //   - path: File system path to the YAML mission file
@@ -891,25 +891,25 @@ func findFieldInMapping(node *yaml.Node, fieldName string) int {
 // LoadMissionFromFileOrName is a convenience function that tries to load a mission
 // definition from multiple sources in priority order:
 // 1. If path is an absolute or relative file path that exists, load from file
-// 2. If path looks like a file name, check for mission.yaml and workflow.yaml
+// 2. If path looks like a file name, check for mission.yaml and mission.yaml
 // 3. Otherwise, assume it's a mission name and look in ~/.gibson/missions/{name}/
 //
-// This function supports both the new mission.yaml format and legacy workflow.yaml.
+// This function supports both the new mission.yaml format and legacy mission.yaml.
 func LoadMissionFromFileOrName(pathOrName string) (*MissionDefinition, error) {
 	// Check if it's a file path that exists
 	if _, err := os.Stat(pathOrName); err == nil {
 		return ParseDefinition(pathOrName)
 	}
 
-	// Check for mission.yaml or workflow.yaml in current directory
+	// Check for mission.yaml or mission.yaml in current directory
 	if !filepath.IsAbs(pathOrName) && !strings.Contains(pathOrName, string(filepath.Separator)) {
 		// Try mission.yaml first (new format)
 		if _, err := os.Stat("mission.yaml"); err == nil {
 			return ParseDefinition("mission.yaml")
 		}
-		// Fall back to workflow.yaml (legacy)
-		if _, err := os.Stat("workflow.yaml"); err == nil {
-			return ParseDefinition("workflow.yaml")
+		// Fall back to mission.yaml (legacy)
+		if _, err := os.Stat("mission.yaml"); err == nil {
+			return ParseDefinition("mission.yaml")
 		}
 	}
 
@@ -925,36 +925,36 @@ func LoadMissionFromFileOrName(pathOrName string) (*MissionDefinition, error) {
 		return ParseDefinition(missionPath)
 	}
 
-	// Fall back to workflow.yaml for backward compatibility
-	workflowPath := filepath.Join(homeDir, ".gibson", "missions", pathOrName, "workflow.yaml")
-	if _, err := os.Stat(workflowPath); err == nil {
-		return ParseDefinition(workflowPath)
+	// Fall back to mission.yaml for backward compatibility
+	missionDefinitionID := filepath.Join(homeDir, ".gibson", "missions", pathOrName, "mission.yaml")
+	if _, err := os.Stat(missionDefinitionID); err == nil {
+		return ParseDefinition(missionDefinitionID)
 	}
 
 	return nil, fmt.Errorf("mission not found: %s (checked file paths and ~/.gibson/missions/)", pathOrName)
 }
 
 // ParseDefinitionProto parses a mission definition from a YAML file and returns
-// a proto WorkflowDefinition with validation.
+// a proto MissionDefinition with validation.
 //
 // This function:
 // 1. Parses YAML to JSON
-// 2. Uses protojson to unmarshal JSON to proto WorkflowDefinition
+// 2. Uses protojson to unmarshal JSON to proto MissionDefinition
 // 3. Validates proto message structure
 //
-// This is the preferred method for parsing workflows when proto validation is needed.
+// This is the preferred method for parsing missions when proto validation is needed.
 //
 // Parameters:
-//   - path: File system path to the YAML workflow file
+//   - path: File system path to the YAML mission file
 //
 // Returns:
-//   - *workflowpb.WorkflowDefinition: The validated proto workflow definition
+//   - *missionpb.MissionDefinition: The validated proto mission definition
 //   - error: Detailed parse error with validation messages, or nil on success
-func ParseDefinitionProto(path string) (*workflowpb.WorkflowDefinition, error) {
+func ParseDefinitionProto(path string) (*missionpb.MissionDefinition, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, &ParseError{
-			Message: fmt.Sprintf("failed to read workflow file: %v", err),
+			Message: fmt.Sprintf("failed to read mission file: %v", err),
 			Err:     err,
 		}
 	}
@@ -963,7 +963,7 @@ func ParseDefinitionProto(path string) (*workflowpb.WorkflowDefinition, error) {
 }
 
 // ParseDefinitionProtoFromBytes parses a mission definition from raw YAML bytes
-// and returns a proto WorkflowDefinition with validation.
+// and returns a proto MissionDefinition with validation.
 //
 // The parser performs:
 // 1. YAML to JSON conversion (preserving structure)
@@ -973,16 +973,16 @@ func ParseDefinitionProto(path string) (*workflowpb.WorkflowDefinition, error) {
 // This provides stronger type safety and validation than the YAML-only parser.
 //
 // Parameters:
-//   - data: Raw YAML bytes containing the workflow definition
+//   - data: Raw YAML bytes containing the mission definition
 //
 // Returns:
-//   - *workflowpb.WorkflowDefinition: The validated proto workflow definition
+//   - *missionpb.MissionDefinition: The validated proto mission definition
 //   - error: Detailed parse error with validation messages, or nil on success
 //
 // Example usage:
 //
 //	yamlData := []byte(`
-//	name: Test Workflow
+//	name: Test Mission
 //	version: 1.0.0
 //	nodes:
 //	  node1:
@@ -990,7 +990,7 @@ func ParseDefinitionProto(path string) (*workflowpb.WorkflowDefinition, error) {
 //	    agent: test-agent
 //	`)
 //	def, err := ParseDefinitionProtoFromBytes(yamlData)
-func ParseDefinitionProtoFromBytes(data []byte) (*workflowpb.WorkflowDefinition, error) {
+func ParseDefinitionProtoFromBytes(data []byte) (*missionpb.MissionDefinition, error) {
 	// First parse YAML into a generic map
 	var yamlData map[string]interface{}
 	if err := yaml.Unmarshal(data, &yamlData); err != nil {
@@ -1011,13 +1011,13 @@ func ParseDefinitionProtoFromBytes(data []byte) (*workflowpb.WorkflowDefinition,
 
 	// Unmarshal JSON to proto using protojson
 	// This provides validation and proper enum conversion
-	var workflowDef workflowpb.WorkflowDefinition
+	var missionDef missionpb.MissionDefinition
 	unmarshaler := protojson.UnmarshalOptions{
 		DiscardUnknown: false, // Strict mode - fail on unknown fields
 		AllowPartial:   false, // Require all required fields
 	}
 
-	if err := unmarshaler.Unmarshal(jsonData, &workflowDef); err != nil {
+	if err := unmarshaler.Unmarshal(jsonData, &missionDef); err != nil {
 		return nil, &ParseError{
 			Message: fmt.Sprintf("proto validation failed: %v", err),
 			Err:     err,
@@ -1025,15 +1025,15 @@ func ParseDefinitionProtoFromBytes(data []byte) (*workflowpb.WorkflowDefinition,
 	}
 
 	// Additional validation: check that we have at least one node
-	if len(workflowDef.Nodes) == 0 {
+	if len(missionDef.Nodes) == 0 {
 		return nil, &ParseError{
-			Message: "workflow must have at least one node",
+			Message: "mission must have at least one node",
 		}
 	}
 
 	// Validate node types and configurations
-	for nodeID, node := range workflowDef.Nodes {
-		if node.Type == workflowpb.NodeType_NODE_TYPE_UNSPECIFIED {
+	for nodeID, node := range missionDef.Nodes {
+		if node.Type == missionpb.NodeType_NODE_TYPE_UNSPECIFIED {
 			return nil, &ParseError{
 				Message: fmt.Sprintf("node %s has unspecified type", nodeID),
 				NodeID:  nodeID,
@@ -1042,35 +1042,35 @@ func ParseDefinitionProtoFromBytes(data []byte) (*workflowpb.WorkflowDefinition,
 
 		// Validate that node has appropriate config for its type
 		switch node.Type {
-		case workflowpb.NodeType_NODE_TYPE_AGENT:
+		case missionpb.NodeType_NODE_TYPE_AGENT:
 			if node.GetAgentConfig() == nil {
 				return nil, &ParseError{
 					Message: fmt.Sprintf("agent node %s missing agent_config", nodeID),
 					NodeID:  nodeID,
 				}
 			}
-		case workflowpb.NodeType_NODE_TYPE_TOOL:
+		case missionpb.NodeType_NODE_TYPE_TOOL:
 			if node.GetToolConfig() == nil {
 				return nil, &ParseError{
 					Message: fmt.Sprintf("tool node %s missing tool_config", nodeID),
 					NodeID:  nodeID,
 				}
 			}
-		case workflowpb.NodeType_NODE_TYPE_PLUGIN:
+		case missionpb.NodeType_NODE_TYPE_PLUGIN:
 			if node.GetPluginConfig() == nil {
 				return nil, &ParseError{
 					Message: fmt.Sprintf("plugin node %s missing plugin_config", nodeID),
 					NodeID:  nodeID,
 				}
 			}
-		case workflowpb.NodeType_NODE_TYPE_CONDITION:
+		case missionpb.NodeType_NODE_TYPE_CONDITION:
 			if node.GetConditionConfig() == nil {
 				return nil, &ParseError{
 					Message: fmt.Sprintf("condition node %s missing condition_config", nodeID),
 					NodeID:  nodeID,
 				}
 			}
-		case workflowpb.NodeType_NODE_TYPE_PARALLEL:
+		case missionpb.NodeType_NODE_TYPE_PARALLEL:
 			if node.GetParallelConfig() == nil {
 				return nil, &ParseError{
 					Message: fmt.Sprintf("parallel node %s missing parallel_config", nodeID),
@@ -1081,18 +1081,18 @@ func ParseDefinitionProtoFromBytes(data []byte) (*workflowpb.WorkflowDefinition,
 	}
 
 	// Validate edges reference valid nodes
-	for i, edge := range workflowDef.Edges {
-		if _, ok := workflowDef.Nodes[edge.From]; !ok {
+	for i, edge := range missionDef.Edges {
+		if _, ok := missionDef.Nodes[edge.From]; !ok {
 			return nil, &ParseError{
 				Message: fmt.Sprintf("edge %d references non-existent source node: %s", i, edge.From),
 			}
 		}
-		if _, ok := workflowDef.Nodes[edge.To]; !ok {
+		if _, ok := missionDef.Nodes[edge.To]; !ok {
 			return nil, &ParseError{
 				Message: fmt.Sprintf("edge %d references non-existent target node: %s", i, edge.To),
 			}
 		}
 	}
 
-	return &workflowDef, nil
+	return &missionDef, nil
 }

@@ -16,7 +16,7 @@ type TargetStore interface {
 
 // MissionOrchestrator defines the interface for executing missions.
 type MissionOrchestrator interface {
-	// Execute runs the mission workflow and manages all orchestration
+	// Execute runs the mission and manages all orchestration
 	Execute(ctx context.Context, mission *Mission) (*MissionResult, error)
 
 	// ExecuteFromCheckpoint resumes a mission from a saved checkpoint.

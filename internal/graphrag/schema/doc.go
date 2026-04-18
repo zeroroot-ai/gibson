@@ -2,7 +2,7 @@
 //
 // This package defines the core data structures that represent mission execution
 // state in the Neo4j graph database. These types enable the orchestrator to track
-// workflow execution, dependencies, and state transitions in a graph-native way.
+// mission execution, dependencies, and state transitions in a graph-native way.
 //
 // # Mission Node
 //
@@ -26,9 +26,9 @@
 //	// ... execute mission ...
 //	mission.MarkCompleted()
 //
-// # WorkflowNode Node
+// # MissionNode Node
 //
-// The WorkflowNode represents individual tasks within a mission workflow. Each node
+// The MissionNode represents individual tasks within a mission. Each node
 // can be either an agent execution or a tool invocation. Nodes track:
 //   - Parent mission relationship
 //   - Task type (agent or tool)
@@ -69,14 +69,14 @@
 // The package provides strongly-typed status enums with validation:
 //
 //   - MissionStatus: pending, running, completed, failed
-//   - WorkflowNodeStatus: pending, ready, running, completed, failed, skipped
-//   - WorkflowNodeType: agent, tool
+//   - MissionNodeStatus: pending, ready, running, completed, failed, skipped
+//   - MissionNodeType: agent, tool
 //
 // All status enums implement Validate() for runtime safety.
 //
 // # RetryPolicy
 //
-// The RetryPolicy struct configures retry behavior for workflow nodes:
+// The RetryPolicy struct configures retry behavior for mission nodes:
 //
 //	policy := &schema.RetryPolicy{
 //	    MaxRetries: 5,
@@ -110,7 +110,7 @@
 //
 //	const (
 //	    LabelMission           = "Mission"
-//	    LabelWorkflowNode      = "WorkflowNode"
+//	    LabelMissionNode      = "MissionNode"
 //	    NodeLabelAgentExecution = "AgentExecution"
 //	    NodeLabelDecision      = "Decision"
 //	    NodeLabelToolExecution = "ToolExecution"
@@ -123,7 +123,7 @@
 // The package provides execution tracking types for observability and debugging:
 //
 //   - AgentExecution: Tracks individual agent execution instances including configuration,
-//     status, timing, results, and retry attempts. Each execution is linked to a workflow
+//     status, timing, results, and retry attempts. Each execution is linked to a mission
 //     node and mission.
 //
 //   - Decision: Captures orchestrator decision points including the reasoning process,
@@ -168,9 +168,9 @@
 // # Decision Actions
 //
 // The Decision type supports multiple orchestrator actions:
-//   - execute_agent: Execute a workflow agent
+//   - execute_agent: Execute a mission agent
 //   - skip_agent: Skip an agent based on graph state
 //   - modify_params: Modify agent parameters before execution
-//   - complete: Complete the workflow
+//   - complete: Complete the mission
 //   - spawn_agent: Dynamically spawn a new agent
 package schema

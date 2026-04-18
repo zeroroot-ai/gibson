@@ -140,26 +140,18 @@ func convertMissionToData(m *mission.Mission) api.MissionData {
 		endTime = *m.CompletedAt.Time
 	}
 
-	// Determine workflow path - use WorkflowID as a string for now
-	// In future, this could be resolved to actual workflow file path
-	workflowPath := m.WorkflowID.String()
-	if m.WorkflowJSON != "" {
-		// If inline workflow, indicate it's inline
-		workflowPath = "<inline>"
-	}
-
 	return api.MissionData{
-		ID:           m.ID.String(),
-		TenantID:     m.TenantID,
-		Name:         m.Name,
-		Description:  m.Description,
-		WorkflowPath: workflowPath,
-		WorkflowYAML: m.WorkflowJSON,
-		Status:       string(m.Status),
-		StartTime:    startTime,
-		EndTime:      endTime,
-		FindingCount: int32(m.FindingsCount),
-		Progress:     m.Progress,
+		ID:                  m.ID.String(),
+		TenantID:            m.TenantID,
+		Name:                m.Name,
+		Description:         m.Description,
+		MissionDefinitionID: m.MissionDefinitionID.String(),
+		TargetID:            m.TargetID.String(),
+		Status:              string(m.Status),
+		StartTime:           startTime,
+		EndTime:             endTime,
+		FindingCount:        int32(m.FindingsCount),
+		Progress:            m.Progress,
 	}
 }
 

@@ -34,7 +34,7 @@ import (
 // This struct is embedded in daemonImpl to provide access to these components
 // during mission execution, attack operations, and event streaming.
 type Infrastructure struct {
-	// planExecutor executes workflow DAGs with guardrails and approvals
+	// planExecutor executes mission DAGs with guardrails and approvals
 	planExecutor *plan.PlanExecutor
 
 	// findingStore persists and retrieves findings

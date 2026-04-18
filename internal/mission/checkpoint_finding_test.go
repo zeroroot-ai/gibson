@@ -97,12 +97,12 @@ func newCheckpointTestMission() *Mission {
 	wfID := types.NewID()
 	now := time.Now()
 	return &Mission{
-		ID:         id,
-		WorkflowID: wfID,
-		Status:     MissionStatusRunning,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		Metrics:    &MissionMetrics{StartedAt: now},
+		ID:                  id,
+		MissionDefinitionID: wfID,
+		Status:              MissionStatusRunning,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+		Metrics:             &MissionMetrics{StartedAt: now},
 	}
 }
 

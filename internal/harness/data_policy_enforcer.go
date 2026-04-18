@@ -13,7 +13,7 @@ import (
 // ensuring agents only see data allowed by their configured policy.
 //
 // The enforcer operates transparently - agents call QueryNodes() with a simple query,
-// and the harness automatically applies scope filters based on the workflow's data_policy.
+// and the harness automatically applies scope filters based on the mission's data_policy.
 type DataPolicyEnforcer interface {
 	// ApplyInputScope modifies the query to filter by the agent's input_scope policy.
 	// Returns error if:
@@ -29,9 +29,9 @@ type dataPolicyEnforcer struct {
 	policySource PolicySource
 }
 
-// PolicySource provides access to workflow data policies.
-// This interface is typically implemented by the WorkflowConfig or orchestrator
-// components that parse and manage workflow YAML.
+// PolicySource provides access to mission data policies.
+// This interface is typically implemented by the MissionConfig or orchestrator
+// components that parse and manage mission YAML.
 //
 // NOTE: This mirrors orchestrator.PolicySource but returns DataPolicyConfig
 // instead of orchestrator.DataPolicy to avoid circular dependencies.

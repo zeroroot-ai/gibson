@@ -588,15 +588,15 @@ func TestReusePolicyIntegration_EdgeCases(t *testing.T) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// End-to-End Workflow Simulation
+// End-to-End Mission Simulation
 // ────────────────────────────────────────────────────────────────────────────
 
-// TestReusePolicyIntegration_E2E_WorkflowSimulation simulates a complete workflow execution.
+// TestReusePolicyIntegration_E2E_MissionSimulation simulates a complete mission execution.
 // Scenario:
 // 1. Mission Run 1: Recon agent stores data
 // 2. Mission Run 2: Recon agent skipped (reuse=skip), Exploit agent runs (reuse=never)
 // 3. Mission Run 3: Both agents skipped (recon: existing data, exploit: reuse=always)
-func TestReusePolicyIntegration_E2E_WorkflowSimulation(t *testing.T) {
+func TestReusePolicyIntegration_E2E_MissionSimulation(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup: Create mock implementations

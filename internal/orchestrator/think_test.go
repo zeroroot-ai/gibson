@@ -586,7 +586,7 @@ func TestThinker_buildPrompt(t *testing.T) {
 	assert.Contains(t, prompt, state.MissionInfo.Objective)
 	assert.Contains(t, prompt, state.MissionInfo.Name) // Name is included in prompt, not ID
 	assert.Contains(t, prompt, "MISSION CONTEXT")
-	assert.Contains(t, prompt, "WORKFLOW PROGRESS")
+	assert.Contains(t, prompt, "MISSION PROGRESS")
 	assert.Contains(t, prompt, "Response Format")
 
 	// Verify nodes are included

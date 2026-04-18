@@ -66,7 +66,7 @@ func (a *missionHarnessAdapter) store() (mission.MissionStore, error) {
 }
 
 // CreateMission implements harness.MissionClientIface.
-// Parses WorkflowJSON into a MissionDefinition, creates the mission record,
+// Parses MissionDefinitionJSON into a MissionDefinition, creates the mission record,
 // and persists it to the store. Does NOT start execution (call Run for that).
 func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.MissionClientCreateRequest) (*harness.MissionClientInfo, error) {
 	if req == nil {
@@ -78,11 +78,11 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 		return nil, err
 	}
 
-	// Parse the workflow JSON into a MissionDefinition.
+	// Parse the mission JSON into a MissionDefinition.
 	var def mission.MissionDefinition
-	if req.WorkflowJSON != "" {
-		if jsonErr := json.Unmarshal([]byte(req.WorkflowJSON), &def); jsonErr != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "failed to parse workflow JSON: %v", jsonErr)
+	if req.MissionDefinitionJSON != "" {
+		if jsonErr := json.Unmarshal([]byte(req.MissionDefinitionJSON), &def); jsonErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "failed to parse mission JSON: %v", jsonErr)
 		}
 	}
 
@@ -94,7 +94,7 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 		def.Description = req.Description
 	}
 
-	// Generate a new workflow ID if not already set.
+	// Generate a new mission ID if not already set.
 	if def.ID.IsZero() {
 		def.ID = types.NewID()
 	}
@@ -107,16 +107,16 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 
 	// Build the mission record directly using the store.
 	m := &mission.Mission{
-		ID:              types.NewID(),
-		Name:            def.Name,
-		Description:     def.Description,
-		Status:          mission.MissionStatusPending,
-		TargetID:        req.TargetID,
-		WorkflowID:      def.ID,
-		WorkflowJSON:    req.WorkflowJSON,
-		ParentMissionID: req.ParentMissionID,
-		Depth:           depth,
-		Metadata:        req.Metadata,
+		ID:                    types.NewID(),
+		Name:                  def.Name,
+		Description:           def.Description,
+		Status:                mission.MissionStatusPending,
+		TargetID:              req.TargetID,
+		MissionDefinitionID:   def.ID,
+		MissionDefinitionJSON: req.MissionDefinitionJSON,
+		ParentMissionID:       req.ParentMissionID,
+		Depth:                 depth,
+		Metadata:              req.Metadata,
 	}
 
 	if saveErr := store.Save(ctx, m); saveErr != nil {
@@ -130,7 +130,7 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 }
 
 // Run implements harness.MissionClientIface.
-// Loads the mission's WorkflowJSON from the store, writes it to a temp file,
+// Loads the mission's MissionDefinitionJSON from the store, writes it to a temp file,
 // and delegates to missionManager.Run (which requires a file path).
 // The temp file is removed after Run returns. Agents can poll via GetStatus.
 func (a *missionHarnessAdapter) Run(ctx context.Context, missionID string) error {
@@ -154,22 +154,22 @@ func (a *missionHarnessAdapter) Run(ctx context.Context, missionID string) error
 		return status.Errorf(codes.NotFound, "mission %s not found: %v", missionID, getErr)
 	}
 
-	// Write the WorkflowJSON to a temp file so missionManager.Run can parse it.
-	workflowJSON := m.WorkflowJSON
-	if workflowJSON == "" {
-		// No workflow JSON — mission cannot be executed.
-		return status.Errorf(codes.FailedPrecondition, "mission %s has no workflow definition", missionID)
+	// Write the MissionDefinitionJSON to a temp file so missionManager.Run can parse it.
+	missionDefinitionJSON := m.MissionDefinitionJSON
+	if missionDefinitionJSON == "" {
+		// No mission JSON — mission cannot be executed.
+		return status.Errorf(codes.FailedPrecondition, "mission %s has no mission definition", missionID)
 	}
 
 	tmpFile, tmpErr := os.CreateTemp("", "gibson-sub-mission-*.yaml")
 	if tmpErr != nil {
-		return status.Errorf(codes.Internal, "failed to create temp workflow file: %v", tmpErr)
+		return status.Errorf(codes.Internal, "failed to create temp mission file: %v", tmpErr)
 	}
 	defer os.Remove(tmpFile.Name())
 
-	if _, writeErr := tmpFile.WriteString(workflowJSON); writeErr != nil {
+	if _, writeErr := tmpFile.WriteString(missionDefinitionJSON); writeErr != nil {
 		tmpFile.Close()
-		return status.Errorf(codes.Internal, "failed to write workflow to temp file: %v", writeErr)
+		return status.Errorf(codes.Internal, "failed to write mission to temp file: %v", writeErr)
 	}
 	tmpFile.Close()
 

@@ -261,11 +261,11 @@ func TestOTelMissionTracer_LogAgentExecution(t *testing.T) {
 
 	// Create agent execution
 	execution := &schema.AgentExecution{
-		ID:             types.NewID(),
-		WorkflowNodeID: "node-123",
-		Attempt:        1,
-		Status:         schema.ExecutionStatusCompleted,
-		StartedAt:      time.Now(),
+		ID:            types.NewID(),
+		MissionNodeID: "node-123",
+		Attempt:       1,
+		Status:        schema.ExecutionStatusCompleted,
+		StartedAt:     time.Now(),
 	}
 
 	agentLog := &AgentExecutionLog{
@@ -311,7 +311,7 @@ func TestOTelMissionTracer_LogAgentExecution(t *testing.T) {
 	}
 
 	assert.Equal(t, "test-agent", attrMap[GibsonAgentName])
-	assert.Equal(t, "node-123", attrMap[GibsonAgentWorkflowNodeID])
+	assert.Equal(t, "node-123", attrMap[GibsonAgentMissionNodeID])
 	assert.Equal(t, int64(1), attrMap[GibsonAgentAttempt])
 	assert.Equal(t, schema.ExecutionStatusCompleted.String(), attrMap[GibsonAgentStatus])
 	assert.Equal(t, int64(3), attrMap[GibsonAgentToolCallsCount])
@@ -352,11 +352,11 @@ func TestOTelMissionTracer_LogToolExecution(t *testing.T) {
 	ctx, missionSpan, _ := tracer.StartMissionTrace(context.Background(), mission)
 
 	execution := &schema.AgentExecution{
-		ID:             types.NewID(),
-		WorkflowNodeID: "node-123",
-		Attempt:        1,
-		Status:         schema.ExecutionStatusCompleted,
-		StartedAt:      time.Now(),
+		ID:            types.NewID(),
+		MissionNodeID: "node-123",
+		Attempt:       1,
+		Status:        schema.ExecutionStatusCompleted,
+		StartedAt:     time.Now(),
 	}
 
 	agentLog := &AgentExecutionLog{
@@ -455,11 +455,11 @@ func TestOTelMissionTracer_LogFinding(t *testing.T) {
 	ctx, missionSpan, _ := tracer.StartMissionTrace(context.Background(), mission)
 
 	execution := &schema.AgentExecution{
-		ID:             types.NewID(),
-		WorkflowNodeID: "node-123",
-		Attempt:        1,
-		Status:         schema.ExecutionStatusCompleted,
-		StartedAt:      time.Now(),
+		ID:            types.NewID(),
+		MissionNodeID: "node-123",
+		Attempt:       1,
+		Status:        schema.ExecutionStatusCompleted,
+		StartedAt:     time.Now(),
 	}
 
 	agentLog := &AgentExecutionLog{
@@ -551,11 +551,11 @@ func TestOTelMissionTracer_LogMemoryOp(t *testing.T) {
 	ctx, missionSpan, _ := tracer.StartMissionTrace(context.Background(), mission)
 
 	execution := &schema.AgentExecution{
-		ID:             types.NewID(),
-		WorkflowNodeID: "node-123",
-		Attempt:        1,
-		Status:         schema.ExecutionStatusCompleted,
-		StartedAt:      time.Now(),
+		ID:            types.NewID(),
+		MissionNodeID: "node-123",
+		Attempt:       1,
+		Status:        schema.ExecutionStatusCompleted,
+		StartedAt:     time.Now(),
 	}
 
 	agentLog := &AgentExecutionLog{
@@ -650,11 +650,11 @@ func TestOTelMissionTracer_LogGraphOp(t *testing.T) {
 	ctx, missionSpan, _ := tracer.StartMissionTrace(context.Background(), mission)
 
 	execution := &schema.AgentExecution{
-		ID:             types.NewID(),
-		WorkflowNodeID: "node-123",
-		Attempt:        1,
-		Status:         schema.ExecutionStatusCompleted,
-		StartedAt:      time.Now(),
+		ID:            types.NewID(),
+		MissionNodeID: "node-123",
+		Attempt:       1,
+		Status:        schema.ExecutionStatusCompleted,
+		StartedAt:     time.Now(),
 	}
 
 	agentLog := &AgentExecutionLog{

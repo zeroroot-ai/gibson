@@ -50,7 +50,7 @@ type Actor struct {
 	discoveryProcessor DiscoveryProcessor  // Processes DiscoveryResult from agent outputs (optional, can be nil)
 	approvalManager    ApprovalManager     // Manages approval request lifecycle (optional, can be nil)
 	escalationManager  EscalationManager   // Manages escalation lifecycle (optional, can be nil)
-	checkpointManager  CheckpointManager   // Manages workflow checkpoints and rollback (optional, can be nil)
+	checkpointManager  CheckpointManager   // Manages mission checkpoints and rollback (optional, can be nil)
 	reflectionEngine   ReflectionEngine    // Performs self-evaluation of strategy (optional, can be nil)
 	memoryRecaller     MemoryRecaller      // Queries memory tiers for context (optional, can be nil)
 	logger             *slog.Logger        // Logger for Actor operations
@@ -137,7 +137,7 @@ type ActionResult struct {
 	AgentExecution *schema.AgentExecution
 
 	// NewNode contains the newly spawned node if spawn_agent was used
-	NewNode *schema.WorkflowNode
+	NewNode *schema.MissionNode
 
 	// Error contains any error that occurred during action execution
 	Error error
@@ -214,18 +214,18 @@ func (a *Actor) Act(ctx context.Context, decision *Decision, missionID string) (
 	}
 }
 
-// executeAgent executes the workflow node by delegating to the appropriate agent.
+// executeAgent executes the mission node by delegating to the appropriate agent.
 // This creates an execution node, delegates to the agent, and updates the graph
 // with the execution results.
 func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
-	// Get the workflow node
-	node, err := a.getWorkflowNode(ctx, decision.TargetNodeID)
+	// Get the mission node
+	node, err := a.getMissionNode(ctx, decision.TargetNodeID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow node: %w", err)
+		return nil, fmt.Errorf("failed to get mission node: %w", err)
 	}
 
 	// Verify it's an agent node
-	if node.Type != schema.WorkflowNodeTypeAgent {
+	if node.Type != schema.MissionNodeTypeAgent {
 		return nil, fmt.Errorf("node %s is not an agent node (type: %s)", node.ID, node.Type)
 	}
 
@@ -240,7 +240,7 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 				"reason", reason)
 
 			// Mark the node as skipped
-			if err := a.updateNodeStatus(ctx, node.ID, schema.WorkflowNodeStatusSkipped); err != nil {
+			if err := a.updateNodeStatus(ctx, node.ID, schema.MissionNodeStatusSkipped); err != nil {
 				return nil, fmt.Errorf("failed to update node status to skipped: %w", err)
 			}
 
@@ -287,8 +287,8 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 		return nil, fmt.Errorf("failed to create agent execution: %w", err)
 	}
 
-	// Update workflow node status to running
-	if err := a.updateNodeStatus(ctx, node.ID, schema.WorkflowNodeStatusRunning); err != nil {
+	// Update mission node status to running
+	if err := a.updateNodeStatus(ctx, node.ID, schema.MissionNodeStatusRunning); err != nil {
 		return nil, fmt.Errorf("failed to update node status: %w", err)
 	}
 
@@ -314,7 +314,7 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 		task.Description = desc
 	}
 
-	// Set Goal from TaskConfig (populated by workflow parser from YAML goal field)
+	// Set Goal from TaskConfig (populated by mission parser from YAML goal field)
 	if goal, ok := node.TaskConfig["goal"].(string); ok {
 		task.Goal = goal
 	} else if task.Description != "" {
@@ -386,7 +386,7 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 		}
 
 		// Update node status to failed
-		if updateErr := a.updateNodeStatus(ctx, node.ID, schema.WorkflowNodeStatusFailed); updateErr != nil {
+		if updateErr := a.updateNodeStatus(ctx, node.ID, schema.MissionNodeStatusFailed); updateErr != nil {
 			return nil, fmt.Errorf("failed to update node status: %w", updateErr)
 		}
 
@@ -443,7 +443,7 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 		}
 
 		// Update node status to failed
-		if updateErr := a.updateNodeStatus(ctx, node.ID, schema.WorkflowNodeStatusFailed); updateErr != nil {
+		if updateErr := a.updateNodeStatus(ctx, node.ID, schema.MissionNodeStatusFailed); updateErr != nil {
 			return nil, fmt.Errorf("failed to update node status: %w", updateErr)
 		}
 	} else {
@@ -459,7 +459,7 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 		a.processAgentDiscovery(ctx, result.Output, node.AgentName, execution.ID.String(), missionID, missionRunID)
 
 		// Update node status to completed
-		if updateErr := a.updateNodeStatus(ctx, node.ID, schema.WorkflowNodeStatusCompleted); updateErr != nil {
+		if updateErr := a.updateNodeStatus(ctx, node.ID, schema.MissionNodeStatusCompleted); updateErr != nil {
 			return nil, fmt.Errorf("failed to update node status: %w", updateErr)
 		}
 
@@ -493,17 +493,17 @@ func (a *Actor) executeAgent(ctx context.Context, decision *Decision, missionID 
 	}, nil
 }
 
-// skipAgent marks a workflow node as skipped with the reasoning from the decision.
+// skipAgent marks a mission node as skipped with the reasoning from the decision.
 // This is used when the orchestrator determines a node doesn't need to execute.
 func (a *Actor) skipAgent(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
-	// Get the workflow node
-	node, err := a.getWorkflowNode(ctx, decision.TargetNodeID)
+	// Get the mission node
+	node, err := a.getMissionNode(ctx, decision.TargetNodeID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow node: %w", err)
+		return nil, fmt.Errorf("failed to get mission node: %w", err)
 	}
 
 	// Update node status to skipped
-	if err := a.updateNodeStatus(ctx, node.ID, schema.WorkflowNodeStatusSkipped); err != nil {
+	if err := a.updateNodeStatus(ctx, node.ID, schema.MissionNodeStatusSkipped); err != nil {
 		return nil, fmt.Errorf("failed to update node status: %w", err)
 	}
 
@@ -519,13 +519,13 @@ func (a *Actor) skipAgent(ctx context.Context, decision *Decision, missionID typ
 	}, nil
 }
 
-// modifyParams updates the task configuration for a workflow node and then executes it.
+// modifyParams updates the task configuration for a mission node and then executes it.
 // This allows the orchestrator to adapt agent parameters based on context.
 func (a *Actor) modifyParams(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
-	// Get the workflow node
-	node, err := a.getWorkflowNode(ctx, decision.TargetNodeID)
+	// Get the mission node
+	node, err := a.getMissionNode(ctx, decision.TargetNodeID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow node: %w", err)
+		return nil, fmt.Errorf("failed to get mission node: %w", err)
 	}
 
 	// Merge modifications into task config
@@ -557,13 +557,13 @@ func (a *Actor) modifyParams(ctx context.Context, decision *Decision, missionID 
 	return a.executeAgent(ctx, execDecision, missionID)
 }
 
-// retryAgent re-executes a failed workflow node, optionally with modified parameters.
+// retryAgent re-executes a failed mission node, optionally with modified parameters.
 // This implements retry logic based on the node's retry policy.
 func (a *Actor) retryAgent(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
-	// Get the workflow node
-	node, err := a.getWorkflowNode(ctx, decision.TargetNodeID)
+	// Get the mission node
+	node, err := a.getMissionNode(ctx, decision.TargetNodeID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow node: %w", err)
+		return nil, fmt.Errorf("failed to get mission node: %w", err)
 	}
 
 	// Check retry policy
@@ -596,7 +596,7 @@ func (a *Actor) retryAgent(ctx context.Context, decision *Decision, missionID ty
 	}
 
 	// Reset node status to ready for retry
-	if err := a.updateNodeStatus(ctx, node.ID, schema.WorkflowNodeStatusReady); err != nil {
+	if err := a.updateNodeStatus(ctx, node.ID, schema.MissionNodeStatusReady); err != nil {
 		return nil, fmt.Errorf("failed to reset node status: %w", err)
 	}
 
@@ -611,8 +611,8 @@ func (a *Actor) retryAgent(ctx context.Context, decision *Decision, missionID ty
 	return a.executeAgent(ctx, execDecision, missionID)
 }
 
-// spawnAgent creates a new workflow node dynamically and optionally executes it.
-// This allows the orchestrator to adapt the workflow at runtime.
+// spawnAgent creates a new mission node dynamically and optionally executes it.
+// This allows the orchestrator to adapt the mission at runtime.
 func (a *Actor) spawnAgent(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
 	if decision.SpawnConfig == nil {
 		return nil, fmt.Errorf("spawn_config is required for spawn_agent action")
@@ -622,7 +622,7 @@ func (a *Actor) spawnAgent(ctx context.Context, decision *Decision, missionID ty
 	if a.inventory != nil {
 		validator := NewInventoryValidator(a.inventory)
 		if err := validator.ValidateSpawnAgent(decision); err != nil {
-			// Return validation error - don't create the workflow node
+			// Return validation error - don't create the mission node
 			return &ActionResult{
 				Action:       ActionSpawnAgent,
 				Error:        err,
@@ -634,7 +634,7 @@ func (a *Actor) spawnAgent(ctx context.Context, decision *Decision, missionID ty
 
 	cfg := decision.SpawnConfig
 
-	// Create new workflow node
+	// Create new mission node
 	nodeID := types.NewID()
 	node := schema.NewAgentNode(
 		nodeID,
@@ -645,11 +645,11 @@ func (a *Actor) spawnAgent(ctx context.Context, decision *Decision, missionID ty
 	)
 	node.MarkDynamic("orchestrator") // Mark as dynamically spawned
 	node.WithTaskConfig(cfg.TaskConfig)
-	node.WithStatus(schema.WorkflowNodeStatusReady)
+	node.WithStatus(schema.MissionNodeStatusReady)
 
 	// Create node in graph
-	if err := a.createWorkflowNode(ctx, node); err != nil {
-		return nil, fmt.Errorf("failed to create workflow node: %w", err)
+	if err := a.createMissionNode(ctx, node); err != nil {
+		return nil, fmt.Errorf("failed to create mission node: %w", err)
 	}
 
 	// Create dependencies if specified
@@ -713,10 +713,10 @@ func (a *Actor) completeMission(ctx context.Context, decision *Decision, mission
 	}, nil
 }
 
-// getWorkflowNode retrieves a workflow node by ID from the graph.
-func (a *Actor) getWorkflowNode(ctx context.Context, nodeID string) (*schema.WorkflowNode, error) {
+// getMissionNode retrieves a mission node by ID from the graph.
+func (a *Actor) getMissionNode(ctx context.Context, nodeID string) (*schema.MissionNode, error) {
 	cypher := `
-		MATCH (n:WorkflowNode {id: $node_id})
+		MATCH (n:MissionNode {id: $node_id})
 		RETURN n
 	`
 
@@ -726,16 +726,16 @@ func (a *Actor) getWorkflowNode(ctx context.Context, nodeID string) (*schema.Wor
 
 	result, err := a.graphClient.Query(ctx, cypher, params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query workflow node: %w", err)
+		return nil, fmt.Errorf("failed to query mission node: %w", err)
 	}
 
 	if len(result.Records) == 0 {
-		return nil, fmt.Errorf("workflow node %s not found", nodeID)
+		return nil, fmt.Errorf("mission node %s not found", nodeID)
 	}
 
 	nodeData := result.Records[0]["n"]
 	if nodeData == nil {
-		return nil, fmt.Errorf("workflow node data is nil")
+		return nil, fmt.Errorf("mission node data is nil")
 	}
 
 	// Handle different return types from Neo4j driver
@@ -749,13 +749,13 @@ func (a *Actor) getWorkflowNode(ctx context.Context, nodeID string) (*schema.Wor
 		return nil, fmt.Errorf("invalid node data format: got %T", nodeData)
 	}
 
-	return a.parseWorkflowNode(dataMap)
+	return a.parseMissionNode(dataMap)
 }
 
-// updateNodeStatus updates the status of a workflow node in the graph.
-func (a *Actor) updateNodeStatus(ctx context.Context, nodeID types.ID, status schema.WorkflowNodeStatus) error {
+// updateNodeStatus updates the status of a mission node in the graph.
+func (a *Actor) updateNodeStatus(ctx context.Context, nodeID types.ID, status schema.MissionNodeStatus) error {
 	cypher := `
-		MATCH (n:WorkflowNode {id: $node_id})
+		MATCH (n:MissionNode {id: $node_id})
 		SET n.status = $status,
 			n.updated_at = datetime()
 		RETURN n.id as id
@@ -786,11 +786,11 @@ func (a *Actor) updateDependentNodesToReady(ctx context.Context, completedNodeID
 	// 1. It is currently "pending"
 	// 2. All nodes it DEPENDS_ON are "completed"
 	cypher := `
-		MATCH (completed:WorkflowNode {id: $completed_node_id})
-		MATCH (dependent:WorkflowNode)-[:DEPENDS_ON]->(completed)
+		MATCH (completed:MissionNode {id: $completed_node_id})
+		MATCH (dependent:MissionNode)-[:DEPENDS_ON]->(completed)
 		WHERE dependent.status = 'pending'
 		WITH dependent
-		OPTIONAL MATCH (dependent)-[:DEPENDS_ON]->(dep:WorkflowNode)
+		OPTIONAL MATCH (dependent)-[:DEPENDS_ON]->(dep:MissionNode)
 		WITH dependent, collect(dep) as dependencies
 		WHERE ALL(d IN dependencies WHERE d.status = 'completed')
 		SET dependent.status = 'ready', dependent.updated_at = datetime()
@@ -821,7 +821,7 @@ func (a *Actor) updateDependentNodesToReady(ctx context.Context, completedNodeID
 	return nil
 }
 
-// updateNodeConfig updates the task configuration of a workflow node in the graph.
+// updateNodeConfig updates the task configuration of a mission node in the graph.
 func (a *Actor) updateNodeConfig(ctx context.Context, nodeID types.ID, config map[string]interface{}) error {
 	configJSON, err := json.Marshal(config)
 	if err != nil {
@@ -829,7 +829,7 @@ func (a *Actor) updateNodeConfig(ctx context.Context, nodeID types.ID, config ma
 	}
 
 	cypher := `
-		MATCH (n:WorkflowNode {id: $node_id})
+		MATCH (n:MissionNode {id: $node_id})
 		SET n.task_config = $config,
 			n.updated_at = datetime()
 		RETURN n.id as id
@@ -852,10 +852,10 @@ func (a *Actor) updateNodeConfig(ctx context.Context, nodeID types.ID, config ma
 	return nil
 }
 
-// createWorkflowNode creates a new workflow node in the graph.
-func (a *Actor) createWorkflowNode(ctx context.Context, node *schema.WorkflowNode) error {
+// createMissionNode creates a new mission node in the graph.
+func (a *Actor) createMissionNode(ctx context.Context, node *schema.MissionNode) error {
 	if err := node.Validate(); err != nil {
-		return fmt.Errorf("invalid workflow node: %w", err)
+		return fmt.Errorf("invalid mission node: %w", err)
 	}
 
 	configJSON, err := node.TaskConfigJSON()
@@ -869,7 +869,7 @@ func (a *Actor) createWorkflowNode(ctx context.Context, node *schema.WorkflowNod
 	}
 
 	cypher := `
-		CREATE (n:WorkflowNode)
+		CREATE (n:MissionNode)
 		SET n.id = $id,
 			n.mission_id = $mission_id,
 			n.type = $type,
@@ -906,11 +906,11 @@ func (a *Actor) createWorkflowNode(ctx context.Context, node *schema.WorkflowNod
 
 	result, err := a.graphClient.Query(ctx, cypher, params)
 	if err != nil {
-		return fmt.Errorf("failed to create workflow node: %w", err)
+		return fmt.Errorf("failed to create mission node: %w", err)
 	}
 
 	if len(result.Records) == 0 {
-		return fmt.Errorf("failed to create workflow node")
+		return fmt.Errorf("failed to create mission node")
 	}
 
 	return nil
@@ -923,10 +923,10 @@ func (a *Actor) createNodeDependencies(ctx context.Context, nodeID types.ID, dep
 	}
 
 	cypher := `
-		MATCH (n:WorkflowNode {id: $node_id})
+		MATCH (n:MissionNode {id: $node_id})
 		WITH n
 		UNWIND $depends_on as dep_id
-		MATCH (dep:WorkflowNode {id: dep_id})
+		MATCH (dep:MissionNode {id: dep_id})
 		MERGE (n)-[:DEPENDS_ON]->(dep)
 		RETURN count(*) as count
 	`
@@ -952,7 +952,7 @@ func (a *Actor) createNodeDependencies(ctx context.Context, nodeID types.ID, dep
 func (a *Actor) linkNodeToMission(ctx context.Context, missionID, nodeID types.ID) error {
 	cypher := `
 		MATCH (m:Mission {id: $mission_id})
-		MATCH (n:WorkflowNode {id: $node_id})
+		MATCH (n:MissionNode {id: $node_id})
 		MERGE (n)-[:PART_OF]->(m)
 		RETURN count(*) as count
 	`
@@ -974,8 +974,8 @@ func (a *Actor) linkNodeToMission(ctx context.Context, missionID, nodeID types.I
 	return nil
 }
 
-// parseWorkflowNode converts a Neo4j result map to a WorkflowNode struct.
-func (a *Actor) parseWorkflowNode(data map[string]interface{}) (*schema.WorkflowNode, error) {
+// parseMissionNode converts a Neo4j result map to a MissionNode struct.
+func (a *Actor) parseMissionNode(data map[string]interface{}) (*schema.MissionNode, error) {
 	id, err := types.ParseID(data["id"].(string))
 	if err != nil {
 		return nil, fmt.Errorf("invalid node ID: %w", err)
@@ -986,13 +986,13 @@ func (a *Actor) parseWorkflowNode(data map[string]interface{}) (*schema.Workflow
 		return nil, fmt.Errorf("invalid mission ID: %w", err)
 	}
 
-	node := &schema.WorkflowNode{
+	node := &schema.MissionNode{
 		ID:          id,
 		MissionID:   missionID,
-		Type:        schema.WorkflowNodeType(data["type"].(string)),
+		Type:        schema.MissionNodeType(data["type"].(string)),
 		Name:        data["name"].(string),
 		Description: data["description"].(string),
-		Status:      schema.WorkflowNodeStatus(data["status"].(string)),
+		Status:      schema.MissionNodeStatus(data["status"].(string)),
 		IsDynamic:   data["is_dynamic"].(bool),
 		TaskConfig:  make(map[string]interface{}),
 	}
@@ -1036,7 +1036,7 @@ func (a *Actor) parseWorkflowNode(data map[string]interface{}) (*schema.Workflow
 }
 
 // requestApproval pauses execution and waits for human approval before executing the target node.
-// This implements human-in-the-loop workflows for sensitive operations.
+// This implements human-in-the-loop missions for sensitive operations.
 func (a *Actor) requestApproval(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
 	// Check if approval manager is configured
 	if a.approvalManager == nil {
@@ -1105,9 +1105,9 @@ func (a *Actor) requestApproval(ctx context.Context, decision *Decision, mission
 	}
 
 	// Approval rejected or timed out - skip the node
-	node, err := a.getWorkflowNode(ctx, decision.TargetNodeID)
+	node, err := a.getMissionNode(ctx, decision.TargetNodeID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow node: %w", err)
+		return nil, fmt.Errorf("failed to get mission node: %w", err)
 	}
 
 	skipReason := "approval_rejected"
@@ -1115,7 +1115,7 @@ func (a *Actor) requestApproval(ctx context.Context, decision *Decision, mission
 		skipReason = fmt.Sprintf("approval_timeout_%s", timeoutAction)
 	}
 
-	if err := a.updateNodeStatus(ctx, node.ID, schema.WorkflowNodeStatusSkipped); err != nil {
+	if err := a.updateNodeStatus(ctx, node.ID, schema.MissionNodeStatusSkipped); err != nil {
 		return nil, fmt.Errorf("failed to update node status to skipped: %w", err)
 	}
 
@@ -1283,7 +1283,7 @@ func (a *Actor) escalate(ctx context.Context, decision *Decision, missionID type
 	}, nil
 }
 
-// rollback reverts the workflow to a previously captured checkpoint state.
+// rollback reverts the mission to a previously captured checkpoint state.
 // This resets node statuses and marks rolled-back executions as "rolled_back".
 func (a *Actor) rollback(ctx context.Context, decision *Decision, missionID types.ID) (*ActionResult, error) {
 	// Validate that checkpoint manager is configured
@@ -1311,7 +1311,7 @@ func (a *Actor) rollback(ctx context.Context, decision *Decision, missionID type
 
 		// Query for the implicit checkpoint that was created BEFORE this node
 		cypher := `
-			MATCH (c:Checkpoint)-[:BEFORE_NODE]->(n:WorkflowNode {id: $node_id})
+			MATCH (c:Checkpoint)-[:BEFORE_NODE]->(n:MissionNode {id: $node_id})
 			WHERE c.mission_id = $mission_id AND c.is_implicit = true
 			RETURN c.id as checkpoint_id
 			ORDER BY c.created_at DESC
@@ -1858,11 +1858,11 @@ func (a *Actor) buildObservationState(ctx context.Context, missionID types.ID) *
 		}
 	}
 
-	// Query workflow nodes and build execution history
+	// Query mission nodes and build execution history
 	if a.execQueries != nil {
-		// Get all workflow nodes for this mission
+		// Get all mission nodes for this mission
 		cypher := `
-			MATCH (n:WorkflowNode)-[:PART_OF]->(m:Mission {id: $mission_id})
+			MATCH (n:MissionNode)-[:PART_OF]->(m:Mission {id: $mission_id})
 			RETURN n.id as node_id,
 			       n.name as name,
 			       n.type as type,

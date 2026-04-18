@@ -109,11 +109,11 @@ type CatalogRefresher struct {
 	interval time.Duration
 	entryTTL time.Duration
 
-	mu       sync.Mutex
-	running  bool
-	cancel   context.CancelFunc
-	refresh  chan struct{} // RefreshNow signal; buffered 1
-	stopped  chan struct{}
+	mu      sync.Mutex
+	running bool
+	cancel  context.CancelFunc
+	refresh chan struct{} // RefreshNow signal; buffered 1
+	stopped chan struct{}
 }
 
 // NewCatalogRefresher constructs a refresher. Returns a clear error on
@@ -313,15 +313,15 @@ type imageCatalog struct {
 // emits. Kept in sync with
 // opensource/gibson-tool-runner/internal/registry/registry.go.
 type runnerCatalogEntry struct {
-	Name                  string           `json:"name"`
-	Version               string           `json:"version"`
-	Description           string           `json:"description"`
-	Tags                  []string         `json:"tags"`
-	InputSchema           map[string]any   `json:"input_schema"`
-	OutputProtoType       string           `json:"output_proto_type"`
-	DefaultParseQuality   int32            `json:"default_parse_quality"`
-	Resources             resourceHint     `json:"resources"`
-	DefaultTimeoutSeconds int32            `json:"default_timeout_seconds"`
+	Name                  string         `json:"name"`
+	Version               string         `json:"version"`
+	Description           string         `json:"description"`
+	Tags                  []string       `json:"tags"`
+	InputSchema           map[string]any `json:"input_schema"`
+	OutputProtoType       string         `json:"output_proto_type"`
+	DefaultParseQuality   int32          `json:"default_parse_quality"`
+	Resources             resourceHint   `json:"resources"`
+	DefaultTimeoutSeconds int32          `json:"default_timeout_seconds"`
 }
 
 type resourceHint struct {

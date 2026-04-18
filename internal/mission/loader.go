@@ -120,17 +120,17 @@ func (l *DefaultMissionLoader) LoadByName(ctx context.Context, name string) (*Mi
 		return def, nil
 	}
 
-	// Fall back to workflow.yaml (legacy format)
-	workflowPath := filepath.Join(missionDir, "workflow.yaml")
-	if _, err := os.Stat(workflowPath); err == nil {
-		def, err := ParseDefinition(workflowPath)
+	// Fall back to mission.yaml (legacy format)
+	missionDefinitionID := filepath.Join(missionDir, "mission.yaml")
+	if _, err := os.Stat(missionDefinitionID); err == nil {
+		def, err := ParseDefinition(missionDefinitionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse mission definition: %w", err)
 		}
 		return def, nil
 	}
 
-	return nil, fmt.Errorf("mission '%s' has no mission.yaml or workflow.yaml in %s", name, missionDir)
+	return nil, fmt.Errorf("mission '%s' has no mission.yaml or mission.yaml in %s", name, missionDir)
 }
 
 // LoadFromFile loads a mission definition from a file path.
@@ -192,7 +192,7 @@ func (l *DefaultMissionLoader) LoadFromURL(ctx context.Context, url string) (*Mi
 	// Clean up temp directory after we're done
 	defer os.RemoveAll(tempDir)
 
-	// Try to find mission.yaml or workflow.yaml
+	// Try to find mission.yaml or mission.yaml
 	missionPath := filepath.Join(tempDir, "mission.yaml")
 	if _, err := os.Stat(missionPath); err == nil {
 		def, err := ParseDefinition(missionPath)
@@ -202,16 +202,16 @@ func (l *DefaultMissionLoader) LoadFromURL(ctx context.Context, url string) (*Mi
 		return def, nil
 	}
 
-	workflowPath := filepath.Join(tempDir, "workflow.yaml")
-	if _, err := os.Stat(workflowPath); err == nil {
-		def, err := ParseDefinition(workflowPath)
+	missionDefinitionID := filepath.Join(tempDir, "mission.yaml")
+	if _, err := os.Stat(missionDefinitionID); err == nil {
+		def, err := ParseDefinition(missionDefinitionID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse workflow.yaml: %w", err)
+			return nil, fmt.Errorf("failed to parse mission.yaml: %w", err)
 		}
 		return def, nil
 	}
 
-	return nil, fmt.Errorf("no mission.yaml or workflow.yaml found in repository root")
+	return nil, fmt.Errorf("no mission.yaml or mission.yaml found in repository root")
 }
 
 // Load automatically detects the source type and routes to the appropriate loader.

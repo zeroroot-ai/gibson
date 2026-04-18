@@ -429,7 +429,7 @@ type AgentHarness interface {
 	// ────────────────────────────────────────────────────────────────────────────
 
 	// DelegateToAgent delegates a task to another registered agent for execution.
-	// This enables hierarchical agent workflows and specialization.
+	// This enables hierarchical agent missions and specialization.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and tracing (inherited by sub-agent)

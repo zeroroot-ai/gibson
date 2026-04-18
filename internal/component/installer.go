@@ -4,12 +4,13 @@ import (
 	"context"
 
 	"fmt"
-	sdkGraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	sdkGraphrag "github.com/zero-day-ai/sdk/graphrag"
 
 	"github.com/zero-day-ai/gibson/internal/component/build"
 	"github.com/zero-day-ai/gibson/internal/component/git"

@@ -664,17 +664,17 @@ func setupTestHarness(t *testing.T, mockResponses []string) (AgentHarness, *Harn
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Task 7.1: Full Workflow Integration Tests
+// Task 7.1: Full Mission Integration Tests
 // ────────────────────────────────────────────────────────────────────────────
 
-// TestIntegration_FullWorkflow tests a complete agent workflow:
+// TestIntegration_FullMission tests a complete agent mission:
 // 1. Create harness via factory
 // 2. Make LLM completion call
 // 3. Execute tool based on LLM response
 // 4. Query plugin for additional data
 // 5. Submit finding
 // 6. Verify metrics and token tracking
-func TestIntegration_FullWorkflow(t *testing.T) {
+func TestIntegration_FullMission(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup harness with mock LLM responses

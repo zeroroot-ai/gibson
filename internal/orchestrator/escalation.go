@@ -21,7 +21,7 @@ type Escalation struct {
 	// MissionID is the mission this escalation belongs to
 	MissionID string
 
-	// NodeID is the workflow node that triggered the escalation
+	// NodeID is the mission node that triggered the escalation
 	NodeID string
 
 	// Level specifies who to escalate to: "human", "senior_agent", "specialist"
@@ -119,7 +119,7 @@ func (m *Neo4jEscalationManager) CreateEscalation(ctx context.Context, esc Escal
 	// Create escalation node in Neo4j
 	cypher := `
 		MATCH (m:Mission {id: $mission_id})
-		MATCH (n:WorkflowNode {id: $node_id})
+		MATCH (n:MissionNode {id: $node_id})
 		CREATE (e:Escalation {
 			id: $id,
 			mission_id: $mission_id,

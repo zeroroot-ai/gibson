@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestIntegration_FullAssemblyWorkflow tests the complete prompt assembly workflow
+// TestIntegration_FullAssemblyMission tests the complete prompt assembly mission
 // from registry creation through final message generation.
-func TestIntegration_FullAssemblyWorkflow(t *testing.T) {
+func TestIntegration_FullAssemblyMission(t *testing.T) {
 	// Step 1: Create a registry
 	registry := NewPromptRegistry()
 

@@ -18,12 +18,12 @@ import (
 // ------------------------------------------------------------------
 
 type fakeFGA struct {
-	resolve            func(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error)
-	crossRules         func(ctx context.Context, subjectFGA string, components []agentauth.ComponentRef) ([]agentauth.CrossRule, error)
-	intersection       func(ctx context.Context, apID, ownerID, tenantID string) ([]agentauth.ComponentRef, error)
-	resolveCalls       int
-	crossCalls         int
-	intersectionCalls  int
+	resolve           func(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error)
+	crossRules        func(ctx context.Context, subjectFGA string, components []agentauth.ComponentRef) ([]agentauth.CrossRule, error)
+	intersection      func(ctx context.Context, apID, ownerID, tenantID string) ([]agentauth.ComponentRef, error)
+	resolveCalls      int
+	crossCalls        int
+	intersectionCalls int
 }
 
 func (f *fakeFGA) ResolveCapabilities(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error) {

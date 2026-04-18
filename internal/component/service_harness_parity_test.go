@@ -314,8 +314,8 @@ func TestServiceHarnessParity_CreateMission_HappyPath(t *testing.T) {
 	svc := newParityServer().WithMissionManager(mock)
 
 	resp, err := svc.CreateMission(tenantCtx(), &componentpb.CreateMissionRequest{
-		WorkflowJson: []byte(`{}`),
-		TargetId:     "target-1",
+		MissionDefinitionJson: []byte(`{}`),
+		TargetId:              "target-1",
 	})
 
 	require.NoError(t, err)

@@ -14,8 +14,11 @@ import (
 
 // MissionController provides high-level mission control operations.
 type MissionController interface {
-	// Create creates a new mission from configuration
-	Create(ctx context.Context, config *MissionConfig) (*Mission, error)
+	// CreateByReference creates a new mission that references a pre-registered
+	// target and mission definition. Inline construction is not supported —
+	// callers register the definition via the daemon's CreateMissionDefinition
+	// RPC first, then call this method with the resulting IDs.
+	CreateByReference(ctx context.Context, req CreateMissionByReferenceRequest) (*Mission, error)
 
 	// Start transitions mission to running and begins execution
 	Start(ctx context.Context, missionID types.ID) error
@@ -208,9 +211,10 @@ func (c *DefaultMissionController) releaseOperationLock(missionID types.ID) {
 	}
 }
 
-// Create creates a new mission from configuration.
-func (c *DefaultMissionController) Create(ctx context.Context, config *MissionConfig) (*Mission, error) {
-	return c.service.CreateFromConfig(ctx, config)
+// CreateByReference creates a new mission that references a pre-registered
+// target and mission definition.
+func (c *DefaultMissionController) CreateByReference(ctx context.Context, req CreateMissionByReferenceRequest) (*Mission, error) {
+	return c.service.CreateByReference(ctx, req)
 }
 
 // Start transitions mission to running and begins execution.

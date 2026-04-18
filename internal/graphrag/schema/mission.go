@@ -14,8 +14,8 @@ import (
 const (
 	// LabelMission is the Neo4j label for Mission nodes
 	LabelMission = "Mission"
-	// LabelWorkflowNode is the Neo4j label for WorkflowNode nodes
-	LabelWorkflowNode = "WorkflowNode"
+	// LabelMissionNode is the Neo4j label for MissionNode nodes
+	LabelMissionNode = "MissionNode"
 )
 
 // MissionStatus represents the execution status of a mission
@@ -43,58 +43,58 @@ func (s MissionStatus) Validate() error {
 	}
 }
 
-// WorkflowNodeStatus represents the execution status of a workflow node
-type WorkflowNodeStatus string
+// MissionNodeStatus represents the execution status of a mission node
+type MissionNodeStatus string
 
 const (
-	WorkflowNodeStatusPending   WorkflowNodeStatus = "pending"
-	WorkflowNodeStatusReady     WorkflowNodeStatus = "ready"
-	WorkflowNodeStatusRunning   WorkflowNodeStatus = "running"
-	WorkflowNodeStatusCompleted WorkflowNodeStatus = "completed"
-	WorkflowNodeStatusFailed    WorkflowNodeStatus = "failed"
-	WorkflowNodeStatusSkipped   WorkflowNodeStatus = "skipped"
+	MissionNodeStatusPending   MissionNodeStatus = "pending"
+	MissionNodeStatusReady     MissionNodeStatus = "ready"
+	MissionNodeStatusRunning   MissionNodeStatus = "running"
+	MissionNodeStatusCompleted MissionNodeStatus = "completed"
+	MissionNodeStatusFailed    MissionNodeStatus = "failed"
+	MissionNodeStatusSkipped   MissionNodeStatus = "skipped"
 )
 
-// String returns the string representation of WorkflowNodeStatus
-func (s WorkflowNodeStatus) String() string {
+// String returns the string representation of MissionNodeStatus
+func (s MissionNodeStatus) String() string {
 	return string(s)
 }
 
-// Validate checks if the WorkflowNodeStatus is valid
-func (s WorkflowNodeStatus) Validate() error {
+// Validate checks if the MissionNodeStatus is valid
+func (s MissionNodeStatus) Validate() error {
 	switch s {
-	case WorkflowNodeStatusPending, WorkflowNodeStatusReady, WorkflowNodeStatusRunning,
-		WorkflowNodeStatusCompleted, WorkflowNodeStatusFailed, WorkflowNodeStatusSkipped:
+	case MissionNodeStatusPending, MissionNodeStatusReady, MissionNodeStatusRunning,
+		MissionNodeStatusCompleted, MissionNodeStatusFailed, MissionNodeStatusSkipped:
 		return nil
 	default:
-		return fmt.Errorf("invalid workflow node status: %s", s)
+		return fmt.Errorf("invalid mission node status: %s", s)
 	}
 }
 
-// WorkflowNodeType represents the type of workflow node (agent or tool)
-type WorkflowNodeType string
+// MissionNodeType represents the type of mission node (agent or tool)
+type MissionNodeType string
 
 const (
-	WorkflowNodeTypeAgent WorkflowNodeType = "agent"
-	WorkflowNodeTypeTool  WorkflowNodeType = "tool"
+	MissionNodeTypeAgent MissionNodeType = "agent"
+	MissionNodeTypeTool  MissionNodeType = "tool"
 )
 
-// String returns the string representation of WorkflowNodeType
-func (t WorkflowNodeType) String() string {
+// String returns the string representation of MissionNodeType
+func (t MissionNodeType) String() string {
 	return string(t)
 }
 
-// Validate checks if the WorkflowNodeType is valid
-func (t WorkflowNodeType) Validate() error {
+// Validate checks if the MissionNodeType is valid
+func (t MissionNodeType) Validate() error {
 	switch t {
-	case WorkflowNodeTypeAgent, WorkflowNodeTypeTool:
+	case MissionNodeTypeAgent, MissionNodeTypeTool:
 		return nil
 	default:
-		return fmt.Errorf("invalid workflow node type: %s", t)
+		return fmt.Errorf("invalid mission node type: %s", t)
 	}
 }
 
-// RetryPolicy defines the retry behavior for a workflow node
+// RetryPolicy defines the retry behavior for a mission node
 type RetryPolicy struct {
 	MaxRetries int           `json:"max_retries"`           // Maximum number of retry attempts
 	Backoff    time.Duration `json:"backoff"`               // Backoff duration between retries
@@ -129,7 +129,7 @@ func (p *RetryPolicy) ToJSON() (string, error) {
 }
 
 // Mission represents a mission node in the graph.
-// Missions track the overall execution state of a security testing workflow.
+// Missions track the overall execution state of a security testing mission.
 type Mission struct {
 	ID          types.ID      `json:"id"`
 	Name        string        `json:"name"`
@@ -217,37 +217,37 @@ func (m *Mission) MarkFailed() {
 	m.CompletedAt = &now
 }
 
-// WorkflowNode represents a task node in a mission workflow.
+// MissionNode represents a task node in a mission.
 // Each node represents either an agent execution or tool invocation.
-type WorkflowNode struct {
-	ID          types.ID           `json:"id"`                     // Unique within mission
-	MissionID   types.ID           `json:"mission_id"`             // Parent mission ID (stable SQLite ID)
-	Type        WorkflowNodeType   `json:"type"`                   // "agent" or "tool"
-	Name        string             `json:"name"`                   // Node name/identifier
-	Description string             `json:"description"`            // Human-readable description
-	AgentName   string             `json:"agent_name,omitempty"`   // If type=agent
-	ToolName    string             `json:"tool_name,omitempty"`    // If type=tool
-	Timeout     time.Duration      `json:"timeout,omitempty"`      // Execution timeout
-	RetryPolicy *RetryPolicy       `json:"retry_policy,omitempty"` // Retry configuration
-	TaskConfig  map[string]any     `json:"task_config,omitempty"`  // Original task configuration
-	Status      WorkflowNodeStatus `json:"status"`                 // Current execution status
-	IsDynamic   bool               `json:"is_dynamic"`             // True if spawned at runtime
-	SpawnedBy   string             `json:"spawned_by,omitempty"`   // ID of execution that spawned this
-	CreatedAt   time.Time          `json:"created_at"`             // When node was created
-	UpdatedAt   time.Time          `json:"updated_at"`             // When node was last updated
+type MissionNode struct {
+	ID          types.ID          `json:"id"`                     // Unique within mission
+	MissionID   types.ID          `json:"mission_id"`             // Parent mission ID (stable SQLite ID)
+	Type        MissionNodeType   `json:"type"`                   // "agent" or "tool"
+	Name        string            `json:"name"`                   // Node name/identifier
+	Description string            `json:"description"`            // Human-readable description
+	AgentName   string            `json:"agent_name,omitempty"`   // If type=agent
+	ToolName    string            `json:"tool_name,omitempty"`    // If type=tool
+	Timeout     time.Duration     `json:"timeout,omitempty"`      // Execution timeout
+	RetryPolicy *RetryPolicy      `json:"retry_policy,omitempty"` // Retry configuration
+	TaskConfig  map[string]any    `json:"task_config,omitempty"`  // Original task configuration
+	Status      MissionNodeStatus `json:"status"`                 // Current execution status
+	IsDynamic   bool              `json:"is_dynamic"`             // True if spawned at runtime
+	SpawnedBy   string            `json:"spawned_by,omitempty"`   // ID of execution that spawned this
+	CreatedAt   time.Time         `json:"created_at"`             // When node was created
+	UpdatedAt   time.Time         `json:"updated_at"`             // When node was last updated
 }
 
-// NewWorkflowNode creates a new WorkflowNode with the given parameters.
+// NewMissionNode creates a new MissionNode with the given parameters.
 // The node is initialized with pending status and current timestamp.
-func NewWorkflowNode(id, missionID types.ID, nodeType WorkflowNodeType, name, description string) *WorkflowNode {
+func NewMissionNode(id, missionID types.ID, nodeType MissionNodeType, name, description string) *MissionNode {
 	now := time.Now()
-	return &WorkflowNode{
+	return &MissionNode{
 		ID:          id,
 		MissionID:   missionID,
 		Type:        nodeType,
 		Name:        name,
 		Description: description,
-		Status:      WorkflowNodeStatusPending,
+		Status:      MissionNodeStatusPending,
 		IsDynamic:   false,
 		TaskConfig:  make(map[string]any),
 		CreatedAt:   now,
@@ -255,24 +255,24 @@ func NewWorkflowNode(id, missionID types.ID, nodeType WorkflowNodeType, name, de
 	}
 }
 
-// NewAgentNode creates a new WorkflowNode for an agent execution.
-func NewAgentNode(id, missionID types.ID, name, description, agentName string) *WorkflowNode {
-	node := NewWorkflowNode(id, missionID, WorkflowNodeTypeAgent, name, description)
+// NewAgentNode creates a new MissionNode for an agent execution.
+func NewAgentNode(id, missionID types.ID, name, description, agentName string) *MissionNode {
+	node := NewMissionNode(id, missionID, MissionNodeTypeAgent, name, description)
 	node.AgentName = agentName
 	return node
 }
 
-// NewToolNode creates a new WorkflowNode for a tool invocation.
-func NewToolNode(id, missionID types.ID, name, description, toolName string) *WorkflowNode {
-	node := NewWorkflowNode(id, missionID, WorkflowNodeTypeTool, name, description)
+// NewToolNode creates a new MissionNode for a tool invocation.
+func NewToolNode(id, missionID types.ID, name, description, toolName string) *MissionNode {
+	node := NewMissionNode(id, missionID, MissionNodeTypeTool, name, description)
 	node.ToolName = toolName
 	return node
 }
 
 // Validate checks that all required fields are set correctly.
-func (n *WorkflowNode) Validate() error {
+func (n *MissionNode) Validate() error {
 	if err := n.ID.Validate(); err != nil {
-		return fmt.Errorf("invalid workflow node ID: %w", err)
+		return fmt.Errorf("invalid mission node ID: %w", err)
 	}
 	if err := n.MissionID.Validate(); err != nil {
 		return fmt.Errorf("invalid mission ID: %w", err)
@@ -281,7 +281,7 @@ func (n *WorkflowNode) Validate() error {
 		return err
 	}
 	if n.Name == "" {
-		return fmt.Errorf("workflow node name is required")
+		return fmt.Errorf("mission node name is required")
 	}
 	if err := n.Status.Validate(); err != nil {
 		return err
@@ -289,11 +289,11 @@ func (n *WorkflowNode) Validate() error {
 
 	// Type-specific validation
 	switch n.Type {
-	case WorkflowNodeTypeAgent:
+	case MissionNodeTypeAgent:
 		if n.AgentName == "" {
 			return fmt.Errorf("agent_name is required for agent nodes")
 		}
-	case WorkflowNodeTypeTool:
+	case MissionNodeTypeTool:
 		if n.ToolName == "" {
 			return fmt.Errorf("tool_name is required for tool nodes")
 		}
@@ -310,32 +310,32 @@ func (n *WorkflowNode) Validate() error {
 }
 
 // WithStatus sets the status and updates the timestamp.
-func (n *WorkflowNode) WithStatus(status WorkflowNodeStatus) *WorkflowNode {
+func (n *MissionNode) WithStatus(status MissionNodeStatus) *MissionNode {
 	n.Status = status
 	n.UpdatedAt = time.Now()
 	return n
 }
 
 // WithTimeout sets the timeout duration.
-func (n *WorkflowNode) WithTimeout(timeout time.Duration) *WorkflowNode {
+func (n *MissionNode) WithTimeout(timeout time.Duration) *MissionNode {
 	n.Timeout = timeout
 	return n
 }
 
 // WithRetryPolicy sets the retry policy.
-func (n *WorkflowNode) WithRetryPolicy(policy *RetryPolicy) *WorkflowNode {
+func (n *MissionNode) WithRetryPolicy(policy *RetryPolicy) *MissionNode {
 	n.RetryPolicy = policy
 	return n
 }
 
 // WithTaskConfig sets the task configuration.
-func (n *WorkflowNode) WithTaskConfig(config map[string]any) *WorkflowNode {
+func (n *MissionNode) WithTaskConfig(config map[string]any) *MissionNode {
 	n.TaskConfig = config
 	return n
 }
 
 // MarkDynamic marks the node as dynamically spawned.
-func (n *WorkflowNode) MarkDynamic(spawnedBy string) *WorkflowNode {
+func (n *MissionNode) MarkDynamic(spawnedBy string) *MissionNode {
 	n.IsDynamic = true
 	n.SpawnedBy = spawnedBy
 	n.UpdatedAt = time.Now()
@@ -343,7 +343,7 @@ func (n *WorkflowNode) MarkDynamic(spawnedBy string) *WorkflowNode {
 }
 
 // TaskConfigJSON converts the TaskConfig to a JSON string for storage in Neo4j.
-func (n *WorkflowNode) TaskConfigJSON() (string, error) {
+func (n *MissionNode) TaskConfigJSON() (string, error) {
 	if n.TaskConfig == nil || len(n.TaskConfig) == 0 {
 		return "{}", nil
 	}
@@ -356,7 +356,7 @@ func (n *WorkflowNode) TaskConfigJSON() (string, error) {
 
 // RetryPolicyJSON converts the RetryPolicy to a JSON string for storage in Neo4j.
 // Returns empty JSON object if no retry policy is set.
-func (n *WorkflowNode) RetryPolicyJSON() (string, error) {
+func (n *MissionNode) RetryPolicyJSON() (string, error) {
 	if n.RetryPolicy == nil {
 		return "{}", nil
 	}

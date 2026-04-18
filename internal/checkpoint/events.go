@@ -74,7 +74,7 @@ type CheckpointLifecycleEvent struct {
 	// CheckpointID is the checkpoint this event relates to (optional for some events).
 	CheckpointID string `json:"checkpoint_id,omitempty"`
 
-	// NodeID is the workflow node associated with this event (optional).
+	// NodeID is the mission node associated with this event (optional).
 	NodeID string `json:"node_id,omitempty"`
 
 	// Timestamp is when this event occurred.

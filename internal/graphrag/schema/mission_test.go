@@ -55,45 +55,45 @@ func TestMissionStatus_Validate(t *testing.T) {
 	}
 }
 
-func TestWorkflowNodeStatus_Validate(t *testing.T) {
+func TestMissionNodeStatus_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
-		status  WorkflowNodeStatus
+		status  MissionNodeStatus
 		wantErr bool
 	}{
 		{
 			name:    "valid pending status",
-			status:  WorkflowNodeStatusPending,
+			status:  MissionNodeStatusPending,
 			wantErr: false,
 		},
 		{
 			name:    "valid ready status",
-			status:  WorkflowNodeStatusReady,
+			status:  MissionNodeStatusReady,
 			wantErr: false,
 		},
 		{
 			name:    "valid running status",
-			status:  WorkflowNodeStatusRunning,
+			status:  MissionNodeStatusRunning,
 			wantErr: false,
 		},
 		{
 			name:    "valid completed status",
-			status:  WorkflowNodeStatusCompleted,
+			status:  MissionNodeStatusCompleted,
 			wantErr: false,
 		},
 		{
 			name:    "valid failed status",
-			status:  WorkflowNodeStatusFailed,
+			status:  MissionNodeStatusFailed,
 			wantErr: false,
 		},
 		{
 			name:    "valid skipped status",
-			status:  WorkflowNodeStatusSkipped,
+			status:  MissionNodeStatusSkipped,
 			wantErr: false,
 		},
 		{
 			name:    "invalid status",
-			status:  WorkflowNodeStatus("invalid"),
+			status:  MissionNodeStatus("invalid"),
 			wantErr: true,
 		},
 	}
@@ -110,25 +110,25 @@ func TestWorkflowNodeStatus_Validate(t *testing.T) {
 	}
 }
 
-func TestWorkflowNodeType_Validate(t *testing.T) {
+func TestMissionNodeType_Validate(t *testing.T) {
 	tests := []struct {
 		name     string
-		nodeType WorkflowNodeType
+		nodeType MissionNodeType
 		wantErr  bool
 	}{
 		{
 			name:     "valid agent type",
-			nodeType: WorkflowNodeTypeAgent,
+			nodeType: MissionNodeTypeAgent,
 			wantErr:  false,
 		},
 		{
 			name:     "valid tool type",
-			nodeType: WorkflowNodeTypeTool,
+			nodeType: MissionNodeTypeTool,
 			wantErr:  false,
 		},
 		{
 			name:     "invalid type",
-			nodeType: WorkflowNodeType("invalid"),
+			nodeType: MissionNodeType("invalid"),
 			wantErr:  true,
 		},
 	}
@@ -394,20 +394,20 @@ func TestMission_WithMethods(t *testing.T) {
 	assert.Equal(t, completedTime, *mission.CompletedAt)
 }
 
-func TestNewWorkflowNode(t *testing.T) {
+func TestNewMissionNode(t *testing.T) {
 	id := types.NewID()
 	missionID := types.NewID()
 	name := "test-node"
 	description := "Test node description"
 
-	node := NewWorkflowNode(id, missionID, WorkflowNodeTypeAgent, name, description)
+	node := NewMissionNode(id, missionID, MissionNodeTypeAgent, name, description)
 
 	assert.Equal(t, id, node.ID)
 	assert.Equal(t, missionID, node.MissionID)
-	assert.Equal(t, WorkflowNodeTypeAgent, node.Type)
+	assert.Equal(t, MissionNodeTypeAgent, node.Type)
 	assert.Equal(t, name, node.Name)
 	assert.Equal(t, description, node.Description)
-	assert.Equal(t, WorkflowNodeStatusPending, node.Status)
+	assert.Equal(t, MissionNodeStatusPending, node.Status)
 	assert.False(t, node.IsDynamic)
 	assert.NotNil(t, node.TaskConfig)
 	assert.NotZero(t, node.CreatedAt)
@@ -421,7 +421,7 @@ func TestNewAgentNode(t *testing.T) {
 
 	node := NewAgentNode(id, missionID, "test-node", "description", agentName)
 
-	assert.Equal(t, WorkflowNodeTypeAgent, node.Type)
+	assert.Equal(t, MissionNodeTypeAgent, node.Type)
 	assert.Equal(t, agentName, node.AgentName)
 	assert.Empty(t, node.ToolName)
 }
@@ -433,84 +433,84 @@ func TestNewToolNode(t *testing.T) {
 
 	node := NewToolNode(id, missionID, "test-node", "description", toolName)
 
-	assert.Equal(t, WorkflowNodeTypeTool, node.Type)
+	assert.Equal(t, MissionNodeTypeTool, node.Type)
 	assert.Equal(t, toolName, node.ToolName)
 	assert.Empty(t, node.AgentName)
 }
 
-func TestWorkflowNode_Validate(t *testing.T) {
+func TestMissionNode_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
-		node    *WorkflowNode
+		node    *MissionNode
 		wantErr bool
 	}{
 		{
 			name: "valid agent node",
-			node: &WorkflowNode{
+			node: &MissionNode{
 				ID:        types.NewID(),
 				MissionID: types.NewID(),
-				Type:      WorkflowNodeTypeAgent,
+				Type:      MissionNodeTypeAgent,
 				Name:      "test-node",
 				AgentName: "test-agent",
-				Status:    WorkflowNodeStatusPending,
+				Status:    MissionNodeStatusPending,
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid tool node",
-			node: &WorkflowNode{
+			node: &MissionNode{
 				ID:        types.NewID(),
 				MissionID: types.NewID(),
-				Type:      WorkflowNodeTypeTool,
+				Type:      MissionNodeTypeTool,
 				Name:      "test-node",
 				ToolName:  "test-tool",
-				Status:    WorkflowNodeStatusPending,
+				Status:    MissionNodeStatusPending,
 			},
 			wantErr: false,
 		},
 		{
 			name: "agent node without agent name",
-			node: &WorkflowNode{
+			node: &MissionNode{
 				ID:        types.NewID(),
 				MissionID: types.NewID(),
-				Type:      WorkflowNodeTypeAgent,
+				Type:      MissionNodeTypeAgent,
 				Name:      "test-node",
-				Status:    WorkflowNodeStatusPending,
+				Status:    MissionNodeStatusPending,
 			},
 			wantErr: true,
 		},
 		{
 			name: "tool node without tool name",
-			node: &WorkflowNode{
+			node: &MissionNode{
 				ID:        types.NewID(),
 				MissionID: types.NewID(),
-				Type:      WorkflowNodeTypeTool,
+				Type:      MissionNodeTypeTool,
 				Name:      "test-node",
-				Status:    WorkflowNodeStatusPending,
+				Status:    MissionNodeStatusPending,
 			},
 			wantErr: true,
 		},
 		{
 			name: "empty name",
-			node: &WorkflowNode{
+			node: &MissionNode{
 				ID:        types.NewID(),
 				MissionID: types.NewID(),
-				Type:      WorkflowNodeTypeAgent,
+				Type:      MissionNodeTypeAgent,
 				Name:      "",
 				AgentName: "test-agent",
-				Status:    WorkflowNodeStatusPending,
+				Status:    MissionNodeStatusPending,
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid retry policy",
-			node: &WorkflowNode{
+			node: &MissionNode{
 				ID:        types.NewID(),
 				MissionID: types.NewID(),
-				Type:      WorkflowNodeTypeAgent,
+				Type:      MissionNodeTypeAgent,
 				Name:      "test-node",
 				AgentName: "test-agent",
-				Status:    WorkflowNodeStatusPending,
+				Status:    MissionNodeStatusPending,
 				RetryPolicy: &RetryPolicy{
 					MaxRetries: -1,
 				},
@@ -531,7 +531,7 @@ func TestWorkflowNode_Validate(t *testing.T) {
 	}
 }
 
-func TestWorkflowNode_WithMethods(t *testing.T) {
+func TestMissionNode_WithMethods(t *testing.T) {
 	node := NewAgentNode(
 		types.NewID(),
 		types.NewID(),
@@ -549,18 +549,18 @@ func TestWorkflowNode_WithMethods(t *testing.T) {
 		"key": "value",
 	}
 
-	node.WithStatus(WorkflowNodeStatusReady).
+	node.WithStatus(MissionNodeStatusReady).
 		WithTimeout(timeout).
 		WithRetryPolicy(retryPolicy).
 		WithTaskConfig(taskConfig)
 
-	assert.Equal(t, WorkflowNodeStatusReady, node.Status)
+	assert.Equal(t, MissionNodeStatusReady, node.Status)
 	assert.Equal(t, timeout, node.Timeout)
 	assert.Equal(t, retryPolicy, node.RetryPolicy)
 	assert.Equal(t, taskConfig, node.TaskConfig)
 }
 
-func TestWorkflowNode_MarkDynamic(t *testing.T) {
+func TestMissionNode_MarkDynamic(t *testing.T) {
 	node := NewAgentNode(
 		types.NewID(),
 		types.NewID(),
@@ -579,7 +579,7 @@ func TestWorkflowNode_MarkDynamic(t *testing.T) {
 	assert.Equal(t, spawnedBy, node.SpawnedBy)
 }
 
-func TestWorkflowNode_TaskConfigJSON(t *testing.T) {
+func TestMissionNode_TaskConfigJSON(t *testing.T) {
 	node := NewAgentNode(
 		types.NewID(),
 		types.NewID(),
@@ -615,7 +615,7 @@ func TestWorkflowNode_TaskConfigJSON(t *testing.T) {
 	})
 }
 
-func TestWorkflowNode_RetryPolicyJSON(t *testing.T) {
+func TestMissionNode_RetryPolicyJSON(t *testing.T) {
 	node := NewAgentNode(
 		types.NewID(),
 		types.NewID(),
@@ -654,7 +654,7 @@ func TestWorkflowNode_RetryPolicyJSON(t *testing.T) {
 func TestConstants(t *testing.T) {
 	// Test label constants
 	assert.Equal(t, "Mission", LabelMission)
-	assert.Equal(t, "WorkflowNode", LabelWorkflowNode)
+	assert.Equal(t, "MissionNode", LabelMissionNode)
 
 	// Test mission status constants
 	assert.Equal(t, "pending", MissionStatusPending.String())
@@ -662,15 +662,15 @@ func TestConstants(t *testing.T) {
 	assert.Equal(t, "completed", MissionStatusCompleted.String())
 	assert.Equal(t, "failed", MissionStatusFailed.String())
 
-	// Test workflow node status constants
-	assert.Equal(t, "pending", WorkflowNodeStatusPending.String())
-	assert.Equal(t, "ready", WorkflowNodeStatusReady.String())
-	assert.Equal(t, "running", WorkflowNodeStatusRunning.String())
-	assert.Equal(t, "completed", WorkflowNodeStatusCompleted.String())
-	assert.Equal(t, "failed", WorkflowNodeStatusFailed.String())
-	assert.Equal(t, "skipped", WorkflowNodeStatusSkipped.String())
+	// Test mission node status constants
+	assert.Equal(t, "pending", MissionNodeStatusPending.String())
+	assert.Equal(t, "ready", MissionNodeStatusReady.String())
+	assert.Equal(t, "running", MissionNodeStatusRunning.String())
+	assert.Equal(t, "completed", MissionNodeStatusCompleted.String())
+	assert.Equal(t, "failed", MissionNodeStatusFailed.String())
+	assert.Equal(t, "skipped", MissionNodeStatusSkipped.String())
 
-	// Test workflow node type constants
-	assert.Equal(t, "agent", WorkflowNodeTypeAgent.String())
-	assert.Equal(t, "tool", WorkflowNodeTypeTool.String())
+	// Test mission node type constants
+	assert.Equal(t, "agent", MissionNodeTypeAgent.String())
+	assert.Equal(t, "tool", MissionNodeTypeTool.String())
 }

@@ -197,7 +197,7 @@ func (m *MockMemoryRecaller) Recall(ctx context.Context, query RecallQuery) (*Re
 // Test requestApproval action handler
 
 // Note: More comprehensive integration tests for requestApproval would require
-// mocking the graph client and workflow nodes. The existing approval_test.go
+// mocking the graph client and mission nodes. The existing approval_test.go
 // covers the ApprovalManager functionality, and decision validation tests
 // ensure the action is properly defined.
 

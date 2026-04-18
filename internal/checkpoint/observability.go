@@ -57,7 +57,7 @@ const (
 	// AttrMissionID is the mission identifier
 	AttrMissionID = "gibson.checkpoint.mission_id"
 
-	// AttrNodeID is the workflow node identifier
+	// AttrNodeID is the mission node identifier
 	AttrNodeID = "gibson.checkpoint.node_id"
 
 	// AttrCheckpointSizeBytes is the checkpoint size in bytes
@@ -120,7 +120,7 @@ const (
 
 // CheckpointTracer provides OpenTelemetry-based tracing for checkpoint operations.
 // It creates spans for checkpoint lifecycle events including creation, restoration,
-// replay, deletion, and human-in-the-loop approval workflows.
+// replay, deletion, and human-in-the-loop approval missions.
 //
 // The tracer follows a fire-and-forget pattern where tracing errors never block
 // checkpoint operations. All public methods are thread-safe.
@@ -265,7 +265,7 @@ func (t *CheckpointTracer) StartCheckpointReplay(ctx context.Context, sourceChec
 // Parameters:
 //   - ctx: Context for trace propagation
 //   - threadID: The execution thread identifier
-//   - nodeID: The workflow node requesting approval
+//   - nodeID: The mission node requesting approval
 //
 // Returns:
 //   - context.Context: Context containing the approval request span
@@ -417,7 +417,7 @@ func AddRestorationAttributes(span trace.Span, result *RestorationResult) {
 }
 
 // AddApprovalAttributes adds approval-specific attributes to a span.
-// This captures the approval workflow state and decision details.
+// This captures the approval mission state and decision details.
 //
 // Parameters:
 //   - span: The span to add attributes to

@@ -278,7 +278,7 @@ func TestNewDataPolicy(t *testing.T) {
 }
 
 func TestDataPolicy_SetDefaultsAndValidate(t *testing.T) {
-	// Common workflow: unmarshal from YAML, set defaults, validate
+	// Common mission: unmarshal from YAML, set defaults, validate
 	yamlData := `
 output_scope: global
 `

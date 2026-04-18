@@ -51,13 +51,13 @@ func TestExecutionStatus_Validate(t *testing.T) {
 }
 
 func TestNewAgentExecution(t *testing.T) {
-	workflowNodeID := "agent_1"
+	missionNodeID := "agent_1"
 	missionID := types.NewID()
 
-	exec := NewAgentExecution(workflowNodeID, missionID)
+	exec := NewAgentExecution(missionNodeID, missionID)
 
 	assert.NotEmpty(t, exec.ID)
-	assert.Equal(t, workflowNodeID, exec.WorkflowNodeID)
+	assert.Equal(t, missionNodeID, exec.MissionNodeID)
 	assert.Equal(t, missionID, exec.MissionID)
 	assert.Equal(t, ExecutionStatusRunning, exec.Status)
 	assert.Equal(t, 1, exec.Attempt)
@@ -208,14 +208,14 @@ func TestAgentExecution_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "empty workflow node ID",
+			name: "empty mission node ID",
 			setup: func() *AgentExecution {
 				exec := NewAgentExecution("agent_1", types.NewID())
-				exec.WorkflowNodeID = ""
+				exec.MissionNodeID = ""
 				return exec
 			},
 			wantErr: true,
-			errMsg:  "workflow_node_id is required",
+			errMsg:  "mission_node_id is required",
 		},
 		{
 			name: "invalid status",
@@ -271,7 +271,7 @@ func TestAgentExecution_JSON(t *testing.T) {
 
 	// Compare key fields
 	assert.Equal(t, original.ID, decoded.ID)
-	assert.Equal(t, original.WorkflowNodeID, decoded.WorkflowNodeID)
+	assert.Equal(t, original.MissionNodeID, decoded.MissionNodeID)
 	assert.Equal(t, original.MissionID, decoded.MissionID)
 	assert.Equal(t, original.Status, decoded.Status)
 	assert.Equal(t, original.LangfuseSpanID, decoded.LangfuseSpanID)

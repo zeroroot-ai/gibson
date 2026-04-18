@@ -93,7 +93,7 @@ func (b *manifestBuilder) Build(ctx context.Context, subject ManifestSubject) (*
 
 	// --- (2) + agent_principal intersection -------------------------------
 	var (
-		caps    []agentauth.Capability
+		caps      []agentauth.Capability
 		ownerCaps []agentauth.Capability
 	)
 	switch subject.Type {
@@ -162,22 +162,22 @@ func (b *manifestBuilder) Build(ctx context.Context, subject ManifestSubject) (*
 	expiresAt := issuedAt.Add(b.cfg.TTL)
 
 	m := &manifestpb.CapabilityManifest{
-		ManifestId:                    newManifestID(issuedAt),
-		ManifestVersion:               version,
-		TenantId:                      tenantID,
-		Subject:                       subjectFGA,
-		IssuedAt:                      timestamppb.New(issuedAt),
-		ExpiresAt:                     timestamppb.New(expiresAt),
-		TtlSeconds:                    uint32(b.cfg.TTL.Seconds()),
-		TenantContext:                 &manifestpb.TenantContext{TenantId: tenantID},
-		Agents:                        agents,
-		Tools:                         tools,
-		Plugins:                       plugins,
-		CrossComponentRules:           pbRules,
-		CrossComponentRulesTruncated:  truncated,
-		Limits:                        limits,
-		AvailableLlmSlots:             slots,
-		Memory:                        memory,
+		ManifestId:                   newManifestID(issuedAt),
+		ManifestVersion:              version,
+		TenantId:                     tenantID,
+		Subject:                      subjectFGA,
+		IssuedAt:                     timestamppb.New(issuedAt),
+		ExpiresAt:                    timestamppb.New(expiresAt),
+		TtlSeconds:                   uint32(b.cfg.TTL.Seconds()),
+		TenantContext:                &manifestpb.TenantContext{TenantId: tenantID},
+		Agents:                       agents,
+		Tools:                        tools,
+		Plugins:                      plugins,
+		CrossComponentRules:          pbRules,
+		CrossComponentRulesTruncated: truncated,
+		Limits:                       limits,
+		AvailableLlmSlots:            slots,
+		Memory:                       memory,
 	}
 
 	// --- (7) sign -------------------------------------------------------

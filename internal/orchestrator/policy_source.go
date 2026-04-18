@@ -9,7 +9,7 @@ import (
 )
 
 // MissionPolicySource implements PolicySource by reading from a MissionDefinition.
-// It extracts data_policy configuration from workflow nodes.
+// It extracts data_policy configuration from mission nodes.
 type MissionPolicySource struct {
 	definition *mission.MissionDefinition
 }
@@ -28,7 +28,7 @@ func (m *MissionPolicySource) GetDataPolicy(agentName string) (*DataPolicy, erro
 		return nil, fmt.Errorf("mission definition is nil")
 	}
 
-	// Search through workflow nodes to find the agent
+	// Search through mission nodes to find the agent
 	for _, node := range m.definition.Nodes {
 		if node.Type == mission.NodeTypeAgent && node.AgentName == agentName {
 			// Found the agent node - check if it has a data policy

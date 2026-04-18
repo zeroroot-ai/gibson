@@ -37,17 +37,15 @@ USAGE SCENARIOS:
 
 1. Local Development:
    $ gibson daemon start &        # Start daemon in background shell
-   $ gibson mission run workflow.yaml
-   $ gibson agent list
+   $ gibson daemon status
    $ gibson daemon stop
 
 2. Container Deployment (Dockerfile):
    CMD ["gibson", "daemon", "start"]
 
 3. Kubernetes (with GIBSON_DAEMON_ADDRESS):
-   # CLI connects to remote daemon via port-forward or service
-   $ export GIBSON_DAEMON_ADDRESS=localhost:50002
-   $ gibson agent list`,
+   # External callers (dashboard, SDK clients) reach the daemon via port-forward or service
+   $ export GIBSON_DAEMON_ADDRESS=localhost:50002`,
 }
 
 var daemonStartCmd = &cobra.Command{

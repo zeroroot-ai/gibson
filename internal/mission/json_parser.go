@@ -6,7 +6,7 @@ import (
 )
 
 // ParseDefinitionFromJSON parses a mission definition from JSON bytes.
-// This is used when resuming missions from stored WorkflowJSON.
+// This is used when resuming missions from stored MissionDefinitionJSON.
 // Unlike ParseDefinitionFromBytes (YAML), this handles the JSON field names
 // and numeric duration values produced by json.Marshal.
 //
@@ -15,7 +15,7 @@ import (
 // needed is validation of required fields after unmarshaling.
 //
 // Parameters:
-//   - data: JSON bytes to parse (typically from database WorkflowJSON column)
+//   - data: JSON bytes to parse (typically from database MissionDefinitionJSON column)
 //
 // Returns:
 //   - *MissionDefinition: The parsed mission definition
@@ -23,7 +23,7 @@ import (
 //
 // Example usage:
 //
-//	def, err := ParseDefinitionFromJSON([]byte(missionRecord.WorkflowJSON))
+//	def, err := ParseDefinitionFromJSON([]byte(missionRecord.MissionDefinitionJSON))
 //	if err != nil {
 //	    return fmt.Errorf("failed to parse mission definition: %w", err)
 //	}

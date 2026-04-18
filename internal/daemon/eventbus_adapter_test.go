@@ -31,10 +31,10 @@ func TestConvertToAPIEventData(t *testing.T) {
 				TraceID:   testTraceID,
 				SpanID:    testSpanID,
 				Payload: events.MissionStartedPayload{
-					MissionID:    testMissionID,
-					WorkflowName: "test-workflow",
-					TargetID:     types.ID("target-456"),
-					NodeCount:    5,
+					MissionID:   testMissionID,
+					MissionName: "test-mission",
+					TargetID:    types.ID("target-456"),
+					NodeCount:   5,
 				},
 			},
 			validate: func(t *testing.T, result api.EventData) {
@@ -45,7 +45,7 @@ func TestConvertToAPIEventData(t *testing.T) {
 				assert.Equal(t, "mission.started", result.MissionEvent.EventType)
 				assert.Equal(t, "mission-123", result.MissionEvent.MissionID)
 				assert.Equal(t, "Mission started", result.MissionEvent.Message)
-				assert.Equal(t, "test-workflow", result.MissionEvent.Payload["workflow_name"])
+				assert.Equal(t, "test-mission", result.MissionEvent.Payload["mission_name"])
 				assert.Equal(t, "target-456", result.MissionEvent.Payload["target_id"])
 				assert.Equal(t, 5, result.MissionEvent.Payload["node_count"])
 				assert.Equal(t, testTraceID, result.Metadata["trace_id"])
@@ -588,9 +588,9 @@ func TestConvertToAPIEventData_EdgeCases(t *testing.T) {
 			TraceID:   "", // Empty
 			SpanID:    "", // Empty
 			Payload: events.MissionStartedPayload{
-				MissionID:    types.ID("mission-123"),
-				WorkflowName: "test",
-				NodeCount:    1,
+				MissionID:   types.ID("mission-123"),
+				MissionName: "test",
+				NodeCount:   1,
 			},
 		}
 
@@ -607,10 +607,10 @@ func TestConvertToAPIEventData_EdgeCases(t *testing.T) {
 			Timestamp: now,
 			MissionID: types.ID("mission-123"),
 			Payload: events.MissionStartedPayload{
-				MissionID:    types.ID("mission-123"),
-				WorkflowName: "", // Empty
-				TargetID:     types.ID(""),
-				NodeCount:    0,
+				MissionID:   types.ID("mission-123"),
+				MissionName: "", // Empty
+				TargetID:    types.ID(""),
+				NodeCount:   0,
 			},
 		}
 
@@ -618,7 +618,7 @@ func TestConvertToAPIEventData_EdgeCases(t *testing.T) {
 
 		assert.Equal(t, "mission.started", result.EventType)
 		assert.NotNil(t, result.MissionEvent)
-		assert.Equal(t, "", result.MissionEvent.Payload["workflow_name"])
+		assert.Equal(t, "", result.MissionEvent.Payload["mission_name"])
 		assert.Equal(t, "", result.MissionEvent.Payload["target_id"])
 		assert.Equal(t, 0, result.MissionEvent.Payload["node_count"])
 	})

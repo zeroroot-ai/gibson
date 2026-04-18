@@ -12,9 +12,10 @@ import (
 	// binary so their init() funcs register their service/method descriptors
 	// with protoregistry.GlobalFiles. The package-level import of this
 	// package itself (the one declaring DaemonAdminService) already provides
-	// gibson.daemon.admin.v1; these imports cover the other two services.
+	// gibson.daemon.admin.v1; these imports cover the other services.
 	_ "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	_ "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	_ "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 )
 
 // TestFgaRegistryCoverAllProtoRPCs is the default-deny CI gate. It walks
@@ -73,6 +74,7 @@ var coveredProtoPackages = map[string]struct{}{
 	"gibson.daemon.v1":       {},
 	"gibson.daemon.admin.v1": {},
 	"gibson.component.v1":    {},
+	"intelligence.v1":        {},
 }
 
 // discoverGibsonRPCs walks protoregistry.GlobalFiles and returns the

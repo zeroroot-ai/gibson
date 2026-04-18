@@ -496,7 +496,7 @@ func TestEvalHarnessFactory_Results(t *testing.T) {
 	assert.Same(t, results, results2)
 }
 
-// TestEvalHarnessFactory_Integration tests end-to-end workflow
+// TestEvalHarnessFactory_Integration tests end-to-end mission
 func TestEvalHarnessFactory_Integration(t *testing.T) {
 	innerFactory := &mockHarnessFactory{}
 	opts := NewEvalOptions()

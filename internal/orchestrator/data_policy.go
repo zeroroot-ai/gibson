@@ -4,13 +4,13 @@ import (
 	"fmt"
 )
 
-// DataPolicy defines data scoping and reuse behavior for agents in workflow nodes.
+// DataPolicy defines data scoping and reuse behavior for agents in mission nodes.
 // This declarative policy controls:
 //   - Where stored data is visible (output_scope)
 //   - What data the agent can query (input_scope)
 //   - Whether to skip execution when data exists (reuse)
 //
-// Policies are defined per-node in workflow YAML and enforced by the harness.
+// Policies are defined per-node in mission YAML and enforced by the harness.
 // Agents remain unaware of scoping - the harness transparently applies filters.
 //
 // Example YAML usage:

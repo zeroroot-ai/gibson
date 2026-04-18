@@ -34,8 +34,8 @@ func TestGraphContextFormatting(t *testing.T) {
 		if !strings.Contains(output, "=== MISSION CONTEXT ===") {
 			t.Error("missing mission context header")
 		}
-		if !strings.Contains(output, "=== WORKFLOW PROGRESS ===") {
-			t.Error("missing workflow progress header")
+		if !strings.Contains(output, "=== MISSION PROGRESS ===") {
+			t.Error("missing mission progress header")
 		}
 	})
 
@@ -71,7 +71,7 @@ func TestGraphContextFormatting(t *testing.T) {
 			"Mission: Test Mission",
 			"Objective: Find vulnerabilities",
 			"Status: running",
-			"=== WORKFLOW PROGRESS ===",
+			"=== MISSION PROGRESS ===",
 			"Total Nodes: 5",
 			"Completed: 2",
 			"Failed: 1",

@@ -43,7 +43,7 @@ type FindingQuerier interface {
 // May be nil; mission management RPCs return Unimplemented when nil.
 type MissionManager interface {
 	// CreateMission creates a sub-mission and returns JSON-encoded mission.MissionInfo.
-	CreateMission(ctx context.Context, tenant string, workflowJSON []byte, targetID string, optsJSON []byte) ([]byte, error)
+	CreateMission(ctx context.Context, tenant string, missionDefinitionJSON []byte, targetID string, optsJSON []byte) ([]byte, error)
 	// RunMission queues a mission for execution.
 	RunMission(ctx context.Context, tenant, missionID string, optsJSON []byte) error
 	// GetMissionStatus returns JSON-encoded mission.MissionStatusInfo.

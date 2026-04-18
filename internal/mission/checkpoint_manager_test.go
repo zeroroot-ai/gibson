@@ -1,7 +1,7 @@
 //go:build skip_old_tests
 // +build skip_old_tests
 
-// NOTE: This file contains tests for the old workflow-based API which has been removed.
+// NOTE: This file contains tests for the old mission-based API which has been removed.
 // These tests need to be rewritten for the new mission definition API.
 // Use -tags=skip_old_tests to run these (they will fail).
 
@@ -35,20 +35,20 @@ func TestCheckpointManager_Capture(t *testing.T) {
 	}
 	require.NoError(t, store.Save(ctx, mission))
 
-	// Create test workflow and state
-	wf := &mockWorkflow{
-		ID:    mission.WorkflowID,
-		Name:  "test-workflow",
-		Nodes: make(map[string]*mockWorkflowNode),
+	// Create test mission and state
+	wf := &mockMission{
+		ID:    mission.MissionDefinitionID,
+		Name:  "test-mission",
+		Nodes: make(map[string]*mockMissionNode),
 	}
 
 	// Add some nodes
-	wf.Nodes["node1"] = &mockWorkflowNode{ID: "node1", Name: "Node 1", Type: mockNodeTypeAgent}
-	wf.Nodes["node2"] = &mockWorkflowNode{ID: "node2", Name: "Node 2", Type: mockNodeTypeAgent}
-	wf.Nodes["node3"] = &mockWorkflowNode{ID: "node3", Name: "Node 3", Type: mockNodeTypeAgent}
+	wf.Nodes["node1"] = &mockMissionNode{ID: "node1", Name: "Node 1", Type: mockNodeTypeAgent}
+	wf.Nodes["node2"] = &mockMissionNode{ID: "node2", Name: "Node 2", Type: mockNodeTypeAgent}
+	wf.Nodes["node3"] = &mockMissionNode{ID: "node3", Name: "Node 3", Type: mockNodeTypeAgent}
 
-	state := newMockWorkflowState(wf)
-	state.Status = mockWorkflowStatusRunning
+	state := newMockMissionState(wf)
+	state.Status = mockMissionStatusRunning
 
 	// Mark some nodes as completed
 	now := time.Now()
@@ -104,7 +104,7 @@ func TestCheckpointManager_Restore(t *testing.T) {
 	originalCheckpoint := &MissionCheckpoint{
 		ID:             types.NewID(),
 		Version:        1,
-		WorkflowState:  map[string]any{"status": "running"},
+		MissionState:   map[string]any{"status": "running"},
 		CompletedNodes: []string{"node1"},
 		PendingNodes:   []string{"node2", "node3"},
 		NodeResults: map[string]any{
@@ -169,7 +169,7 @@ func TestCheckpointManager_Restore_CorruptedCheckpoint(t *testing.T) {
 	corruptedCheckpoint := &MissionCheckpoint{
 		ID:             types.NewID(),
 		Version:        1,
-		WorkflowState:  map[string]any{"status": "running"},
+		MissionState:   map[string]any{"status": "running"},
 		CompletedNodes: []string{"node1"},
 		PendingNodes:   []string{"node2"},
 		CheckpointedAt: time.Now(),
@@ -208,7 +208,7 @@ func TestCheckpointManager_List(t *testing.T) {
 	checkpoint := &MissionCheckpoint{
 		ID:             types.NewID(),
 		Version:        1,
-		WorkflowState:  map[string]any{"status": "running"},
+		MissionState:   map[string]any{"status": "running"},
 		CompletedNodes: []string{"node1"},
 		PendingNodes:   []string{"node2"},
 		CheckpointedAt: time.Now(),
@@ -254,7 +254,7 @@ func TestCheckpointManager_ChecksumValidation(t *testing.T) {
 	checkpoint := &MissionCheckpoint{
 		ID:             types.NewID(),
 		Version:        1,
-		WorkflowState:  map[string]any{"status": "running", "node_count": 5},
+		MissionState:   map[string]any{"status": "running", "node_count": 5},
 		CompletedNodes: []string{"node1", "node2"},
 		PendingNodes:   []string{"node3", "node4", "node5"},
 		NodeResults: map[string]any{
@@ -283,38 +283,38 @@ func TestCheckpointManager_ChecksumValidation(t *testing.T) {
 	assert.NotEqual(t, checksum1, checksum3, "Checksum should change after data modification")
 }
 
-func TestCheckpointManager_SerializeWorkflowState(t *testing.T) {
+func TestCheckpointManager_SerializeMissionState(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewDBMissionStore(db)
 	manager := NewCheckpointManager(store).(*DefaultCheckpointManager)
 
-	// Create test workflow and state
-	wf := &mockWorkflow{
+	// Create test mission and state
+	wf := &mockMission{
 		ID:    types.NewID(),
-		Name:  "test-workflow",
-		Nodes: make(map[string]*mockWorkflowNode),
+		Name:  "test-mission",
+		Nodes: make(map[string]*mockMissionNode),
 	}
-	wf.Nodes["node1"] = &mockWorkflowNode{ID: "node1", Name: "Node 1", Type: mockNodeTypeAgent}
-	wf.Nodes["node2"] = &mockWorkflowNode{ID: "node2", Name: "Node 2", Type: mockNodeTypeAgent}
+	wf.Nodes["node1"] = &mockMissionNode{ID: "node1", Name: "Node 1", Type: mockNodeTypeAgent}
+	wf.Nodes["node2"] = &mockMissionNode{ID: "node2", Name: "Node 2", Type: mockNodeTypeAgent}
 
-	state := newMockWorkflowState(wf)
-	state.Status = mockWorkflowStatusRunning
+	state := newMockMissionState(wf)
+	state.Status = mockMissionStatusRunning
 	state.MarkNodeCompleted("node1", nil)
 
 	// Serialize state
-	serialized, err := manager.serializeWorkflowState(state)
+	serialized, err := manager.serializeMissionState(state)
 	require.NoError(t, err)
 	require.NotNil(t, serialized)
 
 	// Verify serialized data contains expected fields
-	assert.Contains(t, serialized, "workflow_id")
+	assert.Contains(t, serialized, "mission_definition_id")
 	assert.Contains(t, serialized, "status")
 	assert.Contains(t, serialized, "started_at")
 	assert.Contains(t, serialized, "node_states")
 
-	// Verify workflow ID is serialized correctly
-	assert.Equal(t, wf.ID.String(), serialized["workflow_id"])
-	assert.Equal(t, string(mockWorkflowStatusRunning), serialized["status"])
+	// Verify mission ID is serialized correctly
+	assert.Equal(t, wf.ID.String(), serialized["mission_definition_id"])
+	assert.Equal(t, string(mockMissionStatusRunning), serialized["status"])
 
 	// Verify node states are serialized
 	nodeStates, ok := serialized["node_states"].(map[string]map[string]any)

@@ -13,7 +13,7 @@ import (
 )
 
 // Observer gathers execution state to build context for LLM reasoning.
-// It queries the graph database to collect mission progress, workflow status,
+// It queries the graph database to collect mission progress, mission status,
 // and recent findings to inform orchestrator decisions.
 type Observer struct {
 	missionQueries   *queries.MissionQueries
@@ -128,7 +128,7 @@ type ObservationState struct {
 	// Graph statistics summary
 	GraphSummary GraphSummary `json:"graph_summary"`
 
-	// Workflow node states by status
+	// Mission node states by status
 	ReadyNodes     []NodeSummary          `json:"ready_nodes"`
 	RunningNodes   []NodeSummary          `json:"running_nodes"`
 	PendingNodes   []PendingNodeSummary   `json:"pending_nodes,omitempty"`
@@ -149,9 +149,9 @@ type ObservationState struct {
 	// Optional - only populated if Observer was configured with InventoryBuilder.
 	ComponentInventory *ComponentInventory `json:"component_inventory,omitempty"`
 
-	// WorkflowDAG shows full graph structure with entry/exit points and edges
+	// MissionDAG shows full graph structure with entry/exit points and edges
 	// Optional - only populated when dependency data is available
-	WorkflowDAG *WorkflowDAG `json:"workflow_dag,omitempty"`
+	MissionDAG *MissionDAG `json:"mission_dag,omitempty"`
 
 	// RecalledContext contains formatted memory query results from recall action
 	// This is injected by the recall handler when inject_into_context is true
@@ -201,7 +201,7 @@ type GraphSummary struct {
 	TotalExecutions int `json:"total_executions"`
 }
 
-// NodeSummary is a concise representation of a workflow node
+// NodeSummary is a concise representation of a mission node
 type NodeSummary struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -254,9 +254,9 @@ type CompletedNodeSummary struct {
 	FindingsSeverity map[string]int `json:"findings_severity,omitempty"`
 }
 
-// WorkflowDAG represents the full workflow graph structure.
-// This provides complete visibility into the workflow topology.
-type WorkflowDAG struct {
+// MissionDAG represents the full mission graph structure.
+// This provides complete visibility into the mission topology.
+type MissionDAG struct {
 	// EntryPoints are nodes with no dependencies (can execute immediately)
 	EntryPoints []string `json:"entry_points"`
 
@@ -377,15 +377,15 @@ func (o *Observer) Observe(ctx context.Context, missionID string) (*ObservationS
 		return nil, fmt.Errorf("failed to observe mission stats: %w", err)
 	}
 
-	// 3. Get workflow nodes by status
+	// 3. Get mission nodes by status
 	nodes, dependencyMap, err := o.observeNodesWithDependencies(ctx, mid, state)
 	if err != nil {
-		return nil, fmt.Errorf("failed to observe workflow nodes: %w", err)
+		return nil, fmt.Errorf("failed to observe mission nodes: %w", err)
 	}
 
-	// 4. Build workflow DAG structure
+	// 4. Build mission DAG structure
 	if len(nodes) > 0 && dependencyMap != nil {
-		state.WorkflowDAG = buildWorkflowDAG(nodes, dependencyMap)
+		state.MissionDAG = buildMissionDAG(nodes, dependencyMap)
 	}
 
 	// 5. Get recent decisions for context
@@ -572,9 +572,9 @@ func (o *Observer) observeStats(ctx context.Context, missionID types.ID, state *
 	return nil
 }
 
-// observeNodesWithDependencies retrieves and categorizes workflow nodes by status.
+// observeNodesWithDependencies retrieves and categorizes mission nodes by status.
 // Returns the nodes and dependency map for DAG construction.
-func (o *Observer) observeNodesWithDependencies(ctx context.Context, missionID types.ID, state *ObservationState) ([]*schema.WorkflowNode, map[string][]string, error) {
+func (o *Observer) observeNodesWithDependencies(ctx context.Context, missionID types.ID, state *ObservationState) ([]*schema.MissionNode, map[string][]string, error) {
 	// Get all nodes for the mission
 	nodes, err := o.missionQueries.GetMissionNodes(ctx, missionID)
 	if err != nil {
@@ -592,7 +592,7 @@ func (o *Observer) observeNodesWithDependencies(ctx context.Context, missionID t
 	}
 
 	// Create node lookup map for status checks
-	nodeMap := make(map[string]*schema.WorkflowNode, len(nodes))
+	nodeMap := make(map[string]*schema.MissionNode, len(nodes))
 	for _, node := range nodes {
 		nodeMap[node.ID.String()] = node
 	}
@@ -602,8 +602,8 @@ func (o *Observer) observeNodesWithDependencies(ctx context.Context, missionID t
 		summary := nodeToSummary(node)
 
 		// Add attempt count for failed/running nodes
-		if node.Status == schema.WorkflowNodeStatusFailed ||
-			node.Status == schema.WorkflowNodeStatusRunning {
+		if node.Status == schema.MissionNodeStatusFailed ||
+			node.Status == schema.MissionNodeStatusRunning {
 			executions, err := o.missionQueries.GetNodeExecutions(ctx, node.ID)
 			if err == nil && len(executions) > 0 {
 				summary.Attempt = executions[len(executions)-1].Attempt
@@ -611,13 +611,13 @@ func (o *Observer) observeNodesWithDependencies(ctx context.Context, missionID t
 		}
 
 		switch node.Status {
-		case schema.WorkflowNodeStatusReady:
+		case schema.MissionNodeStatusReady:
 			state.ReadyNodes = append(state.ReadyNodes, summary)
 
-		case schema.WorkflowNodeStatusRunning:
+		case schema.MissionNodeStatusRunning:
 			state.RunningNodes = append(state.RunningNodes, summary)
 
-		case schema.WorkflowNodeStatusPending:
+		case schema.MissionNodeStatusPending:
 			// Build pending node with dependency information
 			pendingNode := PendingNodeSummary{
 				NodeSummary: summary,
@@ -641,7 +641,7 @@ func (o *Observer) observeNodesWithDependencies(ctx context.Context, missionID t
 
 			state.PendingNodes = append(state.PendingNodes, pendingNode)
 
-		case schema.WorkflowNodeStatusCompleted:
+		case schema.MissionNodeStatusCompleted:
 			// Build completed node with execution details
 			completedNode := CompletedNodeSummary{
 				NodeSummary: summary,
@@ -666,7 +666,7 @@ func (o *Observer) observeNodesWithDependencies(ctx context.Context, missionID t
 				}
 
 				// For agent nodes, extract findings count and severity
-				if node.Type == schema.WorkflowNodeTypeAgent && lastExec.Result != nil {
+				if node.Type == schema.MissionNodeTypeAgent && lastExec.Result != nil {
 					if findingsData, ok := lastExec.Result["findings"]; ok {
 						completedNode.FindingsCount, completedNode.FindingsSeverity = extractFindingsInfo(findingsData)
 					}
@@ -675,7 +675,7 @@ func (o *Observer) observeNodesWithDependencies(ctx context.Context, missionID t
 
 			state.CompletedNodes = append(state.CompletedNodes, completedNode)
 
-		case schema.WorkflowNodeStatusFailed:
+		case schema.MissionNodeStatusFailed:
 			state.FailedNodes = append(state.FailedNodes, summary)
 		}
 	}
@@ -782,7 +782,7 @@ func (o *Observer) ObserveWithFailure(ctx context.Context, missionID string, fai
 		return nil, fmt.Errorf("failed to get nodes: %w", err)
 	}
 
-	var failedNode *schema.WorkflowNode
+	var failedNode *schema.MissionNode
 	for _, node := range nodes {
 		if node.ID == nid {
 			failedNode = node
@@ -837,8 +837,8 @@ func (s *ObservationState) FormatForPrompt() string {
 	sb.WriteString(fmt.Sprintf("Time Elapsed: %s\n", s.MissionInfo.TimeElapsed))
 	sb.WriteString("\n")
 
-	// Workflow progress
-	sb.WriteString("=== WORKFLOW PROGRESS ===\n")
+	// Mission progress
+	sb.WriteString("=== MISSION PROGRESS ===\n")
 	sb.WriteString(fmt.Sprintf("Total Nodes: %d\n", s.GraphSummary.TotalNodes))
 	sb.WriteString(fmt.Sprintf("Completed: %d\n", s.GraphSummary.CompletedNodes))
 	sb.WriteString(fmt.Sprintf("Failed: %d\n", s.GraphSummary.FailedNodes))
@@ -1100,8 +1100,8 @@ func (s *ObservationState) FormatForPrompt() string {
 
 // Helper functions
 
-// nodeToSummary converts a schema.WorkflowNode to a concise NodeSummary
-func nodeToSummary(node *schema.WorkflowNode) NodeSummary {
+// nodeToSummary converts a schema.MissionNode to a concise NodeSummary
+func nodeToSummary(node *schema.MissionNode) NodeSummary {
 	return NodeSummary{
 		ID:          node.ID.String(),
 		Name:        node.Name,
@@ -1217,15 +1217,15 @@ func extractFindingsInfo(findingsData any) (int, map[string]int) {
 	return 0, severityMap
 }
 
-// buildWorkflowDAG constructs a WorkflowDAG structure from nodes and their dependencies.
-// This provides complete visibility into the workflow topology including entry/exit points
+// buildMissionDAG constructs a MissionDAG structure from nodes and their dependencies.
+// This provides complete visibility into the mission topology including entry/exit points
 // and the critical path length.
-func buildWorkflowDAG(nodes []*schema.WorkflowNode, dependencyMap map[string][]string) *WorkflowDAG {
+func buildMissionDAG(nodes []*schema.MissionNode, dependencyMap map[string][]string) *MissionDAG {
 	if len(nodes) == 0 {
 		return nil
 	}
 
-	dag := &WorkflowDAG{
+	dag := &MissionDAG{
 		Edges:       make(map[string][]string),
 		TotalNodes:  len(nodes),
 		EntryPoints: []string{},
@@ -1273,7 +1273,7 @@ func buildWorkflowDAG(nodes []*schema.WorkflowNode, dependencyMap map[string][]s
 }
 
 // calculateCriticalPath calculates the longest path from entry points to any node.
-// This represents the minimum number of sequential steps needed to complete the workflow.
+// This represents the minimum number of sequential steps needed to complete the mission.
 func calculateCriticalPath(dependencyMap map[string][]string, entryPoints []string) int {
 	if len(entryPoints) == 0 {
 		return 0

@@ -59,7 +59,7 @@ func (e *PlanExecutor) executeTool(ctx context.Context, step *ExecutionStep, h h
 		return nil, nil, fmt.Errorf("tool execution failed: %w", err)
 	}
 
-	// Convert proto response back to map[string]any for workflow output
+	// Convert proto response back to map[string]any for mission output
 	output, err := protoMessageToMap(outputMsg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to convert output from proto: %w", err)

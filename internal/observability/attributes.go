@@ -19,8 +19,8 @@ const (
 	// GibsonAgentVersion is the version of the agent
 	GibsonAgentVersion = "gibson.agent.version"
 
-	// GibsonAgentWorkflowNodeID is the workflow node ID for agent execution
-	GibsonAgentWorkflowNodeID = "gibson.agent.workflow_node_id"
+	// GibsonAgentMissionNodeID is the mission node ID for agent execution
+	GibsonAgentMissionNodeID = "gibson.agent.mission_node_id"
 
 	// GibsonAgentAttempt is the attempt number for agent execution
 	GibsonAgentAttempt = "gibson.agent.attempt"
@@ -110,10 +110,6 @@ const (
 
 	// GibsonOrchestratorReasoning is the reasoning behind the decision
 	GibsonOrchestratorReasoning = "gibson.orchestrator.reasoning"
-
-	// Workflow-specific attributes
-	// GibsonWorkflowName is the name of the workflow being executed
-	GibsonWorkflowName = "gibson.workflow.name"
 
 	// GibsonTurnNumber is the turn number in the agent's execution
 	GibsonTurnNumber = "gibson.turn.number"
@@ -539,8 +535,8 @@ func GraphOpAttributes(operation string, nodesCreated, relsCreated int, nodeLabe
 }
 
 // AgentExecutionAttributes creates OpenTelemetry attributes for an agent execution.
-// It captures the agent name, workflow node ID, status, attempt number, and duration.
-func AgentExecutionAttributes(name, workflowNodeID, status string, attempt int, durationMs int64) []attribute.KeyValue {
+// It captures the agent name, mission node ID, status, attempt number, and duration.
+func AgentExecutionAttributes(name, missionNodeID, status string, attempt int, durationMs int64) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		attribute.String(GibsonAgentName, name),
 		attribute.String(GibsonAgentStatus, status),
@@ -548,8 +544,8 @@ func AgentExecutionAttributes(name, workflowNodeID, status string, attempt int, 
 		attribute.Int64(GibsonAgentDurationMs, durationMs),
 	}
 
-	if workflowNodeID != "" {
-		attrs = append(attrs, attribute.String(GibsonAgentWorkflowNodeID, workflowNodeID))
+	if missionNodeID != "" {
+		attrs = append(attrs, attribute.String(GibsonAgentMissionNodeID, missionNodeID))
 	}
 
 	return attrs

@@ -30,8 +30,8 @@ func (r *recordingInvalidator) Calls() []struct{ tenant, reason string } {
 }
 
 type countingVersions struct {
-	mu     sync.Mutex
-	bumps  map[string]uint64
+	mu    sync.Mutex
+	bumps map[string]uint64
 }
 
 func newCountingVersions() *countingVersions { return &countingVersions{bumps: map[string]uint64{}} }
@@ -246,4 +246,3 @@ func TestNotifier_DedupeWindowResets(t *testing.T) {
 		t.Fatalf("expected two notifies across the dedup window, got %d", c)
 	}
 }
-

@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestContentLoggingConfig_Integration demonstrates full workflow.
+// TestContentLoggingConfig_Integration demonstrates full mission.
 func TestContentLoggingConfig_Integration(t *testing.T) {
 	// Create config with defaults
 	cfg := DefaultContentLoggingConfig()
@@ -36,7 +36,7 @@ func TestContentLoggingConfig_Integration(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestOTLPConfig_Integration demonstrates full workflow.
+// TestOTLPConfig_Integration demonstrates full mission.
 func TestOTLPConfig_Integration(t *testing.T) {
 	// Create config with defaults
 	cfg := DefaultOTLPConfig()

@@ -16,18 +16,19 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/agentauth"
-	"github.com/zero-day-ai/gibson/internal/manifest"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
+	"github.com/zero-day-ai/gibson/internal/manifest"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
 	"github.com/zero-day-ai/gibson/internal/onboarding"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/internal/version"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // authzIface is the narrow subset of authz.Authorizer that the DaemonServer
@@ -202,8 +203,11 @@ type DaemonInterface interface {
 	// QueryPlugin executes a method on a plugin
 	QueryPlugin(ctx context.Context, name, method string, params map[string]any) (any, error)
 
-	// RunMission starts a mission and returns an event channel
-	RunMission(ctx context.Context, workflowPath string, missionID string, variables map[string]string, memoryContinuity string) (<-chan MissionEventData, error)
+	// RunMission starts a mission by reference and returns an event channel.
+	// The mission definition must already be registered via CreateMissionDefinition
+	// and the target must already be registered — inline construction is no longer
+	// supported.
+	RunMission(ctx context.Context, missionDefinitionID string, targetID string, variables map[string]string, memoryContinuity string) (<-chan MissionEventData, error)
 
 	// StopMission stops a running mission
 	StopMission(ctx context.Context, missionID string, force bool) error
@@ -232,18 +236,6 @@ type DaemonInterface interface {
 	// GetMissionCheckpoints returns all checkpoints for a mission
 	GetMissionCheckpoints(ctx context.Context, missionID string) ([]CheckpointData, error)
 
-	// InstallComponent installs a component from a git repository
-	InstallComponent(ctx context.Context, kind string, url string, branch string, tag string, force bool, skipBuild bool, verbose bool) (InstallComponentResult, error)
-
-	// InstallAllComponent installs all components from a mono-repo
-	InstallAllComponent(ctx context.Context, kind string, url string, branch string, tag string, force bool, skipBuild bool, verbose bool) (InstallAllComponentResult, error)
-
-	// UninstallComponent uninstalls a component by kind and name
-	UninstallComponent(ctx context.Context, kind string, name string, force bool) error
-
-	// UpdateComponent updates a component to the latest version
-	UpdateComponent(ctx context.Context, kind string, name string, restart bool, skipBuild bool, verbose bool) (UpdateComponentResult, error)
-
 	// BuildComponent rebuilds a component from source
 	BuildComponent(ctx context.Context, kind string, name string) (BuildComponentResult, error)
 
@@ -253,29 +245,15 @@ type DaemonInterface interface {
 	// GetComponentLogs streams log entries for a component
 	GetComponentLogs(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan LogEntryData, error)
 
-	// InstallMission installs a mission from a git repository
-	InstallMission(ctx context.Context, url string, branch string, tag string, force bool, yes bool, timeoutMs int64) (InstallMissionResult, error)
-
-	// UninstallMission removes an installed mission
-	UninstallMission(ctx context.Context, name string, force bool) error
-
 	// ListMissionDefinitions returns all installed mission definitions
 	ListMissionDefinitions(ctx context.Context, limit int, offset int) ([]MissionDefinitionData, int, error)
 
-	// UpdateMission updates an installed mission to the latest version
-	UpdateMission(ctx context.Context, name string, timeoutMs int64) (UpdateMissionResult, error)
-
-	// ResolveMissionDependencies resolves and returns the dependency tree for a mission workflow
-	ResolveMissionDependencies(ctx context.Context, missionPath string) (DependencyTreeData, error)
-
-	// ValidateMissionDependencies validates the state of all dependencies for a mission workflow
-	ValidateMissionDependencies(ctx context.Context, missionPath string) (ValidationResultData, error)
-
-	// EnsureMissionDependencies ensures all dependencies for a mission workflow are running
-	EnsureMissionDependencies(ctx context.Context, missionPath string) error
-
-	// CreateMission creates a new mission with target and workflow configuration
+	// CreateMission creates a new mission by reference (target_id + mission_definition_id).
+	// Inline target / inline mission are not supported.
 	CreateMission(ctx context.Context, req CreateMissionData) (CreateMissionResultData, error)
+
+	// CreateMissionDefinition registers a structured mission definition.
+	CreateMissionDefinition(ctx context.Context, req CreateMissionDefinitionData) (CreateMissionDefinitionResultData, error)
 
 	// RequestShutdown requests graceful shutdown of the daemon
 	RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error
@@ -351,17 +329,17 @@ type PluginInfoInternal struct {
 
 // MissionData represents mission information.
 type MissionData struct {
-	ID           string
-	TenantID     string
-	Name         string
-	Description  string
-	WorkflowPath string
-	WorkflowYAML string
-	Status       string
-	StartTime    time.Time
-	EndTime      time.Time
-	FindingCount int32
-	Progress     float64
+	ID                  string
+	TenantID            string
+	Name                string
+	Description         string
+	MissionDefinitionID string
+	TargetID            string
+	Status              string
+	StartTime           time.Time
+	EndTime             time.Time
+	FindingCount        int32
+	Progress            float64
 }
 
 // MissionEventData represents mission event data from the daemon.
@@ -374,7 +352,7 @@ type MissionEventData struct {
 	Data      string
 	Error     string
 	Result    *daemonpb.OperationResult
-	Payload   map[string]interface{} // Additional payload data (workflow_name, duration, status, etc.)
+	Payload   map[string]interface{} // Additional payload data (mission_name, duration, status, etc.)
 }
 
 // FindingData represents finding information.
@@ -493,39 +471,6 @@ type StopComponentResult struct {
 	TotalCount   int
 }
 
-// InstallComponentResult represents the result of installing a component.
-type InstallComponentResult struct {
-	Name        string
-	Version     string
-	RepoPath    string
-	BinPath     string
-	BuildOutput string
-	DurationMs  int64
-}
-
-// InstallAllComponentResult represents the result of installing multiple components.
-type InstallAllComponentResult struct {
-	Success         bool
-	ComponentsFound int
-	SuccessfulCount int
-	SkippedCount    int
-	FailedCount     int
-	Successful      []daemonpb.InstallAllResultItem
-	Skipped         []daemonpb.InstallAllResultItem
-	Failed          []daemonpb.InstallAllFailedItem
-	DurationMs      int64
-	Message         string
-}
-
-// UpdateComponentResult represents the result of updating a component.
-type UpdateComponentResult struct {
-	Updated     bool
-	OldVersion  string
-	NewVersion  string
-	BuildOutput string
-	DurationMs  int64
-}
-
 // BuildComponentResult represents the result of building a component.
 type BuildComponentResult struct {
 	Success    bool
@@ -582,30 +527,6 @@ type CheckpointData struct {
 	Version        int
 }
 
-// InstallMissionResult represents the result of installing a mission.
-type InstallMissionResult struct {
-	Name         string
-	Version      string
-	Path         string
-	Dependencies []InstalledDependencyData
-	DurationMs   int64
-}
-
-// InstalledDependencyData represents a dependency that was installed.
-type InstalledDependencyData struct {
-	Type             string
-	Name             string
-	AlreadyInstalled bool
-}
-
-// UpdateMissionResult represents the result of updating a mission.
-type UpdateMissionResult struct {
-	Updated    bool
-	OldVersion string
-	NewVersion string
-	DurationMs int64
-}
-
 // MissionDefinitionData represents an installed mission definition.
 type MissionDefinitionData struct {
 	Name        string
@@ -617,124 +538,43 @@ type MissionDefinitionData struct {
 	NodeCount   int
 }
 
-// DependencyTreeData represents the complete dependency graph for a mission.
-type DependencyTreeData struct {
-	MissionRef  string
-	ResolvedAt  time.Time
-	TotalNodes  int
-	AgentCount  int
-	ToolCount   int
-	PluginCount int
-	Nodes       []DependencyNodeData
-}
-
-// DependencyNodeData represents a single component in the dependency tree.
-type DependencyNodeData struct {
-	Kind          string
-	Name          string
-	Version       string
-	Source        string
-	SourceRef     string
-	Installed     bool
-	Running       bool
-	Healthy       bool
-	ActualVersion string
-}
-
-// ValidationResultData contains the outcome of dependency validation.
-type ValidationResultData struct {
-	Valid                bool
-	Summary              string
-	TotalComponents      int
-	InstalledCount       int
-	RunningCount         int
-	HealthyCount         int
-	NotInstalledCount    int
-	NotRunningCount      int
-	UnhealthyCount       int
-	VersionMismatchCount int
-	ValidatedAt          time.Time
-	DurationMs           int64
-	NotInstalled         []DependencyNodeData
-	NotRunning           []DependencyNodeData
-	Unhealthy            []DependencyNodeData
-	VersionMismatch      []VersionMismatchData
-}
-
-// VersionMismatchData describes a version constraint violation.
-type VersionMismatchData struct {
-	ComponentKind   string
-	ComponentName   string
-	RequiredVersion string
-	ActualVersion   string
-}
-
 // CreateMissionData represents the data for creating a new mission.
+// Inline target / inline mission / YAML paths were removed under spec
+// mission-api-only-cleanup — missions now reference a registered target and
+// mission definition by ID only.
 type CreateMissionData struct {
-	Name        string
-	Description string
-
-	// Target configuration (mutually exclusive)
-	TargetID     string
-	InlineTarget *InlineTargetData
-
-	// Workflow configuration (mutually exclusive)
-	WorkflowID     string
-	InlineWorkflow *InlineWorkflowData
-
-	// Optional configuration
-	Metadata map[string]string
-}
-
-// InlineTargetData represents inline target configuration data.
-type InlineTargetData struct {
-	Seeds    []*TargetSeedData
-	Profile  string
-	Depth    int32
-	Excluded []string
-	Metadata map[string]string
-}
-
-// TargetSeedData represents a target seed.
-type TargetSeedData struct {
-	Value string
-	Type  string
-	Scope string
-}
-
-// InlineWorkflowData represents inline workflow configuration data.
-type InlineWorkflowData struct {
-	Name     string
-	Nodes    []*WorkflowNodeData
-	Edges    []*WorkflowEdgeData
-	Metadata map[string]string
-}
-
-// WorkflowNodeData represents a workflow node configuration.
-type WorkflowNodeData struct {
-	ID        string
-	Type      string
-	Name      string
-	DependsOn []string
-	Config    map[string]any
-}
-
-// WorkflowEdgeData represents a workflow edge configuration.
-type WorkflowEdgeData struct {
-	From      string
-	To        string
-	Condition string
+	Name                string
+	Description         string
+	TargetID            string
+	MissionDefinitionID string
+	Variables           map[string]string
+	MemoryContinuity    string
+	Metadata            map[string]string
 }
 
 // CreateMissionResultData represents the result of creating a mission.
 type CreateMissionResultData struct {
-	MissionID   string
-	TargetID    string
-	WorkflowID  string
-	Name        string
-	Description string
-	Status      string
-	CreatedAt   time.Time
+	MissionID           string
+	TargetID            string
+	MissionDefinitionID string
+	Name                string
+	Description         string
+	Status              string
+	CreatedAt           time.Time
+}
+
+// CreateMissionDefinitionData represents the data for registering a mission
+// definition with the daemon. The Definition is a fully-formed value; it is
+// validated and persisted by the handler.
+type CreateMissionDefinitionData struct {
+	Definition *mission.MissionDefinition
+}
+
+// CreateMissionDefinitionResultData represents the result of registering a
+// mission definition.
+type CreateMissionDefinitionResultData struct {
+	MissionDefinitionID string
+	Info                MissionDefinitionData
 }
 
 // ProvisioningStep describes a single step in the tenant provisioning pipeline.
@@ -1007,14 +847,22 @@ func (s *DaemonServer) Status(ctx context.Context, req *daemonpb.StatusRequest) 
 	}, nil
 }
 
-// RunMission starts a mission and streams execution events.
+// RunMission starts a mission by reference and streams execution events.
+// Both mission_definition_id and target_id are required; inline construction
+// and YAML paths were removed under spec mission-api-only-cleanup.
 func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.ServerStreamingServer[daemonpb.RunMissionResponse]) error {
 	s.logger.Info("mission run request received",
-		"workflow_path", req.WorkflowPath,
-		"workflow_yaml_size", len(req.WorkflowYaml),
-		"mission_id", req.MissionId,
+		"mission_definition_id", req.MissionDefinitionId,
+		"target_id", req.TargetId,
 		"memory_continuity", req.MemoryContinuity,
 	)
+
+	if req.MissionDefinitionId == "" {
+		return status_grpc.Errorf(codes.InvalidArgument, "mission_definition_id is required")
+	}
+	if req.TargetId == "" {
+		return status_grpc.Errorf(codes.InvalidArgument, "target_id is required")
+	}
 
 	// Enforce per-tenant quotas before any resource allocation.
 	if s.quotaManager != nil {
@@ -1033,76 +881,8 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 		}
 	}
 
-	// Determine workflow path to use
-	var workflowPath string
-	var cleanupTempFile func()
-
-	if req.WorkflowYaml != "" {
-		// Inline YAML provided - validate size (max 10MB)
-		const maxYamlSize = 10 * 1024 * 1024 // 10MB
-		if len(req.WorkflowYaml) > maxYamlSize {
-			s.logger.Error("workflow YAML exceeds size limit",
-				"size", len(req.WorkflowYaml),
-				"max_size", maxYamlSize,
-			)
-			return status_grpc.Errorf(codes.InvalidArgument,
-				"workflow YAML size (%d bytes) exceeds maximum allowed size (%d bytes)",
-				len(req.WorkflowYaml), maxYamlSize)
-		}
-
-		// Validate YAML by parsing it using the mission definition parser
-		if _, err := mission.ParseDefinitionFromBytes([]byte(req.WorkflowYaml)); err != nil {
-			s.logger.Error("failed to parse workflow YAML", "error", err)
-			return status_grpc.Errorf(codes.InvalidArgument, "invalid workflow YAML: %v", err)
-		}
-
-		// Write to temporary file
-		tmpFile, err := os.CreateTemp("", "gibson-mission-*.yaml")
-		if err != nil {
-			s.logger.Error("failed to create temporary file", "error", err)
-			return status_grpc.Errorf(codes.Internal, "failed to create temporary file: %v", err)
-		}
-		workflowPath = tmpFile.Name()
-
-		// Write YAML content
-		if _, err := tmpFile.WriteString(req.WorkflowYaml); err != nil {
-			tmpFile.Close()
-			os.Remove(tmpFile.Name())
-			s.logger.Error("failed to write workflow YAML to temporary file", "error", err)
-			return status_grpc.Errorf(codes.Internal, "failed to write workflow YAML: %v", err)
-		}
-		if err := tmpFile.Close(); err != nil {
-			os.Remove(tmpFile.Name())
-			s.logger.Error("failed to close temporary file", "error", err)
-			return status_grpc.Errorf(codes.Internal, "failed to close temporary file: %v", err)
-		}
-
-		// Setup cleanup function to remove temp file when done
-		cleanupTempFile = func() {
-			if err := os.Remove(workflowPath); err != nil {
-				s.logger.Warn("failed to remove temporary workflow file",
-					"path", workflowPath,
-					"error", err,
-				)
-			} else {
-				s.logger.Debug("removed temporary workflow file", "path", workflowPath)
-			}
-		}
-		defer cleanupTempFile()
-
-		s.logger.Debug("wrote workflow YAML to temporary file", "path", workflowPath)
-	} else if req.WorkflowPath != "" {
-		// Use provided workflow path
-		workflowPath = req.WorkflowPath
-	} else {
-		// Neither provided - return error
-		s.logger.Error("neither workflow_path nor workflow_yaml provided")
-		return status_grpc.Errorf(codes.InvalidArgument,
-			"either workflow_path or workflow_yaml must be provided")
-	}
-
 	// Start mission and get event channel
-	eventChan, err := s.daemon.RunMission(stream.Context(), workflowPath, req.MissionId, req.Variables, req.MemoryContinuity)
+	eventChan, err := s.daemon.RunMission(stream.Context(), req.MissionDefinitionId, req.TargetId, req.Variables, req.MemoryContinuity)
 	if err != nil {
 		s.logger.Error("failed to start mission", "error", err)
 		return status_grpc.Errorf(codes.Internal, "failed to start mission: %v", err)
@@ -1122,13 +902,19 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 	for {
 		select {
 		case <-stream.Context().Done():
-			s.logger.Info("mission stream cancelled", "mission_id", req.MissionId)
+			s.logger.Info("mission stream cancelled",
+				"mission_definition_id", req.MissionDefinitionId,
+				"target_id", req.TargetId,
+			)
 			return stream.Context().Err()
 
 		case event, ok := <-eventChan:
 			if !ok {
 				// Event channel closed, mission completed
-				s.logger.Info("mission completed", "mission_id", req.MissionId)
+				s.logger.Info("mission completed",
+					"mission_definition_id", req.MissionDefinitionId,
+					"target_id", req.TargetId,
+				)
 				return nil
 			}
 
@@ -1215,16 +1001,16 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissi
 	protoMissions := make([]*daemonpb.MissionInfo, len(missions))
 	for i, m := range missions {
 		protoMissions[i] = &daemonpb.MissionInfo{
-			Id:           m.ID,
-			Name:         m.Name,
-			Description:  m.Description,
-			WorkflowPath: m.WorkflowPath,
-			WorkflowYaml: m.WorkflowYAML,
-			Status:       m.Status,
-			StartTime:    m.StartTime.Unix(),
-			EndTime:      m.EndTime.Unix(),
-			FindingCount: m.FindingCount,
-			Progress:     m.Progress,
+			Id:                  m.ID,
+			Name:                m.Name,
+			Description:         m.Description,
+			MissionDefinitionId: m.MissionDefinitionID,
+			TargetId:            m.TargetID,
+			Status:              m.Status,
+			StartTime:           m.StartTime.Unix(),
+			EndTime:             m.EndTime.Unix(),
+			FindingCount:        m.FindingCount,
+			Progress:            m.Progress,
 		}
 	}
 
@@ -1955,201 +1741,6 @@ func (s *DaemonServer) GetMissionCheckpoints(ctx context.Context, req *daemonpb.
 	}, nil
 }
 
-// InstallAllComponent installs all components from a mono-repo.
-func (s *DaemonServer) InstallAllComponent(ctx context.Context, req *daemonpb.InstallAllComponentRequest) (*daemonpb.InstallAllComponentResponse, error) {
-	s.logger.Info("install all components request received",
-		"kind", req.Kind,
-		"url", req.Url,
-		"branch", req.Branch,
-		"tag", req.Tag,
-		"force", req.Force,
-	)
-
-	// Validate request
-	if req.Kind == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component kind is required")
-	}
-	if req.Url == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component URL is required")
-	}
-
-	// Validate kind is one of the supported types
-	if req.Kind != "agent" && req.Kind != "tool" && req.Kind != "plugin" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid component kind: %s (must be agent, tool, or plugin)", req.Kind)
-	}
-
-	// Call daemon implementation
-	result, err := s.daemon.InstallAllComponent(ctx, req.Kind, req.Url, req.Branch, req.Tag, req.Force, req.SkipBuild, req.Verbose)
-	if err != nil {
-		s.logger.Error("failed to install all components", "error", err, "kind", req.Kind, "url", req.Url)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "clone failed") {
-			return nil, status_grpc.Errorf(codes.NotFound, "%v", err)
-		}
-		if strings.Contains(err.Error(), "no components found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "%v", err)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to install components: %v", err)
-	}
-
-	s.logger.Info("components installed",
-		"kind", req.Kind,
-		"found", result.ComponentsFound,
-		"successful", result.SuccessfulCount,
-		"skipped", result.SkippedCount,
-		"failed", result.FailedCount,
-	)
-
-	// Convert result to proto response
-	protoSuccessful := make([]*daemonpb.InstallAllResultItem, len(result.Successful))
-	for i := range result.Successful {
-		protoSuccessful[i] = &daemonpb.InstallAllResultItem{
-			Name:    result.Successful[i].Name,
-			Version: result.Successful[i].Version,
-			Path:    result.Successful[i].Path,
-		}
-	}
-
-	protoSkipped := make([]*daemonpb.InstallAllResultItem, len(result.Skipped))
-	for i := range result.Skipped {
-		protoSkipped[i] = &daemonpb.InstallAllResultItem{
-			Name:    result.Skipped[i].Name,
-			Version: result.Skipped[i].Version,
-			Path:    result.Skipped[i].Path,
-		}
-	}
-
-	protoFailed := make([]*daemonpb.InstallAllFailedItem, len(result.Failed))
-	for i := range result.Failed {
-		protoFailed[i] = &daemonpb.InstallAllFailedItem{
-			Name:  result.Failed[i].Name,
-			Path:  result.Failed[i].Path,
-			Error: result.Failed[i].Error,
-		}
-	}
-
-	return &daemonpb.InstallAllComponentResponse{
-		Success:         result.Success,
-		ComponentsFound: int32(result.ComponentsFound),
-		SuccessfulCount: int32(result.SuccessfulCount),
-		SkippedCount:    int32(result.SkippedCount),
-		FailedCount:     int32(result.FailedCount),
-		Successful:      protoSuccessful,
-		Skipped:         protoSkipped,
-		Failed:          protoFailed,
-		DurationMs:      result.DurationMs,
-		Message:         result.Message,
-	}, nil
-}
-
-// UninstallComponent removes a component (agent, tool, or plugin) by kind and name.
-func (s *DaemonServer) UninstallComponent(ctx context.Context, req *daemonpb.UninstallComponentRequest) (*daemonpb.UninstallComponentResponse, error) {
-	s.logger.Info("uninstall component request received",
-		"kind", req.Kind,
-		"name", req.Name,
-		"force", req.Force,
-	)
-
-	// Validate request
-	if req.Kind == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component kind is required")
-	}
-	if req.Name == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component name is required")
-	}
-
-	// Validate kind is one of the supported types
-	if req.Kind != "agent" && req.Kind != "tool" && req.Kind != "plugin" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid component kind: %s (must be agent, tool, or plugin)", req.Kind)
-	}
-
-	// Call daemon implementation
-	err := s.daemon.UninstallComponent(ctx, req.Kind, req.Name, req.Force)
-	if err != nil {
-		s.logger.Error("failed to uninstall component", "error", err, "kind", req.Kind, "name", req.Name)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "not found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "component '%s' not found", req.Name)
-		}
-		if strings.Contains(err.Error(), "running") && !req.Force {
-			return nil, status_grpc.Errorf(codes.FailedPrecondition, "component '%s' is running. Stop it first or use --force", req.Name)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to uninstall component: %v", err)
-	}
-
-	s.logger.Info("component uninstalled successfully",
-		"kind", req.Kind,
-		"name", req.Name,
-	)
-
-	return &daemonpb.UninstallComponentResponse{
-		Success: true,
-		Message: fmt.Sprintf("Component '%s' uninstalled successfully", req.Name),
-	}, nil
-}
-
-// UpdateComponent updates a component (agent, tool, or plugin) to the latest version.
-func (s *DaemonServer) UpdateComponent(ctx context.Context, req *daemonpb.UpdateComponentRequest) (*daemonpb.UpdateComponentResponse, error) {
-	s.logger.Info("update component request received",
-		"kind", req.Kind,
-		"name", req.Name,
-		"restart", req.Restart,
-	)
-
-	// Validate request
-	if req.Kind == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component kind is required")
-	}
-	if req.Name == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component name is required")
-	}
-
-	// Validate kind is one of the supported types
-	if req.Kind != "agent" && req.Kind != "tool" && req.Kind != "plugin" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid component kind: %s (must be agent, tool, or plugin)", req.Kind)
-	}
-
-	// Call daemon implementation
-	result, err := s.daemon.UpdateComponent(ctx, req.Kind, req.Name, req.Restart, req.SkipBuild, req.Verbose)
-	if err != nil {
-		s.logger.Error("failed to update component", "error", err, "kind", req.Kind, "name", req.Name)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "not found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "component '%s' not found", req.Name)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to update component: %v", err)
-	}
-
-	s.logger.Info("component updated successfully",
-		"kind", req.Kind,
-		"name", req.Name,
-		"updated", result.Updated,
-		"old_version", result.OldVersion,
-		"new_version", result.NewVersion,
-	)
-
-	msg := fmt.Sprintf("Component '%s' updated successfully", req.Name)
-	if !result.Updated {
-		msg = fmt.Sprintf("Component '%s' is already at the latest version", req.Name)
-	}
-
-	return &daemonpb.UpdateComponentResponse{
-		Success:     true,
-		Updated:     result.Updated,
-		OldVersion:  result.OldVersion,
-		NewVersion:  result.NewVersion,
-		BuildOutput: result.BuildOutput,
-		DurationMs:  result.DurationMs,
-		Message:     msg,
-	}, nil
-}
-
 // BuildComponent rebuilds a component (agent, tool, or plugin) from source.
 func (s *DaemonServer) BuildComponent(ctx context.Context, req *daemonpb.BuildComponentRequest) (*daemonpb.BuildComponentResponse, error) {
 	s.logger.Info("build component request received",
@@ -2322,98 +1913,6 @@ func (s *DaemonServer) GetComponentLogs(req *daemonpb.GetComponentLogsRequest, s
 	}
 }
 
-// InstallMission installs a mission from a Git repository.
-func (s *DaemonServer) InstallMission(ctx context.Context, req *daemonpb.InstallMissionRequest) (*daemonpb.InstallMissionResponse, error) {
-	s.logger.Info("install mission request received",
-		"url", req.Url,
-		"branch", req.Branch,
-		"tag", req.Tag,
-		"force", req.Force,
-	)
-
-	// Validate request
-	if req.Url == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission URL is required")
-	}
-
-	// Call daemon implementation
-	result, err := s.daemon.InstallMission(ctx, req.Url, req.Branch, req.Tag, req.Force, req.Yes, req.TimeoutMs)
-	if err != nil {
-		s.logger.Error("failed to install mission", "error", err, "url", req.Url)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "already exists") {
-			return nil, status_grpc.Errorf(codes.AlreadyExists, "%v", err)
-		}
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "clone failed") {
-			return nil, status_grpc.Errorf(codes.NotFound, "%v", err)
-		}
-		if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "validation") {
-			return nil, status_grpc.Errorf(codes.InvalidArgument, "%v", err)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to install mission: %v", err)
-	}
-
-	s.logger.Info("mission installed successfully",
-		"name", result.Name,
-		"version", result.Version,
-	)
-
-	// Convert dependencies to proto format
-	protoDeps := make([]*daemonpb.InstalledDependency, len(result.Dependencies))
-	for i, dep := range result.Dependencies {
-		protoDeps[i] = &daemonpb.InstalledDependency{
-			Type:             dep.Type,
-			Name:             dep.Name,
-			AlreadyInstalled: dep.AlreadyInstalled,
-		}
-	}
-
-	return &daemonpb.InstallMissionResponse{
-		Success:      true,
-		Name:         result.Name,
-		Version:      result.Version,
-		Path:         result.Path,
-		Dependencies: protoDeps,
-		DurationMs:   result.DurationMs,
-		Message:      fmt.Sprintf("Mission '%s' installed successfully", result.Name),
-	}, nil
-}
-
-// UninstallMission removes an installed mission.
-func (s *DaemonServer) UninstallMission(ctx context.Context, req *daemonpb.UninstallMissionRequest) (*daemonpb.UninstallMissionResponse, error) {
-	s.logger.Info("uninstall mission request received",
-		"name", req.Name,
-		"force", req.Force,
-	)
-
-	// Validate request
-	if req.Name == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission name is required")
-	}
-
-	// Call daemon implementation
-	err := s.daemon.UninstallMission(ctx, req.Name, req.Force)
-	if err != nil {
-		s.logger.Error("failed to uninstall mission", "error", err, "name", req.Name)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "not found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "%v", err)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to uninstall mission: %v", err)
-	}
-
-	s.logger.Info("mission uninstalled successfully", "name", req.Name)
-
-	return &daemonpb.UninstallMissionResponse{
-		Success: true,
-		Message: fmt.Sprintf("Mission '%s' uninstalled successfully", req.Name),
-	}, nil
-}
-
 // ListMissionDefinitions returns all installed mission definitions.
 func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb.ListMissionDefinitionsRequest) (*daemonpb.ListMissionDefinitionsResponse, error) {
 	s.logger.Debug("list mission definitions request received",
@@ -2454,146 +1953,35 @@ func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb
 	}, nil
 }
 
-// UpdateMission updates an installed mission to the latest version.
-func (s *DaemonServer) UpdateMission(ctx context.Context, req *daemonpb.UpdateMissionRequest) (*daemonpb.UpdateMissionResponse, error) {
-	s.logger.Info("update mission request received", "name", req.Name)
-
-	// Validate request
-	if req.Name == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission name is required")
-	}
-
-	// Call daemon implementation
-	result, err := s.daemon.UpdateMission(ctx, req.Name, req.TimeoutMs)
-	if err != nil {
-		s.logger.Error("failed to update mission", "error", err, "name", req.Name)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "not found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "%v", err)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to update mission: %v", err)
-	}
-
-	s.logger.Info("mission update completed",
-		"name", req.Name,
-		"updated", result.Updated,
-		"old_version", result.OldVersion,
-		"new_version", result.NewVersion,
-	)
-
-	message := fmt.Sprintf("Mission '%s' is already up to date (version %s)", req.Name, result.NewVersion)
-	if result.Updated {
-		message = fmt.Sprintf("Mission '%s' updated from %s to %s", req.Name, result.OldVersion, result.NewVersion)
-	}
-
-	return &daemonpb.UpdateMissionResponse{
-		Success:    true,
-		Updated:    result.Updated,
-		OldVersion: result.OldVersion,
-		NewVersion: result.NewVersion,
-		DurationMs: result.DurationMs,
-		Message:    message,
-	}, nil
-}
-
-// CreateMission creates a new mission with target and workflow configuration.
+// CreateMission creates a new mission by reference. Inline target / inline
+// mission / YAML paths were removed under spec mission-api-only-cleanup — the
+// mission definition and target must already be registered via
+// CreateMissionDefinition and the target API.
 func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMissionRequest) (*daemonpb.CreateMissionResponse, error) {
 	s.logger.Info("create mission request received",
 		"name", req.Name,
-		"has_inline_target", req.GetInlineTarget() != nil,
-		"has_inline_workflow", req.GetInlineWorkflow() != nil,
+		"target_id", req.TargetId,
+		"mission_definition_id", req.MissionDefinitionId,
 	)
 
-	// Validate request - name is required
 	if req.Name == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission name is required")
 	}
+	if req.TargetId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "target_id is required")
+	}
+	if req.MissionDefinitionId == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission_definition_id is required")
+	}
 
-	// Build CreateMissionData from proto request
 	data := CreateMissionData{
-		Name:        req.Name,
-		Description: req.Description,
-		Metadata:    req.Metadata,
-	}
-
-	// Handle target configuration (oneof)
-	switch tc := req.GetTargetConfig().(type) {
-	case *daemonpb.CreateMissionRequest_TargetId:
-		if tc.TargetId == "" {
-			return nil, status_grpc.Errorf(codes.InvalidArgument, "target_id cannot be empty")
-		}
-		data.TargetID = tc.TargetId
-	case *daemonpb.CreateMissionRequest_InlineTarget:
-		inlineTarget := tc.InlineTarget
-		if inlineTarget == nil {
-			return nil, status_grpc.Errorf(codes.InvalidArgument, "inline_target cannot be nil")
-		}
-		// Convert proto InlineTargetConfig to InlineTargetData
-		seeds := make([]*TargetSeedData, len(inlineTarget.Seeds))
-		for i, s := range inlineTarget.Seeds {
-			seeds[i] = &TargetSeedData{
-				Value: s.Value,
-				Type:  s.Type,
-				Scope: s.Scope,
-			}
-		}
-		data.InlineTarget = &InlineTargetData{
-			Seeds:    seeds,
-			Profile:  inlineTarget.Profile,
-			Depth:    inlineTarget.Depth,
-			Excluded: inlineTarget.Excluded,
-			Metadata: inlineTarget.Metadata,
-		}
-	default:
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "target configuration is required (target_id or inline_target)")
-	}
-
-	// Handle workflow configuration (oneof)
-	switch wc := req.GetWorkflowConfig().(type) {
-	case *daemonpb.CreateMissionRequest_WorkflowId:
-		if wc.WorkflowId == "" {
-			return nil, status_grpc.Errorf(codes.InvalidArgument, "workflow_id cannot be empty")
-		}
-		data.WorkflowID = wc.WorkflowId
-	case *daemonpb.CreateMissionRequest_InlineWorkflow:
-		inlineWorkflow := wc.InlineWorkflow
-		if inlineWorkflow == nil {
-			return nil, status_grpc.Errorf(codes.InvalidArgument, "inline_workflow cannot be nil")
-		}
-		// Convert proto InlineWorkflowConfig to InlineWorkflowData
-		nodes := make([]*WorkflowNodeData, len(inlineWorkflow.Nodes))
-		for i, n := range inlineWorkflow.Nodes {
-			// Convert TypedMap config to map[string]any
-			var config map[string]any
-			if n.Config != nil {
-				config = TypedMapToMap(n.Config)
-			}
-			nodes[i] = &WorkflowNodeData{
-				ID:        n.Id,
-				Type:      n.Type,
-				Name:      n.Name,
-				DependsOn: n.DependsOn,
-				Config:    config,
-			}
-		}
-		edges := make([]*WorkflowEdgeData, len(inlineWorkflow.Edges))
-		for i, e := range inlineWorkflow.Edges {
-			edges[i] = &WorkflowEdgeData{
-				From:      e.From,
-				To:        e.To,
-				Condition: e.Condition,
-			}
-		}
-		data.InlineWorkflow = &InlineWorkflowData{
-			Name:     inlineWorkflow.Name,
-			Nodes:    nodes,
-			Edges:    edges,
-			Metadata: inlineWorkflow.Metadata,
-		}
-	default:
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "workflow configuration is required (workflow_id or inline_workflow)")
+		Name:                req.Name,
+		Description:         req.Description,
+		TargetID:            req.TargetId,
+		MissionDefinitionID: req.MissionDefinitionId,
+		Variables:           req.Variables,
+		MemoryContinuity:    req.MemoryContinuity,
+		Metadata:            req.Metadata,
 	}
 
 	// Call daemon implementation
@@ -2618,16 +2006,15 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 	s.logger.Info("mission created successfully",
 		"mission_id", result.MissionID,
 		"target_id", result.TargetID,
-		"workflow_id", result.WorkflowID,
+		"mission_definition_id", result.MissionDefinitionID,
 	)
 
 	// Build proto Mission response
 	protoMission := &daemonpb.Mission{
-		Id:         result.MissionID,
-		Name:       result.Name,
-		Status:     daemonpb.MissionStatus_MISSION_STATUS_PENDING,
-		TargetId:   result.TargetID,
-		WorkflowId: result.WorkflowID,
+		Id:       result.MissionID,
+		Name:     result.Name,
+		Status:   daemonpb.MissionStatus_MISSION_STATUS_PENDING,
+		TargetId: result.TargetID,
 	}
 
 	return &daemonpb.CreateMissionResponse{
@@ -2635,6 +2022,75 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 		Mission: protoMission,
 		Message: fmt.Sprintf("Mission '%s' created successfully", result.Name),
 	}, nil
+}
+
+// CreateMissionDefinition registers a structured mission definition with the
+// daemon. The definition is validated via mission.Validate and persisted to the
+// definition store; no YAML parsing, git cloning, or dependency resolution runs.
+func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonpb.CreateMissionDefinitionRequest) (*daemonpb.CreateMissionDefinitionResponse, error) {
+	if req == nil || req.Definition == nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition is required")
+	}
+
+	def, err := protoToMissionDefinition(req.Definition)
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid mission definition: %v", err)
+	}
+
+	// Minimal validation at the wire boundary. The proto MissionDefinition
+	// currently carries only the summary envelope (name, version, description,
+	// source, timestamps); the node/edge expansion is scheduled for Phase 3 of
+	// mission-api-only-cleanup. Once the proto carries nodes and edges we will
+	// call mission.Validate(def) here.
+	if def.Name == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition name is required")
+	}
+
+	result, err := s.daemon.CreateMissionDefinition(ctx, CreateMissionDefinitionData{Definition: def})
+	if err != nil {
+		s.logger.Error("failed to create mission definition", "error", err, "name", def.Name)
+		if strings.Contains(err.Error(), "already exists") {
+			return nil, status_grpc.Errorf(codes.AlreadyExists, "%v", err)
+		}
+		return nil, status_grpc.Errorf(codes.Internal, "failed to create mission definition: %v", err)
+	}
+
+	s.logger.Info("mission definition created",
+		"mission_definition_id", result.MissionDefinitionID,
+		"name", result.Info.Name,
+	)
+
+	return &daemonpb.CreateMissionDefinitionResponse{
+		MissionDefinitionId: result.MissionDefinitionID,
+		Info: &daemonpb.MissionDefinitionInfo{
+			Name:        result.Info.Name,
+			Version:     result.Info.Version,
+			Description: result.Info.Description,
+			Source:      result.Info.Source,
+			InstalledAt: result.Info.InstalledAt.Unix(),
+			UpdatedAt:   result.Info.UpdatedAt.Unix(),
+			NodeCount:   int32(result.Info.NodeCount),
+		},
+	}, nil
+}
+
+// protoToMissionDefinition converts the wire-format MissionDefinition to the
+// internal Go representation used by the mission package.
+func protoToMissionDefinition(p *missionpb.MissionDefinition) (*mission.MissionDefinition, error) {
+	if p == nil {
+		return nil, fmt.Errorf("definition is nil")
+	}
+
+	def := &mission.MissionDefinition{
+		Name:        p.Name,
+		Version:     p.Version,
+		Description: p.Description,
+		Source:      p.Source,
+	}
+	if ts := p.GetInstalledAt(); ts != nil {
+		def.InstalledAt = ts.AsTime()
+	}
+	return def, nil
 }
 
 // Shutdown requests graceful shutdown of the daemon.

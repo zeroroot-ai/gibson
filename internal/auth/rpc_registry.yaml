@@ -79,27 +79,13 @@ entries:
   - method: /gibson.daemon.v1.DaemonService/GetMissionCheckpoints
     relation: member
     description: Retrieve mission checkpoints within caller's tenant
-  - method: /gibson.daemon.v1.DaemonService/InstallMission
-    relation: admin
-    description: Install a mission definition into a tenant (admin only)
-  - method: /gibson.daemon.v1.DaemonService/UninstallMission
-    relation: admin
-    description: Uninstall a mission definition from a tenant (admin only)
   - method: /gibson.daemon.v1.DaemonService/ListMissionDefinitions
     relation: member
     description: List installed mission definitions within caller's tenant
-  - method: /gibson.daemon.v1.DaemonService/UpdateMission
-    relation: member
-    description: Update a mission definition within caller's tenant
-  - method: /gibson.daemon.v1.DaemonService/ResolveMissionDependencies
-    relation: member
-    description: Resolve mission dependency graph within caller's tenant
-  - method: /gibson.daemon.v1.DaemonService/ValidateMissionDependencies
-    relation: member
-    description: Validate mission dependencies within caller's tenant
-  - method: /gibson.daemon.v1.DaemonService/EnsureDependenciesRunning
-    relation: member
-    description: Ensure mission dependencies are running within caller's tenant
+  - method: /gibson.daemon.v1.DaemonService/CreateMissionDefinition
+    relation: writer
+    object_from: mission_definition_from_context
+    description: Register a structured mission definition with the daemon (writer on tenant's mission_definition container; granted via tenant admin)
 
   # intelligence.v1.IntelligenceService — cross-mission analytics RPCs
   # (productionize-graph-intelligence Task 2). All five queries read aggregate
@@ -151,18 +137,6 @@ entries:
   - method: /gibson.daemon.v1.DaemonService/StopComponent
     relation: admin
     description: Stop a component within caller's tenant (admin only)
-  - method: /gibson.daemon.v1.DaemonService/InstallComponent
-    relation: admin
-    description: Install a component into caller's tenant (admin only)
-  - method: /gibson.daemon.v1.DaemonService/InstallAllComponent
-    relation: admin
-    description: Install all components into caller's tenant (admin only)
-  - method: /gibson.daemon.v1.DaemonService/UninstallComponent
-    relation: admin
-    description: Uninstall a component from caller's tenant (admin only)
-  - method: /gibson.daemon.v1.DaemonService/UpdateComponent
-    relation: admin
-    description: Update a component within caller's tenant (admin only)
   - method: /gibson.daemon.v1.DaemonService/BuildComponent
     relation: admin
     description: Build a component image within caller's tenant (admin only)

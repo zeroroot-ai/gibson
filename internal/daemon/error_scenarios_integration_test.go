@@ -14,7 +14,7 @@ import (
 	daemonclient "github.com/zero-day-ai/sdk/daemonclient"
 )
 
-// TestInvalidWorkflowParsing is a PLACEHOLDER for testing invalid workflow handling.
+// TestInvalidMissionParsing is a PLACEHOLDER for testing invalid mission handling.
 //
 // When mission execution is implemented, this test should verify:
 // 1. Invalid YAML syntax returns appropriate error
@@ -22,37 +22,37 @@ import (
 // 3. Circular dependencies are detected
 // 4. Invalid node types are rejected
 //
-// Use testdata/invalid-workflow.yaml for this test.
-func TestInvalidWorkflowParsing(t *testing.T) {
+// Use testdata/invalid-mission.yaml for this test.
+func TestInvalidMissionParsing(t *testing.T) {
 	t.Skip("Mission execution not yet implemented")
 
 	// TODO: Implement when mission execution is ready
 	// Steps:
 	// 1. Start daemon and connect client
-	// 2. Call RunMission with invalid-workflow.yaml
+	// 2. Call RunMission with invalid-mission.yaml
 	// 3. Verify error is returned before streaming starts
 	// 4. Verify error message is descriptive
-	// 5. Test various invalid workflow scenarios:
+	// 5. Test various invalid mission scenarios:
 	//    - Missing 'type' field
 	//    - Circular dependencies
 	//    - Invalid node references in depends_on
 	//    - Invalid YAML syntax
-	//    - Missing required workflow fields (name, nodes)
+	//    - Missing required mission fields (name, nodes)
 }
 
-// TestNonexistentWorkflowFile is a PLACEHOLDER for testing file not found errors.
+// TestNonexistentMissionFile is a PLACEHOLDER for testing file not found errors.
 //
 // When mission execution is implemented, this test should verify:
-// 1. Nonexistent workflow path returns file not found error
+// 1. Nonexistent mission path returns file not found error
 // 2. Error is returned before mission starts
 // 3. Error message includes the problematic path
-func TestNonexistentWorkflowFile(t *testing.T) {
+func TestNonexistentMissionFile(t *testing.T) {
 	t.Skip("Mission execution not yet implemented")
 
 	// TODO: Implement when mission execution is ready
 	// Steps:
 	// 1. Start daemon and connect client
-	// 2. Call RunMission with "/nonexistent/path/to/workflow.yaml"
+	// 2. Call RunMission with "/nonexistent/path/to/mission.yaml"
 	// 3. Verify error is returned
 	// 4. Verify error indicates file not found
 	// 5. Verify no mission is created in ListMissions
@@ -61,7 +61,7 @@ func TestNonexistentWorkflowFile(t *testing.T) {
 // TestAgentNotFound is a PLACEHOLDER for testing agent discovery errors.
 //
 // When mission execution is implemented, this test should verify:
-// 1. Workflow referencing nonexistent agent returns error
+// 1. Mission referencing nonexistent agent returns error
 // 2. Error occurs when executing the agent node
 // 3. Mission status reflects the error
 // 4. Event stream includes error event
@@ -81,7 +81,7 @@ func TestAgentNotFound(t *testing.T) {
 // TestToolNotFound is a PLACEHOLDER for testing tool discovery errors.
 //
 // When mission execution is implemented, this test should verify:
-// 1. Workflow referencing nonexistent tool returns error
+// 1. Mission referencing nonexistent tool returns error
 // 2. Error occurs when executing the tool node
 // 3. Event stream includes error event
 func TestToolNotFound(t *testing.T) {
@@ -100,14 +100,14 @@ func TestToolNotFound(t *testing.T) {
 // When mission execution is implemented, this test should verify:
 // 1. Node that exceeds timeout is terminated
 // 2. Timeout event is streamed to client
-// 3. Mission can continue or fail based on workflow config
+// 3. Mission can continue or fail based on mission config
 // 4. Cleanup occurs after timeout
 func TestNodeTimeout(t *testing.T) {
 	t.Skip("Mission execution not yet implemented")
 
 	// TODO: Implement when mission execution is ready
 	// Steps:
-	// 1. Create workflow with very short timeout (e.g., 1s)
+	// 1. Create mission with very short timeout (e.g., 1s)
 	// 2. Use agent that takes longer than timeout
 	// 3. Verify timeout error event is received
 	// 4. Verify node is terminated
@@ -126,7 +126,7 @@ func TestNodeRetryBehavior(t *testing.T) {
 
 	// TODO: Implement when mission execution is ready
 	// Steps:
-	// 1. Create workflow with retry config (max_retries: 2, backoff: exponential)
+	// 1. Create mission with retry config (max_retries: 2, backoff: exponential)
 	// 2. Use agent that always fails
 	// 3. Verify node is retried exactly 2 times
 	// 4. Verify backoff delay increases between retries

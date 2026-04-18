@@ -206,8 +206,8 @@ func buildSafeMessage(code codes.Code, originalMsg string, err error) string {
 func classifyInvalidArgument(msg string) string {
 	lower := strings.ToLower(msg)
 
-	if strings.Contains(lower, "yaml") || strings.Contains(lower, "workflow") {
-		return "invalid workflow definition: check YAML syntax and required fields"
+	if strings.Contains(lower, "yaml") || strings.Contains(lower, "mission") {
+		return "invalid mission definition: check YAML syntax and required fields"
 	}
 	if strings.Contains(lower, "mission") {
 		return "invalid mission configuration"

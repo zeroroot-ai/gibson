@@ -76,7 +76,7 @@ type MissionExecutionContext struct {
 	// IsResumed indicates if this run was resumed from a checkpoint.
 	IsResumed bool
 
-	// ResumedFromNode is the workflow node ID where execution resumed (empty if not resumed).
+	// ResumedFromNode is the mission node ID where execution resumed (empty if not resumed).
 	ResumedFromNode string
 
 	// PreviousRunID links to the prior run (nil if this is the first run).

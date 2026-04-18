@@ -42,7 +42,7 @@ type Checkpoint struct {
 	// MissionID is the mission this checkpoint belongs to.
 	MissionID types.ID `json:"mission_id" msgpack:"mission_id"`
 
-	// CurrentNodeID is the workflow node being executed when this checkpoint was created.
+	// CurrentNodeID is the mission node being executed when this checkpoint was created.
 	// This is where execution will resume from.
 	CurrentNodeID string `json:"current_node_id" msgpack:"current_node_id"`
 
@@ -87,7 +87,7 @@ type Checkpoint struct {
 	// This is typically msgpack or JSON-encoded []llm.Message for context reconstruction.
 	ConversationHistory []byte `json:"conversation_history,omitempty" msgpack:"conversation_history,omitempty"`
 
-	// ApprovalState captures human-in-the-loop approval workflow state.
+	// ApprovalState captures human-in-the-loop approval mission state.
 	// Non-nil when execution is paused waiting for human approval.
 	ApprovalState *ApprovalState `json:"approval_state,omitempty" msgpack:"approval_state,omitempty"`
 
@@ -123,7 +123,7 @@ type Checkpoint struct {
 // NodeState tracks the runtime state of a single mission node.
 // This is distinct from NodeOutput which captures the final result.
 type NodeState struct {
-	// NodeID is the unique identifier for this node in the workflow.
+	// NodeID is the unique identifier for this node in the mission.
 	NodeID string `json:"node_id" msgpack:"node_id"`
 
 	// Status indicates the current execution state of this node.

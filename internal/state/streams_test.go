@@ -1382,12 +1382,12 @@ func TestStreamClaim(t *testing.T) {
 	}
 }
 
-func TestConsumerGroupWorkflow(t *testing.T) {
+func TestConsumerGroupMission(t *testing.T) {
 	client := setupTestClient(t)
 	defer client.Close()
 
 	ctx := context.Background()
-	stream := "test:stream:workflow"
+	stream := "test:stream:mission"
 	group := "processors"
 
 	// Clean up before test

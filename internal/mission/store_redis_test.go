@@ -203,14 +203,14 @@ func TestRedisMissionStore_BuildSearchQuery(t *testing.T) {
 			expected: "@target_id:{target123}",
 		},
 		{
-			name: "workflow_id filter",
+			name: "mission_definition_id filter",
 			filter: func() *MissionFilter {
 				f := NewMissionFilter()
-				workflowID := types.ID("workflow456")
-				f.WorkflowID = &workflowID
+				missionDefinitionID := types.ID("mission456")
+				f.MissionDefinitionID = &missionDefinitionID
 				return f
 			}(),
-			expected: "@workflow_id:{workflow456}",
+			expected: "@mission_definition_id:{mission456}",
 		},
 		{
 			name: "created_after filter",
@@ -262,8 +262,8 @@ func TestRedisMissionStore_BuildSearchQuery(t *testing.T) {
 				f.Status = &status
 				targetID := types.ID("target123")
 				f.TargetID = &targetID
-				workflowID := types.ID("workflow456")
-				f.WorkflowID = &workflowID
+				missionDefinitionID := types.ID("mission456")
+				f.MissionDefinitionID = &missionDefinitionID
 				after := time.Unix(1000000000, 0)
 				f.CreatedAfter = &after
 				before := time.Unix(2000000000, 0)
@@ -273,7 +273,7 @@ func TestRedisMissionStore_BuildSearchQuery(t *testing.T) {
 				return f
 			}(),
 			// Order may vary but all conditions should be present
-			expected: "@status:{running} @target_id:{target123} @workflow_id:{workflow456} @created_at:[1000000000 +inf] @created_at:[-inf 2000000000] (@name:security | @description:security)",
+			expected: "@status:{running} @target_id:{target123} @mission_definition_id:{mission456} @created_at:[1000000000 +inf] @created_at:[-inf 2000000000] (@name:security | @description:security)",
 		},
 	}
 
@@ -295,15 +295,15 @@ func TestRedisMissionStore_SaveAndGet(t *testing.T) {
 	ctx := context.Background()
 
 	mission := &Mission{
-		ID:          types.NewID(),
-		Name:        "test-mission",
-		Description: "Test mission description",
-		Status:      MissionStatusPending,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		Progress:    0.0,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:                  types.NewID(),
+		Name:                "test-mission",
+		Description:         "Test mission description",
+		Status:              MissionStatusPending,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		Progress:            0.0,
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	// Save mission
@@ -343,14 +343,14 @@ func TestRedisMissionStore_Update(t *testing.T) {
 	ctx := context.Background()
 
 	mission := &Mission{
-		ID:          types.NewID(),
-		Name:        "test-mission",
-		Description: "Original description",
-		Status:      MissionStatusPending,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:                  types.NewID(),
+		Name:                "test-mission",
+		Description:         "Original description",
+		Status:              MissionStatusPending,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	// Save mission
@@ -380,13 +380,13 @@ func TestRedisMissionStore_UpdateStatus(t *testing.T) {
 	ctx := context.Background()
 
 	mission := &Mission{
-		ID:         types.NewID(),
-		Name:       "test-mission",
-		Status:     MissionStatusPending,
-		TargetID:   types.NewID(),
-		WorkflowID: types.NewID(),
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:                  types.NewID(),
+		Name:                "test-mission",
+		Status:              MissionStatusPending,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	// Save mission
@@ -413,14 +413,14 @@ func TestRedisMissionStore_UpdateProgress(t *testing.T) {
 	ctx := context.Background()
 
 	mission := &Mission{
-		ID:         types.NewID(),
-		Name:       "test-mission",
-		Status:     MissionStatusRunning,
-		Progress:   0.0,
-		TargetID:   types.NewID(),
-		WorkflowID: types.NewID(),
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:                  types.NewID(),
+		Name:                "test-mission",
+		Status:              MissionStatusRunning,
+		Progress:            0.0,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	// Save mission
@@ -447,13 +447,13 @@ func TestRedisMissionStore_UpdateProgress_InvalidRange(t *testing.T) {
 	ctx := context.Background()
 
 	mission := &Mission{
-		ID:         types.NewID(),
-		Name:       "test-mission",
-		Status:     MissionStatusRunning,
-		TargetID:   types.NewID(),
-		WorkflowID: types.NewID(),
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:                  types.NewID(),
+		Name:                "test-mission",
+		Status:              MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	// Save mission
@@ -480,14 +480,14 @@ func TestRedisMissionStore_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	mission := &Mission{
-		ID:          types.NewID(),
-		Name:        "test-mission",
-		Status:      MissionStatusCompleted,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		CompletedAt: ptrTime(time.Now()),
+		ID:                  types.NewID(),
+		Name:                "test-mission",
+		Status:              MissionStatusCompleted,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
+		CompletedAt:         ptrTime(time.Now()),
 	}
 
 	// Save mission
@@ -514,13 +514,13 @@ func TestRedisMissionStore_DeleteNonTerminal(t *testing.T) {
 	ctx := context.Background()
 
 	mission := &Mission{
-		ID:         types.NewID(),
-		Name:       "test-mission",
-		Status:     MissionStatusRunning, // Non-terminal state
-		TargetID:   types.NewID(),
-		WorkflowID: types.NewID(),
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:                  types.NewID(),
+		Name:                "test-mission",
+		Status:              MissionStatusRunning, // Non-terminal state
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	// Save mission
@@ -543,13 +543,13 @@ func TestRedisMissionStore_SaveCheckpoint(t *testing.T) {
 	ctx := context.Background()
 
 	mission := &Mission{
-		ID:         types.NewID(),
-		Name:       "test-mission",
-		Status:     MissionStatusRunning,
-		TargetID:   types.NewID(),
-		WorkflowID: types.NewID(),
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:                  types.NewID(),
+		Name:                "test-mission",
+		Status:              MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	// Save mission
@@ -647,40 +647,40 @@ func TestRedisMissionStore_SaveValidation(t *testing.T) {
 		{
 			name: "missing name",
 			mission: &Mission{
-				ID:         types.NewID(),
-				TargetID:   types.NewID(),
-				WorkflowID: types.NewID(),
-				Status:     MissionStatusPending,
+				ID:                  types.NewID(),
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
+				Status:              MissionStatusPending,
 			},
 			expectErr: "name is required",
 		},
 		{
 			name: "missing target_id",
 			mission: &Mission{
-				ID:         types.NewID(),
-				Name:       "test",
-				WorkflowID: types.NewID(),
-				Status:     MissionStatusPending,
+				ID:                  types.NewID(),
+				Name:                "test",
+				MissionDefinitionID: types.NewID(),
+				Status:              MissionStatusPending,
 			},
 			expectErr: "target ID is required",
 		},
 		{
-			name: "missing workflow_id",
+			name: "missing mission_definition_id",
 			mission: &Mission{
 				ID:       types.NewID(),
 				Name:     "test",
 				TargetID: types.NewID(),
 				Status:   MissionStatusPending,
 			},
-			expectErr: "workflow ID is required",
+			expectErr: "mission ID is required",
 		},
 		{
 			name: "missing status",
 			mission: &Mission{
-				ID:         types.NewID(),
-				Name:       "test",
-				TargetID:   types.NewID(),
-				WorkflowID: types.NewID(),
+				ID:                  types.NewID(),
+				Name:                "test",
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
 			},
 			expectErr: "status is required",
 		},

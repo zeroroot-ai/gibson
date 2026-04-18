@@ -29,8 +29,8 @@ func toInt64(v any) (int64, bool) {
 	}
 }
 
-// Checkpoint represents a saved workflow state that can be restored later.
-// Checkpoints capture the status and configuration of all workflow nodes at a point in time.
+// Checkpoint represents a saved mission state that can be restored later.
+// Checkpoints capture the status and configuration of all mission nodes at a point in time.
 type Checkpoint struct {
 	// ID is the unique identifier for this checkpoint
 	ID string `json:"id"`
@@ -44,16 +44,16 @@ type Checkpoint struct {
 	// CreatedAt is when the checkpoint was created
 	CreatedAt time.Time `json:"created_at"`
 
-	// NodeStates contains the state of each workflow node at checkpoint time
+	// NodeStates contains the state of each mission node at checkpoint time
 	NodeStates map[string]NodeCheckpointState `json:"node_states"`
 
 	// IsImplicit indicates if this was auto-created (true) or explicitly requested (false)
 	IsImplicit bool `json:"is_implicit"`
 }
 
-// NodeCheckpointState captures the state of a single workflow node at checkpoint time.
+// NodeCheckpointState captures the state of a single mission node at checkpoint time.
 type NodeCheckpointState struct {
-	// NodeID is the workflow node identifier
+	// NodeID is the mission node identifier
 	NodeID string `json:"node_id"`
 
 	// Status is the node status at checkpoint time
@@ -66,14 +66,14 @@ type NodeCheckpointState struct {
 	Attempt int `json:"attempt"`
 }
 
-// CheckpointManager defines the interface for managing workflow checkpoints.
+// CheckpointManager defines the interface for managing mission checkpoints.
 // Checkpoints enable rollback to previous states for error recovery and experimentation.
 type CheckpointManager interface {
-	// CreateCheckpoint captures the current workflow state and returns the checkpoint ID.
+	// CreateCheckpoint captures the current mission state and returns the checkpoint ID.
 	// The label can be user-provided or empty (auto-generated).
 	CreateCheckpoint(ctx context.Context, missionID string, label string) (string, error)
 
-	// RestoreCheckpoint reverts the workflow to a previously captured state.
+	// RestoreCheckpoint reverts the mission to a previously captured state.
 	// This resets node statuses and marks rolled-back executions as "rolled_back".
 	RestoreCheckpoint(ctx context.Context, checkpointID string) error
 
@@ -111,7 +111,7 @@ func (cm *Neo4jCheckpointManager) WithLogger(logger *slog.Logger) *Neo4jCheckpoi
 	return cm
 }
 
-// CreateCheckpoint captures all WorkflowNode states as JSON.
+// CreateCheckpoint captures all MissionNode states as JSON.
 func (cm *Neo4jCheckpointManager) CreateCheckpoint(ctx context.Context, missionID string, label string) (string, error) {
 	// Validate mission ID
 	mid, err := types.ParseID(missionID)
@@ -128,9 +128,9 @@ func (cm *Neo4jCheckpointManager) CreateCheckpoint(ctx context.Context, missionI
 	checkpointID := types.NewID().String()
 	now := time.Now()
 
-	// Query all workflow nodes for the mission
+	// Query all mission nodes for the mission
 	cypher := `
-		MATCH (n:WorkflowNode)-[:PART_OF]->(m:Mission {id: $mission_id})
+		MATCH (n:MissionNode)-[:PART_OF]->(m:Mission {id: $mission_id})
 		RETURN n.id as node_id,
 		       n.status as status,
 		       n.task_config_json as task_config_json,
@@ -144,7 +144,7 @@ func (cm *Neo4jCheckpointManager) CreateCheckpoint(ctx context.Context, missionI
 
 	result, err := cm.client.Query(ctx, cypher, params)
 	if err != nil {
-		return "", fmt.Errorf("failed to query workflow nodes: %w", err)
+		return "", fmt.Errorf("failed to query mission nodes: %w", err)
 	}
 
 	// Build node states map
@@ -174,7 +174,7 @@ func (cm *Neo4jCheckpointManager) CreateCheckpoint(ctx context.Context, missionI
 		// Get attempt count from executions
 		attempt := 1
 		execCypher := `
-			MATCH (e:AgentExecution)-[:EXECUTES]->(n:WorkflowNode {id: $node_id})
+			MATCH (e:AgentExecution)-[:EXECUTES]->(n:MissionNode {id: $node_id})
 			RETURN e.attempt as attempt
 			ORDER BY e.started_at DESC
 			LIMIT 1
@@ -313,7 +313,7 @@ func (cm *Neo4jCheckpointManager) RestoreCheckpoint(ctx context.Context, checkpo
 
 	// 1. Mark all executions after checkpoint as rolled_back
 	markExecutionsCypher := `
-		MATCH (e:AgentExecution)-[:EXECUTES]->(n:WorkflowNode)-[:PART_OF]->(m:Mission {id: $mission_id})
+		MATCH (e:AgentExecution)-[:EXECUTES]->(n:MissionNode)-[:PART_OF]->(m:Mission {id: $mission_id})
 		WHERE e.status IN ['running', 'completed', 'failed']
 		SET e.rolled_back = true,
 		    e.updated_at = datetime($updated_at)
@@ -341,7 +341,7 @@ func (cm *Neo4jCheckpointManager) RestoreCheckpoint(ctx context.Context, checkpo
 	for nodeID, state := range nodeStates {
 		// Update node status and task config
 		updateNodeCypher := `
-			MATCH (n:WorkflowNode {id: $node_id})
+			MATCH (n:MissionNode {id: $node_id})
 			SET n.status = $status,
 			    n.task_config_json = $task_config_json,
 			    n.updated_at = datetime($updated_at)
@@ -380,10 +380,10 @@ func (cm *Neo4jCheckpointManager) RestoreCheckpoint(ctx context.Context, checkpo
 	// 3. Reset dependent nodes to PENDING if their dependencies changed
 	// Find all nodes that were completed/failed and reset them if dependencies are no longer complete
 	resetDependentsCypher := `
-		MATCH (n:WorkflowNode)-[:PART_OF]->(m:Mission {id: $mission_id})
+		MATCH (n:MissionNode)-[:PART_OF]->(m:Mission {id: $mission_id})
 		WHERE n.status IN ['completed', 'failed', 'running']
 		AND EXISTS {
-			MATCH (n)-[:DEPENDS_ON]->(dep:WorkflowNode)
+			MATCH (n)-[:DEPENDS_ON]->(dep:MissionNode)
 			WHERE dep.status <> 'completed'
 		}
 		SET n.status = 'pending',
@@ -522,9 +522,9 @@ func (cm *Neo4jCheckpointManager) CreateImplicitCheckpoint(ctx context.Context, 
 	label := fmt.Sprintf("before_node_%s", nodeID[:8])
 	now := time.Now()
 
-	// Query all workflow nodes for the mission
+	// Query all mission nodes for the mission
 	cypher := `
-		MATCH (n:WorkflowNode)-[:PART_OF]->(m:Mission {id: $mission_id})
+		MATCH (n:MissionNode)-[:PART_OF]->(m:Mission {id: $mission_id})
 		RETURN n.id as node_id,
 		       n.status as status,
 		       n.task_config_json as task_config_json
@@ -537,7 +537,7 @@ func (cm *Neo4jCheckpointManager) CreateImplicitCheckpoint(ctx context.Context, 
 
 	result, err := cm.client.Query(ctx, cypher, params)
 	if err != nil {
-		return fmt.Errorf("failed to query workflow nodes: %w", err)
+		return fmt.Errorf("failed to query mission nodes: %w", err)
 	}
 
 	// Build node states map (same as CreateCheckpoint)
@@ -563,7 +563,7 @@ func (cm *Neo4jCheckpointManager) CreateImplicitCheckpoint(ctx context.Context, 
 		// Get attempt count
 		attempt := 1
 		execCypher := `
-			MATCH (e:AgentExecution)-[:EXECUTES]->(n:WorkflowNode {id: $node_id})
+			MATCH (e:AgentExecution)-[:EXECUTES]->(n:MissionNode {id: $node_id})
 			RETURN e.attempt as attempt
 			ORDER BY e.started_at DESC
 			LIMIT 1
@@ -606,7 +606,7 @@ func (cm *Neo4jCheckpointManager) CreateImplicitCheckpoint(ctx context.Context, 
 		MATCH (m:Mission {id: $mission_id})
 		CREATE (c)-[:CHECKPOINT_OF]->(m)
 		WITH c
-		MATCH (n:WorkflowNode {id: $node_id})
+		MATCH (n:MissionNode {id: $node_id})
 		CREATE (c)-[:BEFORE_NODE]->(n)
 		RETURN c.id as id
 	`

@@ -264,7 +264,7 @@ func TestDecision_Validate(t *testing.T) {
 				Reasoning:  "All objectives achieved",
 				Action:     ActionComplete,
 				Confidence: 1.0,
-				StopReason: "Successfully completed all workflow nodes",
+				StopReason: "Successfully completed all mission nodes",
 			},
 			wantErr: false,
 		},
@@ -443,7 +443,7 @@ func TestParseDecision(t *testing.T) {
 		},
 		{
 			name:    "valid_complete",
-			jsonStr: `{"reasoning":"All nodes completed","action":"complete","confidence":1.0,"stop_reason":"Successfully executed all workflow nodes"}`,
+			jsonStr: `{"reasoning":"All nodes completed","action":"complete","confidence":1.0,"stop_reason":"Successfully executed all mission nodes"}`,
 			wantErr: false,
 			check: func(t *testing.T, d *Decision) {
 				if d.Action != ActionComplete {

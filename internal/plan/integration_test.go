@@ -638,8 +638,8 @@ func TestMultiStepPlanWithDependencies(t *testing.T) {
 	// Step 3 would not be executed because we stop on first failure
 }
 
-// Test approval workflow integration
-func TestApprovalWorkflowIntegration(t *testing.T) {
+// Test approval mission integration
+func TestApprovalMissionIntegration(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("auto approve", func(t *testing.T) {

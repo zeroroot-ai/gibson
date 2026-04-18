@@ -118,6 +118,7 @@ func (r *FgaRpcRegistry) Validate(ctx context.Context, authorizer authz.Authoriz
 		"owner":              {},
 		"parent":             {},
 		"can_view_data_from": {},
+		"writer":             {},
 	}
 
 	var errs []string
@@ -236,33 +237,14 @@ func (r *FgaRpcRegistry) populate() {
 		Relation:    "member",
 		Description: "Retrieve mission checkpoints within caller's tenant",
 	})
-	r.add("/gibson.daemon.v1.DaemonService/InstallMission", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Install a mission definition into a tenant (admin only)",
-	})
-	r.add("/gibson.daemon.v1.DaemonService/UninstallMission", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Uninstall a mission definition from a tenant (admin only)",
-	})
 	r.add("/gibson.daemon.v1.DaemonService/ListMissionDefinitions", FgaCheckSpec{
 		Relation:    "member",
 		Description: "List installed mission definitions within caller's tenant",
 	})
-	r.add("/gibson.daemon.v1.DaemonService/UpdateMission", FgaCheckSpec{
-		Relation:    "member",
-		Description: "Update a mission definition within caller's tenant",
-	})
-	r.add("/gibson.daemon.v1.DaemonService/ResolveMissionDependencies", FgaCheckSpec{
-		Relation:    "member",
-		Description: "Resolve mission dependency graph within caller's tenant",
-	})
-	r.add("/gibson.daemon.v1.DaemonService/ValidateMissionDependencies", FgaCheckSpec{
-		Relation:    "member",
-		Description: "Validate mission dependencies within caller's tenant",
-	})
-	r.add("/gibson.daemon.v1.DaemonService/EnsureDependenciesRunning", FgaCheckSpec{
-		Relation:    "member",
-		Description: "Ensure mission dependencies are running within caller's tenant",
+	r.add("/gibson.daemon.v1.DaemonService/CreateMissionDefinition", FgaCheckSpec{
+		Relation:    "writer",
+		ObjectFrom:  missionDefinitionFromCtx(),
+		Description: "Register a structured mission definition with the daemon (writer on tenant's mission_definition container; granted via tenant admin)",
 	})
 
 	// intelligence.v1.IntelligenceService — cross-mission analytics RPCs.
@@ -328,22 +310,6 @@ func (r *FgaRpcRegistry) populate() {
 	r.add("/gibson.daemon.v1.DaemonService/StopComponent", FgaCheckSpec{
 		Relation:    "admin",
 		Description: "Stop a component within caller's tenant (admin only)",
-	})
-	r.add("/gibson.daemon.v1.DaemonService/InstallComponent", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Install a component into caller's tenant (admin only)",
-	})
-	r.add("/gibson.daemon.v1.DaemonService/InstallAllComponent", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Install all components into caller's tenant (admin only)",
-	})
-	r.add("/gibson.daemon.v1.DaemonService/UninstallComponent", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Uninstall a component from caller's tenant (admin only)",
-	})
-	r.add("/gibson.daemon.v1.DaemonService/UpdateComponent", FgaCheckSpec{
-		Relation:    "admin",
-		Description: "Update a component within caller's tenant (admin only)",
 	})
 	r.add("/gibson.daemon.v1.DaemonService/BuildComponent", FgaCheckSpec{
 		Relation:    "admin",

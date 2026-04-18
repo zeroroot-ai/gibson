@@ -11,7 +11,7 @@
 //     These link execution context (agent runs) to discovered assets.
 //
 //   - Structural Relationships: PART_OF, EXECUTES, PRODUCED
-//     These define the workflow/execution structure.
+//     These define the mission/execution structure.
 //
 // All relationships use MERGE semantics for idempotency.
 package harness
@@ -496,11 +496,11 @@ func (r *RelationshipResolver) CreateBelongsToRelationship(ctx context.Context, 
 }
 
 // CreateStructuralRelationship creates a structural relationship (PART_OF, EXECUTES, PRODUCED).
-// These relationships are created explicitly when workflow/execution nodes are created.
+// These relationships are created explicitly when mission/execution nodes are created.
 //
 // Valid relationship types:
-//   - PART_OF: WorkflowNode → Mission
-//   - EXECUTES: AgentExecution → WorkflowNode
+//   - PART_OF: MissionNode → Mission
+//   - EXECUTES: AgentExecution → MissionNode
 //   - PRODUCED: AgentExecution → Finding
 //   - RUN_OF: MissionRun → Mission
 //

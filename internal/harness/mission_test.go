@@ -147,7 +147,7 @@ func (m *mockMissionOperator) WaitForCompletion(ctx context.Context, missionID s
 			TotalFindings: 3,
 		},
 		FindingIDs: []string{"finding-1", "finding-2", "finding-3"},
-		WorkflowResult: map[string]any{
+		MissionResult: map[string]any{
 			"success": true,
 			"message": "mission completed",
 		},
@@ -245,7 +245,7 @@ func (m *mockMissionOperator) GetResults(ctx context.Context, missionID types.ID
 			TotalFindings: 3,
 		},
 		FindingIDs: []string{"finding-1", "finding-2"},
-		WorkflowResult: map[string]any{
+		MissionResult: map[string]any{
 			"status":  "success",
 			"output":  "test results",
 			"details": "completed successfully",
@@ -269,7 +269,7 @@ func createTestMissionHarness(missionClient MissionOperator, spawnLimits SpawnLi
 	}
 }
 
-// TestCreateMission tests the CreateMission method with valid workflow.
+// TestCreateMission tests the CreateMission method with valid mission.
 func TestCreateMission(t *testing.T) {
 	ctx := context.Background()
 	mockClient := newMockMissionOperator()
@@ -286,9 +286,9 @@ func TestCreateMission(t *testing.T) {
 	harness := createTestMissionHarness(mockClient, DefaultSpawnLimits())
 	harness.missionCtx.ID = parentID
 
-	// Create a simple workflow struct
-	workflow := map[string]any{
-		"name":  "test-workflow",
+	// Create a simple mission struct
+	mission := map[string]any{
+		"name":  "test-mission",
 		"steps": []string{"step1", "step2"},
 	}
 
@@ -308,7 +308,7 @@ func TestCreateMission(t *testing.T) {
 	}
 
 	// Execute
-	missionInfo, err := harness.CreateMission(ctx, workflow, targetID.String(), opts)
+	missionInfo, err := harness.CreateMission(ctx, mission, targetID.String(), opts)
 
 	// Verify
 	if err != nil {
@@ -337,10 +337,10 @@ func TestCreateMission_NoMissionClient(t *testing.T) {
 	ctx := context.Background()
 	harness := createTestMissionHarness(nil, DefaultSpawnLimits())
 
-	workflow := map[string]any{"name": "test"}
+	mission := map[string]any{"name": "test"}
 	targetID := types.NewID()
 
-	_, err := harness.CreateMission(ctx, workflow, targetID.String(), nil)
+	_, err := harness.CreateMission(ctx, mission, targetID.String(), nil)
 
 	if err == nil {
 		t.Fatal("Expected error when mission client is nil, got nil")
@@ -351,28 +351,28 @@ func TestCreateMission_NoMissionClient(t *testing.T) {
 	}
 }
 
-// TestCreateMission_InvalidWorkflow tests CreateMission with invalid workflow that cannot be serialized.
-func TestCreateMission_InvalidWorkflow(t *testing.T) {
+// TestCreateMission_InvalidMission tests CreateMission with invalid mission that cannot be serialized.
+func TestCreateMission_InvalidMission(t *testing.T) {
 	ctx := context.Background()
 	mockClient := newMockMissionOperator()
 	harness := createTestMissionHarness(mockClient, DefaultSpawnLimits())
 
-	// Create a workflow with un-serializable content (channel)
-	workflow := map[string]any{
+	// Create a mission with un-serializable content (channel)
+	mission := map[string]any{
 		"name":    "test",
 		"channel": make(chan int), // channels cannot be JSON marshaled
 	}
 
 	targetID := types.NewID()
 
-	_, err := harness.CreateMission(ctx, workflow, targetID.String(), nil)
+	_, err := harness.CreateMission(ctx, mission, targetID.String(), nil)
 
 	if err == nil {
-		t.Fatal("Expected error for invalid workflow, got nil")
+		t.Fatal("Expected error for invalid mission, got nil")
 	}
 
-	if !stringContains(err.Error(), "failed to serialize workflow") {
-		t.Errorf("Expected 'failed to serialize workflow' error, got %v", err)
+	if !stringContains(err.Error(), "failed to serialize mission") {
+		t.Errorf("Expected 'failed to serialize mission' error, got %v", err)
 	}
 }
 
@@ -382,9 +382,9 @@ func TestCreateMission_InvalidTargetID(t *testing.T) {
 	mockClient := newMockMissionOperator()
 	harness := createTestMissionHarness(mockClient, DefaultSpawnLimits())
 
-	workflow := map[string]any{"name": "test"}
+	mission := map[string]any{"name": "test"}
 
-	_, err := harness.CreateMission(ctx, workflow, "invalid-id", nil)
+	_, err := harness.CreateMission(ctx, mission, "invalid-id", nil)
 
 	if err == nil {
 		t.Fatal("Expected error for invalid target ID, got nil")
@@ -429,10 +429,10 @@ func TestCreateMission_SpawnLimitExceeded(t *testing.T) {
 	harness := createTestMissionHarness(mockClient, limits)
 	harness.missionCtx.ID = parentID
 
-	workflow := map[string]any{"name": "test"}
+	mission := map[string]any{"name": "test"}
 	targetID := types.NewID()
 
-	_, err := harness.CreateMission(ctx, workflow, targetID.String(), nil)
+	_, err := harness.CreateMission(ctx, mission, targetID.String(), nil)
 
 	if err == nil {
 		t.Fatal("Expected spawn limit error, got nil")
@@ -591,7 +591,7 @@ func TestWaitForMission(t *testing.T) {
 			TotalFindings: 5,
 		},
 		FindingIDs: []string{"finding-1", "finding-2", "finding-3"},
-		WorkflowResult: map[string]any{
+		MissionResult: map[string]any{
 			"success": true,
 			"data":    "test data",
 		},
@@ -834,7 +834,7 @@ func TestGetMissionResults(t *testing.T) {
 			TotalFindings: 7,
 		},
 		FindingIDs: []string{"finding-1", "finding-2", "finding-3", "finding-4"},
-		WorkflowResult: map[string]any{
+		MissionResult: map[string]any{
 			"status":          "success",
 			"vulnerabilities": 4,
 			"scan_time":       180,
@@ -906,14 +906,14 @@ func TestMissionLineageTracking(t *testing.T) {
 	harness := createTestMissionHarness(mockClient, DefaultSpawnLimits())
 	harness.missionCtx.ID = parentID
 
-	workflow := map[string]any{"name": "child-workflow"}
+	mission := map[string]any{"name": "child-mission"}
 	targetID := types.NewID()
 	opts := &sdkmission.CreateMissionOpts{
 		Name: "Child Mission",
 	}
 
 	// Create child mission
-	childInfo, err := harness.CreateMission(ctx, workflow, targetID.String(), opts)
+	childInfo, err := harness.CreateMission(ctx, mission, targetID.String(), opts)
 	if err != nil {
 		t.Fatalf("Failed to create child mission: %v", err)
 	}
@@ -967,7 +967,7 @@ func TestEndToEndMissionFlow(t *testing.T) {
 	harness.missionCtx.ID = parentID
 
 	// Step 1: Create mission
-	workflow := map[string]any{
+	mission := map[string]any{
 		"name":   "integration-test",
 		"steps":  []string{"scan", "analyze", "report"},
 		"config": map[string]any{"timeout": 300},
@@ -982,7 +982,7 @@ func TestEndToEndMissionFlow(t *testing.T) {
 		},
 	}
 
-	missionInfo, err := harness.CreateMission(ctx, workflow, targetID.String(), opts)
+	missionInfo, err := harness.CreateMission(ctx, mission, targetID.String(), opts)
 	if err != nil {
 		t.Fatalf("Step 1 (Create) failed: %v", err)
 	}
@@ -1151,10 +1151,10 @@ func TestSpawnLimitIntegration(t *testing.T) {
 			harness := createTestMissionHarness(mockClient, tt.limits)
 			harness.missionCtx.ID = parentID
 
-			workflow := map[string]any{"name": "test"}
+			mission := map[string]any{"name": "test"}
 			targetID := types.NewID()
 
-			_, err := harness.CreateMission(ctx, workflow, targetID.String(), nil)
+			_, err := harness.CreateMission(ctx, mission, targetID.String(), nil)
 
 			if tt.expectError {
 				if err == nil {

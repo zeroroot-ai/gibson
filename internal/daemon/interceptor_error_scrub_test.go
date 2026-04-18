@@ -67,7 +67,7 @@ func TestNeedsScrubbing(t *testing.T) {
 		},
 		{
 			name:     "simple user-facing error",
-			msg:      "either workflow_path or workflow_yaml must be provided",
+			msg:      "either mission_definition_id or mission_yaml must be provided",
 			expected: false,
 		},
 		{
@@ -96,9 +96,9 @@ func TestBuildSafeMessage(t *testing.T) {
 		{
 			name:     "invalid argument with yaml",
 			code:     codes.InvalidArgument,
-			msg:      "invalid workflow YAML: yaml.TypeError line 5",
-			err:      status.Error(codes.InvalidArgument, "invalid workflow YAML: yaml.TypeError line 5"),
-			expected: "invalid workflow definition: check YAML syntax and required fields",
+			msg:      "invalid mission YAML: yaml.TypeError line 5",
+			err:      status.Error(codes.InvalidArgument, "invalid mission YAML: yaml.TypeError line 5"),
+			expected: "invalid mission definition: check YAML syntax and required fields",
 		},
 		{
 			name:     "invalid argument with component",
@@ -154,17 +154,17 @@ func TestBuildSafeMessage(t *testing.T) {
 
 func TestScrubError_PassthroughCleanErrors(t *testing.T) {
 	// Clean errors should pass through without modification
-	cleanErr := status.Error(codes.InvalidArgument, "either workflow_path or workflow_yaml must be provided")
+	cleanErr := status.Error(codes.InvalidArgument, "either mission_definition_id or mission_yaml must be provided")
 	result := scrubError(nil, nil, nil, cleanErr, "/test.Method")
 	st, _ := status.FromError(result)
-	assert.Equal(t, "either workflow_path or workflow_yaml must be provided", st.Message())
+	assert.Equal(t, "either mission_definition_id or mission_yaml must be provided", st.Message())
 }
 
 func TestScrubError_ScrubbsDirtyErrors(t *testing.T) {
 	// Dirty errors should be scrubbed
-	dirtyErr := status.Error(codes.InvalidArgument, "invalid workflow YAML: yaml: line 5: cannot unmarshal !!str into mission.yamlNodeData")
+	dirtyErr := status.Error(codes.InvalidArgument, "invalid mission YAML: yaml: line 5: cannot unmarshal !!str into mission.yamlNodeData")
 	result := scrubError(nil, nil, nil, dirtyErr, "/test.Method")
 	st, _ := status.FromError(result)
-	assert.Equal(t, "invalid workflow definition: check YAML syntax and required fields", st.Message())
+	assert.Equal(t, "invalid mission definition: check YAML syntax and required fields", st.Message())
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 }

@@ -64,7 +64,7 @@ func ExampleDecision_spawnAgent() {
 // Example demonstrates a completion decision
 func ExampleDecision_complete() {
 	decision := &orchestrator.Decision{
-		Reasoning:  "All workflow nodes have been executed successfully. Reconnaissance identified 5 hosts, vulnerability scanning found 3 exploitable services, and exploitation was successful on 2 targets. All mission objectives have been achieved.",
+		Reasoning:  "All mission nodes have been executed successfully. Reconnaissance identified 5 hosts, vulnerability scanning found 3 exploitable services, and exploitation was successful on 2 targets. All mission objectives have been achieved.",
 		Action:     orchestrator.ActionComplete,
 		Confidence: 0.98,
 		StopReason: "Successfully compromised target infrastructure and established persistent access",

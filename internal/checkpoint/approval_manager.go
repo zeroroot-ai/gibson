@@ -10,7 +10,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// ApprovalManager manages the approval workflow lifecycle for human-in-the-loop operations.
+// ApprovalManager manages the approval mission lifecycle for human-in-the-loop operations.
 // It coordinates approval requests, decisions, timeouts, and state modifications during review.
 type ApprovalManager interface {
 	// RequestApproval initiates an approval request and pauses execution.
@@ -41,7 +41,7 @@ type ApprovalManager interface {
 
 // ApprovalRequest contains the details needed to create an approval request.
 type ApprovalRequest struct {
-	// NodeID is the workflow node requesting approval.
+	// NodeID is the mission node requesting approval.
 	NodeID string
 
 	// Title is a brief summary of what needs approval.

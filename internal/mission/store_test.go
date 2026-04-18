@@ -41,14 +41,14 @@ func createTestMission(t *testing.T) *Mission {
 	t.Helper()
 
 	return &Mission{
-		ID:          types.NewID(),
-		Name:        "test-mission-" + types.NewID().String()[:8],
-		Description: "Test mission description",
-		Status:      MissionStatusPending,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:                  types.NewID(),
+		Name:                "test-mission-" + types.NewID().String()[:8],
+		Description:         "Test mission description",
+		Status:              MissionStatusPending,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 }
 
@@ -260,7 +260,7 @@ func TestDBMissionStore_SaveCheckpoint(t *testing.T) {
 		PendingNodes:   []string{"node3", "node4"},
 		LastNodeID:     "node2",
 		CheckpointedAt: time.Now(),
-		WorkflowState:  map[string]any{"key": "value"},
+		MissionState:   map[string]any{"key": "value"},
 		NodeResults:    map[string]any{"node1": "result1"},
 	}
 

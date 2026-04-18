@@ -11,7 +11,7 @@ import (
 )
 
 // DependencyResolver resolves and manages component dependencies for missions.
-// It provides methods to build dependency trees from missions or workflow files,
+// It provides methods to build dependency trees from missions,
 // validate the state of all dependencies, and ensure all required components are running.
 //
 // The resolver uses a three-phase approach:
@@ -50,18 +50,6 @@ type DependencyResolver interface {
 	//  - A required component cannot be found in the store
 	//  - Manifest loading fails for a critical component
 	ResolveFromMission(ctx context.Context, mission MissionDefinition) (*DependencyTree, error)
-
-	// ResolveFromWorkflow builds a dependency tree from a workflow YAML file path.
-	// This is a convenience method that loads the workflow file, parses it into a
-	// mission definition, and then calls ResolveFromMission.
-	//
-	// The workflowPath parameter must be an absolute path to a valid workflow YAML file.
-	//
-	// Returns an error if:
-	//  - The workflow file cannot be read
-	//  - The workflow YAML is malformed
-	//  - Any errors occur during mission resolution (see ResolveFromMission)
-	ResolveFromWorkflow(ctx context.Context, workflowPath string) (*DependencyTree, error)
 
 	// ValidateState checks the current state of all components in the dependency tree.
 	// It verifies that each component is installed, running, and healthy by:
@@ -109,16 +97,16 @@ type DependencyResolver interface {
 //	func (m *mission.MissionDefinition) Nodes() []MissionNode { ... }
 //	func (m *mission.MissionDefinition) Dependencies() []MissionDependency { ... }
 type MissionDefinition interface {
-	// Nodes returns all nodes (workflow steps) in the mission.
+	// Nodes returns all nodes (mission steps) in the mission.
 	// Each node may reference agents, tools, or plugins.
 	Nodes() []MissionNode
 
 	// Dependencies returns explicitly declared dependencies from the mission YAML.
-	// These are dependencies listed in the "dependencies" section of the workflow.
+	// These are dependencies listed in the "dependencies" section of the mission.
 	Dependencies() []MissionDependency
 }
 
-// MissionNode represents a single node (workflow step) in a mission.
+// MissionNode represents a single node (mission step) in a mission.
 // Each node has a type and may reference a specific component.
 type MissionNode interface {
 	// ID returns the unique identifier for this node within the mission.
@@ -133,7 +121,7 @@ type MissionNode interface {
 }
 
 // MissionDependency represents an explicit dependency declaration from a mission YAML.
-// This corresponds to entries in the "dependencies" section of the workflow.
+// This corresponds to entries in the "dependencies" section of the mission.
 type MissionDependency interface {
 	// Kind returns the component kind (agent, tool, plugin).
 	Kind() component.ComponentKind
@@ -405,13 +393,6 @@ func parseComponentDependency(depStr string) (component.ComponentKind, string, s
 
 	// No kind specified - default to agent
 	return component.ComponentKindAgent, nameWithKind, version
-}
-
-// ResolveFromWorkflow builds a dependency tree from a workflow YAML file path.
-//
-// Not yet implemented. Call ResolveFromMission with a parsed mission definition instead.
-func (r *resolver) ResolveFromWorkflow(_ context.Context, workflowPath string) (*DependencyTree, error) {
-	return nil, fmt.Errorf("ResolveFromWorkflow: not yet implemented (workflow path: %s)", workflowPath)
 }
 
 // ValidateState checks the current state of all components in the dependency tree.

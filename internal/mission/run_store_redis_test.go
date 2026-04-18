@@ -486,7 +486,7 @@ func TestRedisMissionRunStore_CountByMission(t *testing.T) {
 	assert.Equal(t, 0, count)
 }
 
-func TestRedisMissionRunStore_CompleteWorkflow(t *testing.T) {
+func TestRedisMissionRunStore_CompleteMission(t *testing.T) {
 	// Integration test: simulate a complete mission run lifecycle
 	store, cleanup := setupRedisRunStore(t)
 	defer cleanup()
@@ -504,7 +504,7 @@ func TestRedisMissionRunStore_CompleteWorkflow(t *testing.T) {
 	run.Checkpoint = &MissionCheckpoint{
 		ID:             types.NewID(),
 		Version:        1,
-		WorkflowState:  map[string]any{"step": "init"},
+		MissionState:   map[string]any{"step": "init"},
 		CompletedNodes: []string{},
 		PendingNodes:   []string{"node1"},
 		NodeResults:    map[string]any{},

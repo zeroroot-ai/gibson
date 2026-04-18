@@ -9,12 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestConfigIntegration_FullWorkflow tests the complete workflow:
+// TestConfigIntegration_FullMission tests the complete mission:
 // 1. Load YAML config from file
 // 2. Validate configuration
 // 3. Convert to EvalOptions
 // 4. Build scorer instances
-func TestConfigIntegration_FullWorkflow(t *testing.T) {
+func TestConfigIntegration_FullMission(t *testing.T) {
 	// Create a temporary config file
 	yaml := `
 scorers:

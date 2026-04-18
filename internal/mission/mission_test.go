@@ -101,11 +101,11 @@ func TestMissionStatus_CanTransitionTo(t *testing.T) {
 // TestMission_Validate tests mission validation
 func TestMission_Validate(t *testing.T) {
 	validMission := &Mission{
-		ID:         types.NewID(),
-		Name:       "Test Mission",
-		TargetID:   types.NewID(),
-		WorkflowID: types.NewID(),
-		Status:     MissionStatusPending,
+		ID:                  types.NewID(),
+		Name:                "Test Mission",
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		Status:              MissionStatusPending,
 	}
 
 	tests := []struct {
@@ -122,10 +122,10 @@ func TestMission_Validate(t *testing.T) {
 		{
 			name: "missing ID",
 			mission: &Mission{
-				Name:       "Test",
-				TargetID:   types.NewID(),
-				WorkflowID: types.NewID(),
-				Status:     MissionStatusPending,
+				Name:                "Test",
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
+				Status:              MissionStatusPending,
 			},
 			wantErr: true,
 			errMsg:  "mission ID is required",
@@ -133,10 +133,10 @@ func TestMission_Validate(t *testing.T) {
 		{
 			name: "missing name",
 			mission: &Mission{
-				ID:         types.NewID(),
-				TargetID:   types.NewID(),
-				WorkflowID: types.NewID(),
-				Status:     MissionStatusPending,
+				ID:                  types.NewID(),
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
+				Status:              MissionStatusPending,
 			},
 			wantErr: true,
 			errMsg:  "mission name is required",
@@ -144,16 +144,16 @@ func TestMission_Validate(t *testing.T) {
 		{
 			name: "missing target ID",
 			mission: &Mission{
-				ID:         types.NewID(),
-				Name:       "Test",
-				WorkflowID: types.NewID(),
-				Status:     MissionStatusPending,
+				ID:                  types.NewID(),
+				Name:                "Test",
+				MissionDefinitionID: types.NewID(),
+				Status:              MissionStatusPending,
 			},
 			wantErr: true,
 			errMsg:  "target ID is required",
 		},
 		{
-			name: "missing workflow ID",
+			name: "missing mission ID",
 			mission: &Mission{
 				ID:       types.NewID(),
 				Name:     "Test",
@@ -161,15 +161,15 @@ func TestMission_Validate(t *testing.T) {
 				Status:   MissionStatusPending,
 			},
 			wantErr: true,
-			errMsg:  "workflow ID is required",
+			errMsg:  "mission ID is required",
 		},
 		{
 			name: "missing status",
 			mission: &Mission{
-				ID:         types.NewID(),
-				Name:       "Test",
-				TargetID:   types.NewID(),
-				WorkflowID: types.NewID(),
+				ID:                  types.NewID(),
+				Name:                "Test",
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
 			},
 			wantErr: true,
 			errMsg:  "mission status is required",
@@ -618,11 +618,11 @@ func TestMissionError_Error(t *testing.T) {
 		{
 			name: "error with cause",
 			err: &MissionError{
-				Code:    ErrMissionWorkflowFailed,
-				Message: "workflow execution failed",
+				Code:    ErrMissionMissionFailed,
+				Message: "mission execution failed",
 				Cause:   errors.New("database connection lost"),
 			},
-			expected: "[workflow_failed] workflow execution failed: database connection lost",
+			expected: "[mission_failed] mission execution failed: database connection lost",
 		},
 	}
 
@@ -690,16 +690,16 @@ func TestMissionErrorHelpers(t *testing.T) {
 		assert.Equal(t, "target-123", err.Context["target_id"])
 	})
 
-	t.Run("NewWorkflowNotFoundError", func(t *testing.T) {
-		err := NewWorkflowNotFoundError("workflow-123")
-		assert.Equal(t, ErrMissionWorkflowNotFound, err.Code)
-		assert.Equal(t, "workflow-123", err.Context["workflow_id"])
+	t.Run("NewMissionNotFoundError", func(t *testing.T) {
+		err := NewMissionNotFoundError("mission-123")
+		assert.Equal(t, ErrMissionMissionNotFound, err.Code)
+		assert.Equal(t, "mission-123", err.Context["mission_definition_id"])
 	})
 
-	t.Run("NewWorkflowFailedError", func(t *testing.T) {
+	t.Run("NewMissionFailedError", func(t *testing.T) {
 		causeErr := errors.New("node failed")
-		err := NewWorkflowFailedError("workflow-123", causeErr)
-		assert.Equal(t, ErrMissionWorkflowFailed, err.Code)
+		err := NewMissionFailedError("mission-123", causeErr)
+		assert.Equal(t, ErrMissionMissionFailed, err.Code)
 		assert.Equal(t, causeErr, err.Cause)
 	})
 

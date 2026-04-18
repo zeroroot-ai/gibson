@@ -344,10 +344,10 @@ type FindingSubmittedData struct {
 }
 
 type MissionStartedData struct {
-	MissionID    types.ID json:"mission_id"
-	WorkflowName string   json:"workflow_name,omitempty"
-	TargetID     types.ID json:"target_id,omitempty"
-	NodeCount    int      json:"node_count"
+	MissionID          types.ID json:"mission_id"
+	MissionDefinitionName string   json:"mission_definition_name,omitempty"
+	TargetID           types.ID json:"target_id,omitempty"
+	NodeCount          int      json:"node_count"
 }
 
 type MissionProgressData struct {

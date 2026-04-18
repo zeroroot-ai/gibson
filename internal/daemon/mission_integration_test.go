@@ -34,7 +34,7 @@ func addBootstrapMocks(mockClient *graph.MockGraphClient, nodeCount, depCount in
 	mockClient.AddQueryResult(graph.QueryResult{
 		Records: []map[string]any{{"run_id": "mock-run-id"}},
 	})
-	// WorkflowNode creation (one per node)
+	// MissionNode creation (one per node)
 	for i := 0; i < nodeCount; i++ {
 		mockClient.AddQueryResult(graph.QueryResult{
 			Records: []map[string]any{{"id": fmt.Sprintf("node-%d-id", i+1)}},
@@ -82,13 +82,13 @@ func TestMissionLifecycle(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:          missionID,
-		Name:        "Lifecycle Test Mission",
-		Description: "Verifies the full bootstrap lifecycle path",
-		Status:      mission.MissionStatusRunning,
-		TargetID:    types.NewID(),
-		WorkflowID:  types.NewID(),
-		StartedAt:   mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Lifecycle Test Mission",
+		Description:         "Verifies the full bootstrap lifecycle path",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	def := &mission.MissionDefinition{
@@ -139,7 +139,7 @@ func TestMissionLifecycle(t *testing.T) {
 }
 
 // TestMissionEventStreamOrdering verifies that the DAG topology of a parallel
-// workflow is correctly represented after bootstrap.  Specifically:
+// mission is correctly represented after bootstrap.  Specifically:
 //   - Entry nodes (no dependencies) are created with status "ready"
 //   - Downstream nodes (with dependencies) are created with status "pending"
 //   - The correct number of DEPENDS_ON edges is created
@@ -167,16 +167,16 @@ func TestMissionEventStreamOrdering(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:         missionID,
-		Name:       "Parallel Workflow Mission",
-		Status:     mission.MissionStatusRunning,
-		TargetID:   types.NewID(),
-		WorkflowID: types.NewID(),
-		StartedAt:  mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Parallel Mission",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	def := &mission.MissionDefinition{
-		Name:        "Parallel Workflow Mission",
+		Name:        "Parallel Mission",
 		Description: "Fan-out then join to verify event ordering.",
 		Nodes: map[string]*mission.MissionNode{
 			"node-1": {
@@ -204,15 +204,15 @@ func TestMissionEventStreamOrdering(t *testing.T) {
 
 	run := newTestMissionRun(missionID)
 	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
-	require.NoError(t, err, "Bootstrap should succeed for a parallel workflow")
+	require.NoError(t, err, "Bootstrap should succeed for a parallel mission")
 	require.NotNil(t, result)
 
 	// Verify query count: 1 Mission + 1 MissionRun + 4 nodes + 4 deps = 10.
 	calls := mockClient.GetCallsByMethod("Query")
-	assert.Len(t, calls, 10, "Parallel workflow should issue 10 queries (1 mission + 1 run + 4 nodes + 4 deps)")
+	assert.Len(t, calls, 10, "Parallel mission should issue 10 queries (1 mission + 1 run + 4 nodes + 4 deps)")
 
 	// The first two calls are CreateMission and CreateMissionRun.
-	// Calls 3-6 (indices 2-5) are WorkflowNode creation.  Verify status semantics:
+	// Calls 3-6 (indices 2-5) are MissionNode creation.  Verify status semantics:
 	//   node-1 has no deps → "ready"; node-2/3/4 have deps → "pending".
 	readyCount, pendingCount := 0, 0
 	for _, call := range calls[2:6] {
@@ -254,12 +254,12 @@ func TestMissionStop(t *testing.T) {
 		missionID := types.NewID()
 		now := time.Now()
 		m := &mission.Mission{
-			ID:         missionID,
-			Name:       "Long Running Mission",
-			Status:     mission.MissionStatusRunning,
-			TargetID:   types.NewID(),
-			WorkflowID: types.NewID(),
-			StartedAt:  mission.NewUnixTimePtr(&now),
+			ID:                  missionID,
+			Name:                "Long Running Mission",
+			Status:              mission.MissionStatusRunning,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			StartedAt:           mission.NewUnixTimePtr(&now),
 		}
 		def := &mission.MissionDefinition{
 			Name:        "Long Running Mission",
@@ -297,12 +297,12 @@ func TestMissionStop(t *testing.T) {
 		missionID := types.NewID()
 		now := time.Now()
 		m := &mission.Mission{
-			ID:         missionID,
-			Name:       "Force Stop Mission",
-			Status:     mission.MissionStatusRunning,
-			TargetID:   types.NewID(),
-			WorkflowID: types.NewID(),
-			StartedAt:  mission.NewUnixTimePtr(&now),
+			ID:                  missionID,
+			Name:                "Force Stop Mission",
+			Status:              mission.MissionStatusRunning,
+			TargetID:            types.NewID(),
+			MissionDefinitionID: types.NewID(),
+			StartedAt:           mission.NewUnixTimePtr(&now),
 		}
 		def := &mission.MissionDefinition{
 			Name:        "Force Stop Mission",
@@ -350,12 +350,12 @@ func TestMissionVariables(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:         missionID,
-		Name:       "Variable Substitution Mission",
-		Status:     mission.MissionStatusRunning,
-		TargetID:   types.NewID(),
-		WorkflowID: types.NewID(),
-		StartedAt:  mission.NewUnixTimePtr(&now),
+		ID:                  missionID,
+		Name:                "Variable Substitution Mission",
+		Status:              mission.MissionStatusRunning,
+		TargetID:            types.NewID(),
+		MissionDefinitionID: types.NewID(),
+		StartedAt:           mission.NewUnixTimePtr(&now),
 	}
 
 	// Nodes use ${VAR} placeholders in inputs.
@@ -462,12 +462,12 @@ func TestMultipleConcurrentMissions(t *testing.T) {
 			missionID := types.NewID()
 			now := time.Now()
 			m := &mission.Mission{
-				ID:         missionID,
-				Name:       fmt.Sprintf("Concurrent Mission %d", i),
-				Status:     mission.MissionStatusRunning,
-				TargetID:   types.NewID(),
-				WorkflowID: types.NewID(),
-				StartedAt:  mission.NewUnixTimePtr(&now),
+				ID:                  missionID,
+				Name:                fmt.Sprintf("Concurrent Mission %d", i),
+				Status:              mission.MissionStatusRunning,
+				TargetID:            types.NewID(),
+				MissionDefinitionID: types.NewID(),
+				StartedAt:           mission.NewUnixTimePtr(&now),
 			}
 			def := &mission.MissionDefinition{
 				Name:        fmt.Sprintf("Concurrent Mission %d", i),
@@ -532,7 +532,7 @@ func TestMultipleConcurrentMissions(t *testing.T) {
 // This integration test verifies that:
 // 1. A mission can be bootstrapped into Neo4j with GraphBootstrapper
 // 2. The Mission node exists in Neo4j
-// 3. WorkflowNode nodes exist with PART_OF relationships to the mission
+// 3. MissionNode nodes exist with PART_OF relationships to the mission
 // 4. Observer.Observe() can retrieve the mission without "mission not found" errors
 func TestMissionBootstrapAndObserve(t *testing.T) {
 	if testing.Short() {
@@ -566,14 +566,14 @@ func TestMissionBootstrapAndObserve(t *testing.T) {
 	missionID := types.NewID()
 	now := time.Now()
 	m := &mission.Mission{
-		ID:           missionID,
-		Name:         "Integration Test Mission",
-		Description:  "Mission for testing bootstrap and observe flow",
-		Status:       mission.MissionStatusRunning,
-		TargetID:     types.NewID(),
-		WorkflowID:   types.NewID(),
-		WorkflowJSON: `{"name": "test-workflow", "description": "Test workflow"}`,
-		StartedAt:    mission.NewUnixTimePtr(&now),
+		ID:                    missionID,
+		Name:                  "Integration Test Mission",
+		Description:           "Mission for testing bootstrap and observe flow",
+		Status:                mission.MissionStatusRunning,
+		TargetID:              types.NewID(),
+		MissionDefinitionID:   types.NewID(),
+		MissionDefinitionJSON: `{"name": "test-mission", "description": "Test mission"}`,
+		StartedAt:             mission.NewUnixTimePtr(&now),
 	}
 
 	// Create mission definition with 3 nodes:
@@ -658,16 +658,16 @@ func TestMissionBootstrapAndObserve(t *testing.T) {
 			record["id"], record["name"], record["status"])
 	})
 
-	// Step 4: Verify WorkflowNode nodes exist with PART_OF relationships
-	t.Run("Verify WorkflowNodes and Relationships", func(t *testing.T) {
-		// Query for workflow nodes linked to this mission
+	// Step 4: Verify MissionNode nodes exist with PART_OF relationships
+	t.Run("Verify MissionNodes and Relationships", func(t *testing.T) {
+		// Query for mission nodes linked to this mission
 		result, err := graphClient.Query(ctx, `
-			MATCH (m:Mission {id: $mission_id})<-[:PART_OF]-(n:WorkflowNode)
+			MATCH (m:Mission {id: $mission_id})<-[:PART_OF]-(n:MissionNode)
 			RETURN n.id as id, n.name as name, n.type as type, n.status as status
 			ORDER BY n.name
 		`, map[string]any{"mission_id": missionID.String()})
-		require.NoError(t, err, "Query for WorkflowNode nodes should succeed")
-		require.Len(t, result.Records, 3, "Should find exactly 3 WorkflowNode nodes")
+		require.NoError(t, err, "Query for MissionNode nodes should succeed")
+		require.Len(t, result.Records, 3, "Should find exactly 3 MissionNode nodes")
 
 		// Verify nodes have correct properties
 		nodeNames := []string{"node-1", "node-2", "node-3"}
@@ -677,7 +677,7 @@ func TestMissionBootstrapAndObserve(t *testing.T) {
 			assert.NotEmpty(t, record["type"], "Node type should not be empty")
 			assert.NotEmpty(t, record["status"], "Node status should not be empty")
 
-			t.Logf("WorkflowNode verified: name=%s, id=%s, type=%s, status=%s",
+			t.Logf("MissionNode verified: name=%s, id=%s, type=%s, status=%s",
 				record["name"], record["id"], record["type"], record["status"])
 		}
 	})
@@ -686,7 +686,7 @@ func TestMissionBootstrapAndObserve(t *testing.T) {
 	t.Run("Verify Node Dependencies", func(t *testing.T) {
 		// Query for DEPENDS_ON relationships
 		result, err := graphClient.Query(ctx, `
-			MATCH (from:WorkflowNode)-[:DEPENDS_ON]->(to:WorkflowNode)
+			MATCH (from:MissionNode)-[:DEPENDS_ON]->(to:MissionNode)
 			WHERE from.mission_id = $mission_id
 			RETURN from.name as from_name, to.name as to_name
 			ORDER BY from_name, to_name

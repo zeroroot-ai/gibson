@@ -398,4 +398,3 @@ func NewAgentUnregisteredEvent(agentID, agentName string) api.EventData {
 		},
 	}
 }
-

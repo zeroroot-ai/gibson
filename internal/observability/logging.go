@@ -73,7 +73,7 @@ func NewLogger(config Config) *Logger {
 //
 // Example:
 //
-//	logger.Debug(ctx, "processing workflow node", "node_id", "recon-1", "status", "running")
+//	logger.Debug(ctx, "processing mission node", "node_id", "recon-1", "status", "running")
 func (l *Logger) Debug(ctx context.Context, msg string, args ...any) {
 	// Add context fields and log at debug level
 	logger := l.withContextFields(ctx)
@@ -235,7 +235,7 @@ func (l *Logger) WithAgent(agentName string) *Logger {
 // This method returns a new Logger instance; it does not modify the original.
 //
 // Parameters:
-//   - nodeID: The workflow node identifier
+//   - nodeID: The mission node identifier
 //
 // Returns:
 //   - *Logger: A new logger with the node_id field set

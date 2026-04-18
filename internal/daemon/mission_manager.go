@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -31,10 +30,11 @@ import (
 // targetStore is an interface for target lookup in mission manager
 type targetStoreLookup interface {
 	GetByName(ctx context.Context, name string) (*types.Target, error)
+	Get(ctx context.Context, id types.ID) (*types.Target, error)
 }
 
 // missionManager implements the MissionManager interface for daemon operations.
-// It orchestrates mission lifecycle including workflow loading, execution, tracking,
+// It orchestrates mission lifecycle including mission loading, execution, tracking,
 // and event emission.
 type missionManager struct {
 	config          *config.Config
@@ -52,9 +52,9 @@ type missionManager struct {
 	infrastructure  *Infrastructure
 	otelStack       *observability.OTelObservabilityStack // nil when OTel is disabled
 	eventBus        orchestrator.EventBus                 // EventBus for emitting orchestration events
-	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
+	// TODO(mission-migration): Re-enable GraphRAG storage for mission definitions
 	// graphLoader will store mission definitions in Neo4j for cross-mission analysis
-	// Currently disabled during workflow -> mission migration
+	// Currently disabled during mission -> mission migration
 	// graphLoader     *MissionGraphLoader
 
 	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
@@ -98,8 +98,8 @@ func newMissionManager(
 	eventBus orchestrator.EventBus,
 	authzStore mission.MissionAuthzStore,
 ) *missionManager {
-	// TODO(workflow-migration): Re-enable GraphRAG storage for mission definitions
-	// GraphLoader initialization disabled during workflow -> mission migration
+	// TODO(mission-migration): Re-enable GraphRAG storage for mission definitions
+	// GraphLoader initialization disabled during mission -> mission migration
 	// Will be replaced with MissionGraphLoader that works with mission.MissionDefinition
 	// if infrastructure != nil && infrastructure.graphRAGClient != nil {
 	//     graphLoader = mission.NewGraphLoader(infrastructure.graphRAGClient)
@@ -127,44 +127,57 @@ func newMissionManager(
 	}
 }
 
-// Run starts a mission and returns an event channel for progress updates.
-// This implements the core mission execution flow:
-// 1. Load workflow from file
-// 2. Create mission context and stores
-// 3. Launch workflow executor in goroutine
-// 4. Return event channel for streaming updates
-func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID string, variables map[string]string, memoryContinuity string) (<-chan api.MissionEventData, error) {
+// Run starts a mission by reference and returns an event channel for progress
+// updates. Missions are invoked by reference only — the mission definition and
+// target must already be registered. File-path / inline-YAML invocation was
+// removed under spec mission-api-only-cleanup.
+func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, targetID string, variables map[string]string, memoryContinuity string) (<-chan api.MissionEventData, error) {
 	m.logger.Info("starting mission",
-		"workflow_path", workflowPath,
-		"mission_id", missionID,
+		"mission_definition_id", missionDefinitionID,
+		"target_id", targetID,
 		"variables", len(variables),
 		"memory_continuity", memoryContinuity,
 	)
 
-	// Load mission definition from YAML file
-	def, err := mission.ParseDefinition(workflowPath)
+	if missionDefinitionID == "" {
+		return nil, fmt.Errorf("mission_definition_id is required")
+	}
+	if targetID == "" {
+		return nil, fmt.Errorf("target_id is required")
+	}
+
+	if m.missionStore == nil {
+		return nil, fmt.Errorf("mission store not initialized")
+	}
+
+	// Load mission definition from the registered-definition store. The caller
+	// may supply either the name (friendly ID used in Redis key) or the parsed
+	// ID — try name first, fall back to ID lookup across all definitions.
+	def, err := m.missionStore.GetDefinition(ctx, missionDefinitionID)
 	if err != nil {
-		m.logger.Error("failed to load mission definition", "error", err, "path", workflowPath)
-		return nil, fmt.Errorf("failed to load mission definition from %s: %w", workflowPath, err)
+		m.logger.Error("failed to load mission definition", "error", err, "mission_definition_id", missionDefinitionID)
+		return nil, fmt.Errorf("failed to load mission definition %s: %w", missionDefinitionID, err)
+	}
+	if def == nil {
+		// Fall back to ID-based lookup across all definitions.
+		defs, listErr := m.missionStore.ListDefinitions(ctx)
+		if listErr == nil {
+			for _, candidate := range defs {
+				if candidate.ID.String() == missionDefinitionID {
+					def = candidate
+					break
+				}
+			}
+		}
+		if def == nil {
+			return nil, fmt.Errorf("mission definition not found: %s", missionDefinitionID)
+		}
 	}
 
 	m.logger.Debug("mission definition loaded",
 		"mission_name", def.Name,
 		"node_count", len(def.Nodes),
 	)
-
-	// Generate mission ID if not provided
-	if missionID == "" {
-		missionID = types.NewID().String()
-	}
-
-	// Parse mission ID
-	missionIDTyped, err := types.ParseID(missionID)
-	if err != nil {
-		m.logger.Error("invalid mission ID format", "error", err, "mission_id", missionID)
-		return nil, fmt.Errorf("invalid mission ID format: %w", err)
-	}
-	def.ID = missionIDTyped
 
 	// Store mission definition in GraphRAG for cross-mission analysis (non-blocking).
 	// Errors are logged at WARN and must not prevent mission startup.
@@ -175,65 +188,59 @@ func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID
 			if err := m.storeMissionInGraphRAG(storeCtx, d); err != nil {
 				m.logger.WarnContext(storeCtx, "failed to store mission definition in GraphRAG (best-effort)",
 					"error", err,
-					"mission_id", missionID,
+					"mission_definition_id", missionDefinitionID,
 					"mission_name", d.Name,
 				)
 			}
 		}(def)
 	}
 
-	// Check if mission ID already exists
+	// Resolve target ID via the target store. The caller may supply either a
+	// target UUID or a target name; try both.
+	if m.targetStore == nil {
+		return nil, fmt.Errorf("target_id '%s' supplied but target store not available", targetID)
+	}
+	var resolvedTargetID types.ID
+	var targetRef string
+	if parsed, parseErr := types.ParseID(targetID); parseErr == nil {
+		target, getErr := m.targetStore.Get(ctx, parsed)
+		if getErr == nil && target != nil {
+			resolvedTargetID = target.ID
+			if target.URL != "" {
+				targetRef = target.URL
+			} else if conn, ok := target.Connection["url"].(string); ok {
+				targetRef = conn
+			} else {
+				targetRef = target.Name
+			}
+		}
+	}
+	if resolvedTargetID.IsZero() {
+		target, getErr := m.targetStore.GetByName(ctx, targetID)
+		if getErr != nil || target == nil {
+			return nil, fmt.Errorf("target '%s' not found", targetID)
+		}
+		resolvedTargetID = target.ID
+		if target.URL != "" {
+			targetRef = target.URL
+		} else if conn, ok := target.Connection["url"].(string); ok {
+			targetRef = conn
+		} else {
+			targetRef = target.Name
+		}
+	}
+	m.logger.Debug("resolved target", "target_id", resolvedTargetID, "target_ref", targetRef)
+
+	// Build an internal mission ID for tracking this run.
+	missionID := types.NewID().String()
+
+	// Check if mission ID already exists (defensive — should not be possible with fresh IDs)
 	m.mu.RLock()
 	if _, exists := m.activeMissions[missionID]; exists {
 		m.mu.RUnlock()
 		return nil, fmt.Errorf("mission %s is already running", missionID)
 	}
 	m.mu.RUnlock()
-
-	// Resolve target from mission definition
-	var targetID types.ID
-	var targetRef string // Store original target ref (URL or name) for injection into agent context
-	if def.TargetRef != "" {
-		// Check if target is a direct URL (ad-hoc target without pre-registration)
-		isURL := strings.HasPrefix(def.TargetRef, "http://") || strings.HasPrefix(def.TargetRef, "https://")
-
-		if isURL {
-			// Direct URL target - use a synthetic ID and preserve the URL for injection
-			// Generate a deterministic ID from the URL for consistency
-			targetID = types.ID("00000000-0000-0000-0000-u17006d15c0") // Marker for URL-based targets
-			targetRef = def.TargetRef                                  // Preserve URL for agent context injection
-			m.logger.Debug("using direct URL target", "target_url", def.TargetRef, "target_id", targetID)
-		} else {
-			// Named target - look up in target store
-			if m.targetStore == nil {
-				return nil, fmt.Errorf("target '%s' specified but target store not available", def.TargetRef)
-			}
-			target, err := m.targetStore.GetByName(ctx, def.TargetRef)
-			if err != nil {
-				m.logger.Error("failed to lookup target", "error", err, "target_ref", def.TargetRef)
-				return nil, fmt.Errorf("failed to lookup target '%s': %w", def.TargetRef, err)
-			}
-			if target == nil {
-				return nil, fmt.Errorf("target '%s' not found", def.TargetRef)
-			}
-			targetID = target.ID
-			// Use target URL or name as the ref for agent context
-			if target.URL != "" {
-				targetRef = target.URL
-			} else if conn, ok := target.Connection["url"].(string); ok {
-				targetRef = conn
-			} else {
-				targetRef = def.TargetRef
-			}
-			m.logger.Debug("resolved target", "target_ref", def.TargetRef, "target_id", targetID, "target_url", targetRef)
-		}
-	} else {
-		// No target specified - use a synthetic "discovery" target ID
-		// This allows orchestration/discovery missions that don't target a specific system
-		// Use a well-known UUID that signals this is a discovery mission
-		targetID = types.ID("00000000-0000-0000-0000-d15c00e00000")
-		m.logger.Debug("no target specified, using discovery target", "target_id", targetID)
-	}
 
 	// Serialize mission definition to JSON for storage
 	definitionJSON, err := json.Marshal(def)
@@ -242,20 +249,20 @@ func (m *missionManager) Run(ctx context.Context, workflowPath string, missionID
 		return nil, fmt.Errorf("failed to serialize mission definition: %w", err)
 	}
 
-	// Find or create stable mission record (one per workflow name)
+	// Find or create stable mission record (one per mission name)
 	now := mission.NewUnixTimeNow()
 	missionTemplate := &mission.Mission{
-		ID:               types.NewID(), // Template ID, may be replaced by existing
-		Name:             def.Name,
-		Description:      def.Description,
-		Status:           mission.MissionStatusPending,
-		WorkflowID:       def.ID,
-		WorkflowJSON:     string(definitionJSON),
-		TargetID:         targetID,
-		MemoryContinuity: memoryContinuity,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-		FindingsCount:    0,
+		ID:                    types.NewID(), // Template ID, may be replaced by existing
+		Name:                  def.Name,
+		Description:           def.Description,
+		Status:                mission.MissionStatusPending,
+		MissionDefinitionID:   def.ID,
+		MissionDefinitionJSON: string(definitionJSON),
+		TargetID:              resolvedTargetID,
+		MemoryContinuity:      memoryContinuity,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+		FindingsCount:         0,
 		Metrics: &mission.MissionMetrics{
 			TotalNodes:     len(def.Nodes),
 			CompletedNodes: 0,
@@ -412,7 +419,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		ctx, span = tracer.Start(ctx, observability.SpanMissionExecute,
 			trace.WithAttributes(
 				attribute.String(observability.GibsonMissionID, missionID),
-				attribute.String(observability.GibsonWorkflowName, def.Name),
+				attribute.String(observability.GibsonMissionName, def.Name),
 			),
 		)
 		defer span.End()
@@ -665,9 +672,9 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 
 	orch := orchestrator.NewOrchestrator(observer, thinker, actor, orchOptions...)
 
-	// Emit workflow execution started event
+	// Emit mission execution started event
 	m.emitEvent(eventChan, api.MissionEventData{
-		EventType: "workflow.started",
+		EventType: "mission.started",
 		Timestamp: time.Now(),
 		MissionID: missionID,
 		Message:   fmt.Sprintf("Starting orchestrator for mission %s", missionID),
@@ -961,8 +968,8 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 
 	// Parse mission definition from stored JSON
 	var def *mission.MissionDefinition
-	if missionRecord.WorkflowJSON != "" {
-		def, err = mission.ParseDefinitionFromJSON([]byte(missionRecord.WorkflowJSON))
+	if missionRecord.MissionDefinitionJSON != "" {
+		def, err = mission.ParseDefinitionFromJSON([]byte(missionRecord.MissionDefinitionJSON))
 		if err != nil {
 			m.logger.Error("failed to parse mission definition", "error", err)
 			return nil, fmt.Errorf("failed to parse mission definition: %w", err)
@@ -1194,11 +1201,12 @@ func (m *missionManager) emitEvent(eventChan chan api.MissionEventData, event ap
 // missionToData converts a mission.Mission to api.MissionData.
 func missionToData(m *mission.Mission) api.MissionData {
 	data := api.MissionData{
-		ID:           m.ID.String(),
-		WorkflowPath: "", // Not tracked in Mission struct
-		Status:       string(m.Status),
-		StartTime:    m.CreatedAt.Time,
-		FindingCount: int32(m.FindingsCount),
+		ID:                  m.ID.String(),
+		MissionDefinitionID: m.MissionDefinitionID.String(),
+		TargetID:            m.TargetID.String(),
+		Status:              string(m.Status),
+		StartTime:           m.CreatedAt.Time,
+		FindingCount:        int32(m.FindingsCount),
 	}
 
 	if !m.CompletedAt.IsNil() {

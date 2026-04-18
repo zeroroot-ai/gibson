@@ -11,7 +11,7 @@ import (
 // can be extracted from markdown code blocks
 func TestExtractJSON_DecisionWithMarkdown(t *testing.T) {
 	// Simulate an LLM response with a Decision wrapped in markdown
-	response := `Based on the workflow state, here's my decision:
+	response := `Based on the mission state, here's my decision:
 
 ` + "```json" + `
 {
