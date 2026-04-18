@@ -370,10 +370,19 @@ func TestPricingConfig_GetAllProviders(t *testing.T) {
 	config := DefaultPricing()
 
 	providers := config.GetAllProviders()
-	assert.Contains(t, providers, "anthropic")
-	assert.Contains(t, providers, "openai")
-	assert.Contains(t, providers, "google")
-	assert.Equal(t, 3, len(providers))
+	// Every provider with a DefaultPricing() entry must be listed here. Drift
+	// in this list means DefaultPricing added/removed a provider without
+	// updating the test.
+	expected := []string{
+		"anthropic", "openai", "google",
+		"bedrock", "cloudflare", "cohere", "mistral", "huggingface", "maritaca",
+		"ernie", "watsonx",
+		"ollama", "llamafile", "local",
+	}
+	for _, p := range expected {
+		assert.Contains(t, providers, p, "missing provider %q in DefaultPricing", p)
+	}
+	assert.Equal(t, len(expected), len(providers), "unexpected number of pricing providers")
 }
 
 func TestPricingConfig_GetProviderModels(t *testing.T) {

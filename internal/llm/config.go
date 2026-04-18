@@ -11,11 +11,59 @@ import (
 type ProviderType string
 
 const (
-	ProviderAnthropic ProviderType = "anthropic"
-	ProviderOpenAI    ProviderType = "openai"
-	ProviderGoogle    ProviderType = "google"
-	ProviderCustom    ProviderType = "custom"
+	ProviderAnthropic   ProviderType = "anthropic"
+	ProviderOpenAI      ProviderType = "openai"
+	ProviderGoogle      ProviderType = "google"
+	ProviderOllama      ProviderType = "ollama"
+	ProviderBedrock     ProviderType = "bedrock"
+	ProviderCloudflare  ProviderType = "cloudflare"
+	ProviderCohere      ProviderType = "cohere"
+	ProviderErnie       ProviderType = "ernie"
+	ProviderHuggingFace ProviderType = "huggingface"
+	ProviderLlamafile   ProviderType = "llamafile"
+	ProviderLocal       ProviderType = "local"
+	ProviderMaritaca    ProviderType = "maritaca"
+	ProviderMistral     ProviderType = "mistral"
+	ProviderWatsonX     ProviderType = "watsonx"
+	ProviderCustom      ProviderType = "custom"
 )
+
+// SupportedProviderTypes returns every ProviderType the platform can construct,
+// in a deterministic order. This is the single source of truth for the factory
+// switch, config validator, and the GetSupportedProviders introspection RPC.
+func SupportedProviderTypes() []ProviderType {
+	return []ProviderType{
+		ProviderAnthropic,
+		ProviderOpenAI,
+		ProviderGoogle,
+		ProviderOllama,
+		ProviderBedrock,
+		ProviderCloudflare,
+		ProviderCohere,
+		ProviderErnie,
+		ProviderHuggingFace,
+		ProviderLlamafile,
+		ProviderLocal,
+		ProviderMaritaca,
+		ProviderMistral,
+		ProviderWatsonX,
+		ProviderCustom,
+	}
+}
+
+// selfHostedProviderTypes lists providers that do not require an API key at
+// construction time (the endpoint is operator-controlled).
+var selfHostedProviderTypes = map[ProviderType]bool{
+	ProviderOllama:    true,
+	ProviderLlamafile: true,
+	ProviderLocal:     true,
+}
+
+// IsSelfHosted reports whether the provider runs on operator-controlled
+// infrastructure and therefore does not require an API key at config time.
+func (p ProviderType) IsSelfHosted() bool {
+	return selfHostedProviderTypes[p]
+}
 
 // LLMConfig contains the root LLM provider configuration.
 // It specifies which provider to use by default and provides
@@ -63,13 +111,18 @@ func (c *LLMConfig) Validate() error {
 // It includes authentication credentials, API endpoints, available models,
 // and provider-specific options.
 type ProviderConfig struct {
-	Type         ProviderType           `mapstructure:"type" yaml:"type" validate:"required,oneof=anthropic openai google custom"`
-	APIKey       string                 `mapstructure:"api_key" yaml:"api_key" validate:"required"`
+	Type         ProviderType           `mapstructure:"type" yaml:"type" validate:"required,oneof=anthropic openai google ollama bedrock cloudflare cohere ernie huggingface llamafile local maritaca mistral watsonx custom"`
+	APIKey       string                 `mapstructure:"api_key" yaml:"api_key"`
 	BaseURL      string                 `mapstructure:"base_url" yaml:"base_url"`
 	DefaultModel string                 `mapstructure:"default_model" yaml:"default_model" validate:"required"`
 	Models       map[string]ModelConfig `mapstructure:"models" yaml:"models" validate:"dive"`
 	Options      map[string]interface{} `mapstructure:"options" yaml:"options"`
 	RateLimits   RateLimitConfig        `mapstructure:"rate_limits" yaml:"rate_limits"`
+	// Extra carries provider-specific credentials (e.g. aws_access_key_id,
+	// watsonx_project_id, ernie_secret_key) that do not fit the typed fields
+	// above. Keys are provider-defined; values are treated as secrets and
+	// redacted by the observability layer.
+	Extra map[string]string `mapstructure:"extra" yaml:"extra"`
 }
 
 // Validate performs validation on the ProviderConfig.
@@ -80,21 +133,25 @@ func (p *ProviderConfig) Validate() error {
 		return types.NewError(types.CONFIG_VALIDATION_FAILED, "provider type cannot be empty")
 	}
 
-	// Validate provider type
-	validTypes := map[ProviderType]bool{
-		ProviderAnthropic: true,
-		ProviderOpenAI:    true,
-		ProviderGoogle:    true,
-		ProviderCustom:    true,
+	// Validate provider type against the full supported set
+	validTypes := make(map[ProviderType]bool, len(SupportedProviderTypes()))
+	for _, t := range SupportedProviderTypes() {
+		validTypes[t] = true
 	}
 	if !validTypes[p.Type] {
+		names := make([]string, 0, len(SupportedProviderTypes()))
+		for _, t := range SupportedProviderTypes() {
+			names = append(names, string(t))
+		}
 		return types.NewError(
 			types.CONFIG_VALIDATION_FAILED,
-			fmt.Sprintf("invalid provider type '%s', must be one of: anthropic, openai, google, custom", p.Type),
+			fmt.Sprintf("invalid provider type '%s', must be one of: %s", p.Type, strings.Join(names, ", ")),
 		)
 	}
 
-	if p.APIKey == "" {
+	// APIKey is required for hosted providers but optional for self-hosted ones
+	// (ollama, llamafile, local) where the endpoint is operator-controlled.
+	if p.APIKey == "" && !p.Type.IsSelfHosted() {
 		return types.NewError(types.CONFIG_VALIDATION_FAILED, "api_key cannot be empty")
 	}
 

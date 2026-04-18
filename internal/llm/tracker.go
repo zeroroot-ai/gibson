@@ -2,6 +2,7 @@ package llm
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -99,12 +100,35 @@ func NewTokenTracker(pricing *PricingConfig) *DefaultTokenTracker {
 // RecordUsage records token usage for a specific scope and calculates the cost.
 // It automatically aggregates usage at all hierarchical levels (mission, agent, slot).
 func (t *DefaultTokenTracker) RecordUsage(scope UsageScope, provider string, model string, usage TokenUsage) error {
-	// Calculate cost for this usage
-	cost, err := t.pricing.CalculateCost(provider, model, usage)
-	if err != nil {
-		// If pricing is not found, record usage with zero cost
+	// Calculate cost for this usage.
+	//
+	// Three cases produce a zero-cost record:
+	//   1. SelfHosted pricing (ollama/llamafile/local) — expected, silent.
+	//   2. Unknown pricing flag (e.g. WatsonX custom deployments) — WARN so
+	//      operators notice and patch the pricing table.
+	//   3. No pricing entry at all — WARN so operators can add one.
+	//
+	// We check the pricing entry explicitly (not just the cost) so case 1 is
+	// distinguishable from cases 2 and 3.
+	pricing := t.pricing.GetModelPricing(provider, model)
+	var cost float64
+	switch {
+	case pricing == nil:
+		slog.Warn("no pricing entry for LLM usage; recording zero cost",
+			"provider", provider, "model", model,
+			"input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens)
 		cost = 0
+	case pricing.Unknown:
+		slog.Warn("unknown model pricing, cost not tracked",
+			"provider", provider, "model", model,
+			"input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens)
+		cost = 0
+	case pricing.SelfHosted:
+		cost = 0
+	default:
+		cost = pricing.CalculateCost(usage)
 	}
+	_ = pricing // keep for future diagnostics
 
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -19,6 +19,25 @@ var SensitiveFields = map[string]struct{}{
 	"secretkey":     {},
 	"prompt":        {},
 	"prompts":       {},
+
+	// LLM provider credential keys (cfg.Extra map keys from each provider's
+	// CredentialSchema). Each entry is the post-normalisation form
+	// (lowercased, underscores removed) of the canonical key the resolver
+	// reads. Adding a new provider with Extra credentials? Append here AND
+	// to providers.redactCredentialKeys().
+	"awsaccesskeyid":      {}, // Bedrock
+	"awssecretaccesskey":  {}, // Bedrock
+	"awssessiontoken":     {}, // Bedrock
+	"cloudflareaccountid": {}, // Cloudflare (identifier — redact defensively)
+	"cloudflareapitoken":  {}, // Cloudflare
+	"cohereapikey":        {}, // Cohere (typed alias)
+	"ernieaccesskey":      {}, // ERNIE
+	"erniesecretkey":      {}, // ERNIE
+	"huggingfaceapitoken": {}, // HuggingFace
+	"mistralapikey":       {}, // Mistral (typed alias)
+	"maritacaapikey":      {}, // Maritaca (typed alias)
+	"watsonxapikey":       {}, // WatsonX
+	"watsonxprojectid":    {}, // WatsonX (project identifier — redact defensively)
 }
 
 // Redact takes slog-style key-value pairs and redacts sensitive values.

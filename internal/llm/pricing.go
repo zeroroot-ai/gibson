@@ -18,6 +18,17 @@ type TokenUsage struct {
 type ModelPricing struct {
 	InputPer1M  float64 `mapstructure:"input_per_1m" yaml:"input_per_1m" validate:"min=0"`
 	OutputPer1M float64 `mapstructure:"output_per_1m" yaml:"output_per_1m" validate:"min=0"`
+
+	// SelfHosted is true for providers running on operator-controlled
+	// infrastructure (ollama, llamafile, local) — cost is always zero by
+	// convention. Distinguishes "free" from "unknown".
+	SelfHosted bool `mapstructure:"self_hosted" yaml:"self_hosted"`
+
+	// Unknown is true when the provider has a public rate card but Gibson
+	// has not been configured with the rates (e.g. IBM WatsonX custom
+	// deployments). The token tracker emits a WARN log and records zero
+	// cost rather than poisoning metrics with a false zero.
+	Unknown bool `mapstructure:"unknown" yaml:"unknown"`
 }
 
 // PricingConfig manages pricing information for all providers and models.
@@ -128,6 +139,97 @@ func DefaultPricing() *PricingConfig {
 			InputPer1M:  3.00,
 			OutputPer1M: 4.00,
 		},
+	}
+
+	// AWS Bedrock pricing (mirrors the upstream model family's published per-1M rates)
+	config.Pricing["bedrock"] = map[string]ModelPricing{
+		"anthropic.claude-3-opus-20240229-v1:0":    {InputPer1M: 15.00, OutputPer1M: 75.00},
+		"anthropic.claude-3-sonnet-20240229-v1:0":  {InputPer1M: 3.00, OutputPer1M: 15.00},
+		"anthropic.claude-3-haiku-20240307-v1:0":   {InputPer1M: 0.25, OutputPer1M: 1.25},
+		"anthropic.claude-3-5-sonnet-20241022-v2:0": {InputPer1M: 3.00, OutputPer1M: 15.00},
+		"anthropic.claude-3-5-haiku-20241022-v1:0":  {InputPer1M: 1.00, OutputPer1M: 5.00},
+		"amazon.titan-text-lite-v1":                {InputPer1M: 0.15, OutputPer1M: 0.20},
+		"amazon.titan-text-express-v1":             {InputPer1M: 0.20, OutputPer1M: 0.60},
+		"us.amazon.nova-micro-v1:0":                {InputPer1M: 0.035, OutputPer1M: 0.14},
+		"us.amazon.nova-lite-v1:0":                 {InputPer1M: 0.06, OutputPer1M: 0.24},
+		"us.amazon.nova-pro-v1:0":                  {InputPer1M: 0.80, OutputPer1M: 3.20},
+		"meta.llama3-8b-instruct-v1:0":             {InputPer1M: 0.30, OutputPer1M: 0.60},
+		"meta.llama3-70b-instruct-v1:0":            {InputPer1M: 2.65, OutputPer1M: 3.50},
+		"mistral.mistral-large-2407-v1:0":          {InputPer1M: 3.00, OutputPer1M: 9.00},
+	}
+
+	// Cloudflare Workers AI — per-neuron pricing converted to rough per-1M
+	// estimates for budgeting. Cloudflare's pricing model is neuron-based so
+	// exact conversions vary by model; treat these as advisory.
+	config.Pricing["cloudflare"] = map[string]ModelPricing{
+		"@cf/meta/llama-3.1-8b-instruct":         {InputPer1M: 0.11, OutputPer1M: 0.11},
+		"@cf/meta/llama-3-8b-instruct":           {InputPer1M: 0.11, OutputPer1M: 0.11},
+		"@cf/mistral/mistral-7b-instruct-v0.1":   {InputPer1M: 0.11, OutputPer1M: 0.11},
+		"@cf/google/gemma-7b-it":                 {InputPer1M: 0.11, OutputPer1M: 0.11},
+	}
+
+	// Cohere pricing
+	config.Pricing["cohere"] = map[string]ModelPricing{
+		"command-r-plus":   {InputPer1M: 2.50, OutputPer1M: 10.00},
+		"command-r":        {InputPer1M: 0.15, OutputPer1M: 0.60},
+		"command":          {InputPer1M: 1.00, OutputPer1M: 2.00},
+		"command-light":    {InputPer1M: 0.30, OutputPer1M: 0.60},
+	}
+
+	// Mistral La Plateforme pricing
+	config.Pricing["mistral"] = map[string]ModelPricing{
+		"mistral-large-latest":  {InputPer1M: 2.00, OutputPer1M: 6.00},
+		"mistral-medium-latest": {InputPer1M: 2.70, OutputPer1M: 8.10},
+		"mistral-small-latest":  {InputPer1M: 0.20, OutputPer1M: 0.60},
+		"codestral-latest":      {InputPer1M: 0.20, OutputPer1M: 0.60},
+		"open-mistral-7b":       {InputPer1M: 0.25, OutputPer1M: 0.25},
+		"open-mixtral-8x7b":     {InputPer1M: 0.70, OutputPer1M: 0.70},
+		"open-mixtral-8x22b":    {InputPer1M: 2.00, OutputPer1M: 6.00},
+	}
+
+	// HuggingFace Inference API — public serverless is free-tier-gated with
+	// enterprise metering variants. Rates here assume the standard plan.
+	config.Pricing["huggingface"] = map[string]ModelPricing{
+		"meta-llama/Llama-3.1-70B-Instruct":  {InputPer1M: 0.90, OutputPer1M: 0.90},
+		"meta-llama/Llama-3.1-8B-Instruct":   {InputPer1M: 0.20, OutputPer1M: 0.20},
+		"meta-llama/Llama-3-70B-Instruct":    {InputPer1M: 0.90, OutputPer1M: 0.90},
+		"mistralai/Mixtral-8x7B-Instruct-v0.1": {InputPer1M: 0.60, OutputPer1M: 0.60},
+	}
+
+	// Maritaca (Brazilian LLM provider) pricing
+	config.Pricing["maritaca"] = map[string]ModelPricing{
+		"sabia-3":         {InputPer1M: 1.00, OutputPer1M: 3.00},
+		"sabia-2-medium":  {InputPer1M: 0.50, OutputPer1M: 1.50},
+		"sabia-2-small":   {InputPer1M: 0.10, OutputPer1M: 0.30},
+	}
+
+	// Baidu ERNIE — rates not publicly consistent; marked Unknown so the
+	// tracker warns rather than reporting false zeros.
+	config.Pricing["ernie"] = map[string]ModelPricing{
+		"ernie-bot-4":     {Unknown: true},
+		"ernie-bot-turbo": {Unknown: true},
+		"ernie-bot":       {Unknown: true},
+	}
+
+	// IBM WatsonX — custom deployments have per-account pricing. Unknown flag
+	// prevents false zeros in billing reports.
+	config.Pricing["watsonx"] = map[string]ModelPricing{
+		"ibm/granite-13b-chat-v2":            {Unknown: true},
+		"ibm/granite-20b-multilingual":       {Unknown: true},
+		"meta-llama/llama-3-70b-instruct":    {Unknown: true},
+		"meta-llama/llama-3-8b-instruct":     {Unknown: true},
+		"mistralai/mixtral-8x7b-instruct-v01": {Unknown: true},
+	}
+
+	// Self-hosted providers — zero cost by convention.
+	config.Pricing["ollama"] = map[string]ModelPricing{
+		"*": {SelfHosted: true},
+	}
+	config.Pricing["llamafile"] = map[string]ModelPricing{
+		"*": {SelfHosted: true},
+	}
+	config.Pricing["local"] = map[string]ModelPricing{
+		"*": {SelfHosted: true},
 	}
 
 	// Google Gemini pricing

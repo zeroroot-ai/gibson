@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -608,7 +610,178 @@ func TestProviderType_Constants(t *testing.T) {
 	assert.Equal(t, ProviderType("anthropic"), ProviderAnthropic)
 	assert.Equal(t, ProviderType("openai"), ProviderOpenAI)
 	assert.Equal(t, ProviderType("google"), ProviderGoogle)
+	assert.Equal(t, ProviderType("ollama"), ProviderOllama)
+	assert.Equal(t, ProviderType("bedrock"), ProviderBedrock)
+	assert.Equal(t, ProviderType("cloudflare"), ProviderCloudflare)
+	assert.Equal(t, ProviderType("cohere"), ProviderCohere)
+	assert.Equal(t, ProviderType("ernie"), ProviderErnie)
+	assert.Equal(t, ProviderType("huggingface"), ProviderHuggingFace)
+	assert.Equal(t, ProviderType("llamafile"), ProviderLlamafile)
+	assert.Equal(t, ProviderType("local"), ProviderLocal)
+	assert.Equal(t, ProviderType("maritaca"), ProviderMaritaca)
+	assert.Equal(t, ProviderType("mistral"), ProviderMistral)
+	assert.Equal(t, ProviderType("watsonx"), ProviderWatsonX)
 	assert.Equal(t, ProviderType("custom"), ProviderCustom)
+}
+
+func TestSupportedProviderTypes(t *testing.T) {
+	got := SupportedProviderTypes()
+	// Spot-check every constant is present and no duplicates exist.
+	seen := make(map[ProviderType]bool, len(got))
+	for _, p := range got {
+		assert.False(t, seen[p], "duplicate provider type in SupportedProviderTypes: %s", p)
+		seen[p] = true
+	}
+	// Anchor the full enum so adding/removing a provider must update this test.
+	expected := []ProviderType{
+		ProviderAnthropic, ProviderOpenAI, ProviderGoogle, ProviderOllama,
+		ProviderBedrock, ProviderCloudflare, ProviderCohere, ProviderErnie,
+		ProviderHuggingFace, ProviderLlamafile, ProviderLocal, ProviderMaritaca,
+		ProviderMistral, ProviderWatsonX, ProviderCustom,
+	}
+	assert.ElementsMatch(t, expected, got, "SupportedProviderTypes drift")
+}
+
+// TestSupportedProviderTypes_ParityWithOneofTag asserts that every type in
+// SupportedProviderTypes() appears in the ProviderConfig.Type struct-tag
+// `oneof=` list, and vice versa. Drift here means either the struct tag or
+// the helper was updated without the other.
+func TestSupportedProviderTypes_ParityWithOneofTag(t *testing.T) {
+	typ := reflect.TypeOf(ProviderConfig{})
+	field, ok := typ.FieldByName("Type")
+	require.True(t, ok, "ProviderConfig.Type field missing")
+
+	rawTag := field.Tag.Get("validate")
+	// rawTag looks like: required,oneof=anthropic openai google ... custom
+	var oneofList string
+	for _, part := range strings.Split(rawTag, ",") {
+		if strings.HasPrefix(part, "oneof=") {
+			oneofList = strings.TrimPrefix(part, "oneof=")
+			break
+		}
+	}
+	require.NotEmpty(t, oneofList, "oneof= clause missing from ProviderConfig.Type validate tag: %q", rawTag)
+
+	tagSet := make(map[string]bool)
+	for _, name := range strings.Fields(oneofList) {
+		tagSet[name] = true
+	}
+
+	for _, p := range SupportedProviderTypes() {
+		assert.True(t, tagSet[string(p)],
+			"provider type %q is in SupportedProviderTypes() but missing from `oneof=` struct tag", p)
+		delete(tagSet, string(p))
+	}
+	assert.Empty(t, tagSet,
+		"`oneof=` struct tag contains provider types not in SupportedProviderTypes(): %v", tagSet)
+}
+
+func TestProviderType_IsSelfHosted(t *testing.T) {
+	selfHosted := []ProviderType{ProviderOllama, ProviderLlamafile, ProviderLocal}
+	for _, p := range selfHosted {
+		assert.True(t, p.IsSelfHosted(), "%s should be self-hosted", p)
+	}
+	hosted := []ProviderType{
+		ProviderAnthropic, ProviderOpenAI, ProviderGoogle,
+		ProviderBedrock, ProviderCloudflare, ProviderCohere, ProviderErnie,
+		ProviderHuggingFace, ProviderMaritaca, ProviderMistral, ProviderWatsonX,
+		ProviderCustom,
+	}
+	for _, p := range hosted {
+		assert.False(t, p.IsSelfHosted(), "%s should not be self-hosted", p)
+	}
+}
+
+func TestProviderConfig_Validate_NewProviders(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     ProviderConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "bedrock accepts extra map with aws creds and no api_key",
+			cfg: ProviderConfig{
+				Type:         ProviderBedrock,
+				APIKey:       "unused-but-accepted",
+				DefaultModel: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				Extra: map[string]string{
+					"aws_access_key_id":     "AKIA...",
+					"aws_secret_access_key": "secret",
+					"aws_region":            "us-east-1",
+				},
+			},
+		},
+		{
+			name: "mistral requires api_key",
+			cfg: ProviderConfig{
+				Type:         ProviderMistral,
+				DefaultModel: "mistral-large-latest",
+			},
+			wantErr: true,
+			errMsg:  "api_key cannot be empty",
+		},
+		{
+			name: "llamafile accepts empty api_key (self-hosted)",
+			cfg: ProviderConfig{
+				Type:         ProviderLlamafile,
+				DefaultModel: "llamafile-local",
+				BaseURL:      "http://localhost:8080",
+			},
+		},
+		{
+			name: "local accepts empty api_key (self-hosted)",
+			cfg: ProviderConfig{
+				Type:         ProviderLocal,
+				DefaultModel: "local-model",
+				BaseURL:      "http://localhost:9000",
+			},
+		},
+		{
+			name: "ollama accepts empty api_key (self-hosted)",
+			cfg: ProviderConfig{
+				Type:         ProviderOllama,
+				DefaultModel: "llama3.1:8b",
+				BaseURL:      "http://localhost:11434",
+			},
+		},
+		{
+			name: "unknown type rejected",
+			cfg: ProviderConfig{
+				Type:         ProviderType("vaporware"),
+				APIKey:       "k",
+				DefaultModel: "m",
+			},
+			wantErr: true,
+			errMsg:  "invalid provider type",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestProviderConfig_ExtraField_Roundtrip(t *testing.T) {
+	cfg := ProviderConfig{
+		Type:         ProviderWatsonX,
+		APIKey:       "key",
+		DefaultModel: "ibm/granite-13b-chat-v2",
+		Extra: map[string]string{
+			"watsonx_project_id": "proj-abc",
+		},
+	}
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, "proj-abc", cfg.Extra["watsonx_project_id"])
 }
 
 func TestModelFeature_Constants(t *testing.T) {
