@@ -79,6 +79,12 @@ type AgentClaims struct {
 	// OwnerUserID is sourced from the agent's store record (not the JWT).
 	OwnerUserID string
 
+	// ComponentScope is the FGA component identifier bound to this agent at
+	// registration time (spec R2). Extracted from the JWT's component_scope
+	// payload claim. VerifyAgentJWT rejects tokens whose component_scope is
+	// empty — there is no grace period.
+	ComponentScope string
+
 	// IssuedAt is when the token was created (JWT iat).
 	IssuedAt time.Time
 
@@ -141,6 +147,11 @@ type rawPayload struct {
 
 	// JTI is the JWT ID used for replay prevention.
 	JTI string `json:"jti"`
+
+	// ComponentScope is the FGA component identifier bound to the agent at
+	// registration time (spec R2). Required on agent+jwt tokens; absent on
+	// host+jwt.
+	ComponentScope string `json:"component_scope,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +226,10 @@ func (v *JWTVerifier) VerifyAgentJWT(ctx context.Context, tokenStr, expectedAud 
 		return nil, fmt.Errorf("agentauth: VerifyAgentJWT: audience mismatch: got %q, want %q", payload.Aud, expectedAud)
 	}
 
+	if payload.ComponentScope == "" {
+		return nil, fmt.Errorf("agentauth: VerifyAgentJWT: component_scope is required (spec R2 AC 5)")
+	}
+
 	// Check expiry BEFORE signature verification — prevents timing oracles.
 	now := v.clock()
 	expiresAt := time.Unix(payload.Exp, 0)
@@ -260,13 +275,14 @@ func (v *JWTVerifier) VerifyAgentJWT(ctx context.Context, tokenStr, expectedAud 
 	_ = v.store.UpdateAgentLastActive(ctx, payload.Sub)
 
 	return &AgentClaims{
-		AgentID:     payload.Sub,
-		HostID:      payload.Iss,
-		TenantID:    agent.TenantID,
-		OwnerUserID: agent.UserID,
-		IssuedAt:    issuedAt,
-		ExpiresAt:   expiresAt,
-		JTI:         payload.JTI,
+		AgentID:        payload.Sub,
+		HostID:         payload.Iss,
+		TenantID:       agent.TenantID,
+		OwnerUserID:    agent.UserID,
+		ComponentScope: payload.ComponentScope,
+		IssuedAt:       issuedAt,
+		ExpiresAt:      expiresAt,
+		JTI:            payload.JTI,
 	}, nil
 }
 

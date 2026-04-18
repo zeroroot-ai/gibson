@@ -36,7 +36,8 @@ var (
 // ---------------------------------------------------------------------------
 
 // AgentAuthClaims contains the verified claims from an agent+jwt or host+jwt token.
-// All fields are guaranteed non-empty after successful verification.
+// All fields are guaranteed non-empty after successful verification, EXCEPT
+// ComponentScope which is empty on host+jwt tokens (scope is agent-level).
 type AgentAuthClaims struct {
 	// AgentID is the agent that presented this token (JWT sub).
 	AgentID string
@@ -52,8 +53,45 @@ type AgentAuthClaims struct {
 	// interceptor checks the owner's permissions, not the agent's.
 	OwnerUserID string
 
+	// ComponentScope is the FGA component identifier bound to this agent at
+	// registration. The adapter extracts the value from the agent+jwt's
+	// component_scope payload claim. Host+jwt tokens (used only for
+	// registration, not daemon RPCs) leave this empty. The FGA interceptor
+	// denies any daemon RPC that comes in on the agent-auth path without
+	// ComponentScope populated (spec R2 AC 5).
+	ComponentScope string
+
 	// ExpiresAt is when the token expires (JWT exp).
 	ExpiresAt time.Time
+}
+
+// contextKey is a private type to avoid collisions on context values.
+type contextKey string
+
+// componentScopeContextKey is the context key used to carry the verified
+// agent component_scope through the request pipeline. Set by
+// UnaryAuthInterceptor during agent-auth routing; consumed by the FGA
+// interceptor for the second (component-scope) Check.
+const componentScopeContextKey contextKey = "agent-component-scope"
+
+// ContextWithComponentScope attaches scope to ctx. Returns ctx unchanged if
+// scope is empty — use only with the verified value from AgentAuthClaims.
+func ContextWithComponentScope(ctx context.Context, scope string) context.Context {
+	if scope == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, componentScopeContextKey, scope)
+}
+
+// ComponentScopeFromContext returns the agent's component_scope (e.g.,
+// "component:agent-abc123") if the request was authenticated via agent-auth,
+// or empty string otherwise. The FGA interceptor branches on this value to
+// run the R2 two-check path (owner + component).
+func ComponentScopeFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(componentScopeContextKey).(string); ok {
+		return v
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +267,7 @@ func buildUnaryInterceptor(
 		setAuthSpanAttributes(span, identity)
 		ctx = ContextWithIdentity(ctx, identity)
 		ctx = injectTenant(ctx, identity, cfg, mode, span)
+		ctx = injectComponentScope(ctx, identity)
 		if mode == "saas" && TenantFromContext(ctx) == "" {
 			span.SetAttributes(attribute.String("auth.result", "no_tenant"))
 			logMissingTenant(ctx, logger, info.FullMethod, identity)
@@ -237,6 +276,17 @@ func buildUnaryInterceptor(
 
 		return handler(ctx, req)
 	}
+}
+
+// injectComponentScope pulls the component_scope claim out of an agent-auth
+// identity and attaches it to ctx. No-op for non-agent-auth identities. The
+// FGA interceptor's R2 two-check path consumes the context value via
+// ComponentScopeFromContext.
+func injectComponentScope(ctx context.Context, identity *Identity) context.Context {
+	if identity == nil || identity.Issuer != "agent-auth" {
+		return ctx
+	}
+	return ContextWithComponentScope(ctx, agentScopeFromIdentity(identity))
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +391,7 @@ func buildStreamInterceptor(
 		setAuthSpanAttributes(span, identity)
 		ctx = ContextWithIdentity(ctx, identity)
 		ctx = injectTenant(ctx, identity, cfg, mode, span)
+		ctx = injectComponentScope(ctx, identity)
 		if mode == "saas" && TenantFromContext(ctx) == "" {
 			span.SetAttributes(attribute.String("auth.result", "no_tenant"))
 			logMissingTenant(ctx, logger, info.FullMethod, identity)
@@ -415,12 +466,27 @@ func agentClaimsToIdentity(claims *AgentAuthClaims) *Identity {
 			ExpiresAt:       claims.ExpiresAt,
 			AuthenticatedAt: time.Now(),
 			Claims: map[string]any{
-				"agent_id": claims.AgentID,
-				"host_id":  claims.HostID,
+				"agent_id":        claims.AgentID,
+				"host_id":         claims.HostID,
+				"component_scope": claims.ComponentScope,
 			},
 		},
 		Tenants: []string{claims.TenantID},
 	}
+}
+
+// agentScopeFromIdentity pulls the component_scope claim (set by
+// agentClaimsToIdentity) back out of the Identity.Claims map. Returns empty
+// for non-agent-auth identities — the downstream FGA interceptor checks
+// Identity.Issuer before using this.
+func agentScopeFromIdentity(ident *Identity) string {
+	if ident == nil || ident.Claims == nil {
+		return ""
+	}
+	if v, ok := ident.Claims["component_scope"].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------

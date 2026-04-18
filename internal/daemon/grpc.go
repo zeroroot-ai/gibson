@@ -453,11 +453,12 @@ func (a *agentJWTAdapter) VerifyAgentJWT(ctx context.Context, tokenStr, expected
 		return nil, err
 	}
 	return &auth.AgentAuthClaims{
-		AgentID:     claims.AgentID,
-		HostID:      claims.HostID,
-		TenantID:    claims.TenantID,
-		OwnerUserID: claims.OwnerUserID,
-		ExpiresAt:   claims.ExpiresAt,
+		AgentID:        claims.AgentID,
+		HostID:         claims.HostID,
+		TenantID:       claims.TenantID,
+		OwnerUserID:    claims.OwnerUserID,
+		ComponentScope: claims.ComponentScope,
+		ExpiresAt:      claims.ExpiresAt,
 	}, nil
 }
 

@@ -118,18 +118,28 @@ type tokenParts struct {
 	SigEncoded     string
 }
 
-// buildAgentToken constructs and signs a minimal agent+jwt.
+// buildAgentToken constructs and signs a minimal agent+jwt. component_scope
+// defaults to "component:<agentID>" for test ergonomics; tests that need to
+// exercise missing/invalid scope use buildTokenWithScope directly.
 func buildAgentToken(priv ed25519.PrivateKey, agentID, hostID, aud, jti string, iat, exp time.Time) tokenParts {
-	return buildToken(priv, "agent+jwt", agentID, hostID, aud, jti, iat, exp)
+	return buildTokenWithScope(priv, "agent+jwt", agentID, hostID, aud, jti, "component:"+agentID, iat, exp)
 }
 
 // buildHostToken constructs and signs a minimal host+jwt.
 func buildHostToken(priv ed25519.PrivateKey, hostID, aud string, iat, exp time.Time) tokenParts {
-	return buildToken(priv, "host+jwt", hostID, hostID, aud, "", iat, exp)
+	return buildTokenWithScope(priv, "host+jwt", hostID, hostID, aud, "", "", iat, exp)
 }
 
-// buildToken is the shared implementation for buildAgentToken and buildHostToken.
+// buildToken is retained for legacy call sites (host JWTs and tests that don't
+// care about component_scope). It delegates to buildTokenWithScope with an
+// empty scope, matching the pre-component_scope behaviour for host+jwt.
 func buildToken(priv ed25519.PrivateKey, typ, sub, iss, aud, jti string, iat, exp time.Time) tokenParts {
+	return buildTokenWithScope(priv, typ, sub, iss, aud, jti, "", iat, exp)
+}
+
+// buildTokenWithScope is the shared implementation for buildAgentToken,
+// buildHostToken, and tests that need control over component_scope.
+func buildTokenWithScope(priv ed25519.PrivateKey, typ, sub, iss, aud, jti, componentScope string, iat, exp time.Time) tokenParts {
 	hdrBytes, _ := json.Marshal(map[string]string{
 		"typ": typ,
 		"alg": "EdDSA",
@@ -143,6 +153,9 @@ func buildToken(priv ed25519.PrivateKey, typ, sub, iss, aud, jti string, iat, ex
 	}
 	if jti != "" {
 		payMap["jti"] = jti
+	}
+	if componentScope != "" {
+		payMap["component_scope"] = componentScope
 	}
 	payBytes, _ := json.Marshal(payMap)
 
@@ -386,8 +399,10 @@ func TestVerifyAgentJWT_MissingJTI(t *testing.T) {
 
 	v := NewJWTVerifier(store)
 	now := time.Now()
-	// buildToken with an empty jti omits the field from the payload JSON.
-	tp := buildToken(priv, "agent+jwt", "agent-001", "host-001", "gibson-daemon", "", now, now.Add(30*time.Second))
+	// buildTokenWithScope with an empty jti omits the field from the payload
+	// JSON but keeps the required component_scope so the token passes the
+	// R2 pre-check.
+	tp := buildTokenWithScope(priv, "agent+jwt", "agent-001", "host-001", "gibson-daemon", "", "component:agent-001", now, now.Add(30*time.Second))
 
 	// JTI is not enforced — missing JTI should succeed.
 	claims, err := v.VerifyAgentJWT(context.Background(), tp.token(), "gibson-daemon")
@@ -750,7 +765,8 @@ func TestVerifyAgentJWT_TamperedPayload(t *testing.T) {
 	evilPayBytes, _ := json.Marshal(map[string]interface{}{
 		"iss": "host-attacker", "sub": "agent-001", "aud": "gibson-daemon",
 		"iat": now.Unix(), "exp": now.Add(30 * time.Second).Unix(),
-		"jti": "jti-tamp",
+		"jti":             "jti-tamp",
+		"component_scope": "component:agent-001",
 	})
 	evilPayEnc := base64.RawURLEncoding.EncodeToString(evilPayBytes)
 	tamperedToken := tp.HeaderEncoded + "." + evilPayEnc + "." + tp.SigEncoded

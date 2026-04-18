@@ -29,7 +29,28 @@ type fgaMetricsRecorder interface {
 const (
 	fgaAuthzTracerName = "gibson.auth.fga_authz"
 	fgaAuthzSpanName   = "gibson.auth.fga_authz_check"
+	agentAuthIssuer    = "agent-auth"
 )
+
+// catalogRelationToComponentGrant maps an owner-side catalog relation to its
+// component-scope grant counterpart. Only catalog-gated actions (can_read,
+// can_configure, can_execute) participate in component-scope narrowing; RPCs
+// that check other relations (e.g., "member" on a tenant) are not subject to
+// a second component-scope Check. Spec R2 AC 4.
+var catalogRelationToComponentGrantMap = map[string]string{
+	"can_read":      "component_read_enabled",
+	"can_configure": "component_write_enabled",
+	"can_execute":   "component_execute_enabled",
+}
+
+// catalogRelationToComponentGrant returns the component-scope grant relation
+// corresponding to ownerRelation, and true if ownerRelation is a catalog-gated
+// action. Returns "", false for non-catalog relations so the caller skips the
+// second check.
+func catalogRelationToComponentGrant(ownerRelation string) (string, bool) {
+	v, ok := catalogRelationToComponentGrantMap[ownerRelation]
+	return v, ok
+}
 
 // FgaAuthzInterceptor is the single gRPC authorization interceptor that
 // consults OpenFGA for every RPC's authorization decision.
@@ -204,9 +225,68 @@ func (i *FgaAuthzInterceptor) checkInternal(ctx context.Context, req any, fullMe
 		return status.Errorf(codes.PermissionDenied, "authorization failed")
 	}
 
-	// Step 6: call FGA Check.
+	// Step 6: call FGA Check (owner identity for agent-auth; direct for
+	// everyone else).
 	tenant := TenantFromContext(ctx)
 	allowed, checkErr := i.authorizer.Check(ctx, user, spec.Relation, object)
+
+	// Step 6b: when the caller is on the agent-auth path AND the RPC's
+	// relation is a catalog-gated action (can_read / can_configure /
+	// can_execute), run a second check against the component's per-action
+	// grant. Both checks must pass for the RPC to proceed. component_scope
+	// is required for any agent-auth caller; its absence is a hard deny.
+	// Spec R2 AC 4/5.
+	if identity.Issuer == agentAuthIssuer && checkErr == nil && allowed {
+		componentScope := ComponentScopeFromContext(ctx)
+		if componentScope == "" {
+			i.logger.Warn("fga_authz: agent-auth caller missing component_scope",
+				"method", fullMethod,
+				"subject", identity.Subject,
+			)
+			i.incrementDecision(ctx, "deny", fullMethod)
+			logAuditEvent(ctx, i.logger, &AuditEvent{
+				EventType:          "authz_deny",
+				Method:             fullMethod,
+				Subject:            identity.Subject,
+				TenantID:           tenant,
+				Reason:             "component_scope_missing",
+				PermissionRequired: spec.Description,
+				FgaRelation:        spec.Relation,
+				FgaObject:          object,
+				Success:            false,
+			})
+			return status.Errorf(codes.PermissionDenied, "component_scope required")
+		}
+		if componentRelation, ok := catalogRelationToComponentGrant(spec.Relation); ok {
+			var compAllowed bool
+			compAllowed, checkErr = i.authorizer.Check(ctx, componentScope, componentRelation, object)
+			if checkErr == nil && !compAllowed {
+				i.logger.Info("fga_authz: component scope denied",
+					"method", fullMethod,
+					"subject", identity.Subject,
+					"component_scope", componentScope,
+					"component_relation", componentRelation,
+					"object", object,
+				)
+				i.incrementDecision(ctx, "deny", fullMethod)
+				logAuditEvent(ctx, i.logger, &AuditEvent{
+					EventType:          "authz_deny",
+					Method:             fullMethod,
+					Subject:            identity.Subject,
+					TenantID:           tenant,
+					Reason:             "component_scope_deny",
+					PermissionRequired: spec.Description,
+					FgaRelation:        componentRelation,
+					FgaObject:          object,
+					Success:            false,
+				})
+				return status.Errorf(codes.PermissionDenied, "authorization failed")
+			}
+			// If compAllowed is true, proceed with `allowed == true`.
+			// If checkErr is non-nil, let the shared error-handling path below
+			// surface the FGA failure.
+		}
+	}
 
 	// Step 7: error from FGA.
 	if checkErr != nil {
