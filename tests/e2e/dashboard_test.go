@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // TestDashboardObservability is an E2E test that verifies the complete observability pipeline.
@@ -51,7 +52,7 @@ func TestDashboardObservability(t *testing.T) {
 	defer cancel()
 
 	// Setup OTLP trace exporter (in real test, this would connect to Langfuse)
-	// For this test, we use an in-memory exporter to verify trace structure
+	// For this test, we use an in-memory exporter to verify trace structure.
 	exporter, tp := setupTraceProvider(t, ctx)
 	defer tp.Shutdown(ctx)
 
@@ -68,7 +69,7 @@ func TestDashboardObservability(t *testing.T) {
 		// Setup mock responses
 		setupMockGraphResponses(client)
 
-		loader := loader.NewGraphLoader(client)
+		l := loader.NewGraphLoader(client)
 
 		// Create mission context
 		missionID := types.NewID()
@@ -104,7 +105,7 @@ func TestDashboardObservability(t *testing.T) {
 		}
 
 		// Execute graph write (should emit trace)
-		result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
+		result, err := l.LoadDiscovery(ctx, execCtx, discovery)
 		require.NoError(t, err)
 		assert.False(t, result.HasErrors())
 
@@ -116,19 +117,21 @@ func TestDashboardObservability(t *testing.T) {
 			spans := exporter.GetSpans()
 			require.NotEmpty(t, spans, "Expected traces to be emitted")
 
-			// Find the graph store span
-			var graphStoreSpan *sdktrace.ReadOnlySpan
-			for _, s := range spans {
-				span := s
-				if s.Name() == "gibson.graph.store" {
-					graphStoreSpan = &span
+			// Find the graph store span.
+			// SpanStub.Name is a field (not a method call).
+			var graphStoreSpan *tracetest.SpanStub
+			for i := range spans {
+				if spans[i].Name == "gibson.graph.store" {
+					s := spans[i]
+					graphStoreSpan = &s
 					break
 				}
 			}
 			require.NotNil(t, graphStoreSpan, "Expected gibson.graph.store span")
 
-			// Verify span attributes
-			attrs := graphStoreSpan.Attributes()
+			// Verify span attributes.
+			// SpanStub.Attributes is []attribute.KeyValue (field, not method).
+			attrs := graphStoreSpan.Attributes
 			attrMap := make(map[string]interface{})
 			for _, attr := range attrs {
 				attrMap[string(attr.Key)] = attr.Value.AsInterface()
@@ -140,7 +143,7 @@ func TestDashboardObservability(t *testing.T) {
 			assert.Greater(t, entitiesCount, int64(0), "entities_count should be greater than 0")
 
 			// Check relationships count
-			relationshipsCount, ok := attrMap["gibson.graph.relationships_count"]
+			_, ok = attrMap["gibson.graph.relationships_count"]
 			assert.True(t, ok, "Span should have relationships_count attribute")
 
 			// Check entity types
@@ -148,12 +151,12 @@ func TestDashboardObservability(t *testing.T) {
 			assert.True(t, ok, "Span should have entity_types attribute")
 
 			// Parse entity types JSON
-			var types []string
-			err := json.Unmarshal([]byte(entityTypes.(string)), &types)
+			var entityTypeList []string
+			err := json.Unmarshal([]byte(entityTypes.(string)), &entityTypeList)
 			require.NoError(t, err, "entity_types should be valid JSON")
-			assert.Contains(t, types, "host", "entity_types should contain 'host'")
-			assert.Contains(t, types, "port", "entity_types should contain 'port'")
-			assert.Contains(t, types, "finding", "entity_types should contain 'finding'")
+			assert.Contains(t, entityTypeList, "host", "entity_types should contain 'host'")
+			assert.Contains(t, entityTypeList, "port", "entity_types should contain 'port'")
+			assert.Contains(t, entityTypeList, "finding", "entity_types should contain 'finding'")
 		})
 	})
 }
@@ -177,27 +180,26 @@ func TestDashboardObservabilityWithRealLangfuse(t *testing.T) {
 	defer cancel()
 
 	// Setup OTLP exporter to send to Langfuse
-	exporter, err := otlptracegrpc.New(ctx,
+	otlpExporter, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithEndpoint(langfuseHost),
 		otlptracegrpc.WithInsecure(), // Use TLS in production
 	)
 	require.NoError(t, err)
 
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithBatcher(otlpExporter),
 	)
 	defer tp.Shutdown(ctx)
 
 	otel.SetTracerProvider(tp)
 
-	// Execute a simple mission
 	client := graph.NewMockGraphClient()
 	err = client.Connect(ctx)
 	require.NoError(t, err)
 
 	setupMockGraphResponses(client)
 
-	loader := loader.NewGraphLoader(client)
+	l := loader.NewGraphLoader(client)
 
 	execCtx := loader.ExecContext{
 		MissionID:    types.NewID().String(),
@@ -212,7 +214,7 @@ func TestDashboardObservabilityWithRealLangfuse(t *testing.T) {
 		},
 	}
 
-	result, err := loader.LoadDiscovery(ctx, execCtx, discovery)
+	result, err := l.LoadDiscovery(ctx, execCtx, discovery)
 	require.NoError(t, err)
 	assert.False(t, result.HasErrors())
 
@@ -241,6 +243,7 @@ func isLangfuseAvailable(host string) bool {
 
 // setupTraceProvider creates an in-memory trace provider for testing.
 func setupTraceProvider(t *testing.T, ctx context.Context) (*tracetest.InMemoryExporter, *sdktrace.TracerProvider) {
+	t.Helper()
 	exporter := tracetest.NewInMemoryExporter()
 
 	tp := sdktrace.NewTracerProvider(
@@ -252,9 +255,6 @@ func setupTraceProvider(t *testing.T, ctx context.Context) (*tracetest.InMemoryE
 
 // setupMockGraphResponses configures the mock graph client with expected responses.
 func setupMockGraphResponses(client *graph.MockGraphClient) {
-	// Mock responses for various graph operations
-	// These are generic responses that work for most test scenarios
-
 	// Host creation responses
 	for i := 0; i < 10; i++ {
 		client.AddQueryResult(graph.QueryResult{
@@ -295,33 +295,21 @@ func TestMissionSummarySpan(t *testing.T) {
 	missionCtx, missionSpan := tracer.Start(ctx, "gibson.mission")
 	defer missionSpan.End()
 
-	// Simulate mission work
 	time.Sleep(10 * time.Millisecond)
 
-	// Create summary span (this would normally be done by orchestrator)
 	_, summarySpan := tracer.Start(missionCtx, "gibson.mission.complete")
-
-	// Add aggregate statistics (as orchestrator would)
-	// These attributes would be calculated from mission execution
-	summarySpan.SetAttributes(
-		// Add mission summary attributes here
-		// This is a placeholder - real implementation would use observability.MissionAttributes
-	)
-
 	summarySpan.End()
 	missionSpan.End()
 
-	// Wait for export
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify spans
 	spans := exporter.GetSpans()
 	require.NotEmpty(t, spans)
 
-	// Look for mission spans
 	var hasMissionSpan bool
 	for _, s := range spans {
-		if s.Name() == "gibson.mission" {
+		// SpanStub.Name is a field, not a method.
+		if s.Name == "gibson.mission" {
 			hasMissionSpan = true
 			break
 		}
@@ -332,7 +320,6 @@ func TestMissionSummarySpan(t *testing.T) {
 
 // TestE2ECleanup ensures that test resources are properly cleaned up.
 func TestE2ECleanup(t *testing.T) {
-	// This test verifies that cleanup happens correctly
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -342,18 +329,14 @@ func TestE2ECleanup(t *testing.T) {
 		assert.NoError(t, err, "TracerProvider shutdown should not error")
 	}()
 
-	// Verify exporter is working
 	require.NotNil(t, exporter)
 
-	// Create a simple span
 	tracer := otel.Tracer("test")
 	_, span := tracer.Start(ctx, "test.span")
 	span.End()
 
-	// Wait for export
 	time.Sleep(50 * time.Millisecond)
 
-	// Verify span was captured
 	spans := exporter.GetSpans()
 	assert.NotEmpty(t, spans)
 }

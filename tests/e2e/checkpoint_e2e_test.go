@@ -3,9 +3,28 @@
 
 package e2e
 
+// checkpoint_e2e_test.go verifies the mission pause/resume and approval
+// checkpoint workflows end-to-end.
+//
+// Status: tests compile and skip unconditionally. Full wiring requires a
+// complete mission orchestrator + Redis testcontainer setup that is deferred
+// to the mission-orchestrator-e2e spec.
+//
+// Refactor history:
+//   - agent-checkpointing spec: removed checkpoint.Store type; current
+//     interface is checkpoint.CheckpointStore. ThreadManager signature changed.
+//     agent.Harness renamed to agent.AgentHarness; agent.Result is a value
+//     type (not pointer); NewResult takes types.ID not string.
+//   - mission-api-only-cleanup spec: removed mission.MissionConfig and
+//     MissionController.Create; replaced by CreateMissionByReferenceRequest
+//     and CreateByReference. WorkflowID renamed to MissionDefinitionID.
+//
+// Next steps to un-skip: wire NewRedisCheckpointStore + DefaultMissionController
+// + a real mission definition registered via CreateMissionDefinition, then
+// remove the t.Skip() from setupE2EEnv.
+
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -23,27 +42,27 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// E2ETestEnv encapsulates all dependencies for E2E checkpoint tests
+// E2ETestEnv encapsulates all dependencies for E2E checkpoint tests.
 type E2ETestEnv struct {
-	RedisClient       *redis.Client
-	CheckpointStore   checkpoint.Store
-	Checkpointer      checkpoint.ThreadedCheckpointer
-	Restorer          checkpoint.StateRestorer
-	ThreadManager     checkpoint.ThreadManager
-	ApprovalManager   checkpoint.ApprovalManager
-	MissionStore      mission.MissionStore
-	Controller        mission.MissionController
-	TrackingAgent     *trackingAgent
-	RedisContainer    testcontainers.Container
-	CleanupFuncs      []func()
+	RedisClient     *redis.Client
+	CheckpointStore checkpoint.CheckpointStore
+	Checkpointer    checkpoint.ThreadedCheckpointer
+	Restorer        checkpoint.StateRestorer
+	ThreadManager   checkpoint.ThreadManager
+	ApprovalManager checkpoint.ApprovalManager
+	MissionStore    mission.MissionStore
+	Controller      mission.MissionController
+	TrackingAgent   *trackingAgent
+	RedisContainer  testcontainers.Container
+	CleanupFuncs    []func()
 }
 
-// trackingAgent is a mock agent that records execution for verification
+// trackingAgent is a mock agent that records execution for verification.
 type trackingAgent struct {
 	mu            sync.Mutex
 	executedNodes []string
 	executionTime map[string]time.Time
-	shouldPause   bool // When true, agent signals it wants to pause
+	shouldPause   bool
 	pauseAfter    string
 	shouldFail    bool
 	failAt        string
@@ -56,52 +75,51 @@ func newTrackingAgent() *trackingAgent {
 	}
 }
 
-func (t *trackingAgent) Execute(ctx context.Context, harness agent.Harness, task *agent.Task) (*agent.Result, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+// Execute implements agent.Agent. Signature matches the current interface:
+// (ctx, task agent.Task, harness agent.AgentHarness) (agent.Result, error)
+func (ta *trackingAgent) Execute(ctx context.Context, task agent.Task, harness agent.AgentHarness) (agent.Result, error) {
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
 
 	nodeID := task.Name
-	t.executedNodes = append(t.executedNodes, nodeID)
-	t.executionTime[nodeID] = time.Now()
+	ta.executedNodes = append(ta.executedNodes, nodeID)
+	ta.executionTime[nodeID] = time.Now()
 
-	// Simulate some work
 	time.Sleep(100 * time.Millisecond)
 
-	// Check if we should fail at this node
-	if t.shouldFail && t.failAt == nodeID {
-		return nil, fmt.Errorf("simulated failure at node %s", nodeID)
+	if ta.shouldFail && ta.failAt == nodeID {
+		return agent.Result{}, fmt.Errorf("simulated failure at node %s", nodeID)
 	}
 
-	// Check if we should pause after this node
-	if t.shouldPause && t.pauseAfter == nodeID {
-		// Signal pause via result metadata
-		result := agent.NewResult("completed")
-		result.WithMetadata(map[string]any{"request_pause": true})
+	result := agent.NewResult(task.ID)
+
+	if ta.shouldPause && ta.pauseAfter == nodeID {
+		result.Output = map[string]any{"request_pause": true}
+		result.Status = agent.ResultStatusCompleted
 		return result, nil
 	}
 
-	result := agent.NewResult("completed")
-	result.WithOutput(map[string]any{
-		"node_id":    nodeID,
-		"executed_at": t.executionTime[nodeID],
-		"data":       fmt.Sprintf("output from %s", nodeID),
+	result.Complete(map[string]any{
+		"node_id":     nodeID,
+		"executed_at": ta.executionTime[nodeID],
+		"data":        fmt.Sprintf("output from %s", nodeID),
 	})
 
 	return result, nil
 }
 
-func (t *trackingAgent) GetExecutedNodes() []string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	nodes := make([]string, len(t.executedNodes))
-	copy(nodes, t.executedNodes)
+func (ta *trackingAgent) GetExecutedNodes() []string {
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	nodes := make([]string, len(ta.executedNodes))
+	copy(nodes, ta.executedNodes)
 	return nodes
 }
 
-func (t *trackingAgent) WasNodeExecuted(nodeID string) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	for _, id := range t.executedNodes {
+func (ta *trackingAgent) WasNodeExecuted(nodeID string) bool {
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	for _, id := range ta.executedNodes {
 		if id == nodeID {
 			return true
 		}
@@ -109,25 +127,28 @@ func (t *trackingAgent) WasNodeExecuted(nodeID string) bool {
 	return false
 }
 
-func (t *trackingAgent) Reset() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.executedNodes = make([]string, 0)
-	t.executionTime = make(map[string]time.Time)
-	t.shouldPause = false
-	t.pauseAfter = ""
-	t.shouldFail = false
-	t.failAt = ""
+func (ta *trackingAgent) Reset() {
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	ta.executedNodes = make([]string, 0)
+	ta.executionTime = make(map[string]time.Time)
+	ta.shouldPause = false
+	ta.pauseAfter = ""
+	ta.shouldFail = false
+	ta.failAt = ""
 }
 
-// setupE2EEnv initializes the test environment with real Redis
+// setupE2EEnv initializes the test environment with real Redis.
+//
+// NOTE: this function calls t.Skip() unconditionally until the full
+// mission orchestrator integration is wired. See file-level comment.
 func setupE2EEnv(t *testing.T) (*E2ETestEnv, func()) {
 	ctx := context.Background()
 	env := &E2ETestEnv{
 		CleanupFuncs: make([]func(), 0),
 	}
 
-	// Start Redis container with JSON support
+	// Start Redis container with JSON support.
 	req := testcontainers.ContainerRequest{
 		Image:        "redis/redis-stack-server:latest",
 		ExposedPorts: []string{"6379/tcp"},
@@ -141,39 +162,31 @@ func setupE2EEnv(t *testing.T) (*E2ETestEnv, func()) {
 	require.NoError(t, err, "Failed to start Redis container")
 	env.RedisContainer = redisContainer
 
-	// Get Redis connection info
 	host, err := redisContainer.Host(ctx)
 	require.NoError(t, err)
 
 	port, err := redisContainer.MappedPort(ctx, "6379")
 	require.NoError(t, err)
 
-	// Create Redis client
 	redisAddr := fmt.Sprintf("%s:%s", host, port.Port())
 	env.RedisClient = redis.NewClient(&redis.Options{
 		Addr: redisAddr,
 	})
 
-	// Verify Redis is ready
 	err = env.RedisClient.Ping(ctx).Err()
 	require.NoError(t, err, "Redis connection failed")
 
-	// Initialize checkpoint components
-	// Note: In a real implementation, these would be properly constructed
-	// For E2E tests, we need actual implementations or well-constructed mocks
-	// env.CheckpointStore = checkpoint.NewRedisStore(env.RedisClient)
-	// env.Checkpointer = checkpoint.NewThreadedCheckpointer(...)
-	// env.Restorer = checkpoint.NewStateRestorer(...)
-	// env.ThreadManager = checkpoint.NewThreadManager(...)
-	// env.ApprovalManager = checkpoint.NewApprovalManager(...)
+	// TODO: wire checkpoint and mission stack once orchestrator integration is
+	// available. The interfaces are:
+	//   checkpoint.NewRedisCheckpointStore(stateClient, checkpoint.DefaultStoreConfig())
+	//   checkpoint.NewDefaultThreadManager(store)
+	//   mission.NewMissionController(store, service, orchestrator, opts...)
+	//   CreateMissionDefinition via daemon client, then CreateByReference
 
-	// For now, mark as TODO since full integration requires orchestrator setup
-	t.Skip("Full E2E test setup requires complete mission orchestrator - implement after orchestrator integration")
+	t.Skip("Full E2E test setup requires complete mission orchestrator — implement after orchestrator integration")
 
-	// Create tracking agent
 	env.TrackingAgent = newTrackingAgent()
 
-	// Cleanup function
 	cleanup := func() {
 		for _, fn := range env.CleanupFuncs {
 			fn()
@@ -189,8 +202,10 @@ func setupE2EEnv(t *testing.T) (*E2ETestEnv, func()) {
 	return env, cleanup
 }
 
-// createTestMission creates a test mission definition with sequential nodes
-func createTestMission() *mission.MissionDefinition {
+// createTestMissionDef creates a test mission definition with sequential nodes.
+// Uses mission.MissionDefinition (the pre-registered definition type, not the
+// deleted mission.MissionConfig inline wrapper).
+func createTestMissionDef() *mission.MissionDefinition {
 	return &mission.MissionDefinition{
 		ID:          types.NewID(),
 		Name:        "Test Mission",
@@ -231,9 +246,9 @@ func createTestMission() *mission.MissionDefinition {
 	}
 }
 
-// createApprovalMission creates a mission with an approval-required node
-func createApprovalMission() *mission.MissionDefinition {
-	def := &mission.MissionDefinition{
+// createApprovalMissionDef creates a mission definition with an approval-required node.
+func createApprovalMissionDef() *mission.MissionDefinition {
+	return &mission.MissionDefinition{
 		ID:          types.NewID(),
 		Name:        "Approval Test Mission",
 		Description: "Mission with approval workflow",
@@ -245,11 +260,11 @@ func createApprovalMission() *mission.MissionDefinition {
 				AgentName: "tracking-agent",
 			},
 			"approval": {
-				ID:          "approval",
-				Type:        mission.NodeTypeAgent,
-				Name:        "Approval Node",
-				AgentName:   "tracking-agent",
-				Metadata:    map[string]any{"requires_approval": true},
+				ID:        "approval",
+				Type:      mission.NodeTypeAgent,
+				Name:      "Approval Node",
+				AgentName: "tracking-agent",
+				Metadata:  map[string]any{"requires_approval": true},
 			},
 			"node2": {
 				ID:        "node2",
@@ -265,11 +280,10 @@ func createApprovalMission() *mission.MissionDefinition {
 		EntryPoints: []string{"node1"},
 		ExitPoints:  []string{"node2"},
 	}
-	return def
 }
 
-// createParallelMission creates a mission with parallel node execution
-func createParallelMission() *mission.MissionDefinition {
+// createParallelMissionDef creates a mission definition with parallel nodes.
+func createParallelMissionDef() *mission.MissionDefinition {
 	return &mission.MissionDefinition{
 		ID:          types.NewID(),
 		Name:        "Parallel Test Mission",
@@ -312,73 +326,56 @@ func createParallelMission() *mission.MissionDefinition {
 	}
 }
 
-// TestE2E_MissionPauseResume tests the complete pause/resume workflow
+// TestE2E_MissionPauseResume tests the complete pause/resume workflow.
 func TestE2E_MissionPauseResume(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createTestMission()
+	testDef := createTestMissionDef()
 
-	// 1. Start a mission
-	missionConfig := &mission.MissionConfig{
-		Name:        testDef.Name,
-		Description: testDef.Description,
-		WorkflowID:  testDef.ID,
-		TargetID:    types.NewID(), // Mock target
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	// Create mission via CreateByReference (mission-api-only-cleanup: MissionConfig
+	// was removed; missions now reference pre-registered definitions by ID).
+	targetID := types.NewID()
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            targetID,
+	})
 	require.NoError(t, err, "Failed to create mission")
 
-	// Configure agent to pause after node2
 	env.TrackingAgent.shouldPause = true
 	env.TrackingAgent.pauseAfter = "node2"
 
-	// Start mission execution
-	err = env.Controller.Start(ctx, mission.ID)
+	err = env.Controller.Start(ctx, missionRecord.ID)
 	require.NoError(t, err, "Failed to start mission")
 
-	// 2. Wait for mission to execute a few nodes and pause
 	time.Sleep(3 * time.Second)
 
-	// 3. Verify checkpoint was created
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusPaused, mission.Status)
-	assert.NotNil(t, mission.Checkpoint, "Checkpoint should be created on pause")
+	assert.Equal(t, mission.MissionStatusPaused, missionRecord.Status)
+	assert.NotNil(t, missionRecord.Checkpoint, "Checkpoint should be created on pause")
 
-	// Verify nodes 1 and 2 were executed
 	assert.True(t, env.TrackingAgent.WasNodeExecuted("node1"))
 	assert.True(t, env.TrackingAgent.WasNodeExecuted("node2"))
 	assert.False(t, env.TrackingAgent.WasNodeExecuted("node3"))
 
-	// 4. Verify checkpoint contains correct state
-	cp := mission.Checkpoint
-	assert.Contains(t, cp.CompletedNodes, "node1")
-	assert.Contains(t, cp.CompletedNodes, "node2")
-	assert.Contains(t, cp.PendingNodes, "node3")
-	assert.Contains(t, cp.PendingNodes, "node4")
+	cp := missionRecord.Checkpoint
 	assert.NotEmpty(t, cp.Checksum, "Checkpoint should have integrity checksum")
 
-	// 5. Resume the mission
-	env.TrackingAgent.shouldPause = false // Don't pause again
-	err = env.Controller.Resume(ctx, mission.ID)
+	env.TrackingAgent.shouldPause = false
+	err = env.Controller.Resume(ctx, missionRecord.ID)
 	require.NoError(t, err, "Failed to resume mission")
 
-	// 6. Wait for mission to complete
 	time.Sleep(3 * time.Second)
 
-	// 7. Verify execution continued from correct node
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusCompleted, mission.Status)
+	assert.Equal(t, mission.MissionStatusCompleted, missionRecord.Status)
 
-	// 8. Verify no nodes are re-executed
 	executedNodes := env.TrackingAgent.GetExecutedNodes()
 	assert.Equal(t, 4, len(executedNodes), "Should execute exactly 4 nodes")
 
-	// Verify each node executed only once
 	nodeCount := make(map[string]int)
 	for _, nodeID := range executedNodes {
 		nodeCount[nodeID]++
@@ -390,608 +387,448 @@ func TestE2E_MissionPauseResume(t *testing.T) {
 	t.Logf("SUCCESS: Mission pause/resume completed. Executed nodes: %v", executedNodes)
 }
 
-// TestE2E_CrashRecovery simulates pod eviction and recovery
+// TestE2E_CrashRecovery simulates pod eviction and recovery.
 func TestE2E_CrashRecovery(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createTestMission()
+	testDef := createTestMissionDef()
 
-	// 1. Start a mission
-	missionConfig := &mission.MissionConfig{
-		Name:        testDef.Name,
-		WorkflowID:  testDef.ID,
-		TargetID:    types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
-	require.NoError(t, err)
-
-	err = env.Controller.Start(ctx, mission.ID)
-	require.NoError(t, err)
-
-	// 2. Let some nodes execute
-	time.Sleep(2 * time.Second)
-
-	// 3. Create a checkpoint (simulating periodic checkpoint)
-	state := &checkpoint.ExecutionState{
-		MissionID:      mission.ID,
-		CurrentNodeID:  "node2",
-		CompletedNodes: []string{"node1", "node2"},
-		PendingNodes:   []string{"node3", "node4"},
-		NodeStates:     make(map[string]*checkpoint.NodeState),
-	}
-
-	cp, err := env.Checkpointer.Capture(ctx, state, checkpoint.CaptureOptions{
-		Label: "crash-recovery-test",
+	targetID := types.NewID()
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            targetID,
 	})
 	require.NoError(t, err)
 
-	// 4. Simulate pod termination (cancel context and clear state)
-	cancelCtx, cancel := context.WithCancel(ctx)
-	cancel() // Simulate sudden termination
+	err = env.Controller.Start(ctx, missionRecord.ID)
+	require.NoError(t, err)
 
-	// Clear agent state to simulate restart
+	time.Sleep(2 * time.Second)
+
+	// Create a checkpoint (simulating periodic checkpoint via ThreadedCheckpointer).
+	threadID, err := env.Checkpointer.CreateThread(ctx, missionRecord.ID)
+	require.NoError(t, err)
+
+	state := &checkpoint.ExecutionState{
+		MissionID:     missionRecord.ID,
+		ThreadID:      threadID,
+		CurrentNodeID: "node2",
+		PendingQueue:  []string{"node3", "node4"},
+		NodeStates:    make(map[string]*checkpoint.NodeState),
+	}
+
+	cp, err := env.Checkpointer.Checkpoint(ctx, threadID, state)
+	require.NoError(t, err)
+
 	executedBeforeCrash := env.TrackingAgent.GetExecutedNodes()
 	env.TrackingAgent.Reset()
 
-	// 5. "Restart" and discover incomplete mission
 	time.Sleep(500 * time.Millisecond)
 
-	// Verify checkpoint still exists
-	loadedCP, err := env.CheckpointStore.Load(ctx, mission.ID, cp.ThreadID, cp.ID)
+	// Load checkpoint to verify it persisted.
+	loadedCP, err := env.CheckpointStore.GetLatestCheckpoint(ctx, cp.ThreadID)
 	require.NoError(t, err)
 	require.NotNil(t, loadedCP)
 	assert.Equal(t, cp.ID, loadedCP.ID)
 
-	// 6. Resume from checkpoint
-	err = env.Controller.Resume(cancelCtx, mission.ID)
+	err = env.Controller.Resume(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
-	// 7. Wait for completion
 	time.Sleep(3 * time.Second)
 
-	// 8. Verify mission completes correctly
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusCompleted, mission.Status)
+	assert.Equal(t, mission.MissionStatusCompleted, missionRecord.Status)
 
-	// Verify only remaining nodes were executed
-	executedAfterRecovery := env.TrackingAgent.GetExecutedNodes()
 	assert.True(t, env.TrackingAgent.WasNodeExecuted("node3"))
 	assert.True(t, env.TrackingAgent.WasNodeExecuted("node4"))
-
-	// Nodes 1 and 2 should not be in the post-recovery execution list
 	assert.False(t, env.TrackingAgent.WasNodeExecuted("node1"))
 	assert.False(t, env.TrackingAgent.WasNodeExecuted("node2"))
 
 	t.Logf("Executed before crash: %v", executedBeforeCrash)
-	t.Logf("Executed after recovery: %v", executedAfterRecovery)
+	t.Logf("Executed after recovery: %v", env.TrackingAgent.GetExecutedNodes())
 }
 
-// TestE2E_ApprovalWorkflow tests human-in-the-loop approval
+// TestE2E_ApprovalWorkflow tests human-in-the-loop approval.
 func TestE2E_ApprovalWorkflow(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createApprovalMission()
+	testDef := createApprovalMissionDef()
 
-	// 1. Start mission with approval-required node
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	err = env.Controller.Start(ctx, mission.ID)
+	err = env.Controller.Start(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
-	// 2. Execute until approval node
 	time.Sleep(2 * time.Second)
 
-	// 3. Verify mission pauses at approval
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
+	assert.Equal(t, mission.MissionStatusPaused, missionRecord.Status)
 
-	// Should be paused waiting for approval
-	assert.Equal(t, mission.MissionStatusPaused, mission.Status)
+	require.NotNil(t, missionRecord.Checkpoint)
 
-	// 4. Verify checkpoint created with approval state
-	require.NotNil(t, mission.Checkpoint)
-	// In real implementation, checkpoint would have ApprovalState populated
-
-	// 5. Submit approval via approval manager
-	approvalReq := &checkpoint.ApprovalRequest{
-		MissionID:  mission.ID,
-		CheckpointID: mission.Checkpoint.ID.String(),
-		NodeID:     "approval",
-		Decision:   "approved",
-		Reason:     "E2E test approval",
+	// Submit approval via ApprovalManager.ProcessDecision.
+	// MissionCheckpoint does not carry ThreadID; resolve it via ThreadManager.
+	missionThreads, err := env.ThreadManager.ListThreads(ctx, missionRecord.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, missionThreads, "Expected at least one thread for the mission")
+	threadID := missionThreads[0].ID
+	decision := checkpoint.ApprovalDecision{
+		Status:     checkpoint.ApprovalStatusApproved,
+		ApprovedBy: "e2e-test",
+		ApprovedAt: time.Now(),
 	}
 
-	err = env.ApprovalManager.SubmitApproval(ctx, approvalReq)
+	err = env.ApprovalManager.ProcessDecision(ctx, threadID, decision)
 	require.NoError(t, err)
 
-	// 6. Verify resume within 500ms
 	start := time.Now()
-	time.Sleep(1 * time.Second) // Give time for auto-resume
+	time.Sleep(1 * time.Second)
 	resumeDuration := time.Since(start)
 	assert.Less(t, resumeDuration, 600*time.Millisecond, "Should resume within 500ms of approval")
 
-	// 7. Verify mission continues
 	time.Sleep(2 * time.Second)
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusCompleted, mission.Status)
+	assert.Equal(t, mission.MissionStatusCompleted, missionRecord.Status)
 
-	// Verify all nodes executed
 	assert.True(t, env.TrackingAgent.WasNodeExecuted("node1"))
 	assert.True(t, env.TrackingAgent.WasNodeExecuted("approval"))
 	assert.True(t, env.TrackingAgent.WasNodeExecuted("node2"))
 }
 
-// TestE2E_ApprovalTimeout tests approval timeout behavior
+// TestE2E_ApprovalTimeout tests approval timeout behavior.
 func TestE2E_ApprovalTimeout(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createApprovalMission()
-
-	// Configure short timeout
+	testDef := createApprovalMissionDef()
 	testDef.Nodes["approval"].Timeout = 2 * time.Second
 
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	err = env.Controller.Start(ctx, mission.ID)
+	err = env.Controller.Start(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
-	// Wait for timeout
 	time.Sleep(4 * time.Second)
 
-	// Verify mission transitions to paused_timeout
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-
-	// Should still be paused but with timeout metadata
-	assert.Equal(t, mission.MissionStatusPaused, mission.Status)
-	if mission.Metadata != nil {
-		timeout, ok := mission.Metadata["approval_timeout"]
+	assert.Equal(t, mission.MissionStatusPaused, missionRecord.Status)
+	if missionRecord.Metadata != nil {
+		timeout, ok := missionRecord.Metadata["approval_timeout"]
 		assert.True(t, ok, "Should have approval_timeout metadata")
 		assert.True(t, timeout.(bool))
 	}
 
-	// Verify checkpoint preserved
-	assert.NotNil(t, mission.Checkpoint)
-
-	t.Logf("Approval timeout handled correctly. Mission status: %s", mission.Status)
+	assert.NotNil(t, missionRecord.Checkpoint)
+	t.Logf("Approval timeout handled correctly. Mission status: %s", missionRecord.Status)
 }
 
-// TestE2E_ApprovalWithModification tests approval with state modification
+// TestE2E_ApprovalWithModification tests approval with state modification.
 func TestE2E_ApprovalWithModification(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createApprovalMission()
+	testDef := createApprovalMissionDef()
 
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	err = env.Controller.Start(ctx, mission.ID)
+	err = env.Controller.Start(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
-	// Wait for approval pause
 	time.Sleep(2 * time.Second)
 
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	require.NotNil(t, mission.Checkpoint)
+	require.NotNil(t, missionRecord.Checkpoint)
 
-	originalCheckpointID := mission.Checkpoint.ID
+	// MissionCheckpoint does not carry ThreadID; resolve it via ThreadManager.
+	timeoutThreads, err := env.ThreadManager.ListThreads(ctx, missionRecord.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, timeoutThreads, "Expected at least one thread for the mission")
+	threadID := timeoutThreads[0].ID
 
-	// Submit approval with modified parameters
-	approvalReq := &checkpoint.ApprovalRequest{
-		MissionID:    mission.ID,
-		CheckpointID: mission.Checkpoint.ID.String(),
-		NodeID:       "approval",
-		Decision:     "approved",
-		Reason:       "Approved with modifications",
-		Modifications: map[string]any{
-			"param1": "modified_value",
-			"param2": 42,
-		},
+	decision := checkpoint.ApprovalDecision{
+		Status:     checkpoint.ApprovalStatusApproved,
+		ApprovedBy: "e2e-test",
+		ApprovedAt: time.Now(),
 	}
 
-	err = env.ApprovalManager.SubmitApproval(ctx, approvalReq)
+	err = env.ApprovalManager.ProcessDecision(ctx, threadID, decision)
 	require.NoError(t, err)
 
-	// Wait for execution to continue
 	time.Sleep(3 * time.Second)
 
-	// Verify new checkpoint branch created
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-
-	// Checkpoint ID should be different (new branch)
-	if mission.Checkpoint != nil {
-		assert.NotEqual(t, originalCheckpointID, mission.Checkpoint.ID,
-			"Should create new checkpoint branch for modifications")
-	}
-
-	// Verify modified state used for continuation
-	// In real implementation, would check that node2 received modified params
-	assert.Equal(t, mission.MissionStatusCompleted, mission.Status)
+	assert.Equal(t, mission.MissionStatusCompleted, missionRecord.Status)
 }
 
-// TestE2E_TimeTravel tests replaying from a historical checkpoint
+// TestE2E_TimeTravel tests replaying from a historical checkpoint.
+// Note: The old ReplayFromCheckpoint / BranchOptions APIs were removed.
+// Thread branching is now done via ThreadedCheckpointer.UpdateState.
 func TestE2E_TimeTravel(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createTestMission()
+	testDef := createTestMissionDef()
 
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	// Configure periodic checkpoints
 	env.TrackingAgent.shouldPause = true
 	env.TrackingAgent.pauseAfter = "node2"
 
-	err = env.Controller.Start(ctx, mission.ID)
+	err = env.Controller.Start(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
-	// Wait for first checkpoint (after node2)
 	time.Sleep(3 * time.Second)
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	middleCheckpointID := mission.Checkpoint.ID
+	require.NotNil(t, missionRecord.Checkpoint)
+	// MissionCheckpoint does not carry ThreadID; resolve it via ThreadManager.
+	midThreads, err := env.ThreadManager.ListThreads(ctx, missionRecord.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, midThreads, "Expected at least one thread for the mission")
+	middleThreadID := midThreads[0].ID
 
-	// Resume and complete mission
 	env.TrackingAgent.shouldPause = false
-	err = env.Controller.Resume(ctx, mission.ID)
+	err = env.Controller.Resume(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
 	time.Sleep(3 * time.Second)
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusCompleted, mission.Status)
+	assert.Equal(t, mission.MissionStatusCompleted, missionRecord.Status)
 
-	// Now time-travel: replay from middle checkpoint
+	// Create a branch from the midpoint checkpoint using CreateBranchThread.
 	env.TrackingAgent.Reset()
 
-	// Create replay options
-	replayOpts := &checkpoint.ReplayOptions{
-		CheckpointID: middleCheckpointID.String(),
-		ThreadLabel:  "time-travel-replay",
-	}
-
-	// Replay from checkpoint
-	err = env.ThreadManager.ReplayFromCheckpoint(ctx, mission.ID, replayOpts)
+	latestCP, err := env.CheckpointStore.GetLatestCheckpoint(ctx, middleThreadID)
 	require.NoError(t, err)
 
-	// Wait for replay execution
-	time.Sleep(3 * time.Second)
+	branchThread, err := env.ThreadManager.CreateBranchThread(ctx, middleThreadID, latestCP.ID)
+	require.NoError(t, err)
+	require.NotNil(t, branchThread)
 
-	// Verify nodes before checkpoint were skipped
-	assert.False(t, env.TrackingAgent.WasNodeExecuted("node1"))
-	assert.False(t, env.TrackingAgent.WasNodeExecuted("node2"))
-
-	// Verify nodes after checkpoint were re-executed
-	assert.True(t, env.TrackingAgent.WasNodeExecuted("node3"))
-	assert.True(t, env.TrackingAgent.WasNodeExecuted("node4"))
-
-	t.Logf("Time travel replay successful from checkpoint %s", middleCheckpointID)
+	assert.Equal(t, middleThreadID, branchThread.ParentThread)
+	t.Logf("Branch thread created: %s (parent: %s)", branchThread.ID, branchThread.ParentThread)
 }
 
-// TestE2E_ThreadBranching tests creating and executing thread branches
+// TestE2E_ThreadBranching tests creating and executing thread branches.
 func TestE2E_ThreadBranching(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createTestMission()
+	testDef := createTestMissionDef()
 
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	// Execute to checkpoint
 	env.TrackingAgent.shouldPause = true
 	env.TrackingAgent.pauseAfter = "node2"
 
-	err = env.Controller.Start(ctx, mission.ID)
+	err = env.Controller.Start(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
 	time.Sleep(3 * time.Second)
 
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	require.NotNil(t, mission.Checkpoint)
-	originalCheckpoint := mission.Checkpoint
+	require.NotNil(t, missionRecord.Checkpoint)
 
-	// Create branch with modified state
-	branchOpts := &checkpoint.BranchOptions{
-		Label:         "experimental-branch",
-		SourceCheckpoint: originalCheckpoint.ID.String(),
-		StateModifications: map[string]any{
-			"experiment": true,
-			"branch_param": "test",
-		},
-	}
+	// MissionCheckpoint does not carry ThreadID; resolve it via ThreadManager.
+	// MissionCheckpoint.ID is types.ID; CreateBranchThread expects a string.
+	branchBaseThreads, err := env.ThreadManager.ListThreads(ctx, missionRecord.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, branchBaseThreads, "Expected at least one thread for the mission")
+	originalThreadID := branchBaseThreads[0].ID
+	originalCheckpointID := missionRecord.Checkpoint.ID.String()
 
-	branchThread, err := env.ThreadManager.CreateBranch(ctx, mission.ID, branchOpts)
+	// Create branch via ThreadedCheckpointer.
+	branchThread, err := env.ThreadManager.CreateBranchThread(ctx, originalThreadID, originalCheckpointID)
 	require.NoError(t, err)
 	require.NotNil(t, branchThread)
 
-	// Execute branch
 	env.TrackingAgent.Reset()
 	env.TrackingAgent.shouldPause = false
 
-	err = env.ThreadManager.ExecuteThread(ctx, mission.ID, branchThread.ID)
+	// Verify original thread status via ThreadManager.
+	threads, err := env.ThreadManager.ListThreads(ctx, missionRecord.ID)
 	require.NoError(t, err)
+	assert.NotEmpty(t, threads, "Should have at least one thread")
 
-	time.Sleep(3 * time.Second)
-
-	// Verify original thread unaffected
-	originalThread, err := env.ThreadManager.GetThread(ctx, mission.ID, originalCheckpoint.ThreadID)
-	require.NoError(t, err)
-	assert.Equal(t, "paused", originalThread.Status)
-
-	// Verify branch has correct parent
-	assert.Equal(t, originalCheckpoint.ThreadID, branchThread.ParentThread)
-	assert.Equal(t, "experimental-branch", branchThread.Label)
-
-	// Verify branch executed independently
-	branchCheckpoints, err := env.CheckpointStore.ListByThread(ctx, mission.ID, branchThread.ID)
-	require.NoError(t, err)
-	assert.NotEmpty(t, branchCheckpoints, "Branch should have its own checkpoints")
-
-	t.Logf("Branch created successfully: %s (parent: %s)", branchThread.ID, branchThread.ParentThread)
+	assert.Equal(t, originalThreadID, branchThread.ParentThread)
+	t.Logf("Branch created: %s (parent: %s)", branchThread.ID, branchThread.ParentThread)
 }
 
-// TestE2E_MemoryContinuity tests memory preservation across pause/resume
+// TestE2E_MemoryContinuity tests memory preservation across pause/resume.
 func TestE2E_MemoryContinuity(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createTestMission()
+	testDef := createTestMissionDef()
 
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	// Start mission and let it build up memory
-	err = env.Controller.Start(ctx, mission.ID)
+	err = env.Controller.Start(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
-	// Simulate memory operations in agent
-	testData := map[string]any{
-		"discovered_hosts": []string{"192.168.1.1", "192.168.1.2"},
-		"scan_progress":    0.5,
-		"findings_count":   3,
-		"context": map[string]any{
-			"phase": "reconnaissance",
-			"target": "example.com",
-		},
-	}
-
-	// In real implementation, agent would store to memory via harness
-	// harness.Memory().Mission().Set(ctx, "test_data", testData)
-
-	// Pause after node2
 	env.TrackingAgent.shouldPause = true
 	env.TrackingAgent.pauseAfter = "node2"
 
 	time.Sleep(3 * time.Second)
 
-	// Verify checkpoint created with memory
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	require.NotNil(t, mission.Checkpoint)
+	require.NotNil(t, missionRecord.Checkpoint)
 
-	checkpoint := mission.Checkpoint
-	// In real implementation, verify memory is in checkpoint
-	// assert.NotEmpty(t, checkpoint.MissionMemory)
-
-	// Resume mission
 	env.TrackingAgent.shouldPause = false
-	err = env.Controller.Resume(ctx, mission.ID)
+	err = env.Controller.Resume(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
 	time.Sleep(3 * time.Second)
 
-	// Verify working memory restored
-	// In real implementation, agent would read from memory and verify data matches
-	// retrievedData, err := harness.Memory().Mission().Get(ctx, "test_data")
-	// require.NoError(t, err)
-	// assert.Equal(t, testData, retrievedData)
-
-	// Verify mission memory accessible
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusCompleted, mission.Status)
+	assert.Equal(t, mission.MissionStatusCompleted, missionRecord.Status)
 
 	t.Log("Memory continuity verified across pause/resume cycle")
 }
 
-// TestE2E_ParallelNodes tests checkpoint creation with parallel execution
+// TestE2E_ParallelNodes tests checkpoint creation with parallel execution.
 func TestE2E_ParallelNodes(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createParallelMission()
+	testDef := createParallelMissionDef()
 
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	err = env.Controller.Start(ctx, mission.ID)
+	err = env.Controller.Start(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
-	// Wait for parallel nodes to execute
 	time.Sleep(2 * time.Second)
 
-	// Pause before join node
-	// In real implementation, would configure to pause after parallel group completes
-	err = env.Controller.Pause(ctx, mission.ID)
+	err = env.Controller.Pause(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
 	time.Sleep(1 * time.Second)
 
-	// Verify single checkpoint created
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	require.NotNil(t, mission.Checkpoint)
+	require.NotNil(t, missionRecord.Checkpoint)
 
-	checkpoint := mission.Checkpoint
-
-	// Verify parallel results preserved
-	assert.Contains(t, checkpoint.CompletedNodes, "start")
-	assert.Contains(t, checkpoint.CompletedNodes, "parallel1")
-	assert.Contains(t, checkpoint.CompletedNodes, "parallel2")
-	assert.Contains(t, checkpoint.PendingNodes, "join")
-
-	// Verify checkpoint has parallel state
-	// In real implementation, DAGState would track parallel execution
-	// assert.NotNil(t, checkpoint.DAGState)
-	// assert.NotEmpty(t, checkpoint.DAGState.ParallelState)
-
-	// Resume and verify completion
-	err = env.Controller.Resume(ctx, mission.ID)
+	err = env.Controller.Resume(ctx, missionRecord.ID)
 	require.NoError(t, err)
 
 	time.Sleep(2 * time.Second)
 
-	mission, err = env.Controller.Get(ctx, mission.ID)
+	missionRecord, err = env.Controller.Get(ctx, missionRecord.ID)
 	require.NoError(t, err)
-	assert.Equal(t, mission.MissionStatusCompleted, mission.Status)
+	assert.Equal(t, mission.MissionStatusCompleted, missionRecord.Status)
 
-	// Verify all nodes executed exactly once
 	executedNodes := env.TrackingAgent.GetExecutedNodes()
 	assert.Equal(t, 4, len(executedNodes), "Should execute all 4 nodes")
 
 	t.Logf("Parallel execution with checkpoint successful. Nodes: %v", executedNodes)
 }
 
-// TestE2E_CheckpointIntegrity tests checkpoint integrity validation
+// TestE2E_CheckpointIntegrity tests checkpoint integrity validation.
 func TestE2E_CheckpointIntegrity(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createTestMission()
+	testDef := createTestMissionDef()
 
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	// Create execution state
+	// Create a thread and checkpoint via ThreadedCheckpointer.
+	threadID, err := env.Checkpointer.CreateThread(ctx, missionRecord.ID)
+	require.NoError(t, err)
+
 	state := &checkpoint.ExecutionState{
-		MissionID:      mission.ID,
-		CurrentNodeID:  "node1",
-		CompletedNodes: []string{},
-		PendingNodes:   []string{"node1", "node2", "node3", "node4"},
+		MissionID:     missionRecord.ID,
+		ThreadID:      threadID,
+		CurrentNodeID: "node1",
+		PendingQueue:  []string{"node1", "node2", "node3", "node4"},
+		NodeStates:    make(map[string]*checkpoint.NodeState),
 	}
 
-	// Capture checkpoint
-	cp, err := env.Checkpointer.Capture(ctx, state, checkpoint.CaptureOptions{
-		Label: "integrity-test",
-	})
+	cp, err := env.Checkpointer.Checkpoint(ctx, threadID, state)
 	require.NoError(t, err)
 	require.NotEmpty(t, cp.Checksum, "Checkpoint must have checksum")
 
 	originalChecksum := cp.Checksum
 
-	// Load checkpoint
-	loadedCP, err := env.CheckpointStore.Load(ctx, mission.ID, cp.ThreadID, cp.ID)
+	loadedCP, err := env.CheckpointStore.GetLatestCheckpoint(ctx, threadID)
 	require.NoError(t, err)
 
-	// Verify checksum matches
 	assert.Equal(t, originalChecksum, loadedCP.Checksum)
-
-	// Tamper with checkpoint data (simulate corruption)
-	loadedCP.CompletedNodes["tampered"] = &checkpoint.NodeOutput{
-		NodeID: "tampered",
-		Status: "completed",
-	}
-
-	// Attempt to validate - should fail
-	// In real implementation, validation would detect checksum mismatch
-	// err = env.Checkpointer.ValidateChecksum(loadedCP)
-	// assert.Error(t, err, "Should detect tampered checkpoint")
 
 	t.Log("Checkpoint integrity validation successful")
 }
 
-// TestE2E_ConcurrentCheckpoints tests concurrent checkpoint operations
+// TestE2E_ConcurrentCheckpoints tests concurrent checkpoint operations.
 func TestE2E_ConcurrentCheckpoints(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createTestMission()
+	testDef := createTestMissionDef()
 
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	// Start multiple goroutines trying to create checkpoints
 	numGoroutines := 5
 	var wg sync.WaitGroup
-	errors := make(chan error, numGoroutines)
+	errs := make(chan error, numGoroutines)
 	checkpoints := make(chan *checkpoint.Checkpoint, numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
@@ -999,95 +836,91 @@ func TestE2E_ConcurrentCheckpoints(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 
-			state := &checkpoint.ExecutionState{
-				MissionID:      mission.ID,
-				CurrentNodeID:  fmt.Sprintf("node%d", idx),
-				CompletedNodes: []string{fmt.Sprintf("node%d", idx)},
-				PendingNodes:   []string{"remaining"},
+			threadID, createErr := env.Checkpointer.CreateThread(ctx, missionRecord.ID)
+			if createErr != nil {
+				errs <- createErr
+				return
 			}
 
-			cp, err := env.Checkpointer.Capture(ctx, state, checkpoint.CaptureOptions{
-				Label: fmt.Sprintf("concurrent-%d", idx),
-			})
+			state := &checkpoint.ExecutionState{
+				MissionID:     missionRecord.ID,
+				ThreadID:      threadID,
+				CurrentNodeID: fmt.Sprintf("node%d", idx),
+				PendingQueue:  []string{"remaining"},
+				NodeStates:    make(map[string]*checkpoint.NodeState),
+			}
 
-			if err != nil {
-				errors <- err
+			cp, checkErr := env.Checkpointer.Checkpoint(ctx, threadID, state)
+			if checkErr != nil {
+				errs <- checkErr
 				return
 			}
 			checkpoints <- cp
 		}(i)
 	}
 
-	// Wait for all goroutines
 	wg.Wait()
-	close(errors)
+	close(errs)
 	close(checkpoints)
 
-	// Verify no errors occurred
-	for err := range errors {
+	for err := range errs {
 		assert.NoError(t, err, "Concurrent checkpoint should not error")
 	}
 
-	// Verify we can load a checkpoint successfully
-	// Last write should win
-	loadedCP, err := env.CheckpointStore.Load(ctx, mission.ID, (<-checkpoints).ThreadID, (<-checkpoints).ID)
-	require.NoError(t, err)
-	require.NotNil(t, loadedCP)
+	// Verify we can load a checkpoint from any of the threads.
+	for cp := range checkpoints {
+		loaded, loadErr := env.CheckpointStore.GetLatestCheckpoint(ctx, cp.ThreadID)
+		require.NoError(t, loadErr)
+		assert.NotNil(t, loaded)
+		break // Verify one is enough to prove correctness
+	}
 
 	t.Log("Concurrent checkpoint operations handled safely")
 }
 
-// TestE2E_LargeCheckpoint tests checkpoint with large state data
+// TestE2E_LargeCheckpoint tests checkpoint with large state data.
 func TestE2E_LargeCheckpoint(t *testing.T) {
 	env, cleanup := setupE2EEnv(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	testDef := createTestMission()
+	testDef := createTestMissionDef()
 
-	missionConfig := &mission.MissionConfig{
-		Name:       testDef.Name,
-		WorkflowID: testDef.ID,
-		TargetID:   types.NewID(),
-	}
-
-	mission, err := env.Controller.Create(ctx, missionConfig)
+	missionRecord, err := env.Controller.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+		MissionDefinitionID: testDef.ID,
+		TargetID:            types.NewID(),
+	})
 	require.NoError(t, err)
 
-	// Create large state with lots of node results
-	state := &checkpoint.ExecutionState{
-		MissionID:     mission.ID,
-		CurrentNodeID: "current",
-	}
+	threadID, err := env.Checkpointer.CreateThread(ctx, missionRecord.ID)
+	require.NoError(t, err)
 
-	// Add many completed nodes with large output
-	state.CompletedNodes = make([]string, 100)
+	pendingNodes := make([]string, 100)
 	for i := 0; i < 100; i++ {
-		nodeID := fmt.Sprintf("node_%d", i)
-		state.CompletedNodes[i] = nodeID
+		pendingNodes[i] = fmt.Sprintf("node_%d", i)
 	}
 
-	// Capture checkpoint with compression
+	state := &checkpoint.ExecutionState{
+		MissionID:     missionRecord.ID,
+		ThreadID:      threadID,
+		CurrentNodeID: "current",
+		PendingQueue:  pendingNodes,
+		NodeStates:    make(map[string]*checkpoint.NodeState),
+	}
+
 	start := time.Now()
-	cp, err := env.Checkpointer.Capture(ctx, state, checkpoint.CaptureOptions{
-		Label:    "large-checkpoint",
-		Compress: true,
-	})
+	cp, err := env.Checkpointer.Checkpoint(ctx, threadID, state)
 	require.NoError(t, err)
 	captureDuration := time.Since(start)
 
-	// Verify checkpoint was compressed
-	assert.True(t, cp.Compressed, "Large checkpoint should be compressed")
 	assert.Greater(t, cp.SizeBytes, int64(0), "Should track checkpoint size")
 
-	// Load and verify
 	start = time.Now()
-	loadedCP, err := env.CheckpointStore.Load(ctx, mission.ID, cp.ThreadID, cp.ID)
+	loadedCP, err := env.CheckpointStore.GetLatestCheckpoint(ctx, threadID)
 	require.NoError(t, err)
 	loadDuration := time.Since(start)
 
 	assert.Equal(t, cp.ID, loadedCP.ID)
-	assert.Equal(t, 100, len(loadedCP.CompletedNodes))
 
 	t.Logf("Large checkpoint: capture=%v, load=%v, size=%d bytes",
 		captureDuration, loadDuration, cp.SizeBytes)
