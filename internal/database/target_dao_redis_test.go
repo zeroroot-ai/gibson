@@ -500,7 +500,7 @@ func TestRedisTargetDAO_Delete(t *testing.T) {
 		assert.Error(t, err)
 
 		// Verify name lookup also deleted
-		exists, err := dao.ExistsByName(ctx, target.Name)
+		exists, err := dao.Exists(ctx, target.Name)
 		require.NoError(t, err)
 		assert.False(t, exists)
 	})
@@ -524,14 +524,14 @@ func TestRedisTargetDAO_Exists(t *testing.T) {
 		err := dao.Create(ctx, target)
 		require.NoError(t, err)
 
-		exists, err := dao.Exists(ctx, target.ID)
+		exists, err := dao.ExistsByID(ctx, target.ID)
 		require.NoError(t, err)
 		assert.True(t, exists)
 	})
 
 	t.Run("exists_by_id_false", func(t *testing.T) {
 		id := types.NewID()
-		exists, err := dao.Exists(ctx, id)
+		exists, err := dao.ExistsByID(ctx, id)
 		require.NoError(t, err)
 		assert.False(t, exists)
 	})
@@ -544,18 +544,20 @@ func TestRedisTargetDAO_ExistsByName(t *testing.T) {
 	}
 	defer cleanup()
 
+	// Note: `Exists` takes a name string; `ExistsByID` takes a types.ID.
+	// This test covers the by-name lookup surface.
 	t.Run("exists_by_name_true", func(t *testing.T) {
 		target := createTestTarget("exists-by-name-test")
 		err := dao.Create(ctx, target)
 		require.NoError(t, err)
 
-		exists, err := dao.ExistsByName(ctx, "exists-by-name-test")
+		exists, err := dao.Exists(ctx, "exists-by-name-test")
 		require.NoError(t, err)
 		assert.True(t, exists)
 	})
 
 	t.Run("exists_by_name_false", func(t *testing.T) {
-		exists, err := dao.ExistsByName(ctx, "nonexistent")
+		exists, err := dao.Exists(ctx, "nonexistent")
 		require.NoError(t, err)
 		assert.False(t, exists)
 	})

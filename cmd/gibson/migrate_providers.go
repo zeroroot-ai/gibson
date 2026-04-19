@@ -114,11 +114,11 @@ var unsupportedTypes = map[string]bool{
 // ─────────────────────────────────────────────────────────────────────────────
 
 var (
-	migrateDaemonAddr   string
-	migrateLockKey      string
-	migrateDryRun       bool
-	migrateRedisAddr    string
-	migrateKubeconfig   string
+	migrateDaemonAddr string
+	migrateLockKey    string
+	migrateDryRun     bool
+	migrateRedisAddr  string
+	migrateKubeconfig string
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

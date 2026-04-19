@@ -33,9 +33,9 @@ import (
 type Server struct {
 	discoverypb.UnimplementedDiscoveryServiceServer
 
-	authorizer  authz.Authorizer
-	registry    component.ComponentRegistry
-	logger      *slog.Logger
+	authorizer authz.Authorizer
+	registry   component.ComponentRegistry
+	logger     *slog.Logger
 }
 
 // NewServer builds a DiscoveryServer wired to the injected dependencies.
@@ -105,12 +105,12 @@ func (s *Server) WhoAmI(ctx context.Context, _ *discoverypb.WhoAmIRequest) (*dis
 	}
 
 	resp := &discoverypb.WhoAmIResponse{
-		UserId:        ident.Subject,
-		ActiveTenant:  activeTenant,
-		Tenants:       prefixAll("tenant", tenantIDs),
-		Teams:         prefixAll("team", teamIDs),
-		Relations:     relations,
-		IsAgentAuth:   ident.Issuer == "agent-auth",
+		UserId:         ident.Subject,
+		ActiveTenant:   activeTenant,
+		Tenants:        prefixAll("tenant", tenantIDs),
+		Teams:          prefixAll("team", teamIDs),
+		Relations:      relations,
+		IsAgentAuth:    ident.Issuer == "agent-auth",
 		ComponentScope: auth.ComponentScopeFromContext(ctx),
 	}
 	return resp, nil

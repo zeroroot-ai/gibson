@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -224,7 +225,7 @@ func (tm *DefaultThreadManager) UpdateThreadStatus(ctx context.Context, threadID
 		// Note: Normally Fail() takes an error, but we don't have one here
 		// The caller should use thread.Fail(err) directly if they have an error
 		thread.Status = ThreadStatusFailed
-		thread.UpdatedAt = thread.UpdatedAt // Will be updated by the next line
+		thread.UpdatedAt = time.Now()
 	case ThreadStatusCancelled:
 		thread.Cancel()
 	case ThreadStatusMerged:

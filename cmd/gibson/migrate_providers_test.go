@@ -54,8 +54,8 @@ import (
 type fakeAdminServer struct {
 	adminapi.UnimplementedDaemonAdminServiceServer
 
-	mu      sync.Mutex
-	calls   []*adminapi.CreateProviderRequest
+	mu    sync.Mutex
+	calls []*adminapi.CreateProviderRequest
 }
 
 func (s *fakeAdminServer) CreateProvider(_ context.Context, req *adminapi.CreateProviderRequest) (*adminapi.CreateProviderResponse, error) {
@@ -652,9 +652,9 @@ func TestMigrateProviders_ExtractBedrockCredentials(t *testing.T) {
 
 	t.Run("nested_overrides_flat", func(t *testing.T) {
 		rec := &legacyProviderRecord{
-			AWSRegion:          "us-east-1",    // flat
-			AWSAccessKeyID:     "AKIA_FLAT",    // flat
-			AWSSecretAccessKey: "flat_secret",  // flat
+			AWSRegion:          "us-east-1",   // flat
+			AWSAccessKeyID:     "AKIA_FLAT",   // flat
+			AWSSecretAccessKey: "flat_secret", // flat
 			AWS: &legacyAWSFields{
 				Region:          "eu-west-1",     // nested wins
 				AccessKeyID:     "AKIA_OVERRIDE", // nested wins

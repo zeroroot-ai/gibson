@@ -12,8 +12,8 @@ import (
 // path consults.
 func TestCatalogRelationToComponentGrant(t *testing.T) {
 	cases := []struct {
-		owner      string
-		wantGrant  string
+		owner         string
+		wantGrant     string
 		wantIsCatalog bool
 	}{
 		{"can_read", "component_read_enabled", true},

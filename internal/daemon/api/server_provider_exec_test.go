@@ -42,7 +42,9 @@ func (s *stubProviderConfigStore) Create(ctx context.Context, tenantID string, i
 func (s *stubProviderConfigStore) Update(ctx context.Context, tenantID, name string, input *providerconfig.ProviderConfigInput) (*providerconfig.ProviderConfig, error) {
 	return nil, nil
 }
-func (s *stubProviderConfigStore) Delete(ctx context.Context, tenantID, name string) error { return nil }
+func (s *stubProviderConfigStore) Delete(ctx context.Context, tenantID, name string) error {
+	return nil
+}
 func (s *stubProviderConfigStore) GetDefault(ctx context.Context, tenantID string) (*providerconfig.ProviderConfig, error) {
 	return nil, nil
 }
@@ -100,8 +102,8 @@ func (p *stubMockProvider) Health(_ context.Context) types.HealthStatus {
 
 // stubExecLimiter is a controllable execLimiterIface.
 type stubExecLimiter struct {
-	calls    int
-	blockAt  int // block on the nth call (1-based). 0 = never block.
+	calls   int
+	blockAt int // block on the nth call (1-based). 0 = never block.
 }
 
 func (l *stubExecLimiter) Check(_ context.Context, _, _ string) error {
@@ -150,8 +152,8 @@ func tenantCtx(tenantID string) context.Context {
 // factory. Callers may further customise fields (e.g. WithExecLimiter).
 func newExecServer(store providerConfigStoreIface, factory func(llm.ProviderConfig) (llm.LLMProvider, error)) *DaemonServer {
 	s := &DaemonServer{
-		logger:         slog.Default(),
-		providerConfig: store,
+		logger:          slog.Default(),
+		providerConfig:  store,
 		providerFactory: factory,
 	}
 	return s

@@ -2,7 +2,6 @@ package mission
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -18,8 +17,8 @@ func TestMissionLineageFields(t *testing.T) {
 			Status:              MissionStatusPending,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
-			CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
+			CreatedAt:           NewUnixTimeNow(),
+			UpdatedAt:           NewUnixTimeNow(),
 			Depth:               0,
 		}
 
@@ -40,8 +39,8 @@ func TestMissionLineageFields(t *testing.T) {
 			Status:              MissionStatusPending,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
-			CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
+			CreatedAt:           NewUnixTimeNow(),
+			UpdatedAt:           NewUnixTimeNow(),
 		}
 		mission.WithParent(parentID, parentDepth)
 
@@ -62,8 +61,8 @@ func TestMissionLineageFields(t *testing.T) {
 			Status:              MissionStatusPending,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
-			CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
+			CreatedAt:           NewUnixTimeNow(),
+			UpdatedAt:           NewUnixTimeNow(),
 		}
 		parent.WithParent(grandparentID, 0) // Parent is depth 1
 
@@ -73,8 +72,8 @@ func TestMissionLineageFields(t *testing.T) {
 			Status:              MissionStatusPending,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
-			CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
+			CreatedAt:           NewUnixTimeNow(),
+			UpdatedAt:           NewUnixTimeNow(),
 		}
 		grandchild.WithParent(parent.ID, parent.Depth) // Grandchild is depth 2
 
@@ -92,8 +91,8 @@ func TestMissionLineageFields(t *testing.T) {
 			Status:              MissionStatusPending,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
-			CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
+			CreatedAt:           NewUnixTimeNow(),
+			UpdatedAt:           NewUnixTimeNow(),
 		}).WithParent(parentID, 0)
 
 		assert.NotNil(t, mission, "chained method should return mission")
@@ -112,8 +111,8 @@ func TestMissionBackwardCompatibility(t *testing.T) {
 			Status:              MissionStatusPending,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
-			CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
+			CreatedAt:           NewUnixTimeNow(),
+			UpdatedAt:           NewUnixTimeNow(),
 			// ParentMissionID and Depth not set (defaults: nil and 0)
 		}
 
@@ -150,8 +149,8 @@ func TestMissionJSONSerialization(t *testing.T) {
 			Status:              MissionStatusPending,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
-			CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
+			CreatedAt:           NewUnixTimeNow(),
+			UpdatedAt:           NewUnixTimeNow(),
 			Depth:               0,
 		}
 
@@ -168,8 +167,8 @@ func TestMissionJSONSerialization(t *testing.T) {
 			Status:              MissionStatusPending,
 			TargetID:            types.NewID(),
 			MissionDefinitionID: types.NewID(),
-			CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
+			CreatedAt:           NewUnixTimeNow(),
+			UpdatedAt:           NewUnixTimeNow(),
 		}
 		mission.WithParent(parentID, 0)
 

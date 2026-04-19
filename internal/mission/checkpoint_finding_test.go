@@ -96,12 +96,13 @@ func newCheckpointTestMission() *Mission {
 	id := types.NewID()
 	wfID := types.NewID()
 	now := time.Now()
+	nowUT := NewUnixTime(now)
 	return &Mission{
 		ID:                  id,
 		MissionDefinitionID: wfID,
 		Status:              MissionStatusRunning,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		CreatedAt:           nowUT,
+		UpdatedAt:           nowUT,
 		Metrics:             &MissionMetrics{StartedAt: now},
 	}
 }
@@ -120,7 +121,7 @@ func newCheckpointTestState(missionID types.ID) *MissionState {
 				CompletedAt: &now,
 			},
 		},
-		Results: map[string]any{},
+		Results: map[string]*NodeResult{},
 	}
 }
 

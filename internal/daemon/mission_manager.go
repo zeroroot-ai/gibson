@@ -981,9 +981,6 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 	// Create event channel for mission updates
 	eventChan := make(chan api.MissionEventData, 100)
 
-	// Create mission context with cancellation
-	missionCtx, cancel := context.WithCancel(context.Background())
-
 	// Update mission status to running
 	missionRecord.Status = mission.MissionStatusRunning
 	missionRecord.StartedAt = mission.NewUnixTimePtrNow()
@@ -1013,6 +1010,11 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 		missionRun = mission.NewMissionRun(missionRecord.ID, 1)
 		missionRun.MarkStarted()
 	}
+
+	// Create mission context with cancellation. Constructed here rather than
+	// earlier so the two `GetNextRunNumber` / `Save` error paths above can
+	// return without leaking a cancel func (go vet: lostcancel).
+	missionCtx, cancel := context.WithCancel(context.Background())
 
 	// Create active mission entry
 	active := &activeMission{

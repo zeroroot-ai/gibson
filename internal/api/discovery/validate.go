@@ -24,7 +24,7 @@ type permissionsFile struct {
 }
 
 type permissionEntry struct {
-	Name    string          `yaml:"name"`
+	Name    string           `yaml:"name"`
 	Read    *permissionBlock `yaml:"read,omitempty"`
 	Write   *permissionBlock `yaml:"write,omitempty"`
 	Execute *permissionBlock `yaml:"execute,omitempty"`
@@ -39,10 +39,10 @@ type permissionBlock struct {
 // validator. Full manifest parsing lives in SDK; we duplicate only the
 // fields we need to avoid importing the SDK parser into the daemon.
 type componentManifest struct {
-	Name     string `yaml:"name"`
-	Type     string `yaml:"type"`
-	Kind     string `yaml:"kind"` // tools/plugins use `kind`; agents use `type`
-	Version  string `yaml:"version"`
+	Name    string `yaml:"name"`
+	Type    string `yaml:"type"`
+	Kind    string `yaml:"kind"` // tools/plugins use `kind`; agents use `type`
+	Version string `yaml:"version"`
 }
 
 // ValidateComponent dry-runs a draft component.yaml + permissions.yaml

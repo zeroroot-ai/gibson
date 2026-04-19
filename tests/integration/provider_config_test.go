@@ -302,10 +302,10 @@ func testTwoTenantIsolation(t *testing.T, store providerconfig.ProviderConfigSto
 
 	// Tenant A creates "foo".
 	_, err := store.Create(ctx, tenantA, &providerconfig.ProviderConfigInput{
-		Name:  "foo",
-		Type:  llm.ProviderOpenAI,
+		Name:        "foo",
+		Type:        llm.ProviderOpenAI,
 		Credentials: map[string]string{"api_key": "sk-openai-00000001"},
-		Enabled: true,
+		Enabled:     true,
 	})
 	require.NoError(t, err, "Tenant A create failed")
 
@@ -329,8 +329,8 @@ func testTwoTenantIsolation(t *testing.T, store providerconfig.ProviderConfigSto
 				defer wg.Done()
 				name := fmt.Sprintf("%s-provider-%d", prefix, idx)
 				input := &providerconfig.ProviderConfigInput{
-					Name:  name,
-					Type:  llm.ProviderAnthropic,
+					Name: name,
+					Type: llm.ProviderAnthropic,
 					Credentials: map[string]string{
 						"api_key": fmt.Sprintf("sk-ant-%s-%04d", prefix, idx),
 					},

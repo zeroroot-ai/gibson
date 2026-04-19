@@ -89,9 +89,9 @@ type storedRecord struct {
 // It uses AES-256-GCM encryption via crypto.Encryptor and resolves the
 // master key through crypto.KeyProvider on every write/read.
 type redisStore struct {
-	rdb      redis.UniversalClient
-	enc      crypto.Encryptor
-	keyProv  crypto.KeyProvider
+	rdb     redis.UniversalClient
+	enc     crypto.Encryptor
+	keyProv crypto.KeyProvider
 }
 
 // Ensure redisStore satisfies the interface at compile time.

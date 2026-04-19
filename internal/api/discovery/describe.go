@@ -75,14 +75,14 @@ func (s *Server) DescribeAgent(ctx context.Context, req *discoverypb.DescribeAge
 	// install flow pulls these from the manifest directly; this handler
 	// surfaces what the registry already knows (name, version, rwx).
 	return &discoverypb.DescribeAgentResponse{
-		Name:                  info.Name,
-		DisplayName:           firstNonEmpty(info.Metadata["display_name"], info.Name),
-		Description:           info.Description,
-		Version:               info.Version,
-		LlmSlots:              []string{},
-		RequestedPermissions:  []*discoverypb.PermissionRequest{},
-		Rwx:                   rwx,
-		DenyingGates:          gates,
+		Name:                 info.Name,
+		DisplayName:          firstNonEmpty(info.Metadata["display_name"], info.Name),
+		Description:          info.Description,
+		Version:              info.Version,
+		LlmSlots:             []string{},
+		RequestedPermissions: []*discoverypb.PermissionRequest{},
+		Rwx:                  rwx,
+		DenyingGates:         gates,
 	}, nil
 }
 
