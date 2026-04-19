@@ -89,7 +89,9 @@ func (p *LlamafileProvider) Health(_ context.Context) types.HealthStatus {
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
 }
 
-func (p *LlamafileProvider) CredentialSchema() []llm.CredentialField { return LlamafileCredentialSchema() }
+func (p *LlamafileProvider) CredentialSchema() []llm.CredentialField {
+	return LlamafileCredentialSchema()
+}
 
 func LlamafileCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{

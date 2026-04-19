@@ -142,37 +142,37 @@ func DefaultPricing() *PricingConfig {
 
 	// AWS Bedrock pricing (mirrors the upstream model family's published per-1M rates)
 	config.Pricing["bedrock"] = map[string]ModelPricing{
-		"anthropic.claude-3-opus-20240229-v1:0":    {InputPer1M: 15.00, OutputPer1M: 75.00},
-		"anthropic.claude-3-sonnet-20240229-v1:0":  {InputPer1M: 3.00, OutputPer1M: 15.00},
-		"anthropic.claude-3-haiku-20240307-v1:0":   {InputPer1M: 0.25, OutputPer1M: 1.25},
+		"anthropic.claude-3-opus-20240229-v1:0":     {InputPer1M: 15.00, OutputPer1M: 75.00},
+		"anthropic.claude-3-sonnet-20240229-v1:0":   {InputPer1M: 3.00, OutputPer1M: 15.00},
+		"anthropic.claude-3-haiku-20240307-v1:0":    {InputPer1M: 0.25, OutputPer1M: 1.25},
 		"anthropic.claude-3-5-sonnet-20241022-v2:0": {InputPer1M: 3.00, OutputPer1M: 15.00},
 		"anthropic.claude-3-5-haiku-20241022-v1:0":  {InputPer1M: 1.00, OutputPer1M: 5.00},
-		"amazon.titan-text-lite-v1":                {InputPer1M: 0.15, OutputPer1M: 0.20},
-		"amazon.titan-text-express-v1":             {InputPer1M: 0.20, OutputPer1M: 0.60},
-		"us.amazon.nova-micro-v1:0":                {InputPer1M: 0.035, OutputPer1M: 0.14},
-		"us.amazon.nova-lite-v1:0":                 {InputPer1M: 0.06, OutputPer1M: 0.24},
-		"us.amazon.nova-pro-v1:0":                  {InputPer1M: 0.80, OutputPer1M: 3.20},
-		"meta.llama3-8b-instruct-v1:0":             {InputPer1M: 0.30, OutputPer1M: 0.60},
-		"meta.llama3-70b-instruct-v1:0":            {InputPer1M: 2.65, OutputPer1M: 3.50},
-		"mistral.mistral-large-2407-v1:0":          {InputPer1M: 3.00, OutputPer1M: 9.00},
+		"amazon.titan-text-lite-v1":                 {InputPer1M: 0.15, OutputPer1M: 0.20},
+		"amazon.titan-text-express-v1":              {InputPer1M: 0.20, OutputPer1M: 0.60},
+		"us.amazon.nova-micro-v1:0":                 {InputPer1M: 0.035, OutputPer1M: 0.14},
+		"us.amazon.nova-lite-v1:0":                  {InputPer1M: 0.06, OutputPer1M: 0.24},
+		"us.amazon.nova-pro-v1:0":                   {InputPer1M: 0.80, OutputPer1M: 3.20},
+		"meta.llama3-8b-instruct-v1:0":              {InputPer1M: 0.30, OutputPer1M: 0.60},
+		"meta.llama3-70b-instruct-v1:0":             {InputPer1M: 2.65, OutputPer1M: 3.50},
+		"mistral.mistral-large-2407-v1:0":           {InputPer1M: 3.00, OutputPer1M: 9.00},
 	}
 
 	// Cloudflare Workers AI — per-neuron pricing converted to rough per-1M
 	// estimates for budgeting. Cloudflare's pricing model is neuron-based so
 	// exact conversions vary by model; treat these as advisory.
 	config.Pricing["cloudflare"] = map[string]ModelPricing{
-		"@cf/meta/llama-3.1-8b-instruct":         {InputPer1M: 0.11, OutputPer1M: 0.11},
-		"@cf/meta/llama-3-8b-instruct":           {InputPer1M: 0.11, OutputPer1M: 0.11},
-		"@cf/mistral/mistral-7b-instruct-v0.1":   {InputPer1M: 0.11, OutputPer1M: 0.11},
-		"@cf/google/gemma-7b-it":                 {InputPer1M: 0.11, OutputPer1M: 0.11},
+		"@cf/meta/llama-3.1-8b-instruct":       {InputPer1M: 0.11, OutputPer1M: 0.11},
+		"@cf/meta/llama-3-8b-instruct":         {InputPer1M: 0.11, OutputPer1M: 0.11},
+		"@cf/mistral/mistral-7b-instruct-v0.1": {InputPer1M: 0.11, OutputPer1M: 0.11},
+		"@cf/google/gemma-7b-it":               {InputPer1M: 0.11, OutputPer1M: 0.11},
 	}
 
 	// Cohere pricing
 	config.Pricing["cohere"] = map[string]ModelPricing{
-		"command-r-plus":   {InputPer1M: 2.50, OutputPer1M: 10.00},
-		"command-r":        {InputPer1M: 0.15, OutputPer1M: 0.60},
-		"command":          {InputPer1M: 1.00, OutputPer1M: 2.00},
-		"command-light":    {InputPer1M: 0.30, OutputPer1M: 0.60},
+		"command-r-plus": {InputPer1M: 2.50, OutputPer1M: 10.00},
+		"command-r":      {InputPer1M: 0.15, OutputPer1M: 0.60},
+		"command":        {InputPer1M: 1.00, OutputPer1M: 2.00},
+		"command-light":  {InputPer1M: 0.30, OutputPer1M: 0.60},
 	}
 
 	// Mistral La Plateforme pricing
@@ -189,9 +189,9 @@ func DefaultPricing() *PricingConfig {
 	// HuggingFace Inference API — public serverless is free-tier-gated with
 	// enterprise metering variants. Rates here assume the standard plan.
 	config.Pricing["huggingface"] = map[string]ModelPricing{
-		"meta-llama/Llama-3.1-70B-Instruct":  {InputPer1M: 0.90, OutputPer1M: 0.90},
-		"meta-llama/Llama-3.1-8B-Instruct":   {InputPer1M: 0.20, OutputPer1M: 0.20},
-		"meta-llama/Llama-3-70B-Instruct":    {InputPer1M: 0.90, OutputPer1M: 0.90},
+		"meta-llama/Llama-3.1-70B-Instruct":    {InputPer1M: 0.90, OutputPer1M: 0.90},
+		"meta-llama/Llama-3.1-8B-Instruct":     {InputPer1M: 0.20, OutputPer1M: 0.20},
+		"meta-llama/Llama-3-70B-Instruct":      {InputPer1M: 0.90, OutputPer1M: 0.90},
 		"mistralai/Mixtral-8x7B-Instruct-v0.1": {InputPer1M: 0.60, OutputPer1M: 0.60},
 	}
 

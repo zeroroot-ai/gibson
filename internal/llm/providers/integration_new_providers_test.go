@@ -154,4 +154,3 @@ func TestIntegrationLlamafile(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, resp.Message.Content)
 }
-

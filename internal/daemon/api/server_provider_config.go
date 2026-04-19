@@ -136,11 +136,11 @@ func validateProviderInput(input *ProviderConfigInput) error {
 type providerAuditAction = string
 
 const (
-	auditProviderCreated        providerAuditAction = "provider_created"
-	auditProviderUpdated        providerAuditAction = "provider_updated"
-	auditProviderDeleted        providerAuditAction = "provider_deleted"
-	auditProviderTested         providerAuditAction = "provider_tested"
-	auditProviderDefaultChanged providerAuditAction = "provider_default_changed"
+	auditProviderCreated         providerAuditAction = "provider_created"
+	auditProviderUpdated         providerAuditAction = "provider_updated"
+	auditProviderDeleted         providerAuditAction = "provider_deleted"
+	auditProviderTested          providerAuditAction = "provider_tested"
+	auditProviderDefaultChanged  providerAuditAction = "provider_default_changed"
 	auditProviderFallbackChanged providerAuditAction = "provider_fallback_chain_changed"
 )
 

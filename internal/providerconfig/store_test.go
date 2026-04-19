@@ -522,10 +522,10 @@ func TestMaskCredential_Rules(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"", ""},               // empty → empty
-		{"abc", "****"},        // < 8 chars → full mask
-		{"1234567", "****"},    // 7 chars (< 8) → full mask
-		{"12345678", "****5678"}, // exactly 8 → ****<last4>
+		{"", ""},                            // empty → empty
+		{"abc", "****"},                     // < 8 chars → full mask
+		{"1234567", "****"},                 // 7 chars (< 8) → full mask
+		{"12345678", "****5678"},            // exactly 8 → ****<last4>
 		{"sk-ant-api03-abcdef", "****cdef"}, // long key
 	}
 	for _, tt := range tests {
@@ -543,9 +543,9 @@ func TestAsRecord_MasksAllFields(t *testing.T) {
 	}
 	creds := map[string]string{
 		"api_key":     "sk-ant-api03-abcdef1234567890",
-		"short":       "abc",        // < 8 — full mask
-		"exactly8":    "12345678",   // = 8 — ****5678
-		"empty_field": "",           // empty — stays empty
+		"short":       "abc",      // < 8 — full mask
+		"exactly8":    "12345678", // = 8 — ****5678
+		"empty_field": "",         // empty — stays empty
 	}
 	masked := AsRecord(cfg, creds)
 	assert.Equal(t, "****7890", masked.CredentialsMasked["api_key"])
@@ -617,9 +617,9 @@ type failingKeyProvider struct{}
 func (p *failingKeyProvider) GetEncryptionKey(_ context.Context) ([]byte, error) {
 	return nil, errors.New("key provider is unavailable")
 }
-func (p *failingKeyProvider) Name() string                              { return "failing" }
+func (p *failingKeyProvider) Name() string                                { return "failing" }
 func (p *failingKeyProvider) Health(_ context.Context) types.HealthStatus { return types.Unhealthy("") }
-func (p *failingKeyProvider) Close() error                              { return nil }
+func (p *failingKeyProvider) Close() error                                { return nil }
 
 var _ crypto.KeyProvider = (*failingKeyProvider)(nil)
 

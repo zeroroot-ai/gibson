@@ -95,8 +95,7 @@ func TestNewMemoryManager_WithCustomConfig(t *testing.T) {
 		LongTerm: LongTermMemoryConfig{
 			Backend: "embedded",
 			Embedder: EmbedderConfig{
-				Provider: "mock",
-				Model:    "test-model",
+				Provider: "native",
 			},
 		},
 	}

@@ -1,7 +1,7 @@
 // Package reconciler implements background reconciliation loops for
 // cross-tenant state that isn't bound to a single request. Currently:
 //
-//   * CatalogFanout — ensures every platform-enabled catalog item has a
+//   - CatalogFanout — ensures every platform-enabled catalog item has a
 //     tenant_enabled tuple on every existing tenant so new marketplace
 //     publishes fan out automatically (spec R4 AC 7).
 //

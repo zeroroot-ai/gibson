@@ -36,13 +36,13 @@ var (
 // Credentials are always masked in this struct; use DecryptedConfig (via Resolve)
 // for the execution path.
 type ProviderConfig struct {
-	ID            types.ID
-	TenantID      string
-	Name          string
-	Type          llm.ProviderType
-	DefaultModel  string
-	IsDefault     bool
-	Enabled       bool
+	ID           types.ID
+	TenantID     string
+	Name         string
+	Type         llm.ProviderType
+	DefaultModel string
+	IsDefault    bool
+	Enabled      bool
 	// CredentialsMasked is the credential map with values masked as "****<last4>"
 	// (or "****" for values shorter than 8 characters). Computed at read time,
 	// never stored. Empty string values are passed through as empty strings.
@@ -66,12 +66,12 @@ type DecryptedConfig struct {
 // Credentials are plaintext on the way in; the store encrypts immediately before
 // persisting to Redis.
 type ProviderConfigInput struct {
-	Name          string
-	Type          llm.ProviderType
-	DefaultModel  string
-	Credentials   map[string]string // plaintext — encrypted before storage
-	SetAsDefault  bool
-	Enabled       bool
+	Name         string
+	Type         llm.ProviderType
+	DefaultModel string
+	Credentials  map[string]string // plaintext — encrypted before storage
+	SetAsDefault bool
+	Enabled      bool
 }
 
 // AsRecord computes the masked credential map for cfg and returns a copy of cfg

@@ -302,8 +302,8 @@ func TestRedisMissionStore_SaveAndGet(t *testing.T) {
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
 		Progress:            0.0,
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	// Save mission
@@ -349,8 +349,8 @@ func TestRedisMissionStore_Update(t *testing.T) {
 		Status:              MissionStatusPending,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	// Save mission
@@ -385,8 +385,8 @@ func TestRedisMissionStore_UpdateStatus(t *testing.T) {
 		Status:              MissionStatusPending,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	// Save mission
@@ -419,8 +419,8 @@ func TestRedisMissionStore_UpdateProgress(t *testing.T) {
 		Progress:            0.0,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	// Save mission
@@ -452,8 +452,8 @@ func TestRedisMissionStore_UpdateProgress_InvalidRange(t *testing.T) {
 		Status:              MissionStatusRunning,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	// Save mission
@@ -485,9 +485,9 @@ func TestRedisMissionStore_Delete(t *testing.T) {
 		Status:              MissionStatusCompleted,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
-		CompletedAt:         ptrTime(time.Now()),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
+		CompletedAt:         NewUnixTimePtr(ptrTime(time.Now())),
 	}
 
 	// Save mission
@@ -519,8 +519,8 @@ func TestRedisMissionStore_DeleteNonTerminal(t *testing.T) {
 		Status:              MissionStatusRunning, // Non-terminal state
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	// Save mission
@@ -548,8 +548,8 @@ func TestRedisMissionStore_SaveCheckpoint(t *testing.T) {
 		Status:              MissionStatusRunning,
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
+		CreatedAt:           NewUnixTimeNow(),
+		UpdatedAt:           NewUnixTimeNow(),
 	}
 
 	// Save mission

@@ -31,23 +31,23 @@ import (
 // mockProviderStore satisfies providerConfigStoreIface for tests.
 // All return values are configurable via exported fields.
 type mockProviderStore struct {
-	listOut    []*providerconfig.ProviderConfig
-	listErr    error
-	getOut     *providerconfig.ProviderConfig
-	getErr     error
-	createOut  *providerconfig.ProviderConfig
-	createErr  error
-	updateOut  *providerconfig.ProviderConfig
-	updateErr  error
-	deleteErr  error
-	defaultOut *providerconfig.ProviderConfig
-	defaultErr error
-	setDefErr  error
-	chainOut   []string
-	chainErr   error
+	listOut     []*providerconfig.ProviderConfig
+	listErr     error
+	getOut      *providerconfig.ProviderConfig
+	getErr      error
+	createOut   *providerconfig.ProviderConfig
+	createErr   error
+	updateOut   *providerconfig.ProviderConfig
+	updateErr   error
+	deleteErr   error
+	defaultOut  *providerconfig.ProviderConfig
+	defaultErr  error
+	setDefErr   error
+	chainOut    []string
+	chainErr    error
 	setChainErr error
-	resolveOut *providerconfig.DecryptedConfig
-	resolveErr error
+	resolveOut  *providerconfig.DecryptedConfig
+	resolveErr  error
 
 	// captured inputs for mutation verification
 	capturedCreateInput *providerconfig.ProviderConfigInput
@@ -129,16 +129,16 @@ func (m *mockAuditLogger) Log(_ context.Context, action, resource, resourceID st
 // fakeProviderRecord returns a minimal ProviderConfig for use in mock returns.
 func fakeProviderRecord(name string) *providerconfig.ProviderConfig {
 	return &providerconfig.ProviderConfig{
-		ID:            types.NewID(),
-		TenantID:      "acme",
-		Name:          name,
-		Type:          llm.ProviderOpenAI,
-		DefaultModel:  "gpt-4o-mini",
-		IsDefault:     false,
-		Enabled:       true,
+		ID:                types.NewID(),
+		TenantID:          "acme",
+		Name:              name,
+		Type:              llm.ProviderOpenAI,
+		DefaultModel:      "gpt-4o-mini",
+		IsDefault:         false,
+		Enabled:           true,
 		CredentialsMasked: map[string]string{"api_key": "****abcd"},
-		CreatedAt:     time.Now().UTC(),
-		UpdatedAt:     time.Now().UTC(),
+		CreatedAt:         time.Now().UTC(),
+		UpdatedAt:         time.Now().UTC(),
 	}
 }
 

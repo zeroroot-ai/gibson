@@ -172,7 +172,7 @@ func TestCachedTenantValidator_PerTenantCacheIsolation(t *testing.T) {
 		"tenant-b": mockB,
 	}}
 	_ = callMap
-	_ = mu
+	_ = &mu // reference by pointer to avoid copying the mutex
 	_ = delegate
 	_ = perTenantValidator{}
 

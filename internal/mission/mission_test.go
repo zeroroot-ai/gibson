@@ -307,8 +307,8 @@ func TestMission_GetDuration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mission := &Mission{
-				StartedAt:   tt.startedAt,
-				CompletedAt: tt.completedAt,
+				StartedAt:   NewUnixTimePtr(tt.startedAt),
+				CompletedAt: NewUnixTimePtr(tt.completedAt),
 			}
 			duration := mission.GetDuration()
 			if tt.minDuration > 0 {

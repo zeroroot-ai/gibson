@@ -45,10 +45,13 @@ var (
 //   - Applies mean pooling on last_hidden_state output
 //   - Handles int32->int64 conversion for ONNX model compatibility
 type NativeEmbedder struct {
-	model     *onnx.Model
-	ctx       *mlcontext.Context
-	backend   backends.Backend
-	tokenizer tokenize.FeatureFactory
+	model   *onnx.Model
+	ctx     *mlcontext.Context
+	backend backends.Backend
+	// tokenizer is a pointer because tokenize.FeatureFactory contains a
+	// sync.Mutex — copying the value by storing it directly would copy the
+	// lock (go vet: copylocks).
+	tokenizer *tokenize.FeatureFactory
 	mu        sync.RWMutex
 }
 
@@ -142,7 +145,7 @@ func CreateNativeEmbedder() (*NativeEmbedder, error) {
 			model:     model,
 			ctx:       ctx,
 			backend:   backend,
-			tokenizer: featureFactory,
+			tokenizer: &featureFactory,
 		}
 	})
 
