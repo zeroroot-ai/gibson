@@ -118,6 +118,7 @@ func init() {
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(authz.Cmd)
+	rootCmd.AddCommand(migrateProvidersCmd) // migrate-providers: one-shot K8s Secret → daemon migration (spec 25)
 }
 
 var versionCmd = &cobra.Command{

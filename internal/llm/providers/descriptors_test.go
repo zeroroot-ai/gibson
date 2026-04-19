@@ -31,14 +31,14 @@ func TestSupportedProviderDescriptors_SelfHostedFlag(t *testing.T) {
 	for _, d := range descs {
 		byType[d.Type] = d
 	}
-	selfHosted := []llm.ProviderType{llm.ProviderOllama, llm.ProviderLlamafile, llm.ProviderLocal}
+	selfHosted := []llm.ProviderType{llm.ProviderOllama, llm.ProviderLlamafile}
 	for _, t_ := range selfHosted {
 		assert.True(t, byType[t_].SelfHosted, "%s should have SelfHosted=true", t_)
 	}
 	hosted := []llm.ProviderType{
 		llm.ProviderAnthropic, llm.ProviderBedrock, llm.ProviderCloudflare,
-		llm.ProviderCohere, llm.ProviderErnie, llm.ProviderHuggingFace,
-		llm.ProviderMaritaca, llm.ProviderMistral, llm.ProviderWatsonX,
+		llm.ProviderCohere, llm.ProviderHuggingFace,
+		llm.ProviderMistral,
 	}
 	for _, t_ := range hosted {
 		assert.False(t, byType[t_].SelfHosted, "%s should have SelfHosted=false", t_)

@@ -531,6 +531,66 @@ func (r *FgaRpcRegistry) populate() {
 	})
 
 	// =========================================================================
+	// spec-25: Provider config CRUD RPCs on DaemonAdminService
+	// =========================================================================
+
+	// Read-only provider queries — tenant member.
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ListProviders", FgaCheckSpec{
+		Relation:    "member",
+		Description: "List tenant-configured LLM providers (credentials masked)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetProvider", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Get a single tenant-configured LLM provider (credentials masked)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetProviderHealth", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Check the health of a stored LLM provider",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetDefaultProvider", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Get the tenant's default LLM provider",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/GetFallbackChain", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Get the tenant's LLM provider fallback chain",
+	})
+
+	// Write/mutate provider operations — tenant admin.
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/CreateProvider", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Store a new LLM provider config (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/UpdateProvider", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Update a stored LLM provider config (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/DeleteProvider", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Delete a stored LLM provider config (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/TestProvider", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Validate a proposed LLM provider config without persisting (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/ExecuteLLM", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Execute a one-shot LLM completion through a tenant-configured provider (member)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/StreamLLM", FgaCheckSpec{
+		Relation:    "member",
+		Description: "Stream an LLM completion through a tenant-configured provider (member)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/SetDefaultProvider", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Set the tenant's default LLM provider (admin only)",
+	})
+	r.add("/gibson.daemon.admin.v1.DaemonAdminService/SetFallbackChain", FgaCheckSpec{
+		Relation:    "admin",
+		Description: "Set the tenant's LLM provider fallback chain (admin only)",
+	})
+
+	// =========================================================================
 	// gibson.component.v1.ComponentService — internal component/agent API
 	// =========================================================================
 	// ComponentService is used by agents, tools, and plugins. These callers
@@ -797,33 +857,6 @@ func (r *FgaRpcRegistry) populate() {
 		ObjectFrom:  constObject("component:_system"),
 		Description: "Report step hints from an agent",
 	})
-
-	// ---------------------------------------------------------------------
-	// DiscoveryService — read-only introspection for gibson-mcp + dashboard.
-	// Every RPC gates on tenant#member since they surface tenant-scoped
-	// catalog state. The handler itself enforces the scope+action semantics;
-	// this registry entry just ensures the caller belongs to the tenant.
-	// Spec: agent-authoring-and-tenant-entitlements R6 AC 2.
-	// ---------------------------------------------------------------------
-	discoveryRPCs := []string{
-		"/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI",
-		"/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins",
-		"/gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin",
-		"/gibson.daemon.discovery.v1.DiscoveryService/ListTools",
-		"/gibson.daemon.discovery.v1.DiscoveryService/DescribeTool",
-		"/gibson.daemon.discovery.v1.DiscoveryService/ListAgents",
-		"/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent",
-		"/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots",
-		"/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces",
-		"/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent",
-		"/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability",
-	}
-	for _, method := range discoveryRPCs {
-		r.add(method, FgaCheckSpec{
-			Relation:    "member",
-			Description: "DiscoveryService: " + method[len("/gibson.daemon.discovery.v1.DiscoveryService/"):],
-		})
-	}
 
 	// ---------------------------------------------------------------------
 	// Entitlement admin RPCs — called by the tenant-operator through the

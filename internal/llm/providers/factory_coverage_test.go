@@ -69,12 +69,6 @@ func minimalConfigFor(typ llm.ProviderType) llm.ProviderConfig {
 		cfg.Extra = map[string]string{"aws_region": "us-east-1"}
 	case llm.ProviderCloudflare:
 		cfg.Extra = map[string]string{"cloudflare_account_id": "acct"}
-	case llm.ProviderErnie:
-		cfg.Extra = map[string]string{"ernie_access_key": "ak", "ernie_secret_key": "sk"}
-	case llm.ProviderWatsonX:
-		cfg.Extra = map[string]string{"watsonx_project_id": "proj"}
-	case llm.ProviderLocal:
-		cfg.Extra = map[string]string{"bin": "/bin/true"}
 	}
 	return cfg
 }

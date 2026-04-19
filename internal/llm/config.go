@@ -18,13 +18,9 @@ const (
 	ProviderBedrock     ProviderType = "bedrock"
 	ProviderCloudflare  ProviderType = "cloudflare"
 	ProviderCohere      ProviderType = "cohere"
-	ProviderErnie       ProviderType = "ernie"
 	ProviderHuggingFace ProviderType = "huggingface"
 	ProviderLlamafile   ProviderType = "llamafile"
-	ProviderLocal       ProviderType = "local"
-	ProviderMaritaca    ProviderType = "maritaca"
 	ProviderMistral     ProviderType = "mistral"
-	ProviderWatsonX     ProviderType = "watsonx"
 	ProviderCustom      ProviderType = "custom"
 )
 
@@ -40,13 +36,9 @@ func SupportedProviderTypes() []ProviderType {
 		ProviderBedrock,
 		ProviderCloudflare,
 		ProviderCohere,
-		ProviderErnie,
 		ProviderHuggingFace,
 		ProviderLlamafile,
-		ProviderLocal,
-		ProviderMaritaca,
 		ProviderMistral,
-		ProviderWatsonX,
 		ProviderCustom,
 	}
 }
@@ -56,7 +48,6 @@ func SupportedProviderTypes() []ProviderType {
 var selfHostedProviderTypes = map[ProviderType]bool{
 	ProviderOllama:    true,
 	ProviderLlamafile: true,
-	ProviderLocal:     true,
 }
 
 // IsSelfHosted reports whether the provider runs on operator-controlled
@@ -111,7 +102,7 @@ func (c *LLMConfig) Validate() error {
 // It includes authentication credentials, API endpoints, available models,
 // and provider-specific options.
 type ProviderConfig struct {
-	Type         ProviderType           `mapstructure:"type" yaml:"type" validate:"required,oneof=anthropic openai google ollama bedrock cloudflare cohere ernie huggingface llamafile local maritaca mistral watsonx custom"`
+	Type         ProviderType           `mapstructure:"type" yaml:"type" validate:"required,oneof=anthropic openai google ollama bedrock cloudflare cohere huggingface llamafile mistral custom"`
 	APIKey       string                 `mapstructure:"api_key" yaml:"api_key"`
 	BaseURL      string                 `mapstructure:"base_url" yaml:"base_url"`
 	DefaultModel string                 `mapstructure:"default_model" yaml:"default_model" validate:"required"`
@@ -150,7 +141,7 @@ func (p *ProviderConfig) Validate() error {
 	}
 
 	// APIKey is required for hosted providers but optional for self-hosted ones
-	// (ollama, llamafile, local) where the endpoint is operator-controlled.
+	// (ollama, llamafile) where the endpoint is operator-controlled.
 	if p.APIKey == "" && !p.Type.IsSelfHosted() {
 		return types.NewError(types.CONFIG_VALIDATION_FAILED, "api_key cannot be empty")
 	}

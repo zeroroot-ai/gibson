@@ -293,6 +293,67 @@ entries:
     relation: admin
     description: Bulk grant or revoke component access for any principal (admin only)
 
+  # Entitlement admin RPCs (agent-authoring-and-tenant-entitlements spec).
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/WriteAccessTuples
+    relation: admin
+    description: "Entitlement admin RPC: WriteAccessTuples"
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/UpsertTenantQuota
+    relation: admin
+    description: "Entitlement admin RPC: UpsertTenantQuota"
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListFeatureTuples
+    relation: admin
+    description: "Entitlement admin RPC: ListFeatureTuples"
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/SeedCatalogTenantEnabled
+    relation: admin
+    description: "Entitlement admin RPC: SeedCatalogTenantEnabled"
+
+  # ===========================================================================
+  # spec-25: Provider config CRUD RPCs on DaemonAdminService
+  # ===========================================================================
+
+  # Read-only provider queries — tenant member.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ListProviders
+    relation: member
+    description: List tenant-configured LLM providers (credentials masked)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetProvider
+    relation: member
+    description: Get a single tenant-configured LLM provider (credentials masked)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetProviderHealth
+    relation: member
+    description: Check the health of a stored LLM provider
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetDefaultProvider
+    relation: member
+    description: Get the tenant's default LLM provider
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/GetFallbackChain
+    relation: member
+    description: Get the tenant's LLM provider fallback chain
+
+  # Write/mutate provider operations — tenant admin.
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/CreateProvider
+    relation: admin
+    description: Store a new LLM provider config (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/UpdateProvider
+    relation: admin
+    description: Update a stored LLM provider config (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/DeleteProvider
+    relation: admin
+    description: Delete a stored LLM provider config (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/TestProvider
+    relation: admin
+    description: Validate a proposed LLM provider config without persisting (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/ExecuteLLM
+    relation: member
+    description: Execute a one-shot LLM completion through a tenant-configured provider (member)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/StreamLLM
+    relation: member
+    description: Stream an LLM completion through a tenant-configured provider (member)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/SetDefaultProvider
+    relation: admin
+    description: Set the tenant's default LLM provider (admin only)
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/SetFallbackChain
+    relation: admin
+    description: Set the tenant's LLM provider fallback chain (admin only)
+
   # ===========================================================================
   # gibson.component.v1.ComponentService — agents, tools, plugins
   # ===========================================================================

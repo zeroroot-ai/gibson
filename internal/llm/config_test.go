@@ -614,13 +614,9 @@ func TestProviderType_Constants(t *testing.T) {
 	assert.Equal(t, ProviderType("bedrock"), ProviderBedrock)
 	assert.Equal(t, ProviderType("cloudflare"), ProviderCloudflare)
 	assert.Equal(t, ProviderType("cohere"), ProviderCohere)
-	assert.Equal(t, ProviderType("ernie"), ProviderErnie)
 	assert.Equal(t, ProviderType("huggingface"), ProviderHuggingFace)
 	assert.Equal(t, ProviderType("llamafile"), ProviderLlamafile)
-	assert.Equal(t, ProviderType("local"), ProviderLocal)
-	assert.Equal(t, ProviderType("maritaca"), ProviderMaritaca)
 	assert.Equal(t, ProviderType("mistral"), ProviderMistral)
-	assert.Equal(t, ProviderType("watsonx"), ProviderWatsonX)
 	assert.Equal(t, ProviderType("custom"), ProviderCustom)
 }
 
@@ -635,9 +631,9 @@ func TestSupportedProviderTypes(t *testing.T) {
 	// Anchor the full enum so adding/removing a provider must update this test.
 	expected := []ProviderType{
 		ProviderAnthropic, ProviderOpenAI, ProviderGoogle, ProviderOllama,
-		ProviderBedrock, ProviderCloudflare, ProviderCohere, ProviderErnie,
-		ProviderHuggingFace, ProviderLlamafile, ProviderLocal, ProviderMaritaca,
-		ProviderMistral, ProviderWatsonX, ProviderCustom,
+		ProviderBedrock, ProviderCloudflare, ProviderCohere,
+		ProviderHuggingFace, ProviderLlamafile,
+		ProviderMistral, ProviderCustom,
 	}
 	assert.ElementsMatch(t, expected, got, "SupportedProviderTypes drift")
 }
@@ -677,14 +673,14 @@ func TestSupportedProviderTypes_ParityWithOneofTag(t *testing.T) {
 }
 
 func TestProviderType_IsSelfHosted(t *testing.T) {
-	selfHosted := []ProviderType{ProviderOllama, ProviderLlamafile, ProviderLocal}
+	selfHosted := []ProviderType{ProviderOllama, ProviderLlamafile}
 	for _, p := range selfHosted {
 		assert.True(t, p.IsSelfHosted(), "%s should be self-hosted", p)
 	}
 	hosted := []ProviderType{
 		ProviderAnthropic, ProviderOpenAI, ProviderGoogle,
-		ProviderBedrock, ProviderCloudflare, ProviderCohere, ProviderErnie,
-		ProviderHuggingFace, ProviderMaritaca, ProviderMistral, ProviderWatsonX,
+		ProviderBedrock, ProviderCloudflare, ProviderCohere,
+		ProviderHuggingFace, ProviderMistral,
 		ProviderCustom,
 	}
 	for _, p := range hosted {
@@ -730,14 +726,6 @@ func TestProviderConfig_Validate_NewProviders(t *testing.T) {
 			},
 		},
 		{
-			name: "local accepts empty api_key (self-hosted)",
-			cfg: ProviderConfig{
-				Type:         ProviderLocal,
-				DefaultModel: "local-model",
-				BaseURL:      "http://localhost:9000",
-			},
-		},
-		{
 			name: "ollama accepts empty api_key (self-hosted)",
 			cfg: ProviderConfig{
 				Type:         ProviderOllama,
@@ -773,15 +761,17 @@ func TestProviderConfig_Validate_NewProviders(t *testing.T) {
 
 func TestProviderConfig_ExtraField_Roundtrip(t *testing.T) {
 	cfg := ProviderConfig{
-		Type:         ProviderWatsonX,
+		Type:         ProviderBedrock,
 		APIKey:       "key",
-		DefaultModel: "ibm/granite-13b-chat-v2",
+		DefaultModel: "anthropic.claude-3-haiku-20240307-v1:0",
 		Extra: map[string]string{
-			"watsonx_project_id": "proj-abc",
+			"aws_access_key_id":     "AKIA...",
+			"aws_secret_access_key": "secret",
+			"aws_region":            "us-east-1",
 		},
 	}
 	require.NoError(t, cfg.Validate())
-	assert.Equal(t, "proj-abc", cfg.Extra["watsonx_project_id"])
+	assert.Equal(t, "us-east-1", cfg.Extra["aws_region"])
 }
 
 func TestModelFeature_Constants(t *testing.T) {

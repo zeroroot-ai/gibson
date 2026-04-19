@@ -81,22 +81,13 @@ func redactCredentialKeys() []string {
 		"cloudflare_account_id",
 		"cloudflare_api_token",
 
-		// ERNIE
-		"ernie_access_key",
-		"ernie_secret_key",
-
 		// HuggingFace
 		"huggingface_api_token",
 
-		// WatsonX
-		"watsonx_api_key",
-		"watsonx_project_id",
-
-		// Mistral / Cohere / Maritaca share the generic api_key field but also
-		// expose typed env-var-equivalent keys in case operators want to store
-		// them in cfg.Extra alongside multi-provider configs.
+		// Mistral / Cohere share the generic api_key field but also expose typed
+		// env-var-equivalent keys in case operators want to store them in
+		// cfg.Extra alongside multi-provider configs.
 		"mistral_api_key",
 		"cohere_api_key",
-		"maritaca_api_key",
 	}
 }

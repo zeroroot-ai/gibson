@@ -137,60 +137,6 @@ func TestIntegrationHuggingFace(t *testing.T) {
 	assert.NotEmpty(t, resp.Message.Content)
 }
 
-func TestIntegrationErnie(t *testing.T) {
-	if os.Getenv("ERNIE_INTEGRATION") != "1" {
-		t.Skip("ERNIE_INTEGRATION not set")
-	}
-	p, err := NewErnieProvider(llm.ProviderConfig{
-		Type:         llm.ProviderErnie,
-		DefaultModel: "ernie-bot-turbo",
-	})
-	require.NoError(t, err)
-
-	ctx, cancel := integrationCtx(t)
-	defer cancel()
-
-	resp, err := p.Complete(ctx, shortPrompt())
-	require.NoError(t, err)
-	assert.NotEmpty(t, resp.Message.Content)
-}
-
-func TestIntegrationMaritaca(t *testing.T) {
-	if os.Getenv("MARITACA_INTEGRATION") != "1" {
-		t.Skip("MARITACA_INTEGRATION not set")
-	}
-	p, err := NewMaritacaProvider(llm.ProviderConfig{
-		Type:         llm.ProviderMaritaca,
-		DefaultModel: "sabia-2-small",
-	})
-	require.NoError(t, err)
-
-	ctx, cancel := integrationCtx(t)
-	defer cancel()
-
-	resp, err := p.Complete(ctx, shortPrompt())
-	require.NoError(t, err)
-	assert.NotEmpty(t, resp.Message.Content)
-}
-
-func TestIntegrationWatsonX(t *testing.T) {
-	if os.Getenv("WATSONX_INTEGRATION") != "1" {
-		t.Skip("WATSONX_INTEGRATION not set")
-	}
-	p, err := NewWatsonXProvider(llm.ProviderConfig{
-		Type:         llm.ProviderWatsonX,
-		DefaultModel: "ibm/granite-13b-chat-v2",
-	})
-	require.NoError(t, err)
-
-	ctx, cancel := integrationCtx(t)
-	defer cancel()
-
-	resp, err := p.Complete(ctx, shortPrompt())
-	require.NoError(t, err)
-	assert.NotEmpty(t, resp.Message.Content)
-}
-
 func TestIntegrationLlamafile(t *testing.T) {
 	if os.Getenv("LLAMAFILE_INTEGRATION") != "1" {
 		t.Skip("LLAMAFILE_INTEGRATION not set")
@@ -209,23 +155,3 @@ func TestIntegrationLlamafile(t *testing.T) {
 	assert.NotEmpty(t, resp.Message.Content)
 }
 
-func TestIntegrationLocal(t *testing.T) {
-	if os.Getenv("LOCAL_INTEGRATION") != "1" {
-		t.Skip("LOCAL_INTEGRATION not set")
-	}
-	bin := os.Getenv("LOCAL_LLM_BIN")
-	require.NotEmpty(t, bin, "LOCAL_LLM_BIN must be set when LOCAL_INTEGRATION=1")
-	p, err := NewLocalProvider(llm.ProviderConfig{
-		Type:         llm.ProviderLocal,
-		DefaultModel: "local-model",
-		Extra:        map[string]string{"bin": bin},
-	})
-	require.NoError(t, err)
-
-	ctx, cancel := integrationCtx(t)
-	defer cancel()
-
-	resp, err := p.Complete(ctx, shortPrompt())
-	require.NoError(t, err)
-	assert.NotEmpty(t, resp.Message.Content)
-}
