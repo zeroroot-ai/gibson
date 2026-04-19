@@ -1,20 +1,8 @@
-//go:build stale
-// +build stale
-
-// NOTE: this test's `mockMissionStore` and `mockApprovalManager` have diverged
-// from the real `MissionStore` and `checkpoint.ApprovalManager` interfaces
-// across multiple refactors (interface growth + method-signature changes on
-// ProcessDecision). Kept behind the `stale` build tag so the file is
-// preserved for future repair but does not block `go vet` / `go test`.
-// Rewrite the mocks to match the current interfaces and drop the tag when
-// revisiting.
-
 package mission
 
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -186,10 +174,14 @@ func (m *mockThreadManager) GenerateSubgraphThreadID(parentThread string, nodeID
 	return parentThread + ":" + nodeID + ":test"
 }
 
-// mockApprovalManager implements checkpoint.ApprovalManager for testing
+// mockApprovalManager implements checkpoint.ApprovalManager for testing.
+// Signatures refreshed against the current interface (see
+// internal/checkpoint/approval_manager.go) — earlier revisions used
+// ProposedAction/ApprovalDetails arguments that have since been folded
+// into ApprovalRequest/ApprovalDecision structs.
 type mockApprovalManager struct{}
 
-func (m *mockApprovalManager) RequestApproval(ctx context.Context, threadID string, details checkpoint.ApprovalDetails, actions []checkpoint.ProposedAction, timeout time.Duration) (*checkpoint.ApprovalState, error) {
+func (m *mockApprovalManager) RequestApproval(ctx context.Context, threadID string, checkpointID string, request checkpoint.ApprovalRequest) (*checkpoint.ApprovalState, error) {
 	return nil, nil
 }
 
@@ -197,8 +189,8 @@ func (m *mockApprovalManager) GetPendingApproval(ctx context.Context, threadID s
 	return nil, nil
 }
 
-func (m *mockApprovalManager) ProcessDecision(ctx context.Context, threadID string, status checkpoint.ApprovalStatus, approvedBy string, comments string, modifications map[int]map[string]any) (*checkpoint.ApprovalState, error) {
-	return nil, nil
+func (m *mockApprovalManager) ProcessDecision(ctx context.Context, threadID string, decision checkpoint.ApprovalDecision) error {
+	return nil
 }
 
 func (m *mockApprovalManager) CheckTimeout(ctx context.Context, threadID string) (bool, error) {
