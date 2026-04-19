@@ -62,6 +62,7 @@ const (
 	DaemonAdminService_UpsertTenantQuota_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/UpsertTenantQuota"
 	DaemonAdminService_ListFeatureTuples_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/ListFeatureTuples"
 	DaemonAdminService_SeedCatalogTenantEnabled_FullMethodName        = "/gibson.daemon.admin.v1.DaemonAdminService/SeedCatalogTenantEnabled"
+	DaemonAdminService_EmitAuditEvent_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/EmitAuditEvent"
 	DaemonAdminService_ListProviders_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/ListProviders"
 	DaemonAdminService_GetProvider_FullMethodName                     = "/gibson.daemon.admin.v1.DaemonAdminService/GetProvider"
 	DaemonAdminService_CreateProvider_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/CreateProvider"
@@ -232,6 +233,12 @@ type DaemonAdminServiceClient interface {
 	// tenant and by a background reconciler when new platform-catalog items are
 	// published.
 	SeedCatalogTenantEnabled(ctx context.Context, in *SeedCatalogTenantEnabledRequest, opts ...grpc.CallOption) (*SeedCatalogTenantEnabledResponse, error)
+	// EmitAuditEvent lets an operator / platform workload forward a
+	// structured audit event onto the daemon's emitter. The handler
+	// overwrites actor_subject with the SPIFFE identity of the caller so
+	// forged subjects cannot reach the stream. Used for tenant-operator
+	// reconcile summaries.
+	EmitAuditEvent(ctx context.Context, in *EmitAuditEventRequest, opts ...grpc.CallOption) (*EmitAuditEventResponse, error)
 	// ListProviders returns all provider configs for the calling tenant.
 	// Credentials in the response are always masked (e.g. "****abc").
 	// Requires FGA member relation on the tenant.
@@ -726,6 +733,16 @@ func (c *daemonAdminServiceClient) SeedCatalogTenantEnabled(ctx context.Context,
 	return out, nil
 }
 
+func (c *daemonAdminServiceClient) EmitAuditEvent(ctx context.Context, in *EmitAuditEventRequest, opts ...grpc.CallOption) (*EmitAuditEventResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EmitAuditEventResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_EmitAuditEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonAdminServiceClient) ListProviders(ctx context.Context, in *ListProvidersRequest, opts ...grpc.CallOption) (*ListProvidersResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListProvidersResponse)
@@ -1020,6 +1037,12 @@ type DaemonAdminServiceServer interface {
 	// tenant and by a background reconciler when new platform-catalog items are
 	// published.
 	SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error)
+	// EmitAuditEvent lets an operator / platform workload forward a
+	// structured audit event onto the daemon's emitter. The handler
+	// overwrites actor_subject with the SPIFFE identity of the caller so
+	// forged subjects cannot reach the stream. Used for tenant-operator
+	// reconcile summaries.
+	EmitAuditEvent(context.Context, *EmitAuditEventRequest) (*EmitAuditEventResponse, error)
 	// ListProviders returns all provider configs for the calling tenant.
 	// Credentials in the response are always masked (e.g. "****abc").
 	// Requires FGA member relation on the tenant.
@@ -1212,6 +1235,9 @@ func (UnimplementedDaemonAdminServiceServer) ListFeatureTuples(context.Context, 
 }
 func (UnimplementedDaemonAdminServiceServer) SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SeedCatalogTenantEnabled not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) EmitAuditEvent(context.Context, *EmitAuditEventRequest) (*EmitAuditEventResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EmitAuditEvent not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) ListProviders(context.Context, *ListProvidersRequest) (*ListProvidersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListProviders not implemented")
@@ -2047,6 +2073,24 @@ func _DaemonAdminService_SeedCatalogTenantEnabled_Handler(srv interface{}, ctx c
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonAdminService_EmitAuditEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EmitAuditEventRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).EmitAuditEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_EmitAuditEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).EmitAuditEvent(ctx, req.(*EmitAuditEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonAdminService_ListProviders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListProvidersRequest)
 	if err := dec(in); err != nil {
@@ -2452,6 +2496,10 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SeedCatalogTenantEnabled",
 			Handler:    _DaemonAdminService_SeedCatalogTenantEnabled_Handler,
+		},
+		{
+			MethodName: "EmitAuditEvent",
+			Handler:    _DaemonAdminService_EmitAuditEvent_Handler,
 		},
 		{
 			MethodName: "ListProviders",

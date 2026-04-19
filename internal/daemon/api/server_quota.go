@@ -13,9 +13,12 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
@@ -115,14 +118,139 @@ func (s *DaemonServer) GetTenantQuota(ctx context.Context, req *GetTenantQuotaRe
 		return nil, status_grpc.Error(codes.Internal, "quota read failed")
 	}
 
-	return &GetTenantQuotaResponse{
+	resp := &GetTenantQuotaResponse{
 		Quota: &TenantQuota{
 			MaxMissions: q.MaxMissions,
 			MaxAgents:   q.MaxAgents,
 			MaxFindings: q.MaxFindings,
 			PlanTier:    q.PlanTier,
 		},
-	}, nil
+	}
+
+	// Plan-based limits from Postgres tenant_quotas. The dashboard Postgres
+	// is optional in dev; when absent we leave the extended fields at zero
+	// rather than failing the RPC.
+	if db := s.dashboardDB; db != nil {
+		limits, err := readTenantQuotasRow(ctx, db, tenantID)
+		if err != nil {
+			s.logger.WarnContext(ctx, "GetTenantQuota: postgres read failed (continuing with zero limits)",
+				slog.String("tenant_id", tenantID),
+				slog.String("error", err.Error()),
+			)
+		} else if limits != nil {
+			resp.Seats = limits.seats
+			resp.ConcurrentAgents = limits.concurrentAgents
+			resp.StorageGb = limits.storageGb
+			resp.RetentionDays = limits.retentionDays
+			resp.SandboxLaunchesPerMonth = limits.sandboxLaunchesPerMonth
+			resp.UpdatedAt = limits.updatedAt
+		}
+	}
+
+	// Usage snapshot from Redis counters. Missing counters are treated as
+	// zero; callers render "0 / limit" in that case.
+	if usage := s.readTenantUsageSnapshot(ctx, tenantID); usage != nil {
+		resp.CurrentSeats = usage.currentSeats
+		resp.CurrentConcurrentAgents = usage.currentConcurrentAgents
+		resp.CurrentStorageGb = usage.currentStorageGb
+		resp.CurrentSandboxLaunchesThisMonth = usage.currentSandboxLaunchesThisMonth
+	}
+
+	return resp, nil
+}
+
+type tenantQuotaRow struct {
+	seats                   int32
+	concurrentAgents        int32
+	storageGb               int32
+	retentionDays           int32
+	sandboxLaunchesPerMonth int32
+	updatedAt               string
+}
+
+func readTenantQuotasRow(ctx context.Context, db *sql.DB, tenantID string) (*tenantQuotaRow, error) {
+	const q = `
+		SELECT seats, concurrent_agents, storage_gb, retention_days,
+			sandbox_launches_per_month, updated_at
+		FROM tenant_quotas
+		WHERE tenant_id = $1
+	`
+	var r tenantQuotaRow
+	var updatedAt time.Time
+	err := db.QueryRowContext(ctx, q, tenantID).Scan(
+		&r.seats, &r.concurrentAgents, &r.storageGb, &r.retentionDays,
+		&r.sandboxLaunchesPerMonth, &updatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.updatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	return &r, nil
+}
+
+type tenantUsageSnapshot struct {
+	currentSeats                    int32
+	currentConcurrentAgents         int32
+	currentStorageGb                int32
+	currentSandboxLaunchesThisMonth int32
+}
+
+// tenantUsageReader is a narrow interface injected via WithTenantUsageReader.
+// Implementations read live usage counters (Redis keys owned by the quota
+// manager). A nil reader degrades silently to zero-valued usage so
+// dashboards continue to render a valid Plan & Usage section for brand-new
+// tenants.
+type tenantUsageReader interface {
+	ReadTenantUsage(ctx context.Context, tenantID string) (seats, concurrentAgents, storageGb, sandboxLaunchesThisMonth int32, err error)
+}
+
+// redisTenantUsageReader implements tenantUsageReader over a raw Redis client
+// using the `tenant:usage:<id>:<metric>` key convention. Missing keys return
+// zero without error.
+type redisTenantUsageReader struct {
+	client goredis.UniversalClient
+}
+
+// NewRedisTenantUsageReader builds a tenantUsageReader backed by the given
+// Redis client.
+func NewRedisTenantUsageReader(client goredis.UniversalClient) *redisTenantUsageReader {
+	return &redisTenantUsageReader{client: client}
+}
+
+func (r *redisTenantUsageReader) ReadTenantUsage(ctx context.Context, tenantID string) (int32, int32, int32, int32, error) {
+	read := func(metric string) int32 {
+		v, err := r.client.Get(ctx, fmt.Sprintf("tenant:usage:%s:%s", tenantID, metric)).Int()
+		if err != nil {
+			return 0
+		}
+		return int32(v)
+	}
+	return read("seats"), read("concurrent_agents"), read("storage_gb"), read("sandbox_launches_month"), nil
+}
+
+// readTenantUsageSnapshot pulls the four per-tenant usage counters through
+// the injected reader. Missing reader or missing counters degrade to zero.
+func (s *DaemonServer) readTenantUsageSnapshot(ctx context.Context, tenantID string) *tenantUsageSnapshot {
+	if s.tenantUsage == nil {
+		return nil
+	}
+	seats, concurrent, storage, sandbox, err := s.tenantUsage.ReadTenantUsage(ctx, tenantID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "GetTenantQuota: usage read failed (treating as zero)",
+			slog.String("tenant_id", tenantID),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+	return &tenantUsageSnapshot{
+		currentSeats:                    seats,
+		currentConcurrentAgents:         concurrent,
+		currentStorageGb:                storage,
+		currentSandboxLaunchesThisMonth: sandbox,
+	}
 }
 
 // ---------------------------------------------------------------------------

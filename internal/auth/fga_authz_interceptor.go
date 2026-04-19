@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -50,6 +51,29 @@ var catalogRelationToComponentGrantMap = map[string]string{
 func catalogRelationToComponentGrant(ownerRelation string) (string, bool) {
 	v, ok := catalogRelationToComponentGrantMap[ownerRelation]
 	return v, ok
+}
+
+// relationToActionClass maps any FGA relation to the three-action class
+// label ("read" | "write" | "execute"). Covers owner-side (can_*), grant
+// (component_*_enabled), and deny (*_disabled) variants. Returns "" for
+// non-catalog relations so audit consumers can filter cleanly.
+// Spec: access-matrix-finish R6 AC 3 (regression-guarded via R6 AC 8).
+func relationToActionClass(relation string) string {
+	switch {
+	case relation == "can_read",
+		relation == "component_read_enabled",
+		strings.HasSuffix(relation, "_read_disabled"):
+		return "read"
+	case relation == "can_configure",
+		relation == "component_write_enabled",
+		strings.HasSuffix(relation, "_write_disabled"):
+		return "write"
+	case relation == "can_execute",
+		relation == "component_execute_enabled",
+		strings.HasSuffix(relation, "_execute_disabled"):
+		return "execute"
+	}
+	return ""
 }
 
 // FgaAuthzInterceptor is the single gRPC authorization interceptor that
@@ -253,6 +277,8 @@ func (i *FgaAuthzInterceptor) checkInternal(ctx context.Context, req any, fullMe
 				PermissionRequired: spec.Description,
 				FgaRelation:        spec.Relation,
 				FgaObject:          object,
+				ActionClass:        relationToActionClass(spec.Relation),
+				ComponentScope:     "",
 				Success:            false,
 			})
 			return status.Errorf(codes.PermissionDenied, "component_scope required")
@@ -278,6 +304,8 @@ func (i *FgaAuthzInterceptor) checkInternal(ctx context.Context, req any, fullMe
 					PermissionRequired: spec.Description,
 					FgaRelation:        componentRelation,
 					FgaObject:          object,
+					ActionClass:        relationToActionClass(componentRelation),
+					ComponentScope:     componentScope,
 					Success:            false,
 				})
 				return status.Errorf(codes.PermissionDenied, "authorization failed")
@@ -363,6 +391,8 @@ func (i *FgaAuthzInterceptor) checkInternal(ctx context.Context, req any, fullMe
 			PermissionRequired: spec.Description,
 			FgaRelation:        spec.Relation,
 			FgaObject:          object,
+			ActionClass:        relationToActionClass(spec.Relation),
+			ComponentScope:     ComponentScopeFromContext(ctx),
 			Success:            false,
 		})
 		return status.Errorf(codes.PermissionDenied, "authorization failed")

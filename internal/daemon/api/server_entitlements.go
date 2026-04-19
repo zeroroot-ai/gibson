@@ -56,6 +56,24 @@ func (s *DaemonServer) WriteAccessTuples(ctx context.Context, req *WriteAccessTu
 			return nil, status.Errorf(codes.Internal, "fga delete: %v", err)
 		}
 	}
+
+	// Audit emission: one event per tuple, non-blocking. Source classification
+	// is derived from the caller identity; reason forwarded verbatim.
+	actorSource := classifyActorSource(ctx)
+	reason := req.GetReason()
+	for _, t := range adds {
+		emitAccessTupleChange(ctx, s.auditLogger, actorSource,
+			struct{ User, Relation, Object string }{t.User, t.Relation, t.Object},
+			"write", reason,
+		)
+	}
+	for _, t := range dels {
+		emitAccessTupleChange(ctx, s.auditLogger, actorSource,
+			struct{ User, Relation, Object string }{t.User, t.Relation, t.Object},
+			"delete", reason,
+		)
+	}
+
 	s.logger.Info("entitlements: WriteAccessTuples",
 		"added", len(adds), "deleted", len(dels), "reason", req.GetReason())
 	return &WriteAccessTuplesResponse{Added: int32(len(adds)), Deleted: int32(len(dels))}, nil
@@ -166,6 +184,79 @@ func (s *DaemonServer) SeedCatalogTenantEnabled(ctx context.Context, req *SeedCa
 
 func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+// EmitAuditEvent records a caller-supplied audit event onto the daemon's
+// emitter. Only operator / platform actors are permitted to emit events
+// with arbitrary subjects; all other callers (users, agents) are forbidden
+// from this RPC entirely so they cannot forge an audit trail. The handler
+// ignores the request's actor_subject field: the actor is always the
+// SPIFFE identity already attached to ctx by the auth interceptor.
+func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *EmitAuditEventRequest) (*EmitAuditEventResponse, error) {
+	if s.auditLogger == nil {
+		return nil, status.Error(codes.Unavailable, "audit emitter not configured")
+	}
+	ev := req.GetEvent()
+	if ev == nil {
+		return nil, status.Error(codes.InvalidArgument, "event required")
+	}
+	actorSource := classifyActorSource(ctx)
+	if actorSource != "operator" && actorSource != "platform" && actorSource != "system" {
+		return nil, status.Error(codes.PermissionDenied, "only operator/platform workloads may emit audit events")
+	}
+
+	details := make(map[string]any, len(ev.GetFields())+6)
+	for k, v := range ev.GetFields() {
+		details[k] = v
+	}
+	if ev.GetTuple() != "" {
+		details["tuple"] = ev.GetTuple()
+	}
+	if ev.GetActionClass() != "" {
+		details["action_class"] = ev.GetActionClass()
+	}
+	if ev.GetScopeType() != "" {
+		details["scope_type"] = ev.GetScopeType()
+	}
+	if ev.GetOperation() != "" {
+		details["operation"] = ev.GetOperation()
+	}
+	if ev.GetReason() != "" {
+		details["reason"] = ev.GetReason()
+	}
+	details["actor_source"] = actorSource
+	if ev.GetTimestamp() != "" {
+		details["timestamp"] = ev.GetTimestamp()
+	} else {
+		details["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+
+	resource := ev.GetScopeType()
+	if resource == "" {
+		resource = "event"
+	}
+	resourceID := ""
+	if ev.GetTuple() != "" {
+		// For tuple events the object side is the resource id.
+		if i := indexByte(ev.GetTuple(), '@'); i >= 0 {
+			resourceID = ev.GetTuple()[i+1:]
+		}
+	}
+
+	if err := s.auditLogger.Log(ctx, ev.GetType(), resource, resourceID, details); err != nil {
+		return nil, status.Errorf(codes.Internal, "audit log: %v", err)
+	}
+	return &EmitAuditEventResponse{}, nil
+}
+
+// indexByte returns the first index of c in s, or -1.
+func indexByte(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
 }
 
 // ensureTenantQuotasTable is an idempotent CREATE TABLE IF NOT EXISTS for

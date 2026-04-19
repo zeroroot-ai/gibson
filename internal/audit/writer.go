@@ -100,6 +100,12 @@ type Event struct {
 	TargetID   string
 	Decision   string          // "allow", "deny", or "" for non-authz events
 	Metadata   json.RawMessage // stored verbatim in the JSONB column
+
+	// Tuple is the FGA tuple this event describes, serialised as
+	// "{user}#{relation}@{object}". Non-empty only for access_tuple_change
+	// events emitted by WriteAccessTuples; absent for non-tuple events.
+	// Added by access-matrix-finish spec.
+	Tuple string
 }
 
 // ---------------------------------------------------------------------------

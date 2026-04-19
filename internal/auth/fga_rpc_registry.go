@@ -869,6 +869,7 @@ func (r *FgaRpcRegistry) populate() {
 		"/gibson.daemon.admin.v1.DaemonAdminService/UpsertTenantQuota",
 		"/gibson.daemon.admin.v1.DaemonAdminService/ListFeatureTuples",
 		"/gibson.daemon.admin.v1.DaemonAdminService/SeedCatalogTenantEnabled",
+		"/gibson.daemon.admin.v1.DaemonAdminService/EmitAuditEvent",
 	}
 	for _, method := range entitlementRPCs {
 		r.add(method, FgaCheckSpec{

@@ -125,6 +125,12 @@ type DaemonServer struct {
 	// Added by prod-feature-wiring spec.
 	quotaStore quotaStoreIface
 
+	// tenantUsage reads live usage counters for the Plan & Usage card's
+	// "current X / limit" display. May be nil; when nil GetTenantQuota
+	// returns zero-valued usage fields (valid for brand-new tenants).
+	// Added by access-matrix-finish spec.
+	tenantUsage tenantUsageReader
+
 	// alertStore persists and retrieves per-user platform alerts.
 	// May be nil; when nil, ListAlerts/MarkAlertRead return codes.Unavailable.
 	// Added by prod-feature-wiring spec.
@@ -718,6 +724,14 @@ func (s *DaemonServer) WithFindingStore(store findingStoreIface) *DaemonServer {
 // Added by prod-feature-wiring spec.
 func (s *DaemonServer) WithQuotaStore(store quotaStoreIface) *DaemonServer {
 	s.quotaStore = store
+	return s
+}
+
+// WithTenantUsageReader wires the live-usage-counter reader that populates
+// the current_* fields in GetTenantQuota responses. Optional; when unset
+// usage counters render as zero.
+func (s *DaemonServer) WithTenantUsageReader(r tenantUsageReader) *DaemonServer {
+	s.tenantUsage = r
 	return s
 }
 

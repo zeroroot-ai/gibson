@@ -268,6 +268,13 @@ service DaemonAdminService {
   // published.
   rpc SeedCatalogTenantEnabled(SeedCatalogTenantEnabledRequest) returns (SeedCatalogTenantEnabledResponse);
 
+  // EmitAuditEvent lets an operator / platform workload forward a
+  // structured audit event onto the daemon's emitter. The handler
+  // overwrites actor_subject with the SPIFFE identity of the caller so
+  // forged subjects cannot reach the stream. Used for tenant-operator
+  // reconcile summaries.
+  rpc EmitAuditEvent(EmitAuditEventRequest) returns (EmitAuditEventResponse);
+
   // ---------------------------------------------------------------------------
   // LLM Providers — daemon-managed credential store (spec 25)
   // ---------------------------------------------------------------------------
@@ -894,10 +901,30 @@ message GetTenantQuotaRequest {
   string tenant_id = 1;
 }
 
-// GetTenantQuotaResponse carries the tenant quota configuration.
+// GetTenantQuotaResponse carries the tenant quota configuration plus the
+// current usage snapshot sourced from Redis counters. Limits come from
+// Postgres `tenant_quotas` (the plan-based fields); legacy runtime caps
+// remain on the nested TenantQuota.
 message GetTenantQuotaResponse {
-  // quota contains the configured limits for the tenant.
+  // quota contains the legacy runtime caps (max_missions/agents/findings).
   TenantQuota quota = 1;
+
+  // Plan-based limits (mirroring UpsertTenantQuotaRequest). These are the
+  // authoritative quotas the Plan & Usage page renders.
+  int32 seats = 2;
+  int32 concurrent_agents = 3;
+  int32 storage_gb = 4;
+  int32 retention_days = 5;
+  int32 sandbox_launches_per_month = 6;
+
+  // updated_at is the Postgres row's last-written timestamp (RFC 3339).
+  string updated_at = 7;
+
+  // Usage snapshot fields — zero when the underlying counter is missing.
+  int32 current_seats = 8;
+  int32 current_concurrent_agents = 9;
+  int32 current_storage_gb = 10;
+  int32 current_sandbox_launches_this_month = 11;
 }
 
 // SetTenantQuotaRequest sets the quota configuration for a tenant.
@@ -1606,6 +1633,53 @@ message SeedCatalogTenantEnabledRequest {
 message SeedCatalogTenantEnabledResponse {
   int32 tuples_written = 1;
 }
+
+// AuditEventMessage is the wire shape for EmitAuditEvent. Mirrors the
+// in-memory audit.Event struct's exported fields. Empty strings in scalar
+// fields indicate "not applicable".
+message AuditEventMessage {
+  // type is the event class: "access_tuple_change", "entitlements_reconcile",
+  // "authz_deny", etc.
+  string type = 1;
+
+  // actor_subject is the caller identity (ignored on EmitAuditEvent — the
+  // handler overwrites it with the SPIFFE identity of the emitting workload).
+  string actor_subject = 2;
+
+  // actor_source classifies the caller: "operator", "platform",
+  // "tenant_admin", "user", "system", "unknown".
+  string actor_source = 3;
+
+  // tuple formatted as "{user}#{relation}@{object}"; empty for non-tuple
+  // events such as reconcile summaries.
+  string tuple = 4;
+
+  // action_class is "read" | "write" | "execute" | "" (non-catalog).
+  string action_class = 5;
+
+  // scope_type is "tenant" | "team" | "user" | "component" | "feature" | "".
+  string scope_type = 6;
+
+  // operation is "write" | "delete" for tuple events.
+  string operation = 7;
+
+  // reason is an operator-supplied justification string; must not carry
+  // secrets or PII (sanitisation is the caller's responsibility).
+  string reason = 8;
+
+  // timestamp RFC 3339; server overrides when empty.
+  string timestamp = 9;
+
+  // fields is a catch-all for event-type-specific payloads (e.g.,
+  // reconcile-summary fields such as added_feature_tuples count).
+  map<string, string> fields = 10;
+}
+
+message EmitAuditEventRequest {
+  AuditEventMessage event = 1;
+}
+
+message EmitAuditEventResponse {}
 
 // ---------------------------------------------------------------------------
 // LLM Providers — CRUD + execution messages (spec 25)

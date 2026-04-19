@@ -306,6 +306,9 @@ entries:
   - method: /gibson.daemon.admin.v1.DaemonAdminService/SeedCatalogTenantEnabled
     relation: admin
     description: "Entitlement admin RPC: SeedCatalogTenantEnabled"
+  - method: /gibson.daemon.admin.v1.DaemonAdminService/EmitAuditEvent
+    relation: admin
+    description: "Entitlement admin RPC: EmitAuditEvent"
 
   # ===========================================================================
   # spec-25: Provider config CRUD RPCs on DaemonAdminService
