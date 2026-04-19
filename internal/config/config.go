@@ -136,6 +136,12 @@ type LLMConfig struct {
 
 	// Providers contains provider-specific configurations
 	Providers map[string]ProviderConfig `mapstructure:"providers" yaml:"providers"`
+
+	// ExecRateLimits configures per-RPC tenant rate limits for the LLM execution
+	// handlers (ExecuteLLM, StreamLLM, TestProvider). Keys are RPC names;
+	// values are requests-per-minute limits. When a key is absent the default
+	// from ratelimit.DefaultLimits() is used.
+	ExecRateLimits map[string]int `mapstructure:"rate_limits" yaml:"rate_limits"`
 }
 
 // ProviderConfig contains configuration for an LLM provider.

@@ -122,16 +122,6 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials:   CohereCredentialSchema(),
 			DefaultModels: models,
 		}, true
-	case llm.ProviderErnie:
-		p := &ErnieProvider{}
-		models, _ := p.Models(nil)
-		return ProviderDescriptor{
-			Type:          t,
-			DisplayName:   "Baidu ERNIE",
-			DocsURL:       "https://cloud.baidu.com/doc/WENXINWORKSHOP/",
-			Credentials:   ErnieCredentialSchema(),
-			DefaultModels: models,
-		}, true
 	case llm.ProviderHuggingFace:
 		p := &HuggingFaceProvider{}
 		models, _ := p.Models(nil)
@@ -153,27 +143,6 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials:   LlamafileCredentialSchema(),
 			DefaultModels: models,
 		}, true
-	case llm.ProviderLocal:
-		p := &LocalProvider{}
-		models, _ := p.Models(nil)
-		return ProviderDescriptor{
-			Type:          t,
-			DisplayName:   "Local (subprocess)",
-			DocsURL:       "",
-			SelfHosted:    true,
-			Credentials:   LocalCredentialSchema(),
-			DefaultModels: models,
-		}, true
-	case llm.ProviderMaritaca:
-		p := &MaritacaProvider{}
-		models, _ := p.Models(nil)
-		return ProviderDescriptor{
-			Type:          t,
-			DisplayName:   "Maritaca AI",
-			DocsURL:       "https://docs.maritaca.ai/",
-			Credentials:   MaritacaCredentialSchema(),
-			DefaultModels: models,
-		}, true
 	case llm.ProviderMistral:
 		p := &MistralProvider{}
 		models, _ := p.Models(nil)
@@ -182,16 +151,6 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName:   "Mistral",
 			DocsURL:       "https://docs.mistral.ai/",
 			Credentials:   MistralCredentialSchema(),
-			DefaultModels: models,
-		}, true
-	case llm.ProviderWatsonX:
-		p := &WatsonXProvider{}
-		models, _ := p.Models(nil)
-		return ProviderDescriptor{
-			Type:          t,
-			DisplayName:   "IBM WatsonX",
-			DocsURL:       "https://www.ibm.com/products/watsonx-ai",
-			Credentials:   WatsonXCredentialSchema(),
 			DefaultModels: models,
 		}, true
 	case llm.ProviderCustom:

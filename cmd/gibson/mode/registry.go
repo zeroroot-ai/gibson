@@ -21,6 +21,9 @@ func init() {
 	Register("gibson authz write", Standalone)
 	Register("gibson authz model-info", Standalone)
 
+	// Migration commands - standalone (connects directly to daemon and k8s, not via registry)
+	Register("gibson migrate-providers", Standalone)
+
 	// Daemon commands - Manages daemon lifecycle
 	Register("gibson daemon", Daemon)
 	Register("gibson daemon start", Daemon)

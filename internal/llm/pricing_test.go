@@ -375,9 +375,8 @@ func TestPricingConfig_GetAllProviders(t *testing.T) {
 	// updating the test.
 	expected := []string{
 		"anthropic", "openai", "google",
-		"bedrock", "cloudflare", "cohere", "mistral", "huggingface", "maritaca",
-		"ernie", "watsonx",
-		"ollama", "llamafile", "local",
+		"bedrock", "cloudflare", "cohere", "mistral", "huggingface",
+		"ollama", "llamafile",
 	}
 	for _, p := range expected {
 		assert.Contains(t, providers, p, "missing provider %q in DefaultPricing", p)

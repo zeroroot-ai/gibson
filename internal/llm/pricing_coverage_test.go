@@ -19,12 +19,8 @@ func TestDefaultPricing_NewProvidersHaveEntries(t *testing.T) {
 		"cohere":      {mustHaveFlag: "rates"},
 		"mistral":     {mustHaveFlag: "rates"},
 		"huggingface": {mustHaveFlag: "rates"},
-		"maritaca":    {mustHaveFlag: "rates"},
-		"ernie":       {mustHaveFlag: "unknown"},
-		"watsonx":     {mustHaveFlag: "unknown"},
 		"ollama":      {mustHaveFlag: "selfhosted"},
 		"llamafile":   {mustHaveFlag: "selfhosted"},
-		"local":       {mustHaveFlag: "selfhosted"},
 	}
 
 	for provider, tc := range cases {

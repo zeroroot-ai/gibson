@@ -25,11 +25,13 @@ func TestGetSupportedProviders_IncludesEveryKnownProvider(t *testing.T) {
 
 	// Spot-check the core providers. ProviderCustom is intentionally
 	// excluded from the descriptor set (custom is operator-defined).
+	// Note: ernie, local, maritaca, watsonx were removed from the daemon
+	// in spec 25-daemon-driven-provider-config task 6.
 	required := []string{
 		"anthropic", "openai", "google", "ollama",
-		"bedrock", "cloudflare", "cohere", "ernie",
-		"huggingface", "llamafile", "local", "maritaca",
-		"mistral", "watsonx",
+		"bedrock", "cloudflare", "cohere",
+		"huggingface", "llamafile",
+		"mistral",
 	}
 	for _, typ := range required {
 		assert.Contains(t, byType, typ, "descriptor missing for provider %q", typ)

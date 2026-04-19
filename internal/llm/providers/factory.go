@@ -26,20 +26,12 @@ func NewProvider(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
 		return NewCloudflareProvider(cfg)
 	case llm.ProviderCohere:
 		return NewCohereProvider(cfg)
-	case llm.ProviderErnie:
-		return NewErnieProvider(cfg)
 	case llm.ProviderHuggingFace:
 		return NewHuggingFaceProvider(cfg)
 	case llm.ProviderLlamafile:
 		return NewLlamafileProvider(cfg)
-	case llm.ProviderLocal:
-		return NewLocalProvider(cfg)
-	case llm.ProviderMaritaca:
-		return NewMaritacaProvider(cfg)
 	case llm.ProviderMistral:
 		return NewMistralProvider(cfg)
-	case llm.ProviderWatsonX:
-		return NewWatsonXProvider(cfg)
 	case llm.ProviderCustom:
 		// Custom is a deliberate escape hatch for operators wiring a provider
 		// the daemon doesn't know about. Construction is their responsibility;

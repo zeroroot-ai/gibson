@@ -122,10 +122,8 @@ func TestRedactCredentialKeys_IncludesEveryProviderSecret(t *testing.T) {
 		"api_key",
 		"aws_access_key_id", "aws_secret_access_key", "aws_session_token",
 		"cloudflare_account_id", "cloudflare_api_token",
-		"ernie_access_key", "ernie_secret_key",
 		"huggingface_api_token",
-		"watsonx_api_key", "watsonx_project_id",
-		"mistral_api_key", "cohere_api_key", "maritaca_api_key",
+		"mistral_api_key", "cohere_api_key",
 	}
 	for _, k := range required {
 		assert.True(t, set[k], "redactCredentialKeys() missing %q", k)

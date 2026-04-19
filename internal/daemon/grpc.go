@@ -19,10 +19,13 @@ import (
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
 	"github.com/zero-day-ai/gibson/internal/memory"
+	"github.com/zero-day-ai/gibson/internal/providerconfig"
+	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
@@ -204,6 +207,35 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		daemonSvc.WithQuotaManager(d.quotaManager)
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
 	}
+
+	// Wire provider-config store and execution rate limiter (spec 25, task 4).
+	// Both require a Redis client: the provider store for encrypted credential
+	// storage, the rate limiter for per-(tenant, RPC) sliding-window counters.
+	if d.stateClient != nil && d.stateClient.Client() != nil && d.keyProvider != nil {
+		enc := crypto.NewAESGCMEncryptor()
+		provStore, provStoreErr := providerconfig.NewStore(d.stateClient.Client(), enc, d.keyProvider)
+		if provStoreErr != nil {
+			d.logger.Warn(ctx, "provider-config store not wired", "error", provStoreErr)
+		} else {
+			daemonSvc.WithProviderConfigStore(provStore)
+			d.logger.Info(ctx, "provider-config store wired into DaemonServer (spec 25)")
+		}
+	} else if d.keyProvider == nil {
+		d.logger.Info(ctx, "provider-config store not wired: no key provider configured (set security.key_provider)")
+	}
+
+	if d.stateClient != nil && d.stateClient.Client() != nil {
+		// Build limits from config, falling back to DefaultLimits() for any
+		// absent key so partial overrides work.
+		limits := ratelimit.DefaultLimits()
+		for rpcName, rpm := range d.config.LLM.ExecRateLimits {
+			limits[rpcName] = ratelimit.RateLimit{RequestsPerMinute: rpm}
+		}
+		execLimiter := ratelimit.NewRedisLimiter(d.stateClient.Client(), limits)
+		daemonSvc.WithExecLimiter(execLimiter)
+		d.logger.Info(ctx, "execution rate limiter wired into DaemonServer (spec 25)")
+	}
+
 	// Wire daemon dependencies that require the Redis state client.
 	// Tenant lifecycle (create/provision/deprovision) has moved out of the daemon
 	// to the standalone gibson-tenant-operator; this block only wires the

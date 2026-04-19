@@ -22,6 +22,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
+	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/manifest"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
@@ -148,6 +149,22 @@ type DaemonServer struct {
 	// connected WatchManifestInvalidations streams. May be nil; when nil,
 	// that RPC returns codes.Unavailable.
 	manifestWatchHub *manifest.WatchHub
+
+	// providerConfig is the encrypted provider-config store (spec 25).
+	// May be nil; when nil, all provider CRUD RPCs return codes.FailedPrecondition
+	// with a message pointing at security.key_provider.
+	providerConfig providerConfigStoreIface
+
+	// execLimiter enforces per-(tenant, RPC) request rates for ExecuteLLM,
+	// StreamLLM, and TestProvider. May be nil; when nil rate limiting is skipped.
+	// Added by spec 25-daemon-driven-provider-config task 4.
+	execLimiter execLimiterIface
+
+	// providerFactory constructs an llm.LLMProvider from a resolved ProviderConfig.
+	// Defaults to the package-level providerFactoryFunc; overridden in tests via
+	// WithProviderFactory. Must never be nil after NewDaemonServer.
+	// Added by spec 25-daemon-driven-provider-config task 4.
+	providerFactory func(cfg llm.ProviderConfig) (llm.LLMProvider, error)
 }
 
 // missionDraftStoreIface is the narrow interface the DaemonServer uses for
@@ -639,6 +656,7 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		credentialHandler: credentialHandler,
 		logger:            logger.With("component", "daemon-grpc"),
 		sessionCounter:    0,
+		providerFactory:   providerFactoryFunc,
 	}
 }
 
@@ -739,6 +757,15 @@ func (s *DaemonServer) WithAuthorizer(az authzIface) *DaemonServer {
 // there). May be nil; handlers that require it return Unavailable.
 func (s *DaemonServer) WithDashboardDB(db *sql.DB) *DaemonServer {
 	s.dashboardDB = db
+	return s
+}
+
+// WithProviderConfigStore wires the encrypted provider-config store for the
+// spec-25 CRUD and execution RPCs. When nil, provider CRUD RPCs return
+// codes.FailedPrecondition pointing at security.key_provider.
+// Added by spec 25-daemon-driven-provider-config.
+func (s *DaemonServer) WithProviderConfigStore(store providerConfigStoreIface) *DaemonServer {
+	s.providerConfig = store
 	return s
 }
 

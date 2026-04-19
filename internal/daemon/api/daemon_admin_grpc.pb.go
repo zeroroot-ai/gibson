@@ -62,6 +62,19 @@ const (
 	DaemonAdminService_UpsertTenantQuota_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/UpsertTenantQuota"
 	DaemonAdminService_ListFeatureTuples_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/ListFeatureTuples"
 	DaemonAdminService_SeedCatalogTenantEnabled_FullMethodName        = "/gibson.daemon.admin.v1.DaemonAdminService/SeedCatalogTenantEnabled"
+	DaemonAdminService_ListProviders_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/ListProviders"
+	DaemonAdminService_GetProvider_FullMethodName                     = "/gibson.daemon.admin.v1.DaemonAdminService/GetProvider"
+	DaemonAdminService_CreateProvider_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/CreateProvider"
+	DaemonAdminService_UpdateProvider_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/UpdateProvider"
+	DaemonAdminService_DeleteProvider_FullMethodName                  = "/gibson.daemon.admin.v1.DaemonAdminService/DeleteProvider"
+	DaemonAdminService_TestProvider_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/TestProvider"
+	DaemonAdminService_GetProviderHealth_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/GetProviderHealth"
+	DaemonAdminService_GetDefaultProvider_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/GetDefaultProvider"
+	DaemonAdminService_SetDefaultProvider_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/SetDefaultProvider"
+	DaemonAdminService_GetFallbackChain_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/GetFallbackChain"
+	DaemonAdminService_SetFallbackChain_FullMethodName                = "/gibson.daemon.admin.v1.DaemonAdminService/SetFallbackChain"
+	DaemonAdminService_ExecuteLLM_FullMethodName                      = "/gibson.daemon.admin.v1.DaemonAdminService/ExecuteLLM"
+	DaemonAdminService_StreamLLM_FullMethodName                       = "/gibson.daemon.admin.v1.DaemonAdminService/StreamLLM"
 )
 
 // DaemonAdminServiceClient is the client API for DaemonAdminService service.
@@ -219,6 +232,60 @@ type DaemonAdminServiceClient interface {
 	// tenant and by a background reconciler when new platform-catalog items are
 	// published.
 	SeedCatalogTenantEnabled(ctx context.Context, in *SeedCatalogTenantEnabledRequest, opts ...grpc.CallOption) (*SeedCatalogTenantEnabledResponse, error)
+	// ListProviders returns all provider configs for the calling tenant.
+	// Credentials in the response are always masked (e.g. "****abc").
+	// Requires FGA member relation on the tenant.
+	ListProviders(ctx context.Context, in *ListProvidersRequest, opts ...grpc.CallOption) (*ListProvidersResponse, error)
+	// GetProvider returns a single provider config by name.
+	// Credentials in the response are always masked.
+	// Requires FGA member relation on the tenant.
+	GetProvider(ctx context.Context, in *GetProviderRequest, opts ...grpc.CallOption) (*GetProviderResponse, error)
+	// CreateProvider encrypts and stores a new provider config.
+	// The plaintext credentials in the request are encrypted immediately;
+	// they are never persisted in plaintext.
+	// Requires FGA admin relation on the tenant.
+	CreateProvider(ctx context.Context, in *CreateProviderRequest, opts ...grpc.CallOption) (*CreateProviderResponse, error)
+	// UpdateProvider replaces an existing provider config.
+	// If credentials fields are empty or omitted, the stored values are retained.
+	// Requires FGA admin relation on the tenant.
+	UpdateProvider(ctx context.Context, in *UpdateProviderRequest, opts ...grpc.CallOption) (*UpdateProviderResponse, error)
+	// DeleteProvider removes a provider config from the store.
+	// Requires FGA admin relation on the tenant.
+	DeleteProvider(ctx context.Context, in *DeleteProviderRequest, opts ...grpc.CallOption) (*DeleteProviderResponse, error)
+	// TestProvider validates a proposed provider config by making a minimal
+	// live request to the upstream. The config is NOT persisted.
+	// Returns a structured result rather than a gRPC-level error on upstream
+	// failure so the dashboard can surface latency and error detail.
+	// Requires FGA admin relation on the tenant.
+	TestProvider(ctx context.Context, in *TestProviderRequest, opts ...grpc.CallOption) (*TestProviderResponse, error)
+	// GetProviderHealth returns the last-known health status of a stored provider.
+	// Requires FGA member relation on the tenant.
+	GetProviderHealth(ctx context.Context, in *GetProviderHealthRequest, opts ...grpc.CallOption) (*GetProviderHealthResponse, error)
+	// GetDefaultProvider returns the tenant's currently configured default provider.
+	// Requires FGA member relation on the tenant.
+	GetDefaultProvider(ctx context.Context, in *GetDefaultProviderRequest, opts ...grpc.CallOption) (*GetDefaultProviderResponse, error)
+	// SetDefaultProvider designates an existing stored provider as the default.
+	// Requires FGA admin relation on the tenant.
+	SetDefaultProvider(ctx context.Context, in *SetDefaultProviderRequest, opts ...grpc.CallOption) (*SetDefaultProviderResponse, error)
+	// GetFallbackChain returns the ordered list of provider names the daemon
+	// tries when the default provider is unavailable.
+	// Requires FGA member relation on the tenant.
+	GetFallbackChain(ctx context.Context, in *GetFallbackChainRequest, opts ...grpc.CallOption) (*GetFallbackChainResponse, error)
+	// SetFallbackChain replaces the tenant's provider fallback chain.
+	// All named providers must already exist in the store.
+	// Requires FGA admin relation on the tenant.
+	SetFallbackChain(ctx context.Context, in *SetFallbackChainRequest, opts ...grpc.CallOption) (*SetFallbackChainResponse, error)
+	// ExecuteLLM proxies a single (non-streaming) LLM completion through the
+	// daemon's provider-credential store. The dashboard's GibsonLLMAdapter
+	// calls this for non-streaming chat turns.
+	// Requires FGA member relation on the tenant.
+	ExecuteLLM(ctx context.Context, in *ExecuteLLMRequest, opts ...grpc.CallOption) (*ExecuteLLMResponse, error)
+	// StreamLLM proxies a streaming LLM completion through the daemon's
+	// provider-credential store. The dashboard's GibsonLLMAdapter calls this
+	// for streaming chat turns. Server-streaming: the daemon sends back
+	// StreamLLMResponse chunks until finish or error.
+	// Requires FGA member relation on the tenant.
+	StreamLLM(ctx context.Context, in *StreamLLMRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamLLMResponse], error)
 }
 
 type daemonAdminServiceClient struct {
@@ -659,6 +726,145 @@ func (c *daemonAdminServiceClient) SeedCatalogTenantEnabled(ctx context.Context,
 	return out, nil
 }
 
+func (c *daemonAdminServiceClient) ListProviders(ctx context.Context, in *ListProvidersRequest, opts ...grpc.CallOption) (*ListProvidersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProvidersResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListProviders_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GetProvider(ctx context.Context, in *GetProviderRequest, opts ...grpc.CallOption) (*GetProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProviderResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) CreateProvider(ctx context.Context, in *CreateProviderRequest, opts ...grpc.CallOption) (*CreateProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateProviderResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_CreateProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) UpdateProvider(ctx context.Context, in *UpdateProviderRequest, opts ...grpc.CallOption) (*UpdateProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateProviderResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_UpdateProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) DeleteProvider(ctx context.Context, in *DeleteProviderRequest, opts ...grpc.CallOption) (*DeleteProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteProviderResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_DeleteProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) TestProvider(ctx context.Context, in *TestProviderRequest, opts ...grpc.CallOption) (*TestProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TestProviderResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_TestProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GetProviderHealth(ctx context.Context, in *GetProviderHealthRequest, opts ...grpc.CallOption) (*GetProviderHealthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProviderHealthResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetProviderHealth_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GetDefaultProvider(ctx context.Context, in *GetDefaultProviderRequest, opts ...grpc.CallOption) (*GetDefaultProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetDefaultProviderResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetDefaultProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) SetDefaultProvider(ctx context.Context, in *SetDefaultProviderRequest, opts ...grpc.CallOption) (*SetDefaultProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetDefaultProviderResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_SetDefaultProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) GetFallbackChain(ctx context.Context, in *GetFallbackChainRequest, opts ...grpc.CallOption) (*GetFallbackChainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetFallbackChainResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetFallbackChain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) SetFallbackChain(ctx context.Context, in *SetFallbackChainRequest, opts ...grpc.CallOption) (*SetFallbackChainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetFallbackChainResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_SetFallbackChain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) ExecuteLLM(ctx context.Context, in *ExecuteLLMRequest, opts ...grpc.CallOption) (*ExecuteLLMResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExecuteLLMResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ExecuteLLM_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonAdminServiceClient) StreamLLM(ctx context.Context, in *StreamLLMRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamLLMResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DaemonAdminService_ServiceDesc.Streams[0], DaemonAdminService_StreamLLM_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StreamLLMRequest, StreamLLMResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonAdminService_StreamLLMClient = grpc.ServerStreamingClient[StreamLLMResponse]
+
 // DaemonAdminServiceServer is the server API for DaemonAdminService service.
 // All implementations must embed UnimplementedDaemonAdminServiceServer
 // for forward compatibility.
@@ -814,6 +1020,60 @@ type DaemonAdminServiceServer interface {
 	// tenant and by a background reconciler when new platform-catalog items are
 	// published.
 	SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error)
+	// ListProviders returns all provider configs for the calling tenant.
+	// Credentials in the response are always masked (e.g. "****abc").
+	// Requires FGA member relation on the tenant.
+	ListProviders(context.Context, *ListProvidersRequest) (*ListProvidersResponse, error)
+	// GetProvider returns a single provider config by name.
+	// Credentials in the response are always masked.
+	// Requires FGA member relation on the tenant.
+	GetProvider(context.Context, *GetProviderRequest) (*GetProviderResponse, error)
+	// CreateProvider encrypts and stores a new provider config.
+	// The plaintext credentials in the request are encrypted immediately;
+	// they are never persisted in plaintext.
+	// Requires FGA admin relation on the tenant.
+	CreateProvider(context.Context, *CreateProviderRequest) (*CreateProviderResponse, error)
+	// UpdateProvider replaces an existing provider config.
+	// If credentials fields are empty or omitted, the stored values are retained.
+	// Requires FGA admin relation on the tenant.
+	UpdateProvider(context.Context, *UpdateProviderRequest) (*UpdateProviderResponse, error)
+	// DeleteProvider removes a provider config from the store.
+	// Requires FGA admin relation on the tenant.
+	DeleteProvider(context.Context, *DeleteProviderRequest) (*DeleteProviderResponse, error)
+	// TestProvider validates a proposed provider config by making a minimal
+	// live request to the upstream. The config is NOT persisted.
+	// Returns a structured result rather than a gRPC-level error on upstream
+	// failure so the dashboard can surface latency and error detail.
+	// Requires FGA admin relation on the tenant.
+	TestProvider(context.Context, *TestProviderRequest) (*TestProviderResponse, error)
+	// GetProviderHealth returns the last-known health status of a stored provider.
+	// Requires FGA member relation on the tenant.
+	GetProviderHealth(context.Context, *GetProviderHealthRequest) (*GetProviderHealthResponse, error)
+	// GetDefaultProvider returns the tenant's currently configured default provider.
+	// Requires FGA member relation on the tenant.
+	GetDefaultProvider(context.Context, *GetDefaultProviderRequest) (*GetDefaultProviderResponse, error)
+	// SetDefaultProvider designates an existing stored provider as the default.
+	// Requires FGA admin relation on the tenant.
+	SetDefaultProvider(context.Context, *SetDefaultProviderRequest) (*SetDefaultProviderResponse, error)
+	// GetFallbackChain returns the ordered list of provider names the daemon
+	// tries when the default provider is unavailable.
+	// Requires FGA member relation on the tenant.
+	GetFallbackChain(context.Context, *GetFallbackChainRequest) (*GetFallbackChainResponse, error)
+	// SetFallbackChain replaces the tenant's provider fallback chain.
+	// All named providers must already exist in the store.
+	// Requires FGA admin relation on the tenant.
+	SetFallbackChain(context.Context, *SetFallbackChainRequest) (*SetFallbackChainResponse, error)
+	// ExecuteLLM proxies a single (non-streaming) LLM completion through the
+	// daemon's provider-credential store. The dashboard's GibsonLLMAdapter
+	// calls this for non-streaming chat turns.
+	// Requires FGA member relation on the tenant.
+	ExecuteLLM(context.Context, *ExecuteLLMRequest) (*ExecuteLLMResponse, error)
+	// StreamLLM proxies a streaming LLM completion through the daemon's
+	// provider-credential store. The dashboard's GibsonLLMAdapter calls this
+	// for streaming chat turns. Server-streaming: the daemon sends back
+	// StreamLLMResponse chunks until finish or error.
+	// Requires FGA member relation on the tenant.
+	StreamLLM(*StreamLLMRequest, grpc.ServerStreamingServer[StreamLLMResponse]) error
 	mustEmbedUnimplementedDaemonAdminServiceServer()
 }
 
@@ -952,6 +1212,45 @@ func (UnimplementedDaemonAdminServiceServer) ListFeatureTuples(context.Context, 
 }
 func (UnimplementedDaemonAdminServiceServer) SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SeedCatalogTenantEnabled not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ListProviders(context.Context, *ListProvidersRequest) (*ListProvidersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListProviders not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetProvider(context.Context, *GetProviderRequest) (*GetProviderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProvider not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) CreateProvider(context.Context, *CreateProviderRequest) (*CreateProviderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateProvider not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) UpdateProvider(context.Context, *UpdateProviderRequest) (*UpdateProviderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateProvider not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) DeleteProvider(context.Context, *DeleteProviderRequest) (*DeleteProviderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteProvider not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) TestProvider(context.Context, *TestProviderRequest) (*TestProviderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TestProvider not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetProviderHealth(context.Context, *GetProviderHealthRequest) (*GetProviderHealthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProviderHealth not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetDefaultProvider(context.Context, *GetDefaultProviderRequest) (*GetDefaultProviderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDefaultProvider not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) SetDefaultProvider(context.Context, *SetDefaultProviderRequest) (*SetDefaultProviderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetDefaultProvider not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) GetFallbackChain(context.Context, *GetFallbackChainRequest) (*GetFallbackChainResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetFallbackChain not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) SetFallbackChain(context.Context, *SetFallbackChainRequest) (*SetFallbackChainResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetFallbackChain not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) ExecuteLLM(context.Context, *ExecuteLLMRequest) (*ExecuteLLMResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExecuteLLM not implemented")
+}
+func (UnimplementedDaemonAdminServiceServer) StreamLLM(*StreamLLMRequest, grpc.ServerStreamingServer[StreamLLMResponse]) error {
+	return status.Error(codes.Unimplemented, "method StreamLLM not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) mustEmbedUnimplementedDaemonAdminServiceServer() {}
 func (UnimplementedDaemonAdminServiceServer) testEmbeddedByValue()                            {}
@@ -1748,6 +2047,233 @@ func _DaemonAdminService_SeedCatalogTenantEnabled_Handler(srv interface{}, ctx c
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonAdminService_ListProviders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProvidersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ListProviders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ListProviders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ListProviders(ctx, req.(*ListProvidersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GetProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetProvider(ctx, req.(*GetProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_CreateProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).CreateProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_CreateProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).CreateProvider(ctx, req.(*CreateProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_UpdateProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).UpdateProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_UpdateProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).UpdateProvider(ctx, req.(*UpdateProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_DeleteProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).DeleteProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_DeleteProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).DeleteProvider(ctx, req.(*DeleteProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_TestProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TestProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).TestProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_TestProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).TestProvider(ctx, req.(*TestProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GetProviderHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProviderHealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetProviderHealth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetProviderHealth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetProviderHealth(ctx, req.(*GetProviderHealthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GetDefaultProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDefaultProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetDefaultProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetDefaultProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetDefaultProvider(ctx, req.(*GetDefaultProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_SetDefaultProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetDefaultProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).SetDefaultProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_SetDefaultProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).SetDefaultProvider(ctx, req.(*SetDefaultProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_GetFallbackChain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFallbackChainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).GetFallbackChain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_GetFallbackChain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).GetFallbackChain(ctx, req.(*GetFallbackChainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_SetFallbackChain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetFallbackChainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).SetFallbackChain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_SetFallbackChain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).SetFallbackChain(ctx, req.(*SetFallbackChainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_ExecuteLLM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExecuteLLMRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonAdminServiceServer).ExecuteLLM(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonAdminService_ExecuteLLM_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonAdminServiceServer).ExecuteLLM(ctx, req.(*ExecuteLLMRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonAdminService_StreamLLM_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(StreamLLMRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonAdminServiceServer).StreamLLM(m, &grpc.GenericServerStream[StreamLLMRequest, StreamLLMResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonAdminService_StreamLLMServer = grpc.ServerStreamingServer[StreamLLMResponse]
+
 // DaemonAdminService_ServiceDesc is the grpc.ServiceDesc for DaemonAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1927,7 +2453,61 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "SeedCatalogTenantEnabled",
 			Handler:    _DaemonAdminService_SeedCatalogTenantEnabled_Handler,
 		},
+		{
+			MethodName: "ListProviders",
+			Handler:    _DaemonAdminService_ListProviders_Handler,
+		},
+		{
+			MethodName: "GetProvider",
+			Handler:    _DaemonAdminService_GetProvider_Handler,
+		},
+		{
+			MethodName: "CreateProvider",
+			Handler:    _DaemonAdminService_CreateProvider_Handler,
+		},
+		{
+			MethodName: "UpdateProvider",
+			Handler:    _DaemonAdminService_UpdateProvider_Handler,
+		},
+		{
+			MethodName: "DeleteProvider",
+			Handler:    _DaemonAdminService_DeleteProvider_Handler,
+		},
+		{
+			MethodName: "TestProvider",
+			Handler:    _DaemonAdminService_TestProvider_Handler,
+		},
+		{
+			MethodName: "GetProviderHealth",
+			Handler:    _DaemonAdminService_GetProviderHealth_Handler,
+		},
+		{
+			MethodName: "GetDefaultProvider",
+			Handler:    _DaemonAdminService_GetDefaultProvider_Handler,
+		},
+		{
+			MethodName: "SetDefaultProvider",
+			Handler:    _DaemonAdminService_SetDefaultProvider_Handler,
+		},
+		{
+			MethodName: "GetFallbackChain",
+			Handler:    _DaemonAdminService_GetFallbackChain_Handler,
+		},
+		{
+			MethodName: "SetFallbackChain",
+			Handler:    _DaemonAdminService_SetFallbackChain_Handler,
+		},
+		{
+			MethodName: "ExecuteLLM",
+			Handler:    _DaemonAdminService_ExecuteLLM_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StreamLLM",
+			Handler:       _DaemonAdminService_StreamLLM_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "gibson/daemon/admin/v1/daemon_admin.proto",
 }

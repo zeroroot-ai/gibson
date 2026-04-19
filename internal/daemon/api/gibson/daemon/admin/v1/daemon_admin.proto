@@ -267,6 +267,77 @@ service DaemonAdminService {
   // tenant and by a background reconciler when new platform-catalog items are
   // published.
   rpc SeedCatalogTenantEnabled(SeedCatalogTenantEnabledRequest) returns (SeedCatalogTenantEnabledResponse);
+
+  // ---------------------------------------------------------------------------
+  // LLM Providers — daemon-managed credential store (spec 25)
+  // ---------------------------------------------------------------------------
+
+  // ListProviders returns all provider configs for the calling tenant.
+  // Credentials in the response are always masked (e.g. "****abc").
+  // Requires FGA member relation on the tenant.
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+
+  // GetProvider returns a single provider config by name.
+  // Credentials in the response are always masked.
+  // Requires FGA member relation on the tenant.
+  rpc GetProvider(GetProviderRequest) returns (GetProviderResponse);
+
+  // CreateProvider encrypts and stores a new provider config.
+  // The plaintext credentials in the request are encrypted immediately;
+  // they are never persisted in plaintext.
+  // Requires FGA admin relation on the tenant.
+  rpc CreateProvider(CreateProviderRequest) returns (CreateProviderResponse);
+
+  // UpdateProvider replaces an existing provider config.
+  // If credentials fields are empty or omitted, the stored values are retained.
+  // Requires FGA admin relation on the tenant.
+  rpc UpdateProvider(UpdateProviderRequest) returns (UpdateProviderResponse);
+
+  // DeleteProvider removes a provider config from the store.
+  // Requires FGA admin relation on the tenant.
+  rpc DeleteProvider(DeleteProviderRequest) returns (DeleteProviderResponse);
+
+  // TestProvider validates a proposed provider config by making a minimal
+  // live request to the upstream. The config is NOT persisted.
+  // Returns a structured result rather than a gRPC-level error on upstream
+  // failure so the dashboard can surface latency and error detail.
+  // Requires FGA admin relation on the tenant.
+  rpc TestProvider(TestProviderRequest) returns (TestProviderResponse);
+
+  // GetProviderHealth returns the last-known health status of a stored provider.
+  // Requires FGA member relation on the tenant.
+  rpc GetProviderHealth(GetProviderHealthRequest) returns (GetProviderHealthResponse);
+
+  // GetDefaultProvider returns the tenant's currently configured default provider.
+  // Requires FGA member relation on the tenant.
+  rpc GetDefaultProvider(GetDefaultProviderRequest) returns (GetDefaultProviderResponse);
+
+  // SetDefaultProvider designates an existing stored provider as the default.
+  // Requires FGA admin relation on the tenant.
+  rpc SetDefaultProvider(SetDefaultProviderRequest) returns (SetDefaultProviderResponse);
+
+  // GetFallbackChain returns the ordered list of provider names the daemon
+  // tries when the default provider is unavailable.
+  // Requires FGA member relation on the tenant.
+  rpc GetFallbackChain(GetFallbackChainRequest) returns (GetFallbackChainResponse);
+
+  // SetFallbackChain replaces the tenant's provider fallback chain.
+  // All named providers must already exist in the store.
+  // Requires FGA admin relation on the tenant.
+  rpc SetFallbackChain(SetFallbackChainRequest) returns (SetFallbackChainResponse);
+
+  // ExecuteLLM proxies a single (non-streaming) LLM completion through the
+  // daemon's provider-credential store. The dashboard's GibsonLLMAdapter
+  // calls this for non-streaming chat turns.
+  // Requires FGA member relation on the tenant.
+  rpc ExecuteLLM(ExecuteLLMRequest) returns (ExecuteLLMResponse);
+
+  // StreamLLM proxies a streaming LLM completion through the daemon's
+  // provider-credential store. The dashboard's GibsonLLMAdapter calls this
+  // for streaming chat turns. Server-streaming: the daemon sends back
+  // StreamLLMResponse chunks until finish or error.
+  // Requires FGA member relation on the tenant.
+  rpc StreamLLM(StreamLLMRequest) returns (stream StreamLLMResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -1534,4 +1605,407 @@ message SeedCatalogTenantEnabledRequest {
 
 message SeedCatalogTenantEnabledResponse {
   int32 tuples_written = 1;
+}
+
+// ---------------------------------------------------------------------------
+// LLM Providers — CRUD + execution messages (spec 25)
+// ---------------------------------------------------------------------------
+
+// ProviderRecord is the read-side representation of a stored provider config.
+// Credentials are always masked: {"api_key": "****abc"}.
+message ProviderRecord {
+  // id is the server-generated UUID for this provider record.
+  string id = 1;
+
+  // name is the tenant-scoped human name for this provider.
+  string name = 2;
+
+  // type is the provider type identifier (e.g. "anthropic", "openai", "bedrock").
+  string type = 3;
+
+  // default_model is the model name used when the caller does not specify one.
+  string default_model = 4;
+
+  // is_default indicates this provider is the tenant's default.
+  bool is_default = 5;
+
+  // enabled indicates whether this provider is active.
+  bool enabled = 6;
+
+  // credentials_masked holds masked credential values for display only.
+  // Format: {"api_key": "****xyz"} — last 4 chars visible, rest masked.
+  // Fields shorter than 8 characters are fully masked as "****".
+  map<string, string> credentials_masked = 7;
+
+  // created_at is the RFC 3339 creation timestamp.
+  string created_at = 8;
+
+  // updated_at is the RFC 3339 last-update timestamp.
+  string updated_at = 9;
+}
+
+// ProviderConfigInput is the write-side shape accepted by CreateProvider and
+// UpdateProvider. Credentials are plaintext on the wire; the daemon encrypts
+// them immediately and never persists the plaintext.
+message ProviderConfigInput {
+  // name is the tenant-scoped human name for this provider.
+  string name = 1;
+
+  // type is the provider type identifier (e.g. "anthropic", "openai").
+  string type = 2;
+
+  // default_model is the model name to use when none is specified by the caller.
+  string default_model = 3;
+
+  // credentials holds plaintext credential values (e.g. {"api_key": "sk-..."}).
+  // Daemon encrypts immediately via AES-256-GCM + KeyProvider. Never stored
+  // or logged in plaintext.
+  map<string, string> credentials = 4;
+
+  // set_as_default, when true, atomically designates this provider as the
+  // tenant's default after a successful create or update.
+  bool set_as_default = 5;
+}
+
+// ResponseFormat controls the structure of the LLM's output.
+message ResponseFormat {
+  // type is "text", "json_object", or "json_schema".
+  string type = 1;
+
+  // name is the schema name (json_schema mode only).
+  string name = 2;
+
+  // schema_json is the JSON-encoded schema (json_schema mode only).
+  string schema_json = 3;
+
+  // strict enables strict schema adherence when supported by the provider.
+  bool strict = 4;
+}
+
+// ToolCallDelta carries incremental tool-call information in a streaming response.
+message ToolCallDelta {
+  // index identifies which tool call this delta belongs to (0-based).
+  int32 index = 1;
+
+  // id is the tool call identifier (present on the first delta for this index).
+  string id = 2;
+
+  // name is the tool name (present on the first delta for this index).
+  string name = 3;
+
+  // arguments_delta is an incremental fragment of the JSON arguments string.
+  string arguments_delta = 4;
+}
+
+// LLMTokenUsage reports token consumption for an LLM completion.
+// Mirrors gibson.harness.v1.TokenUsage; defined locally to avoid
+// cross-module proto imports in the buf build graph.
+message LLMTokenUsage {
+  int32 input_tokens = 1;
+  int32 output_tokens = 2;
+  int32 total_tokens = 3;
+}
+
+// LLMMessageContent is a single message in a conversation.
+// Mirrors gibson.harness.v1.LLMMessage; defined locally for the same reason.
+message LLMMessageContent {
+  // role is "system", "user", "assistant", or "tool".
+  string role = 1;
+
+  // content is the text content of the message.
+  string content = 2;
+
+  // tool_calls are any tool calls requested by this message.
+  repeated LLMToolCall tool_calls = 3;
+
+  // tool_results are tool-call results included in this message.
+  repeated LLMToolResult tool_results = 4;
+
+  // name is the tool name, for tool-role messages.
+  string name = 5;
+}
+
+// LLMToolCall describes a tool invocation requested by the LLM.
+// Mirrors gibson.harness.v1.ToolCall.
+message LLMToolCall {
+  string id = 1;
+  string name = 2;
+  // arguments is a JSON-encoded string of the tool call arguments.
+  string arguments = 3;
+}
+
+// LLMToolResult carries the output of a tool call.
+// Mirrors gibson.harness.v1.ToolResult.
+message LLMToolResult {
+  string tool_call_id = 1;
+  string content = 2;
+  bool is_error = 3;
+}
+
+// LLMToolDef defines a tool the LLM may invoke.
+// Mirrors gibson.harness.v1.ToolDef.
+message LLMToolDef {
+  string name = 1;
+  string description = 2;
+  // parameters_json is the JSON-encoded JSON Schema for the tool arguments.
+  string parameters_json = 3;
+}
+
+// ProviderHarnessError carries an error from the LLM execution path.
+// Mirrors gibson.harness.v1.HarnessError; defined locally for the same reason.
+message ProviderHarnessError {
+  // code is a numeric error code (maps to gibson.common.v1.ErrorCode values).
+  int32 code = 1;
+  string message = 2;
+  bool retryable = 3;
+}
+
+// StreamFinish is emitted as the final chunk of a StreamLLM response.
+message StreamFinish {
+  // finish_reason is "stop", "length", "tool_calls", or "content_filter".
+  string finish_reason = 1;
+
+  // usage reports token consumption for the full streamed completion.
+  LLMTokenUsage usage = 2;
+}
+
+// --- ListProviders ---
+
+message ListProvidersRequest {}
+
+message ListProvidersResponse {
+  // providers is the list of provider configs for the calling tenant.
+  repeated ProviderRecord providers = 1;
+}
+
+// --- GetProvider ---
+
+message GetProviderRequest {
+  // name is the tenant-scoped provider name to retrieve.
+  string name = 1;
+}
+
+message GetProviderResponse {
+  // provider is the matching provider config with masked credentials.
+  ProviderRecord provider = 1;
+}
+
+// --- CreateProvider ---
+
+message CreateProviderRequest {
+  // input contains the provider config to create.
+  ProviderConfigInput input = 1;
+}
+
+message CreateProviderResponse {
+  // provider is the newly created config with masked credentials.
+  ProviderRecord provider = 1;
+}
+
+// --- UpdateProvider ---
+
+message UpdateProviderRequest {
+  // name is the tenant-scoped provider name to update.
+  string name = 1;
+
+  // input contains the replacement config. Empty credential values mean
+  // "retain the stored value"; non-empty values replace it.
+  ProviderConfigInput input = 2;
+}
+
+message UpdateProviderResponse {
+  // provider is the updated config with masked credentials.
+  ProviderRecord provider = 1;
+}
+
+// --- DeleteProvider ---
+
+message DeleteProviderRequest {
+  // name is the tenant-scoped provider name to delete.
+  string name = 1;
+}
+
+message DeleteProviderResponse {}
+
+// --- TestProvider ---
+
+message TestProviderRequest {
+  // input contains the provider config to validate. Not persisted.
+  ProviderConfigInput input = 1;
+}
+
+message TestProviderResponse {
+  // ok is true when the upstream returned a successful response.
+  bool ok = 1;
+
+  // latency_ms is the round-trip time in milliseconds (always reported).
+  int64 latency_ms = 2;
+
+  // model is the model that was used for the test completion.
+  string model = 3;
+
+  // error is the cleaned upstream error message when ok is false.
+  string error = 4;
+}
+
+// --- GetProviderHealth ---
+
+message GetProviderHealthRequest {
+  // name is the tenant-scoped provider name to check.
+  string name = 1;
+}
+
+message GetProviderHealthResponse {
+  // healthy is true when the provider's last health check succeeded.
+  bool healthy = 1;
+
+  // last_checked_at is the RFC 3339 timestamp of the last health check.
+  string last_checked_at = 2;
+
+  // error is set when healthy is false.
+  string error = 3;
+}
+
+// --- GetDefaultProvider ---
+
+message GetDefaultProviderRequest {}
+
+message GetDefaultProviderResponse {
+  // provider is the tenant's default provider config, or absent if none is set.
+  ProviderRecord provider = 1;
+}
+
+// --- SetDefaultProvider ---
+
+message SetDefaultProviderRequest {
+  // name is the tenant-scoped provider name to designate as default.
+  string name = 1;
+}
+
+message SetDefaultProviderResponse {
+  // provider is the updated provider record (now is_default=true).
+  ProviderRecord provider = 1;
+}
+
+// --- GetFallbackChain ---
+
+message GetFallbackChainRequest {}
+
+message GetFallbackChainResponse {
+  // provider_names is the ordered list of provider names in the fallback chain.
+  repeated string provider_names = 1;
+}
+
+// --- SetFallbackChain ---
+
+message SetFallbackChainRequest {
+  // provider_names is the new ordered fallback chain. All names must refer to
+  // existing stored providers.
+  repeated string provider_names = 1;
+}
+
+message SetFallbackChainResponse {
+  // provider_names is the fallback chain as stored (mirrors the request).
+  repeated string provider_names = 1;
+}
+
+// --- ExecuteLLM ---
+
+// ExecuteLLMRequest carries a single (non-streaming) LLM completion request.
+// The daemon resolves provider_name to a stored credential, decrypts it, and
+// dispatches to the appropriate langchaingo provider. The plaintext credential
+// never leaves daemon process memory.
+message ExecuteLLMRequest {
+  // provider_name resolves to a ProviderRecord in the tenant's credential store.
+  string provider_name = 1;
+
+  // model overrides the provider's default_model when set.
+  string model = 2;
+
+  // messages is the conversation history to send to the LLM.
+  repeated LLMMessageContent messages = 3;
+
+  // tools is the optional set of tool definitions to expose to the LLM.
+  repeated LLMToolDef tools = 4;
+
+  // response_format controls the structure of the LLM's output.
+  optional ResponseFormat response_format = 5;
+
+  // temperature controls the randomness of the output (0.0–2.0).
+  optional double temperature = 6;
+
+  // max_tokens is the maximum number of tokens to generate.
+  optional int32 max_tokens = 7;
+
+  // top_p is the nucleus-sampling probability mass (0.0–1.0).
+  optional double top_p = 8;
+
+  // stop is a list of sequences that cause the model to stop generating.
+  repeated string stop = 9;
+}
+
+// ExecuteLLMResponse carries the result of a non-streaming LLM completion.
+message ExecuteLLMResponse {
+  // content is the text response from the LLM.
+  string content = 1;
+
+  // tool_calls is the list of tool calls the LLM requested.
+  repeated LLMToolCall tool_calls = 2;
+
+  // finish_reason is "stop", "length", "tool_calls", or "content_filter".
+  string finish_reason = 3;
+
+  // usage reports token consumption for this completion.
+  LLMTokenUsage usage = 4;
+}
+
+// --- StreamLLM ---
+
+// StreamLLMRequest carries a streaming LLM completion request.
+// Fields are identical to ExecuteLLMRequest.
+message StreamLLMRequest {
+  // provider_name resolves to a ProviderRecord in the tenant's credential store.
+  string provider_name = 1;
+
+  // model overrides the provider's default_model when set.
+  string model = 2;
+
+  // messages is the conversation history to send to the LLM.
+  repeated LLMMessageContent messages = 3;
+
+  // tools is the optional set of tool definitions to expose to the LLM.
+  repeated LLMToolDef tools = 4;
+
+  // response_format controls the structure of the LLM's output.
+  optional ResponseFormat response_format = 5;
+
+  // temperature controls the randomness of the output (0.0–2.0).
+  optional double temperature = 6;
+
+  // max_tokens is the maximum number of tokens to generate.
+  optional int32 max_tokens = 7;
+
+  // top_p is the nucleus-sampling probability mass (0.0–1.0).
+  optional double top_p = 8;
+
+  // stop is a list of sequences that cause the model to stop generating.
+  repeated string stop = 9;
+}
+
+// StreamLLMResponse is one chunk in a server-streaming LLM response.
+// Exactly one of the payload variants is set per message.
+message StreamLLMResponse {
+  oneof payload {
+    // text_delta is an incremental text fragment.
+    string text_delta = 1;
+
+    // tool_call_delta carries an incremental tool-call fragment.
+    ToolCallDelta tool_call_delta = 2;
+
+    // finish is the terminal chunk carrying finish_reason and usage.
+    StreamFinish finish = 3;
+
+    // error carries a harness error that terminates the stream.
+    ProviderHarnessError error = 4;
+  }
 }

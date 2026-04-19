@@ -25,9 +25,8 @@ type ModelPricing struct {
 	SelfHosted bool `mapstructure:"self_hosted" yaml:"self_hosted"`
 
 	// Unknown is true when the provider has a public rate card but Gibson
-	// has not been configured with the rates (e.g. IBM WatsonX custom
-	// deployments). The token tracker emits a WARN log and records zero
-	// cost rather than poisoning metrics with a false zero.
+	// has not been configured with the rates. The token tracker emits a WARN
+	// log and records zero cost rather than poisoning metrics with a false zero.
 	Unknown bool `mapstructure:"unknown" yaml:"unknown"`
 }
 
@@ -196,39 +195,11 @@ func DefaultPricing() *PricingConfig {
 		"mistralai/Mixtral-8x7B-Instruct-v0.1": {InputPer1M: 0.60, OutputPer1M: 0.60},
 	}
 
-	// Maritaca (Brazilian LLM provider) pricing
-	config.Pricing["maritaca"] = map[string]ModelPricing{
-		"sabia-3":         {InputPer1M: 1.00, OutputPer1M: 3.00},
-		"sabia-2-medium":  {InputPer1M: 0.50, OutputPer1M: 1.50},
-		"sabia-2-small":   {InputPer1M: 0.10, OutputPer1M: 0.30},
-	}
-
-	// Baidu ERNIE — rates not publicly consistent; marked Unknown so the
-	// tracker warns rather than reporting false zeros.
-	config.Pricing["ernie"] = map[string]ModelPricing{
-		"ernie-bot-4":     {Unknown: true},
-		"ernie-bot-turbo": {Unknown: true},
-		"ernie-bot":       {Unknown: true},
-	}
-
-	// IBM WatsonX — custom deployments have per-account pricing. Unknown flag
-	// prevents false zeros in billing reports.
-	config.Pricing["watsonx"] = map[string]ModelPricing{
-		"ibm/granite-13b-chat-v2":            {Unknown: true},
-		"ibm/granite-20b-multilingual":       {Unknown: true},
-		"meta-llama/llama-3-70b-instruct":    {Unknown: true},
-		"meta-llama/llama-3-8b-instruct":     {Unknown: true},
-		"mistralai/mixtral-8x7b-instruct-v01": {Unknown: true},
-	}
-
 	// Self-hosted providers — zero cost by convention.
 	config.Pricing["ollama"] = map[string]ModelPricing{
 		"*": {SelfHosted: true},
 	}
 	config.Pricing["llamafile"] = map[string]ModelPricing{
-		"*": {SelfHosted: true},
-	}
-	config.Pricing["local"] = map[string]ModelPricing{
 		"*": {SelfHosted: true},
 	}
 
