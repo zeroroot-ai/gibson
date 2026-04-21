@@ -9,16 +9,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
 // tenantFromCtx extracts the tenant ID from the context and returns an error
 // if it is missing. All GraphRAG execution queries require tenant isolation.
 func tenantFromCtx(ctx context.Context) (string, error) {
-	tid := auth.TenantFromContext(ctx)
+	tid := identity.TenantFromContext(ctx)
 	if tid == "" {
 		return "", fmt.Errorf("tenant_id required for GraphRAG queries")
 	}
