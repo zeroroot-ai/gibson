@@ -6,9 +6,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -267,13 +269,46 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.logger.Info(ctx, "execution rate limiter wired into DaemonServer (spec 25)")
 
 		// Budget enforcer — per-user/team/tenant token + spend ceilings
-		// around ExecuteLLM / StreamLLM. Team membership resolver is nil
-		// for v1 (team-scope enforcement skipped when empty); Clock is
-		// nil so the enforcer uses time.Now. Absent budget configs =
-		// unlimited, so this degrades to today's behavior until a
-		// tenant admin sets budgets via the dashboard.
+		// around ExecuteLLM / StreamLLM. Clock is nil so the enforcer
+		// uses time.Now. Absent budget configs = unlimited, so this
+		// degrades to today's behavior until a tenant admin sets
+		// budgets via the dashboard.
+		//
+		// TeamMembershipResolver is wired against FGA: `team#member@user`
+		// tuples are the source of truth for team membership. Calls fall
+		// back to tenant+user scopes (no teams) on authorizer absence or
+		// transient error — the enforcer itself downgrades to no team
+		// check when the resolver returns nil.
 		// Spec: llm-user-attribution-governance (Requirement 3).
-		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), nil, nil)
+		var teamResolver budget.TeamMembershipResolver
+		if d.authorizer != nil {
+			authorizer := d.authorizer
+			logger := d.logger.Slog()
+			teamResolver = func(ctx context.Context, _, userID string) ([]string, error) {
+				if userID == "" {
+					return nil, nil
+				}
+				teams, err := authorizer.ListObjects(ctx, "user:"+userID, "member", "team")
+				if err != nil {
+					logger.WarnContext(ctx, "budget: team membership lookup failed; falling back to tenant+user scopes only",
+						slog.String("user_id", userID),
+						slog.String("error", err.Error()),
+					)
+					return nil, nil
+				}
+				// ListObjects returns entries like "team:engineering"; strip the prefix.
+				ids := make([]string, 0, len(teams))
+				for _, t := range teams {
+					if strings.HasPrefix(t, "team:") {
+						ids = append(ids, strings.TrimPrefix(t, "team:"))
+					} else {
+						ids = append(ids, t)
+					}
+				}
+				return ids, nil
+			}
+		}
+		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil)
 		daemonSvc.WithBudgetEnforcer(budgetEnforcer)
 		d.budgetEnforcer = budgetEnforcer
 		d.logger.Info(ctx, "budget enforcer wired into DaemonServer (spec: llm-user-attribution-governance)")
@@ -300,6 +335,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			if d.authorizer != nil {
 				filter := modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0)
 				dsm.WithModelFilter(filter)
+				// Expose the filter's cache-invalidation hook so
+				// grant/revoke take effect within milliseconds rather
+				// than the filter's 30s TTL. The Filter interface
+				// requires InvalidateCache so this is always safe.
+				daemonSvc.WithModelGateInvalidator(filter)
 				d.logger.Info(ctx, "modelgate filter wired into slot resolver (spec: llm-user-attribution-governance)")
 			}
 			// Emit model_resolved events even when no filter is wired —
@@ -335,24 +375,40 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 
 	// Agent-owner lookup on the callback service so DelegateToAgent
-	// populates ExecutorUser on sub-agent dispatch. The lookup closes
-	// over the component registry; callers not found yield empty string
-	// which the callback service treats as graceful degradation
-	// (ExecutorUser simply omitted from the dispatch context).
+	// populates ExecutorUser on sub-agent dispatch. Uses Discover to
+	// read the registered-component instance's Metadata map — the
+	// ComponentMetadataOwnerUserID key is written at registration from
+	// the caller's Identity.Subject. Returns empty string (graceful
+	// degradation: EnrichSpan omits executor_user_id) when the registry
+	// has no live instance, when the caller was anonymous at
+	// registration, or when every instance lacks the metadata key
+	// (e.g., pre-spec registrations).
 	// Spec: llm-user-attribution-governance (Requirement 1.5).
 	if d.callback != nil && d.compRegistry != nil {
 		registry := d.compRegistry
+		logger := d.logger.Slog()
 		d.callback.SetAgentOwnerLookup(func(ctx context.Context, agentName string) (string, error) {
-			// Minimal owner lookup: the registry doesn't expose a
-			// direct "component owner user" accessor today, so this
-			// returns empty string until the component manifest grows
-			// an owner_user field. Graceful degradation is the
-			// documented default.
-			_ = registry
-			_ = agentName
+			if agentName == "" {
+				return "", nil
+			}
+			tenant := identity.TenantFromContext(ctx)
+			instances, err := registry.Discover(ctx, tenant, "agent", agentName)
+			if err != nil {
+				logger.WarnContext(ctx, "agent owner lookup: registry discover failed; executor_user_id omitted",
+					slog.String("agent", agentName),
+					slog.String("tenant", tenant),
+					slog.String("error", err.Error()),
+				)
+				return "", nil
+			}
+			for _, inst := range instances {
+				if owner, ok := inst.Metadata[component.ComponentMetadataOwnerUserID]; ok && owner != "" {
+					return owner, nil
+				}
+			}
 			return "", nil
 		})
-		d.logger.Info(ctx, "agent owner lookup wired on callback service (placeholder impl; returns empty until registry exposes owner)")
+		d.logger.Info(ctx, "agent owner lookup wired on callback service (reads registry ComponentInfo.Metadata owner_user_id)")
 	}
 
 	// Wire daemon dependencies that require the Redis state client.
@@ -392,6 +448,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				auditWriter.Start(ctx)
 				d.auditWriter = auditWriter
 				auditQuery := audit.NewQuery(d.dashboardDB)
+				// Wire the audit read path into ModelAccessService so the
+				// dashboard's audit drawer renders real model_resolved
+				// events. Spec: llm-user-attribution-governance R4.9.
+				daemonSvc.WithAuditQuery(auditQuery)
+				d.logger.Info(ctx, "audit query wired into DaemonServer for ListModelResolutionEvents")
 
 				fgaBridge := capabilitygrant.NewFGABridge(d.authorizer, d.compRegistry, d.logger.Slog())
 

@@ -514,6 +514,17 @@ func (s *ComponentServiceServer) RegisterComponent(
 		info.Metadata["output_message_type"] = outputMsgType
 	}
 
+	// Record the registering user so ExecutorUser attribution works when a
+	// parent agent later delegates to this component. Populated from the
+	// authenticated caller's identity when present; absent for anonymous
+	// registrations (which graceful-degrade to no executor_user_id on
+	// downstream spans). Spec: llm-user-attribution-governance Req 1.5.
+	if id, err := identity.IdentityFromContext(ctx); err == nil && id.Subject != "" {
+		info.Metadata[ComponentMetadataOwnerUserID] = id.Subject
+	} else if uid, ok := identity.ActingUserFromContext(ctx); ok && uid != "" {
+		info.Metadata[ComponentMetadataOwnerUserID] = uid
+	}
+
 	instanceID, err := s.registry.Register(ctx, tenant, req.Kind, req.Name, info)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "component registration failed",

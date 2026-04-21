@@ -72,6 +72,27 @@ func (s *DaemonServer) WithBudgetEnforcer(e budgetEnforcerIface) *DaemonServer {
 	return s
 }
 
+// WithModelGateInvalidator wires the modelgate filter's cache-
+// invalidation hook so Grant / Revoke RPCs invalidate cached FGA
+// check results immediately. Without this the next call after a
+// grant/revoke may still see the prior state for up to 30s (the
+// filter's TTL).
+// Spec: llm-user-attribution-governance (Requirement 4.6).
+func (s *DaemonServer) WithModelGateInvalidator(inv modelGateInvalidator) *DaemonServer {
+	s.modelGateInvalidator = inv
+	return s
+}
+
+// WithAuditQuery wires the audit-log read backend for
+// ListModelResolutionEvents. When nil the RPC returns an empty
+// response rather than Unimplemented (so dashboard callers render
+// "no events" cleanly on environments without dashboard Postgres).
+// Spec: llm-user-attribution-governance (Requirement 4.9).
+func (s *DaemonServer) WithAuditQuery(q auditQueryIface) *DaemonServer {
+	s.auditQuery = q
+	return s
+}
+
 // enforceBudgetCheck runs the budget Check if an enforcer is wired and
 // maps an exceedance error to a gRPC ResourceExhausted status carrying
 // a gibson.budget.v1.BudgetExceeded detail so SDK callers can decode it

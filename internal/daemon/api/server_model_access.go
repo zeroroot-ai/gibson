@@ -2,13 +2,16 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/identity"
 	modelaccesspb "github.com/zero-day-ai/sdk/api/gen/gibson/authz/v1"
@@ -100,6 +103,14 @@ func (s *DaemonServer) GrantAccess(ctx context.Context, req *modelaccesspb.Grant
 		return nil, status_grpc.Error(codes.Internal, "failed to persist grant")
 	}
 
+	// Invalidate modelgate's in-process cache so the next slot
+	// resolution sees the new grant immediately. Non-blocking —
+	// absent invalidator means grants take effect at the cache's
+	// TTL boundary (30s worst-case).
+	if s.modelGateInvalidator != nil {
+		s.modelGateInvalidator.InvalidateCache()
+	}
+
 	return &modelaccesspb.GrantAccessResponse{Grant: g}, nil
 }
 
@@ -132,6 +143,12 @@ func (s *DaemonServer) RevokeAccess(ctx context.Context, req *modelaccesspb.Revo
 		s.logger.WarnContext(ctx, "model_access: revoke failed",
 			slog.String("error", err.Error()), slog.String("tenant", tenantID))
 		return nil, status_grpc.Error(codes.Internal, "failed to revoke grant")
+	}
+
+	// Invalidate modelgate's in-process cache so the revoke takes
+	// effect on the next call rather than waiting for the TTL.
+	if s.modelGateInvalidator != nil {
+		s.modelGateInvalidator.InvalidateCache()
 	}
 
 	return &modelaccesspb.RevokeAccessResponse{
@@ -195,10 +212,10 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *modelaccesspb.ListAc
 }
 
 // ListModelResolutionEvents returns recent model_resolved events.
-// Implementation stub: returns an empty list until the audit-query
-// backend wires this to Postgres / Loki; shipping as a stub (non-
-// Unimplemented) is the project convention for RPCs that have a
-// dashboard consumer but whose backend story is cross-cutting.
+// Backed by the audit.Query wired via WithAuditQuery. When the audit
+// backend is not configured (e.g., no dashboard Postgres) the RPC
+// returns an empty response rather than failing — dashboard callers
+// render "no events in range" cleanly.
 // Spec: llm-user-attribution-governance Requirement 4.9.
 func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *modelaccesspb.ListModelResolutionEventsRequest) (*modelaccesspb.ListModelResolutionEventsResponse, error) {
 	tenantID := identity.TenantFromContext(ctx)
@@ -208,8 +225,64 @@ func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *model
 	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
 		return nil, err
 	}
-	// Empty response — backend query to be wired in a follow-up task.
-	return &modelaccesspb.ListModelResolutionEventsResponse{}, nil
+	if s.auditQuery == nil {
+		return &modelaccesspb.ListModelResolutionEventsResponse{}, nil
+	}
+
+	filters := audit.Filters{
+		Action:   "model_resolved",
+		ActorID:  req.GetUserId(),
+	}
+	if sec := req.GetStartTimeUnix(); sec > 0 {
+		t := time.Unix(sec, 0)
+		filters.Since = &t
+	}
+	if sec := req.GetEndTimeUnix(); sec > 0 {
+		t := time.Unix(sec, 0)
+		filters.Until = &t
+	}
+
+	// Hard cap the dashboard page at 500 rows; operators who need more
+	// paginate by narrowing the time range.
+	rows, _, err := s.auditQuery.List(ctx, tenantID, filters, 500, 0)
+	if err != nil {
+		s.logger.WarnContext(ctx, "model_access: audit query failed",
+			slog.String("error", err.Error()), slog.String("tenant", tenantID))
+		return &modelaccesspb.ListModelResolutionEventsResponse{}, nil
+	}
+
+	events := make([]*modelaccesspb.ModelResolutionEvent, 0, len(rows))
+	for _, r := range rows {
+		ev := &modelaccesspb.ModelResolutionEvent{
+			TenantId:      r.TenantID,
+			UserId:        r.ActorID,
+			TimestampUnix: r.CreatedAt.Unix(),
+		}
+		// target_id is of the form "provider/model" — split on the
+		// slash. Events from other sources (none today — model_resolved
+		// is emitted only by audit.EmitModelResolved) are tolerated.
+		if slash := strings.IndexByte(r.TargetID, '/'); slash > 0 {
+			ev.ChosenProvider = r.TargetID[:slash]
+			ev.ChosenModel = r.TargetID[slash+1:]
+		}
+		// Unmarshal the slot-resolution metadata embedded in the event
+		// to recover fields not captured by the base Event shape.
+		if len(r.Metadata) > 0 {
+			var meta audit.ModelResolutionEvent
+			if err := json.Unmarshal(r.Metadata, &meta); err == nil {
+				ev.MissionId = meta.MissionID
+				ev.RunId = meta.RunID
+				ev.AgentId = meta.AgentID
+				ev.SlotName = meta.SlotName
+				// Slot filter narrows client-side so we don't over-engineer the SQL.
+				if req.GetSlotName() != "" && meta.SlotName != req.GetSlotName() {
+					continue
+				}
+			}
+		}
+		events = append(events, ev)
+	}
+	return &modelaccesspb.ListModelResolutionEventsResponse{Events: events}, nil
 }
 
 // timeNowUnix wraps time.Now().Unix() in a named helper so the value

@@ -38,6 +38,16 @@ type SandboxResources struct {
 // serialize without these fields — new fields carry `omitempty` tags so
 // round-trips remain clean. Entries discovered without a dispatch_mode are
 // treated as DISPATCH_MODE_UNSPECIFIED (misconfiguration).
+// ComponentMetadataOwnerUserID is the ComponentInfo.Metadata key that
+// records the user ID that registered the component instance.
+// Populated by ComponentServiceServer.RegisterComponent from the
+// authenticated caller's identity. Consumed by daemon wiring to
+// populate ExecutorUser on sub-agent delegation. Absent on anonymous
+// registrations — callers treat absent as "owner unknown" and
+// gracefully degrade.
+// Spec: llm-user-attribution-governance (Requirement 1.5).
+const ComponentMetadataOwnerUserID = "owner_user_id"
+
 type ComponentInfo struct {
 	Kind          string            `json:"kind"`
 	Name          string            `json:"name"`

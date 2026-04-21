@@ -179,6 +179,19 @@ type DaemonServer struct {
 	// degrades to today's behavior).
 	// Spec: llm-user-attribution-governance (Requirement 3).
 	budgetEnforcer budgetEnforcerIface
+
+	// modelGateInvalidator is called from Grant/Revoke so that the
+	// next slot resolution picks up the new grant state within
+	// milliseconds (bypassing the filter's 30s TTL). May be nil; when
+	// nil, grant/revoke still persist but callers may see up to 30s of
+	// stale enforcement.
+	// Spec: llm-user-attribution-governance (Requirement 4.6).
+	modelGateInvalidator modelGateInvalidator
+
+	// auditQuery backs ListModelResolutionEvents. May be nil; when nil
+	// the RPC returns an empty response rather than Unimplemented.
+	// Spec: llm-user-attribution-governance (Requirement 4.9).
+	auditQuery auditQueryIface
 }
 
 // budgetEnforcerIface is the narrow surface ExecuteLLM / StreamLLM use
@@ -187,6 +200,21 @@ type DaemonServer struct {
 type budgetEnforcerIface interface {
 	Check(ctx context.Context, estimatedTokens int64) (*budget.Status, error)
 	Record(ctx context.Context, actualTokens int64, actualCostUSDCents int64) error
+}
+
+// modelGateInvalidator is the narrow cache-invalidation hook the
+// ModelAccessService handlers call after Grant / Revoke so the next
+// call reflects the new state within milliseconds rather than waiting
+// for the modelgate 30s TTL. Implemented by *modelgate.fgaFilter.
+type modelGateInvalidator interface {
+	InvalidateCache()
+}
+
+// auditQueryIface is the narrow read surface ListModelResolutionEvents
+// uses from audit.Query. Pluggable so tests can return deterministic
+// data without spinning up Postgres.
+type auditQueryIface interface {
+	List(ctx context.Context, tenantID string, filters audit.Filters, limit, offset int) ([]audit.PgEntry, int, error)
 }
 
 // missionDraftStoreIface is the narrow interface the DaemonServer uses for

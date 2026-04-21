@@ -35,8 +35,14 @@ type Candidate struct {
 // to use, preserving rank order. Returning an empty slice when no
 // candidates pass signals to the caller that PermissionDenied is
 // appropriate.
+//
+// InvalidateCache drops any memoised authorization decisions so the
+// next Permitted call re-queries the underlying authorizer. Called
+// from the dashboard's Grant/Revoke RPCs so grant changes take effect
+// within milliseconds instead of waiting for the filter's TTL.
 type Filter interface {
 	Permitted(ctx context.Context, candidates []Candidate) ([]Candidate, error)
+	InvalidateCache()
 }
 
 // NewFGAFilter wires a Filter against the given Authorizer. cacheTTL
