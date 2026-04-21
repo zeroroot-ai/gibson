@@ -12,7 +12,9 @@ import (
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
 	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/crypto"
@@ -222,6 +224,19 @@ type daemonImpl struct {
 	// either a real fgaAuthorizer (authz.enabled=true) or a noopAuthorizer
 	// (authz.enabled=false or FGA unreachable in dev mode).
 	authorizer authz.Authorizer
+
+	// budgetEnforcer is the per-user/team/tenant LLM budget enforcer.
+	// Wired in grpcSubsystem alongside the rate limiter when a Redis
+	// client is available. Also used by the PeriodRolloverJob as the
+	// backing counter source.
+	// Spec: llm-user-attribution-governance (Requirement 3).
+	budgetEnforcer budget.Enforcer
+
+	// auditWriter is the tenant-scoped audit event stream writer.
+	// Wired in grpcSubsystem when a dashboard Postgres pool is
+	// available. Used by capability-grant RPCs and by the slot
+	// resolver's onResolve callback for model_resolved events.
+	auditWriter *audit.Writer
 
 	// envelopeSigner signs AuthzContext payloads attached to dispatched work items.
 	// Created during Start() with a random per-daemon secret. Components verify

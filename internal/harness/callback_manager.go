@@ -533,3 +533,14 @@ func (m *CallbackManager) SetMissionManager(op MissionOperator) {
 		m.logger.Debug("set mission manager on callback service")
 	}
 }
+
+// SetAgentOwnerLookup wires the AgentOwnerLookup hook into the callback
+// service so DelegateToAgent populates ExecutorUser on the dispatch
+// context. Pass nil to disable. Spec: llm-user-attribution-governance
+// Requirement 1.5.
+func (m *CallbackManager) SetAgentOwnerLookup(fn AgentOwnerLookup) {
+	if m.server != nil {
+		m.server.SetAgentOwnerLookup(fn)
+		m.logger.Debug("set agent owner lookup on callback service")
+	}
+}

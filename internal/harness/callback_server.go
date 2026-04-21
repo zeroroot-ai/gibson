@@ -175,3 +175,13 @@ func (s *CallbackServer) SetComponentAuthzMetrics(m ComponentAuthzMetrics) {
 func (s *CallbackServer) SetMissionManager(op MissionOperator) {
 	s.service.missionManager = op
 }
+
+// SetAgentOwnerLookup wires the AgentOwnerLookup hook so DelegateToAgent
+// can resolve the delegated agent's owner and populate ExecutorUser on
+// the sub-agent dispatch context. Pass nil to disable executor
+// attribution (graceful degradation — EnrichSpan simply omits the
+// executor_user_id attribute).
+// Spec: llm-user-attribution-governance Requirement 1.5.
+func (s *CallbackServer) SetAgentOwnerLookup(fn AgentOwnerLookup) {
+	s.service.agentOwnerLookup = fn
+}

@@ -17,7 +17,9 @@ import (
 	discoverysvc "github.com/zero-day-ai/gibson/internal/api/discovery"
 	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/audit"
+	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
+	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
@@ -263,6 +265,94 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		execLimiter := ratelimit.NewRedisLimiter(d.stateClient.Client(), limits)
 		daemonSvc.WithExecLimiter(execLimiter)
 		d.logger.Info(ctx, "execution rate limiter wired into DaemonServer (spec 25)")
+
+		// Budget enforcer — per-user/team/tenant token + spend ceilings
+		// around ExecuteLLM / StreamLLM. Team membership resolver is nil
+		// for v1 (team-scope enforcement skipped when empty); Clock is
+		// nil so the enforcer uses time.Now. Absent budget configs =
+		// unlimited, so this degrades to today's behavior until a
+		// tenant admin sets budgets via the dashboard.
+		// Spec: llm-user-attribution-governance (Requirement 3).
+		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), nil, nil)
+		daemonSvc.WithBudgetEnforcer(budgetEnforcer)
+		d.budgetEnforcer = budgetEnforcer
+		d.logger.Info(ctx, "budget enforcer wired into DaemonServer (spec: llm-user-attribution-governance)")
+
+		// Launch the period-rollover job. SETNX-locked so only one
+		// replica emits the boundary marker. Cancellation via ctx.
+		// Spec: llm-user-attribution-governance (Requirement 3.8).
+		rollover := budget.NewPeriodRolloverJob(d.stateClient.Client(), d.logger.Slog(), nil, nil)
+		go func() {
+			if err := rollover.Run(ctx); err != nil && err != context.Canceled {
+				d.logger.Warn(ctx, "budget rollover subsystem exited with error (non-fatal)", "error", err)
+			}
+		}()
+		d.logger.Info(ctx, "budget period-rollover subsystem launched")
+	}
+
+	// Model-access gate on the slot resolver + audit emission on every
+	// slot resolution. Both degrade gracefully when their dependencies
+	// are absent (nil authorizer = permit-all, nil auditWriter = no
+	// events emitted).
+	// Spec: llm-user-attribution-governance (Requirement 4).
+	if d.infrastructure != nil {
+		if dsm, ok := d.infrastructure.slotManager.(*DaemonSlotManager); ok {
+			if d.authorizer != nil {
+				filter := modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0)
+				dsm.WithModelFilter(filter)
+				d.logger.Info(ctx, "modelgate filter wired into slot resolver (spec: llm-user-attribution-governance)")
+			}
+			// Emit model_resolved events even when no filter is wired —
+			// the audit trail captures every resolution regardless of
+			// gating status.
+			if d.auditWriter != nil {
+				emitter := d.auditWriter
+				logger := d.logger.Slog()
+				dsm.WithResolveCallback(func(ctx context.Context, picked modelgate.Candidate, allowed bool) {
+					tenantID := identity.TenantFromContext(ctx)
+					userID := ""
+					if uid, ok := identity.ActingUserFromContext(ctx); ok {
+						userID = uid
+					} else if uid, ok := identity.InitiatorUserFromContext(ctx); ok {
+						userID = uid
+					}
+					audit.EmitModelResolved(ctx, emitter, logger, audit.ModelResolutionEvent{
+						TenantID:       tenantID,
+						UserID:         userID,
+						ChosenProvider: picked.Provider,
+						ChosenModel:    picked.Model,
+						Considered: []audit.CandidateOutcome{{
+							Provider: picked.Provider,
+							Model:    picked.Model,
+							Allowed:  allowed,
+							Reason:   func() string { if allowed { return "allowed" }; return "fga_denied" }(),
+						}},
+					})
+				})
+				d.logger.Info(ctx, "model_resolved audit emitter wired into slot resolver")
+			}
+		}
+	}
+
+	// Agent-owner lookup on the callback service so DelegateToAgent
+	// populates ExecutorUser on sub-agent dispatch. The lookup closes
+	// over the component registry; callers not found yield empty string
+	// which the callback service treats as graceful degradation
+	// (ExecutorUser simply omitted from the dispatch context).
+	// Spec: llm-user-attribution-governance (Requirement 1.5).
+	if d.callback != nil && d.compRegistry != nil {
+		registry := d.compRegistry
+		d.callback.SetAgentOwnerLookup(func(ctx context.Context, agentName string) (string, error) {
+			// Minimal owner lookup: the registry doesn't expose a
+			// direct "component owner user" accessor today, so this
+			// returns empty string until the component manifest grows
+			// an owner_user field. Graceful degradation is the
+			// documented default.
+			_ = registry
+			_ = agentName
+			return "", nil
+		})
+		d.logger.Info(ctx, "agent owner lookup wired on callback service (placeholder impl; returns empty until registry exposes owner)")
 	}
 
 	// Wire daemon dependencies that require the Redis state client.
@@ -300,6 +390,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				agentStore := capabilitygrant.NewCapabilityGrantStore(d.dashboardDB)
 				auditWriter := audit.NewWriter(d.dashboardDB, d.logger.Slog())
 				auditWriter.Start(ctx)
+				d.auditWriter = auditWriter
 				auditQuery := audit.NewQuery(d.dashboardDB)
 
 				fgaBridge := capabilitygrant.NewFGABridge(d.authorizer, d.compRegistry, d.logger.Slog())

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -30,6 +31,16 @@ type DaemonSlotManager struct {
 	logger          *slog.Logger
 	mu              sync.RWMutex      // Protects concurrent access to slot resolution
 	providerEnvVars map[string]string // Maps provider name to its API key env var name
+
+	// modelFilter gates the resolved (provider, model) against the
+	// calling user's FGA can_use grants. Nil = permit-all (backwards
+	// compatible with pre-spec behavior). Wired in daemon bootstrap.
+	// Spec: llm-user-attribution-governance (Requirement 4).
+	modelFilter modelgate.Filter
+
+	// onResolve is fired after every successful slot resolution. Used
+	// by the daemon to emit model_resolved audit events.
+	onResolve func(ctx context.Context, picked modelgate.Candidate, allowed bool)
 }
 
 // NewDaemonSlotManager creates a new DaemonSlotManager with the given LLM registry.
@@ -51,6 +62,64 @@ func (m *DaemonSlotManager) SetProviderEnvVars(envVars map[string]string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.providerEnvVars = envVars
+}
+
+// WithModelFilter wires a modelgate.Filter so slot resolution checks the
+// calling user's FGA can_use grants against the picked (provider, model).
+// Pass nil to disable gating (which is also the default — permit-all).
+// Spec: llm-user-attribution-governance Requirement 4.
+func (m *DaemonSlotManager) WithModelFilter(f modelgate.Filter) *DaemonSlotManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.modelFilter = f
+	return m
+}
+
+// WithResolveCallback wires a callback fired after every slot resolution
+// with the picked candidate + whether access was permitted. Daemon
+// bootstrap uses this to emit model_resolved audit events from a single
+// point (rather than having every caller emit).
+// Spec: llm-user-attribution-governance Requirement 4.7.
+func (m *DaemonSlotManager) WithResolveCallback(cb func(ctx context.Context, picked modelgate.Candidate, allowed bool)) *DaemonSlotManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onResolve = cb
+	return m
+}
+
+// applyModelGate runs the configured modelgate.Filter on the picked
+// (provider, model) and emits the optional resolve callback. Returns
+// nil when access is permitted or no filter is wired; otherwise
+// returns an ErrNoMatchingProvider signaling model_access_denied.
+func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotDefinition, provider llm.LLMProvider, model llm.ModelInfo) error {
+	picked := modelgate.Candidate{
+		Provider: provider.Name(),
+		Model:    model.Name,
+		Rank:     0,
+	}
+	allowed := true
+	if m.modelFilter != nil {
+		permitted, ferr := m.modelFilter.Permitted(ctx, []modelgate.Candidate{picked})
+		if ferr != nil {
+			// Fail open — filter already logs; blocking LLM dispatch on
+			// every FGA blip is worse than missing a gate for a few
+			// seconds. Matches the budget enforcer's Redis-outage
+			// behavior.
+			permitted = []modelgate.Candidate{picked}
+		}
+		allowed = len(permitted) == 1
+	}
+	if m.onResolve != nil {
+		m.onResolve(ctx, picked, allowed)
+	}
+	if !allowed {
+		return types.NewError(
+			llm.ErrNoMatchingProvider,
+			fmt.Sprintf("model_access_denied: user not permitted to use model %q on provider %q for slot %q",
+				model.Name, provider.Name(), slot.Name),
+		)
+	}
+	return nil
 }
 
 // envVarHint returns the environment variable hint for a provider, falling back
@@ -219,6 +288,9 @@ func (m *DaemonSlotManager) resolveExplicitConfig(ctx context.Context, slot agen
 					err,
 				)
 			}
+			if err := m.applyModelGate(ctx, slot, provider, model); err != nil {
+				return nil, llm.ModelInfo{}, err
+			}
 			return provider, model, nil
 		}
 	}
@@ -306,6 +378,9 @@ func (m *DaemonSlotManager) tryProvider(ctx context.Context, providerName string
 		for _, model := range models {
 			if model.Name == preferredModel {
 				if err := m.validateConstraints(slot, model); err == nil {
+					if err := m.applyModelGate(ctx, slot, provider, model); err != nil {
+						return nil, llm.ModelInfo{}, err
+					}
 					return provider, model, nil
 				}
 			}
@@ -325,6 +400,9 @@ func (m *DaemonSlotManager) tryProvider(ctx context.Context, providerName string
 	}
 
 	if bestModel != nil {
+		if err := m.applyModelGate(ctx, slot, provider, *bestModel); err != nil {
+			return nil, llm.ModelInfo{}, err
+		}
 		return provider, *bestModel, nil
 	}
 
