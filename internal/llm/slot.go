@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/authz/modelgate"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -25,13 +26,41 @@ type SlotManager interface {
 // DefaultSlotManager implements SlotManager with provider registry integration.
 type DefaultSlotManager struct {
 	registry LLMRegistry
+
+	// modelFilter, when non-nil, gates the resolved (provider, model)
+	// against the calling user's FGA `can_use` grants. Nil = permit-all
+	// (backwards compatible with pre-spec behavior).
+	// Spec: llm-user-attribution-governance (Requirement 4).
+	modelFilter modelgate.Filter
+
+	// onResolve, when non-nil, is called for every resolution with the
+	// picked model and whether access was permitted. Used by the daemon
+	// to emit a `model_resolved` audit event.
+	onResolve func(ctx context.Context, picked modelgate.Candidate, allowed bool)
 }
 
-// NewSlotManager creates a new DefaultSlotManager with the given registry
+// NewSlotManager creates a new DefaultSlotManager with the given registry.
 func NewSlotManager(registry LLMRegistry) *DefaultSlotManager {
 	return &DefaultSlotManager{
 		registry: registry,
 	}
+}
+
+// WithModelFilter wires a modelgate.Filter so ResolveSlot checks the
+// calling user's FGA grants against the picked (provider, model).
+// Returning an empty slice from Filter triggers PermissionDenied at the
+// resolver's surface. Pass nil to disable gating.
+func (m *DefaultSlotManager) WithModelFilter(f modelgate.Filter) *DefaultSlotManager {
+	m.modelFilter = f
+	return m
+}
+
+// WithResolveCallback wires a callback fired after every successful slot
+// resolution with the picked candidate. Callers use this to emit the
+// `model_resolved` audit event.
+func (m *DefaultSlotManager) WithResolveCallback(cb func(ctx context.Context, picked modelgate.Candidate, allowed bool)) *DefaultSlotManager {
+	m.onResolve = cb
+	return m
 }
 
 // ResolveSlot resolves a slot definition to a specific provider and model.
@@ -114,6 +143,37 @@ func (m *DefaultSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDef
 				config.Model, config.Provider, slot.Name),
 			err,
 		)
+	}
+
+	// Model-access gate: check the picked (provider, model) against the
+	// calling user's FGA grants. Skipped when no filter is wired (permit-
+	// all default). Spec: llm-user-attribution-governance Req 4.2, 4.3.
+	if m.modelFilter != nil {
+		picked := modelgate.Candidate{
+			Provider: config.Provider,
+			Model:    config.Model,
+			Rank:     0,
+		}
+		permitted, ferr := m.modelFilter.Permitted(ctx, []modelgate.Candidate{picked})
+		if ferr != nil {
+			// Filter already logs on its own; failing closed here would
+			// block LLM dispatch on every FGA blip. Fail open matches
+			// the enforcer's Redis-outage behavior.
+			permitted = []modelgate.Candidate{picked}
+		}
+		allowed := len(permitted) == 1
+		if m.onResolve != nil {
+			m.onResolve(ctx, picked, allowed)
+		}
+		if !allowed {
+			return nil, ModelInfo{}, types.NewError(
+				ErrNoMatchingProvider,
+				fmt.Sprintf("model_access_denied: user is not permitted to use model %q on provider %q",
+					config.Model, config.Provider),
+			)
+		}
+	} else if m.onResolve != nil {
+		m.onResolve(ctx, modelgate.Candidate{Provider: config.Provider, Model: config.Model}, true)
 	}
 
 	return provider, modelInfo, nil

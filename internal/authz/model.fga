@@ -233,3 +233,34 @@ type tenant_component
     define can_execute: member from parent
     define can_register: admin from parent
     define can_list: member from parent
+
+# ----------------------------------------------------------------------
+# LLM provider / model access gating — spec `llm-user-attribution-governance`
+# ----------------------------------------------------------------------
+#
+# provider and model types enable per-user / per-team / per-tenant gating
+# of slot resolution. Absent tuples = permit-all (backwards compatible
+# with today's behavior); gating kicks in once any tuple exists.
+#
+# Tuple examples:
+#   tenant:acme               | owner   | provider:anthropic
+#   user:alice                | can_use | provider:anthropic
+#   team:engineering#member   | can_use | provider:openai
+#   tenant:acme#member        | can_use | provider:anthropic   (grant to all members)
+#   provider:anthropic        | provider | model:claude-opus-4
+#   role:senior               | can_use | model:claude-opus-4     (not yet wired)
+#
+# can_use on model is a computed-union: direct tuple OR inherited from
+# the provider, so granting provider:anthropic:can_use to a user grants
+# them every model on that provider automatically.
+
+type provider
+  relations
+    define owner: [tenant]
+    define can_use: [user, team#member, tenant#member]
+
+type model
+  relations
+    define provider: [provider]
+    define owner: [tenant]
+    define can_use: [user, team#member, tenant#member] or can_use from provider
