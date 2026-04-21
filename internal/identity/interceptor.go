@@ -34,6 +34,23 @@ func verify(secret []byte, ctx context.Context, method string) (Identity, error)
 	return id, nil
 }
 
+// enrichCtx stores the verified identity plus the derived ActingUser and
+// Tenant context keys so every downstream handler (and every span that
+// EnrichSpan touches) has an explicit user_id and tenant_id without
+// needing to re-read the Identity struct. Identity.Subject is the end-user
+// ID for zitadel/apikey issuers and the workload subject for spire; either
+// way it's the correct attribution target.
+func enrichCtx(ctx context.Context, id Identity) context.Context {
+	ctx = WithIdentity(ctx, id)
+	if id.Subject != "" {
+		ctx = ContextWithActingUser(ctx, id.Subject)
+	}
+	if id.Tenant != "" {
+		ctx = ContextWithTenant(ctx, id.Tenant)
+	}
+	return ctx
+}
+
 // UnaryInterceptor verifies Envoy-signed identity headers and injects Identity
 // into context. HMAC failure returns codes.Internal (gateway bypass attempt).
 func UnaryInterceptor(secret []byte) grpc.UnaryServerInterceptor {
@@ -42,7 +59,7 @@ func UnaryInterceptor(secret []byte) grpc.UnaryServerInterceptor {
 		if err != nil {
 			return nil, err
 		}
-		return h(WithIdentity(ctx, id), req)
+		return h(enrichCtx(ctx, id), req)
 	}
 }
 
@@ -53,7 +70,7 @@ func StreamInterceptor(secret []byte) grpc.StreamServerInterceptor {
 		if err != nil {
 			return err
 		}
-		return h(srv, &wrappedStream{ss, WithIdentity(ss.Context(), id)})
+		return h(srv, &wrappedStream{ss, enrichCtx(ss.Context(), id)})
 	}
 }
 

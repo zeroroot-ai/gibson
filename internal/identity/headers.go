@@ -85,6 +85,51 @@ func ContextWithActingUser(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, actingUserContextKey{}, userID)
 }
 
+// initiatorUserContextKey is the unexported context key for the mission
+// initiator: the user who triggered the mission. Stable across the entire
+// mission lifetime — including sub-agent delegation, scheduled runs, and
+// checkpoint/resume — so span attribution follows the spend, not the code.
+type initiatorUserContextKey struct{}
+
+// executorUserContextKey is the unexported context key for the currently
+// executing agent's owner. Differs from the initiator when a parent agent
+// delegates to a sub-agent whose component is owned by a different user.
+type executorUserContextKey struct{}
+
+// InitiatorUserFromContext returns the mission initiator's user ID stored by
+// ContextWithInitiatorUser, and true if set. The initiator is the human (or
+// API-key owner) who triggered the mission; it remains stable across every
+// span in the mission tree — including sub-agent delegation.
+func InitiatorUserFromContext(ctx context.Context) (string, bool) {
+	if v, ok := ctx.Value(initiatorUserContextKey{}).(string); ok && v != "" {
+		return v, true
+	}
+	return "", false
+}
+
+// ContextWithInitiatorUser stores the initiator user ID in ctx. Called once
+// at mission start from MissionAuthzState.UserID so every descendant span
+// inherits it via context.
+func ContextWithInitiatorUser(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, initiatorUserContextKey{}, userID)
+}
+
+// ExecutorUserFromContext returns the executing agent's owner user ID stored
+// by ContextWithExecutorUser, and true if set. May differ from the initiator
+// when a parent agent delegates to a sub-agent owned by a different user.
+func ExecutorUserFromContext(ctx context.Context) (string, bool) {
+	if v, ok := ctx.Value(executorUserContextKey{}).(string); ok && v != "" {
+		return v, true
+	}
+	return "", false
+}
+
+// ContextWithExecutorUser stores the executing agent's owner user ID in ctx.
+// Set at sub-agent dispatch time to preserve attribution through delegation.
+func ContextWithExecutorUser(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, executorUserContextKey{}, userID)
+}
+
 // IsCrossTenantCaller returns true when the identity belongs to a workload
 // that is permitted to operate across tenant boundaries. The signal is the
 // identity issuer: "spire" identifies platform-operator services authenticated

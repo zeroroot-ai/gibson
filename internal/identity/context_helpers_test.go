@@ -111,6 +111,107 @@ func TestActingUserFromContext_EmptyString(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
+// InitiatorUserFromContext / ContextWithInitiatorUser
+// -----------------------------------------------------------------------
+
+func TestInitiatorUserFromContext_NotSet(t *testing.T) {
+	_, ok := InitiatorUserFromContext(t.Context())
+	if ok {
+		t.Error("expected ok=false when initiator not in context")
+	}
+}
+
+func TestInitiatorUserFromContext_Set(t *testing.T) {
+	ctx := ContextWithInitiatorUser(t.Context(), "user-initiator-42")
+	got, ok := InitiatorUserFromContext(ctx)
+	if !ok {
+		t.Error("expected ok=true after ContextWithInitiatorUser")
+	}
+	if got != "user-initiator-42" {
+		t.Errorf("got %q, want %q", got, "user-initiator-42")
+	}
+}
+
+func TestInitiatorUserFromContext_EmptyStringIsNotSet(t *testing.T) {
+	ctx := ContextWithInitiatorUser(t.Context(), "")
+	_, ok := InitiatorUserFromContext(ctx)
+	if ok {
+		t.Error("empty initiator string should not set ok=true")
+	}
+}
+
+func TestContextWithInitiatorUser_Overwrite(t *testing.T) {
+	ctx := ContextWithInitiatorUser(t.Context(), "first")
+	ctx = ContextWithInitiatorUser(ctx, "second")
+	got, ok := InitiatorUserFromContext(ctx)
+	if !ok || got != "second" {
+		t.Errorf("overwrite failed: got %q ok=%v, want %q ok=true", got, ok, "second")
+	}
+}
+
+func TestInitiatorUser_DoesNotLeakIntoActingUser(t *testing.T) {
+	// The two keys are independent — setting initiator must not populate
+	// acting, and vice versa.
+	ctx := ContextWithInitiatorUser(t.Context(), "initiator")
+	if _, ok := ActingUserFromContext(ctx); ok {
+		t.Error("initiator context key must not be read as acting user")
+	}
+}
+
+// -----------------------------------------------------------------------
+// ExecutorUserFromContext / ContextWithExecutorUser
+// -----------------------------------------------------------------------
+
+func TestExecutorUserFromContext_NotSet(t *testing.T) {
+	_, ok := ExecutorUserFromContext(t.Context())
+	if ok {
+		t.Error("expected ok=false when executor not in context")
+	}
+}
+
+func TestExecutorUserFromContext_Set(t *testing.T) {
+	ctx := ContextWithExecutorUser(t.Context(), "executor-owner-7")
+	got, ok := ExecutorUserFromContext(ctx)
+	if !ok {
+		t.Error("expected ok=true after ContextWithExecutorUser")
+	}
+	if got != "executor-owner-7" {
+		t.Errorf("got %q, want %q", got, "executor-owner-7")
+	}
+}
+
+func TestExecutorUserFromContext_EmptyStringIsNotSet(t *testing.T) {
+	ctx := ContextWithExecutorUser(t.Context(), "")
+	_, ok := ExecutorUserFromContext(ctx)
+	if ok {
+		t.Error("empty executor string should not set ok=true")
+	}
+}
+
+func TestContextWithExecutorUser_Overwrite(t *testing.T) {
+	ctx := ContextWithExecutorUser(t.Context(), "first-exec")
+	ctx = ContextWithExecutorUser(ctx, "second-exec")
+	got, ok := ExecutorUserFromContext(ctx)
+	if !ok || got != "second-exec" {
+		t.Errorf("overwrite failed: got %q ok=%v, want %q ok=true", got, ok, "second-exec")
+	}
+}
+
+func TestInitiatorAndExecutor_Independent(t *testing.T) {
+	// Both keys must coexist without interfering.
+	ctx := ContextWithInitiatorUser(t.Context(), "alice")
+	ctx = ContextWithExecutorUser(ctx, "bob")
+	initGot, initOk := InitiatorUserFromContext(ctx)
+	execGot, execOk := ExecutorUserFromContext(ctx)
+	if !initOk || initGot != "alice" {
+		t.Errorf("initiator read failed: got %q ok=%v", initGot, initOk)
+	}
+	if !execOk || execGot != "bob" {
+		t.Errorf("executor read failed: got %q ok=%v", execGot, execOk)
+	}
+}
+
+// -----------------------------------------------------------------------
 // IsCrossTenantCaller
 // -----------------------------------------------------------------------
 

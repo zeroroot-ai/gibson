@@ -136,12 +136,33 @@ type HarnessCallbackService struct {
 	// resolver provides dynamic proto type resolution using FileDescriptorSets
 	resolver protoresolver.ProtoResolver
 
+	// agentOwnerLookup resolves a target agent name to its owning user ID for
+	// sub-agent ExecutorUser attribution (spec:
+	// llm-user-attribution-governance Requirement 1.5). When nil the
+	// DelegateToAgent handler simply does not populate ExecutorUser —
+	// EnrichSpan omits the attribute rather than failing the call. The
+	// indirection keeps the callback service free of a direct dependency on
+	// the component registry.
+	agentOwnerLookup AgentOwnerLookup
+
 	// mu protects spanProcessors for concurrent access
 	mu sync.RWMutex
 
 	// logger for service-level logging
 	logger *slog.Logger
 }
+
+// AgentOwnerLookup resolves an agent component name (as registered in the
+// daemon's component registry) to the user ID that owns it. Used by
+// DelegateToAgent to populate ExecutorUser on the sub-agent's execution
+// context so downstream LLM spans carry executor_user_id alongside the
+// mission-stable initiator_user_id.
+//
+// Implementations should return ("", nil) when the owner is not resolvable
+// (unknown agent, tenant-shared system agent, etc.) — DelegateToAgent
+// treats this as graceful degradation and simply does not set the key.
+// Returning a non-nil error aborts the delegation.
+type AgentOwnerLookup func(ctx context.Context, agentName string) (userID string, err error)
 
 // CallbackServiceOption configures the callback service.
 type CallbackServiceOption func(*HarnessCallbackService)
@@ -220,6 +241,17 @@ func WithMissionManager(missionMgr MissionOperator) CallbackServiceOption {
 func WithProtoResolver(resolver protoresolver.ProtoResolver) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.resolver = resolver
+	}
+}
+
+// WithAgentOwnerLookup wires an AgentOwnerLookup so DelegateToAgent can
+// populate ExecutorUser on the sub-agent dispatch context. When not
+// configured, the handler skips ExecutorUser propagation and EnrichSpan
+// omits the executor_user_id span attribute (graceful degradation).
+// Typical implementations close over the daemon's ComponentRegistry.
+func WithAgentOwnerLookup(fn AgentOwnerLookup) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.agentOwnerLookup = fn
 	}
 }
 
@@ -1112,6 +1144,21 @@ func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *harne
 
 	// Capture start time for agent execution
 	agentStartTime := time.Now()
+
+	// Resolve the delegated agent's owning user so ExecutorUser attribution
+	// follows the code that's about to run. Graceful on both lookup absence
+	// (no hook wired) and lookup miss (unknown agent, system-shared agent).
+	// Spec: llm-user-attribution-governance Requirement 1.5.
+	if s.agentOwnerLookup != nil {
+		if ownerID, lookupErr := s.agentOwnerLookup(ctx, req.Name); lookupErr != nil {
+			s.logger.Warn("agent owner lookup failed; skipping executor_user_id attribution",
+				"agent", req.Name,
+				"error", lookupErr,
+			)
+		} else if ownerID != "" {
+			ctx = identity.ContextWithExecutorUser(ctx, ownerID)
+		}
+	}
 
 	// Emit agent.started event
 	s.publishEvent(ctx, "agent.started", map[string]interface{}{

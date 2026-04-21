@@ -8,12 +8,14 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	"github.com/zero-day-ai/gibson/internal/types"
+	budgetpb "github.com/zero-day-ai/sdk/api/gen/gibson/budget/v1"
 	"github.com/zero-day-ai/sdk/schema"
 )
 
@@ -60,6 +62,97 @@ func (s *DaemonServer) WithProviderFactory(f func(cfg llm.ProviderConfig) (llm.L
 	return s
 }
 
+// WithBudgetEnforcer wires the per-user/team/tenant LLM budget enforcer
+// so ExecuteLLM and StreamLLM check projected-post-call usage before
+// dispatch and record authoritative usage after dispatch. Pass nil to
+// disable enforcement (which is also the default).
+// Spec: llm-user-attribution-governance (Requirement 3).
+func (s *DaemonServer) WithBudgetEnforcer(e budgetEnforcerIface) *DaemonServer {
+	s.budgetEnforcer = e
+	return s
+}
+
+// enforceBudgetCheck runs the budget Check if an enforcer is wired and
+// maps an exceedance error to a gRPC ResourceExhausted status carrying
+// a gibson.budget.v1.BudgetExceeded detail so SDK callers can decode it
+// via llm.IsBudgetExceeded. Returns (nil, nil) when the call is allowed
+// OR when no enforcer is configured.
+func (s *DaemonServer) enforceBudgetCheck(ctx context.Context, estimatedTokens int64) error {
+	if s.budgetEnforcer == nil {
+		return nil
+	}
+	_, err := s.budgetEnforcer.Check(ctx, estimatedTokens)
+	if err == nil {
+		return nil
+	}
+	// Map exceedance to gRPC status with a typed detail.
+	detail, hasDetail := budget.DetailFromError(err)
+	st := status_grpc.New(codes.ResourceExhausted, err.Error())
+	if hasDetail {
+		pbDetail := &budgetpb.BudgetExceeded{
+			Scope:             budgetScopeToProto(detail.Scope),
+			Dimension:         detail.Dimension,
+			CurrentUsage:      detail.CurrentUsage,
+			Limit:             detail.Limit,
+			PeriodResetAtUnix: detail.PeriodResetAt.Unix(),
+			SubjectId:         detail.SubjectID,
+		}
+		if withDetails, detailErr := st.WithDetails(pbDetail); detailErr == nil {
+			st = withDetails
+		}
+	}
+	return st.Err()
+}
+
+// budgetScopeToProto maps the internal Scope string to the proto enum.
+func budgetScopeToProto(s budget.Scope) budgetpb.BudgetScope {
+	switch s {
+	case budget.ScopeUser:
+		return budgetpb.BudgetScope_BUDGET_SCOPE_USER
+	case budget.ScopeTeam:
+		return budgetpb.BudgetScope_BUDGET_SCOPE_TEAM
+	case budget.ScopeTenant:
+		return budgetpb.BudgetScope_BUDGET_SCOPE_TENANT
+	}
+	return budgetpb.BudgetScope_BUDGET_SCOPE_UNSPECIFIED
+}
+
+// estimateTokens returns a conservative input-token + max-tokens estimate
+// for an LLM call. Used by the budget pre-check. The estimate is
+// intentionally conservative — over-reserving is preferable to letting
+// a large call slip under the limit.
+func estimateTokens(req *ExecuteLLMRequest) int64 {
+	var est int64
+	for _, m := range req.GetMessages() {
+		// Rough heuristic: 1 token per 4 chars. The token recorder uses
+		// the provider's authoritative count post-dispatch; this is only
+		// the pre-dispatch reservation.
+		est += int64(len(m.GetContent())) / 4
+	}
+	if req.MaxTokens != nil && req.GetMaxTokens() > 0 {
+		est += int64(req.GetMaxTokens())
+	} else {
+		// If the caller didn't specify max_tokens the provider's default
+		// applies. Reserve a pessimistic 4k completion.
+		est += 4096
+	}
+	return est
+}
+
+// streamEstimateTokens is the equivalent for StreamLLM.
+func streamEstimateTokens(req *StreamLLMRequest) int64 {
+	var est int64
+	for _, m := range req.GetMessages() {
+		est += int64(len(m.GetContent())) / 4
+	}
+	if req.MaxTokens != nil && req.GetMaxTokens() > 0 {
+		est += int64(req.GetMaxTokens())
+	} else {
+		est += 4096
+	}
+	return est
+}
+
 // ---------------------------------------------------------------------------
 // ExecuteLLM — unary RPC
 // ---------------------------------------------------------------------------
@@ -83,6 +176,13 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *ExecuteLLMRequest) (
 				return nil, status_grpc.Errorf(codes.ResourceExhausted, "rate limit exceeded for ExecuteLLM: %s", limitErr.Error())
 			}
 		}
+	}
+
+	// 2b. Budget check — returns ResourceExhausted with a typed
+	// gibson.budget.v1.BudgetExceeded detail when denied.
+	// Spec: llm-user-attribution-governance Requirement 3.3, 3.4.
+	if err := s.enforceBudgetCheck(ctx, estimateTokens(req)); err != nil {
+		return nil, err
 	}
 
 	// 3. Resolve the named provider — decrypts credentials.
@@ -173,7 +273,22 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *ExecuteLLMRequest) (
 		return nil, status_grpc.Errorf(codes.Internal, "LLM completion failed")
 	}
 
-	// 8. Translate response to proto.
+	// 8. Budget record — authoritative usage post-dispatch. Runs
+	// independently of the error path so only successful calls
+	// increment counters. Cost accounting can be added later from the
+	// provider's pricing table; for now pass 0 cents.
+	// Spec: llm-user-attribution-governance Requirement 3.10.
+	if s.budgetEnforcer != nil && resp != nil {
+		totalTokens := int64(resp.Usage.PromptTokens) + int64(resp.Usage.CompletionTokens)
+		if totalTokens > 0 {
+			if recErr := s.budgetEnforcer.Record(ctx, totalTokens, 0); recErr != nil {
+				s.logger.WarnContext(ctx, "budget record failed (non-blocking)",
+					"error", recErr, "tenant", tenantID)
+			}
+		}
+	}
+
+	// 9. Translate response to proto.
 	return completionRespToProto(resp), nil
 }
 

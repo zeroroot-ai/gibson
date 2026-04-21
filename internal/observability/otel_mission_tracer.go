@@ -228,6 +228,10 @@ func (t *OTelMissionTracer) StartMissionTrace(ctx context.Context, mission *sche
 		attribute.String(GibsonMissionStatus, mission.Status.String()),
 		attribute.String("tenant_id", tenantID),
 	)
+	// Apply canonical identity + mission attribute set (user_id,
+	// initiator/executor, run_id, agent_id, component_scope, slot_name).
+	// Spec: llm-user-attribution-governance Requirement 1.1, 1.7.
+	EnrichSpan(spanCtx, span)
 
 	// Create MissionSpan wrapper for statistics tracking
 	missionSpan := &MissionSpan{
@@ -332,6 +336,10 @@ func (t *OTelMissionTracer) LogDecision(ctx context.Context, missionSpan *Missio
 	}
 
 	span.SetAttributes(attrs...)
+	// Apply canonical identity + mission attribute set to the LLM-decision
+	// span so per-user cost attribution works in Langfuse.
+	// Spec: llm-user-attribution-governance Requirement 1.1, 1.7, 1.8.
+	EnrichSpan(ctx, span)
 
 	// Add content logging events if enabled
 	if t.contentConfig.Enabled {
@@ -451,6 +459,9 @@ func (t *OTelMissionTracer) LogAgentExecution(ctx context.Context, missionSpan *
 	}
 
 	span.SetAttributes(attrs...)
+	// Apply canonical identity + mission attribute set to the agent span.
+	// Spec: llm-user-attribution-governance Requirement 1.1, 1.7.
+	EnrichSpan(spanCtx, span)
 
 	// Create AgentSpan wrapper for statistics tracking
 	agentSpan := &AgentSpan{
@@ -557,6 +568,9 @@ func (t *OTelMissionTracer) LogToolExecution(ctx context.Context, agentSpan *Age
 	}
 
 	span.SetAttributes(attrs...)
+	// Apply canonical identity + mission attribute set to the tool span.
+	// Spec: llm-user-attribution-governance Requirement 1.1, 1.7.
+	EnrichSpan(ctx, span)
 
 	// Add content logging events if enabled and tool I/O is included
 	if t.contentConfig.Enabled && t.contentConfig.IncludeToolIO {
@@ -664,6 +678,9 @@ func (t *OTelMissionTracer) LogFinding(ctx context.Context, agentSpan *AgentSpan
 	}
 
 	span.SetAttributes(attrs...)
+	// Apply canonical identity + mission attribute set to the finding span.
+	// Spec: llm-user-attribution-governance Requirement 1.1, 1.7.
+	EnrichSpan(ctx, span)
 
 	// Increment agent statistics
 	agentSpan.AddFinding()
@@ -756,6 +773,9 @@ func (t *OTelMissionTracer) LogMemoryOp(ctx context.Context, agentSpan *AgentSpa
 	}
 
 	span.SetAttributes(attrs...)
+	// Apply canonical identity + mission attribute set to the memory-op span.
+	// Spec: llm-user-attribution-governance Requirement 1.1, 1.7.
+	EnrichSpan(ctx, span)
 
 	// Increment agent statistics
 	agentSpan.AddMemoryOp()
@@ -833,6 +853,9 @@ func (t *OTelMissionTracer) LogGraphOp(ctx context.Context, agentSpan *AgentSpan
 	}
 
 	span.SetAttributes(attrs...)
+	// Apply canonical identity + mission attribute set to the graph-op span.
+	// Spec: llm-user-attribution-governance Requirement 1.1, 1.7.
+	EnrichSpan(ctx, span)
 
 	// Increment mission-level statistics if agent span is available
 	if agentSpan != nil && agentSpan.parent != nil {

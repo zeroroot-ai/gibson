@@ -18,6 +18,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/identity"
@@ -171,6 +172,21 @@ type DaemonServer struct {
 	// WithProviderFactory. Must never be nil after NewDaemonServer.
 	// Added by spec 25-daemon-driven-provider-config task 4.
 	providerFactory func(cfg llm.ProviderConfig) (llm.LLMProvider, error)
+
+	// budgetEnforcer enforces per-user/team/tenant token and spend
+	// budgets around ExecuteLLM / StreamLLM. May be nil; when nil budget
+	// enforcement is skipped (absent-budget = unlimited, so this
+	// degrades to today's behavior).
+	// Spec: llm-user-attribution-governance (Requirement 3).
+	budgetEnforcer budgetEnforcerIface
+}
+
+// budgetEnforcerIface is the narrow surface ExecuteLLM / StreamLLM use
+// from internal/budget.Enforcer. Interfaced here so tests can inject a
+// mock without spinning up Redis. Spec: llm-user-attribution-governance.
+type budgetEnforcerIface interface {
+	Check(ctx context.Context, estimatedTokens int64) (*budget.Status, error)
+	Record(ctx context.Context, actualTokens int64, actualCostUSDCents int64) error
 }
 
 // missionDraftStoreIface is the narrow interface the DaemonServer uses for

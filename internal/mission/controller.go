@@ -257,16 +257,20 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 		c.activeRuns[missionID] = runID
 	}
 
+	// Resolve the initiating user once — used both for authz state and for
+	// InitiatorUser context propagation below. Empty string is valid
+	// (system-scheduled runs have no human initiator).
+	initiatorUserID := ""
+	if id, err := identity.IdentityFromContext(ctx); err == nil {
+		initiatorUserID = id.Subject
+	}
+
 	// Record authz state so that HarnessCallbackService.Authorize can look up
 	// the owning user during component callbacks. Errors are logged but do not
 	// abort the mission start — authz state is advisory.
 	if c.authzStore != nil && !runID.IsZero() {
-		userID := ""
 		tenantID := identity.TenantFromContext(ctx)
-		if id, err := identity.IdentityFromContext(ctx); err == nil {
-			userID = id.Subject
-		}
-		if putErr := c.authzStore.Put(ctx, runID.String(), userID, tenantID); putErr != nil {
+		if putErr := c.authzStore.Put(ctx, runID.String(), initiatorUserID, tenantID); putErr != nil {
 			c.logger.Warn("mission controller: failed to record authz state on start",
 				slog.String("mission_id", missionID.String()),
 				slog.String("run_id", runID.String()),
@@ -278,9 +282,18 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 	// Build the base execution context.
 	// Propagate any tenant present in the caller's context so that the
 	// orchestrator's harness can use it for ComponentRegistry lookups.
+	// Also propagate the InitiatorUser so every descendant span and LLM
+	// call on this mission carries the stable initiator identity through
+	// Langfuse (spec: llm-user-attribution-governance, Requirement 1.2,
+	// 1.4, 1.5). The caller's synchronous ActingUser is deliberately NOT
+	// propagated — this is an autonomous goroutine, there is no longer
+	// a synchronous caller.
 	baseCtx := context.Background()
 	if tenant := identity.TenantFromContext(ctx); tenant != "" {
 		baseCtx = identity.ContextWithTenant(baseCtx, tenant)
+	}
+	if initiatorUserID != "" {
+		baseCtx = identity.ContextWithInitiatorUser(baseCtx, initiatorUserID)
 	}
 
 	// Log which discovery path will be used for agent dispatch.
