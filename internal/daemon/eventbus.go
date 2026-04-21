@@ -17,6 +17,14 @@ import (
 // The event bus is thread-safe and supports multiple concurrent subscribers.
 // Slow consumers are handled gracefully - if a subscriber's channel is full,
 // the event is dropped for that subscriber to prevent blocking others.
+//
+// NOTE: This daemon-local EventBus handles gRPC Subscribe RPC delivery using
+// api.EventData (daemon-specific). It cannot be moved to internal/events/
+// without circular imports (internal/events cannot import internal/daemon/api).
+// The long-term migration target is to adopt internal/events.DefaultEventBus
+// end-to-end once the gRPC Subscribe handler is updated to emit events.Event
+// directly. The OrchestratorEventBusAdapter in eventbus_adapter.go bridges
+// between the two representations today.
 type EventBus struct {
 	mu          sync.RWMutex
 	subscribers map[string]*subscription

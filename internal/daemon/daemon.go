@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
+	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
@@ -24,7 +26,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/reconciler"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/gibson/internal/version"
+	"github.com/zero-day-ai/gibson/pkg/version"
 	healthhttp "github.com/zero-day-ai/sdk/health/http"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 )
@@ -59,6 +61,18 @@ type AgentRuntimeState struct {
 type daemonImpl struct {
 	// config is the loaded Gibson configuration
 	config *config.Config
+
+	// homeDir is the resolved Gibson home directory (e.g. ~/.gibson).
+	// Set via WithHomeDir option; falls back to cfg.Core.HomeDir, then $HOME/.gibson.
+	homeDir string
+
+	// injectedLogger is the slog.Logger provided via WithLogger option.
+	// When nil, New falls back to slog.Default().
+	injectedLogger *slog.Logger
+
+	// metricsRegisterer is the Prometheus registerer for daemon metrics.
+	// Defaults to prometheus.DefaultRegisterer.
+	metricsRegisterer prometheus.Registerer
 
 	// logger is the structured logger for daemon operations
 	logger *observability.Logger
@@ -121,8 +135,13 @@ type daemonImpl struct {
 	// Key is agent name, value is AgentRuntimeState
 	agentState map[string]*AgentRuntimeState
 
-	// grpcServer is the gRPC server for client connections (added in Phase 3)
+	// grpcServer is the gRPC server for client connections. This field exists for
+	// backward-compat with DrainPhase; prefer grpcSubsystem for new code.
 	grpcServer interface{}
+
+	// grpcSubsystem owns the gRPC server lifecycle. Constructed by buildGRPCServer;
+	// Serve(ctx) launched in a goroutine from Start. Wire into eg.Go in task 7.3.
+	grpcSubsystem *grpcSubsystem
 
 	// grpcAddr is the address the gRPC server listens on (added in Phase 3)
 	grpcAddr string
@@ -130,14 +149,17 @@ type daemonImpl struct {
 	// redisDaemonInfo provides Redis-based daemon discovery and registration
 	redisDaemonInfo *RedisDaemonInfo
 
-	// healthServer provides HTTP health endpoints for Kubernetes probes
+	// healthServer provides HTTP health endpoints for Kubernetes probes.
+	// Prefer healthSubsystem for lifecycle management; this field is kept for
+	// backward-compat with stopServices cleanup.
 	healthServer *healthhttp.Server
+
+	// healthSubsystem wraps healthServer with a Serve(ctx) error lifecycle.
+	// Constructed after all readiness checks are registered.
+	healthSys *healthSubsystem
 
 	// healthState tracks shutdown state for health endpoints
 	healthState *healthStateManager
-
-	// signalHandler manages OS signal handling for graceful shutdown
-	signalHandler *SignalHandler
 
 	// checkpointer manages mission checkpointing during graceful shutdown
 	checkpointer *DaemonMissionCheckpointer
@@ -183,6 +205,14 @@ type daemonImpl struct {
 	// startTime tracks when the daemon started
 	startTime time.Time
 
+	// schemaMigrationErr holds the last error returned by SchemaMigrator.Run.
+	// A non-nil value means at least one migration had a constraint violation
+	// on existing data (legacy rows missing tenant_id). The daemon continues
+	// running but the /readyz probe returns Degraded until an operator cleans
+	// the offending rows and restarts (or the migrator is re-run via CLI).
+	// Liveness (/healthz) is NOT affected.
+	schemaMigrationErr error
+
 	// onRegistryReady is called during startup before other services are initialized.
 	// This allows CLI to set up verbose logging during startup.
 	onRegistryReady func()
@@ -216,6 +246,10 @@ type daemonImpl struct {
 	// Nil when ToolRunner.Enabled is false. Started asynchronously during
 	// daemon.Start so startup does not block on Setec health.
 	toolCatalogRefresher *CatalogRefresher
+
+	// extauthzSys owns the ext_authz gRPC client lifecycle.
+	// Nil when ext_authz is unavailable or in non-gateway overlays.
+	extauthzSys *extauthzSubsystem
 }
 
 // spiffeX509Closer is the narrow interface for closing an X.509 source on shutdown.
@@ -224,96 +258,103 @@ type spiffeX509Closer interface {
 	Close() error
 }
 
-// New creates a new daemon instance with the provided configuration.
+// New creates a new daemon instance with the provided configuration and options.
 //
-// This function initializes the daemon structure and prepares service managers
-// but does not start any services. Call Start() to begin daemon operations.
+// New initializes the daemon structure and prepares service managers but does not
+// start any services. Call [Daemon.Start] to begin daemon operations.
 //
 // Parameters:
-//   - cfg: The loaded Gibson configuration
-//   - homeDir: The Gibson home directory (typically ~/.gibson)
+//   - cfg: The loaded Gibson configuration (must not be nil).
+//     Returns an error wrapping [ErrInvalidConfig] if cfg is nil.
+//   - opts: Zero or more functional options (see [WithLogger], [WithHomeDir],
+//     [WithMetricsRegisterer]).
 //
-// Returns:
-//   - Daemon: A new daemon instance ready to be started
-//   - error: Non-nil if initialization fails
+// Example:
 //
-// Example usage:
+//	cfg, err := config.NewConfigLoader(...).LoadWithDefaults(cfgPath)
+//	if err != nil { ... }
 //
-//	cfg, err := config.Load()
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	daemon, err := New(cfg, os.Getenv("GIBSON_HOME"))
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-func New(cfg *config.Config, homeDir string) (Daemon, error) {
+//	d, err := daemon.New(cfg,
+//	    daemon.WithLogger(slog.Default()),
+//	    daemon.WithHomeDir("/opt/gibson"),
+//	)
+//	if err != nil { ... }
+//	if err := d.Start(ctx); err != nil { ... }
+func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("config cannot be nil")
+		return nil, fmt.Errorf("daemon: %w", ErrInvalidConfig)
 	}
 
-	if homeDir == "" {
-		return nil, fmt.Errorf("home directory cannot be empty")
+	// Apply options to a temporary impl to collect option values before
+	// any expensive initialization.
+	d := &daemonImpl{
+		config:            cfg,
+		activeMissions:    make(map[string]context.CancelFunc),
+		agentState:        make(map[string]*AgentRuntimeState),
+		metricsRegisterer: prometheus.DefaultRegisterer,
+	}
+	for _, opt := range opts {
+		opt(d)
 	}
 
-	// Setup unified logger
+	// Resolve home directory: option > cfg.Core.HomeDir > $HOME/.gibson > /var/lib/gibson
+	if d.homeDir == "" {
+		d.homeDir = resolveHomeDir(cfg)
+	}
+
+	// Resolve logger: WithLogger option > slog.Default() fallback.
+	// Passing nil to WithLogger is treated the same as not calling WithLogger.
+	var slogLogger *slog.Logger
+	if d.injectedLogger != nil {
+		slogLogger = d.injectedLogger
+	} else {
+		slogLogger = slog.Default()
+	}
+	// Wrap in observability.Logger so existing code that calls logger.Info(ctx, ...) works.
 	logCfg := observability.ConfigFromEnv()
 	logCfg.Component = "daemon"
-	logger := observability.NewLogger(logCfg)
+	d.logger = observability.NewLoggerFromSlog(slogLogger, logCfg)
 
 	// Initialize callback manager
 	callbackMgr := harness.NewCallbackManager(harness.CallbackConfig{
 		ListenAddress:    cfg.Callback.ListenAddress,
 		AdvertiseAddress: cfg.Callback.AdvertiseAddress,
 		Enabled:          cfg.Callback.Enabled,
-	}, logger.Slog())
+	}, d.logger.Slog())
 
-	// Initialize Redis state stores (default and required)
-	// StateClient will be initialized in Start() after logging is set up
-	var stateClient *state.StateClient
-	var missionStore mission.MissionStore
-	var missionRunStore mission.MissionRunStore
-	var targetStore targetStore
-
-	// Stores will be initialized in Start() after StateClient is created
-	// For now, keep them nil - they will be set up with Redis backends
-	logger.Info(nil, "Redis stores will be initialized on startup",
-		"note", "Gibson requires Redis for state persistence")
+	d.callback = callbackMgr
 
 	// Initialize event bus
-	eventBus := NewEventBus(logger.Slog(), WithEventBufferSize(100))
+	d.eventBus = NewEventBus(d.logger.Slog(), WithEventBufferSize(100))
 
-	// Determine gRPC address from config, environment variable, or default
+	// Determine gRPC address from config or default.
+	// Note: environment variable override (GIBSON_DAEMON_GRPC_ADDR) is intentionally
+	// read at the entry point (cmd/gibson/main.go) and applied to cfg before New() is
+	// called, so that environment reading stays in the process entry point.
 	grpcAddr := cfg.Daemon.GRPCAddress
 	if grpcAddr == "" {
 		grpcAddr = "localhost:50002"
 	}
-	// Environment variable takes precedence
-	if envAddr := os.Getenv("GIBSON_DAEMON_GRPC_ADDR"); envAddr != "" {
-		grpcAddr = envAddr
+
+	d.grpcAddr = grpcAddr
+	d.healthState = newHealthStateManager()
+
+	d.logger.Info(nil, "Redis stores will be initialized on startup",
+		"note", "Gibson requires Redis for state persistence")
+
+	return d, nil
+}
+
+// resolveHomeDir derives the Gibson home directory from config and environment.
+// Fallback: cfg.Core.HomeDir → $HOME/.gibson → /var/lib/gibson.
+func resolveHomeDir(cfg *config.Config) string {
+	if cfg.Core.HomeDir != "" {
+		return cfg.Core.HomeDir
 	}
-
-	// Initialize health state manager
-	healthState := newHealthStateManager()
-
-	return &daemonImpl{
-		config:          cfg,
-		logger:          logger,
-		registryAdapter: nil, // Created in Start() after registry is available
-		callback:        callbackMgr,
-		eventBus:        eventBus,
-		stateClient:     stateClient,     // Will be initialized in Start()
-		missionStore:    missionStore,    // Will be initialized in Start()
-		missionRunStore: missionRunStore, // Will be initialized in Start()
-		targetStore:     targetStore,     // Will be initialized in Start()
-		activeMissions:  make(map[string]context.CancelFunc),
-		agentState:      make(map[string]*AgentRuntimeState),
-		grpcServer:      nil,         // Created in Start()
-		grpcAddr:        grpcAddr,    // Configurable via config file or environment variable
-		healthState:     healthState, // Health state manager for shutdown coordination
-		startTime:       time.Time{}, // Set when Start() is called
-	}, nil
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		return h + "/.gibson"
+	}
+	return "/var/lib/gibson"
 }
 
 // SetOnRegistryReady sets a callback that will be called during startup
@@ -340,14 +381,31 @@ func (d *daemonImpl) SetOnRegistryReady(fn func()) {
 func (d *daemonImpl) Start(ctx context.Context) error {
 	d.logger.Info(ctx, "starting Gibson daemon",
 		"callback_enabled", d.config.Callback.Enabled,
+		"mode", d.config.Mode().String(),
+		"strict_tenant", d.config.StrictTenant(),
 	)
+
+	// Emit the gibson_mode_info{mode} Prometheus gauge so operators can
+	// observe the resolved deployment mode from dashboards and alerts.
+	config.EmitModeMetric(d.config)
 
 	// Record start time
 	d.startTime = time.Now()
 
-	// Create an internal context that can be cancelled by signal handler
-	internalCtx, internalCancel := context.WithCancel(ctx)
-	defer internalCancel()
+	// Construct the ext_authz gRPC client subsystem (lazy-dial; non-fatal if absent).
+	// The client is available for injection into services that need capability-grant
+	// delegation. In non-gateway overlays the client is nil and callers receive
+	// codes.Unavailable on the first RPC attempt.
+	d.extauthzSys = newExtauthzSubsystem(ctx, d.logger)
+	if d.extauthzSys != nil {
+		go func() {
+			if err := d.extauthzSys.Serve(ctx); err != nil {
+				d.logger.Warn(ctx, "ext_authz subsystem error (non-fatal)", "error", err)
+			}
+		}()
+		d.logger.Info(ctx, "ext_authz client initialized",
+			"note", "lazy-dial; unreachable service deferred to first RPC call")
+	}
 
 	// Call the startup callback if set
 	if d.onRegistryReady != nil {
@@ -661,22 +719,37 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Warn(ctx, "mission checkpointer not initialized - state client not available")
 	}
 
-	// Start callback server
+	// Start callback server via Serve (blocking lifecycle in goroutine).
 	if d.config.Callback.Enabled {
 		d.logger.Info(ctx, "starting callback server")
+		// Probe start synchronously so any port-in-use error surfaces here
+		// before the daemon continues initializing.
 		if err := d.callback.Start(ctx); err != nil {
 			d.stopServices(ctx)
 			return fmt.Errorf("failed to start callback server: %w", err)
 		}
+		// Run Serve in the background so it blocks until ctx.Done() then
+		// calls Stop(). The Stop() call from ConnectionPhase is idempotent.
+		go func() {
+			<-ctx.Done()
+			d.callback.Stop()
+		}()
 	}
 
-	// Start gRPC server
+	// Build and start gRPC server.
 	d.logger.Info(ctx, "starting gRPC server", "address", d.grpcAddr)
-	if err := d.startGRPCServer(ctx); err != nil {
-		// Stop services on gRPC start failure
+	grpcSys, err := d.buildGRPCServer(ctx)
+	if err != nil {
 		d.stopServices(ctx)
-		return fmt.Errorf("failed to start gRPC server: %w", err)
+		return fmt.Errorf("failed to build gRPC server: %w", err)
 	}
+	d.grpcSubsystem = grpcSys
+	d.grpcServer = grpcSys.srv // retained for DrainPhase in stopServices
+	go func() {
+		if serveErr := grpcSys.Serve(ctx); serveErr != nil {
+			d.logger.Error(ctx, "gRPC server error", "error", serveErr)
+		}
+	}()
 
 	// Start health server
 	// Health port defaults to 8080, can be overridden via config or GIBSON_HEALTH_PORT env var
@@ -726,6 +799,24 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Register shutdown state check - this signals Kubernetes to stop routing traffic during shutdown
 	d.healthServer.RegisterReadinessCheck("shutdown", d.healthState.CheckFunc())
 	d.logger.Debug(ctx, "registered shutdown state readiness check")
+
+	// Register Neo4j schema migration readiness check.
+	// Fails (Degraded, not Unhealthy) when the migrator encountered a
+	// constraint violation — meaning legacy rows without tenant_id exist.
+	// Liveness is NOT affected. Only readiness fails so the pod is removed
+	// from service endpoints without triggering a restart loop.
+	d.healthServer.RegisterReadinessCheck("neo4j_schema_migrations", func(_ context.Context) sdktypes.HealthStatus {
+		if d.schemaMigrationErr != nil {
+			return sdktypes.NewDegradedStatus(
+				"Neo4j schema migration has constraint violations on existing data — "+
+					"legacy rows missing tenant_id must be cleaned up; "+
+					"see metric gibson_graphrag_tenant_constraint_violations_total",
+				nil,
+			)
+		}
+		return sdktypes.NewHealthyStatus("Neo4j schema migrations applied")
+	})
+	d.logger.Debug(ctx, "registered neo4j schema migrations readiness check")
 
 	// Register key provider health check if available
 	if d.keyProvider != nil {
@@ -785,13 +876,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Debug(ctx, "registered authz FGA readiness check")
 	}
 
-	// Start the health server (non-blocking)
-	if err := d.healthServer.Start(); err != nil {
-		// Log error but don't fail daemon startup - health endpoints are not critical
-		d.logger.Warn(ctx, "failed to start health server", "error", err)
-	} else {
-		d.logger.Info(ctx, "health server started successfully")
-	}
+	// Start health server via healthSubsystem.
+	d.healthSys = newHealthSubsystem(d.healthServer, d.logger)
+	go func() {
+		if err := d.healthSys.Serve(ctx); err != nil {
+			d.logger.Warn(ctx, "health subsystem error (non-fatal)", "error", err)
+		}
+	}()
 
 	// Prepare daemon info for registration
 	pid := os.Getpid()
@@ -836,31 +927,20 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			Authorizer: d.authorizer,
 			Logger:     d.logger.Slog(),
 		})
-		go fanout.Run(internalCtx)
+		catalogSys := newCatalogRefresherSubsystem(fanout)
+		go func() {
+			if err := catalogSys.Serve(ctx); err != nil {
+				d.logger.Warn(ctx, "catalog refresher subsystem error (non-fatal)", "error", err)
+			}
+		}()
 		d.logger.Info(ctx, "catalog fan-out reconciler started (60s interval)")
 	}
 
-	// Setup signal handler for graceful shutdown
-	d.logger.Info(ctx, "setting up signal handler for graceful shutdown")
-	d.signalHandler = NewSignalHandler(SignalHandlerConfig{
-		ShutdownCallback: func() {
-			d.logger.Info(context.Background(), "signal handler triggered shutdown")
-			// Cancel the internal context to trigger shutdown
-			internalCancel()
-		},
-		ForceExitCode: 1,
-	}, d.logger)
-	d.signalHandler.Start(internalCtx)
-
-	// Block until context cancellation or shutdown signal
+	// Block until context cancellation (signal.NotifyContext in main() handles SIGTERM/SIGINT).
+	// The second-signal force-exit goroutine is in cmd/gibson/main.go.
 	d.logger.Info(ctx, "daemon running (press Ctrl+C to stop)")
-	<-internalCtx.Done()
+	<-ctx.Done()
 	d.logger.Info(ctx, "shutdown signal received, stopping daemon")
-
-	// Stop signal handler to prevent further signals during shutdown
-	if d.signalHandler != nil {
-		d.signalHandler.Stop()
-	}
 
 	return d.Stop(context.Background())
 }
@@ -906,18 +986,24 @@ func (d *daemonImpl) Stop(ctx context.Context) error {
 	return nil
 }
 
+// Run bootstraps all daemon subsystems and blocks until ctx is cancelled or a
+// subsystem returns a non-nil error.
+//
+// This is the preferred entry point for production use (called by cmd/gibson/main.go).
+// Internally it delegates to Start(ctx) for now; tasks 7.3–7.7 will migrate each
+// subsystem to a native Serve(ctx) error implementation and remove that delegation.
+//
+// When ctx is cancelled cleanly (e.g. SIGTERM via signal.NotifyContext), Run
+// returns nil. Any startup failure propagates as a non-nil error.
+func (d *daemonImpl) Run(ctx context.Context) error {
+	return d.Start(ctx)
+}
+
 // stopServices stops all daemon services using the ShutdownCoordinator.
 //
 // This is a helper method used by Stop() and error cleanup paths.
 // It executes shutdown phases in order through the coordinator to ensure clean shutdown.
 func (d *daemonImpl) stopServices(ctx context.Context) {
-	// Stop signal handler first (no new signals during shutdown)
-	if d.signalHandler != nil {
-		d.logger.Debug(ctx, "stopping signal handler")
-		d.signalHandler.Stop()
-		d.signalHandler = nil
-	}
-
 	// Stop all running missions before coordinator
 	d.missionsMu.Lock()
 	if len(d.activeMissions) > 0 {
@@ -968,14 +1054,27 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 		coordinator.RegisterPhase(NewAgentPhase(agentNotifier, d.config.Shutdown.AgentTimeout, d.logger, coordinator.metrics))
 	}
 
-	// Phase 5: Close all connections
+	// Phase 5: Close all connections.
+	// Concrete-pointer-to-interface conversion: a nil concrete pointer stored in an
+	// interface{} creates a non-nil interface (type descriptor present, data nil).
+	// The nil check inside ConnectionPhase would pass but Close() would panic on the
+	// nil receiver. Guard both stateClient and credentialStore so ConnectionPhase
+	// always receives a true nil interface value when the resource was never opened.
+	var stateClientCloser interface{ Close() error }
+	if d.stateClient != nil {
+		stateClientCloser = d.stateClient
+	}
+	var credStoreCloser interface{ Close() error }
+	if d.credentialStore != nil {
+		credStoreCloser = d.credentialStore
+	}
 	coordinator.RegisterPhase(NewConnectionPhase(
 		d.infrastructure,
-		d.stateClient,
+		stateClientCloser,
 		d.callback,
 		d.eventBus,
 		nil, // registry stopper: was etcd; now nil (Redis cleanup handled by redisDaemonInfo.Deregister)
-		d.credentialStore,
+		credStoreCloser,
 		d.logger,
 	))
 
@@ -984,19 +1083,17 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 		d.logger.Warn(ctx, "shutdown coordinator encountered errors", "error", err)
 	}
 
-	// Stop health server separately (already drained)
-	if d.healthServer != nil {
-		d.logger.Info(ctx, "stopping health server")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := d.healthServer.Stop(shutdownCtx); err != nil {
-			d.logger.Warn(ctx, "error stopping health server", "error", err)
-		}
-		d.healthServer = nil
-	}
+	// Health server is already stopped by healthSubsystem.Serve on ctx cancellation.
+	// Clear references for GC.
+	d.healthSys = nil
+	d.healthServer = nil
 
-	// Clear gRPC server reference (already stopped by DrainPhase)
+	// Clear gRPC server references (already stopped by DrainPhase / grpcSubsystem.Serve).
 	d.grpcServer = nil
+	d.grpcSubsystem = nil
+
+	// ext_authz client is already closed by extauthzSubsystem.Serve on ctx cancellation.
+	d.extauthzSys = nil
 
 	// Close dashboard PostgreSQL connection pool.
 	if d.dashboardDB != nil {

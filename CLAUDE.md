@@ -21,13 +21,23 @@ go test -v -run TestName ./internal/path/...
 
 Test file conventions: `*_test.go` (unit), `*_integration_test.go` (testcontainers for Redis / Neo4j / FGA), `*_e2e_test.go`. `testify/assert`. Mocks live beside the code they mock.
 
+### Build-tag–gated tests
+
+Some tests are gated behind Go build tags so they do not run during `make test`/`test-race` or `go test ./...`. They only execute when the tag is passed explicitly. CI runs them in dedicated jobs.
+
+| Tag | Files | Why gated | Run with |
+|---|---|---|---|
+| `embedder_tests` | `internal/memory/embedder/{factory_test.go,native_test.go}` | Loads HuggingFace tokenizer model files from disk; can hang or download large artifacts on first run | `go test -tags=embedder_tests ./internal/memory/embedder/...` |
+
+When adding a new test that has slow startup, network dependencies, or requires model files, prefer adding a build tag over flaky `t.Skip()` heuristics. Document the tag here.
+
 ## Directory Map (AI reference)
 
 ```
-cmd/gibson/          CLI entry (cobra). root.go, daemon.go, config.go, cutover_v4.go, authz/, mode/, internal/ (output/err helpers), templates/, testdata/
+cmd/gibson/          Daemon entry point: minimal main.go (Mat Ryer pattern) + main_test.go. No cobra, no subcommands.
 internal/
-  daemon/            Lifecycle: daemon.go (New/Start), grpc.go, infrastructure.go, signals.go, checkpoint_manager.go, eventbus*.go, event_stream_redis.go, credential_store.go, health_state.go
-  daemon/api/        DaemonServer impl for BOTH DaemonService (proto in SDK) + DaemonAdminService (proto local). server.go (~3000 LOC) + split handlers: server_{agentauth,alerts,audit,chat,quota,user,prod_handlers}.go, findings_export.go, credentials.go
+  daemon/            Lifecycle: daemon.go (New/Run/bootstrap), grpc.go (grpcSubsystem), health_subsystem.go, catalog_refresher_subsystem.go, extauthz_subsystem.go, eventbus*.go, event_stream_redis.go, credential_store.go, health_state.go, shutdown*.go
+  daemon/api/        DaemonServer impl for BOTH DaemonService (proto in SDK) + DaemonAdminService (proto local). server.go (~3000 LOC) + split handlers: server_{capabilitygrant,alerts,audit,chat,quota,user,prod_handlers}.go, findings_export.go, credentials.go
   daemon/api/gibson/daemon/admin/v1/   daemon_admin.proto — the ONLY proto file owned by this module
   orchestrator/      Mission DAG executor: act / think / observe / recall / reflect stages, decision logic, error recovery, embedding cache
   mission/           Mission definition registry + MissionService, Redis stores (definitions, runs, events), checkpoint codec/manager, controller state machine. Definitions are created via the `CreateMissionDefinition` RPC and referenced by ID on `CreateMission` / `RunMission`; no inline or file-based loading remains in the daemon (inline removal + installer purge shipped under spec `mission-api-only-cleanup`, 2026-04-18).
@@ -38,8 +48,10 @@ internal/
   agent/             Agent descriptor introspection, stream manager
   tool/              Tool metadata, registry helpers
   plugin/            Plugin metadata, registry helpers
-  agentauth/         Agent Auth Protocol: mint agent JWTs, FGA capability grant bridge
-  auth/              5-path authN: API key (gsk_), OIDC JWT (any compliant IdP), K8s SA, SPIFFE/SPIRE, Better Auth session tokens (better_auth.go); FGA gRPC interceptor + fga_rpc_registry.go declarative RPC→(type,relation) map; audit.go
+  identity/          HMAC-verification interceptor for Envoy-signed x-gibson-identity-* headers (TenantFromContext, ContextWithTenant). FGA authorization has moved to Envoy + ext_authz gateway.
+  extauthz/          ext_authz gRPC client lifecycle — connects to the sidecar that enforces FGA upstream of the daemon.
+  apikeys/           API key Redis store (hash + lookup for gsk_-prefixed keys); key validation is performed by the ext_authz service, not inline.
+  capabilitygrant/   Capability Grant Protocol: mint agent JWTs, FGA capability grant bridge
   authz/             OpenFGA HTTP client wrapper, noopAuthorizer, envelope HMAC signer, model.fga (schema 1.1)
   llm/               Slot resolver, provider registry (Anthropic/OpenAI/Gemini/Ollama + Bedrock/Cloudflare/Cohere/HuggingFace/Llamafile/Mistral — 10 total after spec 25 removed ernie/local/maritaca/watsonx; see `providers/` + `docs/byok-providers.md`), rate limiter, pricing (with SelfHosted/Unknown flags), embedding provider + cache, JSON extractor, tool-use tracker, error recovery. Each provider exposes `CredentialSchema()` consumed by the `GetSupportedProviders` admin RPC so the dashboard renders forms dynamically.
   providerconfig/    Encrypted per-tenant provider credential store (spec 25). Wraps `crypto.AESGCMEncryptor` + `KeyProvider` + Redis. Single source of truth for LLM provider credentials — dashboard does NOT have its own credential store. CRUD + Resolve surface consumed by `DaemonAdminService.{List,Get,Create,Update,Delete,Test}Provider + Get/Set Default/FallbackChain + ExecuteLLM + StreamLLM` handlers in `internal/daemon/api/server_provider_config.go` and `server_provider_exec.go`.
@@ -52,7 +64,7 @@ internal/
   config/            Loader, schema, validation, env var substitution `${VAR:-default}`
   state/             Redis client wrapper, TenantScopedStore (tenant-prefixed keys)
   database/          Redis DAOs (TargetDAO, CredentialDAO, …)
-  events/            In-process pub/sub primitives (bus lives in internal/daemon)
+  events/            In-process pub/sub: DefaultEventBus + event types used by mission/harness/plugin. The daemon-local EventBus (api.EventData gRPC delivery) lives in internal/daemon/eventbus.go pending circular-import resolution.
   observability/     slog logger, OTel stack (tracer/meter/logger providers), OTLP exporters, attributes helpers
   audit/             Audit writer, Loki client, Redis audit stream consumers
   impersonation/     Tenant impersonation token issuer (platform-operator only)
@@ -64,11 +76,8 @@ internal/
   plan/              Mission planning helpers used by orchestrator
   prompt/            Prompt template management
   eval/              Agent/mission evaluation harness (lightly integrated)
-  cutover/v4/        V4 audit-foundation migration support (legacy, still referenced by CLI cutover_v4.go)
   testing/           Test fixtures shared across packages
-  version/           Build-time version info (set via ldflags)
-pkg/version/         Same version pkg re-exported for external consumers
-api/                 (no .proto here; intentionally empty placeholder — the repo's proto lives under internal/daemon/api/…)
+pkg/version/         Build-time version info (Version/GitCommit/BuildTime set via ldflags). Single source of truth — internal/version was deleted; all callers import this package.
 sdk/                 Shared graphrag + manifest helpers used by this daemon and SDK tests
 models/huggingface/  Embedding model metadata
 configs/             gibson.yaml template
@@ -76,9 +85,11 @@ scripts/             check-coverage.sh etc.
 tests/               integration + e2e tests (cross-package)
 ```
 
-## Daemon Startup Pipeline (`internal/daemon/daemon.go` → `Start()`)
+## Daemon Startup Pipeline (`internal/daemon/daemon.go` → `Run(ctx) error`)
 
-Phased init — later phases depend on earlier. Reordering is breaking.
+`Run(ctx)` is the sole lifecycle entry point. It runs a sequential `bootstrap(ctx)` then launches subsystems concurrently via `errgroup.WithContext`. Signal handling lives in `cmd/gibson/main.go` (stdlib `signal.NotifyContext`); `Run` simply returns when its context is cancelled.
+
+**Phase 1 — `bootstrap(ctx)` (sequential, fail-fast):**
 
 1. **State client (Redis)** — REQUIRED. Retry loop; initialises Redis event stream.
 2. **Authorizer** — OpenFGA client or noop (see Authz table below).
@@ -89,10 +100,21 @@ Phased init — later phases depend on earlier. Reordering is breaking.
 7. **Infrastructure bundle** — DAG executor, finding store, LLM registry, memory factory, harness factory, OTel stack, GraphRAG store + discovery processor.
 8. **Credential store** — KeyProvider + CredentialDAO (optional; enabled if `security.key_provider` set).
 9. **Access stores** — Tool / Agent / Plugin opt-in (Redis).
-10. **gRPC server** (`grpc.go`) — auth interceptors (conditional on `auth.IsAuthEnabled()`), FGA interceptor (conditional on authz.enabled), SPIFFE mTLS (optional), registers DaemonService + DaemonAdminService + ComponentService + HarnessCallbackService + IntelligenceService (when GraphRAG driver is live), Redis daemon registration for CLI discovery.
-11. **Event bus** — in-process pub/sub + per-tenant Redis Streams bridge.
-12. **Health server** on `:8080` — `/healthz` liveness, `/readyz` readiness (FGA probe with 10 s TTL cache when authz enabled).
-13. **Signal handler** — 4-phase graceful shutdown: PreShutdown → Checkpoint (save active missions to Redis via `DaemonMissionCheckpointer`) → Wait (drain) → Terminate.
+
+**Phase 2 — `errgroup` serve loop (concurrent subsystems):**
+
+Each subsystem exposes `Serve(ctx) error` and is launched via `eg.Go`. Cancelling `ctx` cascades to all subsystems concurrently. Any subsystem returning a non-nil error cancels the group.
+
+- **gRPC server** (`grpcSubsystem`) — identity interceptor (HMAC-signed Envoy headers, skip if secret unavailable), SPIFFE mTLS (optional), registers DaemonService + DaemonAdminService + ComponentService + HarnessCallbackService + IntelligenceService (when GraphRAG live).
+- **Callback manager** — HarnessCallbackService on `:50001`.
+- **Health server** (`healthSubsystem`) on `:8080` — `/healthz` liveness, `/readyz` readiness.
+- **Catalog refresher** (`catalogRefresherSubsystem`) — 60 s discovery fanout.
+- **ext_authz client** (`extauthzSubsystem`) — lifecycle owner for the Envoy ext_authz gRPC connection.
+- **Event bus** — in-process pub/sub + per-tenant Redis Streams bridge.
+
+**Phase 3 — shutdown coordinator (5-phase, runs after errgroup returns):**
+
+PreShutdown → Stop new work → Checkpoint (save active missions to Redis via `DaemonMissionCheckpointer`) → Drain (wait for in-flight) → Terminate.
 
 ## gRPC Surface
 
@@ -101,7 +123,7 @@ Two Gibson-owned services plus two re-exported SDK services plus the harness cal
 | Service | Proto source | Purpose |
 |---|---|---|
 | `gibson.daemon.v1.DaemonService` | **SDK** (`sdk/api/gen/gibson/daemon/v1`, alias `daemonpb`) | Public mission / component / agent control plane. RPCs: Connect, Ping, Status, RunMission (stream), StopMission, Pause/ResumeMission, List/Get Mission{History,Checkpoints}, ListAgents, GetAgentStatus, ListTools, ListPlugins, QueryPlugin, Subscribe (stream), Start/StopComponent, CreateMissionDefinition, CreateMission, ListMissionDefinitions, GetMissionDefinition, GetComponentLogs (stream), GetMyPermissions. `CreateMission` / `RunMission` are reference-only (mission-definition-id + target-id); no inline configs, no YAML payloads, no file paths. |
-| `gibson.daemon.admin.v1.DaemonAdminService` | **Local** (`internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto`) | Privileged ops: Shutdown, ImpersonateTenant, {Get,Set,Delete}TenantLangfuseCredentials, {Get,Update}OnboardingState, {Create,List,Revoke}APIKey, ListAuditEvents, agent-auth (RegisterAgentAuth, ExecuteAgentCapability, GetAgentAuthStatus, RevokeAgentAuth, ListAgentAuthAgents, ListAgentCapabilities, CreateHostRegistrationToken, ListComponentGrants, BatchGrantComponentAccessV2, ListAuditLog), tenant quota/sessions/alerts/conversations, findings export, mission drafts, user-profile RPCs (ResetPassword / RevokeUserSessions / SuspendMember — some stubbed, see Implementation Status below). |
+| `gibson.daemon.admin.v1.DaemonAdminService` | **Local** (`internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto`) | Privileged ops: Shutdown, ImpersonateTenant, {Get,Set,Delete}TenantLangfuseCredentials, {Get,Update}OnboardingState, {Create,List,Revoke}APIKey, ListAuditEvents, capability-grant (RegisterCapabilityGrant, ExecuteAgentCapability, GetCapabilityGrantStatus, RevokeCapabilityGrant, ListCapabilityGrantAgents, ListAgentCapabilities, CreateHostRegistrationToken, ListComponentGrants, BatchGrantComponentAccessV2, ListAuditLog), tenant quota/sessions/alerts/conversations, findings export, mission drafts, user-profile RPCs (ResetPassword / RevokeUserSessions / SuspendMember — some stubbed, see Implementation Status below). |
 | `gibson.component.v1.ComponentService` | SDK | `RegisterComponent`, `PollWork` (stream), `SubmitResult`, heartbeat. Called by every agent / tool / plugin. |
 | `gibson.harness.v1.HarnessCallbackService` | SDK | Agent → daemon callbacks: `ExecuteLLM`, `SubmitFinding`, `Store/GetMemory`, `ExecuteTool`, `QueryPlugin`, `GetCredential`. Runs on `:50001` via `harness.CallbackManager`. |
 | `intelligence.v1.IntelligenceService` | SDK | Cross-mission analytics RPCs (`GetRecurringVulnerabilities`, `GetRemediationMetrics`, `GetAssetRiskScore`, `GetAttackPatterns`, `GetSimilarTargets`). Server-side adapter at `internal/graphrag/intelligence/grpc.go` wraps `intelligence.Service`. Skipped when GraphRAG/Neo4j unavailable. Wired under spec `productionize-graph-intelligence`. |
@@ -153,7 +175,7 @@ The surviving `Attack*` types live in **completely different protos** and descri
 
 The naming overlap is unfortunate but the concepts are unrelated. Do not conflate them. When in doubt: anything in `internal/attack/` would have been the runner (deleted); anything with `Attack` in the name living in `intelligence.v1`, `gibson.harness.v1`, or the MITRE taxonomy is graph intelligence and stays.
 
-**Implementation status within DaemonAdminService** — core admin RPCs (authz, audit, API keys, impersonation, Langfuse creds, agent-auth, onboarding) are fully wired. The `prod-unimplemented-apis` / `prod-feature-wiring` spec tracked stubs are in `server_prod_handlers.go` (ResetPassword, RevokeUserSessions, SuspendMember, Get/UpdateUserProfile, ExportFindings, SaveMissionDraft/ListMissionDrafts, GetUserSessions, Alerts, Conversations) — they return valid empty/stub responses and are enforced by `TestNewRPCsNotUnimplemented` (`server_integration_test.go`) to never emit `codes.Unimplemented`.
+**Implementation status within DaemonAdminService** — core admin RPCs (authz, audit, API keys, impersonation, Langfuse creds, capability-grant, onboarding) are fully wired. The `prod-unimplemented-apis` / `prod-feature-wiring` spec tracked stubs are in `server_prod_handlers.go` (ResetPassword, RevokeUserSessions, SuspendMember, Get/UpdateUserProfile, ExportFindings, SaveMissionDraft/ListMissionDrafts, GetUserSessions, Alerts, Conversations) — they return valid empty/stub responses and are enforced by `TestNewRPCsNotUnimplemented` (`server_integration_test.go`) to never emit `codes.Unimplemented`.
 
 ## Feature Catalog — what's wired and where
 
@@ -169,9 +191,10 @@ The naming overlap is unfortunate but the concepts are unrelated. Do not conflat
 | GraphRAG intelligence queries (per-finding agent recall — Path C) | `internal/graphrag/intelligence/` + `internal/harness/graphrag_query_bridge.go` | ✅ Active | Neo4j |
 | Orchestrator graph intelligence (decision-prompt enrichment — Path A) | `internal/orchestrator/graph_intelligence.go` + `Observer.observeGraphContext` | ✅ Active (wired under `productionize-graph-intelligence`) | Neo4j |
 | IntelligenceService gRPC (cross-mission analytics — Path B) | `internal/graphrag/intelligence/grpc.go` | ✅ Active (registered under `productionize-graph-intelligence`) | Neo4j |
-| 4-path authN (apikey / OIDC / K8s SA / SPIFFE) | `internal/auth/` | ✅ Active | Redis (apikey store), OIDC issuer, SPIRE (optional) |
-| OpenFGA authZ | `internal/authz/` + `internal/auth/fga_authz_interceptor.go` | ✅ Active | FGA HTTP `gibson-fga:8080` |
-| Agent Auth Protocol (JWT mint + FGA bridge) | `internal/agentauth/` | ✅ Active (dispatch of `ExecuteAgentCapability` is a thin stub — FGA check works, execution forwarding is minimal) | FGA |
+| Identity HMAC verification (Envoy-signed headers) | `internal/identity/` | ✅ Active | HMAC secret via `internal/extauthz` |
+| API key store | `internal/apikeys/` | ✅ Active (validation in ext_authz sidecar; store here) | Redis |
+| OpenFGA authZ (upstream, via ext_authz) | `internal/extauthz/` + `internal/authz/` | ✅ Active — FGA enforced by Envoy/ext_authz; daemon trusts signed identity headers | ext_authz sidecar → FGA HTTP `gibson-fga:8080` |
+| Capability Grant Protocol (JWT mint + FGA bridge) | `internal/capabilitygrant/` | ✅ Active (dispatch of `ExecuteAgentCapability` is a thin stub — FGA check works, execution forwarding is minimal) | FGA |
 | Plugin config encryption (AES-256-GCM) | `internal/crypto/` | ✅ Active if `security.key_provider` set | k8s/Vault/AWS/Azure/GCP |
 | Event streaming (`Subscribe` RPC) | `internal/daemon/eventbus*.go` + `internal/events/` | ✅ Active | Redis Streams (optional; in-process fallback) |
 | Audit logging | `internal/audit/` | ✅ Wired, low usage | Redis stream + Loki + Postgres |
@@ -182,17 +205,6 @@ The naming overlap is unfortunate but the concepts are unrelated. Do not conflat
 | Guardrails | `internal/guardrail/` | ✅ Active inside mission loop | — |
 | Sandboxed tool execution (Setec microVM dispatch) | `internal/harness/sandboxed/` + `internal/daemon/sandboxed_setec_adapter.go` (build tag `setec_integration`) | ⚠️ Code in place; enable by building with `-tags=setec_integration` and wiring config per `opensource/setec/development/k3s/README.md` | Setec gRPC frontend (private repo at time of writing) |
 | Eval harness | `internal/eval/` | ⚠️ Lightly integrated; only orchestrator touches it | — |
-| V4 cutover / migration | `internal/cutover/v4/` | ⚠️ Kept for backward-compat; invoked only by CLI `cutover_v4.go` | — |
-
-## CLI (`cmd/gibson/`)
-
-Commands are classified in `cmd/gibson/mode/registry.go`:
-
-- **Standalone** (no daemon conn): `version`, `completion`, `config {show,get,set,validate}`, `authz {check,write,model-info}`
-- **Daemon** (lifecycle): `daemon {start,stop,status,restart}`
-- **Client** (default): every other command talks to the running daemon via gRPC (discovered through Redis registration). `cutover_v4` is a client-mode legacy migration command.
-
-Global flags: `--home`, `--config`, `--verbose`, `--output-format`.
 
 ## Authorization (OpenFGA) — Startup Behaviour Matrix
 
@@ -203,15 +215,15 @@ Global flags: `--home`, `--config`, `--verbose`, `--output-format`.
 | true | no | true | daemon fails to start (production) |
 | true | no | false | noop authorizer, WARN log (dev) |
 
-- FGA endpoint is **HTTP** at `gibson-fga:8080` (not gRPC 8081).
-- Per-RPC `(object_type, relation)` mapping is declarative in `internal/auth/fga_rpc_registry.go`; changes to that map are load-bearing — `fga_rpc_coverage_test.go` asserts every RPC has a rule.
+- FGA endpoint is **HTTP** at `gibson-fga:8080` (not gRPC 8081). FGA enforcement is performed by the Envoy + ext_authz sidecar, not inline in the daemon.
+- The daemon still holds `internal/authz/` for the OpenFGA HTTP client wrapper and noop authorizer (used for admin-RPC capability checks). The old inline FGA interceptor has been removed.
 - `internal/authz/model.fga` is schema 1.1 with types `user`, `tenant`, `component`, `system_tenant`. Provisioned by the `gibson-fga-init` k8s Job on helm install/upgrade.
 - Store/model IDs resolved in order: config file → ConfigMap `gibson/gibson-fga-config` → env `GIBSON_AUTHZ_FGA_STORE_ID` / `..._MODEL_ID`.
 
 ## Multi-Tenancy Rules
 
 - `_system` is the platform-tenant; hosts plugins available to every tenant.
-- `ComponentService` reads tenant from auth metadata via `auth.TenantFromContext()`.
+- `ComponentService` reads tenant from auth metadata via `identity.TenantFromContext()`.
 - Registry exposes `Discover`, `DiscoverAll`, `DiscoverTenantOnly`, `DiscoverSystemOnly` — pick deliberately; `DiscoverAll` leaks system components into tenant listings.
 - **Tenant create/provision/deprovision is NOT in this daemon.** It moved to the external `gibson-tenant-operator`. Gibson is a read-consumer of tenant state. Do not add tenant lifecycle RPCs here.
 
@@ -232,7 +244,6 @@ Pay attention to these when refactoring — they look load-bearing but generally
 | Path | Reality | Recommendation |
 |---|---|---|
 | `internal/util/` | Only `paths.go` + test | Keep; used by config loader |
-| `internal/cutover/v4/` | Audit-foundation migration used by the `gibson cutover-v4` CLI | Keep until all deployments have cut over; then remove alongside the CLI command. |
 | Stub RPCs in `server_prod_handlers.go` (ResetPassword, RevokeUserSessions, SuspendMember, Get/UpdateUserProfile, ExportFindings, mission drafts, GetUserSessions, Alerts, Conversations) | Intentional — tracked under `prod-unimplemented-apis` and `prod-feature-wiring` specs; test-enforced to return non-Unimplemented | Implement per-spec; don't delete. |
 
 ## Tracked Security Advisories (awaiting upstream fix)
@@ -258,7 +269,7 @@ Dependabot advisories against this module that have no patched release available
 
 ## Configuration (`configs/gibson.yaml` or `~/.gibson/config.yaml`)
 
-Key sections: `core` (home/data/cache dirs, parallel_limit), `security` (encryption algo, `key_provider` = k8s/vault/aws/azure/gcp), `llm` (default_provider + providers), `memory` (embedder + vector store), `logging`, `tracing`, `metrics`, `registry`, `callback`, `daemon` (grpc addr), `health`, `redis` (REQUIRED), `plugins`, `auth` (OIDC issuers, K8s SA, SPIFFE, better-auth, local users), `authz` (FGA store/model IDs, `require_ready`), `checkpoint` (redis or s3 blob backend), `observability` / `otel_observability`, `dashboard_postgres` (optional; non-fatal if missing). Env var substitution: `${VAR:-default}`.
+Key sections: `core` (home/data/cache dirs, parallel_limit), `security` (encryption algo, `key_provider` = k8s/vault/aws/azure/gcp), `llm` (default_provider + providers), `memory` (embedder + vector store), `logging`, `tracing`, `metrics`, `registry`, `callback`, `daemon` (grpc addr), `health`, `redis` (REQUIRED), `plugins`, `auth` (HMAC secret for Envoy-signed identity headers; Zitadel/external IdP config consumed upstream by the gateway, not inline by the daemon), `authz` (FGA store/model IDs, `require_ready`), `checkpoint` (redis or s3 blob backend), `observability` / `otel_observability`, `dashboard_postgres` (optional; non-fatal if missing). Env var substitution: `${VAR:-default}`.
 
 ## Infrastructure Dependencies
 
@@ -278,4 +289,4 @@ Pre-commit runs gitleaks + large-file + private-key checks (`.pre-commit-config.
 
 ## Spec Workflow
 
-This module drives design via `.spec-workflow/` at the repo root (requirements / design / tasks). Active specs touching this daemon currently include the FGA authZ migration, `prod-unimplemented-apis`, `prod-feature-wiring`, agent-auth FGA integration, and auth refactor. Recently completed: `remove-attack-payload-subsystem` (deleted the ad-hoc one-off attack runner and payload templates that missions superseded), `productionize-graph-intelligence` (wired the orchestrator's `WithGraphQueries`, registered the `IntelligenceService` gRPC endpoint, and added the cross-mission learning data-flow documented above), `decouple-sdk-from-tool-protos` (deleted the SDK's `toolspb` package + tool-specific recovery defaults; gibson now hosts all tool-specific knowledge in `internal/harness/toolerr_defaults.go`), and `mission-api-only-cleanup` (renamed the `gibson.workflow.v1` proto package to `gibson.mission.v1`, removed all inline-target / inline-workflow / workflow-YAML / workflow-path payloads from `CreateMission` + `RunMission`, and purged the dead mission/component installer + dependency-resolver RPCs, handlers, CLI commands, and the 726-LOC `internal/mission/installer.go`). Completed specs are not retained as documents — shipped code and commit history are the source of truth.
+This module drives design via `.spec-workflow/` at the repo root (requirements / design / tasks). Active specs touching this daemon currently include the FGA authZ migration, `prod-unimplemented-apis`, `prod-feature-wiring`, capability-grant FGA integration, and auth refactor. Recently completed: `remove-attack-payload-subsystem` (deleted the ad-hoc one-off attack runner and payload templates that missions superseded), `productionize-graph-intelligence` (wired the orchestrator's `WithGraphQueries`, registered the `IntelligenceService` gRPC endpoint, and added the cross-mission learning data-flow documented above), `decouple-sdk-from-tool-protos` (deleted the SDK's `toolspb` package + tool-specific recovery defaults; gibson now hosts all tool-specific knowledge in `internal/harness/toolerr_defaults.go`), and `mission-api-only-cleanup` (renamed the `gibson.workflow.v1` proto package to `gibson.mission.v1`, removed all inline-target / inline-workflow / workflow-YAML / workflow-path payloads from `CreateMission` + `RunMission`, and purged the dead mission/component installer + dependency-resolver RPCs, handlers, CLI commands, and the 726-LOC `internal/mission/installer.go`). Completed specs are not retained as documents — shipped code and commit history are the source of truth.

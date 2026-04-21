@@ -30,7 +30,7 @@ func TestDaemonStartStopCycle(t *testing.T) {
 	cfg := createTestConfig(t, homeDir)
 
 	// Create daemon instance
-	d, err := New(cfg, homeDir)
+	d, err := New(cfg, WithHomeDir(homeDir))
 	require.NoError(t, err, "failed to create daemon")
 
 	// Start daemon in background mode
@@ -105,7 +105,7 @@ func TestDaemonStart(t *testing.T) {
 	cfg := createTestConfig(t, homeDir)
 
 	// Create daemon instance
-	d, err := New(cfg, homeDir)
+	d, err := New(cfg, WithHomeDir(homeDir))
 	require.NoError(t, err, "failed to create daemon")
 
 	// Start daemon with cancellable context

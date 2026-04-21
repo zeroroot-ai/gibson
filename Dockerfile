@@ -70,11 +70,15 @@ ENV GIBSON_HOME=/root/.gibson
 # 9090:  Prometheus metrics
 EXPOSE 50001 50002 9090
 
-# Health check using daemon status command
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD gibson daemon status || exit 1
+# Health check via the daemon's HTTP health endpoint.
+# The daemon binds /healthz on :8080 (internal/daemon/health_state.go).
+# Alpine 3.21 ships wget in busybox, so no extra package is needed.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8080/healthz || exit 1
 
 WORKDIR /root/.gibson
 
 ENTRYPOINT ["/usr/local/bin/gibson"]
-CMD ["daemon", "start"]
+# No subcommand: the binary reads GIBSON_CONFIG (or ~/.gibson/config.yaml) and
+# starts the daemon directly, matching the Mat Ryer entry-point pattern.
+CMD []

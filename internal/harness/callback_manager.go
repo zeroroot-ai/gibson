@@ -171,6 +171,24 @@ func (m *CallbackManager) Start(ctx context.Context) error {
 	return startErr
 }
 
+// Serve starts the callback server and blocks until ctx is cancelled.
+// On cancellation it calls Stop() to cleanly shut down the server.
+//
+// Serve is the preferred lifecycle method for integration with errgroup or a
+// plain goroutine. Start/Stop remain available for callers that need split
+// lifecycle control.
+//
+// Returns nil on clean shutdown (ctx cancelled); returns a non-nil error only
+// if the server itself fails during startup (e.g., port already in use).
+func (m *CallbackManager) Serve(ctx context.Context) error {
+	if err := m.Start(ctx); err != nil {
+		return err
+	}
+	<-ctx.Done()
+	m.Stop()
+	return nil
+}
+
 // Stop gracefully stops the callback server.
 //
 // This method blocks until the server has fully shut down. It is safe to call

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
@@ -17,6 +16,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
@@ -357,9 +357,9 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	// logged and do not abort mission start — authz state is advisory.
 	if m.authzStore != nil {
 		userID := ""
-		tenantID := auth.TenantFromContext(ctx)
-		if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
-			userID = identity.Subject
+		tenantID := identity.TenantFromContext(ctx)
+		if id, err := identity.IdentityFromContext(ctx); err == nil {
+			userID = id.Subject
 		}
 		if putErr := m.authzStore.Put(ctx, missionRun.ID.String(), userID, tenantID); putErr != nil {
 			m.logger.Warn("failed to record authz state on mission start",

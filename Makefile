@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz
+.PHONY: all build bin test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage
 
 # Go parameters
 GOCMD=go
@@ -123,6 +123,18 @@ deps:
 	$(GOGET) ./...
 	$(GOMOD) tidy
 
+# check-coverage enforces per-package coverage thresholds for auth-critical packages.
+# The spec (zitadel-envoy-gateway-migration, task 32) requires ≥95% on internal/identity.
+# Other daemon packages have widely varying coverage; only gate on the new auth-critical package.
+check-coverage:
+	@echo "Checking coverage for auth-critical daemon packages..."
+	@$(GOTEST) -coverprofile=/tmp/daemon_identity_cover.out -covermode=atomic ./internal/identity/... -count=1 > /dev/null 2>&1
+	@ID_COV=$$(go tool cover -func=/tmp/daemon_identity_cover.out | grep total | awk '{print $$3}' | sed 's/%//'); \
+	echo "  internal/identity: $${ID_COV}%"; \
+	RESULT=$$(echo "$${ID_COV} >= 95" | bc -l); \
+	if [ "$$RESULT" -ne 1 ]; then echo "FAIL: internal/identity coverage $${ID_COV}% is below 95% threshold"; exit 1; fi
+	@echo "Coverage check PASSED"
+
 # Run all checks before commit
 check: fmt vet lint test-race
 	@echo "All checks passed!"
@@ -133,7 +145,7 @@ check: fmt vet lint test-race
 #   make check-authz INTEGRATION=1  # unit + integration tests (requires Docker)
 check-authz:
 	@echo "Running authz package vet..."
-	$(GOCMD) vet ./internal/authz/... ./internal/daemon/authz_init.go ./cmd/gibson/authz/...
+	$(GOCMD) vet ./internal/authz/... ./internal/daemon/authz_init.go
 	@echo "Running authz unit tests (race detector)..."
 	$(GOTEST) -race -count=1 -timeout=2m ./internal/authz/... ./internal/daemon/...
 	@echo "Running RPC registry drift gate (audit build tag)..."
@@ -180,6 +192,7 @@ help:
 	@echo "  make deps          - Download dependencies"
 	@echo "  make check         - Run all checks (fmt, vet, lint, test-race)"
 	@echo "  make check-authz   - Run authz package checks (unit tests + vet)"
+	@echo "  make check-coverage - Enforce ≥95% coverage on internal/identity"
 	@echo "  make check-authz INTEGRATION=1 - Include FGA integration tests (requires Docker)"
 	@echo "  make proto         - Generate Go code from proto files"
 	@echo "  make proto-deps    - Install protoc plugins"

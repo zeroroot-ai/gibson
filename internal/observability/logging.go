@@ -63,6 +63,21 @@ func NewLogger(config Config) *Logger {
 	}
 }
 
+// NewLoggerFromSlog wraps an existing *slog.Logger in a Gibson Logger, using
+// the provided config for component/context metadata only (the handler is taken
+// from the pre-built slog.Logger). This allows callers that construct their own
+// slog.Logger (e.g. the daemon entry point) to pass it in via daemon.WithLogger.
+func NewLoggerFromSlog(l *slog.Logger, config Config) *Logger {
+	if l == nil {
+		l = slog.Default()
+	}
+	return &Logger{
+		slog:      l,
+		config:    config,
+		component: config.Component,
+	}
+}
+
 // Debug logs a debug-level message with automatic trace correlation.
 // Debug logs include all fields without redaction.
 //

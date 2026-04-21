@@ -234,7 +234,7 @@ func TestGRPCMethodsWithoutDaemon(t *testing.T) {
 	cfg := createTestConfig(t, homeDir)
 
 	// Create and start daemon
-	d, err := daemon.New(cfg, homeDir)
+	d, err := daemon.New(cfg, daemon.WithHomeDir(homeDir))
 	require.NoError(t, err, "failed to create daemon")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)

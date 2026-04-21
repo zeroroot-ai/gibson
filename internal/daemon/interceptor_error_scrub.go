@@ -105,11 +105,13 @@ func scrubError(
 	}
 
 	// Log the full unscrubbed error server-side for debugging
-	logger.Warn("scrubbed error details from gRPC response",
-		"grpc_method", method,
-		"grpc_code", st.Code().String(),
-		"original_error", originalMsg,
-	)
+	if logger != nil {
+		logger.Warn("scrubbed error details from gRPC response",
+			"grpc_method", method,
+			"grpc_code", st.Code().String(),
+			"original_error", originalMsg,
+		)
+	}
 
 	if counter != nil {
 		counter.Add(ctx, 1,

@@ -2,38 +2,146 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
-	"runtime/debug"
+	"os/signal"
+	"syscall"
 
-	"github.com/zero-day-ai/gibson/cmd/gibson/internal"
+	"golang.org/x/term"
+
+	"github.com/zero-day-ai/gibson/internal/config"
+	"github.com/zero-day-ai/gibson/internal/daemon"
+	"github.com/zero-day-ai/gibson/pkg/version"
 )
 
+// daemonRunner is the subset of daemon.Daemon used by run.
+type daemonRunner interface {
+	Run(context.Context) error
+}
+
+// daemonFactory constructs a daemonRunner from a config and options.
+// Replaceable in tests.
+type daemonFactory func(*config.Config, ...daemon.Option) (daemonRunner, error)
+
+// defaultDaemonFactory wraps daemon.New to satisfy daemonFactory.
+var defaultDaemonFactory daemonFactory = func(cfg *config.Config, opts ...daemon.Option) (daemonRunner, error) {
+	return daemon.New(cfg, opts...)
+}
+
 func main() {
-	// Set up panic recovery to handle unexpected errors gracefully
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "Fatal error: %v\n", r)
-			if internal.IsVerbose() {
-				fmt.Fprintf(os.Stderr, "Stack trace:\n%s\n", debug.Stack())
-			} else {
-				fmt.Fprintln(os.Stderr, "Run with --verbose for stack trace")
-			}
-			os.Exit(internal.ExitError)
-		}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// Force-exit on second signal: after first signal ctx is cancelled,
+	// a subsequent unhandled signal terminates the process immediately.
+	go func() {
+		<-ctx.Done()
+		stop() // deregister so next SIGINT/SIGTERM is not captured
+		select {}
 	}()
 
-	// Create base context
-	ctx := context.Background()
+	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr, defaultDaemonFactory))
+}
 
-	// Execute root command
-	// Execute() now handles signal notification internally via signal.NotifyContext
-	if err := Execute(ctx); err != nil {
-		// Handle the error and get the appropriate exit code
-		exitCode := internal.HandleError(rootCmd, err)
-		os.Exit(exitCode)
+// run is the fully-testable entry point. It returns an exit code.
+func run(
+	ctx context.Context,
+	args []string,
+	stdout, stderr io.Writer,
+	factory daemonFactory,
+) int {
+	fs := flag.NewFlagSet("gibson", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var (
+		cfgPath = fs.String("config", "", "path to gibson.yaml (default: ~/.gibson/config.yaml)")
+		showVer = fs.Bool("version", false, "print version and exit")
+	)
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 1
 	}
 
-	// Successful execution
-	os.Exit(internal.ExitSuccess)
+	if *showVer {
+		fmt.Fprintln(stdout, version.String())
+		return 0
+	}
+
+	// Resolve config path.
+	if *cfgPath == "" {
+		homeDir := config.DefaultHomeDir()
+		if h := os.Getenv("GIBSON_HOME"); h != "" {
+			homeDir = h
+		}
+		*cfgPath = config.DefaultConfigPath(homeDir)
+	}
+
+	// Load configuration (uses defaults when file is absent).
+	loader := config.NewConfigLoader(config.NewValidator())
+	cfg, err := loader.LoadWithDefaults(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gibson: config error: %v\n", err)
+		return 1
+	}
+
+	// Apply env-var override for gRPC address (R3.6: env-reading lives in main).
+	if addr := os.Getenv("GIBSON_DAEMON_GRPC_ADDR"); addr != "" {
+		cfg.Daemon.GRPCAddress = addr
+	}
+
+	// Build structured logger (text for interactive TTY, JSON elsewhere).
+	logger := newLogger(stdout, cfg)
+
+	// Resolve home directory for daemon.
+	homeDir := resolveHome(cfg)
+
+	// Construct and start daemon.
+	d, err := factory(cfg, daemon.WithLogger(logger), daemon.WithHomeDir(homeDir))
+	if err != nil {
+		fmt.Fprintf(stderr, "gibson: daemon init error: %v\n", err)
+		return 1
+	}
+
+	if err := d.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(stderr, "gibson: %v\n", err)
+		return 1
+	}
+
+	return 0
+}
+
+// newLogger builds a *slog.Logger. It uses text format when w is a TTY,
+// JSON otherwise (daemon / container / CI environments).
+func newLogger(w io.Writer, cfg *config.Config) *slog.Logger {
+	level := slog.LevelInfo
+	switch cfg.Logging.Level {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	}
+	opts := &slog.HandlerOptions{Level: level}
+
+	if f, ok := w.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		return slog.New(slog.NewTextHandler(w, opts))
+	}
+	return slog.New(slog.NewJSONHandler(w, opts))
+}
+
+// resolveHome returns the Gibson home directory from config, environment, or default.
+func resolveHome(cfg *config.Config) string {
+	if cfg.Core.HomeDir != "" {
+		return cfg.Core.HomeDir
+	}
+	if h := os.Getenv("GIBSON_HOME"); h != "" {
+		return h
+	}
+	return config.DefaultHomeDir()
 }

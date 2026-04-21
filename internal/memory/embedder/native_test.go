@@ -1,3 +1,15 @@
+//go:build embedder_tests
+
+// These tests load HuggingFace tokenizer model files from disk and can hang or
+// download large artifacts on first run. They are gated behind the
+// `embedder_tests` build tag so the standard `go test ./...` skips them.
+//
+// Run explicitly with:
+//
+//	go test -tags=embedder_tests ./internal/memory/embedder/...
+//
+// CI runs them in a dedicated job; local dev runs do not.
+
 package embedder
 
 import (

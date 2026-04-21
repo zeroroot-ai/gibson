@@ -117,7 +117,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// from static sandbox.Registry to dynamic ComponentRegistry
 		// driven by the catalog refresher. Gated by the same flag that
 		// starts the refresher goroutine.
-		ToolRunnerEnabled: d.config.ToolRunner.Enabled,
+		ToolRunnerEnabled: d.config != nil && d.config.ToolRunner.Enabled,
 	}
 
 	// Sandboxed tool executor (Setec microVM dispatch) — constructed only
@@ -126,7 +126,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 	// build returns (nil, nil) so config.Sandbox.Enabled=true without the
 	// tag logs a warning and continues; per-call failures surface at
 	// tool invocation time (design Requirement 5.4).
-	if d.config.Sandbox.Enabled {
+	if d.config != nil && d.config.Sandbox.Enabled {
 		sandboxTracer := func() trace.Tracer {
 			if d.infrastructure != nil && d.infrastructure.otelStack != nil {
 				return d.infrastructure.otelStack.TracerProvider.Tracer("gibson.sandboxed")

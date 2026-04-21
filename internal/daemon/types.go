@@ -116,57 +116,21 @@ type DaemonInfo struct {
 //	if err := daemon.Stop(ctx); err != nil {
 //	    log.Error("shutdown error", "error", err)
 //	}
+//
+// Daemon is the public lifecycle interface for the Gibson daemon.
+// The only lifecycle method is Run(ctx) — callers should not need to
+// call individual subsystem methods directly.
 type Daemon interface {
-	// Start begins the daemon process and blocks until shutdown.
+	// Run bootstraps all subsystems, runs them under a shared errgroup, and
+	// blocks until ctx is cancelled or a subsystem returns a non-nil error.
+	// When ctx is cancelled cleanly, Run returns nil.
 	//
-	// This method initializes and starts all daemon services including the
-	// registry, callback server, and gRPC API server.
-	//
-	// The daemon always runs in foreground mode, blocking until the context
-	// is cancelled or a shutdown signal (SIGTERM/SIGINT) is received. This
-	// makes it ideal for Docker containers and systemd services.
-	//
-	// Parameters:
-	//   - ctx: Context for daemon lifetime (cancellation triggers shutdown)
-	//
-	// Returns:
-	//   - error: Non-nil if startup fails or if another daemon is already running
-	//
-	// The method performs these steps:
-	// 1. Start registry manager
-	// 2. Start callback server
-	// 3. Start gRPC API server
-	// 4. Block until shutdown signal
-	//
-	// Common errors:
-	//   - ErrAlreadyRunning: Another daemon is already running on the same port
-	//   - Port binding errors: Required ports are in use
-	Start(ctx context.Context) error
-
-	// Stop gracefully shuts down the daemon.
-	//
-	// This method performs a graceful shutdown of all daemon services:
-	// 1. Stop accepting new client connections (gRPC)
-	// 2. Stop callback server (agents can't make new callbacks)
-	// 3. Stop registry (embedded etcd shutdown)
-	//
-	// Parameters:
-	//   - ctx: Context with timeout for shutdown operations
-	//
-	// Returns:
-	//   - error: Non-nil if shutdown encounters errors
-	//
-	// The method is idempotent - calling Stop() on a stopped daemon is a no-op.
-	// In-flight operations are given time to complete based on context timeout.
-	Stop(ctx context.Context) error
+	// Shutdown is triggered by cancelling ctx (e.g. from signal.NotifyContext
+	// in main). The shutdown coordinator runs a four-phase graceful drain
+	// (PreShutdown → Checkpoint → Wait → Terminate) before Run returns.
+	Run(ctx context.Context) error
 
 	// SetOnRegistryReady sets a callback that will be called after the registry
-	// is started but before other services. This is used by the CLI to set up
-	// verbose logging after etcd is initialized, avoiding conflicts with etcd's
-	// internal logging during startup.
+	// is started but before other services.
 	SetOnRegistryReady(fn func())
-
-	// Note: Status() method moved to api.DaemonInterface for gRPC integration.
-	// The daemon implements api.DaemonInterface.Status() which returns api.DaemonStatus.
-	// For internal status queries, use the daemon's status() private method.
 }

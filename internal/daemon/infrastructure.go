@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
 	"github.com/zero-day-ai/gibson/internal/graphrag/provider"
+	graphragschema "github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
@@ -174,6 +175,24 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	}
 	d.logger.Info(ctx, "initialized Neo4j GraphRAG",
 		"uri", d.config.GraphRAG.Neo4j.URI)
+
+	// Run schema migrations immediately after the graph client connects.
+	// A constraint-violation error (legacy rows missing tenant_id) is stored in
+	// schemaMigrationErr so the /readyz probe can signal Degraded without
+	// touching liveness. Any other migration error is fatal.
+	migrator := graphragschema.NewSchemaMigrator(graphRAGClient, d.logger.Slog())
+	if err := migrator.Run(ctx); err != nil {
+		if graphragschema.IsConstraintViolationError(err) {
+			// Non-fatal: emit readiness degradation; store for probe.
+			d.logger.Warn(ctx, "Neo4j schema migration has constraint violations — daemon will fail readiness probe until legacy rows are cleaned",
+				"error", err)
+			d.schemaMigrationErr = err
+		} else {
+			return nil, fmt.Errorf("Neo4j schema migration failed: %w", err)
+		}
+	} else {
+		d.logger.Info(ctx, "Neo4j schema migrations applied successfully")
+	}
 
 	// Create the full GraphRAG stack: Provider -> Store -> BridgeAdapter
 	graphRAGBridge, graphRAGQueryBridge, err := d.initGraphRAGBridges(ctx, graphRAGClient)

@@ -14,15 +14,16 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	"github.com/zero-day-ai/gibson/internal/agentauth"
 	discoverysvc "github.com/zero-day-ai/gibson/internal/api/discovery"
+	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
@@ -34,6 +35,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
+	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/onboarding"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/metric"
@@ -54,18 +56,72 @@ func (s *daemonMemoryStore) Working() memory.WorkingMemory   { return s.working 
 func (s *daemonMemoryStore) Mission() memory.MissionMemory   { return nil }
 func (s *daemonMemoryStore) LongTerm() memory.LongTermMemory { return nil }
 
-// startGRPCServer creates and starts the gRPC server.
+// grpcSubsystem owns the lifecycle of the gRPC server. It is constructed by
+// buildGRPCServer and exposes a Serve(ctx) error method that can be launched
+// in an errgroup or a plain goroutine.
+type grpcSubsystem struct {
+	srv                 *grpc.Server
+	listener            net.Listener
+	logger              *observability.Logger
+	gracefulStopTimeout time.Duration
+}
+
+// Serve starts serving gRPC requests and blocks until ctx is cancelled.
+// On cancellation it calls GracefulStop with a bounded timeout, then
+// falls back to Stop if the timeout is exceeded. Returns nil on clean
+// shutdown; returns a non-nil error only if srv.Serve itself fails with
+// an unexpected error (grpc.ErrServerStopped is treated as clean shutdown).
+func (s *grpcSubsystem) Serve(ctx context.Context) error {
+	serveErr := make(chan error, 1)
+	go func() {
+		s.logger.Info(ctx, "gRPC server listening", "address", s.listener.Addr().String())
+		if err := s.srv.Serve(s.listener); err != nil && err.Error() != "use of closed network connection" {
+			serveErr <- err
+		} else {
+			serveErr <- nil
+		}
+	}()
+
+	select {
+	case err := <-serveErr:
+		// Serve returned before ctx was cancelled — propagate the error.
+		return err
+	case <-ctx.Done():
+		// Initiate graceful shutdown with a bounded timeout.
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), s.gracefulStopTimeout)
+		defer stopCancel()
+
+		gracefulDone := make(chan struct{})
+		go func() {
+			s.srv.GracefulStop()
+			close(gracefulDone)
+		}()
+
+		select {
+		case <-gracefulDone:
+			s.logger.Info(ctx, "gRPC server drained gracefully")
+		case <-stopCtx.Done():
+			s.logger.Warn(ctx, "gRPC graceful stop timed out, forcing stop",
+				"timeout", s.gracefulStopTimeout)
+			s.srv.Stop()
+		}
+		// Wait for Serve goroutine to exit.
+		<-serveErr
+		return nil
+	}
+}
+
+// buildGRPCServer creates the gRPC server, registers all services, and returns
+// a grpcSubsystem ready to serve via Serve(ctx). The server is NOT started until
+// Serve is called.
 //
-// This method creates a gRPC server, registers the daemon service,
-// and starts listening on the configured address in a goroutine.
-//
-// If authentication is enabled in config, auth interceptors are installed
-// to enforce authentication on all gRPC endpoints.
-func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
+// All interceptor wiring, service registration, and SPIFFE mTLS setup is unchanged
+// from the original startGRPCServer; only the launch goroutine has been moved to Serve.
+func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error) {
 	// Create listener
 	listener, err := net.Listen("tcp", d.grpcAddr)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", d.grpcAddr, err)
+		return nil, fmt.Errorf("failed to listen on %s: %w", d.grpcAddr, err)
 	}
 
 	// Build interceptor chains. Recovery is always first (outermost).
@@ -80,7 +136,7 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	}
 	unaryRecovery, streamRecovery, err := panicRecoveryInterceptors(d.logger.Slog(), recoveryMeter)
 	if err != nil {
-		return fmt.Errorf("failed to create recovery interceptors: %w", err)
+		return nil, fmt.Errorf("failed to create recovery interceptors: %w", err)
 	}
 	unaryInterceptors = append(unaryInterceptors, unaryRecovery)
 	streamInterceptors = append(streamInterceptors, streamRecovery)
@@ -93,66 +149,39 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	}
 	unaryScrub, streamScrub, err := errorScrubInterceptors(d.logger.Slog(), scrubMeter)
 	if err != nil {
-		return fmt.Errorf("failed to create error scrub interceptors: %w", err)
+		return nil, fmt.Errorf("failed to create error scrub interceptors: %w", err)
 	}
 	unaryInterceptors = append(unaryInterceptors, unaryScrub)
 	streamInterceptors = append(streamInterceptors, streamScrub)
 
-	// 3. Auth interceptors (if enabled)
-	if d.config.Auth.IsAuthEnabled() {
-		d.logger.Info(ctx, "authentication enabled, installing auth interceptors",
-			"mode", d.config.Auth.Mode,
-		)
-
-		apiKeyAuth, jwtVerifier, baValidator, buildErr := d.buildAuthValidators(ctx)
-		if buildErr != nil {
-			return fmt.Errorf("failed to build auth validators: %w", buildErr)
-		}
-
-		unaryInterceptors = append(unaryInterceptors, auth.UnaryAuthInterceptor(apiKeyAuth, jwtVerifier, baValidator, &d.config.Auth, d.logger.Slog()))
-		streamInterceptors = append(streamInterceptors, auth.StreamAuthInterceptor(apiKeyAuth, jwtVerifier, baValidator, &d.config.Auth, d.logger.Slog()))
-
-		d.logger.Info(ctx, "auth interceptors installed",
-			"trust_localhost", d.config.Auth.TrustLocalhost,
-		)
-	} else {
-		d.logger.Warn(ctx, "auth interceptors not installed - auth mode not configured")
-	}
-
-	// 4. User context forwarding — extracts x-gibson-user-id and x-gibson-tenant
-	// from gRPC metadata for callers with the platform-service role (dashboard).
-	// Must run after auth (identity available) and before FGA (tenant context needed).
-	unaryInterceptors = append(unaryInterceptors, auth.UserContextInterceptor())
-	streamInterceptors = append(streamInterceptors, auth.UserContextStreamInterceptor())
-
-	// 5. Authorization interceptor — OpenFGA is the sole enforcement backend.
+	// 3. Identity interceptor — HMAC-verifies Envoy-signed x-gibson-identity-*
+	// headers and injects a typed Identity into the request context.
+	// Authorization (FGA) is enforced upstream by Envoy + ext_authz; the daemon
+	// trusts the signed identity headers and performs no local auth/authz.
 	//
-	// Load FGA registry from the embedded YAML
-	// (core/gibson/internal/auth/rpc_registry.yaml). Operators may override
-	// via GIBSON_AUTHZ_RPC_REGISTRY_PATH (typically wired through the Helm
-	// value gibson.authz.rpcRegistry.override). A missing or invalid override
-	// fails boot loudly — there is NO silent fallback to the embedded default.
-	fgaRegistry, err := auth.LoadRegistry(
-		auth.EmbeddedRpcRegistry,
-		os.Getenv("GIBSON_AUTHZ_RPC_REGISTRY_PATH"),
-	)
-	if err != nil {
-		return fmt.Errorf("rpc registry load: %w", err)
+	// When GIBSON_IDENTITY_HMAC_SECRET_PATH is unset and /etc/gibson/hmac/secret
+	// does not exist, the Envoy gateway is not deployed (dev/non-gateway overlay).
+	// In that case we skip the interceptor rather than failing startup — requests
+	// will be received directly without signed identity headers and the daemon
+	// operates in its pre-gateway trust model (FGA authz still applies).
+	hmacSecret, secretErr := loadHMACSecret()
+	if secretErr != nil {
+		if os.Getenv("GIBSON_IDENTITY_HMAC_SECRET_PATH") == "" {
+			// Env var not configured → Envoy gateway not deployed in this overlay.
+			// Degraded-but-live: log a warning and proceed without the interceptor.
+			d.logger.Warn(ctx, "identity interceptor not installed — HMAC secret unavailable; "+
+				"deploy with Envoy+extAuthz overlay (values-zitadel-envoy.yaml) to enable it",
+				"error", secretErr)
+		} else {
+			// Env var was explicitly configured but the file is missing/unreadable —
+			// this is a misconfiguration in a gateway-enabled overlay. Fail fast.
+			return nil, fmt.Errorf("identity interceptor: %w", secretErr)
+		}
+	} else {
+		unaryInterceptors = append(unaryInterceptors, identity.UnaryInterceptor(hmacSecret))
+		streamInterceptors = append(streamInterceptors, identity.StreamInterceptor(hmacSecret))
+		d.logger.Info(ctx, "identity interceptor installed (HMAC-verified Envoy headers)")
 	}
-	if err := fgaRegistry.Validate(ctx, d.authorizer); err != nil {
-		return fmt.Errorf("fga registry validation failed at startup: %w", err)
-	}
-	d.logger.Info(ctx, "fga rpc registry validated against authorization model")
-
-	fgaInterceptor := auth.NewFgaAuthzInterceptor(
-		d.authorizer,
-		fgaRegistry,
-		d.logger.Slog(),
-		d.GetOTelMetricsRecorder(),
-	)
-	unaryInterceptors = append(unaryInterceptors, fgaInterceptor.Unary())
-	streamInterceptors = append(streamInterceptors, fgaInterceptor.Stream())
-	d.logger.Info(ctx, "fga authz interceptor installed (fga-only mode)")
 
 	// Build server options with chained interceptors
 	serverOpts := []grpc.ServerOption{
@@ -239,58 +268,60 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 	// Wire daemon dependencies that require the Redis state client.
 	// Tenant lifecycle (create/provision/deprovision) has moved out of the daemon
 	// to the standalone gibson-tenant-operator; this block only wires the
-	// remaining runtime services (AgentAuth, onboarding, mission drafts,
+	// remaining runtime services (CapabilityGrant, onboarding, mission drafts,
 	// impersonation, and the API key store).
 	if d.stateClient != nil {
 		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
 			_ = redisClient // retained for future wiring
 
-			// Create APIKeyAuthenticator for the CreateAPIKey/ListAPIKeys/RevokeAPIKey RPCs.
+			// Create apikeys.Store for the CreateAPIKey/ListAPIKeys/RevokeAPIKey RPCs.
 			// API keys are stored in the dashboard Postgres instance.
-			var apiKeyAuth *auth.APIKeyAuthenticator
+			// Validation (authentication) of API keys has moved to the ext_authz service;
+			// only management operations remain in the daemon.
+			var apiKeyStore *apikeys.Store
 			if d.dashboardDB != nil {
 				var akErr error
-				apiKeyAuth, akErr = auth.NewAPIKeyAuthenticator(d.dashboardDB)
+				apiKeyStore, akErr = apikeys.New(d.dashboardDB)
 				if akErr != nil {
-					d.logger.Warn(ctx, "failed to create API key authenticator", "error", akErr)
+					d.logger.Warn(ctx, "failed to create API key store", "error", akErr)
 				}
 			} else {
-				d.logger.Warn(ctx, "API key authenticator not wired: dashboard Postgres unavailable")
+				d.logger.Warn(ctx, "API key store not wired: dashboard Postgres unavailable")
 			}
 
-			if apiKeyAuth != nil {
-				daemonSvc.WithAPIKeyStore(apiKeyAuth)
+			if apiKeyStore != nil {
+				daemonSvc.WithAPIKeyStore(apiKeyStore)
 				d.logger.Info(ctx, "API key store wired into DaemonServer (Postgres-backed)")
 			}
 
-			// Wire the AgentAuthService for the Agent Auth Protocol RPCs.
+			// Wire the CapabilityGrantService for the Agent Auth Protocol RPCs.
 			// Requires dashboardDB (for store + apiKeys) and the FGA authorizer.
-			if d.dashboardDB != nil && apiKeyAuth != nil && d.authorizer != nil {
-				agentStore := agentauth.NewAgentAuthStore(d.dashboardDB)
+			if d.dashboardDB != nil && apiKeyStore != nil && d.authorizer != nil {
+				agentStore := capabilitygrant.NewCapabilityGrantStore(d.dashboardDB)
 				auditWriter := audit.NewWriter(d.dashboardDB, d.logger.Slog())
 				auditWriter.Start(ctx)
 				auditQuery := audit.NewQuery(d.dashboardDB)
 
-				fgaBridge := agentauth.NewFGABridge(d.authorizer, d.compRegistry, d.logger.Slog())
+				fgaBridge := capabilitygrant.NewFGABridge(d.authorizer, d.compRegistry, d.logger.Slog())
 
-				agentAuthDispatcher := newWorkQueueDispatcher(
+				capabilityGrantDispatcher := newWorkQueueDispatcher(
 					component.NewRedisWorkQueue(d.stateClient.Client()),
 				)
 
-				agentAuthSvc := agentauth.NewAgentAuthService(agentauth.AgentAuthServiceConfig{
+				capabilityGrantSvc := capabilitygrant.NewCapabilityGrantService(capabilitygrant.CapabilityGrantServiceConfig{
 					Store:       agentStore,
 					FGABridge:   fgaBridge,
 					Authorizer:  d.authorizer,
-					APIKeys:     apiKeyAuth,
+					APIKeys:     apiKeyStore,
 					AuditWriter: auditWriter,
 					AuditQuery:  auditQuery,
-					Dispatcher:  agentAuthDispatcher,
+					Dispatcher:  capabilityGrantDispatcher,
 					Logger:      d.logger.Slog(),
 				})
-				daemonSvc.WithAgentAuthService(agentAuthSvc)
-				d.logger.Info(ctx, "AgentAuthService wired into DaemonServer")
+				daemonSvc.WithCapabilityGrantService(capabilityGrantSvc)
+				d.logger.Info(ctx, "CapabilityGrantService wired into DaemonServer")
 			} else {
-				d.logger.Warn(ctx, "AgentAuthService not wired: requires dashboardDB, apiKeyAuth, and authorizer")
+				d.logger.Warn(ctx, "CapabilityGrantService not wired: requires dashboardDB, apiKeyStore, and authorizer")
 			}
 
 			// Wire the onboarding store backed by Redis.
@@ -478,124 +509,45 @@ func (d *daemonImpl) startGRPCServer(ctx context.Context) error {
 		d.logger.Warn(ctx, "ComponentService unavailable: stateClient is nil, Redis not configured")
 	}
 
-	// Start serving in goroutine
-	go func() {
-		d.logger.Info(ctx, "gRPC server listening", "address", d.grpcAddr)
-		if err := srv.Serve(listener); err != nil {
-			d.logger.Error(ctx, "gRPC server error", "error", err)
+	// Determine graceful stop timeout. Use half the configured shutdown timeout
+	// (minimum 5s) so the drain phase has a bounded window while leaving the
+	// other shutdown phases their share of the total budget.
+	gracefulStopTimeout := 10 * time.Second
+	if d.config != nil {
+		if half := d.config.Shutdown.DrainTimeout / 2; half > 0 {
+			gracefulStopTimeout = half
 		}
-	}()
-
-	return nil
-}
-
-// agentJWTAdapter wraps agentauth.JWTVerifier to satisfy auth.AgentJWTValidator.
-//
-// The adapter converts agentauth.AgentClaims → auth.AgentAuthClaims so that the
-// auth package never imports agentauth (which would create an import cycle).
-type agentJWTAdapter struct {
-	inner *agentauth.JWTVerifier
-}
-
-// VerifyAgentJWT implements auth.AgentJWTValidator.
-func (a *agentJWTAdapter) VerifyAgentJWT(ctx context.Context, tokenStr, expectedAud string) (*auth.AgentAuthClaims, error) {
-	claims, err := a.inner.VerifyAgentJWT(ctx, tokenStr, expectedAud)
-	if err != nil {
-		return nil, err
 	}
-	return &auth.AgentAuthClaims{
-		AgentID:        claims.AgentID,
-		HostID:         claims.HostID,
-		TenantID:       claims.TenantID,
-		OwnerUserID:    claims.OwnerUserID,
-		ComponentScope: claims.ComponentScope,
-		ExpiresAt:      claims.ExpiresAt,
+
+	return &grpcSubsystem{
+		srv:                 srv,
+		listener:            listener,
+		logger:              d.logger,
+		gracefulStopTimeout: gracefulStopTimeout,
 	}, nil
 }
 
-// buildAuthValidators constructs the authentication validators used by the
-// interceptor. SPIFFE auth is handled at the TLS layer (no validator needed here).
+// loadHMACSecret reads the HMAC secret used to verify Envoy-signed
+// x-gibson-identity-* headers.
 //
-// Validators are constructed on a best-effort basis: if a dependency (Postgres,
-// Better Auth secret) is unavailable the corresponding validator is nil and its
-// path is effectively disabled. The interceptor handles nil validators gracefully.
+// Resolution order:
+//  1. File path from GIBSON_IDENTITY_HMAC_SECRET_PATH env (default /etc/gibson/hmac/secret)
+//  2. Contents must be at least 32 bytes — fail-fast if shorter.
 //
-// Returns:
-//
-//	apiKeyAuth  — Postgres-backed API key authenticator (nil when dashboardDB unavailable)
-//	jwtVerifier — Ed25519 Agent Auth JWT verifier adapter (nil when dashboardDB unavailable)
-//	baValidator — HMAC-SHA256 Better Auth validator (nil when secret is not configured)
-func (d *daemonImpl) buildAuthValidators(ctx context.Context) (
-	apiKeyAuth *auth.APIKeyAuthenticator,
-	jwtValidator auth.AgentJWTValidator,
-	baValidator *auth.BetterAuthValidator,
-	err error,
-) {
-	mode := d.config.Auth.Mode
-
-	// --- Path 1 (token): API key (gsk_ prefix) ---
-	// Postgres-backed; requires dashboardDB.
-	if (mode == "enterprise" || mode == "saas") && d.dashboardDB != nil {
-		apiKeyAuth, err = auth.NewAPIKeyAuthenticator(d.dashboardDB)
-		if err != nil {
-			d.logger.Warn(ctx, "failed to create API key authenticator, continuing without it",
-				"error", err,
-			)
-			apiKeyAuth = nil
-			err = nil // non-fatal
-		} else {
-			d.logger.Info(ctx, "API key authenticator initialised (gsk_ path)")
-		}
-	} else if mode == "enterprise" || mode == "saas" {
-		d.logger.Warn(ctx, "API key auth unavailable: dashboard Postgres not initialised")
+// The secret must never be logged.
+func loadHMACSecret() ([]byte, error) {
+	path := os.Getenv("GIBSON_IDENTITY_HMAC_SECRET_PATH")
+	if path == "" {
+		path = "/etc/gibson/hmac/secret"
 	}
-
-	// --- Path 2 (token): Agent Auth JWT (agent+jwt / host+jwt) ---
-	// Requires dashboardDB for agent record lookup.
-	// Wrapped in agentJWTAdapter to satisfy auth.AgentJWTValidator without
-	// introducing an import cycle between auth and agentauth packages.
-	if d.dashboardDB != nil {
-		agentStore := agentauth.NewAgentAuthStore(d.dashboardDB)
-		inner := agentauth.NewJWTVerifier(agentStore)
-		jwtValidator = &agentJWTAdapter{inner: inner}
-		d.logger.Info(ctx, "agent auth JWT verifier initialised (agent+jwt path)")
-	} else {
-		d.logger.Warn(ctx, "agent auth JWT verifier unavailable: dashboard Postgres not initialised")
+	secret, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read HMAC secret from %q: %w", path, err)
 	}
-
-	// --- Path 3 (token): Better Auth (HMAC-SHA256, default path) ---
-	// Requires BETTER_AUTH_SECRET in config. If the secret is absent the default
-	// path is disabled and unauthenticated requests will fail at the interceptor.
-	if d.config.Auth.BetterAuth.Secret != "" {
-		baValidator, err = auth.NewBetterAuthValidator(d.config.Auth.BetterAuth.Secret)
-		if err != nil {
-			// The only reason NewBetterAuthValidator can fail is an empty secret,
-			// which we already guarded against above. Log and treat as non-fatal.
-			d.logger.Warn(ctx, "failed to create Better Auth validator, continuing without it",
-				"error", err,
-			)
-			baValidator = nil
-			err = nil
-		} else {
-			d.logger.Info(ctx, "Better Auth validator initialised (default path)")
-		}
-	} else {
-		d.logger.Warn(ctx, "Better Auth validator unavailable: auth.better_auth_secret not configured")
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("HMAC secret at %q is too short (%d bytes, minimum 32)", path, len(secret))
 	}
-
-	methods := make([]string, 0, 4)
-	methods = append(methods, "spiffe(mtls)")
-	if apiKeyAuth != nil {
-		methods = append(methods, "apikey(gsk_)")
-	}
-	if jwtValidator != nil {
-		methods = append(methods, "agent-auth-jwt")
-	}
-	if baValidator != nil {
-		methods = append(methods, "better-auth")
-	}
-	d.logger.Info(ctx, "auth validators built", "active_methods", methods)
-	return apiKeyAuth, jwtValidator, baValidator, nil
+	return secret, nil
 }
 
 // Implementation of api.DaemonInterface for delegation from gRPC server.
@@ -1031,7 +983,7 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 // When redisEventStream is available it uses Redis Streams (XREAD BLOCK) as
 // the transport, which allows events to survive daemon restarts and be shared
 // across multiple daemon pods. The tenant is extracted from the request context
-// via auth.TenantFromContext; "default" is used when no tenant is present.
+// via identity.TenantFromContext; "default" is used when no tenant is present.
 //
 // When redisEventStream is nil (e.g., during unit tests that use a lightweight
 // daemon without Redis) the implementation falls back to the in-process
@@ -1041,7 +993,7 @@ func (d *daemonImpl) Subscribe(ctx context.Context, eventTypes []string, mission
 
 	// Use Redis Streams when available: this is the production path.
 	if d.redisEventStream != nil {
-		tenant := auth.TenantFromContext(ctx)
+		tenant := identity.TenantFromContext(ctx)
 		if tenant == "" {
 			tenant = "default"
 		}
@@ -1073,7 +1025,7 @@ func (d *daemonImpl) Subscribe(ctx context.Context, eventTypes []string, mission
 // publishEvent writes an event to both the in-process EventBus and, when
 // redisEventStream is available, the tenant-scoped Redis Stream.
 //
-// It extracts the tenant from the context (auth.TenantFromContext) and falls
+// It extracts the tenant from the context (identity.TenantFromContext) and falls
 // back to "default" when none is present.  Errors from either transport are
 // logged as warnings but do not propagate — event publishing is best-effort.
 func (d *daemonImpl) publishEvent(ctx context.Context, event api.EventData) {
@@ -1086,7 +1038,7 @@ func (d *daemonImpl) publishEvent(ctx context.Context, event api.EventData) {
 
 	// Redis Streams (optional; available after stateClient is initialized).
 	if d.redisEventStream != nil {
-		tenant := auth.TenantFromContext(ctx)
+		tenant := identity.TenantFromContext(ctx)
 		if tenant == "" {
 			tenant = "default"
 		}

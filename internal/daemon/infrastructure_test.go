@@ -42,7 +42,7 @@ func TestInfrastructureInitialization(t *testing.T) {
 		t.Fatalf("failed to create home dir: %v", err)
 	}
 
-	daemon, err := New(cfg, homeDir)
+	daemon, err := New(cfg, WithHomeDir(homeDir))
 	if err != nil {
 		t.Fatalf("failed to create daemon: %v", err)
 	}
