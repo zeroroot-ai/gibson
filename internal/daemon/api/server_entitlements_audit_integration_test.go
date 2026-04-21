@@ -25,10 +25,8 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/require"
 
-	sdkauth "github.com/zero-day-ai/sdk/auth"
-
 	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -47,11 +45,9 @@ func TestAuditEmission_AccessTupleChange_EndToEnd(t *testing.T) {
 	al := audit.NewAuditLogger(stateClient, logger)
 
 	// Identity: tenant admin via API key → classifyActorSource → "tenant_admin".
-	ident := &auth.Identity{
-		Identity: sdkauth.Identity{Subject: "gsk_test", Issuer: "apikey"},
-	}
-	ctx := auth.ContextWithIdentity(context.Background(), ident)
-	ctx = auth.ContextWithTenant(ctx, "acme")
+	ident := identity.Identity{Subject: "gsk_test", Issuer: "apikey", Tenant: "acme"}
+	ctx := identity.WithIdentity(context.Background(), ident)
+	ctx = identity.ContextWithTenant(ctx, "acme")
 
 	tuple := struct{ User, Relation, Object string }{
 		User:     "team:acme-red#member",

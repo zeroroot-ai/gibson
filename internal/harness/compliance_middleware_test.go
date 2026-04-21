@@ -8,13 +8,12 @@ import (
 	"testing"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
 	taxonomypb "github.com/zero-day-ai/sdk/api/gen/taxonomy/v1"
-	sdkauth "github.com/zero-day-ai/sdk/auth"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -137,12 +136,14 @@ func TestComplianceMiddleware_IdentityStamping_Full(t *testing.T) {
 	sink := &fakeSink{}
 	m := minimalMiddleware(t, sink)
 
-	identity := &auth.Identity{
-		Identity: sdkauth.Identity{Subject: "user-123"},
-		Roles:    []string{"admin", "mission_runner"},
+	id := identity.Identity{
+		Subject:        "user-123",
+		Issuer:         "zitadel",
+		CredentialType: "oidc",
+		Tenant:         "tenant-a",
 	}
-	ctx := auth.ContextWithIdentity(context.Background(), identity)
-	ctx = auth.ContextWithTenant(ctx, "tenant-a")
+	ctx := identity.WithIdentity(context.Background(), id)
+	ctx = identity.ContextWithTenant(ctx, "tenant-a")
 
 	sip := m.beginSignal(ctx, MethodComplete, LLMTarget{Slot: "primary"})
 	m.completeSignal(ctx, sip, nil)
@@ -159,8 +160,10 @@ func TestComplianceMiddleware_IdentityStamping_Full(t *testing.T) {
 	if got.ActorTenantId != "tenant-a" {
 		t.Errorf("ActorTenantId = %q; want tenant-a", got.ActorTenantId)
 	}
-	if len(got.RolesSnapshot) != 2 {
-		t.Errorf("RolesSnapshot = %v", got.RolesSnapshot)
+	// Roles are no longer carried in the daemon identity (FGA handles authz);
+	// RolesSnapshot is always empty in the new model.
+	if len(got.RolesSnapshot) != 0 {
+		t.Errorf("RolesSnapshot = %v; want empty (roles removed from daemon identity)", got.RolesSnapshot)
 	}
 	if got.Decision != DecisionNotChecked {
 		t.Errorf("Decision = %q; want not_checked (no authz in context)", got.Decision)

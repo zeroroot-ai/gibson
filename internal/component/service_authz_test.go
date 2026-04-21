@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
@@ -103,7 +103,7 @@ func TestRegisterComponent_WritesOwnershipTuple(t *testing.T) {
 	mock := &mockAuthorizer{}
 	svc := newAuthzServer(mock)
 
-	ctx := auth.ContextWithTenant(context.Background(), "acme")
+	ctx := identity.ContextWithTenant(context.Background(), "acme")
 	resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("agent", "recon-agent"))
 
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestRegisterComponent_WritesOwnershipTuple(t *testing.T) {
 func TestRegisterComponent_NilAuthorizer_NoPanic(t *testing.T) {
 	svc := newAuthzServer(nil) // no authorizer
 
-	ctx := auth.ContextWithTenant(context.Background(), "acme")
+	ctx := identity.ContextWithTenant(context.Background(), "acme")
 
 	assert.NotPanics(t, func() {
 		resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "nmap"))
@@ -140,7 +140,7 @@ func TestRegisterComponent_FGAWriteFailure_DoesNotFailRegistration(t *testing.T)
 	}
 	svc := newAuthzServer(mock)
 
-	ctx := auth.ContextWithTenant(context.Background(), "acme")
+	ctx := identity.ContextWithTenant(context.Background(), "acme")
 	resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("plugin", "gitlab"))
 
 	// Registration must succeed even when FGA is unavailable.
@@ -155,7 +155,7 @@ func TestRegisterComponent_SystemTenant_WritesOwnershipTuple(t *testing.T) {
 	mock := &mockAuthorizer{}
 	svc := newAuthzServer(mock)
 
-	ctx := auth.ContextWithTenant(context.Background(), "_system")
+	ctx := identity.ContextWithTenant(context.Background(), "_system")
 	resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "httpx"))
 
 	require.NoError(t, err)

@@ -7,13 +7,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // MemoryDelete removes a key from the specified memory tier.
 func (s *ComponentServiceServer) MemoryDelete(ctx context.Context, req *componentpb.MemoryDeleteRequest) (*componentpb.MemoryDeleteResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -51,7 +51,7 @@ func (s *ComponentServiceServer) MemoryDelete(ctx context.Context, req *componen
 
 // MemoryClear removes all keys from the specified memory tier.
 func (s *ComponentServiceServer) MemoryClear(ctx context.Context, req *componentpb.MemoryClearRequest) (*componentpb.MemoryClearResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -73,7 +73,7 @@ func (s *ComponentServiceServer) MemoryClear(ctx context.Context, req *component
 
 // MemoryKeys returns all keys in the specified memory tier.
 func (s *ComponentServiceServer) MemoryKeys(ctx context.Context, req *componentpb.MemoryKeysRequest) (*componentpb.MemoryKeysResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -104,7 +104,7 @@ func (s *ComponentServiceServer) MemoryKeys(ctx context.Context, req *componentp
 
 // MemoryHistory returns recent entries from mission memory.
 func (s *ComponentServiceServer) MemoryHistory(ctx context.Context, req *componentpb.MemoryHistoryRequest) (*componentpb.MemoryHistoryResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -126,7 +126,7 @@ func (s *ComponentServiceServer) MemoryHistory(ctx context.Context, req *compone
 
 // MemoryGetPreviousRunValue retrieves a value from the prior mission run.
 func (s *ComponentServiceServer) MemoryGetPreviousRunValue(ctx context.Context, req *componentpb.MemoryGetPreviousRunValueRequest) (*componentpb.MemoryGetPreviousRunValueResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -149,7 +149,7 @@ func (s *ComponentServiceServer) MemoryGetPreviousRunValue(ctx context.Context, 
 
 // MemoryGetValueHistory returns the history of a key's values across runs.
 func (s *ComponentServiceServer) MemoryGetValueHistory(ctx context.Context, req *componentpb.MemoryGetValueHistoryRequest) (*componentpb.MemoryGetValueHistoryResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}

@@ -8,7 +8,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/agentauth"
+	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
 )
@@ -18,20 +18,20 @@ import (
 // ------------------------------------------------------------------
 
 type fakeFGA struct {
-	resolve           func(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error)
-	crossRules        func(ctx context.Context, subjectFGA string, components []agentauth.ComponentRef) ([]agentauth.CrossRule, error)
-	intersection      func(ctx context.Context, apID, ownerID, tenantID string) ([]agentauth.ComponentRef, error)
+	resolve           func(ctx context.Context, userID, tenantID string) ([]capabilitygrant.Capability, error)
+	crossRules        func(ctx context.Context, subjectFGA string, components []capabilitygrant.ComponentRef) ([]capabilitygrant.CrossRule, error)
+	intersection      func(ctx context.Context, apID, ownerID, tenantID string) ([]capabilitygrant.ComponentRef, error)
 	resolveCalls      int
 	crossCalls        int
 	intersectionCalls int
 }
 
-func (f *fakeFGA) ResolveCapabilities(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error) {
+func (f *fakeFGA) ResolveCapabilities(ctx context.Context, userID, tenantID string) ([]capabilitygrant.Capability, error) {
 	f.resolveCalls++
 	return f.resolve(ctx, userID, tenantID)
 }
 
-func (f *fakeFGA) ResolveCrossComponentRules(ctx context.Context, subjectFGA string, components []agentauth.ComponentRef) ([]agentauth.CrossRule, error) {
+func (f *fakeFGA) ResolveCrossComponentRules(ctx context.Context, subjectFGA string, components []capabilitygrant.ComponentRef) ([]capabilitygrant.CrossRule, error) {
 	f.crossCalls++
 	if f.crossRules == nil {
 		return nil, nil
@@ -39,7 +39,7 @@ func (f *fakeFGA) ResolveCrossComponentRules(ctx context.Context, subjectFGA str
 	return f.crossRules(ctx, subjectFGA, components)
 }
 
-func (f *fakeFGA) ResolveAgentPrincipalIntersection(ctx context.Context, apID, ownerID, tenantID string) ([]agentauth.ComponentRef, error) {
+func (f *fakeFGA) ResolveAgentPrincipalIntersection(ctx context.Context, apID, ownerID, tenantID string) ([]capabilitygrant.ComponentRef, error) {
 	f.intersectionCalls++
 	return f.intersection(ctx, apID, ownerID, tenantID)
 }
@@ -86,8 +86,8 @@ func newTestBuilder(t *testing.T, fga FGAResolver, reg RegistrySource) (Builder,
 
 func TestBuilder_UserSubjectHappyPath(t *testing.T) {
 	fga := &fakeFGA{
-		resolve: func(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error) {
-			return []agentauth.Capability{
+		resolve: func(ctx context.Context, userID, tenantID string) ([]capabilitygrant.Capability, error) {
+			return []capabilitygrant.Capability{
 				{Name: "execute:tool:nmap", ComponentRef: "component:nmap", Kind: "tool"},
 				{Name: "configure:plugin:gitlab", ComponentRef: "component:gitlab", Kind: "plugin"},
 			}, nil
@@ -144,17 +144,17 @@ func TestBuilder_AgentPrincipalIntersectionNarrowsScope(t *testing.T) {
 	// Owner can_execute {nmap, sslyze}; agent can_execute {nmap, gitlab}
 	// → intersection {nmap} only. The builder must drop gitlab.
 	fga := &fakeFGA{
-		resolve: func(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error) {
+		resolve: func(ctx context.Context, userID, tenantID string) ([]capabilitygrant.Capability, error) {
 			if userID == "owner-1" {
-				return []agentauth.Capability{
+				return []capabilitygrant.Capability{
 					{Name: "execute:tool:nmap", ComponentRef: "component:nmap", Kind: "tool"},
 					{Name: "execute:tool:sslyze", ComponentRef: "component:sslyze", Kind: "tool"},
 				}, nil
 			}
 			return nil, errors.New("unexpected user subject: " + userID)
 		},
-		intersection: func(ctx context.Context, apID, ownerID, tenantID string) ([]agentauth.ComponentRef, error) {
-			return []agentauth.ComponentRef{{Name: "nmap", Kind: "tool"}}, nil
+		intersection: func(ctx context.Context, apID, ownerID, tenantID string) ([]capabilitygrant.ComponentRef, error) {
+			return []capabilitygrant.ComponentRef{{Name: "nmap", Kind: "tool"}}, nil
 		},
 	}
 	reg := &fakeRegistry{infos: []component.ComponentInfo{
@@ -182,15 +182,15 @@ func TestBuilder_AgentPrincipalIntersectionNarrowsScope(t *testing.T) {
 
 func TestBuilder_CrossComponentRulesPropagate(t *testing.T) {
 	fga := &fakeFGA{
-		resolve: func(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error) {
-			return []agentauth.Capability{
+		resolve: func(ctx context.Context, userID, tenantID string) ([]capabilitygrant.Capability, error) {
+			return []capabilitygrant.Capability{
 				{Name: "execute:tool:nmap", ComponentRef: "component:nmap", Kind: "tool"},
 				{Name: "execute:plugin:gitlab", ComponentRef: "component:gitlab", Kind: "plugin"},
 			}, nil
 		},
-		crossRules: func(ctx context.Context, subjectFGA string, components []agentauth.ComponentRef) ([]agentauth.CrossRule, error) {
-			return []agentauth.CrossRule{
-				{Source: subjectFGA, Target: "component:gitlab", Effect: agentauth.EffectDeny, Reason: "fga_deny"},
+		crossRules: func(ctx context.Context, subjectFGA string, components []capabilitygrant.ComponentRef) ([]capabilitygrant.CrossRule, error) {
+			return []capabilitygrant.CrossRule{
+				{Source: subjectFGA, Target: "component:gitlab", Effect: capabilitygrant.EffectDeny, Reason: "fga_deny"},
 			}, nil
 		},
 	}
@@ -218,7 +218,7 @@ func TestBuilder_CrossComponentRulesPropagate(t *testing.T) {
 
 func TestBuilder_FailsClosedOnFGAError(t *testing.T) {
 	fga := &fakeFGA{
-		resolve: func(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error) {
+		resolve: func(ctx context.Context, userID, tenantID string) ([]capabilitygrant.Capability, error) {
 			return nil, errors.New("fga down")
 		},
 	}
@@ -230,7 +230,9 @@ func TestBuilder_FailsClosedOnFGAError(t *testing.T) {
 }
 
 func TestBuilder_MissingTenantErrors(t *testing.T) {
-	fga := &fakeFGA{resolve: func(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error) { return nil, nil }}
+	fga := &fakeFGA{resolve: func(ctx context.Context, userID, tenantID string) ([]capabilitygrant.Capability, error) {
+		return nil, nil
+	}}
 	b, _, _ := newTestBuilder(t, fga, &fakeRegistry{})
 	_, err := b.Build(context.Background(), ManifestSubject{Type: SubjectTypeUser, ID: "alice"})
 	if err == nil {
@@ -239,7 +241,7 @@ func TestBuilder_MissingTenantErrors(t *testing.T) {
 }
 
 func TestBuilder_MissingAgentOwnerErrors(t *testing.T) {
-	b, _, _ := newTestBuilder(t, &fakeFGA{resolve: func(ctx context.Context, u, ten string) ([]agentauth.Capability, error) { return nil, nil }}, &fakeRegistry{})
+	b, _, _ := newTestBuilder(t, &fakeFGA{resolve: func(ctx context.Context, u, ten string) ([]capabilitygrant.Capability, error) { return nil, nil }}, &fakeRegistry{})
 	_, err := b.Build(context.Background(), ManifestSubject{Type: SubjectTypeAgentPrincipal, ID: "agent", TenantID: "t"})
 	if err == nil {
 		t.Fatalf("expected error when agent owner missing")
@@ -247,7 +249,7 @@ func TestBuilder_MissingAgentOwnerErrors(t *testing.T) {
 }
 
 func TestBuilder_VersionStampFromStore(t *testing.T) {
-	fga := &fakeFGA{resolve: func(ctx context.Context, u, ten string) ([]agentauth.Capability, error) { return nil, nil }}
+	fga := &fakeFGA{resolve: func(ctx context.Context, u, ten string) ([]capabilitygrant.Capability, error) { return nil, nil }}
 	b, _, vs := newTestBuilder(t, fga, &fakeRegistry{})
 	// Bump to 3 before Build.
 	for i := 0; i < 3; i++ {
@@ -265,11 +267,11 @@ func TestBuilder_VersionStampFromStore(t *testing.T) {
 }
 
 func TestBuilder_Build_LatencyUnder100msSmallScope(t *testing.T) {
-	fga := &fakeFGA{resolve: func(ctx context.Context, u, ten string) ([]agentauth.Capability, error) {
-		caps := make([]agentauth.Capability, 50)
+	fga := &fakeFGA{resolve: func(ctx context.Context, u, ten string) ([]capabilitygrant.Capability, error) {
+		caps := make([]capabilitygrant.Capability, 50)
 		for i := range caps {
 			name := "c" + itoa(i)
-			caps[i] = agentauth.Capability{Name: "execute:tool:" + name, ComponentRef: "component:" + name, Kind: "tool"}
+			caps[i] = capabilitygrant.Capability{Name: "execute:tool:" + name, ComponentRef: "component:" + name, Kind: "tool"}
 		}
 		return caps, nil
 	}}

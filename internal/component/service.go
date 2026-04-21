@@ -27,9 +27,9 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
@@ -130,7 +130,7 @@ const (
 //   - SubmitResult       - deliver work outcome back to the orchestrator
 //
 // All operations are tenant-scoped: the tenant is extracted from the context
-// via auth.TenantFromContext and forwarded to both the registry and queue so
+// via identity.TenantFromContext and forwarded to both the registry and queue so
 // that data from different tenants is never commingled.
 type ComponentServiceServer struct {
 	componentpb.UnimplementedComponentServiceServer
@@ -438,92 +438,14 @@ func (s *ComponentServiceServer) RegisterComponent(
 	ctx context.Context,
 	req *componentpb.RegisterComponentRequest,
 ) (*componentpb.RegisterComponentResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
 
-	// ---------------------------------------------------------------------------
-	// Capability-based authorization
-	//
-	// When an authenticated identity is present in the context, validate that the
-	// registering component's Kind and Name are permitted by the identity's
-	// allowed_kinds / allowed_names claims, and that the identity holds the
-	// "components:register" API-key capability. Identities without these claims
-	// (empty slice = unrestricted) pass through.
-	//
-	// When no identity is present we skip all checks to preserve backward
-	// compatibility for dev mode and in-cluster service accounts that do not
-	// carry a Gibson identity.
-	// ---------------------------------------------------------------------------
-	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
-		// Check allowed_kinds: if the claim is non-empty, the request Kind must
-		// appear in it. An empty (or absent) slice means all kinds are permitted.
-		if rawKinds, exists := identity.Claims["allowed_kinds"]; exists {
-			var allowedKinds []string
-			switch v := rawKinds.(type) {
-			case []string:
-				allowedKinds = v
-			case []interface{}:
-				for _, elem := range v {
-					if s, ok := elem.(string); ok {
-						allowedKinds = append(allowedKinds, s)
-					}
-				}
-			}
-			if len(allowedKinds) > 0 {
-				permitted := false
-				for _, k := range allowedKinds {
-					if k == req.Kind {
-						permitted = true
-						break
-					}
-				}
-				if !permitted {
-					s.logger.WarnContext(ctx, "component registration rejected: kind not in allowed_kinds",
-						slog.String("tenant", tenant),
-						slog.String("kind", req.Kind),
-						slog.String("subject", identity.Subject),
-					)
-					return nil, status.Errorf(codes.PermissionDenied, "component kind %q not permitted for this identity", req.Kind)
-				}
-			}
-		}
-
-		// Check allowed_names: if the claim is non-empty, the request Name must
-		// appear in it. An empty (or absent) slice means all names are permitted.
-		if rawNames, exists := identity.Claims["allowed_names"]; exists {
-			var allowedNames []string
-			switch v := rawNames.(type) {
-			case []string:
-				allowedNames = v
-			case []interface{}:
-				for _, elem := range v {
-					if s, ok := elem.(string); ok {
-						allowedNames = append(allowedNames, s)
-					}
-				}
-			}
-			if len(allowedNames) > 0 {
-				permitted := false
-				for _, n := range allowedNames {
-					if n == req.Name {
-						permitted = true
-						break
-					}
-				}
-				if !permitted {
-					s.logger.WarnContext(ctx, "component registration rejected: name not in allowed_names",
-						slog.String("tenant", tenant),
-						slog.String("name", req.Name),
-						slog.String("subject", identity.Subject),
-					)
-					return nil, status.Errorf(codes.PermissionDenied, "component name %q not permitted for this identity", req.Name)
-				}
-			}
-		}
-
-	}
+	// Authorization is enforced by the FGA interceptor at the Envoy layer.
+	// Component kind/name scope filtering (allowed_kinds/allowed_names) has
+	// moved to ext_authz; the daemon trusts the signed identity headers.
 
 	if req.Kind == "" {
 		return nil, status.Error(codes.InvalidArgument, "kind is required")
@@ -697,7 +619,7 @@ func (s *ComponentServiceServer) Heartbeat(
 	ctx context.Context,
 	req *componentpb.HeartbeatRequest,
 ) (*componentpb.HeartbeatResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -793,7 +715,7 @@ func (s *ComponentServiceServer) PollWork(
 	ctx context.Context,
 	req *componentpb.PollWorkRequest,
 ) (*componentpb.PollWorkResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -928,7 +850,7 @@ func (s *ComponentServiceServer) SubmitResult(
 	ctx context.Context,
 	req *componentpb.SubmitResultRequest,
 ) (*componentpb.SubmitResultResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1117,7 +1039,7 @@ func (s *ComponentServiceServer) Complete(
 	ctx context.Context,
 	req *componentpb.CompleteRequest,
 ) (*componentpb.CompleteResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1215,7 +1137,7 @@ func (s *ComponentServiceServer) CompleteStream(
 ) error {
 	ctx := stream.Context()
 
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1308,7 +1230,7 @@ func (s *ComponentServiceServer) CallTool(
 	ctx context.Context,
 	req *componentpb.CallToolRequest,
 ) (*componentpb.CallToolResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1409,7 +1331,7 @@ func (s *ComponentServiceServer) QueryPlugin(
 	ctx context.Context,
 	req *componentpb.QueryPluginRequest,
 ) (*componentpb.QueryPluginResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1542,7 +1464,7 @@ func (s *ComponentServiceServer) SubmitFinding(
 	ctx context.Context,
 	req *componentpb.SubmitFindingRequest,
 ) (*componentpb.SubmitFindingResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1648,7 +1570,7 @@ func (s *ComponentServiceServer) MemoryGet(
 	ctx context.Context,
 	req *componentpb.MemoryGetRequest,
 ) (*componentpb.MemoryGetResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1731,7 +1653,7 @@ func (s *ComponentServiceServer) MemorySet(
 	ctx context.Context,
 	req *componentpb.MemorySetRequest,
 ) (*componentpb.MemorySetResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1821,7 +1743,7 @@ func (s *ComponentServiceServer) MemorySearch(
 	ctx context.Context,
 	req *componentpb.MemorySearchRequest,
 ) (*componentpb.MemorySearchResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1964,7 +1886,7 @@ func (s *ComponentServiceServer) ListAvailablePlugins(
 	ctx context.Context,
 	_ *componentpb.ListAvailablePluginsRequest,
 ) (*componentpb.ListAvailablePluginsResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2012,7 +1934,7 @@ func (s *ComponentServiceServer) EnablePlugin(
 	ctx context.Context,
 	req *componentpb.EnablePluginRequest,
 ) (*componentpb.EnablePluginResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2064,7 +1986,7 @@ func (s *ComponentServiceServer) DisablePlugin(
 	ctx context.Context,
 	req *componentpb.DisablePluginRequest,
 ) (*componentpb.DisablePluginResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2109,7 +2031,7 @@ func (s *ComponentServiceServer) UpdatePluginConfig(
 	ctx context.Context,
 	req *componentpb.UpdatePluginConfigRequest,
 ) (*componentpb.UpdatePluginConfigResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2162,7 +2084,7 @@ func (s *ComponentServiceServer) GetPluginConfig(
 	ctx context.Context,
 	req *componentpb.GetPluginConfigRequest,
 ) (*componentpb.GetPluginConfigResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2225,7 +2147,7 @@ func (s *ComponentServiceServer) TestPluginConnection(
 	ctx context.Context,
 	req *componentpb.TestPluginConnectionRequest,
 ) (*componentpb.TestPluginConnectionResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2329,7 +2251,7 @@ func (s *ComponentServiceServer) ListTenantPlugins(
 	ctx context.Context,
 	_ *componentpb.ListTenantPluginsRequest,
 ) (*componentpb.ListTenantPluginsResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}

@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -79,7 +79,7 @@ func NewQuotaManager(store *state.TenantScopedStore, logger *slog.Logger) *Quota
 // tenant, which callers should interpret as "unlimited on all dimensions".
 func (q *QuotaManager) GetQuota(ctx context.Context, tenant string) (*TenantQuota, error) {
 	// Build a tenant-scoped context so TenantScopedStore uses the right prefix.
-	tctx := auth.ContextWithTenant(ctx, tenant)
+	tctx := identity.ContextWithTenant(ctx, tenant)
 
 	raw, err := q.store.Get(tctx, quotaConfigKey)
 	if err != nil {
@@ -112,7 +112,7 @@ func (q *QuotaManager) SetQuota(ctx context.Context, tenant string, quota *Tenan
 		return fmt.Errorf("marshal quota for tenant %s: %w", tenant, err)
 	}
 
-	tctx := auth.ContextWithTenant(ctx, tenant)
+	tctx := identity.ContextWithTenant(ctx, tenant)
 	if err := q.store.Set(tctx, quotaConfigKey, string(data), 0); err != nil {
 		return fmt.Errorf("set quota config for tenant %s: %w", tenant, err)
 	}
@@ -137,7 +137,7 @@ func (q *QuotaManager) SetQuota(ctx context.Context, tenant string, quota *Tenan
 //
 // Returns codes.ResourceExhausted when the limit is met or exceeded.
 func (q *QuotaManager) CheckMissionQuota(ctx context.Context) error {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 
 	quota, err := q.GetQuota(ctx, tenant)
 	if err != nil || quota == nil || quota.MaxMissions == 0 {
@@ -162,7 +162,7 @@ func (q *QuotaManager) CheckMissionQuota(ctx context.Context) error {
 // Returns nil when no quota is set, MaxAgents is 0, or the current count is
 // below the limit. Returns codes.ResourceExhausted otherwise.
 func (q *QuotaManager) CheckAgentQuota(ctx context.Context) error {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 
 	quota, err := q.GetQuota(ctx, tenant)
 	if err != nil || quota == nil || quota.MaxAgents == 0 {
@@ -188,7 +188,7 @@ func (q *QuotaManager) CheckAgentQuota(ctx context.Context) error {
 // to the current usage would not exceed the limit. Returns codes.ResourceExhausted
 // otherwise.
 func (q *QuotaManager) CheckMemoryQuota(ctx context.Context, additionalMB int64) error {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 
 	quota, err := q.GetQuota(ctx, tenant)
 	if err != nil || quota == nil || quota.MaxMemoryMB == 0 {

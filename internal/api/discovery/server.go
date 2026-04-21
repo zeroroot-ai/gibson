@@ -24,9 +24,9 @@ import (
 
 	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/identity"
 )
 
 // Server implements discoverypb.DiscoveryServiceServer.
@@ -53,17 +53,17 @@ func NewServer(az authz.Authorizer, reg component.ComponentRegistry, logger *slo
 
 // callerUserRef extracts the FGA user reference for the authenticated caller.
 // Empty on unauthenticated contexts (which should not reach these handlers
-// since the interceptor denies non-registry RPCs before dispatch).
+// since the interceptor denies non-authenticated RPCs before dispatch).
 func callerUserRef(ctx context.Context) string {
-	ident, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok || ident == nil || ident.Subject == "" {
+	id, err := identity.IdentityFromContext(ctx)
+	if err != nil || id.Subject == "" {
 		return ""
 	}
-	return "user:" + ident.Subject
+	return "user:" + id.Subject
 }
 
 func callerTenant(ctx context.Context) string {
-	return auth.TenantFromContext(ctx)
+	return identity.TenantFromContext(ctx)
 }
 
 // WhoAmI reports the authenticated caller's identity, their active tenant,
@@ -71,12 +71,12 @@ func callerTenant(ctx context.Context) string {
 // clients (MCP, dashboard, future CLI) can introspect without reimplementing
 // the joins.
 func (s *Server) WhoAmI(ctx context.Context, _ *discoverypb.WhoAmIRequest) (*discoverypb.WhoAmIResponse, error) {
-	ident, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok || ident == nil || ident.Subject == "" {
+	id, err := identity.IdentityFromContext(ctx)
+	if err != nil || id.Subject == "" {
 		return nil, status.Error(codes.Unauthenticated, "no identity in context")
 	}
 
-	userRef := "user:" + ident.Subject
+	userRef := "user:" + id.Subject
 	activeTenant := callerTenant(ctx)
 
 	// Tenant membership: ask FGA which tenants have this user as `member`.
@@ -105,13 +105,13 @@ func (s *Server) WhoAmI(ctx context.Context, _ *discoverypb.WhoAmIRequest) (*dis
 	}
 
 	resp := &discoverypb.WhoAmIResponse{
-		UserId:         ident.Subject,
+		UserId:         id.Subject,
 		ActiveTenant:   activeTenant,
 		Tenants:        prefixAll("tenant", tenantIDs),
 		Teams:          prefixAll("team", teamIDs),
 		Relations:      relations,
-		IsAgentAuth:    ident.Issuer == "agent-auth",
-		ComponentScope: auth.ComponentScopeFromContext(ctx),
+		IsAgentAuth:    id.Issuer == "capability-grant",
+		ComponentScope: identity.ComponentScopeFromContext(ctx),
 	}
 	return resp, nil
 }

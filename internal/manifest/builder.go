@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agentauth"
+	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -93,8 +93,8 @@ func (b *manifestBuilder) Build(ctx context.Context, subject ManifestSubject) (*
 
 	// --- (2) + agent_principal intersection -------------------------------
 	var (
-		caps      []agentauth.Capability
-		ownerCaps []agentauth.Capability
+		caps      []capabilitygrant.Capability
+		ownerCaps []capabilitygrant.Capability
 	)
 	switch subject.Type {
 	case SubjectTypeUser:
@@ -252,7 +252,7 @@ func subjectFGARef(s ManifestSubject) string { return s.FGARef() }
 // produced by FGABridge.ResolveAgentPrincipalIntersection, rekeying the
 // subject field to the agent_principal so ComponentCapability.permissions
 // reflect the agent's reachable surface.
-func projectAgentCapabilities(agentSubject string, intersection []agentauth.ComponentRef, owner []agentauth.Capability) []agentauth.Capability {
+func projectAgentCapabilities(agentSubject string, intersection []capabilitygrant.ComponentRef, owner []capabilitygrant.Capability) []capabilitygrant.Capability {
 	if len(intersection) == 0 || len(owner) == 0 {
 		return nil
 	}
@@ -260,7 +260,7 @@ func projectAgentCapabilities(agentSubject string, intersection []agentauth.Comp
 	for _, r := range intersection {
 		allowed[r.FGARef()] = struct{}{}
 	}
-	var out []agentauth.Capability
+	var out []capabilitygrant.Capability
 	for _, c := range owner {
 		if _, ok := allowed[c.ComponentRef]; !ok {
 			continue
@@ -273,7 +273,7 @@ func projectAgentCapabilities(agentSubject string, intersection []agentauth.Comp
 
 // indexPermissions returns name → sorted permission list for the
 // "{relation}" prefixes FGABridge emits in Capability.Name.
-func indexPermissions(caps []agentauth.Capability) map[string][]string {
+func indexPermissions(caps []capabilitygrant.Capability) map[string][]string {
 	idx := make(map[string][]string)
 	for _, c := range caps {
 		// c.Name format: "verb:kind:name"
@@ -312,7 +312,7 @@ func appendUnique(xs []string, v string) []string {
 // and emits three kind-sorted slices of ComponentCapability plus the
 // flat scope list used by cross-component rule resolution.
 // Components with no permissions in the index are dropped.
-func projectComponents(infos []component.ComponentInfo, perms map[string][]string) (agents, tools, plugins []*manifestpb.ComponentCapability, scope []agentauth.ComponentRef) {
+func projectComponents(infos []component.ComponentInfo, perms map[string][]string) (agents, tools, plugins []*manifestpb.ComponentCapability, scope []capabilitygrant.ComponentRef) {
 	// Dedupe by (kind, name) — the registry may return multiple instances
 	// of the same component.
 	type key struct{ kind, name string }
@@ -342,7 +342,7 @@ func projectComponents(infos []component.ComponentInfo, perms map[string][]strin
 				InstanceCount: 1,
 			},
 		}
-		scope = append(scope, agentauth.ComponentRef{Name: info.Name, Kind: info.Kind})
+		scope = append(scope, capabilitygrant.ComponentRef{Name: info.Name, Kind: info.Kind})
 		switch info.Kind {
 		case "agent":
 			agents = append(agents, cc)
@@ -355,7 +355,7 @@ func projectComponents(infos []component.ComponentInfo, perms map[string][]strin
 	return agents, tools, plugins, scope
 }
 
-func convertRules(rules []agentauth.CrossRule) []*manifestpb.CrossComponentRule {
+func convertRules(rules []capabilitygrant.CrossRule) []*manifestpb.CrossComponentRule {
 	if len(rules) == 0 {
 		return nil
 	}
@@ -363,9 +363,9 @@ func convertRules(rules []agentauth.CrossRule) []*manifestpb.CrossComponentRule 
 	for _, r := range rules {
 		var effect manifestpb.CrossComponentRule_Effect
 		switch r.Effect {
-		case agentauth.EffectAllow:
+		case capabilitygrant.EffectAllow:
 			effect = manifestpb.CrossComponentRule_EFFECT_ALLOW
-		case agentauth.EffectDeny:
+		case capabilitygrant.EffectDeny:
 			effect = manifestpb.CrossComponentRule_EFFECT_DENY
 		default:
 			effect = manifestpb.CrossComponentRule_EFFECT_UNSPECIFIED

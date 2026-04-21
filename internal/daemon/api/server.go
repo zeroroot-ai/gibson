@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -16,11 +15,12 @@ import (
 	grpcmeta "google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/agentauth"
+	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/manifest"
@@ -28,7 +28,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
 	"github.com/zero-day-ai/gibson/internal/onboarding"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/gibson/internal/version"
+	"github.com/zero-day-ai/gibson/pkg/version"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
@@ -141,10 +141,10 @@ type DaemonServer struct {
 	// Added by prod-feature-wiring spec.
 	conversationStore conversationStoreIface
 
-	// agentAuthService handles the Agent Auth Protocol gRPC RPCs.
+	// capabilityGrantService handles the Agent Auth Protocol gRPC RPCs.
 	// May be nil; when nil, Agent Auth RPCs return codes.Unavailable.
 	// Added by agent-auth-fga-integration spec.
-	agentAuthService *agentauth.AgentAuthService
+	capabilityGrantService *capabilitygrant.CapabilityGrantService
 
 	// manifestBuilder builds signed capability manifests for GetCapabilityManifest.
 	// May be nil; when nil, GetCapabilityManifest returns codes.Unavailable.
@@ -681,8 +681,8 @@ func (s *DaemonServer) WithQuotaManager(qm MissionQuotaChecker) *DaemonServer {
 // WithAPIKeyStore wires the API key authenticator so that CreateAPIKey,
 // ListAPIKeys, and RevokeAPIKey RPCs operate against Redis-backed storage.
 // Call this immediately after NewDaemonServer and before registering the server.
-func (s *DaemonServer) WithAPIKeyStore(a *auth.APIKeyAuthenticator) *DaemonServer {
-	s.apiKeyStore = &apiKeyStoreAdapter{auth: a}
+func (s *DaemonServer) WithAPIKeyStore(a *apikeys.Store) *DaemonServer {
+	s.apiKeyStore = &apiKeyStoreAdapter{store: a}
 	return s
 }
 
@@ -751,11 +751,11 @@ func (s *DaemonServer) WithConversationStore(store conversationStoreIface) *Daem
 	return s
 }
 
-// WithAgentAuthService wires the AgentAuthService so that the Agent Auth
+// WithCapabilityGrantService wires the CapabilityGrantService so that the Agent Auth
 // Protocol RPCs are backed by Postgres storage and FGA authorization.
 // Added by agent-auth-fga-integration spec.
-func (s *DaemonServer) WithAgentAuthService(svc *agentauth.AgentAuthService) *DaemonServer {
-	s.agentAuthService = svc
+func (s *DaemonServer) WithCapabilityGrantService(svc *capabilitygrant.CapabilityGrantService) *DaemonServer {
+	s.capabilityGrantService = svc
 	return s
 }
 
@@ -784,41 +784,42 @@ func (s *DaemonServer) WithProviderConfigStore(store providerConfigStoreIface) *
 }
 
 // ---------------------------------------------------------------------------
-// apiKeyStoreAdapter bridges *auth.APIKeyAuthenticator to the apiKeyStore
-// interface expected by DaemonServer.  It translates between the auth
-// package's APIKeyRecord type and the server-local APIKeyRecord type, and
-// maps the slightly different method signatures.
+// apiKeyStoreAdapter bridges *apikeys.Store to the apiKeyStore interface
+// expected by DaemonServer, translating between apikeys.Record and the
+// server-local APIKeyRecord type.
 // ---------------------------------------------------------------------------
 
 type apiKeyStoreAdapter struct {
-	auth *auth.APIKeyAuthenticator
+	store *apikeys.Store
 }
 
-// Create generates a new API key via the auth package and returns the stable
-// key ID plus the raw (unhashed) key material.  The raw key is shown once
-// and never stored.
+// Create generates a new API key and returns the stable key ID plus the raw
+// (unhashed) key material. The raw key is shown once and never stored.
 func (a *apiKeyStoreAdapter) Create(ctx context.Context, tenantID string, allowedKinds, allowedNames, capabilities []string, name, createdBy string) (keyID, rawKey string, err error) {
-	raw, record, err := a.auth.CreateKey(ctx, tenantID, allowedKinds, allowedNames, capabilities, name, createdBy)
+	raw, record, err := a.store.CreateKey(ctx, tenantID, allowedKinds, allowedNames, capabilities, name, createdBy)
 	if err != nil {
 		return "", "", err
 	}
 	return record.KeyID, raw, nil
 }
 
-// List retrieves all API key records for a tenant, converting auth.APIKeyRecord
-// to the server-local APIKeyRecord type.  Key hashes are never returned.
+// List retrieves all API key records for a tenant. Key hashes are never returned.
 func (a *apiKeyStoreAdapter) List(ctx context.Context, tenantID string) ([]APIKeyRecord, error) {
-	authRecords, err := a.auth.ListKeys(ctx, tenantID)
+	recs, err := a.store.ListKeys(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	records := make([]APIKeyRecord, 0, len(authRecords))
-	for _, r := range authRecords {
+	records := make([]APIKeyRecord, 0, len(recs))
+	for _, r := range recs {
+		lastUsed := ""
+		if r.LastUsedAt != nil {
+			lastUsed = r.LastUsedAt.Format(time.RFC3339)
+		}
 		records = append(records, APIKeyRecord{
 			KeyID:        r.KeyID,
 			TenantID:     r.TenantID,
 			CreatedAt:    r.CreatedAt.Format(time.RFC3339),
-			LastUsedAt:   r.LastUsedAt.Format(time.RFC3339),
+			LastUsedAt:   lastUsed,
 			AllowedKinds: r.AllowedKinds,
 			AllowedNames: r.AllowedNames,
 			Name:         r.Name,
@@ -829,10 +830,9 @@ func (a *apiKeyStoreAdapter) List(ctx context.Context, tenantID string) ([]APIKe
 	return records, nil
 }
 
-// Revoke marks the given key as revoked in Redis. The revoked record is
-// retained for audit purposes.
+// Revoke marks the given key as revoked. The record is retained for audit.
 func (a *apiKeyStoreAdapter) Revoke(ctx context.Context, keyID string) error {
-	return a.auth.RevokeKey(ctx, keyID)
+	return a.store.RevokeKey(ctx, keyID)
 }
 
 // containsString reports whether needle is present in the haystack slice.
@@ -1022,7 +1022,7 @@ func (s *DaemonServer) StopMission(ctx context.Context, req *daemonpb.StopMissio
 // only missions belonging to that tenant are returned. When authentication is
 // disabled (empty tenant) all missions are returned for backward compatibility.
 func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissionsRequest) (*daemonpb.ListMissionsResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 
 	s.logger.Debug("mission list request received",
 		"active_only", req.ActiveOnly,
@@ -1076,14 +1076,12 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissi
 	}, nil
 }
 
-// ListAgents returns all registered agents from the etcd registry.
+// ListAgents returns all registered agents from the component registry.
 //
-// Capability-based filtering is applied when an authenticated identity is present
-// in the context. If the identity carries non-empty allowed_kinds or allowed_names
-// claims (scoped API keys), only agents matching those constraints are returned.
-// Identities with the wildcard capability "*" always receive the full list.
-// When no identity is present (dev mode / unauthenticated path), no filtering is
-// applied for backward compatibility.
+// Authorization is enforced by the FGA interceptor at the Envoy layer.
+// The daemon trusts signed identity headers and returns the full agent list
+// for the caller's tenant; fine-grained capability filtering has moved to
+// ext_authz.
 func (s *DaemonServer) ListAgents(ctx context.Context, req *daemonpb.ListAgentsRequest) (*daemonpb.ListAgentsResponse, error) {
 	s.logger.Debug("agent list request received", "kind", req.Kind)
 
@@ -1091,43 +1089,6 @@ func (s *DaemonServer) ListAgents(ctx context.Context, req *daemonpb.ListAgentsR
 	if err != nil {
 		s.logger.Error("failed to list agents", "error", err)
 		return nil, status_grpc.Errorf(codes.Internal, "failed to list agents: %v", err)
-	}
-
-	// Apply capability-based scope filtering when an identity is present.
-	// Capabilities are set by APIKeyAuthenticator for scoped API keys; the
-	// wildcard "*" grants unrestricted access within the caller's tenant.
-	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok && !slices.Contains(identity.Capabilities, "*") {
-		// Extract allowed_kinds and allowed_names from the identity claims.
-		// These are set by APIKeyAuthenticator for scoped API keys.
-		var allowedKinds, allowedNames []string
-		if v, exists := identity.GetClaim("allowed_kinds"); exists {
-			if kinds, ok := v.([]string); ok {
-				allowedKinds = kinds
-			}
-		}
-		if v, exists := identity.GetClaim("allowed_names"); exists {
-			if names, ok := v.([]string); ok {
-				allowedNames = names
-			}
-		}
-
-		// Only filter when at least one scope constraint is present.
-		if len(allowedKinds) > 0 || len(allowedNames) > 0 {
-			filtered := agents[:0]
-			for _, a := range agents {
-				kindAllowed := len(allowedKinds) == 0 || containsString(allowedKinds, a.Kind)
-				nameAllowed := len(allowedNames) == 0 || containsString(allowedNames, a.Name)
-				if kindAllowed && nameAllowed {
-					filtered = append(filtered, a)
-				}
-			}
-			agents = filtered
-			s.logger.Debug("agent list filtered by identity scope",
-				"allowed_kinds", allowedKinds,
-				"allowed_names", allowedNames,
-				"result_count", len(agents),
-			)
-		}
 	}
 
 	// Convert to proto messages
@@ -1177,27 +1138,13 @@ func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *daemonpb.GetAgen
 	}, nil
 }
 
-// ListTools returns all registered tools from the etcd registry.
+// ListTools returns all registered tools from the component registry.
 //
-// Capability-based filtering is applied when an authenticated identity is present.
-// The identity must hold the "tools:execute" capability (or the wildcard "*") to
-// receive any tools. If neither capability is present, an empty list is returned.
-// When no identity is present (dev mode / unauthenticated path), no filtering is
-// applied for backward compatibility.
+// Authorization is enforced by the FGA interceptor at the Envoy layer.
+// Capability-based filtering has moved to ext_authz; the daemon returns
+// the full tool list for the caller's tenant.
 func (s *DaemonServer) ListTools(ctx context.Context, req *daemonpb.ListToolsRequest) (*daemonpb.ListToolsResponse, error) {
 	s.logger.Debug("tool list request received")
-
-	// Gate the entire tool list on the tools:execute capability when an identity
-	// is present. Capabilities are set by APIKeyAuthenticator for scoped API
-	// keys; "*" grants unrestricted access.
-	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok {
-		if !slices.Contains(identity.Capabilities, "tools:execute") && !slices.Contains(identity.Capabilities, "*") {
-			s.logger.Debug("tool list denied: identity lacks tools:execute capability",
-				"subject", identity.Subject,
-			)
-			return &daemonpb.ListToolsResponse{Tools: []*daemonpb.ToolInfo{}}, nil
-		}
-	}
 
 	tools, err := s.daemon.ListTools(ctx)
 	if err != nil {
@@ -1236,14 +1183,11 @@ func (s *DaemonServer) ListTools(ctx context.Context, req *daemonpb.ListToolsReq
 	}, nil
 }
 
-// ListPlugins returns all registered plugins from the etcd registry.
+// ListPlugins returns all registered plugins from the component registry.
 //
-// Capability-based filtering is applied when an authenticated identity is present.
-// For each plugin, the identity must hold either the "plugin:{name}:read" capability
-// or the wildcard "*" capability to see that plugin in the response. Plugins the
-// identity is not authorised to see are silently omitted.
-// When no identity is present (dev mode / unauthenticated path), no filtering is
-// applied for backward compatibility.
+// Authorization is enforced by the FGA interceptor at the Envoy layer.
+// Capability-based filtering has moved to ext_authz; the daemon returns
+// the full plugin list for the caller's tenant.
 func (s *DaemonServer) ListPlugins(ctx context.Context, req *daemonpb.ListPluginsRequest) (*daemonpb.ListPluginsResponse, error) {
 	s.logger.Debug("plugin list request received")
 
@@ -1251,22 +1195,6 @@ func (s *DaemonServer) ListPlugins(ctx context.Context, req *daemonpb.ListPlugin
 	if err != nil {
 		s.logger.Error("failed to list plugins", "error", err)
 		return nil, status_grpc.Errorf(codes.Internal, "failed to list plugins: %v", err)
-	}
-
-	// When an identity is present and does not hold the wildcard capability,
-	// filter the plugin list to only those the identity is authorised to read.
-	if identity, ok := auth.GibsonIdentityFromContext(ctx); ok && !slices.Contains(identity.Capabilities, "*") {
-		filtered := plugins[:0]
-		for _, p := range plugins {
-			if slices.Contains(identity.Capabilities, "plugin:"+p.Name+":read") {
-				filtered = append(filtered, p)
-			}
-		}
-		plugins = filtered
-		s.logger.Debug("plugin list filtered by identity capabilities",
-			"subject", identity.Subject,
-			"result_count", len(plugins),
-		)
 	}
 
 	// Convert to proto messages
@@ -2357,7 +2285,7 @@ func (s *DaemonServer) RefreshToolCatalog(ctx context.Context, req *RefreshToolC
 //
 // Returns codes.Unimplemented if the impersonation issuer is not configured.
 func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error) {
-	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
+	// Authorization enforced by the FGA interceptor at the Envoy layer.
 	// This RPC requires the tenants:impersonate permission (platform-operator only).
 
 	if req.TenantId == "" {
@@ -2365,22 +2293,20 @@ func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTe
 	}
 
 	// Extract caller identity for the audit trail.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
+	callerID, err := identity.IdentityFromContext(ctx)
+	if err != nil {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "not authenticated")
 	}
 
 	s.logger.Info("tenant impersonation started",
-		"admin_subject", identity.Subject,
-		"admin_email", identity.Email,
+		"admin_subject", callerID.Subject,
 		"target_tenant", req.TenantId,
 	)
 
 	// Emit audit event for every impersonation attempt regardless of outcome.
 	if s.auditLogger != nil {
 		_ = s.auditLogger.Log(ctx, "tenants:impersonate", "tenant", req.TenantId, map[string]any{
-			"admin_subject": identity.Subject,
-			"admin_email":   identity.Email,
+			"admin_subject": callerID.Subject,
 		})
 	}
 
@@ -2472,11 +2398,11 @@ func (s *DaemonServer) UpdateOnboardingState(ctx context.Context, req *UpdateOnb
 // "platform-operator" for cross-tenant access.
 // Returns codes.Unimplemented until the API key service has been wired.
 func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
-	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
-	// (non-cross-tenant callers may only target their own tenant) is
-	// verified here as parameter validation.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
+	// Authorization enforced by the FGA interceptor at the Envoy layer.
+	// Tenant isolation (non-cross-tenant callers may only target their own
+	// tenant) is verified here as parameter validation.
+	callerID, err := identity.IdentityFromContext(ctx)
+	if err != nil {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
 
@@ -2485,7 +2411,8 @@ func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReques
 	}
 
 	// Check caller's tenant matches target tenant (unless cross-tenant capable).
-	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
+	// IsCrossTenantCaller identifies platform-operator callers by SPIFFE issuer.
+	if !identity.IsCrossTenantCaller(callerID) && identity.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -2494,14 +2421,8 @@ func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReques
 		return nil, status_grpc.Errorf(codes.Unimplemented, "api key service not configured")
 	}
 
-	// Extract the caller's email for the audit trail. Fall back to the subject
-	// when no email claim is present (e.g. service-account tokens).
-	createdBy := ""
-	if identity.Email != "" {
-		createdBy = identity.Email
-	} else {
-		createdBy = identity.Subject
-	}
+	// Use the caller subject as the "created_by" audit field.
+	createdBy := callerID.Subject
 
 	keyID, rawKey, err := s.apiKeyStore.Create(ctx, req.TenantId, req.AllowedKinds, req.AllowedNames, req.Capabilities, req.Name, createdBy)
 	if err != nil {
@@ -2524,14 +2445,14 @@ func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest)
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
 	}
 
-	// Authorization enforced by the RPCAuthzInterceptor. Tenant isolation
-	// (non-cross-tenant callers may only target their own tenant) is
-	// verified here as parameter validation.
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok {
+	// Authorization enforced by the FGA interceptor at the Envoy layer.
+	// Tenant isolation (non-cross-tenant callers may only target their own
+	// tenant) is verified here as parameter validation.
+	callerID, err := identity.IdentityFromContext(ctx)
+	if err != nil {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !auth.IsCrossTenantCaller(identity.Roles) && auth.TenantFromContext(ctx) != req.TenantId {
+	if !identity.IsCrossTenantCaller(callerID) && identity.TenantFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -2570,7 +2491,7 @@ func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest)
 // "platform-operator" for cross-tenant access.
 // Returns codes.Unimplemented until the API key service has been wired.
 func (s *DaemonServer) RevokeAPIKey(ctx context.Context, req *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error) {
-	// Authorization enforced by auth.RPCAuthzInterceptor via permissions.yaml.
+	// Authorization enforced by the FGA interceptor at the Envoy layer.
 
 	if req.KeyId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "key_id is required")
@@ -2608,17 +2529,18 @@ func (s *DaemonServer) RevokeAPIKey(ctx context.Context, req *RevokeAPIKeyReques
 func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMyPermissionsRequest) (*daemonpb.GetMyPermissionsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = auth.TenantFromContext(ctx)
+		tenantID = identity.TenantFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required (or call with a tenant-scoped JWT)")
 	}
 
 	// Resolve the caller's user ID from the auth context.
-	userID := ""
-	if id, ok := auth.GibsonIdentityFromContext(ctx); ok {
-		userID = id.Subject
+	callerID, err := identity.IdentityFromContext(ctx)
+	if err != nil {
+		return nil, status_grpc.Error(codes.Unauthenticated, "user identity not found in context")
 	}
+	userID := callerID.Subject
 	if userID == "" {
 		return nil, status_grpc.Error(codes.Unauthenticated, "user identity not found in context")
 	}

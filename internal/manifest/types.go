@@ -113,7 +113,7 @@ type SigningKeyJWK struct {
 
 // ComponentRef is a stable FGA-addressable reference to a registered
 // component. It mirrors the "component:<name>" object format used
-// throughout the FGA model. Prefer agentauth.ComponentRef at the
+// throughout the FGA model. Prefer capabilitygrant.ComponentRef at the
 // FGABridge boundary; this local alias exists to keep the Builder's
 // public types anchored in the manifest package.
 type ComponentRef struct {

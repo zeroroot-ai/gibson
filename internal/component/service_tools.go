@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
@@ -27,7 +27,7 @@ func (s *ComponentServiceServer) CallToolStream(
 	stream componentpb.ComponentService_CallToolStreamServer,
 ) error {
 	ctx := stream.Context()
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -68,7 +68,7 @@ func (s *ComponentServiceServer) QueueToolWork(
 	ctx context.Context,
 	req *componentpb.QueueToolWorkRequest,
 ) (*componentpb.QueueToolWorkResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -125,7 +125,7 @@ func (s *ComponentServiceServer) ToolResults(
 	stream componentpb.ComponentService_ToolResultsServer,
 ) error {
 	ctx := stream.Context()
-	_ = auth.TenantFromContext(ctx)
+	_ = identity.TenantFromContext(ctx)
 
 	s.toolJobsMu.Lock()
 	job, ok := s.toolJobs[req.GetJobId()]

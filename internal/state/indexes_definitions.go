@@ -40,11 +40,23 @@ func AllIndexDefinitions() []*IndexDefinition {
 //
 //	// Find missions sorted by creation date
 //	FT.SEARCH gibson:idx:missions "*" SORTBY created_at DESC
+//
+// MissionIndexSchemaVersion is the current schema version for gibson:idx:missions.
+// Increment this constant whenever the MissionIndex schema changes to trigger a
+// one-time online re-index on next daemon startup.
+//
+// Version history:
+//
+//	0 (implicit) → original schema, no tenant_id field
+//	2             → added tenant_id AS tenant_id TAG SORTABLE (Phase 1)
+const MissionIndexSchemaVersion = 2
+
 func MissionIndex() *IndexDefinition {
 	return &IndexDefinition{
-		Name:   "gibson:idx:missions",
-		Prefix: "gibson:mission:",
-		OnJSON: true,
+		Name:          "gibson:idx:missions",
+		Prefix:        "gibson:mission:",
+		OnJSON:        true,
+		SchemaVersion: MissionIndexSchemaVersion,
 		Schema: []FieldDefinition{
 			{
 				Path:   "$.name",
@@ -89,6 +101,15 @@ func MissionIndex() *IndexDefinition {
 				Alias: "findings_count",
 				Type:  FieldTypeNumeric,
 			},
+			// tenant_id TAG SORTABLE — added in schema version 2 (Phase 1 tenant-isolation prep).
+			// Phase 2 adds the caller-side @tenant_id:{...} filter; Phase 1 only ensures the
+			// field is present in the index so the filter is immediately available.
+			{
+				Path:     "$.tenant_id",
+				Alias:    "tenant_id",
+				Type:     FieldTypeTag,
+				Sortable: true,
+			},
 		},
 	}
 }
@@ -121,11 +142,23 @@ func MissionIndex() *IndexDefinition {
 //
 //	// Find findings sorted by risk score
 //	FT.SEARCH gibson:idx:findings "*" SORTBY risk_score DESC
+//
+// FindingIndexSchemaVersion is the current schema version for gibson:idx:findings.
+// Increment this constant whenever the FindingIndex schema changes to trigger a
+// one-time online re-index on next daemon startup.
+//
+// Version history:
+//
+//	0 (implicit) → original schema, tenant_id only in filter code (not in index schema)
+//	2             → added tenant_id AS tenant_id TAG SORTABLE (Phase 1)
+const FindingIndexSchemaVersion = 2
+
 func FindingIndex() *IndexDefinition {
 	return &IndexDefinition{
-		Name:   "gibson:idx:findings",
-		Prefix: "gibson:finding:",
-		OnJSON: true,
+		Name:          "gibson:idx:findings",
+		Prefix:        "gibson:finding:",
+		OnJSON:        true,
+		SchemaVersion: FindingIndexSchemaVersion,
 		Schema: []FieldDefinition{
 			{
 				Path:   "$.title",
@@ -190,6 +223,15 @@ func FindingIndex() *IndexDefinition {
 				Path:     "$.created_at",
 				Alias:    "created_at",
 				Type:     FieldTypeNumeric,
+				Sortable: true,
+			},
+			// tenant_id TAG SORTABLE — added in schema version 2 (Phase 1 tenant-isolation prep).
+			// Phase 2 adds the caller-side @tenant_id:{...} filter; Phase 1 only ensures the
+			// field is present in the index so the filter is immediately available.
+			{
+				Path:     "$.tenant_id",
+				Alias:    "tenant_id",
+				Type:     FieldTypeTag,
 				Sortable: true,
 			},
 		},

@@ -19,8 +19,9 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/identity"
 )
 
 // ---------------------------------------------------------------------------
@@ -60,8 +61,8 @@ func newComponentTestEnv(t *testing.T) *componentTestEnv {
 }
 
 // newAuthDB starts a Postgres container, runs migrations, and returns an
-// APIKeyAuthenticator backed by it. The container is terminated via cleanup.
-func newAuthDB(t *testing.T) (*auth.APIKeyAuthenticator, func()) {
+// apikeys.Store backed by it. The container is terminated via cleanup.
+func newAuthDB(t *testing.T) (*apikeys.Store, func()) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -150,7 +151,7 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id);
 	_, ddlErr := db.ExecContext(ctx, apiKeysDDL)
 	require.NoError(t, ddlErr, "failed to create api_keys table")
 
-	a, authErr := auth.NewAPIKeyAuthenticator(db)
+	a, authErr := apikeys.New(db)
 	require.NoError(t, authErr)
 	require.NotNil(t, a)
 
@@ -374,13 +375,16 @@ func TestComponentLifecycle_MultiTenantIsolation(t *testing.T) {
 // Test 3: API Key → Tenant Context → Component Registration Flow
 // ---------------------------------------------------------------------------
 
-// TestComponentLifecycle_APIKeyToTenantFlow verifies the full authentication
-// and authorisation plumbing: an API key is minted for a tenant, the key is
-// authenticated, the resulting Identity is used to inject tenant context via
-// ContextWithTenant, and the registry enforces that scoping.
+// TestComponentLifecycle_APIKeyToTenantFlow verifies the API key management
+// and tenant context plumbing: an API key is minted for a tenant via
+// apikeys.Store, the tenant from the record is injected into context via
+// identity.ContextWithTenant, and the registry enforces that scoping.
+//
+// Note: API key validation (Authenticate) has moved to the ext_authz sidecar.
+// The daemon only manages key records; it does not authenticate them at runtime.
 func TestComponentLifecycle_APIKeyToTenantFlow(t *testing.T) {
-	// API keys are now Postgres-backed; spin up a container for the authenticator.
-	authenticator, authCleanup := newAuthDB(t)
+	// API keys are Postgres-backed; spin up a container for the store.
+	store, authCleanup := newAuthDB(t)
 	defer authCleanup()
 
 	// The component registry continues to use Redis.
@@ -399,43 +403,40 @@ func TestComponentLifecycle_APIKeyToTenantFlow(t *testing.T) {
 	)
 
 	// Step 1: Create an API key for the target tenant.
-	rawKey, record, err := authenticator.CreateKey(ctx, targetTenant, nil, nil, nil, "", "")
+	rawKey, record, err := store.CreateKey(ctx, targetTenant, nil, nil, nil, "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, rawKey)
 	require.NotNil(t, record)
 	assert.Equal(t, targetTenant, record.TenantID)
 
-	// Step 2: Authenticate with the key.
-	identity, err := authenticator.Authenticate(ctx, rawKey)
-	require.NoError(t, err)
-	require.NotNil(t, identity)
+	// Step 2: The tenant is available directly from the record (validation is
+	// performed by ext_authz; the daemon trusts the signed identity headers it
+	// receives after ext_authz has authenticated the API key).
+	tenantFromRecord := record.TenantID
+	assert.Equal(t, targetTenant, tenantFromRecord,
+		"Record must carry the tenant_id matching the key's tenant")
 
-	// Step 3: Verify the resulting Identity carries the expected tenant claim.
-	tenantFromClaim := auth.ExtractTenantFromIdentity(identity, "tenant_id")
-	assert.Equal(t, targetTenant, tenantFromClaim,
-		"Identity must carry the tenant_id claim matching the key's tenant")
-
-	// Step 4: Inject the tenant into the context using ContextWithTenant.
-	tenantCtx := auth.ContextWithTenant(ctx, tenantFromClaim)
-	assert.Equal(t, targetTenant, auth.TenantFromContext(tenantCtx),
+	// Step 3: Inject the tenant into the context using identity.ContextWithTenant.
+	tenantCtx := identity.ContextWithTenant(ctx, tenantFromRecord)
+	assert.Equal(t, targetTenant, identity.TenantFromContext(tenantCtx),
 		"TenantFromContext must return the tenant injected by ContextWithTenant")
 
-	// Step 5: Register a component using the tenant extracted from the context.
-	tenantID := auth.TenantFromContext(tenantCtx)
+	// Step 4: Register a component using the tenant extracted from the context.
+	tenantID := identity.TenantFromContext(tenantCtx)
 	instanceID, err := reg.Register(tenantCtx, tenantID, kind, name, component.ComponentInfo{
 		Version: "3.0.0",
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, instanceID)
 
-	// Step 6: Verify the component is discoverable for the correct tenant.
+	// Step 5: Verify the component is discoverable for the correct tenant.
 	results, err := reg.Discover(tenantCtx, targetTenant, kind, name)
 	require.NoError(t, err)
 	require.Len(t, results, 1, "component must be discoverable for the registering tenant")
 	assert.Equal(t, targetTenant, results[0].TenantID)
 	assert.Equal(t, instanceID, results[0].InstanceID)
 
-	// Step 7: Verify the component is NOT discoverable for a different tenant
+	// Step 6: Verify the component is NOT discoverable for a different tenant
 	// (both the tenant namespace and the _system namespace must be empty for otherTenant).
 	otherResults, err := reg.Discover(ctx, otherTenant, kind, name)
 	require.NoError(t, err)

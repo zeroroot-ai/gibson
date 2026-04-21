@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/graphrag"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/types"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
@@ -27,7 +27,7 @@ func (f *fakeGraphReader) QueryNodes(ctx context.Context, query graphrag.NodeQue
 }
 
 func tenantCtx(t string) context.Context {
-	return auth.ContextWithTenant(context.Background(), t)
+	return identity.ContextWithTenant(context.Background(), t)
 }
 
 func TestResourceResolver_ToolCall_GraphHit(t *testing.T) {
@@ -94,7 +94,7 @@ func TestResourceResolver_ToolCall_LookupError(t *testing.T) {
 }
 
 func TestResourceResolver_ToolCall_NoTenantFallsBackToSystem(t *testing.T) {
-	// auth.TenantFromContext falls back to SystemTenant when no tenant is
+	// identity.TenantFromContext falls back to SystemTenant when no tenant is
 	// explicit in context — lookup still proceeds, scoped to system.
 	reader := &fakeGraphReader{nodes: nil}
 	r := NewResourceResolver(reader, nil)

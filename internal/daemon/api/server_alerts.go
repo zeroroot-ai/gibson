@@ -22,7 +22,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 )
 
 // alertStoreIface is the narrow interface the alert handlers use for Redis operations.
@@ -190,7 +190,7 @@ func (s *redisAlertStore) MarkAllAlertsRead(ctx context.Context, tenantID, userI
 func (s *DaemonServer) ListAlerts(ctx context.Context, req *ListAlertsRequest) (*ListAlertsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = auth.TenantFromContext(ctx)
+		tenantID = identity.TenantFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -199,7 +199,7 @@ func (s *DaemonServer) ListAlerts(ctx context.Context, req *ListAlertsRequest) (
 	userID := req.GetUserId()
 	if userID == "" {
 		// Fallback: use caller identity.
-		if id, ok := auth.GibsonIdentityFromContext(ctx); ok {
+		if id, err := identity.IdentityFromContext(ctx); err == nil {
 			userID = id.Subject
 		}
 	}
@@ -248,7 +248,7 @@ func (s *DaemonServer) ListAlerts(ctx context.Context, req *ListAlertsRequest) (
 func (s *DaemonServer) MarkAlertRead(ctx context.Context, req *MarkAlertReadRequest) (*MarkAlertReadResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = auth.TenantFromContext(ctx)
+		tenantID = identity.TenantFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -281,7 +281,7 @@ func (s *DaemonServer) MarkAlertRead(ctx context.Context, req *MarkAlertReadRequ
 func (s *DaemonServer) MarkAllAlertsRead(ctx context.Context, req *MarkAllAlertsReadRequest) (*MarkAllAlertsReadResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = auth.TenantFromContext(ctx)
+		tenantID = identity.TenantFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -289,7 +289,7 @@ func (s *DaemonServer) MarkAllAlertsRead(ctx context.Context, req *MarkAllAlerts
 
 	userID := req.GetUserId()
 	if userID == "" {
-		if id, ok := auth.GibsonIdentityFromContext(ctx); ok {
+		if id, err := identity.IdentityFromContext(ctx); err == nil {
 			userID = id.Subject
 		}
 	}

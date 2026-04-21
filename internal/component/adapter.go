@@ -13,8 +13,8 @@ import (
 	"strings"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/sdk/protoresolver"
@@ -188,11 +188,12 @@ func (a *RegistryAdapter) GetResolver() protoresolver.ProtoResolver {
 }
 
 // resolveTenant returns the tenant for a registry query. It checks the request
-// context first (set by the auth interceptor for authenticated RPCs), falling
+// context first (set by the identity interceptor for authenticated RPCs), falling
 // back to the adapter's configured default tenant for unauthenticated or
-// dev-mode paths.
+// dev-mode paths. The _system sentinel returned by TenantFromContext when no
+// real tenant is present is treated as "not set".
 func (a *RegistryAdapter) resolveTenant(ctx context.Context) string {
-	if tenant := auth.TenantFromContext(ctx); tenant != "" {
+	if tenant := identity.TenantFromContext(ctx); tenant != "" && tenant != identity.SystemTenant {
 		return tenant
 	}
 	return a.tenant

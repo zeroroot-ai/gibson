@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	taxonomypb "github.com/zero-day-ai/sdk/api/gen/taxonomy/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -383,33 +383,32 @@ func (m *ComplianceMiddleware) BufferCap() int {
 // actor_id, actor_tenant_id, api_key_id, roles_snapshot. Missing fields fall
 // back to the system sentinel per Requirement 2.4.
 func (m *ComplianceMiddleware) stampIdentity(ctx context.Context, sig *taxonomypb.ComplianceSignal) {
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok || identity == nil {
+	id, err := identity.IdentityFromContext(ctx)
+	if err != nil {
 		sig.ActorId = systemSentinel
 		sig.ActorTenantId = systemSentinel
 		sig.SystemOwned = true
 		return
 	}
 
-	sig.ActorId = identity.Subject
+	sig.ActorId = id.Subject
 	if sig.ActorId == "" {
 		sig.ActorId = systemSentinel
 	}
 
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		tenant = systemSentinel
 	}
 	sig.ActorTenantId = tenant
 
-	if identity.Claims != nil {
-		if v, ok := identity.Claims["api_key_id"].(string); ok && v != "" {
-			sig.ApiKeyId = &v
-		}
+	// For API key callers, Subject is the key ID; expose it for audit trails.
+	if id.CredentialType == "apikey" && id.Subject != "" {
+		subj := id.Subject
+		sig.ApiKeyId = &subj
 	}
-	if len(identity.Roles) > 0 {
-		sig.RolesSnapshot = append([]string{}, identity.Roles...)
-	}
+	// Roles are no longer carried in the daemon identity (FGA handles authz);
+	// RolesSnapshot is left empty.
 }
 
 // stampChain reads the delegation-chain context keys landed by the foundation

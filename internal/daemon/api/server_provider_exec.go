@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
@@ -70,9 +70,9 @@ func (s *DaemonServer) WithProviderFactory(f func(cfg llm.ProviderConfig) (llm.L
 // proto. The decrypted credential is scoped strictly to this stack frame and
 // is never logged, cached, or embedded in any response field.
 func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *ExecuteLLMRequest) (*ExecuteLLMResponse, error) {
-	// 1. Tenant from auth context.
-	tenantID, err := auth.TenantFromContextWithCheck(ctx, s.logger)
-	if err != nil || tenantID == "" {
+	// 1. Tenant from identity context (resolved from Envoy-signed headers).
+	tenantID := identity.TenantFromContext(ctx)
+	if tenantID == "" || tenantID == identity.SystemTenant {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
 
@@ -188,9 +188,9 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *ExecuteLLMRequest) (
 func (s *DaemonServer) StreamLLM(req *StreamLLMRequest, stream DaemonAdminService_StreamLLMServer) error {
 	ctx := stream.Context()
 
-	// 1. Tenant from auth context.
-	tenantID, err := auth.TenantFromContextWithCheck(ctx, s.logger)
-	if err != nil || tenantID == "" {
+	// 1. Tenant from identity context (resolved from Envoy-signed headers).
+	tenantID := identity.TenantFromContext(ctx)
+	if tenantID == "" || tenantID == identity.SystemTenant {
 		return status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
 

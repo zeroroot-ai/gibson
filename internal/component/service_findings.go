@@ -6,14 +6,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // GetFindings queries previously submitted findings with optional filters.
 func (s *ComponentServiceServer) GetFindings(ctx context.Context, req *componentpb.GetFindingsRequest) (*componentpb.GetFindingsResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
-	if tenant == "" {
+	tenant := identity.TenantFromContext(ctx)
+	if tenant == "" || tenant == identity.SystemTenant {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
 	if s.findingQuerier == nil {
@@ -29,8 +29,8 @@ func (s *ComponentServiceServer) GetFindings(ctx context.Context, req *component
 
 // GetRunFindings queries findings scoped to a specific mission run or across all runs.
 func (s *ComponentServiceServer) GetRunFindings(ctx context.Context, req *componentpb.GetRunFindingsRequest) (*componentpb.GetRunFindingsResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
-	if tenant == "" {
+	tenant := identity.TenantFromContext(ctx)
+	if tenant == "" || tenant == identity.SystemTenant {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
 	if s.findingQuerier == nil {

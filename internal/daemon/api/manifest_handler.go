@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/manifest"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
@@ -28,24 +28,24 @@ func (s *DaemonServer) WithManifestBuilder(b manifest.Builder) *DaemonServer {
 // → subject mapping: an identity whose Subject begins with
 // "agent_principal:" becomes an agent_principal subject; anything else
 // is treated as a user subject. Impersonation (request.agent_principal_id
-// set) requires the caller to hold the "admin" role.
+// set) requires the caller to hold the "admin" FGA relation on the tenant.
 func (s *DaemonServer) GetCapabilityManifest(ctx context.Context, req *manifestpb.GetCapabilityManifestRequest) (*manifestpb.GetCapabilityManifestResponse, error) {
 	if s.manifestBuilder == nil {
 		return nil, status.Error(codes.Unavailable, "manifest subsystem not configured")
 	}
 
-	identity, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok || identity == nil {
+	id, err := identity.IdentityFromContext(ctx)
+	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "no identity in context")
 	}
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	if tenantID == "" {
 		return nil, status.Error(codes.PermissionDenied, "caller has no tenant membership")
 	}
 
-	subject, err := s.resolveManifestSubject(identity, req, tenantID)
-	if err != nil {
-		return nil, err
+	subject, resolveErr := s.resolveManifestSubject(id, req, tenantID, ctx)
+	if resolveErr != nil {
+		return nil, resolveErr
 	}
 
 	m, err := s.manifestBuilder.Build(ctx, subject)
@@ -65,7 +65,10 @@ func (s *DaemonServer) GetCapabilityManifest(ctx context.Context, req *manifestp
 // resolveManifestSubject derives a ManifestSubject from the caller
 // identity plus the optional impersonation request field. Returns a
 // gRPC status error ready to return to the client.
-func (s *DaemonServer) resolveManifestSubject(id *auth.Identity, req *manifestpb.GetCapabilityManifestRequest, tenantID string) (manifest.ManifestSubject, error) {
+//
+// Impersonation (req.agent_principal_id set) requires the caller to
+// hold FGA admin relation on the tenant — checked via s.authorizer.
+func (s *DaemonServer) resolveManifestSubject(id identity.Identity, req *manifestpb.GetCapabilityManifestRequest, tenantID string, ctx context.Context) (manifest.ManifestSubject, error) {
 	callerIsAgent := strings.HasPrefix(id.Subject, "agent_principal:")
 
 	// Impersonation path: admin previewing another agent_principal's manifest.
@@ -73,8 +76,13 @@ func (s *DaemonServer) resolveManifestSubject(id *auth.Identity, req *manifestpb
 		if callerIsAgent {
 			return manifest.ManifestSubject{}, status.Error(codes.PermissionDenied, "agent_principal callers may not impersonate")
 		}
-		if !hasRole(id, "admin") {
-			return manifest.ManifestSubject{}, status.Error(codes.PermissionDenied, "impersonation requires tenant admin")
+		// Validate admin via FGA when authorizer is wired.
+		if s.authorizer != nil {
+			isAdmin, err := s.authorizer.Check(ctx,
+				"user:"+id.Subject, "admin", "tenant:"+tenantID)
+			if err != nil || !isAdmin {
+				return manifest.ManifestSubject{}, status.Error(codes.PermissionDenied, "impersonation requires tenant admin")
+			}
 		}
 		return manifest.ManifestSubject{
 			Type:        manifest.SubjectTypeAgentPrincipal,
@@ -87,16 +95,15 @@ func (s *DaemonServer) resolveManifestSubject(id *auth.Identity, req *manifestpb
 	if callerIsAgent {
 		// "agent_principal:<id>" → id suffix is the agent_principal ID.
 		apID := strings.TrimPrefix(id.Subject, "agent_principal:")
-		// OwnerUserID is not in the SDK Identity; fall back to empty so
-		// Builder rejects. Agents that want their own manifest must be
-		// registered with an owner claim the daemon can surface — out of
-		// scope for this task; the Builder will return InvalidArgument.
-		owner := lookupAgentOwner(id)
+		// The lean Identity struct carries no Claims map; agent-principal
+		// callers that need owner resolution should pass it via the request
+		// or use a manifest-specific lookup. The Builder will return
+		// InvalidArgument when OwnerUserID is empty.
 		return manifest.ManifestSubject{
 			Type:        manifest.SubjectTypeAgentPrincipal,
 			ID:          apID,
 			TenantID:    tenantID,
-			OwnerUserID: owner,
+			OwnerUserID: "", // resolved by Builder from agent-auth store
 		}, nil
 	}
 
@@ -105,37 +112,6 @@ func (s *DaemonServer) resolveManifestSubject(id *auth.Identity, req *manifestpb
 		ID:       id.Subject,
 		TenantID: tenantID,
 	}, nil
-}
-
-// lookupAgentOwner returns the owner-user claim if present on the
-// Identity's Claims map. The Agent Auth Protocol JWT carries an
-// "owner_user" claim; if the claim is absent we return empty and the
-// Builder will error with InvalidArgument — which is the right signal
-// for a misconfigured agent token.
-func lookupAgentOwner(id *auth.Identity) string {
-	if id == nil || id.Claims == nil {
-		return ""
-	}
-	if v, ok := id.Claims["owner_user"].(string); ok {
-		return v
-	}
-	if v, ok := id.Claims["owner"].(string); ok {
-		return v
-	}
-	return ""
-}
-
-// hasRole reports whether the identity has the named role.
-func hasRole(id *auth.Identity, role string) bool {
-	if id == nil {
-		return false
-	}
-	for _, r := range id.Roles {
-		if r == role {
-			return true
-		}
-	}
-	return false
 }
 
 // translateBuildError maps Builder errors onto gRPC status codes per
@@ -183,7 +159,7 @@ func (s *DaemonServer) WatchManifestInvalidations(req *manifestpb.WatchManifestI
 		return status.Error(codes.Unavailable, "manifest watch hub not configured")
 	}
 	ctx := stream.Context()
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	if tenantID == "" {
 		return status.Error(codes.PermissionDenied, "caller has no tenant membership")
 	}

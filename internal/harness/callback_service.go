@@ -12,10 +12,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
 	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
@@ -346,7 +346,7 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 	// match. An empty value on either side means the mission predates
 	// multi-tenancy, so we allow it through to preserve backward
 	// compatibility with dev mode deployments.
-	contextTenant := auth.TenantFromContext(ctx)
+	contextTenant := identity.TenantFromContext(ctx)
 	missionTenant := harness.Mission().TenantID
 	if contextTenant != "" && missionTenant != "" && contextTenant != missionTenant {
 		s.logger.Warn("tenant mismatch on harness lookup",

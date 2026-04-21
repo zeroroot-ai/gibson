@@ -8,9 +8,7 @@ import (
 	"context"
 	"testing"
 
-	sdkauth "github.com/zero-day-ai/sdk/auth"
-
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 )
 
 func TestClassifyRelationAction(t *testing.T) {
@@ -65,25 +63,24 @@ func TestClassifyScopeType(t *testing.T) {
 func TestClassifyActorSource(t *testing.T) {
 	cases := []struct {
 		name    string
-		ident   *auth.Identity
+		ident   *identity.Identity
 		want    string
 		subject string
 	}{
 		{"nil identity → system", nil, "system", ""},
-		{"apikey → tenant_admin", &auth.Identity{Identity: sdkauth.Identity{Subject: "gsk_abc", Issuer: "apikey"}}, "tenant_admin", ""},
-		{"better-auth → user", &auth.Identity{Identity: sdkauth.Identity{Subject: "u-1", Issuer: "better-auth"}}, "user", ""},
-		{"agent-auth → user", &auth.Identity{Identity: sdkauth.Identity{Subject: "agent-1", Issuer: "agent-auth"}}, "user", ""},
-		{"internal → system", &auth.Identity{Identity: sdkauth.Identity{Subject: "cli", Issuer: "internal"}}, "system", ""},
-		{"spiffe platform → platform", &auth.Identity{Identity: sdkauth.Identity{Subject: "spiffe://gibson.io/platform/tenant-operator", Issuer: "spiffe"}}, "platform", ""},
-		{"spiffe non-platform → operator", &auth.Identity{Identity: sdkauth.Identity{Subject: "spiffe://gibson.io/dashboard", Issuer: "spiffe"}}, "operator", ""},
-		{"oidc → user", &auth.Identity{Identity: sdkauth.Identity{Subject: "oidc-1", Issuer: "https://auth.example.com"}}, "user", ""},
-		{"unknown issuer → unknown", &auth.Identity{Identity: sdkauth.Identity{Subject: "x", Issuer: "weird"}}, "unknown", ""},
+		{"apikey → tenant_admin", &identity.Identity{Subject: "gsk_abc", Issuer: "apikey"}, "tenant_admin", ""},
+		{"zitadel → user", &identity.Identity{Subject: "u-1", Issuer: "zitadel"}, "user", ""},
+		{"capability-grant → user", &identity.Identity{Subject: "agent-1", Issuer: "capability-grant"}, "user", ""},
+		{"spiffe platform → platform", &identity.Identity{Subject: "spiffe://gibson.io/platform/tenant-operator", Issuer: "spiffe"}, "platform", ""},
+		{"spiffe non-platform → operator", &identity.Identity{Subject: "spiffe://gibson.io/dashboard", Issuer: "spiffe"}, "operator", ""},
+		{"spiffe via subject prefix → platform", &identity.Identity{Subject: "spiffe://gibson.io/platform/dashboard", Issuer: "other"}, "platform", ""},
+		{"unknown issuer → unknown", &identity.Identity{Subject: "x", Issuer: "weird"}, "unknown", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			if tc.ident != nil {
-				ctx = auth.ContextWithIdentity(ctx, tc.ident)
+				ctx = identity.WithIdentity(ctx, *tc.ident)
 			}
 			got := classifyActorSource(ctx)
 			if got != tc.want {

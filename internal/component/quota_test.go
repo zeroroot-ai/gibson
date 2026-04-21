@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -56,7 +56,7 @@ func newTestQuotaManager(t *testing.T, tenant string) (*QuotaManager, context.Co
 	}))
 
 	qm := NewQuotaManager(store, logger)
-	ctx := auth.ContextWithTenant(context.Background(), tenant)
+	ctx := identity.ContextWithTenant(context.Background(), tenant)
 
 	return qm, ctx
 }
@@ -355,8 +355,8 @@ func TestQuotaManager_TenantIsolation_QuotaDoesNotLeak(t *testing.T) {
 	})
 	qm := NewQuotaManager(store, logger)
 
-	ctxA := auth.ContextWithTenant(context.Background(), "tenant-a")
-	ctxB := auth.ContextWithTenant(context.Background(), "tenant-b")
+	ctxA := identity.ContextWithTenant(context.Background(), "tenant-a")
+	ctxB := identity.ContextWithTenant(context.Background(), "tenant-b")
 
 	// Give tenant-a a tight quota and tenant-b a generous quota.
 	require.NoError(t, qm.SetQuota(ctxA, "tenant-a", &TenantQuota{MaxMissions: 1}))
@@ -388,8 +388,8 @@ func TestQuotaManager_TenantIsolation_QuotaConfigDoesNotLeak(t *testing.T) {
 	})
 	qm := NewQuotaManager(store, logger)
 
-	ctxA := auth.ContextWithTenant(context.Background(), "tenant-a")
-	ctxB := auth.ContextWithTenant(context.Background(), "tenant-b")
+	ctxA := identity.ContextWithTenant(context.Background(), "tenant-a")
+	ctxB := identity.ContextWithTenant(context.Background(), "tenant-b")
 
 	// Only configure tenant-a.
 	require.NoError(t, qm.SetQuota(ctxA, "tenant-a", &TenantQuota{MaxMissions: 5}))

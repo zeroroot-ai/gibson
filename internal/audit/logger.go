@@ -32,7 +32,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -164,8 +164,8 @@ func (a *AuditLogger) SetSignalProjector(p SignalProjector) {
 
 // Log writes an audit entry with result "success" to the tenant's Redis Stream.
 //
-// The tenant is extracted from ctx via auth.TenantFromContext; the actor is
-// extracted via auth.IdentityFromContext. If no tenant or identity is found in
+// The tenant is extracted from ctx via identity.TenantFromContext; the actor is
+// extracted via identity.IdentityFromContext. If no tenant or identity is found in
 // the context, sensible defaults ("unknown") are used so that logging never
 // blocks the calling operation.
 //
@@ -189,19 +189,20 @@ func (a *AuditLogger) LogWithResult(
 	action, resource, resourceID, result string,
 	details map[string]any,
 ) error {
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "unknown"
 	}
 
 	actorID := "unknown"
 	actorEmail := "unknown"
-	if identity, ok := auth.IdentityFromContext(ctx); ok && identity != nil {
-		if identity.Subject != "" {
-			actorID = identity.Subject
-		}
-		if identity.Email != "" {
-			actorEmail = identity.Email
+	if id, err := identity.IdentityFromContext(ctx); err == nil {
+		if id.Subject != "" {
+			actorID = id.Subject
+			// For OIDC/Zitadel callers, Subject is the stable user identifier.
+			// Email is not separately propagated in the signed header set;
+			// use Subject as the audit actor for all credential types.
+			actorEmail = id.Subject
 		}
 	}
 
@@ -354,7 +355,7 @@ func (a *AuditLogger) Query(ctx context.Context, tenant string, opts AuditQueryO
 // streamKey returns the fully qualified Redis Stream key for the given tenant.
 // The format mirrors the TenantScopedRedisKey helper: "tenant:{tenant_id}:audit:log".
 func (a *AuditLogger) streamKey(tenantID string) string {
-	return auth.TenantScopedRedisKey(tenantID, auditStreamSuffix)
+	return identity.TenantScopedRedisKey(tenantID, auditStreamSuffix)
 }
 
 // entryFromStreamValues reconstructs an AuditEntry from the raw field-value map

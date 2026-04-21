@@ -46,12 +46,12 @@ const (
 	DaemonAdminService_MarkAllAlertsRead_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/MarkAllAlertsRead"
 	DaemonAdminService_ListConversations_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/ListConversations"
 	DaemonAdminService_GetConversation_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/GetConversation"
-	DaemonAdminService_RegisterAgentAuth_FullMethodName               = "/gibson.daemon.admin.v1.DaemonAdminService/RegisterAgentAuth"
+	DaemonAdminService_RegisterCapabilityGrant_FullMethodName         = "/gibson.daemon.admin.v1.DaemonAdminService/RegisterCapabilityGrant"
 	DaemonAdminService_ExecuteAgentCapability_FullMethodName          = "/gibson.daemon.admin.v1.DaemonAdminService/ExecuteAgentCapability"
 	DaemonAdminService_ListAgentCapabilities_FullMethodName           = "/gibson.daemon.admin.v1.DaemonAdminService/ListAgentCapabilities"
-	DaemonAdminService_GetAgentAuthStatus_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/GetAgentAuthStatus"
-	DaemonAdminService_RevokeAgentAuth_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeAgentAuth"
-	DaemonAdminService_ListAgentAuthAgents_FullMethodName             = "/gibson.daemon.admin.v1.DaemonAdminService/ListAgentAuthAgents"
+	DaemonAdminService_GetCapabilityGrantStatus_FullMethodName        = "/gibson.daemon.admin.v1.DaemonAdminService/GetCapabilityGrantStatus"
+	DaemonAdminService_RevokeCapabilityGrant_FullMethodName           = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeCapabilityGrant"
+	DaemonAdminService_ListCapabilityGrantAgents_FullMethodName       = "/gibson.daemon.admin.v1.DaemonAdminService/ListCapabilityGrantAgents"
 	DaemonAdminService_CreateHostRegistrationToken_FullMethodName     = "/gibson.daemon.admin.v1.DaemonAdminService/CreateHostRegistrationToken"
 	DaemonAdminService_ListComponentGrants_FullMethodName             = "/gibson.daemon.admin.v1.DaemonAdminService/ListComponentGrants"
 	DaemonAdminService_BatchGrantComponentAccessV2_FullMethodName     = "/gibson.daemon.admin.v1.DaemonAdminService/BatchGrantComponentAccessV2"
@@ -164,10 +164,10 @@ type DaemonAdminServiceClient interface {
 	ListConversations(ctx context.Context, in *ListConversationsRequest, opts ...grpc.CallOption) (*ListConversationsResponse, error)
 	// GetConversation returns the full message history for a single conversation.
 	GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*GetConversationResponse, error)
-	// RegisterAgentAuth registers a new agent and its host, resolves FGA-backed
+	// RegisterCapabilityGrant registers a new agent and its host, resolves FGA-backed
 	// capability grants for the agent owner, and writes the grant records.
 	// Requires FGA admin relation on the tenant.
-	RegisterAgentAuth(ctx context.Context, in *RegisterAgentAuthRequest, opts ...grpc.CallOption) (*RegisterAgentAuthResponse, error)
+	RegisterCapabilityGrant(ctx context.Context, in *RegisterCapabilityGrantRequest, opts ...grpc.CallOption) (*RegisterCapabilityGrantResponse, error)
 	// ExecuteAgentCapability checks FGA for the requested capability execution
 	// and records an audit event. Actual component dispatch is a future concern.
 	// Requires FGA member relation on the tenant.
@@ -176,15 +176,15 @@ type DaemonAdminServiceClient interface {
 	// by querying FGA and the component registry.
 	// Requires FGA member relation on the tenant.
 	ListAgentCapabilities(ctx context.Context, in *ListAgentCapabilitiesRequest, opts ...grpc.CallOption) (*ListAgentCapabilitiesResponse, error)
-	// GetAgentAuthStatus returns the current status and grants for an agent.
+	// GetCapabilityGrantStatus returns the current status and grants for an agent.
 	// Requires FGA member relation on the tenant.
-	GetAgentAuthStatus(ctx context.Context, in *GetAgentAuthStatusRequest, opts ...grpc.CallOption) (*GetAgentAuthStatusResponse, error)
-	// RevokeAgentAuth sets the agent's status to revoked and revokes all grants.
+	GetCapabilityGrantStatus(ctx context.Context, in *GetCapabilityGrantStatusRequest, opts ...grpc.CallOption) (*GetCapabilityGrantStatusResponse, error)
+	// RevokeCapabilityGrant sets the agent's status to revoked and revokes all grants.
 	// Requires FGA admin relation on the tenant.
-	RevokeAgentAuth(ctx context.Context, in *RevokeAgentAuthRequest, opts ...grpc.CallOption) (*RevokeAgentAuthResponse, error)
-	// ListAgentAuthAgents returns a paginated list of agents for a tenant.
+	RevokeCapabilityGrant(ctx context.Context, in *RevokeCapabilityGrantRequest, opts ...grpc.CallOption) (*RevokeCapabilityGrantResponse, error)
+	// ListCapabilityGrantAgents returns a paginated list of agents for a tenant.
 	// Requires FGA admin relation on the tenant.
-	ListAgentAuthAgents(ctx context.Context, in *ListAgentAuthAgentsRequest, opts ...grpc.CallOption) (*ListAgentAuthAgentsResponse, error)
+	ListCapabilityGrantAgents(ctx context.Context, in *ListCapabilityGrantAgentsRequest, opts ...grpc.CallOption) (*ListCapabilityGrantAgentsResponse, error)
 	// CreateHostRegistrationToken issues a single-use API key for host registration.
 	// Requires FGA admin relation on the tenant.
 	CreateHostRegistrationToken(ctx context.Context, in *CreateHostRegistrationTokenRequest, opts ...grpc.CallOption) (*CreateHostRegistrationTokenResponse, error)
@@ -573,10 +573,10 @@ func (c *daemonAdminServiceClient) GetConversation(ctx context.Context, in *GetC
 	return out, nil
 }
 
-func (c *daemonAdminServiceClient) RegisterAgentAuth(ctx context.Context, in *RegisterAgentAuthRequest, opts ...grpc.CallOption) (*RegisterAgentAuthResponse, error) {
+func (c *daemonAdminServiceClient) RegisterCapabilityGrant(ctx context.Context, in *RegisterCapabilityGrantRequest, opts ...grpc.CallOption) (*RegisterCapabilityGrantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RegisterAgentAuthResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_RegisterAgentAuth_FullMethodName, in, out, cOpts...)
+	out := new(RegisterCapabilityGrantResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_RegisterCapabilityGrant_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -603,30 +603,30 @@ func (c *daemonAdminServiceClient) ListAgentCapabilities(ctx context.Context, in
 	return out, nil
 }
 
-func (c *daemonAdminServiceClient) GetAgentAuthStatus(ctx context.Context, in *GetAgentAuthStatusRequest, opts ...grpc.CallOption) (*GetAgentAuthStatusResponse, error) {
+func (c *daemonAdminServiceClient) GetCapabilityGrantStatus(ctx context.Context, in *GetCapabilityGrantStatusRequest, opts ...grpc.CallOption) (*GetCapabilityGrantStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetAgentAuthStatusResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_GetAgentAuthStatus_FullMethodName, in, out, cOpts...)
+	out := new(GetCapabilityGrantStatusResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_GetCapabilityGrantStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *daemonAdminServiceClient) RevokeAgentAuth(ctx context.Context, in *RevokeAgentAuthRequest, opts ...grpc.CallOption) (*RevokeAgentAuthResponse, error) {
+func (c *daemonAdminServiceClient) RevokeCapabilityGrant(ctx context.Context, in *RevokeCapabilityGrantRequest, opts ...grpc.CallOption) (*RevokeCapabilityGrantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RevokeAgentAuthResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_RevokeAgentAuth_FullMethodName, in, out, cOpts...)
+	out := new(RevokeCapabilityGrantResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_RevokeCapabilityGrant_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *daemonAdminServiceClient) ListAgentAuthAgents(ctx context.Context, in *ListAgentAuthAgentsRequest, opts ...grpc.CallOption) (*ListAgentAuthAgentsResponse, error) {
+func (c *daemonAdminServiceClient) ListCapabilityGrantAgents(ctx context.Context, in *ListCapabilityGrantAgentsRequest, opts ...grpc.CallOption) (*ListCapabilityGrantAgentsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListAgentAuthAgentsResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_ListAgentAuthAgents_FullMethodName, in, out, cOpts...)
+	out := new(ListCapabilityGrantAgentsResponse)
+	err := c.cc.Invoke(ctx, DaemonAdminService_ListCapabilityGrantAgents_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -968,10 +968,10 @@ type DaemonAdminServiceServer interface {
 	ListConversations(context.Context, *ListConversationsRequest) (*ListConversationsResponse, error)
 	// GetConversation returns the full message history for a single conversation.
 	GetConversation(context.Context, *GetConversationRequest) (*GetConversationResponse, error)
-	// RegisterAgentAuth registers a new agent and its host, resolves FGA-backed
+	// RegisterCapabilityGrant registers a new agent and its host, resolves FGA-backed
 	// capability grants for the agent owner, and writes the grant records.
 	// Requires FGA admin relation on the tenant.
-	RegisterAgentAuth(context.Context, *RegisterAgentAuthRequest) (*RegisterAgentAuthResponse, error)
+	RegisterCapabilityGrant(context.Context, *RegisterCapabilityGrantRequest) (*RegisterCapabilityGrantResponse, error)
 	// ExecuteAgentCapability checks FGA for the requested capability execution
 	// and records an audit event. Actual component dispatch is a future concern.
 	// Requires FGA member relation on the tenant.
@@ -980,15 +980,15 @@ type DaemonAdminServiceServer interface {
 	// by querying FGA and the component registry.
 	// Requires FGA member relation on the tenant.
 	ListAgentCapabilities(context.Context, *ListAgentCapabilitiesRequest) (*ListAgentCapabilitiesResponse, error)
-	// GetAgentAuthStatus returns the current status and grants for an agent.
+	// GetCapabilityGrantStatus returns the current status and grants for an agent.
 	// Requires FGA member relation on the tenant.
-	GetAgentAuthStatus(context.Context, *GetAgentAuthStatusRequest) (*GetAgentAuthStatusResponse, error)
-	// RevokeAgentAuth sets the agent's status to revoked and revokes all grants.
+	GetCapabilityGrantStatus(context.Context, *GetCapabilityGrantStatusRequest) (*GetCapabilityGrantStatusResponse, error)
+	// RevokeCapabilityGrant sets the agent's status to revoked and revokes all grants.
 	// Requires FGA admin relation on the tenant.
-	RevokeAgentAuth(context.Context, *RevokeAgentAuthRequest) (*RevokeAgentAuthResponse, error)
-	// ListAgentAuthAgents returns a paginated list of agents for a tenant.
+	RevokeCapabilityGrant(context.Context, *RevokeCapabilityGrantRequest) (*RevokeCapabilityGrantResponse, error)
+	// ListCapabilityGrantAgents returns a paginated list of agents for a tenant.
 	// Requires FGA admin relation on the tenant.
-	ListAgentAuthAgents(context.Context, *ListAgentAuthAgentsRequest) (*ListAgentAuthAgentsResponse, error)
+	ListCapabilityGrantAgents(context.Context, *ListCapabilityGrantAgentsRequest) (*ListCapabilityGrantAgentsResponse, error)
 	// CreateHostRegistrationToken issues a single-use API key for host registration.
 	// Requires FGA admin relation on the tenant.
 	CreateHostRegistrationToken(context.Context, *CreateHostRegistrationTokenRequest) (*CreateHostRegistrationTokenResponse, error)
@@ -1188,8 +1188,8 @@ func (UnimplementedDaemonAdminServiceServer) ListConversations(context.Context, 
 func (UnimplementedDaemonAdminServiceServer) GetConversation(context.Context, *GetConversationRequest) (*GetConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversation not implemented")
 }
-func (UnimplementedDaemonAdminServiceServer) RegisterAgentAuth(context.Context, *RegisterAgentAuthRequest) (*RegisterAgentAuthResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RegisterAgentAuth not implemented")
+func (UnimplementedDaemonAdminServiceServer) RegisterCapabilityGrant(context.Context, *RegisterCapabilityGrantRequest) (*RegisterCapabilityGrantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterCapabilityGrant not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) ExecuteAgentCapability(context.Context, *ExecuteAgentCapabilityRequest) (*ExecuteAgentCapabilityResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExecuteAgentCapability not implemented")
@@ -1197,14 +1197,14 @@ func (UnimplementedDaemonAdminServiceServer) ExecuteAgentCapability(context.Cont
 func (UnimplementedDaemonAdminServiceServer) ListAgentCapabilities(context.Context, *ListAgentCapabilitiesRequest) (*ListAgentCapabilitiesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAgentCapabilities not implemented")
 }
-func (UnimplementedDaemonAdminServiceServer) GetAgentAuthStatus(context.Context, *GetAgentAuthStatusRequest) (*GetAgentAuthStatusResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetAgentAuthStatus not implemented")
+func (UnimplementedDaemonAdminServiceServer) GetCapabilityGrantStatus(context.Context, *GetCapabilityGrantStatusRequest) (*GetCapabilityGrantStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCapabilityGrantStatus not implemented")
 }
-func (UnimplementedDaemonAdminServiceServer) RevokeAgentAuth(context.Context, *RevokeAgentAuthRequest) (*RevokeAgentAuthResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RevokeAgentAuth not implemented")
+func (UnimplementedDaemonAdminServiceServer) RevokeCapabilityGrant(context.Context, *RevokeCapabilityGrantRequest) (*RevokeCapabilityGrantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeCapabilityGrant not implemented")
 }
-func (UnimplementedDaemonAdminServiceServer) ListAgentAuthAgents(context.Context, *ListAgentAuthAgentsRequest) (*ListAgentAuthAgentsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListAgentAuthAgents not implemented")
+func (UnimplementedDaemonAdminServiceServer) ListCapabilityGrantAgents(context.Context, *ListCapabilityGrantAgentsRequest) (*ListCapabilityGrantAgentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCapabilityGrantAgents not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) CreateHostRegistrationToken(context.Context, *CreateHostRegistrationTokenRequest) (*CreateHostRegistrationTokenResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateHostRegistrationToken not implemented")
@@ -1785,20 +1785,20 @@ func _DaemonAdminService_GetConversation_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DaemonAdminService_RegisterAgentAuth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RegisterAgentAuthRequest)
+func _DaemonAdminService_RegisterCapabilityGrant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterCapabilityGrantRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).RegisterAgentAuth(ctx, in)
+		return srv.(DaemonAdminServiceServer).RegisterCapabilityGrant(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DaemonAdminService_RegisterAgentAuth_FullMethodName,
+		FullMethod: DaemonAdminService_RegisterCapabilityGrant_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).RegisterAgentAuth(ctx, req.(*RegisterAgentAuthRequest))
+		return srv.(DaemonAdminServiceServer).RegisterCapabilityGrant(ctx, req.(*RegisterCapabilityGrantRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1839,56 +1839,56 @@ func _DaemonAdminService_ListAgentCapabilities_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DaemonAdminService_GetAgentAuthStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetAgentAuthStatusRequest)
+func _DaemonAdminService_GetCapabilityGrantStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCapabilityGrantStatusRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).GetAgentAuthStatus(ctx, in)
+		return srv.(DaemonAdminServiceServer).GetCapabilityGrantStatus(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DaemonAdminService_GetAgentAuthStatus_FullMethodName,
+		FullMethod: DaemonAdminService_GetCapabilityGrantStatus_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).GetAgentAuthStatus(ctx, req.(*GetAgentAuthStatusRequest))
+		return srv.(DaemonAdminServiceServer).GetCapabilityGrantStatus(ctx, req.(*GetCapabilityGrantStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DaemonAdminService_RevokeAgentAuth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RevokeAgentAuthRequest)
+func _DaemonAdminService_RevokeCapabilityGrant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeCapabilityGrantRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).RevokeAgentAuth(ctx, in)
+		return srv.(DaemonAdminServiceServer).RevokeCapabilityGrant(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DaemonAdminService_RevokeAgentAuth_FullMethodName,
+		FullMethod: DaemonAdminService_RevokeCapabilityGrant_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).RevokeAgentAuth(ctx, req.(*RevokeAgentAuthRequest))
+		return srv.(DaemonAdminServiceServer).RevokeCapabilityGrant(ctx, req.(*RevokeCapabilityGrantRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DaemonAdminService_ListAgentAuthAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListAgentAuthAgentsRequest)
+func _DaemonAdminService_ListCapabilityGrantAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCapabilityGrantAgentsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).ListAgentAuthAgents(ctx, in)
+		return srv.(DaemonAdminServiceServer).ListCapabilityGrantAgents(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DaemonAdminService_ListAgentAuthAgents_FullMethodName,
+		FullMethod: DaemonAdminService_ListCapabilityGrantAgents_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).ListAgentAuthAgents(ctx, req.(*ListAgentAuthAgentsRequest))
+		return srv.(DaemonAdminServiceServer).ListCapabilityGrantAgents(ctx, req.(*ListCapabilityGrantAgentsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2434,8 +2434,8 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DaemonAdminService_GetConversation_Handler,
 		},
 		{
-			MethodName: "RegisterAgentAuth",
-			Handler:    _DaemonAdminService_RegisterAgentAuth_Handler,
+			MethodName: "RegisterCapabilityGrant",
+			Handler:    _DaemonAdminService_RegisterCapabilityGrant_Handler,
 		},
 		{
 			MethodName: "ExecuteAgentCapability",
@@ -2446,16 +2446,16 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DaemonAdminService_ListAgentCapabilities_Handler,
 		},
 		{
-			MethodName: "GetAgentAuthStatus",
-			Handler:    _DaemonAdminService_GetAgentAuthStatus_Handler,
+			MethodName: "GetCapabilityGrantStatus",
+			Handler:    _DaemonAdminService_GetCapabilityGrantStatus_Handler,
 		},
 		{
-			MethodName: "RevokeAgentAuth",
-			Handler:    _DaemonAdminService_RevokeAgentAuth_Handler,
+			MethodName: "RevokeCapabilityGrant",
+			Handler:    _DaemonAdminService_RevokeCapabilityGrant_Handler,
 		},
 		{
-			MethodName: "ListAgentAuthAgents",
-			Handler:    _DaemonAdminService_ListAgentAuthAgents_Handler,
+			MethodName: "ListCapabilityGrantAgents",
+			Handler:    _DaemonAdminService_ListCapabilityGrantAgents_Handler,
 		},
 		{
 			MethodName: "CreateHostRegistrationToken",

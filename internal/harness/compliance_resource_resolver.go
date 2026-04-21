@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/graphrag"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -168,9 +168,9 @@ func (r *ResourceResolver) resolveToolCall(ctx context.Context, request any) Res
 
 	// Attempt a tenant-scoped graph lookup for a node matching the URI.
 	// The lookup is advisory — if it fails or returns nothing, we still
-	// stamp the URI and proceed. auth.TenantFromContext falls back to the
+	// stamp the URI and proceed. identity.TenantFromContext falls back to the
 	// system tenant when no tenant is set, so the scope is always non-empty.
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	res.ResourceNodeID = r.lookupNodeByURI(ctx, uri, tenant)
 	return res
 }

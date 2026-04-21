@@ -7,7 +7,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -118,7 +118,7 @@ func (s *RedisMissionStore) Save(ctx context.Context, mission *Mission) error {
 	mission.UpdatedAt = now
 
 	// Extract tenant for key scoping — writes always use tenant-scoped key
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 
 	// Store mission document using JSON.SET
 	key := missionKey(tenantID, mission.ID)
@@ -148,7 +148,7 @@ func (s *RedisMissionStore) Save(ctx context.Context, mission *Mission) error {
 // Get retrieves a mission by ID.
 // Uses backward-compatible reads: tries tenant-scoped key first, falls back to legacy.
 func (s *RedisMissionStore) Get(ctx context.Context, id types.ID) (*Mission, error) {
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	key := missionKey(tenantID, id)
 
 	var mission Mission
@@ -317,7 +317,7 @@ func (s *RedisMissionStore) Update(ctx context.Context, mission *Mission) error 
 	mission.UpdatedAt = NewUnixTimeNow()
 
 	// Extract tenant for key scoping — writes always use tenant-scoped key
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 
 	// Check if mission exists and get old values for index comparison
 	key := missionKey(tenantID, mission.ID)
@@ -376,7 +376,7 @@ func (s *RedisMissionStore) Update(ctx context.Context, mission *Mission) error 
 
 // UpdateStatus updates only the status field of a mission with secondary index maintenance.
 func (s *RedisMissionStore) UpdateStatus(ctx context.Context, id types.ID, status MissionStatus) error {
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	key := missionKey(tenantID, id)
 
 	// Check if mission exists and get old status for index update
@@ -426,7 +426,7 @@ func (s *RedisMissionStore) UpdateProgress(ctx context.Context, id types.ID, pro
 		return fmt.Errorf("progress must be between 0.0 and 1.0, got %f", progress)
 	}
 
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	key := missionKey(tenantID, id)
 
 	// Check if mission exists
@@ -454,7 +454,7 @@ func (s *RedisMissionStore) UpdateProgress(ctx context.Context, id types.ID, pro
 // Delete soft-deletes a mission using cascade delete script with secondary index cleanup.
 // Only missions in terminal states can be deleted.
 func (s *RedisMissionStore) Delete(ctx context.Context, id types.ID) error {
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 
 	// First, check if mission exists and is in a terminal state
 	mission, err := s.Get(ctx, id)
@@ -534,7 +534,7 @@ func (s *RedisMissionStore) SaveCheckpoint(ctx context.Context, missionID types.
 		return fmt.Errorf("checkpoint cannot be nil")
 	}
 
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	key := missionKey(tenantID, missionID)
 
 	// Check if mission exists
@@ -702,7 +702,7 @@ func (s *RedisMissionStore) GetLatestByName(ctx context.Context, name string) (*
 
 // IncrementRunNumber atomically increments and returns the next run number for a mission name.
 func (s *RedisMissionStore) IncrementRunNumber(ctx context.Context, name string) (int, error) {
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	counterKey := missionCounterKey(tenantID, name)
 
 	// Use the IncrementAndGetRunNumber script
@@ -766,7 +766,7 @@ func (s *RedisMissionStore) FindOrCreateByName(ctx context.Context, mission *Mis
 
 	// If mission was created, add to secondary indexes
 	if result.Created {
-		tenantID := auth.TenantFromContext(ctx)
+		tenantID := identity.TenantFromContext(ctx)
 		pipe := s.client.Pipeline(ctx)
 
 		// Add to by_status set
@@ -833,7 +833,7 @@ func (s *RedisMissionStore) CreateDefinition(ctx context.Context, def *MissionDe
 		return fmt.Errorf("failed to marshal mission definition: %w", err)
 	}
 
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	key := missionDefinitionKey(tenantID, def.Name)
 
 	// SET NX — only set if key does not exist
@@ -859,7 +859,7 @@ func (s *RedisMissionStore) GetDefinition(ctx context.Context, name string) (*Mi
 		return nil, fmt.Errorf("Redis client not configured")
 	}
 
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	key := missionDefinitionKey(tenantID, name)
 
 	data, err := s.client.Client().Get(ctx, key).Result()
@@ -890,7 +890,7 @@ func (s *RedisMissionStore) ListDefinitions(ctx context.Context) ([]*MissionDefi
 		return nil, fmt.Errorf("Redis client not configured")
 	}
 
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	indexKey := missionDefinitionIndexKey(tenantID)
 
 	names, err := s.client.Client().SMembers(ctx, indexKey).Result()
@@ -945,7 +945,7 @@ func (s *RedisMissionStore) UpdateDefinition(ctx context.Context, def *MissionDe
 	}
 
 	// Writes always use tenant-scoped key
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	key := missionDefinitionKey(tenantID, def.Name)
 
 	if err := s.client.Client().Set(ctx, key, string(data), 0).Err(); err != nil {
@@ -962,7 +962,7 @@ func (s *RedisMissionStore) DeleteDefinition(ctx context.Context, name string) e
 		return fmt.Errorf("Redis client not configured")
 	}
 
-	tenantID := auth.TenantFromContext(ctx)
+	tenantID := identity.TenantFromContext(ctx)
 	key := missionDefinitionKey(tenantID, name)
 
 	n, err := s.client.Client().Del(ctx, key).Result()

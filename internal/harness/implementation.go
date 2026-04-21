@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
@@ -598,7 +598,7 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 
 	// ── Path 2: ComponentRegistry (Redis-backed, tenant-scoped) ──────────────
 	if h.componentRegistry != nil {
-		tenant := auth.TenantFromContext(ctx)
+		tenant := identity.TenantFromContext(ctx)
 		if tenant == "" {
 			h.logger.Warn("component registry configured but no tenant in context, skipping registry lookup",
 				"tool", name)
@@ -1460,7 +1460,7 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 	if err != nil {
 		// ── Path 2: ComponentRegistry (Redis-backed, tenant-scoped) ──────────
 		if h.componentRegistry != nil {
-			tenant := auth.TenantFromContext(ctx)
+			tenant := identity.TenantFromContext(ctx)
 			if tenant == "" {
 				h.logger.Warn("component registry configured but no tenant in context, skipping registry lookup",
 					"plugin", name)

@@ -8,7 +8,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/agentauth"
+	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 )
 
@@ -42,7 +42,7 @@ func benchBuilder(b *testing.B, componentCount, denyRuleCount int) {
 	b.Cleanup(mr.Close)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
-	bridge := agentauth.NewFGABridge(&stubAuthorizer{listObjects: listObjects}, &stubRegistry{infos: infos}, nil)
+	bridge := capabilitygrant.NewFGABridge(&stubAuthorizer{listObjects: listObjects}, &stubRegistry{infos: infos}, nil)
 	k, _ := GenerateSignerKey("k1")
 	signer, _ := NewSigner("k1", []SignerKey{k})
 	vs := NewVersionStore(rdb, time.Second)
@@ -85,7 +85,7 @@ func TestBuilderBuild_P95Budget_50c_100r(t *testing.T) {
 	mr, _ := miniredis.Run()
 	t.Cleanup(mr.Close)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	bridge := agentauth.NewFGABridge(&stubAuthorizer{listObjects: listObjects}, &stubRegistry{infos: infos}, nil)
+	bridge := capabilitygrant.NewFGABridge(&stubAuthorizer{listObjects: listObjects}, &stubRegistry{infos: infos}, nil)
 	k, _ := GenerateSignerKey("k1")
 	signer, _ := NewSigner("k1", []SignerKey{k})
 	vs := NewVersionStore(rdb, time.Second)

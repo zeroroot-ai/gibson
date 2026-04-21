@@ -450,7 +450,7 @@ func TestMissionIndex(t *testing.T) {
 		assert.Equal(t, "gibson:idx:missions", idx.Name)
 		assert.Equal(t, "gibson:mission:", idx.Prefix)
 		assert.True(t, idx.OnJSON)
-		assert.Len(t, idx.Schema, 8)
+		assert.Len(t, idx.Schema, 9) // 8 original + tenant_id (schema version 2)
 
 		// Verify field definitions
 		fields := make(map[string]FieldDefinition)
@@ -472,6 +472,28 @@ func TestMissionIndex(t *testing.T) {
 		assert.Equal(t, FieldTypeNumeric, fields["created_at"].Type)
 		assert.True(t, fields["created_at"].Sortable)
 	})
+
+	t.Run("contains tenant_id as TAG SORTABLE (schema version 2)", func(t *testing.T) {
+		idx := MissionIndex()
+
+		fields := make(map[string]FieldDefinition)
+		for _, f := range idx.Schema {
+			fields[f.Alias] = f
+		}
+
+		tenantField, ok := fields["tenant_id"]
+		require.True(t, ok, "tenant_id field must be present in gibson:idx:missions schema")
+		assert.Equal(t, "$.tenant_id", tenantField.Path)
+		assert.Equal(t, FieldTypeTag, tenantField.Type, "tenant_id must be a TAG field")
+		assert.True(t, tenantField.Sortable, "tenant_id TAG field must be SORTABLE")
+	})
+
+	t.Run("schema version constant matches expected bumped value", func(t *testing.T) {
+		assert.Equal(t, 2, MissionIndexSchemaVersion,
+			"MissionIndexSchemaVersion must be 2 after Phase 1 tenant_id addition")
+		assert.Equal(t, MissionIndexSchemaVersion, MissionIndex().SchemaVersion,
+			"MissionIndex().SchemaVersion must equal MissionIndexSchemaVersion constant")
+	})
 }
 
 func TestFindingIndex(t *testing.T) {
@@ -481,7 +503,7 @@ func TestFindingIndex(t *testing.T) {
 		assert.Equal(t, "gibson:idx:findings", idx.Name)
 		assert.Equal(t, "gibson:finding:", idx.Prefix)
 		assert.True(t, idx.OnJSON)
-		assert.Len(t, idx.Schema, 12)
+		assert.Len(t, idx.Schema, 13) // 12 original + tenant_id (schema version 2)
 
 		// Verify weighted text fields
 		fields := make(map[string]FieldDefinition)
@@ -500,6 +522,28 @@ func TestFindingIndex(t *testing.T) {
 		assert.True(t, fields["cvss_score"].Sortable)
 		assert.True(t, fields["created_at"].Sortable)
 	})
+
+	t.Run("contains tenant_id as TAG SORTABLE (schema version 2)", func(t *testing.T) {
+		idx := FindingIndex()
+
+		fields := make(map[string]FieldDefinition)
+		for _, f := range idx.Schema {
+			fields[f.Alias] = f
+		}
+
+		tenantField, ok := fields["tenant_id"]
+		require.True(t, ok, "tenant_id field must be present in gibson:idx:findings schema")
+		assert.Equal(t, "$.tenant_id", tenantField.Path)
+		assert.Equal(t, FieldTypeTag, tenantField.Type, "tenant_id must be a TAG field")
+		assert.True(t, tenantField.Sortable, "tenant_id TAG field must be SORTABLE")
+	})
+
+	t.Run("schema version constant matches expected bumped value", func(t *testing.T) {
+		assert.Equal(t, 2, FindingIndexSchemaVersion,
+			"FindingIndexSchemaVersion must be 2 after Phase 1 tenant_id addition")
+		assert.Equal(t, FindingIndexSchemaVersion, FindingIndex().SchemaVersion,
+			"FindingIndex().SchemaVersion must equal FindingIndexSchemaVersion constant")
+	})
 }
 
 func TestMissionMemoryIndex(t *testing.T) {
@@ -509,7 +553,7 @@ func TestMissionMemoryIndex(t *testing.T) {
 		assert.Equal(t, "gibson:idx:memory", idx.Name)
 		assert.Equal(t, "gibson:memory:", idx.Prefix)
 		assert.True(t, idx.OnJSON)
-		assert.Len(t, idx.Schema, 4)
+		assert.Len(t, idx.Schema, 5) // key, value, tenant_id, mission_id, created_at
 
 		// Verify fields
 		fields := make(map[string]FieldDefinition)
@@ -522,6 +566,9 @@ func TestMissionMemoryIndex(t *testing.T) {
 
 		// Check mission_id tag for filtering
 		assert.Equal(t, FieldTypeTag, fields["mission_id"].Type)
+
+		// Check tenant_id tag for isolation (pre-existing field in memory index)
+		assert.Equal(t, FieldTypeTag, fields["tenant_id"].Type)
 	})
 }
 
@@ -882,6 +929,177 @@ func TestIndexDefinition_Validate(t *testing.T) {
 
 		err := idx.Validate()
 		assert.NoError(t, err)
+	})
+}
+
+// TestSchemaVersionKey tests the Redis key naming convention for schema versions.
+func TestSchemaVersionKey(t *testing.T) {
+	t.Run("mission index schema version key", func(t *testing.T) {
+		key := schemaVersionKey("gibson:idx:missions")
+		assert.Equal(t, "gibson:idx:missions:schema_version", key)
+	})
+
+	t.Run("finding index schema version key", func(t *testing.T) {
+		key := schemaVersionKey("gibson:idx:findings")
+		assert.Equal(t, "gibson:idx:findings:schema_version", key)
+	})
+
+	t.Run("arbitrary index name produces consistent key", func(t *testing.T) {
+		key := schemaVersionKey("test:idx:sample")
+		assert.Equal(t, "test:idx:sample:schema_version", key)
+	})
+}
+
+// TestIndexDefinition_SchemaVersion tests that SchemaVersion is propagated correctly.
+func TestIndexDefinition_SchemaVersion(t *testing.T) {
+	t.Run("mission index has SchemaVersion set to MissionIndexSchemaVersion", func(t *testing.T) {
+		idx := MissionIndex()
+		assert.Equal(t, MissionIndexSchemaVersion, idx.SchemaVersion)
+	})
+
+	t.Run("finding index has SchemaVersion set to FindingIndexSchemaVersion", func(t *testing.T) {
+		idx := FindingIndex()
+		assert.Equal(t, FindingIndexSchemaVersion, idx.SchemaVersion)
+	})
+
+	t.Run("MissionIndexSchemaVersion is 2", func(t *testing.T) {
+		assert.Equal(t, 2, MissionIndexSchemaVersion)
+	})
+
+	t.Run("FindingIndexSchemaVersion is 2", func(t *testing.T) {
+		assert.Equal(t, 2, FindingIndexSchemaVersion)
+	})
+
+	t.Run("indexes with no SchemaVersion default to 0", func(t *testing.T) {
+		idx := &IndexDefinition{
+			Name:   "test:idx:noversion",
+			Prefix: "test:nv:",
+			OnJSON: true,
+			Schema: []FieldDefinition{
+				{Path: "$.name", Alias: "name", Type: FieldTypeText},
+			},
+		}
+		assert.Equal(t, 0, idx.SchemaVersion)
+	})
+}
+
+// TestIndexManager_WithReindexObserver tests the reindex observer wiring (pure unit, no Redis).
+func TestIndexManager_WithReindexObserver(t *testing.T) {
+	t.Run("returns the same IndexManager for chaining", func(t *testing.T) {
+		mgr := NewIndexManager(nil)
+		result := mgr.WithReindexObserver(func(_ string, _ float64) {})
+		assert.Same(t, mgr, result, "WithReindexObserver must return the receiver for chaining")
+	})
+
+	t.Run("nil observer is accepted and results in no reindexObserver set", func(t *testing.T) {
+		mgr := NewIndexManager(nil)
+		// Setting a non-nil observer and then replacing with nil should work
+		mgr.WithReindexObserver(nil)
+		assert.Nil(t, mgr.reindexObserver)
+	})
+
+	t.Run("observer is stored on the manager", func(t *testing.T) {
+		var called bool
+		mgr := NewIndexManager(nil)
+		mgr.WithReindexObserver(func(name string, dur float64) {
+			called = true
+		})
+		require.NotNil(t, mgr.reindexObserver)
+		mgr.reindexObserver("test", 1.5)
+		assert.True(t, called)
+	})
+}
+
+// TestIndexManager_ReindexObserverInvocation tests that the observer is called with
+// correct arguments after a reindex is triggered (integration test — needs Redis).
+func TestIndexManager_ReindexObserverInvocation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	client := setupTestRedis(t)
+	defer client.Close()
+
+	const testIndexName = "test:idx:reindex_observer"
+	const testPrefix = "test:reindex_obs:"
+
+	// Track observer invocations
+	type observation struct {
+		name     string
+		duration float64
+	}
+	var observations []observation
+
+	mgr := NewIndexManager(client)
+	mgr.WithReindexObserver(func(name string, dur float64) {
+		observations = append(observations, observation{name: name, duration: dur})
+	})
+
+	defer func() { _ = mgr.DropIndex(ctx, testIndexName) }()
+	_ = mgr.DropIndex(ctx, testIndexName) // clean slate
+
+	idx := &IndexDefinition{
+		Name:          testIndexName,
+		Prefix:        testPrefix,
+		OnJSON:        true,
+		SchemaVersion: 1,
+		Schema: []FieldDefinition{
+			{Path: "$.name", Alias: "name", Type: FieldTypeText},
+		},
+	}
+
+	t.Run("observer called on fresh index creation", func(t *testing.T) {
+		observations = nil
+		err := mgr.EnsureIndex(ctx, idx)
+		require.NoError(t, err)
+		require.Len(t, observations, 1, "observer must be called once on index creation")
+		assert.Equal(t, testIndexName, observations[0].name)
+		assert.GreaterOrEqual(t, observations[0].duration, 0.0)
+	})
+
+	t.Run("observer NOT called when schema version unchanged", func(t *testing.T) {
+		observations = nil
+		err := mgr.EnsureIndex(ctx, idx) // same version — should skip re-index
+		require.NoError(t, err)
+		assert.Empty(t, observations, "observer must NOT be called when schema version matches")
+	})
+
+	t.Run("observer called once on schema version bump", func(t *testing.T) {
+		observations = nil
+		// Bump the version — simulates a schema change
+		bumpedIdx := &IndexDefinition{
+			Name:          testIndexName,
+			Prefix:        testPrefix,
+			OnJSON:        true,
+			SchemaVersion: 2, // bumped
+			Schema: []FieldDefinition{
+				{Path: "$.name", Alias: "name", Type: FieldTypeText},
+				{Path: "$.tenant_id", Alias: "tenant_id", Type: FieldTypeTag, Sortable: true},
+			},
+		}
+		err := mgr.EnsureIndex(ctx, bumpedIdx)
+		require.NoError(t, err)
+		require.Len(t, observations, 1, "observer must be called exactly once on version bump re-index")
+		assert.Equal(t, testIndexName, observations[0].name)
+		assert.GreaterOrEqual(t, observations[0].duration, 0.0)
+	})
+
+	t.Run("observer NOT called again for same bumped version", func(t *testing.T) {
+		observations = nil
+		bumpedIdx := &IndexDefinition{
+			Name:          testIndexName,
+			Prefix:        testPrefix,
+			OnJSON:        true,
+			SchemaVersion: 2,
+			Schema: []FieldDefinition{
+				{Path: "$.name", Alias: "name", Type: FieldTypeText},
+				{Path: "$.tenant_id", Alias: "tenant_id", Type: FieldTypeTag, Sortable: true},
+			},
+		}
+		err := mgr.EnsureIndex(ctx, bumpedIdx)
+		require.NoError(t, err)
+		assert.Empty(t, observations, "observer must NOT be called when version already matches")
 	})
 }
 

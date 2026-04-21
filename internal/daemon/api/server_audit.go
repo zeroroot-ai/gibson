@@ -27,7 +27,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 )
 
 // ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ func (s *DaemonServer) WithLokiQuerier(lq audit.LokiQuerier) *DaemonServer {
 func (s *DaemonServer) ListAuditEvents(ctx context.Context, req *ListAuditEventsRequest) (*ListAuditEventsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = auth.TenantFromContext(ctx)
+		tenantID = identity.TenantFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -220,8 +220,17 @@ func (s *DaemonServer) requireTenantAdmin(ctx context.Context, tenantID string) 
 		return nil
 	}
 
-	id, ok := auth.GibsonIdentityFromContext(ctx)
-	if !ok || id.Subject == "" {
+	id, idErr := identity.IdentityFromContext(ctx)
+	if idErr != nil || id.Subject == "" {
+		// Structured log (spec dashboard-admin-via-envoy, Req 8 criterion 3)
+		// so operators can grep `admin_rpc_denied` for any unauthenticated
+		// admin-path reject. No bearer tokens or claim payloads appear here —
+		// only the extracted subject (empty when anonymous) + the reason.
+		s.logger.InfoContext(ctx, "admin_rpc_denied",
+			slog.String("reason", "unauthenticated"),
+			slog.String("tenant_id", tenantID),
+			slog.String("subject", ""),
+		)
 		return status_grpc.Error(codes.Unauthenticated, "authentication required")
 	}
 
@@ -239,6 +248,12 @@ func (s *DaemonServer) requireTenantAdmin(ctx context.Context, tenantID string) 
 		return status_grpc.Error(codes.Internal, "authorization check failed")
 	}
 	if !isAdmin {
+		s.logger.InfoContext(ctx, "admin_rpc_denied",
+			slog.String("reason", "not_tenant_admin"),
+			slog.String("tenant_id", tenantID),
+			slog.String("subject", id.Subject),
+			slog.String("relation", "admin"),
+		)
 		return status_grpc.Error(codes.PermissionDenied, "tenant admin required")
 	}
 	return nil

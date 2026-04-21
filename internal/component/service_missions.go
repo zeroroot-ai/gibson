@@ -6,13 +6,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // CreateMission creates a new sub-mission.
 func (s *ComponentServiceServer) CreateMission(ctx context.Context, req *componentpb.CreateMissionRequest) (*componentpb.CreateMissionResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -29,7 +29,7 @@ func (s *ComponentServiceServer) CreateMission(ctx context.Context, req *compone
 
 // RunMission queues a mission for execution.
 func (s *ComponentServiceServer) RunMission(ctx context.Context, req *componentpb.RunMissionRequest) (*componentpb.RunMissionResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -45,7 +45,7 @@ func (s *ComponentServiceServer) RunMission(ctx context.Context, req *componentp
 
 // GetMissionStatus returns the current status of a mission.
 func (s *ComponentServiceServer) GetMissionStatus(ctx context.Context, req *componentpb.GetMissionStatusRequest) (*componentpb.GetMissionStatusResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -62,7 +62,7 @@ func (s *ComponentServiceServer) GetMissionStatus(ctx context.Context, req *comp
 
 // WaitMission blocks until a mission completes or the timeout expires.
 func (s *ComponentServiceServer) WaitMission(ctx context.Context, req *componentpb.WaitMissionRequest) (*componentpb.WaitMissionResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -79,7 +79,7 @@ func (s *ComponentServiceServer) WaitMission(ctx context.Context, req *component
 
 // ListMissions returns missions matching the given filter.
 func (s *ComponentServiceServer) ListMissions(ctx context.Context, req *componentpb.ListMissionsRequest) (*componentpb.ListMissionsResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -96,7 +96,7 @@ func (s *ComponentServiceServer) ListMissions(ctx context.Context, req *componen
 
 // CancelMission requests cancellation of a running mission.
 func (s *ComponentServiceServer) CancelMission(ctx context.Context, req *componentpb.CancelMissionRequest) (*componentpb.CancelMissionResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -112,7 +112,7 @@ func (s *ComponentServiceServer) CancelMission(ctx context.Context, req *compone
 
 // GetMissionResults returns the final results of a completed mission.
 func (s *ComponentServiceServer) GetMissionResults(ctx context.Context, req *componentpb.GetMissionResultsRequest) (*componentpb.GetMissionResultsResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -129,7 +129,7 @@ func (s *ComponentServiceServer) GetMissionResults(ctx context.Context, req *com
 
 // GetMissionRunHistory returns summaries of previous mission runs.
 func (s *ComponentServiceServer) GetMissionRunHistory(ctx context.Context, req *componentpb.GetMissionRunHistoryRequest) (*componentpb.GetMissionRunHistoryResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}

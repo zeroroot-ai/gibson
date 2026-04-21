@@ -60,6 +60,12 @@ func (l *viperConfigLoader) Load(path string) (*Config, error) {
 		}
 	}
 
+	// Apply runtime env-var overrides (GIBSON_MODE, GIBSON_STRICT_TENANT).
+	// These are env-only knobs not sourced from YAML.
+	if err := applyRuntimeEnvOverrides(&cfg); err != nil {
+		return nil, fmt.Errorf("configuration error: %w", err)
+	}
+
 	// Validate the loaded configuration
 	if err := l.validator.Validate(&cfg); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
@@ -77,7 +83,10 @@ func (l *viperConfigLoader) LoadWithDefaults(path string) (*Config, error) {
 
 	// Check if file exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		// No file, just validate and return defaults
+		// No file — apply runtime env overrides on top of defaults, then validate.
+		if err := applyRuntimeEnvOverrides(cfg); err != nil {
+			return nil, fmt.Errorf("configuration error: %w", err)
+		}
 		if err := l.validator.Validate(cfg); err != nil {
 			return nil, fmt.Errorf("default configuration validation failed: %w", err)
 		}
@@ -114,12 +123,40 @@ func (l *viperConfigLoader) LoadWithDefaults(path string) (*Config, error) {
 		}
 	}
 
+	// Apply runtime env-var overrides (GIBSON_MODE, GIBSON_STRICT_TENANT).
+	// These are env-only knobs not sourced from YAML.
+	if err := applyRuntimeEnvOverrides(cfg); err != nil {
+		return nil, fmt.Errorf("configuration error: %w", err)
+	}
+
 	// Validate the loaded configuration
 	if err := l.validator.Validate(cfg); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
 	return cfg, nil
+}
+
+// applyRuntimeEnvOverrides reads GIBSON_MODE and GIBSON_STRICT_TENANT from the
+// environment and writes the resolved values into the unexported mode and
+// strictTenant fields of cfg. This is called after YAML unmarshalling so that
+// env vars always win over file values for these two knobs, and so that env-var
+// reads are concentrated in the config loader rather than scattered across the
+// daemon codebase.
+func applyRuntimeEnvOverrides(cfg *Config) error {
+	mode, err := loadMode()
+	if err != nil {
+		return err
+	}
+	cfg.mode = mode
+
+	strict, err := loadStrictTenant()
+	if err != nil {
+		return err
+	}
+	cfg.strictTenant = strict
+
+	return nil
 }
 
 // interpolateEnvVars recursively interpolates environment variables in the config map.

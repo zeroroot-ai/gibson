@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
@@ -145,7 +145,7 @@ func (s *stubStreamServer) SetTrailer(_ metadata.MD)       {}
 
 // tenantCtx builds a context with the given tenant wired in.
 func tenantCtx(tenantID string) context.Context {
-	return auth.ContextWithTenant(context.Background(), tenantID)
+	return identity.ContextWithTenant(context.Background(), tenantID)
 }
 
 // newExecServer builds a minimal DaemonServer with a stubbed provider store and
@@ -267,19 +267,17 @@ func TestExecuteLLM_ProviderNotFound(t *testing.T) {
 }
 
 // TestExecuteLLM_NoTenantContext verifies that a context with no explicit tenant
-// falls through to the _system tenant (TenantFromContextWithCheck returns
-// SystemTenant, not an error, for an empty context). The handler will then fail
-// at the provider store step since there is no provider named "x" for the
-// system tenant — resulting in NotFound.
+// is rejected with Unauthenticated. Under the Envoy/identity interceptor model,
+// the tenant is derived from the HMAC-verified identity headers. A context
+// with no identity (or _system tenant) cannot proceed to the provider store.
 func TestExecuteLLM_NoTenantContext(t *testing.T) {
 	store := &stubProviderConfigStore{} // Resolve always returns ErrNotFound
 	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil })
-	// Plain context — no explicit tenant; falls back to _system.
+	// Plain context — no tenant identity; handler rejects with Unauthenticated.
 	_, err := s.ExecuteLLM(context.Background(), &ExecuteLLMRequest{ProviderName: "x"})
 	require.Error(t, err)
 	st, _ := status_grpc.FromError(err)
-	// _system proceeds to the store, which returns ErrNotFound → codes.NotFound.
-	assert.Equal(t, codes.NotFound, st.Code())
+	assert.Equal(t, codes.Unauthenticated, st.Code())
 }
 
 // TestExecuteLLM_RateLimitEnforced verifies that the 11th call returns
@@ -539,20 +537,20 @@ func TestStreamLLM_CredentialNotLeaked(t *testing.T) {
 }
 
 // TestStreamLLM_NoTenantContext verifies that a context with no explicit tenant
-// falls through to the _system tenant. The handler then fails at the provider
-// store step since providerConfig is nil — resulting in FailedPrecondition.
+// is rejected with Unauthenticated. Under the Envoy/identity interceptor model,
+// the tenant is derived from the HMAC-verified identity headers. A context with
+// no identity (or _system tenant) cannot proceed to the provider store.
 func TestStreamLLM_NoTenantContext(t *testing.T) {
 	s := &DaemonServer{
 		logger:          slog.Default(),
 		providerFactory: func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil },
-		// providerConfig is nil — triggers FailedPrecondition.
 	}
 	stream := &stubStreamServer{ctx: context.Background()}
 	err := s.StreamLLM(&StreamLLMRequest{ProviderName: "x"}, stream)
 	require.Error(t, err)
 	st, _ := status_grpc.FromError(err)
-	// Falls through to the nil providerConfig guard → FailedPrecondition.
-	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	// No tenant context → Unauthenticated (identity interceptor check).
+	assert.Equal(t, codes.Unauthenticated, st.Code())
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ package manifest
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/agentauth"
+	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
 )
@@ -44,13 +44,13 @@ type ManifestNotifier interface {
 	Notify(ctx context.Context, tenantID string, reason string)
 }
 
-// FGAResolver is the narrow Builder-facing view of the agentauth.FGABridge.
-// *agentauth.FGABridge satisfies it natively. Declared here so unit
+// FGAResolver is the narrow Builder-facing view of the capabilitygrant.FGABridge.
+// *capabilitygrant.FGABridge satisfies it natively. Declared here so unit
 // tests mock one small surface rather than the full bridge.
 type FGAResolver interface {
-	ResolveCapabilities(ctx context.Context, userID, tenantID string) ([]agentauth.Capability, error)
-	ResolveCrossComponentRules(ctx context.Context, subjectFGA string, components []agentauth.ComponentRef) ([]agentauth.CrossRule, error)
-	ResolveAgentPrincipalIntersection(ctx context.Context, agentPrincipalID, ownerUserID, tenantID string) ([]agentauth.ComponentRef, error)
+	ResolveCapabilities(ctx context.Context, userID, tenantID string) ([]capabilitygrant.Capability, error)
+	ResolveCrossComponentRules(ctx context.Context, subjectFGA string, components []capabilitygrant.ComponentRef) ([]capabilitygrant.CrossRule, error)
+	ResolveAgentPrincipalIntersection(ctx context.Context, agentPrincipalID, ownerUserID, tenantID string) ([]capabilitygrant.ComponentRef, error)
 }
 
 // RegistrySource is the narrow Builder-facing view of the component

@@ -4299,8 +4299,8 @@ func (x *AgentCapabilityGrant) GetInputSchema() []byte {
 	return nil
 }
 
-// RegisterAgentAuthRequest registers a new agent + host pair under a tenant.
-type RegisterAgentAuthRequest struct {
+// RegisterCapabilityGrantRequest registers a new agent + host pair under a tenant.
+type RegisterCapabilityGrantRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4323,8 +4323,8 @@ type RegisterAgentAuthRequest struct {
 	BootstrapCredential string `protobuf:"bytes,8,opt,name=bootstrap_credential,json=bootstrapCredential,proto3" json:"bootstrap_credential,omitempty"`
 }
 
-func (x *RegisterAgentAuthRequest) Reset() {
-	*x = RegisterAgentAuthRequest{}
+func (x *RegisterCapabilityGrantRequest) Reset() {
+	*x = RegisterCapabilityGrantRequest{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[65]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4332,13 +4332,13 @@ func (x *RegisterAgentAuthRequest) Reset() {
 	}
 }
 
-func (x *RegisterAgentAuthRequest) String() string {
+func (x *RegisterCapabilityGrantRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RegisterAgentAuthRequest) ProtoMessage() {}
+func (*RegisterCapabilityGrantRequest) ProtoMessage() {}
 
-func (x *RegisterAgentAuthRequest) ProtoReflect() protoreflect.Message {
+func (x *RegisterCapabilityGrantRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[65]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4350,69 +4350,69 @@ func (x *RegisterAgentAuthRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RegisterAgentAuthRequest.ProtoReflect.Descriptor instead.
-func (*RegisterAgentAuthRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use RegisterCapabilityGrantRequest.ProtoReflect.Descriptor instead.
+func (*RegisterCapabilityGrantRequest) Descriptor() ([]byte, []int) {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{65}
 }
 
-func (x *RegisterAgentAuthRequest) GetTenantId() string {
+func (x *RegisterCapabilityGrantRequest) GetTenantId() string {
 	if x != nil {
 		return x.TenantId
 	}
 	return ""
 }
 
-func (x *RegisterAgentAuthRequest) GetOwnerUserId() string {
+func (x *RegisterCapabilityGrantRequest) GetOwnerUserId() string {
 	if x != nil {
 		return x.OwnerUserId
 	}
 	return ""
 }
 
-func (x *RegisterAgentAuthRequest) GetAgentName() string {
+func (x *RegisterCapabilityGrantRequest) GetAgentName() string {
 	if x != nil {
 		return x.AgentName
 	}
 	return ""
 }
 
-func (x *RegisterAgentAuthRequest) GetAgentMode() string {
+func (x *RegisterCapabilityGrantRequest) GetAgentMode() string {
 	if x != nil {
 		return x.AgentMode
 	}
 	return ""
 }
 
-func (x *RegisterAgentAuthRequest) GetHostPublicKeyJwk() []byte {
+func (x *RegisterCapabilityGrantRequest) GetHostPublicKeyJwk() []byte {
 	if x != nil {
 		return x.HostPublicKeyJwk
 	}
 	return nil
 }
 
-func (x *RegisterAgentAuthRequest) GetAgentPublicKeyJwk() []byte {
+func (x *RegisterCapabilityGrantRequest) GetAgentPublicKeyJwk() []byte {
 	if x != nil {
 		return x.AgentPublicKeyJwk
 	}
 	return nil
 }
 
-func (x *RegisterAgentAuthRequest) GetBootstrapType() string {
+func (x *RegisterCapabilityGrantRequest) GetBootstrapType() string {
 	if x != nil {
 		return x.BootstrapType
 	}
 	return ""
 }
 
-func (x *RegisterAgentAuthRequest) GetBootstrapCredential() string {
+func (x *RegisterCapabilityGrantRequest) GetBootstrapCredential() string {
 	if x != nil {
 		return x.BootstrapCredential
 	}
 	return ""
 }
 
-// RegisterAgentAuthResponse is returned after successful agent registration.
-type RegisterAgentAuthResponse struct {
+// RegisterCapabilityGrantResponse is returned after successful agent registration.
+type RegisterCapabilityGrantResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4427,8 +4427,8 @@ type RegisterAgentAuthResponse struct {
 	Status string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
 }
 
-func (x *RegisterAgentAuthResponse) Reset() {
-	*x = RegisterAgentAuthResponse{}
+func (x *RegisterCapabilityGrantResponse) Reset() {
+	*x = RegisterCapabilityGrantResponse{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[66]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4436,13 +4436,13 @@ func (x *RegisterAgentAuthResponse) Reset() {
 	}
 }
 
-func (x *RegisterAgentAuthResponse) String() string {
+func (x *RegisterCapabilityGrantResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RegisterAgentAuthResponse) ProtoMessage() {}
+func (*RegisterCapabilityGrantResponse) ProtoMessage() {}
 
-func (x *RegisterAgentAuthResponse) ProtoReflect() protoreflect.Message {
+func (x *RegisterCapabilityGrantResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[66]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4454,33 +4454,33 @@ func (x *RegisterAgentAuthResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RegisterAgentAuthResponse.ProtoReflect.Descriptor instead.
-func (*RegisterAgentAuthResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use RegisterCapabilityGrantResponse.ProtoReflect.Descriptor instead.
+func (*RegisterCapabilityGrantResponse) Descriptor() ([]byte, []int) {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{66}
 }
 
-func (x *RegisterAgentAuthResponse) GetAgentId() string {
+func (x *RegisterCapabilityGrantResponse) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
 	}
 	return ""
 }
 
-func (x *RegisterAgentAuthResponse) GetHostId() string {
+func (x *RegisterCapabilityGrantResponse) GetHostId() string {
 	if x != nil {
 		return x.HostId
 	}
 	return ""
 }
 
-func (x *RegisterAgentAuthResponse) GetCapabilities() []*AgentCapabilityGrant {
+func (x *RegisterCapabilityGrantResponse) GetCapabilities() []*AgentCapabilityGrant {
 	if x != nil {
 		return x.Capabilities
 	}
 	return nil
 }
 
-func (x *RegisterAgentAuthResponse) GetStatus() string {
+func (x *RegisterCapabilityGrantResponse) GetStatus() string {
 	if x != nil {
 		return x.Status
 	}
@@ -4630,8 +4630,8 @@ func (x *ExecuteAgentCapabilityResponse) GetErrorMessage() string {
 	return ""
 }
 
-// GetAgentAuthStatusRequest fetches status for a single agent.
-type GetAgentAuthStatusRequest struct {
+// GetCapabilityGrantStatusRequest fetches status for a single agent.
+type GetCapabilityGrantStatusRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4642,8 +4642,8 @@ type GetAgentAuthStatusRequest struct {
 	TenantId string `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 }
 
-func (x *GetAgentAuthStatusRequest) Reset() {
-	*x = GetAgentAuthStatusRequest{}
+func (x *GetCapabilityGrantStatusRequest) Reset() {
+	*x = GetCapabilityGrantStatusRequest{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[69]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4651,13 +4651,13 @@ func (x *GetAgentAuthStatusRequest) Reset() {
 	}
 }
 
-func (x *GetAgentAuthStatusRequest) String() string {
+func (x *GetCapabilityGrantStatusRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetAgentAuthStatusRequest) ProtoMessage() {}
+func (*GetCapabilityGrantStatusRequest) ProtoMessage() {}
 
-func (x *GetAgentAuthStatusRequest) ProtoReflect() protoreflect.Message {
+func (x *GetCapabilityGrantStatusRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[69]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4669,27 +4669,27 @@ func (x *GetAgentAuthStatusRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetAgentAuthStatusRequest.ProtoReflect.Descriptor instead.
-func (*GetAgentAuthStatusRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetCapabilityGrantStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetCapabilityGrantStatusRequest) Descriptor() ([]byte, []int) {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{69}
 }
 
-func (x *GetAgentAuthStatusRequest) GetAgentId() string {
+func (x *GetCapabilityGrantStatusRequest) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
 	}
 	return ""
 }
 
-func (x *GetAgentAuthStatusRequest) GetTenantId() string {
+func (x *GetCapabilityGrantStatusRequest) GetTenantId() string {
 	if x != nil {
 		return x.TenantId
 	}
 	return ""
 }
 
-// GetAgentAuthStatusResponse carries agent status and capability grants.
-type GetAgentAuthStatusResponse struct {
+// GetCapabilityGrantStatusResponse carries agent status and capability grants.
+type GetCapabilityGrantStatusResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4712,8 +4712,8 @@ type GetAgentAuthStatusResponse struct {
 	CreatedAt int64 `protobuf:"varint,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 }
 
-func (x *GetAgentAuthStatusResponse) Reset() {
-	*x = GetAgentAuthStatusResponse{}
+func (x *GetCapabilityGrantStatusResponse) Reset() {
+	*x = GetCapabilityGrantStatusResponse{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[70]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4721,13 +4721,13 @@ func (x *GetAgentAuthStatusResponse) Reset() {
 	}
 }
 
-func (x *GetAgentAuthStatusResponse) String() string {
+func (x *GetCapabilityGrantStatusResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetAgentAuthStatusResponse) ProtoMessage() {}
+func (*GetCapabilityGrantStatusResponse) ProtoMessage() {}
 
-func (x *GetAgentAuthStatusResponse) ProtoReflect() protoreflect.Message {
+func (x *GetCapabilityGrantStatusResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[70]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4739,69 +4739,69 @@ func (x *GetAgentAuthStatusResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetAgentAuthStatusResponse.ProtoReflect.Descriptor instead.
-func (*GetAgentAuthStatusResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetCapabilityGrantStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetCapabilityGrantStatusResponse) Descriptor() ([]byte, []int) {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{70}
 }
 
-func (x *GetAgentAuthStatusResponse) GetAgentId() string {
+func (x *GetCapabilityGrantStatusResponse) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
 	}
 	return ""
 }
 
-func (x *GetAgentAuthStatusResponse) GetHostId() string {
+func (x *GetCapabilityGrantStatusResponse) GetHostId() string {
 	if x != nil {
 		return x.HostId
 	}
 	return ""
 }
 
-func (x *GetAgentAuthStatusResponse) GetStatus() string {
+func (x *GetCapabilityGrantStatusResponse) GetStatus() string {
 	if x != nil {
 		return x.Status
 	}
 	return ""
 }
 
-func (x *GetAgentAuthStatusResponse) GetMode() string {
+func (x *GetCapabilityGrantStatusResponse) GetMode() string {
 	if x != nil {
 		return x.Mode
 	}
 	return ""
 }
 
-func (x *GetAgentAuthStatusResponse) GetOwnerUserId() string {
+func (x *GetCapabilityGrantStatusResponse) GetOwnerUserId() string {
 	if x != nil {
 		return x.OwnerUserId
 	}
 	return ""
 }
 
-func (x *GetAgentAuthStatusResponse) GetCapabilities() []*AgentCapabilityGrant {
+func (x *GetCapabilityGrantStatusResponse) GetCapabilities() []*AgentCapabilityGrant {
 	if x != nil {
 		return x.Capabilities
 	}
 	return nil
 }
 
-func (x *GetAgentAuthStatusResponse) GetLastActiveAt() int64 {
+func (x *GetCapabilityGrantStatusResponse) GetLastActiveAt() int64 {
 	if x != nil {
 		return x.LastActiveAt
 	}
 	return 0
 }
 
-func (x *GetAgentAuthStatusResponse) GetCreatedAt() int64 {
+func (x *GetCapabilityGrantStatusResponse) GetCreatedAt() int64 {
 	if x != nil {
 		return x.CreatedAt
 	}
 	return 0
 }
 
-// RevokeAgentAuthRequest revokes an agent and all its grants.
-type RevokeAgentAuthRequest struct {
+// RevokeCapabilityGrantRequest revokes an agent and all its grants.
+type RevokeCapabilityGrantRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4812,8 +4812,8 @@ type RevokeAgentAuthRequest struct {
 	TenantId string `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 }
 
-func (x *RevokeAgentAuthRequest) Reset() {
-	*x = RevokeAgentAuthRequest{}
+func (x *RevokeCapabilityGrantRequest) Reset() {
+	*x = RevokeCapabilityGrantRequest{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[71]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4821,13 +4821,13 @@ func (x *RevokeAgentAuthRequest) Reset() {
 	}
 }
 
-func (x *RevokeAgentAuthRequest) String() string {
+func (x *RevokeCapabilityGrantRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RevokeAgentAuthRequest) ProtoMessage() {}
+func (*RevokeCapabilityGrantRequest) ProtoMessage() {}
 
-func (x *RevokeAgentAuthRequest) ProtoReflect() protoreflect.Message {
+func (x *RevokeCapabilityGrantRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[71]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4839,34 +4839,34 @@ func (x *RevokeAgentAuthRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RevokeAgentAuthRequest.ProtoReflect.Descriptor instead.
-func (*RevokeAgentAuthRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use RevokeCapabilityGrantRequest.ProtoReflect.Descriptor instead.
+func (*RevokeCapabilityGrantRequest) Descriptor() ([]byte, []int) {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{71}
 }
 
-func (x *RevokeAgentAuthRequest) GetAgentId() string {
+func (x *RevokeCapabilityGrantRequest) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
 	}
 	return ""
 }
 
-func (x *RevokeAgentAuthRequest) GetTenantId() string {
+func (x *RevokeCapabilityGrantRequest) GetTenantId() string {
 	if x != nil {
 		return x.TenantId
 	}
 	return ""
 }
 
-// RevokeAgentAuthResponse is empty on success.
-type RevokeAgentAuthResponse struct {
+// RevokeCapabilityGrantResponse is empty on success.
+type RevokeCapabilityGrantResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 }
 
-func (x *RevokeAgentAuthResponse) Reset() {
-	*x = RevokeAgentAuthResponse{}
+func (x *RevokeCapabilityGrantResponse) Reset() {
+	*x = RevokeCapabilityGrantResponse{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[72]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4874,13 +4874,13 @@ func (x *RevokeAgentAuthResponse) Reset() {
 	}
 }
 
-func (x *RevokeAgentAuthResponse) String() string {
+func (x *RevokeCapabilityGrantResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RevokeAgentAuthResponse) ProtoMessage() {}
+func (*RevokeCapabilityGrantResponse) ProtoMessage() {}
 
-func (x *RevokeAgentAuthResponse) ProtoReflect() protoreflect.Message {
+func (x *RevokeCapabilityGrantResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[72]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4892,13 +4892,13 @@ func (x *RevokeAgentAuthResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RevokeAgentAuthResponse.ProtoReflect.Descriptor instead.
-func (*RevokeAgentAuthResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use RevokeCapabilityGrantResponse.ProtoReflect.Descriptor instead.
+func (*RevokeCapabilityGrantResponse) Descriptor() ([]byte, []int) {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{72}
 }
 
-// ListAgentAuthAgentsRequest returns a paginated list of agents for a tenant.
-type ListAgentAuthAgentsRequest struct {
+// ListCapabilityGrantAgentsRequest returns a paginated list of agents for a tenant.
+type ListCapabilityGrantAgentsRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4911,8 +4911,8 @@ type ListAgentAuthAgentsRequest struct {
 	Offset int32 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
 }
 
-func (x *ListAgentAuthAgentsRequest) Reset() {
-	*x = ListAgentAuthAgentsRequest{}
+func (x *ListCapabilityGrantAgentsRequest) Reset() {
+	*x = ListCapabilityGrantAgentsRequest{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[73]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4920,13 +4920,13 @@ func (x *ListAgentAuthAgentsRequest) Reset() {
 	}
 }
 
-func (x *ListAgentAuthAgentsRequest) String() string {
+func (x *ListCapabilityGrantAgentsRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListAgentAuthAgentsRequest) ProtoMessage() {}
+func (*ListCapabilityGrantAgentsRequest) ProtoMessage() {}
 
-func (x *ListAgentAuthAgentsRequest) ProtoReflect() protoreflect.Message {
+func (x *ListCapabilityGrantAgentsRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[73]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4938,46 +4938,46 @@ func (x *ListAgentAuthAgentsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListAgentAuthAgentsRequest.ProtoReflect.Descriptor instead.
-func (*ListAgentAuthAgentsRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListCapabilityGrantAgentsRequest.ProtoReflect.Descriptor instead.
+func (*ListCapabilityGrantAgentsRequest) Descriptor() ([]byte, []int) {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{73}
 }
 
-func (x *ListAgentAuthAgentsRequest) GetTenantId() string {
+func (x *ListCapabilityGrantAgentsRequest) GetTenantId() string {
 	if x != nil {
 		return x.TenantId
 	}
 	return ""
 }
 
-func (x *ListAgentAuthAgentsRequest) GetLimit() int32 {
+func (x *ListCapabilityGrantAgentsRequest) GetLimit() int32 {
 	if x != nil {
 		return x.Limit
 	}
 	return 0
 }
 
-func (x *ListAgentAuthAgentsRequest) GetOffset() int32 {
+func (x *ListCapabilityGrantAgentsRequest) GetOffset() int32 {
 	if x != nil {
 		return x.Offset
 	}
 	return 0
 }
 
-// ListAgentAuthAgentsResponse carries the paginated agent list.
-type ListAgentAuthAgentsResponse struct {
+// ListCapabilityGrantAgentsResponse carries the paginated agent list.
+type ListCapabilityGrantAgentsResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
 	// agents is the list of agent status records.
-	Agents []*GetAgentAuthStatusResponse `protobuf:"bytes,1,rep,name=agents,proto3" json:"agents,omitempty"`
+	Agents []*GetCapabilityGrantStatusResponse `protobuf:"bytes,1,rep,name=agents,proto3" json:"agents,omitempty"`
 	// total is the total number of agents (before pagination).
 	Total int32 `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
 }
 
-func (x *ListAgentAuthAgentsResponse) Reset() {
-	*x = ListAgentAuthAgentsResponse{}
+func (x *ListCapabilityGrantAgentsResponse) Reset() {
+	*x = ListCapabilityGrantAgentsResponse{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[74]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4985,13 +4985,13 @@ func (x *ListAgentAuthAgentsResponse) Reset() {
 	}
 }
 
-func (x *ListAgentAuthAgentsResponse) String() string {
+func (x *ListCapabilityGrantAgentsResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListAgentAuthAgentsResponse) ProtoMessage() {}
+func (*ListCapabilityGrantAgentsResponse) ProtoMessage() {}
 
-func (x *ListAgentAuthAgentsResponse) ProtoReflect() protoreflect.Message {
+func (x *ListCapabilityGrantAgentsResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[74]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5003,19 +5003,19 @@ func (x *ListAgentAuthAgentsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListAgentAuthAgentsResponse.ProtoReflect.Descriptor instead.
-func (*ListAgentAuthAgentsResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListCapabilityGrantAgentsResponse.ProtoReflect.Descriptor instead.
+func (*ListCapabilityGrantAgentsResponse) Descriptor() ([]byte, []int) {
 	return file_gibson_daemon_admin_v1_daemon_admin_proto_rawDescGZIP(), []int{74}
 }
 
-func (x *ListAgentAuthAgentsResponse) GetAgents() []*GetAgentAuthStatusResponse {
+func (x *ListCapabilityGrantAgentsResponse) GetAgents() []*GetCapabilityGrantStatusResponse {
 	if x != nil {
 		return x.Agents
 	}
 	return nil
 }
 
-func (x *ListAgentAuthAgentsResponse) GetTotal() int32 {
+func (x *ListCapabilityGrantAgentsResponse) GetTotal() int32 {
 	if x != nil {
 		return x.Total
 	}
@@ -11180,16 +11180,16 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_goTypes = []any{
 	(*GetConversationRequest)(nil),                  // 62: gibson.daemon.admin.v1.GetConversationRequest
 	(*GetConversationResponse)(nil),                 // 63: gibson.daemon.admin.v1.GetConversationResponse
 	(*AgentCapabilityGrant)(nil),                    // 64: gibson.daemon.admin.v1.AgentCapabilityGrant
-	(*RegisterAgentAuthRequest)(nil),                // 65: gibson.daemon.admin.v1.RegisterAgentAuthRequest
-	(*RegisterAgentAuthResponse)(nil),               // 66: gibson.daemon.admin.v1.RegisterAgentAuthResponse
+	(*RegisterCapabilityGrantRequest)(nil),          // 65: gibson.daemon.admin.v1.RegisterCapabilityGrantRequest
+	(*RegisterCapabilityGrantResponse)(nil),         // 66: gibson.daemon.admin.v1.RegisterCapabilityGrantResponse
 	(*ExecuteAgentCapabilityRequest)(nil),           // 67: gibson.daemon.admin.v1.ExecuteAgentCapabilityRequest
 	(*ExecuteAgentCapabilityResponse)(nil),          // 68: gibson.daemon.admin.v1.ExecuteAgentCapabilityResponse
-	(*GetAgentAuthStatusRequest)(nil),               // 69: gibson.daemon.admin.v1.GetAgentAuthStatusRequest
-	(*GetAgentAuthStatusResponse)(nil),              // 70: gibson.daemon.admin.v1.GetAgentAuthStatusResponse
-	(*RevokeAgentAuthRequest)(nil),                  // 71: gibson.daemon.admin.v1.RevokeAgentAuthRequest
-	(*RevokeAgentAuthResponse)(nil),                 // 72: gibson.daemon.admin.v1.RevokeAgentAuthResponse
-	(*ListAgentAuthAgentsRequest)(nil),              // 73: gibson.daemon.admin.v1.ListAgentAuthAgentsRequest
-	(*ListAgentAuthAgentsResponse)(nil),             // 74: gibson.daemon.admin.v1.ListAgentAuthAgentsResponse
+	(*GetCapabilityGrantStatusRequest)(nil),         // 69: gibson.daemon.admin.v1.GetCapabilityGrantStatusRequest
+	(*GetCapabilityGrantStatusResponse)(nil),        // 70: gibson.daemon.admin.v1.GetCapabilityGrantStatusResponse
+	(*RevokeCapabilityGrantRequest)(nil),            // 71: gibson.daemon.admin.v1.RevokeCapabilityGrantRequest
+	(*RevokeCapabilityGrantResponse)(nil),           // 72: gibson.daemon.admin.v1.RevokeCapabilityGrantResponse
+	(*ListCapabilityGrantAgentsRequest)(nil),        // 73: gibson.daemon.admin.v1.ListCapabilityGrantAgentsRequest
+	(*ListCapabilityGrantAgentsResponse)(nil),       // 74: gibson.daemon.admin.v1.ListCapabilityGrantAgentsResponse
 	(*ListAgentCapabilitiesRequest)(nil),            // 75: gibson.daemon.admin.v1.ListAgentCapabilitiesRequest
 	(*ListAgentCapabilitiesResponse)(nil),           // 76: gibson.daemon.admin.v1.ListAgentCapabilitiesResponse
 	(*CreateHostRegistrationTokenRequest)(nil),      // 77: gibson.daemon.admin.v1.CreateHostRegistrationTokenRequest
@@ -11284,9 +11284,9 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_depIdxs = []int32{
 	58,  // 14: gibson.daemon.admin.v1.ListConversationsResponse.conversations:type_name -> gibson.daemon.admin.v1.ConversationSummary
 	58,  // 15: gibson.daemon.admin.v1.GetConversationResponse.conversation:type_name -> gibson.daemon.admin.v1.ConversationSummary
 	59,  // 16: gibson.daemon.admin.v1.GetConversationResponse.messages:type_name -> gibson.daemon.admin.v1.ConversationMessage
-	64,  // 17: gibson.daemon.admin.v1.RegisterAgentAuthResponse.capabilities:type_name -> gibson.daemon.admin.v1.AgentCapabilityGrant
-	64,  // 18: gibson.daemon.admin.v1.GetAgentAuthStatusResponse.capabilities:type_name -> gibson.daemon.admin.v1.AgentCapabilityGrant
-	70,  // 19: gibson.daemon.admin.v1.ListAgentAuthAgentsResponse.agents:type_name -> gibson.daemon.admin.v1.GetAgentAuthStatusResponse
+	64,  // 17: gibson.daemon.admin.v1.RegisterCapabilityGrantResponse.capabilities:type_name -> gibson.daemon.admin.v1.AgentCapabilityGrant
+	64,  // 18: gibson.daemon.admin.v1.GetCapabilityGrantStatusResponse.capabilities:type_name -> gibson.daemon.admin.v1.AgentCapabilityGrant
+	70,  // 19: gibson.daemon.admin.v1.ListCapabilityGrantAgentsResponse.agents:type_name -> gibson.daemon.admin.v1.GetCapabilityGrantStatusResponse
 	64,  // 20: gibson.daemon.admin.v1.ListAgentCapabilitiesResponse.capabilities:type_name -> gibson.daemon.admin.v1.AgentCapabilityGrant
 	80,  // 21: gibson.daemon.admin.v1.ListComponentGrantsResponse.grants:type_name -> gibson.daemon.admin.v1.AgentComponentGrant
 	82,  // 22: gibson.daemon.admin.v1.BatchGrantComponentAccessV2Request.changes:type_name -> gibson.daemon.admin.v1.GrantChangeV2
@@ -11350,12 +11350,12 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_depIdxs = []int32{
 	56,  // 80: gibson.daemon.admin.v1.DaemonAdminService.MarkAllAlertsRead:input_type -> gibson.daemon.admin.v1.MarkAllAlertsReadRequest
 	60,  // 81: gibson.daemon.admin.v1.DaemonAdminService.ListConversations:input_type -> gibson.daemon.admin.v1.ListConversationsRequest
 	62,  // 82: gibson.daemon.admin.v1.DaemonAdminService.GetConversation:input_type -> gibson.daemon.admin.v1.GetConversationRequest
-	65,  // 83: gibson.daemon.admin.v1.DaemonAdminService.RegisterAgentAuth:input_type -> gibson.daemon.admin.v1.RegisterAgentAuthRequest
+	65,  // 83: gibson.daemon.admin.v1.DaemonAdminService.RegisterCapabilityGrant:input_type -> gibson.daemon.admin.v1.RegisterCapabilityGrantRequest
 	67,  // 84: gibson.daemon.admin.v1.DaemonAdminService.ExecuteAgentCapability:input_type -> gibson.daemon.admin.v1.ExecuteAgentCapabilityRequest
 	75,  // 85: gibson.daemon.admin.v1.DaemonAdminService.ListAgentCapabilities:input_type -> gibson.daemon.admin.v1.ListAgentCapabilitiesRequest
-	69,  // 86: gibson.daemon.admin.v1.DaemonAdminService.GetAgentAuthStatus:input_type -> gibson.daemon.admin.v1.GetAgentAuthStatusRequest
-	71,  // 87: gibson.daemon.admin.v1.DaemonAdminService.RevokeAgentAuth:input_type -> gibson.daemon.admin.v1.RevokeAgentAuthRequest
-	73,  // 88: gibson.daemon.admin.v1.DaemonAdminService.ListAgentAuthAgents:input_type -> gibson.daemon.admin.v1.ListAgentAuthAgentsRequest
+	69,  // 86: gibson.daemon.admin.v1.DaemonAdminService.GetCapabilityGrantStatus:input_type -> gibson.daemon.admin.v1.GetCapabilityGrantStatusRequest
+	71,  // 87: gibson.daemon.admin.v1.DaemonAdminService.RevokeCapabilityGrant:input_type -> gibson.daemon.admin.v1.RevokeCapabilityGrantRequest
+	73,  // 88: gibson.daemon.admin.v1.DaemonAdminService.ListCapabilityGrantAgents:input_type -> gibson.daemon.admin.v1.ListCapabilityGrantAgentsRequest
 	77,  // 89: gibson.daemon.admin.v1.DaemonAdminService.CreateHostRegistrationToken:input_type -> gibson.daemon.admin.v1.CreateHostRegistrationTokenRequest
 	79,  // 90: gibson.daemon.admin.v1.DaemonAdminService.ListComponentGrants:input_type -> gibson.daemon.admin.v1.ListComponentGrantsRequest
 	83,  // 91: gibson.daemon.admin.v1.DaemonAdminService.BatchGrantComponentAccessV2:input_type -> gibson.daemon.admin.v1.BatchGrantComponentAccessV2Request
@@ -11407,12 +11407,12 @@ var file_gibson_daemon_admin_v1_daemon_admin_proto_depIdxs = []int32{
 	57,  // 137: gibson.daemon.admin.v1.DaemonAdminService.MarkAllAlertsRead:output_type -> gibson.daemon.admin.v1.MarkAllAlertsReadResponse
 	61,  // 138: gibson.daemon.admin.v1.DaemonAdminService.ListConversations:output_type -> gibson.daemon.admin.v1.ListConversationsResponse
 	63,  // 139: gibson.daemon.admin.v1.DaemonAdminService.GetConversation:output_type -> gibson.daemon.admin.v1.GetConversationResponse
-	66,  // 140: gibson.daemon.admin.v1.DaemonAdminService.RegisterAgentAuth:output_type -> gibson.daemon.admin.v1.RegisterAgentAuthResponse
+	66,  // 140: gibson.daemon.admin.v1.DaemonAdminService.RegisterCapabilityGrant:output_type -> gibson.daemon.admin.v1.RegisterCapabilityGrantResponse
 	68,  // 141: gibson.daemon.admin.v1.DaemonAdminService.ExecuteAgentCapability:output_type -> gibson.daemon.admin.v1.ExecuteAgentCapabilityResponse
 	76,  // 142: gibson.daemon.admin.v1.DaemonAdminService.ListAgentCapabilities:output_type -> gibson.daemon.admin.v1.ListAgentCapabilitiesResponse
-	70,  // 143: gibson.daemon.admin.v1.DaemonAdminService.GetAgentAuthStatus:output_type -> gibson.daemon.admin.v1.GetAgentAuthStatusResponse
-	72,  // 144: gibson.daemon.admin.v1.DaemonAdminService.RevokeAgentAuth:output_type -> gibson.daemon.admin.v1.RevokeAgentAuthResponse
-	74,  // 145: gibson.daemon.admin.v1.DaemonAdminService.ListAgentAuthAgents:output_type -> gibson.daemon.admin.v1.ListAgentAuthAgentsResponse
+	70,  // 143: gibson.daemon.admin.v1.DaemonAdminService.GetCapabilityGrantStatus:output_type -> gibson.daemon.admin.v1.GetCapabilityGrantStatusResponse
+	72,  // 144: gibson.daemon.admin.v1.DaemonAdminService.RevokeCapabilityGrant:output_type -> gibson.daemon.admin.v1.RevokeCapabilityGrantResponse
+	74,  // 145: gibson.daemon.admin.v1.DaemonAdminService.ListCapabilityGrantAgents:output_type -> gibson.daemon.admin.v1.ListCapabilityGrantAgentsResponse
 	78,  // 146: gibson.daemon.admin.v1.DaemonAdminService.CreateHostRegistrationToken:output_type -> gibson.daemon.admin.v1.CreateHostRegistrationTokenResponse
 	81,  // 147: gibson.daemon.admin.v1.DaemonAdminService.ListComponentGrants:output_type -> gibson.daemon.admin.v1.ListComponentGrantsResponse
 	84,  // 148: gibson.daemon.admin.v1.DaemonAdminService.BatchGrantComponentAccessV2:output_type -> gibson.daemon.admin.v1.BatchGrantComponentAccessV2Response
@@ -12231,7 +12231,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			}
 		}
 		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[65].Exporter = func(v any, i int) any {
-			switch v := v.(*RegisterAgentAuthRequest); i {
+			switch v := v.(*RegisterCapabilityGrantRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12243,7 +12243,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			}
 		}
 		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[66].Exporter = func(v any, i int) any {
-			switch v := v.(*RegisterAgentAuthResponse); i {
+			switch v := v.(*RegisterCapabilityGrantResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12279,7 +12279,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			}
 		}
 		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[69].Exporter = func(v any, i int) any {
-			switch v := v.(*GetAgentAuthStatusRequest); i {
+			switch v := v.(*GetCapabilityGrantStatusRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12291,7 +12291,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			}
 		}
 		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[70].Exporter = func(v any, i int) any {
-			switch v := v.(*GetAgentAuthStatusResponse); i {
+			switch v := v.(*GetCapabilityGrantStatusResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12303,7 +12303,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			}
 		}
 		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[71].Exporter = func(v any, i int) any {
-			switch v := v.(*RevokeAgentAuthRequest); i {
+			switch v := v.(*RevokeCapabilityGrantRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12315,7 +12315,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			}
 		}
 		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[72].Exporter = func(v any, i int) any {
-			switch v := v.(*RevokeAgentAuthResponse); i {
+			switch v := v.(*RevokeCapabilityGrantResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12327,7 +12327,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			}
 		}
 		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[73].Exporter = func(v any, i int) any {
-			switch v := v.(*ListAgentAuthAgentsRequest); i {
+			switch v := v.(*ListCapabilityGrantAgentsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12339,7 +12339,7 @@ func file_gibson_daemon_admin_v1_daemon_admin_proto_init() {
 			}
 		}
 		file_gibson_daemon_admin_v1_daemon_admin_proto_msgTypes[74].Exporter = func(v any, i int) any {
-			switch v := v.(*ListAgentAuthAgentsResponse); i {
+			switch v := v.(*ListCapabilityGrantAgentsResponse); i {
 			case 0:
 				return &v.state
 			case 1:

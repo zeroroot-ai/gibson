@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 )
 
@@ -99,8 +98,8 @@ func DefaultConfig() *Config {
 			Neo4jBrowserURL:      "http://localhost:7474",
 			LangfuseDashboardURL: "http://localhost:3000",
 		},
-		Auth: auth.AuthConfig{
-			Enabled:        false, // Disabled by default for backward compatibility
+		Auth: AuthConfig{
+			Enabled:        false, // Deprecated: use Mode instead
 			TrustLocalhost: false,
 			ClockSkew:      30 * time.Second,
 		},

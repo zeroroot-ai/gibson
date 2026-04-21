@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 )
 
 // TenantScopedStore wraps StateClient to provide tenant-aware Redis operations.
@@ -27,7 +27,7 @@ import (
 //	tenantStore := state.NewTenantScopedStore(stateClient, cfg)
 //
 //	// Context has tenant injected by auth interceptor
-//	ctx := auth.ContextWithTenant(ctx, "acme-corp")
+//	ctx := identity.ContextWithTenant(ctx, "acme-corp")
 //
 //	// Key is automatically scoped: tenant:acme-corp:mission:123
 //	err := tenantStore.Set(ctx, "mission:123", data, 0)
@@ -93,7 +93,7 @@ func NewTenantScopedStore(client *StateClient, config *TenantStoreConfig) *Tenan
 // Returns an error if tenant is required but missing from context.
 func (s *TenantScopedStore) resolveTenant(ctx context.Context) (string, error) {
 	// Extract tenant from context (injected by auth interceptor)
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 
 	// If tenant found, use it
 	if tenant != "" {
@@ -122,7 +122,7 @@ func (s *TenantScopedStore) scopeKey(ctx context.Context, key string) (string, e
 		return "", err
 	}
 
-	return auth.TenantScopedRedisKey(tenant, key), nil
+	return identity.TenantScopedRedisKey(tenant, key), nil
 }
 
 // Get retrieves a value from Redis using a tenant-scoped key.
@@ -132,7 +132,7 @@ func (s *TenantScopedStore) scopeKey(ctx context.Context, key string) (string, e
 //
 // Example:
 //
-//	ctx := auth.ContextWithTenant(ctx, "acme")
+//	ctx := identity.ContextWithTenant(ctx, "acme")
 //	value, err := store.Get(ctx, "mission:123")
 //	// Accesses key: "tenant:acme:mission:123"
 func (s *TenantScopedStore) Get(ctx context.Context, key string) (string, error) {
@@ -442,8 +442,8 @@ func (s *TenantScopedStore) Keys(ctx context.Context, pattern string) ([]string,
 //	defer pipe.Close()
 //
 //	// All operations in pipeline are tenant-scoped
-//	pipe.Set(ctx, auth.TenantScopedRedisKey(tenant, "key1"), "value1", 0)
-//	pipe.Set(ctx, auth.TenantScopedRedisKey(tenant, "key2"), "value2", 0)
+//	pipe.Set(ctx, identity.TenantScopedRedisKey(tenant, "key1"), "value1", 0)
+//	pipe.Set(ctx, identity.TenantScopedRedisKey(tenant, "key2"), "value2", 0)
 //
 //	_, err = pipe.Exec(ctx)
 func (s *TenantScopedStore) Pipeline(ctx context.Context) (redis.Pipeliner, string, error) {

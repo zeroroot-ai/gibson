@@ -160,7 +160,76 @@ type team
 # and checked by the CreateMissionDefinition RPC authz rule. `writer` is granted
 # only to users who are admin of the parent tenant — no direct user grants
 # intended; contribute via tenant admin membership only.
+#
+# can_view / can_execute / can_list added under spec
+# phase-1-daemon-critical-exfil-fixes (Task 4) so per-resource authz checks
+# have a typed relation to bind against. Per-request tuples are NEVER written;
+# the only writers are resource creation (Phase 2 provisioning hook) and the
+# BackfillResourceParents routine in backfill.go (Phase 1 flag-gated off).
 type mission_definition
   relations
     define parent: [tenant]
     define writer: admin from parent
+    define can_view: member from parent
+    define can_execute: member from parent
+    define can_list: member from parent
+
+# mission — a parameterised mission instance scoped to a tenant. Created via
+# gibson.daemon.v1.DaemonService/CreateMission. `parent` links the mission to
+# its owning tenant; per-request authz checks bind against can_view /
+# can_execute / can_list. Per-request tuples are never written; tuples are
+# produced only by Create (Phase 2) and BackfillResourceParents (see
+# backfill.go). Added under spec phase-1-daemon-critical-exfil-fixes Task 4.
+type mission
+  relations
+    define parent: [tenant]
+    define can_view: member from parent
+    define can_execute: member from parent
+    define can_list: member from parent
+
+# run — a mission execution instance (invocation of a mission against a
+# target) scoped to a tenant. Follows the same parent/relation shape as
+# mission. Added under spec phase-1-daemon-critical-exfil-fixes Task 4.
+type run
+  relations
+    define parent: [tenant]
+    define can_view: member from parent
+    define can_execute: member from parent
+    define can_list: member from parent
+
+# target — a scan target (system / endpoint / asset) scoped to a tenant.
+# Follows the same parent/relation shape as mission. Added under spec
+# phase-1-daemon-critical-exfil-fixes Task 4.
+type target
+  relations
+    define parent: [tenant]
+    define can_view: member from parent
+    define can_execute: member from parent
+    define can_list: member from parent
+
+# finding — a security finding emitted by a mission run, scoped to a tenant.
+# Read-only: findings are produced by tools/agents and consumed by the
+# dashboard; there is no "execute a finding" operation. Added under spec
+# phase-1-daemon-critical-exfil-fixes Task 4.
+type finding
+  relations
+    define parent: [tenant]
+    define can_view: member from parent
+    define can_list: member from parent
+
+# tenant_component — per-tenant view of a registered component (agent /
+# tool / plugin) for resource-level authz. The existing `component` type
+# (above) carries the catalog-gating and deny-wins access model; this
+# tenant-parented companion type expresses "this component belongs to
+# tenant X" so can_view / can_execute / can_register / can_list can be
+# bound as simple member-from-parent relations. Added under spec
+# phase-1-daemon-critical-exfil-fixes Task 4. The original `component`
+# type is NOT modified — per task restrictions, existing tenant membership
+# semantics are preserved.
+type tenant_component
+  relations
+    define parent: [tenant]
+    define can_view: member from parent
+    define can_execute: member from parent
+    define can_register: admin from parent
+    define can_list: member from parent

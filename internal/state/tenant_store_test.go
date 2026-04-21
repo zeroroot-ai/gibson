@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 )
 
 func TestTenantScopedStore_ResolveTenant(t *testing.T) {
@@ -79,7 +79,7 @@ func TestTenantScopedStore_ResolveTenant(t *testing.T) {
 
 			ctx := context.Background()
 			if tt.contextTenant != "" {
-				ctx = auth.ContextWithTenant(ctx, tt.contextTenant)
+				ctx = identity.ContextWithTenant(ctx, tt.contextTenant)
 			}
 
 			got, err := store.resolveTenant(ctx)
@@ -145,7 +145,7 @@ func TestTenantScopedStore_ScopeKey(t *testing.T) {
 
 			ctx := context.Background()
 			if tt.contextTenant != "" {
-				ctx = auth.ContextWithTenant(ctx, tt.contextTenant)
+				ctx = identity.ContextWithTenant(ctx, tt.contextTenant)
 			}
 
 			got, err := store.scopeKey(ctx, tt.key)
@@ -180,8 +180,8 @@ func TestTenantScopedStore_Integration(t *testing.T) {
 	store := NewTenantScopedStore(client, storeConfig)
 
 	// Create two tenant contexts
-	ctxTenant1 := auth.ContextWithTenant(context.Background(), "tenant1")
-	ctxTenant2 := auth.ContextWithTenant(context.Background(), "tenant2")
+	ctxTenant1 := identity.ContextWithTenant(context.Background(), "tenant1")
+	ctxTenant2 := identity.ContextWithTenant(context.Background(), "tenant2")
 
 	// Clean up any existing test data
 	defer func() {
@@ -406,7 +406,7 @@ func TestTenantScopedStore_DefaultTenantMode(t *testing.T) {
 
 	t.Run("context tenant overrides default", func(t *testing.T) {
 		// Create context with specific tenant
-		ctxWithTenant := auth.ContextWithTenant(context.Background(), "team-alpha")
+		ctxWithTenant := identity.ContextWithTenant(context.Background(), "team-alpha")
 
 		// Set with tenant in context
 		err := store.Set(ctxWithTenant, "test:override", "team-value", 0)
@@ -472,7 +472,7 @@ func TestTenantScopedStore_GetTenant(t *testing.T) {
 
 			ctx := context.Background()
 			if tt.contextTenant != "" {
-				ctx = auth.ContextWithTenant(ctx, tt.contextTenant)
+				ctx = identity.ContextWithTenant(ctx, tt.contextTenant)
 			}
 
 			got, err := store.GetTenant(ctx)

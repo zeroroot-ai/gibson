@@ -272,6 +272,25 @@ func (c *StateClient) Config() Config {
 //	    log.Fatalf("failed to create indexes: %v", err)
 //	}
 func (c *StateClient) EnsureIndexes(ctx context.Context) error {
-	manager := NewIndexManager(c.client)
+	return c.EnsureIndexesWithObserver(ctx, nil)
+}
+
+// EnsureIndexesWithObserver creates all RediSearch indexes and, for each index that
+// undergoes an online re-index, calls reindexObserver(indexName, durationSeconds).
+// Pass nil for reindexObserver to silence the callback.
+//
+// Callers in the daemon startup path should wire this to the
+// gibson_redisearch_reindex_duration_seconds histogram:
+//
+//	meter := provider.Meter("gibson")
+//	hist, _ := meter.Float64Histogram("gibson_redisearch_reindex_duration_seconds")
+//	client.EnsureIndexesWithObserver(ctx, func(name string, secs float64) {
+//	    hist.Record(ctx, secs, metric.WithAttributes(attribute.String("index", name)))
+//	})
+func (c *StateClient) EnsureIndexesWithObserver(
+	ctx context.Context,
+	reindexObserver func(indexName string, durationSeconds float64),
+) error {
+	manager := NewIndexManager(c.client).WithReindexObserver(reindexObserver)
 	return manager.EnsureAllIndexes(ctx)
 }

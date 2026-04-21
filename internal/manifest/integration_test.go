@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agentauth"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
 )
@@ -104,7 +104,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	}}
 	observedReg := NewRegistryObserver(reg, notifier, nil)
 
-	bridge := agentauth.NewFGABridge(observedAuth, observedReg, nil)
+	bridge := capabilitygrant.NewFGABridge(observedAuth, observedReg, nil)
 	signerKey, err := GenerateSignerKey("k1")
 	if err != nil {
 		t.Fatalf("signer key: %v", err)
@@ -210,7 +210,7 @@ func TestIntegration_AgentPrincipalCrossDeny(t *testing.T) {
 	reg := &stubRegistry{infos: []component.ComponentInfo{
 		{Kind: "plugin", Name: "gitlab", TenantID: "tenant-acme"},
 	}}
-	bridge := agentauth.NewFGABridge(stubAuth, reg, nil)
+	bridge := capabilitygrant.NewFGABridge(stubAuth, reg, nil)
 	signerKey, _ := GenerateSignerKey("k1")
 	signer, _ := NewSigner("k1", []SignerKey{signerKey})
 	vs := NewVersionStore(rdb, time.Second)

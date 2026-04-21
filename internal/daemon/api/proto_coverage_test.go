@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -18,39 +17,9 @@ import (
 	_ "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 )
 
-// TestFgaRegistryCoverAllProtoRPCs is the default-deny CI gate. It walks
-// every gRPC method compiled into the daemon (via protoregistry.GlobalFiles)
-// and asserts that every one has an entry in the FgaRpcRegistry.
-//
-// A developer who adds a new RPC without updating fga_rpc_registry.go will
-// see this test fail with the unmapped method name.
-//
-// Lives in internal/daemon/api (not internal/auth) because internal/auth
-// cannot import internal/daemon/api without an import cycle — the test
-// depends on the proto registrations in the daemon api package.
-func TestFgaRegistryCoverAllProtoRPCs(t *testing.T) {
-	reg, regErr := auth.LoadRegistry(auth.EmbeddedRpcRegistry, "")
-	if regErr != nil {
-		t.Fatalf("load registry: %v", regErr)
-	}
-
-	methods := discoverGibsonRPCs(t)
-	if len(methods) == 0 {
-		t.Fatal("no gibson.* RPCs discovered — blank imports in proto_coverage_test.go may be wrong")
-	}
-
-	var missing []string
-	for _, method := range methods {
-		if _, ok := reg.Lookup(method); !ok {
-			missing = append(missing, method)
-		}
-	}
-
-	if len(missing) > 0 {
-		t.Errorf("FGA registry coverage gap — %d RPC(s) not registered:\n  %s\n\nEvery proto RPC must have an entry in internal/auth/rpc_registry.yaml.",
-			len(missing), strings.Join(missing, "\n  "))
-	}
-}
+// Note: FGA registry coverage tests have been removed. FGA enforcement has
+// moved to Envoy + ext_authz; the daemon no longer runs an FGA interceptor.
+// The discoverGibsonRPCs helper below is retained for other test utilities.
 
 // coveredProtoPackages is the allowlist of proto packages whose services
 // are actually REGISTERED on the daemon's main gRPC server (see

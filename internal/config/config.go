@@ -3,7 +3,6 @@ package config
 import (
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
@@ -79,12 +78,35 @@ type Config struct {
 	Shutdown          ShutdownConfig          `mapstructure:"shutdown" yaml:"shutdown"`
 	Observability     ObservabilityConfig     `mapstructure:"observability" yaml:"observability"`
 	OTelObservability OTelObservabilityConfig `mapstructure:"otel_observability" yaml:"otel_observability"`
-	Auth              auth.AuthConfig         `mapstructure:"auth" yaml:"auth"`
+	Auth              AuthConfig              `mapstructure:"auth" yaml:"auth"`
 	Checkpoint        CheckpointConfig        `mapstructure:"checkpoint" yaml:"checkpoint"`
 	Authz             AuthzConfig             `mapstructure:"authz" yaml:"authz"`
 	DashboardPostgres DashboardPostgresConfig `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
 	Sandbox           SandboxConfig           `mapstructure:"sandbox" yaml:"sandbox,omitempty"`
 	ToolRunner        ToolRunnerConfig        `mapstructure:"tool_runner" yaml:"tool_runner,omitempty"`
+
+	// mode is the deployment mode resolved from GIBSON_MODE at config load time.
+	// Read via Mode(). Not sourced from YAML — env-var only.
+	// Default: ModeSelfhost (preserves current behaviour for self-hosted deployments).
+	mode Mode
+
+	// strictTenant controls whether TenantFromContext and related helpers use
+	// the fail-closed strict behaviour introduced in Phase 1. Read via
+	// StrictTenant(). Not sourced from YAML — env-var only.
+	// Default: false in Phase 1; Phase 5 flips this default and removes the flag.
+	strictTenant bool
+}
+
+// Mode returns the resolved deployment mode (GIBSON_MODE env var).
+// Defaults to ModeSelfhost when GIBSON_MODE is unset or empty.
+func (c *Config) Mode() Mode {
+	return c.mode
+}
+
+// StrictTenant returns true when strict tenant-context enforcement is enabled
+// (GIBSON_STRICT_TENANT=1/true/yes). False in Phase 1 default.
+func (c *Config) StrictTenant() bool {
+	return c.strictTenant
 }
 
 // ToolRunnerConfig governs the daemon's catalog refresher: which

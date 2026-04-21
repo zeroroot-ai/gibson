@@ -6,7 +6,7 @@ import (
 )
 
 // WellKnownPath is the canonical HTTP path for the Agent Auth
-// configuration document. Kept in sync with core/sdk/agentauth/discovery.go's
+// configuration document. Kept in sync with core/sdk/capabilitygrant/discovery.go's
 // wellKnownPath constant.
 const WellKnownPath = "/.well-known/agent-configuration"
 

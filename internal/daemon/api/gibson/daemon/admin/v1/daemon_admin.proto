@@ -165,10 +165,10 @@ service DaemonAdminService {
   // Agent Auth Protocol (agent-auth-fga-integration)
   // ---------------------------------------------------------------------------
 
-  // RegisterAgentAuth registers a new agent and its host, resolves FGA-backed
+  // RegisterCapabilityGrant registers a new agent and its host, resolves FGA-backed
   // capability grants for the agent owner, and writes the grant records.
   // Requires FGA admin relation on the tenant.
-  rpc RegisterAgentAuth(RegisterAgentAuthRequest) returns (RegisterAgentAuthResponse);
+  rpc RegisterCapabilityGrant(RegisterCapabilityGrantRequest) returns (RegisterCapabilityGrantResponse);
 
   // ExecuteAgentCapability checks FGA for the requested capability execution
   // and records an audit event. Actual component dispatch is a future concern.
@@ -180,17 +180,17 @@ service DaemonAdminService {
   // Requires FGA member relation on the tenant.
   rpc ListAgentCapabilities(ListAgentCapabilitiesRequest) returns (ListAgentCapabilitiesResponse);
 
-  // GetAgentAuthStatus returns the current status and grants for an agent.
+  // GetCapabilityGrantStatus returns the current status and grants for an agent.
   // Requires FGA member relation on the tenant.
-  rpc GetAgentAuthStatus(GetAgentAuthStatusRequest) returns (GetAgentAuthStatusResponse);
+  rpc GetCapabilityGrantStatus(GetCapabilityGrantStatusRequest) returns (GetCapabilityGrantStatusResponse);
 
-  // RevokeAgentAuth sets the agent's status to revoked and revokes all grants.
+  // RevokeCapabilityGrant sets the agent's status to revoked and revokes all grants.
   // Requires FGA admin relation on the tenant.
-  rpc RevokeAgentAuth(RevokeAgentAuthRequest) returns (RevokeAgentAuthResponse);
+  rpc RevokeCapabilityGrant(RevokeCapabilityGrantRequest) returns (RevokeCapabilityGrantResponse);
 
-  // ListAgentAuthAgents returns a paginated list of agents for a tenant.
+  // ListCapabilityGrantAgents returns a paginated list of agents for a tenant.
   // Requires FGA admin relation on the tenant.
-  rpc ListAgentAuthAgents(ListAgentAuthAgentsRequest) returns (ListAgentAuthAgentsResponse);
+  rpc ListCapabilityGrantAgents(ListCapabilityGrantAgentsRequest) returns (ListCapabilityGrantAgentsResponse);
 
   // CreateHostRegistrationToken issues a single-use API key for host registration.
   // Requires FGA admin relation on the tenant.
@@ -1162,8 +1162,8 @@ message AgentCapabilityGrant {
   bytes input_schema = 4;
 }
 
-// RegisterAgentAuthRequest registers a new agent + host pair under a tenant.
-message RegisterAgentAuthRequest {
+// RegisterCapabilityGrantRequest registers a new agent + host pair under a tenant.
+message RegisterCapabilityGrantRequest {
   // tenant_id is the tenant that owns this agent.
   string tenant_id = 1;
 
@@ -1189,8 +1189,8 @@ message RegisterAgentAuthRequest {
   string bootstrap_credential = 8;
 }
 
-// RegisterAgentAuthResponse is returned after successful agent registration.
-message RegisterAgentAuthResponse {
+// RegisterCapabilityGrantResponse is returned after successful agent registration.
+message RegisterCapabilityGrantResponse {
   // agent_id is the newly created agent identifier (agt_xxxx).
   string agent_id = 1;
 
@@ -1231,8 +1231,8 @@ message ExecuteAgentCapabilityResponse {
   string error_message = 3;
 }
 
-// GetAgentAuthStatusRequest fetches status for a single agent.
-message GetAgentAuthStatusRequest {
+// GetCapabilityGrantStatusRequest fetches status for a single agent.
+message GetCapabilityGrantStatusRequest {
   // agent_id is the agent to retrieve.
   string agent_id = 1;
 
@@ -1240,8 +1240,8 @@ message GetAgentAuthStatusRequest {
   string tenant_id = 2;
 }
 
-// GetAgentAuthStatusResponse carries agent status and capability grants.
-message GetAgentAuthStatusResponse {
+// GetCapabilityGrantStatusResponse carries agent status and capability grants.
+message GetCapabilityGrantStatusResponse {
   // agent_id is the agent identifier.
   string agent_id = 1;
 
@@ -1267,8 +1267,8 @@ message GetAgentAuthStatusResponse {
   int64 created_at = 8;
 }
 
-// RevokeAgentAuthRequest revokes an agent and all its grants.
-message RevokeAgentAuthRequest {
+// RevokeCapabilityGrantRequest revokes an agent and all its grants.
+message RevokeCapabilityGrantRequest {
   // agent_id is the agent to revoke.
   string agent_id = 1;
 
@@ -1276,11 +1276,11 @@ message RevokeAgentAuthRequest {
   string tenant_id = 2;
 }
 
-// RevokeAgentAuthResponse is empty on success.
-message RevokeAgentAuthResponse {}
+// RevokeCapabilityGrantResponse is empty on success.
+message RevokeCapabilityGrantResponse {}
 
-// ListAgentAuthAgentsRequest returns a paginated list of agents for a tenant.
-message ListAgentAuthAgentsRequest {
+// ListCapabilityGrantAgentsRequest returns a paginated list of agents for a tenant.
+message ListCapabilityGrantAgentsRequest {
   // tenant_id is the tenant to list agents for.
   string tenant_id = 1;
 
@@ -1291,10 +1291,10 @@ message ListAgentAuthAgentsRequest {
   int32 offset = 3;
 }
 
-// ListAgentAuthAgentsResponse carries the paginated agent list.
-message ListAgentAuthAgentsResponse {
+// ListCapabilityGrantAgentsResponse carries the paginated agent list.
+message ListCapabilityGrantAgentsResponse {
   // agents is the list of agent status records.
-  repeated GetAgentAuthStatusResponse agents = 1;
+  repeated GetCapabilityGrantStatusResponse agents = 1;
 
   // total is the total number of agents (before pagination).
   int32 total = 2;

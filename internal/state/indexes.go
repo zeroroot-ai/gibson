@@ -134,6 +134,18 @@ type IndexDefinition struct {
 
 	// Schema is the list of indexed fields.
 	Schema []FieldDefinition
+
+	// SchemaVersion is the current schema version for this index.
+	// When the daemon starts, it compares this value against the version stored
+	// in Redis at key "{Name}:schema_version". If they differ, the index is
+	// dropped and re-created online (documents are preserved; RediSearch
+	// re-indexes them automatically). Increment this value whenever the Schema
+	// changes to trigger a one-time online re-index on next startup.
+	//
+	// Version history for tenant-isolation work:
+	//   0 (implicit) → version key absent, original schema without tenant_id
+	//   2             → added tenant_id AS tenant_id TAG SORTABLE (Phase 1)
+	SchemaVersion int
 }
 
 // Validate checks if the index definition is valid and returns an error if not.
@@ -242,6 +254,12 @@ type IndexInfo struct {
 // IndexManager manages RediSearch indexes for Gibson entities.
 type IndexManager struct {
 	client redis.UniversalClient
+
+	// reindexObserver is called once per index re-index with the index name and
+	// elapsed duration in seconds. Set via WithReindexObserver to wire in
+	// the gibson_redisearch_reindex_duration_seconds metric without importing
+	// the observability package into the state package.
+	reindexObserver func(indexName string, durationSeconds float64)
 }
 
 // NewIndexManager creates a new IndexManager with the given Redis client.
@@ -251,19 +269,46 @@ func NewIndexManager(client redis.UniversalClient) *IndexManager {
 	}
 }
 
-// EnsureIndex creates a RediSearch index if it doesn't already exist.
-// This operation is idempotent - no error is returned if the index already exists.
-// When creating a new index, it also re-indexes any existing keys matching the prefix.
+// WithReindexObserver attaches a callback that is invoked once per online re-index
+// with the index name and elapsed duration in seconds. Wire this to
+// gibson_redisearch_reindex_duration_seconds{index} in the daemon startup path.
+func (m *IndexManager) WithReindexObserver(fn func(indexName string, durationSeconds float64)) *IndexManager {
+	m.reindexObserver = fn
+	return m
+}
+
+// schemaVersionKey returns the Redis key that stores the current schema version
+// for the given index. Stored as a plain string (integer value).
+//
+//	"gibson:idx:missions:schema_version"
+func schemaVersionKey(indexName string) string {
+	return indexName + ":schema_version"
+}
+
+// EnsureIndex creates or updates a RediSearch index, performing an online re-index
+// when the schema version has changed.
+//
+// Schema-version behaviour:
+//   - The expected version is stored in IndexDefinition.SchemaVersion.
+//   - The persisted version is held at Redis key "{Name}:schema_version".
+//   - If the index does not exist: FT.CREATE it and record the version.
+//   - If the index exists and versions match: run reindexMissingKeys (idempotent).
+//   - If the index exists and versions differ: drop the index (documents are
+//     preserved), re-create it with the new schema, re-index existing keys,
+//     then store the new version. The re-index duration is reported via
+//     the optional reindexObserver to surface gibson_redisearch_reindex_duration_seconds.
 //
 // Example:
 //
 //	idx := &IndexDefinition{
-//	    Name:   "gibson:idx:missions",
-//	    Prefix: "gibson:mission:",
-//	    OnJSON: true,
+//	    Name:          "gibson:idx:missions",
+//	    Prefix:        "gibson:mission:",
+//	    OnJSON:        true,
+//	    SchemaVersion: 2,
 //	    Schema: []FieldDefinition{
 //	        {Path: "$.name", Alias: "name", Type: FieldTypeText, Weight: 2.0},
 //	        {Path: "$.status", Alias: "status", Type: FieldTypeTag},
+//	        {Path: "$.tenant_id", Alias: "tenant_id", Type: FieldTypeTag, Sortable: true},
 //	    },
 //	}
 //	err := manager.EnsureIndex(ctx, idx)
@@ -280,15 +325,35 @@ func (m *IndexManager) EnsureIndex(ctx context.Context, def *IndexDefinition) er
 	}
 
 	if exists {
-		// Index exists - but check if there are unindexed keys
-		// This handles the case where index was created but keys existed before
-		// or there were indexing failures
-		_ = m.reindexMissingKeys(ctx, def)
-		// Note: errors are intentionally ignored here. If reindexing fails,
-		// keys will be indexed when they are next modified. The reindexMissingKeys
-		// function transforms string timestamps to numeric values which fixes
-		// the most common indexing failure.
-		return nil
+		// Index exists — check whether the schema version matches.
+		versionKey := schemaVersionKey(def.Name)
+		storedVersionStr, err := m.client.Get(ctx, versionKey).Result()
+		if err != nil && err != redis.Nil {
+			return fmt.Errorf("failed to read schema version for %q: %w", def.Name, err)
+		}
+
+		storedVersion := 0
+		if storedVersionStr != "" {
+			if _, scanErr := fmt.Sscanf(storedVersionStr, "%d", &storedVersion); scanErr != nil {
+				storedVersion = 0
+			}
+		}
+
+		if storedVersion == def.SchemaVersion {
+			// Schema unchanged — just repair any missing keys.
+			_ = m.reindexMissingKeys(ctx, def)
+			// Note: errors are intentionally ignored here. If reindexing fails,
+			// keys will be indexed when they are next modified.
+			return nil
+		}
+
+		// Schema version mismatch: drop the index and fall through to re-create.
+		// FT.DROPINDEX by default does NOT delete documents — only the index
+		// structure is removed. Existing data is preserved and will be re-indexed
+		// once the new index is created.
+		if dropErr := m.DropIndex(ctx, def.Name); dropErr != nil {
+			return fmt.Errorf("failed to drop stale index %q for re-creation: %w", def.Name, dropErr)
+		}
 	}
 
 	// Track that we're creating a new index - we'll need to reindex existing keys
@@ -390,11 +455,27 @@ func (m *IndexManager) EnsureIndex(ctx context.Context, def *IndexDefinition) er
 	// RediSearch only indexes keys that are created/modified AFTER the index exists.
 	// We need to "touch" existing keys to trigger indexing.
 	if needsReindex {
+		reindexStart := time.Now()
+
 		if err := m.reindexExistingKeys(ctx, def); err != nil {
 			// Log but don't fail - the index is created, just some keys might not be indexed
 			// They'll get indexed when next modified
 			return fmt.Errorf("index created but failed to reindex existing keys: %w", err)
 		}
+
+		// Record re-index duration via the optional observer so callers can emit
+		// gibson_redisearch_reindex_duration_seconds{index=<name>}.
+		if m.reindexObserver != nil {
+			m.reindexObserver(def.Name, time.Since(reindexStart).Seconds())
+		}
+	}
+
+	// Persist the schema version so future startups skip this re-index.
+	versionKey := schemaVersionKey(def.Name)
+	if err := m.client.Set(ctx, versionKey, fmt.Sprintf("%d", def.SchemaVersion), 0).Err(); err != nil {
+		// Non-fatal: if we fail to store the version the re-index will run again
+		// on the next startup, which is safe.
+		_ = err
 	}
 
 	return nil

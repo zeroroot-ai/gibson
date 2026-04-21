@@ -15,45 +15,38 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 )
 
 // classifyActorSource derives the "actor_source" audit field from the
-// identity already attached to ctx by the auth interceptors.
+// identity already attached to ctx by the identity interceptor.
 //
 // Mapping (R6 AC 2):
 //   - apikey issuer         → "tenant_admin" (keys are tenant-scoped admin
 //     surfaces; dashboard users issue them explicitly for automation)
-//   - better-auth issuer    → "user"
-//   - agent-auth issuer     → "user" (agent acting on behalf of its owner)
-//   - spiffe + "/platform/" → "platform"
-//   - spiffe (other)        → "operator"
-//   - internal              → "system"
-//   - http(s) issuer URL    → "user" (OIDC)
+//   - spire issuer + "/platform/" in subject → "platform"
+//   - spire issuer (other)  → "operator"
+//   - zitadel issuer        → "user" (OIDC from Zitadel)
+//   - capability-grant      → "user" (agent acting on behalf of its owner)
 //   - everything else       → "unknown"
 func classifyActorSource(ctx context.Context) string {
-	ident, _ := auth.GibsonIdentityFromContext(ctx)
-	if ident == nil {
+	id, err := identity.IdentityFromContext(ctx)
+	if err != nil {
 		return "system"
 	}
-	switch ident.Issuer {
+	switch id.Issuer {
 	case "apikey":
 		return "tenant_admin"
-	case "better-auth":
+	case "zitadel":
 		return "user"
-	case "agent-auth":
+	case "capability-grant":
 		return "user"
-	case "internal":
-		return "system"
 	}
-	if ident.Issuer == "spiffe" || strings.HasPrefix(ident.Subject, "spiffe://") {
-		if strings.Contains(ident.Subject, "/platform/") {
+	if id.Issuer == "spire" || strings.HasPrefix(id.Subject, "spiffe://") {
+		if strings.Contains(id.Subject, "/platform/") {
 			return "platform"
 		}
 		return "operator"
-	}
-	if strings.HasPrefix(ident.Issuer, "http://") || strings.HasPrefix(ident.Issuer, "https://") {
-		return "user"
 	}
 	return "unknown"
 }
@@ -130,16 +123,16 @@ func emitAccessTupleChange(
 		return
 	}
 	details := map[string]any{
-		"tuple":        formatTuple(tuple.User, tuple.Relation, tuple.Object),
-		"tuple_user":   tuple.User,
+		"tuple":          formatTuple(tuple.User, tuple.Relation, tuple.Object),
+		"tuple_user":     tuple.User,
 		"tuple_relation": tuple.Relation,
-		"tuple_object": tuple.Object,
-		"action_class": classifyRelationAction(tuple.Relation),
-		"scope_type":   classifyScopeType(tuple.User),
-		"operation":    op,
-		"reason":       reason,
-		"actor_source": actorSource,
-		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
+		"tuple_object":   tuple.Object,
+		"action_class":   classifyRelationAction(tuple.Relation),
+		"scope_type":     classifyScopeType(tuple.User),
+		"operation":      op,
+		"reason":         reason,
+		"actor_source":   actorSource,
+		"timestamp":      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	_ = em.Log(ctx, "access_tuple_change", "component", tuple.Object, details)
 }

@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
@@ -30,7 +30,7 @@ func (s *ComponentServiceServer) CompleteWithTools(
 	ctx context.Context,
 	req *componentpb.CompleteWithToolsRequest,
 ) (*componentpb.CompleteWithToolsResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -117,7 +117,7 @@ func (s *ComponentServiceServer) CompleteStructured(
 	ctx context.Context,
 	req *componentpb.CompleteStructuredRequest,
 ) (*componentpb.CompleteStructuredResponse, error) {
-	tenant := auth.TenantFromContext(ctx)
+	tenant := identity.TenantFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}

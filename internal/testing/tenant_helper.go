@@ -3,7 +3,7 @@ package testing
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 )
 
 const (
@@ -41,7 +41,7 @@ func WithTestTenant() context.Context {
 //	    // ... test isolation between tenant-1 and tenant-2
 //	}
 func WithTenant(ctx context.Context, tenantID string) context.Context {
-	return auth.ContextWithTenant(ctx, tenantID)
+	return identity.ContextWithTenant(ctx, tenantID)
 }
 
 // WithTestTenantCancel creates a context with the default test tenant injected
@@ -58,5 +58,5 @@ func WithTenant(ctx context.Context, tenantID string) context.Context {
 //	}
 func WithTestTenantCancel() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
-	return auth.ContextWithTenant(ctx, DefaultTestTenant), cancel
+	return identity.ContextWithTenant(ctx, DefaultTestTenant), cancel
 }

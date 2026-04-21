@@ -11,9 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	sdkauth "github.com/zero-day-ai/sdk/auth"
-
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -44,19 +42,21 @@ func newTestLogger(t *testing.T) *AuditLogger {
 
 // ctxWithTenant returns a context with the given tenant ID injected.
 func ctxWithTenant(tenant string) context.Context {
-	return auth.ContextWithTenant(context.Background(), tenant)
+	return identity.ContextWithTenant(context.Background(), tenant)
 }
 
-// ctxWithTenantAndIdentity returns a context carrying both a tenant ID and an
-// SDK identity (subject + email).
-func ctxWithTenantAndIdentity(tenant, subject, email string) context.Context {
-	ctx := auth.ContextWithTenant(context.Background(), tenant)
-	identity := &sdkauth.Identity{
-		Subject: subject,
-		Email:   email,
+// ctxWithTenantAndIdentity returns a context carrying both a tenant ID and a
+// verified identity. In the new model the identity is set via
+// identity.WithIdentity; Subject doubles as the email/actor identifier.
+func ctxWithTenantAndIdentity(tenant, subject, _ string) context.Context {
+	ctx := identity.ContextWithTenant(context.Background(), tenant)
+	id := identity.Identity{
+		Subject:        subject,
+		Issuer:         "zitadel",
+		CredentialType: "oidc",
+		Tenant:         tenant,
 	}
-	ctx = sdkauth.ContextWithIdentity(ctx, identity)
-	return ctx
+	return identity.WithIdentity(ctx, id)
 }
 
 // ---------------------------------------------------------------------------
@@ -80,7 +80,8 @@ func TestAuditLogger_Log_WritesEntryToStream(t *testing.T) {
 	assert.NotEmpty(t, e.ID, "entry ID must be set")
 	assert.Equal(t, "acme", e.TenantID)
 	assert.Equal(t, "user-123", e.ActorID)
-	assert.Equal(t, "alice@example.com", e.ActorEmail)
+	// In the new identity model, ActorEmail mirrors Subject (no separate email field).
+	assert.Equal(t, "user-123", e.ActorEmail)
 	assert.Equal(t, "apikey.create", e.Action)
 	assert.Equal(t, "apikey", e.Resource)
 	assert.Equal(t, "key-abc", e.ResourceID)

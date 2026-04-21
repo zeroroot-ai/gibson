@@ -9,7 +9,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/auth"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -63,7 +63,7 @@ func writeSlotOverrides(t *testing.T, mr *miniredis.Miniredis, tenant, missionID
 	require.NoError(t, err)
 
 	// Key format must match missionSlotOverridesKey + TenantScopedRedisKey
-	key := auth.TenantScopedRedisKey(tenant, missionSlotOverridesKey(missionID))
+	key := identity.TenantScopedRedisKey(tenant, missionSlotOverridesKey(missionID))
 	require.NoError(t, mr.Set(key, string(raw)))
 }
 
@@ -232,7 +232,7 @@ func TestResolveMissionForWork_UsesTenantFromWorkContext(t *testing.T) {
 	})
 
 	// Put a different tenant in the context — should be ignored for key scoping.
-	ctx := auth.ContextWithTenant(context.Background(), "tenant-wrong")
+	ctx := identity.ContextWithTenant(context.Background(), "tenant-wrong")
 
 	gotMission, gotOverrides, err := resolver.ResolveMissionForWork(ctx, workID)
 	require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestResolveMissionForWork_FallsBackToContextTenantWhenWorkContextTenantEmpt
 		},
 	})
 
-	ctx := auth.ContextWithTenant(context.Background(), tenant)
+	ctx := identity.ContextWithTenant(context.Background(), tenant)
 
 	gotMission, gotOverrides, err := resolver.ResolveMissionForWork(ctx, workID)
 	require.NoError(t, err)
@@ -300,11 +300,11 @@ func TestResolveMissionForWork_MalformedOverridesJSONTreatedAsNoOverrides(t *tes
 	writeWorkContext(t, mr, workID, missionID, tenant)
 
 	// Write invalid JSON to the overrides key.
-	key := auth.TenantScopedRedisKey(tenant, missionSlotOverridesKey(missionID))
+	key := identity.TenantScopedRedisKey(tenant, missionSlotOverridesKey(missionID))
 	require.NoError(t, mr.Set(key, "not-valid-json{{{"))
 
 	gotMission, gotOverrides, err := resolver.ResolveMissionForWork(
-		auth.ContextWithTenant(context.Background(), tenant), workID,
+		identity.ContextWithTenant(context.Background(), tenant), workID,
 	)
 	require.NoError(t, err)
 	assert.Equal(t, missionID, gotMission)
@@ -502,7 +502,7 @@ func TestResolveMissionForWork_OverridesKeyHasNoForcedTTL(t *testing.T) {
 
 	// After work context expires, the resolver returns empty missionID.
 	gotMission, gotOverrides, err := resolver.ResolveMissionForWork(
-		auth.ContextWithTenant(context.Background(), tenant), workID,
+		identity.ContextWithTenant(context.Background(), tenant), workID,
 	)
 	require.NoError(t, err)
 	assert.Empty(t, gotMission, "work context expired; mission ID should be empty")
