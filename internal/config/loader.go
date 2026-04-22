@@ -379,6 +379,31 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
+	// Apply DashboardPostgres config interpolation. Critical — the chart
+	// ships the password as `${DASHBOARD_DB_PASSWORD}` and relies on this
+	// hook to expand it; without this block the daemon tries to
+	// authenticate with the literal string and every capability-grant +
+	// audit path degrades. Pre-existing gap, surfaced by the
+	// llm-user-attribution-governance spec because the audit stream
+	// depends on this pool being healthy.
+	if dp, ok := interpolated["dashboard_postgres"].(map[string]interface{}); ok {
+		if host, ok := dp["host"].(string); ok {
+			cfg.DashboardPostgres.Host = interpolateString(host)
+		}
+		if database, ok := dp["database"].(string); ok {
+			cfg.DashboardPostgres.Database = interpolateString(database)
+		}
+		if username, ok := dp["username"].(string); ok {
+			cfg.DashboardPostgres.Username = interpolateString(username)
+		}
+		if password, ok := dp["password"].(string); ok {
+			cfg.DashboardPostgres.Password = interpolateString(password)
+		}
+		if sslMode, ok := dp["ssl_mode"].(string); ok {
+			cfg.DashboardPostgres.SSLMode = interpolateString(sslMode)
+		}
+	}
+
 	// Apply Observability config interpolation
 	if observability, ok := interpolated["observability"].(map[string]interface{}); ok {
 		if neo4jBrowserURL, ok := observability["neo4j_browser_url"].(string); ok {
