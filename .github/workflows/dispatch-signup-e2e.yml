@@ -1,0 +1,51 @@
+# dispatch-signup-e2e.yml — fires the deploy repo's signup-e2e workflow on PR.
+#
+# When a PR modifies any auth-chain file in core/gibson, this workflow fires a
+# repository_dispatch event to zero-day-ai/deploy, passing the PR's commit SHA.
+# The deploy repo's signup-e2e workflow then boots a fresh Kind cluster, deploys
+# the full stack at this repo's SHA, and runs the signup full-chain regression.
+#
+# Requirements: R5.1.
+# This workflow file is CODEOWNERS-protected — changes require platform-architecture approval.
+name: Dispatch signup-e2e
+
+on:
+  pull_request:
+    paths:
+      - "internal/identity/**"
+      - "internal/auth/**"
+      - "internal/authz/**"
+      - "internal/agentauth/**"
+      - "internal/daemon/grpc.go"
+      - "internal/daemon/api/**"
+      - "tests/e2e/**"
+      - ".github/workflows/dispatch-signup-e2e.yml"
+
+jobs:
+  dispatch:
+    name: Trigger signup-e2e in deploy repo
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Dispatch signup-e2e to deploy repo
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.SIGNUP_E2E_DISPATCH_TOKEN }}
+          script: |
+            await github.rest.repos.createDispatchEvent({
+              owner: 'zero-day-ai',
+              repo: 'deploy',
+              event_type: 'signup-e2e-trigger',
+              client_payload: {
+                gibson_ref: context.payload.pull_request.head.sha,
+                sdk_ref: 'main',
+                dashboard_ref: 'main',
+                extauthz_ref: 'main',
+                operator_ref: 'main',
+                source_repo: 'gibson',
+                source_pr: context.payload.pull_request.number,
+              },
+            });
+            console.log(`Dispatched signup-e2e for PR #${context.payload.pull_request.number} @ ${context.payload.pull_request.head.sha}`);

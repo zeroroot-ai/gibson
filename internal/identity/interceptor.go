@@ -2,8 +2,11 @@ package identity
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -22,8 +25,31 @@ func verify(secret []byte, ctx context.Context, method string) (Identity, error)
 			h.Set(k, vs[0])
 		}
 	}
+	if identityTraceEnabled {
+		// DEBUG: dump every incoming gRPC metadata key sorted, plus what we got for
+		// each x-gibson-identity-* header. This proves whether ext-authz's signed
+		// headers are actually arriving at the daemon over the Envoy → daemon hop.
+		// Gated behind GIBSON_IDENTITY_TRACE=1 — the e2e test and `make signup-trace`
+		// set this env var on the daemon pod.  The daemon_log_tailer.go helper scrapes
+		// these lines to assert B16 (headers NOT stripped by Envoy).
+		keys := make([]string, 0, len(md))
+		for k := range md {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		fmt.Printf("[identity-debug] method=%s metadata_keys=[%s]\n", method, strings.Join(keys, ","))
+		for _, hk := range []string{hSubject, hIssuer, hCredentialType, hTenant, hIssuedAt, hSignature} {
+			val := h.Get(hk)
+			// Redact the signature value — presence only.
+			if hk == hSignature && val != "" {
+				val = "[present, redacted]"
+			}
+			fmt.Printf("[identity-debug]   %s=%q\n", hk, val)
+		}
+	}
 	id, err := IdentityFromHeaders(secret, h)
 	if err != nil {
+		fmt.Printf("[identity-debug] IdentityFromHeaders err: %v\n", err)
 		addr := ""
 		if p, ok := peer.FromContext(ctx); ok {
 			addr = p.Addr.String()

@@ -24,10 +24,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"time"
 )
+
+// identityTraceEnabled gates the [identity-debug] printf statements.
+// Set GIBSON_IDENTITY_TRACE=1 to enable; default is off so production logs
+// are not polluted.  The e2e test and `make signup-trace` set this env var
+// for the daemon pod so the log tailer can capture the structured output.
+var identityTraceEnabled = os.Getenv("GIBSON_IDENTITY_TRACE") == "1"
 
 // SystemTenant is the reserved tenant identifier for platform-hosted shared
 // components. API keys scoped to SystemTenant grant access to the _system
@@ -225,7 +232,23 @@ func IdentityFromHeaders(secret []byte, h http.Header) (Identity, error) {
 	canonical := subject + "\n" + issuer + "\n" + credType + "\n" + tenant + "\n" + strconv.FormatInt(issuedAtSec, 10)
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(canonical))
-	if subtle.ConstantTimeCompare([]byte(gotSig), []byte(hex.EncodeToString(mac.Sum(nil)))) != 1 {
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if subtle.ConstantTimeCompare([]byte(gotSig), []byte(expected)) != 1 {
+		if identityTraceEnabled {
+			// DEBUG: dump raw inputs to diagnose ext-authz vs daemon mismatch.
+			// Gated behind GIBSON_IDENTITY_TRACE=1 so production logs stay clean.
+			// The e2e test sets this env var on the daemon pod and scrapes these
+			// lines via daemon_log_tailer.go to assert B15/B16 are not regressing.
+			fmt.Printf("[identity-debug] HMAC mismatch:\n"+
+				"  subject=%q issuer=%q credType=%q tenant=%q issuedAt=%d\n"+
+				"  canonical_hex=%x\n"+
+				"  gotSig=%s\n  expected=%s (REDACTED — presence only)\n"+
+				"  secret_len=%d\n",
+				subject, issuer, credType, tenant, issuedAtSec,
+				canonical,
+				gotSig, "[redacted]",
+				len(secret))
+		}
 		return Identity{}, errors.New("identity: HMAC signature mismatch")
 	}
 	if issuer == "zitadel" && tenant == "" {

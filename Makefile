@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage
+.PHONY: all build bin test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip
 
 # Go parameters
 GOCMD=go
@@ -157,6 +157,25 @@ check-authz:
 		echo "Skipping integration tests. Run 'make check-authz INTEGRATION=1' to include them (requires Docker)."; \
 	fi
 	@echo "authz checks passed!"
+
+# test-daemon-identity-roundtrip — Task 28 / B15 cross-format golden test.
+#
+# Proves that the daemon's IdentityFromHeaders function accepts headers produced
+# by ext-authz's Sign logic when both sides use the SAME decoded HMAC key.
+#
+# The test uses a fixed 64-char hex secret (simulating EXT_AUTHZ_HMAC_SECRET)
+# and three sub-assertions:
+#   1. Zitadel OIDC identity roundtrips (the normal production path).
+#   2. SPIFFE identity roundtrips (the signup saga path — B6 coupling).
+#   3. B15 wrong-key detection: if one side decodes and the other doesn't,
+#      IdentityFromHeaders must return HMAC mismatch (not silently pass).
+#
+# This test runs in < 5s with no network or cluster dependency.
+# Requirements: R3.2, B15.
+test-daemon-identity-roundtrip:
+	@echo "Running daemon identity HMAC roundtrip test (B15)..."
+	$(GOTEST) -v -count=1 -run 'TestRoundtrip' ./internal/identity/...
+	@echo "PASS: daemon identity roundtrip (B15)"
 
 # Proto generation
 proto-deps:
