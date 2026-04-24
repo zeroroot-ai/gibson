@@ -220,6 +220,28 @@ The naming overlap is unfortunate but the concepts are unrelated. Do not conflat
 - `internal/authz/model.fga` is schema 1.1 with types `user`, `tenant`, `component`, `system_tenant`. Provisioned by the `gibson-fga-init` k8s Job on helm install/upgrade.
 - Store/model IDs resolved in order: config file → ConfigMap `gibson/gibson-fga-config` → env `GIBSON_AUTHZ_FGA_STORE_ID` / `..._MODEL_ID`.
 
+## Identity / SPIFFE — In-cluster Transport
+
+Daemon SPIFFE mTLS stays **ON in every overlay** including Kind dev. There is no debugging shortcut to disable it. Memorialised by:
+
+- **Memory** `feedback_spiffe_mtls_required.md` — agent context that this is forbidden.
+- **Chart guard** `gibson.validateSpiffeRequired` in `enterprise/deploy/helm/gibson/templates/_helpers.tpl` — `helm template/install/upgrade` fails if `gibson.auth.spiffe` is null/empty in any overlay.
+- **Chart guard** `gibson.validateEnvoySdsWired` — `helm template` fails if Envoy is enabled and `gibson.auth.spiffe` is populated but `files/envoy/envoy.yaml` lacks the SDS `UpstreamTlsContext` on the `gibson_daemon_grpc` cluster.
+- **CI guard** `.github/workflows/spiffe-guard.yml` — blocks PR merge on the same regressions.
+
+Three layers of defense; cost of disabling daemon SPIFFE = cost of writing spec `in-cluster-mtls-restoration` (non-trivial). Don't.
+
+**Single canonical path: dashboard → Envoy → daemon, JWT-SVID auth.** All dashboard-originated daemon RPCs (admin and non-admin alike) flow through Envoy at `https://api.<domain>:30443` with `Authorization: Bearer <SPIFFE JWT-SVID>` (audience `spiffe://gibson.io/platform/daemon`). Envoy validates the JWT-SVID via its `spiffe` provider, ext-authz mints HMAC-signed `x-gibson-identity-*` headers, and the daemon trusts those headers exclusively. The daemon's mTLS listener accepts ONLY connections from `spiffe://gibson.io/platform/envoy` (Envoy presents its own SPIRE-issued SVID via SDS). Direct dashboard → daemon paths are forbidden by `gibson.validateEnvoySdsWired` + the dashboard's `gibson-client.ts` is wired to refuse them post Phase 5 of `in-cluster-mtls-restoration`. See `docs/auth-flow.md` "In-cluster transport" for the full sequence diagram.
+
+**Component identities** registered with SPIRE (entries in `gibson-spire-server`):
+- `spiffe://gibson.io/platform/daemon` — gibson statefulset; serves mTLS on `:50051`.
+- `spiffe://gibson.io/platform/envoy` — gibson-envoy deployment; presents this SVID upstream to the daemon via SDS-resolved `UpstreamTlsContext`.
+- `spiffe://gibson.io/platform/dashboard` — gibson-dashboard deployment; mints JWT-SVIDs for the audience above.
+- `spiffe://gibson.io/platform/tenant-operator` — gibson-tenant-operator; same JWT-SVID minting pattern for admin RPCs.
+- `spiffe://gibson.io/platform/spiffe-jwks` — sidecar that translates the SPIRE JWT bundle into a JWKS HTTP endpoint Envoy and Auth.js can consume.
+
+The trust domain `gibson.io` is **legacy** — see memory `project_gibson_ownership.md`. Renaming to `zero-day.ai` is out of scope; track in a future spec.
+
 ## Multi-Tenancy Rules
 
 - `_system` is the platform-tenant; hosts plugins available to every tenant.
