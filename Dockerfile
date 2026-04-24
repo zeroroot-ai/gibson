@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder - Pure Go compilation (no CGO)
 # ============================================================================
-FROM golang:1.25-alpine AS builder
+FROM golang:1.25-alpine@sha256:5caaf1cca9dc351e13deafbc3879fd4754801acba8653fa9540cea125d01a71f AS builder
 
 # Install git and ca-certificates for dependency fetching
 RUN apk add --no-cache git ca-certificates
@@ -44,7 +44,7 @@ RUN if [ -n "$BUILD_TAGS" ]; then \
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
-FROM alpine:3.21 AS runtime
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS runtime
 
 # Install ca-certificates for HTTPS connections
 RUN apk add --no-cache ca-certificates
@@ -52,13 +52,13 @@ RUN apk add --no-cache ca-certificates
 # Copy gibson binary from builder
 COPY --from=builder /out/gibson /usr/local/bin/gibson
 
-# Create gibson home directory
-RUN mkdir -p /root/.gibson && chmod -R 755 /root/.gibson
-
-# Copy pre-cached HuggingFace model files for native embedder
-# These files are required by GraphRAG and must exist to avoid network calls at startup
-# The model directory must be copied from the build context (models/huggingface/)
-COPY models/huggingface/ /root/.cache/huggingface/
+# Create gibson home directory and HF model-cache mount point.
+# In production, /root/.cache/huggingface/ is mounted from EFS via the
+# gibson.hfModelCache values path and seeded by a pre-install Job that
+# syncs from s3://<artifacts>/huggingface/. In Kind / local dev without
+# EFS, the daemon downloads models from HuggingFace on first use.
+RUN mkdir -p /root/.gibson /root/.cache/huggingface \
+    && chmod -R 755 /root/.gibson /root/.cache/huggingface
 
 # Set environment variables
 ENV GIBSON_CONFIG=/etc/gibson/gibson.yaml
