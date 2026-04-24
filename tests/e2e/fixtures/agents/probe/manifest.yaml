@@ -1,0 +1,68 @@
+---
+# ServiceAccount for the probe agent pod.
+# Minimal permissions — no cluster-wide access.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: probe-agent
+  namespace: gibson
+  labels:
+    app: probe
+    e2e: "true"
+
+---
+# Deployment — probe test agent.
+# Kept Running continuously so it's available when a mission dispatches work.
+# RestartPolicy: Always (re-registers after each work item).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-agent
+  namespace: gibson
+  labels:
+    app: probe
+    e2e: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: probe
+  template:
+    metadata:
+      labels:
+        app: probe
+        e2e: "true"
+    spec:
+      serviceAccountName: probe-agent
+      # NFR Security: no external network beyond configured target.
+      # The probe agent only talks to the daemon's component service endpoint.
+      containers:
+        - name: probe
+          image: probe:dev
+          imagePullPolicy: Never  # loaded into Kind via `make load`
+          env:
+            - name: GIBSON_DAEMON_ADDR
+              value: "gibson.gibson.svc.cluster.local:50002"
+            - name: GIBSON_TENANT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['gibson.io/tenant-id']
+            - name: PROBE_MAX_ITEMS
+              value: "999"  # run continuously until restarted
+            - name: PROBE_WORK_TIMEOUT_MS
+              value: "30000"
+            - name: PROBE_SEED
+              value: "e2e-probe-seed-v1"
+          # No CPU/memory limits needed for a test fixture.
+          # livenessProbe is not needed — the probe restarts after each item.
+          # readinessProbe: the fixture_deployer waits for pod Running+Ready.
+          readinessProbe:
+            exec:
+              # The probe is "ready" as long as the binary is present.
+              command: ["/probe", "--version"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 6
+      restartPolicy: Always
+      # NFR Security: no internet access for test fixtures.
+      dnsPolicy: ClusterFirst

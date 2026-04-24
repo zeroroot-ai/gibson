@@ -143,7 +143,7 @@ func TestRoundtrip_HexDecodedSecret_SPIFFEIdentity(t *testing.T) {
 		Subject:        "spiffe://gibson.io/platform/dashboard",
 		Issuer:         "spiffe",
 		CredentialType: "spiffe",
-		Tenant:         "",     // SPIFFE identities carry no tenant
+		Tenant:         "", // SPIFFE identities carry no tenant
 		IssuedAt:       time.Unix(1_700_000_001, 0).UTC(),
 	}
 

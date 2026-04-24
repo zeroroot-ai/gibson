@@ -1,0 +1,1922 @@
+# dashboard-routes.yaml — Route manifest for the dashboard-smoke-e2e-tdd suite.
+#
+# Source of truth per R4.1: every dashboard page.tsx and route.ts is enumerated
+# here. Adding a new route to the dashboard without a matching entry here fails
+# the `make test-route-manifest-drift` CI guard.
+#
+# Schema per design Component 2:
+#   path              — URL path (use {slug} for tenant slug placeholder, {id} for ID params)
+#   kind              — "page" | "action" | "api"
+#   method            — HTTP method (default: GET)
+#   auth              — "required" | "public"
+#   landmark          — CSS selector or text fragment to assert visible (for kind=page)
+#   shape_schema      — path to Zod schema for JSON routes (null if none exists yet)
+#   upstream_rpc      — gRPC RPC name backing this route (for drift guard)
+#   perf_budget_ms    — per-route load time budget (default 3000ms)
+#   excluded          — true if intentionally excluded from active smoke testing
+#   excluded_reason   — why it's excluded (required if excluded: true)
+#   excluded_tracking_issue — tracking issue URL (required if excluded: true)
+#
+# CODEOWNERS: this file requires @platform-architecture approval to modify.
+# Any new dashboard route MUST be added here in the same PR that adds the route.
+
+routes:
+
+  # ===========================================================================
+  # Public pages (auth: public) — these MUST return 200 without a session
+  # ===========================================================================
+
+  - path: "/"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "main"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/login"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "form"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/signup"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "form"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/forgot-password"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/reset-password"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/pricing"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/contact-sales"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/signin/provide-email"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "form"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/signup/duplicate-email"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/signup/provisioning"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/verify-email"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/verify-email/confirm"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ===========================================================================
+  # Auth-required dashboard pages (kind=page, auth=required)
+  # ===========================================================================
+
+  - path: "/dashboard/missions"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/missions/create"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/missions/{id}"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real mission ID; covered by mission-run e2e spec"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/agents"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/tools"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/plugins"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/findings"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/graph"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/events"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/chat"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/deploy"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/onboarding"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/users"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/users/{userId}"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real user ID; covered by user-management e2e spec"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/default"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/forbidden"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/no-workspace"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Dashboard pages/ sub-section (template/demo pages)
+  # ---------------------------------------------------------------------------
+
+  - path: "/dashboard/pages/empty-states/01"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "UI template page — no daemon RPC backing; excluded from smoke to save time"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/empty-states/02"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "UI template page — no daemon RPC backing"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/empty-states/03"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "UI template page — no daemon RPC backing"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/empty-states/04"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "UI template page — no daemon RPC backing"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/error/403"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/notifications"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/onboarding-flow"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/orders"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Demo/template page — not a production feature"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/orders/{id}"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Demo/template page — not a production feature"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/pricing/column"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "UI template page — no daemon RPC backing"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/pricing/single"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "UI template page — no daemon RPC backing"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/pricing/table"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "UI template page — no daemon RPC backing"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/products"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Demo/template page — not a production feature"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/products/create"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Demo/template page — not a production feature"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/products/{id}"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Demo/template page — not a production feature"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/profile"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/account"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/agents"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/api-keys"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/appearance"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/billing"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/budgets"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/display"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/model-access"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/notifications"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/plugins"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/settings/providers"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/usage"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/user-profile"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/users"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/error/404"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/pages/error/500"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/register/v1"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "form"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/register/v2"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "form"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/forgot-password"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/settings/organization/security-policy"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Path normalizes to /pages/settings/organization/security-policy at runtime (route group (dashboard) strips prefix); covered by /pages/settings/organization/security-policy entry"
+    excluded_tracking_issue: ""
+
+  - path: "/dashboard/settings/organization/teams"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Path normalizes to /pages/settings/organization/teams at runtime (route group (dashboard) strips prefix); covered by /pages/settings/organization/teams entry"
+    excluded_tracking_issue: ""
+
+  - path: "/pages/settings/organization/security-policy"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/pages/settings/organization/teams"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/device"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/docs"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Path normalizes to /docs/{[[...slug]]} (optional catch-all); covered by /docs/{[[...slug]]} entry"
+    excluded_tracking_issue: ""
+
+  - path: "/docs/{[[...slug]]}"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Alias for /docs/{[...slug]} — drift detector normalizes [[...slug]] differently; covered by /docs/{[...slug]} entry"
+    excluded_tracking_issue: ""
+
+  - path: "/docs/{[...slug]}"
+    kind: page
+    method: GET
+    auth: public
+    landmark: "h1"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ===========================================================================
+  # API routes (kind=api) — assert Content-Type: application/json + shape
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Health / status
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/health"
+    kind: api
+    method: GET
+    auth: public
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/status"
+    kind: api
+    method: GET
+    auth: public
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Alerts
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/alerts"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/ListAlerts"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/alerts/mark-all-read"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/MarkAlertsRead"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/alerts/{id}/read"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/MarkAlertsRead"
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real alert ID"
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Analytics
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/analytics/agents/performance"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/analytics/findings/by-category"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/analytics/findings/by-severity"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/analytics/findings/time-series"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/analytics/kpis"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/analytics/missions/heatmap"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Auth
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/auth/[...nextauth]"
+    kind: api
+    method: GET
+    auth: public
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "NextAuth.js dynamic catch-all route — not directly testable as a smoke target; auth is tested end-to-end in signup/login specs; disk path normalizes to /api/auth/{...nextauth}"
+    excluded_tracking_issue: ""
+
+  - path: "/api/auth/{...nextauth}"
+    kind: api
+    method: GET
+    auth: public
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "NextAuth.js dynamic catch-all route — auth is tested end-to-end in signup/login specs"
+    excluded_tracking_issue: ""
+
+  - path: "/api/auth/federated-signout"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Billing
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/billing/webhook"
+    kind: api
+    method: POST
+    auth: public
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Stripe webhook endpoint — requires signed Stripe payload; cannot be tested as standard smoke"
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Chat
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/chat"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/chat/agents"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/ListAgents"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/chat/graph-summary"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Components
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/components/agents"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/ListAgents"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/components/plugins"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/ListPlugins"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/components/tools"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/ListTools"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/components/permissions"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/GetMyPermissions"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Contact sales
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/contact-sales"
+    kind: api
+    method: POST
+    auth: public
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Debug
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/debug/recent-errors"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Events
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/events"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/events/stream"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/Subscribe"
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "SSE streaming endpoint — long-lived connection; smoke test cannot wait for stream close"
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Findings
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/findings"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/ListFindings"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/findings/counts"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/ListFindings"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/findings/export"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/ExportFindings"
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/findings/stream"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "SSE streaming endpoint — long-lived connection; smoke test cannot wait for stream close"
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Graph / GraphRAG
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/graph"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/graph/stats"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/graph/mission/{id}"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real mission ID"
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Metrics
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/metrics"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Missions
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/missions"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/ListMissionDefinitions"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/create"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/CreateMission"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/templates"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/ListMissionDefinitions"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/validate"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/{id}"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/GetMissionDefinition"
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real mission ID"
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/{id}/clone"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real mission ID"
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/{id}/findings"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/ListFindings"
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real mission ID"
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/{id}/logs"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/GetComponentLogs"
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param + streaming; requires a real mission ID"
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/{id}/pause"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/PauseMission"
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real running mission ID"
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/{id}/resume"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/ResumeMission"
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real paused mission ID"
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/{id}/stop"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/StopMission"
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real running mission ID"
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/{id}/traces"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real mission ID"
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/{id}/traces/observations/{obsId}"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID params — requires a real mission ID and observation ID"
+    excluded_tracking_issue: ""
+
+  - path: "/api/missions/templates/{id}"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.v1.DaemonService/GetMissionDefinition"
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real template ID"
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Onboarding
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/onboarding/status"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/GetOnboardingState"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Search
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/search"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Session
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/session/switch-tenant"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Settings / API keys
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/settings/api-keys"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/ListAPIKeys"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/settings/tier"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Settings / LLM providers
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/settings/providers"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/ListProviders"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/settings/providers/supported"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/GetSupportedProviders"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/settings/providers/default"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/GetDefaultProvider"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/settings/providers/fallback-chain"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/GetFallbackChain"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/settings/providers/test"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/TestProvider"
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/settings/providers/{name}"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/GetProvider"
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic provider name param — requires a known provider name"
+    excluded_tracking_issue: ""
+
+  - path: "/api/settings/providers/{name}/health"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/TestProvider"
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Dynamic provider name param — requires a known provider name"
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Signup progress
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/signup/status"
+    kind: api
+    method: GET
+    auth: public
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/signup/progress/{id}"
+    kind: api
+    method: GET
+    auth: public
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: true
+    excluded_reason: "Dynamic ID param — requires a real signup progress ID"
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Tenant
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/tenant/select"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # User / Users
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/user/layout"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/users/activity"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/users/api-keys"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/ListAPIKeys"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  - path: "/api/users/profile"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/GetUserProfile"
+    perf_budget_ms: 1500
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # K8s watch (excluded — stream endpoint)
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/k8s/watch/{...path}"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "SSE/k8s watch streaming endpoint — long-lived connection; smoke test cannot wait for stream close"
+    excluded_tracking_issue: ""
+
+  # ---------------------------------------------------------------------------
+  # Admin provisioning (platform-operator only)
+  # ---------------------------------------------------------------------------
+
+  - path: "/api/admin/provisioning/entitlements/emit-summary"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/entitlements/list-feature-tuples"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/entitlements/seed-catalog-tenant-enabled"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/entitlements/upsert-quota"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/entitlements/write-tuples"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/invitation/reissue"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/organization/add-member"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/organization/create"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/organization/delete"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/organization/get"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/organization/list-members"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/organization/remove-member"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/user/delete"
+    kind: api
+    method: POST
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""
+
+  - path: "/api/admin/provisioning/user/list-organizations"
+    kind: api
+    method: GET
+    auth: required
+    landmark: null
+    shape_schema: null
+    upstream_rpc: ""
+    perf_budget_ms: 3000
+    excluded: true
+    excluded_reason: "Platform-operator only — cannot test without platform-operator role in smoke context"
+    excluded_tracking_issue: ""

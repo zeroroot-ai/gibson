@@ -1,0 +1,68 @@
+# CODEOWNERS — core/gibson
+#
+# This file defines code ownership for files in core/gibson/.
+# GitHub requires a review from the listed owners before a PR can be merged.
+#
+# Format: <pattern> <owner> [<owner> ...]
+# Patterns are evaluated top-to-bottom; the LAST matching pattern wins.
+#
+# Team handles used here:
+#   @platform-architecture — Platform Architecture team
+#     (responsible for auth chain, e2e test coverage, route manifest policy)
+
+# ---------------------------------------------------------------------------
+# Route manifest — the single source of truth for dashboard route coverage.
+# Any modification (add / remove / re-classify a route) requires
+# platform-architecture review to prevent silent coverage drift.
+# Per R4.3 (dashboard-smoke-e2e-tdd requirements).
+# ---------------------------------------------------------------------------
+tests/e2e/manifests/dashboard-routes.yaml   @platform-architecture
+
+# ---------------------------------------------------------------------------
+# Dashboard smoke e2e test — the orchestrator for the full smoke suite.
+# Per R4.3.
+# ---------------------------------------------------------------------------
+tests/e2e/dashboard_smoke_test.go           @platform-architecture
+
+# ---------------------------------------------------------------------------
+# Route drift CLI — the binary that enforces manifest completeness.
+# Per R4.3.
+# ---------------------------------------------------------------------------
+cmd/route-drift/                            @platform-architecture
+
+# ---------------------------------------------------------------------------
+# Auth chain tests — signup + login full-chain Go orchestrators.
+# ---------------------------------------------------------------------------
+tests/e2e/signup_full_chain_test.go         @platform-architecture
+tests/e2e/login_full_chain_test.go          @platform-architecture
+
+# ---------------------------------------------------------------------------
+# Auth chain helpers — changes here can silently break test coverage.
+# ---------------------------------------------------------------------------
+tests/e2e/helpers/                          @platform-architecture
+
+# ---------------------------------------------------------------------------
+# Mission-run e2e test — the orchestrator for the full mission lifecycle suite.
+# Changes here must be reviewed to preserve product surface gating (MISSION-B).
+# Per R7 (mission-run-e2e-tdd requirements).
+# ---------------------------------------------------------------------------
+tests/e2e/mission_run_test.go               @platform-architecture
+
+# ---------------------------------------------------------------------------
+# Mission-run fixtures — test-target server + mock-LLM provider.
+# Modifications can affect production-safety guarantees (build-tag + env-var
+# defense-in-depth). Changes require platform-architecture review.
+# Per NFR Security (mission-run-e2e-tdd requirements).
+# ---------------------------------------------------------------------------
+tests/e2e/fixtures/                         @platform-architecture
+
+# ---------------------------------------------------------------------------
+# Fixtures lint CLI — enforces GIBSON_TEST_FIXTURES_ENABLED never set in
+# production overlays. Weakening this check is a security regression.
+# ---------------------------------------------------------------------------
+cmd/fixtures-lint/                          @platform-architecture
+
+# ---------------------------------------------------------------------------
+# Full-flow documentation — covers auth + mission lifecycle + fixture runbook.
+# ---------------------------------------------------------------------------
+/docs/auth-flow.md                          @platform-architecture

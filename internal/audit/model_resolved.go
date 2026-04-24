@@ -18,16 +18,16 @@ import (
 // ModelResolutionEvent is the structured payload persisted to the
 // audit stream every time a slot resolution occurs.
 type ModelResolutionEvent struct {
-	TenantID         string             `json:"tenant_id"`
-	UserID           string             `json:"user_id"`
-	MissionID        string             `json:"mission_id,omitempty"`
-	RunID            string             `json:"run_id,omitempty"`
-	AgentID          string             `json:"agent_id,omitempty"`
-	SlotName         string             `json:"slot_name"`
-	ChosenProvider   string             `json:"chosen_provider"`
-	ChosenModel      string             `json:"chosen_model"`
-	Considered       []CandidateOutcome `json:"considered,omitempty"`
-	TimestampUnix    int64              `json:"timestamp_unix"`
+	TenantID       string             `json:"tenant_id"`
+	UserID         string             `json:"user_id"`
+	MissionID      string             `json:"mission_id,omitempty"`
+	RunID          string             `json:"run_id,omitempty"`
+	AgentID        string             `json:"agent_id,omitempty"`
+	SlotName       string             `json:"slot_name"`
+	ChosenProvider string             `json:"chosen_provider"`
+	ChosenModel    string             `json:"chosen_model"`
+	Considered     []CandidateOutcome `json:"considered,omitempty"`
+	TimestampUnix  int64              `json:"timestamp_unix"`
 }
 
 // CandidateOutcome captures a single model's permit/deny outcome in a

@@ -1,13 +1,15 @@
-# dispatch-signup-e2e.yml — fires the deploy repo's signup-e2e workflow on PR.
+# dispatch-auth-e2e.yml — fires the deploy repo's auth-e2e workflow on PR.
 #
+# Renamed from dispatch-signup-e2e.yml (login-e2e-tdd Task 9).
 # When a PR modifies any auth-chain file in core/gibson, this workflow fires a
 # repository_dispatch event to zero-day-ai/deploy, passing the PR's commit SHA.
-# The deploy repo's signup-e2e workflow then boots a fresh Kind cluster, deploys
-# the full stack at this repo's SHA, and runs the signup full-chain regression.
+# The deploy repo's auth-e2e workflow then boots a fresh Kind cluster, deploys
+# the full stack at this repo's SHA, and runs both signup and login full-chain
+# regressions.
 #
-# Requirements: R5.1.
+# Requirements: R5.1, R5.3.
 # This workflow file is CODEOWNERS-protected — changes require platform-architecture approval.
-name: Dispatch signup-e2e
+name: Dispatch auth-e2e
 
 on:
   pull_request:
@@ -19,17 +21,17 @@ on:
       - "internal/daemon/grpc.go"
       - "internal/daemon/api/**"
       - "tests/e2e/**"
-      - ".github/workflows/dispatch-signup-e2e.yml"
+      - ".github/workflows/dispatch-auth-e2e.yml"
 
 jobs:
   dispatch:
-    name: Trigger signup-e2e in deploy repo
+    name: Trigger auth-e2e in deploy repo
     runs-on: ubuntu-latest
     permissions:
       contents: read
 
     steps:
-      - name: Dispatch signup-e2e to deploy repo
+      - name: Dispatch auth-e2e to deploy repo
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.SIGNUP_E2E_DISPATCH_TOKEN }}
@@ -37,7 +39,7 @@ jobs:
             await github.rest.repos.createDispatchEvent({
               owner: 'zero-day-ai',
               repo: 'deploy',
-              event_type: 'signup-e2e-trigger',
+              event_type: 'auth-e2e-trigger',
               client_payload: {
                 gibson_ref: context.payload.pull_request.head.sha,
                 sdk_ref: 'main',
@@ -48,4 +50,4 @@ jobs:
                 source_pr: context.payload.pull_request.number,
               },
             });
-            console.log(`Dispatched signup-e2e for PR #${context.payload.pull_request.number} @ ${context.payload.pull_request.head.sha}`);
+            console.log(`Dispatched auth-e2e for PR #${context.payload.pull_request.number} @ ${context.payload.pull_request.head.sha}`);

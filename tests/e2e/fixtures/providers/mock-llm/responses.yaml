@@ -1,0 +1,35 @@
+# responses.yaml — canned request-pattern → response map for the mock LLM provider.
+#
+# This file is loaded by the mock provider at runtime (when GIBSON_TEST_FIXTURES_ENABLED=true)
+# to serve deterministic responses keyed by request-pattern substring.
+#
+# Format:
+#   - pattern: <substring matched against the first user message content>
+#     response: <verbatim response returned to the caller>
+#     mode: happy | error | slow     (optional, default: happy)
+#
+# The mock provider iterates patterns in order; first match wins.
+# If no pattern matches, the built-in DeterministicResponse constant is returned.
+#
+# PRODUCTION SAFETY: this file is only loaded when the binary was built with
+# -tags=test_fixtures AND GIBSON_TEST_FIXTURES_ENABLED=true.
+# Neither condition holds in the production Helm chart.
+
+patterns:
+  # Default happy-path response used by the probe agent (R3.3).
+  - pattern: "MOCK_LLM_DETERMINISTIC_RESPONSE_v1"
+    response: "MOCK_LLM_DETERMINISTIC_RESPONSE_v1"
+    mode: happy
+
+  # Negative test R4.3 — injected via InjectErrorMode; the code path in provider.go
+  # uses errorModeError which returns a provider error without consulting this file.
+  # Documented here for traceability.
+  - pattern: "__r43_inject_error__"
+    response: ""
+    mode: error
+
+  # Negative test R4.4 — injected via InjectSlowMode; provider.go blocks on ctx.Done().
+  # Documented here for traceability.
+  - pattern: "__r44_inject_slow__"
+    response: ""
+    mode: slow

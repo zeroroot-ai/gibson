@@ -36,3 +36,7 @@ build/.env
 /gibson
 bin/gibson
 gibson
+
+# E2E helper / lint binaries built ad-hoc into the module root
+/route-drift
+/fixtures-lint

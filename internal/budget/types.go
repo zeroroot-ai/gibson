@@ -77,12 +77,12 @@ type Status struct {
 // budget. Mapped to gRPC codes.ResourceExhausted with a
 // gibson.budget.v1.BudgetExceeded status detail at the daemon edge.
 var (
-	ErrTokenBudgetExceededUser    = errors.New("user token budget exceeded")
-	ErrTokenBudgetExceededTeam    = errors.New("team token budget exceeded")
-	ErrTokenBudgetExceededTenant  = errors.New("tenant token budget exceeded")
-	ErrSpendCapExceededUser       = errors.New("user spend cap exceeded")
-	ErrSpendCapExceededTeam       = errors.New("team spend cap exceeded")
-	ErrSpendCapExceededTenant     = errors.New("tenant spend cap exceeded")
+	ErrTokenBudgetExceededUser   = errors.New("user token budget exceeded")
+	ErrTokenBudgetExceededTeam   = errors.New("team token budget exceeded")
+	ErrTokenBudgetExceededTenant = errors.New("tenant token budget exceeded")
+	ErrSpendCapExceededUser      = errors.New("user spend cap exceeded")
+	ErrSpendCapExceededTeam      = errors.New("team spend cap exceeded")
+	ErrSpendCapExceededTenant    = errors.New("tenant spend cap exceeded")
 )
 
 // ErrorDetail is populated by the daemon edge when mapping a budget

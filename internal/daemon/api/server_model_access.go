@@ -230,8 +230,8 @@ func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *model
 	}
 
 	filters := audit.Filters{
-		Action:   "model_resolved",
-		ActorID:  req.GetUserId(),
+		Action:  "model_resolved",
+		ActorID: req.GetUserId(),
 	}
 	if sec := req.GetStartTimeUnix(); sec > 0 {
 		t := time.Unix(sec, 0)

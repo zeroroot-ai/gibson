@@ -437,6 +437,12 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 		}
 	}
 
+	// Register the e2e mock LLM provider when the binary was built with
+	// -tags=test_fixtures AND GIBSON_TEST_FIXTURES_ENABLED=true.
+	// In production builds this is a compile-time no-op (see
+	// fixture_mock_llm_register_stub.go).
+	maybeRegisterMockLLMProvider(ctx, registry)
+
 	// Verify at least one provider is registered
 	if len(registry.ListProviders()) == 0 {
 		d.logger.Warn(ctx, "no LLM providers registered - missions may fail if they require LLM access")

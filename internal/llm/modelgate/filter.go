@@ -80,8 +80,8 @@ type fgaFilter struct {
 }
 
 type cacheEntry struct {
-	allowed  bool
-	expires  time.Time
+	allowed bool
+	expires time.Time
 }
 
 // Permitted implements Filter. Returns the subset of candidates in the
