@@ -1,0 +1,28 @@
+name: gibson-daemon
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+
+concurrency:
+  group: gibson-daemon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: ./.github/workflows/reusable-image-build.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      component_name: gibson
+      component_path: .
+      dockerfile_path: Dockerfile
+      image_name: ghcr.io/zero-day-ai/gibson
+      tag_pattern: v(.*)
