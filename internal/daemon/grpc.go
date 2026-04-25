@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"log/slog"
@@ -194,8 +195,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 
 	// SPIFFE mTLS — initialize X509Source and configure TLS when SPIFFE is configured.
-	// tls.VerifyClientCertIfGiven allows both mTLS clients (in-cluster SPIFFE workloads)
-	// and standard TLS clients (Agent Auth, API key, Better Auth) to connect.
+	// tls.RequestClientCert allows both mTLS clients (in-cluster SPIFFE workloads)
+	// and standard TLS clients (Agent Auth, API key, Better Auth) to connect on the
+	// same listener. See the comment block below for why this specific value is used.
 	if d.config.Auth.SPIFFE != nil && d.config.Auth.SPIFFE.WorkloadAPISocket != "" {
 		socketAddr := "unix://" + d.config.Auth.SPIFFE.WorkloadAPISocket
 		x509Source, sourceErr := workloadapi.NewX509Source(ctx,
@@ -210,7 +212,78 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			)
 		} else {
 			tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeAny())
-			tlsCfg.ClientAuth = tls.VerifyClientCertIfGiven
+			// tls.RequestClientCert: ask for the client cert but DO NOT let Go's
+			// stdlib chain verifier run on it. We rely entirely on go-spiffe's
+			// VerifyPeerCertificate callback (installed by tlsconfig.MTLSServerConfig
+			// above) for SPIFFE chain validation against the SPIRE bundle.
+			//
+			// DO NOT change to tls.VerifyClientCertIfGiven (the prior broken state):
+			// stdlib verifier finds no acceptable issuer (ClientCAs is unset) and
+			// emits `tlsv1 alert unknown_ca` post-handshake, killing the SPIFFE
+			// callback before it runs. See spec daemon-tls-clientauth-fix and the
+			// B-bug 1 entry in in-cluster-mtls-restoration/design.md.
+			//
+			// DO NOT change to tls.RequireAnyClientCert: would reject Bearer-only
+			// clients (Agent Auth, API key, Auth.js / Better Auth callers) that
+			// don't present a cert at all.
+			tlsCfg.ClientAuth = tls.RequestClientCert
+			// Go calls VerifyPeerCertificate even when no cert is presented (rawCerts
+			// is empty) under RequestClientCert. go-spiffe's callback returns an error
+			// for empty chains. Wrap it to:
+			//   (a) pass through the no-cert case so Bearer-only clients reach the
+			//       identity interceptor (original intent of the override),
+			//   (b) log accepted mTLS handshakes at INFO with the client's SPIFFE ID
+			//       (Requirement 1.4 — operators confirm mTLS is live without tcpdump),
+			//   (c) log rejected handshakes at WARN with structured detail
+			//       (NFR Usability — speeds up debugging vs opaque TLS alert 48).
+			origVerify := tlsCfg.VerifyPeerCertificate
+			logger := d.logger
+			tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+				if len(rawCerts) == 0 {
+					return nil // no cert presented — fall through to Bearer-token path
+				}
+				if err := origVerify(rawCerts, verifiedChains); err != nil {
+					// Parse the leaf cert for structured rejection detail.
+					// Best-effort: if parsing fails, log what we can.
+					logCtx := context.Background()
+					if leaf, parseErr := x509.ParseCertificate(rawCerts[0]); parseErr == nil {
+						sans := make([]string, 0, len(leaf.URIs))
+						for _, u := range leaf.URIs {
+							sans = append(sans, u.String())
+						}
+						logger.Warn(logCtx, "SPIFFE mTLS: rejected client cert",
+							"issuer", leaf.Issuer.String(),
+							"subject", leaf.Subject.String(),
+							"sans_uri", strings.Join(sans, ","),
+							"not_before", leaf.NotBefore.Format(time.RFC3339),
+							"not_after", leaf.NotAfter.Format(time.RFC3339),
+							"error", err.Error(),
+						)
+					} else {
+						logger.Warn(logCtx, "SPIFFE mTLS: rejected client cert (unparseable)",
+							"error", err.Error(),
+						)
+					}
+					return err
+				}
+				// Cert accepted — log the SPIFFE ID (URI SAN) from the leaf cert.
+				// Log ONLY the URI SAN — never raw cert bytes, never client IP.
+				if leaf, parseErr := x509.ParseCertificate(rawCerts[0]); parseErr == nil {
+					spiffeID := ""
+					for _, u := range leaf.URIs {
+						if strings.HasPrefix(u.Scheme, "spiffe") {
+							spiffeID = u.String()
+							break
+						}
+					}
+					if spiffeID != "" {
+						logger.Info(context.Background(), "mTLS handshake accepted",
+							"spiffe_id", spiffeID,
+						)
+					}
+				}
+				return nil
+			}
 			serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
 			// Store source on daemon for graceful shutdown close.
 			d.spiffeX509Source = x509Source

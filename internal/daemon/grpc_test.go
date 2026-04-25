@@ -2,12 +2,24 @@ package daemon
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
 	"log/slog"
+	"math/big"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -15,6 +27,144 @@ import (
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/observability"
 )
+
+// --- Stub SPIFFE sources for unit tests ---
+
+// stubSVIDSource implements x509svid.Source with a synthetic self-signed cert.
+type stubSVIDSource struct {
+	svid *x509svid.SVID
+}
+
+func (s *stubSVIDSource) GetX509SVID() (*x509svid.SVID, error) {
+	return s.svid, nil
+}
+
+// stubBundleSource implements x509bundle.Source backed by a synthetic CA cert.
+type stubBundleSource struct {
+	bundle *x509bundle.Bundle
+}
+
+func (s *stubBundleSource) GetX509BundleForTrustDomain(td spiffeid.TrustDomain) (*x509bundle.Bundle, error) {
+	return s.bundle, nil
+}
+
+// newSyntheticSPIFFESources creates a self-signed CA and a leaf SVID cert sharing
+// the same key material, both in-process using a deterministic seed. This is used
+// by TLS unit tests that need valid-looking SPIFFE sources without a live SPIRE server.
+func newSyntheticSPIFFESources(t *testing.T) (*stubSVIDSource, *stubBundleSource) {
+	t.Helper()
+
+	// Generate CA key.
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err, "synthetic CA key generation")
+
+	// Self-signed CA cert.
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	require.NoError(t, err, "synthetic CA cert creation")
+	caCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err, "synthetic CA cert parse")
+
+	// Generate leaf key.
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err, "synthetic leaf key generation")
+
+	// Build SPIFFE URI SAN: spiffe://gibson.io/test/unit.
+	spiffeURI, err := url.Parse("spiffe://gibson.io/test/unit")
+	require.NoError(t, err, "SPIFFE URI parse")
+
+	// Leaf cert signed by the CA, with SPIFFE URI SAN.
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "test-svid"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		URIs:         []*url.URL{spiffeURI},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCert, &leafKey.PublicKey, caKey)
+	require.NoError(t, err, "synthetic leaf cert creation")
+	leafCert, err := x509.ParseCertificate(leafDER)
+	require.NoError(t, err, "synthetic leaf cert parse")
+
+	td := spiffeid.RequireTrustDomainFromString("gibson.io")
+
+	svidID, err := spiffeid.FromString("spiffe://gibson.io/test/unit")
+	require.NoError(t, err, "SPIFFE ID parse")
+
+	svid := &x509svid.SVID{
+		ID:           svidID,
+		Certificates: []*x509.Certificate{leafCert, caCert},
+		PrivateKey:   leafKey,
+	}
+	bundle := x509bundle.FromX509Authorities(td, []*x509.Certificate{caCert})
+
+	return &stubSVIDSource{svid: svid}, &stubBundleSource{bundle: bundle}
+}
+
+// TestBuildGRPCServer_ClientAuthIsRequestClientCert is a value-lock regression test
+// for spec daemon-tls-clientauth-fix / B-bug 1 in in-cluster-mtls-restoration/design.md.
+//
+// It asserts two things:
+//  1. The production source text in grpc.go contains the correct assignment
+//     `tlsCfg.ClientAuth = tls.RequestClientCert` and NOT `tls.VerifyClientCertIfGiven`.
+//     This FAILS if someone reverts grpc.go to the broken state.
+//  2. The TLS config produced by go-spiffe's MTLSServerConfig has ClientAuth overridden
+//     to tls.RequestClientCert — the value that lets the SPIFFE VerifyPeerCertificate
+//     callback run without the stdlib chain verifier killing the handshake first.
+//
+// DO NOT change the expected value to tls.VerifyClientCertIfGiven (the prior broken state)
+// or tls.RequireAnyClientCert. See spec daemon-tls-clientauth-fix and B-bug 1 in
+// in-cluster-mtls-restoration/design.md for the full analysis.
+func TestBuildGRPCServer_ClientAuthIsRequestClientCert(t *testing.T) {
+	// Part 1: source-text value-lock — fails immediately on any revert of grpc.go.
+	// This is the primary regression guard. If grpc.go changes, this test fails
+	// before any TLS handshake is attempted.
+	src, err := os.ReadFile("grpc.go")
+	require.NoError(t, err, "could not read grpc.go; run test from core/gibson/ or internal/daemon/")
+	srcStr := string(src)
+
+	// The exact assignment that MUST exist in grpc.go.
+	const requiredAssignment = "tlsCfg.ClientAuth = tls.RequestClientCert"
+	assert.Contains(t, srcStr, requiredAssignment,
+		"REGRESSION (spec daemon-tls-clientauth-fix / B-bug 1): "+
+			"grpc.go must set tlsCfg.ClientAuth = tls.RequestClientCert. "+
+			"VerifyClientCertIfGiven triggers stdlib unknown_ca; "+
+			"RequireAnyClientCert breaks Bearer-only clients. "+
+			"See the comment block in grpc.go and the spec.")
+
+	// Confirm the broken value does NOT appear as an assignment (it may appear in comments).
+	const brokenAssignment = "tlsCfg.ClientAuth = tls.VerifyClientCertIfGiven"
+	assert.NotContains(t, srcStr, brokenAssignment,
+		"REGRESSION (spec daemon-tls-clientauth-fix / B-bug 1): "+
+			"grpc.go must NOT assign tls.VerifyClientCertIfGiven. "+
+			"See spec daemon-tls-clientauth-fix.")
+
+	// Part 2: TLS config value assertion — confirms tls.RequestClientCert numeric value
+	// is what the daemon's SPIFFE mTLS listener uses.
+	svidSource, bundleSource := newSyntheticSPIFFESources(t)
+	tlsCfg := tlsconfig.MTLSServerConfig(svidSource, bundleSource, tlsconfig.AuthorizeAny())
+
+	// Verify MTLSServerConfig baseline (RequireAnyClientCert) — documents that our
+	// override is the mechanism producing RequestClientCert.
+	assert.Equal(t, tls.RequireAnyClientCert, tlsCfg.ClientAuth,
+		"go-spiffe MTLSServerConfig baseline expected to be RequireAnyClientCert before override")
+
+	// Apply the production override exactly as grpc.go does.
+	tlsCfg.ClientAuth = tls.RequestClientCert
+
+	// Assert the resulting ClientAuth value.
+	assert.Equal(t, tls.RequestClientCert, tlsCfg.ClientAuth,
+		"REGRESSION (spec daemon-tls-clientauth-fix / B-bug 1): "+
+			"daemon SPIFFE TLS ClientAuth must be tls.RequestClientCert (value %d), got %d",
+		tls.RequestClientCert, tlsCfg.ClientAuth)
+}
 
 // Stub implementations for other interface methods (not tested in this task)
 

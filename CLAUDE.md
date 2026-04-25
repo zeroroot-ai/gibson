@@ -31,6 +31,17 @@ Some tests are gated behind Go build tags so they do not run during `make test`/
 
 When adding a new test that has slow startup, network dependencies, or requires model files, prefer adding a build tag over flaky `t.Skip()` heuristics. Document the tag here.
 
+### E2E test conventions — validation gate (MANDATORY)
+
+**E2E tests are not done until they exit 0 against `make deploy-local`.** This rule exists because the `e2e-harness-realignment` spec found $1500+ of scaffolding written without ever running — tests that pointed at non-existent routes, imagined form fields, and fictional REST endpoints.
+
+- Any task that adds or modifies e2e files (`tests/e2e/**`, `e2e/auth/**`, diagnostic scripts, route manifests) **MUST run the test against a live Kind cluster and capture evidence before marking `[x]`**.
+- Evidence means: exit code 0, at minimum 5 log lines showing assertions passed, or a screenshot of the green test run.
+- If the cluster is unavailable: mark the task `[~]` (validation-pending). Never `[x]`.
+- If the test fails: classify each failure — test bug (fix the test, no catalog entry) or system bug (fix the system, add to the relevant `*-B` catalog in the spec's `design.md`, lock in a regression assertion). Do NOT lower assertions to make tests pass — fix the system.
+- The spec-workflow tasks template (`.spec-workflow/templates/tasks-template.md`) enforces this rule with a `_Validation:` block pattern. All future e2e-touching task prompts must include it.
+- The four Makefile targets are the canonical run commands: `make test-signup-e2e`, `make test-login-e2e`, `make test-dashboard-smoke-e2e`, `make test-mission-run-e2e`, `make test-full-e2e`.
+
 ## Directory Map (AI reference)
 
 ```
@@ -239,6 +250,8 @@ Three layers of defense; cost of disabling daemon SPIFFE = cost of writing spec 
 - `spiffe://gibson.io/platform/dashboard` — gibson-dashboard deployment; mints JWT-SVIDs for the audience above.
 - `spiffe://gibson.io/platform/tenant-operator` — gibson-tenant-operator; same JWT-SVID minting pattern for admin RPCs.
 - `spiffe://gibson.io/platform/spiffe-jwks` — sidecar that translates the SPIRE JWT bundle into a JWKS HTTP endpoint Envoy and Auth.js can consume.
+
+**Daemon mTLS listener `ClientAuth` value**: the gRPC server uses `tls.RequestClientCert` (NOT `tls.VerifyClientCertIfGiven`) — see spec `daemon-tls-clientauth-fix`. Changing this back to `VerifyClientCertIfGiven` breaks every SPIFFE client with `tlsv1 alert unknown_ca` (B-bug 1 in `in-cluster-mtls-restoration/design.md`). The unit test `TestBuildGRPCServer_ClientAuthIsRequestClientCert` enforces this.
 
 The trust domain `gibson.io` is **legacy** — see memory `project_gibson_ownership.md`. Renaming to `zero-day.ai` is out of scope; track in a future spec.
 
