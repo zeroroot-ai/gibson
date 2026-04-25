@@ -70,6 +70,71 @@ type MeUserMeta struct {
 }
 
 // ---------------------------------------------------------------------------
+// UserProfileResponse — typed shape of /api/users/profile JSON response
+// ---------------------------------------------------------------------------
+
+// UserProfileResponse is the shape returned by GET /api/users/profile.
+// The dashboard wraps the profile in a "profile" key when the daemon RPC is
+// unavailable (fallback path); it also may return the profile at the top level
+// when the daemon RPC succeeds. We parse both shapes.
+type UserProfileResponse struct {
+	// Direct shape (when daemon RPC succeeds)
+	ID       string   `json:"id"`
+	Email    string   `json:"email"`
+	TenantID string   `json:"tenantId"`
+	Roles    []string `json:"roles"`
+	// Wrapped shape (fallback, daemon RPC unavailable)
+	Profile *struct {
+		ID       string   `json:"id"`
+		Email    string   `json:"email"`
+		TenantID string   `json:"tenantId"`
+		Roles    []string `json:"roles"`
+	} `json:"profile"`
+}
+
+// ResolvedEmail returns the email from either the direct or wrapped profile shape.
+func (r *UserProfileResponse) ResolvedEmail() string {
+	if r.Email != "" {
+		return r.Email
+	}
+	if r.Profile != nil {
+		return r.Profile.Email
+	}
+	return ""
+}
+
+// ResolvedTenantID returns the tenantId from either the direct or wrapped profile shape.
+func (r *UserProfileResponse) ResolvedTenantID() string {
+	if r.TenantID != "" {
+		return r.TenantID
+	}
+	if r.Profile != nil {
+		return r.Profile.TenantID
+	}
+	return ""
+}
+
+// FetchUserProfile makes a GET /api/users/profile request using the provided
+// cookie jar and returns the parsed response.
+//
+// LOGIN-B3 fix: /api/me doesn't exist in the dashboard; the real endpoint is
+// /api/users/profile. Returns an error if the HTTP request fails, if the
+// endpoint returns a non-200 status, or if the JSON cannot be parsed.
+//
+// Requirements: R1.6.
+func FetchUserProfile(ctx context.Context, cookies []*PlaywrightCookie, baseURL string) (*UserProfileResponse, error) {
+	body, err := FetchProtectedJSON(ctx, cookies, baseURL, "/api/users/profile")
+	if err != nil {
+		return nil, fmt.Errorf("session: FetchUserProfile: %w", err)
+	}
+	var profile UserProfileResponse
+	if err := json.Unmarshal(body, &profile); err != nil {
+		return nil, fmt.Errorf("session: FetchUserProfile: unmarshal response: %w (body: %.200s)", err, string(body))
+	}
+	return &profile, nil
+}
+
+// ---------------------------------------------------------------------------
 // ExpiredSessionResult — written by Playwright, read by Go test
 // ---------------------------------------------------------------------------
 
@@ -245,8 +310,11 @@ func FetchProtectedJSON(ctx context.Context, cookies []*PlaywrightCookie, baseUR
 	return rawBody, nil
 }
 
-// FetchMeUnauthenticated makes a GET /api/me request WITHOUT any session
-// cookie and returns the HTTP status code.
+// FetchMeUnauthenticated makes a GET /api/users/profile request WITHOUT any
+// session cookie and returns the HTTP status code.
+//
+// LOGIN-B5 FIX: /api/me does not exist (404). The real protected endpoint is
+// /api/users/profile which properly returns 401 when unauthenticated.
 //
 // Used by the R2.3 negative test: no-cookie → 401 or redirect to /login.
 //
@@ -263,7 +331,7 @@ func FetchMeUnauthenticated(ctx context.Context, baseURL string) (int, error) {
 		},
 	}
 
-	reqURL := strings.TrimRight(baseURL, "/") + "/api/me"
+	reqURL := strings.TrimRight(baseURL, "/") + "/api/users/profile"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return 0, fmt.Errorf("session: FetchMeUnauthenticated: build request: %w", err)
@@ -271,14 +339,17 @@ func FetchMeUnauthenticated(ctx context.Context, baseURL string) (int, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("session: FetchMeUnauthenticated: GET /api/me: %w", err)
+		return 0, fmt.Errorf("session: FetchMeUnauthenticated: GET /api/users/profile: %w", err)
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode, nil
 }
 
-// FetchMeWithCookies makes a GET /api/me request with the provided cookies
-// and returns the HTTP status code (without consuming the body).
+// FetchMeWithCookies makes a GET /api/users/profile request with the provided
+// cookies and returns the HTTP status code (without consuming the body).
+//
+// LOGIN-B5 FIX: /api/me does not exist (404). Use /api/users/profile which
+// properly rejects tampered session cookies.
 //
 // Used by the R2.4 tampered-cookie negative test.
 //
@@ -289,7 +360,7 @@ func FetchMeWithCookies(ctx context.Context, cookies []*PlaywrightCookie, baseUR
 		return 0, err
 	}
 
-	reqURL := strings.TrimRight(baseURL, "/") + "/api/me"
+	reqURL := strings.TrimRight(baseURL, "/") + "/api/users/profile"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return 0, fmt.Errorf("session: FetchMeWithCookies: build request: %w", err)
@@ -297,20 +368,56 @@ func FetchMeWithCookies(ctx context.Context, cookies []*PlaywrightCookie, baseUR
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("session: FetchMeWithCookies: GET /api/me: %w", err)
+		return 0, fmt.Errorf("session: FetchMeWithCookies: GET /api/users/profile: %w", err)
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode, nil
 }
 
-// TamperCookie finds the cookie with the given name in the slice and returns
-// a new slice with that cookie's value deterministically corrupted (one byte
-// flipped at a fixed offset).
+// SessionCookieName is the Auth.js v5 session cookie name.
+//
+// Auth.js v5 uses the __Secure- prefix when served over HTTPS (which the Kind
+// cluster does via Envoy TLS termination). The fallback without the prefix
+// applies when served over HTTP (local dev only).
+//
+// The old Auth.js v4 name was "next-auth.session-token" — that is NOT used.
+//
+// Requirements: R3.2 (realigned for Auth.js v5 cookie naming).
+const SessionCookieName = "__Secure-authjs.session-token"
+
+// SessionCookieNameInsecure is the Auth.js v5 cookie name without the
+// __Secure- prefix, used when the cluster is served over HTTP.
+const SessionCookieNameInsecure = "authjs.session-token"
+
+// HasSessionCookie returns true if the cookie jar contains an Auth.js v5
+// session cookie (either the __Secure- prefixed name for HTTPS or the plain
+// name for HTTP).
+//
+// Auth.js v4's "next-auth.session-token" is NOT recognised — those cookies
+// will not pass this check (any remaining v4 cookies indicate a version
+// migration issue in the dashboard).
+//
+// Security: cookie values are NOT logged — only cookie names.
+//
+// Requirements: R3.2.
+func HasSessionCookie(cookies []*PlaywrightCookie) bool {
+	for _, c := range cookies {
+		if c.Name == SessionCookieName || c.Name == SessionCookieNameInsecure {
+			return true
+		}
+	}
+	return false
+}
+
+// TamperCookie finds the cookie matching any of the Auth.js v5 session cookie
+// names and returns a new slice with that cookie's value deterministically
+// corrupted (one byte flipped at a fixed offset).
+//
+// The name parameter accepts either the exact name OR a substring. The first
+// matching cookie is tampered. If no matching cookie exists, the slice is
+// returned unchanged.
 //
 // The corruption is deterministic (not random) so tests are reproducible.
-//
-// If no cookie with the given name exists, the slice is returned unchanged —
-// the tampered request will then behave as if the cookie is simply absent.
 //
 // Security: neither the original nor the tampered value is logged — only
 // the cookie name and the fact that corruption was applied.
@@ -319,7 +426,10 @@ func FetchMeWithCookies(ctx context.Context, cookies []*PlaywrightCookie, baseUR
 func TamperCookie(cookies []*PlaywrightCookie, name string) []*PlaywrightCookie {
 	result := make([]*PlaywrightCookie, len(cookies))
 	for i, c := range cookies {
-		if c.Name != name || len(c.Value) == 0 {
+		// Match by exact name or by substring (handles v5 __Secure- prefix variants).
+		matches := c.Name == name ||
+			(name == "authjs.session-token" && (c.Name == SessionCookieName || c.Name == SessionCookieNameInsecure))
+		if !matches || len(c.Value) == 0 {
 			result[i] = c
 			continue
 		}

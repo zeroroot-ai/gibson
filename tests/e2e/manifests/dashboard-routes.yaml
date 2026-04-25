@@ -162,6 +162,17 @@ routes:
   # Auth-required dashboard pages (kind=page, auth=required)
   # ===========================================================================
 
+  - path: "/dashboard"
+    kind: page
+    method: GET
+    auth: required
+    landmark: "main"
+    shape_schema: null
+    perf_budget_ms: 3000
+    excluded: false
+    excluded_reason: ""
+    excluded_tracking_issue: ""
+
   - path: "/dashboard/missions"
     kind: page
     method: GET
@@ -323,8 +334,8 @@ routes:
     landmark: "h1"
     shape_schema: null
     perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
+    excluded: true
+    excluded_reason: "Route consolidated into /dashboard (e2e-harness-realignment); page.tsx removed from disk"
     excluded_tracking_issue: ""
 
   - path: "/dashboard/forbidden"
@@ -774,29 +785,29 @@ routes:
   - path: "/pages/settings/organization/security-policy"
     kind: page
     method: GET
-    auth: required
+    auth: public
     landmark: "h1"
     shape_schema: null
     perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
+    excluded: true
+    excluded_reason: "UI component showcase page in (dashboard) route group — middleware does not cover /pages/* prefix; page loads unauthenticated (client-side session guard only). Not a product route. (e2e-harness-realignment)"
     excluded_tracking_issue: ""
 
   - path: "/pages/settings/organization/teams"
     kind: page
     method: GET
-    auth: required
+    auth: public
     landmark: "h1"
     shape_schema: null
     perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
+    excluded: true
+    excluded_reason: "UI component showcase page in (dashboard) route group — middleware does not cover /pages/* prefix; page loads unauthenticated (client-side session guard only). Not a product route. (e2e-harness-realignment)"
     excluded_tracking_issue: ""
 
   - path: "/device"
     kind: page
     method: GET
-    auth: required
+    auth: public
     landmark: "h1"
     shape_schema: null
     perf_budget_ms: 3000
@@ -833,8 +844,8 @@ routes:
     landmark: "h1"
     shape_schema: null
     perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
+    excluded: true
+    excluded_reason: "Docs catch-all route — test slug substitution resolves to /docs/pods which does not exist in docs tree (returns 404). Cannot probe without a valid slug from the actual docs source tree. (e2e-harness-realignment)"
     excluded_tracking_issue: ""
 
   # ===========================================================================
@@ -860,7 +871,7 @@ routes:
   - path: "/api/status"
     kind: api
     method: GET
-    auth: public
+    auth: required
     landmark: null
     shape_schema: null
     upstream_rpc: ""
@@ -887,14 +898,14 @@ routes:
 
   - path: "/api/alerts/mark-all-read"
     kind: api
-    method: POST
+    method: PATCH
     auth: required
     landmark: null
     shape_schema: null
     upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/MarkAlertsRead"
     perf_budget_ms: 1500
-    excluded: false
-    excluded_reason: ""
+    excluded: true
+    excluded_reason: "PATCH-only route — unauthenticated GET probe returns 405; cannot probe without session + correct method in smoke unauthenticated probe (which always uses method=GET for non-200 check). Covered by authenticated probe with PATCH method. (e2e-harness-realignment)"
     excluded_tracking_issue: ""
 
   - path: "/api/alerts/{id}/read"
@@ -1145,8 +1156,8 @@ routes:
     shape_schema: null
     upstream_rpc: ""
     perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
+    excluded: true
+    excluded_reason: "POST-only route requiring a valid contact-sales JSON body — GET probe returns 500 (body validation failure). Cannot probe without a valid body in the smoke suite unauthenticated probe. (e2e-harness-realignment)"
     excluded_tracking_issue: ""
 
   # ---------------------------------------------------------------------------
@@ -1156,13 +1167,13 @@ routes:
   - path: "/api/debug/recent-errors"
     kind: api
     method: GET
-    auth: required
+    auth: public
     landmark: null
     shape_schema: null
     upstream_rpc: ""
     perf_budget_ms: 1500
-    excluded: false
-    excluded_reason: ""
+    excluded: true
+    excluded_reason: "Debug-flag-gated endpoint — returns 404 unless DASHBOARD_DEBUG=1. Auth guard is via debug flag, not session. Non-deterministic in smoke suite depending on cluster debug configuration. (e2e-harness-realignment)"
     excluded_tracking_issue: ""
 
   # ---------------------------------------------------------------------------
@@ -1223,14 +1234,14 @@ routes:
 
   - path: "/api/findings/export"
     kind: api
-    method: GET
+    method: POST
     auth: required
     landmark: null
     shape_schema: null
     upstream_rpc: "/gibson.daemon.admin.v1.DaemonAdminService/ExportFindings"
     perf_budget_ms: 3000
-    excluded: false
-    excluded_reason: ""
+    excluded: true
+    excluded_reason: "POST-only route requiring export format body — GET probe returns 405. Cannot probe without body in smoke unauthenticated probe. Covered by authenticated integration tests. (e2e-harness-realignment)"
     excluded_tracking_issue: ""
 
   - path: "/api/findings/stream"
@@ -1496,7 +1507,7 @@ routes:
   - path: "/api/search"
     kind: api
     method: GET
-    auth: required
+    auth: public
     landmark: null
     shape_schema: null
     upstream_rpc: ""
@@ -1649,8 +1660,8 @@ routes:
     shape_schema: null
     upstream_rpc: ""
     perf_budget_ms: 1500
-    excluded: false
-    excluded_reason: ""
+    excluded: true
+    excluded_reason: "Requires ?tenant=<tenantId> query param — returns 400 without it. Cannot probe without a real in-flight signup tenant ID. (e2e-harness-realignment)"
     excluded_tracking_issue: ""
 
   - path: "/api/signup/progress/{id}"

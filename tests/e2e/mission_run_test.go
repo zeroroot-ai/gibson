@@ -371,8 +371,14 @@ func TestMission_Run_HappyPath(t *testing.T) {
 		require.NotEmpty(t, missionID, "missionID is empty — run mission phase must succeed first")
 
 		baseURL := helpers.GatewayURL()
-		statePath := fmt.Sprintf("/tmp/playwright-state-%s.json", env.slug)
+		// Use the session cookie jar written by the login-e2e Playwright spec.
+		// File: /tmp/login-storage-state-<slug>.json (written by login-full-chain.spec.ts).
+		statePath := fmt.Sprintf("/tmp/login-storage-state-%s.json", env.slug)
 		cookies, _ := helpers.LoadCookieJar(t, statePath)
+		if !helpers.HasSessionCookie(cookies) {
+			t.Logf("mission run: no Auth.js session cookie in %s — falling back to unauthenticated fetch", statePath)
+			cookies = nil
+		}
 
 		var fetchErr error
 		findings, fetchErr = helpers.GetMissionFindings(ctx, cookies, baseURL, env.slug, missionID)

@@ -3,8 +3,7 @@
 
 // Package e2e contains black-box end-to-end tests for the Gibson daemon and
 // its surrounding auth chain.  Tests in this package require a live Kind
-// cluster deployed with `make deploy-local` (values-zitadel-envoy.yaml
-// overlay) and are invoked via:
+// cluster deployed with `make deploy-local` and are invoked via:
 //
 //	SIGNUP_SLUG_A=<slug-a> SIGNUP_EMAIL_A=<email-a> \
 //	SIGNUP_SLUG_B=<slug-b> SIGNUP_EMAIL_B=<email-b> \
@@ -223,9 +222,9 @@ func TestDashboard_CrossTenantIsolation(t *testing.T) {
 	// -------------------------------------------------------------------------
 	statePathA := fmt.Sprintf("/tmp/dashboard-smoke-session-a-%s.json", env.slugA)
 	jarA, err := helpers.LoadCookieJar(t, statePathA)
-	if err != nil || len(jarA) == 0 {
-		t.Skipf("cross-tenant isolation: session A storage state not found at %s — "+
-			"ensure the Playwright spec ran and wrote the session file: %v", statePathA, err)
+	if err != nil || !helpers.HasSessionCookie(jarA) {
+		t.Skipf("cross-tenant isolation: session A storage state not found or missing Auth.js session cookie at %s — "+
+			"ensure the Playwright spec ran and completed the OIDC flow: %v", statePathA, err)
 		return
 	}
 
@@ -234,9 +233,9 @@ func TestDashboard_CrossTenantIsolation(t *testing.T) {
 	// -------------------------------------------------------------------------
 	statePathB := fmt.Sprintf("/tmp/dashboard-smoke-session-b-%s.json", env.slugB)
 	jarB, err := helpers.LoadCookieJar(t, statePathB)
-	if err != nil || len(jarB) == 0 {
-		t.Skipf("cross-tenant isolation: session B storage state not found at %s — "+
-			"ensure the Playwright spec ran and wrote the session file: %v", statePathB, err)
+	if err != nil || !helpers.HasSessionCookie(jarB) {
+		t.Skipf("cross-tenant isolation: session B storage state not found or missing Auth.js session cookie at %s — "+
+			"ensure the Playwright spec ran and completed the OIDC flow: %v", statePathB, err)
 		return
 	}
 

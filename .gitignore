@@ -40,3 +40,10 @@ gibson
 # E2E helper / lint binaries built ad-hoc into the module root
 /route-drift
 /fixtures-lint
+
+# E2E fixture binaries built ad-hoc by `go build` next to their main.go
+tests/e2e/fixtures/agents/probe/probe
+tests/e2e/fixtures/targets/test-target/test-target
+
+# Claude Code internal scheduler state
+.claude/

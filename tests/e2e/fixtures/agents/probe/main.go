@@ -181,14 +181,16 @@ func callLLM(ctx context.Context, client componentpb.ComponentServiceClient, ins
 
 	resp, err := client.Complete(completeCtx, &componentpb.CompleteRequest{
 		WorkId: workID,
-		Prompt: prompt,
-		Model:  "mock-model",
+		Slot:   "mock-model",
+		Messages: []*componentpb.LLMMessage{
+			{Role: "user", Content: prompt},
+		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("callLLM: Complete RPC: %w", err)
 	}
 
-	content := resp.GetContent()
+	content := resp.GetResponse().GetContent()
 	slog.Info("probe: LLM response received", "content_len", len(content))
 	return content, nil
 }
@@ -207,8 +209,8 @@ func submitFinding(ctx context.Context, client componentpb.ComponentServiceClien
 		Technique:   "probe-observation",
 		Evidence: []*typespb.Evidence{
 			{
+				Title:   "mock-llm-e2e",
 				Content: fmt.Sprintf("LLM evidence: %s", llmEvidence),
-				Source:  "mock-llm-e2e",
 			},
 		},
 		Tags: []string{"e2e", "probe", "deterministic"},
