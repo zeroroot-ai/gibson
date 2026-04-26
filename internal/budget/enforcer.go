@@ -10,7 +10,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // Enforcer is the surface the daemon's ExecuteLLM handler calls to gate
@@ -171,13 +171,13 @@ func scopeSubject(ctx context.Context, scope Scope) (string, bool) {
 	case ScopeTenant:
 		return "", true
 	case ScopeUser:
-		if uid, ok := identity.ActingUserFromContext(ctx); ok && uid != "" {
+		if uid, ok := auth.ActingUserFromContext(ctx); ok && uid != "" {
 			return uid, true
 		}
 		// Fall back to the initiator user when Acting is unset — this
 		// happens on scheduled / autonomous mission goroutines where the
 		// caller context is no longer synchronous.
-		if uid, ok := identity.InitiatorUserFromContext(ctx); ok && uid != "" {
+		if uid, ok := auth.InitiatorUserFromContext(ctx); ok && uid != "" {
 			return uid, true
 		}
 	}
@@ -247,7 +247,7 @@ func (e *redisEnforcer) readCounter(ctx context.Context, key string) (tokens int
 // (current + estimated) against each applicable budget and returns the
 // most-constrained error.
 func (e *redisEnforcer) Check(ctx context.Context, estimatedTokens int64) (*Status, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	now := e.clock()
 	period := PeriodID(now)
 	resetAt := PeriodResetAt(now)
@@ -299,7 +299,7 @@ func (e *redisEnforcer) Check(ctx context.Context, estimatedTokens int64) (*Stat
 // Record implements Enforcer.Record. Atomically increments each
 // applicable scope's counter.
 func (e *redisEnforcer) Record(ctx context.Context, actualTokens, actualCostUSDCents int64) error {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	period := PeriodID(e.clock())
 
 	// Tenant counter.
@@ -330,7 +330,7 @@ func (e *redisEnforcer) recordOne(ctx context.Context, key string, tokens, cost 
 
 // GetBudget implements Enforcer.GetBudget.
 func (e *redisEnforcer) GetBudget(ctx context.Context, scope Scope, subjectID string) (*Budget, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	return e.loadBudget(ctx, configKey(tenantID, scope, subjectID))
 }
 
@@ -340,7 +340,7 @@ func (e *redisEnforcer) SetBudget(ctx context.Context, b *Budget) error {
 		return errors.New("budget must not be nil")
 	}
 	if b.TenantID == "" {
-		b.TenantID = identity.TenantFromContext(ctx)
+		b.TenantID = auth.TenantStringFromContext(ctx)
 	}
 	data, err := json.Marshal(b)
 	if err != nil {
@@ -357,7 +357,7 @@ func (e *redisEnforcer) SetBudget(ctx context.Context, b *Budget) error {
 // tenant's configured budgets in the requested scope and returns
 // current period usage for each. Used by the dashboard's usage page.
 func (e *redisEnforcer) ListStatusByScope(ctx context.Context, scope Scope) ([]*Status, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	now := e.clock()
 	period := PeriodID(now)
 	resetAt := PeriodResetAt(now)

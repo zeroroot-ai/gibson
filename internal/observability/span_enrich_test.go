@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // captureAttrs runs EnrichSpan against a fresh in-memory tracer and returns
@@ -39,7 +39,7 @@ func captureAttrs(t *testing.T, ctx context.Context, spanName string) map[string
 }
 
 // TestEnrichSpan_EmptyContext_FallsBack asserts that a bare context produces
-// tenant_id=identity.SystemTenant (the "_system" sentinel returned by
+// tenant_id=auth.SystemTenantString (the "_system" sentinel returned by
 // TenantFromContext when nothing else is resolvable) and user_id="unknown".
 // The hardcoded "default" fallback in EnrichSpan is effectively dead code
 // because TenantFromContext never returns "" — matches the existing
@@ -47,8 +47,8 @@ func captureAttrs(t *testing.T, ctx context.Context, spanName string) map[string
 func TestEnrichSpan_EmptyContext_FallsBack(t *testing.T) {
 	got := captureAttrs(t, context.Background(), "TestSpan")
 
-	if v, ok := got[AttrTenantID]; !ok || v.AsString() != identity.SystemTenant {
-		t.Errorf("tenant_id = %v, want %q", got[AttrTenantID], identity.SystemTenant)
+	if v, ok := got[AttrTenantID]; !ok || v.AsString() != auth.SystemTenantString {
+		t.Errorf("tenant_id = %v, want %q", got[AttrTenantID], auth.SystemTenantString)
 	}
 	if v, ok := got[AttrUserID]; !ok || v.AsString() != unknownUserSentinel {
 		t.Errorf("user_id = %v, want %q", got[AttrUserID], unknownUserSentinel)
@@ -63,7 +63,7 @@ func TestEnrichSpan_EmptyContext_FallsBack(t *testing.T) {
 
 // TestEnrichSpan_TenantOnly asserts tenant_id is taken from context.
 func TestEnrichSpan_TenantOnly(t *testing.T) {
-	ctx := identity.ContextWithTenant(context.Background(), "acme-corp")
+	ctx := auth.ContextWithTenantString(context.Background(), "acme-corp")
 	got := captureAttrs(t, ctx, "TestSpan")
 
 	if v := got[AttrTenantID].AsString(); v != "acme-corp" {
@@ -76,7 +76,7 @@ func TestEnrichSpan_TenantOnly(t *testing.T) {
 
 // TestEnrichSpan_ActingUser asserts ActingUser populates user_id.
 func TestEnrichSpan_ActingUser(t *testing.T) {
-	ctx := identity.ContextWithActingUser(context.Background(), "user-alice")
+	ctx := auth.ContextWithActingUser(context.Background(), "user-alice")
 	got := captureAttrs(t, ctx, "TestSpan")
 
 	if v := got[AttrUserID].AsString(); v != "user-alice" {
@@ -88,7 +88,7 @@ func TestEnrichSpan_ActingUser(t *testing.T) {
 // user_id when no ActingUser is set, and that initiator_user_id is also
 // written as its own attribute.
 func TestEnrichSpan_InitiatorOnly_UserIDFallsBack(t *testing.T) {
-	ctx := identity.ContextWithInitiatorUser(context.Background(), "user-initiator")
+	ctx := auth.ContextWithInitiatorUser(context.Background(), "user-initiator")
 	got := captureAttrs(t, ctx, "TestSpan")
 
 	if v := got[AttrUserID].AsString(); v != "user-initiator" {
@@ -103,8 +103,8 @@ func TestEnrichSpan_InitiatorOnly_UserIDFallsBack(t *testing.T) {
 // are set, user_id takes ActingUser but initiator_user_id is still present
 // so downstream aggregation can distinguish them.
 func TestEnrichSpan_ActingAndInitiator_ActingWins(t *testing.T) {
-	ctx := identity.ContextWithActingUser(context.Background(), "user-acting")
-	ctx = identity.ContextWithInitiatorUser(ctx, "user-initiator")
+	ctx := auth.ContextWithActingUser(context.Background(), "user-acting")
+	ctx = auth.ContextWithInitiatorUser(ctx, "user-initiator")
 	got := captureAttrs(t, ctx, "TestSpan")
 
 	if v := got[AttrUserID].AsString(); v != "user-acting" {
@@ -117,8 +117,8 @@ func TestEnrichSpan_ActingAndInitiator_ActingWins(t *testing.T) {
 
 // TestEnrichSpan_ExecutorSet asserts executor_user_id is written when set.
 func TestEnrichSpan_ExecutorSet(t *testing.T) {
-	ctx := identity.ContextWithInitiatorUser(context.Background(), "user-alice")
-	ctx = identity.ContextWithExecutorUser(ctx, "user-bob")
+	ctx := auth.ContextWithInitiatorUser(context.Background(), "user-alice")
+	ctx = auth.ContextWithExecutorUser(ctx, "user-bob")
 	got := captureAttrs(t, ctx, "TestSpan")
 
 	if v := got[AttrInitiatorUserID].AsString(); v != "user-alice" {
@@ -131,7 +131,7 @@ func TestEnrichSpan_ExecutorSet(t *testing.T) {
 
 // TestEnrichSpan_ComponentScopeSet asserts component_scope is written.
 func TestEnrichSpan_ComponentScopeSet(t *testing.T) {
-	ctx := identity.ContextWithComponentScope(context.Background(), "agent_principal:agent-xyz")
+	ctx := auth.ContextWithComponentScope(context.Background(), "agent_principal:agent-xyz")
 	got := captureAttrs(t, ctx, "TestSpan")
 
 	if v := got[AttrComponentScope].AsString(); v != "agent_principal:agent-xyz" {
@@ -235,7 +235,7 @@ func TestEnrichSpan_UnknownUserIncrementsCounter(t *testing.T) {
 func TestEnrichSpan_KnownUserDoesNotIncrementCounter(t *testing.T) {
 	initUnknownUserCounter()
 
-	ctx := identity.ContextWithActingUser(context.Background(), "user-known")
+	ctx := auth.ContextWithActingUser(context.Background(), "user-known")
 	before := testutil.ToFloat64(unknownUserCounter.WithLabelValues("KnownSpan"))
 	captureAttrs(t, ctx, "KnownSpan")
 	after := testutil.ToFloat64(unknownUserCounter.WithLabelValues("KnownSpan"))

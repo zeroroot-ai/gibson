@@ -23,7 +23,7 @@ import (
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 const (
@@ -98,7 +98,7 @@ func (i *Issuer) IssueToken(ctx context.Context, tenantID string) (string, error
 
 	// Extract the caller's identity for the impersonator claim.
 	impersonatorSubject := ""
-	if id, err := identity.IdentityFromContext(ctx); err == nil {
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
 		impersonatorSubject = id.Subject
 	}
 

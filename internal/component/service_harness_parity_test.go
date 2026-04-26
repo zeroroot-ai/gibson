@@ -7,7 +7,7 @@ package component
 // Each test constructs a minimal server via NewComponentServiceServer with stub
 // registry/queue, then wires exactly the mock needed for the handler under
 // test via the corresponding With*() method. Auth context is set with
-// identity.ContextWithTenant. Tests verify happy-path delegation, nil-dependency
+// auth.ContextWithTenantString. Tests verify happy-path delegation, nil-dependency
 // returns Unimplemented, and missing tenant returns Unauthenticated.
 
 import (
@@ -23,7 +23,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
@@ -92,7 +92,7 @@ func newParityServer() *ComponentServiceServer {
 
 // tenantCtx returns a background context stamped with "test-tenant".
 func tenantCtx() context.Context {
-	return identity.ContextWithTenant(context.Background(), "test-tenant")
+	return auth.ContextWithTenantString(context.Background(), "test-tenant")
 }
 
 // ---------------------------------------------------------------------------

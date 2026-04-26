@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // newTestRedis starts a miniredis instance and returns a connected redis.Client.
@@ -211,8 +211,8 @@ func TestRemoteToolDispatch_SystemToolAccessibleFromAnyTenant(t *testing.T) {
 	require.NoError(t, err, "Register httpx")
 
 	// Build a tenant-a context and confirm tenant extraction.
-	tenantCtx := identity.ContextWithTenant(ctx, "tenant-a")
-	require.Equal(t, "tenant-a", identity.TenantFromContext(tenantCtx))
+	tenantCtx := auth.ContextWithTenantString(ctx, "tenant-a")
+	require.Equal(t, "tenant-a", auth.TenantStringFromContext(tenantCtx))
 
 	// Discover from tenant-a — Discover falls back to _system automatically.
 	instances, err := reg.Discover(tenantCtx, "tenant-a", "tool", "httpx")

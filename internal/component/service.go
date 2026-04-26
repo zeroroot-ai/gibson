@@ -29,7 +29,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
@@ -130,7 +130,7 @@ const (
 //   - SubmitResult       - deliver work outcome back to the orchestrator
 //
 // All operations are tenant-scoped: the tenant is extracted from the context
-// via identity.TenantFromContext and forwarded to both the registry and queue so
+// via auth.TenantStringFromContext and forwarded to both the registry and queue so
 // that data from different tenants is never commingled.
 type ComponentServiceServer struct {
 	componentpb.UnimplementedComponentServiceServer
@@ -438,7 +438,7 @@ func (s *ComponentServiceServer) RegisterComponent(
 	ctx context.Context,
 	req *componentpb.RegisterComponentRequest,
 ) (*componentpb.RegisterComponentResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -519,9 +519,9 @@ func (s *ComponentServiceServer) RegisterComponent(
 	// authenticated caller's identity when present; absent for anonymous
 	// registrations (which graceful-degrade to no executor_user_id on
 	// downstream spans). Spec: llm-user-attribution-governance Req 1.5.
-	if id, err := identity.IdentityFromContext(ctx); err == nil && id.Subject != "" {
+	if id, err := auth.IdentityFromContext(ctx); err == nil && id.Subject != "" {
 		info.Metadata[ComponentMetadataOwnerUserID] = id.Subject
-	} else if uid, ok := identity.ActingUserFromContext(ctx); ok && uid != "" {
+	} else if uid, ok := auth.ActingUserFromContext(ctx); ok && uid != "" {
 		info.Metadata[ComponentMetadataOwnerUserID] = uid
 	}
 
@@ -630,7 +630,7 @@ func (s *ComponentServiceServer) Heartbeat(
 	ctx context.Context,
 	req *componentpb.HeartbeatRequest,
 ) (*componentpb.HeartbeatResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -726,7 +726,7 @@ func (s *ComponentServiceServer) PollWork(
 	ctx context.Context,
 	req *componentpb.PollWorkRequest,
 ) (*componentpb.PollWorkResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -861,7 +861,7 @@ func (s *ComponentServiceServer) SubmitResult(
 	ctx context.Context,
 	req *componentpb.SubmitResultRequest,
 ) (*componentpb.SubmitResultResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1050,7 +1050,7 @@ func (s *ComponentServiceServer) Complete(
 	ctx context.Context,
 	req *componentpb.CompleteRequest,
 ) (*componentpb.CompleteResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1148,7 +1148,7 @@ func (s *ComponentServiceServer) CompleteStream(
 ) error {
 	ctx := stream.Context()
 
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1241,7 +1241,7 @@ func (s *ComponentServiceServer) CallTool(
 	ctx context.Context,
 	req *componentpb.CallToolRequest,
 ) (*componentpb.CallToolResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1342,7 +1342,7 @@ func (s *ComponentServiceServer) QueryPlugin(
 	ctx context.Context,
 	req *componentpb.QueryPluginRequest,
 ) (*componentpb.QueryPluginResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1475,7 +1475,7 @@ func (s *ComponentServiceServer) SubmitFinding(
 	ctx context.Context,
 	req *componentpb.SubmitFindingRequest,
 ) (*componentpb.SubmitFindingResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1581,7 +1581,7 @@ func (s *ComponentServiceServer) MemoryGet(
 	ctx context.Context,
 	req *componentpb.MemoryGetRequest,
 ) (*componentpb.MemoryGetResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1664,7 +1664,7 @@ func (s *ComponentServiceServer) MemorySet(
 	ctx context.Context,
 	req *componentpb.MemorySetRequest,
 ) (*componentpb.MemorySetResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1754,7 +1754,7 @@ func (s *ComponentServiceServer) MemorySearch(
 	ctx context.Context,
 	req *componentpb.MemorySearchRequest,
 ) (*componentpb.MemorySearchResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1897,7 +1897,7 @@ func (s *ComponentServiceServer) ListAvailablePlugins(
 	ctx context.Context,
 	_ *componentpb.ListAvailablePluginsRequest,
 ) (*componentpb.ListAvailablePluginsResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1945,7 +1945,7 @@ func (s *ComponentServiceServer) EnablePlugin(
 	ctx context.Context,
 	req *componentpb.EnablePluginRequest,
 ) (*componentpb.EnablePluginResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -1997,7 +1997,7 @@ func (s *ComponentServiceServer) DisablePlugin(
 	ctx context.Context,
 	req *componentpb.DisablePluginRequest,
 ) (*componentpb.DisablePluginResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2042,7 +2042,7 @@ func (s *ComponentServiceServer) UpdatePluginConfig(
 	ctx context.Context,
 	req *componentpb.UpdatePluginConfigRequest,
 ) (*componentpb.UpdatePluginConfigResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2095,7 +2095,7 @@ func (s *ComponentServiceServer) GetPluginConfig(
 	ctx context.Context,
 	req *componentpb.GetPluginConfigRequest,
 ) (*componentpb.GetPluginConfigResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2158,7 +2158,7 @@ func (s *ComponentServiceServer) TestPluginConnection(
 	ctx context.Context,
 	req *componentpb.TestPluginConnectionRequest,
 ) (*componentpb.TestPluginConnectionResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}
@@ -2262,7 +2262,7 @@ func (s *ComponentServiceServer) ListTenantPlugins(
 	ctx context.Context,
 	_ *componentpb.ListTenantPluginsRequest,
 ) (*componentpb.ListTenantPluginsResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing tenant in context")
 	}

@@ -17,7 +17,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
@@ -52,11 +52,11 @@ func (s *stubAuthorizer) ModelID() string { return "" }
 func (s *stubAuthorizer) Close() error    { return nil }
 
 // ctxWithSubject installs a verified Identity carrying sub into the context
-// the way identity.UnaryInterceptor would in production.
+// the way auth.UnaryServerInterceptor would in production.
 func ctxWithSubject(t *testing.T, sub string) context.Context {
 	t.Helper()
-	id := identity.Identity{Subject: sub}
-	return identity.WithIdentity(context.Background(), id)
+	id := auth.Identity{Subject: sub}
+	return auth.WithIdentity(context.Background(), id)
 }
 
 // ctxNoIdentity returns a context with no installed Identity, simulating a

@@ -21,7 +21,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -378,7 +378,7 @@ func TestComponentLifecycle_MultiTenantIsolation(t *testing.T) {
 // TestComponentLifecycle_APIKeyToTenantFlow verifies the API key management
 // and tenant context plumbing: an API key is minted for a tenant via
 // apikeys.Store, the tenant from the record is injected into context via
-// identity.ContextWithTenant, and the registry enforces that scoping.
+// auth.ContextWithTenantString, and the registry enforces that scoping.
 //
 // Note: API key validation (Authenticate) has moved to the ext_authz sidecar.
 // The daemon only manages key records; it does not authenticate them at runtime.
@@ -416,13 +416,13 @@ func TestComponentLifecycle_APIKeyToTenantFlow(t *testing.T) {
 	assert.Equal(t, targetTenant, tenantFromRecord,
 		"Record must carry the tenant_id matching the key's tenant")
 
-	// Step 3: Inject the tenant into the context using identity.ContextWithTenant.
-	tenantCtx := identity.ContextWithTenant(ctx, tenantFromRecord)
-	assert.Equal(t, targetTenant, identity.TenantFromContext(tenantCtx),
+	// Step 3: Inject the tenant into the context using auth.ContextWithTenantString.
+	tenantCtx := auth.ContextWithTenantString(ctx, tenantFromRecord)
+	assert.Equal(t, targetTenant, auth.TenantStringFromContext(tenantCtx),
 		"TenantFromContext must return the tenant injected by ContextWithTenant")
 
 	// Step 4: Register a component using the tenant extracted from the context.
-	tenantID := identity.TenantFromContext(tenantCtx)
+	tenantID := auth.TenantStringFromContext(tenantCtx)
 	instanceID, err := reg.Register(tenantCtx, tenantID, kind, name, component.ComponentInfo{
 		Version: "3.0.0",
 	})

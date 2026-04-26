@@ -8,7 +8,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 func TestClassifyRelationAction(t *testing.T) {
@@ -63,24 +63,24 @@ func TestClassifyScopeType(t *testing.T) {
 func TestClassifyActorSource(t *testing.T) {
 	cases := []struct {
 		name    string
-		ident   *identity.Identity
+		ident   *auth.Identity
 		want    string
 		subject string
 	}{
 		{"nil identity → system", nil, "system", ""},
-		{"apikey → tenant_admin", &identity.Identity{Subject: "gsk_abc", Issuer: "apikey"}, "tenant_admin", ""},
-		{"zitadel → user", &identity.Identity{Subject: "u-1", Issuer: "zitadel"}, "user", ""},
-		{"capability-grant → user", &identity.Identity{Subject: "agent-1", Issuer: "capability-grant"}, "user", ""},
-		{"spiffe platform → platform", &identity.Identity{Subject: "spiffe://gibson.io/platform/tenant-operator", Issuer: "spiffe"}, "platform", ""},
-		{"spiffe non-platform → operator", &identity.Identity{Subject: "spiffe://gibson.io/dashboard", Issuer: "spiffe"}, "operator", ""},
-		{"spiffe via subject prefix → platform", &identity.Identity{Subject: "spiffe://gibson.io/platform/dashboard", Issuer: "other"}, "platform", ""},
-		{"unknown issuer → unknown", &identity.Identity{Subject: "x", Issuer: "weird"}, "unknown", ""},
+		{"apikey → tenant_admin", &auth.Identity{Subject: "gsk_abc", Issuer: "apikey"}, "tenant_admin", ""},
+		{"zitadel → user", &auth.Identity{Subject: "u-1", Issuer: "zitadel"}, "user", ""},
+		{"capability-grant → user", &auth.Identity{Subject: "agent-1", Issuer: "capability-grant"}, "user", ""},
+		{"spiffe platform → platform", &auth.Identity{Subject: "spiffe://gibson.io/platform/tenant-operator", Issuer: "spiffe"}, "platform", ""},
+		{"spiffe non-platform → operator", &auth.Identity{Subject: "spiffe://gibson.io/dashboard", Issuer: "spiffe"}, "operator", ""},
+		{"spiffe via subject prefix → platform", &auth.Identity{Subject: "spiffe://gibson.io/platform/dashboard", Issuer: "other"}, "platform", ""},
+		{"unknown issuer → unknown", &auth.Identity{Subject: "x", Issuer: "weird"}, "unknown", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			if tc.ident != nil {
-				ctx = identity.WithIdentity(ctx, *tc.ident)
+				ctx = auth.WithIdentity(ctx, *tc.ident)
 			}
 			got := classifyActorSource(ctx)
 			if got != tc.want {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // listCatalog is the shared workhorse for ListPlugins/ListTools/ListAgents.
@@ -129,7 +129,7 @@ func (s *Server) catalogItemForScope(
 	subject := userRef
 	isComponentSubject := false
 	if q.GetScope() == discoverypb.Scope_SCOPE_COMPONENT_ENABLED {
-		scope := identity.ComponentScopeFromContext(ctx)
+		scope := auth.ComponentScopeFromContext(ctx)
 		if scope == "" {
 			// Component scope required for this view.
 			return nil, false

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/neo4j"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/attribute"
@@ -214,7 +214,7 @@ func (t *OTelMissionTracer) StartMissionTrace(ctx context.Context, mission *sche
 	)
 
 	// Resolve tenant ID for multi-tenancy attribute.
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -289,7 +289,7 @@ func (t *OTelMissionTracer) LogDecision(ctx context.Context, missionSpan *Missio
 	defer span.End(trace.WithTimestamp(decision.Timestamp.Add(time.Duration(decision.LatencyMs) * time.Millisecond)))
 
 	// Resolve tenant ID for multi-tenancy attribute.
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -423,7 +423,7 @@ func (t *OTelMissionTracer) LogAgentExecution(ctx context.Context, missionSpan *
 	)
 
 	// Resolve tenant ID for multi-tenancy attribute.
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -532,7 +532,7 @@ func (t *OTelMissionTracer) LogToolExecution(ctx context.Context, agentSpan *Age
 	}
 
 	// Resolve tenant ID for multi-tenancy attribute.
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -640,7 +640,7 @@ func (t *OTelMissionTracer) LogFinding(ctx context.Context, agentSpan *AgentSpan
 	defer span.End()
 
 	// Resolve tenant ID for multi-tenancy attribute.
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -744,7 +744,7 @@ func (t *OTelMissionTracer) LogMemoryOp(ctx context.Context, agentSpan *AgentSpa
 	defer span.End()
 
 	// Resolve tenant ID for multi-tenancy attribute.
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -826,7 +826,7 @@ func (t *OTelMissionTracer) LogGraphOp(ctx context.Context, agentSpan *AgentSpan
 	defer span.End()
 
 	// Resolve tenant ID for multi-tenancy attribute.
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}

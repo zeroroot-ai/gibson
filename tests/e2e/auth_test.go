@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // Note: The auth interceptor tests that previously lived here tested the
@@ -21,7 +21,7 @@ import (
 //
 // Authentication is now performed by the Envoy ext_authz sidecar. The daemon
 // trusts the signed x-gibson-identity-* headers that Envoy injects after
-// authenticating the request. The identity.UnaryInterceptor / StreamInterceptor
+// authenticating the request. The auth.UnaryServerInterceptor / StreamInterceptor
 // verifies the HMAC signature on those headers.
 //
 // Integration tests for the identity interceptor live in:
@@ -124,7 +124,7 @@ func TestTenantIsolation_RedisKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := identity.TenantScopedRedisKey(tt.tenant, tt.key)
+			result := auth.TenantScopedRedisKey(tt.tenant, tt.key)
 			assert.Equal(t, tt.expected, result, "Redis key should be tenant-scoped")
 		})
 	}
@@ -135,21 +135,21 @@ func TestTenantContext(t *testing.T) {
 	t.Parallel()
 
 	t.Run("inject_and_extract_tenant", func(t *testing.T) {
-		ctx := identity.ContextWithTenant(context.Background(), "acme-corp")
-		tenant := identity.TenantFromContext(ctx)
+		ctx := auth.ContextWithTenantString(context.Background(), "acme-corp")
+		tenant := auth.TenantStringFromContext(ctx)
 		assert.Equal(t, "acme-corp", tenant, "Should extract injected tenant")
 	})
 
 	t.Run("nil_context", func(t *testing.T) {
-		tenant := identity.TenantFromContext(nil)
-		assert.Equal(t, identity.SystemTenant, tenant, "Nil context should return SystemTenant")
+		tenant := auth.TenantStringFromContext(nil)
+		assert.Equal(t, auth.SystemTenantString, tenant, "Nil context should return SystemTenant")
 	})
 
 	t.Run("overwrite_tenant", func(t *testing.T) {
 		ctx := context.Background()
-		ctx = identity.ContextWithTenant(ctx, "first-tenant")
-		ctx = identity.ContextWithTenant(ctx, "second-tenant")
-		tenant := identity.TenantFromContext(ctx)
+		ctx = auth.ContextWithTenantString(ctx, "first-tenant")
+		ctx = auth.ContextWithTenantString(ctx, "second-tenant")
+		tenant := auth.TenantStringFromContext(ctx)
 		assert.Equal(t, "second-tenant", tenant, "Should use latest tenant")
 	})
 }
@@ -179,10 +179,10 @@ func TestAuthConfig_AutoProvision(t *testing.T) {
 func TestIdentity_IsCrossTenantCaller(t *testing.T) {
 	t.Parallel()
 
-	require.True(t, identity.IsCrossTenantCaller(identity.Identity{Issuer: "spire"}),
+	require.True(t, auth.IsCrossTenantCaller(auth.Identity{Issuer: "spire"}),
 		"spire issuer should be cross-tenant")
-	require.False(t, identity.IsCrossTenantCaller(identity.Identity{Issuer: "zitadel"}),
+	require.False(t, auth.IsCrossTenantCaller(auth.Identity{Issuer: "zitadel"}),
 		"zitadel issuer should NOT be cross-tenant")
-	require.False(t, identity.IsCrossTenantCaller(identity.Identity{Issuer: "apikey"}),
+	require.False(t, auth.IsCrossTenantCaller(auth.Identity{Issuer: "apikey"}),
 		"apikey issuer should NOT be cross-tenant")
 }

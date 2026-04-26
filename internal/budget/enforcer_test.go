@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // fixedClock returns a deterministic time for period-boundary tests.
@@ -27,8 +27,8 @@ func newEnforcer(t *testing.T, tenantID, userID string) (Enforcer, context.Conte
 	// All assertions use the default clock (time.Now) unless noted.
 	e := NewEnforcer(rdb, nil, nil, nil)
 
-	ctx := identity.ContextWithTenant(context.Background(), tenantID)
-	ctx = identity.ContextWithActingUser(ctx, userID)
+	ctx := auth.ContextWithTenantString(context.Background(), tenantID)
+	ctx = auth.ContextWithActingUser(ctx, userID)
 	return e, ctx, mr
 }
 
@@ -162,8 +162,8 @@ func TestEnforcer_TeamResolver_EnforcesTeamBudget(t *testing.T) {
 	}
 	e := NewEnforcer(rdb, nil, resolver, nil)
 
-	ctx := identity.ContextWithTenant(context.Background(), "acme")
-	ctx = identity.ContextWithActingUser(ctx, "user-1")
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	ctx = auth.ContextWithActingUser(ctx, "user-1")
 
 	require.NoError(t, e.SetBudget(ctx, &Budget{
 		Scope: ScopeTeam, SubjectID: "team-a", MonthlyTokens: 500,
@@ -193,8 +193,8 @@ func TestEnforcer_PeriodRollover_ResetsCounters(t *testing.T) {
 	march31 := time.Date(2026, 3, 31, 23, 0, 0, 0, time.UTC)
 	e := NewEnforcer(rdb, nil, nil, fixedClock(march31))
 
-	ctx := identity.ContextWithTenant(context.Background(), "acme")
-	ctx = identity.ContextWithActingUser(ctx, "user-1")
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	ctx = auth.ContextWithActingUser(ctx, "user-1")
 	require.NoError(t, e.SetBudget(ctx, &Budget{
 		Scope: ScopeUser, SubjectID: "user-1", MonthlyTokens: 1000,
 	}))
@@ -208,8 +208,8 @@ func TestEnforcer_PeriodRollover_ResetsCounters(t *testing.T) {
 	// is fresh (no usage recorded in April).
 	april1 := time.Date(2026, 4, 1, 0, 30, 0, 0, time.UTC)
 	e = NewEnforcer(rdb, nil, nil, fixedClock(april1))
-	ctx = identity.ContextWithTenant(context.Background(), "acme")
-	ctx = identity.ContextWithActingUser(ctx, "user-1")
+	ctx = auth.ContextWithTenantString(context.Background(), "acme")
+	ctx = auth.ContextWithActingUser(ctx, "user-1")
 
 	// Now the same 200-token check should pass — April's counter is 0.
 	_, err = e.Check(ctx, 200)
@@ -243,7 +243,7 @@ func TestEnforcer_Check_WithoutUserContext_FallsBackToTenantOnly(t *testing.T) {
 	e := NewEnforcer(rdb, nil, nil, nil)
 
 	// Tenant-only context — no ActingUser / InitiatorUser.
-	ctx := identity.ContextWithTenant(context.Background(), "acme")
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
 	require.NoError(t, e.SetBudget(ctx, &Budget{
 		Scope: ScopeTenant, MonthlyTokens: 1_000_000,

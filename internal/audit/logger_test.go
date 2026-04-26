@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -42,21 +42,22 @@ func newTestLogger(t *testing.T) *AuditLogger {
 
 // ctxWithTenant returns a context with the given tenant ID injected.
 func ctxWithTenant(tenant string) context.Context {
-	return identity.ContextWithTenant(context.Background(), tenant)
+	return auth.ContextWithTenantString(context.Background(), tenant)
 }
 
 // ctxWithTenantAndIdentity returns a context carrying both a tenant ID and a
 // verified identity. In the new model the identity is set via
-// identity.WithIdentity; Subject doubles as the email/actor identifier.
+// auth.WithIdentity; Subject doubles as the email/actor identifier.
 func ctxWithTenantAndIdentity(tenant, subject, _ string) context.Context {
-	ctx := identity.ContextWithTenant(context.Background(), tenant)
-	id := identity.Identity{
+	ctx := auth.ContextWithTenantString(context.Background(), tenant)
+	tid, _ := auth.NewTenantID(tenant)
+	id := auth.Identity{
 		Subject:        subject,
 		Issuer:         "zitadel",
 		CredentialType: "oidc",
-		Tenant:         tenant,
+		Tenant:         tid,
 	}
-	return identity.WithIdentity(ctx, id)
+	return auth.WithIdentity(ctx, id)
 }
 
 // ---------------------------------------------------------------------------

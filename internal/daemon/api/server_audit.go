@@ -27,7 +27,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ func (s *DaemonServer) WithLokiQuerier(lq audit.LokiQuerier) *DaemonServer {
 func (s *DaemonServer) ListAuditEvents(ctx context.Context, req *ListAuditEventsRequest) (*ListAuditEventsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -220,7 +220,7 @@ func (s *DaemonServer) requireTenantAdmin(ctx context.Context, tenantID string) 
 		return nil
 	}
 
-	id, idErr := identity.IdentityFromContext(ctx)
+	id, idErr := auth.IdentityFromContext(ctx)
 	if idErr != nil || id.Subject == "" {
 		// Structured log (spec dashboard-admin-via-envoy, Req 8 criterion 3)
 		// so operators can grep `admin_rpc_denied` for any unauthenticated

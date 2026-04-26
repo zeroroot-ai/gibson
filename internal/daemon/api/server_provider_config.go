@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
@@ -163,7 +163,7 @@ func (s *DaemonServer) emitProviderAudit(ctx context.Context, tenantID, action, 
 // ListProviders returns all provider configs for the caller's tenant with
 // credentials masked.
 func (s *DaemonServer) ListProviders(ctx context.Context, _ *ListProvidersRequest) (*ListProvidersResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -184,7 +184,7 @@ func (s *DaemonServer) ListProviders(ctx context.Context, _ *ListProvidersReques
 
 // GetProvider returns a single named provider config with credentials masked.
 func (s *DaemonServer) GetProvider(ctx context.Context, req *GetProviderRequest) (*GetProviderResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -206,7 +206,7 @@ func (s *DaemonServer) GetProvider(ctx context.Context, req *GetProviderRequest)
 // CreateProvider stores a new provider config for the caller's tenant.
 // Credentials are encrypted immediately; the response contains only masked values.
 func (s *DaemonServer) CreateProvider(ctx context.Context, req *CreateProviderRequest) (*CreateProviderResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -232,7 +232,7 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *CreateProviderRe
 // UpdateProvider replaces the named provider config with new values.
 // Credentials in the request are encrypted; the response contains only masked values.
 func (s *DaemonServer) UpdateProvider(ctx context.Context, req *UpdateProviderRequest) (*UpdateProviderResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -257,7 +257,7 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *UpdateProviderRe
 
 // DeleteProvider removes the named provider config for the caller's tenant.
 func (s *DaemonServer) DeleteProvider(ctx context.Context, req *DeleteProviderRequest) (*DeleteProviderResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -291,7 +291,7 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *DeleteProviderRe
 //  5. Return TestProviderResponse {ok, latency_ms, model, error}.
 //     Timeout → {ok: false, error: "timeout"} — never a gRPC-level error.
 func (s *DaemonServer) TestProvider(ctx context.Context, req *TestProviderRequest) (*TestProviderResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -421,7 +421,7 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *TestProviderReques
 // It resolves the provider config from storage, constructs the provider, and
 // runs a Health check under a 5s deadline.
 func (s *DaemonServer) GetProviderHealth(ctx context.Context, req *GetProviderHealthRequest) (*GetProviderHealthResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -468,7 +468,7 @@ func (s *DaemonServer) GetProviderHealth(ctx context.Context, req *GetProviderHe
 
 // GetDefaultProvider returns the provider config marked as the tenant's default.
 func (s *DaemonServer) GetDefaultProvider(ctx context.Context, _ *GetDefaultProviderRequest) (*GetDefaultProviderResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -489,7 +489,7 @@ func (s *DaemonServer) GetDefaultProvider(ctx context.Context, _ *GetDefaultProv
 
 // SetDefaultProvider marks the named provider as the tenant's default.
 func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *SetDefaultProviderRequest) (*SetDefaultProviderResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -517,7 +517,7 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *SetDefaultPr
 
 // GetFallbackChain returns the ordered list of fallback provider names.
 func (s *DaemonServer) GetFallbackChain(ctx context.Context, _ *GetFallbackChainRequest) (*GetFallbackChainResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
@@ -538,7 +538,7 @@ func (s *DaemonServer) GetFallbackChain(ctx context.Context, _ *GetFallbackChain
 
 // SetFallbackChain replaces the tenant's fallback provider chain.
 func (s *DaemonServer) SetFallbackChain(ctx context.Context, req *SetFallbackChainRequest) (*SetFallbackChainResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}

@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
@@ -145,7 +145,7 @@ func (s *stubStreamServer) SetTrailer(_ metadata.MD)       {}
 
 // tenantCtx builds a context with the given tenant wired in.
 func tenantCtx(tenantID string) context.Context {
-	return identity.ContextWithTenant(context.Background(), tenantID)
+	return auth.ContextWithTenantString(context.Background(), tenantID)
 }
 
 // newExecServer builds a minimal DaemonServer with a stubbed provider store and

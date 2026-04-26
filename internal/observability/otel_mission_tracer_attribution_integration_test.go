@@ -14,7 +14,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -53,11 +53,11 @@ func TestOTelMissionTracer_AttributionEndToEnd(t *testing.T) {
 	// dispatch for executor) — for the test we stitch them in one step.
 	// ------------------------------------------------------------------
 	ctx := context.Background()
-	ctx = identity.ContextWithTenant(ctx, "acme-corp")
-	ctx = identity.ContextWithActingUser(ctx, "user-alice")
-	ctx = identity.ContextWithInitiatorUser(ctx, "user-alice")
-	ctx = identity.ContextWithExecutorUser(ctx, "user-bob")
-	ctx = identity.ContextWithComponentScope(ctx, "agent_principal:delegated-abc")
+	ctx = auth.ContextWithTenantString(ctx, "acme-corp")
+	ctx = auth.ContextWithActingUser(ctx, "user-alice")
+	ctx = auth.ContextWithInitiatorUser(ctx, "user-alice")
+	ctx = auth.ContextWithExecutorUser(ctx, "user-bob")
+	ctx = auth.ContextWithComponentScope(ctx, "agent_principal:delegated-abc")
 
 	ctx = context.WithValue(ctx, contextkeys.MissionID, "mission-42")
 	ctx = contextkeys.WithMissionRunID(ctx, "run-42-1")
@@ -202,7 +202,7 @@ func TestOTelMissionTracer_UnknownUser_Fallback(t *testing.T) {
 		attrs[string(a.Key)] = a.Value
 	}
 
-	assert.Equal(t, identity.SystemTenant, attrs[AttrTenantID].AsString(),
+	assert.Equal(t, auth.SystemTenantString, attrs[AttrTenantID].AsString(),
 		"tenant_id falls back to SystemTenant on empty context")
 	assert.Equal(t, unknownUserSentinel, attrs[AttrUserID].AsString(),
 		"user_id falls back to 'unknown' on empty context")

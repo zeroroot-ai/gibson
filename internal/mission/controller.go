@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -261,7 +261,7 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 	// InitiatorUser context propagation below. Empty string is valid
 	// (system-scheduled runs have no human initiator).
 	initiatorUserID := ""
-	if id, err := identity.IdentityFromContext(ctx); err == nil {
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
 		initiatorUserID = id.Subject
 	}
 
@@ -269,7 +269,7 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 	// the owning user during component callbacks. Errors are logged but do not
 	// abort the mission start — authz state is advisory.
 	if c.authzStore != nil && !runID.IsZero() {
-		tenantID := identity.TenantFromContext(ctx)
+		tenantID := auth.TenantStringFromContext(ctx)
 		if putErr := c.authzStore.Put(ctx, runID.String(), initiatorUserID, tenantID); putErr != nil {
 			c.logger.Warn("mission controller: failed to record authz state on start",
 				slog.String("mission_id", missionID.String()),
@@ -289,11 +289,11 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 	// propagated — this is an autonomous goroutine, there is no longer
 	// a synchronous caller.
 	baseCtx := context.Background()
-	if tenant := identity.TenantFromContext(ctx); tenant != "" {
-		baseCtx = identity.ContextWithTenant(baseCtx, tenant)
+	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
+		baseCtx = auth.ContextWithTenantString(baseCtx, tenant)
 	}
 	if initiatorUserID != "" {
-		baseCtx = identity.ContextWithInitiatorUser(baseCtx, initiatorUserID)
+		baseCtx = auth.ContextWithInitiatorUser(baseCtx, initiatorUserID)
 	}
 
 	// Log which discovery path will be used for agent dispatch.
@@ -313,7 +313,7 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 	// Log pre-flight agent availability if ComponentRegistry is configured.
 	// This is informational — failure to list agents does not abort the mission start.
 	if c.componentRegistry != nil {
-		if tenant := identity.TenantFromContext(ctx); tenant != "" {
+		if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
 			agents, listErr := c.componentRegistry.DiscoverAll(ctx, tenant, "agent")
 			if listErr != nil {
 				c.logger.Warn("mission controller: failed to list available agents via ComponentRegistry",
@@ -562,8 +562,8 @@ func (c *DefaultMissionController) Resume(ctx context.Context, missionID types.I
 
 	// Propagate tenant from caller context into the resumed execution context.
 	resumeBaseCtx := context.Background()
-	if tenant := identity.TenantFromContext(ctx); tenant != "" {
-		resumeBaseCtx = identity.ContextWithTenant(resumeBaseCtx, tenant)
+	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
+		resumeBaseCtx = auth.ContextWithTenantString(resumeBaseCtx, tenant)
 	}
 
 	if c.componentRegistry != nil {

@@ -6,13 +6,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // GetCredential retrieves a tenant-scoped credential by name.
 func (s *ComponentServiceServer) GetCredential(ctx context.Context, req *componentpb.GetCredentialRequest) (*componentpb.GetCredentialResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -42,7 +42,7 @@ func (s *ComponentServiceServer) GetTaxonomySchema(ctx context.Context, req *com
 
 // ReportStepHints reports planning step hints from an agent back to the orchestrator.
 func (s *ComponentServiceServer) ReportStepHints(ctx context.Context, req *componentpb.ReportStepHintsRequest) (*componentpb.ReportStepHintsResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}

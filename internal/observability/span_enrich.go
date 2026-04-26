@@ -26,7 +26,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // Attribute keys applied by EnrichSpan. Flat (no "gibson." prefix) so they
@@ -103,7 +103,7 @@ func EnrichSpan(ctx context.Context, span trace.Span) {
 
 	// Tenant — always set; "default" sentinel when absent for parity with
 	// the existing tracer behavior.
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = tenantFallback
 	}
@@ -112,9 +112,9 @@ func EnrichSpan(ctx context.Context, span trace.Span) {
 	// InitiatorUser (mission-stable), then fall back to the unknown sentinel
 	// and bump the metric so operators can triage the gap.
 	var effectiveUser string
-	if v, ok := identity.ActingUserFromContext(ctx); ok {
+	if v, ok := auth.ActingUserFromContext(ctx); ok {
 		effectiveUser = v
-	} else if v, ok := identity.InitiatorUserFromContext(ctx); ok {
+	} else if v, ok := auth.InitiatorUserFromContext(ctx); ok {
 		effectiveUser = v
 	} else {
 		effectiveUser = unknownUserSentinel
@@ -130,15 +130,15 @@ func EnrichSpan(ctx context.Context, span trace.Span) {
 	// Initiator / Executor — set only when present so Langfuse filters
 	// don't see "" or "unknown" noise for spans that legitimately have no
 	// initiator (e.g., health probes).
-	if v, ok := identity.InitiatorUserFromContext(ctx); ok {
+	if v, ok := auth.InitiatorUserFromContext(ctx); ok {
 		attrs = append(attrs, attribute.String(AttrInitiatorUserID, v))
 	}
-	if v, ok := identity.ExecutorUserFromContext(ctx); ok {
+	if v, ok := auth.ExecutorUserFromContext(ctx); ok {
 		attrs = append(attrs, attribute.String(AttrExecutorUserID, v))
 	}
 
 	// Component scope — present when the RPC arrived via a capability grant.
-	if v := identity.ComponentScopeFromContext(ctx); v != "" {
+	if v := auth.ComponentScopeFromContext(ctx); v != "" {
 		attrs = append(attrs, attribute.String(AttrComponentScope, v))
 	}
 

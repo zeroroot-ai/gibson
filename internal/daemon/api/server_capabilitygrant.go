@@ -36,7 +36,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ func (s *DaemonServer) RegisterCapabilityGrant(ctx context.Context, req *Registe
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -119,7 +119,7 @@ func (s *DaemonServer) ExecuteAgentCapability(ctx context.Context, req *ExecuteA
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 
 	result, err := s.capabilityGrantService.ExecuteAgentCapability(
@@ -161,7 +161,7 @@ func (s *DaemonServer) ListAgentCapabilities(ctx context.Context, req *ListAgent
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -209,7 +209,7 @@ func (s *DaemonServer) GetCapabilityGrantStatus(ctx context.Context, req *GetCap
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 
 	result, err := s.capabilityGrantService.GetCapabilityGrantStatus(ctx, req.GetAgentId(), tenantID)
@@ -266,12 +266,12 @@ func (s *DaemonServer) RevokeCapabilityGrant(ctx context.Context, req *RevokeCap
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 
 	// Extract actor ID from the auth context for audit.
 	actorID := ""
-	if id, err := identity.IdentityFromContext(ctx); err == nil {
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
 		actorID = id.Subject
 	}
 
@@ -298,7 +298,7 @@ func (s *DaemonServer) ListCapabilityGrantAgents(ctx context.Context, req *ListC
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -353,7 +353,7 @@ func (s *DaemonServer) CreateHostRegistrationToken(ctx context.Context, req *Cre
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -361,7 +361,7 @@ func (s *DaemonServer) CreateHostRegistrationToken(ctx context.Context, req *Cre
 
 	// Extract actor ID for the key's created_by field.
 	createdBy := ""
-	if id, err := identity.IdentityFromContext(ctx); err == nil {
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
 		createdBy = id.Subject
 	}
 
@@ -399,7 +399,7 @@ func (s *DaemonServer) ListComponentGrants(ctx context.Context, req *ListCompone
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -443,7 +443,7 @@ func (s *DaemonServer) BatchGrantComponentAccessV2(ctx context.Context, req *Bat
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -453,7 +453,7 @@ func (s *DaemonServer) BatchGrantComponentAccessV2(ctx context.Context, req *Bat
 	}
 
 	actorID := ""
-	if id, err := identity.IdentityFromContext(ctx); err == nil {
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
 		actorID = id.Subject
 	}
 
@@ -494,7 +494,7 @@ func (s *DaemonServer) ListAuditLog(ctx context.Context, req *ListAuditLogReques
 
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")

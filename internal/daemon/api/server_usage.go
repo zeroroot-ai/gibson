@@ -9,7 +9,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	usagepb "github.com/zero-day-ai/sdk/api/gen/gibson/usage/v1"
 )
 
@@ -30,8 +30,8 @@ import (
 // ListUsage dispatches to the scope-specific handler. Non-admins are
 // narrowed to themselves regardless of subject_filter.
 func (s *DaemonServer) ListUsage(ctx context.Context, req *usagepb.ListUsageRequest) (*usagepb.ListUsageResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	userID, admin, err := s.isTenantAdmin(ctx, tenantID)

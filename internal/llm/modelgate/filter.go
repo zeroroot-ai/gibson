@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // Candidate is a single (provider, model) pair considered by the slot
@@ -99,9 +99,9 @@ func (f *fgaFilter) Permitted(ctx context.Context, candidates []Candidate) ([]Ca
 		return candidates, nil
 	}
 
-	userID, ok := identity.ActingUserFromContext(ctx)
+	userID, ok := auth.ActingUserFromContext(ctx)
 	if !ok || userID == "" {
-		if v, ok2 := identity.InitiatorUserFromContext(ctx); ok2 && v != "" {
+		if v, ok2 := auth.InitiatorUserFromContext(ctx); ok2 && v != "" {
 			userID = v
 		}
 	}
@@ -110,7 +110,7 @@ func (f *fgaFilter) Permitted(ctx context.Context, candidates []Candidate) ([]Ca
 		// with empty identity context) don't break.
 		return candidates, nil
 	}
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 
 	// Permit-all shortcut: if no tenant has written any provider/model
 	// tuples, skip the per-candidate checks.

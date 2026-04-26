@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/manifest"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
@@ -34,11 +34,11 @@ func (s *DaemonServer) GetCapabilityManifest(ctx context.Context, req *manifestp
 		return nil, status.Error(codes.Unavailable, "manifest subsystem not configured")
 	}
 
-	id, err := identity.IdentityFromContext(ctx)
+	id, err := auth.IdentityFromContext(ctx)
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "no identity in context")
 	}
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status.Error(codes.PermissionDenied, "caller has no tenant membership")
 	}
@@ -68,7 +68,7 @@ func (s *DaemonServer) GetCapabilityManifest(ctx context.Context, req *manifestp
 //
 // Impersonation (req.agent_principal_id set) requires the caller to
 // hold FGA admin relation on the tenant — checked via s.authorizer.
-func (s *DaemonServer) resolveManifestSubject(id identity.Identity, req *manifestpb.GetCapabilityManifestRequest, tenantID string, ctx context.Context) (manifest.ManifestSubject, error) {
+func (s *DaemonServer) resolveManifestSubject(id auth.Identity, req *manifestpb.GetCapabilityManifestRequest, tenantID string, ctx context.Context) (manifest.ManifestSubject, error) {
 	callerIsAgent := strings.HasPrefix(id.Subject, "agent_principal:")
 
 	// Impersonation path: admin previewing another agent_principal's manifest.
@@ -159,7 +159,7 @@ func (s *DaemonServer) WatchManifestInvalidations(req *manifestpb.WatchManifestI
 		return status.Error(codes.Unavailable, "manifest watch hub not configured")
 	}
 	ctx := stream.Context()
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return status.Error(codes.PermissionDenied, "caller has no tenant membership")
 	}

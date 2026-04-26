@@ -9,7 +9,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
@@ -185,8 +185,8 @@ func streamEstimateTokens(req *StreamLLMRequest) int64 {
 // is never logged, cached, or embedded in any response field.
 func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *ExecuteLLMRequest) (*ExecuteLLMResponse, error) {
 	// 1. Tenant from identity context (resolved from Envoy-signed headers).
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
 
@@ -325,8 +325,8 @@ func (s *DaemonServer) StreamLLM(req *StreamLLMRequest, stream DaemonAdminServic
 	ctx := stream.Context()
 
 	// 1. Tenant from identity context (resolved from Envoy-signed headers).
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
 

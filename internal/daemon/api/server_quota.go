@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // quotaStoreIface is the narrow Redis interface used by the quota handlers.
@@ -95,7 +95,7 @@ func (s *redisQuotaStore) SetQuota(ctx context.Context, tenantID string, q *stor
 func (s *DaemonServer) GetTenantQuota(ctx context.Context, req *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")

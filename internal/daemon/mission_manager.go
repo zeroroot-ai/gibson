@@ -16,7 +16,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
@@ -357,8 +357,8 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	// logged and do not abort mission start — authz state is advisory.
 	if m.authzStore != nil {
 		userID := ""
-		tenantID := identity.TenantFromContext(ctx)
-		if id, err := identity.IdentityFromContext(ctx); err == nil {
+		tenantID := auth.TenantStringFromContext(ctx)
+		if id, err := auth.IdentityFromContext(ctx); err == nil {
 			userID = id.Subject
 		}
 		if putErr := m.authzStore.Put(ctx, missionRun.ID.String(), userID, tenantID); putErr != nil {

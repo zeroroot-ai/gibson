@@ -10,6 +10,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zero-day-ai/sdk/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -68,7 +69,11 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to listen on port %d: %w", s.port, err)
 	}
 
-	// Create gRPC server with keepalive options
+	// Create gRPC server with keepalive options + the SDK auth
+	// interceptor. Per unified-identity-and-authorization Requirement
+	// 8.5/Component E, every Gibson gRPC server applies the same
+	// header-trusting interceptor (audit C4 closure: the harness
+	// callback server is no longer unauthenticated).
 	serverOpts := []grpc.ServerOption{
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    10 * time.Second,
@@ -78,6 +83,8 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 			MinTime:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
+		grpc.UnaryInterceptor(auth.UnaryServerInterceptor()),
+		grpc.StreamInterceptor(auth.StreamServerInterceptor()),
 	}
 	s.server = grpc.NewServer(serverOpts...)
 

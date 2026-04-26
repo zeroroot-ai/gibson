@@ -22,7 +22,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/finding"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/manifest"
@@ -1085,7 +1085,7 @@ func (s *DaemonServer) StopMission(ctx context.Context, req *daemonpb.StopMissio
 // only missions belonging to that tenant are returned. When authentication is
 // disabled (empty tenant) all missions are returned for backward compatibility.
 func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissionsRequest) (*daemonpb.ListMissionsResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 
 	s.logger.Debug("mission list request received",
 		"active_only", req.ActiveOnly,
@@ -2356,7 +2356,7 @@ func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTe
 	}
 
 	// Extract caller identity for the audit trail.
-	callerID, err := identity.IdentityFromContext(ctx)
+	callerID, err := auth.IdentityFromContext(ctx)
 	if err != nil {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "not authenticated")
 	}
@@ -2464,7 +2464,7 @@ func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReques
 	// Authorization enforced by the FGA interceptor at the Envoy layer.
 	// Tenant isolation (non-cross-tenant callers may only target their own
 	// tenant) is verified here as parameter validation.
-	callerID, err := identity.IdentityFromContext(ctx)
+	callerID, err := auth.IdentityFromContext(ctx)
 	if err != nil {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
@@ -2475,7 +2475,7 @@ func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReques
 
 	// Check caller's tenant matches target tenant (unless cross-tenant capable).
 	// IsCrossTenantCaller identifies platform-operator callers by SPIFFE issuer.
-	if !identity.IsCrossTenantCaller(callerID) && identity.TenantFromContext(ctx) != req.TenantId {
+	if !auth.IsCrossTenantCaller(callerID) && auth.TenantStringFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -2511,11 +2511,11 @@ func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest)
 	// Authorization enforced by the FGA interceptor at the Envoy layer.
 	// Tenant isolation (non-cross-tenant callers may only target their own
 	// tenant) is verified here as parameter validation.
-	callerID, err := identity.IdentityFromContext(ctx)
+	callerID, err := auth.IdentityFromContext(ctx)
 	if err != nil {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !identity.IsCrossTenantCaller(callerID) && identity.TenantFromContext(ctx) != req.TenantId {
+	if !auth.IsCrossTenantCaller(callerID) && auth.TenantStringFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -2592,14 +2592,14 @@ func (s *DaemonServer) RevokeAPIKey(ctx context.Context, req *RevokeAPIKeyReques
 func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMyPermissionsRequest) (*daemonpb.GetMyPermissionsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required (or call with a tenant-scoped JWT)")
 	}
 
 	// Resolve the caller's user ID from the auth context.
-	callerID, err := identity.IdentityFromContext(ctx)
+	callerID, err := auth.IdentityFromContext(ctx)
 	if err != nil {
 		return nil, status_grpc.Error(codes.Unauthenticated, "user identity not found in context")
 	}
@@ -2660,7 +2660,7 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 // jwt_authn + ext-authz) but no per-tenant FGA gate is performed (the
 // response IS the tenant list).
 func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMyMembershipsRequest) (*daemonpb.ListMyMembershipsResponse, error) {
-	callerID, err := identity.IdentityFromContext(ctx)
+	callerID, err := auth.IdentityFromContext(ctx)
 	if err != nil || callerID.Subject == "" {
 		return nil, status_grpc.Error(codes.Unauthenticated, "user identity not found in context")
 	}

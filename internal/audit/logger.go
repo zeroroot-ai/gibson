@@ -32,7 +32,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -164,8 +164,8 @@ func (a *AuditLogger) SetSignalProjector(p SignalProjector) {
 
 // Log writes an audit entry with result "success" to the tenant's Redis Stream.
 //
-// The tenant is extracted from ctx via identity.TenantFromContext; the actor is
-// extracted via identity.IdentityFromContext. If no tenant or identity is found in
+// The tenant is extracted from ctx via auth.TenantStringFromContext; the actor is
+// extracted via auth.IdentityFromContext. If no tenant or identity is found in
 // the context, sensible defaults ("unknown") are used so that logging never
 // blocks the calling operation.
 //
@@ -189,14 +189,14 @@ func (a *AuditLogger) LogWithResult(
 	action, resource, resourceID, result string,
 	details map[string]any,
 ) error {
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "unknown"
 	}
 
 	actorID := "unknown"
 	actorEmail := "unknown"
-	if id, err := identity.IdentityFromContext(ctx); err == nil {
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
 		if id.Subject != "" {
 			actorID = id.Subject
 			// For OIDC/Zitadel callers, Subject is the stable user identifier.
@@ -355,7 +355,7 @@ func (a *AuditLogger) Query(ctx context.Context, tenant string, opts AuditQueryO
 // streamKey returns the fully qualified Redis Stream key for the given tenant.
 // The format mirrors the TenantScopedRedisKey helper: "tenant:{tenant_id}:audit:log".
 func (a *AuditLogger) streamKey(tenantID string) string {
-	return identity.TenantScopedRedisKey(tenantID, auditStreamSuffix)
+	return auth.TenantScopedRedisKey(tenantID, auditStreamSuffix)
 }
 
 // entryFromStreamValues reconstructs an AuditEntry from the raw field-value map

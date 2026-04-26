@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -367,7 +367,7 @@ func (r *OTelMetricsRecorder) RecordLLMCompletion(ctx context.Context, provider,
 		return
 	}
 
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -449,7 +449,7 @@ func (r *OTelMetricsRecorder) RecordToolCall(ctx context.Context, toolName, stat
 		return
 	}
 
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -492,7 +492,7 @@ func (r *OTelMetricsRecorder) RecordFinding(ctx context.Context, severity, categ
 		return
 	}
 
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -526,7 +526,7 @@ func (r *OTelMetricsRecorder) RecordAgentExecution(ctx context.Context, agentNam
 		return
 	}
 
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -570,7 +570,7 @@ func (r *OTelMetricsRecorder) RecordMission(ctx context.Context, status string, 
 		return
 	}
 
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -613,7 +613,7 @@ func (r *OTelMetricsRecorder) RecordMemoryOp(ctx context.Context, tier, operatio
 		return
 	}
 
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -645,7 +645,7 @@ func (r *OTelMetricsRecorder) RecordGraphOp(ctx context.Context, operation strin
 		return
 	}
 
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -676,7 +676,7 @@ func (r *OTelMetricsRecorder) RecordDecision(ctx context.Context, action string)
 		return
 	}
 
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -715,7 +715,7 @@ func (r *OTelMetricsRecorder) RecordAuthzDecision(ctx context.Context, decision,
 		return
 	}
 
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -770,7 +770,7 @@ func (r *OTelMetricsRecorder) RecordComponentAuthz(ctx context.Context, action, 
 	if r == nil || r.componentAuthzTotal == nil {
 		return
 	}
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -798,7 +798,7 @@ func (r *OTelMetricsRecorder) RecordComponentAuthzFailOpen(ctx context.Context, 
 	if r == nil || r.componentAuthzFailOpenTotal == nil {
 		return
 	}
-	tenantID := identity.TenantFromContext(ctx)
+	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "default"
 	}

@@ -6,13 +6,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // DelegateToAgent dispatches a sub-task to another agent and returns its result.
 func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *componentpb.DelegateToAgentRequest) (*componentpb.DelegateToAgentResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -29,7 +29,7 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 
 // ListAgents returns descriptors for all agents visible to the caller's tenant.
 func (s *ComponentServiceServer) ListAgents(ctx context.Context, req *componentpb.ListAgentsRequest) (*componentpb.ListAgentsResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
@@ -56,7 +56,7 @@ func (s *ComponentServiceServer) ListAgents(ctx context.Context, req *componentp
 
 // ListTools returns descriptors for all tools visible to the caller's tenant.
 func (s *ComponentServiceServer) ListTools(ctx context.Context, req *componentpb.ListToolsRequest) (*componentpb.ListToolsResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}

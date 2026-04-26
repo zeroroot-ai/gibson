@@ -30,7 +30,7 @@ import (
 	"log/slog"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -238,7 +238,7 @@ func (r *MissionContextResolver) ResolveMissionForWork(
 	// ------------------------------------------------------------------
 	tenant := fields[workContextTenantField]
 	if tenant == "" {
-		tenant = identity.TenantFromContext(ctx)
+		tenant = auth.TenantStringFromContext(ctx)
 	}
 
 	if tenant == "" {
@@ -254,7 +254,7 @@ func (r *MissionContextResolver) ResolveMissionForWork(
 	// Inject the resolved tenant into a child context so TenantScopedStore
 	// scopes the key correctly, regardless of what the auth middleware put in
 	// the original context.
-	tenantCtx := identity.ContextWithTenant(ctx, tenant)
+	tenantCtx := auth.ContextWithTenantString(ctx, tenant)
 
 	overridesKey := missionSlotOverridesKey(missionID)
 	raw, getErr := r.tenantStore.Get(tenantCtx, overridesKey)

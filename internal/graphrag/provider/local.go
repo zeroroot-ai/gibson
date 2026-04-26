@@ -10,7 +10,7 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 	"github.com/zero-day-ai/gibson/internal/graphrag"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -249,7 +249,7 @@ func (l *LocalGraphRAGProvider) StoreNode(ctx context.Context, node graphrag.Gra
 
 		// Add tenant_id from context if present
 		// This enables multi-tenant isolation at the data layer
-		if tenant := identity.TenantFromContext(ctx); tenant != "" {
+		if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
 			props["tenant_id"] = tenant
 		}
 
@@ -371,7 +371,7 @@ func (l *LocalGraphRAGProvider) queryNodesFromGraph(ctx context.Context, query g
 	params := make(map[string]any)
 
 	// Add tenant_id from context for tenant isolation
-	if tenant := identity.TenantFromContext(ctx); tenant != "" {
+	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
 		params["_tenant_id"] = tenant
 	}
 
@@ -662,7 +662,7 @@ func (l *LocalGraphRAGProvider) QueryRelationships(ctx context.Context, query gr
 	where := make([]string, 0)
 
 	// Add tenant_id filter from context for tenant isolation
-	if tenant := identity.TenantFromContext(ctx); tenant != "" {
+	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
 		where = append(where, "from.tenant_id = $tenant_id")
 		where = append(where, "to.tenant_id = $tenant_id")
 		params["tenant_id"] = tenant
@@ -761,7 +761,7 @@ func (l *LocalGraphRAGProvider) TraverseGraph(ctx context.Context, startID strin
 	where := make([]string, 0)
 
 	// Add tenant_id filter from context for tenant isolation during traversal
-	if tenant := identity.TenantFromContext(ctx); tenant != "" {
+	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
 		where = append(where, "start.tenant_id = $tenant_id")
 		where = append(where, "ALL(node IN nodes(path) WHERE node.tenant_id = $tenant_id)")
 		params["tenant_id"] = tenant

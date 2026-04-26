@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	taxonomypb "github.com/zero-day-ai/sdk/api/gen/taxonomy/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -383,7 +383,7 @@ func (m *ComplianceMiddleware) BufferCap() int {
 // actor_id, actor_tenant_id, api_key_id, roles_snapshot. Missing fields fall
 // back to the system sentinel per Requirement 2.4.
 func (m *ComplianceMiddleware) stampIdentity(ctx context.Context, sig *taxonomypb.ComplianceSignal) {
-	id, err := identity.IdentityFromContext(ctx)
+	id, err := auth.IdentityFromContext(ctx)
 	if err != nil {
 		sig.ActorId = systemSentinel
 		sig.ActorTenantId = systemSentinel
@@ -396,7 +396,7 @@ func (m *ComplianceMiddleware) stampIdentity(ctx context.Context, sig *taxonomyp
 		sig.ActorId = systemSentinel
 	}
 
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		tenant = systemSentinel
 	}

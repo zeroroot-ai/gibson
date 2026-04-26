@@ -262,9 +262,6 @@ type daemonImpl struct {
 	// daemon.Start so startup does not block on Setec health.
 	toolCatalogRefresher *CatalogRefresher
 
-	// extauthzSys owns the ext_authz gRPC client lifecycle.
-	// Nil when ext_authz is unavailable or in non-gateway overlays.
-	extauthzSys *extauthzSubsystem
 }
 
 // spiffeX509Closer is the narrow interface for closing an X.509 source on shutdown.
@@ -407,20 +404,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Record start time
 	d.startTime = time.Now()
 
-	// Construct the ext_authz gRPC client subsystem (lazy-dial; non-fatal if absent).
-	// The client is available for injection into services that need capability-grant
-	// delegation. In non-gateway overlays the client is nil and callers receive
-	// codes.Unavailable on the first RPC attempt.
-	d.extauthzSys = newExtauthzSubsystem(ctx, d.logger)
-	if d.extauthzSys != nil {
-		go func() {
-			if err := d.extauthzSys.Serve(ctx); err != nil {
-				d.logger.Warn(ctx, "ext_authz subsystem error (non-fatal)", "error", err)
-			}
-		}()
-		d.logger.Info(ctx, "ext_authz client initialized",
-			"note", "lazy-dial; unreachable service deferred to first RPC call")
-	}
+	// Per unified-identity-and-authorization Requirement 8.4 the
+	// daemon no longer talks to ext-authz directly: ext-authz lives
+	// upstream of the daemon and consults the SDK-rendered registry +
+	// the daemon's published JWKS. The legacy outbound client is
+	// removed. Capability-grant minting now happens locally via
+	// internal/capabilitygrant.Minter.
+
 
 	// Call the startup callback if set
 	if d.onRegistryReady != nil {
@@ -1107,8 +1097,6 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 	d.grpcServer = nil
 	d.grpcSubsystem = nil
 
-	// ext_authz client is already closed by extauthzSubsystem.Serve on ctx cancellation.
-	d.extauthzSys = nil
 
 	// Close dashboard PostgreSQL connection pool.
 	if d.dashboardDB != nil {

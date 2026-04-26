@@ -22,7 +22,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // conversationStoreIface is the narrow interface the chat handlers use.
@@ -155,7 +155,7 @@ func (s *redisConversationStore) GetConversation(ctx context.Context, tenantID, 
 func (s *DaemonServer) ListConversations(ctx context.Context, req *ListConversationsRequest) (*ListConversationsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -163,7 +163,7 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *ListConversat
 
 	userID := req.GetUserId()
 	if userID == "" {
-		if id, err := identity.IdentityFromContext(ctx); err == nil {
+		if id, err := auth.IdentityFromContext(ctx); err == nil {
 			userID = id.Subject
 		}
 	}
@@ -209,7 +209,7 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *ListConversat
 func (s *DaemonServer) GetConversation(ctx context.Context, req *GetConversationRequest) (*GetConversationResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
-		tenantID = identity.TenantFromContext(ctx)
+		tenantID = auth.TenantStringFromContext(ctx)
 	}
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")

@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ func TestResolveTenant_FromContext(t *testing.T) {
 	reg, _ := newTestRegistry(t)
 	adapter := NewRegistryAdapter(reg, "default-tenant")
 
-	ctx := identity.ContextWithTenant(context.Background(), "acme-corp")
+	ctx := auth.ContextWithTenantString(context.Background(), "acme-corp")
 	got := adapter.resolveTenant(ctx)
 	assert.Equal(t, "acme-corp", got)
 }
@@ -35,7 +35,7 @@ func TestResolveTenant_EmptyContextTenant(t *testing.T) {
 	adapter := NewRegistryAdapter(reg, "default-tenant")
 
 	// Empty string tenant in context should fall back
-	ctx := identity.ContextWithTenant(context.Background(), "")
+	ctx := auth.ContextWithTenantString(context.Background(), "")
 	got := adapter.resolveTenant(ctx)
 	assert.Equal(t, "default-tenant", got)
 }
@@ -65,7 +65,7 @@ func TestListAgents_UsesContextTenant(t *testing.T) {
 	adapter := NewRegistryAdapter(reg, "wrong-tenant")
 
 	// Query with acme-corp context — should see acme-corp + _system agents
-	acmeCtx := identity.ContextWithTenant(ctx, "acme-corp")
+	acmeCtx := auth.ContextWithTenantString(ctx, "acme-corp")
 	agents, err := adapter.ListAgents(acmeCtx)
 	require.NoError(t, err)
 
@@ -98,7 +98,7 @@ func TestListAgents_OtherTenantCannotSeeAcme(t *testing.T) {
 	adapter := NewRegistryAdapter(reg, "default")
 
 	// Query with other-corp context — should only see _system, NOT acme-corp
-	otherCtx := identity.ContextWithTenant(ctx, "other-corp")
+	otherCtx := auth.ContextWithTenantString(ctx, "other-corp")
 	agents, err := adapter.ListAgents(otherCtx)
 	require.NoError(t, err)
 
@@ -156,7 +156,7 @@ func TestListTools_UsesContextTenant(t *testing.T) {
 
 	adapter := NewRegistryAdapter(reg, "wrong-tenant")
 
-	acmeCtx := identity.ContextWithTenant(ctx, "acme-corp")
+	acmeCtx := auth.ContextWithTenantString(ctx, "acme-corp")
 	tools, err := adapter.ListTools(acmeCtx)
 	require.NoError(t, err)
 
@@ -190,7 +190,7 @@ func TestListPlugins_UsesContextTenant(t *testing.T) {
 
 	adapter := NewRegistryAdapter(reg, "wrong-tenant")
 
-	acmeCtx := identity.ContextWithTenant(ctx, "acme-corp")
+	acmeCtx := auth.ContextWithTenantString(ctx, "acme-corp")
 	plugins, err := adapter.ListPlugins(acmeCtx)
 	require.NoError(t, err)
 

@@ -26,7 +26,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // Server implements discoverypb.DiscoveryServiceServer.
@@ -55,7 +55,7 @@ func NewServer(az authz.Authorizer, reg component.ComponentRegistry, logger *slo
 // Empty on unauthenticated contexts (which should not reach these handlers
 // since the interceptor denies non-authenticated RPCs before dispatch).
 func callerUserRef(ctx context.Context) string {
-	id, err := identity.IdentityFromContext(ctx)
+	id, err := auth.IdentityFromContext(ctx)
 	if err != nil || id.Subject == "" {
 		return ""
 	}
@@ -63,7 +63,7 @@ func callerUserRef(ctx context.Context) string {
 }
 
 func callerTenant(ctx context.Context) string {
-	return identity.TenantFromContext(ctx)
+	return auth.TenantStringFromContext(ctx)
 }
 
 // WhoAmI reports the authenticated caller's identity, their active tenant,
@@ -71,7 +71,7 @@ func callerTenant(ctx context.Context) string {
 // clients (MCP, dashboard, future CLI) can introspect without reimplementing
 // the joins.
 func (s *Server) WhoAmI(ctx context.Context, _ *discoverypb.WhoAmIRequest) (*discoverypb.WhoAmIResponse, error) {
-	id, err := identity.IdentityFromContext(ctx)
+	id, err := auth.IdentityFromContext(ctx)
 	if err != nil || id.Subject == "" {
 		return nil, status.Error(codes.Unauthenticated, "no identity in context")
 	}
@@ -111,7 +111,7 @@ func (s *Server) WhoAmI(ctx context.Context, _ *discoverypb.WhoAmIRequest) (*dis
 		Teams:          prefixAll("team", teamIDs),
 		Relations:      relations,
 		IsAgentAuth:    id.Issuer == "capability-grant",
-		ComponentScope: identity.ComponentScopeFromContext(ctx),
+		ComponentScope: auth.ComponentScopeFromContext(ctx),
 	}
 	return resp, nil
 }

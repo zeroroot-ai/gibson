@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // classifyActorSource derives the "actor_source" audit field from the
@@ -30,7 +30,7 @@ import (
 //   - capability-grant      → "user" (agent acting on behalf of its owner)
 //   - everything else       → "unknown"
 func classifyActorSource(ctx context.Context) string {
-	id, err := identity.IdentityFromContext(ctx)
+	id, err := auth.IdentityFromContext(ctx)
 	if err != nil {
 		return "system"
 	}

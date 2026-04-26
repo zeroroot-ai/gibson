@@ -28,7 +28,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	sdkregistry "github.com/zero-day-ai/sdk/auth/registry"
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
@@ -161,34 +161,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	unaryInterceptors = append(unaryInterceptors, unaryScrub)
 	streamInterceptors = append(streamInterceptors, streamScrub)
 
-	// 3. Identity interceptor — HMAC-verifies Envoy-signed x-gibson-identity-*
-	// headers and injects a typed Identity into the request context.
+	// 3. Identity interceptor — reads x-gibson-identity-* headers ext-authz
+	// emits and injects a typed Identity into the request context.
 	// Authorization (FGA) is enforced upstream by Envoy + ext_authz; the daemon
-	// trusts the signed identity headers and performs no local auth/authz.
-	//
-	// When GIBSON_IDENTITY_HMAC_SECRET_PATH is unset and /etc/gibson/hmac/secret
-	// does not exist, the Envoy gateway is not deployed (dev/non-gateway overlay).
-	// In that case we skip the interceptor rather than failing startup — requests
-	// will be received directly without signed identity headers and the daemon
-	// operates in its pre-gateway trust model (FGA authz still applies).
-	hmacSecret, secretErr := loadHMACSecret()
-	if secretErr != nil {
-		if os.Getenv("GIBSON_IDENTITY_HMAC_SECRET_PATH") == "" {
-			// Env var not configured → Envoy gateway not deployed in this overlay.
-			// Degraded-but-live: log a warning and proceed without the interceptor.
-			d.logger.Warn(ctx, "identity interceptor not installed — HMAC secret unavailable; "+
-				"deploy with Envoy+extAuthz overlay (values-zitadel-envoy.yaml) to enable it",
-				"error", secretErr)
-		} else {
-			// Env var was explicitly configured but the file is missing/unreadable —
-			// this is a misconfiguration in a gateway-enabled overlay. Fail fast.
-			return nil, fmt.Errorf("identity interceptor: %w", secretErr)
-		}
-	} else {
-		unaryInterceptors = append(unaryInterceptors, identity.UnaryInterceptor(hmacSecret))
-		streamInterceptors = append(streamInterceptors, identity.StreamInterceptor(hmacSecret))
-		d.logger.Info(ctx, "identity interceptor installed (HMAC-verified Envoy headers)")
-	}
+	// trusts the headers because the Envoy↔daemon channel is SPIFFE-pinned mTLS.
+	// HMAC signing was removed (Spec: unified-identity-and-authorization
+	// Requirement 8.4); the secret-loading dance is gone with it.
+	unaryInterceptors = append(unaryInterceptors, auth.UnaryServerInterceptor())
+	streamInterceptors = append(streamInterceptors, auth.StreamServerInterceptor())
+	d.logger.Info(ctx, "identity interceptor installed (header-trusting; channel security via SPIFFE mTLS)")
 
 	// Build server options with chained interceptors
 	serverOpts := []grpc.ServerOption{
@@ -424,11 +405,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				emitter := d.auditWriter
 				logger := d.logger.Slog()
 				dsm.WithResolveCallback(func(ctx context.Context, picked modelgate.Candidate, allowed bool) {
-					tenantID := identity.TenantFromContext(ctx)
+					tenantID := auth.TenantStringFromContext(ctx)
 					userID := ""
-					if uid, ok := identity.ActingUserFromContext(ctx); ok {
+					if uid, ok := auth.ActingUserFromContext(ctx); ok {
 						userID = uid
-					} else if uid, ok := identity.InitiatorUserFromContext(ctx); ok {
+					} else if uid, ok := auth.InitiatorUserFromContext(ctx); ok {
 						userID = uid
 					}
 					audit.EmitModelResolved(ctx, emitter, logger, audit.ModelResolutionEvent{
@@ -471,7 +452,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			if agentName == "" {
 				return "", nil
 			}
-			tenant := identity.TenantFromContext(ctx)
+			tenant := auth.TenantStringFromContext(ctx)
 			instances, err := registry.Discover(ctx, tenant, "agent", agentName)
 			if err != nil {
 				logger.WarnContext(ctx, "agent owner lookup: registry discover failed; executor_user_id omitted",
@@ -1250,7 +1231,7 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 // When redisEventStream is available it uses Redis Streams (XREAD BLOCK) as
 // the transport, which allows events to survive daemon restarts and be shared
 // across multiple daemon pods. The tenant is extracted from the request context
-// via identity.TenantFromContext; "default" is used when no tenant is present.
+// via auth.TenantStringFromContext; "default" is used when no tenant is present.
 //
 // When redisEventStream is nil (e.g., during unit tests that use a lightweight
 // daemon without Redis) the implementation falls back to the in-process
@@ -1260,7 +1241,7 @@ func (d *daemonImpl) Subscribe(ctx context.Context, eventTypes []string, mission
 
 	// Use Redis Streams when available: this is the production path.
 	if d.redisEventStream != nil {
-		tenant := identity.TenantFromContext(ctx)
+		tenant := auth.TenantStringFromContext(ctx)
 		if tenant == "" {
 			tenant = "default"
 		}
@@ -1292,7 +1273,7 @@ func (d *daemonImpl) Subscribe(ctx context.Context, eventTypes []string, mission
 // publishEvent writes an event to both the in-process EventBus and, when
 // redisEventStream is available, the tenant-scoped Redis Stream.
 //
-// It extracts the tenant from the context (identity.TenantFromContext) and falls
+// It extracts the tenant from the context (auth.TenantStringFromContext) and falls
 // back to "default" when none is present.  Errors from either transport are
 // logged as warnings but do not propagate — event publishing is best-effort.
 func (d *daemonImpl) publishEvent(ctx context.Context, event api.EventData) {
@@ -1305,7 +1286,7 @@ func (d *daemonImpl) publishEvent(ctx context.Context, event api.EventData) {
 
 	// Redis Streams (optional; available after stateClient is initialized).
 	if d.redisEventStream != nil {
-		tenant := identity.TenantFromContext(ctx)
+		tenant := auth.TenantStringFromContext(ctx)
 		if tenant == "" {
 			tenant = "default"
 		}

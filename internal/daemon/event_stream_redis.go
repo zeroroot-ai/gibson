@@ -9,7 +9,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/state"
 )
 
@@ -71,7 +71,7 @@ func (r *RedisEventStream) TenantStreamKey(tenant string) string {
 	if tenant == "" {
 		tenant = "default"
 	}
-	return identity.TenantScopedRedisKey(tenant, eventsStreamSuffix)
+	return auth.TenantScopedRedisKey(tenant, eventsStreamSuffix)
 }
 
 // PublishEvent appends event to the tenant's Redis Stream via XADD.

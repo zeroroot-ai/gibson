@@ -14,7 +14,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/sdk/protoresolver"
@@ -193,7 +193,7 @@ func (a *RegistryAdapter) GetResolver() protoresolver.ProtoResolver {
 // dev-mode paths. The _system sentinel returned by TenantFromContext when no
 // real tenant is present is treated as "not set".
 func (a *RegistryAdapter) resolveTenant(ctx context.Context) string {
-	if tenant := identity.TenantFromContext(ctx); tenant != "" && tenant != identity.SystemTenant {
+	if tenant := auth.TenantStringFromContext(ctx); tenant != "" && tenant != auth.SystemTenantString {
 		return tenant
 	}
 	return a.tenant

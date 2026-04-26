@@ -10,7 +10,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	budgetpb "github.com/zero-day-ai/sdk/api/gen/gibson/budget/v1"
 )
 
@@ -34,7 +34,7 @@ type budgetEnforcerAdminIface interface {
 // isTenantAdmin checks FGA tenant#admin@user:<caller>. Degrades to false
 // (non-admin) when the authorizer is unwired or check errors.
 func (s *DaemonServer) isTenantAdmin(ctx context.Context, tenantID string) (string, bool, error) {
-	callerID, err := identity.IdentityFromContext(ctx)
+	callerID, err := auth.IdentityFromContext(ctx)
 	if err != nil {
 		return "", false, status_grpc.Error(codes.Unauthenticated, "user identity not found")
 	}
@@ -142,8 +142,8 @@ func statusToProto(s *budget.Status) *budgetpb.BudgetStatus {
 // Non-admins may only read their own user-scope budget. Tenant defaults
 // are readable by any authenticated caller within the tenant.
 func (s *DaemonServer) GetBudget(ctx context.Context, req *budgetpb.GetBudgetRequest) (*budgetpb.GetBudgetResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 
@@ -182,8 +182,8 @@ func (s *DaemonServer) GetBudget(ctx context.Context, req *budgetpb.GetBudgetReq
 
 // SetBudget persists a budget. Tenant-admin only.
 func (s *DaemonServer) SetBudget(ctx context.Context, req *budgetpb.SetBudgetRequest) (*budgetpb.SetBudgetResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
@@ -210,8 +210,8 @@ func (s *DaemonServer) SetBudget(ctx context.Context, req *budgetpb.SetBudgetReq
 // ListBudgets returns all configured budgets in the given scope. Admin-only
 // for user and team scopes; any caller can list tenant defaults.
 func (s *DaemonServer) ListBudgets(ctx context.Context, req *budgetpb.ListBudgetsRequest) (*budgetpb.ListBudgetsResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	scope, err := scopeFromProto(req.GetScope())
@@ -250,8 +250,8 @@ func (s *DaemonServer) ListBudgets(ctx context.Context, req *budgetpb.ListBudget
 // ListStatus returns current usage for every subject in scope. Same
 // narrowing rules as ListBudgets.
 func (s *DaemonServer) ListStatus(ctx context.Context, req *budgetpb.ListStatusRequest) (*budgetpb.ListStatusResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	scope, err := scopeFromProto(req.GetScope())
@@ -292,8 +292,8 @@ func (s *DaemonServer) ListStatus(ctx context.Context, req *budgetpb.ListStatusR
 // GetTenantDefaults returns the tenant-level defaults. Any tenant member
 // can read (so they can see what applies to them by default).
 func (s *DaemonServer) GetTenantDefaults(ctx context.Context, _ *budgetpb.GetTenantDefaultsRequest) (*budgetpb.GetTenantDefaultsResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	admin, err := s.budgetEnforcerAdmin()
@@ -320,8 +320,8 @@ func (s *DaemonServer) GetTenantDefaults(ctx context.Context, _ *budgetpb.GetTen
 
 // SetTenantDefaults persists the tenant-level defaults. Tenant-admin only.
 func (s *DaemonServer) SetTenantDefaults(ctx context.Context, req *budgetpb.SetTenantDefaultsRequest) (*budgetpb.SetTenantDefaultsResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {

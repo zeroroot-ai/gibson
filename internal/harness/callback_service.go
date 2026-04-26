@@ -15,7 +15,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
 	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
@@ -380,9 +380,9 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 	// reaches a handler — if it does not, the request is rejected.
 	// Mission tenant must always be set — if it is not, the mission
 	// was created under broken state and we refuse to operate on it.
-	contextTenant := identity.TenantFromContext(ctx)
+	contextTenant := auth.TenantStringFromContext(ctx)
 	missionTenant := harness.Mission().TenantID
-	if contextTenant == "" || contextTenant == identity.SystemTenant {
+	if contextTenant == "" || contextTenant == auth.SystemTenantString {
 		s.logger.Warn("harness lookup with missing tenant in context",
 			slog.String("mission_id", contextInfo.MissionId),
 			slog.String("agent_name", contextInfo.AgentName),
@@ -1172,7 +1172,7 @@ func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *harne
 				"error", lookupErr,
 			)
 		} else if ownerID != "" {
-			ctx = identity.ContextWithExecutorUser(ctx, ownerID)
+			ctx = auth.ContextWithExecutorUser(ctx, ownerID)
 		}
 	}
 

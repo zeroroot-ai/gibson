@@ -13,7 +13,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	modelaccesspb "github.com/zero-day-ai/sdk/api/gen/gibson/authz/v1"
 )
 
@@ -69,8 +69,8 @@ func fgaTargetToProto(obj string) (modelaccesspb.GrantTargetKind, string) {
 // call picks up the new grant within milliseconds rather than the 30s
 // TTL.
 func (s *DaemonServer) GrantAccess(ctx context.Context, req *modelaccesspb.GrantAccessRequest) (*modelaccesspb.GrantAccessResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
@@ -116,8 +116,8 @@ func (s *DaemonServer) GrantAccess(ctx context.Context, req *modelaccesspb.Grant
 
 // RevokeAccess removes an FGA tuple written by GrantAccess.
 func (s *DaemonServer) RevokeAccess(ctx context.Context, req *modelaccesspb.RevokeAccessRequest) (*modelaccesspb.RevokeAccessResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
@@ -159,8 +159,8 @@ func (s *DaemonServer) RevokeAccess(ctx context.Context, req *modelaccesspb.Revo
 // ListAccess returns all grants for the tenant, optionally narrowed to a
 // specific subject. Admin-only (tenant admin FGA).
 func (s *DaemonServer) ListAccess(ctx context.Context, req *modelaccesspb.ListAccessRequest) (*modelaccesspb.ListAccessResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
@@ -218,8 +218,8 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *modelaccesspb.ListAc
 // render "no events in range" cleanly.
 // Spec: llm-user-attribution-governance Requirement 4.9.
 func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *modelaccesspb.ListModelResolutionEventsRequest) (*modelaccesspb.ListModelResolutionEventsResponse, error) {
-	tenantID := identity.TenantFromContext(ctx)
-	if tenantID == "" || tenantID == identity.SystemTenant {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return nil, status_grpc.Error(codes.Unauthenticated, "tenant context required")
 	}
 	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {

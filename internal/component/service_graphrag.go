@@ -6,14 +6,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // QueryNodes searches the knowledge graph using hybrid vector + graph scoring.
 func (s *ComponentServiceServer) QueryNodes(ctx context.Context, req *componentpb.QueryNodesRequest) (*componentpb.QueryNodesResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
-	if tenant == "" || tenant == identity.SystemTenant {
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" || tenant == auth.SystemTenantString {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
 	if s.graphrag == nil {
@@ -29,8 +29,8 @@ func (s *ComponentServiceServer) QueryNodes(ctx context.Context, req *componentp
 
 // StoreNode persists a node in the knowledge graph and returns its assigned ID.
 func (s *ComponentServiceServer) StoreNode(ctx context.Context, req *componentpb.StoreNodeRequest) (*componentpb.StoreNodeResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
-	if tenant == "" || tenant == identity.SystemTenant {
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" || tenant == auth.SystemTenantString {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
 	if s.graphrag == nil {
@@ -46,8 +46,8 @@ func (s *ComponentServiceServer) StoreNode(ctx context.Context, req *componentpb
 
 // FindSimilarAttacks returns attack patterns semantically similar to the given content.
 func (s *ComponentServiceServer) FindSimilarAttacks(ctx context.Context, req *componentpb.FindSimilarAttacksRequest) (*componentpb.FindSimilarAttacksResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
-	if tenant == "" || tenant == identity.SystemTenant {
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" || tenant == auth.SystemTenantString {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
 	if s.graphrag == nil {
@@ -63,8 +63,8 @@ func (s *ComponentServiceServer) FindSimilarAttacks(ctx context.Context, req *co
 
 // GetAttackChains returns multi-hop attack paths from a starting technique.
 func (s *ComponentServiceServer) GetAttackChains(ctx context.Context, req *componentpb.GetAttackChainsRequest) (*componentpb.GetAttackChainsResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
-	if tenant == "" || tenant == identity.SystemTenant {
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" || tenant == auth.SystemTenantString {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
 	if s.graphrag == nil {
@@ -80,8 +80,8 @@ func (s *ComponentServiceServer) GetAttackChains(ctx context.Context, req *compo
 
 // FindSimilarFindings returns findings semantically similar to the given finding.
 func (s *ComponentServiceServer) FindSimilarFindings(ctx context.Context, req *componentpb.FindSimilarFindingsRequest) (*componentpb.FindSimilarFindingsResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
-	if tenant == "" || tenant == identity.SystemTenant {
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" || tenant == auth.SystemTenantString {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
 	if s.graphrag == nil {
@@ -97,8 +97,8 @@ func (s *ComponentServiceServer) FindSimilarFindings(ctx context.Context, req *c
 
 // GetRelatedFindings returns findings related to the given finding via graph edges.
 func (s *ComponentServiceServer) GetRelatedFindings(ctx context.Context, req *componentpb.GetRelatedFindingsRequest) (*componentpb.GetRelatedFindingsResponse, error) {
-	tenant := identity.TenantFromContext(ctx)
-	if tenant == "" || tenant == identity.SystemTenant {
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" || tenant == auth.SystemTenantString {
 		return nil, status.Error(codes.Unauthenticated, "tenant not found in context")
 	}
 	if s.graphrag == nil {

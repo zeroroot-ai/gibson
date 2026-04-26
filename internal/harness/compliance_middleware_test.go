@@ -9,7 +9,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -136,14 +136,14 @@ func TestComplianceMiddleware_IdentityStamping_Full(t *testing.T) {
 	sink := &fakeSink{}
 	m := minimalMiddleware(t, sink)
 
-	id := identity.Identity{
+	id := auth.Identity{
 		Subject:        "user-123",
 		Issuer:         "zitadel",
 		CredentialType: "oidc",
-		Tenant:         "tenant-a",
+		Tenant:         auth.MustNewTenantID("tenant-a"),
 	}
-	ctx := identity.WithIdentity(context.Background(), id)
-	ctx = identity.ContextWithTenant(ctx, "tenant-a")
+	ctx := auth.WithIdentity(context.Background(), id)
+	ctx = auth.ContextWithTenantString(ctx, "tenant-a")
 
 	sip := m.beginSignal(ctx, MethodComplete, LLMTarget{Slot: "primary"})
 	m.completeSignal(ctx, sip, nil)

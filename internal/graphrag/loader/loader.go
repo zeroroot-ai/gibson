@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/neo4j"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
@@ -861,7 +861,7 @@ func (l *GraphLoader) loadProtoNodes(
 	}
 
 	// Extract tenant_id from context for multi-tenant isolation
-	tenant := identity.TenantFromContext(ctx)
+	tenant := auth.TenantStringFromContext(ctx)
 
 	// Build CREATE query with UNWIND
 	cypher := fmt.Sprintf(`
