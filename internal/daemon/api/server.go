@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 // avoids importing the authz package in tests that don't care about it.
 type authzIface interface {
 	Check(ctx context.Context, user, relation, object string) (bool, error)
+	BatchCheck(ctx context.Context, checks []authz.CheckRequest) ([]bool, error)
 	Write(ctx context.Context, tuples []authz.Tuple) error
 	Delete(ctx context.Context, tuples []authz.Tuple) error
 	ListObjects(ctx context.Context, user, relation, objectType string) ([]string, error)
@@ -97,6 +99,13 @@ type DaemonServer struct {
 	// authorizer is the FGA Authorizer used by admin handlers that need direct FGA access.
 	// May be nil; when nil, RPCs that require it return codes.Unavailable.
 	authorizer authzIface
+
+	// tenantNameResolver looks up a tenant's friendly display name. Wired by
+	// the daemon bootstrap to read the operator-published Redis cache via
+	// `core/gibson/internal/state.GetTenantName`. May be nil; when nil, the
+	// ListMyMemberships handler falls back to the tenant ID as the name.
+	// Returning ("", false, nil) is a cache miss — also handled as fallback.
+	tenantNameResolver func(ctx context.Context, tenantID string) (string, bool, error)
 
 	// dashboardDB is the shared-dashboard Postgres pool used by the
 	// entitlements handlers (UpsertTenantQuota in particular). Wired via
@@ -807,6 +816,16 @@ func (s *DaemonServer) WithCapabilityGrantService(svc *capabilitygrant.Capabilit
 // FGA access (e.g. GetMyPermissions).
 func (s *DaemonServer) WithAuthorizer(az authzIface) *DaemonServer {
 	s.authorizer = az
+	return s
+}
+
+// WithTenantNameResolver wires the tenant display-name lookup used by the
+// ListMyMemberships handler. The daemon bootstrap supplies a closure that
+// reads the operator-published cache (`tenant:name:<id>`) via
+// `core/gibson/internal/state.GetTenantName`. When unset, ListMyMemberships
+// returns the tenant ID as the name (still functional, just less friendly).
+func (s *DaemonServer) WithTenantNameResolver(fn func(ctx context.Context, tenantID string) (string, bool, error)) *DaemonServer {
+	s.tenantNameResolver = fn
 	return s
 }
 
@@ -2628,6 +2647,101 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 		ComponentGrants: nil,
 		TeamMemberships: nil,
 	}, nil
+}
+
+// ListMyMemberships returns every tenant the authenticated caller is a
+// `member` of, with the caller's role (admin/member) per tenant. Identity
+// comes from the request context; no tenant_id parameter — this RPC
+// discovers the caller's tenants. Used by the dashboard at sign-in time
+// to populate the tenant picker / set the active-tenant cookie.
+//
+// Authz semantics: registered as `unauthenticated: true` in the ext-authz
+// RPC registry — caller identity is required (validated by Envoy
+// jwt_authn + ext-authz) but no per-tenant FGA gate is performed (the
+// response IS the tenant list).
+func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMyMembershipsRequest) (*daemonpb.ListMyMembershipsResponse, error) {
+	callerID, err := identity.IdentityFromContext(ctx)
+	if err != nil || callerID.Subject == "" {
+		return nil, status_grpc.Error(codes.Unauthenticated, "user identity not found in context")
+	}
+	userID := callerID.Subject
+
+	if s.authorizer == nil {
+		// No authorizer wired — best we can do is return an empty list and
+		// let the dashboard route the user to onboarding. Logged so the
+		// degraded mode is visible.
+		s.logger.WarnContext(ctx, "ListMyMemberships: authorizer not wired; returning empty memberships",
+			slog.String("user_id", userID),
+		)
+		return &daemonpb.ListMyMembershipsResponse{Memberships: nil}, nil
+	}
+
+	tenantIDs, err := s.authorizer.ListObjects(ctx, "user:"+userID, "member", "tenant")
+	if err != nil {
+		s.logger.WarnContext(ctx, "ListMyMemberships: ListObjects failed",
+			slog.String("user_id", userID),
+			slog.String("error", err.Error()),
+		)
+		return nil, status_grpc.Error(codes.Internal, "failed to list memberships")
+	}
+	if len(tenantIDs) == 0 {
+		return &daemonpb.ListMyMembershipsResponse{Memberships: nil}, nil
+	}
+
+	// Batch-evaluate admin relations across all tenants in a single FGA call.
+	checks := make([]authz.CheckRequest, 0, len(tenantIDs))
+	for _, tid := range tenantIDs {
+		checks = append(checks, authz.CheckRequest{
+			User:     "user:" + userID,
+			Relation: "admin",
+			Object:   "tenant:" + tid,
+		})
+	}
+	adminFlags, err := s.authorizer.BatchCheck(ctx, checks)
+	if err != nil {
+		// Non-fatal: degrade to "everyone is member"; log for observability.
+		s.logger.WarnContext(ctx, "ListMyMemberships: BatchCheck for admin relation failed; defaulting roles to member",
+			slog.String("user_id", userID),
+			slog.String("error", err.Error()),
+		)
+		adminFlags = make([]bool, len(tenantIDs))
+	}
+
+	memberships := make([]*daemonpb.Membership, 0, len(tenantIDs))
+	for i, tid := range tenantIDs {
+		role := "member"
+		if i < len(adminFlags) && adminFlags[i] {
+			role = "admin"
+		}
+		// Friendly name lookup is best-effort; on miss/timeout fall back to ID.
+		name := tid
+		if s.tenantNameResolver != nil {
+			if resolved, ok, _ := s.tenantNameResolver(ctx, tid); ok && resolved != "" {
+				name = resolved
+			}
+		}
+		memberships = append(memberships, &daemonpb.Membership{
+			TenantId:   tid,
+			TenantName: name,
+			Role:       role,
+		})
+	}
+
+	// Sort by display name ASC so the dashboard picker is stable across requests.
+	sortMembershipsByName(memberships)
+
+	return &daemonpb.ListMyMembershipsResponse{Memberships: memberships}, nil
+}
+
+// sortMembershipsByName sorts a slice of Memberships in-place by TenantName ASC.
+// Equal names tie-break on TenantId for determinism.
+func sortMembershipsByName(ms []*daemonpb.Membership) {
+	sort.Slice(ms, func(i, j int) bool {
+		if ms[i].GetTenantName() != ms[j].GetTenantName() {
+			return ms[i].GetTenantName() < ms[j].GetTenantName()
+		}
+		return ms[i].GetTenantId() < ms[j].GetTenantId()
+	})
 }
 
 // traceSpanFromContext extracts the trace ID string using the grpc metadata
