@@ -315,6 +315,7 @@ Key sections: `core` (home/data/cache dirs, parallel_limit), `security` (encrypt
 - **ClickHouse** — only via Langfuse (not a direct dep).
 - **SPIRE** — optional; workload identity for daemon-to-daemon mTLS.
 - **OTLP collector** — optional; falls back to stdio logging.
+- **Embedder model cache** — the daemon's GraphRAG bridge requires `sentence-transformers/all-MiniLM-L6-v2` cached at `/root/.cache/huggingface/hub/`. The embedder factory has a hard 10-second download timeout, so the model must be on disk when the daemon boots. In Kind dev clusters with `gibson.embedder.cache.enabled=true` (the values-kind.yaml default), an init container hydrates the cache PVC from HuggingFace on first deploy and exits in `<5s` on subsequent boots. Production overlays set `initMode=skip` and expect the PVC to be hydrated externally (EFS sync, S3 pre-stage). See spec `daemon-embedder-cache-pvc` for full chart wiring including the three modes (download / s3 / skip).
 
 Redis key patterns: `plugin-access:tenant:name`, `plugin-config:tenant:name`, `plugin-schema:name`, `mission:run:*`, `component:registry:*`, `audit:stream:<tenant>`.
 
