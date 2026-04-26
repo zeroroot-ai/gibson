@@ -10,6 +10,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
@@ -125,6 +126,14 @@ type DefaultAgentHarness struct {
 	// envelopeSigner signs AuthzContext payloads attached to dispatched work items.
 	// When nil, work items are dispatched without an AuthzContext (dev mode).
 	envelopeSigner *authz.EnvelopeSigner
+
+	// cgMinter mints capability-grant JWTs that flow with each
+	// dispatched work item. Agents present the CG-JWT on harness
+	// callbacks; ext-authz validates it and short-circuits FGA when
+	// the requested method is in allowed_rpcs. Nil disables CG-JWT
+	// dispatch — useful for tests; production should always wire it.
+	// Spec: unified-identity-and-authorization Requirement 13.1.
+	cgMinter *capabilitygrant.Minter
 
 	// workQueueTimeout is the maximum duration to wait for a remote component to
 	// deliver a WorkResult after enqueuing. Defaults to 5 minutes when zero.
@@ -1014,6 +1023,15 @@ func (h *DefaultAgentHarness) callToolViaWorkQueue(
 		}
 	}
 
+	// Mint a capability-grant JWT scoped to this task so the
+	// component's harness callbacks can short-circuit FGA. Spec
+	// Requirement 13.1 / 5.1. The agent SDK reads this from
+	// WorkItem.Context["capability_grant"] and attaches it to
+	// every callback's X-Capability-Grant header.
+	if cgToken := h.mintCGForWork(name, "tool"); cgToken != "" {
+		workCtx["capability_grant"] = cgToken
+	}
+
 	// Pre-assign a WorkID so we can subscribe for the result by ID. The WorkQueue
 	// preserves an explicitly set WorkID (only auto-generates when WorkID == "").
 	workID := fmt.Sprintf("tool-%s-%d", name, time.Now().UnixNano())
@@ -1163,6 +1181,13 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 				"error", marshalErr,
 			)
 		}
+	}
+
+	// Mint capability-grant JWT for plugin work items too — the
+	// plugin's harness callbacks go through the same FGA/CG-JWT
+	// chain. Spec Requirement 13.1.
+	if cgToken := h.mintCGForWork(name, "plugin"); cgToken != "" {
+		workCtx["capability_grant"] = cgToken
 	}
 
 	// Inject plugin_config for _system plugins so the remote worker has access
@@ -2866,6 +2891,59 @@ func (h *DefaultAgentHarness) GetAllRunFindings(ctx context.Context, filter Find
 //   - protoresolver.ProtoResolver: The resolver instance, or nil if not configured
 func (h *DefaultAgentHarness) Resolver() protoresolver.ProtoResolver {
 	return h.resolver
+}
+
+// mintCGForWork mints a capability-grant JWT for a work-item dispatch.
+// Returns "" when no minter is wired (test mode or pre-Phase-3
+// daemons) — callers omit the workCtx entry rather than fail the
+// dispatch. The allowed_rpcs list is the broad superset of methods
+// agents typically need on harness callbacks; per-component-yaml
+// scoping is a future iteration that requires the manifest to be
+// loaded by this code path. Spec: Requirement 13.1, 13.2.
+func (h *DefaultAgentHarness) mintCGForWork(componentName, kind string) string {
+	if h.cgMinter == nil {
+		return ""
+	}
+	tenant := h.missionCtx.TenantID
+	if tenant == "" || h.missionCtx.MissionRunID == "" {
+		return ""
+	}
+	tok, err := h.cgMinter.Mint(capabilitygrant.MintRequest{
+		Subject:   "component:" + kind + ":" + componentName,
+		Tenant:    tenant,
+		MissionID: h.missionCtx.ID.String(),
+		TaskID:    h.missionCtx.MissionRunID,
+		AllowedRPCs: []string{
+			"/gibson.harness.v1.HarnessCallbackService/LLMComplete",
+			"/gibson.harness.v1.HarnessCallbackService/LLMCompleteWithTools",
+			"/gibson.harness.v1.HarnessCallbackService/LLMStream",
+			"/gibson.harness.v1.HarnessCallbackService/LLMCompleteStructured",
+			"/gibson.harness.v1.HarnessCallbackService/MemoryGet",
+			"/gibson.harness.v1.HarnessCallbackService/MemorySet",
+			"/gibson.harness.v1.HarnessCallbackService/MemoryDelete",
+			"/gibson.harness.v1.HarnessCallbackService/SubmitFinding",
+			"/gibson.harness.v1.HarnessCallbackService/CallToolProto",
+			"/gibson.harness.v1.HarnessCallbackService/QueryPlugin",
+			"/gibson.harness.v1.HarnessCallbackService/GraphRAGQuery",
+			"/gibson.daemon.v1.DaemonService/RenewCapabilityGrant",
+		},
+	})
+	if err != nil {
+		h.logger.Warn("failed to mint CG-JWT for work item; dispatching without CG-JWT",
+			"component", componentName,
+			"kind", kind,
+			"error", err)
+		return ""
+	}
+	return tok
+}
+
+// WithCGMinter wires a capability-grant minter so dispatched work
+// items carry a CG-JWT in WorkItem.Context["capability_grant"]. Tests
+// that don't exercise the CG-JWT path may leave this nil.
+func (h *DefaultAgentHarness) WithCGMinter(m *capabilitygrant.Minter) *DefaultAgentHarness {
+	h.cgMinter = m
+	return h
 }
 
 // ────────────────────────────────────────────────────────────────────────────
