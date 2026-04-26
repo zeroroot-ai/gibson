@@ -41,6 +41,12 @@ RUN if [ -n "$BUILD_TAGS" ]; then \
         go build -ldflags="-s -w" -o /out/gibson ./cmd/gibson; \
     fi
 
+# Build the auxiliary one-shot tools shipped alongside the daemon.
+# Spec auth-resolution-hardening (R4): lowercase-tenant-owner runs as a
+# Helm post-install/post-upgrade Hook Job to lowercase any pre-existing
+# Tenant.spec.owner values. Idempotent.
+RUN go build -ldflags="-s -w" -o /out/lowercase-tenant-owner ./cmd/lowercase-tenant-owner
+
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
@@ -49,8 +55,9 @@ FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d650
 # Install ca-certificates for HTTPS connections
 RUN apk add --no-cache ca-certificates
 
-# Copy gibson binary from builder
+# Copy gibson binary + auxiliary tools from builder
 COPY --from=builder /out/gibson /usr/local/bin/gibson
+COPY --from=builder /out/lowercase-tenant-owner /usr/local/bin/lowercase-tenant-owner
 
 # Create gibson home directory and HF model-cache mount point.
 # In production, /root/.cache/huggingface/ is mounted from EFS via the
