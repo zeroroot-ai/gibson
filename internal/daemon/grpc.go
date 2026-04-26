@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
 	"github.com/zero-day-ai/gibson/internal/identity"
+	sdkregistry "github.com/zero-day-ai/sdk/auth/registry"
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
@@ -749,12 +751,47 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		}
 	}
 
+	// Spec: unified-identity-and-authorization Requirement 14.3.
+	// Verify every gRPC method registered on this server has a
+	// matching entry in the SDK-generated registry. A drift here
+	// means the daemon would accept a method that ext-authz cannot
+	// authorize — fail closed at startup so deployment is blocked.
+	if err := assertRegistryCoverage(srv); err != nil {
+		return nil, fmt.Errorf("daemon: registry coverage check failed: %w", err)
+	}
+
 	return &grpcSubsystem{
 		srv:                 srv,
 		listener:            listener,
 		logger:              d.logger,
 		gracefulStopTimeout: gracefulStopTimeout,
 	}, nil
+}
+
+// assertRegistryCoverage walks every registered service+method on
+// srv and verifies it has an entry in sdkregistry.Registry. Returns
+// an error listing missing methods on mismatch. Called once at
+// daemon startup; safe to skip for tests via the daemon test scaffold.
+//
+// Spec: unified-identity-and-authorization Requirement 14.3.
+func assertRegistryCoverage(srv *grpc.Server) error {
+	var missing []string
+	for svcName, info := range srv.GetServiceInfo() {
+		for _, m := range info.Methods {
+			full := "/" + svcName + "/" + m.Name
+			if _, ok := sdkregistry.Registry[full]; !ok {
+				missing = append(missing, full)
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf(
+		"the following gRPC methods are registered on the daemon but missing from the SDK auth registry — regenerate sdk/auth/registry by running `make proto` in zero-day-ai/sdk and bumping the gibson SDK pin:\n  - %s",
+		strings.Join(missing, "\n  - "),
+	)
 }
 
 // loadHMACSecret reads the HMAC secret used to verify Envoy-signed

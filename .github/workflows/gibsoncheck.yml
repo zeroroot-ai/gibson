@@ -1,0 +1,51 @@
+name: gibsoncheck
+
+# Spec: unified-identity-and-authorization Requirement 14.1.
+# Runs the custom gibsoncheck Go analyzer (forbidden-imports +
+# notrustlocalhost + tenantfromcontext) on every PR.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'tools/gibsoncheck/**'
+      - '.github/workflows/gibsoncheck.yml'
+  pull_request:
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'tools/gibsoncheck/**'
+      - '.github/workflows/gibsoncheck.yml'
+
+concurrency:
+  group: gibsoncheck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Run gibsoncheck against the daemon
+        run: |
+          set -e
+          go build -o bin/gibsoncheck ./tools/gibsoncheck
+          # Run individually so we can see which check (if any) fails.
+          # Each analyzer exits non-zero on diagnostic.
+          ./bin/gibsoncheck -forbiddenimports ./internal/... ./cmd/...
+          ./bin/gibsoncheck -notrustlocalhost ./internal/... ./cmd/...
+          # tenantfromcontext is informational during migration; treat
+          # diagnostics as warnings (capture but do not fail).
+          ./bin/gibsoncheck -tenantfromcontext ./internal/... ./cmd/... || true
+
+      - name: Run gibsoncheck self-tests
+        run: go test -race ./tools/gibsoncheck/...

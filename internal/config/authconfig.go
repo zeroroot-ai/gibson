@@ -76,11 +76,6 @@ type AuthConfig struct {
 	// Ignored when Mode is set. Removed in a future release.
 	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
 
-	// TrustLocalhost skips authentication for connections from 127.0.0.1 or ::1.
-	// Useful for local development with external tools.
-	// Default: false
-	TrustLocalhost bool `mapstructure:"trust_localhost" yaml:"trust_localhost"`
-
 	// ClockSkew is the maximum allowed time difference when validating token expiry.
 	// Accommodates clock drift between Gibson and identity providers.
 	// Default: 30s

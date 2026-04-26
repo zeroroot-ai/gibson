@@ -373,14 +373,30 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 		"task_id", contextInfo.TaskId,
 	)
 
-	// Tenant isolation: prevent cross-tenant harness access.
-	// When both the context tenant and the mission tenant are non-empty they must
-	// match. An empty value on either side means the mission predates
-	// multi-tenancy, so we allow it through to preserve backward
-	// compatibility with dev mode deployments.
+	// Tenant isolation: prevent cross-tenant harness access. Per
+	// unified-identity-and-authorization Requirement 8.6, the legacy
+	// dev-mode bypass (allowing through when either side was empty)
+	// is removed. Identity must always have a tenant by the time it
+	// reaches a handler — if it does not, the request is rejected.
+	// Mission tenant must always be set — if it is not, the mission
+	// was created under broken state and we refuse to operate on it.
 	contextTenant := identity.TenantFromContext(ctx)
 	missionTenant := harness.Mission().TenantID
-	if contextTenant != "" && missionTenant != "" && contextTenant != missionTenant {
+	if contextTenant == "" || contextTenant == identity.SystemTenant {
+		s.logger.Warn("harness lookup with missing tenant in context",
+			slog.String("mission_id", contextInfo.MissionId),
+			slog.String("agent_name", contextInfo.AgentName),
+		)
+		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+	if missionTenant == "" {
+		s.logger.Warn("harness lookup against mission with empty tenant",
+			slog.String("context_tenant", contextTenant),
+			slog.String("mission_id", contextInfo.MissionId),
+		)
+		return nil, status.Error(codes.PermissionDenied, "mission has no tenant")
+	}
+	if contextTenant != missionTenant {
 		s.logger.Warn("tenant mismatch on harness lookup",
 			slog.String("context_tenant", contextTenant),
 			slog.String("mission_tenant", missionTenant),

@@ -99,9 +99,8 @@ func DefaultConfig() *Config {
 			LangfuseDashboardURL: "http://localhost:3000",
 		},
 		Auth: AuthConfig{
-			Enabled:        false, // Deprecated: use Mode instead
-			TrustLocalhost: false,
-			ClockSkew:      30 * time.Second,
+			Enabled:   false, // Deprecated: use Mode instead
+			ClockSkew: 30 * time.Second,
 		},
 		Checkpoint: *DefaultCheckpointConfig(),
 		Authz: AuthzConfig{
