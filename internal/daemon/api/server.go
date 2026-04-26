@@ -81,6 +81,11 @@ type DaemonServer struct {
 		Revoke(ctx context.Context, keyID string) error
 	}
 
+	// cgMinter / cgVerifier back the RenewCapabilityGrant RPC.
+	// Wired via WithCGRenewal; nil-checked at handler entry.
+	cgMinter   *capabilitygrant.Minter
+	cgVerifier CGJWTVerifier
+
 	// onboardingStore manages tenant onboarding state.
 	// May be nil; wired when the onboarding service is available.
 	// TODO: replace with concrete type once onboarding package is introduced.
