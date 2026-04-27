@@ -25,13 +25,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
 	"github.com/zero-day-ai/sdk/auth"
 	sdkregistry "github.com/zero-day-ai/sdk/auth/registry"
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
@@ -296,25 +294,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
 	}
 
-	// Wire provider-config store (Phase C: Postgres-backed with envelope encryption).
-	// Falls back gracefully when the credential Postgres pool is not yet configured.
-	if d.credentialPGPool != nil && d.keyProvider != nil {
-		masterKey, mkErr := d.keyProvider.GetEncryptionKey(ctx)
-		if mkErr != nil {
-			d.logger.Warn(ctx, "provider-config store not wired: could not get master key", "error", mkErr)
-		} else {
-			provStore, provStoreErr := providerconfig.NewPostgresStore(d.credentialPGPool, masterKey)
-			if provStoreErr != nil {
-				d.logger.Warn(ctx, "provider-config store not wired", "error", provStoreErr)
-			} else {
-				daemonSvc.WithProviderConfigStore(provStore)
-				d.logger.Info(ctx, "provider-config store wired into DaemonServer (Phase C Postgres)")
-			}
-		}
-	} else if d.keyProvider == nil {
-		d.logger.Info(ctx, "provider-config store not wired: no key provider configured (set security.key_provider)")
+	// Wire provider-config store (Phase D: pool-backed, per-tenant Postgres).
+	// PoolProviderConfigStore acquires a per-tenant Conn per RPC call from the
+	// data-plane Pool, constructs a providerconfig.NewPostgresStore from
+	// conn.Postgres + conn.KEK, and releases the Conn after the call.
+	if d.pool != nil {
+		daemonSvc.WithProviderConfigStore(NewPoolProviderConfigStore(d.pool))
+		d.logger.Info(ctx, "provider-config store wired into DaemonServer (Phase D pool-backed)")
 	} else {
-		d.logger.Info(ctx, "provider-config store not wired: dashboard Postgres not configured")
+		d.logger.Info(ctx, "provider-config store not wired: data-plane pool not configured (set security.key_provider)")
 	}
 
 	if d.stateClient != nil && d.stateClient.Client() != nil {
@@ -619,25 +607,25 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			auditLogger := audit.NewAuditLogger(d.stateClient, d.logger.Slog())
 
 			// Wire GraphRAGFindingSubmitter when infrastructure is available.
-			// It routes findings to both Redis (tenant-scoped indexes) and Neo4j
+			// It routes findings to both the finding store and Neo4j
 			// (via GraphRAGBridge.StoreAsync, fire-and-forget). Falls back to nil
 			// when the finding store or bridge has not been initialized, in which
 			// case ComponentServiceServer logs and returns a generated finding_id.
+			//
+			// Phase D: NewGraphRAGFindingSubmitter now accepts finding.FindingStore
+			// (interface), so any implementation — RedisFindingStore or
+			// ConnBoundFindingStore — is passed directly without a type assertion.
 			var findingSubmitter component.FindingSubmitter
 			if d.infrastructure != nil &&
 				d.infrastructure.findingStore != nil &&
 				d.infrastructure.graphRAGBridge != nil {
-				if redisStore, ok := d.infrastructure.findingStore.(*finding.RedisFindingStore); ok {
-					findingSubmitter = component.NewGraphRAGFindingSubmitter(
-						d.infrastructure.graphRAGBridge,
-						redisStore,
-						d.stateClient,
-						d.logger.WithComponent("finding-submitter").Slog(),
-					)
-					d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings routed to Redis and Neo4j")
-				} else {
-					d.logger.Warn(ctx, "finding store is not *finding.RedisFindingStore; finding submitter not wired")
-				}
+				findingSubmitter = component.NewGraphRAGFindingSubmitter(
+					d.infrastructure.graphRAGBridge,
+					d.infrastructure.findingStore,
+					d.stateClient,
+					d.logger.WithComponent("finding-submitter").Slog(),
+				)
+				d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings routed to finding store and Neo4j")
 			} else {
 				d.logger.Warn(ctx, "infrastructure not ready; finding submitter not wired (findings will be logged only)")
 			}

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/audit"
@@ -253,13 +252,6 @@ type daemonImpl struct {
 	// (degraded mode — provisioning unavailable but missions/tools/agents continue).
 	dashboardDB *sql.DB
 
-	// credentialPGPool is a pgxpool.Pool pointing at the same Postgres host as
-	// dashboardDB, used by the Phase C credential DAO bridge. Phase D wired the
-	// data-plane Pool (below); credential/providerconfig DAO bridge replacement
-	// is tracked by TODO(database-per-tenant-data-plane Phase D cutover).
-	// May be nil when DashboardPostgres is not configured.
-	credentialPGPool *pgxpool.Pool
-
 	// pool is the per-tenant data-plane connection pool introduced in Phase B/C/D.
 	// It provides tenant-isolated Postgres, Redis, Neo4j, and vector store connections
 	// via Pool.For(ctx, tenant). Nil when keyProvider is not configured (no security.key_provider).
@@ -449,13 +441,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.logger.Info(ctx, "redis event stream initialized")
 
 	// Initialize Redis stores.
-	// TODO(database-per-tenant-data-plane Phase D cutover): missionStore and missionRunStore
-	// are global multi-tenant stores (prefixed keys via RedisMissionStore/RedisMissionRunStore).
-	// Per-tenant ConnBoundMissionStore / ConnBoundRunStore are used by the memory factory and
-	// memory resolver (Phase D). Migrating these global stores to ConnBound requires restructuring
-	// daemon startup paths (recoverRunningMissions, discoverCheckpoints) that operate without a
-	// per-tenant context. Tracked as a follow-up: migrate handler call sites one at a time once
-	// the Pool is fully wired and the admin-path / startup-path distinction is resolved.
+	// Note: missionStore / missionRunStore are global multi-tenant stores (tenant-prefixed keys
+	// via RedisMissionStore / RedisMissionRunStore). They remain for handler call sites that have
+	// not yet migrated to the per-tenant Pool path. The startup crash-recovery path
+	// (recoverRunningMissionsAcrossTenants) has already been migrated (Phase D) to use the
+	// per-tenant pool, so it no longer calls into these global stores. Handler-level migration
+	// continues one call site at a time.
 	d.missionStore = mission.NewRedisMissionStore(stateClient)
 	d.missionRunStore = mission.NewRedisMissionRunStore(stateClient)
 	d.checkpointStore = mission.NewRedisCheckpointStore(stateClient)
@@ -617,41 +608,29 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				}
 			}
 
-			// Phase C: credentials stored in Postgres with envelope encryption.
-			// TODO(database-per-tenant-data-plane Phase D cutover): replace this bridge with
-			// conn.Credentials() / conn.ProviderConfigs() once the CredentialDAO/ProviderConfigStore
-			// interfaces are aligned with CredentialOps / the ConnBound ops surface.
-			var credentialDAO database.CredentialDAO
-			if d.credentialPGPool != nil {
-				masterKey, mkErr := keyProvider.GetEncryptionKey(ctx)
-				if mkErr != nil {
-					d.logger.Warn(ctx, "failed to get master key for credential DAO", "error", mkErr)
-				} else {
-					credentialDAO = database.NewPostgresCredentialDAO(d.credentialPGPool, masterKey)
-					d.logger.Info(ctx, "using Postgres credential DAO (Phase C bridge)")
-				}
-			} else {
-				d.logger.Info(ctx, "credential Postgres pool not available — credentials unavailable until dashboard Postgres is configured")
-			}
-
-			if credentialDAO != nil {
-				credentialStore, err := NewDaemonCredentialStore(credentialDAO, keyProvider)
+			// Phase D: credentials routed through the per-tenant data-plane Pool.
+			// DaemonCredentialStore and CredentialHandler now accept a Pool and
+			// acquire a per-tenant Conn (conn.Credentials()) per RPC call, keyed
+			// by the tenant in the request context. This eliminates the Phase C
+			// credentialPGPool bridge that pointed at the shared dashboard Postgres.
+			if p != nil {
+				credentialStore, err := NewDaemonCredentialStore(p, keyProvider)
 				if err != nil {
 					d.logger.Warn(ctx, "failed to initialize credential store (credentials will not be available)",
 						"error", err)
 				} else {
 					d.credentialStore = credentialStore
 					d.callback.SetCredentialStore(credentialStore)
-					d.logger.Info(ctx, "configured callback service with credential store")
+					d.logger.Info(ctx, "configured callback service with pool-backed credential store (Phase D)")
 				}
 
 				// Initialize credential handler for dashboard API
-				credentialHandler, err := api.NewCredentialHandler(credentialDAO, keyProvider)
+				credentialHandler, err := api.NewCredentialHandler(p, keyProvider)
 				if err != nil {
 					d.logger.Warn(ctx, "failed to initialize credential handler", "error", err)
 				} else {
 					d.credentialHandler = credentialHandler
-					d.logger.Info(ctx, "initialized credential handler for dashboard API")
+					d.logger.Info(ctx, "initialized pool-backed credential handler for dashboard API (Phase D)")
 
 					// Initialize LLM config handler for dashboard API
 					llmConfigHandler, err := api.NewLLMConfigHandler(d.stateClient, credentialHandler)
@@ -662,6 +641,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 						d.logger.Info(ctx, "initialized LLM config handler for dashboard API")
 					}
 				}
+			} else {
+				d.logger.Info(ctx, "data-plane pool not available — credentials unavailable until security.key_provider is configured")
 			}
 
 			// Plugin access store still uses Redis (plugin store migration is Phase D).
@@ -758,9 +739,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	}
 
 	// Perform crash recovery: find any missions that were running when daemon stopped
-	// and transition them to paused status before accepting new connections
+	// and transition them to paused status before accepting new connections.
+	// Phase D: recoverRunningMissionsAcrossTenants fans out across tenant CRDs and uses
+	// per-tenant Conns (conn.Missions().ListRunning) rather than the global RedisMissionStore.
 	d.logger.Info(ctx, "checking for missions to recover after daemon restart")
-	if err := d.recoverRunningMissions(ctx); err != nil {
+	if err := d.recoverRunningMissionsAcrossTenants(ctx); err != nil {
 		d.logger.Warn(ctx, "failed to recover running missions", "error", err)
 		// Don't fail startup on recovery error - continue with normal operation
 	}
@@ -1183,13 +1166,6 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 		d.dashboardDB = nil
 	}
 
-	// Close Phase C credential pgxpool.
-	if d.credentialPGPool != nil {
-		d.logger.Info(ctx, "closing credential pgxpool")
-		d.credentialPGPool.Close()
-		d.credentialPGPool = nil
-	}
-
 	// Close Phase D data-plane pool.
 	if d.pool != nil {
 		d.logger.Info(ctx, "closing data-plane pool")
@@ -1283,26 +1259,6 @@ func (d *daemonImpl) initDashboardPostgres(ctx context.Context) {
 	// the operator has provisioned.
 	d.dashboardDB = db
 
-	// Phase C: also create a pgxpool.Pool for the credential DAO.
-	// pgxpool uses the pgx-native connection string format.
-	pgxDSN := fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		pgCfg.Username,
-		pgCfg.Password,
-		pgCfg.Host,
-		pgCfg.Port,
-		pgCfg.Database,
-		pgCfg.SSLMode,
-	)
-	credPool, credPoolErr := pgxpool.New(ctx, pgxDSN)
-	if credPoolErr != nil {
-		d.logger.Warn(ctx, "credential pgxpool: failed to create (credential DAO unavailable)",
-			"error", credPoolErr,
-		)
-		return
-	}
-	d.credentialPGPool = credPool
-	d.logger.Info(ctx, "credential pgxpool: established for Phase C credential DAO bridge")
 }
 
 // status returns the current daemon status and health information.

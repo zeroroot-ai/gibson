@@ -167,6 +167,45 @@ func IsCrossTenantCredentialError(err error) bool {
 	return false
 }
 
+// ListNames returns the names of all credentials in the tenant's database,
+// applying a limit/offset from the provided filter if non-nil. This is a
+// lightweight scan that does not decrypt any credentials; it is used by
+// CredentialHandler.List to enumerate names for the dashboard API.
+func (o *CredentialOps) ListNames(ctx context.Context, filter *types.CredentialFilter) ([]string, error) {
+	limit := 100
+	offset := 0
+	if filter != nil {
+		if filter.Limit > 0 {
+			limit = filter.Limit
+		}
+		if filter.Offset > 0 {
+			offset = filter.Offset
+		}
+	}
+
+	rows, err := o.pg.Query(ctx,
+		`SELECT name FROM credentials ORDER BY name LIMIT $1 OFFSET $2`,
+		limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("credential: list names: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("credential: scan name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("credential: iterate names: %w", err)
+	}
+	return names, nil
+}
+
 // -------------------------------------------------------------------
 // CredentialDAO adapter — satisfies the existing interface
 // -------------------------------------------------------------------

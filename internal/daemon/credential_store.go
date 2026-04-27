@@ -2,59 +2,85 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/database"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // DaemonCredentialStore implements harness.CredentialStore using the
-// daemon's Postgres-backed CredentialDAO with envelope encryption.
+// per-tenant data-plane Pool. Each GetCredential call acquires a Conn
+// for the calling tenant (resolved from context), calls conn.Credentials().Get,
+// and releases the Conn before returning.
 //
-// Phase C: credentials are stored in Postgres using AES Key Wrap DEK +
-// AES-256-GCM per-record envelope encryption. The keyProvider is retained for
-// Health() and Close() — the actual decryption is performed inside
-// database.PostgresCredentialDAO, which holds the KEK.
+// Phase D: this replaces the Phase C bridge (PostgresCredentialDAO wrapping a
+// shared credentialPGPool pointing at the dashboard Postgres). Credentials are
+// now stored in each tenant's own Postgres database, wrapped under the per-tenant
+// KEK via envelope encryption (see internal/database.CredentialOps).
 type DaemonCredentialStore struct {
-	dao         database.CredentialDAO
+	pool        datapool.Pool
 	keyProvider crypto.KeyProvider
 }
 
-// NewDaemonCredentialStore creates a new credential store for the daemon.
-// dao must be a database.CredentialDAO backed by the per-tenant Postgres
-// store (database.PostgresCredentialDAO or equivalent). The keyProvider is
-// used for Health() and Close(); decryption is handled by the DAO itself.
-func NewDaemonCredentialStore(dao database.CredentialDAO, keyProvider crypto.KeyProvider) (*DaemonCredentialStore, error) {
-	if dao == nil {
-		return nil, fmt.Errorf("credential DAO cannot be nil")
+// NewDaemonCredentialStore creates a new pool-backed credential store.
+// pool must not be nil; it is used to acquire a per-tenant Conn per RPC call.
+// keyProvider is retained for Health() and Close().
+func NewDaemonCredentialStore(pool datapool.Pool, keyProvider crypto.KeyProvider) (*DaemonCredentialStore, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("credential store: pool must not be nil")
 	}
 	if keyProvider == nil {
-		return nil, fmt.Errorf("key provider cannot be nil")
+		return nil, fmt.Errorf("credential store: keyProvider must not be nil")
 	}
-
 	return &DaemonCredentialStore{
-		dao:         dao,
+		pool:        pool,
 		keyProvider: keyProvider,
 	}, nil
 }
 
-// GetCredential retrieves a credential by name.
-// The PostgresCredentialDAO performs envelope decryption internally; the
-// plaintext secret is returned in cred.EncryptedValue (legacy field reuse).
-// The returned string is the decrypted plaintext secret.
+// GetCredential retrieves a credential by name for the tenant in context.
+// It acquires a per-tenant Conn, calls conn.Credentials().Get(ctx, name),
+// and releases the Conn. The decrypted plaintext secret is returned as the
+// second return value.
 //
-// SECURITY: never log or persist the returned string value.
+// SECURITY: never log or persist the returned secret string.
 func (s *DaemonCredentialStore) GetCredential(ctx context.Context, name string) (*types.Credential, string, error) {
-	cred, err := s.dao.GetByName(ctx, name)
-	if err != nil {
-		return nil, "", fmt.Errorf("credential %q not found: %w", name, err)
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok || tenant.IsZero() {
+		return nil, "", fmt.Errorf("credential store: no tenant in context")
 	}
-	// PostgresCredentialDAO.GetByName decrypts via envelope and stores the
-	// plaintext secret bytes in cred.EncryptedValue for backward compat.
-	secret := string(cred.EncryptedValue)
-	return cred, secret, nil
+
+	conn, err := s.pool.For(ctx, tenant)
+	if err != nil {
+		var npErr *datapool.NotProvisionedError
+		if errors.As(err, &npErr) {
+			return nil, "", fmt.Errorf("credential store: tenant %s not provisioned", tenant)
+		}
+		return nil, "", fmt.Errorf("credential store: acquire conn: %w", err)
+	}
+	defer conn.Release()
+
+	secretBytes, err := conn.Credentials().Get(ctx, name)
+	if err != nil {
+		if errors.Is(err, database.ErrCredentialNotFound) {
+			return nil, "", fmt.Errorf("credential %q not found", name)
+		}
+		return nil, "", fmt.Errorf("credential store: get %q: %w", name, err)
+	}
+
+	// Build a minimal Credential for the harness API.
+	// The harness only uses Name and the plaintext secret; other fields
+	// are not required by the CredentialStore interface contract.
+	cred := &types.Credential{
+		ID:   types.NewID(),
+		Name: name,
+	}
+	return cred, string(secretBytes), nil
 }
 
 // Health returns the health status of the key provider.
@@ -67,5 +93,5 @@ func (s *DaemonCredentialStore) Close() error {
 	return s.keyProvider.Close()
 }
 
-// Ensure DaemonCredentialStore implements harness.CredentialStore
+// Ensure DaemonCredentialStore implements harness.CredentialStore.
 var _ harness.CredentialStore = (*DaemonCredentialStore)(nil)

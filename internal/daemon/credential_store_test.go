@@ -6,7 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // MockKeyProvider is a mock implementation of crypto.KeyProvider for testing.
@@ -37,185 +39,95 @@ func (m *MockKeyProvider) Close() error {
 	return args.Error(0)
 }
 
-// MockCredentialDAO is a mock implementation of database.CredentialDAO for testing.
-type MockCredentialDAO struct {
-	mock.Mock
+// stubPool is a minimal datapool.Pool for tests that returns an error on For().
+type stubPool struct{}
+
+func (s *stubPool) For(_ context.Context, _ auth.TenantID) (*datapool.Conn, error) {
+	return nil, datapool.ErrAdminPoolNotConfigured // any error is fine for tests
+}
+func (s *stubPool) Admin(_ context.Context) (*datapool.AdminConn, error) {
+	return nil, datapool.ErrAdminPoolNotConfigured
+}
+func (s *stubPool) SetAdminPool(_ datapool.AdminAcquirer) {}
+func (s *stubPool) Close() error                          { return nil }
+
+var _ datapool.Pool = (*stubPool)(nil)
+
+// newMockPool returns a Pool stub sufficient for constructor-level tests.
+func newMockPool(_ *testing.T) datapool.Pool {
+	return &stubPool{}
 }
 
-func (m *MockCredentialDAO) GetByName(ctx context.Context, name string) (*types.Credential, error) {
-	args := m.Called(ctx, name)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*types.Credential), args.Error(1)
-}
-
-func (m *MockCredentialDAO) Create(ctx context.Context, cred *types.Credential) error {
-	args := m.Called(ctx, cred)
-	return args.Error(0)
-}
-
-func (m *MockCredentialDAO) Update(ctx context.Context, cred *types.Credential) error {
-	args := m.Called(ctx, cred)
-	return args.Error(0)
-}
-
-func (m *MockCredentialDAO) Delete(ctx context.Context, id types.ID) error {
-	args := m.Called(ctx, id)
-	return args.Error(0)
-}
-
-func (m *MockCredentialDAO) DeleteByName(ctx context.Context, name string) error {
-	args := m.Called(ctx, name)
-	return args.Error(0)
-}
-
-func (m *MockCredentialDAO) Exists(ctx context.Context, name string) (bool, error) {
-	args := m.Called(ctx, name)
-	return args.Bool(0), args.Error(1)
-}
-
-func (m *MockCredentialDAO) Get(ctx context.Context, id types.ID) (*types.Credential, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*types.Credential), args.Error(1)
-}
-
-func (m *MockCredentialDAO) List(ctx context.Context, filter *types.CredentialFilter) ([]*types.Credential, error) {
-	args := m.Called(ctx, filter)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]*types.Credential), args.Error(1)
-}
-
-func (m *MockCredentialDAO) Close() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-func TestNewDaemonCredentialStore_NilDAO(t *testing.T) {
-	mockKeyProvider := new(MockKeyProvider)
-
-	store, err := NewDaemonCredentialStore(nil, mockKeyProvider)
+// TestNewDaemonCredentialStore_NilPool verifies that a nil pool is rejected.
+func TestNewDaemonCredentialStore_NilPool(t *testing.T) {
+	mockKP := new(MockKeyProvider)
+	store, err := NewDaemonCredentialStore(nil, mockKP)
 	assert.Error(t, err)
 	assert.Nil(t, store)
-	assert.Contains(t, err.Error(), "DAO cannot be nil")
+	assert.Contains(t, err.Error(), "pool must not be nil")
 }
 
+// TestNewDaemonCredentialStore_NilKeyProvider verifies that a nil key provider is rejected.
 func TestNewDaemonCredentialStore_NilKeyProvider(t *testing.T) {
-	mockDAO := new(MockCredentialDAO)
-
-	store, err := NewDaemonCredentialStore(mockDAO, nil)
+	mp := newMockPool(t)
+	store, err := NewDaemonCredentialStore(mp, nil)
 	assert.Error(t, err)
 	assert.Nil(t, store)
-	assert.Contains(t, err.Error(), "key provider cannot be nil")
+	assert.Contains(t, err.Error(), "keyProvider must not be nil")
 }
 
-func TestNewDaemonCredentialStore_Success(t *testing.T) {
-	mockDAO := new(MockCredentialDAO)
-	mockKeyProvider := new(MockKeyProvider)
+// TestDaemonCredentialStore_GetCredential_NoTenant verifies that a missing tenant returns an error.
+func TestDaemonCredentialStore_GetCredential_NoTenant(t *testing.T) {
+	mp := newMockPool(t)
+	mockKP := new(MockKeyProvider)
 
-	store, err := NewDaemonCredentialStore(mockDAO, mockKeyProvider)
+	store, err := NewDaemonCredentialStore(mp, mockKP)
 	assert.NoError(t, err)
-	assert.NotNil(t, store)
-	assert.Equal(t, mockDAO, store.dao)
-	assert.Equal(t, mockKeyProvider, store.keyProvider)
-}
 
-func TestDaemonCredentialStore_GetCredential_DAOError(t *testing.T) {
-	mockDAO := new(MockCredentialDAO)
-	mockKeyProvider := new(MockKeyProvider)
-
-	store, _ := NewDaemonCredentialStore(mockDAO, mockKeyProvider)
-
-	ctx := context.Background()
-	mockDAO.On("GetByName", ctx, "test-cred").Return(nil, assert.AnError)
-
-	cred, secret, err := store.GetCredential(ctx, "test-cred")
+	// Context without a tenant — TenantFromContext returns (zero, false).
+	_, _, err = store.GetCredential(context.Background(), "test-cred")
 	assert.Error(t, err)
-	assert.Nil(t, cred)
-	assert.Empty(t, secret)
-	assert.Contains(t, err.Error(), "not found")
-
-	mockDAO.AssertExpectations(t)
+	assert.Contains(t, err.Error(), "no tenant in context")
 }
 
-func TestDaemonCredentialStore_GetCredential_KeyProviderError(t *testing.T) {
-	mockDAO := new(MockCredentialDAO)
-	mockKeyProvider := new(MockKeyProvider)
-
-	store, _ := NewDaemonCredentialStore(mockDAO, mockKeyProvider)
-
-	ctx := context.Background()
-	testCred := &types.Credential{
-		Name:              "test-cred",
-		Type:              "generic",
-		EncryptedValue:    []byte("encrypted"),
-		EncryptionIV:      []byte("iv"),
-		KeyDerivationSalt: []byte("salt"),
-	}
-
-	mockDAO.On("GetByName", ctx, "test-cred").Return(testCred, nil)
-	mockKeyProvider.On("GetEncryptionKey", ctx).Return(nil, assert.AnError)
-
-	cred, secret, err := store.GetCredential(ctx, "test-cred")
-	assert.Error(t, err)
-	assert.Nil(t, cred)
-	assert.Empty(t, secret)
-	assert.Contains(t, err.Error(), "failed to get encryption key")
-
-	mockDAO.AssertExpectations(t)
-	mockKeyProvider.AssertExpectations(t)
-}
-
+// TestDaemonCredentialStore_Health delegates to the key provider.
 func TestDaemonCredentialStore_Health(t *testing.T) {
-	mockDAO := new(MockCredentialDAO)
-	mockKeyProvider := new(MockKeyProvider)
+	mp := newMockPool(t)
+	mockKP := new(MockKeyProvider)
 
-	store, _ := NewDaemonCredentialStore(mockDAO, mockKeyProvider)
+	store, err := NewDaemonCredentialStore(mp, mockKP)
+	assert.NoError(t, err)
 
 	ctx := context.Background()
-	expectedHealth := types.HealthStatus{
-		State:   types.HealthStateHealthy,
-		Message: "key provider is healthy",
-	}
-
-	mockKeyProvider.On("Health", ctx).Return(expectedHealth)
+	expected := types.HealthStatus{State: types.HealthStateHealthy, Message: "ok"}
+	mockKP.On("Health", ctx).Return(expected)
 
 	health := store.Health(ctx)
-	assert.Equal(t, expectedHealth, health)
-
-	mockKeyProvider.AssertExpectations(t)
+	assert.Equal(t, expected, health)
+	mockKP.AssertExpectations(t)
 }
 
+// TestDaemonCredentialStore_Close delegates to the key provider.
 func TestDaemonCredentialStore_Close(t *testing.T) {
-	mockDAO := new(MockCredentialDAO)
-	mockKeyProvider := new(MockKeyProvider)
+	mp := newMockPool(t)
+	mockKP := new(MockKeyProvider)
 
-	store, _ := NewDaemonCredentialStore(mockDAO, mockKeyProvider)
-
-	mockKeyProvider.On("Close").Return(nil)
-
-	err := store.Close()
+	store, err := NewDaemonCredentialStore(mp, mockKP)
 	assert.NoError(t, err)
 
-	mockKeyProvider.AssertExpectations(t)
+	mockKP.On("Close").Return(nil)
+	assert.NoError(t, store.Close())
+	mockKP.AssertExpectations(t)
 }
 
+// TestDaemonCredentialStore_ImplementsInterface is a compile-time check via assertion.
 func TestDaemonCredentialStore_ImplementsInterface(t *testing.T) {
-	// Compile-time check that DaemonCredentialStore implements harness.CredentialStore
-	// This is already verified in the source file, but we can test it here too
-	mockDAO := new(MockCredentialDAO)
-	mockKeyProvider := new(MockKeyProvider)
+	mp := newMockPool(t)
+	mockKP := new(MockKeyProvider)
 
-	store, err := NewDaemonCredentialStore(mockDAO, mockKeyProvider)
+	store, err := NewDaemonCredentialStore(mp, mockKP)
 	assert.NoError(t, err)
 	assert.NotNil(t, store)
-
-	// The store should have the required methods
 	assert.Implements(t, (*interface {
 		GetCredential(ctx context.Context, name string) (*types.Credential, string, error)
 		Health(ctx context.Context) types.HealthStatus
