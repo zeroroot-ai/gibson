@@ -6,6 +6,10 @@ Guidance for Claude Code working inside the Gibson daemon. Keep this file in syn
 
 Gibson is the Kubernetes-native AI-agent orchestration **daemon** — a single Go 1.25 binary that exposes gRPC (`:50002`), runs mission DAGs, brokers multi-provider LLM calls, manages a Redis-backed component registry (agents/tools/plugins), and persists discoveries into a Neo4j knowledge graph. All components connect **into** this daemon; agents never touch Redis / Neo4j / LLM providers directly.
 
+## Auth
+
+Auth: see [`docs/auth.md`](docs/auth.md).
+
 ## Data plane
 
 See [`docs/data-plane.md`](docs/data-plane.md) for the per-tenant connection bundle model (`Pool.For(tenant) → *Conn`), per-tenant KEK, envelope encryption, admin pool, and build guards.

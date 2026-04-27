@@ -1,41 +1,173 @@
-# rules.yaml — Gibson daemon, data-plane rules
+# rules.yaml — Gibson daemon
 #
-# Spec: database-per-tenant-data-plane (Phase J, task 10.1).
-# Schema: an authoritative shared schema is planned at
-# sdk/docs/rules-schema.yaml under unified-identity-and-authorization
-# task 10.2 but does not yet exist. The shape used here is a forward-
-# compatible JSON-Schema-style YAML that future tooling
-# ("gibsoncheck doc-driven") can validate.
+# Specs:
+#   - unified-identity-and-authorization (Phase J task 10.1) — `gibson-auth-*`
+#   - database-per-tenant-data-plane    (Phase J task 10.1) — `gibson-dp-*`
 #
-# Field summary:
-#   id        — stable rule identifier (dp-NNN for data-plane rules).
-#   scope     — list of path globs that the rule applies to. "**" means
-#               anywhere in the repo. Globs use Go's filepath.Match
-#               semantics extended with "**" for recursive match.
-#   exempt    — list of path globs that override the scope (e.g. the
-#               narrow allowlists where the pattern is legitimate).
-#   pattern   — kind of rule:
-#                 forbidden-import   — Go import path prefix not allowed.
-#                 forbidden-call     — function/method call site not allowed.
-#                 forbidden-literal  — string literal pattern not allowed.
-#                 required-call      — call must appear in the same scope.
-#                 manual-review      — not mechanically enforced; human gate.
-#   target    — the concrete value the pattern matches (string, regex,
-#               or list, depending on pattern kind).
-#   severity  — error | warning. error fails CI.
-#   message   — short remediation hint shown when the rule fires.
-#   enforced_by — list of currently-implemented enforcement points
-#               (gibsoncheck analyzer name, script path, or "manual").
+# Schema: ../../sdk/docs/rules-schema.yaml v1.0.0.
+#
+# Field summary (full reference: sdk/docs/rules-schema.yaml):
+#   id            — `<repo-slug>-<area>-<NNN>` (gibson-auth-001, gibson-dp-001).
+#   scope         — list of path globs that the rule applies to. "**" matches
+#                   recursively; globs use Go's filepath.Match semantics.
+#   exempt        — list of path globs that override scope.
+#   pattern.kind  — forbidden_import | forbidden_call | forbidden_string |
+#                   required_call | required_annotation
+#   pattern.target — concrete value or regex.
+#   severity      — error | warning | info. error fails CI.
+#   message       — short remediation hint.
+#   enforced_by   — concrete enforcement points (gibsoncheck:<analyzer>,
+#                   script:<path>, helm:<validator>, ci:<job>, or `manual`).
 
-version: 1
+version: "1.0.0"
 
 rules:
-  - id: dp-001
+  # =========================================================================
+  # Auth rules — unified-identity-and-authorization
+  # =========================================================================
+
+  - id: gibson-auth-001
+    description: |
+      The daemon does no JWT validation and no FGA calls. JWT signature /
+      iss / aud / exp validation belongs to Envoy's jwt_authn filter; FGA
+      decisions belong to ext-authz. The daemon trusts the identity
+      headers ext-authz emits because the channel is SPIFFE-pinned mTLS.
+    scope:
+      - "**/*.go"
+    exempt:
+      - "internal/capabilitygrant/**"   # mints CG-JWTs (Ed25519, KMS-derived)
+      - "internal/authz/**"              # narrow FGA bridge for capability grants
+      - "tools/**"
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_import
+      target:
+        - "github.com/zitadel/oidc"
+        - "github.com/zitadel/oidc/v3"
+        - "github.com/openfga/go-sdk"
+        - "github.com/openfga/api"
+    severity: error
+    message: |
+      Move the work to Envoy's jwt_authn (auth) or ext-authz (authz). If
+      the import is genuinely required for CG-JWT minting or the narrow
+      capability-grant FGA bridge, add the file to the documented
+      allowlist with a code comment citing the spec phase.
+    enforced_by:
+      - "gibsoncheck:forbiddenimports"
+      - "ci:gibson-make-check"
+
+  - id: gibson-auth-002
+    description: |
+      The deleted `TrustLocalhost` interceptor option must not return.
+      Audit C17 was a "127.0.0.1 means trusted" bypass; the spec
+      eliminated it structurally.
+    scope:
+      - "**/*.go"
+    exempt:
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_string
+      target: "TrustLocalhost"
+    severity: error
+    message: |
+      No localhost bypass exists. Authentication is the SPIFFE peer pin
+      on the inbound listener plus the ext-authz emitted headers. Local
+      development uses the same path through Envoy.
+    enforced_by:
+      - "gibsoncheck:notrustlocalhost"
+
+  - id: gibson-auth-003
+    description: |
+      Handlers must read tenant from auth.TenantFromContext(ctx), never
+      from the request body. Caller-supplied tenant strings are not
+      authoritative; tenant comes from the verified identity headers
+      ext-authz emits.
+    scope:
+      - "internal/daemon/api/**/*.go"
+      - "internal/harness/**/*.go"
+    exempt:
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_call
+      target: "(req|request)\\.(Tenant|TenantId|TenantID)"
+    severity: warning
+    message: |
+      Replace req.Tenant / req.TenantId / req.TenantID with
+      `tenant, ok := auth.TenantFromContext(ctx)`. The handler sees the
+      tenant ext-authz validated, not whatever the wire carries.
+    enforced_by:
+      - "gibsoncheck:tenantfromcontext"
+
+  - id: gibson-auth-004
+    description: |
+      The daemon registers ONE multiplexed gRPC server. The legacy
+      callback (:50001) and registration (:50100) listeners were
+      eliminated; reintroducing a parallel listener creates a path that
+      bypasses Envoy + ext-authz.
+    scope:
+      - "internal/daemon/**/*.go"
+      - "internal/harness/**/*.go"
+      - "cmd/gibson/**/*.go"
+    pattern:
+      kind: forbidden_string
+      target: ":(50001|50100)\\b"
+    severity: error
+    message: |
+      Use the single daemon.NewServer factory (internal/daemon/grpc.go).
+      Callback and registration RPCs share the same listener; the
+      multiplexed port is the only path Envoy is configured to reach.
+    enforced_by:
+      - "manual"
+
+  - id: gibson-auth-005
+    description: |
+      The startup self-check in internal/daemon/grpc.go must walk every
+      registered service+method and verify a matching SDK registry entry.
+      Removing the check lets a stale registry ship and silently misses
+      authz decisions for new RPCs.
+    scope:
+      - "internal/daemon/grpc.go"
+    pattern:
+      kind: required_call
+      target: "assertRegistryCoverage"
+    severity: error
+    message: |
+      Keep assertRegistryCoverage(srv) in the daemon bootstrap path.
+      A non-coverage state must panic before serving traffic.
+    enforced_by:
+      - "manual"
+
+  - id: gibson-auth-006
+    description: |
+      The CG-JWT signing key is derived from the master KEK held by the
+      configured KeyProvider via HKDF domain separation. The signing
+      key must never be loaded from a Kubernetes Secret in plaintext or
+      hardcoded in config.
+    scope:
+      - "internal/capabilitygrant/**/*.go"
+    exempt:
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_string
+      target: "(?i)cg[_-]?signing[_-]?key|capabilityGrantSecret"
+    severity: error
+    message: |
+      Use crypto.KeyProvider to fetch the master KEK and derive the
+      Ed25519 keypair via HKDF (internal/capabilitygrant/mint.go). No
+      plaintext key bytes in YAML/Secret/code.
+    enforced_by:
+      - "manual"
+
+  # =========================================================================
+  # Data-plane rules — database-per-tenant-data-plane
+  # =========================================================================
+
+  - id: gibson-dp-001
     description: |
       Raw store client libraries (pgx, go-redis, neo4j-go-driver,
       qdrant) may only be imported from the data-plane packages.
-      Every other package must access storage through
-      *datapool.Conn, which is already tenant-bound.
+      Every other package must access storage through *datapool.Conn,
+      which is already tenant-bound.
     scope:
       - "**/*.go"
     exempt:
@@ -46,95 +178,94 @@ rules:
       - "cmd/daemon/**"
       - "internal/daemon/**"
       - "tools/gibsoncheck/**"
-    pattern: forbidden-import
-    target:
-      - "github.com/jackc/pgx/v5"
-      - "github.com/redis/go-redis/v9"
-      - "github.com/neo4j/neo4j-go-driver/v5"
-      - "github.com/qdrant/go-client"
-      - "github.com/alicebob/miniredis/v2"   # test files exempt; analyzer handles
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_import
+      target:
+        - "github.com/jackc/pgx/v5"
+        - "github.com/redis/go-redis/v9"
+        - "github.com/neo4j/neo4j-go-driver/v5"
+        - "github.com/qdrant/go-client"
+        - "github.com/alicebob/miniredis/v2"
     severity: error
     message: |
-      Use internal/datapool/Conn (already tenant-bound) instead of importing
-      raw store clients. See docs/data-plane.md "The Conn pattern".
+      Use internal/datapool/Conn (already tenant-bound) instead of
+      importing raw store clients. See docs/data-plane.md "The Conn
+      pattern".
     enforced_by:
-      - "tools/gibsoncheck/checks/forbid_raw_store_imports.go (ForbidRawStoreImportsAnalyzer)"
+      - "gibsoncheck:forbidrawstoreimports"
 
-  - id: dp-002
+  - id: gibson-dp-002
     description: |
-      Every successful pool.For(ctx, tenant) call must be paired with a
-      conn.Release() — typically via defer immediately after the err
-      check. Skipping Release leaks the KEK and prevents pool eviction.
+      Every successful pool.For(ctx, tenant) call must be paired with
+      conn.Release() — typically `defer conn.Release()` immediately after
+      the err check. Skipping Release leaks the KEK and prevents pool
+      eviction.
     scope:
       - "**/*.go"
     exempt:
       - "internal/datapool/**"
       - "**/*_test.go"
-    pattern: required-call
-    target:
-      after: "pool.For"
-      requires: "Release()"
-      idiom: "defer conn.Release()"
+    pattern:
+      kind: required_call
+      target:
+        after: "pool.For"
+        requires: "Release"
     severity: warning
     message: |
-      Acquire-without-release detected. Add `defer conn.Release()` immediately
-      after the err check. Failure to release leaves the per-tenant KEK
-      in memory and blocks idle eviction.
+      Acquire-without-release detected. Add `defer conn.Release()`
+      immediately after the err check.
     enforced_by:
-      - "manual review"   # no analyzer yet; future ASTwalker
+      - "manual"
 
-  - id: dp-003
+  - id: gibson-dp-003
     description: |
       Migration files must not declare a tenant_id column or property.
       Per-tenant database isolation removes the need; the column would
-      be dead weight that re-introduces the convention-based pattern.
+      be dead weight.
     scope:
       - "migrations/postgres/**/*.sql"
       - "migrations/neo4j/**/*.cypher"
-    pattern: forbidden-literal
-    target:
-      regex: "tenant_id"
+    pattern:
+      kind: forbidden_string
+      target: "tenant_id"
     severity: error
     message: |
       Remove tenant_id. Each tenant owns its own database; the column is
-      implied by which database the row lives in. (Spec Req 1.8 / 2.6.)
+      implied by which database the row lives in.
     enforced_by:
-      - "scripts/check-no-tenant-id-column.sh"
+      - "script:scripts/check-no-tenant-id-column.sh"
 
-  - id: dp-004
+  - id: gibson-dp-004
     description: |
-      Redis key construction must not embed a tenant prefix. The
-      per-tenant client is already routed to the tenant's logical DB,
-      so a tenant-namespaced key is redundant and easy to get wrong.
+      Redis key construction must not embed a tenant prefix. Conn.Redis
+      is already routed to the tenant's logical DB.
     scope:
       - "**/*.go"
     exempt:
-      - "internal/datapool/admin/**"   # master index lookup on db 0
+      - "internal/datapool/admin/**"
       - "internal/datapool/**"
       - "internal/daemon/**"
-      - "internal/audit/**"            # cross-tenant audit stream
-      - "internal/component/**"        # component-name (not tenant) keyed
+      - "internal/audit/**"
+      - "internal/component/**"
       - "internal/migrate/**"
       - "cmd/gibson-migrate/**"
       - "tools/gibsoncheck/**"
-    pattern: forbidden-literal
-    target:
-      regex_list:
-        - "(?i)^tenant:"
-        - "(?i)^gibson:tenant:"
-        - "(?i)^[a-z][a-z0-9_-]*:tenant:"
+    pattern:
+      kind: forbidden_string
+      target: "(?i)^(tenant:|gibson:tenant:|[a-z][a-z0-9_-]*:tenant:)"
     severity: error
     message: |
-      Drop the tenant prefix and use a plain key. Conn.Redis is already
+      Drop the tenant prefix and use a plain key. Conn.Redis is
       DB-scoped to the calling tenant.
     enforced_by:
-      - "tools/gibsoncheck/checks/forbid_redis_key_prefix.go (ForbidRedisKeyPrefixAnalyzer)"
-      - "scripts/check-no-redis-prefix.sh"
+      - "gibsoncheck:forbidrediskeyprefix"
+      - "script:scripts/check-no-redis-prefix.sh"
 
-  - id: dp-005
+  - id: gibson-dp-005
     description: |
       The cross-tenant admin pool may be acquired only from the two
-      designated locations. CODEOWNERS narrow waist (Spec Req 11.5).
+      designated locations. CODEOWNERS narrow waist.
     scope:
       - "**/*.go"
     exempt:
@@ -144,55 +275,52 @@ rules:
       - "cmd/gibson-migrate/**"
       - "tools/gibsoncheck/**"
       - "**/*_test.go"
-    pattern: forbidden-import
-    target:
-      - "github.com/zero-day-ai/gibson/internal/datapool/admin"
+    pattern:
+      kind: forbidden_import
+      target:
+        - "github.com/zero-day-ai/gibson/internal/datapool/admin"
     severity: error
     message: |
-      Cross-tenant access requires CODEOWNERS review. Move the call into
-      internal/admin/ or use Pool.For(tenant) for per-tenant access.
+      Cross-tenant access requires CODEOWNERS review. Move the call
+      into internal/admin/ or use Pool.For(tenant) for per-tenant
+      access.
     enforced_by:
-      - "tools/gibsoncheck/checks/admin_pool_acquire.go (AdminPoolAcquireAnalyzer)"
+      - "gibsoncheck:adminpoolacquire"
 
-  - id: dp-006
+  - id: gibson-dp-006
     description: |
       Anything secret-shaped persisted to storage must be wrapped via
       datapool/envelope/Encrypt(conn.KEK, plaintext, aad). aad must
-      bind the record to its context (record_type + identifier) so a
-      row cannot be moved or renamed without decryption failing.
+      bind the record to its context (record_type + identifier).
     scope:
       - "internal/credentials/**"
       - "internal/providerconfig/**"
       - "internal/database/**"
       - "internal/datapool/conn_credentials.go"
-    pattern: manual-review
-    target:
-      requires: "envelope.Encrypt(...)"
+    pattern:
+      kind: required_call
+      target: "envelope.Encrypt"
     severity: error
     message: |
-      Any field that holds a secret (BYOK key, customer credential,
-      sensitive mission output) must be stored via envelope.Encrypt with
-      AAD = "<record_type>:<identifier>". Plain inserts are forbidden.
+      Any field that holds a secret must be stored via envelope.Encrypt
+      with AAD = "<record_type>:<identifier>".
     enforced_by:
-      - "manual review (CODEOWNERS for the listed packages)"
+      - "manual"
 
-  - id: dp-007
+  - id: gibson-dp-007
     description: |
-      Cypher queries must not include tenant_id filters. Per-tenant Neo4j
-      database isolation makes the filter dead code; carrying it forward
-      re-introduces the convention-based pattern this spec deletes.
+      Cypher queries must not include tenant_id filters. Conn.Neo4j is
+      bound to the tenant's dedicated database.
     scope:
       - "internal/graphrag/**/*.go"
       - "internal/orchestrator/**/*.go"
       - "migrations/neo4j/**/*.cypher"
-    pattern: forbidden-literal
-    target:
-      regex_list:
-        - "(?i)WHERE\\s+\\w+\\.tenant_id"
-        - "(?i)\\.tenant_id\\s*="
+    pattern:
+      kind: forbidden_string
+      target: "(?i)(WHERE\\s+\\w+\\.tenant_id|\\.tenant_id\\s*=)"
     severity: error
     message: |
       Remove the tenant_id filter. Conn.Neo4j is bound to the tenant's
       dedicated database; standard Cypher works without a tenant filter.
     enforced_by:
-      - "scripts/check-no-tenant-id-column.sh"
+      - "script:scripts/check-no-tenant-id-column.sh"
