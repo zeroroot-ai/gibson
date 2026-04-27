@@ -8,11 +8,13 @@ import (
 	"github.com/redis/go-redis/v9"
 	sdkmemory "github.com/zero-day-ai/sdk/memory"
 
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
 
 // ContinuityOpts holds parameters for cross-run memory continuity.
@@ -53,6 +55,12 @@ type MemoryManagerFactory struct {
 	// config is the memory configuration to apply to all managers
 	config *memory.MemoryConfig
 
+	// pool is the Phase D per-tenant data-plane pool. When set, CreateForMission
+	// acquires a Conn for the tenant and uses the per-tenant Redis client for
+	// ConnBoundMissionMemory. Falls back to the stateClient (global, prefixed)
+	// when pool is nil or when the tenant string is empty/invalid.
+	pool datapool.Pool
+
 	// sharedLongTerm is the cross-mission long-term memory instance.
 	// Created lazily on first use and reused for all missions.
 	sharedLongTerm memory.LongTermMemory
@@ -62,6 +70,14 @@ type MemoryManagerFactory struct {
 
 	// sharedEmbedder is the embedder instance reused across missions.
 	sharedEmbedder embedder.Embedder
+}
+
+// SetPool wires the Phase D per-tenant data-plane pool into the factory.
+// When set, CreateForMission uses the per-tenant Redis client from Pool.For
+// rather than the global stateClient for mission memory.
+// Safe to call at any time before CreateForMission is first called.
+func (f *MemoryManagerFactory) SetPool(p datapool.Pool) {
+	f.pool = p
 }
 
 // NewMemoryManagerFactory creates a new MemoryManagerFactory.
@@ -143,7 +159,8 @@ func (f *MemoryManagerFactory) CreateForMissionWithContinuity(ctx context.Contex
 //
 // It creates:
 //   - Working memory: SDK RedisWorkingMemory (distributed, ephemeral) wrapped with adapter
-//   - Mission memory: RedisMissionMemory with RediSearch for full-text search and tenant isolation
+//   - Mission memory: ConnBoundMissionMemory (per-tenant Redis client, Phase D) when a Pool
+//     and valid tenantID are available, otherwise RedisMissionMemory (global, prefixed).
 //   - Long-term memory: Vector store for semantic search
 //
 // The Redis implementations provide distributed, high-performance storage suitable
@@ -158,20 +175,47 @@ func (f *MemoryManagerFactory) createRedisBackedManager(ctx context.Context, mis
 		return nil, fmt.Errorf("failed to create Redis working memory: %w", err)
 	}
 
-	// Build mission memory options: TTL + optional continuity
-	missionOpts := []memory.RedisMissionMemoryOption{
-		memory.WithTTL(f.config.Mission.TTL),
-	}
-	if continuity != nil && continuity.Mode != memory.MemoryIsolated {
-		missionOpts = append(missionOpts, memory.WithContinuity(
-			continuity.Mode,
-			continuity.PreviousMissionID,
-			continuity.MissionName,
-		))
+	var missionMem memory.MissionMemory
+
+	// Phase D: use per-tenant Redis client from Pool when available.
+	// The pool provides structural tenant isolation (per-tenant logical DB)
+	// replacing the global stateClient with tenant-prefixed keys.
+	if f.pool != nil && tenantID != "" {
+		if tid, tidErr := sdkauth.NewTenantID(tenantID); tidErr == nil {
+			if conn, connErr := f.pool.For(ctx, tid); connErr == nil {
+				connOpts := []memory.ConnBoundMissionMemoryOption{
+					memory.WithConnTTL(f.config.Mission.TTL),
+				}
+				if continuity != nil && continuity.Mode != memory.MemoryIsolated {
+					connOpts = append(connOpts, memory.WithConnContinuity(
+						continuity.Mode,
+						continuity.PreviousMissionID,
+					))
+				}
+				missionMem = memory.NewConnBoundMissionMemory(conn.Redis, missionID, connOpts...)
+				// Release the Conn immediately: the per-tenant Redis client is long-lived
+				// in the pool and remains valid after conn.Release(). MissionMemory operations
+				// go directly through the client, not through the Conn lifecycle.
+				conn.Release()
+			}
+			// If Pool.For fails (e.g., tenant not provisioned), fall through to legacy path below.
+		}
 	}
 
-	// Create Redis-backed mission memory scoped to the tenant for defense-in-depth isolation.
-	missionMem := memory.NewRedisMissionMemory(f.stateClient, missionID, tenantID, missionOpts...)
+	// Fallback: global stateClient with tenant-prefixed keys (Phase C / single-tenant mode).
+	if missionMem == nil {
+		legacyOpts := []memory.RedisMissionMemoryOption{
+			memory.WithTTL(f.config.Mission.TTL),
+		}
+		if continuity != nil && continuity.Mode != memory.MemoryIsolated {
+			legacyOpts = append(legacyOpts, memory.WithContinuity(
+				continuity.Mode,
+				continuity.PreviousMissionID,
+				continuity.MissionName,
+			))
+		}
+		missionMem = memory.NewRedisMissionMemory(f.stateClient, missionID, tenantID, legacyOpts...)
+	}
 
 	// Get or create shared long-term memory (cross-mission vector store)
 	longTermMem, vectorStore, err := f.getOrCreateSharedLongTermMemory()

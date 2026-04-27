@@ -22,6 +22,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/crypto/providers"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/database"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
@@ -253,10 +254,18 @@ type daemonImpl struct {
 	dashboardDB *sql.DB
 
 	// credentialPGPool is a pgxpool.Pool pointing at the same Postgres host as
-	// dashboardDB, used by the Phase C credential DAO bridge. Phase D will replace
-	// this with per-tenant Conn acquisition from the data-plane pool.
+	// dashboardDB, used by the Phase C credential DAO bridge. Phase D wired the
+	// data-plane Pool (below); credential/providerconfig DAO bridge replacement
+	// is tracked by TODO(database-per-tenant-data-plane Phase D cutover).
 	// May be nil when DashboardPostgres is not configured.
 	credentialPGPool *pgxpool.Pool
+
+	// pool is the per-tenant data-plane connection pool introduced in Phase B/C/D.
+	// It provides tenant-isolated Postgres, Redis, Neo4j, and vector store connections
+	// via Pool.For(ctx, tenant). Nil when keyProvider is not configured (no security.key_provider).
+	// Initialized after the keyProvider is resolved during Start().
+	// Shutdown via pool.Close() in stopServices().
+	pool datapool.Pool
 
 	// spiffeX509Source is the SPIFFE Workload API X.509 SVID source used by the
 	// gRPC server for mTLS. It must be closed on daemon shutdown to release the
@@ -439,7 +448,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.redisEventStream = NewRedisEventStream(stateClient, d.logger.Slog())
 	d.logger.Info(ctx, "redis event stream initialized")
 
-	// Initialize Redis stores
+	// Initialize Redis stores.
+	// TODO(database-per-tenant-data-plane Phase D cutover): missionStore and missionRunStore
+	// are global multi-tenant stores (prefixed keys via RedisMissionStore/RedisMissionRunStore).
+	// Per-tenant ConnBoundMissionStore / ConnBoundRunStore are used by the memory factory and
+	// memory resolver (Phase D). Migrating these global stores to ConnBound requires restructuring
+	// daemon startup paths (recoverRunningMissions, discoverCheckpoints) that operate without a
+	// per-tenant context. Tracked as a follow-up: migrate handler call sites one at a time once
+	// the Pool is fully wired and the admin-path / startup-path distinction is resolved.
 	d.missionStore = mission.NewRedisMissionStore(stateClient)
 	d.missionRunStore = mission.NewRedisMissionRunStore(stateClient)
 	d.checkpointStore = mission.NewRedisCheckpointStore(stateClient)
@@ -571,9 +587,40 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		} else {
 			d.keyProvider = keyProvider
 
+			// Phase D: instantiate the per-tenant data-plane Pool now that the
+			// keyProvider is available. The pool provides tenant-isolated Postgres,
+			// Redis, Neo4j, and vector store connections via Pool.For(ctx, tenant).
+			// provisioningChecker is nil here — Phase F will wire the K8s client.
+			// Without a checker, Pool.For bypasses the Tenant CRD readiness gate,
+			// which is acceptable for Phase D (fail-open until F lands).
+			poolCfg := datapool.DefaultConfig()
+			if d.config.Redis.URL != "" {
+				poolCfg.RedisAddr = d.config.Redis.URL
+			}
+			if d.config.GraphRAG.Neo4j.URI != "" {
+				poolCfg.Neo4jURI = d.config.GraphRAG.Neo4j.URI
+				poolCfg.Neo4jUser = d.config.GraphRAG.Neo4j.Username
+				poolCfg.Neo4jPassword = d.config.GraphRAG.Neo4j.Password
+			}
+			p, poolErr := datapool.NewPool(ctx, poolCfg, keyProvider, nil)
+			if poolErr != nil {
+				d.logger.Warn(ctx, "data-plane pool initialization failed (per-tenant store ops will be unavailable)",
+					"error", poolErr)
+			} else {
+				d.pool = p
+				d.logger.Info(ctx, "data-plane pool initialized (Phase D)")
+				// Inject pool into memory factory so CreateForMission uses per-tenant
+				// Redis clients (ConnBoundMissionMemory) instead of the global stateClient.
+				if d.infrastructure != nil && d.infrastructure.memoryManagerFactory != nil {
+					d.infrastructure.memoryManagerFactory.SetPool(p)
+					d.logger.Info(ctx, "data-plane pool wired into memory manager factory")
+				}
+			}
+
 			// Phase C: credentials stored in Postgres with envelope encryption.
-			// Use credentialPGPool (initialized from DashboardPostgres config) as a
-			// bridge until Phase D threads per-tenant datapool.Conn through handlers.
+			// TODO(database-per-tenant-data-plane Phase D cutover): replace this bridge with
+			// conn.Credentials() / conn.ProviderConfigs() once the CredentialDAO/ProviderConfigStore
+			// interfaces are aligned with CredentialOps / the ConnBound ops surface.
 			var credentialDAO database.CredentialDAO
 			if d.credentialPGPool != nil {
 				masterKey, mkErr := keyProvider.GetEncryptionKey(ctx)
@@ -1141,6 +1188,15 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 		d.logger.Info(ctx, "closing credential pgxpool")
 		d.credentialPGPool.Close()
 		d.credentialPGPool = nil
+	}
+
+	// Close Phase D data-plane pool.
+	if d.pool != nil {
+		d.logger.Info(ctx, "closing data-plane pool")
+		if err := d.pool.Close(); err != nil {
+			d.logger.Warn(ctx, "error closing data-plane pool", "error", err)
+		}
+		d.pool = nil
 	}
 
 	// Close SPIFFE X509Source to release the Workload API socket connection.

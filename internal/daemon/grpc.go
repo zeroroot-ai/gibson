@@ -695,7 +695,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// RedisMemoryResolver caches MissionMemory instances in a sync.Map and
 			// resolves work_id → mission_id via short-lived Redis hash keys written
 			// by PollWork when work items carrying mission_id context are dispatched.
-			compSvc.WithMemoryResolver(component.NewRedisMemoryResolver(d.stateClient))
+			memResolver := component.NewRedisMemoryResolver(d.stateClient)
+			if d.pool != nil {
+				memResolver.SetPool(d.pool)
+				d.logger.Info(ctx, "data-plane pool wired into memory resolver (Phase D)")
+			}
+			compSvc.WithMemoryResolver(memResolver)
 
 			// Wire the quota manager so RegisterComponent enforces per-tenant
 			// agent quotas before the agent is admitted to the registry.

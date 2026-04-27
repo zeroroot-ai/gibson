@@ -25,9 +25,11 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -113,14 +115,23 @@ func NewWorkContextNotFoundError(workID string) *types.GibsonError {
 // ---------------------------------------------------------------------------
 
 // RedisMemoryResolver implements MemoryResolver using Redis for the
-// work-item→mission mapping and caches *RedisMissionMemory instances in a
+// work-item→mission mapping and caches MissionMemory instances in a
 // sync.Map keyed by "{tenant}:{missionID}".
+//
+// Phase D: when a Pool is configured (via SetPool), ResolveForWork uses the
+// per-tenant Redis client from Pool.For (ConnBoundMissionMemory) for structural
+// tenant isolation. Falls back to the global stateClient (prefixed keys) when
+// pool is nil or tenant lookup fails.
 //
 // Thread safety: all methods are safe for concurrent use. The sync.Map ensures
 // that at most one RedisMissionMemory is created per mission even under
 // concurrent requests.
 type RedisMemoryResolver struct {
 	stateClient *state.StateClient
+
+	// pool is the Phase D per-tenant data-plane pool. When set, ResolveForWork
+	// uses the per-tenant Redis client (ConnBoundMissionMemory). May be nil.
+	pool datapool.Pool
 
 	// cache maps "{tenant}:{missionID}" → memory.MissionMemory
 	cache sync.Map
@@ -134,6 +145,14 @@ var _ MemoryResolver = (*RedisMemoryResolver)(nil)
 // instances it creates; it must already be connected and healthy.
 func NewRedisMemoryResolver(stateClient *state.StateClient) *RedisMemoryResolver {
 	return &RedisMemoryResolver{stateClient: stateClient}
+}
+
+// SetPool wires the Phase D per-tenant data-plane pool into the resolver.
+// When set, ResolveForWork uses the per-tenant Redis client from Pool.For
+// (ConnBoundMissionMemory) for structural tenant isolation.
+// Safe to call at any time before ResolveForWork is first called.
+func (r *RedisMemoryResolver) SetPool(p datapool.Pool) {
+	r.pool = p
 }
 
 // RegisterWorkContext writes a Redis hash at gibson:work:ctx:{work_id} with
@@ -216,16 +235,31 @@ func (r *RedisMemoryResolver) ResolveForWork(
 	cacheKey := storedTenant + ":" + missionID
 
 	// Load or store: if another goroutine is already creating this instance we
-	// will get theirs; both paths are equivalent since RedisMissionMemory is
+	// will get theirs; both paths are equivalent since the memory impl is
 	// stateless with respect to the Redis connection.
 	if cached, ok := r.cache.Load(cacheKey); ok {
 		return cached.(memory.MissionMemory), nil
 	}
 
-	mm := memory.NewRedisMissionMemory(r.stateClient, types.ID(missionID), storedTenant)
+	// Phase D: use per-tenant Redis client when pool is configured.
+	var mm memory.MissionMemory
+	if r.pool != nil && storedTenant != "" {
+		if tid, tidErr := sdkauth.NewTenantID(storedTenant); tidErr == nil {
+			if conn, connErr := r.pool.For(ctx, tid); connErr == nil {
+				mm = memory.NewConnBoundMissionMemory(conn.Redis, types.ID(missionID))
+				// Release the Conn immediately: the per-tenant Redis client is long-lived
+				// in the pool and remains valid after conn.Release().
+				conn.Release()
+			}
+		}
+	}
+	// Fallback: global stateClient with tenant-prefixed keys.
+	if mm == nil {
+		mm = memory.NewRedisMissionMemory(r.stateClient, types.ID(missionID), storedTenant)
+	}
 
 	// LoadOrStore is safe: if two goroutines race here we simply discard the
-	// duplicate; both RedisMissionMemory values are equivalent wrappers.
+	// duplicate; both values are equivalent wrappers over the same Redis connection.
 	actual, _ := r.cache.LoadOrStore(cacheKey, mm)
 	return actual.(memory.MissionMemory), nil
 }
