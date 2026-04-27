@@ -10,6 +10,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/audit"
@@ -250,6 +251,12 @@ type daemonImpl struct {
 	// no DashboardPostgresConfig is provided or when the connection fails at startup
 	// (degraded mode — provisioning unavailable but missions/tools/agents continue).
 	dashboardDB *sql.DB
+
+	// credentialPGPool is a pgxpool.Pool pointing at the same Postgres host as
+	// dashboardDB, used by the Phase C credential DAO bridge. Phase D will replace
+	// this with per-tenant Conn acquisition from the data-plane pool.
+	// May be nil when DashboardPostgres is not configured.
+	credentialPGPool *pgxpool.Pool
 
 	// spiffeX509Source is the SPIFFE Workload API X.509 SVID source used by the
 	// gRPC server for mTLS. It must be closed on daemon shutdown to release the
@@ -564,49 +571,31 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		} else {
 			d.keyProvider = keyProvider
 
-			// Create credential store with Redis DAO and KeyProvider
-			credentialDAO := database.NewRedisCredentialDAO(d.stateClient)
-			d.logger.Info(ctx, "using Redis credential DAO")
-
-			credentialStore, err := NewDaemonCredentialStore(credentialDAO, keyProvider)
-			if err != nil {
-				d.logger.Warn(ctx, "failed to initialize credential store (credentials will not be available)",
-					"error", err)
-			} else {
-				d.credentialStore = credentialStore
-				d.callback.SetCredentialStore(credentialStore)
-				d.logger.Info(ctx, "configured callback service with credential store")
-
-				// Initialize plugin access store for tenant-scoped plugin opt-in management.
-				// Shares the same Redis client, encryptor, key provider, and component registry
-				// as the credential store so plugin configs are co-located with other daemon state.
-				if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
-					d.pluginAccessStore = component.NewRedisPluginAccessStore(
-						redisClient,
-						crypto.NewAESGCMEncryptor(),
-						keyProvider,
-						d.compRegistry,
-						d.logger.Slog(),
-					)
-					d.logger.Info(ctx, "initialized plugin access store")
-
-					// Patch the harness factory that was built before the key provider was
-					// available. The factory stores config by value so we use SetPluginAccess
-					// to inject the store without rebuilding the entire factory.
-					if d.infrastructure != nil && d.infrastructure.harnessFactory != nil {
-						if df, ok := d.infrastructure.harnessFactory.(*harness.DefaultHarnessFactory); ok {
-							df.SetPluginAccess(d.pluginAccessStore)
-							d.logger.Info(ctx, "wired plugin access store into harness factory")
-						}
-					}
-
-					// Initialize tool and agent access stores.
-					d.toolAccessStore = component.NewRedisToolAccessStore(redisClient, d.logger.Slog())
-					d.agentAccessStore = component.NewRedisAgentAccessStore(redisClient, d.logger.Slog())
-					d.logger.Info(ctx, "initialized tool and agent access stores")
-
+			// Phase C: credentials stored in Postgres with envelope encryption.
+			// Use credentialPGPool (initialized from DashboardPostgres config) as a
+			// bridge until Phase D threads per-tenant datapool.Conn through handlers.
+			var credentialDAO database.CredentialDAO
+			if d.credentialPGPool != nil {
+				masterKey, mkErr := keyProvider.GetEncryptionKey(ctx)
+				if mkErr != nil {
+					d.logger.Warn(ctx, "failed to get master key for credential DAO", "error", mkErr)
 				} else {
-					d.logger.Warn(ctx, "plugin access store unavailable: Redis client is not standalone mode")
+					credentialDAO = database.NewPostgresCredentialDAO(d.credentialPGPool, masterKey)
+					d.logger.Info(ctx, "using Postgres credential DAO (Phase C bridge)")
+				}
+			} else {
+				d.logger.Info(ctx, "credential Postgres pool not available — credentials unavailable until dashboard Postgres is configured")
+			}
+
+			if credentialDAO != nil {
+				credentialStore, err := NewDaemonCredentialStore(credentialDAO, keyProvider)
+				if err != nil {
+					d.logger.Warn(ctx, "failed to initialize credential store (credentials will not be available)",
+						"error", err)
+				} else {
+					d.credentialStore = credentialStore
+					d.callback.SetCredentialStore(credentialStore)
+					d.logger.Info(ctx, "configured callback service with credential store")
 				}
 
 				// Initialize credential handler for dashboard API
@@ -626,6 +615,36 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 						d.logger.Info(ctx, "initialized LLM config handler for dashboard API")
 					}
 				}
+			}
+
+			// Plugin access store still uses Redis (plugin store migration is Phase D).
+			if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
+				d.pluginAccessStore = component.NewRedisPluginAccessStore(
+					redisClient,
+					crypto.NewAESGCMEncryptor(),
+					keyProvider,
+					d.compRegistry,
+					d.logger.Slog(),
+				)
+				d.logger.Info(ctx, "initialized plugin access store")
+
+				// Patch the harness factory that was built before the key provider was
+				// available. The factory stores config by value so we use SetPluginAccess
+				// to inject the store without rebuilding the entire factory.
+				if d.infrastructure != nil && d.infrastructure.harnessFactory != nil {
+					if df, ok := d.infrastructure.harnessFactory.(*harness.DefaultHarnessFactory); ok {
+						df.SetPluginAccess(d.pluginAccessStore)
+						d.logger.Info(ctx, "wired plugin access store into harness factory")
+					}
+				}
+
+				// Initialize tool and agent access stores.
+				d.toolAccessStore = component.NewRedisToolAccessStore(redisClient, d.logger.Slog())
+				d.agentAccessStore = component.NewRedisAgentAccessStore(redisClient, d.logger.Slog())
+				d.logger.Info(ctx, "initialized tool and agent access stores")
+
+			} else {
+				d.logger.Warn(ctx, "plugin access store unavailable: Redis client is not standalone mode")
 			}
 		}
 	} else {
@@ -1107,6 +1126,13 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 		d.dashboardDB = nil
 	}
 
+	// Close Phase C credential pgxpool.
+	if d.credentialPGPool != nil {
+		d.logger.Info(ctx, "closing credential pgxpool")
+		d.credentialPGPool.Close()
+		d.credentialPGPool = nil
+	}
+
 	// Close SPIFFE X509Source to release the Workload API socket connection.
 	if d.spiffeX509Source != nil {
 		d.logger.Info(ctx, "closing SPIFFE X509Source")
@@ -1190,6 +1216,27 @@ func (d *daemonImpl) initDashboardPostgres(ctx context.Context) {
 	// gibson-tenant-operator. The daemon simply relies on whatever schema
 	// the operator has provisioned.
 	d.dashboardDB = db
+
+	// Phase C: also create a pgxpool.Pool for the credential DAO.
+	// pgxpool uses the pgx-native connection string format.
+	pgxDSN := fmt.Sprintf(
+		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		pgCfg.Username,
+		pgCfg.Password,
+		pgCfg.Host,
+		pgCfg.Port,
+		pgCfg.Database,
+		pgCfg.SSLMode,
+	)
+	credPool, credPoolErr := pgxpool.New(ctx, pgxDSN)
+	if credPoolErr != nil {
+		d.logger.Warn(ctx, "credential pgxpool: failed to create (credential DAO unavailable)",
+			"error", credPoolErr,
+		)
+		return
+	}
+	d.credentialPGPool = credPool
+	d.logger.Info(ctx, "credential pgxpool: established for Phase C credential DAO bridge")
 }
 
 // status returns the current daemon status and health information.

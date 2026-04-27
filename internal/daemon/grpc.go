@@ -24,7 +24,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
@@ -297,20 +296,25 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
 	}
 
-	// Wire provider-config store and execution rate limiter (spec 25, task 4).
-	// Both require a Redis client: the provider store for encrypted credential
-	// storage, the rate limiter for per-(tenant, RPC) sliding-window counters.
-	if d.stateClient != nil && d.stateClient.Client() != nil && d.keyProvider != nil {
-		enc := crypto.NewAESGCMEncryptor()
-		provStore, provStoreErr := providerconfig.NewStore(d.stateClient.Client(), enc, d.keyProvider)
-		if provStoreErr != nil {
-			d.logger.Warn(ctx, "provider-config store not wired", "error", provStoreErr)
+	// Wire provider-config store (Phase C: Postgres-backed with envelope encryption).
+	// Falls back gracefully when the credential Postgres pool is not yet configured.
+	if d.credentialPGPool != nil && d.keyProvider != nil {
+		masterKey, mkErr := d.keyProvider.GetEncryptionKey(ctx)
+		if mkErr != nil {
+			d.logger.Warn(ctx, "provider-config store not wired: could not get master key", "error", mkErr)
 		} else {
-			daemonSvc.WithProviderConfigStore(provStore)
-			d.logger.Info(ctx, "provider-config store wired into DaemonServer (spec 25)")
+			provStore, provStoreErr := providerconfig.NewPostgresStore(d.credentialPGPool, masterKey)
+			if provStoreErr != nil {
+				d.logger.Warn(ctx, "provider-config store not wired", "error", provStoreErr)
+			} else {
+				daemonSvc.WithProviderConfigStore(provStore)
+				d.logger.Info(ctx, "provider-config store wired into DaemonServer (Phase C Postgres)")
+			}
 		}
 	} else if d.keyProvider == nil {
 		d.logger.Info(ctx, "provider-config store not wired: no key provider configured (set security.key_provider)")
+	} else {
+		d.logger.Info(ctx, "provider-config store not wired: dashboard Postgres not configured")
 	}
 
 	if d.stateClient != nil && d.stateClient.Client() != nil {

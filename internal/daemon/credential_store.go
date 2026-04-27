@@ -11,18 +11,21 @@ import (
 )
 
 // DaemonCredentialStore implements harness.CredentialStore using the
-// daemon's database and key provider for secure credential retrieval.
-// It supports both SQLite and Redis credential DAOs via the CredentialDAO interface.
+// daemon's Postgres-backed CredentialDAO with envelope encryption.
+//
+// Phase C: credentials are stored in Postgres using AES Key Wrap DEK +
+// AES-256-GCM per-record envelope encryption. The keyProvider is retained for
+// Health() and Close() — the actual decryption is performed inside
+// database.PostgresCredentialDAO, which holds the KEK.
 type DaemonCredentialStore struct {
 	dao         database.CredentialDAO
-	encryptor   *crypto.AESGCMEncryptor
 	keyProvider crypto.KeyProvider
 }
 
 // NewDaemonCredentialStore creates a new credential store for the daemon.
-// It uses the provided KeyProvider to retrieve the master encryption key.
-// The dao parameter accepts any CredentialDAO implementation (SQLite or Redis).
-// The keyProvider parameter retrieves keys from Kubernetes Secrets, Vault, or other secret stores.
+// dao must be a database.CredentialDAO backed by the per-tenant Postgres
+// store (database.PostgresCredentialDAO or equivalent). The keyProvider is
+// used for Health() and Close(); decryption is handled by the DAO itself.
 func NewDaemonCredentialStore(dao database.CredentialDAO, keyProvider crypto.KeyProvider) (*DaemonCredentialStore, error) {
 	if dao == nil {
 		return nil, fmt.Errorf("credential DAO cannot be nil")
@@ -33,41 +36,28 @@ func NewDaemonCredentialStore(dao database.CredentialDAO, keyProvider crypto.Key
 
 	return &DaemonCredentialStore{
 		dao:         dao,
-		encryptor:   crypto.NewAESGCMEncryptor(),
 		keyProvider: keyProvider,
 	}, nil
 }
 
-// GetCredential retrieves a credential by name and decrypts its value.
-// Returns the credential metadata and the decrypted secret value.
+// GetCredential retrieves a credential by name.
+// The PostgresCredentialDAO performs envelope decryption internally; the
+// plaintext secret is returned in cred.EncryptedValue (legacy field reuse).
+// The returned string is the decrypted plaintext secret.
+//
+// SECURITY: never log or persist the returned string value.
 func (s *DaemonCredentialStore) GetCredential(ctx context.Context, name string) (*types.Credential, string, error) {
-	// Fetch credential from database
 	cred, err := s.dao.GetByName(ctx, name)
 	if err != nil {
 		return nil, "", fmt.Errorf("credential %q not found: %w", name, err)
 	}
-
-	// Get master key from provider
-	masterKey, err := s.keyProvider.GetEncryptionKey(ctx)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get encryption key: %w", err)
-	}
-
-	// Decrypt the credential value
-	decryptedValue, err := s.encryptor.Decrypt(
-		cred.EncryptedValue,
-		cred.EncryptionIV,
-		cred.KeyDerivationSalt,
-		masterKey,
-	)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to decrypt credential: %w", err)
-	}
-
-	return cred, string(decryptedValue), nil
+	// PostgresCredentialDAO.GetByName decrypts via envelope and stores the
+	// plaintext secret bytes in cred.EncryptedValue for backward compat.
+	secret := string(cred.EncryptedValue)
+	return cred, secret, nil
 }
 
-// Health returns the health status of the credential store.
+// Health returns the health status of the key provider.
 func (s *DaemonCredentialStore) Health(ctx context.Context) types.HealthStatus {
 	return s.keyProvider.Health(ctx)
 }
