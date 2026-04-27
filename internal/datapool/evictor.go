@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	dpmetrics "github.com/zero-day-ai/gibson/internal/datapool/metrics"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -101,6 +102,7 @@ func (e *evictor) sweep() {
 
 		lastReleased := time.Unix(0, entry.lastReleased.Load())
 		if now.Sub(lastReleased) > e.idleTTL {
+			dpmetrics.IncPoolIdleEviction(tenant.String())
 			e.p.evictTenant(tenant)
 		}
 		return true

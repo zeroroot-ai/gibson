@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/zero-day-ai/gibson/internal/crypto"
+	dpmetrics "github.com/zero-day-ai/gibson/internal/datapool/metrics"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -143,6 +144,9 @@ func (p *pool) For(ctx context.Context, tenant auth.TenantID) (*Conn, error) {
 		return nil, fmt.Errorf("datapool: For called with zero TenantID")
 	}
 
+	// Start acquire timer for gibson_pool_acquire_duration_seconds{store="all"}.
+	acquireStart := time.Now()
+
 	// Step 1: provisioning check.
 	if p.checker != nil {
 		if _, err := p.checker.isProvisioned(ctx, tenant); err != nil {
@@ -206,6 +210,11 @@ func (p *pool) For(ctx context.Context, tenant auth.TenantID) (*Conn, error) {
 	entry := p.getOrCreateEntry(tenant)
 	entry.activeConns.Add(1)
 
+	// Record acquire duration and increment active conn gauge.
+	dpmetrics.ObservePoolAcquireDuration(dpmetrics.StoreAll, time.Since(acquireStart).Seconds())
+	dpmetrics.IncPoolActiveConns(tenant.String())
+
+	tenantStr := tenant.String()
 	conn.release = func() {
 		// Close Neo4j session (sessions are per-Conn; not pooled).
 		if conn.Neo4j != nil {
@@ -214,6 +223,8 @@ func (p *pool) For(ctx context.Context, tenant auth.TenantID) (*Conn, error) {
 		// Decrement active conn count and record last-released timestamp.
 		entry.activeConns.Add(-1)
 		entry.lastReleased.Store(time.Now().UnixNano())
+		// Decrement active conn gauge.
+		dpmetrics.DecPoolActiveConns(tenantStr)
 	}
 
 	return conn, nil
@@ -223,26 +234,34 @@ func (p *pool) For(ctx context.Context, tenant auth.TenantID) (*Conn, error) {
 // It is called inside a singleflight group so only one goroutine runs it at
 // a time per tenant.
 func (p *pool) initTenant(ctx context.Context, tenant auth.TenantID, tenantKEK []byte) error {
+	tenantStr := tenant.String()
+
 	// Postgres pool is lazily created in pgPerTenant.ForTenant; we warm it
 	// here to detect NotProvisioned early.
 	_, err := p.pg.ForTenant(ctx, tenant, tenantKEK)
 	if err != nil {
 		var npErr *NotProvisionedError
 		if errors.As(err, &npErr) {
+			dpmetrics.IncPoolInitFailure(tenantStr, dpmetrics.StorePostgres, "not_provisioned")
 			return npErr
 		}
+		dpmetrics.IncPoolInitFailure(tenantStr, dpmetrics.StorePostgres, "conn_error")
 		return fmt.Errorf("datapool: tenant %s init: postgres: %w", tenant, err)
 	}
+	dpmetrics.IncPoolInit(tenantStr, dpmetrics.StorePostgres)
 
 	// Redis is optional; skip if not configured.
 	if p.redisPool != nil {
 		if _, err := p.redisPool.ForTenant(ctx, tenant); err != nil {
 			var npErr *NotProvisionedError
 			if errors.As(err, &npErr) {
+				dpmetrics.IncPoolInitFailure(tenantStr, dpmetrics.StoreRedis, "not_provisioned")
 				return npErr
 			}
+			dpmetrics.IncPoolInitFailure(tenantStr, dpmetrics.StoreRedis, "conn_error")
 			return fmt.Errorf("datapool: tenant %s init: redis: %w", tenant, err)
 		}
+		dpmetrics.IncPoolInit(tenantStr, dpmetrics.StoreRedis)
 	}
 
 	return nil

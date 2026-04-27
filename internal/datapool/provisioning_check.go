@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
+	dpmetrics "github.com/zero-day-ai/gibson/internal/datapool/metrics"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -129,12 +130,14 @@ func (c *provisioningChecker) fetchFromAPI(ctx context.Context, tenant auth.Tena
 	obj, err := resource.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
+			dpmetrics.IncProvisioningCheckFailure(dpmetrics.ReasonNotProvisioned)
 			return false, &NotProvisionedError{
 				Tenant: tenant.String(),
 				Reason: fmt.Sprintf("Tenant CRD %q not found in cluster", name),
 			}
 		}
 		// Transient API error — fail closed.
+		dpmetrics.IncProvisioningCheckFailure(dpmetrics.ReasonCRDUnavailable)
 		return false, &NotProvisionedError{
 			Tenant: tenant.String(),
 			Reason: fmt.Sprintf("Tenant CRD lookup failed: %v", err),
@@ -147,6 +150,7 @@ func (c *provisioningChecker) fetchFromAPI(ctx context.Context, tenant auth.Tena
 	// field is absent and we return not-provisioned.
 	status, ok := obj.Object["status"].(map[string]any)
 	if !ok {
+		dpmetrics.IncProvisioningCheckFailure(dpmetrics.ReasonNotProvisioned)
 		return false, &NotProvisionedError{
 			Tenant: tenant.String(),
 			Reason: "Tenant CRD status field absent or wrong type",
@@ -156,6 +160,7 @@ func (c *provisioningChecker) fetchFromAPI(ctx context.Context, tenant auth.Tena
 	dataPlane, ok := status["dataPlane"].(map[string]any)
 	if !ok {
 		// Phase F has not populated the dataPlane field yet.
+		dpmetrics.IncProvisioningCheckFailure(dpmetrics.ReasonNotProvisioned)
 		return false, &NotProvisionedError{
 			Tenant: tenant.String(),
 			Reason: "status.dataPlane absent (Phase F not yet deployed)",
