@@ -39,6 +39,10 @@ type pool struct {
 	checker *provisioningChecker
 	evictor *evictor
 
+	// adminAcquirer is the wired admin.AdminPool (set via SetAdminPool).
+	adminAcquirer AdminAcquirer
+	adminMu       sync.RWMutex
+
 	// tenantEntries tracks per-tenant eviction state.
 	tenantEntries sync.Map // map[auth.TenantID]*tenantEntry
 
@@ -244,10 +248,27 @@ func (p *pool) initTenant(ctx context.Context, tenant auth.TenantID, tenantKEK [
 	return nil
 }
 
-// Admin implements Pool.Admin. Phase E provides the real implementation;
-// this stub returns "not implemented" until then.
-func (p *pool) Admin(_ context.Context) (*AdminConn, error) {
-	return nil, fmt.Errorf("datapool: Admin pool not yet implemented (Phase E)")
+// SetAdminPool wires the AdminAcquirer (typically *admin.AdminPool from
+// internal/datapool/admin) into this pool so that Admin() can delegate to it.
+// Thread-safe; may be called at any time before Admin() is invoked.
+func (p *pool) SetAdminPool(acquirer AdminAcquirer) {
+	p.adminMu.Lock()
+	p.adminAcquirer = acquirer
+	p.adminMu.Unlock()
+}
+
+// Admin implements Pool.Admin. It delegates to the wired AdminAcquirer.
+// Returns ErrAdminPoolNotConfigured when no AdminAcquirer has been set via
+// SetAdminPool.
+func (p *pool) Admin(ctx context.Context) (*AdminConn, error) {
+	p.adminMu.RLock()
+	acquirer := p.adminAcquirer
+	p.adminMu.RUnlock()
+
+	if acquirer == nil {
+		return nil, ErrAdminPoolNotConfigured
+	}
+	return acquirer.Acquire(ctx)
 }
 
 // Close shuts down the pool. It stops the evictor and closes all sub-pools.

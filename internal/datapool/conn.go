@@ -75,16 +75,42 @@ func (c *Conn) Release() {
 }
 
 // AdminConn provides cross-tenant data access for platform-operator code
-// paths. It is returned by Pool.Admin and lives in internal/datapool/admin/
-// (Phase E). The type is declared here so that the Pool interface can
-// reference it without a circular import.
+// paths. It is returned by Pool.Admin (via the wired AdminAcquirer) and
+// by admin.AdminPool.Acquire directly for internal/admin/ callers.
 //
-// AdminConn acquisition requires the caller to hold the platform_operator
-// FGA relation on system_tenant:_system. Every acquisition is audit-logged.
-// Use AdminConn only inside internal/admin/; it must not appear in
-// tenant-handler code.
+// AdminConn acquisition requires the calling identity to hold the
+// platform_operator FGA relation on system_tenant:_system. Every acquisition
+// is audit-logged. Use AdminConn only inside internal/admin/; it must not
+// appear in tenant-handler code.
+//
+// The admin-specific sub-clients and ForEachTenant helper live in
+// internal/datapool/admin/ and are populated by admin.AdminPool.Acquire.
+// Callers that need ForEachTenant must use admin.AdminPool.Acquire directly
+// rather than going through Pool.Admin.
 type AdminConn struct {
-	// release is the cleanup hook.
+	// AdminPostgres is the admin pgxpool.Pool with CONNECT on all tenant_* DBs.
+	// May be nil if Postgres was not configured.
+	AdminPostgres *pgxpool.Pool
+
+	// AdminRedis is the admin *redis.Client pointing at db 0 (master index).
+	// May be nil if Redis was not configured.
+	AdminRedis *redis.Client
+
+	// AdminNeo4jDriver is the admin Neo4j driver with cross-DB privileges.
+	// May be nil if Neo4j was not configured.
+	AdminNeo4jDriver neo4j.DriverWithContext
+
+	// AdminVector is the admin vector-store driver.
+	// May be nil if the vector store was not configured.
+	AdminVector vectordb.Driver
+
+	// Subject is the FGA subject that acquired this AdminConn (e.g., "platform-svc").
+	Subject string
+
+	// RPCMethod is the gRPC method that triggered the acquisition (best-effort).
+	RPCMethod string
+
+	// release is the cleanup hook (may be nil for no-op release).
 	release func()
 
 	// released guards against double-release.

@@ -2,6 +2,7 @@ package datapool
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/zero-day-ai/sdk/auth"
@@ -79,6 +80,18 @@ func DefaultConfig() Config {
 	}
 }
 
+// AdminAcquirer is the narrow interface that pool.Admin() delegates to. It
+// is satisfied by *admin.AdminPool (internal/datapool/admin). The interface
+// lives here (not in admin/) to avoid a circular import: admin imports
+// datapool; datapool must not import admin.
+//
+// SetAdminPool wires the concrete implementation after construction.
+type AdminAcquirer interface {
+	// Acquire verifies the calling identity and returns a cross-tenant
+	// AdminConn. Identical contract to admin.AdminPool.Acquire.
+	Acquire(ctx context.Context) (*AdminConn, error)
+}
+
 // Pool is the single chokepoint for acquiring tenant-scoped data-plane
 // connections. All four storage backends (Postgres, Redis, Neo4j, vector
 // store) are accessible only through the Conn returned by For.
@@ -101,14 +114,23 @@ type Pool interface {
 
 	// Admin returns a cross-tenant AdminConn for platform-operator code paths.
 	// Acquisition requires the caller to hold the platform_operator FGA
-	// relation; this is enforced inside the implementation.
+	// relation; this is enforced inside the AdminAcquirer implementation
+	// (internal/datapool/admin.AdminPool).
 	//
-	// The AdminConn implementation lives in internal/datapool/admin/ (Phase E).
-	// This stub returns a "not implemented" error until Phase E lands.
+	// Wire the implementation via SetAdminPool before calling Admin.
+	// Returns ErrAdminPoolNotConfigured when no AdminAcquirer has been set.
 	Admin(ctx context.Context) (*AdminConn, error)
+
+	// SetAdminPool wires the AdminAcquirer (admin.AdminPool) into the pool so
+	// that Admin() can delegate to it. Must be called before Admin() is used.
+	SetAdminPool(acquirer AdminAcquirer)
 
 	// Close shuts down the pool, closing all per-tenant sub-pools and
 	// stopping the background evictor. In-flight Conns are not forcibly
 	// closed; callers should release them before calling Close.
 	Close() error
 }
+
+// ErrAdminPoolNotConfigured is returned by Pool.Admin when no AdminAcquirer
+// has been wired via SetAdminPool.
+var ErrAdminPoolNotConfigured = fmt.Errorf("datapool: Admin pool not configured; call SetAdminPool first")

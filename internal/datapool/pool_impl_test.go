@@ -1,6 +1,7 @@
 package datapool
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -73,11 +74,35 @@ func TestPool_EvictTenant(t *testing.T) {
 	assert.False(t, ok, "tenant entry must be removed after eviction")
 }
 
-// TestPool_Admin_Stub verifies that Admin returns "not implemented" until
-// Phase E lands.
-func TestPool_Admin_Stub(t *testing.T) {
+// TestPool_Admin_NotConfigured verifies that Admin returns an informative
+// error when no AdminAcquirer has been wired via SetAdminPool (Phase E).
+func TestPool_Admin_NotConfigured(t *testing.T) {
 	p := &pool{}
-	_, err := p.Admin(nil)
+	_, err := p.Admin(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not yet implemented")
+	assert.ErrorIs(t, err, ErrAdminPoolNotConfigured)
+	assert.Contains(t, err.Error(), "SetAdminPool")
+}
+
+// TestPool_SetAdminPool_ThenAdmin verifies that wiring an AdminAcquirer via
+// SetAdminPool causes Admin() to delegate to it.
+func TestPool_SetAdminPool_ThenAdmin(t *testing.T) {
+	p := &pool{}
+
+	// Stub AdminAcquirer that returns a canned AdminConn.
+	stub := &stubAdminAcquirer{}
+	p.SetAdminPool(stub)
+
+	_, err := p.Admin(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, stub.calls)
+}
+
+type stubAdminAcquirer struct {
+	calls int
+}
+
+func (s *stubAdminAcquirer) Acquire(_ context.Context) (*AdminConn, error) {
+	s.calls++
+	return &AdminConn{}, nil
 }
