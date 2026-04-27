@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin gibson-migrate test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip
+.PHONY: all build bin gibson-migrate test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id
 
 # Go parameters
 GOCMD=go
@@ -142,8 +142,16 @@ check-coverage:
 	if [ "$$RESULT" -ne 1 ]; then echo "FAIL: internal/identity coverage $${ID_COV}% is below 95% threshold"; exit 1; fi
 	@echo "Coverage check PASSED"
 
+# check-no-tenant-id enforces the database-per-tenant invariant:
+# no migration file may define a tenant_id column or property.
+# Spec: database-per-tenant-data-plane Phase I Task 9.2, Requirement 16.1.
+check-no-tenant-id:
+	@echo "Checking migrations for tenant_id column references..."
+	@bash scripts/check-no-tenant-id-column.sh
+	@echo "check-no-tenant-id PASSED"
+
 # Run all checks before commit
-check: fmt vet lint test-race
+check: fmt vet lint test-race check-no-tenant-id
 	@echo "All checks passed!"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)
@@ -220,6 +228,7 @@ help:
 	@echo "  make check-authz   - Run authz package checks (unit tests + vet)"
 	@echo "  make check-coverage - Enforce ≥95% coverage on internal/identity"
 	@echo "  make check-authz INTEGRATION=1 - Include FGA integration tests (requires Docker)"
+	@echo "  make check-no-tenant-id - Fail if any migration defines a tenant_id column"
 	@echo "  make proto         - Generate Go code from proto files"
 	@echo "  make proto-deps    - Install protoc plugins"
 	@echo "  make proto-clean   - Remove generated proto files"

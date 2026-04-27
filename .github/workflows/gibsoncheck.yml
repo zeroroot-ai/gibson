@@ -49,3 +49,26 @@ jobs:
 
       - name: Run gibsoncheck self-tests
         run: go test -race ./tools/gibsoncheck/...
+
+      - name: Run adminpoolacquire guard on full codebase
+        run: |
+          set -e
+          go build -o bin/gibsoncheck ./tools/gibsoncheck
+          ./bin/gibsoncheck -adminpoolacquire ./internal/... ./cmd/...
+          ./bin/gibsoncheck -forbidrawstoreimports ./internal/... ./cmd/...
+
+  migration-guards:
+    runs-on: ubuntu-latest
+    name: Migration build guards
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check no tenant_id in migrations
+        run: |
+          # Self-test first to verify the guard itself works.
+          SELFTEST=1 bash scripts/check-no-tenant-id-column.sh
+          # Then run the real check against the actual migrations.
+          bash scripts/check-no-tenant-id-column.sh
+
+      - name: Check no Redis tenant-prefix patterns
+        run: bash scripts/check-no-redis-prefix.sh

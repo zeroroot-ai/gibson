@@ -22,8 +22,21 @@
 //     internal/datapool/admin is a cross-tenant policy violation per
 //     database-per-tenant-data-plane Requirement 11.5.
 //
+//   - forbidrawstoreimports: any package outside internal/datapool/,
+//     internal/admin/, internal/migrate/, cmd/gibson-migrate/, and
+//     cmd/daemon/ may not import raw store client libraries (pgx,
+//     go-redis, neo4j-go-driver, qdrant, miniredis). All store access
+//     must go through internal/datapool/Conn which is already
+//     tenant-bound by construction. Test files may import miniredis.
+//
+//   - forbidrediskeyprefix: flags string literals that look like per-tenant
+//     Redis key-prefix patterns (e.g. "tenant:", "gibson:tenant:") in
+//     Redis call arguments outside the allowlisted subsystems. In the
+//     database-per-tenant model, Conn.Redis is already scoped to the
+//     tenant's logical DB and plain keys are sufficient.
+//
 // Spec: unified-identity-and-authorization Requirements 6.6, 8.7, 14.1.
-// Spec: database-per-tenant-data-plane Requirement 11.5.
+// Spec: database-per-tenant-data-plane Requirements 11.5, 16.1.
 package main
 
 import (
@@ -49,6 +62,8 @@ func main() {
 			checks.NoTrustLocalhostAnalyzer,
 			checks.TenantFromContextAnalyzer,
 			checks.AdminPoolAcquireAnalyzer,
+			checks.ForbidRawStoreImportsAnalyzer,
+			checks.ForbidRedisKeyPrefixAnalyzer,
 		}...,
 	)
 }
