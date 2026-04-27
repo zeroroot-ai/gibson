@@ -1,63 +1,19 @@
-// Migration 0003 — tenant_id NOT NULL constraints + range indexes
+// Migration 0003 — per-tenant database constraints (re-authored)
 //
-// Applies a NOT NULL constraint and a RANGE index on tenant_id for every
-// tenant-scoped label written by the GraphLoader (loader/loader.go).
+// Tenant isolation is now provided by the per-tenant Neo4j database
+// (database-per-tenant-data-plane). The old tenant_id NOT NULL constraints
+// and RANGE indexes have been removed.
 //
-// Labels are taken directly from the taxonomy (taxonomy/core.yaml v4.0.0)
-// and the GraphLoader node-type strings. They are all lowercase, matching
-// the CREATE (n:<nodeType>) Cypher in loadProtoNodes.
+// This migration is intentionally a no-op (no statements) so that existing
+// deployments that have already applied migration 0003 continue to start
+// cleanly. The ID is preserved to avoid the migrator re-running earlier
+// migrations.
 //
-// IF NOT EXISTS guards make every statement safe to re-run (idempotent).
-// Do NOT drop existing indexes or constraints; only additions are made here.
+// The actual per-tenant schema (uniqueness constraints + indexes) is now
+// applied by the tenant-operator provisioner from migrations/neo4j/
+// at database-creation time, not by the daemon's schema migrator.
 //
-// Labels covered: host, port, service, endpoint, domain, subdomain,
-//                 technology, certificate, finding, evidence,
-//                 technique, compliance_signal
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:host) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:host) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:port) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:port) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:service) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:service) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:endpoint) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:endpoint) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:domain) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:domain) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:subdomain) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:subdomain) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:technology) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:technology) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:certificate) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:certificate) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:finding) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:finding) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:evidence) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:evidence) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:technique) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:technique) ON (n.tenant_id)
-
-CREATE CONSTRAINT IF NOT EXISTS FOR (n:compliance_signal) REQUIRE n.tenant_id IS NOT NULL
-
-CREATE RANGE INDEX IF NOT EXISTS FOR (n:compliance_signal) ON (n.tenant_id)
+// Environments that previously had tenant_id NOT NULL constraints will
+// find them satisfied vacuously (the per-tenant DB has no rows from other
+// tenants, so no row can violate a tenant_id NOT NULL constraint on the
+// old schema, and the constraints themselves are no longer created here).

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/neo4j"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
@@ -860,30 +859,19 @@ func (l *GraphLoader) loadProtoNodes(
 		return result, nil
 	}
 
-	// Extract tenant_id from context for multi-tenant isolation
-	tenant := auth.TenantStringFromContext(ctx)
+	// No tenant_id property: tenant isolation is provided by the per-tenant
+	// Neo4j database (database-per-tenant-data-plane, Requirement 2.6).
 
 	// Build CREATE query with UNWIND
 	cypher := fmt.Sprintf(`
 		UNWIND $nodes AS nodeData
 		CREATE (n:%s)
-		SET n = nodeData.all_props, n.created_at = timestamp()`, nodeType)
-
-	// Add tenant_id if present
-	if tenant != "" {
-		cypher += `, n.tenant_id = $tenant_id`
-	}
-
-	cypher += `
+		SET n = nodeData.all_props, n.created_at = timestamp()
 		RETURN elementId(n) as element_id, nodeData.index as idx
-	`
+	`, nodeType)
 
 	params := map[string]any{
 		"nodes": nodeDataList,
-	}
-
-	if tenant != "" {
-		params["tenant_id"] = tenant
 	}
 
 	// Execute the batch CREATE query

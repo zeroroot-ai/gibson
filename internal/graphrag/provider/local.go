@@ -10,7 +10,6 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 	"github.com/zero-day-ai/gibson/internal/graphrag"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -196,16 +195,8 @@ func (l *LocalGraphRAGProvider) createIndices(ctx context.Context) error {
 		return err
 	}
 
-	// Create label-agnostic index on tenant_id for multi-tenant isolation
-	// Enables efficient tenant-scoped queries across all node types
-	_, err = l.graphClient.Query(ctx, `
-		CREATE INDEX tenant_id_lookup IF NOT EXISTS
-		FOR (n)
-		ON (n.tenant_id)
-	`, nil)
-	if err != nil {
-		return err
-	}
+	// No tenant_id index: tenant isolation is provided by the per-tenant
+	// Neo4j database (database-per-tenant-data-plane, Requirement 2.6).
 
 	return nil
 }
@@ -247,11 +238,8 @@ func (l *LocalGraphRAGProvider) StoreNode(ctx context.Context, node graphrag.Gra
 			props["mission_id"] = node.MissionID.String()
 		}
 
-		// Add tenant_id from context if present
-		// This enables multi-tenant isolation at the data layer
-		if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
-			props["tenant_id"] = tenant
-		}
+		// No tenant_id property: tenant isolation is provided by the per-tenant
+		// Neo4j database (database-per-tenant-data-plane, Requirement 2.6).
 
 		// Create or update node in Neo4j
 		_, err := l.graphClient.CreateNode(ctx, labels, props)
@@ -368,12 +356,10 @@ func (l *LocalGraphRAGProvider) QueryNodes(ctx context.Context, query graphrag.N
 // Basic query functionality without scope filtering.
 // Policy-based filtering will be added in a separate task.
 func (l *LocalGraphRAGProvider) queryNodesFromGraph(ctx context.Context, query graphrag.NodeQuery) ([]graphrag.GraphNode, error) {
+	// Tenant isolation is provided by the per-tenant Neo4j database; no
+	// tenant-scoped params needed (C18 closure — buildGlobalQuery tenant
+	// fail-open path deleted).
 	params := make(map[string]any)
-
-	// Add tenant_id from context for tenant isolation
-	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
-		params["_tenant_id"] = tenant
-	}
 
 	// Build basic query - policy-based filtering will be added later
 	cypher := l.buildGlobalQuery(query, params)
@@ -424,23 +410,18 @@ func (l *LocalGraphRAGProvider) queryNodesFromGraph(ctx context.Context, query g
 	return nodes, nil
 }
 
-// buildGlobalQuery builds a Cypher query with no mission filtering.
-// Returns nodes across all missions (global query).
+// buildGlobalQuery builds a Cypher query with no tenant or mission filtering.
+// Tenant isolation is provided by the per-tenant Neo4j database, so no
+// WHERE n.tenant_id clause is needed or allowed (C18 closure).
 func (l *LocalGraphRAGProvider) buildGlobalQuery(query graphrag.NodeQuery, params map[string]any) string {
 	// Build label filter
 	labelFilter := l.buildLabelFilter(query.NodeTypes)
 
-	// Simple global query
+	// Simple query scoped only to the per-tenant database.
 	cypher := "MATCH (n" + labelFilter + ")"
 
-	// Build WHERE clauses
+	// Build WHERE clauses — no tenant_id filter (C18 closure).
 	whereClauses := []string{}
-
-	// Add tenant filter from context
-	// Extract tenant from query context (passed via params)
-	if tenantID, ok := params["_tenant_id"].(string); ok && tenantID != "" {
-		whereClauses = append(whereClauses, "n.tenant_id = $_tenant_id")
-	}
 
 	// Add property filters
 	for key, value := range query.Properties {
@@ -449,7 +430,7 @@ func (l *LocalGraphRAGProvider) buildGlobalQuery(query graphrag.NodeQuery, param
 		params[paramKey] = value
 	}
 
-	// Add legacy mission ID filter if present
+	// Add mission ID filter if present
 	if query.MissionID != nil {
 		whereClauses = append(whereClauses, "n.mission_id = $mission_id")
 		params["mission_id"] = query.MissionID.String()
@@ -657,16 +638,10 @@ func (l *LocalGraphRAGProvider) QueryRelationships(ctx context.Context, query gr
 
 	cypher += "]->(to)"
 
-	// Add filters
+	// Tenant isolation is provided by the per-tenant Neo4j database; no
+	// tenant_id property filter is needed (database-per-tenant-data-plane).
 	params := make(map[string]any)
 	where := make([]string, 0)
-
-	// Add tenant_id filter from context for tenant isolation
-	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
-		where = append(where, "from.tenant_id = $tenant_id")
-		where = append(where, "to.tenant_id = $tenant_id")
-		params["tenant_id"] = tenant
-	}
 
 	if query.FromID != nil {
 		where = append(where, "from.id = $from_id")
@@ -757,15 +732,9 @@ func (l *LocalGraphRAGProvider) TraverseGraph(ctx context.Context, startID strin
 		// Note: This is simplified - production code would build proper Cypher syntax
 	}
 
-	// Add WHERE clause for filters
+	// Tenant isolation is provided by the per-tenant Neo4j database; no
+	// tenant_id property filter is needed during traversal (C18 closure).
 	where := make([]string, 0)
-
-	// Add tenant_id filter from context for tenant isolation during traversal
-	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
-		where = append(where, "start.tenant_id = $tenant_id")
-		where = append(where, "ALL(node IN nodes(path) WHERE node.tenant_id = $tenant_id)")
-		params["tenant_id"] = tenant
-	}
 
 	if len(filters.AllowedNodeTypes) > 0 {
 		// Filter by node labels
