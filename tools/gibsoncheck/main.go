@@ -17,7 +17,13 @@
 //   - notrustlocalhost: rejects any reference to the deleted
 //     TrustLocalhost option.
 //
+//   - adminpoolacquire: only internal/admin/ and internal/datapool/admin/
+//     may import the admin pool package. Any other package importing
+//     internal/datapool/admin is a cross-tenant policy violation per
+//     database-per-tenant-data-plane Requirement 11.5.
+//
 // Spec: unified-identity-and-authorization Requirements 6.6, 8.7, 14.1.
+// Spec: database-per-tenant-data-plane Requirement 11.5.
 package main
 
 import (
@@ -42,6 +48,7 @@ func main() {
 			checks.ForbiddenImportsAnalyzer,
 			checks.NoTrustLocalhostAnalyzer,
 			checks.TenantFromContextAnalyzer,
+			checks.AdminPoolAcquireAnalyzer,
 		}...,
 	)
 }

@@ -1,0 +1,9 @@
+# CODEOWNERS — internal/admin/
+#
+# This directory contains platform-operator business logic that spans tenant
+# data-plane connections. Every addition to this package gains access to all
+# tenant data via AdminPool — the bar for review is high.
+#
+# Per database-per-tenant-data-plane spec, Requirement 11.5.
+#
+internal/admin/    @platform-architecture @security
