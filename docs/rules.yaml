@@ -1,0 +1,198 @@
+# rules.yaml — Gibson daemon, data-plane rules
+#
+# Spec: database-per-tenant-data-plane (Phase J, task 10.1).
+# Schema: an authoritative shared schema is planned at
+# sdk/docs/rules-schema.yaml under unified-identity-and-authorization
+# task 10.2 but does not yet exist. The shape used here is a forward-
+# compatible JSON-Schema-style YAML that future tooling
+# ("gibsoncheck doc-driven") can validate.
+#
+# Field summary:
+#   id        — stable rule identifier (dp-NNN for data-plane rules).
+#   scope     — list of path globs that the rule applies to. "**" means
+#               anywhere in the repo. Globs use Go's filepath.Match
+#               semantics extended with "**" for recursive match.
+#   exempt    — list of path globs that override the scope (e.g. the
+#               narrow allowlists where the pattern is legitimate).
+#   pattern   — kind of rule:
+#                 forbidden-import   — Go import path prefix not allowed.
+#                 forbidden-call     — function/method call site not allowed.
+#                 forbidden-literal  — string literal pattern not allowed.
+#                 required-call      — call must appear in the same scope.
+#                 manual-review      — not mechanically enforced; human gate.
+#   target    — the concrete value the pattern matches (string, regex,
+#               or list, depending on pattern kind).
+#   severity  — error | warning. error fails CI.
+#   message   — short remediation hint shown when the rule fires.
+#   enforced_by — list of currently-implemented enforcement points
+#               (gibsoncheck analyzer name, script path, or "manual").
+
+version: 1
+
+rules:
+  - id: dp-001
+    description: |
+      Raw store client libraries (pgx, go-redis, neo4j-go-driver,
+      qdrant) may only be imported from the data-plane packages.
+      Every other package must access storage through
+      *datapool.Conn, which is already tenant-bound.
+    scope:
+      - "**/*.go"
+    exempt:
+      - "internal/datapool/**"
+      - "internal/admin/**"
+      - "internal/migrate/**"
+      - "cmd/gibson-migrate/**"
+      - "cmd/daemon/**"
+      - "internal/daemon/**"
+      - "tools/gibsoncheck/**"
+    pattern: forbidden-import
+    target:
+      - "github.com/jackc/pgx/v5"
+      - "github.com/redis/go-redis/v9"
+      - "github.com/neo4j/neo4j-go-driver/v5"
+      - "github.com/qdrant/go-client"
+      - "github.com/alicebob/miniredis/v2"   # test files exempt; analyzer handles
+    severity: error
+    message: |
+      Use internal/datapool/Conn (already tenant-bound) instead of importing
+      raw store clients. See docs/data-plane.md "The Conn pattern".
+    enforced_by:
+      - "tools/gibsoncheck/checks/forbid_raw_store_imports.go (ForbidRawStoreImportsAnalyzer)"
+
+  - id: dp-002
+    description: |
+      Every successful pool.For(ctx, tenant) call must be paired with a
+      conn.Release() — typically via defer immediately after the err
+      check. Skipping Release leaks the KEK and prevents pool eviction.
+    scope:
+      - "**/*.go"
+    exempt:
+      - "internal/datapool/**"
+      - "**/*_test.go"
+    pattern: required-call
+    target:
+      after: "pool.For"
+      requires: "Release()"
+      idiom: "defer conn.Release()"
+    severity: warning
+    message: |
+      Acquire-without-release detected. Add `defer conn.Release()` immediately
+      after the err check. Failure to release leaves the per-tenant KEK
+      in memory and blocks idle eviction.
+    enforced_by:
+      - "manual review"   # no analyzer yet; future ASTwalker
+
+  - id: dp-003
+    description: |
+      Migration files must not declare a tenant_id column or property.
+      Per-tenant database isolation removes the need; the column would
+      be dead weight that re-introduces the convention-based pattern.
+    scope:
+      - "migrations/postgres/**/*.sql"
+      - "migrations/neo4j/**/*.cypher"
+    pattern: forbidden-literal
+    target:
+      regex: "tenant_id"
+    severity: error
+    message: |
+      Remove tenant_id. Each tenant owns its own database; the column is
+      implied by which database the row lives in. (Spec Req 1.8 / 2.6.)
+    enforced_by:
+      - "scripts/check-no-tenant-id-column.sh"
+
+  - id: dp-004
+    description: |
+      Redis key construction must not embed a tenant prefix. The
+      per-tenant client is already routed to the tenant's logical DB,
+      so a tenant-namespaced key is redundant and easy to get wrong.
+    scope:
+      - "**/*.go"
+    exempt:
+      - "internal/datapool/admin/**"   # master index lookup on db 0
+      - "internal/datapool/**"
+      - "internal/daemon/**"
+      - "internal/audit/**"            # cross-tenant audit stream
+      - "internal/component/**"        # component-name (not tenant) keyed
+      - "internal/migrate/**"
+      - "cmd/gibson-migrate/**"
+      - "tools/gibsoncheck/**"
+    pattern: forbidden-literal
+    target:
+      regex_list:
+        - "(?i)^tenant:"
+        - "(?i)^gibson:tenant:"
+        - "(?i)^[a-z][a-z0-9_-]*:tenant:"
+    severity: error
+    message: |
+      Drop the tenant prefix and use a plain key. Conn.Redis is already
+      DB-scoped to the calling tenant.
+    enforced_by:
+      - "tools/gibsoncheck/checks/forbid_redis_key_prefix.go (ForbidRedisKeyPrefixAnalyzer)"
+      - "scripts/check-no-redis-prefix.sh"
+
+  - id: dp-005
+    description: |
+      The cross-tenant admin pool may be acquired only from the two
+      designated locations. CODEOWNERS narrow waist (Spec Req 11.5).
+    scope:
+      - "**/*.go"
+    exempt:
+      - "internal/datapool/admin/**"
+      - "internal/admin/**"
+      - "internal/migrate/**"
+      - "cmd/gibson-migrate/**"
+      - "tools/gibsoncheck/**"
+      - "**/*_test.go"
+    pattern: forbidden-import
+    target:
+      - "github.com/zero-day-ai/gibson/internal/datapool/admin"
+    severity: error
+    message: |
+      Cross-tenant access requires CODEOWNERS review. Move the call into
+      internal/admin/ or use Pool.For(tenant) for per-tenant access.
+    enforced_by:
+      - "tools/gibsoncheck/checks/admin_pool_acquire.go (AdminPoolAcquireAnalyzer)"
+
+  - id: dp-006
+    description: |
+      Anything secret-shaped persisted to storage must be wrapped via
+      datapool/envelope/Encrypt(conn.KEK, plaintext, aad). aad must
+      bind the record to its context (record_type + identifier) so a
+      row cannot be moved or renamed without decryption failing.
+    scope:
+      - "internal/credentials/**"
+      - "internal/providerconfig/**"
+      - "internal/database/**"
+      - "internal/datapool/conn_credentials.go"
+    pattern: manual-review
+    target:
+      requires: "envelope.Encrypt(...)"
+    severity: error
+    message: |
+      Any field that holds a secret (BYOK key, customer credential,
+      sensitive mission output) must be stored via envelope.Encrypt with
+      AAD = "<record_type>:<identifier>". Plain inserts are forbidden.
+    enforced_by:
+      - "manual review (CODEOWNERS for the listed packages)"
+
+  - id: dp-007
+    description: |
+      Cypher queries must not include tenant_id filters. Per-tenant Neo4j
+      database isolation makes the filter dead code; carrying it forward
+      re-introduces the convention-based pattern this spec deletes.
+    scope:
+      - "internal/graphrag/**/*.go"
+      - "internal/orchestrator/**/*.go"
+      - "migrations/neo4j/**/*.cypher"
+    pattern: forbidden-literal
+    target:
+      regex_list:
+        - "(?i)WHERE\\s+\\w+\\.tenant_id"
+        - "(?i)\\.tenant_id\\s*="
+    severity: error
+    message: |
+      Remove the tenant_id filter. Conn.Neo4j is bound to the tenant's
+      dedicated database; standard Cypher works without a tenant filter.
+    enforced_by:
+      - "scripts/check-no-tenant-id-column.sh"
