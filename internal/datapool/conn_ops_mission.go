@@ -342,3 +342,81 @@ func (m *MissionOps) IncrRunCounter(ctx context.Context, name string) (int64, er
 	}
 	return n, nil
 }
+
+// ---------------------------------------------------------------------------
+// RunningMission is a lightweight summary returned by ListRunning.
+// ---------------------------------------------------------------------------
+
+// RunningMission is a condensed view of a mission run that was active when the
+// daemon last stopped. Only the fields required for crash-recovery are included.
+type RunningMission struct {
+	MissionID   string `json:"mission_id"`
+	MissionName string `json:"mission_name"`
+	RunID       string `json:"run_id"`
+}
+
+// runningMissionDoc is the JSON shape stored per mission run key.
+// We only decode the fields we need for recovery.
+type runningMissionDoc struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	RunID    string `json:"run_id,omitempty"`
+}
+
+// ListRunning returns all missions currently in the "running" or "paused"
+// state in this tenant's Redis logical DB. It is used exclusively during
+// daemon start-up crash recovery (recoverRunningMissionsAcrossTenants).
+//
+// The scan covers all gibson:mission:* keys that are not secondary-index
+// keys. Keys carrying no-tenant prefixes are exactly the pattern produced by
+// MissionOps.SaveRun; isolation is structural (per-tenant logical DB).
+func (m *MissionOps) ListRunning(ctx context.Context) ([]RunningMission, error) {
+	if m.rdb == nil {
+		return nil, nil
+	}
+
+	var results []RunningMission
+	var cursor uint64
+
+	for {
+		keys, next, err := m.rdb.Scan(ctx, cursor, "gibson:mission_run:*", 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("mission ops: list running scan: %w", err)
+		}
+
+		for _, key := range keys {
+			raw, err := m.rdb.Do(ctx, "JSON.GET", key, "$").Result()
+			if err == goredis.Nil || raw == nil {
+				continue
+			}
+			if err != nil {
+				continue
+			}
+			rawStr, ok := raw.(string)
+			if !ok {
+				continue
+			}
+			var docs []runningMissionDoc
+			if err := json.Unmarshal([]byte(rawStr), &docs); err != nil || len(docs) == 0 {
+				continue
+			}
+			doc := docs[0]
+			if doc.Status != "running" && doc.Status != "paused" {
+				continue
+			}
+			results = append(results, RunningMission{
+				MissionID:   doc.ID,
+				MissionName: doc.Name,
+				RunID:       doc.RunID,
+			})
+		}
+
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return results, nil
+}
