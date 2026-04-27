@@ -760,6 +760,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		}()
 	}
 
+	// Phase G, task 7.2: startup migration check.
+	// Runs after the state client and component registry are initialised but
+	// BEFORE the gRPC server starts serving traffic. Pending migrations are
+	// logged as WARN by default. Set GIBSON_REQUIRE_MIGRATIONS=true to
+	// fail-fast instead.
+	if migErr := d.startupMigrationCheck(ctx); migErr != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("startup migration check failed: %w", migErr)
+	}
+
 	// Build and start gRPC server.
 	d.logger.Info(ctx, "starting gRPC server", "address", d.grpcAddr)
 	grpcSys, err := d.buildGRPCServer(ctx)

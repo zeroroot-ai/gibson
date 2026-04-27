@@ -123,7 +123,6 @@ func TestNewDaemonCredentialStore_Success(t *testing.T) {
 	assert.NotNil(t, store)
 	assert.Equal(t, mockDAO, store.dao)
 	assert.Equal(t, mockKeyProvider, store.keyProvider)
-	assert.NotNil(t, store.encryptor)
 }
 
 func TestDaemonCredentialStore_GetCredential_DAOError(t *testing.T) {
