@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip
+.PHONY: all build bin gibson-migrate test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip
 
 # Go parameters
 GOCMD=go
@@ -52,8 +52,15 @@ bin:
 	@echo "Build complete: $(BINARY_DIR)/$(BINARY_NAME)"
 
 # Full build (for Docker/CI/CD)
-build: bin
+build: bin gibson-migrate
 	@echo "Full build complete"
+
+# Build the gibson-migrate CLI for backfilling tenant DB migrations
+gibson-migrate:
+	@echo "Building gibson-migrate..."
+	@mkdir -p $(BINARY_DIR)
+	$(GOBUILD) $(BUILD_TAGS) $(LDFLAGS) -o $(BINARY_DIR)/gibson-migrate ./cmd/gibson-migrate
+	@echo "Build complete: $(BINARY_DIR)/gibson-migrate"
 
 # Run tests
 test:
