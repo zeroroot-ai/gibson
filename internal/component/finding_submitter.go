@@ -26,16 +26,21 @@ type FindingGraphBridge interface {
 }
 
 // GraphRAGFindingSubmitter implements FindingSubmitter by routing findings to:
-//  1. The Redis finding store, for tenant-scoped indexes and efficient lookup.
+//  1. A FindingStore (finding.FindingStore interface), for tenant-scoped index writes.
 //  2. The GraphRAG knowledge graph via FindingGraphBridge.StoreAsync (fire-and-forget).
 //
-// Redis store failures are logged as warnings and do not cause Submit to return
-// an error — the finding ID is still returned so the calling agent can continue.
+// Accepting the interface (not a concrete *finding.RedisFindingStore) allows the
+// caller to pass any FindingStore implementation, including the per-tenant
+// ConnBoundFindingStore introduced in Phase D. This closes the TODO marked by
+// "database-per-tenant-data-plane Phase D cutover" in infrastructure.go.
+//
+// Store failures are logged as warnings and do not cause Submit to return an
+// error — the finding ID is still returned so the calling agent can continue.
 // GraphRAG storage is fully async: StoreAsync returns immediately and the actual
 // write happens in a background goroutine managed by the bridge.
 type GraphRAGFindingSubmitter struct {
 	bridge      FindingGraphBridge
-	store       *finding.RedisFindingStore
+	store       finding.FindingStore
 	stateClient *state.StateClient
 	logger      *slog.Logger
 }
@@ -44,12 +49,14 @@ type GraphRAGFindingSubmitter struct {
 //
 // Parameters:
 //   - bridge:      FindingGraphBridge for async Neo4j storage (must not be nil).
-//   - store:       RedisFindingStore for tenant-scoped index writes (must not be nil).
+//   - store:       FindingStore for tenant-scoped index writes (must not be nil).
+//     Any implementation of finding.FindingStore is accepted, including
+//     *finding.RedisFindingStore and *finding.ConnBoundFindingStore.
 //   - stateClient: StateClient used to resolve workID → missionID from Redis.
 //   - logger:      Structured logger; if nil, slog.Default() is used.
 func NewGraphRAGFindingSubmitter(
 	bridge FindingGraphBridge,
-	store *finding.RedisFindingStore,
+	store finding.FindingStore,
 	stateClient *state.StateClient,
 	logger *slog.Logger,
 ) *GraphRAGFindingSubmitter {

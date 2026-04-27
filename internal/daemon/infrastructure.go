@@ -103,11 +103,10 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	d.logger.Info(ctx, "initializing infrastructure components")
 
 	// Create finding store with Redis (required).
-	// TODO(database-per-tenant-data-plane Phase D cutover): migrate to ConnBoundFindingStore
-	// once component.NewGraphRAGFindingSubmitter accepts finding.FindingStore (interface) instead
-	// of the concrete *finding.RedisFindingStore. The type assertion in grpc.go:
-	//   if redisStore, ok := d.infrastructure.findingStore.(*finding.RedisFindingStore); ok {
-	// prevents replacing this with a ConnBound type. Track in finding_submitter.go refactor.
+	// Phase D: NewGraphRAGFindingSubmitter now accepts finding.FindingStore (interface).
+	// The type assertion in grpc.go has been removed. The concrete RedisFindingStore is
+	// retained here for handlers that have not yet migrated to ConnBoundFindingStore;
+	// both implement finding.FindingStore so either can be substituted transparently.
 	if d.stateClient == nil {
 		return nil, fmt.Errorf("StateClient not initialized - cannot create finding store")
 	}
