@@ -62,9 +62,12 @@ type missionManager struct {
 	// When nil, authz state tracking is skipped (dev mode or authz disabled).
 	authzStore mission.MissionAuthzStore
 
-	// Track active missions with their contexts and event channels
+	// activeMissions tracks running missions keyed by (tenant, missionID).
+	// The outer key is the tenant; the inner key is the mission ID string.
+	// Pause/Resume/Stop operations traverse only the calling tenant's submap
+	// (audit C9 closure — a tenant cannot affect another tenant's missions).
 	mu             sync.RWMutex
-	activeMissions map[string]*activeMission
+	activeMissions map[auth.TenantID]map[string]*activeMission
 	completedCount int
 }
 
@@ -77,6 +80,7 @@ type activeMission struct {
 	eventChan    chan api.MissionEventData
 	missionState *mission.MissionState
 	startTime    time.Time
+	tenantID     auth.TenantID // tenant this mission belongs to (C9 isolation key)
 }
 
 // newMissionManager creates a new mission manager instance.
@@ -123,8 +127,93 @@ func newMissionManager(
 		otelStack:       otelStack,
 		eventBus:        eventBus,
 		authzStore:      authzStore,
-		activeMissions:  make(map[string]*activeMission),
+		activeMissions:  make(map[auth.TenantID]map[string]*activeMission),
 	}
+}
+
+// activeMissionTenant returns the auth.TenantID for a mission's tenant.
+// Falls back to auth.SystemTenant when the mission has no tenant (admin ops).
+func activeMissionTenant(m *mission.Mission) auth.TenantID {
+	if m.TenantID == "" {
+		return auth.SystemTenant
+	}
+	t, err := auth.NewTenantID(m.TenantID)
+	if err != nil {
+		return auth.SystemTenant
+	}
+	return t
+}
+
+// tenantFromCtxOrSystem extracts the tenant from the context; returns SystemTenant
+// when none is present (e.g., admin or unauthed internal callers).
+func tenantFromCtxOrSystem(ctx context.Context) auth.TenantID {
+	t, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return auth.SystemTenant
+	}
+	return t
+}
+
+// setActive registers a mission in the tenant-partitioned active map (C9 closure).
+func (mm *missionManager) setActive(tenant auth.TenantID, missionID string, am *activeMission) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	if mm.activeMissions[tenant] == nil {
+		mm.activeMissions[tenant] = make(map[string]*activeMission)
+	}
+	mm.activeMissions[tenant][missionID] = am
+}
+
+// getActive retrieves an active mission scoped to the given tenant (C9 closure).
+// Returns nil, false if not found.
+func (mm *missionManager) getActive(tenant auth.TenantID, missionID string) (*activeMission, bool) {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+	if sub, ok := mm.activeMissions[tenant]; ok {
+		am, exists := sub[missionID]
+		return am, exists
+	}
+	return nil, false
+}
+
+// deleteActive removes a mission from the active map (C9 closure).
+func (mm *missionManager) deleteActive(tenant auth.TenantID, missionID string) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	if sub, ok := mm.activeMissions[tenant]; ok {
+		delete(sub, missionID)
+		if len(sub) == 0 {
+			delete(mm.activeMissions, tenant)
+		}
+	}
+	mm.completedCount++
+}
+
+// allActive returns a flat list of all active missions across all tenants.
+// Used only for global operations (shutdown, status queries) that legitimately
+// span tenants under operator authority.
+func (mm *missionManager) allActive() []*activeMission {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+	var result []*activeMission
+	for _, sub := range mm.activeMissions {
+		for _, am := range sub {
+			result = append(result, am)
+		}
+	}
+	return result
+}
+
+// tenantActive returns all active missions for a specific tenant (C9 closure).
+func (mm *missionManager) tenantActive(tenant auth.TenantID) []*activeMission {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+	sub := mm.activeMissions[tenant]
+	result := make([]*activeMission, 0, len(sub))
+	for _, am := range sub {
+		result = append(result, am)
+	}
+	return result
 }
 
 // Run starts a mission by reference and returns an event channel for progress
@@ -234,13 +323,13 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	// Build an internal mission ID for tracking this run.
 	missionID := types.NewID().String()
 
+	// Resolve the calling tenant (C9 isolation key).
+	callingTenant := tenantFromCtxOrSystem(ctx)
+
 	// Check if mission ID already exists (defensive — should not be possible with fresh IDs)
-	m.mu.RLock()
-	if _, exists := m.activeMissions[missionID]; exists {
-		m.mu.RUnlock()
+	if _, exists := m.getActive(callingTenant, missionID); exists {
 		return nil, fmt.Errorf("mission %s is already running", missionID)
 	}
-	m.mu.RUnlock()
 
 	// Serialize mission definition to JSON for storage
 	definitionJSON, err := json.Marshal(def)
@@ -384,12 +473,11 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 		cancel:     cancel,
 		eventChan:  eventChan,
 		startTime:  time.Now(),
+		tenantID:   callingTenant,
 	}
 
-	// Register active mission by stable mission ID
-	m.mu.Lock()
-	m.activeMissions[missionRecord.ID.String()] = active
-	m.mu.Unlock()
+	// Register active mission under the calling tenant's partition (C9 closure).
+	m.setActive(callingTenant, missionRecord.ID.String(), active)
 
 	// Emit mission started event
 	m.emitEvent(eventChan, api.MissionEventData{
@@ -410,7 +498,6 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 // the Observe → Think → Act loop, and cleanup.
 func (m *missionManager) executeMission(ctx context.Context, missionID string, def *mission.MissionDefinition, eventChan chan api.MissionEventData) {
 	defer close(eventChan)
-	defer m.cleanupMission(missionID)
 
 	// Create mission execution span if OTel tracing is enabled
 	var span trace.Span
@@ -427,10 +514,25 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 
 	m.logger.Info("executing mission with orchestrator", "mission_id", missionID)
 
-	// Get active mission
+	// Find the active mission across all tenants (this goroutine runs without
+	// a tenant-carrying context; use the stored tenantID on the active entry).
+	var active *activeMission
+	var exists bool
 	m.mu.RLock()
-	active, exists := m.activeMissions[missionID]
+	for _, sub := range m.activeMissions {
+		if am, ok := sub[missionID]; ok {
+			active = am
+			exists = true
+			break
+		}
+	}
 	m.mu.RUnlock()
+	// Defer cleanup using the tenant from the active entry (C9 closure).
+	defer func() {
+		if active != nil {
+			m.deleteActive(active.tenantID, missionID)
+		}
+	}()
 
 	if !exists {
 		m.logger.Error("active mission not found", "mission_id", missionID)
@@ -862,13 +964,12 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 }
 
 // Pause pauses a running mission at the next clean checkpoint.
+// Only the calling tenant's missions may be paused (C9 closure).
 func (m *missionManager) Pause(ctx context.Context, missionID string, force bool) error {
 	m.logger.Info("pausing mission", "mission_id", missionID, "force", force)
 
-	m.mu.RLock()
-	active, exists := m.activeMissions[missionID]
-	m.mu.RUnlock()
-
+	tenant := tenantFromCtxOrSystem(ctx)
+	active, exists := m.getActive(tenant, missionID)
 	if !exists {
 		return fmt.Errorf("mission %s not found or not running", missionID)
 	}
@@ -913,10 +1014,8 @@ func (m *missionManager) Pause(ctx context.Context, missionID string, force bool
 			return fmt.Errorf("timeout waiting for mission to pause")
 
 		case <-ticker.C:
-			// Check if mission is still active
-			m.mu.RLock()
-			_, stillActive := m.activeMissions[missionID]
-			m.mu.RUnlock()
+			// Check if mission is still active (scoped to tenant — C9 closure)
+			_, stillActive := m.getActive(active.tenantID, missionID)
 
 			// If mission is no longer active, it has completed or failed
 			if !stillActive {
@@ -939,16 +1038,16 @@ func (m *missionManager) Pause(ctx context.Context, missionID string, force bool
 }
 
 // Resume resumes a paused mission from its last checkpoint.
+// Resume resumes a paused mission. Only the calling tenant's missions may
+// be resumed (C9 closure — audit finding closure).
 func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan api.MissionEventData, error) {
 	m.logger.Info("resuming mission", "mission_id", missionID)
 
-	// Check if mission is already running
-	m.mu.RLock()
-	if _, exists := m.activeMissions[missionID]; exists {
-		m.mu.RUnlock()
+	tenant := tenantFromCtxOrSystem(ctx)
+	// Check if mission is already running under this tenant (C9 closure).
+	if _, exists := m.getActive(tenant, missionID); exists {
 		return nil, fmt.Errorf("mission %s is already running", missionID)
 	}
-	m.mu.RUnlock()
 
 	// Get mission from store
 	if m.missionStore == nil {
@@ -1024,12 +1123,11 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 		cancel:     cancel,
 		eventChan:  eventChan,
 		startTime:  time.Now(),
+		tenantID:   tenant,
 	}
 
-	// Register active mission
-	m.mu.Lock()
-	m.activeMissions[missionID] = active
-	m.mu.Unlock()
+	// Register active mission under tenant partition (C9 closure).
+	m.setActive(tenant, missionID, active)
 
 	// Emit mission resumed event
 	m.emitEvent(eventChan, api.MissionEventData{
@@ -1048,13 +1146,12 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 }
 
 // Stop stops a running mission with optional force flag.
+// Only the calling tenant's missions may be stopped (C9 closure).
 func (m *missionManager) Stop(ctx context.Context, missionID string, force bool) error {
 	m.logger.Info("stopping mission", "mission_id", missionID, "force", force)
 
-	m.mu.RLock()
-	active, exists := m.activeMissions[missionID]
-	m.mu.RUnlock()
-
+	tenant := tenantFromCtxOrSystem(ctx)
+	active, exists := m.getActive(tenant, missionID)
 	if !exists {
 		return fmt.Errorf("mission %s not found or not running", missionID)
 	}
@@ -1090,13 +1187,13 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 
 	var result []api.MissionData
 
-	// Get active missions
-	m.mu.RLock()
-	activeMissions := make([]*mission.Mission, 0, len(m.activeMissions))
-	for _, active := range m.activeMissions {
-		activeMissions = append(activeMissions, active.mission)
+	// Get active missions scoped to the calling tenant (C9 closure).
+	tenant := tenantFromCtxOrSystem(ctx)
+	tenantActives := m.tenantActive(tenant)
+	activeMissions := make([]*mission.Mission, 0, len(tenantActives))
+	for _, am := range tenantActives {
+		activeMissions = append(activeMissions, am.mission)
 	}
-	m.mu.RUnlock()
 
 	// Add active missions to result
 	for _, m := range activeMissions {
@@ -1149,16 +1246,13 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 	return result, total, nil
 }
 
-// Get returns a specific mission by ID.
+// Get returns a specific mission by ID, scoped to the calling tenant.
 func (m *missionManager) Get(ctx context.Context, missionID string) (*api.MissionData, error) {
 	m.logger.Debug("getting mission", "mission_id", missionID)
 
-	// Check active missions first
-	m.mu.RLock()
-	active, exists := m.activeMissions[missionID]
-	m.mu.RUnlock()
-
-	if exists {
+	tenant := tenantFromCtxOrSystem(ctx)
+	// Check active missions for the calling tenant first (C9 closure).
+	if active, exists := m.getActive(tenant, missionID); exists {
 		data := missionToData(active.mission)
 		return &data, nil
 	}
@@ -1175,15 +1269,23 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 	return nil, fmt.Errorf("mission %s not found", missionID)
 }
 
-// cleanupMission removes a mission from active tracking after completion.
+// cleanupMission is retained for callers that still reference it. It searches
+// for the mission across all tenants and removes it. Prefer deleteActive when
+// the tenant is known.
 func (m *missionManager) cleanupMission(missionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	delete(m.activeMissions, missionID)
-	m.completedCount++
-
-	m.logger.Debug("mission cleaned up", "mission_id", missionID)
+	for tenant, sub := range m.activeMissions {
+		if _, ok := sub[missionID]; ok {
+			delete(sub, missionID)
+			if len(sub) == 0 {
+				delete(m.activeMissions, tenant)
+			}
+			m.completedCount++
+			m.logger.Debug("mission cleaned up", "mission_id", missionID)
+			return
+		}
+	}
 }
 
 // emitEvent safely sends an event to the event channel without blocking.
