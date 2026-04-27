@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -21,6 +22,17 @@ import (
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
+
+// testRedisClient extracts the standalone *redis.Client from a StateClient.
+// All integration tests use a standalone (not cluster) Redis instance so this
+// assertion is always safe. ConnBoundEventStore requires a *redis.Client rather
+// than the redis.UniversalClient surface exposed by StateClient.Client().
+func testRedisClient(t *testing.T, sc *state.StateClient) *goredis.Client {
+	t.Helper()
+	rc, ok := sc.Client().(*goredis.Client)
+	require.True(t, ok, "integration tests require a standalone *redis.Client, got %T", sc.Client())
+	return rc
+}
 
 const (
 	// Test key prefix to isolate tests
@@ -528,7 +540,7 @@ func TestEventStoreWithStreams(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	store := mission.NewRedisEventStore(client)
+	store := mission.NewConnBoundEventStore(testRedisClient(t, client))
 	defer cleanupKeys(ctx, t, client, fmt.Sprintf("gibson:stream:mission:%s:*", missionID))
 
 	// Append events using the current MissionEvent API.
@@ -806,7 +818,7 @@ func TestAtomicityCascadeDelete(t *testing.T) {
 
 	missionStore := mission.NewRedisMissionStore(client)
 	runStore := mission.NewRedisMissionRunStore(client)
-	eventStore := mission.NewRedisEventStore(client)
+	eventStore := mission.NewConnBoundEventStore(testRedisClient(t, client))
 	findingStore := finding.NewRedisFindingStore(client)
 
 	// Create mission with related data
@@ -1051,7 +1063,7 @@ func TestPerformanceStreamThroughput(t *testing.T) {
 	defer client.Close()
 
 	missionID := types.NewID()
-	store := mission.NewRedisEventStore(client)
+	store := mission.NewConnBoundEventStore(testRedisClient(t, client))
 	defer cleanupKeys(ctx, t, client, fmt.Sprintf("gibson:stream:mission:%s:*", missionID))
 
 	count := 5000
