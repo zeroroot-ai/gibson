@@ -1,0 +1,99 @@
+package idp
+
+import "time"
+
+// Role identifies the functional role of a machine service account.
+// These values are vendor-neutral and map to IdP-specific role/claim
+// values in each provider implementation.
+type Role string
+
+const (
+	// RoleAgent identifies an agent service account.
+	RoleAgent Role = "agent"
+	// RoleTool identifies a tool service account.
+	RoleTool Role = "tool"
+	// RolePlugin identifies a plugin service account.
+	RolePlugin Role = "plugin"
+)
+
+// ServiceAccount is a vendor-neutral representation of a machine service account
+// in the IdP. Fields that the IdP does not support are left at their zero values
+// (LastAuthenticatedAt is nil if the IdP does not track it).
+type ServiceAccount struct {
+	// AccountID is the IdP-assigned unique identifier for the service account.
+	AccountID string
+
+	// Name is the display name of the service account.
+	Name string
+
+	// Role is the functional role of the service account.
+	Role Role
+
+	// CreatedAt is when the service account was created.
+	CreatedAt time.Time
+
+	// LastAuthenticatedAt is when the service account last obtained a token,
+	// or nil if the IdP does not track authentication history or the account
+	// has never authenticated.
+	LastAuthenticatedAt *time.Time
+
+	// Description is the optional human-readable description.
+	Description string
+}
+
+// CreateServiceAccountRequest carries parameters for creating a new service account.
+type CreateServiceAccountRequest struct {
+	// Name is the pre-formatted service account name: "<kind>-<tenant>-<name>".
+	// The caller (TenantAdminService handler) is responsible for constructing
+	// this name before invoking the AdminClient.
+	Name string
+
+	// Description is the optional human-readable description.
+	Description string
+
+	// Role is the functional role of the service account.
+	Role Role
+}
+
+// AddMembershipRequest carries parameters for adding a service account to a
+// tenant scope in the IdP.
+type AddMembershipRequest struct {
+	// AccountID is the IdP-assigned unique identifier for the service account.
+	AccountID string
+
+	// TenantScopeID identifies the tenant's scope in the IdP.
+	// For Zitadel this is the project ID. Other providers may use a different
+	// concept (org ID, namespace, etc.).
+	TenantScopeID string
+
+	// Role is the role to grant within the tenant scope.
+	Role Role
+}
+
+// ListServiceAccountsRequest carries parameters for listing service accounts.
+type ListServiceAccountsRequest struct {
+	// TenantScopeID identifies the tenant's scope in the IdP.
+	TenantScopeID string
+
+	// PageSize is the maximum number of accounts to return. Zero means use the
+	// implementation's default.
+	PageSize int
+
+	// PageToken is the pagination cursor from a previous response. Empty string
+	// requests the first page.
+	PageToken string
+
+	// RoleFilter restricts the results to accounts with this role.
+	// An empty string means return all roles.
+	RoleFilter Role
+}
+
+// ListServiceAccountsResponse carries the results of a list operation.
+type ListServiceAccountsResponse struct {
+	// ServiceAccounts is the page of results.
+	ServiceAccounts []ServiceAccount
+
+	// NextPageToken is the cursor for the next page. An empty string means
+	// there are no more results.
+	NextPageToken string
+}
