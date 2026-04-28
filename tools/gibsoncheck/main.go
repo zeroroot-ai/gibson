@@ -37,6 +37,7 @@
 //
 // Spec: unified-identity-and-authorization Requirements 6.6, 8.7, 14.1.
 // Spec: database-per-tenant-data-plane Requirements 11.5, 16.1.
+// Spec: daemon-mission-finding-per-tenant-cutover Requirements 5.3, 5.4.
 package main
 
 import (
@@ -64,6 +65,7 @@ func main() {
 			checks.AdminPoolAcquireAnalyzer,
 			checks.ForbidRawStoreImportsAnalyzer,
 			checks.ForbidRedisKeyPrefixAnalyzer,
+			checks.ForbidRedisClientConstructionAnalyzer,
 		}...,
 	)
 }
