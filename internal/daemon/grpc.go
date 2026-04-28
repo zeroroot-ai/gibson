@@ -21,13 +21,12 @@ import (
 	discoverysvc "github.com/zero-day-ai/gibson/internal/api/discovery"
 	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/audit"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
-	"github.com/zero-day-ai/sdk/auth"
-	sdkregistry "github.com/zero-day-ai/sdk/auth/registry"
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
@@ -35,6 +34,8 @@ import (
 	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
+	"github.com/zero-day-ai/sdk/auth"
+	sdkregistry "github.com/zero-day-ai/sdk/auth/registry"
 
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
@@ -558,6 +559,30 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
 	api.RegisterDaemonAdminServiceServer(srv, daemonSvc)
+
+	// Register TenantAdminService — the new tenant-admin surface.
+	// Initialise the IdP admin client from env vars; fail-closed if the env
+	// is set but invalid. When env is unset entirely the client is nil and
+	// the agent-identity RPCs return codes.Unavailable.
+	idpClient, idpErr := initIDPAdminClient(ctx)
+	if idpErr != nil {
+		return nil, fmt.Errorf("daemon: IdP admin client init failed: %w", idpErr)
+	}
+	if idpClient != nil {
+		daemonSvc.WithIdPAdminClient(idpClient)
+		d.logger.Info(ctx, "IdP admin client wired into TenantAdminService")
+	} else {
+		d.logger.Info(ctx, "IdP admin client not configured (GIBSON_IDP_PROVIDER not set); TenantAdminService agent-identity RPCs will return Unavailable")
+	}
+	// Wire audit writer for TenantAdminService when Postgres is available.
+	if d.dashboardDB != nil {
+		tenantAuditWriter := audit.NewWriter(d.dashboardDB, d.logger.Slog())
+		tenantAuditWriter.Start(ctx)
+		daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
+		d.logger.Info(ctx, "audit writer wired into TenantAdminService")
+	}
+	tenantv1.RegisterTenantAdminServiceServer(srv, daemonSvc)
+	d.logger.Info(ctx, "registered TenantAdminService gRPC endpoint")
 
 	// Register DiscoveryService — the read-only introspection surface
 	// consumed by opensource/adk/cmd/gibson-mcp and the dashboard's

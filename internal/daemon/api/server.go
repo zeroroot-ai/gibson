@@ -19,6 +19,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zero-day-ai/gibson/internal/idp"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/finding"
@@ -55,6 +57,7 @@ type authzIface interface {
 type DaemonServer struct {
 	daemonpb.UnimplementedDaemonServiceServer
 	UnimplementedDaemonAdminServiceServer
+	tenantv1.UnimplementedTenantAdminServiceServer
 
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface
@@ -206,6 +209,29 @@ type DaemonServer struct {
 	// the RPC returns an empty response rather than Unimplemented.
 	// Spec: llm-user-attribution-governance (Requirement 4.9).
 	auditQuery auditQueryIface
+
+	// idpAdminClient is the vendor-neutral IdP admin interface used by
+	// TenantAdminService agent-identity RPCs. May be nil; when nil the
+	// agent-identity RPCs return codes.Unavailable.
+	// Spec: agent-service-credentials.
+	idpAdminClient idp.AdminClient
+
+	// tenantAdminAuditWriter is the Postgres-backed audit event writer for
+	// TenantAdminService operations. May be nil; when nil audit events are
+	// silently dropped (not a fatal error — the operation still succeeds).
+	// Spec: agent-service-credentials.
+	tenantAdminAuditWriter auditWriterIface
+
+	// gibsonPublicURL is the public Envoy URL returned in CreateAgentIdentity
+	// responses as the gibson_url and in the enroll_command field.
+	// Populated from GIBSON_PUBLIC_URL env var at server construction time.
+	gibsonPublicURL string
+}
+
+// auditWriterIface is the narrow surface TenantAdminService uses from
+// audit.Writer. Using an interface allows tests to inject a no-op.
+type auditWriterIface interface {
+	Log(event audit.Event)
 }
 
 // budgetEnforcerIface is the narrow surface ExecuteLLM / StreamLLM use
@@ -721,6 +747,7 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 		logger:            logger.With("component", "daemon-grpc"),
 		sessionCounter:    0,
 		providerFactory:   providerFactoryFunc,
+		gibsonPublicURL:   os.Getenv("GIBSON_PUBLIC_URL"),
 	}
 }
 
@@ -848,6 +875,25 @@ func (s *DaemonServer) WithDashboardDB(db *sql.DB) *DaemonServer {
 // Added by spec 25-daemon-driven-provider-config.
 func (s *DaemonServer) WithProviderConfigStore(store providerConfigStoreIface) *DaemonServer {
 	s.providerConfig = store
+	return s
+}
+
+// WithIdPAdminClient wires the vendor-neutral IdP admin client into the server.
+// When set, TenantAdminService agent-identity RPCs (CreateAgentIdentity,
+// ListAgentIdentities, RevokeAgentIdentity) are available. When nil, those
+// RPCs return codes.Unavailable with a clear message directing the operator
+// to set GIBSON_IDP_PROVIDER and related env vars.
+// Spec: agent-service-credentials.
+func (s *DaemonServer) WithIdPAdminClient(c idp.AdminClient) *DaemonServer {
+	s.idpAdminClient = c
+	return s
+}
+
+// WithTenantAdminAuditWriter wires an audit writer for TenantAdminService
+// operations. When nil, audit events are silently dropped but operations
+// still succeed (non-fatal degradation). Spec: agent-service-credentials.
+func (s *DaemonServer) WithTenantAdminAuditWriter(w auditWriterIface) *DaemonServer {
+	s.tenantAdminAuditWriter = w
 	return s
 }
 

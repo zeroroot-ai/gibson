@@ -84,6 +84,24 @@ type agent_principal
     define belongs_to: [tenant]
     define cannot_invoke: [component]
 
+# tool_principal — a per-tool machine identity provisioned via
+# TenantAdminService.CreateAgentIdentity with kind=TOOL.
+# Mirrors agent_principal shape. Spec: agent-service-credentials.
+type tool_principal
+  relations
+    define owner: [user]
+    define belongs_to: [tenant]
+    define cannot_invoke: [component]
+
+# plugin_principal — a per-plugin machine identity provisioned via
+# TenantAdminService.CreateAgentIdentity with kind=PLUGIN.
+# Mirrors agent_principal shape. Spec: agent-service-credentials.
+type plugin_principal
+  relations
+    define owner: [user]
+    define belongs_to: [tenant]
+    define cannot_invoke: [component]
+
 type component
   relations
     define owner: [tenant]
