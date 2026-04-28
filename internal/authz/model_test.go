@@ -13,8 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestModelV2_CatalogGating exercises the extended FGA schema's catalog
-// gating semantics:
+// TestModel_CatalogGating exercises the FGA schema's catalog gating semantics:
 //
 //   - R3: ownership scope (platform_enabled / tenant_published) + tenant_enabled
 //   - R3: deny-wins composition at tenant / team / user scope per action class
@@ -24,7 +23,7 @@ import (
 // It uses an OpenFGA testcontainer and loads model.fga via openfga-language,
 // so the test exercises the exact production model. Each subtest creates its
 // own store so tuples from one case don't leak into the next.
-func TestModelV2_CatalogGating(t *testing.T) {
+func TestModel_CatalogGating(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
