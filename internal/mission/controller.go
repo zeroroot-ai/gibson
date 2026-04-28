@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // MissionController provides high-level mission control operations.

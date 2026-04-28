@@ -14,8 +14,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // TestOTelMissionTracer_AttributionEndToEnd exercises the full tracer path

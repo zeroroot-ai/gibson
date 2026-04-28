@@ -23,9 +23,9 @@ type fixedKeyProvider struct{ key []byte }
 func (f *fixedKeyProvider) GetEncryptionKey(ctx context.Context) ([]byte, error) {
 	return f.key, nil
 }
-func (f *fixedKeyProvider) Name() string                                    { return "test" }
-func (f *fixedKeyProvider) Health(ctx context.Context) any                  { return nil }
-func (f *fixedKeyProvider) Close() error                                    { return nil }
+func (f *fixedKeyProvider) Name() string                   { return "test" }
+func (f *fixedKeyProvider) Health(ctx context.Context) any { return nil }
+func (f *fixedKeyProvider) Close() error                   { return nil }
 
 // Adapt to crypto.KeyProvider's actual signature with HealthStatus by
 // using struct{} placeholder. The mint.go code only calls

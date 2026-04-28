@@ -17,8 +17,8 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/sdk/auth"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // stubAuthorizer is a minimal Authorizer fake for the membership tests.

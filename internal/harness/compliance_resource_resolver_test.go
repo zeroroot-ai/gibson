@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/types"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // fakeGraphReader is a programmable GraphReader stub.

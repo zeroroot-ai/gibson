@@ -36,8 +36,8 @@ type fakeVectorClient struct {
 	collection string
 }
 
-func (c *fakeVectorClient) Upsert(_ context.Context, _ []vectordb.Point) error   { return nil }
-func (c *fakeVectorClient) Delete(_ context.Context, _ []string) error            { return nil }
+func (c *fakeVectorClient) Upsert(_ context.Context, _ []vectordb.Point) error { return nil }
+func (c *fakeVectorClient) Delete(_ context.Context, _ []string) error         { return nil }
 func (c *fakeVectorClient) Search(_ context.Context, _ []float32, _ uint64, _ *vectordb.Filter) ([]vectordb.SearchResult, error) {
 	return nil, nil
 }

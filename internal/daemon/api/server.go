@@ -16,7 +16,6 @@ import (
 	grpcmeta "google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/idp"
@@ -74,15 +73,6 @@ type DaemonServer struct {
 	// quotaManager enforces per-tenant resource quotas on mission submission.
 	// May be nil; when nil, quota checks are skipped.
 	quotaManager MissionQuotaChecker
-
-	// apiKeyStore manages tenant API keys.
-	// May be nil; wired when the API key service is available.
-	// TODO: replace with concrete type once apikey package is introduced.
-	apiKeyStore interface {
-		Create(ctx context.Context, tenantID string, allowedKinds, allowedNames, capabilities []string, name, createdBy string) (keyID, rawKey string, err error)
-		List(ctx context.Context, tenantID string) ([]APIKeyRecord, error)
-		Revoke(ctx context.Context, keyID string) error
-	}
 
 	// cgMinter / cgVerifier back the RenewCapabilityGrant RPC.
 	// Wired via WithCGRenewal; nil-checked at handler entry.
@@ -700,20 +690,6 @@ type ProvisioningStep struct {
 	Timestamp string
 }
 
-// APIKeyRecord is the internal representation of an API key without the secret
-// value.  Used by the API key store interface stub.
-type APIKeyRecord struct {
-	KeyID        string
-	TenantID     string
-	CreatedAt    string
-	LastUsedAt   string
-	AllowedKinds []string
-	AllowedNames []string
-	Name         string
-	Capabilities []string
-	CreatedBy    string
-}
-
 // BillingUsageRecord holds current resource consumption metrics for a tenant.
 // Used by the billing store interface stub.
 type BillingUsageRecord struct {
@@ -760,14 +736,6 @@ func NewDaemonServer(daemon DaemonInterface, credentialHandler *CredentialHandle
 //	api.RegisterDaemonServiceServer(grpcSrv, srv)
 func (s *DaemonServer) WithQuotaManager(qm MissionQuotaChecker) *DaemonServer {
 	s.quotaManager = qm
-	return s
-}
-
-// WithAPIKeyStore wires the API key authenticator so that CreateAPIKey,
-// ListAPIKeys, and RevokeAPIKey RPCs operate against Redis-backed storage.
-// Call this immediately after NewDaemonServer and before registering the server.
-func (s *DaemonServer) WithAPIKeyStore(a *apikeys.Store) *DaemonServer {
-	s.apiKeyStore = &apiKeyStoreAdapter{store: a}
 	return s
 }
 
@@ -895,58 +863,6 @@ func (s *DaemonServer) WithIdPAdminClient(c idp.AdminClient) *DaemonServer {
 func (s *DaemonServer) WithTenantAdminAuditWriter(w auditWriterIface) *DaemonServer {
 	s.tenantAdminAuditWriter = w
 	return s
-}
-
-// ---------------------------------------------------------------------------
-// apiKeyStoreAdapter bridges *apikeys.Store to the apiKeyStore interface
-// expected by DaemonServer, translating between apikeys.Record and the
-// server-local APIKeyRecord type.
-// ---------------------------------------------------------------------------
-
-type apiKeyStoreAdapter struct {
-	store *apikeys.Store
-}
-
-// Create generates a new API key and returns the stable key ID plus the raw
-// (unhashed) key material. The raw key is shown once and never stored.
-func (a *apiKeyStoreAdapter) Create(ctx context.Context, tenantID string, allowedKinds, allowedNames, capabilities []string, name, createdBy string) (keyID, rawKey string, err error) {
-	raw, record, err := a.store.CreateKey(ctx, tenantID, allowedKinds, allowedNames, capabilities, name, createdBy)
-	if err != nil {
-		return "", "", err
-	}
-	return record.KeyID, raw, nil
-}
-
-// List retrieves all API key records for a tenant. Key hashes are never returned.
-func (a *apiKeyStoreAdapter) List(ctx context.Context, tenantID string) ([]APIKeyRecord, error) {
-	recs, err := a.store.ListKeys(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	records := make([]APIKeyRecord, 0, len(recs))
-	for _, r := range recs {
-		lastUsed := ""
-		if r.LastUsedAt != nil {
-			lastUsed = r.LastUsedAt.Format(time.RFC3339)
-		}
-		records = append(records, APIKeyRecord{
-			KeyID:        r.KeyID,
-			TenantID:     r.TenantID,
-			CreatedAt:    r.CreatedAt.Format(time.RFC3339),
-			LastUsedAt:   lastUsed,
-			AllowedKinds: r.AllowedKinds,
-			AllowedNames: r.AllowedNames,
-			Name:         r.Name,
-			Capabilities: r.Capabilities,
-			CreatedBy:    r.CreatedBy,
-		})
-	}
-	return records, nil
-}
-
-// Revoke marks the given key as revoked. The record is retained for audit.
-func (a *apiKeyStoreAdapter) Revoke(ctx context.Context, keyID string) error {
-	return a.store.RevokeKey(ctx, keyID)
 }
 
 // containsString reports whether needle is present in the haystack slice.
@@ -2503,125 +2419,11 @@ func (s *DaemonServer) UpdateOnboardingState(ctx context.Context, req *UpdateOnb
 }
 
 // ---------------------------------------------------------------------------
-// API Key RPCs
+// API Key RPCs — deleted.
+// CreateAPIKey, ListAPIKeys, RevokeAPIKey have been removed from
+// DaemonAdminService and from the daemon. The gsk_ API key system is gone.
+// See: agent-service-credentials spec Requirement 10.
 // ---------------------------------------------------------------------------
-
-// CreateAPIKey issues a new API key for a tenant.
-//
-// Requires "owner" or "admin" role within the caller's own tenant, or
-// "platform-operator" for cross-tenant access.
-// Returns codes.Unimplemented until the API key service has been wired.
-func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
-	// Authorization enforced by the FGA interceptor at the Envoy layer.
-	// Tenant isolation (non-cross-tenant callers may only target their own
-	// tenant) is verified here as parameter validation.
-	callerID, err := auth.IdentityFromContext(ctx)
-	if err != nil {
-		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// Check caller's tenant matches target tenant (defense-in-depth; primary gate is FGA via Envoy).
-	if auth.TenantStringFromContext(ctx) != req.TenantId {
-		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
-	}
-
-	// TODO: Wire to the API key service once the concrete type is available.
-	if s.apiKeyStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "api key service not configured")
-	}
-
-	// Use the caller subject as the "created_by" audit field.
-	createdBy := callerID.Subject
-
-	keyID, rawKey, err := s.apiKeyStore.Create(ctx, req.TenantId, req.AllowedKinds, req.AllowedNames, req.Capabilities, req.Name, createdBy)
-	if err != nil {
-		s.logger.Error("failed to create API key", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to create API key: %v", err)
-	}
-
-	s.logger.Info("API key created via RPC", "tenant_id", req.TenantId, "key_id", keyID, "name", req.Name, "created_by", createdBy)
-	return &CreateAPIKeyResponse{KeyId: keyID, RawKey: rawKey, TenantId: req.TenantId}, nil
-}
-
-// ListAPIKeys returns API key metadata for a tenant.  The raw key value is
-// never returned — only the key ID and non-sensitive metadata.
-//
-// Requires "owner" or "admin" role within the caller's own tenant, or
-// "platform-operator" for cross-tenant access.
-// Returns codes.Unimplemented until the API key service has been wired.
-func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest) (*ListAPIKeysResponse, error) {
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// Authorization enforced by the FGA interceptor at the Envoy layer.
-	// Tenant isolation (non-cross-tenant callers may only target their own
-	// tenant) is verified here as parameter validation.
-	if _, err := auth.IdentityFromContext(ctx); err != nil {
-		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
-	}
-	if auth.TenantStringFromContext(ctx) != req.TenantId {
-		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
-	}
-
-	// TODO: Wire to the API key service once the concrete type is available.
-	if s.apiKeyStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "api key service not configured")
-	}
-
-	records, err := s.apiKeyStore.List(ctx, req.TenantId)
-	if err != nil {
-		s.logger.Error("failed to list API keys", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to list API keys: %v", err)
-	}
-
-	keys := make([]*APIKeyInfo, 0, len(records))
-	for _, rec := range records {
-		keys = append(keys, &APIKeyInfo{
-			KeyId:        rec.KeyID,
-			TenantId:     rec.TenantID,
-			CreatedAt:    rec.CreatedAt,
-			LastUsedAt:   rec.LastUsedAt,
-			AllowedKinds: rec.AllowedKinds,
-			AllowedNames: rec.AllowedNames,
-			Name:         rec.Name,
-			Capabilities: rec.Capabilities,
-			CreatedBy:    rec.CreatedBy,
-		})
-	}
-
-	return &ListAPIKeysResponse{Keys: keys}, nil
-}
-
-// RevokeAPIKey permanently revokes an API key.
-//
-// Requires "owner" or "admin" role within the caller's tenant, or
-// "platform-operator" for cross-tenant access.
-// Returns codes.Unimplemented until the API key service has been wired.
-func (s *DaemonServer) RevokeAPIKey(ctx context.Context, req *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error) {
-	// Authorization enforced by the FGA interceptor at the Envoy layer.
-
-	if req.KeyId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "key_id is required")
-	}
-
-	// TODO: Wire to the API key service once the concrete type is available.
-	if s.apiKeyStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "api key service not configured")
-	}
-
-	if err := s.apiKeyStore.Revoke(ctx, req.KeyId); err != nil {
-		s.logger.Error("failed to revoke API key", "key_id", req.KeyId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to revoke API key: %v", err)
-	}
-
-	s.logger.Info("API key revoked via RPC", "key_id", req.KeyId)
-	return &RevokeAPIKeyResponse{}, nil
-}
 
 // ---------------------------------------------------------------------------
 // InitiateSignup has been removed. Signup is now owned by the

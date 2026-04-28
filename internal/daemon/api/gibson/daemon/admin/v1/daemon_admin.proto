@@ -4,13 +4,15 @@ package gibson.daemon.admin.v1;
 
 option go_package = "github.com/zero-day-ai/gibson/internal/daemon/api;api";
 
-// DaemonAdminService provides the internal admin gRPC API for Gibson daemon.
+// Deprecated: use gibson.tenant.v1.TenantAdminService /
+// gibson.platform.v1.PlatformOperatorService / gibson.user.v1.UserService.
+// Removed in admin-services-completion.
 //
-// This service exposes privileged operations including tenant lifecycle management,
-// billing, provisioning, impersonation, API key management, and daemon shutdown.
-// It is NEVER exposed to end-customers — only to platform operators and internal
-// services.
+// DaemonAdminService provides the internal admin gRPC API for Gibson daemon.
+// This is the legacy service; new RPCs should be added to the service
+// appropriate to their audience (tenant-admin, platform-operator, or user).
 service DaemonAdminService {
+  // Deprecated: use gibson.platform.v1.PlatformOperatorService.Shutdown.
   // Shutdown requests graceful shutdown of the daemon.
   // This is used by the CLI to stop the daemon remotely.
   // Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
@@ -24,6 +26,7 @@ service DaemonAdminService {
   // the standalone gibson-tenant-operator. Only read-only and runtime-affecting
   // RPCs remain here.
 
+  // Deprecated: use gibson.platform.v1.PlatformOperatorService.ImpersonateTenant.
   // ImpersonateTenant requests a time-limited context token for the given tenant.
   // Requires the "platform-operator" role.
   rpc ImpersonateTenant(ImpersonateTenantRequest) returns (ImpersonateTenantResponse);
@@ -32,13 +35,16 @@ service DaemonAdminService {
   // Observability
   // ---------------------------------------------------------------------------
 
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.GetTenantLangfuseCredentials.
   // GetTenantLangfuseCredentials retrieves the Langfuse project credentials for a tenant.
   // Returns NOT_FOUND if no credentials have been configured for the tenant.
   rpc GetTenantLangfuseCredentials(GetTenantLangfuseCredentialsRequest) returns (GetTenantLangfuseCredentialsResponse);
 
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.SetTenantLangfuseCredentials.
   // SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
   rpc SetTenantLangfuseCredentials(SetTenantLangfuseCredentialsRequest) returns (SetTenantLangfuseCredentialsResponse);
 
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.DeleteTenantLangfuseCredentials.
   // DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
   rpc DeleteTenantLangfuseCredentials(DeleteTenantLangfuseCredentialsRequest) returns (DeleteTenantLangfuseCredentialsResponse);
 
@@ -46,29 +52,26 @@ service DaemonAdminService {
   // Onboarding
   // ---------------------------------------------------------------------------
 
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.GetOnboardingState.
   // GetOnboardingState queries the onboarding progress for a tenant.
   rpc GetOnboardingState(GetOnboardingStateRequest) returns (GetOnboardingStateResponse);
 
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.UpdateOnboardingState.
   // UpdateOnboardingState advances or modifies the onboarding state.
   rpc UpdateOnboardingState(UpdateOnboardingStateRequest) returns (UpdateOnboardingStateResponse);
 
   // ---------------------------------------------------------------------------
-  // API Keys
+  // API Keys — REMOVED.
+  // CreateAPIKey, ListAPIKeys, RevokeAPIKey have been removed from this service.
+  // The gsk_ API key system is dead-on-arrival (no extauthz validation exists).
+  // Spec: agent-service-credentials Requirement 10.2.
   // ---------------------------------------------------------------------------
-
-  // CreateAPIKey issues a new API key for a tenant.
-  rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse);
-
-  // ListAPIKeys returns API key metadata (never raw key values).
-  rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
-
-  // RevokeAPIKey permanently revokes an API key.
-  rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (RevokeAPIKeyResponse);
 
   // ---------------------------------------------------------------------------
   // Audit Log (authz-06)
   // ---------------------------------------------------------------------------
 
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.ListAuditEvents.
   // ListAuditEvents returns audit events for a tenant, sourced from the daemon's
   // Redis audit stream. Requires FGA admin relation on the tenant.
   rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse);
@@ -77,77 +80,75 @@ service DaemonAdminService {
   // Identity and Access Management (prod-unimplemented-apis)
   // ---------------------------------------------------------------------------
 
+  // Deprecated: deleted in admin-services-completion (no replacement; IdP handles password reset).
   // ResetPassword triggers a password-reset email for the given address.
-  // Always returns success regardless of whether the email exists, to prevent
-  // email enumeration attacks.
   rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
 
+  // Deprecated: deleted in admin-services-completion (no replacement; use IdP hosted profile page).
   // RevokeUserSessions revokes one or all active sessions for a user.
-  // Delegates to the identity provider session management and emits a Redis pub/sub event.
   rpc RevokeUserSessions(RevokeUserSessionsRequest) returns (RevokeUserSessionsResponse);
 
+  // Deprecated: deleted in admin-services-completion (no replacement).
   // SuspendMember disables or reactivates a tenant member in the identity provider.
-  // When suspend=true the user is disabled and their FGA tuple is removed.
-  // When suspend=false the user is re-enabled and the tuple is restored.
   rpc SuspendMember(SuspendMemberRequest) returns (SuspendMemberResponse);
 
+  // Deprecated: use gibson.user.v1.UserService.GetUserProfile.
   // GetUserProfile retrieves a user's profile information from the identity provider.
-  // Accessible by the user themselves or by a tenant admin.
   rpc GetUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse);
 
-  // UpdateUserProfile updates mutable profile fields (display_name, avatar_url)
-  // for a user. Email and role changes are not permitted here.
+  // Deprecated: use gibson.user.v1.UserService.UpdateUserProfile.
+  // UpdateUserProfile updates mutable profile fields (display_name, avatar_url) for a user.
   rpc UpdateUserProfile(UpdateUserProfileRequest) returns (UpdateUserProfileResponse);
 
   // ---------------------------------------------------------------------------
   // Findings Export and Mission Drafts (prod-unimplemented-apis)
   // ---------------------------------------------------------------------------
 
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.ExportFindings.
   // ExportFindings exports findings to the requested format (json, csv, sarif).
-  // The serialized content is returned as bytes in the response.
   rpc ExportFindings(ExportFindingsRequest) returns (ExportFindingsResponse);
 
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.SaveMissionDraft.
   // SaveMissionDraft persists a mission YAML draft for later use.
-  // If draft_id is empty a new draft is created; otherwise the existing draft
-  // is updated. Drafts expire automatically after 30 days.
   rpc SaveMissionDraft(SaveMissionDraftRequest) returns (SaveMissionDraftResponse);
 
-  // ListMissionDrafts returns all saved mission drafts for a tenant, ordered
-  // by update time descending.
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.ListMissionDrafts.
+  // ListMissionDrafts returns all saved mission drafts for a tenant.
   rpc ListMissionDrafts(ListMissionDraftsRequest) returns (ListMissionDraftsResponse);
 
   // ---------------------------------------------------------------------------
   // Quota Management (prod-feature-wiring)
   // ---------------------------------------------------------------------------
 
+  // Deprecated: use gibson.tenant.v1.TenantAdminService.GetTenantQuota.
   // GetTenantQuota retrieves the configured resource quotas for a tenant.
-  // Returns zero values for any quota not explicitly set.
-  // Requires FGA admin relation on the tenant.
   rpc GetTenantQuota(GetTenantQuotaRequest) returns (GetTenantQuotaResponse);
 
+  // Deprecated: use gibson.platform.v1.PlatformOperatorService.SetTenantQuota.
   // SetTenantQuota sets or updates the resource quotas for a tenant.
-  // Requires platform-operator role.
   rpc SetTenantQuota(SetTenantQuotaRequest) returns (SetTenantQuotaResponse);
 
   // ---------------------------------------------------------------------------
   // User Management (prod-feature-wiring)
   // ---------------------------------------------------------------------------
 
+  // Deprecated: deleted in admin-services-completion (no replacement; use IdP hosted profile page).
   // GetUserSessions returns the active sessions for a user.
-  // Accessible by the user themselves or by a tenant admin.
   rpc GetUserSessions(GetUserSessionsRequest) returns (GetUserSessionsResponse);
 
   // ---------------------------------------------------------------------------
   // Alerts (prod-feature-wiring)
   // ---------------------------------------------------------------------------
 
+  // Deprecated: use gibson.user.v1.UserService.ListAlerts.
   // ListAlerts returns platform alerts for a tenant user.
-  // Supports filtering to unread-only alerts.
   rpc ListAlerts(ListAlertsRequest) returns (ListAlertsResponse);
 
+  // Deprecated: use gibson.user.v1.UserService.MarkAlertRead.
   // MarkAlertRead marks a single alert as read.
   rpc MarkAlertRead(MarkAlertReadRequest) returns (MarkAlertReadResponse);
 
+  // Deprecated: use gibson.user.v1.UserService.MarkAllAlertsRead.
   // MarkAllAlertsRead marks all alerts for a user as read.
   rpc MarkAllAlertsRead(MarkAllAlertsReadRequest) returns (MarkAllAlertsReadResponse);
 
@@ -155,9 +156,11 @@ service DaemonAdminService {
   // Chat Conversations (prod-feature-wiring)
   // ---------------------------------------------------------------------------
 
+  // Deprecated: use gibson.user.v1.UserService.ListConversations.
   // ListConversations returns the conversation history list for a user.
   rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
 
+  // Deprecated: use gibson.user.v1.UserService.GetConversation.
   // GetConversation returns the full message history for a single conversation.
   rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
 
@@ -165,73 +168,61 @@ service DaemonAdminService {
   // Agent Auth Protocol (agent-auth-fga-integration)
   // ---------------------------------------------------------------------------
 
+  // Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
   // RegisterCapabilityGrant registers a new agent and its host, resolves FGA-backed
   // capability grants for the agent owner, and writes the grant records.
-  // Requires FGA admin relation on the tenant.
   rpc RegisterCapabilityGrant(RegisterCapabilityGrantRequest) returns (RegisterCapabilityGrantResponse);
 
-  // ExecuteAgentCapability checks FGA for the requested capability execution
-  // and records an audit event. Actual component dispatch is a future concern.
-  // Requires FGA member relation on the tenant.
+  // Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
+  // ExecuteAgentCapability checks FGA for the requested capability execution.
   rpc ExecuteAgentCapability(ExecuteAgentCapabilityRequest) returns (ExecuteAgentCapabilityResponse);
 
-  // ListAgentCapabilities returns all capabilities available to a given user
-  // by querying FGA and the component registry.
-  // Requires FGA member relation on the tenant.
+  // Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
+  // ListAgentCapabilities returns all capabilities available to a given user.
   rpc ListAgentCapabilities(ListAgentCapabilitiesRequest) returns (ListAgentCapabilitiesResponse);
 
+  // Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
   // GetCapabilityGrantStatus returns the current status and grants for an agent.
-  // Requires FGA member relation on the tenant.
   rpc GetCapabilityGrantStatus(GetCapabilityGrantStatusRequest) returns (GetCapabilityGrantStatusResponse);
 
+  // Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
   // RevokeCapabilityGrant sets the agent's status to revoked and revokes all grants.
-  // Requires FGA admin relation on the tenant.
   rpc RevokeCapabilityGrant(RevokeCapabilityGrantRequest) returns (RevokeCapabilityGrantResponse);
 
+  // Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
   // ListCapabilityGrantAgents returns a paginated list of agents for a tenant.
-  // Requires FGA admin relation on the tenant.
   rpc ListCapabilityGrantAgents(ListCapabilityGrantAgentsRequest) returns (ListCapabilityGrantAgentsResponse);
 
-  // CreateHostRegistrationToken issues a single-use API key for host registration.
-  // Requires FGA admin relation on the tenant.
+  // Deprecated: deleted in admin-services-completion (CreateHostRegistrationToken removed with gsk_).
+  // CreateHostRegistrationToken issues a single-use host registration token.
   rpc CreateHostRegistrationToken(CreateHostRegistrationTokenRequest) returns (CreateHostRegistrationTokenResponse);
 
+  // Deprecated: deleted in admin-services-completion (no replacement; use FGA ListUsers/ListObjects).
   // ListComponentGrants returns FGA component grants for all users in a tenant.
-  // Best-effort: enumerates FGA tuples directly. Requires admin relation on the tenant.
   rpc ListComponentGrants(ListComponentGrantsRequest) returns (ListComponentGrantsResponse);
 
-  // BatchGrantComponentAccessV2 applies a list of per-principal grant/revoke
-  // operations across any component for any user or team.
-  // Requires FGA admin relation on the tenant.
+  // Deprecated: deleted in admin-services-completion (use CreateAgentIdentity component_grants).
+  // BatchGrantComponentAccessV2 applies per-principal grant/revoke operations.
   rpc BatchGrantComponentAccessV2(BatchGrantComponentAccessV2Request) returns (BatchGrantComponentAccessV2Response);
 
+  // Deprecated: deleted in admin-services-completion (ListAuditLog vs ListAuditEvents; use ListAuditEvents).
   // ListAuditLog returns Postgres-backed audit log entries for a tenant.
-  // Requires FGA admin relation on the tenant.
   rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse);
 
   // ---------------------------------------------------------------------------
   // Tool Catalog (gibson-tool-runner)
   // ---------------------------------------------------------------------------
 
-  // RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
-  // catalog. Bypasses the scheduled interval — useful for CI to publish a
-  // new tool-runner image and immediately surface its parsers to the
-  // orchestrator. Only works on the replica currently holding the refresh
-  // leader lease; followers accept the call but defer to the leader's
-  // next scheduled tick. Requires the platform-operator FGA role.
+  // Deprecated: use gibson.platform.v1.PlatformOperatorService.RefreshToolCatalog.
+  // RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool catalog.
   rpc RefreshToolCatalog(RefreshToolCatalogRequest) returns (RefreshToolCatalogResponse);
 
   // ---------------------------------------------------------------------------
   // LLM Providers — introspection for dashboard form rendering
   // ---------------------------------------------------------------------------
 
-  // GetSupportedProviders returns the full list of LLM provider types the
-  // daemon can construct, with per-provider credential schemas and default
-  // model catalogues. The dashboard consumes this to render the Settings >
-  // Providers form dynamically — no hard-coded frontend provider list,
-  // no drift between daemon and UI. Read-only; all metadata is built from
-  // in-process provider descriptors (no network calls). Requires any
-  // authenticated tenant member role.
+  // Deprecated: deleted in admin-services-completion (no replacement; model as daemon.config.v1.ConfigService if needed).
+  // GetSupportedProviders returns the full list of LLM provider types the daemon can construct.
   rpc GetSupportedProviders(GetSupportedProvidersRequest) returns (GetSupportedProvidersResponse);
 
   // ---------------------------------------------------------------------------
@@ -486,90 +477,11 @@ message UpdateOnboardingStateRequest {
 message UpdateOnboardingStateResponse {}
 
 // ---------------------------------------------------------------------------
-// API Key RPCs — request/response messages
+// API Key RPCs — REMOVED.
+// CreateAPIKeyRequest/Response, APIKeyInfo, ListAPIKeys*, RevokeAPIKey*
+// message types have been deleted along with the RPCs.
+// Spec: agent-service-credentials Requirement 10.2.
 // ---------------------------------------------------------------------------
-
-// CreateAPIKeyRequest issues a new API key for a tenant.
-message CreateAPIKeyRequest {
-  // tenant_id is the tenant to create the key for
-  string tenant_id = 1;
-
-  // allowed_kinds restricts the component kinds the key may access (empty = all)
-  repeated string allowed_kinds = 2;
-
-  // allowed_names restricts the specific component names the key may access (empty = all)
-  repeated string allowed_names = 3;
-
-  // capabilities are the API-key resource:action grants for this key (e.g. ["graphrag:write", "*"])
-  // Pass ["*"] for unrestricted access. An empty slice grants no explicit capabilities.
-  repeated string capabilities = 4;
-
-  // name is a human-readable label for this key (e.g. "CI/CD Deploy Key")
-  string name = 5;
-}
-
-// CreateAPIKeyResponse returns the new API key (raw value shown once).
-message CreateAPIKeyResponse {
-  // key_id is the stable identifier for this key (used for listing/revoking)
-  string key_id = 1;
-
-  // raw_key is the full API key value including the "gsk_" prefix (shown once only)
-  string raw_key = 2;
-
-  // tenant_id is the tenant this key belongs to
-  string tenant_id = 3;
-}
-
-// APIKeyInfo describes a stored API key without exposing the secret value.
-message APIKeyInfo {
-  // key_id is the stable identifier for this key
-  string key_id = 1;
-
-  // tenant_id is the tenant this key belongs to
-  string tenant_id = 2;
-
-  // created_at is when the key was created (RFC 3339 string)
-  string created_at = 3;
-
-  // last_used_at is when the key was last used (RFC 3339 string, empty if never)
-  string last_used_at = 4;
-
-  // allowed_kinds lists the component kinds this key may access (empty = all)
-  repeated string allowed_kinds = 5;
-
-  // allowed_names lists the specific component names this key may access (empty = all)
-  repeated string allowed_names = 6;
-
-  // name is the human-readable label assigned at creation time
-  string name = 7;
-
-  // capabilities are the API-key resource:action grants for this key
-  repeated string capabilities = 8;
-
-  // created_by is the email or subject of the identity that created this key
-  string created_by = 9;
-}
-
-// ListAPIKeysRequest queries the API keys for a tenant.
-message ListAPIKeysRequest {
-  // tenant_id is the tenant whose keys to list
-  string tenant_id = 1;
-}
-
-// ListAPIKeysResponse returns API key metadata (never raw key values).
-message ListAPIKeysResponse {
-  // keys is the list of API key metadata records
-  repeated APIKeyInfo keys = 1;
-}
-
-// RevokeAPIKeyRequest permanently revokes an API key.
-message RevokeAPIKeyRequest {
-  // key_id is the identifier of the key to revoke
-  string key_id = 1;
-}
-
-// RevokeAPIKeyResponse confirms the key was revoked.
-message RevokeAPIKeyResponse {}
 
 // ---------------------------------------------------------------------------
 // Audit Log (authz-06) — request/response messages

@@ -14,9 +14,9 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/protoresolver"
 	"github.com/zero-day-ai/sdk/types"
 )

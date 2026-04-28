@@ -26,11 +26,11 @@ import (
 
 // Label name constants prevent typos at call sites.
 const (
-	LabelStore  = "store"
-	LabelTenant = "tenant"
-	LabelRPC    = "rpc"
+	LabelStore   = "store"
+	LabelTenant  = "tenant"
+	LabelRPC     = "rpc"
 	LabelSubject = "subject"
-	LabelReason = "reason"
+	LabelReason  = "reason"
 
 	// Store label values used by Inc/Observe helpers.
 	StorePostgres = "postgres"

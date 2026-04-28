@@ -283,4 +283,3 @@ func parseXMessage(msg goredis.XMessage, missionID types.ID) (*MissionEvent, err
 		Payload:   payload,
 	}, nil
 }
-

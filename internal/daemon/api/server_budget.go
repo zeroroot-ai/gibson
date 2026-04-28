@@ -10,8 +10,8 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/sdk/auth"
 	budgetpb "github.com/zero-day-ai/sdk/api/gen/gibson/budget/v1"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // Package server_budget.go — DaemonServer implementation of

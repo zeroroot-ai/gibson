@@ -13,8 +13,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/sdk/auth"
 	modelaccesspb "github.com/zero-day-ai/sdk/api/gen/gibson/authz/v1"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // server_model_access.go — DaemonServer implementation of

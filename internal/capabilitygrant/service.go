@@ -12,10 +12,13 @@
 //   - GetCapabilityGrantStatus: read agent + grants from store.
 //   - RevokeCapabilityGrant: revoke agent + grants in store, emit audit event.
 //   - ListCapabilityGrantAgents: paginated list from store.
-//   - CreateHostRegistrationToken: issue single-use API key via APIKeyAuthenticator.
 //   - ListComponentGrants: enumerate FGA tuples for all users × all components.
 //   - BatchGrantComponentAccessV2: write/delete FGA tuples, emit audit events.
 //   - ListAuditLog: read from Postgres audit_log table via audit.Query.
+//
+// Note: CreateHostRegistrationToken and ValidateBootstrap (api_key path) have been
+// removed. The architectural replacement is TenantAdminService.CreateAgentIdentity.
+// Spec: agent-service-credentials Requirement 10.4.
 //
 // Thread-safety: CapabilityGrantService is safe for concurrent use provided all
 // injected dependencies are also safe for concurrent use.
@@ -29,9 +32,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
-	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
 )
@@ -55,13 +56,12 @@ type ComponentDispatcher interface {
 // CapabilityGrantService implements the Capability Grant Protocol gRPC handlers.
 //
 // All handler methods follow the thin-wrapper pattern: validate inputs, delegate
-// to domain helpers (store, fgaBridge, apiKeys, auditWriter), map results to Go
+// to domain helpers (store, fgaBridge, auditWriter), map results to Go
 // return types. Business logic lives in the domain helpers, not here.
 type CapabilityGrantService struct {
 	store       *CapabilityGrantStore
 	fgaBridge   *FGABridge
 	authorizer  authz.Authorizer
-	apiKeys     *apikeys.Store
 	auditWriter *audit.Writer
 	auditQuery  *audit.Query
 	dispatcher  ComponentDispatcher
@@ -79,10 +79,6 @@ type CapabilityGrantServiceConfig struct {
 	// Authorizer is used for FGA write/delete operations in BatchGrantComponentAccessV2
 	// and for listing objects in ListComponentGrants. Required.
 	Authorizer authz.Authorizer
-
-	// APIKeys is the Postgres-backed API key store used for
-	// CreateHostRegistrationToken and bootstrap credential validation.
-	APIKeys *apikeys.Store
 
 	// AuditWriter is the async Postgres audit writer. Required.
 	AuditWriter *audit.Writer
@@ -111,9 +107,6 @@ func NewCapabilityGrantService(cfg CapabilityGrantServiceConfig) *CapabilityGran
 	if cfg.Authorizer == nil {
 		panic("capabilitygrant: CapabilityGrantService: Authorizer must not be nil")
 	}
-	if cfg.APIKeys == nil {
-		panic("capabilitygrant: CapabilityGrantService: APIKeys must not be nil")
-	}
 	if cfg.AuditWriter == nil {
 		panic("capabilitygrant: CapabilityGrantService: AuditWriter must not be nil")
 	}
@@ -128,7 +121,6 @@ func NewCapabilityGrantService(cfg CapabilityGrantServiceConfig) *CapabilityGran
 		store:       cfg.Store,
 		fgaBridge:   cfg.FGABridge,
 		authorizer:  cfg.Authorizer,
-		apiKeys:     cfg.APIKeys,
 		auditWriter: cfg.AuditWriter,
 		auditQuery:  cfg.AuditQuery,
 		dispatcher:  cfg.Dispatcher,
@@ -175,12 +167,12 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 		return nil, fmt.Errorf("capabilitygrant: RegisterCapabilityGrant: agent_public_key_jwk is required")
 	}
 
-	// Validate bootstrap credential when type is api_key.
-	if bootstrapType == "api_key" {
-		if err := s.apiKeys.ValidateBootstrap(ctx, bootstrapCredential); err != nil {
-			return nil, fmt.Errorf("capabilitygrant: RegisterCapabilityGrant: invalid bootstrap credential: %w", err)
-		}
-	}
+	// Note: "api_key" bootstrap type validation has been removed.
+	// The gsk_ API key system was removed in agent-service-credentials spec.
+	// The only supported bootstrap path is now TenantAdminService.CreateAgentIdentity.
+	// Any remaining api_key bootstrap calls will return an error at the RPC layer
+	// (the three CreateAPIKey/ListAPIKeys/RevokeAPIKey RPCs are also deleted from proto).
+	_ = bootstrapCredential // retained as parameter for proto compatibility
 
 	// Derive stable IDs from the public key JWKs.
 	// The host ID is a content-addressed thumbprint so that re-registrations from
@@ -522,65 +514,6 @@ func (s *CapabilityGrantService) ListCapabilityGrantAgents(
 	return &ListCapabilityGrantAgentsResult{
 		Agents: agents,
 		Total:  total,
-	}, nil
-}
-
-// ---------------------------------------------------------------------------
-// CreateHostRegistrationToken
-// ---------------------------------------------------------------------------
-
-// HostRegistrationTokenResult carries the raw token and its metadata.
-type HostRegistrationTokenResult struct {
-	RawToken  string
-	KeyID     string
-	ExpiresAt time.Time
-}
-
-// CreateHostRegistrationToken issues a single-use API key scoped to the given
-// tenant with AllowedKinds=["host"] and MaxUses=1.
-//
-// ttlHours must be in [1, 168]. Values outside that range are clamped.
-func (s *CapabilityGrantService) CreateHostRegistrationToken(
-	ctx context.Context,
-	tenantID, name, createdBy string,
-	ttlHours int,
-) (*HostRegistrationTokenResult, error) {
-	if tenantID == "" {
-		return nil, fmt.Errorf("capabilitygrant: CreateHostRegistrationToken: tenant_id is required")
-	}
-	if name == "" {
-		name = "host-registration"
-	}
-
-	// Clamp TTL.
-	if ttlHours <= 0 {
-		ttlHours = 24
-	}
-	if ttlHours > 168 {
-		ttlHours = 168
-	}
-
-	rawKey, record, err := s.apiKeys.CreateKey(
-		ctx,
-		tenantID,
-		[]string{"host"},          // AllowedKinds: host registrations only
-		[]string{},                // AllowedNames: no restriction
-		[]string{"register:host"}, // Capabilities
-		name,
-		createdBy,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("capabilitygrant: CreateHostRegistrationToken: %w", err)
-	}
-
-	expiresAt := time.Now().UTC().Add(time.Duration(ttlHours) * time.Hour)
-
-	_ = record // record is logged by CreateKey internally
-
-	return &HostRegistrationTokenResult{
-		RawToken:  rawKey,
-		KeyID:     record.KeyID,
-		ExpiresAt: expiresAt,
 	}, nil
 }
 

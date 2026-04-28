@@ -37,9 +37,9 @@ const adminPoolImportPath = "github.com/zero-day-ai/gibson/internal/datapool/adm
 var allowedAdminPackages = []string{
 	"/internal/datapool/admin",
 	"/internal/admin",
-	"/internal/migrate",    // migration runner uses admin pool for tenant enumeration
-	"/cmd/gibson-migrate",  // migration CLI entry point
-	"/tools/gibsoncheck",   // the analyzer itself during test runs
+	"/internal/migrate",   // migration runner uses admin pool for tenant enumeration
+	"/cmd/gibson-migrate", // migration CLI entry point
+	"/tools/gibsoncheck",  // the analyzer itself during test runs
 }
 
 func runAdminPoolAcquire(pass *analysis.Pass) (any, error) {

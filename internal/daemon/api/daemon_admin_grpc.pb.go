@@ -26,9 +26,6 @@ const (
 	DaemonAdminService_DeleteTenantLangfuseCredentials_FullMethodName = "/gibson.daemon.admin.v1.DaemonAdminService/DeleteTenantLangfuseCredentials"
 	DaemonAdminService_GetOnboardingState_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/GetOnboardingState"
 	DaemonAdminService_UpdateOnboardingState_FullMethodName           = "/gibson.daemon.admin.v1.DaemonAdminService/UpdateOnboardingState"
-	DaemonAdminService_CreateAPIKey_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/CreateAPIKey"
-	DaemonAdminService_ListAPIKeys_FullMethodName                     = "/gibson.daemon.admin.v1.DaemonAdminService/ListAPIKeys"
-	DaemonAdminService_RevokeAPIKey_FullMethodName                    = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeAPIKey"
 	DaemonAdminService_ListAuditEvents_FullMethodName                 = "/gibson.daemon.admin.v1.DaemonAdminService/ListAuditEvents"
 	DaemonAdminService_ResetPassword_FullMethodName                   = "/gibson.daemon.admin.v1.DaemonAdminService/ResetPassword"
 	DaemonAdminService_RevokeUserSessions_FullMethodName              = "/gibson.daemon.admin.v1.DaemonAdminService/RevokeUserSessions"
@@ -82,136 +79,127 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// DaemonAdminService provides the internal admin gRPC API for Gibson daemon.
+// Deprecated: use gibson.tenant.v1.TenantAdminService /
+// gibson.platform.v1.PlatformOperatorService / gibson.user.v1.UserService.
+// Removed in admin-services-completion.
 //
-// This service exposes privileged operations including tenant lifecycle management,
-// billing, provisioning, impersonation, API key management, and daemon shutdown.
-// It is NEVER exposed to end-customers — only to platform operators and internal
-// services.
+// DaemonAdminService provides the internal admin gRPC API for Gibson daemon.
+// This is the legacy service; new RPCs should be added to the service
+// appropriate to their audience (tenant-admin, platform-operator, or user).
 type DaemonAdminServiceClient interface {
+	// Deprecated: use gibson.platform.v1.PlatformOperatorService.Shutdown.
 	// Shutdown requests graceful shutdown of the daemon.
 	// This is used by the CLI to stop the daemon remotely.
 	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
+	// Deprecated: use gibson.platform.v1.PlatformOperatorService.ImpersonateTenant.
 	// ImpersonateTenant requests a time-limited context token for the given tenant.
 	// Requires the "platform-operator" role.
 	ImpersonateTenant(ctx context.Context, in *ImpersonateTenantRequest, opts ...grpc.CallOption) (*ImpersonateTenantResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.GetTenantLangfuseCredentials.
 	// GetTenantLangfuseCredentials retrieves the Langfuse project credentials for a tenant.
 	// Returns NOT_FOUND if no credentials have been configured for the tenant.
 	GetTenantLangfuseCredentials(ctx context.Context, in *GetTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*GetTenantLangfuseCredentialsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.SetTenantLangfuseCredentials.
 	// SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
 	SetTenantLangfuseCredentials(ctx context.Context, in *SetTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*SetTenantLangfuseCredentialsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.DeleteTenantLangfuseCredentials.
 	// DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
 	DeleteTenantLangfuseCredentials(ctx context.Context, in *DeleteTenantLangfuseCredentialsRequest, opts ...grpc.CallOption) (*DeleteTenantLangfuseCredentialsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.GetOnboardingState.
 	// GetOnboardingState queries the onboarding progress for a tenant.
 	GetOnboardingState(ctx context.Context, in *GetOnboardingStateRequest, opts ...grpc.CallOption) (*GetOnboardingStateResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.UpdateOnboardingState.
 	// UpdateOnboardingState advances or modifies the onboarding state.
 	UpdateOnboardingState(ctx context.Context, in *UpdateOnboardingStateRequest, opts ...grpc.CallOption) (*UpdateOnboardingStateResponse, error)
-	// CreateAPIKey issues a new API key for a tenant.
-	CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error)
-	// ListAPIKeys returns API key metadata (never raw key values).
-	ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error)
-	// RevokeAPIKey permanently revokes an API key.
-	RevokeAPIKey(ctx context.Context, in *RevokeAPIKeyRequest, opts ...grpc.CallOption) (*RevokeAPIKeyResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.ListAuditEvents.
 	// ListAuditEvents returns audit events for a tenant, sourced from the daemon's
 	// Redis audit stream. Requires FGA admin relation on the tenant.
 	ListAuditEvents(ctx context.Context, in *ListAuditEventsRequest, opts ...grpc.CallOption) (*ListAuditEventsResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement; IdP handles password reset).
 	// ResetPassword triggers a password-reset email for the given address.
-	// Always returns success regardless of whether the email exists, to prevent
-	// email enumeration attacks.
 	ResetPassword(ctx context.Context, in *ResetPasswordRequest, opts ...grpc.CallOption) (*ResetPasswordResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement; use IdP hosted profile page).
 	// RevokeUserSessions revokes one or all active sessions for a user.
-	// Delegates to the identity provider session management and emits a Redis pub/sub event.
 	RevokeUserSessions(ctx context.Context, in *RevokeUserSessionsRequest, opts ...grpc.CallOption) (*RevokeUserSessionsResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement).
 	// SuspendMember disables or reactivates a tenant member in the identity provider.
-	// When suspend=true the user is disabled and their FGA tuple is removed.
-	// When suspend=false the user is re-enabled and the tuple is restored.
 	SuspendMember(ctx context.Context, in *SuspendMemberRequest, opts ...grpc.CallOption) (*SuspendMemberResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.GetUserProfile.
 	// GetUserProfile retrieves a user's profile information from the identity provider.
-	// Accessible by the user themselves or by a tenant admin.
 	GetUserProfile(ctx context.Context, in *GetUserProfileRequest, opts ...grpc.CallOption) (*GetUserProfileResponse, error)
-	// UpdateUserProfile updates mutable profile fields (display_name, avatar_url)
-	// for a user. Email and role changes are not permitted here.
+	// Deprecated: use gibson.user.v1.UserService.UpdateUserProfile.
+	// UpdateUserProfile updates mutable profile fields (display_name, avatar_url) for a user.
 	UpdateUserProfile(ctx context.Context, in *UpdateUserProfileRequest, opts ...grpc.CallOption) (*UpdateUserProfileResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.ExportFindings.
 	// ExportFindings exports findings to the requested format (json, csv, sarif).
-	// The serialized content is returned as bytes in the response.
 	ExportFindings(ctx context.Context, in *ExportFindingsRequest, opts ...grpc.CallOption) (*ExportFindingsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.SaveMissionDraft.
 	// SaveMissionDraft persists a mission YAML draft for later use.
-	// If draft_id is empty a new draft is created; otherwise the existing draft
-	// is updated. Drafts expire automatically after 30 days.
 	SaveMissionDraft(ctx context.Context, in *SaveMissionDraftRequest, opts ...grpc.CallOption) (*SaveMissionDraftResponse, error)
-	// ListMissionDrafts returns all saved mission drafts for a tenant, ordered
-	// by update time descending.
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.ListMissionDrafts.
+	// ListMissionDrafts returns all saved mission drafts for a tenant.
 	ListMissionDrafts(ctx context.Context, in *ListMissionDraftsRequest, opts ...grpc.CallOption) (*ListMissionDraftsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.GetTenantQuota.
 	// GetTenantQuota retrieves the configured resource quotas for a tenant.
-	// Returns zero values for any quota not explicitly set.
-	// Requires FGA admin relation on the tenant.
 	GetTenantQuota(ctx context.Context, in *GetTenantQuotaRequest, opts ...grpc.CallOption) (*GetTenantQuotaResponse, error)
+	// Deprecated: use gibson.platform.v1.PlatformOperatorService.SetTenantQuota.
 	// SetTenantQuota sets or updates the resource quotas for a tenant.
-	// Requires platform-operator role.
 	SetTenantQuota(ctx context.Context, in *SetTenantQuotaRequest, opts ...grpc.CallOption) (*SetTenantQuotaResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement; use IdP hosted profile page).
 	// GetUserSessions returns the active sessions for a user.
-	// Accessible by the user themselves or by a tenant admin.
 	GetUserSessions(ctx context.Context, in *GetUserSessionsRequest, opts ...grpc.CallOption) (*GetUserSessionsResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.ListAlerts.
 	// ListAlerts returns platform alerts for a tenant user.
-	// Supports filtering to unread-only alerts.
 	ListAlerts(ctx context.Context, in *ListAlertsRequest, opts ...grpc.CallOption) (*ListAlertsResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.MarkAlertRead.
 	// MarkAlertRead marks a single alert as read.
 	MarkAlertRead(ctx context.Context, in *MarkAlertReadRequest, opts ...grpc.CallOption) (*MarkAlertReadResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.MarkAllAlertsRead.
 	// MarkAllAlertsRead marks all alerts for a user as read.
 	MarkAllAlertsRead(ctx context.Context, in *MarkAllAlertsReadRequest, opts ...grpc.CallOption) (*MarkAllAlertsReadResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.ListConversations.
 	// ListConversations returns the conversation history list for a user.
 	ListConversations(ctx context.Context, in *ListConversationsRequest, opts ...grpc.CallOption) (*ListConversationsResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.GetConversation.
 	// GetConversation returns the full message history for a single conversation.
 	GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*GetConversationResponse, error)
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
 	// RegisterCapabilityGrant registers a new agent and its host, resolves FGA-backed
 	// capability grants for the agent owner, and writes the grant records.
-	// Requires FGA admin relation on the tenant.
 	RegisterCapabilityGrant(ctx context.Context, in *RegisterCapabilityGrantRequest, opts ...grpc.CallOption) (*RegisterCapabilityGrantResponse, error)
-	// ExecuteAgentCapability checks FGA for the requested capability execution
-	// and records an audit event. Actual component dispatch is a future concern.
-	// Requires FGA member relation on the tenant.
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
+	// ExecuteAgentCapability checks FGA for the requested capability execution.
 	ExecuteAgentCapability(ctx context.Context, in *ExecuteAgentCapabilityRequest, opts ...grpc.CallOption) (*ExecuteAgentCapabilityResponse, error)
-	// ListAgentCapabilities returns all capabilities available to a given user
-	// by querying FGA and the component registry.
-	// Requires FGA member relation on the tenant.
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
+	// ListAgentCapabilities returns all capabilities available to a given user.
 	ListAgentCapabilities(ctx context.Context, in *ListAgentCapabilitiesRequest, opts ...grpc.CallOption) (*ListAgentCapabilitiesResponse, error)
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
 	// GetCapabilityGrantStatus returns the current status and grants for an agent.
-	// Requires FGA member relation on the tenant.
 	GetCapabilityGrantStatus(ctx context.Context, in *GetCapabilityGrantStatusRequest, opts ...grpc.CallOption) (*GetCapabilityGrantStatusResponse, error)
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
 	// RevokeCapabilityGrant sets the agent's status to revoked and revokes all grants.
-	// Requires FGA admin relation on the tenant.
 	RevokeCapabilityGrant(ctx context.Context, in *RevokeCapabilityGrantRequest, opts ...grpc.CallOption) (*RevokeCapabilityGrantResponse, error)
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
 	// ListCapabilityGrantAgents returns a paginated list of agents for a tenant.
-	// Requires FGA admin relation on the tenant.
 	ListCapabilityGrantAgents(ctx context.Context, in *ListCapabilityGrantAgentsRequest, opts ...grpc.CallOption) (*ListCapabilityGrantAgentsResponse, error)
-	// CreateHostRegistrationToken issues a single-use API key for host registration.
-	// Requires FGA admin relation on the tenant.
+	// Deprecated: deleted in admin-services-completion (CreateHostRegistrationToken removed with gsk_).
+	// CreateHostRegistrationToken issues a single-use host registration token.
 	CreateHostRegistrationToken(ctx context.Context, in *CreateHostRegistrationTokenRequest, opts ...grpc.CallOption) (*CreateHostRegistrationTokenResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement; use FGA ListUsers/ListObjects).
 	// ListComponentGrants returns FGA component grants for all users in a tenant.
-	// Best-effort: enumerates FGA tuples directly. Requires admin relation on the tenant.
 	ListComponentGrants(ctx context.Context, in *ListComponentGrantsRequest, opts ...grpc.CallOption) (*ListComponentGrantsResponse, error)
-	// BatchGrantComponentAccessV2 applies a list of per-principal grant/revoke
-	// operations across any component for any user or team.
-	// Requires FGA admin relation on the tenant.
+	// Deprecated: deleted in admin-services-completion (use CreateAgentIdentity component_grants).
+	// BatchGrantComponentAccessV2 applies per-principal grant/revoke operations.
 	BatchGrantComponentAccessV2(ctx context.Context, in *BatchGrantComponentAccessV2Request, opts ...grpc.CallOption) (*BatchGrantComponentAccessV2Response, error)
+	// Deprecated: deleted in admin-services-completion (ListAuditLog vs ListAuditEvents; use ListAuditEvents).
 	// ListAuditLog returns Postgres-backed audit log entries for a tenant.
-	// Requires FGA admin relation on the tenant.
 	ListAuditLog(ctx context.Context, in *ListAuditLogRequest, opts ...grpc.CallOption) (*ListAuditLogResponse, error)
-	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
-	// catalog. Bypasses the scheduled interval — useful for CI to publish a
-	// new tool-runner image and immediately surface its parsers to the
-	// orchestrator. Only works on the replica currently holding the refresh
-	// leader lease; followers accept the call but defer to the leader's
-	// next scheduled tick. Requires the platform-operator FGA role.
+	// Deprecated: use gibson.platform.v1.PlatformOperatorService.RefreshToolCatalog.
+	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool catalog.
 	RefreshToolCatalog(ctx context.Context, in *RefreshToolCatalogRequest, opts ...grpc.CallOption) (*RefreshToolCatalogResponse, error)
-	// GetSupportedProviders returns the full list of LLM provider types the
-	// daemon can construct, with per-provider credential schemas and default
-	// model catalogues. The dashboard consumes this to render the Settings >
-	// Providers form dynamically — no hard-coded frontend provider list,
-	// no drift between daemon and UI. Read-only; all metadata is built from
-	// in-process provider descriptors (no network calls). Requires any
-	// authenticated tenant member role.
+	// Deprecated: deleted in admin-services-completion (no replacement; model as daemon.config.v1.ConfigService if needed).
+	// GetSupportedProviders returns the full list of LLM provider types the daemon can construct.
 	GetSupportedProviders(ctx context.Context, in *GetSupportedProvidersRequest, opts ...grpc.CallOption) (*GetSupportedProvidersResponse, error)
 	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
 	// an authenticated caller. The daemon validates that every tuple's subject
@@ -367,36 +355,6 @@ func (c *daemonAdminServiceClient) UpdateOnboardingState(ctx context.Context, in
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateOnboardingStateResponse)
 	err := c.cc.Invoke(ctx, DaemonAdminService_UpdateOnboardingState_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateAPIKeyResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_CreateAPIKey_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListAPIKeysResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_ListAPIKeys_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *daemonAdminServiceClient) RevokeAPIKey(ctx context.Context, in *RevokeAPIKeyRequest, opts ...grpc.CallOption) (*RevokeAPIKeyResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RevokeAPIKeyResponse)
-	err := c.cc.Invoke(ctx, DaemonAdminService_RevokeAPIKey_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -886,136 +844,127 @@ type DaemonAdminService_StreamLLMClient = grpc.ServerStreamingClient[StreamLLMRe
 // All implementations must embed UnimplementedDaemonAdminServiceServer
 // for forward compatibility.
 //
-// DaemonAdminService provides the internal admin gRPC API for Gibson daemon.
+// Deprecated: use gibson.tenant.v1.TenantAdminService /
+// gibson.platform.v1.PlatformOperatorService / gibson.user.v1.UserService.
+// Removed in admin-services-completion.
 //
-// This service exposes privileged operations including tenant lifecycle management,
-// billing, provisioning, impersonation, API key management, and daemon shutdown.
-// It is NEVER exposed to end-customers — only to platform operators and internal
-// services.
+// DaemonAdminService provides the internal admin gRPC API for Gibson daemon.
+// This is the legacy service; new RPCs should be added to the service
+// appropriate to their audience (tenant-admin, platform-operator, or user).
 type DaemonAdminServiceServer interface {
+	// Deprecated: use gibson.platform.v1.PlatformOperatorService.Shutdown.
 	// Shutdown requests graceful shutdown of the daemon.
 	// This is used by the CLI to stop the daemon remotely.
 	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
+	// Deprecated: use gibson.platform.v1.PlatformOperatorService.ImpersonateTenant.
 	// ImpersonateTenant requests a time-limited context token for the given tenant.
 	// Requires the "platform-operator" role.
 	ImpersonateTenant(context.Context, *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.GetTenantLangfuseCredentials.
 	// GetTenantLangfuseCredentials retrieves the Langfuse project credentials for a tenant.
 	// Returns NOT_FOUND if no credentials have been configured for the tenant.
 	GetTenantLangfuseCredentials(context.Context, *GetTenantLangfuseCredentialsRequest) (*GetTenantLangfuseCredentialsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.SetTenantLangfuseCredentials.
 	// SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
 	SetTenantLangfuseCredentials(context.Context, *SetTenantLangfuseCredentialsRequest) (*SetTenantLangfuseCredentialsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.DeleteTenantLangfuseCredentials.
 	// DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
 	DeleteTenantLangfuseCredentials(context.Context, *DeleteTenantLangfuseCredentialsRequest) (*DeleteTenantLangfuseCredentialsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.GetOnboardingState.
 	// GetOnboardingState queries the onboarding progress for a tenant.
 	GetOnboardingState(context.Context, *GetOnboardingStateRequest) (*GetOnboardingStateResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.UpdateOnboardingState.
 	// UpdateOnboardingState advances or modifies the onboarding state.
 	UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error)
-	// CreateAPIKey issues a new API key for a tenant.
-	CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error)
-	// ListAPIKeys returns API key metadata (never raw key values).
-	ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error)
-	// RevokeAPIKey permanently revokes an API key.
-	RevokeAPIKey(context.Context, *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.ListAuditEvents.
 	// ListAuditEvents returns audit events for a tenant, sourced from the daemon's
 	// Redis audit stream. Requires FGA admin relation on the tenant.
 	ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement; IdP handles password reset).
 	// ResetPassword triggers a password-reset email for the given address.
-	// Always returns success regardless of whether the email exists, to prevent
-	// email enumeration attacks.
 	ResetPassword(context.Context, *ResetPasswordRequest) (*ResetPasswordResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement; use IdP hosted profile page).
 	// RevokeUserSessions revokes one or all active sessions for a user.
-	// Delegates to the identity provider session management and emits a Redis pub/sub event.
 	RevokeUserSessions(context.Context, *RevokeUserSessionsRequest) (*RevokeUserSessionsResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement).
 	// SuspendMember disables or reactivates a tenant member in the identity provider.
-	// When suspend=true the user is disabled and their FGA tuple is removed.
-	// When suspend=false the user is re-enabled and the tuple is restored.
 	SuspendMember(context.Context, *SuspendMemberRequest) (*SuspendMemberResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.GetUserProfile.
 	// GetUserProfile retrieves a user's profile information from the identity provider.
-	// Accessible by the user themselves or by a tenant admin.
 	GetUserProfile(context.Context, *GetUserProfileRequest) (*GetUserProfileResponse, error)
-	// UpdateUserProfile updates mutable profile fields (display_name, avatar_url)
-	// for a user. Email and role changes are not permitted here.
+	// Deprecated: use gibson.user.v1.UserService.UpdateUserProfile.
+	// UpdateUserProfile updates mutable profile fields (display_name, avatar_url) for a user.
 	UpdateUserProfile(context.Context, *UpdateUserProfileRequest) (*UpdateUserProfileResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.ExportFindings.
 	// ExportFindings exports findings to the requested format (json, csv, sarif).
-	// The serialized content is returned as bytes in the response.
 	ExportFindings(context.Context, *ExportFindingsRequest) (*ExportFindingsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.SaveMissionDraft.
 	// SaveMissionDraft persists a mission YAML draft for later use.
-	// If draft_id is empty a new draft is created; otherwise the existing draft
-	// is updated. Drafts expire automatically after 30 days.
 	SaveMissionDraft(context.Context, *SaveMissionDraftRequest) (*SaveMissionDraftResponse, error)
-	// ListMissionDrafts returns all saved mission drafts for a tenant, ordered
-	// by update time descending.
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.ListMissionDrafts.
+	// ListMissionDrafts returns all saved mission drafts for a tenant.
 	ListMissionDrafts(context.Context, *ListMissionDraftsRequest) (*ListMissionDraftsResponse, error)
+	// Deprecated: use gibson.tenant.v1.TenantAdminService.GetTenantQuota.
 	// GetTenantQuota retrieves the configured resource quotas for a tenant.
-	// Returns zero values for any quota not explicitly set.
-	// Requires FGA admin relation on the tenant.
 	GetTenantQuota(context.Context, *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error)
+	// Deprecated: use gibson.platform.v1.PlatformOperatorService.SetTenantQuota.
 	// SetTenantQuota sets or updates the resource quotas for a tenant.
-	// Requires platform-operator role.
 	SetTenantQuota(context.Context, *SetTenantQuotaRequest) (*SetTenantQuotaResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement; use IdP hosted profile page).
 	// GetUserSessions returns the active sessions for a user.
-	// Accessible by the user themselves or by a tenant admin.
 	GetUserSessions(context.Context, *GetUserSessionsRequest) (*GetUserSessionsResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.ListAlerts.
 	// ListAlerts returns platform alerts for a tenant user.
-	// Supports filtering to unread-only alerts.
 	ListAlerts(context.Context, *ListAlertsRequest) (*ListAlertsResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.MarkAlertRead.
 	// MarkAlertRead marks a single alert as read.
 	MarkAlertRead(context.Context, *MarkAlertReadRequest) (*MarkAlertReadResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.MarkAllAlertsRead.
 	// MarkAllAlertsRead marks all alerts for a user as read.
 	MarkAllAlertsRead(context.Context, *MarkAllAlertsReadRequest) (*MarkAllAlertsReadResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.ListConversations.
 	// ListConversations returns the conversation history list for a user.
 	ListConversations(context.Context, *ListConversationsRequest) (*ListConversationsResponse, error)
+	// Deprecated: use gibson.user.v1.UserService.GetConversation.
 	// GetConversation returns the full message history for a single conversation.
 	GetConversation(context.Context, *GetConversationRequest) (*GetConversationResponse, error)
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
 	// RegisterCapabilityGrant registers a new agent and its host, resolves FGA-backed
 	// capability grants for the agent owner, and writes the grant records.
-	// Requires FGA admin relation on the tenant.
 	RegisterCapabilityGrant(context.Context, *RegisterCapabilityGrantRequest) (*RegisterCapabilityGrantResponse, error)
-	// ExecuteAgentCapability checks FGA for the requested capability execution
-	// and records an audit event. Actual component dispatch is a future concern.
-	// Requires FGA member relation on the tenant.
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
+	// ExecuteAgentCapability checks FGA for the requested capability execution.
 	ExecuteAgentCapability(context.Context, *ExecuteAgentCapabilityRequest) (*ExecuteAgentCapabilityResponse, error)
-	// ListAgentCapabilities returns all capabilities available to a given user
-	// by querying FGA and the component registry.
-	// Requires FGA member relation on the tenant.
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
+	// ListAgentCapabilities returns all capabilities available to a given user.
 	ListAgentCapabilities(context.Context, *ListAgentCapabilitiesRequest) (*ListAgentCapabilitiesResponse, error)
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
 	// GetCapabilityGrantStatus returns the current status and grants for an agent.
-	// Requires FGA member relation on the tenant.
 	GetCapabilityGrantStatus(context.Context, *GetCapabilityGrantStatusRequest) (*GetCapabilityGrantStatusResponse, error)
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
 	// RevokeCapabilityGrant sets the agent's status to revoked and revokes all grants.
-	// Requires FGA admin relation on the tenant.
 	RevokeCapabilityGrant(context.Context, *RevokeCapabilityGrantRequest) (*RevokeCapabilityGrantResponse, error)
+	// Deprecated: deleted in admin-services-completion (capability-grant family; no replacement).
 	// ListCapabilityGrantAgents returns a paginated list of agents for a tenant.
-	// Requires FGA admin relation on the tenant.
 	ListCapabilityGrantAgents(context.Context, *ListCapabilityGrantAgentsRequest) (*ListCapabilityGrantAgentsResponse, error)
-	// CreateHostRegistrationToken issues a single-use API key for host registration.
-	// Requires FGA admin relation on the tenant.
+	// Deprecated: deleted in admin-services-completion (CreateHostRegistrationToken removed with gsk_).
+	// CreateHostRegistrationToken issues a single-use host registration token.
 	CreateHostRegistrationToken(context.Context, *CreateHostRegistrationTokenRequest) (*CreateHostRegistrationTokenResponse, error)
+	// Deprecated: deleted in admin-services-completion (no replacement; use FGA ListUsers/ListObjects).
 	// ListComponentGrants returns FGA component grants for all users in a tenant.
-	// Best-effort: enumerates FGA tuples directly. Requires admin relation on the tenant.
 	ListComponentGrants(context.Context, *ListComponentGrantsRequest) (*ListComponentGrantsResponse, error)
-	// BatchGrantComponentAccessV2 applies a list of per-principal grant/revoke
-	// operations across any component for any user or team.
-	// Requires FGA admin relation on the tenant.
+	// Deprecated: deleted in admin-services-completion (use CreateAgentIdentity component_grants).
+	// BatchGrantComponentAccessV2 applies per-principal grant/revoke operations.
 	BatchGrantComponentAccessV2(context.Context, *BatchGrantComponentAccessV2Request) (*BatchGrantComponentAccessV2Response, error)
+	// Deprecated: deleted in admin-services-completion (ListAuditLog vs ListAuditEvents; use ListAuditEvents).
 	// ListAuditLog returns Postgres-backed audit log entries for a tenant.
-	// Requires FGA admin relation on the tenant.
 	ListAuditLog(context.Context, *ListAuditLogRequest) (*ListAuditLogResponse, error)
-	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
-	// catalog. Bypasses the scheduled interval — useful for CI to publish a
-	// new tool-runner image and immediately surface its parsers to the
-	// orchestrator. Only works on the replica currently holding the refresh
-	// leader lease; followers accept the call but defer to the leader's
-	// next scheduled tick. Requires the platform-operator FGA role.
+	// Deprecated: use gibson.platform.v1.PlatformOperatorService.RefreshToolCatalog.
+	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool catalog.
 	RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error)
-	// GetSupportedProviders returns the full list of LLM provider types the
-	// daemon can construct, with per-provider credential schemas and default
-	// model catalogues. The dashboard consumes this to render the Settings >
-	// Providers form dynamically — no hard-coded frontend provider list,
-	// no drift between daemon and UI. Read-only; all metadata is built from
-	// in-process provider descriptors (no network calls). Requires any
-	// authenticated tenant member role.
+	// Deprecated: deleted in admin-services-completion (no replacement; model as daemon.config.v1.ConfigService if needed).
+	// GetSupportedProviders returns the full list of LLM provider types the daemon can construct.
 	GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error)
 	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
 	// an authenticated caller. The daemon validates that every tuple's subject
@@ -1127,15 +1076,6 @@ func (UnimplementedDaemonAdminServiceServer) GetOnboardingState(context.Context,
 }
 func (UnimplementedDaemonAdminServiceServer) UpdateOnboardingState(context.Context, *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateOnboardingState not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateAPIKey not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListAPIKeys not implemented")
-}
-func (UnimplementedDaemonAdminServiceServer) RevokeAPIKey(context.Context, *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RevokeAPIKey not implemented")
 }
 func (UnimplementedDaemonAdminServiceServer) ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAuditEvents not implemented")
@@ -1421,60 +1361,6 @@ func _DaemonAdminService_UpdateOnboardingState_Handler(srv interface{}, ctx cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonAdminServiceServer).UpdateOnboardingState(ctx, req.(*UpdateOnboardingStateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_CreateAPIKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateAPIKeyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).CreateAPIKey(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_CreateAPIKey_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).CreateAPIKey(ctx, req.(*CreateAPIKeyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_ListAPIKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListAPIKeysRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).ListAPIKeys(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_ListAPIKeys_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).ListAPIKeys(ctx, req.(*ListAPIKeysRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DaemonAdminService_RevokeAPIKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RevokeAPIKeyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonAdminServiceServer).RevokeAPIKey(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonAdminService_RevokeAPIKey_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonAdminServiceServer).RevokeAPIKey(ctx, req.(*RevokeAPIKeyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2352,18 +2238,6 @@ var DaemonAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateOnboardingState",
 			Handler:    _DaemonAdminService_UpdateOnboardingState_Handler,
-		},
-		{
-			MethodName: "CreateAPIKey",
-			Handler:    _DaemonAdminService_CreateAPIKey_Handler,
-		},
-		{
-			MethodName: "ListAPIKeys",
-			Handler:    _DaemonAdminService_ListAPIKeys_Handler,
-		},
-		{
-			MethodName: "RevokeAPIKey",
-			Handler:    _DaemonAdminService_RevokeAPIKey_Handler,
 		},
 		{
 			MethodName: "ListAuditEvents",

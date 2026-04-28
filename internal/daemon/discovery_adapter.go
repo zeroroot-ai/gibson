@@ -3,8 +3,8 @@ package daemon
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
+	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 

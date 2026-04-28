@@ -20,7 +20,6 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	discoverysvc "github.com/zero-day-ai/gibson/internal/api/discovery"
-	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/budget"
@@ -492,34 +491,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Tenant lifecycle (create/provision/deprovision) has moved out of the daemon
 	// to the standalone gibson-tenant-operator; this block only wires the
 	// remaining runtime services (CapabilityGrant, onboarding, mission drafts,
-	// impersonation, and the API key store).
+	// impersonation).
+	// Note: API key store removed (agent-service-credentials spec Req 10.1-10.4).
 	if d.stateClient != nil {
 		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
 			_ = redisClient // retained for future wiring
 
-			// Create apikeys.Store for the CreateAPIKey/ListAPIKeys/RevokeAPIKey RPCs.
-			// API keys are stored in the dashboard Postgres instance.
-			// Validation (authentication) of API keys has moved to the ext_authz service;
-			// only management operations remain in the daemon.
-			var apiKeyStore *apikeys.Store
-			if d.dashboardDB != nil {
-				var akErr error
-				apiKeyStore, akErr = apikeys.New(d.dashboardDB)
-				if akErr != nil {
-					d.logger.Warn(ctx, "failed to create API key store", "error", akErr)
-				}
-			} else {
-				d.logger.Warn(ctx, "API key store not wired: dashboard Postgres unavailable")
-			}
-
-			if apiKeyStore != nil {
-				daemonSvc.WithAPIKeyStore(apiKeyStore)
-				d.logger.Info(ctx, "API key store wired into DaemonServer (Postgres-backed)")
-			}
-
 			// Wire the CapabilityGrantService for the Agent Auth Protocol RPCs.
-			// Requires dashboardDB (for store + apiKeys) and the FGA authorizer.
-			if d.dashboardDB != nil && apiKeyStore != nil && d.authorizer != nil {
+			// Requires dashboardDB and the FGA authorizer.
+			if d.dashboardDB != nil && d.authorizer != nil {
 				agentStore := capabilitygrant.NewCapabilityGrantStore(d.dashboardDB)
 				auditWriter := audit.NewWriter(d.dashboardDB, d.logger.Slog())
 				auditWriter.Start(ctx)
@@ -541,7 +521,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 					Store:       agentStore,
 					FGABridge:   fgaBridge,
 					Authorizer:  d.authorizer,
-					APIKeys:     apiKeyStore,
 					AuditWriter: auditWriter,
 					AuditQuery:  auditQuery,
 					Dispatcher:  capabilityGrantDispatcher,
@@ -550,7 +529,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				daemonSvc.WithCapabilityGrantService(capabilityGrantSvc)
 				d.logger.Info(ctx, "CapabilityGrantService wired into DaemonServer")
 			} else {
-				d.logger.Warn(ctx, "CapabilityGrantService not wired: requires dashboardDB, apiKeyStore, and authorizer")
+				d.logger.Warn(ctx, "CapabilityGrantService not wired: requires dashboardDB and authorizer")
 			}
 
 			// Wire the onboarding store backed by Redis.

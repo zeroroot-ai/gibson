@@ -15,8 +15,8 @@ func TestSanitizeForPostgres_Valid(t *testing.T) {
 		{"acme", "acme"},
 		{"bigcorp", "bigcorp"},
 		{"tenant1", "tenant1"},
-		{"my-tenant", "my_tenant"},   // hyphens → underscores
-		{"a-b-c", "a_b_c"},           // multiple hyphens
+		{"my-tenant", "my_tenant"}, // hyphens → underscores
+		{"a-b-c", "a_b_c"},         // multiple hyphens
 		{"abc123", "abc123"},
 		{"a1b2c3", "a1b2c3"},
 	}

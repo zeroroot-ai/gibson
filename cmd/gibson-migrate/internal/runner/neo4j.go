@@ -397,4 +397,3 @@ func splitCypherStatements(src string) []string {
 	}
 	return stmts
 }
-

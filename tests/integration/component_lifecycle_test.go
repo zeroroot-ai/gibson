@@ -5,21 +5,15 @@ package integration
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/zero-day-ai/gibson/internal/apikeys"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/sdk/auth"
 )
@@ -60,103 +54,12 @@ func newComponentTestEnv(t *testing.T) *componentTestEnv {
 	}
 }
 
-// newAuthDB starts a Postgres container, runs migrations, and returns an
-// apikeys.Store backed by it. The container is terminated via cleanup.
-func newAuthDB(t *testing.T) (*apikeys.Store, func()) {
-	t.Helper()
-	ctx := context.Background()
-
-	provider, err := testcontainers.ProviderDocker.GetProvider()
-	if err != nil {
-		t.Skipf("Docker not available, skipping test: %v", err)
-		return nil, func() {}
-	}
-	if healthErr := provider.Health(ctx); healthErr != nil {
-		t.Skipf("Docker not running, skipping test: %v", healthErr)
-		return nil, func() {}
-	}
-
-	const (
-		pgUser     = "testuser"
-		pgPassword = "testpassword"
-		pgDB       = "testdb"
-	)
-
-	req := testcontainers.ContainerRequest{
-		Image: "postgres:15-alpine",
-		Env: map[string]string{
-			"POSTGRES_USER":     pgUser,
-			"POSTGRES_PASSWORD": pgPassword,
-			"POSTGRES_DB":       pgDB,
-		},
-		ExposedPorts: []string{"5432/tcp"},
-		WaitingFor: wait.ForAll(
-			wait.ForLog("database system is ready to accept connections"),
-			wait.ForListeningPort("5432/tcp"),
-		),
-	}
-
-	pgC, startErr := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	require.NoError(t, startErr, "failed to start Postgres container")
-
-	cleanup := func() {
-		if termErr := pgC.Terminate(ctx); termErr != nil {
-			t.Logf("warning: failed to terminate Postgres container: %v", termErr)
-		}
-	}
-
-	host, hostErr := pgC.Host(ctx)
-	require.NoError(t, hostErr)
-
-	mappedPort, portErr := pgC.MappedPort(ctx, "5432")
-	require.NoError(t, portErr)
-
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, mappedPort.Port(), pgUser, pgPassword, pgDB)
-
-	db, openErr := sql.Open("postgres", dsn)
-	require.NoError(t, openErr)
-	t.Cleanup(func() { _ = db.Close() })
-
-	require.Eventually(t, func() bool {
-		return db.PingContext(ctx) == nil
-	}, 30*time.Second, 200*time.Millisecond, "Postgres did not become ready in time")
-
-	// Inline DDL for the api_keys table. Historically this was done via
-	// provisioner.RunMigrations, but the provisioner package has moved into the
-	// tenant-operator. The integration test only needs the schema local to the
-	// APIKeyAuthenticator under test, so the DDL is inlined here.
-	const apiKeysDDL = `
-CREATE TABLE IF NOT EXISTS api_keys (
-    key_id         TEXT PRIMARY KEY,
-    tenant_id      TEXT NOT NULL,
-    key_hash       TEXT NOT NULL UNIQUE,
-    name           TEXT NOT NULL DEFAULT '',
-    created_by     TEXT NOT NULL DEFAULT '',
-    allowed_kinds  TEXT[] NOT NULL DEFAULT '{}',
-    allowed_names  TEXT[] NOT NULL DEFAULT '{}',
-    capabilities   TEXT[] NOT NULL DEFAULT '{}',
-    status         TEXT NOT NULL DEFAULT 'active',
-    max_uses       INTEGER,
-    use_count      INTEGER NOT NULL DEFAULT 0,
-    expires_at     TIMESTAMPTZ,
-    last_used_at   TIMESTAMPTZ,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id);
-`
-	_, ddlErr := db.ExecContext(ctx, apiKeysDDL)
-	require.NoError(t, ddlErr, "failed to create api_keys table")
-
-	a, authErr := apikeys.New(db)
-	require.NoError(t, authErr)
-	require.NotNil(t, a)
-
-	return a, cleanup
-}
+// newAuthDB was removed. The gsk_ API key system has been deleted.
+// The test that used it (formerly TestComponentLifecycle_APIKeyToTenantFlow)
+// has been refactored to TestComponentLifecycle_TenantScopedRegistration,
+// which tests the same component-registry scoping invariant directly via
+// auth.ContextWithTenantString without a Postgres container.
+// Spec: agent-service-credentials Requirement 10.10.
 
 // ---------------------------------------------------------------------------
 // Test 1: Full Component Lifecycle
@@ -372,29 +275,19 @@ func TestComponentLifecycle_MultiTenantIsolation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: API Key → Tenant Context → Component Registration Flow
+// Test 3: Tenant Context → Component Registration Scoping
 // ---------------------------------------------------------------------------
 
-// TestComponentLifecycle_APIKeyToTenantFlow verifies the API key management
-// and tenant context plumbing: an API key is minted for a tenant via
-// apikeys.Store, the tenant from the record is injected into context via
-// auth.ContextWithTenantString, and the registry enforces that scoping.
-//
-// Note: API key validation (Authenticate) has moved to the ext_authz sidecar.
-// The daemon only manages key records; it does not authenticate them at runtime.
-func TestComponentLifecycle_APIKeyToTenantFlow(t *testing.T) {
-	// API keys are Postgres-backed; spin up a container for the store.
-	store, authCleanup := newAuthDB(t)
-	defer authCleanup()
-
-	// The component registry continues to use Redis.
-	mr := newComponentTestEnv(t)
-	redisClient := redis.NewClient(&redis.Options{Addr: mr.mr.Addr()})
-	t.Cleanup(func() { _ = redisClient.Close() })
-
-	reg := component.NewRedisComponentRegistry(redisClient, 30*time.Second)
-
+// TestComponentLifecycle_TenantScopedRegistration verifies that component
+// registration is tenant-scoped. The gsk_ API key system has been removed;
+// this test exercises the same tenant-context + registry scoping invariant
+// using auth.ContextWithTenantString directly instead of going through
+// the deleted API key store.
+// Spec: agent-service-credentials Requirement 10.10.
+func TestComponentLifecycle_TenantScopedRegistration(t *testing.T) {
+	env := newComponentTestEnv(t)
 	ctx := context.Background()
+
 	const (
 		targetTenant = "acme"
 		otherTenant  = "other-corp"
@@ -402,43 +295,30 @@ func TestComponentLifecycle_APIKeyToTenantFlow(t *testing.T) {
 		name         = "port-scanner"
 	)
 
-	// Step 1: Create an API key for the target tenant.
-	rawKey, record, err := store.CreateKey(ctx, targetTenant, nil, nil, nil, "", "")
-	require.NoError(t, err)
-	require.NotEmpty(t, rawKey)
-	require.NotNil(t, record)
-	assert.Equal(t, targetTenant, record.TenantID)
-
-	// Step 2: The tenant is available directly from the record (validation is
-	// performed by ext_authz; the daemon trusts the signed identity headers it
-	// receives after ext_authz has authenticated the API key).
-	tenantFromRecord := record.TenantID
-	assert.Equal(t, targetTenant, tenantFromRecord,
-		"Record must carry the tenant_id matching the key's tenant")
-
-	// Step 3: Inject the tenant into the context using auth.ContextWithTenantString.
-	tenantCtx := auth.ContextWithTenantString(ctx, tenantFromRecord)
+	// Step 1: Inject the tenant identity into context.
+	// In production this context is built from the Envoy x-gibson-identity-*
+	// headers after ext_authz has authenticated the caller.
+	tenantCtx := auth.ContextWithTenantString(ctx, targetTenant)
 	assert.Equal(t, targetTenant, auth.TenantStringFromContext(tenantCtx),
-		"TenantFromContext must return the tenant injected by ContextWithTenant")
+		"TenantFromContext must return the tenant injected by ContextWithTenantString")
 
-	// Step 4: Register a component using the tenant extracted from the context.
+	// Step 2: Register a component using the tenant extracted from the context.
 	tenantID := auth.TenantStringFromContext(tenantCtx)
-	instanceID, err := reg.Register(tenantCtx, tenantID, kind, name, component.ComponentInfo{
+	instanceID, err := env.reg.Register(tenantCtx, tenantID, kind, name, component.ComponentInfo{
 		Version: "3.0.0",
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, instanceID)
 
-	// Step 5: Verify the component is discoverable for the correct tenant.
-	results, err := reg.Discover(tenantCtx, targetTenant, kind, name)
+	// Step 3: Verify the component is discoverable for the correct tenant.
+	results, err := env.reg.Discover(tenantCtx, targetTenant, kind, name)
 	require.NoError(t, err)
 	require.Len(t, results, 1, "component must be discoverable for the registering tenant")
 	assert.Equal(t, targetTenant, results[0].TenantID)
 	assert.Equal(t, instanceID, results[0].InstanceID)
 
-	// Step 6: Verify the component is NOT discoverable for a different tenant
-	// (both the tenant namespace and the _system namespace must be empty for otherTenant).
-	otherResults, err := reg.Discover(ctx, otherTenant, kind, name)
+	// Step 4: Verify the component is NOT discoverable for a different tenant.
+	otherResults, err := env.reg.Discover(ctx, otherTenant, kind, name)
 	require.NoError(t, err)
 	assert.Empty(t, otherResults,
 		"component registered for %q must not appear under %q",

@@ -133,13 +133,13 @@ func cmdUp(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 
 	type tenantResult struct {
-		Tenant string   `json:"tenant"`
-		Store  string   `json:"store"`
-		Status string   `json:"status"`
-		From   uint     `json:"from"`
-		To     uint     `json:"to"`
+		Tenant  string   `json:"tenant"`
+		Store   string   `json:"store"`
+		Status  string   `json:"status"`
+		From    uint     `json:"from"`
+		To      uint     `json:"to"`
 		Applied []string `json:"applied,omitempty"`
-		Error  string   `json:"error,omitempty"`
+		Error   string   `json:"error,omitempty"`
 	}
 
 	var results []tenantResult
@@ -398,12 +398,12 @@ func cmdDown(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 
 	type downResult struct {
-		Tenant      string   `json:"tenant"`
-		Store       string   `json:"store"`
-		ToVersion   uint     `json:"to_version"`
-		RolledBack  []string `json:"rolled_back,omitempty"`
-		DryRun      bool     `json:"dry_run"`
-		Error       string   `json:"error,omitempty"`
+		Tenant     string   `json:"tenant"`
+		Store      string   `json:"store"`
+		ToVersion  uint     `json:"to_version"`
+		RolledBack []string `json:"rolled_back,omitempty"`
+		DryRun     bool     `json:"dry_run"`
+		Error      string   `json:"error,omitempty"`
 	}
 
 	var results []downResult

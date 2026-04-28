@@ -358,10 +358,10 @@ type RunningMission struct {
 // runningMissionDoc is the JSON shape stored per mission run key.
 // We only decode the fields we need for recovery.
 type runningMissionDoc struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Status   string `json:"status"`
-	RunID    string `json:"run_id,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	RunID  string `json:"run_id,omitempty"`
 }
 
 // ListRunning returns all missions currently in the "running" or "paused"

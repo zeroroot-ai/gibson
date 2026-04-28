@@ -216,17 +216,17 @@ func (o *CredentialOps) ListNames(ctx context.Context, filter *types.CredentialF
 // both the plaintext secret value and the non-sensitive metadata in a single
 // envelope without needing additional Postgres columns.
 type credentialMeta struct {
-	PlainValue        string                   `json:"plain_value"`
-	Type              string                   `json:"type"`
-	Provider          string                   `json:"provider,omitempty"`
-	Status            string                   `json:"status"`
-	Description       string                   `json:"description,omitempty"`
-	Tags              []string                 `json:"tags"`
-	Rotation          types.CredentialRotation `json:"rotation"`
-	Usage             types.CredentialUsage    `json:"usage"`
-	CreatedAt         time.Time                `json:"created_at"`
-	UpdatedAt         time.Time                `json:"updated_at"`
-	LastUsed          *time.Time               `json:"last_used,omitempty"`
+	PlainValue  string                   `json:"plain_value"`
+	Type        string                   `json:"type"`
+	Provider    string                   `json:"provider,omitempty"`
+	Status      string                   `json:"status"`
+	Description string                   `json:"description,omitempty"`
+	Tags        []string                 `json:"tags"`
+	Rotation    types.CredentialRotation `json:"rotation"`
+	Usage       types.CredentialUsage    `json:"usage"`
+	CreatedAt   time.Time                `json:"created_at"`
+	UpdatedAt   time.Time                `json:"updated_at"`
+	LastUsed    *time.Time               `json:"last_used,omitempty"`
 }
 
 // PostgresCredentialDAO wraps CredentialOps to satisfy the legacy CredentialDAO
@@ -476,4 +476,3 @@ func (d *PostgresCredentialDAO) Exists(ctx context.Context, name string) (bool, 
 	}
 	return count > 0, nil
 }
-

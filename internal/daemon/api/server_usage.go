@@ -9,8 +9,8 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/sdk/auth"
 	usagepb "github.com/zero-day-ai/sdk/api/gen/gibson/usage/v1"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // server_usage.go — DaemonServer implementation of

@@ -62,32 +62,32 @@ var allowedStorePackages = []string{
 	"/internal/admin",
 	"/internal/migrate",
 	"/cmd/gibson-migrate",
-	"/cmd/daemon",         // cmd/daemon binary entry point (bootstrap wiring)
-	"/internal/daemon",   // daemon bootstrap and subsystems (wires raw clients into Conn factory)
+	"/cmd/daemon",      // cmd/daemon binary entry point (bootstrap wiring)
+	"/internal/daemon", // daemon bootstrap and subsystems (wires raw clients into Conn factory)
 	"/tools/gibsoncheck",
 
 	// Transitional allowlist — Phase D migration in progress.
 	// These packages are targeted for refactor/deletion; remove entries here
 	// once the corresponding packages are cleaned up.
-	"/internal/state",         // Phase D/4.7: TenantScopedStore pending deletion
-	"/internal/database",      // Phase D/4.2: DAO refactor in progress
-	"/internal/authz",         // Phase E/5.2: cross-tenant code relocation
-	"/internal/audit",         // Phase E/5.2: audit stream on shared Redis
-	"/internal/finding",       // Phase D/4.2: finding store _conn.go uses raw redis via Conn
-	"/internal/graphrag",      // Phase D/4.4: Neo4j session via Conn
-	"/internal/memory",        // Phase D/4.3: mission memory via Conn
-	"/internal/component",     // Phase E/5.2: component quota counters (shared Redis)
-	"/internal/budget",        // Phase D/4.x: budget enforcer pending Conn-bound refactor
-	"/internal/checkpoint",    // Phase D/4.x: checkpoint store pending Conn-bound refactor
-	"/internal/manifest",      // Phase D/4.x: manifest invalidator pending refactor
-	"/internal/mission",       // Phase D/4.1,4.5: Conn-bound wrappers still import raw redis
-	"/internal/missiondraft",  // Phase D/4.x: draft store pending Conn-bound refactor
-	"/internal/onboarding",    // Phase D/4.x: onboarding store pending Conn-bound refactor
-	"/internal/neo4j",         // Phase D/4.4: Neo4j client wrapper
-	"/internal/ratelimit",     // Phase D/4.x: rate limiter on shared Redis
+	"/internal/state",          // Phase D/4.7: TenantScopedStore pending deletion
+	"/internal/database",       // Phase D/4.2: DAO refactor in progress
+	"/internal/authz",          // Phase E/5.2: cross-tenant code relocation
+	"/internal/audit",          // Phase E/5.2: audit stream on shared Redis
+	"/internal/finding",        // Phase D/4.2: finding store _conn.go uses raw redis via Conn
+	"/internal/graphrag",       // Phase D/4.4: Neo4j session via Conn
+	"/internal/memory",         // Phase D/4.3: mission memory via Conn
+	"/internal/component",      // Phase E/5.2: component quota counters (shared Redis)
+	"/internal/budget",         // Phase D/4.x: budget enforcer pending Conn-bound refactor
+	"/internal/checkpoint",     // Phase D/4.x: checkpoint store pending Conn-bound refactor
+	"/internal/manifest",       // Phase D/4.x: manifest invalidator pending refactor
+	"/internal/mission",        // Phase D/4.1,4.5: Conn-bound wrappers still import raw redis
+	"/internal/missiondraft",   // Phase D/4.x: draft store pending Conn-bound refactor
+	"/internal/onboarding",     // Phase D/4.x: onboarding store pending Conn-bound refactor
+	"/internal/neo4j",          // Phase D/4.4: Neo4j client wrapper
+	"/internal/ratelimit",      // Phase D/4.x: rate limiter on shared Redis
 	"/internal/providerconfig", // Phase C/3.3: provider config store pending Conn-bound
-	"/internal/apikeys",       // Phase D/4.x: API key store pending Conn-bound refactor
-	"/internal/orchestrator",  // Phase D/4.4: Neo4j graph querier pending Conn-bound refactor
+	"/internal/apikeys",        // Phase D/4.x: API key store pending Conn-bound refactor
+	"/internal/orchestrator",   // Phase D/4.4: Neo4j graph querier pending Conn-bound refactor
 }
 
 func runForbidRawStoreImports(pass *analysis.Pass) (any, error) {

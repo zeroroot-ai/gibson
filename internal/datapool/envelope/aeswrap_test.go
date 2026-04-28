@@ -12,9 +12,9 @@ import (
 // and the expected wrapped output.
 
 type wrapVector struct {
-	name      string
-	kekHex    string
-	keyHex    string
+	name       string
+	kekHex     string
+	keyHex     string
 	wrappedHex string
 }
 

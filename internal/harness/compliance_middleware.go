@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/sdk/auth"
 	taxonomypb "github.com/zero-day-ai/sdk/api/gen/taxonomy/v1"
+	"github.com/zero-day-ai/sdk/auth"
 	"go.opentelemetry.io/otel/trace"
 )
 

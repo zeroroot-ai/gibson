@@ -342,50 +342,12 @@ func (s *DaemonServer) ListCapabilityGrantAgents(ctx context.Context, req *ListC
 }
 
 // ---------------------------------------------------------------------------
-// CreateHostRegistrationToken
+// CreateHostRegistrationToken — deleted.
+// Removed as part of gsk_ API key system removal.
+// The DaemonAdminService proto still has this RPC stub but the handler
+// falls through to UnimplementedDaemonAdminServiceServer.
+// Spec: agent-service-credentials Requirement 10.4.
 // ---------------------------------------------------------------------------
-
-// CreateHostRegistrationToken issues a single-use host API key for the tenant.
-func (s *DaemonServer) CreateHostRegistrationToken(ctx context.Context, req *CreateHostRegistrationTokenRequest) (*CreateHostRegistrationTokenResponse, error) {
-	if s.capabilityGrantService == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "agent auth service not configured")
-	}
-
-	tenantID := req.GetTenantId()
-	if tenantID == "" {
-		tenantID = auth.TenantStringFromContext(ctx)
-	}
-	if tenantID == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// Extract actor ID for the key's created_by field.
-	createdBy := ""
-	if id, err := auth.IdentityFromContext(ctx); err == nil {
-		createdBy = id.Subject
-	}
-
-	result, err := s.capabilityGrantService.CreateHostRegistrationToken(
-		ctx,
-		tenantID,
-		req.GetName(),
-		createdBy,
-		int(req.GetTtlHours()),
-	)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "CreateHostRegistrationToken: service error",
-			slog.String("tenant_id", tenantID),
-			slog.String("error", err.Error()),
-		)
-		return nil, status_grpc.Error(codes.Internal, "failed to create host registration token")
-	}
-
-	return &CreateHostRegistrationTokenResponse{
-		RawToken:  result.RawToken,
-		KeyId:     result.KeyID,
-		ExpiresAt: result.ExpiresAt.Unix(),
-	}, nil
-}
 
 // ---------------------------------------------------------------------------
 // ListComponentGrants

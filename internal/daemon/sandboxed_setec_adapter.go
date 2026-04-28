@@ -38,8 +38,8 @@ import (
 	setecv1 "github.com/zero-day-ai/setec/api/grpc/v1alpha1"
 
 	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
+	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 )
 

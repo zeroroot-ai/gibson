@@ -26,8 +26,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/state"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 func TestAuditEmission_AccessTupleChange_EndToEnd(t *testing.T) {

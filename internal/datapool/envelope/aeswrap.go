@@ -56,7 +56,7 @@ func Wrap(kek, plaintext []byte) ([]byte, error) {
 
 			// A = MSB(64, B) XOR t, where t = (n*j)+i+1
 			copy(A[:], buf[:8])
-			t := uint64(n*j+i+1)
+			t := uint64(n*j + i + 1)
 			tBytes := make([]byte, 8)
 			binary.BigEndian.PutUint64(tBytes, t)
 			for k := 0; k < 8; k++ {

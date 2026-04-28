@@ -27,8 +27,8 @@ func (realClock) NewTicker(d time.Duration) (<-chan time.Time, func()) {
 
 // fakeClock is a controllable clock for tests.
 type fakeClock struct {
-	now     time.Time
-	tickCh  chan time.Time
+	now    time.Time
+	tickCh chan time.Time
 }
 
 func newFakeClock(start time.Time) *fakeClock {

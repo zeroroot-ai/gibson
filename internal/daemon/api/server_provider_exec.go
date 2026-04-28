@@ -9,13 +9,13 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	"github.com/zero-day-ai/gibson/internal/types"
 	budgetpb "github.com/zero-day-ai/sdk/api/gen/gibson/budget/v1"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/schema"
 )
 

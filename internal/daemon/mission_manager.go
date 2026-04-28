@@ -17,12 +17,12 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/auth"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -45,7 +45,7 @@ type missionManager struct {
 	config          *config.Config
 	logger          *slog.Logger
 	registry        component.ComponentDiscovery
-	pool            datapool.Pool // per-tenant data-plane pool (replaces missionStore, missionRunStore, findingStore)
+	pool            datapool.Pool           // per-tenant data-plane pool (replaces missionStore, missionRunStore, findingStore)
 	checkpointStore mission.CheckpointStore // Stores mission checkpoints for pause/resume
 	llmRegistry     llm.LLMRegistry
 	callbackManager *harness.CallbackManager
