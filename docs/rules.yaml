@@ -3,6 +3,7 @@
 # Specs:
 #   - unified-identity-and-authorization (Phase J task 10.1) — `gibson-auth-*`
 #   - database-per-tenant-data-plane    (Phase J task 10.1) — `gibson-dp-*`
+#   - daemon-mission-finding-per-tenant-cutover (2026-04-26) — `gibson-dp-008`
 #
 # Schema: ../../sdk/docs/rules-schema.yaml v1.0.0.
 #
@@ -324,3 +325,27 @@ rules:
       dedicated database; standard Cypher works without a tenant filter.
     enforced_by:
       - "script:scripts/check-no-tenant-id-column.sh"
+
+  - id: gibson-dp-008
+    description: |
+      redis.NewClient(...) constructs a process-wide shared Redis client
+      with no tenant isolation. All writes land in the same DB index
+      visible to every tenant. This is the construction-site escape hatch
+      that the per-tenant mission/finding cutover closed.
+      Spec: daemon-mission-finding-per-tenant-cutover Requirement 5.3.
+    scope:
+      - "**/*.go"
+    exempt:
+      - "internal/datapool/**"
+      - "internal/admin/**"
+      - "**/*_test.go"
+    pattern:
+      kind: forbidden_call
+      target: "github.com/redis/go-redis/v9.NewClient"
+    severity: error
+    message: |
+      Use pool.For(ctx, tenant) → *Conn and access conn.Redis instead of
+      constructing a raw *redis.Client. See docs/data-plane.md
+      "GIBSON-DP-008: constructing redis.NewClient outside the allowlist".
+    enforced_by:
+      - "gibsoncheck:forbidredisclientconstruction"

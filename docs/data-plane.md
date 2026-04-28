@@ -233,6 +233,30 @@ The runner uses the admin pool for tenant enumeration; the
 analyzer allowlists `cmd/gibson-migrate/` for raw pgx and neo4j-go-driver
 imports.
 
+## Mission / finding / run stores — per-tenant cutover complete
+
+Spec: `daemon-mission-finding-per-tenant-cutover` (2026-04-26).
+
+**All three handler subsystems are now per-tenant.** Every mission, mission-run,
+and finding RPC acquires a `Conn` from the pool and uses `conn.Missions()`,
+`conn.Redis` (for run-event streams), and `conn.Findings()`. The process-wide
+`NewRedisMissionStore`, `NewRedisMissionRunStore`, and `NewRedisFindingStore`
+constructors are **deleted** from the codebase. Audit findings C6, C9, C14, C15
+are now structurally closed.
+
+Before this spec, three subsystems remained on the legacy global-Redis path:
+
+| Subsystem | Old path | New path |
+|---|---|---|
+| Mission CRUD (Create, Get, List, Update) | `RedisMissionStore` (global) | `ConnBoundMissionStore(conn.Redis)` per RPC |
+| Mission-run / event streams | `RedisMissionRunStore` (global) | `ConnBoundRunStore(conn.Redis)` per RPC |
+| Finding store (Submit, Get, List) | `RedisFindingStore` (global) | `ConnBoundFindingStore(conn.Redis)` per RPC |
+
+For operators: run the `legacy-mission-finding-cleanup` Helm hook with
+`upgrade.cleanupLegacyMissionFinding=true` to delete orphaned keys from the
+shared Redis from before the cutover. The Job ships in the chart and defaults
+to scan-only on `helm upgrade`.
+
 ## Build guards
 
 All guards live in [`tools/gibsoncheck/checks/`](../tools/gibsoncheck/checks/)
@@ -243,6 +267,7 @@ violation to a PR fails CI.
 |---|---|---|
 | `forbidrawstoreimports` | [`forbid_raw_store_imports.go`](../tools/gibsoncheck/checks/forbid_raw_store_imports.go) | `pgx`, `go-redis`, `neo4j-go-driver`, `qdrant`, `miniredis` imports outside `internal/datapool/`, `internal/admin/`, `internal/migrate/`, `cmd/gibson-migrate/`, `cmd/daemon/`, `internal/daemon/`, `tools/gibsoncheck/`. Test files may import miniredis. |
 | `forbidrediskeyprefix` | [`forbid_redis_key_prefix.go`](../tools/gibsoncheck/checks/forbid_redis_key_prefix.go) | String literals starting with `tenant:`, `gibson:tenant:`, or `<word>:tenant:` passed to `*redis.Client` methods. The per-tenant client is already DB-scoped; prefixes are dead. |
+| `forbidredisclientconstruction` | [`forbid_redis_client_construction.go`](../tools/gibsoncheck/checks/forbid_redis_client_construction.go) | `redis.NewClient(...)` calls outside `internal/datapool/` and `internal/admin/`. All Redis access must go through `Conn.Redis`. Test files exempt. Spec: daemon-mission-finding-per-tenant-cutover Req 5.3. |
 | `adminpoolacquire` | [`admin_pool_acquire.go`](../tools/gibsoncheck/checks/admin_pool_acquire.go) | Importing `internal/datapool/admin` from anywhere outside `internal/admin/`, `internal/datapool/admin/`, `internal/migrate/`, `cmd/gibson-migrate/`. CODEOWNERS narrow waist. |
 | `forbiddenimports` | [`forbidden_imports.go`](../tools/gibsoncheck/checks/forbidden_imports.go) | (auth-spec) `github.com/zitadel/*`, `github.com/openfga/*` outside the narrow allowlist. |
 | check-no-tenant-id-column | [`scripts/check-no-tenant-id-column.sh`](../scripts/check-no-tenant-id-column.sh) | `tenant_id` references in `migrations/postgres/`, `migrations/neo4j/`, and embedded Cypher in Go. |

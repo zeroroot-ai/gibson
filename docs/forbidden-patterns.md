@@ -297,6 +297,43 @@ _, err = conn.Postgres.Exec(ctx,
     name, ct)
 ```
 
+## GIBSON-DP-008: constructing `redis.NewClient` outside the allowlist
+
+Spec: `daemon-mission-finding-per-tenant-cutover` Requirement 5.3.
+
+Wrong — constructing a process-wide Redis client outside the datapool:
+
+```go
+package mypackage   // outside internal/datapool/ and internal/admin/
+
+import goredis "github.com/redis/go-redis/v9"
+
+func init() {
+    rdb := goredis.NewClient(&goredis.Options{   // forbidden
+        Addr: "redis:6379",
+    })
+    // ...
+}
+```
+
+This creates a process-wide shared client with no tenant isolation.
+All data written to it lands in the same DB index visible to every tenant.
+
+Correct — acquire the tenant-bound `Conn.Redis` from the pool:
+
+```go
+conn, err := s.pool.For(ctx, tenant)
+if err != nil { return nil, datapool.MapPoolError(err) }
+defer conn.Release()
+
+err = conn.Redis.Set(ctx, "gibson:mission:"+id.String(), data, 0).Err()
+```
+
+The `forbidredisclientconstruction` analyzer
+([`tools/gibsoncheck/checks/forbid_redis_client_construction.go`](../tools/gibsoncheck/checks/forbid_redis_client_construction.go))
+fails CI on any `redis.NewClient(...)` call outside `internal/datapool/`
+and `internal/admin/`. Test files (`*_test.go`) are exempt.
+
 ## GIBSON-DP-007: `WHERE n.tenant_id` Cypher patterns
 
 Wrong (pre-refactor `internal/orchestrator/neo4j_graph_querier.go`):
