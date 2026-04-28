@@ -9,11 +9,11 @@ import "errors"
 // The orchestration layer (TenantAdminService handlers) maps these to
 // gRPC status codes:
 //
-//   ErrNotFound      → codes.NotFound
-//   ErrAlreadyExists → codes.AlreadyExists
-//   ErrPermission    → codes.Internal (admin misconfigured — operator issue)
-//   ErrUnreachable   → codes.Unavailable
-//   ErrUpstream      → codes.Internal (sanitized message — hide provider details)
+//	ErrNotFound      → codes.NotFound
+//	ErrAlreadyExists → codes.AlreadyExists
+//	ErrPermission    → codes.Internal (admin misconfigured — operator issue)
+//	ErrUnreachable   → codes.Unavailable
+//	ErrUpstream      → codes.Internal (sanitized message — hide provider details)
 var (
 	// ErrNotFound is returned when the requested resource does not exist in the IdP.
 	ErrNotFound = errors.New("idp: not found")

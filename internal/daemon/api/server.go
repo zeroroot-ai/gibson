@@ -18,11 +18,11 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/idp"
-	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zero-day-ai/gibson/internal/idp"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/manifest"

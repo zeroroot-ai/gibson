@@ -204,8 +204,10 @@ func (c *Client) ListServiceAccounts(ctx context.Context, req idp.ListServiceAcc
 		} `json:"typeQuery"`
 	}
 	body := map[string]interface{}{
-		"limit":   req.PageSize,
-		"queries": []query{{TypeQuery: struct{ Type string `json:"type"` }{Type: "TYPE_MACHINE"}}},
+		"limit": req.PageSize,
+		"queries": []query{{TypeQuery: struct {
+			Type string `json:"type"`
+		}{Type: "TYPE_MACHINE"}}},
 	}
 	if req.PageToken != "" {
 		body["offset"] = req.PageToken
@@ -222,7 +224,7 @@ func (c *Client) ListServiceAccounts(ctx context.Context, req idp.ListServiceAcc
 			} `json:"machine"`
 		} `json:"result"`
 		Details struct {
-			TotalResult    string `json:"totalResult"`
+			TotalResult       string `json:"totalResult"`
 			ProcessedSequence string `json:"processedSequence"`
 		} `json:"details"`
 	}

@@ -26,8 +26,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/idp"
 	tenantpb "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
+	"github.com/zero-day-ai/gibson/internal/idp"
 	"github.com/zero-day-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -253,4 +253,3 @@ func buildEnrollCommand(gibsonURL, clientID string) string {
 		clientID, gibsonURL,
 	)
 }
-
