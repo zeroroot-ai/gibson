@@ -14,7 +14,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/plugin"
@@ -22,9 +21,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/protoresolver"
+	sdkqueue "github.com/zero-day-ai/sdk/queue"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -122,10 +123,6 @@ type DefaultAgentHarness struct {
 	// a direct grpc_endpoint in their metadata) receive work items via this queue
 	// rather than a direct gRPC call. Nil means use the existing path.
 	workQueue component.WorkQueue
-
-	// envelopeSigner signs AuthzContext payloads attached to dispatched work items.
-	// When nil, work items are dispatched without an AuthzContext (dev mode).
-	envelopeSigner *authz.EnvelopeSigner
 
 	// cgMinter mints capability-grant JWTs that flow with each
 	// dispatched work item. Agents present the CG-JWT on harness
@@ -1007,11 +1004,17 @@ func (h *DefaultAgentHarness) callToolViaWorkQueue(
 		workCtx["trace_id"] = spanCtx.TraceID().String()
 	}
 
-	// Attach HMAC-signed AuthzContext if a signer is available.
-	// The run_id is the MissionRunID set on the harness during mission start.
-	// Components verify this context via their shared HMAC secret.
-	if h.envelopeSigner != nil && h.missionCtx.MissionRunID != "" {
-		ac := h.envelopeSigner.Sign(h.missionCtx.MissionRunID, authz.DefaultWorkTTLSeconds)
+	// Attach AuthzContext so the SDK worker can resolve the mission context
+	// for FGA checks. The envelope HMAC signing system has been removed
+	// (admin-services-completion Req 6.4); run_id + issued_at + ttl_seconds
+	// are populated without signing — authorization is fully covered by FGA
+	// tuples binding agent_principal to mission.
+	if h.missionCtx.MissionRunID != "" {
+		ac := sdkqueue.AuthzContext{
+			RunID:      h.missionCtx.MissionRunID,
+			IssuedAt:   time.Now().Unix(),
+			TTLSeconds: authz.DefaultWorkTTLSeconds,
+		}
 		if acJSON, marshalErr := json.Marshal(ac); marshalErr == nil {
 			workCtx[authz.AuthzContextWorkKey] = string(acJSON)
 		} else {
@@ -1169,9 +1172,13 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 		workCtx["trace_id"] = spanCtx.TraceID().String()
 	}
 
-	// Attach HMAC-signed AuthzContext for plugin dispatches.
-	if h.envelopeSigner != nil && h.missionCtx.MissionRunID != "" {
-		ac := h.envelopeSigner.Sign(h.missionCtx.MissionRunID, authz.DefaultWorkTTLSeconds)
+	// Attach AuthzContext for plugin dispatches (unsigned; see tool dispatch comment).
+	if h.missionCtx.MissionRunID != "" {
+		ac := sdkqueue.AuthzContext{
+			RunID:      h.missionCtx.MissionRunID,
+			IssuedAt:   time.Now().Unix(),
+			TTLSeconds: authz.DefaultWorkTTLSeconds,
+		}
 		if acJSON, marshalErr := json.Marshal(ac); marshalErr == nil {
 			workCtx[authz.AuthzContextWorkKey] = string(acJSON)
 		} else {

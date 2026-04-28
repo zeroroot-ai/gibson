@@ -233,13 +233,6 @@ type daemonImpl struct {
 	// resolver's onResolve callback for model_resolved events.
 	auditWriter *audit.Writer
 
-	// envelopeSigner signs AuthzContext payloads attached to dispatched work items.
-	// Created during Start() with a random per-daemon secret. Components verify
-	// signatures via the GIBSON_AUTHZ_HMAC_SECRET env var (populated from this
-	// signer's Secret() method via a ConfigMap or Secret at registration time).
-	// May be nil when authz is disabled.
-	envelopeSigner *authz.EnvelopeSigner
-
 	// dashboardDB is the connection pool for the shared dashboard PostgreSQL instance.
 	// It is used to read and write the tenant_provisioning table. May be nil when
 	// no DashboardPostgresConfig is provided or when the connection fails at startup
@@ -263,7 +256,6 @@ type daemonImpl struct {
 	// Nil when ToolRunner.Enabled is false. Started asynchronously during
 	// daemon.Start so startup does not block on Setec health.
 	toolCatalogRefresher *CatalogRefresher
-
 }
 
 // spiffeX509Closer is the narrow interface for closing an X.509 source on shutdown.
@@ -413,7 +405,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// removed. Capability-grant minting now happens locally via
 	// internal/capabilitygrant.Minter.
 
-
 	// Call the startup callback if set
 	if d.onRegistryReady != nil {
 		d.onRegistryReady()
@@ -453,19 +444,9 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize authorization service: %w", err)
 	}
 
-	// Initialize the per-daemon HMAC signer for work envelope AuthzContexts.
-	// The signer uses a randomly generated secret on every daemon start. Components
-	// pick up the secret via the GIBSON_AUTHZ_HMAC_SECRET env var (populated during
-	// component registration in future task). Failure is non-fatal — authz context
-	// signing is degraded to dev mode (no signing) but the daemon continues.
-	if signer, signerErr := authz.NewEnvelopeSigner(); signerErr != nil {
-		d.logger.Warn(ctx, "failed to create envelope HMAC signer; work items will not carry signed AuthzContext",
-			"error", signerErr.Error(),
-		)
-	} else {
-		d.envelopeSigner = signer
-		d.logger.Info(ctx, "initialized envelope HMAC signer for work item AuthzContext signing")
-	}
+	// Note: envelope HMAC signing removed (admin-services-completion Req 6.4).
+	// Work items now carry unsigned queue.AuthzContext (run_id + issued_at + ttl_seconds).
+	// Authorization is fully covered by FGA tuples binding agent_principal to mission.
 
 	// Dashboard PostgreSQL connection pool — runs AFTER Authorization Service and
 	// BEFORE Component Registry. A connection failure is non-fatal: the daemon
@@ -1143,7 +1124,6 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 	// Clear gRPC server references (already stopped by DrainPhase / grpcSubsystem.Serve).
 	d.grpcServer = nil
 	d.grpcSubsystem = nil
-
 
 	// Close dashboard PostgreSQL connection pool.
 	if d.dashboardDB != nil {

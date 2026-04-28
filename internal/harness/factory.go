@@ -244,7 +244,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		categoryClassifier:  categoryClassifier,
 		componentRegistry:   f.config.ComponentRegistry,
 		workQueue:           f.config.WorkQueue,
-		envelopeSigner:      f.config.EnvelopeSigner,
 		workQueueTimeout:    f.config.WorkQueueTimeout,
 		pluginAccess:        f.config.PluginAccess,
 		maxDelegationDepth:  f.config.MaxDelegationDepth,

@@ -71,11 +71,11 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// ComponentRegistry enables tenant-scoped discovery (Path 2 in CallToolProto/QueryPlugin).
 		// RegistryAdapter handles direct gRPC dispatch when a component exposes grpc_endpoint.
 		// WorkQueue handles pull-based dispatch for components without a direct gRPC endpoint.
-		// EnvelopeSigner signs AuthzContext payloads attached to dispatched work items.
+		// EnvelopeSigner removed (admin-services-completion Req 6.4): AuthzContext is now
+		// populated unsigned; FGA tuples binding agent_principal to mission are the auth gate.
 		ComponentRegistry: d.compRegistry,
 		RegistryAdapter:   d.registryAdapter,
 		WorkQueue:         workQueue,
-		EnvelopeSigner:    d.envelopeSigner, // nil when authz disabled; harness skips signing
 
 		// Finding storage (in-memory for agent execution)
 		FindingStore: harness.NewInMemoryFindingStore(),

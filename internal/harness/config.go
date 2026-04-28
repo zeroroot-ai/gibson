@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/checkpoint"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/events"
@@ -221,13 +220,6 @@ type HarnessConfig struct {
 	// Nil means use the existing direct-gRPC path only.
 	// Optional.
 	WorkQueue component.WorkQueue
-
-	// EnvelopeSigner signs AuthzContext payloads that are attached to dispatched
-	// work items. Components verify these signatures via their HMAC secret to
-	// prevent authz context forgery.
-	// When nil, work items are dispatched without an AuthzContext (dev mode).
-	// Optional.
-	EnvelopeSigner *authz.EnvelopeSigner
 
 	// WorkQueueTimeout is the maximum duration to wait for a remote component to
 	// return a WorkResult. Zero defaults to 5 minutes.

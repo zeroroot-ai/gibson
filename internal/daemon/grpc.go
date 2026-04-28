@@ -16,6 +16,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	discoverysvc "github.com/zero-day-ai/gibson/internal/api/discovery"
@@ -193,7 +194,28 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				"error", sourceErr,
 			)
 		} else {
-			tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeAny())
+			// Auth-review finding 4a (CRITICAL): pin mTLS to Envoy's SPIFFE SVID.
+			// The expected SVID is read from GIBSON_SPIFFE_ENVOY_ID (also stored in
+			// cfg.Auth.SPIFFE.EnvoyID after config loading). If the env var is not
+			// set we fail to start — accepting any SVID was the original finding.
+			envoyID := d.config.Auth.SPIFFE.EnvoyID
+			if envoyID == "" {
+				envoyID = os.Getenv("GIBSON_SPIFFE_ENVOY_ID")
+			}
+			if envoyID == "" {
+				return nil, fmt.Errorf(
+					"SPIFFE mTLS is enabled but GIBSON_SPIFFE_ENVOY_ID is not set; " +
+						"the daemon will not accept any mTLS connections. " +
+						"Set GIBSON_SPIFFE_ENVOY_ID to the Envoy sidecar's SPIFFE SVID " +
+						"(e.g. spiffe://example.com/ns/gibson/sa/envoy). " +
+						"Spec: admin-services-completion Requirement 6.1",
+				)
+			}
+			expectedEnvoyID := spiffeid.RequireFromString(envoyID)
+			tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(expectedEnvoyID))
+			d.logger.Info(ctx, "SPIFFE mTLS pinned to Envoy SVID",
+				"envoy_id", envoyID,
+			)
 			// tls.RequestClientCert: ask for the client cert but DO NOT let Go's
 			// stdlib chain verifier run on it. We rely entirely on go-spiffe's
 			// VerifyPeerCertificate callback (installed by tlsconfig.MTLSServerConfig

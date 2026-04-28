@@ -41,6 +41,14 @@ type SPIFFEConfig struct {
 	// These are platform services (dashboard, daemon) that need system-wide access.
 	// Default: ["spiffe://gibson.io/platform/dashboard", "spiffe://gibson.io/platform/daemon"]
 	InfrastructureIDs []string `mapstructure:"infrastructure_ids" yaml:"infrastructure_ids,omitempty"`
+
+	// EnvoyID is the expected SPIFFE ID of the Envoy sidecar that presents its
+	// SVID on the mTLS connection to the daemon's gRPC listener.
+	// When set, the daemon pins mTLS to accept ONLY this SVID.
+	// When empty the daemon refuses to start (fail-closed per auth-review finding 4a).
+	// Populated from env var GIBSON_SPIFFE_ENVOY_ID.
+	// Spec: admin-services-completion Requirement 6.1.
+	EnvoyID string `mapstructure:"envoy_id" yaml:"envoy_id,omitempty"`
 }
 
 // AuthConfig contains authentication configuration.
