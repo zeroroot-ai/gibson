@@ -36,6 +36,7 @@ import (
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
@@ -607,25 +608,20 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			auditLogger := audit.NewAuditLogger(d.stateClient, d.logger.Slog())
 
 			// Wire GraphRAGFindingSubmitter when infrastructure is available.
-			// It routes findings to both the finding store and Neo4j
+			// It routes findings to the per-tenant data-plane (via Pool) and Neo4j
 			// (via GraphRAGBridge.StoreAsync, fire-and-forget). Falls back to nil
-			// when the finding store or bridge has not been initialized, in which
-			// case ComponentServiceServer logs and returns a generated finding_id.
-			//
-			// Phase D: NewGraphRAGFindingSubmitter now accepts finding.FindingStore
-			// (interface), so any implementation — RedisFindingStore or
-			// ConnBoundFindingStore — is passed directly without a type assertion.
+			// when the bridge has not been initialized, in which case
+			// ComponentServiceServer logs and returns a generated finding_id.
 			var findingSubmitter component.FindingSubmitter
 			if d.infrastructure != nil &&
-				d.infrastructure.findingStore != nil &&
 				d.infrastructure.graphRAGBridge != nil {
 				findingSubmitter = component.NewGraphRAGFindingSubmitter(
 					d.infrastructure.graphRAGBridge,
-					d.infrastructure.findingStore,
+					d.pool, // per-tenant Pool: nil when security.key_provider not configured
 					d.stateClient,
 					d.logger.WithComponent("finding-submitter").Slog(),
 				)
-				d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings routed to finding store and Neo4j")
+				d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings routed to per-tenant store and Neo4j")
 			} else {
 				d.logger.Warn(ctx, "infrastructure not ready; finding submitter not wired (findings will be logged only)")
 			}
@@ -1156,50 +1152,14 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 	cancelFunc, exists := d.activeMissions[missionID]
 	if !exists {
 		d.missionsMu.Unlock()
-		// Mission is not running in memory - check if it exists in the store
-		missionObj, err := d.missionStore.Get(ctx, types.ID(missionID))
-		if err != nil {
-			// Mission not found in store either
-			d.logger.Warn(ctx, "mission not found", "mission_id", missionID)
-			return fmt.Errorf("mission not found: %s", missionID)
-		}
-
-		// If mission is paused (orphaned), mark it as failed to unblock future runs
-		// This preserves memory for inheritance while allowing new runs to proceed
-		if missionObj.Status == mission.MissionStatusPaused {
-			d.logger.Info(ctx, "marking orphaned paused mission as failed", "mission_id", missionID)
-			missionObj.Status = mission.MissionStatusFailed
-			missionObj.CompletedAt = mission.NewUnixTimePtrNow()
-			if missionObj.Metadata == nil {
-				missionObj.Metadata = make(map[string]any)
+		// Mission is not running in memory — delegate to mission manager.
+		if d.missionManager != nil {
+			if stopErr := d.missionManager.Stop(ctx, missionID, force); stopErr == nil {
+				return nil
 			}
-			missionObj.Metadata["failure_reason"] = "Orphaned paused mission - failed to resume"
-
-			if err := d.missionStore.Update(ctx, missionObj); err != nil {
-				d.logger.Error(ctx, "failed to update orphaned mission status", "error", err, "mission_id", missionID)
-				return fmt.Errorf("failed to mark orphaned mission as failed: %w", err)
-			}
-
-			// Emit event for the status change
-			d.publishEvent(ctx, api.EventData{
-				EventType: "mission_failed",
-				Timestamp: time.Now(),
-				Source:    "daemon",
-				MissionEvent: &api.MissionEventData{
-					EventType: "mission_failed",
-					Timestamp: time.Now(),
-					MissionID: missionID,
-					Message:   "Orphaned paused mission marked as failed",
-				},
-			})
-
-			d.logger.Info(ctx, "orphaned paused mission marked as failed", "mission_id", missionID)
-			return nil
 		}
-
-		// Mission exists but is not running and not paused (already terminal)
-		d.logger.Info(ctx, "mission is not currently running", "mission_id", missionID)
-		return fmt.Errorf("mission is not currently running: %s", missionID)
+		d.logger.Warn(ctx, "mission not found", "mission_id", missionID)
+		return fmt.Errorf("mission not found or not running: %s", missionID)
 	}
 
 	// Remove from active missions immediately to prevent duplicate stop requests
@@ -1210,22 +1170,28 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 	d.logger.Info(ctx, "cancelling mission execution", "mission_id", missionID, "force", force)
 	cancelFunc()
 
-	// Update mission status in the store
-	missionObj, err := d.missionStore.Get(ctx, types.ID(missionID))
-	if err != nil {
-		d.logger.Error(ctx, "failed to get mission for status update", "error", err, "mission_id", missionID)
-		// Continue anyway - the cancellation was successful
-	} else {
-		// Update mission status to cancelled
-		missionObj.Status = mission.MissionStatusCancelled
-		completedAt := time.Now()
-		missionObj.CompletedAt = mission.NewUnixTimePtr(&completedAt)
-		if missionObj.Metrics != nil {
-			missionObj.Metrics.Duration = completedAt.Sub(missionObj.Metrics.StartedAt)
-		}
-
-		if err := d.missionStore.Update(ctx, missionObj); err != nil {
-			d.logger.Error(ctx, "failed to update mission status", "error", err, "mission_id", missionID)
+	// Update mission status in the per-tenant store via pool.
+	tenant := tenantFromCtxOrSystem(ctx)
+	if d.pool != nil {
+		if conn, connErr := d.pool.For(ctx, tenant); connErr == nil {
+			defer conn.Release()
+			mStore := mission.NewConnBoundMissionStore(conn.Redis)
+			if missionObj, getErr := mStore.Get(ctx, types.ID(missionID)); getErr == nil {
+				missionObj.Status = mission.MissionStatusCancelled
+				completedAt := time.Now()
+				missionObj.CompletedAt = mission.NewUnixTimePtr(&completedAt)
+				if missionObj.Metrics != nil {
+					missionObj.Metrics.Duration = completedAt.Sub(missionObj.Metrics.StartedAt)
+				}
+				if updateErr := mStore.Update(ctx, missionObj); updateErr != nil {
+					d.logger.Error(ctx, "failed to update mission status", "error", updateErr, "mission_id", missionID)
+				}
+			} else {
+				d.logger.Error(ctx, "failed to get mission for status update", "error", getErr, "mission_id", missionID)
+			}
+		} else {
+			d.logger.Warn(ctx, "failed to acquire conn for mission status update; mission cancelled in memory only",
+				"error", datapool.MapPoolError(connErr), "mission_id", missionID)
 		}
 	}
 
@@ -1390,14 +1356,22 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 		return nil, 0, fmt.Errorf("mission name cannot be empty")
 	}
 
-	// Check if run store is available
-	if d.missionRunStore == nil {
-		d.logger.Warn(ctx, "mission run store not initialized")
+	// Acquire per-tenant stores via pool.
+	tenant := tenantFromCtxOrSystem(ctx)
+	if d.pool == nil {
+		d.logger.Warn(ctx, "pool not configured; mission history unavailable")
 		return []api.MissionRunData{}, 0, nil
 	}
+	conn, connErr := d.pool.For(ctx, tenant)
+	if connErr != nil {
+		return nil, 0, datapool.MapPoolError(connErr)
+	}
+	defer conn.Release()
+	mStore := mission.NewConnBoundMissionStore(conn.Redis)
+	rStore := mission.NewConnBoundRunStore(conn.Redis)
 
 	// Get the mission by name to find its ID
-	m, err := d.missionStore.GetByName(ctx, name)
+	m, err := mStore.GetByName(ctx, name)
 	if err != nil {
 		if mission.IsNotFoundError(err) {
 			d.logger.Debug(ctx, "mission not found", "name", name)
@@ -1408,7 +1382,7 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 	}
 
 	// Get all runs for this mission
-	missionRuns, err := d.missionRunStore.ListByMission(ctx, m.ID)
+	missionRuns, err := rStore.ListByMission(ctx, m.ID)
 	if err != nil {
 		d.logger.Error(ctx, "failed to list mission runs", "error", err, "mission_id", m.ID)
 		return nil, 0, fmt.Errorf("failed to list mission runs: %w", err)
@@ -1479,8 +1453,20 @@ func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string
 		return nil, fmt.Errorf("mission ID cannot be empty")
 	}
 
-	// Get the mission from the store
-	m, err := d.missionStore.Get(ctx, types.ID(missionID))
+	// Acquire per-tenant store via pool.
+	tenantForCheckpoints := tenantFromCtxOrSystem(ctx)
+	if d.pool == nil {
+		return []api.CheckpointData{}, nil
+	}
+	connForCheckpoints, connCheckpointsErr := d.pool.For(ctx, tenantForCheckpoints)
+	if connCheckpointsErr != nil {
+		return nil, datapool.MapPoolError(connCheckpointsErr)
+	}
+	defer connForCheckpoints.Release()
+	mStoreForCheckpoints := mission.NewConnBoundMissionStore(connForCheckpoints.Redis)
+
+	// Get the mission from the per-tenant store.
+	m, err := mStoreForCheckpoints.Get(ctx, types.ID(missionID))
 	if err != nil {
 		d.logger.Error(ctx, "failed to get mission", "error", err, "mission_id", missionID)
 		return nil, fmt.Errorf("failed to get mission: %w", err)
@@ -1704,12 +1690,19 @@ func (d *daemonImpl) getComponentLogsSimple(ctx context.Context, componentName s
 func (d *daemonImpl) ListMissionDefinitions(ctx context.Context, limit int, offset int) ([]api.MissionDefinitionData, int, error) {
 	d.logger.Debug(ctx, "ListMissionDefinitions called", "limit", limit, "offset", offset)
 
-	if d.missionStore == nil {
-		d.logger.Warn(ctx, "mission store not available, returning empty list")
+	tenantForDefs := tenantFromCtxOrSystem(ctx)
+	if d.pool == nil {
+		d.logger.Warn(ctx, "pool not configured; mission definitions unavailable")
 		return []api.MissionDefinitionData{}, 0, nil
 	}
+	connForDefs, connDefsErr := d.pool.For(ctx, tenantForDefs)
+	if connDefsErr != nil {
+		return nil, 0, datapool.MapPoolError(connDefsErr)
+	}
+	defer connForDefs.Release()
+	mStoreForDefs := mission.NewConnBoundMissionStore(connForDefs.Redis)
 
-	defs, err := d.missionStore.ListDefinitions(ctx)
+	defs, err := mStoreForDefs.ListDefinitions(ctx)
 	if err != nil {
 		d.logger.Error(ctx, "failed to list mission definitions", "error", err)
 		return nil, 0, fmt.Errorf("failed to list mission definitions: %w", err)
@@ -1754,11 +1747,6 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		"mission_definition_id", req.MissionDefinitionID,
 	)
 
-	if d.missionService == nil {
-		d.logger.Error(ctx, "mission service not available")
-		return api.CreateMissionResultData{}, fmt.Errorf("mission service not initialized")
-	}
-
 	if req.Name == "" {
 		return api.CreateMissionResultData{}, fmt.Errorf("mission name is required")
 	}
@@ -1778,14 +1766,37 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		return api.CreateMissionResultData{}, fmt.Errorf("invalid mission_definition_id: %w", err)
 	}
 
-	m, err := d.missionService.CreateByReference(ctx, mission.CreateMissionByReferenceRequest{
+	// Acquire per-tenant store via pool to persist the mission.
+	tenantForMission := tenantFromCtxOrSystem(ctx)
+	if d.pool == nil {
+		return api.CreateMissionResultData{}, fmt.Errorf("mission store not initialized (pool not configured)")
+	}
+	connForMission, connMissionErr := d.pool.For(ctx, tenantForMission)
+	if connMissionErr != nil {
+		return api.CreateMissionResultData{}, datapool.MapPoolError(connMissionErr)
+	}
+	defer connForMission.Release()
+	mStoreForMission := mission.NewConnBoundMissionStore(connForMission.Redis)
+
+	// Create the mission record directly against the per-tenant store.
+	m := &mission.Mission{
+		ID:                  types.NewID(),
 		Name:                req.Name,
 		Description:         req.Description,
+		Status:              mission.MissionStatusPending,
 		TargetID:            targetID,
 		MissionDefinitionID: missionDefinitionID,
-		Metadata:            req.Metadata,
-	})
-	if err != nil {
+		CreatedAt:           mission.NewUnixTimeNow(),
+		UpdatedAt:           mission.NewUnixTimeNow(),
+	}
+	// Copy string metadata to map[string]any.
+	if req.Metadata != nil {
+		m.Metadata = make(map[string]any, len(req.Metadata))
+		for k, v := range req.Metadata {
+			m.Metadata[k] = v
+		}
+	}
+	if err := mStoreForMission.Save(ctx, m); err != nil {
 		d.logger.Error(ctx, "failed to create mission", "error", err, "name", req.Name)
 		return api.CreateMissionResultData{}, fmt.Errorf("failed to create mission: %w", err)
 	}
@@ -1820,9 +1831,16 @@ func (d *daemonImpl) CreateMissionDefinition(ctx context.Context, req api.Create
 		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("definition name is required")
 	}
 
-	if d.missionStore == nil {
-		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("mission store not initialized")
+	tenantForCreate := tenantFromCtxOrSystem(ctx)
+	if d.pool == nil {
+		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("mission store not initialized (pool not configured)")
 	}
+	connForCreate, connCreateErr := d.pool.For(ctx, tenantForCreate)
+	if connCreateErr != nil {
+		return api.CreateMissionDefinitionResultData{}, datapool.MapPoolError(connCreateErr)
+	}
+	defer connForCreate.Release()
+	mStoreForCreate := mission.NewConnBoundMissionStore(connForCreate.Redis)
 
 	if def.ID.IsZero() {
 		def.ID = types.NewID()
@@ -1834,7 +1852,7 @@ func (d *daemonImpl) CreateMissionDefinition(ctx context.Context, req api.Create
 		def.Nodes = make(map[string]*mission.MissionNode)
 	}
 
-	if err := d.missionStore.CreateDefinition(ctx, def); err != nil {
+	if err := mStoreForCreate.CreateDefinition(ctx, def); err != nil {
 		d.logger.Error(ctx, "failed to create mission definition", "error", err, "name", def.Name)
 		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("failed to create mission definition: %w", err)
 	}

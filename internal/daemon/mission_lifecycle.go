@@ -35,13 +35,6 @@ func (d *daemonImpl) ensureMissionManager() error {
 			return
 		}
 
-		// Get finding store from infrastructure
-		findingStore := d.infrastructure.findingStore
-		if findingStore == nil {
-			missionManagerInstance.initErr = fmt.Errorf("finding store not initialized in infrastructure")
-			return
-		}
-
 		// Get LLM registry from infrastructure
 		llmReg := d.infrastructure.llmRegistry
 		if llmReg == nil {
@@ -63,15 +56,14 @@ func (d *daemonImpl) ensureMissionManager() error {
 			return
 		}
 
-		// Create mission manager with eventBus for orchestration events
+		// Create mission manager with eventBus for orchestration events.
+		// The pool replaces the three legacy stores (missionStore, missionRunStore, findingStore).
 		missionManagerInstance.mgr = newMissionManager(
 			d.config,
 			d.logger.Slog(),
 			d.registryAdapter,
-			d.missionStore,
-			d.missionRunStore,
+			d.pool,
 			d.checkpointStore,
-			findingStore,
 			llmReg,
 			d.callback,
 			harnessFactory,

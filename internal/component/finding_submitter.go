@@ -1,19 +1,22 @@
 package component
 
 // finding_submitter.go provides GraphRAGFindingSubmitter, which routes
-// findings from remote agents to both Redis (tenant-scoped indexes) and the
-// Neo4j knowledge graph (via an async bridge).
+// findings from remote agents to both the per-tenant finding store (via the
+// data-plane Pool) and the Neo4j knowledge graph (via an async bridge).
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // FindingGraphBridge is a narrow interface over harness.GraphRAGBridge used by
@@ -26,21 +29,19 @@ type FindingGraphBridge interface {
 }
 
 // GraphRAGFindingSubmitter implements FindingSubmitter by routing findings to:
-//  1. A FindingStore (finding.FindingStore interface), for tenant-scoped index writes.
+//  1. The per-tenant finding store (via the data-plane Pool), for tenant-scoped writes.
 //  2. The GraphRAG knowledge graph via FindingGraphBridge.StoreAsync (fire-and-forget).
 //
-// Accepting the interface (not a concrete *finding.RedisFindingStore) allows the
-// caller to pass any FindingStore implementation, including the per-tenant
-// ConnBoundFindingStore introduced in Phase D. This closes the TODO marked by
-// "database-per-tenant-data-plane Phase D cutover" in infrastructure.go.
+// Each Submit call acquires a per-tenant Conn from the pool using the tenant extracted
+// from the request context. Pool errors are mapped to gRPC status errors via
+// datapool.MapPoolError; the finding_id is still returned to the caller so the agent
+// can continue processing.
 //
-// Store failures are logged as warnings and do not cause Submit to return an
-// error — the finding ID is still returned so the calling agent can continue.
 // GraphRAG storage is fully async: StoreAsync returns immediately and the actual
 // write happens in a background goroutine managed by the bridge.
 type GraphRAGFindingSubmitter struct {
 	bridge      FindingGraphBridge
-	store       finding.FindingStore
+	pool        datapool.Pool
 	stateClient *state.StateClient
 	logger      *slog.Logger
 }
@@ -49,14 +50,13 @@ type GraphRAGFindingSubmitter struct {
 //
 // Parameters:
 //   - bridge:      FindingGraphBridge for async Neo4j storage (must not be nil).
-//   - store:       FindingStore for tenant-scoped index writes (must not be nil).
-//     Any implementation of finding.FindingStore is accepted, including
-//     *finding.RedisFindingStore and *finding.ConnBoundFindingStore.
+//   - pool:        Per-tenant data-plane Pool used to acquire Conn for finding writes.
+//     May be nil; when nil, finding persistence is skipped (Neo4j storage still runs).
 //   - stateClient: StateClient used to resolve workID → missionID from Redis.
 //   - logger:      Structured logger; if nil, slog.Default() is used.
 func NewGraphRAGFindingSubmitter(
 	bridge FindingGraphBridge,
-	store finding.FindingStore,
+	pool datapool.Pool,
 	stateClient *state.StateClient,
 	logger *slog.Logger,
 ) *GraphRAGFindingSubmitter {
@@ -65,26 +65,26 @@ func NewGraphRAGFindingSubmitter(
 	}
 	return &GraphRAGFindingSubmitter{
 		bridge:      bridge,
-		store:       store,
+		pool:        pool,
 		stateClient: stateClient,
 		logger:      logger.With("component", "graphrag_finding_submitter"),
 	}
 }
 
-// Submit stores a JSON-encoded agent.Finding in Redis and queues it for
-// asynchronous storage in the Neo4j knowledge graph.
+// Submit stores a JSON-encoded agent.Finding in the per-tenant finding store
+// (via the data-plane Pool) and queues it for asynchronous storage in the Neo4j
+// knowledge graph.
 //
 // The method:
 //  1. Parses the finding JSON into an agent.Finding.
 //  2. Assigns a new finding ID (overwriting any client-supplied ID for consistency).
 //  3. Sets the tenant from the auth context.
 //  4. Resolves the missionID from the work-item context stored in Redis.
-//  5. Stores an EnhancedFinding in the Redis finding store (warn on failure).
+//  5. Acquires a per-tenant Conn and stores an EnhancedFinding (warn on failure).
 //  6. Calls FindingGraphBridge.StoreAsync with the base finding (fire-and-forget).
 //
-// Returns the generated finding ID and nil on success. A non-nil error is
-// returned only when the JSON payload cannot be parsed; Redis and GraphRAG
-// failures are non-fatal.
+// Returns the generated finding ID and nil on success. Pool errors are mapped to
+// gRPC status codes; JSON parse errors return an error; GraphRAG failures are non-fatal.
 func (s *GraphRAGFindingSubmitter) Submit(
 	ctx context.Context,
 	tenant, workID, findingJSON, severity, title string,
@@ -116,23 +116,8 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// an empty missionID.
 	missionID := s.resolveMissionID(ctx, workID)
 
-	// Step 4: Build an EnhancedFinding and persist it in Redis.
-	enhanced := finding.NewEnhancedFinding(baseFinding, missionID, "")
-	if err := s.store.Store(ctx, enhanced); err != nil {
-		s.logger.WarnContext(ctx, "finding submitter: failed to store finding in Redis; continuing",
-			slog.String("tenant", tenant),
-			slog.String("work_id", workID),
-			slog.String("finding_id", findingID.String()),
-			slog.String("error", err.Error()),
-		)
-		// Non-fatal: fall through to GraphRAG storage.
-	} else {
-		s.logger.DebugContext(ctx, "finding submitter: finding stored in Redis",
-			slog.String("tenant", tenant),
-			slog.String("finding_id", findingID.String()),
-			slog.String("mission_id", missionID.String()),
-		)
-	}
+	// Step 4: Acquire a per-tenant Conn and persist the finding.
+	s.persistFinding(ctx, tenant, workID, findingID, baseFinding, missionID)
 
 	// Step 5: Queue async storage to Neo4j via the bridge.
 	// StoreAsync is fire-and-forget; the bridge manages its own goroutines.
@@ -151,6 +136,70 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	)
 
 	return findingID.String(), nil
+}
+
+// persistFinding acquires a per-tenant Conn from the pool and stores the finding.
+// Errors are logged as warnings; the finding ID is still returned to the caller.
+func (s *GraphRAGFindingSubmitter) persistFinding(
+	ctx context.Context,
+	tenant, workID string,
+	findingID types.ID,
+	baseFinding agent.Finding,
+	missionID types.ID,
+) {
+	if s.pool == nil {
+		s.logger.WarnContext(ctx, "finding submitter: pool not configured; finding not persisted to store",
+			slog.String("tenant", tenant),
+			slog.String("finding_id", findingID.String()),
+		)
+		return
+	}
+
+	tenantID, tenantParseErr := auth.NewTenantID(tenant)
+	if tenantParseErr != nil {
+		s.logger.WarnContext(ctx, "finding submitter: invalid tenant ID; finding not persisted",
+			slog.String("tenant", tenant),
+			slog.String("finding_id", findingID.String()),
+			slog.String("error", tenantParseErr.Error()),
+		)
+		return
+	}
+
+	conn, err := s.pool.For(ctx, tenantID)
+	if err != nil {
+		var npErr *datapool.NotProvisionedError
+		if errors.As(err, &npErr) {
+			s.logger.WarnContext(ctx, "finding submitter: tenant not provisioned; finding not persisted",
+				slog.String("tenant", tenant),
+				slog.String("finding_id", findingID.String()),
+			)
+		} else {
+			s.logger.WarnContext(ctx, "finding submitter: failed to acquire conn; finding not persisted",
+				slog.String("tenant", tenant),
+				slog.String("finding_id", findingID.String()),
+				slog.String("error", err.Error()),
+			)
+		}
+		return
+	}
+	defer conn.Release()
+
+	enhanced := finding.NewEnhancedFinding(baseFinding, missionID, "")
+	store := finding.NewConnBoundFindingStore(conn.Redis)
+	if storeErr := store.Store(ctx, enhanced); storeErr != nil {
+		s.logger.WarnContext(ctx, "finding submitter: failed to store finding; continuing",
+			slog.String("tenant", tenant),
+			slog.String("work_id", workID),
+			slog.String("finding_id", findingID.String()),
+			slog.String("error", storeErr.Error()),
+		)
+	} else {
+		s.logger.DebugContext(ctx, "finding submitter: finding stored in per-tenant store",
+			slog.String("tenant", tenant),
+			slog.String("finding_id", findingID.String()),
+			slog.String("mission_id", missionID.String()),
+		)
+	}
 }
 
 // resolveMissionID looks up the missionID associated with a work item from the

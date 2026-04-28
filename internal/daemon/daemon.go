@@ -99,12 +99,6 @@ type daemonImpl struct {
 	// This is initialized when GIBSON_USE_REDIS_STORES=true
 	stateClient *state.StateClient
 
-	// missionStore provides access to mission persistence
-	missionStore mission.MissionStore
-
-	// missionRunStore provides access to mission run persistence
-	missionRunStore mission.MissionRunStore
-
 	// missionAuthzStore tracks the owning user per run for component authz callback resolution.
 	// When nil (authz.enabled=false or no Redis), authz state tracking is skipped.
 	missionAuthzStore mission.MissionAuthzStore
@@ -440,22 +434,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.redisEventStream = NewRedisEventStream(stateClient, d.logger.Slog())
 	d.logger.Info(ctx, "redis event stream initialized")
 
-	// Initialize Redis stores.
-	// Note: missionStore / missionRunStore are global multi-tenant stores (tenant-prefixed keys
-	// via RedisMissionStore / RedisMissionRunStore). They remain for handler call sites that have
-	// not yet migrated to the per-tenant Pool path. The startup crash-recovery path
-	// (recoverRunningMissionsAcrossTenants) has already been migrated (Phase D) to use the
-	// per-tenant pool, so it no longer calls into these global stores. Handler-level migration
-	// continues one call site at a time.
-	d.missionStore = mission.NewRedisMissionStore(stateClient)
-	d.missionRunStore = mission.NewRedisMissionRunStore(stateClient)
+	// Initialize Redis stores (mission/run stores have been migrated to the
+	// per-tenant Pool path; only non-mission stores are initialized here).
 	d.checkpointStore = mission.NewRedisCheckpointStore(stateClient)
 	d.missionAuthzStore = mission.NewRedisMissionAuthzStore(stateClient.Client())
 	d.targetStore = database.NewRedisTargetDAO(stateClient)
 
 	d.logger.Info(ctx, "Redis stores initialized successfully",
-		"mission_store", "RedisMissionStore",
-		"mission_run_store", "RedisMissionRunStore",
 		"checkpoint_store", "RedisCheckpointStore",
 		"mission_authz_store", "RedisMissionAuthzStore",
 		"target_store", "RedisTargetDAO",
@@ -517,10 +502,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Initialize mission service — reference-only after spec mission-api-only-cleanup.
 	// Missions reference a registered target and mission definition by ID; inline
 	// construction and YAML parsing are no longer supported.
-	missionService := mission.NewMissionService(d.missionStore, nil) // finding store wired later if configured
+	// The mission service uses a nil store here; actual mission persistence goes through
+	// the per-tenant Pool (d.pool) acquired by individual RPC handlers.
+	missionService := mission.NewMissionService(nil, nil) // stores wired via pool at handler level
 	missionService.SetTargetStore(d.targetStore)
 	d.missionService = missionService
-	d.logger.Info(ctx, "initialized mission service (reference-only)")
+	d.logger.Info(ctx, "initialized mission service (reference-only, pool-backed)")
 
 	// Initialize QuotaManager for per-tenant resource enforcement.
 	// The TenantScopedStore wraps stateClient so that all quota counters are
@@ -709,12 +696,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// callback RPC surface. The missionHarnessAdapter lazily resolves the
 	// missionManager on first lifecycle call, so it is safe to wire before
 	// ensureMissionManager() runs.
-	if d.missionStore != nil {
-		missionAdapter := newMissionHarnessAdapter(d)
-		missionOperator := harness.NewMissionOperatorAdapter(missionAdapter)
-		d.callback.SetMissionManager(missionOperator)
-		d.logger.Info(ctx, "configured callback service with MissionOperator adapter")
-	}
+	// Wire mission operator adapter unconditionally — the adapter now delegates
+	// to the pool-backed mission manager rather than the legacy global store.
+	missionAdapter := newMissionHarnessAdapter(d)
+	missionOperator := harness.NewMissionOperatorAdapter(missionAdapter)
+	d.callback.SetMissionManager(missionOperator)
+	d.logger.Info(ctx, "configured callback service with MissionOperator adapter")
 
 	// Configure callback service with authz store for component authorization callbacks.
 	// The adapter bridges mission.MissionAuthzStore → harness.RunAuthzLookup to break
@@ -748,7 +735,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// Don't fail startup on recovery error - continue with normal operation
 	}
 
-	// Initialize mission checkpointer for graceful shutdown
+	// Initialize mission checkpointer for graceful shutdown.
+	// The checkpointer uses the pool to acquire per-tenant connections for mission updates.
 	if d.stateClient != nil && d.stateClient.Client() != nil {
 		d.checkpointer = NewDaemonMissionCheckpointer(
 			d.stateClient.Client(),
@@ -762,7 +750,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				}
 				return missions
 			},
-			d.missionStore,
+			d.pool,
 			d.logger,
 		)
 		d.logger.Info(ctx, "mission checkpointer initialized")
@@ -1320,57 +1308,12 @@ func (d *daemonImpl) countRegisteredAgents(ctx context.Context) int {
 	return len(agents)
 }
 
-// recoverRunningMissions handles crash recovery by transitioning any missions that were
-// in running status when the daemon stopped to paused status. This ensures missions can
-// be resumed after an unexpected shutdown.
-//
-// This function is called during daemon startup, after infrastructure initialization but
-// before accepting new connections. It queries for all missions with running status and
-// updates them to paused, logging a warning for each recovered mission.
+// recoverRunningMissions is the legacy global-store crash-recovery path, superseded
+// by recoverRunningMissionsAcrossTenants (Phase D). This stub is retained to satisfy
+// any callers that have not yet been migrated; it delegates to the per-tenant path.
+// Deprecated: use recoverRunningMissionsAcrossTenants instead.
 func (d *daemonImpl) recoverRunningMissions(ctx context.Context) error {
-	// Query for all missions that are currently in running status
-	activeMissions, err := d.missionStore.GetActive(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to query active missions: %w", err)
-	}
-
-	if len(activeMissions) == 0 {
-		d.logger.Info(ctx, "no running missions to recover")
-		return nil
-	}
-
-	// Transition each running mission to paused status
-	recoveredCount := 0
-	for _, m := range activeMissions {
-		// Only recover missions that are actually running (not already paused)
-		if m.Status == mission.MissionStatusRunning {
-			d.logger.Warn(ctx, "recovered mission - set to paused after daemon restart",
-				"mission_id", m.ID.String(),
-				"mission_name", m.Name,
-				"status", m.Status,
-			)
-
-			// Update mission status to paused
-			if err := d.missionStore.UpdateStatus(ctx, m.ID, mission.MissionStatusPaused); err != nil {
-				d.logger.Error(ctx, "failed to pause recovered mission",
-					"mission_id", m.ID.String(),
-					"error", err,
-				)
-				continue
-			}
-
-			recoveredCount++
-		}
-	}
-
-	if recoveredCount > 0 {
-		d.logger.Info(ctx, "completed crash recovery",
-			"recovered_missions", recoveredCount,
-			"total_active", len(activeMissions),
-		)
-	}
-
-	return nil
+	return d.recoverRunningMissionsAcrossTenants(ctx)
 }
 
 // formatDuration formats a duration into a human-readable string.

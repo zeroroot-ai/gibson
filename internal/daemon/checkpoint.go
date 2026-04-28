@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // checkpointKeyPrefix is the Redis key prefix for mission checkpoints
@@ -18,7 +20,8 @@ const checkpointKeyPrefix = "gibson:checkpoint:"
 
 // DaemonMissionCheckpointer implements MissionCheckpointer for the daemon.
 // It checkpoints running missions to Redis during graceful shutdown so they can
-// be resumed after restart.
+// be resumed after restart. Mission metadata is read from the per-tenant data-plane
+// pool rather than a global store.
 type DaemonMissionCheckpointer struct {
 	// redisClient is the Redis client for storing checkpoints
 	redisClient redis.UniversalClient
@@ -27,24 +30,27 @@ type DaemonMissionCheckpointer struct {
 	// This is a function to avoid holding a lock on the daemon's mission map
 	activeMissions func() map[string]context.CancelFunc
 
-	// missionStore provides access to mission metadata
-	missionStore mission.MissionStore
+	// pool provides per-tenant data-plane connections for mission metadata access
+	pool datapool.Pool
 
 	// logger for structured logging
 	logger *observability.Logger
 }
 
 // NewDaemonMissionCheckpointer creates a new mission checkpointer.
+// The pool parameter replaces the previous missionStore; mission metadata is now
+// read from per-tenant Conn acquired from the pool. pool may be nil (dev mode),
+// in which case checkpoint operations that require mission metadata are no-ops.
 func NewDaemonMissionCheckpointer(
 	redisClient redis.UniversalClient,
 	activeMissions func() map[string]context.CancelFunc,
-	missionStore mission.MissionStore,
+	pool datapool.Pool,
 	logger *observability.Logger,
 ) *DaemonMissionCheckpointer {
 	return &DaemonMissionCheckpointer{
 		redisClient:    redisClient,
 		activeMissions: activeMissions,
-		missionStore:   missionStore,
+		pool:           pool,
 		logger:         logger,
 	}
 }
@@ -98,6 +104,8 @@ func (c *DaemonMissionCheckpointer) CheckpointAll(ctx context.Context) (int, err
 }
 
 // CheckpointMission creates a checkpoint for a specific mission and stores it in Redis.
+// tenantID must be provided so the pool can be used to acquire a Conn for the tenant's
+// per-tenant data-plane (mission metadata + status update).
 //
 // The checkpoint is stored with key pattern: gibson:checkpoint:{mission_id}
 // It contains:
@@ -109,18 +117,44 @@ func (c *DaemonMissionCheckpointer) CheckpointAll(ctx context.Context) (int, err
 // Checkpoints are stored with no expiration - they remain until explicitly deleted
 // or until the mission is resumed.
 func (c *DaemonMissionCheckpointer) CheckpointMission(ctx context.Context, missionID types.ID) error {
-	// Load mission metadata from store
-	mis, err := c.missionStore.Get(ctx, missionID)
-	if err != nil {
-		return fmt.Errorf("failed to load mission: %w", err)
-	}
+	return c.CheckpointMissionForTenant(ctx, missionID, auth.TenantID{})
+}
 
-	// Only checkpoint running missions
-	if mis.Status != mission.MissionStatusRunning {
-		c.logger.Debug(ctx, "skipping non-running mission",
-			"mission_id", missionID,
-			"status", mis.Status)
-		return nil
+// CheckpointMissionForTenant is the tenant-aware variant of CheckpointMission.
+// When tenantID is non-zero the pool is used to acquire a per-tenant Conn.
+// When pool is nil or tenantID is zero, mission metadata operations are skipped
+// and only the Redis checkpoint blob is written.
+func (c *DaemonMissionCheckpointer) CheckpointMissionForTenant(ctx context.Context, missionID types.ID, tenantID auth.TenantID) error {
+	// Optionally verify and update mission status via the per-tenant pool.
+	if c.pool != nil && !tenantID.IsZero() {
+		conn, err := c.pool.For(ctx, tenantID)
+		if err == nil {
+			defer conn.Release()
+			store := mission.NewConnBoundMissionStore(conn.Redis)
+			mis, getErr := store.Get(ctx, missionID)
+			if getErr == nil {
+				// Only checkpoint running missions
+				if mis.Status != mission.MissionStatusRunning {
+					c.logger.Debug(ctx, "skipping non-running mission",
+						"mission_id", missionID,
+						"status", mis.Status)
+					return nil
+				}
+			}
+			// Status update deferred below after the checkpoint is written.
+			defer func() {
+				if upErr := store.UpdateStatus(ctx, missionID, mission.MissionStatusPaused); upErr != nil {
+					c.logger.Warn(ctx, "failed to update mission status to paused",
+						"mission_id", missionID,
+						"error", upErr)
+				}
+			}()
+		} else {
+			c.logger.Warn(ctx, "checkpoint: failed to acquire conn for tenant (skipping status check/update)",
+				"tenant", tenantID,
+				"mission_id", missionID,
+				"error", err)
+		}
 	}
 
 	// Create checkpoint struct
@@ -133,13 +167,6 @@ func (c *DaemonMissionCheckpointer) CheckpointMission(ctx context.Context, missi
 		IsImplicit: true, // Auto-created during shutdown
 	}
 
-	// For graceful shutdown, we create a minimal checkpoint.
-	// The mission will need to restart from the beginning, but we preserve
-	// the mission metadata and can track that it was interrupted.
-	// Orchestrator integration for mid-execution node state is pending: the
-	// orchestrator.Checkpoint struct is populated here with the mission ID and
-	// label; finer-grained node states will be added when the orchestrator
-	// exposes a RestoreFromCheckpoint callback.
 	c.logger.Debug(ctx, "creating graceful-shutdown checkpoint (node-level state pending orchestrator integration)",
 		"mission_id", missionID)
 
@@ -159,14 +186,6 @@ func (c *DaemonMissionCheckpointer) CheckpointMission(ctx context.Context, missi
 		"mission_id", missionID,
 		"checkpoint_id", checkpoint.ID,
 		"redis_key", key)
-
-	// Update mission status to paused
-	if err := c.missionStore.UpdateStatus(ctx, missionID, mission.MissionStatusPaused); err != nil {
-		c.logger.Warn(ctx, "failed to update mission status to paused",
-			"mission_id", missionID,
-			"error", err)
-		// Don't fail the checkpoint operation if status update fails
-	}
 
 	return nil
 }

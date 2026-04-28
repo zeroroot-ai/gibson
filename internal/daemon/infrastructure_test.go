@@ -69,9 +69,8 @@ func TestInfrastructureInitialization(t *testing.T) {
 		t.Fatal("infrastructure is nil")
 	}
 
-	if infra.findingStore == nil {
-		t.Fatal("finding store is nil")
-	}
+	// findingStore is intentionally nil post-cutover: findings go through the
+	// per-tenant Pool at handler time. Do not check infra.findingStore here.
 
 	if infra.llmRegistry == nil {
 		t.Fatal("LLM registry is nil")
@@ -93,17 +92,7 @@ func TestInfrastructureInitialization(t *testing.T) {
 		t.Fatal("memory manager factory is nil")
 	}
 
-	// Test finding store basic operation
-	t.Run("FindingStore", func(t *testing.T) {
-		// Count should succeed even with empty database
-		count, err := infra.findingStore.Count(ctx, types.NewID())
-		if err != nil {
-			t.Errorf("finding store count failed: %v", err)
-		}
-		if count != 0 {
-			t.Errorf("expected count 0, got %d", count)
-		}
-	})
+	// Finding store is now per-tenant via Pool — no global infra.findingStore to test.
 
 	// Test LLM registry exists
 	t.Run("LLMRegistry", func(t *testing.T) {

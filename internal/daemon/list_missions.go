@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -49,9 +50,22 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 	var total int
 	var err error
 
+	// Acquire per-tenant store via pool.
+	tenant := tenantFromCtxOrSystem(ctx)
+	if d.pool == nil {
+		d.logger.Warn(ctx, "pool not configured; returning empty mission list")
+		return []api.MissionData{}, 0, nil
+	}
+	conn, connErr := d.pool.For(ctx, tenant)
+	if connErr != nil {
+		return nil, 0, datapool.MapPoolError(connErr)
+	}
+	defer conn.Release()
+	mStore := mission.NewConnBoundMissionStore(conn.Redis)
+
 	if activeOnly {
 		// Query only running or paused missions
-		missions, err = d.missionStore.GetActive(ctx)
+		missions, err = mStore.GetActive(ctx)
 		if err != nil {
 			d.logger.Error(ctx, "failed to get active missions", "error", err)
 			return nil, 0, fmt.Errorf("failed to get active missions: %w", err)
@@ -91,7 +105,7 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 			filter.SearchText = &namePattern
 		}
 
-		missions, err = d.missionStore.List(ctx, filter)
+		missions, err = mStore.List(ctx, filter)
 		if err != nil {
 			d.logger.Error(ctx, "failed to list missions", "error", err)
 			return nil, 0, fmt.Errorf("failed to list missions: %w", err)
@@ -107,7 +121,7 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 			totalFilter.SearchText = &namePattern
 		}
 
-		total, err = d.missionStore.Count(ctx, totalFilter)
+		total, err = mStore.Count(ctx, totalFilter)
 		if err != nil {
 			d.logger.Error(ctx, "failed to count missions", "error", err)
 			return nil, 0, fmt.Errorf("failed to count missions: %w", err)

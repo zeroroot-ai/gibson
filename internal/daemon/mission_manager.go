@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -12,7 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
@@ -36,14 +37,16 @@ type targetStoreLookup interface {
 // missionManager implements the MissionManager interface for daemon operations.
 // It orchestrates mission lifecycle including mission loading, execution, tracking,
 // and event emission.
+//
+// After the mission-finding-per-tenant-cutover spec, mission and run data is stored
+// in per-tenant databases. Each method that needs to persist or read mission data
+// acquires a short-lived *datapool.Conn from the pool using the calling tenant's ID.
 type missionManager struct {
 	config          *config.Config
 	logger          *slog.Logger
 	registry        component.ComponentDiscovery
-	missionStore    mission.MissionStore
-	missionRunStore mission.MissionRunStore // Stores individual run records
+	pool            datapool.Pool // per-tenant data-plane pool (replaces missionStore, missionRunStore, findingStore)
 	checkpointStore mission.CheckpointStore // Stores mission checkpoints for pause/resume
-	findingStore    finding.FindingStore
 	llmRegistry     llm.LLMRegistry
 	callbackManager *harness.CallbackManager
 	harnessFactory  harness.HarnessFactoryInterface
@@ -52,10 +55,6 @@ type missionManager struct {
 	infrastructure  *Infrastructure
 	otelStack       *observability.OTelObservabilityStack // nil when OTel is disabled
 	eventBus        orchestrator.EventBus                 // EventBus for emitting orchestration events
-	// TODO(mission-migration): Re-enable GraphRAG storage for mission definitions
-	// graphLoader will store mission definitions in Neo4j for cross-mission analysis
-	// Currently disabled during mission -> mission migration
-	// graphLoader     *MissionGraphLoader
 
 	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
 	// can resolve run_id → (user_id, tenant_id) during component callbacks.
@@ -84,14 +83,15 @@ type activeMission struct {
 }
 
 // newMissionManager creates a new mission manager instance.
+// The pool parameter provides per-tenant data-plane connections; it replaces the
+// former missionStore, missionRunStore, and findingStore parameters. When pool is nil
+// (dev mode, no security.key_provider), persistence operations are skipped gracefully.
 func newMissionManager(
 	cfg *config.Config,
 	logger *slog.Logger,
 	reg component.ComponentDiscovery,
-	missionStore mission.MissionStore,
-	missionRunStore mission.MissionRunStore,
+	pool datapool.Pool,
 	checkpointStore mission.CheckpointStore,
-	findingStore finding.FindingStore,
 	llmRegistry llm.LLMRegistry,
 	callbackMgr *harness.CallbackManager,
 	harnessFactory harness.HarnessFactoryInterface,
@@ -102,22 +102,12 @@ func newMissionManager(
 	eventBus orchestrator.EventBus,
 	authzStore mission.MissionAuthzStore,
 ) *missionManager {
-	// TODO(mission-migration): Re-enable GraphRAG storage for mission definitions
-	// GraphLoader initialization disabled during mission -> mission migration
-	// Will be replaced with MissionGraphLoader that works with mission.MissionDefinition
-	// if infrastructure != nil && infrastructure.graphRAGClient != nil {
-	//     graphLoader = mission.NewGraphLoader(infrastructure.graphRAGClient)
-	//     logger.Info("initialized GraphLoader for mission persistence to Neo4j")
-	// }
-
 	return &missionManager{
 		config:          cfg,
 		logger:          logger.With("component", "mission-manager"),
 		registry:        reg,
-		missionStore:    missionStore,
-		missionRunStore: missionRunStore,
+		pool:            pool,
 		checkpointStore: checkpointStore,
-		findingStore:    findingStore,
 		llmRegistry:     llmRegistry,
 		callbackManager: callbackMgr,
 		harnessFactory:  harnessFactory,
@@ -129,6 +119,46 @@ func newMissionManager(
 		authzStore:      authzStore,
 		activeMissions:  make(map[auth.TenantID]map[string]*activeMission),
 	}
+}
+
+// missionStoreFor acquires a per-tenant Conn from the pool and returns a
+// ConnBoundMissionStore. The caller MUST call release() exactly once (use defer).
+// Returns (nil, nil, nil) when pool is not configured (dev mode).
+func (m *missionManager) missionStoreFor(ctx context.Context, tenant auth.TenantID) (mission.MissionStore, func(), error) {
+	if m.pool == nil {
+		return nil, func() {}, nil
+	}
+	conn, err := m.pool.For(ctx, tenant)
+	if err != nil {
+		var npErr *datapool.NotProvisionedError
+		if errors.As(err, &npErr) {
+			m.logger.WarnContext(ctx, "mission manager: tenant not provisioned",
+				slog.String("tenant", tenant.String()))
+			return nil, func() {}, nil
+		}
+		return nil, func() {}, fmt.Errorf("mission manager: acquire conn for tenant %s: %w", tenant, err)
+	}
+	store := mission.NewConnBoundMissionStore(conn.Redis)
+	return store, func() { conn.Release() }, nil
+}
+
+// runStoreFor acquires a per-tenant Conn from the pool and returns a
+// ConnBoundRunStore. The caller MUST call release() exactly once (use defer).
+// Returns (nil, nil, nil) when pool is not configured (dev mode).
+func (m *missionManager) runStoreFor(ctx context.Context, tenant auth.TenantID) (mission.MissionRunStore, func(), error) {
+	if m.pool == nil {
+		return nil, func() {}, nil
+	}
+	conn, err := m.pool.For(ctx, tenant)
+	if err != nil {
+		var npErr *datapool.NotProvisionedError
+		if errors.As(err, &npErr) {
+			return nil, func() {}, nil
+		}
+		return nil, func() {}, fmt.Errorf("mission manager: acquire conn (run store) for tenant %s: %w", tenant, err)
+	}
+	store := mission.NewConnBoundRunStore(conn.Redis)
+	return store, func() { conn.Release() }, nil
 }
 
 // activeMissionTenant returns the auth.TenantID for a mission's tenant.
@@ -235,21 +265,29 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 		return nil, fmt.Errorf("target_id is required")
 	}
 
-	if m.missionStore == nil {
-		return nil, fmt.Errorf("mission store not initialized")
+	// Load mission definition from the calling tenant's store.
+	callingTenantForDef := tenantFromCtxOrSystem(ctx)
+	defStore, defRelease, defStoreErr := m.missionStoreFor(ctx, callingTenantForDef)
+	if defStoreErr != nil {
+		return nil, fmt.Errorf("mission run: get store for definition: %w", defStoreErr)
+	}
+	defer defRelease()
+
+	if defStore == nil {
+		return nil, fmt.Errorf("mission store not initialized (pool not configured)")
 	}
 
 	// Load mission definition from the registered-definition store. The caller
 	// may supply either the name (friendly ID used in Redis key) or the parsed
 	// ID — try name first, fall back to ID lookup across all definitions.
-	def, err := m.missionStore.GetDefinition(ctx, missionDefinitionID)
+	def, err := defStore.GetDefinition(ctx, missionDefinitionID)
 	if err != nil {
 		m.logger.Error("failed to load mission definition", "error", err, "mission_definition_id", missionDefinitionID)
 		return nil, fmt.Errorf("failed to load mission definition %s: %w", missionDefinitionID, err)
 	}
 	if def == nil {
 		// Fall back to ID-based lookup across all definitions.
-		defs, listErr := m.missionStore.ListDefinitions(ctx)
+		defs, listErr := defStore.ListDefinitions(ctx)
 		if listErr == nil {
 			for _, candidate := range defs {
 				if candidate.ID.String() == missionDefinitionID {
@@ -370,11 +408,18 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 		missionTemplate.Metadata["target_ref"] = targetRef
 	}
 
+	// Acquire the mission store for this tenant (callingTenant resolved above).
+	mStore, mStoreRelease, mStoreErr := m.missionStoreFor(ctx, callingTenant)
+	if mStoreErr != nil {
+		return nil, fmt.Errorf("mission run: acquire mission store: %w", mStoreErr)
+	}
+	defer mStoreRelease()
+
 	// Use FindOrCreateByName to get stable mission ID
 	var missionRecord *mission.Mission
 	var isNewMission bool
-	if m.missionStore != nil {
-		missionRecord, isNewMission, err = m.missionStore.FindOrCreateByName(ctx, missionTemplate)
+	if mStore != nil {
+		missionRecord, isNewMission, err = mStore.FindOrCreateByName(ctx, missionTemplate)
 		if err != nil {
 			m.logger.Error("failed to find or create mission", "error", err, "mission_name", def.Name)
 			return nil, fmt.Errorf("failed to find or create mission: %w", err)
@@ -405,16 +450,21 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 			}
 		}
 	} else {
-		// No store available, use template directly
+		// No store available (pool not configured), use template directly
 		missionRecord = missionTemplate
 		isNewMission = true
 	}
 
 	// Create new MissionRun for this execution
 	var missionRun *mission.MissionRun
-	if m.missionRunStore != nil {
+	rStore, rStoreRelease, rStoreErr := m.runStoreFor(ctx, callingTenant)
+	defer rStoreRelease()
+	if rStoreErr != nil {
+		m.logger.Warn("failed to acquire run store; using ephemeral run", "error", rStoreErr)
+	}
+	if rStore != nil {
 		// Get next run number
-		runNumber, err := m.missionRunStore.GetNextRunNumber(ctx, missionRecord.ID)
+		runNumber, err := rStore.GetNextRunNumber(ctx, missionRecord.ID)
 		if err != nil {
 			m.logger.Error("failed to get next run number", "error", err)
 			return nil, fmt.Errorf("failed to get next run number: %w", err)
@@ -424,7 +474,7 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 		missionRun = mission.NewMissionRun(missionRecord.ID, runNumber)
 		missionRun.MarkStarted()
 
-		if err := m.missionRunStore.Save(ctx, missionRun); err != nil {
+		if err := rStore.Save(ctx, missionRun); err != nil {
 			m.logger.Error("failed to save mission run", "error", err)
 			return nil, fmt.Errorf("failed to save mission run: %w", err)
 		}
@@ -435,10 +485,10 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 			"run_number", runNumber,
 		)
 	} else {
-		// Fallback: create ephemeral run for graph bootstrap
+		// Fallback: create ephemeral run when pool is not configured
 		missionRun = mission.NewMissionRun(missionRecord.ID, 1)
 		missionRun.MarkStarted()
-		m.logger.Warn("mission run store not available, using ephemeral run")
+		m.logger.Warn("mission run store not available (pool not configured), using ephemeral run")
 	}
 
 	// Record authz state so HarnessCallbackService.Authorize can resolve
@@ -573,13 +623,16 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Set StartedAt timestamp now that execution is beginning
 	active.mission.StartedAt = mission.NewUnixTimePtrNow()
 
-	// Update mission status to Running in SQLite
-	if m.missionStore != nil {
-		active.mission.Status = mission.MissionStatusRunning
-		if err := m.missionStore.Update(ctx, active.mission); err != nil {
+	// Update mission status to Running in the per-tenant store.
+	active.mission.Status = mission.MissionStatusRunning
+	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
+		defer release()
+		if err := mStore.Update(ctx, active.mission); err != nil {
 			m.logger.Warn("failed to update mission status in store", "error", err, "mission_id", missionID)
-			// Continue execution - this is not critical
+			// Continue execution - not critical
 		}
+	} else if storeErr != nil {
+		m.logger.Warn("failed to acquire store for status update", "error", storeErr, "mission_id", missionID)
 	}
 
 	// Check if GraphRAG is available - required for orchestrator
@@ -945,15 +998,18 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		}
 	}
 
-	// Update mission in store
+	// Update mission in the per-tenant store.
 	active.mission.Status = finalStatus
 	active.mission.Error = errorMsg
 	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
 
-	if m.missionStore != nil {
-		if saveErr := m.missionStore.Update(ctx, active.mission); saveErr != nil {
+	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
+		defer release()
+		if saveErr := mStore.Update(ctx, active.mission); saveErr != nil {
 			m.logger.Warn("failed to update mission in store", "error", saveErr)
 		}
+	} else if storeErr != nil {
+		m.logger.Warn("failed to acquire store to save final mission status", "error", storeErr)
 	}
 
 	m.logger.Info("mission execution completed",
@@ -1006,8 +1062,9 @@ func (m *missionManager) Pause(ctx context.Context, missionID string, force bool
 			// Update status to paused anyway
 			active.mission.Status = mission.MissionStatusPaused
 			active.mission.CompletedAt = mission.NewUnixTimePtrNow()
-			if m.missionStore != nil {
-				if err := m.missionStore.Update(ctx, active.mission); err != nil {
+			if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
+				defer release()
+				if err := mStore.Update(ctx, active.mission); err != nil {
 					m.logger.Warn("failed to update mission status to paused", "error", err)
 				}
 			}
@@ -1020,8 +1077,9 @@ func (m *missionManager) Pause(ctx context.Context, missionID string, force bool
 			// If mission is no longer active, it has completed or failed
 			if !stillActive {
 				// Fetch mission from store to get final status
-				if m.missionStore != nil {
-					finalMission, err := m.missionStore.Get(ctx, types.ID(missionID))
+				if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
+					defer release()
+					finalMission, err := mStore.Get(ctx, types.ID(missionID))
 					if err == nil {
 						if finalMission.Status == mission.MissionStatusPaused {
 							m.logger.Info("mission paused successfully", "mission_id", missionID)
@@ -1049,12 +1107,17 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 		return nil, fmt.Errorf("mission %s is already running", missionID)
 	}
 
-	// Get mission from store
-	if m.missionStore == nil {
-		return nil, fmt.Errorf("mission store not available")
+	// Get mission from the per-tenant store.
+	mStore, mStoreRelease, mStoreErr := m.missionStoreFor(ctx, tenant)
+	if mStoreErr != nil {
+		return nil, fmt.Errorf("resume: acquire mission store: %w", mStoreErr)
+	}
+	defer mStoreRelease()
+	if mStore == nil {
+		return nil, fmt.Errorf("mission store not available (pool not configured)")
 	}
 
-	missionRecord, err := m.missionStore.Get(ctx, types.ID(missionID))
+	missionRecord, err := mStore.Get(ctx, types.ID(missionID))
 	if err != nil {
 		m.logger.Error("failed to get mission", "error", err, "mission_id", missionID)
 		return nil, fmt.Errorf("failed to get mission %s: %w", missionID, err)
@@ -1084,14 +1147,19 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 	missionRecord.Status = mission.MissionStatusRunning
 	missionRecord.StartedAt = mission.NewUnixTimePtrNow()
 
-	if err := m.missionStore.Update(ctx, missionRecord); err != nil {
+	if err := mStore.Update(ctx, missionRecord); err != nil {
 		m.logger.Warn("failed to update mission status", "error", err)
 	}
 
 	// Create new MissionRun for resumed execution
 	var missionRun *mission.MissionRun
-	if m.missionRunStore != nil {
-		runNumber, err := m.missionRunStore.GetNextRunNumber(ctx, missionRecord.ID)
+	rStore, rStoreRelease, rStoreErr := m.runStoreFor(ctx, tenant)
+	defer rStoreRelease()
+	if rStoreErr != nil {
+		m.logger.Warn("failed to acquire run store for resume; using ephemeral run", "error", rStoreErr)
+	}
+	if rStore != nil {
+		runNumber, err := rStore.GetNextRunNumber(ctx, missionRecord.ID)
 		if err != nil {
 			m.logger.Error("failed to get next run number", "error", err)
 			return nil, fmt.Errorf("failed to get next run number: %w", err)
@@ -1100,7 +1168,7 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 		missionRun = mission.NewMissionRun(missionRecord.ID, runNumber)
 		missionRun.MarkStarted()
 
-		if err := m.missionRunStore.Save(ctx, missionRun); err != nil {
+		if err := rStore.Save(ctx, missionRun); err != nil {
 			m.logger.Error("failed to save mission run", "error", err)
 			return nil, fmt.Errorf("failed to save mission run: %w", err)
 		}
@@ -1167,14 +1235,17 @@ func (m *missionManager) Stop(ctx context.Context, missionID string, force bool)
 		Message:   "Mission stopped by user",
 	})
 
-	// Update mission status
+	// Update mission status in the per-tenant store.
 	active.mission.Status = mission.MissionStatusCancelled
 	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
 
-	if m.missionStore != nil {
-		if err := m.missionStore.Update(ctx, active.mission); err != nil {
+	if mStore, release, storeErr := m.missionStoreFor(ctx, active.tenantID); storeErr == nil && mStore != nil {
+		defer release()
+		if err := mStore.Update(ctx, active.mission); err != nil {
 			m.logger.Warn("failed to update mission in store", "error", err)
 		}
+	} else if storeErr != nil {
+		m.logger.Warn("failed to acquire store to stop mission", "error", storeErr)
 	}
 
 	m.logger.Info("mission stopped", "mission_id", missionID)
@@ -1200,28 +1271,30 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 		result = append(result, missionToData(m))
 	}
 
-	// If not active-only, also fetch from store
-	if !activeOnly && m.missionStore != nil {
-		filter := mission.NewMissionFilter()
-		filter.Limit = 1000 // Get a reasonable number
-		filter.Offset = 0
+	// If not active-only, also fetch from the per-tenant store.
+	if !activeOnly {
+		if mStore, release, storeErr := m.missionStoreFor(ctx, tenant); storeErr == nil && mStore != nil {
+			defer release()
+			filter := mission.NewMissionFilter()
+			filter.Limit = 1000 // Get a reasonable number
+			filter.Offset = 0
 
-		stored, err := m.missionStore.List(ctx, filter)
-		if err != nil {
-			m.logger.Warn("failed to list missions from store", "error", err)
-		} else {
-			// Add completed missions that aren't already in active list
-			for _, storedMission := range stored {
-				// Check if already in active list
-				isActive := false
-				for _, active := range activeMissions {
-					if active.ID == storedMission.ID {
-						isActive = true
-						break
+			stored, listErr := mStore.List(ctx, filter)
+			if listErr != nil {
+				m.logger.Warn("failed to list missions from store", "error", listErr)
+			} else {
+				// Add completed missions that aren't already in active list
+				for _, storedMission := range stored {
+					isActive := false
+					for _, active := range activeMissions {
+						if active.ID == storedMission.ID {
+							isActive = true
+							break
+						}
 					}
-				}
-				if !isActive && storedMission.Status.IsTerminal() {
-					result = append(result, missionToData(storedMission))
+					if !isActive && storedMission.Status.IsTerminal() {
+						result = append(result, missionToData(storedMission))
+					}
 				}
 			}
 		}
@@ -1257,9 +1330,10 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 		return &data, nil
 	}
 
-	// Check mission store
-	if m.missionStore != nil {
-		missionRecord, err := m.missionStore.Get(ctx, types.ID(missionID))
+	// Check the per-tenant store.
+	if mStore, release, storeErr := m.missionStoreFor(ctx, tenant); storeErr == nil && mStore != nil {
+		defer release()
+		missionRecord, err := mStore.Get(ctx, types.ID(missionID))
 		if err == nil {
 			data := missionToData(missionRecord)
 			return &data, nil

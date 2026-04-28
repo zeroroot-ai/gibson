@@ -2,26 +2,19 @@ package daemon
 
 import (
 	"context"
-
-	"github.com/zero-day-ai/gibson/internal/mission"
 )
 
-// queryMissionCounts queries the mission store for total and active mission counts.
-// This is a helper function to keep the status() method clean.
+// queryMissionCounts returns mission counts from the in-memory mission manager.
+// After the per-tenant cutover, cross-tenant mission counting requires enumerating
+// all tenants; for the daemon status helper we use the mission manager's in-process
+// counters which reflect only active (in-memory) missions. Completed missions in
+// per-tenant Postgres databases are not counted here — this is advisory for the
+// daemon status RPC and the /healthz endpoint, not an authoritative count.
 func (d *daemonImpl) queryMissionCounts(ctx context.Context) (total int, active int) {
-	// Query total missions
-	totalMissions, err := d.missionStore.Count(ctx, mission.NewMissionFilter())
-	if err != nil {
-		d.logger.Warn(ctx, "failed to get total mission count", "error", err)
-		totalMissions = 0
+	if d.missionManager == nil {
+		return 0, 0
 	}
-
-	// Query active missions
-	activeMissions, err := d.missionStore.GetActive(ctx)
-	if err != nil {
-		d.logger.Warn(ctx, "failed to get active mission count", "error", err)
-		activeMissions = nil
-	}
-
-	return totalMissions, len(activeMissions)
+	active = d.missionManager.GetActiveMissionCount()
+	total = d.missionManager.GetTotalMissionCount()
+	return total, active
 }

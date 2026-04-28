@@ -57,12 +57,20 @@ func (a *missionHarnessAdapter) mgr(ctx context.Context) (*missionManager, error
 	return a.daemon.missionManager, nil
 }
 
-// store returns the missionStore, or an error if unavailable.
-func (a *missionHarnessAdapter) store() (mission.MissionStore, error) {
-	if a.daemon.missionStore == nil {
-		return nil, status.Error(codes.Unavailable, "mission store not available")
+// store acquires a per-tenant mission store from the pool using the calling tenant.
+// The caller is responsible for releasing the Conn (returned as the second value).
+// Returns an error when the pool is not configured or the tenant cannot be resolved.
+func (a *missionHarnessAdapter) storeForCtx(ctx context.Context) (mission.MissionStore, func(), error) {
+	if a.daemon.pool == nil {
+		return nil, func() {}, status.Error(codes.Unavailable, "mission store not available (pool not configured)")
 	}
-	return a.daemon.missionStore, nil
+	tenant := tenantFromCtxOrSystem(ctx)
+	conn, err := a.daemon.pool.For(ctx, tenant)
+	if err != nil {
+		return nil, func() {}, status.Errorf(codes.Unavailable, "mission store: acquire conn: %v", err)
+	}
+	store := mission.NewConnBoundMissionStore(conn.Redis)
+	return store, func() { conn.Release() }, nil
 }
 
 // CreateMission implements harness.MissionClientIface.
@@ -73,10 +81,11 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 		return nil, status.Error(codes.InvalidArgument, "create mission request is required")
 	}
 
-	store, err := a.store()
+	store, storeRelease, err := a.storeForCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer storeRelease()
 
 	// Parse the mission JSON into a MissionDefinition.
 	var def mission.MissionDefinition
@@ -139,10 +148,11 @@ func (a *missionHarnessAdapter) Run(ctx context.Context, missionID string) error
 		return mgrErr
 	}
 
-	store, storeErr := a.store()
+	store, storeRelease, storeErr := a.storeForCtx(ctx)
 	if storeErr != nil {
 		return storeErr
 	}
+	defer storeRelease()
 
 	id, parseErr := types.ParseID(missionID)
 	if parseErr != nil {
@@ -185,10 +195,11 @@ func (a *missionHarnessAdapter) Run(ctx context.Context, missionID string) error
 
 // GetStatus implements harness.MissionClientIface.
 func (a *missionHarnessAdapter) GetStatus(ctx context.Context, missionID string) (*harness.MissionClientStatusInfo, error) {
-	store, err := a.store()
+	store, storeRelease, err := a.storeForCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer storeRelease()
 
 	id, parseErr := types.ParseID(missionID)
 	if parseErr != nil {
@@ -233,10 +244,11 @@ func (a *missionHarnessAdapter) GetStatus(ctx context.Context, missionID string)
 
 // WaitForCompletion implements harness.MissionClientIface.
 func (a *missionHarnessAdapter) WaitForCompletion(ctx context.Context, missionID string, timeout time.Duration) (*harness.MissionClientResult, error) {
-	store, err := a.store()
+	store, storeRelease, err := a.storeForCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer storeRelease()
 
 	id, parseErr := types.ParseID(missionID)
 	if parseErr != nil {
@@ -274,10 +286,11 @@ func (a *missionHarnessAdapter) Cancel(ctx context.Context, missionID types.ID) 
 	mgr, err := a.mgr(ctx)
 	if err != nil {
 		// Fallback: update store directly if manager is unavailable.
-		store, storeErr := a.store()
+		store, storeRelease, storeErr := a.storeForCtx(ctx)
 		if storeErr != nil {
 			return err // return original error
 		}
+		defer storeRelease()
 		m, getErr := store.Get(ctx, missionID)
 		if getErr != nil {
 			return status.Errorf(codes.NotFound, "mission %s not found", missionID)
@@ -292,10 +305,11 @@ func (a *missionHarnessAdapter) Cancel(ctx context.Context, missionID types.ID) 
 	// Delegate to missionManager.Stop (non-force cancel).
 	if stopErr := mgr.Stop(ctx, missionID.String(), false); stopErr != nil {
 		// If not found in active missions, fall back to store update.
-		store, storeErr := a.store()
+		store, storeRelease, storeErr := a.storeForCtx(ctx)
 		if storeErr != nil {
 			return status.Errorf(codes.Internal, "failed to cancel mission: %v", stopErr)
 		}
+		defer storeRelease()
 		m, getErr := store.Get(ctx, missionID)
 		if getErr != nil {
 			return status.Errorf(codes.NotFound, "mission %s not found", missionID)
@@ -310,10 +324,11 @@ func (a *missionHarnessAdapter) Cancel(ctx context.Context, missionID types.ID) 
 
 // GetResults implements harness.MissionClientIface.
 func (a *missionHarnessAdapter) GetResults(ctx context.Context, missionID types.ID) (*harness.MissionClientResult, error) {
-	store, err := a.store()
+	store, storeRelease, err := a.storeForCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer storeRelease()
 
 	m, getErr := store.Get(ctx, missionID)
 	if getErr != nil {
@@ -325,10 +340,11 @@ func (a *missionHarnessAdapter) GetResults(ctx context.Context, missionID types.
 
 // List implements harness.MissionClientIface.
 func (a *missionHarnessAdapter) List(ctx context.Context, filter *harness.MissionClientFilter) ([]*harness.MissionClientRecord, error) {
-	store, err := a.store()
+	store, storeRelease, err := a.storeForCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer storeRelease()
 
 	mFilter := &mission.MissionFilter{
 		Limit:  filter.Limit,

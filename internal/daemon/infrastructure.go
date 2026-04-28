@@ -102,16 +102,14 @@ type Infrastructure struct {
 func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, error) {
 	d.logger.Info(ctx, "initializing infrastructure components")
 
-	// Create finding store with Redis (required).
-	// Phase D: NewGraphRAGFindingSubmitter now accepts finding.FindingStore (interface).
-	// The type assertion in grpc.go has been removed. The concrete RedisFindingStore is
-	// retained here for handlers that have not yet migrated to ConnBoundFindingStore;
-	// both implement finding.FindingStore so either can be substituted transparently.
+	// Per-tenant finding store: findings are now written through the data-plane Pool
+	// (conn.Findings()) at handler time. The Infrastructure no longer holds a
+	// global finding store; the field is retained as nil for backward-compat
+	// with code that checks infra.findingStore != nil.
 	if d.stateClient == nil {
-		return nil, fmt.Errorf("StateClient not initialized - cannot create finding store")
+		return nil, fmt.Errorf("StateClient not initialized - cannot initialize infrastructure")
 	}
-	findingStore := finding.NewRedisFindingStore(d.stateClient)
-	d.logger.Info(ctx, "initialized Redis finding store")
+	d.logger.Info(ctx, "finding store: per-tenant path via Pool (no global Redis store)")
 
 	// Create LLM registry
 	llmRegistry := llm.NewLLMRegistry()
@@ -253,10 +251,11 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	planExecutor := plan.NewPlanExecutor(planExecutorOpts...)
 	d.logger.Info(ctx, "initialized plan executor")
 
-	// Store infrastructure components temporarily so newHarnessFactory can access them
+	// Store infrastructure components temporarily so newHarnessFactory can access them.
+	// findingStore is nil: findings are persisted via per-tenant Pool at handler time.
 	infra := &Infrastructure{
 		planExecutor:         planExecutor,
-		findingStore:         findingStore,
+		findingStore:         nil, // migrated to pool-backed per-tenant path
 		llmRegistry:          llmRegistry,
 		slotManager:          slotManager,
 		memoryManagerFactory: memoryFactory,
@@ -282,10 +281,11 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	// Update infrastructure with harness factory
 	infra.harnessFactory = harnessFactory
 
-	// Create mission run linker
-	runLinker := mission.NewMissionRunLinker(d.missionStore)
+	// Mission run linker: per-tenant migration complete, no global store.
+	// Pass nil store — the linker is not actively called post-cutover.
+	runLinker := mission.NewMissionRunLinker(nil)
 	infra.runLinker = runLinker
-	d.logger.Info(ctx, "initialized mission run linker")
+	d.logger.Info(ctx, "initialized mission run linker (no-op store — per-tenant via pool)")
 
 	return infra, nil
 }
@@ -468,13 +468,17 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 func (d *daemonImpl) checkInfrastructureHealth(ctx context.Context, infra *Infrastructure) map[string]string {
 	health := make(map[string]string)
 
-	// Check database/finding store
-	// We can test by attempting to count findings for a dummy mission
-	_, err := infra.findingStore.Count(ctx, "health-check-mission-id")
-	if err != nil {
-		health["finding_store"] = fmt.Sprintf("unhealthy: %v", err)
+	// Finding store check: findings are now per-tenant via Pool; pool health is
+	// checked separately via the /readyz probe. Skip here to avoid cross-tenant access.
+	if infra.findingStore != nil {
+		_, err := infra.findingStore.Count(ctx, "health-check-mission-id")
+		if err != nil {
+			health["finding_store"] = fmt.Sprintf("unhealthy: %v", err)
+		} else {
+			health["finding_store"] = "healthy"
+		}
 	} else {
-		health["finding_store"] = "healthy"
+		health["finding_store"] = "per-tenant (pool-backed)"
 	}
 
 	// Check LLM registry
