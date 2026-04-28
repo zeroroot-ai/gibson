@@ -25,7 +25,9 @@ import (
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
+	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
@@ -559,7 +561,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
-	api.RegisterDaemonAdminServiceServer(srv, daemonSvc)
+	platformv1.RegisterPlatformOperatorServiceServer(srv, daemonSvc)
+	userv1.RegisterUserServiceServer(srv, daemonSvc)
 
 	// Register TenantAdminService — the new tenant-admin surface.
 	// Initialise the IdP admin client from env vars; fail-closed if the env
@@ -773,35 +776,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 // an error listing missing methods on mismatch. Called once at
 // daemon startup; safe to skip for tests via the daemon test scaffold.
 //
-// DaemonAdminService methods are owned by the LOCAL proto at
-// internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto and
-// therefore aren't in the SDK's auth registry by design (the SDK
-// registry-gen tool only walks SDK protos). Until the local proto is
-// annotated and a local registry is wired alongside the SDK one
-// (tracked under unified-identity-and-authorization follow-up — the
-// Phase A authz-registry-gen tool needs a multi-source mode), the
-// daemon.admin service legitimately produces missing-entry diagnostics.
-// We exempt that one service prefix so the coverage check still
-// fail-closes on any new SDK-proto service that drifts.
-//
 // GIBSON_SKIP_REGISTRY_COVERAGE_CHECK=true bypasses the check entirely
-// — used in Kind dev clusters via values-kind.yaml so the daemon boots
-// without the local-registry tool plumbing in place. Production
-// overlays leave it unset; check stays fail-closed there.
+// — used in Kind dev clusters via values-kind.yaml where newly-added
+// operational RPCs may not yet have SDK registry entries.
+// Production overlays leave it unset; check stays fail-closed there.
 //
 // Spec: unified-identity-and-authorization Requirement 14.3.
 func assertRegistryCoverage(srv *grpc.Server) error {
 	if os.Getenv("GIBSON_SKIP_REGISTRY_COVERAGE_CHECK") == "true" {
 		return nil
 	}
-	const localAdminPrefix = "gibson.daemon.admin.v1.DaemonAdminService"
 	var missing []string
 	for svcName, info := range srv.GetServiceInfo() {
-		// DaemonAdminService is owned by the local proto and not yet
-		// folded into the SDK registry — see comment above.
-		if svcName == localAdminPrefix {
-			continue
-		}
 		for _, m := range info.Methods {
 			full := "/" + svcName + "/" + m.Name
 			if _, ok := sdkregistry.Registry[full]; !ok {

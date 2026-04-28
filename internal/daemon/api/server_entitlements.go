@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/authz"
+	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
 )
 
 // entitlementsDB returns the *sql.DB used for tenant_quotas writes. The
@@ -28,7 +29,7 @@ func (s *DaemonServer) entitlementsDB() *sql.DB {
 // Audit wiring (task 49) will hook each write to produce one
 // AccessTupleChange event per tuple; for now the RPC is a direct pass-through
 // to the authorizer.
-func (s *DaemonServer) WriteAccessTuples(ctx context.Context, req *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error) {
+func (s *DaemonServer) WriteAccessTuples(ctx context.Context, req *platformv1.WriteAccessTuplesRequest) (*platformv1.WriteAccessTuplesResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -76,12 +77,12 @@ func (s *DaemonServer) WriteAccessTuples(ctx context.Context, req *WriteAccessTu
 
 	s.logger.Info("entitlements: WriteAccessTuples",
 		"added", len(adds), "deleted", len(dels), "reason", req.GetReason())
-	return &WriteAccessTuplesResponse{Added: int32(len(adds)), Deleted: int32(len(dels))}, nil
+	return &platformv1.WriteAccessTuplesResponse{Added: int32(len(adds)), Deleted: int32(len(dels))}, nil
 }
 
 // UpsertTenantQuota writes the per-tenant quota row. Creates the table on
 // first use so deployments without a pre-run migration step still converge.
-func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *UpsertTenantQuotaRequest) (*UpsertTenantQuotaResponse, error) {
+func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *platformv1.UpsertTenantQuotaRequest) (*platformv1.UpsertTenantQuotaResponse, error) {
 	db := s.entitlementsDB()
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "dashboard Postgres not configured")
@@ -116,14 +117,14 @@ func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *UpsertTenantQ
 	).Scan(&updatedAt); err != nil {
 		return nil, status.Errorf(codes.Internal, "upsert: %v", err)
 	}
-	return &UpsertTenantQuotaResponse{UpdatedAt: updatedAt.UTC().Format(time.RFC3339Nano)}, nil
+	return &platformv1.UpsertTenantQuotaResponse{UpdatedAt: updatedAt.UTC().Format(time.RFC3339Nano)}, nil
 }
 
 // ListFeatureTuples enumerates `tenant:{id}#has_*@tenant:{id}` relations
 // currently set on the given tenant. Implementation note: OpenFGA's
 // ListObjects is a (user, relation, objectType) query, so we iterate the
 // known has_* relation set and record which are currently present.
-func (s *DaemonServer) ListFeatureTuples(ctx context.Context, req *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error) {
+func (s *DaemonServer) ListFeatureTuples(ctx context.Context, req *platformv1.ListFeatureTuplesRequest) (*platformv1.ListFeatureTuplesResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -144,12 +145,12 @@ func (s *DaemonServer) ListFeatureTuples(ctx context.Context, req *ListFeatureTu
 			present = append(present, f)
 		}
 	}
-	return &ListFeatureTuplesResponse{Relations: present}, nil
+	return &platformv1.ListFeatureTuplesResponse{Relations: present}, nil
 }
 
 // SeedCatalogTenantEnabled writes tenant_enabled tuples for every catalog
 // item currently platform_enabled. Idempotent via FGA's write semantics.
-func (s *DaemonServer) SeedCatalogTenantEnabled(ctx context.Context, req *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error) {
+func (s *DaemonServer) SeedCatalogTenantEnabled(ctx context.Context, req *platformv1.SeedCatalogTenantEnabledRequest) (*platformv1.SeedCatalogTenantEnabledResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -163,7 +164,7 @@ func (s *DaemonServer) SeedCatalogTenantEnabled(ctx context.Context, req *SeedCa
 		return nil, status.Errorf(codes.Internal, "list platform_enabled: %v", err)
 	}
 	if len(ids) == 0 {
-		return &SeedCatalogTenantEnabledResponse{TuplesWritten: 0}, nil
+		return &platformv1.SeedCatalogTenantEnabledResponse{TuplesWritten: 0}, nil
 	}
 	tenantRef := "tenant:" + tenantID
 	tuples := make([]authz.Tuple, 0, len(ids))
@@ -179,7 +180,7 @@ func (s *DaemonServer) SeedCatalogTenantEnabled(ctx context.Context, req *SeedCa
 	if err := s.authorizer.Write(ctx, tuples); err != nil {
 		return nil, status.Errorf(codes.Internal, "fga write: %v", err)
 	}
-	return &SeedCatalogTenantEnabledResponse{TuplesWritten: int32(len(tuples))}, nil
+	return &platformv1.SeedCatalogTenantEnabledResponse{TuplesWritten: int32(len(tuples))}, nil
 }
 
 func hasPrefix(s, prefix string) bool {
@@ -192,7 +193,7 @@ func hasPrefix(s, prefix string) bool {
 // from this RPC entirely so they cannot forge an audit trail. The handler
 // ignores the request's actor_subject field: the actor is always the
 // SPIFFE identity already attached to ctx by the auth interceptor.
-func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *EmitAuditEventRequest) (*EmitAuditEventResponse, error) {
+func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *platformv1.EmitAuditEventRequest) (*platformv1.EmitAuditEventResponse, error) {
 	if s.auditLogger == nil {
 		return nil, status.Error(codes.Unavailable, "audit emitter not configured")
 	}
@@ -246,7 +247,7 @@ func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *EmitAuditEventRe
 	if err := s.auditLogger.Log(ctx, ev.GetType(), resource, resourceID, details); err != nil {
 		return nil, status.Errorf(codes.Internal, "audit log: %v", err)
 	}
-	return &EmitAuditEventResponse{}, nil
+	return &platformv1.EmitAuditEventResponse{}, nil
 }
 
 // indexByte returns the first index of c in s, or -1.

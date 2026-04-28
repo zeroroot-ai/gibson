@@ -24,6 +24,8 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -92,21 +94,23 @@ func (s *redisQuotaStore) SetQuota(ctx context.Context, tenantID string, q *stor
 // ---------------------------------------------------------------------------
 
 // GetTenantQuota retrieves the quota configuration for a tenant.
-func (s *DaemonServer) GetTenantQuota(ctx context.Context, req *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error) {
+func (s *DaemonServer) GetTenantQuota(ctx context.Context, req *tenantv1.GetTenantQuotaRequest) (*tenantv1.GetTenantQuotaResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		tenantID = auth.TenantStringFromContext(ctx)
 	}
+
+	// Nil store: return Unavailable regardless of tenant validation.
+	if s.quotaStore == nil {
+		return nil, status_grpc.Error(codes.Unavailable, "quota store not configured")
+	}
+
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
 
 	if err := s.requireTenantAdmin(ctx, tenantID); err != nil {
 		return nil, err
-	}
-
-	if s.quotaStore == nil {
-		return nil, status_grpc.Error(codes.Unavailable, "quota store not configured")
 	}
 
 	q, err := s.quotaStore.GetQuota(ctx, tenantID)
@@ -118,8 +122,8 @@ func (s *DaemonServer) GetTenantQuota(ctx context.Context, req *GetTenantQuotaRe
 		return nil, status_grpc.Error(codes.Internal, "quota read failed")
 	}
 
-	resp := &GetTenantQuotaResponse{
-		Quota: &TenantQuota{
+	resp := &tenantv1.GetTenantQuotaResponse{
+		Quota: &tenantv1.TenantQuota{
 			MaxMissions: q.MaxMissions,
 			MaxAgents:   q.MaxAgents,
 			MaxFindings: q.MaxFindings,
@@ -258,7 +262,7 @@ func (s *DaemonServer) readTenantUsageSnapshot(ctx context.Context, tenantID str
 // ---------------------------------------------------------------------------
 
 // SetTenantQuota sets the quota configuration for a tenant.
-func (s *DaemonServer) SetTenantQuota(ctx context.Context, req *SetTenantQuotaRequest) (*SetTenantQuotaResponse, error) {
+func (s *DaemonServer) SetTenantQuota(ctx context.Context, req *platformv1.SetTenantQuotaRequest) (*platformv1.SetTenantQuotaResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
@@ -297,8 +301,8 @@ func (s *DaemonServer) SetTenantQuota(ctx context.Context, req *SetTenantQuotaRe
 		slog.Int("max_missions", int(q.MaxMissions)),
 	)
 
-	return &SetTenantQuotaResponse{
-		Quota: &TenantQuota{
+	return &platformv1.SetTenantQuotaResponse{
+		Quota: &platformv1.TenantQuota{
 			MaxMissions: q.MaxMissions,
 			MaxAgents:   q.MaxAgents,
 			MaxFindings: q.MaxFindings,

@@ -9,6 +9,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
@@ -142,7 +143,7 @@ func budgetScopeToProto(s budget.Scope) budgetpb.BudgetScope {
 // for an LLM call. Used by the budget pre-check. The estimate is
 // intentionally conservative — over-reserving is preferable to letting
 // a large call slip under the limit.
-func estimateTokens(req *ExecuteLLMRequest) int64 {
+func estimateTokens(req *tenantv1.ExecuteLLMRequest) int64 {
 	var est int64
 	for _, m := range req.GetMessages() {
 		// Rough heuristic: 1 token per 4 chars. The token recorder uses
@@ -161,7 +162,7 @@ func estimateTokens(req *ExecuteLLMRequest) int64 {
 }
 
 // streamEstimateTokens is the equivalent for StreamLLM.
-func streamEstimateTokens(req *StreamLLMRequest) int64 {
+func streamEstimateTokens(req *tenantv1.StreamLLMRequest) int64 {
 	var est int64
 	for _, m := range req.GetMessages() {
 		est += int64(len(m.GetContent())) / 4
@@ -183,7 +184,7 @@ func streamEstimateTokens(req *StreamLLMRequest) int64 {
 // call, dispatches the completion request, and translates the response into
 // proto. The decrypted credential is scoped strictly to this stack frame and
 // is never logged, cached, or embedded in any response field.
-func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *ExecuteLLMRequest) (*ExecuteLLMResponse, error) {
+func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMRequest) (*tenantv1.ExecuteLLMResponse, error) {
 	// 1. Tenant from identity context (resolved from Envoy-signed headers).
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
@@ -321,7 +322,7 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *ExecuteLLMRequest) (
 // caller. Each chunk is translated to a StreamLLMResponse oneof variant:
 // text_delta, tool_call_delta, finish, or error. The decrypted credential is
 // scoped to the lifetime of this handler, never logged, and never forwarded.
-func (s *DaemonServer) StreamLLM(req *StreamLLMRequest, stream DaemonAdminService_StreamLLMServer) error {
+func (s *DaemonServer) StreamLLM(req *tenantv1.StreamLLMRequest, stream tenantv1.TenantAdminService_StreamLLMServer) error {
 	ctx := stream.Context()
 
 	// 1. Tenant from identity context (resolved from Envoy-signed headers).
@@ -390,13 +391,13 @@ func (s *DaemonServer) StreamLLM(req *StreamLLMRequest, stream DaemonAdminServic
 
 	// 7. Forward chunks to the gRPC stream.
 	for chunk := range chunks {
-		var msg *StreamLLMResponse
+		var msg *tenantv1.StreamLLMResponse
 
 		switch {
 		case chunk.Error != nil:
-			msg = &StreamLLMResponse{
-				Payload: &StreamLLMResponse_Error{
-					Error: &ProviderHarnessError{
+			msg = &tenantv1.StreamLLMResponse{
+				Payload: &tenantv1.StreamLLMResponse_Error{
+					Error: &tenantv1.ProviderHarnessError{
 						Code:      int32(codes.Internal),
 						Message:   "stream error",
 						Retryable: false,
@@ -410,9 +411,9 @@ func (s *DaemonServer) StreamLLM(req *StreamLLMRequest, stream DaemonAdminServic
 
 		case chunk.Delta.ToolCallDelta != nil:
 			tcd := chunk.Delta.ToolCallDelta
-			msg = &StreamLLMResponse{
-				Payload: &StreamLLMResponse_ToolCallDelta{
-					ToolCallDelta: &ToolCallDelta{
+			msg = &tenantv1.StreamLLMResponse{
+				Payload: &tenantv1.StreamLLMResponse_ToolCallDelta{
+					ToolCallDelta: &tenantv1.ToolCallDelta{
 						Index:          int32(tcd.Index),
 						Id:             tcd.ID,
 						Name:           tcd.Name,
@@ -422,17 +423,17 @@ func (s *DaemonServer) StreamLLM(req *StreamLLMRequest, stream DaemonAdminServic
 			}
 
 		case chunk.FinishReason != "":
-			msg = &StreamLLMResponse{
-				Payload: &StreamLLMResponse_Finish{
-					Finish: &StreamFinish{
+			msg = &tenantv1.StreamLLMResponse{
+				Payload: &tenantv1.StreamLLMResponse_Finish{
+					Finish: &tenantv1.StreamFinish{
 						FinishReason: string(chunk.FinishReason),
 					},
 				},
 			}
 
 		case chunk.Delta.Content != "":
-			msg = &StreamLLMResponse{
-				Payload: &StreamLLMResponse_TextDelta{
+			msg = &tenantv1.StreamLLMResponse{
+				Payload: &tenantv1.StreamLLMResponse_TextDelta{
 					TextDelta: chunk.Delta.Content,
 				},
 			}
@@ -494,7 +495,7 @@ func decryptedConfigToLLMConfig(dec *providerconfig.DecryptedConfig, modelOverri
 
 // protoMessagesToLLM converts the repeated LLMMessageContent proto messages
 // into the llm.Message slice expected by the provider interfaces.
-func protoMessagesToLLM(protoMsgs []*LLMMessageContent) []llm.Message {
+func protoMessagesToLLM(protoMsgs []*tenantv1.LLMMessageContent) []llm.Message {
 	if len(protoMsgs) == 0 {
 		return nil
 	}
@@ -542,7 +543,7 @@ func protoMessagesToLLM(protoMsgs []*LLMMessageContent) []llm.Message {
 // The ParametersJson field is expected to be a JSON-encoded object schema;
 // if it is empty or invalid JSON, the tool is included with an empty schema
 // (object with no properties) so the request still proceeds.
-func protoToolDefsToLLM(protoTools []*LLMToolDef) []llm.ToolDef {
+func protoToolDefsToLLM(protoTools []*tenantv1.LLMToolDef) []llm.ToolDef {
 	if len(protoTools) == 0 {
 		return nil
 	}
@@ -567,15 +568,15 @@ func protoToolDefsToLLM(protoTools []*LLMToolDef) []llm.ToolDef {
 // completionRespToProto converts an llm.CompletionResponse to the proto wire type.
 // Credentials must never appear in the response — this helper only operates on
 // the completion result (content, tool_calls, finish_reason, usage).
-func completionRespToProto(resp *llm.CompletionResponse) *ExecuteLLMResponse {
+func completionRespToProto(resp *llm.CompletionResponse) *tenantv1.ExecuteLLMResponse {
 	if resp == nil {
-		return &ExecuteLLMResponse{}
+		return &tenantv1.ExecuteLLMResponse{}
 	}
 
-	out := &ExecuteLLMResponse{
+	out := &tenantv1.ExecuteLLMResponse{
 		Content:      resp.Message.Content,
 		FinishReason: string(resp.FinishReason),
-		Usage: &LLMTokenUsage{
+		Usage: &tenantv1.LLMTokenUsage{
 			InputTokens:  int32(resp.Usage.PromptTokens),
 			OutputTokens: int32(resp.Usage.CompletionTokens),
 			TotalTokens:  int32(resp.Usage.TotalTokens),
@@ -583,7 +584,7 @@ func completionRespToProto(resp *llm.CompletionResponse) *ExecuteLLMResponse {
 	}
 
 	for _, tc := range resp.Message.ToolCalls {
-		out.ToolCalls = append(out.ToolCalls, &LLMToolCall{
+		out.ToolCalls = append(out.ToolCalls, &tenantv1.LLMToolCall{
 			Id:        tc.ID,
 			Name:      tc.Name,
 			Arguments: tc.Arguments,

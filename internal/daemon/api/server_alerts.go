@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -187,11 +188,17 @@ func (s *redisAlertStore) MarkAllAlertsRead(ctx context.Context, tenantID, userI
 // ---------------------------------------------------------------------------
 
 // ListAlerts returns platform alerts for a tenant user.
-func (s *DaemonServer) ListAlerts(ctx context.Context, req *ListAlertsRequest) (*ListAlertsResponse, error) {
+func (s *DaemonServer) ListAlerts(ctx context.Context, req *userv1.ListAlertsRequest) (*userv1.ListAlertsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		tenantID = auth.TenantStringFromContext(ctx)
 	}
+
+	// Nil store: short-circuit if tenant is unavailable (graceful degradation).
+	if s.alertStore == nil && tenantID == "" {
+		return &userv1.ListAlertsResponse{Alerts: []*userv1.Alert{}}, nil
+	}
+
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
@@ -208,7 +215,7 @@ func (s *DaemonServer) ListAlerts(ctx context.Context, req *ListAlertsRequest) (
 	}
 
 	if s.alertStore == nil {
-		return &ListAlertsResponse{Alerts: []*Alert{}}, nil
+		return &userv1.ListAlertsResponse{Alerts: []*userv1.Alert{}}, nil
 	}
 
 	stored, err := s.alertStore.ListAlerts(ctx, tenantID, userID, req.GetUnreadOnly(), int(req.GetLimit()))
@@ -221,9 +228,9 @@ func (s *DaemonServer) ListAlerts(ctx context.Context, req *ListAlertsRequest) (
 		return nil, status_grpc.Error(codes.Internal, "alerts read failed")
 	}
 
-	alerts := make([]*Alert, 0, len(stored))
+	alerts := make([]*userv1.Alert, 0, len(stored))
 	for _, a := range stored {
-		alerts = append(alerts, &Alert{
+		alerts = append(alerts, &userv1.Alert{
 			Id:            a.ID,
 			TenantId:      a.TenantID,
 			UserId:        a.UserID,
@@ -237,7 +244,7 @@ func (s *DaemonServer) ListAlerts(ctx context.Context, req *ListAlertsRequest) (
 		})
 	}
 
-	return &ListAlertsResponse{Alerts: alerts}, nil
+	return &userv1.ListAlertsResponse{Alerts: alerts}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -245,11 +252,17 @@ func (s *DaemonServer) ListAlerts(ctx context.Context, req *ListAlertsRequest) (
 // ---------------------------------------------------------------------------
 
 // MarkAlertRead marks a single alert as read.
-func (s *DaemonServer) MarkAlertRead(ctx context.Context, req *MarkAlertReadRequest) (*MarkAlertReadResponse, error) {
+func (s *DaemonServer) MarkAlertRead(ctx context.Context, req *userv1.MarkAlertReadRequest) (*userv1.MarkAlertReadResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		tenantID = auth.TenantStringFromContext(ctx)
 	}
+
+	// Nil store: short-circuit if tenant is unavailable (no-op).
+	if s.alertStore == nil && tenantID == "" {
+		return &userv1.MarkAlertReadResponse{}, nil
+	}
+
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
@@ -258,7 +271,7 @@ func (s *DaemonServer) MarkAlertRead(ctx context.Context, req *MarkAlertReadRequ
 	}
 
 	if s.alertStore == nil {
-		return &MarkAlertReadResponse{}, nil
+		return &userv1.MarkAlertReadResponse{}, nil
 	}
 
 	if err := s.alertStore.MarkAlertRead(ctx, tenantID, req.GetAlertId()); err != nil {
@@ -270,7 +283,7 @@ func (s *DaemonServer) MarkAlertRead(ctx context.Context, req *MarkAlertReadRequ
 		return nil, status_grpc.Error(codes.Internal, "mark read failed")
 	}
 
-	return &MarkAlertReadResponse{}, nil
+	return &userv1.MarkAlertReadResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -278,11 +291,17 @@ func (s *DaemonServer) MarkAlertRead(ctx context.Context, req *MarkAlertReadRequ
 // ---------------------------------------------------------------------------
 
 // MarkAllAlertsRead marks all alerts for a user as read.
-func (s *DaemonServer) MarkAllAlertsRead(ctx context.Context, req *MarkAllAlertsReadRequest) (*MarkAllAlertsReadResponse, error) {
+func (s *DaemonServer) MarkAllAlertsRead(ctx context.Context, req *userv1.MarkAllAlertsReadRequest) (*userv1.MarkAllAlertsReadResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		tenantID = auth.TenantStringFromContext(ctx)
 	}
+
+	// Nil store: short-circuit if tenant is unavailable (no-op).
+	if s.alertStore == nil && tenantID == "" {
+		return &userv1.MarkAllAlertsReadResponse{Count: 0}, nil
+	}
+
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
@@ -298,7 +317,7 @@ func (s *DaemonServer) MarkAllAlertsRead(ctx context.Context, req *MarkAllAlerts
 	}
 
 	if s.alertStore == nil {
-		return &MarkAllAlertsReadResponse{Count: 0}, nil
+		return &userv1.MarkAllAlertsReadResponse{Count: 0}, nil
 	}
 
 	count, err := s.alertStore.MarkAllAlertsRead(ctx, tenantID, userID)
@@ -311,5 +330,5 @@ func (s *DaemonServer) MarkAllAlertsRead(ctx context.Context, req *MarkAllAlerts
 		return nil, status_grpc.Error(codes.Internal, "mark all read failed")
 	}
 
-	return &MarkAllAlertsReadResponse{Count: count}, nil
+	return &userv1.MarkAllAlertsReadResponse{Count: count}, nil
 }

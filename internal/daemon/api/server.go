@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,7 +19,9 @@ import (
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
+	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
+	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/idp"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
@@ -55,8 +56,9 @@ type authzIface interface {
 // It acts as a facade that delegates to the daemon's internal services.
 type DaemonServer struct {
 	daemonpb.UnimplementedDaemonServiceServer
-	UnimplementedDaemonAdminServiceServer
 	tenantv1.UnimplementedTenantAdminServiceServer
+	platformv1.UnimplementedPlatformOperatorServiceServer
+	userv1.UnimplementedUserServiceServer
 
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface
@@ -2107,46 +2109,11 @@ func protoToMissionDefinition(p *missionpb.MissionDefinition) (*mission.MissionD
 	return def, nil
 }
 
-// Shutdown requests graceful shutdown of the daemon.
-func (s *DaemonServer) Shutdown(ctx context.Context, req *ShutdownRequest) (*ShutdownResponse, error) {
-	s.logger.Info("shutdown requested via gRPC",
-		"force", req.Force,
-		"timeout_seconds", req.TimeoutSeconds,
-	)
-
-	// Validate this is a local daemon (not remote via GIBSON_DAEMON_ADDRESS)
-	// The CLI already prevents this, but we double-check here for safety
-	if remoteAddr := os.Getenv("GIBSON_DAEMON_ADDRESS"); remoteAddr != "" {
-		return &ShutdownResponse{
-			Success: false,
-			Message: "Cannot shutdown a remote daemon via this endpoint",
-		}, nil
-	}
-
-	// Request shutdown from the daemon
-	timeoutSeconds := req.TimeoutSeconds
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-
-	// Start shutdown in a goroutine so we can return the response first
-	go func() {
-		// Give the response time to be sent
-		time.Sleep(100 * time.Millisecond)
-
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
-		defer cancel()
-
-		if err := s.daemon.RequestShutdown(shutdownCtx, req.Force, timeoutSeconds); err != nil {
-			s.logger.Error("shutdown failed", "error", err)
-		}
-	}()
-
-	return &ShutdownResponse{
-		Success: true,
-		Message: "Shutdown request accepted, daemon will stop shortly",
-	}, nil
-}
+// Shutdown, ImpersonateTenant, and RefreshToolCatalog have been relocated
+// to platform_operator_shutdown.go, platform_operator_impersonate.go, and
+// platform_operator_refresh_tool_catalog.go as PlatformOperatorService handlers.
+// The langfuseCredentialName helper and langfuseCredentialPayload type remain
+// here for use by the new Langfuse handler files.
 
 // langfuseCredentialName returns the credential name used to store Langfuse
 // project credentials for a given tenant.
@@ -2163,272 +2130,34 @@ type langfuseCredentialPayload struct {
 	ProjectID string `json:"project_id"`
 }
 
-// GetTenantLangfuseCredentials retrieves the Langfuse project credentials for a tenant.
-func (s *DaemonServer) GetTenantLangfuseCredentials(ctx context.Context, req *GetTenantLangfuseCredentialsRequest) (*GetTenantLangfuseCredentialsResponse, error) {
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	if s.credentialHandler == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "credential handler not configured")
-	}
-
-	name := langfuseCredentialName(req.TenantId)
-
-	_, decrypted, err := s.credentialHandler.GetDecrypted(ctx, name)
-	if err != nil {
-		s.logger.Debug("langfuse credentials not found", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.NotFound, "langfuse credentials not found for tenant %q", req.TenantId)
-	}
-
-	var payload langfuseCredentialPayload
-	if err := json.Unmarshal([]byte(decrypted), &payload); err != nil {
-		s.logger.Error("failed to unmarshal langfuse credential payload", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to decode langfuse credentials: %v", err)
-	}
-
-	return &GetTenantLangfuseCredentialsResponse{
-		PublicKey: payload.PublicKey,
-		SecretKey: payload.SecretKey,
-		Host:      payload.Host,
-		ProjectId: payload.ProjectID,
-	}, nil
-}
-
-// SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
-func (s *DaemonServer) SetTenantLangfuseCredentials(ctx context.Context, req *SetTenantLangfuseCredentialsRequest) (*SetTenantLangfuseCredentialsResponse, error) {
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	if s.credentialHandler == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "credential handler not configured")
-	}
-
-	payload := langfuseCredentialPayload{
-		PublicKey: req.PublicKey,
-		SecretKey: req.SecretKey,
-		Host:      req.Host,
-		ProjectID: req.ProjectId,
-	}
-
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		s.logger.Error("failed to marshal langfuse credential payload", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to encode langfuse credentials: %v", err)
-	}
-
-	name := langfuseCredentialName(req.TenantId)
-
-	// Attempt update if credentials already exist; fall back to create.
-	existing, err := s.credentialHandler.GetByName(ctx, name)
-	if err == nil {
-		// Credential exists — update it.
-		apiKey := string(payloadJSON)
-		_, updateErr := s.credentialHandler.Update(ctx, CredentialUpdateRequest{
-			ID:     existing.ID,
-			APIKey: &apiKey,
-		})
-		if updateErr != nil {
-			s.logger.Error("failed to update langfuse credentials", "tenant_id", req.TenantId, "error", updateErr)
-			return nil, status_grpc.Errorf(codes.Internal, "failed to update langfuse credentials: %v", updateErr)
-		}
-	} else {
-		// Credential does not exist — create it.
-		_, createErr := s.credentialHandler.Create(ctx, CredentialCreateRequest{
-			Name:        name,
-			Type:        types.CredentialTypeLangfuseProject,
-			Provider:    "langfuse",
-			APIKey:      string(payloadJSON),
-			Description: fmt.Sprintf("Langfuse project credentials for tenant %s", req.TenantId),
-		})
-		if createErr != nil {
-			s.logger.Error("failed to create langfuse credentials", "tenant_id", req.TenantId, "error", createErr)
-			return nil, status_grpc.Errorf(codes.Internal, "failed to store langfuse credentials: %v", createErr)
-		}
-	}
-
-	s.logger.Info("langfuse credentials stored", "tenant_id", req.TenantId)
-	return &SetTenantLangfuseCredentialsResponse{}, nil
-}
-
-// DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
-func (s *DaemonServer) DeleteTenantLangfuseCredentials(ctx context.Context, req *DeleteTenantLangfuseCredentialsRequest) (*DeleteTenantLangfuseCredentialsResponse, error) {
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	if s.credentialHandler == nil {
-		return nil, status_grpc.Errorf(codes.Unavailable, "credential handler not configured")
-	}
-
-	name := langfuseCredentialName(req.TenantId)
-
-	existing, err := s.credentialHandler.GetByName(ctx, name)
-	if err != nil {
-		s.logger.Debug("langfuse credentials not found for deletion", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.NotFound, "langfuse credentials not found for tenant %q", req.TenantId)
-	}
-
-	if err := s.credentialHandler.Delete(ctx, existing.ID); err != nil {
-		s.logger.Error("failed to delete langfuse credentials", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to delete langfuse credentials: %v", err)
-	}
-
-	s.logger.Info("langfuse credentials deleted", "tenant_id", req.TenantId)
-	return &DeleteTenantLangfuseCredentialsResponse{}, nil
-}
+// GetTenantLangfuseCredentials, SetTenantLangfuseCredentials, and
+// DeleteTenantLangfuseCredentials have been relocated to
+// tenant_admin_langfuse_get.go, tenant_admin_langfuse_set.go, and
+// tenant_admin_langfuse_delete.go as TenantAdminService handlers.
 
 // ---------------------------------------------------------------------------
 // Tenant management RPCs
 //
 // CreateTenant, GetTenant, ListTenants, UpdateTenant, DeleteTenant have been
 // removed. Tenant lifecycle is now the sole responsibility of the standalone
-// gibson-tenant-operator (see core/tenant-operator/). The daemon no longer
-// stores tenant records itself; the corresponding proto RPCs fall through to
-// the Unimplemented* server stubs.
+// gibson-tenant-operator (see core/tenant-operator/).
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Impersonation RPCs
-// ---------------------------------------------------------------------------
-
-// ImpersonateTenant issues a short-lived context token scoped to the target
-// tenant for platform-operator use.
-//
-// Requires the "platform-operator" role (cross-tenant god-mode operation).
-// RefreshToolCatalog triggers an immediate sandboxed-tool catalog refresh
-// on this daemon replica. Authorisation gated by the FGA RPC registry
-// (platform-operator only). Accepts an optional "force" flag; refresher
-// coalesces back-to-back calls so the flag is advisory.
-func (s *DaemonServer) RefreshToolCatalog(ctx context.Context, req *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error) {
-	queued, msg, err := s.daemon.RefreshToolCatalog(ctx)
-	if err != nil {
-		s.logger.Error("tool catalog refresh signal failed", "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "refresh tool catalog: %v", err)
-	}
-	return &RefreshToolCatalogResponse{Queued: queued, Message: msg}, nil
-}
-
-// The caller's identity is extracted from the request context and written to
-// the structured audit log so every impersonation event is traceable.
-//
-// Returns codes.Unimplemented if the impersonation issuer is not configured.
-func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error) {
-	// Authorization enforced by the FGA interceptor at the Envoy layer.
-	// This RPC requires the tenants:impersonate permission (platform-operator only).
-
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// Extract caller identity for the audit trail.
-	callerID, err := auth.IdentityFromContext(ctx)
-	if err != nil {
-		return nil, status_grpc.Errorf(codes.Unauthenticated, "not authenticated")
-	}
-
-	s.logger.Info("tenant impersonation started",
-		"admin_subject", callerID.Subject,
-		"target_tenant", req.TenantId,
-	)
-
-	// Emit audit event for every impersonation attempt regardless of outcome.
-	if s.auditLogger != nil {
-		_ = s.auditLogger.Log(ctx, "tenants:impersonate", "tenant", req.TenantId, map[string]any{
-			"admin_subject": callerID.Subject,
-		})
-	}
-
-	// Issue a signed impersonation token if the issuer is wired.
-	if s.impersonationIssuer == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "impersonation service not configured")
-	}
-
-	token, err := s.impersonationIssuer.IssueToken(ctx, req.TenantId)
-	if err != nil {
-		s.logger.Error("failed to issue impersonation token",
-			"target_tenant", req.TenantId,
-			"error", err,
-		)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to issue impersonation token: %v", err)
-	}
-
-	return &ImpersonateTenantResponse{
-		Token: token,
-	}, nil
-}
-
-// ---------------------------------------------------------------------------
-// Provisioning, Billing, and Tenant lookup RPCs have been removed.
-// Tenant lifecycle and billing now live in gibson-tenant-operator.
-// The proto methods remain (they fall through to the Unimplemented* stubs).
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Onboarding RPCs
-// ---------------------------------------------------------------------------
-
-// GetOnboardingState returns the current onboarding state for a tenant.
-//
-// Returns codes.Unimplemented until the onboarding service has been wired.
-func (s *DaemonServer) GetOnboardingState(ctx context.Context, req *GetOnboardingStateRequest) (*GetOnboardingStateResponse, error) {
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// TODO: Wire to the onboarding service once the concrete type is available.
-	if s.onboardingStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "onboarding service not configured")
-	}
-
-	currentStep, completedSteps, setupTasks, completedAt, err := s.onboardingStore.GetState(ctx, req.TenantId)
-	if err != nil {
-		s.logger.Error("failed to get onboarding state", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to get onboarding state: %v", err)
-	}
-
-	return &GetOnboardingStateResponse{
-		CurrentStep:    currentStep,
-		CompletedSteps: completedSteps,
-		SetupTasks:     setupTasks,
-		CompletedAt:    completedAt,
-	}, nil
-}
-
-// UpdateOnboardingState advances or modifies the onboarding state for a tenant.
-//
-// Returns codes.Unimplemented until the onboarding service has been wired.
-func (s *DaemonServer) UpdateOnboardingState(ctx context.Context, req *UpdateOnboardingStateRequest) (*UpdateOnboardingStateResponse, error) {
-	if req.TenantId == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
-	}
-
-	// TODO: Wire to the onboarding service once the concrete type is available.
-	if s.onboardingStore == nil {
-		return nil, status_grpc.Errorf(codes.Unimplemented, "onboarding service not configured")
-	}
-
-	if err := s.onboardingStore.UpdateState(ctx, req.TenantId, req.CurrentStep, req.CompletedSteps, req.SetupTasks); err != nil {
-		s.logger.Error("failed to update onboarding state", "tenant_id", req.TenantId, "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to update onboarding state: %v", err)
-	}
-
-	s.logger.Info("onboarding state updated via RPC", "tenant_id", req.TenantId)
-	return &UpdateOnboardingStateResponse{}, nil
-}
+// RefreshToolCatalog, ImpersonateTenant, GetOnboardingState, and
+// UpdateOnboardingState have been relocated to PlatformOperatorService and
+// TenantAdminService handler files respectively.
 
 // ---------------------------------------------------------------------------
 // API Key RPCs — deleted.
 // CreateAPIKey, ListAPIKeys, RevokeAPIKey have been removed from
-// DaemonAdminService and from the daemon. The gsk_ API key system is gone.
+// The gsk_ API key system has been removed.
 // See: agent-service-credentials spec Requirement 10.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // InitiateSignup has been removed. Signup is now owned by the
 // gibson-tenant-operator saga (Tenant CRD reconciler).
-// The proto RPC falls through to the UnimplementedDaemonAdminServiceServer stub.
+
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------

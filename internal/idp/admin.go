@@ -40,6 +40,14 @@ type AdminClient interface {
 	// with optional role filtering and pagination.
 	ListServiceAccounts(ctx context.Context, req ListServiceAccountsRequest) (*ListServiceAccountsResponse, error)
 
+	// GetUserProfile retrieves a human user's profile from the IdP.
+	// Returns ErrNotFound if the user does not exist.
+	GetUserProfile(ctx context.Context, accountID string) (*UserProfile, error)
+
+	// UpdateUserProfile updates mutable profile fields for a human user.
+	// Only display_name and preferred_locale are editable; email is immutable.
+	UpdateUserProfile(ctx context.Context, accountID string, req UpdateUserProfileRequest) (*UserProfile, error)
+
 	// Close releases any resources held by the client (HTTP connections, etc.).
 	Close() error
 }

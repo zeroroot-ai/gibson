@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -152,11 +153,17 @@ func (s *redisConversationStore) GetConversation(ctx context.Context, tenantID, 
 // ---------------------------------------------------------------------------
 
 // ListConversations returns the conversation history list for a user.
-func (s *DaemonServer) ListConversations(ctx context.Context, req *ListConversationsRequest) (*ListConversationsResponse, error) {
+func (s *DaemonServer) ListConversations(ctx context.Context, req *userv1.ListConversationsRequest) (*userv1.ListConversationsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		tenantID = auth.TenantStringFromContext(ctx)
 	}
+
+	// Nil store: short-circuit if tenant is unavailable.
+	if s.conversationStore == nil && tenantID == "" {
+		return &userv1.ListConversationsResponse{Conversations: []*userv1.ConversationSummary{}}, nil
+	}
+
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
@@ -172,7 +179,7 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *ListConversat
 	}
 
 	if s.conversationStore == nil {
-		return &ListConversationsResponse{Conversations: []*ConversationSummary{}}, nil
+		return &userv1.ListConversationsResponse{Conversations: []*userv1.ConversationSummary{}}, nil
 	}
 
 	stored, err := s.conversationStore.ListConversations(ctx, tenantID, userID, int(req.GetLimit()))
@@ -185,9 +192,9 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *ListConversat
 		return nil, status_grpc.Error(codes.Internal, "conversations read failed")
 	}
 
-	convs := make([]*ConversationSummary, 0, len(stored))
+	convs := make([]*userv1.ConversationSummary, 0, len(stored))
 	for _, c := range stored {
-		convs = append(convs, &ConversationSummary{
+		convs = append(convs, &userv1.ConversationSummary{
 			Id:            c.ID,
 			TenantId:      c.TenantID,
 			UserId:        c.UserID,
@@ -198,7 +205,7 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *ListConversat
 		})
 	}
 
-	return &ListConversationsResponse{Conversations: convs}, nil
+	return &userv1.ListConversationsResponse{Conversations: convs}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -206,20 +213,23 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *ListConversat
 // ---------------------------------------------------------------------------
 
 // GetConversation returns the full message history for a single conversation.
-func (s *DaemonServer) GetConversation(ctx context.Context, req *GetConversationRequest) (*GetConversationResponse, error) {
-	tenantID := req.GetTenantId()
-	if tenantID == "" {
-		tenantID = auth.TenantStringFromContext(ctx)
-	}
-	if tenantID == "" {
-		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
-	}
+func (s *DaemonServer) GetConversation(ctx context.Context, req *userv1.GetConversationRequest) (*userv1.GetConversationResponse, error) {
 	if req.GetConversationId() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "conversation_id is required")
 	}
 
+	tenantID := req.GetTenantId()
+	if tenantID == "" {
+		tenantID = auth.TenantStringFromContext(ctx)
+	}
+
+	// Nil store: return NotFound regardless of tenant validation.
 	if s.conversationStore == nil {
 		return nil, status_grpc.Error(codes.NotFound, "conversation not found")
+	}
+
+	if tenantID == "" {
+		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
 
 	conv, msgs, err := s.conversationStore.GetConversation(ctx, tenantID, req.GetConversationId())
@@ -232,9 +242,9 @@ func (s *DaemonServer) GetConversation(ctx context.Context, req *GetConversation
 		return nil, status_grpc.Error(codes.NotFound, "conversation not found")
 	}
 
-	protoMsgs := make([]*ConversationMessage, 0, len(msgs))
+	protoMsgs := make([]*userv1.ConversationMessage, 0, len(msgs))
 	for _, m := range msgs {
-		protoMsgs = append(protoMsgs, &ConversationMessage{
+		protoMsgs = append(protoMsgs, &userv1.ConversationMessage{
 			Id:            m.ID,
 			Role:          m.Role,
 			Content:       m.Content,
@@ -242,8 +252,8 @@ func (s *DaemonServer) GetConversation(ctx context.Context, req *GetConversation
 		})
 	}
 
-	return &GetConversationResponse{
-		Conversation: &ConversationSummary{
+	return &userv1.GetConversationResponse{
+		Conversation: &userv1.ConversationSummary{
 			Id:            conv.ID,
 			TenantId:      conv.TenantID,
 			UserId:        conv.UserID,

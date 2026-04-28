@@ -1,8 +1,8 @@
 // Package client provides the internal admin client for the Gibson daemon.
 //
 // This package contains only what is needed for daemon lifecycle commands
-// (daemon stop, daemon restart) — specifically the admin gRPC surface that
-// includes the Shutdown RPC. Operational RPCs (Status, ListMissions, etc.)
+// (daemon stop, daemon restart) — specifically the PlatformOperatorService
+// Shutdown RPC. Operational RPCs (Status, ListMissions, etc.)
 // are available via github.com/zero-day-ai/sdk/daemonclient.
 package client
 
@@ -14,20 +14,20 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
 )
 
-// AdminClient is a minimal gRPC client for the DaemonAdminService.
+// AdminClient is a minimal gRPC client for the PlatformOperatorService.
 //
 // It provides only the operations needed by daemon lifecycle CLI commands:
 // Shutdown (used by daemon stop/restart) and Ping (liveness check).
 // For operational RPCs use github.com/zero-day-ai/sdk/daemonclient.
 type AdminClient struct {
-	conn  *grpc.ClientConn
-	admin api.DaemonAdminServiceClient
+	conn     *grpc.ClientConn
+	platform platformv1.PlatformOperatorServiceClient
 }
 
-// ConnectAdmin establishes a gRPC connection to the admin service at the given address.
+// ConnectAdmin establishes a gRPC connection to the daemon at the given address.
 //
 // Parameters:
 //   - ctx: Context with timeout for connection establishment
@@ -57,20 +57,20 @@ func ConnectAdmin(ctx context.Context, address string) (*AdminClient, error) {
 		grpc.WithBlock(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to daemon admin at %s: %w", address, err)
+		return nil, fmt.Errorf("failed to connect to daemon at %s: %w", address, err)
 	}
 
 	return &AdminClient{
-		conn:  conn,
-		admin: api.NewDaemonAdminServiceClient(conn),
+		conn:     conn,
+		platform: platformv1.NewPlatformOperatorServiceClient(conn),
 	}, nil
 }
 
-// Shutdown requests a graceful shutdown of the daemon via the admin RPC.
+// Shutdown requests a graceful shutdown of the daemon via the PlatformOperatorService RPC.
 //
 // This is the primary method used by 'gibson daemon stop'.
 func (c *AdminClient) Shutdown(ctx context.Context) error {
-	_, err := c.admin.Shutdown(ctx, &api.ShutdownRequest{})
+	_, err := c.platform.Shutdown(ctx, &platformv1.ShutdownRequest{})
 	if err != nil {
 		return fmt.Errorf("shutdown RPC failed: %w", err)
 	}

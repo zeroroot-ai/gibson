@@ -1,6 +1,6 @@
 package api
 
-// server_provider_config.go — CRUD handlers for the DaemonAdminService
+// server_provider_config.go — CRUD handlers for TenantAdminService
 // provider-config RPC surface (ListProviders, GetProvider, CreateProvider,
 // UpdateProvider, DeleteProvider, TestProvider, GetProviderHealth,
 // GetDefaultProvider, SetDefaultProvider, GetFallbackChain, SetFallbackChain).
@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
@@ -69,11 +70,11 @@ func toGRPCProviderError(op string, err error) error {
 
 // toProtoProviderRecord converts an internal ProviderConfig (with masked
 // credentials already populated via AsRecord) to the proto ProviderRecord.
-func toProtoProviderRecord(cfg *providerconfig.ProviderConfig) *ProviderRecord {
+func toProtoProviderRecord(cfg *providerconfig.ProviderConfig) *tenantv1.ProviderRecord {
 	if cfg == nil {
 		return nil
 	}
-	return &ProviderRecord{
+	return &tenantv1.ProviderRecord{
 		Id:                cfg.ID.String(),
 		Name:              cfg.Name,
 		Type:              string(cfg.Type),
@@ -87,8 +88,8 @@ func toProtoProviderRecord(cfg *providerconfig.ProviderConfig) *ProviderRecord {
 }
 
 // toProtoProviderRecords converts a slice of ProviderConfig to proto records.
-func toProtoProviderRecords(cfgs []*providerconfig.ProviderConfig) []*ProviderRecord {
-	out := make([]*ProviderRecord, 0, len(cfgs))
+func toProtoProviderRecords(cfgs []*providerconfig.ProviderConfig) []*tenantv1.ProviderRecord {
+	out := make([]*tenantv1.ProviderRecord, 0, len(cfgs))
 	for _, c := range cfgs {
 		out = append(out, toProtoProviderRecord(c))
 	}
@@ -96,7 +97,7 @@ func toProtoProviderRecords(cfgs []*providerconfig.ProviderConfig) []*ProviderRe
 }
 
 // fromProtoInput converts a proto ProviderConfigInput to the internal write type.
-func fromProtoInput(in *ProviderConfigInput) *providerconfig.ProviderConfigInput {
+func fromProtoInput(in *tenantv1.ProviderConfigInput) *providerconfig.ProviderConfigInput {
 	if in == nil {
 		return &providerconfig.ProviderConfigInput{}
 	}
@@ -116,7 +117,7 @@ func fromProtoInput(in *ProviderConfigInput) *providerconfig.ProviderConfigInput
 
 // validateProviderInput checks that the provider type is in the supported set
 // and is not "custom" (operator-only, not dashboard-configurable).
-func validateProviderInput(input *ProviderConfigInput) error {
+func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 	if input == nil {
 		return fmt.Errorf("input is required")
 	}
@@ -162,7 +163,7 @@ func (s *DaemonServer) emitProviderAudit(ctx context.Context, tenantID, action, 
 
 // ListProviders returns all provider configs for the caller's tenant with
 // credentials masked.
-func (s *DaemonServer) ListProviders(ctx context.Context, _ *ListProvidersRequest) (*ListProvidersResponse, error) {
+func (s *DaemonServer) ListProviders(ctx context.Context, _ *tenantv1.ListProvidersRequest) (*tenantv1.ListProvidersResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -175,7 +176,7 @@ func (s *DaemonServer) ListProviders(ctx context.Context, _ *ListProvidersReques
 	if err != nil {
 		return nil, toGRPCProviderError("list providers", err)
 	}
-	return &ListProvidersResponse{Providers: toProtoProviderRecords(cfgs)}, nil
+	return &tenantv1.ListProvidersResponse{Providers: toProtoProviderRecords(cfgs)}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +184,7 @@ func (s *DaemonServer) ListProviders(ctx context.Context, _ *ListProvidersReques
 // ---------------------------------------------------------------------------
 
 // GetProvider returns a single named provider config with credentials masked.
-func (s *DaemonServer) GetProvider(ctx context.Context, req *GetProviderRequest) (*GetProviderResponse, error) {
+func (s *DaemonServer) GetProvider(ctx context.Context, req *tenantv1.GetProviderRequest) (*tenantv1.GetProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -196,7 +197,7 @@ func (s *DaemonServer) GetProvider(ctx context.Context, req *GetProviderRequest)
 	if err != nil {
 		return nil, toGRPCProviderError("get provider", err)
 	}
-	return &GetProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
+	return &tenantv1.GetProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +206,7 @@ func (s *DaemonServer) GetProvider(ctx context.Context, req *GetProviderRequest)
 
 // CreateProvider stores a new provider config for the caller's tenant.
 // Credentials are encrypted immediately; the response contains only masked values.
-func (s *DaemonServer) CreateProvider(ctx context.Context, req *CreateProviderRequest) (*CreateProviderResponse, error) {
+func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateProviderRequest) (*tenantv1.CreateProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -222,7 +223,7 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *CreateProviderRe
 		return nil, toGRPCProviderError("create provider", err)
 	}
 	s.emitProviderAudit(ctx, tenantID, auditProviderCreated, cfg.Name)
-	return &CreateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
+	return &tenantv1.CreateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +232,7 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *CreateProviderRe
 
 // UpdateProvider replaces the named provider config with new values.
 // Credentials in the request are encrypted; the response contains only masked values.
-func (s *DaemonServer) UpdateProvider(ctx context.Context, req *UpdateProviderRequest) (*UpdateProviderResponse, error) {
+func (s *DaemonServer) UpdateProvider(ctx context.Context, req *tenantv1.UpdateProviderRequest) (*tenantv1.UpdateProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -248,7 +249,7 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *UpdateProviderRe
 		return nil, toGRPCProviderError("update provider", err)
 	}
 	s.emitProviderAudit(ctx, tenantID, auditProviderUpdated, cfg.Name)
-	return &UpdateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
+	return &tenantv1.UpdateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +257,7 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *UpdateProviderRe
 // ---------------------------------------------------------------------------
 
 // DeleteProvider removes the named provider config for the caller's tenant.
-func (s *DaemonServer) DeleteProvider(ctx context.Context, req *DeleteProviderRequest) (*DeleteProviderResponse, error) {
+func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteProviderRequest) (*tenantv1.DeleteProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -270,7 +271,7 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *DeleteProviderRe
 		return nil, toGRPCProviderError("delete provider", err)
 	}
 	s.emitProviderAudit(ctx, tenantID, auditProviderDeleted, name)
-	return &DeleteProviderResponse{}, nil
+	return &tenantv1.DeleteProviderResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +291,7 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *DeleteProviderRe
 //     a minimal Complete call under a 15s deadline.
 //  5. Return TestProviderResponse {ok, latency_ms, model, error}.
 //     Timeout → {ok: false, error: "timeout"} — never a gRPC-level error.
-func (s *DaemonServer) TestProvider(ctx context.Context, req *TestProviderRequest) (*TestProviderResponse, error) {
+func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProviderRequest) (*tenantv1.TestProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -324,7 +325,7 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *TestProviderReques
 	// Construct the provider. This validates type and config without network.
 	prov, err := providers.NewProvider(provCfg)
 	if err != nil {
-		return &TestProviderResponse{
+		return &tenantv1.TestProviderResponse{
 			Ok:    false,
 			Error: fmt.Sprintf("invalid provider configuration: %v", err),
 		}, nil
@@ -342,7 +343,7 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *TestProviderReques
 	// Check if the deadline was exceeded.
 	if healthCtx.Err() == context.DeadlineExceeded {
 		s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-		return &TestProviderResponse{
+		return &tenantv1.TestProviderResponse{
 			Ok:        false,
 			LatencyMs: latencyMS,
 			Error:     "timeout",
@@ -352,7 +353,7 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *TestProviderReques
 	// If health is explicitly healthy, return success.
 	if healthStatus.IsHealthy() {
 		s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-		return &TestProviderResponse{
+		return &tenantv1.TestProviderResponse{
 			Ok:        true,
 			LatencyMs: latencyMS,
 			Model:     input.GetDefaultModel(),
@@ -370,7 +371,7 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *TestProviderReques
 	if !healthStatus.IsHealthy() && latencyMS >= 10 {
 		// Non-trivial latency + unhealthy = genuine failure from upstream.
 		s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-		return &TestProviderResponse{
+		return &tenantv1.TestProviderResponse{
 			Ok:        false,
 			LatencyMs: latencyMS,
 			Error:     healthStatus.Message,
@@ -393,20 +394,20 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *TestProviderReques
 	s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
 
 	if completeCtx.Err() == context.DeadlineExceeded {
-		return &TestProviderResponse{
+		return &tenantv1.TestProviderResponse{
 			Ok:        false,
 			LatencyMs: latencyMS,
 			Error:     "timeout",
 		}, nil
 	}
 	if completeErr != nil {
-		return &TestProviderResponse{
+		return &tenantv1.TestProviderResponse{
 			Ok:        false,
 			LatencyMs: latencyMS,
 			Error:     completeErr.Error(),
 		}, nil
 	}
-	return &TestProviderResponse{
+	return &tenantv1.TestProviderResponse{
 		Ok:        true,
 		LatencyMs: latencyMS,
 		Model:     input.GetDefaultModel(),
@@ -420,7 +421,7 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *TestProviderReques
 // GetProviderHealth returns the last known health status of a stored provider.
 // It resolves the provider config from storage, constructs the provider, and
 // runs a Health check under a 5s deadline.
-func (s *DaemonServer) GetProviderHealth(ctx context.Context, req *GetProviderHealthRequest) (*GetProviderHealthResponse, error) {
+func (s *DaemonServer) GetProviderHealth(ctx context.Context, req *tenantv1.GetProviderHealthRequest) (*tenantv1.GetProviderHealthResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -437,7 +438,7 @@ func (s *DaemonServer) GetProviderHealth(ctx context.Context, req *GetProviderHe
 	provCfg := decryptedToLLMConfig(dec)
 	prov, err := providers.NewProvider(provCfg)
 	if err != nil {
-		return &GetProviderHealthResponse{
+		return &tenantv1.GetProviderHealthResponse{
 			Healthy: false,
 			Error:   fmt.Sprintf("cannot construct provider: %v", err),
 		}, nil
@@ -450,13 +451,13 @@ func (s *DaemonServer) GetProviderHealth(ctx context.Context, req *GetProviderHe
 	status := prov.Health(checkCtx)
 
 	if !status.IsHealthy() {
-		return &GetProviderHealthResponse{
+		return &tenantv1.GetProviderHealthResponse{
 			Healthy:       false,
 			LastCheckedAt: checkedAt,
 			Error:         status.Message,
 		}, nil
 	}
-	return &GetProviderHealthResponse{
+	return &tenantv1.GetProviderHealthResponse{
 		Healthy:       true,
 		LastCheckedAt: checkedAt,
 	}, nil
@@ -467,7 +468,7 @@ func (s *DaemonServer) GetProviderHealth(ctx context.Context, req *GetProviderHe
 // ---------------------------------------------------------------------------
 
 // GetDefaultProvider returns the provider config marked as the tenant's default.
-func (s *DaemonServer) GetDefaultProvider(ctx context.Context, _ *GetDefaultProviderRequest) (*GetDefaultProviderResponse, error) {
+func (s *DaemonServer) GetDefaultProvider(ctx context.Context, _ *tenantv1.GetDefaultProviderRequest) (*tenantv1.GetDefaultProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -480,7 +481,7 @@ func (s *DaemonServer) GetDefaultProvider(ctx context.Context, _ *GetDefaultProv
 	if err != nil {
 		return nil, toGRPCProviderError("get default provider", err)
 	}
-	return &GetDefaultProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
+	return &tenantv1.GetDefaultProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -488,7 +489,7 @@ func (s *DaemonServer) GetDefaultProvider(ctx context.Context, _ *GetDefaultProv
 // ---------------------------------------------------------------------------
 
 // SetDefaultProvider marks the named provider as the tenant's default.
-func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *SetDefaultProviderRequest) (*SetDefaultProviderResponse, error) {
+func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *tenantv1.SetDefaultProviderRequest) (*tenantv1.SetDefaultProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -506,9 +507,9 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *SetDefaultPr
 	cfg, err := s.providerConfig.Get(ctx, tenantID, name)
 	if err != nil {
 		// Best effort — return empty provider on read failure.
-		return &SetDefaultProviderResponse{}, nil
+		return &tenantv1.SetDefaultProviderResponse{}, nil
 	}
-	return &SetDefaultProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
+	return &tenantv1.SetDefaultProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -516,7 +517,7 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *SetDefaultPr
 // ---------------------------------------------------------------------------
 
 // GetFallbackChain returns the ordered list of fallback provider names.
-func (s *DaemonServer) GetFallbackChain(ctx context.Context, _ *GetFallbackChainRequest) (*GetFallbackChainResponse, error) {
+func (s *DaemonServer) GetFallbackChain(ctx context.Context, _ *tenantv1.GetFallbackChainRequest) (*tenantv1.GetFallbackChainResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -529,7 +530,7 @@ func (s *DaemonServer) GetFallbackChain(ctx context.Context, _ *GetFallbackChain
 	if err != nil {
 		return nil, toGRPCProviderError("get fallback chain", err)
 	}
-	return &GetFallbackChainResponse{ProviderNames: chain}, nil
+	return &tenantv1.GetFallbackChainResponse{ProviderNames: chain}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -537,7 +538,7 @@ func (s *DaemonServer) GetFallbackChain(ctx context.Context, _ *GetFallbackChain
 // ---------------------------------------------------------------------------
 
 // SetFallbackChain replaces the tenant's fallback provider chain.
-func (s *DaemonServer) SetFallbackChain(ctx context.Context, req *SetFallbackChainRequest) (*SetFallbackChainResponse, error) {
+func (s *DaemonServer) SetFallbackChain(ctx context.Context, req *tenantv1.SetFallbackChainRequest) (*tenantv1.SetFallbackChainResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
@@ -551,7 +552,7 @@ func (s *DaemonServer) SetFallbackChain(ctx context.Context, req *SetFallbackCha
 		return nil, toGRPCProviderError("set fallback chain", err)
 	}
 	s.emitProviderAudit(ctx, tenantID, auditProviderFallbackChanged, fmt.Sprintf("%v", names))
-	return &SetFallbackChainResponse{ProviderNames: names}, nil
+	return &tenantv1.SetFallbackChainResponse{ProviderNames: names}, nil
 }
 
 // ---------------------------------------------------------------------------

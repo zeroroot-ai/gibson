@@ -27,6 +27,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/audit"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -78,7 +79,7 @@ func (s *DaemonServer) WithLokiQuerier(lq audit.LokiQuerier) *DaemonServer {
 // Authorization: caller must have FGA admin relation on the tenant.
 // Data source: Loki (if wired) → Redis audit stream (fallback).
 // Pagination: cursor = stream entry ID or Loki nanosecond timestamp.
-func (s *DaemonServer) ListAuditEvents(ctx context.Context, req *ListAuditEventsRequest) (*ListAuditEventsResponse, error) {
+func (s *DaemonServer) ListAuditEvents(ctx context.Context, req *tenantv1.ListAuditEventsRequest) (*tenantv1.ListAuditEventsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
 		tenantID = auth.TenantStringFromContext(ctx)
@@ -176,8 +177,8 @@ func (s *DaemonServer) ListAuditEvents(ctx context.Context, req *ListAuditEvents
 }
 
 // auditEntriesToResponse converts AuditEntry slice to the proto response.
-func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCursor string) *ListAuditEventsResponse {
-	events := make([]*AuditEvent, 0, len(entries))
+func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCursor string) *tenantv1.ListAuditEventsResponse {
+	events := make([]*tenantv1.AuditEvent, 0, len(entries))
 	for _, e := range entries {
 		// Convert Details map[string]any to map[string]string.
 		details := make(map[string]string, len(e.Details))
@@ -185,7 +186,7 @@ func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCu
 			details[k] = fmt.Sprintf("%v", v)
 		}
 
-		events = append(events, &AuditEvent{
+		events = append(events, &tenantv1.AuditEvent{
 			EventType:      e.Action,
 			Timestamp:      e.Timestamp.Format(time.RFC3339),
 			ActorUserId:    e.ActorID,
@@ -196,7 +197,7 @@ func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCu
 			TraceId:        e.ID,
 		})
 	}
-	return &ListAuditEventsResponse{
+	return &tenantv1.ListAuditEventsResponse{
 		Events:     events,
 		NextCursor: nextCursor,
 	}

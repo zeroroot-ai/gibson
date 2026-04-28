@@ -2,6 +2,40 @@ package idp
 
 import "time"
 
+// UserProfile is a vendor-neutral representation of a human user's profile.
+type UserProfile struct {
+	// AccountID is the IdP-assigned unique identifier for the user.
+	AccountID string
+
+	// Email is the user's primary email address. Immutable via this interface.
+	Email string
+
+	// DisplayName is the user's preferred display name.
+	DisplayName string
+
+	// AvatarURL is the URL of the user's profile picture (may be empty).
+	AvatarURL string
+
+	// Status is the user's account status ("active", "suspended", etc.).
+	Status string
+
+	// CreatedAt is when the account was created.
+	CreatedAt time.Time
+
+	// PreferredLocale is the user's preferred UI locale (e.g., "en-US").
+	PreferredLocale string
+}
+
+// UpdateUserProfileRequest carries the mutable profile fields to update.
+// Zero values mean "no change"; only non-zero fields are applied.
+type UpdateUserProfileRequest struct {
+	// DisplayName is the new display name (empty = no change).
+	DisplayName string
+
+	// PreferredLocale is the new locale (empty = no change).
+	PreferredLocale string
+}
+
 // Role identifies the functional role of a machine service account.
 // These values are vendor-neutral and map to IdP-specific role/claim
 // values in each provider implementation.

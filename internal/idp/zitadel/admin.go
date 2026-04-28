@@ -271,6 +271,87 @@ func (c *Client) ListServiceAccounts(ctx context.Context, req idp.ListServiceAcc
 }
 
 // ---------------------------------------------------------------------------
+// User profile — human user read/update
+// ---------------------------------------------------------------------------
+
+// zitadelUserResponse is the shape of the Zitadel GetUserByID response.
+type zitadelUserResponse struct {
+	User struct {
+		ID    string `json:"id"`
+		Human *struct {
+			Profile struct {
+				DisplayName     string `json:"displayName"`
+				PreferredLocale string `json:"preferredLanguage"`
+				AvatarURL       string `json:"avatarUrl"`
+			} `json:"profile"`
+			Email struct {
+				Email           string `json:"email"`
+				IsEmailVerified bool   `json:"isEmailVerified"`
+			} `json:"email"`
+		} `json:"human"`
+		State     string `json:"state"`
+		CreatedAt string `json:"createdAt"`
+	} `json:"user"`
+}
+
+// GetUserProfile retrieves a human user's profile from Zitadel.
+func (c *Client) GetUserProfile(ctx context.Context, accountID string) (*idp.UserProfile, error) {
+	if accountID == "" {
+		return nil, fmt.Errorf("%w: accountID required", idp.ErrUpstream)
+	}
+
+	var resp zitadelUserResponse
+	path := "/management/v1/users/" + accountID
+	if err := c.doRequest(ctx, "GET", path, nil, c.cfg.OrgID, &resp); err != nil {
+		if errors.Is(err, idp.ErrNotFound) {
+			return nil, idp.ErrNotFound
+		}
+		return nil, fmt.Errorf("get user profile: %w", err)
+	}
+
+	profile := &idp.UserProfile{
+		AccountID: resp.User.ID,
+		Status:    resp.User.State,
+	}
+	if h := resp.User.Human; h != nil {
+		profile.DisplayName = h.Profile.DisplayName
+		profile.PreferredLocale = h.Profile.PreferredLocale
+		profile.AvatarURL = h.Profile.AvatarURL
+		profile.Email = h.Email.Email
+	}
+	if t, err := time.Parse(time.RFC3339, resp.User.CreatedAt); err == nil {
+		profile.CreatedAt = t
+	}
+	return profile, nil
+}
+
+// UpdateUserProfile updates mutable profile fields for a human user in Zitadel.
+// Only display_name and preferred_locale are editable; email is immutable.
+func (c *Client) UpdateUserProfile(ctx context.Context, accountID string, req idp.UpdateUserProfileRequest) (*idp.UserProfile, error) {
+	if accountID == "" {
+		return nil, fmt.Errorf("%w: accountID required", idp.ErrUpstream)
+	}
+
+	// PATCH /management/v1/users/{userId}/profile
+	type updateProfileBody struct {
+		DisplayName     string `json:"displayName,omitempty"`
+		PreferredLocale string `json:"preferredLanguage,omitempty"`
+	}
+	body := updateProfileBody{
+		DisplayName:     req.DisplayName,
+		PreferredLocale: req.PreferredLocale,
+	}
+
+	path := "/management/v1/users/" + accountID + "/profile"
+	if err := c.doRequest(ctx, "PUT", path, body, c.cfg.OrgID, nil); err != nil {
+		return nil, fmt.Errorf("update user profile: %w", err)
+	}
+
+	// Fetch the updated profile to return the canonical state.
+	return c.GetUserProfile(ctx, accountID)
+}
+
+// ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
