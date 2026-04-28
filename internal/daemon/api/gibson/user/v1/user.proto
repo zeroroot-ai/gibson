@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package gibson.user.v1;
+
+option go_package = "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1;userv1";
+
+// UserService provides user self-service operations.
+// This service is restricted to the calling user acting on their own resources.
+//
+// RPCs will be populated by the admin-services-completion spec.
+service UserService {}

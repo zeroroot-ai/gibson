@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package gibson.platform.v1;
+
+option go_package = "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1;platformv1";
+
+// PlatformOperatorService provides platform-team operations on the Gibson daemon.
+// This service is restricted to callers with the "platform_operator" FGA relation
+// on system_tenant:_system.
+//
+// RPCs will be populated by the admin-services-completion spec.
+service PlatformOperatorService {}

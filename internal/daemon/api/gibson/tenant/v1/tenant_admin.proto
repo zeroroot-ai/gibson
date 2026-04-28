@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "google/protobuf/timestamp.proto";
+
+// TenantAdminService provides tenant-admin operations for managing agent identities
+// and other tenant-scoped administrative tasks. This is the canonical replacement
+// for the deprecated gibson.daemon.admin.v1.DaemonAdminService for tenant-admin RPCs.
+//
+// All RPCs require the caller to hold the "admin" FGA relation on their tenant.
+// Access is gated by the Envoy jwt_authn + ext_authz filter chain.
+service TenantAdminService {
+  // CreateAgentIdentity provisions a new machine identity for an agent, tool, or plugin.
+  // Returns a one-time client_secret that cannot be recovered after this call.
+  rpc CreateAgentIdentity(CreateAgentIdentityRequest) returns (CreateAgentIdentityResponse);
+
+  // ListAgentIdentities returns all agent/tool/plugin identities provisioned in the
+  // caller's tenant, with optional kind filtering and pagination.
+  rpc ListAgentIdentities(ListAgentIdentitiesRequest) returns (ListAgentIdentitiesResponse);
+
+  // RevokeAgentIdentity permanently revokes a machine identity. Existing JWTs stop
+  // validating within the IdP token TTL (<=60 seconds). Idempotent on already-revoked
+  // principals (returns NotFound).
+  rpc RevokeAgentIdentity(RevokeAgentIdentityRequest) returns (RevokeAgentIdentityResponse);
+}
+
+// PrincipalKind identifies the type of machine principal being provisioned.
+enum PrincipalKind {
+  PRINCIPAL_KIND_UNSPECIFIED = 0;
+  PRINCIPAL_KIND_AGENT = 1;
+  PRINCIPAL_KIND_TOOL = 2;
+  PRINCIPAL_KIND_PLUGIN = 3;
+}
+
+// ComponentGrant describes an optional FGA capability grant to apply at creation time.
+message ComponentGrant {
+  // component_ref is the component reference, e.g. "tool:nmap" or "plugin:gitlab".
+  string component_ref = 1;
+  // relation is the FGA relation to grant, e.g. "can_invoke".
+  string relation = 2;
+}
+
+// CreateAgentIdentityRequest is the input to TenantAdminService.CreateAgentIdentity.
+message CreateAgentIdentityRequest {
+  // name must match ^[a-z][a-z0-9-]{2,40}$
+  string name = 1;
+  // kind must not be UNSPECIFIED.
+  PrincipalKind kind = 2;
+  // description is optional, max 256 chars.
+  string description = 3;
+  // component_grants is an optional list of FGA capability grants to apply at creation.
+  repeated ComponentGrant component_grants = 4;
+}
+
+// CreateAgentIdentityResponse carries the provisioned identity credentials.
+// The client_secret is emitted exactly once and cannot be recovered.
+message CreateAgentIdentityResponse {
+  // principal_id is the FGA principal identifier (e.g. "agent_principal:uuid").
+  string principal_id = 1;
+  PrincipalKind kind = 2;
+  string name = 3;
+  // client_id is the OAuth2 client ID for the service account.
+  string client_id = 4;
+  // client_secret is the one-time secret. Store it immediately; it will not be shown again.
+  string client_secret = 5;
+  // gibson_url is the daemon's public Envoy URL for use in enroll_command.
+  string gibson_url = 6;
+  // enroll_command is a complete copy-pasteable shell invocation for agent enrollment.
+  string enroll_command = 7;
+}
+
+// ListAgentIdentitiesRequest is the input to TenantAdminService.ListAgentIdentities.
+message ListAgentIdentitiesRequest {
+  // page_size defaults to 50, max 200.
+  int32 page_size = 1;
+  string page_token = 2;
+  // kind_filter: UNSPECIFIED means return all kinds.
+  PrincipalKind kind_filter = 3;
+}
+
+// AgentIdentity is a single entry in the list response.
+message AgentIdentity {
+  string principal_id = 1;
+  PrincipalKind kind = 2;
+  string name = 3;
+  string description = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // last_authenticated_at is null if never authenticated or unsupported by the IdP.
+  google.protobuf.Timestamp last_authenticated_at = 6;
+  bool revoked = 7;
+  string created_by_subject = 8;
+}
+
+// ListAgentIdentitiesResponse is the output of TenantAdminService.ListAgentIdentities.
+message ListAgentIdentitiesResponse {
+  repeated AgentIdentity identities = 1;
+  string next_page_token = 2;
+}
+
+// RevokeAgentIdentityRequest is the input to TenantAdminService.RevokeAgentIdentity.
+message RevokeAgentIdentityRequest {
+  string principal_id = 1;
+}
+
+// RevokeAgentIdentityResponse is the output of TenantAdminService.RevokeAgentIdentity.
+message RevokeAgentIdentityResponse {}
