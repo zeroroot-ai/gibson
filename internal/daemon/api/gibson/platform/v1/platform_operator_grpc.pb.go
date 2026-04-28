@@ -7,13 +7,28 @@
 package platformv1
 
 import (
+	context "context"
 	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
 )
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
 // Requires gRPC-Go v1.64.0 or later.
 const _ = grpc.SupportPackageIsVersion9
+
+const (
+	PlatformOperatorService_Shutdown_FullMethodName                 = "/gibson.platform.v1.PlatformOperatorService/Shutdown"
+	PlatformOperatorService_ImpersonateTenant_FullMethodName        = "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant"
+	PlatformOperatorService_RefreshToolCatalog_FullMethodName       = "/gibson.platform.v1.PlatformOperatorService/RefreshToolCatalog"
+	PlatformOperatorService_SetTenantQuota_FullMethodName           = "/gibson.platform.v1.PlatformOperatorService/SetTenantQuota"
+	PlatformOperatorService_WriteAccessTuples_FullMethodName        = "/gibson.platform.v1.PlatformOperatorService/WriteAccessTuples"
+	PlatformOperatorService_UpsertTenantQuota_FullMethodName        = "/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota"
+	PlatformOperatorService_ListFeatureTuples_FullMethodName        = "/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples"
+	PlatformOperatorService_SeedCatalogTenantEnabled_FullMethodName = "/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled"
+	PlatformOperatorService_EmitAuditEvent_FullMethodName           = "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent"
+)
 
 // PlatformOperatorServiceClient is the client API for PlatformOperatorService service.
 //
@@ -22,9 +37,38 @@ const _ = grpc.SupportPackageIsVersion9
 // PlatformOperatorService provides platform-team operations on the Gibson daemon.
 // This service is restricted to callers with the "platform_operator" FGA relation
 // on system_tenant:_system.
-//
-// RPCs will be populated by the admin-services-completion spec.
 type PlatformOperatorServiceClient interface {
+	// Shutdown requests graceful shutdown of the daemon.
+	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
+	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
+	// ImpersonateTenant requests a time-limited context token for the given tenant.
+	// Requires the "platform-operator" role.
+	ImpersonateTenant(ctx context.Context, in *ImpersonateTenantRequest, opts ...grpc.CallOption) (*ImpersonateTenantResponse, error)
+	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
+	// catalog. Bypasses the scheduled interval — useful for CI to publish a
+	// new tool-runner image and immediately surface its parsers to the
+	// orchestrator. Only works on the replica currently holding the refresh
+	// leader lease; followers accept the call but defer to the leader's
+	// next scheduled tick. Requires the platform-operator FGA role.
+	RefreshToolCatalog(ctx context.Context, in *RefreshToolCatalogRequest, opts ...grpc.CallOption) (*RefreshToolCatalogResponse, error)
+	// SetTenantQuota sets or updates the resource quotas for a tenant.
+	// Requires platform-operator role.
+	//
+	// Unimplemented: <owner-pending>
+	SetTenantQuota(ctx context.Context, in *SetTenantQuotaRequest, opts ...grpc.CallOption) (*SetTenantQuotaResponse, error)
+	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
+	// an authenticated caller.
+	WriteAccessTuples(ctx context.Context, in *WriteAccessTuplesRequest, opts ...grpc.CallOption) (*WriteAccessTuplesResponse, error)
+	// UpsertTenantQuota writes the tenant's runtime quota record to Postgres.
+	// Called by the operator's reconcile loop after resolving the plan.
+	UpsertTenantQuota(ctx context.Context, in *UpsertTenantQuotaRequest, opts ...grpc.CallOption) (*UpsertTenantQuotaResponse, error)
+	// ListFeatureTuples enumerates the tenant feature tuples currently set.
+	ListFeatureTuples(ctx context.Context, in *ListFeatureTuplesRequest, opts ...grpc.CallOption) (*ListFeatureTuplesResponse, error)
+	// SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
+	SeedCatalogTenantEnabled(ctx context.Context, in *SeedCatalogTenantEnabledRequest, opts ...grpc.CallOption) (*SeedCatalogTenantEnabledResponse, error)
+	// EmitAuditEvent lets an operator/platform workload forward a structured
+	// audit event onto the daemon's emitter.
+	EmitAuditEvent(ctx context.Context, in *EmitAuditEventRequest, opts ...grpc.CallOption) (*EmitAuditEventResponse, error)
 }
 
 type platformOperatorServiceClient struct {
@@ -35,6 +79,96 @@ func NewPlatformOperatorServiceClient(cc grpc.ClientConnInterface) PlatformOpera
 	return &platformOperatorServiceClient{cc}
 }
 
+func (c *platformOperatorServiceClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShutdownResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_Shutdown_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *platformOperatorServiceClient) ImpersonateTenant(ctx context.Context, in *ImpersonateTenantRequest, opts ...grpc.CallOption) (*ImpersonateTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImpersonateTenantResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_ImpersonateTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *platformOperatorServiceClient) RefreshToolCatalog(ctx context.Context, in *RefreshToolCatalogRequest, opts ...grpc.CallOption) (*RefreshToolCatalogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshToolCatalogResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_RefreshToolCatalog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *platformOperatorServiceClient) SetTenantQuota(ctx context.Context, in *SetTenantQuotaRequest, opts ...grpc.CallOption) (*SetTenantQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetTenantQuotaResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_SetTenantQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *platformOperatorServiceClient) WriteAccessTuples(ctx context.Context, in *WriteAccessTuplesRequest, opts ...grpc.CallOption) (*WriteAccessTuplesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WriteAccessTuplesResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_WriteAccessTuples_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *platformOperatorServiceClient) UpsertTenantQuota(ctx context.Context, in *UpsertTenantQuotaRequest, opts ...grpc.CallOption) (*UpsertTenantQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpsertTenantQuotaResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_UpsertTenantQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *platformOperatorServiceClient) ListFeatureTuples(ctx context.Context, in *ListFeatureTuplesRequest, opts ...grpc.CallOption) (*ListFeatureTuplesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListFeatureTuplesResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_ListFeatureTuples_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *platformOperatorServiceClient) SeedCatalogTenantEnabled(ctx context.Context, in *SeedCatalogTenantEnabledRequest, opts ...grpc.CallOption) (*SeedCatalogTenantEnabledResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SeedCatalogTenantEnabledResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_SeedCatalogTenantEnabled_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *platformOperatorServiceClient) EmitAuditEvent(ctx context.Context, in *EmitAuditEventRequest, opts ...grpc.CallOption) (*EmitAuditEventResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EmitAuditEventResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_EmitAuditEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PlatformOperatorServiceServer is the server API for PlatformOperatorService service.
 // All implementations must embed UnimplementedPlatformOperatorServiceServer
 // for forward compatibility.
@@ -42,9 +176,38 @@ func NewPlatformOperatorServiceClient(cc grpc.ClientConnInterface) PlatformOpera
 // PlatformOperatorService provides platform-team operations on the Gibson daemon.
 // This service is restricted to callers with the "platform_operator" FGA relation
 // on system_tenant:_system.
-//
-// RPCs will be populated by the admin-services-completion spec.
 type PlatformOperatorServiceServer interface {
+	// Shutdown requests graceful shutdown of the daemon.
+	// Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
+	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
+	// ImpersonateTenant requests a time-limited context token for the given tenant.
+	// Requires the "platform-operator" role.
+	ImpersonateTenant(context.Context, *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error)
+	// RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
+	// catalog. Bypasses the scheduled interval — useful for CI to publish a
+	// new tool-runner image and immediately surface its parsers to the
+	// orchestrator. Only works on the replica currently holding the refresh
+	// leader lease; followers accept the call but defer to the leader's
+	// next scheduled tick. Requires the platform-operator FGA role.
+	RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error)
+	// SetTenantQuota sets or updates the resource quotas for a tenant.
+	// Requires platform-operator role.
+	//
+	// Unimplemented: <owner-pending>
+	SetTenantQuota(context.Context, *SetTenantQuotaRequest) (*SetTenantQuotaResponse, error)
+	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
+	// an authenticated caller.
+	WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error)
+	// UpsertTenantQuota writes the tenant's runtime quota record to Postgres.
+	// Called by the operator's reconcile loop after resolving the plan.
+	UpsertTenantQuota(context.Context, *UpsertTenantQuotaRequest) (*UpsertTenantQuotaResponse, error)
+	// ListFeatureTuples enumerates the tenant feature tuples currently set.
+	ListFeatureTuples(context.Context, *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error)
+	// SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
+	SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error)
+	// EmitAuditEvent lets an operator/platform workload forward a structured
+	// audit event onto the daemon's emitter.
+	EmitAuditEvent(context.Context, *EmitAuditEventRequest) (*EmitAuditEventResponse, error)
 	mustEmbedUnimplementedPlatformOperatorServiceServer()
 }
 
@@ -55,6 +218,33 @@ type PlatformOperatorServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedPlatformOperatorServiceServer struct{}
 
+func (UnimplementedPlatformOperatorServiceServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
+}
+func (UnimplementedPlatformOperatorServiceServer) ImpersonateTenant(context.Context, *ImpersonateTenantRequest) (*ImpersonateTenantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ImpersonateTenant not implemented")
+}
+func (UnimplementedPlatformOperatorServiceServer) RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RefreshToolCatalog not implemented")
+}
+func (UnimplementedPlatformOperatorServiceServer) SetTenantQuota(context.Context, *SetTenantQuotaRequest) (*SetTenantQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetTenantQuota not implemented")
+}
+func (UnimplementedPlatformOperatorServiceServer) WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WriteAccessTuples not implemented")
+}
+func (UnimplementedPlatformOperatorServiceServer) UpsertTenantQuota(context.Context, *UpsertTenantQuotaRequest) (*UpsertTenantQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpsertTenantQuota not implemented")
+}
+func (UnimplementedPlatformOperatorServiceServer) ListFeatureTuples(context.Context, *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListFeatureTuples not implemented")
+}
+func (UnimplementedPlatformOperatorServiceServer) SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SeedCatalogTenantEnabled not implemented")
+}
+func (UnimplementedPlatformOperatorServiceServer) EmitAuditEvent(context.Context, *EmitAuditEventRequest) (*EmitAuditEventResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EmitAuditEvent not implemented")
+}
 func (UnimplementedPlatformOperatorServiceServer) mustEmbedUnimplementedPlatformOperatorServiceServer() {
 }
 func (UnimplementedPlatformOperatorServiceServer) testEmbeddedByValue() {}
@@ -77,13 +267,212 @@ func RegisterPlatformOperatorServiceServer(s grpc.ServiceRegistrar, srv Platform
 	s.RegisterService(&PlatformOperatorService_ServiceDesc, srv)
 }
 
+func _PlatformOperatorService_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShutdownRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).Shutdown(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_Shutdown_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).Shutdown(ctx, req.(*ShutdownRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlatformOperatorService_ImpersonateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImpersonateTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).ImpersonateTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_ImpersonateTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).ImpersonateTenant(ctx, req.(*ImpersonateTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlatformOperatorService_RefreshToolCatalog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshToolCatalogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).RefreshToolCatalog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_RefreshToolCatalog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).RefreshToolCatalog(ctx, req.(*RefreshToolCatalogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlatformOperatorService_SetTenantQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTenantQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).SetTenantQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_SetTenantQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).SetTenantQuota(ctx, req.(*SetTenantQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlatformOperatorService_WriteAccessTuples_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WriteAccessTuplesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).WriteAccessTuples(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_WriteAccessTuples_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).WriteAccessTuples(ctx, req.(*WriteAccessTuplesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlatformOperatorService_UpsertTenantQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpsertTenantQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).UpsertTenantQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_UpsertTenantQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).UpsertTenantQuota(ctx, req.(*UpsertTenantQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlatformOperatorService_ListFeatureTuples_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListFeatureTuplesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).ListFeatureTuples(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_ListFeatureTuples_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).ListFeatureTuples(ctx, req.(*ListFeatureTuplesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlatformOperatorService_SeedCatalogTenantEnabled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SeedCatalogTenantEnabledRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).SeedCatalogTenantEnabled(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_SeedCatalogTenantEnabled_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).SeedCatalogTenantEnabled(ctx, req.(*SeedCatalogTenantEnabledRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlatformOperatorService_EmitAuditEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EmitAuditEventRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).EmitAuditEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_EmitAuditEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).EmitAuditEvent(ctx, req.(*EmitAuditEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PlatformOperatorService_ServiceDesc is the grpc.ServiceDesc for PlatformOperatorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var PlatformOperatorService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "gibson.platform.v1.PlatformOperatorService",
 	HandlerType: (*PlatformOperatorServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
-	Streams:     []grpc.StreamDesc{},
-	Metadata:    "gibson/platform/v1/platform_operator.proto",
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Shutdown",
+			Handler:    _PlatformOperatorService_Shutdown_Handler,
+		},
+		{
+			MethodName: "ImpersonateTenant",
+			Handler:    _PlatformOperatorService_ImpersonateTenant_Handler,
+		},
+		{
+			MethodName: "RefreshToolCatalog",
+			Handler:    _PlatformOperatorService_RefreshToolCatalog_Handler,
+		},
+		{
+			MethodName: "SetTenantQuota",
+			Handler:    _PlatformOperatorService_SetTenantQuota_Handler,
+		},
+		{
+			MethodName: "WriteAccessTuples",
+			Handler:    _PlatformOperatorService_WriteAccessTuples_Handler,
+		},
+		{
+			MethodName: "UpsertTenantQuota",
+			Handler:    _PlatformOperatorService_UpsertTenantQuota_Handler,
+		},
+		{
+			MethodName: "ListFeatureTuples",
+			Handler:    _PlatformOperatorService_ListFeatureTuples_Handler,
+		},
+		{
+			MethodName: "SeedCatalogTenantEnabled",
+			Handler:    _PlatformOperatorService_SeedCatalogTenantEnabled_Handler,
+		},
+		{
+			MethodName: "EmitAuditEvent",
+			Handler:    _PlatformOperatorService_EmitAuditEvent_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "gibson/platform/v1/platform_operator.proto",
 }

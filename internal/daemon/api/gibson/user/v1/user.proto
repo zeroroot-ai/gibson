@@ -6,6 +6,278 @@ option go_package = "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/us
 
 // UserService provides user self-service operations.
 // This service is restricted to the calling user acting on their own resources.
-//
-// RPCs will be populated by the admin-services-completion spec.
-service UserService {}
+service UserService {
+  // ---------------------------------------------------------------------------
+  // Profile — IMPLEMENT-NOW
+  // ---------------------------------------------------------------------------
+
+  // GetUserProfile retrieves a user's profile information from the identity provider.
+  // Accessible by the user themselves only (subject == req.user_id).
+  rpc GetUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse);
+
+  // UpdateUserProfile updates mutable profile fields (display_name, preferred_locale)
+  // for a user. Email is immutable and changes will be rejected with InvalidArgument.
+  rpc UpdateUserProfile(UpdateUserProfileRequest) returns (UpdateUserProfileResponse);
+
+  // ---------------------------------------------------------------------------
+  // Alerts — DEFER
+  // ---------------------------------------------------------------------------
+
+  // ListAlerts returns platform alerts for a tenant user.
+  //
+  // Unimplemented: <owner-pending>
+  rpc ListAlerts(ListAlertsRequest) returns (ListAlertsResponse);
+
+  // MarkAlertRead marks a single alert as read.
+  //
+  // Unimplemented: <owner-pending>
+  rpc MarkAlertRead(MarkAlertReadRequest) returns (MarkAlertReadResponse);
+
+  // MarkAllAlertsRead marks all alerts for a user as read.
+  //
+  // Unimplemented: <owner-pending>
+  rpc MarkAllAlertsRead(MarkAllAlertsReadRequest) returns (MarkAllAlertsReadResponse);
+
+  // ---------------------------------------------------------------------------
+  // Conversations — DEFER
+  // ---------------------------------------------------------------------------
+
+  // ListConversations returns the conversation history list for a user.
+  //
+  // Unimplemented: <owner-pending>
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
+
+  // GetConversation returns the full message history for a single conversation.
+  //
+  // Unimplemented: <owner-pending>
+  rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Profile — request/response messages
+// ---------------------------------------------------------------------------
+
+// GetUserProfileRequest queries a user's profile from the identity provider.
+message GetUserProfileRequest {
+  // tenant_id is the tenant context for the request.
+  string tenant_id = 1;
+
+  // user_id is the user ID whose profile to retrieve.
+  string user_id = 2;
+}
+
+// UserProfileData carries the public profile fields for a user.
+message UserProfileData {
+  // id is the user ID.
+  string id = 1;
+
+  // email is the user's primary email address.
+  string email = 2;
+
+  // display_name is the user's preferred display name.
+  string display_name = 3;
+
+  // avatar_url is the URL of the user's profile picture.
+  string avatar_url = 4;
+
+  // status is the user's current account status ("active", "suspended", etc.).
+  string status = 5;
+
+  // created_at is the RFC 3339 timestamp when the account was created.
+  string created_at = 6;
+
+  // preferred_locale is the user's preferred UI locale (e.g., "en-US").
+  string preferred_locale = 7;
+}
+
+// GetUserProfileResponse carries the user's profile data.
+message GetUserProfileResponse {
+  // profile contains the user's public profile fields.
+  UserProfileData profile = 1;
+}
+
+// UpdateUserProfileRequest updates mutable profile fields for a user.
+// Email and role changes are not permitted through this endpoint.
+message UpdateUserProfileRequest {
+  // tenant_id is the tenant context for the update.
+  string tenant_id = 1;
+
+  // user_id is the user ID to update.
+  string user_id = 2;
+
+  // display_name is the new display name (empty = no change).
+  string display_name = 3;
+
+  // preferred_locale is the new locale (empty = no change).
+  string preferred_locale = 4;
+}
+
+// UpdateUserProfileResponse carries the user's updated profile data.
+message UpdateUserProfileResponse {
+  // profile contains the updated public profile fields.
+  UserProfileData profile = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Alerts — request/response messages
+// ---------------------------------------------------------------------------
+
+// Alert represents a platform notification for a tenant user.
+message Alert {
+  // id is the unique alert identifier.
+  string id = 1;
+
+  // tenant_id is the tenant this alert belongs to.
+  string tenant_id = 2;
+
+  // user_id is the user this alert is addressed to. Empty means broadcast.
+  string user_id = 3;
+
+  // title is the short alert heading.
+  string title = 4;
+
+  // body is the full alert message body.
+  string body = 5;
+
+  // severity is the alert urgency level (e.g., "info", "warning", "critical").
+  string severity = 6;
+
+  // read indicates whether the user has acknowledged this alert.
+  bool read = 7;
+
+  // created_at_unix is the alert creation time as a Unix timestamp (seconds).
+  int64 created_at_unix = 8;
+
+  // source identifies the subsystem that generated the alert (e.g., "mission", "billing").
+  string source = 9;
+
+  // source_id is the resource ID within the source system (e.g., mission ID).
+  string source_id = 10;
+}
+
+// ListAlertsRequest queries alerts for a tenant user.
+message ListAlertsRequest {
+  // tenant_id is the tenant context. If empty, the caller's tenant is used.
+  string tenant_id = 1;
+
+  // user_id is the user whose alerts to list.
+  string user_id = 2;
+
+  // unread_only restricts results to unread alerts when true.
+  bool unread_only = 3;
+
+  // limit is the maximum number of alerts to return (default 50, max 200).
+  int32 limit = 4;
+}
+
+// ListAlertsResponse carries the list of alerts.
+message ListAlertsResponse {
+  // alerts is the list of alerts, ordered by creation time descending.
+  repeated Alert alerts = 1;
+}
+
+// MarkAlertReadRequest marks a single alert as read.
+message MarkAlertReadRequest {
+  // tenant_id is the tenant context. If empty, the caller's tenant is used.
+  string tenant_id = 1;
+
+  // alert_id is the unique identifier of the alert to mark as read.
+  string alert_id = 2;
+}
+
+// MarkAlertReadResponse confirms the alert was marked as read.
+message MarkAlertReadResponse {}
+
+// MarkAllAlertsReadRequest marks all alerts for a user as read.
+message MarkAllAlertsReadRequest {
+  // tenant_id is the tenant context. If empty, the caller's tenant is used.
+  string tenant_id = 1;
+
+  // user_id is the user whose alerts to mark as read.
+  string user_id = 2;
+}
+
+// MarkAllAlertsReadResponse confirms the bulk-read operation.
+message MarkAllAlertsReadResponse {
+  // count is the number of alerts that were marked as read.
+  int32 count = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Conversations — request/response messages
+// ---------------------------------------------------------------------------
+
+// ConversationSummary carries metadata for a single conversation.
+message ConversationSummary {
+  // id is the unique conversation identifier.
+  string id = 1;
+
+  // tenant_id is the tenant context.
+  string tenant_id = 2;
+
+  // user_id is the user who owns the conversation.
+  string user_id = 3;
+
+  // title is the conversation display title.
+  string title = 4;
+
+  // created_at_unix is the conversation creation time as a Unix timestamp.
+  int64 created_at_unix = 5;
+
+  // updated_at_unix is the most recent message time as a Unix timestamp.
+  int64 updated_at_unix = 6;
+
+  // message_count is the total number of messages in the conversation.
+  int32 message_count = 7;
+}
+
+// ConversationMessage is a single message within a conversation.
+message ConversationMessage {
+  // id is the unique message identifier.
+  string id = 1;
+
+  // role is the message author role (e.g., "user", "assistant").
+  string role = 2;
+
+  // content is the message text content.
+  string content = 3;
+
+  // created_at_unix is the message creation time as a Unix timestamp.
+  int64 created_at_unix = 4;
+}
+
+// ListConversationsRequest queries the conversation list for a user.
+message ListConversationsRequest {
+  // tenant_id is the tenant context. If empty, the caller's tenant is used.
+  string tenant_id = 1;
+
+  // user_id is the user whose conversations to list.
+  string user_id = 2;
+
+  // limit is the maximum number of conversations to return (default 20, max 100).
+  int32 limit = 3;
+}
+
+// ListConversationsResponse carries the list of conversation summaries.
+message ListConversationsResponse {
+  // conversations is the list of conversations, ordered by update time descending.
+  repeated ConversationSummary conversations = 1;
+}
+
+// GetConversationRequest fetches the full message history for a conversation.
+message GetConversationRequest {
+  // conversation_id is the unique identifier of the conversation.
+  string conversation_id = 1;
+
+  // tenant_id is the tenant context. If empty, the caller's tenant is used.
+  string tenant_id = 2;
+}
+
+// GetConversationResponse carries the conversation and its messages.
+message GetConversationResponse {
+  // conversation contains the conversation metadata.
+  ConversationSummary conversation = 1;
+
+  // messages contains all messages in the conversation, ordered by creation time.
+  repeated ConversationMessage messages = 2;
+}
