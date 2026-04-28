@@ -29,13 +29,23 @@ var ForbidRedisClientConstructionAnalyzer = &analysis.Analyzer{
 	Run:      runForbidRedisClientConstruction,
 }
 
-// redisClientConstructionAllowlist contains package import-path substrings
+// redisClientConstructionAllowlist contains package import-path prefixes
 // that are permitted to call redis.NewClient directly. All other packages
-// must access Redis through internal/datapool/Conn.
+// must access Redis through internal/datapool/Conn.Redis.
+//
+// The allowlist is deliberately narrow:
+//   - internal/datapool/ — constructs per-tenant Conn.Redis and the index client.
+//   - internal/datapool/admin/ — constructs the cross-tenant admin Redis client.
+//   - internal/admin/ — admin-plane-only operations.
+//   - internal/state/ — foundational StateClient wrapper (global shared Redis).
+//     Higher-level packages must go through StateClient, not bypass it.
+//   - tools/gibsoncheck/ — the analyzer itself (imports go-redis for type info).
 var redisClientConstructionAllowlist = []string{
 	"github.com/zero-day-ai/gibson/internal/datapool",
 	"github.com/zero-day-ai/gibson/internal/datapool/admin",
 	"github.com/zero-day-ai/gibson/internal/admin",
+	"github.com/zero-day-ai/gibson/internal/state",
+	"github.com/zero-day-ai/gibson/tools/gibsoncheck",
 }
 
 func runForbidRedisClientConstruction(pass *analysis.Pass) (any, error) {
