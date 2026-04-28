@@ -1,7 +1,9 @@
 // Package mission — event_store_conn.go
 //
-// ConnBoundEventStore implements EventStore using a tenant-bound *redis.Client.
-// No key prefixes are used; tenant isolation is structural (audit C7/C10 closure).
+// ConnBoundEventStore persists mission events to a tenant-bound Redis Stream
+// (Append/Query/Stream). No key prefixes are used; tenant isolation is
+// structural (audit C7/C10 closure). EventFilter and its builder methods live
+// here too; they are only used by Query.
 package mission
 
 import (
@@ -14,15 +16,70 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// ConnBoundEventStore implements EventStore against a tenant-bound Redis client.
+// ConnBoundEventStore persists mission events against a tenant-bound Redis client.
 // Keys carry no tenant prefix — the per-tenant client is the isolation boundary.
 type ConnBoundEventStore struct {
 	rdb *goredis.Client
 }
 
-// NewConnBoundEventStore creates an EventStore backed by the given tenant-bound client.
+// NewConnBoundEventStore creates a store backed by the given tenant-bound client.
 func NewConnBoundEventStore(rdb *goredis.Client) *ConnBoundEventStore {
 	return &ConnBoundEventStore{rdb: rdb}
+}
+
+// EventFilter provides filtering options for event queries.
+type EventFilter struct {
+	// MissionID filters events for a specific mission.
+	MissionID *types.ID
+
+	// EventTypes filters by event type (supports multiple types).
+	EventTypes []MissionEventType
+
+	// After filters events created after this time.
+	After *time.Time
+
+	// Before filters events created before this time.
+	Before *time.Time
+
+	// Limit limits the number of results.
+	Limit int
+
+	// Offset skips the first N results.
+	Offset int
+}
+
+// NewEventFilter creates a new empty filter with default pagination.
+func NewEventFilter() *EventFilter {
+	return &EventFilter{
+		Limit:  100,
+		Offset: 0,
+	}
+}
+
+// WithMissionID filters events for a specific mission.
+func (f *EventFilter) WithMissionID(missionID types.ID) *EventFilter {
+	f.MissionID = &missionID
+	return f
+}
+
+// WithEventTypes filters by event types.
+func (f *EventFilter) WithEventTypes(types ...MissionEventType) *EventFilter {
+	f.EventTypes = types
+	return f
+}
+
+// WithTimeRange filters by time range.
+func (f *EventFilter) WithTimeRange(after, before time.Time) *EventFilter {
+	f.After = &after
+	f.Before = &before
+	return f
+}
+
+// WithPagination sets pagination parameters.
+func (f *EventFilter) WithPagination(limit, offset int) *EventFilter {
+	f.Limit = limit
+	f.Offset = offset
+	return f
 }
 
 // connStreamKey returns the Redis Stream key for a mission's events.
@@ -227,5 +284,3 @@ func parseXMessage(msg goredis.XMessage, missionID types.ID) (*MissionEvent, err
 	}, nil
 }
 
-// Ensure ConnBoundEventStore implements EventStore at compile time.
-var _ EventStore = (*ConnBoundEventStore)(nil)

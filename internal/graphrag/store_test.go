@@ -11,7 +11,7 @@ import (
 // Note: MockEmbedder and MockGraphRAGProvider are defined in processor_test.go
 // We use those existing mocks to avoid duplication.
 
-// MockQueryProcessor is a mock implementation of QueryProcessor for testing.
+// MockQueryProcessor is a mock implementation of QueryPipeline for testing.
 type MockQueryProcessor struct {
 	results []GraphRAGResult
 	err     error

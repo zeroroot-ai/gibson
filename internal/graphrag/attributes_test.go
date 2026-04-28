@@ -346,9 +346,6 @@ func TestProviderAttributes(t *testing.T) {
 		expected     string
 	}{
 		{"local", ProviderTypeLocal, "local"},
-		{"cloud", ProviderTypeCloud, "cloud"},
-		{"hybrid", ProviderTypeHybrid, "hybrid"},
-		{"noop", ProviderTypeNoop, "noop"},
 	}
 
 	for _, tt := range tests {

@@ -20,7 +20,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/crypto/providers"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/database"
+	dbredis "github.com/zero-day-ai/gibson/internal/database/redis"
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness"
@@ -438,7 +438,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// per-tenant Pool path; only non-mission stores are initialized here).
 	d.checkpointStore = mission.NewRedisCheckpointStore(stateClient)
 	d.missionAuthzStore = mission.NewRedisMissionAuthzStore(stateClient.Client())
-	d.targetStore = database.NewRedisTargetDAO(stateClient)
+	d.targetStore = dbredis.NewRedisTargetDAO(stateClient)
 
 	d.logger.Info(ctx, "Redis stores initialized successfully",
 		"checkpoint_store", "RedisCheckpointStore",

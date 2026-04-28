@@ -13,14 +13,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
+	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 )
 
 // NewSetecSandboxedExecutor is the no-op implementation used when gibson is
 // built without the setec_integration tag. Always returns (nil, nil) so the
 // caller treats sandboxed dispatch as disabled.
-func NewSetecSandboxedExecutor(_ config.SandboxConfig, _ trace.Tracer, _ *slog.Logger, _ processor.DiscoveryProcessor) (*sandboxed.Executor, error) {
+func NewSetecSandboxedExecutor(_ config.SandboxConfig, _ trace.Tracer, _ *slog.Logger, _ ingest.DiscoveryProcessor) (*sandboxed.Executor, error) {
 	return nil, nil
 }
 

@@ -33,7 +33,7 @@ func TestIntegration_ScopedGraphRAGQueries(t *testing.T) {
 	otherMissionID := types.NewID()
 
 	// Create processor
-	processor := NewDefaultQueryProcessor(embedder, reranker, nil)
+	processor := NewDefaultQueryPipeline(embedder, reranker, nil)
 
 	config := GraphRAGConfig{
 		Provider: "local",
@@ -325,7 +325,7 @@ func TestIntegration_ScopedQueryEdgeCases(t *testing.T) {
 		missionName := "first-run-mission"
 
 		// Mock lister returns only current mission (first run)
-		processor := NewDefaultQueryProcessor(embedder, reranker, nil)
+		processor := NewDefaultQueryPipeline(embedder, reranker, nil)
 
 		config := GraphRAGConfig{}
 		store := &DefaultGraphRAGStore{
@@ -379,7 +379,7 @@ func TestIntegration_ScopedQueryEdgeCases(t *testing.T) {
 			missionIDs[i] = types.NewID()
 		}
 
-		processor := NewDefaultQueryProcessor(embedder, reranker, nil)
+		processor := NewDefaultQueryPipeline(embedder, reranker, nil)
 
 		config := GraphRAGConfig{}
 		store := &DefaultGraphRAGStore{
@@ -422,7 +422,7 @@ func TestIntegration_ScopedQueryEdgeCases(t *testing.T) {
 	})
 
 	t.Run("EmptyMissionName_ReturnsValidationError", func(t *testing.T) {
-		processor := NewDefaultQueryProcessor(embedder, reranker, nil)
+		processor := NewDefaultQueryPipeline(embedder, reranker, nil)
 
 		config := GraphRAGConfig{}
 		store := &DefaultGraphRAGStore{
@@ -460,7 +460,7 @@ func TestIntegration_QueryScopeResolutionWithProcessor(t *testing.T) {
 	missionName := "scope-resolution-mission"
 	mission3ID := types.NewID()
 
-	processor := NewDefaultQueryProcessor(embedder, reranker, nil)
+	processor := NewDefaultQueryPipeline(embedder, reranker, nil)
 
 	// Create query with ScopeSameMission
 	query := NewGraphRAGQuery("test query").
@@ -494,7 +494,7 @@ func TestIntegration_ScopedFindingsSimilarity(t *testing.T) {
 
 	missionID := types.NewID()
 
-	processor := NewDefaultQueryProcessor(embedder, reranker, nil)
+	processor := NewDefaultQueryPipeline(embedder, reranker, nil)
 
 	config := GraphRAGConfig{}
 	store := &DefaultGraphRAGStore{

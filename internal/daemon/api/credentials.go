@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/database"
+	dbpostgres "github.com/zero-day-ai/gibson/internal/database/postgres"
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/auth"
@@ -15,7 +15,7 @@ import (
 
 // CredentialHandler provides credential management operations for the daemon.
 // It acquires a per-tenant Conn from the data-plane Pool on each call,
-// delegates to conn.Credentials() (database.CredentialOps), and releases the Conn.
+// delegates to conn.Credentials() (internal/database/postgres.CredentialOps), and releases the Conn.
 //
 // Phase D: the Phase C bridge (CredentialDAO wrapping a shared credentialPGPool)
 // is replaced by this pool-backed implementation. Credentials are stored in each
@@ -151,7 +151,7 @@ func (h *CredentialHandler) GetByName(ctx context.Context, name string) (*Creden
 
 	secret, err := conn.Credentials().Get(ctx, name)
 	if err != nil {
-		if errors.Is(err, database.ErrCredentialNotFound) {
+		if errors.Is(err, dbpostgres.ErrCredentialNotFound) {
 			return nil, types.WrapError(types.CREDENTIAL_NOT_FOUND, "credential not found", err)
 		}
 		return nil, types.WrapError(types.CREDENTIAL_NOT_FOUND, "credential not found", err)

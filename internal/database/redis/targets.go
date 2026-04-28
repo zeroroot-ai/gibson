@@ -1,4 +1,4 @@
-package database
+package redis
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -221,7 +221,7 @@ func (dao *RedisTargetDAO) Get(ctx context.Context, id types.ID) (*types.Target,
 	var doc targetDocument
 	err := dao.client.JSONGet(ctx, key, "$", &doc)
 	if err != nil {
-		if err == state.ErrNotFound || err == redis.Nil {
+		if err == state.ErrNotFound || err == goredis.Nil {
 			return nil, fmt.Errorf("target not found: %s", id)
 		}
 		return nil, fmt.Errorf("failed to get target: %w", err)
@@ -244,7 +244,7 @@ func (dao *RedisTargetDAO) GetByName(ctx context.Context, name string) (*types.T
 	// Get ID from name lookup
 	idStr, err := dao.client.Client().Get(ctx, nameKey).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if err == goredis.Nil {
 			return nil, fmt.Errorf("target not found: %s", name)
 		}
 		return nil, fmt.Errorf("failed to lookup target by name: %w", err)

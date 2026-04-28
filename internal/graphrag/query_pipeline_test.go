@@ -377,8 +377,8 @@ func TestDefaultMergeReranker_Rerank(t *testing.T) {
 	}
 }
 
-// TestDefaultQueryProcessor_ProcessQuery tests the full query pipeline.
-func TestDefaultQueryProcessor_ProcessQuery(t *testing.T) {
+// TestDefaultQueryPipeline_ProcessQuery tests the full query pipeline.
+func TestDefaultQueryPipeline_ProcessQuery(t *testing.T) {
 	tests := []struct {
 		name         string
 		query        GraphRAGQuery
@@ -539,7 +539,7 @@ func TestDefaultQueryProcessor_ProcessQuery(t *testing.T) {
 
 			// Create processor
 			reranker := NewDefaultMergeReranker(0.6, 0.4)
-			processor := NewDefaultQueryProcessor(embedder, reranker, nil)
+			processor := NewDefaultQueryPipeline(embedder, reranker, nil)
 
 			// Execute query
 			ctx := context.Background()
@@ -564,12 +564,12 @@ func TestDefaultQueryProcessor_ProcessQuery(t *testing.T) {
 	}
 }
 
-// TestDefaultQueryProcessor_FilterByNodeType tests node type filtering.
-func TestDefaultQueryProcessor_FilterByNodeType(t *testing.T) {
+// TestDefaultQueryPipeline_FilterByNodeType tests node type filtering.
+func TestDefaultQueryPipeline_FilterByNodeType(t *testing.T) {
 	embedder := NewMockEmbedder()
 	provider := NewMockProvider()
 	reranker := NewDefaultMergeReranker(0.6, 0.4)
-	processor := NewDefaultQueryProcessor(embedder, reranker, nil)
+	processor := NewDefaultQueryPipeline(embedder, reranker, nil)
 
 	// Setup mocks
 	embedder.SetEmbedding("test query", generateMockEmbedding("test query", 1536))
@@ -612,8 +612,8 @@ func TestDefaultQueryProcessor_FilterByNodeType(t *testing.T) {
 	}
 }
 
-// TestNewQueryProcessorFromConfig tests processor creation from config.
-func TestNewQueryProcessorFromConfig(t *testing.T) {
+// TestNewQueryPipelineFromConfig tests processor creation from config.
+func TestNewQueryPipelineFromConfig(t *testing.T) {
 	tests := []struct {
 		name    string
 		config  GraphRAGConfig
@@ -650,7 +650,7 @@ func TestNewQueryProcessorFromConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			embedder := NewMockEmbedder()
-			processor, err := NewQueryProcessorFromConfig(tt.config, embedder, nil)
+			processor, err := NewQueryPipelineFromConfig(tt.config, embedder, nil)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -733,7 +733,7 @@ func TestProcessorEmbedderHealth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reranker := NewDefaultMergeReranker(0.6, 0.4)
-			processor := NewDefaultQueryProcessor(tt.embedder, reranker, nil)
+			processor := NewDefaultQueryPipeline(tt.embedder, reranker, nil)
 
 			err := processor.EnsureEmbedderHealth(ctx)
 			if tt.wantErr {
@@ -859,7 +859,7 @@ func BenchmarkProcessQuery(b *testing.B) {
 	provider.SetQueriedNodes([]GraphNode{{ID: vectorResults[0].NodeID}})
 
 	reranker := NewDefaultMergeReranker(0.6, 0.4)
-	processor := NewDefaultQueryProcessor(embedder, reranker, nil)
+	processor := NewDefaultQueryPipeline(embedder, reranker, nil)
 
 	query := NewGraphRAGQuery("test query").WithTopK(10).WithMaxHops(2)
 	ctx := context.Background()

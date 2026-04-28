@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/database"
+	dbpostgres "github.com/zero-day-ai/gibson/internal/database/postgres"
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -21,7 +21,7 @@ import (
 // Phase D: this replaces the Phase C bridge (PostgresCredentialDAO wrapping a
 // shared credentialPGPool pointing at the dashboard Postgres). Credentials are
 // now stored in each tenant's own Postgres database, wrapped under the per-tenant
-// KEK via envelope encryption (see internal/database.CredentialOps).
+// KEK via envelope encryption (see internal/database/postgres.CredentialOps).
 type DaemonCredentialStore struct {
 	pool        datapool.Pool
 	keyProvider crypto.KeyProvider
@@ -67,7 +67,7 @@ func (s *DaemonCredentialStore) GetCredential(ctx context.Context, name string) 
 
 	secretBytes, err := conn.Credentials().Get(ctx, name)
 	if err != nil {
-		if errors.Is(err, database.ErrCredentialNotFound) {
+		if errors.Is(err, dbpostgres.ErrCredentialNotFound) {
 			return nil, "", fmt.Errorf("credential %q not found", name)
 		}
 		return nil, "", fmt.Errorf("credential store: get %q: %w", name, err)

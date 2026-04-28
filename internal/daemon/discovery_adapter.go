@@ -4,14 +4,14 @@ import (
 	"context"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
+	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
-// discoveryProcessorAdapter adapts processor.DiscoveryProcessor to orchestrator.DiscoveryProcessor.
+// discoveryProcessorAdapter adapts ingest.DiscoveryProcessor to orchestrator.DiscoveryProcessor.
 // This is needed because the orchestrator defines its own interface to avoid import cycles.
 type discoveryProcessorAdapter struct {
-	processor processor.DiscoveryProcessor
+	processor ingest.DiscoveryProcessor
 }
 
 // ProcessAgentDiscovery implements orchestrator.DiscoveryProcessor.

@@ -8,7 +8,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 )
 
-// QueryProcessor orchestrates the full GraphRAG query pipeline.
+// QueryPipeline orchestrates the full GraphRAG query pipeline.
 // Combines embedding generation, vector search, graph traversal,
 // and hybrid reranking into a single high-level interface.
 //
@@ -19,7 +19,7 @@ import (
 // 4. Merge & Rerank: Combine and score hybrid results
 //
 // Thread-safety: Implementations must be safe for concurrent queries.
-type QueryProcessor interface {
+type QueryPipeline interface {
 	// ProcessQuery executes the full GraphRAG query pipeline.
 	// Returns ranked results combining vector similarity and graph structure.
 	//
@@ -35,33 +35,33 @@ type QueryProcessor interface {
 	ProcessQuery(ctx context.Context, query GraphRAGQuery, provider GraphRAGProvider) ([]GraphRAGResult, error)
 }
 
-// DefaultQueryProcessor implements QueryProcessor with the standard pipeline.
+// DefaultQueryPipeline implements QueryPipeline with the standard pipeline.
 // Uses an Embedder for query encoding and a MergeReranker for hybrid scoring.
-type DefaultQueryProcessor struct {
+type DefaultQueryPipeline struct {
 	embedder embedder.Embedder // For generating query embeddings
 	reranker MergeReranker     // For merging and scoring results
 	logger   *slog.Logger      // For logging warnings and debug info
 }
 
-// NewDefaultQueryProcessor creates a new query processor.
+// NewDefaultQueryPipeline creates a new query processor.
 // The embedder is used to generate embeddings from query text.
 // The reranker combines vector and graph results with configured weights.
 // The logger is used for warnings and debug info (pass slog.Default() if needed).
-func NewDefaultQueryProcessor(emb embedder.Embedder, reranker MergeReranker, logger *slog.Logger) *DefaultQueryProcessor {
+func NewDefaultQueryPipeline(emb embedder.Embedder, reranker MergeReranker, logger *slog.Logger) *DefaultQueryPipeline {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &DefaultQueryProcessor{
+	return &DefaultQueryPipeline{
 		embedder: emb,
 		reranker: reranker,
 		logger:   logger,
 	}
 }
 
-// NewQueryProcessorFromConfig creates a QueryProcessor from GraphRAG configuration.
+// NewQueryPipelineFromConfig creates a QueryPipeline from GraphRAG configuration.
 // Automatically configures the reranker weights from config.Query settings.
 // The logger is used for warnings and debug info (pass slog.Default() if needed).
-func NewQueryProcessorFromConfig(config GraphRAGConfig, emb embedder.Embedder, logger *slog.Logger) (*DefaultQueryProcessor, error) {
+func NewQueryPipelineFromConfig(config GraphRAGConfig, emb embedder.Embedder, logger *slog.Logger) (*DefaultQueryPipeline, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -80,7 +80,7 @@ func NewQueryProcessorFromConfig(config GraphRAGConfig, emb embedder.Embedder, l
 		config.Query.GraphWeight,
 	)
 
-	return &DefaultQueryProcessor{
+	return &DefaultQueryPipeline{
 		embedder: emb,
 		reranker: reranker,
 		logger:   logger,
@@ -106,7 +106,7 @@ func NewQueryProcessorFromConfig(config GraphRAGConfig, emb embedder.Embedder, l
 // - If graph traversal fails, returns vector-only results
 // - If vector search fails but embedding exists, attempts graph-only search
 // - Returns error only if both stages fail or query is invalid
-func (p *DefaultQueryProcessor) ProcessQuery(ctx context.Context, query GraphRAGQuery, provider GraphRAGProvider) ([]GraphRAGResult, error) {
+func (p *DefaultQueryPipeline) ProcessQuery(ctx context.Context, query GraphRAGQuery, provider GraphRAGProvider) ([]GraphRAGResult, error) {
 	// Step 1: Validate the query
 	if err := query.Validate(); err != nil {
 		return nil, NewInvalidQueryError(fmt.Sprintf("query validation failed: %v", err))
@@ -228,7 +228,7 @@ func (p *DefaultQueryProcessor) ProcessQuery(ctx context.Context, query GraphRAG
 // - Apply traversal filters
 // - Collect all discovered nodes
 // - Deduplicate across starting points
-func (p *DefaultQueryProcessor) expandGraph(
+func (p *DefaultQueryPipeline) expandGraph(
 	ctx context.Context,
 	vectorResults []VectorResult,
 	query GraphRAGQuery,
@@ -280,7 +280,7 @@ func (p *DefaultQueryProcessor) expandGraph(
 // Used when graph traversal is disabled (MaxHops=0) or fails.
 //
 // Fetches full node data from provider for each vector result.
-func (p *DefaultQueryProcessor) vectorOnlyResults(
+func (p *DefaultQueryPipeline) vectorOnlyResults(
 	ctx context.Context,
 	vectorResults []VectorResult,
 	provider GraphRAGProvider,
@@ -316,7 +316,7 @@ func (p *DefaultQueryProcessor) vectorOnlyResults(
 }
 
 // filterByNodeType filters results to only include specified node types.
-func (p *DefaultQueryProcessor) filterByNodeType(results []GraphRAGResult, nodeTypes []NodeType) []GraphRAGResult {
+func (p *DefaultQueryPipeline) filterByNodeType(results []GraphRAGResult, nodeTypes []NodeType) []GraphRAGResult {
 	// Create a set of allowed types for O(1) lookup
 	allowedTypes := make(map[NodeType]bool)
 	for _, nt := range nodeTypes {
@@ -377,7 +377,7 @@ func DefaultPipelineOptions() QueryPipelineOptions {
 
 // WithOptions creates a new processor with custom pipeline options.
 // This allows per-query customization of the processing pipeline.
-func (p *DefaultQueryProcessor) WithOptions(opts QueryPipelineOptions) *DefaultQueryProcessor {
+func (p *DefaultQueryPipeline) WithOptions(opts QueryPipelineOptions) *DefaultQueryPipeline {
 	// For now, return the same processor
 	// In a production implementation, we might create a wrapper that applies options
 	return p
@@ -401,7 +401,7 @@ func ValidateProvider(ctx context.Context, provider GraphRAGProvider) error {
 
 // EnsureEmbedderHealth checks if the embedder is operational.
 // Returns an error if the embedder is not healthy.
-func (p *DefaultQueryProcessor) EnsureEmbedderHealth(ctx context.Context) error {
+func (p *DefaultQueryPipeline) EnsureEmbedderHealth(ctx context.Context) error {
 	if p.embedder == nil {
 		return NewEmbeddingError("embedder is not configured", nil, false)
 	}
@@ -424,7 +424,7 @@ func (p *DefaultQueryProcessor) EnsureEmbedderHealth(ctx context.Context) error 
 //
 // This is more efficient than vector search for structured data retrieval
 // where semantic similarity is not needed.
-func (p *DefaultQueryProcessor) processStructuredQuery(ctx context.Context, query GraphRAGQuery, provider GraphRAGProvider) ([]GraphRAGResult, error) {
+func (p *DefaultQueryPipeline) processStructuredQuery(ctx context.Context, query GraphRAGQuery, provider GraphRAGProvider) ([]GraphRAGResult, error) {
 	p.logger.Debug("processing structured query (no vector search)",
 		"node_types", query.NodeTypes,
 		"top_k", query.TopK,

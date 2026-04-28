@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
+	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/memory"
@@ -137,7 +137,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// Pass the infrastructure's DiscoveryProcessor so sandboxed tool
 		// responses populate the knowledge graph alongside live-callback tools.
 		// nil when GraphRAG is disabled; sandboxed.Executor tolerates nil.
-		var sbxDiscovery processor.DiscoveryProcessor
+		var sbxDiscovery ingest.DiscoveryProcessor
 		if d.infrastructure != nil && d.infrastructure.discoveryProcessor != nil {
 			sbxDiscovery = d.infrastructure.discoveryProcessor.processor
 		}

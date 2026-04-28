@@ -6,7 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
+	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	taxonomypb "github.com/zero-day-ai/sdk/api/gen/taxonomy/v1"
 )
@@ -21,14 +21,14 @@ import (
 // parent relationship to the originating agent_run (using the auto-wired
 // ParentRelationships map from the taxonomy).
 type complianceSignalSink struct {
-	proc   processor.DiscoveryProcessor
+	proc   ingest.DiscoveryProcessor
 	logger *slog.Logger
 }
 
 // newComplianceSignalSink constructs the sink. Returns nil if the
 // processor is nil (graphrag disabled) — the harness factory treats a
 // nil ComplianceSink as "emitter not wired".
-func newComplianceSignalSink(proc processor.DiscoveryProcessor, logger *slog.Logger) *complianceSignalSink {
+func newComplianceSignalSink(proc ingest.DiscoveryProcessor, logger *slog.Logger) *complianceSignalSink {
 	if proc == nil {
 		return nil
 	}

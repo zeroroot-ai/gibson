@@ -1,4 +1,4 @@
-package database
+package postgres
 
 import "github.com/zero-day-ai/gibson/internal/datapool/metrics"
 

@@ -11,7 +11,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
+	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
 	"github.com/zero-day-ai/gibson/internal/graphrag/provider"
 	graphragschema "github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
@@ -207,7 +207,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	// This enables downstream agents to query discovered hosts, ports, services, etc.
 	graphLoader := loader.NewGraphLoader(graphRAGClient).
 		WithTaxonomyRegistry(taxonomyRegistry)
-	discoveryProc := processor.NewDiscoveryProcessor(graphLoader, graphRAGClient, d.logger.Slog())
+	discoveryProc := ingest.NewDiscoveryProcessor(graphLoader, graphRAGClient, d.logger.Slog())
 	discoveryProcessorAdapter := &discoveryProcessorAdapter{processor: discoveryProc}
 	d.logger.Info(ctx, "initialized DiscoveryProcessor for automatic discovery storage")
 

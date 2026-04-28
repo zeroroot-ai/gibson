@@ -33,9 +33,14 @@ build/.env
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Stray binaries built at the repo root.
+# The canonical build output is `bin/gibson` (already covered by `bin/*` above) —
+# produced by `make bin`. Running plain `go build` at the repo root drops a
+# `./gibson` here; this anchored entry stops it from ever being committed.
+# Do NOT replace with the bare path `gibson` — that would shadow any future file
+# named gibson in any subdirectory.
 /gibson
-bin/gibson
-gibson
 
 # E2E helper / lint binaries built ad-hoc into the module root
 /route-drift

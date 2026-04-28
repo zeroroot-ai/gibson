@@ -1,7 +1,7 @@
 //go:build integration
 // +build integration
 
-package processor
+package ingest
 
 import (
 	"context"

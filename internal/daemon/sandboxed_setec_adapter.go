@@ -39,7 +39,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/graphrag/processor"
+	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 )
 
@@ -70,7 +70,7 @@ func NewSetecSandboxClient(cfg config.SandboxConfig) (sandboxed.SandboxClient, e
 // field-100 DiscoveryResult from successful tool responses and persists them
 // to Neo4j asynchronously, matching the live-callback path's behavior at
 // core/gibson/internal/harness/callback_service.go:727.
-func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, discoveryProc processor.DiscoveryProcessor) (*sandboxed.Executor, error) {
+func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, discoveryProc ingest.DiscoveryProcessor) (*sandboxed.Executor, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
@@ -92,13 +92,13 @@ func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, lo
 	})
 }
 
-// sandboxedDiscoveryAdapter widens processor.DiscoveryProcessor's
+// sandboxedDiscoveryAdapter widens ingest.DiscoveryProcessor's
 // (*ProcessResult, error) return to the (interface{}, error) signature the
 // sandboxed package's local DiscoveryProcessor interface declares. The
 // sandboxed package deliberately keeps its interface narrow to avoid
 // importing processor; this adapter is the single point of contact.
 type sandboxedDiscoveryAdapter struct {
-	inner processor.DiscoveryProcessor
+	inner ingest.DiscoveryProcessor
 }
 
 func (a *sandboxedDiscoveryAdapter) Process(ctx context.Context, execCtx loader.ExecContext, discovery *graphragpb.DiscoveryResult) (interface{}, error) {
