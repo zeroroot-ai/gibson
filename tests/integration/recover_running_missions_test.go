@@ -26,10 +26,10 @@ import (
 
 // missionRunDoc mirrors the minimal JSON shape stored by ConnBoundRunStore.
 type missionRunDoc struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Status   string `json:"status"`
-	RunID    string `json:"run_id,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	RunID  string `json:"run_id,omitempty"`
 }
 
 // seedRunningMissionRun writes a JSON run document with status="running" into
