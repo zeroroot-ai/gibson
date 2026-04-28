@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/sdk/auth"
@@ -175,14 +174,8 @@ func TestAuthConfig_AutoProvision(t *testing.T) {
 	})
 }
 
-// TestIdentity_IsCrossTenantCaller verifies cross-tenant caller detection by issuer.
-func TestIdentity_IsCrossTenantCaller(t *testing.T) {
-	t.Parallel()
-
-	require.True(t, auth.IsCrossTenantCaller(auth.Identity{Issuer: "spire"}),
-		"spire issuer should be cross-tenant")
-	require.False(t, auth.IsCrossTenantCaller(auth.Identity{Issuer: "zitadel"}),
-		"zitadel issuer should NOT be cross-tenant")
-	require.False(t, auth.IsCrossTenantCaller(auth.Identity{Issuer: "apikey"}),
-		"apikey issuer should NOT be cross-tenant")
-}
+// TestIdentity_IsCrossTenantCaller was removed.
+// auth.IsCrossTenantCaller was deleted from the SDK in v0.86.0 as dead code
+// (auth-review finding 4c). Cross-tenant access is now enforced via
+// auth.TenantStringFromContext(ctx) != req.TenantId direct comparisons.
+// Spec: admin-services-completion Requirement 6.3.
