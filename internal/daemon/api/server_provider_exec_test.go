@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
@@ -114,17 +115,17 @@ func (l *stubExecLimiter) Check(_ context.Context, _, _ string) error {
 	return nil
 }
 
-// stubStreamServer implements DaemonAdminService_StreamLLMServer for tests.
-// DaemonAdminService_StreamLLMServer = grpc.ServerStreamingServer[StreamLLMResponse]
+// stubStreamServer implements TenantAdminService_StreamLLMServer for tests.
+// TenantAdminService_StreamLLMServer = grpc.ServerStreamingServer[tenantv1.StreamLLMResponse]
 // which embeds grpc.ServerStream.
 type stubStreamServer struct {
 	ctx     context.Context
-	sent    []*StreamLLMResponse
+	sent    []*tenantv1.StreamLLMResponse
 	sendErr error
 }
 
 func (s *stubStreamServer) Context() context.Context { return s.ctx }
-func (s *stubStreamServer) Send(m *StreamLLMResponse) error {
+func (s *stubStreamServer) Send(m *tenantv1.StreamLLMResponse) error {
 	if s.sendErr != nil {
 		return s.sendErr
 	}
@@ -212,10 +213,10 @@ func TestExecuteLLM_RoundTrip(t *testing.T) {
 	})
 
 	ctx := tenantCtx("tenant-a")
-	req := &ExecuteLLMRequest{
+	req := &tenantv1.ExecuteLLMRequest{
 		ProviderName: "my-openai",
 		Model:        "gpt-4o-mini",
-		Messages: []*LLMMessageContent{
+		Messages: []*tenantv1.LLMMessageContent{
 			{Role: "user", Content: "hello"},
 		},
 	}
@@ -248,7 +249,7 @@ func TestExecuteLLM_NoProviderStore(t *testing.T) {
 		providerFactory: func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil },
 	}
 	ctx := tenantCtx("tenant-a")
-	_, err := s.ExecuteLLM(ctx, &ExecuteLLMRequest{ProviderName: "x"})
+	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{ProviderName: "x"})
 	require.Error(t, err)
 	st, _ := status_grpc.FromError(err)
 	assert.Equal(t, codes.FailedPrecondition, st.Code())
@@ -260,7 +261,7 @@ func TestExecuteLLM_ProviderNotFound(t *testing.T) {
 	store := &stubProviderConfigStore{}
 	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil })
 	ctx := tenantCtx("tenant-a")
-	_, err := s.ExecuteLLM(ctx, &ExecuteLLMRequest{ProviderName: "missing"})
+	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{ProviderName: "missing"})
 	require.Error(t, err)
 	st, _ := status_grpc.FromError(err)
 	assert.Equal(t, codes.NotFound, st.Code())
@@ -274,7 +275,7 @@ func TestExecuteLLM_NoTenantContext(t *testing.T) {
 	store := &stubProviderConfigStore{} // Resolve always returns ErrNotFound
 	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil })
 	// Plain context — no tenant identity; handler rejects with Unauthenticated.
-	_, err := s.ExecuteLLM(context.Background(), &ExecuteLLMRequest{ProviderName: "x"})
+	_, err := s.ExecuteLLM(context.Background(), &tenantv1.ExecuteLLMRequest{ProviderName: "x"})
 	require.Error(t, err)
 	st, _ := status_grpc.FromError(err)
 	assert.Equal(t, codes.Unauthenticated, st.Code())
@@ -295,7 +296,7 @@ func TestExecuteLLM_RateLimitEnforced(t *testing.T) {
 	s.WithExecLimiter(limiter)
 
 	ctx := tenantCtx("tenant-rl")
-	req := &ExecuteLLMRequest{ProviderName: "p", Messages: []*LLMMessageContent{{Role: "user", Content: "hi"}}}
+	req := &tenantv1.ExecuteLLMRequest{ProviderName: "p", Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}}}
 
 	for i := 0; i < 10; i++ {
 		_, err := s.ExecuteLLM(ctx, req)
@@ -330,9 +331,9 @@ func TestExecuteLLM_CredentialNotLeaked(t *testing.T) {
 	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
 
 	ctx := tenantCtx("tenant-sec")
-	resp, err := s.ExecuteLLM(ctx, &ExecuteLLMRequest{
+	resp, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
 		ProviderName: "p",
-		Messages:     []*LLMMessageContent{{Role: "user", Content: "hi"}},
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
 	})
 	require.NoError(t, err)
 
@@ -367,10 +368,10 @@ func TestExecuteLLM_ToolCalls(t *testing.T) {
 	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
 
 	ctx := tenantCtx("tenant-tools")
-	resp, err := s.ExecuteLLM(ctx, &ExecuteLLMRequest{
+	resp, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
 		ProviderName: "p",
-		Messages:     []*LLMMessageContent{{Role: "user", Content: "scan this"}},
-		Tools:        []*LLMToolDef{{Name: "nmap", Description: "port scanner"}},
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "scan this"}},
+		Tools:        []*tenantv1.LLMToolDef{{Name: "nmap", Description: "port scanner"}},
 	})
 	require.NoError(t, err)
 	require.Len(t, resp.ToolCalls, 1)
@@ -393,10 +394,10 @@ func TestExecuteLLM_StructuredOutputUnimplemented(t *testing.T) {
 	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
 
 	ctx := tenantCtx("tenant-struct")
-	resp, err := s.ExecuteLLM(ctx, &ExecuteLLMRequest{
+	resp, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
 		ProviderName:   "p",
-		Messages:       []*LLMMessageContent{{Role: "user", Content: "json please"}},
-		ResponseFormat: &ResponseFormat{Type: "json_schema", Name: "MySchema"},
+		Messages:       []*tenantv1.LLMMessageContent{{Role: "user", Content: "json please"}},
+		ResponseFormat: &tenantv1.ResponseFormat{Type: "json_schema", Name: "MySchema"},
 	})
 	require.Error(t, err)
 	assert.Nil(t, resp)
@@ -425,9 +426,9 @@ func TestExecuteLLM_TemperatureMaxTokens(t *testing.T) {
 	temp := float64(0.7)
 	maxTok := int32(512)
 	ctx := tenantCtx("tenant-params")
-	_, err := s.ExecuteLLM(ctx, &ExecuteLLMRequest{
+	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
 		ProviderName: "p",
-		Messages:     []*LLMMessageContent{{Role: "user", Content: "hi"}},
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
 		Temperature:  &temp,
 		MaxTokens:    &maxTok,
 	})
@@ -463,9 +464,9 @@ func TestStreamLLM_TextDeltas(t *testing.T) {
 	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
 
 	stream := &stubStreamServer{ctx: tenantCtx("tenant-stream")}
-	err := s.StreamLLM(&StreamLLMRequest{
+	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
 		ProviderName: "p",
-		Messages:     []*LLMMessageContent{{Role: "user", Content: "go"}},
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "go"}},
 	}, stream)
 	require.NoError(t, err)
 
@@ -492,9 +493,9 @@ func TestStreamLLM_RateLimitEnforced(t *testing.T) {
 	s.WithExecLimiter(&stubExecLimiter{blockAt: 1}) // block immediately
 
 	stream := &stubStreamServer{ctx: tenantCtx("tenant-rl")}
-	err := s.StreamLLM(&StreamLLMRequest{
+	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
 		ProviderName: "p",
-		Messages:     []*LLMMessageContent{{Role: "user", Content: "hi"}},
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
 	}, stream)
 	require.Error(t, err)
 	st, _ := status_grpc.FromError(err)
@@ -521,9 +522,9 @@ func TestStreamLLM_CredentialNotLeaked(t *testing.T) {
 	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
 
 	stream := &stubStreamServer{ctx: tenantCtx("tenant-sec")}
-	err := s.StreamLLM(&StreamLLMRequest{
+	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
 		ProviderName: "p",
-		Messages:     []*LLMMessageContent{{Role: "user", Content: "hi"}},
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
 	}, stream)
 	require.NoError(t, err)
 	require.NotEmpty(t, stream.sent)
@@ -546,7 +547,7 @@ func TestStreamLLM_NoTenantContext(t *testing.T) {
 		providerFactory: func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil },
 	}
 	stream := &stubStreamServer{ctx: context.Background()}
-	err := s.StreamLLM(&StreamLLMRequest{ProviderName: "x"}, stream)
+	err := s.StreamLLM(&tenantv1.StreamLLMRequest{ProviderName: "x"}, stream)
 	require.Error(t, err)
 	st, _ := status_grpc.FromError(err)
 	// No tenant context → Unauthenticated (identity interceptor check).
@@ -601,10 +602,10 @@ func TestDecryptedConfigToLLMConfig_ModelOverride(t *testing.T) {
 // TestProtoMessagesToLLM_ToolResults verifies that tool-result entries inside a
 // proto message are promoted to standalone llm.Message values with RoleTool.
 func TestProtoMessagesToLLM_ToolResults(t *testing.T) {
-	msgs := protoMessagesToLLM([]*LLMMessageContent{
+	msgs := protoMessagesToLLM([]*tenantv1.LLMMessageContent{
 		{
 			Role: "tool",
-			ToolResults: []*LLMToolResult{
+			ToolResults: []*tenantv1.LLMToolResult{
 				{ToolCallId: "call-1", Content: "result-A"},
 				{ToolCallId: "call-2", Content: "result-B"},
 			},
@@ -622,7 +623,7 @@ func TestProtoMessagesToLLM_ToolResults(t *testing.T) {
 // TestProtoMessagesToLLM_Empty returns nil for an empty slice.
 func TestProtoMessagesToLLM_Empty(t *testing.T) {
 	assert.Nil(t, protoMessagesToLLM(nil))
-	assert.Nil(t, protoMessagesToLLM([]*LLMMessageContent{}))
+	assert.Nil(t, protoMessagesToLLM([]*tenantv1.LLMMessageContent{}))
 }
 
 // ---------------------------------------------------------------------------
@@ -633,7 +634,7 @@ func TestProtoMessagesToLLM_Empty(t *testing.T) {
 // parameters_json string is unmarshalled into the schema.JSON Parameters field.
 func TestProtoToolDefsToLLM_ParsesParametersJson(t *testing.T) {
 	params := `{"type":"object","properties":{"target":{"type":"string"}}}`
-	defs := protoToolDefsToLLM([]*LLMToolDef{
+	defs := protoToolDefsToLLM([]*tenantv1.LLMToolDef{
 		{Name: "nmap", Description: "port scanner", ParametersJson: params},
 	})
 	require.Len(t, defs, 1)
@@ -646,7 +647,7 @@ func TestProtoToolDefsToLLM_ParsesParametersJson(t *testing.T) {
 // invalid parameters_json value does not cause the request to fail — the tool
 // is included with an empty object schema.
 func TestProtoToolDefsToLLM_InvalidJsonFallsBackToObjectSchema(t *testing.T) {
-	defs := protoToolDefsToLLM([]*LLMToolDef{
+	defs := protoToolDefsToLLM([]*tenantv1.LLMToolDef{
 		{Name: "bad-tool", Description: "has bad params", ParametersJson: "not-json{"},
 	})
 	require.Len(t, defs, 1)
@@ -705,9 +706,9 @@ func TestWithProviderFactory_ReplacesDefault(t *testing.T) {
 	}
 	s.providerConfig = store
 
-	_, err := s.ExecuteLLM(tenantCtx("t"), &ExecuteLLMRequest{
+	_, err := s.ExecuteLLM(tenantCtx("t"), &tenantv1.ExecuteLLMRequest{
 		ProviderName: "p",
-		Messages:     []*LLMMessageContent{{Role: "user", Content: "hi"}},
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
 	})
 	require.NoError(t, err)
 	assert.True(t, called, "injected factory must be invoked")
@@ -726,9 +727,9 @@ func TestWithExecLimiter_NilLimiterSkipsCheck(t *testing.T) {
 	})
 	// execLimiter is nil by default.
 
-	_, err := s.ExecuteLLM(tenantCtx("t"), &ExecuteLLMRequest{
+	_, err := s.ExecuteLLM(tenantCtx("t"), &tenantv1.ExecuteLLMRequest{
 		ProviderName: "p",
-		Messages:     []*LLMMessageContent{{Role: "user", Content: "hi"}},
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
 	})
 	require.NoError(t, err)
 }

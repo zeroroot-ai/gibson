@@ -5,7 +5,8 @@
 //
 // Builds the gRPC client connections needed by the mission e2e test suite:
 //   - DaemonServiceClient (public mission + component control plane)
-//   - DaemonAdminServiceClient (admin RPCs: CreateProvider, etc.)
+//   - TenantAdminServiceClient (admin RPCs: CreateProvider, etc.)
+//   - PlatformOperatorServiceClient (platform-operator RPCs: Shutdown, etc.)
 //
 // Reads DAEMON_GRPC_ADDR env var for the daemon's gRPC endpoint.
 // Default: "localhost:50002" (Kind NodePort convention).
@@ -23,7 +24,8 @@ import (
 	"os"
 	"testing"
 
-	adminpb "github.com/zero-day-ai/gibson/internal/daemon/api"
+	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -32,9 +34,10 @@ import (
 // GRPCClientSet holds all gRPC clients needed by the mission e2e test.
 // Use NewGRPCClients to construct it; call Close when done.
 type GRPCClientSet struct {
-	conn        *grpc.ClientConn
-	Daemon      daemonpb.DaemonServiceClient
-	DaemonAdmin adminpb.DaemonAdminServiceClient
+	conn            *grpc.ClientConn
+	Daemon          daemonpb.DaemonServiceClient
+	TenantAdmin     tenantv1.TenantAdminServiceClient
+	PlatformOperator platformv1.PlatformOperatorServiceClient
 }
 
 // Close releases the underlying gRPC connection.
@@ -68,9 +71,10 @@ func NewGRPCClients() (*GRPCClientSet, error) {
 	}
 
 	return &GRPCClientSet{
-		conn:        conn,
-		Daemon:      daemonpb.NewDaemonServiceClient(conn),
-		DaemonAdmin: adminpb.NewDaemonAdminServiceClient(conn),
+		conn:             conn,
+		Daemon:           daemonpb.NewDaemonServiceClient(conn),
+		TenantAdmin:      tenantv1.NewTenantAdminServiceClient(conn),
+		PlatformOperator: platformv1.NewPlatformOperatorServiceClient(conn),
 	}, nil
 }
 

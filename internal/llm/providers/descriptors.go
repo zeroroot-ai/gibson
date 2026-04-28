@@ -10,7 +10,7 @@ import (
 // form.
 //
 // When the admin RPC is wired (follow-up to spec 21), its proto message
-// type `gibson.daemon.admin.v1.ProviderDescriptor` should be a 1:1 mapping
+// type `gibson.tenant.v1.ProviderRecord` should be a 1:1 mapping
 // of this struct.
 type ProviderDescriptor struct {
 	// Type is the ProviderType constant (e.g. "bedrock").

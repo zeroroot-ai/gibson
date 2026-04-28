@@ -7,6 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+
+	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -45,28 +48,28 @@ func TestGetTenantQuota_EmptyTenantIDUsesContext_NilStore_Unavailable(t *testing
 	// Empty TenantId falls back to auth.TenantFromContext which returns SystemTenant.
 	// With nil quotaStore → Unavailable (not InvalidArgument).
 	srv := blankServer()
-	_, err := srv.GetTenantQuota(context.Background(), &GetTenantQuotaRequest{TenantId: ""})
+	_, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: ""})
 	assert.Equal(t, codes.Unavailable, grpcCode(err))
 }
 
 func TestGetTenantQuota_NilStore_Unavailable(t *testing.T) {
 	srv := blankServer()
 	// authorizer is nil → requireTenantAdmin passes
-	_, err := srv.GetTenantQuota(context.Background(), &GetTenantQuotaRequest{TenantId: "acme"})
+	_, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
 	assert.Equal(t, codes.Unavailable, grpcCode(err))
 }
 
 func TestGetTenantQuota_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.quotaStore = &mockQuotaStore{getErr: assert.AnError}
-	_, err := srv.GetTenantQuota(context.Background(), &GetTenantQuotaRequest{TenantId: "acme"})
+	_, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
 func TestGetTenantQuota_ZeroValues_OK(t *testing.T) {
 	srv := blankServer()
 	srv.quotaStore = &mockQuotaStore{}
-	resp, err := srv.GetTenantQuota(context.Background(), &GetTenantQuotaRequest{TenantId: "acme"})
+	resp, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Quota)
@@ -84,7 +87,7 @@ func TestGetTenantQuota_ExistingQuota_ReturnedCorrectly(t *testing.T) {
 			PlanTier:    "pro",
 		},
 	}
-	resp, err := srv.GetTenantQuota(context.Background(), &GetTenantQuotaRequest{TenantId: "acme"})
+	resp, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
 	require.NoError(t, err)
 	require.NotNil(t, resp.Quota)
 	assert.Equal(t, int32(10), resp.Quota.MaxMissions)
@@ -99,21 +102,21 @@ func TestGetTenantQuota_ExistingQuota_ReturnedCorrectly(t *testing.T) {
 
 func TestSetTenantQuota_MissingTenantID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.SetTenantQuota(context.Background(), &SetTenantQuotaRequest{TenantId: ""})
+	_, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{TenantId: ""})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestSetTenantQuota_NilQuota_InvalidArgument(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.SetTenantQuota(context.Background(), &SetTenantQuotaRequest{TenantId: "acme", Quota: nil})
+	_, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{TenantId: "acme", Quota: nil})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestSetTenantQuota_NilStore_Unavailable(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.SetTenantQuota(context.Background(), &SetTenantQuotaRequest{
+	_, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{
 		TenantId: "acme",
-		Quota:    &TenantQuota{MaxMissions: 5},
+		Quota:    &platformv1.TenantQuota{MaxMissions: 5},
 	})
 	assert.Equal(t, codes.Unavailable, grpcCode(err))
 }
@@ -121,9 +124,9 @@ func TestSetTenantQuota_NilStore_Unavailable(t *testing.T) {
 func TestSetTenantQuota_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.quotaStore = &mockQuotaStore{setErr: assert.AnError}
-	_, err := srv.SetTenantQuota(context.Background(), &SetTenantQuotaRequest{
+	_, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{
 		TenantId: "acme",
-		Quota:    &TenantQuota{MaxMissions: 5},
+		Quota:    &platformv1.TenantQuota{MaxMissions: 5},
 	})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
@@ -132,9 +135,9 @@ func TestSetTenantQuota_Success_ReturnsUpdatedQuota(t *testing.T) {
 	srv := blankServer()
 	store := &mockQuotaStore{}
 	srv.quotaStore = store
-	resp, err := srv.SetTenantQuota(context.Background(), &SetTenantQuotaRequest{
+	resp, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{
 		TenantId: "acme",
-		Quota: &TenantQuota{
+		Quota: &platformv1.TenantQuota{
 			MaxMissions: 20,
 			MaxAgents:   10,
 			MaxFindings: 5000,

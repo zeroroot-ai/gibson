@@ -22,7 +22,7 @@ func TestSetAuthzAttributes_AllFieldsSet(t *testing.T) {
 
 	SetAuthzAttributes(
 		ctx,
-		"/gibson.daemon.admin.v1.DaemonAdminService/ProvisionTenant",
+		"/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity",
 		"alice",
 		"tenant-a",
 		"tenants:provision",
@@ -41,7 +41,7 @@ func TestSetAuthzAttributes_AllFieldsSet(t *testing.T) {
 		got[string(a.Key)] = a.Value
 	}
 
-	if v, ok := got[GibsonAuthzMethod]; !ok || v.AsString() != "/gibson.daemon.admin.v1.DaemonAdminService/ProvisionTenant" {
+	if v, ok := got[GibsonAuthzMethod]; !ok || v.AsString() != "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity" {
 		t.Errorf("method attr wrong: %v", got[GibsonAuthzMethod])
 	}
 	if v, ok := got[GibsonAuthzSubject]; !ok || v.AsString() != "alice" {
@@ -74,7 +74,7 @@ func TestSetAuthzAttributes_DenyIncludesReason(t *testing.T) {
 
 	SetAuthzAttributes(
 		ctx,
-		"/gibson.daemon.admin.v1.DaemonAdminService/ListTenants",
+		"/gibson.tenant.v1.TenantAdminService/ListAgentIdentities",
 		"bob",
 		"*",
 		"tenants:list-all",

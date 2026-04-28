@@ -19,7 +19,7 @@ func TestRecordAuthzDecision_Allow(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	recorder.RecordAuthzDecision(ctx, "allow", "/gibson.daemon.admin.v1.DaemonAdminService/ProvisionTenant", "tenants:provision")
+	recorder.RecordAuthzDecision(ctx, "allow", "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity", "tenants:provision")
 
 	rm := &metricdata.ResourceMetrics{}
 	if err := reader.Collect(ctx, rm); err != nil {
@@ -52,7 +52,7 @@ func TestRecordAuthzDecision_Allow(t *testing.T) {
 			if labels["decision"] != "allow" {
 				t.Errorf("decision label = %q, want allow", labels["decision"])
 			}
-			if labels["method"] != "/gibson.daemon.admin.v1.DaemonAdminService/ProvisionTenant" {
+			if labels["method"] != "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity" {
 				t.Errorf("method label wrong: %q", labels["method"])
 			}
 			if labels["permission"] != "tenants:provision" {
@@ -115,7 +115,7 @@ func TestRecordAuthzDecision_EmptyPermissionOmitted(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	recorder.RecordAuthzDecision(ctx, "allow", "/gibson.daemon.admin.v1.DaemonAdminService/GetAuthSchema", "")
+	recorder.RecordAuthzDecision(ctx, "allow", "/gibson.tenant.v1.TenantAdminService/GetTenantQuota", "")
 
 	rm := &metricdata.ResourceMetrics{}
 	if err := reader.Collect(ctx, rm); err != nil {

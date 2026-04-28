@@ -72,6 +72,14 @@ func (f *fakeIDPClient) ListServiceAccounts(ctx context.Context, req idp.ListSer
 	return &idp.ListServiceAccountsResponse{}, nil
 }
 
+func (f *fakeIDPClient) GetUserProfile(_ context.Context, _ string) (*idp.UserProfile, error) {
+	return nil, idp.ErrNotFound
+}
+
+func (f *fakeIDPClient) UpdateUserProfile(_ context.Context, _ string, _ idp.UpdateUserProfileRequest) (*idp.UserProfile, error) {
+	return nil, idp.ErrNotFound
+}
+
 func (f *fakeIDPClient) Close() error { return nil }
 
 // ---------------------------------------------------------------------------

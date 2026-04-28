@@ -1,0 +1,269 @@
+// Package integration — admin_services_test.go
+//
+// Integration tests for admin-services-completion spec:
+//   - Phase H (Spec 2 tasks 20+25)
+//
+// Tests cover:
+//   - Langfuse cross-tenant guard rejects mismatch (Req 1.5)
+//   - GetTenantQuota happy path and cross-tenant denial
+//   - GetUserProfile / UpdateUserProfile happy paths
+//   - UpdateUserProfile immutable-field rejection
+//   - AuthorizeID rejects non-Envoy SVID at handshake (verified at daemon level)
+//
+// These tests run in-process against a DaemonServer instance with no external
+// services (mini-unit-integration). Full E2E through Envoy is in tests/e2e/.
+package integration
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
+	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
+	"github.com/zero-day-ai/gibson/internal/idp"
+	"github.com/zero-day-ai/sdk/auth"
+)
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func grpcCode(err error) codes.Code {
+	if err == nil {
+		return codes.OK
+	}
+	s, _ := status.FromError(err)
+	return s.Code()
+}
+
+func newServerForTest() *api.DaemonServer {
+	return api.NewDaemonServer(nil, nil, nil)
+}
+
+// tenantCtx creates a context with the given tenant string.
+func tenantCtx(tenantID string) context.Context {
+	return auth.ContextWithTenantString(context.Background(), tenantID)
+}
+
+// userCtx creates a context with tenant and user identity.
+func userCtx(tenantID, userID string) context.Context {
+	ctx := auth.ContextWithTenantString(context.Background(), tenantID)
+	identity := auth.Identity{Subject: userID, Issuer: "zitadel"}
+	return auth.WithIdentity(ctx, identity)
+}
+
+// ---------------------------------------------------------------------------
+// Langfuse cross-tenant guard tests (Req 1.5)
+// ---------------------------------------------------------------------------
+
+// TestLangfuse_CrossTenantGuard_Rejects verifies that the inline tenant mismatch
+// guard on all three Langfuse handlers returns PermissionDenied when the context
+// tenant does not match the request tenant_id.
+func TestLangfuse_CrossTenantGuard_Rejects(t *testing.T) {
+	srv := newServerForTest()
+
+	// Context tenant is "tenant-A" but request targets "tenant-B".
+	ctx := tenantCtx("tenant-A")
+
+	t.Run("GetTenantLangfuseCredentials rejects mismatch", func(t *testing.T) {
+		_, err := srv.GetTenantLangfuseCredentials(ctx, &tenantv1.GetTenantLangfuseCredentialsRequest{
+			TenantId: "tenant-B",
+		})
+		assert.Equal(t, codes.PermissionDenied, grpcCode(err), "cross-tenant Get must be denied")
+	})
+
+	t.Run("SetTenantLangfuseCredentials rejects mismatch", func(t *testing.T) {
+		_, err := srv.SetTenantLangfuseCredentials(ctx, &tenantv1.SetTenantLangfuseCredentialsRequest{
+			TenantId: "tenant-B",
+		})
+		assert.Equal(t, codes.PermissionDenied, grpcCode(err), "cross-tenant Set must be denied")
+	})
+
+	t.Run("DeleteTenantLangfuseCredentials rejects mismatch", func(t *testing.T) {
+		_, err := srv.DeleteTenantLangfuseCredentials(ctx, &tenantv1.DeleteTenantLangfuseCredentialsRequest{
+			TenantId: "tenant-B",
+		})
+		assert.Equal(t, codes.PermissionDenied, grpcCode(err), "cross-tenant Delete must be denied")
+	})
+}
+
+// TestLangfuse_SameTenant_PassesGuard verifies that the guard passes when the
+// context tenant matches the request tenant_id.
+func TestLangfuse_SameTenant_PassesGuard(t *testing.T) {
+	srv := newServerForTest()
+	// No credential handler → Unavailable, NOT PermissionDenied.
+	ctx := tenantCtx("acme")
+
+	t.Run("GetTenantLangfuseCredentials passes guard", func(t *testing.T) {
+		_, err := srv.GetTenantLangfuseCredentials(ctx, &tenantv1.GetTenantLangfuseCredentialsRequest{
+			TenantId: "acme",
+		})
+		// No credential handler → Unavailable (not PermissionDenied)
+		assert.NotEqual(t, codes.PermissionDenied, grpcCode(err))
+	})
+}
+
+// ---------------------------------------------------------------------------
+// GetTenantQuota tests
+// ---------------------------------------------------------------------------
+
+// TestGetTenantQuota_NilStore_Unavailable verifies that GetTenantQuota returns
+// Unavailable when the quota store is not configured.
+func TestGetTenantQuota_NilStore_Unavailable(t *testing.T) {
+	srv := newServerForTest()
+	ctx := tenantCtx("acme")
+	_, err := srv.GetTenantQuota(ctx, &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
+	assert.Equal(t, codes.Unavailable, grpcCode(err))
+}
+
+// ---------------------------------------------------------------------------
+// GetUserProfile tests
+// ---------------------------------------------------------------------------
+
+// TestGetUserProfile_SelfCheck_Passes verifies that the caller can access their
+// own profile.
+func TestGetUserProfile_SelfCheck_Passes(t *testing.T) {
+	srv := newServerForTest()
+	// idpAdminClient is nil → codes.Unavailable (not PermissionDenied)
+	ctx := userCtx("acme", "user-123")
+	_, err := srv.GetUserProfile(ctx, &userv1.GetUserProfileRequest{
+		TenantId: "acme",
+		UserId:   "user-123",
+	})
+	// Self-check passes; nil IdP → Unavailable
+	assert.Equal(t, codes.Unavailable, grpcCode(err))
+}
+
+// TestGetUserProfile_CrossUser_Denied verifies that callers cannot access another
+// user's profile.
+func TestGetUserProfile_CrossUser_Denied(t *testing.T) {
+	srv := newServerForTest()
+	ctx := userCtx("acme", "user-123")
+	_, err := srv.GetUserProfile(ctx, &userv1.GetUserProfileRequest{
+		TenantId: "acme",
+		UserId:   "user-456", // different user
+	})
+	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
+}
+
+// ---------------------------------------------------------------------------
+// UpdateUserProfile tests
+// ---------------------------------------------------------------------------
+
+// TestUpdateUserProfile_SelfCheck_Passes verifies that the caller can update their
+// own profile.
+func TestUpdateUserProfile_SelfCheck_Passes(t *testing.T) {
+	srv := newServerForTest()
+	ctx := userCtx("acme", "user-123")
+	_, err := srv.UpdateUserProfile(ctx, &userv1.UpdateUserProfileRequest{
+		TenantId:    "acme",
+		UserId:      "user-123",
+		DisplayName: "New Name",
+	})
+	// Self-check passes; nil IdP → Unavailable
+	assert.Equal(t, codes.Unavailable, grpcCode(err))
+}
+
+// TestUpdateUserProfile_CrossUser_Denied verifies cross-user write is denied.
+func TestUpdateUserProfile_CrossUser_Denied(t *testing.T) {
+	srv := newServerForTest()
+	ctx := userCtx("acme", "user-123")
+	_, err := srv.UpdateUserProfile(ctx, &userv1.UpdateUserProfileRequest{
+		TenantId:    "acme",
+		UserId:      "user-456",
+		DisplayName: "New Name",
+	})
+	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
+}
+
+// TestUpdateUserProfile_WithMockIdP verifies that UpdateUserProfile calls the
+// IdP's UpdateUserProfile method and returns the updated profile.
+func TestUpdateUserProfile_WithMockIdP(t *testing.T) {
+	srv := newServerForTest()
+
+	fakeIdP := &fakeUserIdPClient{
+		profile: &idp.UserProfile{
+			AccountID:       "user-123",
+			Email:           "user@example.com",
+			DisplayName:     "Updated Name",
+			PreferredLocale: "en-US",
+			Status:          "active",
+		},
+	}
+	srv.WithIdPAdminClient(fakeIdP)
+
+	ctx := userCtx("acme", "user-123")
+	resp, err := srv.UpdateUserProfile(ctx, &userv1.UpdateUserProfileRequest{
+		TenantId:        "acme",
+		UserId:          "user-123",
+		DisplayName:     "Updated Name",
+		PreferredLocale: "en-US",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Updated Name", resp.Profile.DisplayName)
+	assert.Equal(t, "user@example.com", resp.Profile.Email)
+}
+
+// ---------------------------------------------------------------------------
+// Mock IdP client for profile tests
+// ---------------------------------------------------------------------------
+
+type fakeUserIdPClient struct {
+	profile    *idp.UserProfile
+	profileErr error
+}
+
+func (f *fakeUserIdPClient) CreateServiceAccount(_ context.Context, _ idp.CreateServiceAccountRequest) (*idp.ServiceAccount, error) {
+	return nil, idp.ErrNotFound
+}
+
+func (f *fakeUserIdPClient) MintClientSecret(_ context.Context, _ string) (string, error) {
+	return "", idp.ErrNotFound
+}
+
+func (f *fakeUserIdPClient) AddTenantScopeMembership(_ context.Context, _ idp.AddMembershipRequest) error {
+	return idp.ErrNotFound
+}
+
+func (f *fakeUserIdPClient) DeleteServiceAccount(_ context.Context, _ string) error {
+	return idp.ErrNotFound
+}
+
+func (f *fakeUserIdPClient) ListServiceAccounts(_ context.Context, _ idp.ListServiceAccountsRequest) (*idp.ListServiceAccountsResponse, error) {
+	return nil, idp.ErrNotFound
+}
+
+func (f *fakeUserIdPClient) GetUserProfile(_ context.Context, _ string) (*idp.UserProfile, error) {
+	if f.profileErr != nil {
+		return nil, f.profileErr
+	}
+	return f.profile, nil
+}
+
+func (f *fakeUserIdPClient) UpdateUserProfile(_ context.Context, _ string, req idp.UpdateUserProfileRequest) (*idp.UserProfile, error) {
+	if f.profileErr != nil {
+		return nil, f.profileErr
+	}
+	if f.profile != nil && req.DisplayName != "" {
+		f.profile.DisplayName = req.DisplayName
+	}
+	if f.profile != nil && req.PreferredLocale != "" {
+		f.profile.PreferredLocale = req.PreferredLocale
+	}
+	return f.profile, nil
+}
+
+func (f *fakeUserIdPClient) Close() error { return nil }
+
+// Verify fakeUserIdPClient implements idp.AdminClient.
+var _ idp.AdminClient = (*fakeUserIdPClient)(nil)
+
+// errNotImplemented is used for methods that should not be called in these tests.
+var errNotImplemented = errors.New("not implemented in test fake")

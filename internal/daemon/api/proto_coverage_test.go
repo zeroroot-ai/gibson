@@ -9,9 +9,10 @@ import (
 
 	// Blank imports pull the generated Go proto packages into the test
 	// binary so their init() funcs register their service/method descriptors
-	// with protoregistry.GlobalFiles. The package-level import of this
-	// package itself (the one declaring DaemonAdminService) already provides
-	// gibson.daemon.admin.v1; these imports cover the other services.
+	// with protoregistry.GlobalFiles.
+	_ "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
+	_ "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
+	_ "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
 	_ "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	_ "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	_ "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
@@ -40,10 +41,12 @@ import (
 // When a new service is added to the main daemon gRPC server, add its
 // proto package here to extend the coverage gate.
 var coveredProtoPackages = map[string]struct{}{
-	"gibson.daemon.v1":       {},
-	"gibson.daemon.admin.v1": {},
-	"gibson.component.v1":    {},
-	"intelligence.v1":        {},
+	"gibson.daemon.v1":    {},
+	"gibson.component.v1": {},
+	"intelligence.v1":     {},
+	"gibson.tenant.v1":    {},
+	"gibson.platform.v1":  {},
+	"gibson.user.v1":      {},
 }
 
 // discoverGibsonRPCs walks protoregistry.GlobalFiles and returns the

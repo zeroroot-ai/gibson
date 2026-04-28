@@ -17,7 +17,7 @@ import (
 // Added by the declarative-rbac-framework spec (Requirement 9.4).
 const (
 	// GibsonAuthzMethod is the fully-qualified gRPC method path evaluated.
-	// Example: "/gibson.daemon.admin.v1.DaemonAdminService/ProvisionTenant".
+	// Example: "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity".
 	GibsonAuthzMethod = "gibson.authz.method"
 
 	// GibsonAuthzSubject is the authenticated identity's Subject field.

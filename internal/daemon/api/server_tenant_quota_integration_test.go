@@ -3,7 +3,7 @@
 package api
 
 // server_tenant_quota_integration_test.go — end-to-end test of
-// DaemonAdminService.GetTenantQuota.
+// TenantAdminService.GetTenantQuota.
 //
 // Spec: access-matrix-finish task 24, R4 AC 2 + 7.
 //

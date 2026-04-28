@@ -19,7 +19,7 @@ import (
 // The daemon emits these when GIBSON_IDENTITY_TRACE=1 is set on the pod.
 // See internal/identity/interceptor.go for the exact format.
 type IdentityDebugLine struct {
-	// Method is the gRPC full method name, e.g. "/gibson.daemon.admin.v1.DaemonAdminService/UpsertTenantQuota"
+	// Method is the gRPC full method name, e.g. "/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota"
 	Method string
 	// MetadataKeys is the full list of incoming gRPC metadata keys (sorted).
 	MetadataKeys []string

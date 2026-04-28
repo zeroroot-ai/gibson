@@ -55,7 +55,7 @@ var ErrUnauthorizedAdmin = errors.New("admin pool: caller does not have platform
 type AuditEmitter interface {
 	// EmitAdminAcquire records that an AdminConn was acquired. The method
 	// name should be the full gRPC method string (e.g.,
-	// "/gibson.daemon.admin.v1.DaemonAdminService/AggregateUsage") or a
+	// "/gibson.tenant.v1.TenantAdminService/AggregateUsage") or a
 	// descriptive label when called outside a gRPC context.
 	EmitAdminAcquire(ctx context.Context, subject, rpcMethod string)
 }

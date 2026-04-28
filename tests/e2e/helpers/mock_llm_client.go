@@ -24,7 +24,7 @@ import (
 	"context"
 	"fmt"
 
-	adminpb "github.com/zero-day-ai/gibson/internal/daemon/api"
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 )
 
 const (
@@ -64,9 +64,9 @@ const (
 // Security: the mock token is a fixed test-only string — never log it.
 //
 // Requirements: R3.1, R3.2.
-func RegisterMockProvider(ctx context.Context, adminClient adminpb.DaemonAdminServiceClient) error {
-	resp, err := adminClient.CreateProvider(ctx, &adminpb.CreateProviderRequest{
-		Input: &adminpb.ProviderConfigInput{
+func RegisterMockProvider(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+	resp, err := adminClient.CreateProvider(ctx, &tenantv1.CreateProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{
 			Name:         MockProviderName,
 			Type:         MockProviderType,
 			DefaultModel: MockProviderDefaultModel,
@@ -98,10 +98,10 @@ func RegisterMockProvider(ctx context.Context, adminClient adminpb.DaemonAdminSe
 // Updates the provider via UpdateProvider RPC with the "inject_error" credential.
 //
 // Requirements: R4.3.
-func InjectErrorMode(ctx context.Context, adminClient adminpb.DaemonAdminServiceClient) error {
-	_, err := adminClient.UpdateProvider(ctx, &adminpb.UpdateProviderRequest{
+func InjectErrorMode(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+	_, err := adminClient.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{
 		Name: MockProviderName,
-		Input: &adminpb.ProviderConfigInput{
+		Input: &tenantv1.ProviderConfigInput{
 			Name:         MockProviderName,
 			Type:         MockProviderType,
 			DefaultModel: MockProviderDefaultModel,
@@ -122,10 +122,10 @@ func InjectErrorMode(ctx context.Context, adminClient adminpb.DaemonAdminService
 // LLM call. Used by the R4.4 deadline-exceeded negative test.
 //
 // Requirements: R4.4.
-func InjectSlowMode(ctx context.Context, adminClient adminpb.DaemonAdminServiceClient) error {
-	_, err := adminClient.UpdateProvider(ctx, &adminpb.UpdateProviderRequest{
+func InjectSlowMode(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+	_, err := adminClient.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{
 		Name: MockProviderName,
-		Input: &adminpb.ProviderConfigInput{
+		Input: &tenantv1.ProviderConfigInput{
 			Name:         MockProviderName,
 			Type:         MockProviderType,
 			DefaultModel: MockProviderDefaultModel,
@@ -146,10 +146,10 @@ func InjectSlowMode(ctx context.Context, adminClient adminpb.DaemonAdminServiceC
 // Removes any error or slow-mode injection. Idempotent.
 //
 // Requirements: R3.2 (deterministic responses).
-func ResetMockProvider(ctx context.Context, adminClient adminpb.DaemonAdminServiceClient) error {
-	_, err := adminClient.UpdateProvider(ctx, &adminpb.UpdateProviderRequest{
+func ResetMockProvider(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+	_, err := adminClient.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{
 		Name: MockProviderName,
-		Input: &adminpb.ProviderConfigInput{
+		Input: &tenantv1.ProviderConfigInput{
 			Name:         MockProviderName,
 			Type:         MockProviderType,
 			DefaultModel: MockProviderDefaultModel,
@@ -174,8 +174,8 @@ func ResetMockProvider(ctx context.Context, adminClient adminpb.DaemonAdminServi
 // returned (tolerates NotFound).
 //
 // Requirements: R3.1.
-func UnregisterMockProvider(ctx context.Context, adminClient adminpb.DaemonAdminServiceClient) error {
-	_, err := adminClient.DeleteProvider(ctx, &adminpb.DeleteProviderRequest{
+func UnregisterMockProvider(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+	_, err := adminClient.DeleteProvider(ctx, &tenantv1.DeleteProviderRequest{
 		Name: MockProviderName,
 	})
 	if err != nil {

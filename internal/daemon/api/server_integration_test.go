@@ -3,7 +3,7 @@
 package api
 
 // server_integration_test.go — integration smoke tests for the eight new
-// DaemonAdminService RPCs introduced by the prod-unimplemented-apis spec.
+// RPCs introduced by the prod-unimplemented-apis spec.
 //
 // Purpose:
 //   Each test constructs a DaemonServer with all new stores wired (using

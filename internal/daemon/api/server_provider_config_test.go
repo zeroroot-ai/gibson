@@ -17,6 +17,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -181,21 +183,21 @@ func serverWithStoreAndAudit(store providerConfigStoreIface) (*DaemonServer, *mo
 
 func TestListProviders_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.ListProviders(tenantCtx("acme"), &ListProvidersRequest{})
+	_, err := s.ListProviders(tenantCtx("acme"), &tenantv1.ListProvidersRequest{})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestListProviders_StoreError_Internal(t *testing.T) {
 	store := &mockProviderStore{listErr: assert.AnError}
 	s := serverWithStore(store)
-	_, err := s.ListProviders(tenantCtx("acme"), &ListProvidersRequest{})
+	_, err := s.ListProviders(tenantCtx("acme"), &tenantv1.ListProvidersRequest{})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
 func TestListProviders_Empty_OK(t *testing.T) {
 	store := &mockProviderStore{listOut: nil}
 	s := serverWithStore(store)
-	resp, err := s.ListProviders(tenantCtx("acme"), &ListProvidersRequest{})
+	resp, err := s.ListProviders(tenantCtx("acme"), &tenantv1.ListProvidersRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Empty(t, resp.Providers)
@@ -209,7 +211,7 @@ func TestListProviders_Multiple_ReturnedInOrder(t *testing.T) {
 		},
 	}
 	s := serverWithStore(store)
-	resp, err := s.ListProviders(tenantCtx("acme"), &ListProvidersRequest{})
+	resp, err := s.ListProviders(tenantCtx("acme"), &tenantv1.ListProvidersRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.Providers, 2)
 	assert.Equal(t, "openai-primary", resp.Providers[0].Name)
@@ -224,21 +226,21 @@ func TestListProviders_Multiple_ReturnedInOrder(t *testing.T) {
 
 func TestGetProvider_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.GetProvider(tenantCtx("acme"), &GetProviderRequest{Name: "x"})
+	_, err := s.GetProvider(tenantCtx("acme"), &tenantv1.GetProviderRequest{Name: "x"})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestGetProvider_NotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{getErr: providerconfig.ErrNotFound}
 	s := serverWithStore(store)
-	_, err := s.GetProvider(tenantCtx("acme"), &GetProviderRequest{Name: "missing"})
+	_, err := s.GetProvider(tenantCtx("acme"), &tenantv1.GetProviderRequest{Name: "missing"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
 
 func TestGetProvider_StoreError_Internal(t *testing.T) {
 	store := &mockProviderStore{getErr: assert.AnError}
 	s := serverWithStore(store)
-	_, err := s.GetProvider(tenantCtx("acme"), &GetProviderRequest{Name: "x"})
+	_, err := s.GetProvider(tenantCtx("acme"), &tenantv1.GetProviderRequest{Name: "x"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
@@ -246,7 +248,7 @@ func TestGetProvider_Success_ReturnsRecord(t *testing.T) {
 	cfg := fakeProviderRecord("openai-primary")
 	store := &mockProviderStore{getOut: cfg}
 	s := serverWithStore(store)
-	resp, err := s.GetProvider(tenantCtx("acme"), &GetProviderRequest{Name: "openai-primary"})
+	resp, err := s.GetProvider(tenantCtx("acme"), &tenantv1.GetProviderRequest{Name: "openai-primary"})
 	require.NoError(t, err)
 	require.NotNil(t, resp.Provider)
 	assert.Equal(t, "openai-primary", resp.Provider.Name)
@@ -260,24 +262,24 @@ func TestGetProvider_Success_ReturnsRecord(t *testing.T) {
 
 func TestCreateProvider_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.CreateProvider(tenantCtx("acme"), &CreateProviderRequest{
-		Input: &ProviderConfigInput{Name: "p", Type: "openai"},
+	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{Name: "p", Type: "openai"},
 	})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestCreateProvider_InvalidType_InvalidArgument(t *testing.T) {
 	s := serverWithStore(&mockProviderStore{})
-	_, err := s.CreateProvider(tenantCtx("acme"), &CreateProviderRequest{
-		Input: &ProviderConfigInput{Name: "p", Type: "made-up-provider"},
+	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{Name: "p", Type: "made-up-provider"},
 	})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestCreateProvider_CustomType_InvalidArgument(t *testing.T) {
 	s := serverWithStore(&mockProviderStore{})
-	_, err := s.CreateProvider(tenantCtx("acme"), &CreateProviderRequest{
-		Input: &ProviderConfigInput{Name: "p", Type: "custom"},
+	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{Name: "p", Type: "custom"},
 	})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
@@ -285,8 +287,8 @@ func TestCreateProvider_CustomType_InvalidArgument(t *testing.T) {
 func TestCreateProvider_AlreadyExists_AlreadyExists(t *testing.T) {
 	store := &mockProviderStore{createErr: providerconfig.ErrAlreadyExists}
 	s := serverWithStore(store)
-	_, err := s.CreateProvider(tenantCtx("acme"), &CreateProviderRequest{
-		Input: &ProviderConfigInput{Name: "dup", Type: "openai"},
+	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{Name: "dup", Type: "openai"},
 	})
 	assert.Equal(t, codes.AlreadyExists, grpcCode(err))
 }
@@ -294,8 +296,8 @@ func TestCreateProvider_AlreadyExists_AlreadyExists(t *testing.T) {
 func TestCreateProvider_StoreError_Internal(t *testing.T) {
 	store := &mockProviderStore{createErr: assert.AnError}
 	s := serverWithStore(store)
-	_, err := s.CreateProvider(tenantCtx("acme"), &CreateProviderRequest{
-		Input: &ProviderConfigInput{Name: "p", Type: "openai"},
+	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{Name: "p", Type: "openai"},
 	})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
@@ -305,8 +307,8 @@ func TestCreateProvider_Success_ReturnsRecordAndEmitsAudit(t *testing.T) {
 	store := &mockProviderStore{createOut: cfg}
 	s := serverWithStore(store)
 	// auditLogger is nil → emitProviderAudit is a no-op; no panic.
-	resp, err := s.CreateProvider(tenantCtx("acme"), &CreateProviderRequest{
-		Input: &ProviderConfigInput{
+	resp, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{
 			Name:         "openai-new",
 			Type:         "openai",
 			DefaultModel: "gpt-4o-mini",
@@ -325,8 +327,8 @@ func TestCreateProvider_CredentialsNotInResponse(t *testing.T) {
 	cfg := fakeProviderRecord("p")
 	store := &mockProviderStore{createOut: cfg}
 	s := serverWithStore(store)
-	resp, err := s.CreateProvider(tenantCtx("acme"), &CreateProviderRequest{
-		Input: &ProviderConfigInput{
+	resp, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{
 			Name:        "p",
 			Type:        "openai",
 			Credentials: map[string]string{"api_key": "sk-super-secret-key-plaintext"},
@@ -347,9 +349,9 @@ func TestCreateProvider_CredentialsNotInResponse(t *testing.T) {
 
 func TestUpdateProvider_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.UpdateProvider(tenantCtx("acme"), &UpdateProviderRequest{
+	_, err := s.UpdateProvider(tenantCtx("acme"), &tenantv1.UpdateProviderRequest{
 		Name:  "p",
-		Input: &ProviderConfigInput{Type: "openai"},
+		Input: &tenantv1.ProviderConfigInput{Type: "openai"},
 	})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
@@ -357,9 +359,9 @@ func TestUpdateProvider_NilStore_FailedPrecondition(t *testing.T) {
 func TestUpdateProvider_NotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{updateErr: providerconfig.ErrNotFound}
 	s := serverWithStore(store)
-	_, err := s.UpdateProvider(tenantCtx("acme"), &UpdateProviderRequest{
+	_, err := s.UpdateProvider(tenantCtx("acme"), &tenantv1.UpdateProviderRequest{
 		Name:  "missing",
-		Input: &ProviderConfigInput{Type: "openai"},
+		Input: &tenantv1.ProviderConfigInput{Type: "openai"},
 	})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
@@ -368,9 +370,9 @@ func TestUpdateProvider_Success_PassesNameToStore(t *testing.T) {
 	cfg := fakeProviderRecord("openai-updated")
 	store := &mockProviderStore{updateOut: cfg}
 	s := serverWithStore(store)
-	resp, err := s.UpdateProvider(tenantCtx("acme"), &UpdateProviderRequest{
+	resp, err := s.UpdateProvider(tenantCtx("acme"), &tenantv1.UpdateProviderRequest{
 		Name:  "openai-updated",
-		Input: &ProviderConfigInput{Type: "openai", DefaultModel: "gpt-4o"},
+		Input: &tenantv1.ProviderConfigInput{Type: "openai", DefaultModel: "gpt-4o"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "openai-updated", store.capturedUpdateName)
@@ -383,21 +385,21 @@ func TestUpdateProvider_Success_PassesNameToStore(t *testing.T) {
 
 func TestDeleteProvider_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.DeleteProvider(tenantCtx("acme"), &DeleteProviderRequest{Name: "p"})
+	_, err := s.DeleteProvider(tenantCtx("acme"), &tenantv1.DeleteProviderRequest{Name: "p"})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestDeleteProvider_NotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{deleteErr: providerconfig.ErrNotFound}
 	s := serverWithStore(store)
-	_, err := s.DeleteProvider(tenantCtx("acme"), &DeleteProviderRequest{Name: "gone"})
+	_, err := s.DeleteProvider(tenantCtx("acme"), &tenantv1.DeleteProviderRequest{Name: "gone"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
 
 func TestDeleteProvider_Success_PassesNameToStore(t *testing.T) {
 	store := &mockProviderStore{}
 	s := serverWithStore(store)
-	_, err := s.DeleteProvider(tenantCtx("acme"), &DeleteProviderRequest{Name: "old-provider"})
+	_, err := s.DeleteProvider(tenantCtx("acme"), &tenantv1.DeleteProviderRequest{Name: "old-provider"})
 	require.NoError(t, err)
 	assert.Equal(t, "old-provider", store.capturedDeleteName)
 }
@@ -408,14 +410,14 @@ func TestDeleteProvider_Success_PassesNameToStore(t *testing.T) {
 
 func TestGetDefaultProvider_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.GetDefaultProvider(tenantCtx("acme"), &GetDefaultProviderRequest{})
+	_, err := s.GetDefaultProvider(tenantCtx("acme"), &tenantv1.GetDefaultProviderRequest{})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestGetDefaultProvider_NotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{defaultErr: providerconfig.ErrNotFound}
 	s := serverWithStore(store)
-	_, err := s.GetDefaultProvider(tenantCtx("acme"), &GetDefaultProviderRequest{})
+	_, err := s.GetDefaultProvider(tenantCtx("acme"), &tenantv1.GetDefaultProviderRequest{})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
 
@@ -424,7 +426,7 @@ func TestGetDefaultProvider_Success(t *testing.T) {
 	cfg.IsDefault = true
 	store := &mockProviderStore{defaultOut: cfg}
 	s := serverWithStore(store)
-	resp, err := s.GetDefaultProvider(tenantCtx("acme"), &GetDefaultProviderRequest{})
+	resp, err := s.GetDefaultProvider(tenantCtx("acme"), &tenantv1.GetDefaultProviderRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, resp.Provider)
 	assert.Equal(t, "default-prov", resp.Provider.Name)
@@ -437,14 +439,14 @@ func TestGetDefaultProvider_Success(t *testing.T) {
 
 func TestSetDefaultProvider_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.SetDefaultProvider(tenantCtx("acme"), &SetDefaultProviderRequest{Name: "p"})
+	_, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "p"})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestSetDefaultProvider_StoreError_Internal(t *testing.T) {
 	store := &mockProviderStore{setDefErr: assert.AnError}
 	s := serverWithStore(store)
-	_, err := s.SetDefaultProvider(tenantCtx("acme"), &SetDefaultProviderRequest{Name: "p"})
+	_, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "p"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
@@ -453,7 +455,7 @@ func TestSetDefaultProvider_Success_PassesNameAndEmitsAudit(t *testing.T) {
 	cfg.IsDefault = true
 	store := &mockProviderStore{getOut: cfg}
 	s := serverWithStore(store)
-	resp, err := s.SetDefaultProvider(tenantCtx("acme"), &SetDefaultProviderRequest{Name: "primary"})
+	resp, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "primary"})
 	require.NoError(t, err)
 	assert.Equal(t, "primary", store.capturedDefaultName)
 	// Response should contain the updated record from the follow-up Get.
@@ -466,7 +468,7 @@ func TestSetDefaultProvider_GetFailureAfterSet_ReturnsEmpty(t *testing.T) {
 	// rather than propagating the read error.
 	store := &mockProviderStore{getErr: assert.AnError}
 	s := serverWithStore(store)
-	resp, err := s.SetDefaultProvider(tenantCtx("acme"), &SetDefaultProviderRequest{Name: "p"})
+	resp, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "p"})
 	require.NoError(t, err) // no gRPC-level error
 	assert.Nil(t, resp.Provider)
 }
@@ -477,14 +479,14 @@ func TestSetDefaultProvider_GetFailureAfterSet_ReturnsEmpty(t *testing.T) {
 
 func TestGetFallbackChain_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.GetFallbackChain(tenantCtx("acme"), &GetFallbackChainRequest{})
+	_, err := s.GetFallbackChain(tenantCtx("acme"), &tenantv1.GetFallbackChainRequest{})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestGetFallbackChain_Success_ReturnsList(t *testing.T) {
 	store := &mockProviderStore{chainOut: []string{"openai-primary", "anthropic-backup"}}
 	s := serverWithStore(store)
-	resp, err := s.GetFallbackChain(tenantCtx("acme"), &GetFallbackChainRequest{})
+	resp, err := s.GetFallbackChain(tenantCtx("acme"), &tenantv1.GetFallbackChainRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"openai-primary", "anthropic-backup"}, resp.ProviderNames)
 }
@@ -492,7 +494,7 @@ func TestGetFallbackChain_Success_ReturnsList(t *testing.T) {
 func TestGetFallbackChain_Empty_ReturnsNil(t *testing.T) {
 	store := &mockProviderStore{chainOut: nil}
 	s := serverWithStore(store)
-	resp, err := s.GetFallbackChain(tenantCtx("acme"), &GetFallbackChainRequest{})
+	resp, err := s.GetFallbackChain(tenantCtx("acme"), &tenantv1.GetFallbackChainRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, resp.ProviderNames)
 }
@@ -503,7 +505,7 @@ func TestGetFallbackChain_Empty_ReturnsNil(t *testing.T) {
 
 func TestSetFallbackChain_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.SetFallbackChain(tenantCtx("acme"), &SetFallbackChainRequest{
+	_, err := s.SetFallbackChain(tenantCtx("acme"), &tenantv1.SetFallbackChainRequest{
 		ProviderNames: []string{"p1"},
 	})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
@@ -512,7 +514,7 @@ func TestSetFallbackChain_NilStore_FailedPrecondition(t *testing.T) {
 func TestSetFallbackChain_StoreError_Internal(t *testing.T) {
 	store := &mockProviderStore{setChainErr: assert.AnError}
 	s := serverWithStore(store)
-	_, err := s.SetFallbackChain(tenantCtx("acme"), &SetFallbackChainRequest{
+	_, err := s.SetFallbackChain(tenantCtx("acme"), &tenantv1.SetFallbackChainRequest{
 		ProviderNames: []string{"p1"},
 	})
 	assert.Equal(t, codes.Internal, grpcCode(err))
@@ -521,7 +523,7 @@ func TestSetFallbackChain_StoreError_Internal(t *testing.T) {
 func TestSetFallbackChain_Success_StoreAndRespond(t *testing.T) {
 	store := &mockProviderStore{}
 	s := serverWithStore(store)
-	resp, err := s.SetFallbackChain(tenantCtx("acme"), &SetFallbackChainRequest{
+	resp, err := s.SetFallbackChain(tenantCtx("acme"), &tenantv1.SetFallbackChainRequest{
 		ProviderNames: []string{"openai-primary", "anthropic-backup", "bedrock-fallback"},
 	})
 	require.NoError(t, err)
@@ -532,7 +534,7 @@ func TestSetFallbackChain_Success_StoreAndRespond(t *testing.T) {
 func TestSetFallbackChain_EmptyList_OK(t *testing.T) {
 	store := &mockProviderStore{}
 	s := serverWithStore(store)
-	resp, err := s.SetFallbackChain(tenantCtx("acme"), &SetFallbackChainRequest{
+	resp, err := s.SetFallbackChain(tenantCtx("acme"), &tenantv1.SetFallbackChainRequest{
 		ProviderNames: []string{},
 	})
 	require.NoError(t, err)
@@ -545,14 +547,14 @@ func TestSetFallbackChain_EmptyList_OK(t *testing.T) {
 
 func TestGetProviderHealth_NilStore_FailedPrecondition(t *testing.T) {
 	s := blankServer()
-	_, err := s.GetProviderHealth(tenantCtx("acme"), &GetProviderHealthRequest{Name: "p"})
+	_, err := s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "p"})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestGetProviderHealth_ResolveNotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{resolveErr: providerconfig.ErrNotFound}
 	s := serverWithStore(store)
-	_, err := s.GetProviderHealth(tenantCtx("acme"), &GetProviderHealthRequest{Name: "missing"})
+	_, err := s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "missing"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
 
@@ -570,7 +572,7 @@ func TestGetProviderHealth_UnknownProviderType_ReturnsUnhealthy(t *testing.T) {
 		},
 	}
 	s := serverWithStore(store)
-	resp, err := s.GetProviderHealth(tenantCtx("acme"), &GetProviderHealthRequest{Name: "bad"})
+	resp, err := s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "bad"})
 	require.NoError(t, err) // handler-level: no gRPC error
 	assert.False(t, resp.Healthy)
 	assert.NotEmpty(t, resp.Error)
@@ -582,22 +584,22 @@ func TestGetProviderHealth_UnknownProviderType_ReturnsUnhealthy(t *testing.T) {
 
 func TestTestProvider_NilInput_InvalidArgument(t *testing.T) {
 	s := serverWithStore(&mockProviderStore{})
-	_, err := s.TestProvider(tenantCtx("acme"), &TestProviderRequest{Input: nil})
+	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Input: nil})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestTestProvider_InvalidType_InvalidArgument(t *testing.T) {
 	s := serverWithStore(&mockProviderStore{})
-	_, err := s.TestProvider(tenantCtx("acme"), &TestProviderRequest{
-		Input: &ProviderConfigInput{Type: "not-a-real-provider"},
+	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{Type: "not-a-real-provider"},
 	})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestTestProvider_CustomType_InvalidArgument(t *testing.T) {
 	s := serverWithStore(&mockProviderStore{})
-	_, err := s.TestProvider(tenantCtx("acme"), &TestProviderRequest{
-		Input: &ProviderConfigInput{Type: "custom"},
+	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{Type: "custom"},
 	})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
@@ -612,8 +614,8 @@ func TestTestProvider_ProviderConstructionFails_ReturnsFalseOkNoGRPCError(t *tes
 	// GetProviderHealth handler or mock the factory directly.
 	// This test verifies the input-validation → codes.InvalidArgument path.
 	s := blankServer()
-	_, err := s.TestProvider(tenantCtx("acme"), &TestProviderRequest{
-		Input: &ProviderConfigInput{Type: "unknown-x"},
+	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{Type: "unknown-x"},
 	})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
@@ -641,8 +643,8 @@ func TestTestProvider_CredentialsNotEchoedBack(t *testing.T) {
 	// The test catches any accidental echo of credentials in ok/error/model fields.
 	s := blankServer()
 	// providerConfig is nil for TestProvider — it doesn't read from the store.
-	resp, err := s.TestProvider(tenantCtx("acme"), &TestProviderRequest{
-		Input: &ProviderConfigInput{
+	resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
+		Input: &tenantv1.ProviderConfigInput{
 			Name:         "my-ollama",
 			Type:         "ollama",
 			DefaultModel: "llama3",
@@ -718,7 +720,7 @@ func TestFromProtoInput_NilReturnsEmpty(t *testing.T) {
 }
 
 func TestFromProtoInput_CredentialsCopied(t *testing.T) {
-	in := &ProviderConfigInput{
+	in := &tenantv1.ProviderConfigInput{
 		Name:         "p",
 		Type:         "anthropic",
 		DefaultModel: "claude-3-5-sonnet-20241022",
@@ -743,13 +745,13 @@ func TestValidateProviderInput_NilInput_Error(t *testing.T) {
 }
 
 func TestValidateProviderInput_CustomType_Error(t *testing.T) {
-	err := validateProviderInput(&ProviderConfigInput{Type: "custom"})
+	err := validateProviderInput(&tenantv1.ProviderConfigInput{Type: "custom"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "operator-only")
 }
 
 func TestValidateProviderInput_UnknownType_Error(t *testing.T) {
-	err := validateProviderInput(&ProviderConfigInput{Type: "notreal"})
+	err := validateProviderInput(&tenantv1.ProviderConfigInput{Type: "notreal"})
 	require.Error(t, err)
 }
 
@@ -759,7 +761,7 @@ func TestValidateProviderInput_KnownTypes_NoError(t *testing.T) {
 			continue
 		}
 		t.Run(string(typ), func(t *testing.T) {
-			err := validateProviderInput(&ProviderConfigInput{Type: string(typ)})
+			err := validateProviderInput(&tenantv1.ProviderConfigInput{Type: string(typ)})
 			assert.NoError(t, err, "supported type %q must validate successfully", typ)
 		})
 	}

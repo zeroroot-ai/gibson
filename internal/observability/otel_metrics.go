@@ -708,8 +708,8 @@ func (r *OTelMetricsRecorder) RecordDecision(ctx context.Context, action string)
 //
 // Example:
 //
-//	recorder.RecordAuthzDecision(ctx, "allow", "/gibson.daemon.admin.v1.DaemonAdminService/ProvisionTenant", "tenants:provision")
-//	recorder.RecordAuthzDecision(ctx, "deny", "/gibson.daemon.admin.v1.DaemonAdminService/ListTenants", "tenants:list-all")
+//	recorder.RecordAuthzDecision(ctx, "allow", "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity", "tenants:provision")
+//	recorder.RecordAuthzDecision(ctx, "deny", "/gibson.tenant.v1.TenantAdminService/ListAgentIdentities", "tenants:list-all")
 func (r *OTelMetricsRecorder) RecordAuthzDecision(ctx context.Context, decision, method, permission string) {
 	if r == nil || r.authzDecisionsTotal == nil {
 		return

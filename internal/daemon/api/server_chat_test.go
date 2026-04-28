@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+
+	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -45,21 +47,21 @@ func TestListConversations_EmptyTenantIDFallsBackToSystemTenant_NilStoreReturnsE
 	// Empty TenantId falls back to auth.TenantFromContext (returns SystemTenant).
 	// With nil conversationStore, the handler returns empty list successfully.
 	srv := blankServer()
-	resp, err := srv.ListConversations(context.Background(), &ListConversationsRequest{TenantId: "", UserId: "u1"})
+	resp, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "", UserId: "u1"})
 	require.NoError(t, err)
 	assert.Empty(t, resp.Conversations)
 }
 
 func TestListConversations_MissingUserID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.ListConversations(context.Background(), &ListConversationsRequest{TenantId: "acme", UserId: ""})
+	_, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: ""})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestListConversations_NilStore_ReturnsEmpty(t *testing.T) {
 	// Nil conversationStore → returns empty list, not error.
 	srv := blankServer()
-	resp, err := srv.ListConversations(context.Background(), &ListConversationsRequest{TenantId: "acme", UserId: "u1"})
+	resp, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
 	require.NoError(t, err)
 	assert.Empty(t, resp.Conversations)
 }
@@ -67,7 +69,7 @@ func TestListConversations_NilStore_ReturnsEmpty(t *testing.T) {
 func TestListConversations_StoreError_Internal(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{listErr: assert.AnError}
-	_, err := srv.ListConversations(context.Background(), &ListConversationsRequest{TenantId: "acme", UserId: "u1"})
+	_, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
@@ -86,7 +88,7 @@ func TestListConversations_Success_ReturnsMapped(t *testing.T) {
 			},
 		},
 	}
-	resp, err := srv.ListConversations(context.Background(), &ListConversationsRequest{TenantId: "acme", UserId: "u1"})
+	resp, err := srv.ListConversations(context.Background(), &userv1.ListConversationsRequest{TenantId: "acme", UserId: "u1"})
 	require.NoError(t, err)
 	require.Len(t, resp.Conversations, 1)
 	assert.Equal(t, "c1", resp.Conversations[0].Id)
@@ -102,7 +104,7 @@ func TestGetConversation_EmptyTenantIDFallsBackToSystemTenant_NilStoreNotFound(t
 	// Empty TenantId falls back to auth.TenantFromContext (returns SystemTenant).
 	// With nil conversationStore, the handler returns NotFound.
 	srv := blankServer()
-	_, err := srv.GetConversation(context.Background(), &GetConversationRequest{
+	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
 		TenantId:       "",
 		ConversationId: "c1",
 	})
@@ -111,7 +113,7 @@ func TestGetConversation_EmptyTenantIDFallsBackToSystemTenant_NilStoreNotFound(t
 
 func TestGetConversation_MissingConversationID_InvalidArgument(t *testing.T) {
 	srv := blankServer()
-	_, err := srv.GetConversation(context.Background(), &GetConversationRequest{
+	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "",
 	})
@@ -121,7 +123,7 @@ func TestGetConversation_MissingConversationID_InvalidArgument(t *testing.T) {
 func TestGetConversation_NilStore_NotFound(t *testing.T) {
 	// Nil conversationStore → NotFound (no store = conversation cannot exist).
 	srv := blankServer()
-	_, err := srv.GetConversation(context.Background(), &GetConversationRequest{
+	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
@@ -131,7 +133,7 @@ func TestGetConversation_NilStore_NotFound(t *testing.T) {
 func TestGetConversation_StoreError_NotFound(t *testing.T) {
 	srv := blankServer()
 	srv.conversationStore = &mockConversationStore{getErr: assert.AnError}
-	_, err := srv.GetConversation(context.Background(), &GetConversationRequest{
+	_, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
@@ -149,7 +151,7 @@ func TestGetConversation_Success_ReturnsMappedMessages(t *testing.T) {
 			{ID: "m2", Role: "assistant", Content: "Hi there", CreatedAtUnix: 200},
 		},
 	}
-	resp, err := srv.GetConversation(context.Background(), &GetConversationRequest{
+	resp, err := srv.GetConversation(context.Background(), &userv1.GetConversationRequest{
 		TenantId:       "acme",
 		ConversationId: "c1",
 	})
