@@ -22,7 +22,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/finding"
-	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/manifest"
@@ -33,6 +32,7 @@ import (
 	"github.com/zero-day-ai/gibson/pkg/version"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // authzIface is the narrow subset of authz.Authorizer that the DaemonServer
@@ -2478,9 +2478,8 @@ func (s *DaemonServer) CreateAPIKey(ctx context.Context, req *CreateAPIKeyReques
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
 	}
 
-	// Check caller's tenant matches target tenant (unless cross-tenant capable).
-	// IsCrossTenantCaller identifies platform-operator callers by SPIFFE issuer.
-	if !auth.IsCrossTenantCaller(callerID) && auth.TenantStringFromContext(ctx) != req.TenantId {
+	// Check caller's tenant matches target tenant (defense-in-depth; primary gate is FGA via Envoy).
+	if auth.TenantStringFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 
@@ -2516,11 +2515,10 @@ func (s *DaemonServer) ListAPIKeys(ctx context.Context, req *ListAPIKeysRequest)
 	// Authorization enforced by the FGA interceptor at the Envoy layer.
 	// Tenant isolation (non-cross-tenant callers may only target their own
 	// tenant) is verified here as parameter validation.
-	callerID, err := auth.IdentityFromContext(ctx)
-	if err != nil {
+	if _, err := auth.IdentityFromContext(ctx); err != nil {
 		return nil, status_grpc.Error(codes.Unauthenticated, "not authenticated")
 	}
-	if !auth.IsCrossTenantCaller(callerID) && auth.TenantStringFromContext(ctx) != req.TenantId {
+	if auth.TenantStringFromContext(ctx) != req.TenantId {
 		return nil, status_grpc.Error(codes.PermissionDenied, "access denied: wrong tenant")
 	}
 

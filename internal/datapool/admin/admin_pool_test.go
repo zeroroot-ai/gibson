@@ -168,7 +168,7 @@ func TestAcquire_DeniedWhenFGADenies(t *testing.T) {
 
 	identity := auth.Identity{
 		Subject: "user-alice",
-		Issuer:  auth.IssuerZitadel,
+		Issuer:  auth.IssuerOIDC,
 	}
 	ctx := auth.WithIdentity(context.Background(), identity)
 
@@ -196,7 +196,7 @@ func TestAcquire_DeniedWhenFGAErrors(t *testing.T) {
 
 	ap := newTestAdminPool(t, fga, emitter, pool)
 
-	identity := auth.Identity{Subject: "user-bob", Issuer: auth.IssuerZitadel}
+	identity := auth.Identity{Subject: "user-bob", Issuer: auth.IssuerOIDC}
 	ctx := auth.WithIdentity(context.Background(), identity)
 
 	_, err := ap.Acquire(ctx)
@@ -213,7 +213,7 @@ func TestAcquire_AllowedEmitsAuditAndReturnsConn(t *testing.T) {
 
 	ap := newTestAdminPool(t, fga, emitter, pool)
 
-	identity := auth.Identity{Subject: "platform-svc", Issuer: auth.IssuerZitadel}
+	identity := auth.Identity{Subject: "platform-svc", Issuer: auth.IssuerOIDC}
 	ctx := auth.WithIdentity(context.Background(), identity)
 
 	conn, err := ap.Acquire(ctx)
@@ -239,7 +239,7 @@ func TestAcquire_IdempotentRelease(t *testing.T) {
 
 	ap := newTestAdminPool(t, fga, emitter, pool)
 
-	identity := auth.Identity{Subject: "platform-svc", Issuer: auth.IssuerZitadel}
+	identity := auth.Identity{Subject: "platform-svc", Issuer: auth.IssuerOIDC}
 	ctx := auth.WithIdentity(context.Background(), identity)
 
 	conn, err := ap.Acquire(ctx)
@@ -263,7 +263,7 @@ func mustTenant(t *testing.T, s string) auth.TenantID {
 
 func acquireAdminConn(t *testing.T, ap *admin.AdminPool, subject string) *datapool.AdminConn {
 	t.Helper()
-	identity := auth.Identity{Subject: subject, Issuer: auth.IssuerZitadel}
+	identity := auth.Identity{Subject: subject, Issuer: auth.IssuerOIDC}
 	ctx := auth.WithIdentity(context.Background(), identity)
 	conn, err := ap.Acquire(ctx)
 	require.NoError(t, err)

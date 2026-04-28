@@ -451,6 +451,8 @@ github.com/zero-day-ai/sdk v0.83.0 h1:FCsgjvcAfhg1KJn44Tw8gp6Au9DxIykE6h8slemTS5
 github.com/zero-day-ai/sdk v0.83.0/go.mod h1:mW3o4zISV+eBvf2dHNwrtL+iGLSSUzXkV4GGvpkKS8A=
 github.com/zero-day-ai/sdk v0.85.0 h1://z7XDdQ/qEgoVedamlKe3/rR5A+MfB+jX0fq1yLV+Y=
 github.com/zero-day-ai/sdk v0.85.0/go.mod h1:mW3o4zISV+eBvf2dHNwrtL+iGLSSUzXkV4GGvpkKS8A=
+github.com/zero-day-ai/sdk v0.86.0 h1:cPcthuZI12iiXzOcCnniiclVC4+VI6BeI3reBpSTm88=
+github.com/zero-day-ai/sdk v0.86.0/go.mod h1:mW3o4zISV+eBvf2dHNwrtL+iGLSSUzXkV4GGvpkKS8A=
 github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66 h1:7hZeaP1CwGKTEJgSiyXL1GEyCAFWSZ4O6rCYMFThy8U=
 github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66/go.mod h1:toFwwA5SpWeL0/Pr3XOelvHRZrzs7Ex9vpul5lA1SCY=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
