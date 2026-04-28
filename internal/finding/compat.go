@@ -2,13 +2,10 @@ package finding
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -58,9 +55,10 @@ type SearchOptions struct {
 	Offset int
 }
 
-// Save stores a Finding to Redis. It adapts the flat Finding type to the
-// EnhancedFinding structure expected by the underlying store.
-func (s *RedisFindingStore) Save(ctx context.Context, f *Finding) error {
+// Save stores a Finding in the per-tenant store. It adapts the flat Finding type
+// to the EnhancedFinding structure expected by the underlying store.
+// This method is now defined on ConnBoundFindingStore (post per-tenant cutover).
+func (s *ConnBoundFindingStore) Save(ctx context.Context, f *Finding) error {
 	if f == nil {
 		return fmt.Errorf("finding must not be nil")
 	}
@@ -92,8 +90,8 @@ func (s *RedisFindingStore) Save(ctx context.Context, f *Finding) error {
 
 // GetByMission retrieves all Finding records for a mission.
 // Results are returned as a slice of *Finding using the flat representation.
-func (s *RedisFindingStore) GetByMission(ctx context.Context, missionID types.ID) ([]*Finding, error) {
-	enhanced, err := s.listByMission(ctx, "", missionID)
+func (s *ConnBoundFindingStore) GetByMission(ctx context.Context, missionID types.ID) ([]*Finding, error) {
+	enhanced, err := s.listByMission(ctx, missionID)
 	if err != nil {
 		return nil, err
 	}
@@ -119,74 +117,3 @@ func (s *RedisFindingStore) GetByMission(ctx context.Context, missionID types.ID
 	return out, nil
 }
 
-// Search executes a finding search using SearchOptions and returns flat Finding results.
-func (s *RedisFindingStore) Search(ctx context.Context, opts *SearchOptions) ([]*Finding, error) {
-	if opts == nil {
-		opts = &SearchOptions{}
-	}
-
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-
-	searchOpts := &state.SearchOptions{
-		Limit:      limit,
-		Offset:     opts.Offset,
-		WithScores: false,
-	}
-
-	query := buildFindingSearchQuery(opts)
-
-	result, err := s.client.Search(ctx, "gibson:idx:findings", query, searchOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search findings: %w", err)
-	}
-
-	out := make([]*Finding, 0, len(result.Documents))
-	for _, doc := range result.Documents {
-		var enhanced EnhancedFinding
-		if err := json.Unmarshal(doc.JSON, &enhanced); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal finding: %w", err)
-		}
-
-		out = append(out, &Finding{
-			ID:          enhanced.ID,
-			MissionID:   enhanced.MissionID,
-			TenantID:    enhanced.TenantID,
-			Title:       enhanced.Title,
-			Description: enhanced.Description,
-			Severity:    enhanced.Severity,
-			Status:      enhanced.Status,
-			RiskScore:   enhanced.RiskScore,
-			AgentName:   enhanced.AgentName,
-			CreatedAt:   enhanced.CreatedAt,
-			UpdatedAt:   enhanced.UpdatedAt,
-		})
-	}
-
-	return out, nil
-}
-
-// buildFindingSearchQuery constructs a RediSearch query from SearchOptions.
-func buildFindingSearchQuery(opts *SearchOptions) string {
-	var parts []string
-
-	if opts.MissionID != "" {
-		parts = append(parts, fmt.Sprintf("@mission_id:{%s}", state.EscapeTag(opts.MissionID.String())))
-	}
-
-	if opts.Severity != "" {
-		parts = append(parts, fmt.Sprintf("@severity:{%s}", state.EscapeTag(string(opts.Severity))))
-	}
-
-	if opts.Query != "" {
-		parts = append(parts, state.EscapeQuery(opts.Query))
-	}
-
-	if len(parts) == 0 {
-		return "*"
-	}
-
-	return strings.Join(parts, " ")
-}
