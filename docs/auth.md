@@ -36,7 +36,7 @@ caller --(Zitadel JWT)--> Envoy --(SPIFFE mTLS)--> daemon
                             |   - CG-JWT short-circuit OR FGA check
                             |   - on allow, emits x-gibson-identity-* headers
                             |
-                            +-- SVID belongs to spiffe://gibson.io/platform/envoy
+                            +-- SVID belongs to spiffe://zero-day.ai/platform/envoy
                                                        |
                                                        v
               daemon TLS listener (internal/daemon/grpc.go:183)
@@ -174,7 +174,7 @@ The daemon refuses to start in either case — **fail-closed**.
 
 The TLS listener ([`internal/daemon/grpc.go:183`](../internal/daemon/grpc.go))
 uses `tls.RequestClientCert` with a go-spiffe `MTLSServerConfig`
-verifier. The verifier accepts only `spiffe://gibson.io/platform/envoy`
+verifier. The verifier accepts only `spiffe://zero-day.ai/platform/envoy`
 (the Envoy SDS-resolved upstream SVID). Any other peer SVID is rejected
 at the TLS handshake before headers are read.
 

@@ -76,8 +76,8 @@ func newSyntheticSPIFFESources(t *testing.T) (*stubSVIDSource, *stubBundleSource
 	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err, "synthetic leaf key generation")
 
-	// Build SPIFFE URI SAN: spiffe://gibson.io/test/unit.
-	spiffeURI, err := url.Parse("spiffe://gibson.io/test/unit")
+	// Build SPIFFE URI SAN: spiffe://zero-day.ai/test/unit.
+	spiffeURI, err := url.Parse("spiffe://zero-day.ai/test/unit")
 	require.NoError(t, err, "SPIFFE URI parse")
 
 	// Leaf cert signed by the CA, with SPIFFE URI SAN.
@@ -93,9 +93,9 @@ func newSyntheticSPIFFESources(t *testing.T) (*stubSVIDSource, *stubBundleSource
 	leafCert, err := x509.ParseCertificate(leafDER)
 	require.NoError(t, err, "synthetic leaf cert parse")
 
-	td := spiffeid.RequireTrustDomainFromString("gibson.io")
+	td := spiffeid.RequireTrustDomainFromString("zero-day.ai")
 
-	svidID, err := spiffeid.FromString("spiffe://gibson.io/test/unit")
+	svidID, err := spiffeid.FromString("spiffe://zero-day.ai/test/unit")
 	require.NoError(t, err, "SPIFFE ID parse")
 
 	svid := &x509svid.SVID{

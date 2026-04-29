@@ -71,9 +71,9 @@ func TestClassifyActorSource(t *testing.T) {
 		{"apikey → tenant_admin", &auth.Identity{Subject: "gsk_abc", Issuer: "apikey"}, "tenant_admin", ""},
 		{"zitadel → user", &auth.Identity{Subject: "u-1", Issuer: "zitadel"}, "user", ""},
 		{"capability-grant → user", &auth.Identity{Subject: "agent-1", Issuer: "capability-grant"}, "user", ""},
-		{"spiffe platform → platform", &auth.Identity{Subject: "spiffe://gibson.io/platform/tenant-operator", Issuer: "spiffe"}, "platform", ""},
-		{"spiffe non-platform → operator", &auth.Identity{Subject: "spiffe://gibson.io/dashboard", Issuer: "spiffe"}, "operator", ""},
-		{"spiffe via subject prefix → platform", &auth.Identity{Subject: "spiffe://gibson.io/platform/dashboard", Issuer: "other"}, "platform", ""},
+		{"spiffe platform → platform", &auth.Identity{Subject: "spiffe://zero-day.ai/platform/tenant-operator", Issuer: "spiffe"}, "platform", ""},
+		{"spiffe non-platform → operator", &auth.Identity{Subject: "spiffe://zero-day.ai/dashboard", Issuer: "spiffe"}, "operator", ""},
+		{"spiffe via subject prefix → platform", &auth.Identity{Subject: "spiffe://zero-day.ai/platform/dashboard", Issuer: "other"}, "platform", ""},
 		{"unknown issuer → unknown", &auth.Identity{Subject: "x", Issuer: "weird"}, "unknown", ""},
 	}
 	for _, tc := range cases {

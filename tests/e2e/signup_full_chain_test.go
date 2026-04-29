@@ -222,8 +222,8 @@ func TestSignup_FullChain_HappyPath(t *testing.T) {
 		})
 
 		t.Run("assert FGA platform-operator tuple exists", func(t *testing.T) {
-			// The dashboard SPIFFE is "gibson.io/platform/dashboard" (without spiffe:// prefix — B6 fix).
-			dashboardSPIFFE := "gibson.io/platform/dashboard"
+			// The dashboard SPIFFE is "zero-day.ai/platform/dashboard" (without spiffe:// prefix — B6 fix).
+			dashboardSPIFFE := "zero-day.ai/platform/dashboard"
 			helpers.MustHavePlatformOperator(t, ctx, fgaClient, dashboardSPIFFE)
 		})
 	}
@@ -330,7 +330,7 @@ func TestSignup_FullChain_HappyPath(t *testing.T) {
 		spireServerPod := pods.Items[0]
 		assert.Equal(t, "Running", string(spireServerPod.Status.Phase),
 			"SPIRE server pod %q is not Running — Bug catalog: B1 (socket mount wrong), B13 (SDS resource names)")
-		t.Logf("SPIRE server pod %q is Running — manual verify: exec into pod and run spire-server entry show | grep spiffe://gibson.io", spireServerPod.Name)
+		t.Logf("SPIRE server pod %q is Running — manual verify: exec into pod and run spire-server entry show | grep spiffe://zero-day.ai", spireServerPod.Name)
 	})
 
 	// Cleanup on test completion (R1.10).

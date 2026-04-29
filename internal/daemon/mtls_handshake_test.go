@@ -53,7 +53,7 @@ type spiffeTestPKI struct {
 }
 
 // newSpiffeTestPKI creates a fresh CA + one leaf SVID, both in-process.
-// trustDomainName e.g. "gibson.io", pathSuffix e.g. "/test/server".
+// trustDomainName e.g. "zero-day.ai", pathSuffix e.g. "/test/server".
 func newSpiffeTestPKI(t *testing.T, trustDomainName, pathSuffix string) *spiffeTestPKI {
 	t.Helper()
 
@@ -183,7 +183,7 @@ func dialWithForeignCert(t *testing.T, target string, foreignClientPKI *spiffeTe
 	// Server CA pool so the client can verify the server cert.
 	serverCAPool := x509.NewCertPool()
 	serverBundle, err := serverPKI.bundleSource.GetX509BundleForTrustDomain(
-		spiffeid.RequireTrustDomainFromString("gibson.io"),
+		spiffeid.RequireTrustDomainFromString("zero-day.ai"),
 	)
 	require.NoError(t, err)
 	for _, ca := range serverBundle.X509Authorities() {
@@ -320,8 +320,8 @@ func base64Encode(dst, src []byte) {
 //
 // Reference: spec daemon-tls-clientauth-fix Requirement 1.1 / Component 3(a).
 func TestMTLS_ValidSPIFFECert_HandshakeSucceeds(t *testing.T) {
-	serverPKI := newSpiffeTestPKI(t, "gibson.io", "/test/server")
-	clientPKI := newSpiffeTestPKI(t, "gibson.io", "/test/client")
+	serverPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/server")
+	clientPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/client")
 
 	// The server's bundle must trust the CLIENT's CA for this test to pass.
 	// Add client CA to the server's bundle source.
@@ -354,7 +354,7 @@ func TestMTLS_ValidSPIFFECert_HandshakeSucceeds(t *testing.T) {
 //
 // Reference: spec daemon-tls-clientauth-fix Requirement 1.2 / Component 3(b).
 func TestMTLS_NonSPIFFECert_HandshakeFails(t *testing.T) {
-	serverPKI := newSpiffeTestPKI(t, "gibson.io", "/test/server")
+	serverPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/server")
 	// foreignPKI is from a COMPLETELY different CA — NOT trusted by the server.
 	foreignPKI := newSpiffeTestPKI(t, "foreign.example", "/test/foreign")
 
@@ -399,7 +399,7 @@ func TestMTLS_NonSPIFFECert_HandshakeFails(t *testing.T) {
 //
 // Reference: spec daemon-tls-clientauth-fix Requirement 1.3 / Component 3(c).
 func TestMTLS_NoCert_HandshakeSucceedsAndFallsThroughToBearer(t *testing.T) {
-	serverPKI := newSpiffeTestPKI(t, "gibson.io", "/test/server")
+	serverPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/server")
 	_, addr := startMTLSTestServer(t, serverPKI)
 
 	cc := dialWithNoCert(t, addr, serverPKI)
@@ -445,8 +445,8 @@ func TestMTLS_NoCert_HandshakeSucceedsAndFallsThroughToBearer(t *testing.T) {
 //
 // Reference: spec daemon-tls-clientauth-fix B-bug 1 analysis.
 func TestMTLS_VerifyClientCertIfGiven_WouldBreakSPIFFE(t *testing.T) {
-	serverPKI := newSpiffeTestPKI(t, "gibson.io", "/test/server")
-	clientPKI := newSpiffeTestPKI(t, "gibson.io", "/test/client")
+	serverPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/server")
+	clientPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/client")
 
 	// Add client CA to server bundle (same as the valid test).
 	serverBundle := serverPKI.bundleSource.bundle.Clone()

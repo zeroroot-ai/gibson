@@ -29,7 +29,7 @@ type BetterAuthConfig struct {
 // and uses it for mTLS on the gRPC server. In-cluster callers (dashboard, tools,
 // agents, plugins) authenticate by presenting their SPIFFE SVIDs in the TLS handshake.
 type SPIFFEConfig struct {
-	// TrustDomain is the SPIFFE trust domain (e.g., "gibson.io").
+	// TrustDomain is the SPIFFE trust domain (e.g., "zero-day.ai").
 	// All SPIFFE IDs authenticated by this daemon must be under this trust domain.
 	TrustDomain string `mapstructure:"trust_domain" yaml:"trust_domain"`
 
@@ -39,7 +39,7 @@ type SPIFFEConfig struct {
 
 	// InfrastructureIDs lists the SPIFFE IDs that bypass OpenFGA authorization.
 	// These are platform services (dashboard, daemon) that need system-wide access.
-	// Default: ["spiffe://gibson.io/platform/dashboard", "spiffe://gibson.io/platform/daemon"]
+	// Default: ["spiffe://zero-day.ai/platform/dashboard", "spiffe://zero-day.ai/platform/daemon"]
 	InfrastructureIDs []string `mapstructure:"infrastructure_ids" yaml:"infrastructure_ids,omitempty"`
 
 	// EnvoyID is the expected SPIFFE ID of the Envoy sidecar that presents its
