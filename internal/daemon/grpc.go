@@ -60,6 +60,16 @@ import (
 // Mission-tier and long-term-tier operations are handled by the per-mission
 // MemoryResolver wired separately (compSvc.WithMemoryResolver); only Working() is
 // used from this shared store.
+// serverStreamCtxOverride wraps a grpc.ServerStream so the handler sees a
+// caller-augmented context (used by the registry-aware bypass that does
+// loose identity parsing for unauthenticated RPCs).
+type serverStreamCtxOverride struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s *serverStreamCtxOverride) Context() context.Context { return s.ctx }
+
 type daemonMemoryStore struct {
 	working memory.WorkingMemory
 }
@@ -192,22 +202,55 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	unaryInterceptors = append(unaryInterceptors, debugDumpMetadata)
 
 	// Wrap sdk/auth's identity interceptor with a registry-aware shim
-	// that SKIPS identity validation for RPCs declared `unauthenticated:
-	// true` in the SDK auth registry (e.g. ListMyMemberships, which is
-	// the bootstrap call that DISCOVERS the user's tenants — chicken-
-	// and-egg if it required a tenant header). For everything else,
-	// the standard sdk/auth interceptor runs unchanged.
+	// that does LOOSE identity parsing for RPCs declared `unauthenticated:
+	// true` in the SDK auth registry. "Unauthenticated" here is a
+	// misnomer — it really means "no FGA / no tenant scope required".
+	// The handler still wants to know WHO is asking (e.g. ListMyMemberships
+	// uses callerID.Subject to look up memberships). So we extract the
+	// subject from ext-authz's identity header and attach a minimal
+	// Identity to the context, bypassing strict tenant validation.
+	// For everything else, the standard sdk/auth interceptor runs
+	// unchanged with strict 5-header validation.
+	looseIdentityFromMD := func(ctx context.Context) context.Context {
+		md, ok := grpcmetadata.FromIncomingContext(ctx)
+		if !ok {
+			return ctx
+		}
+		subject := ""
+		if vals := md.Get("x-gibson-identity-subject"); len(vals) > 0 {
+			subject = vals[0]
+		}
+		if subject == "" {
+			return ctx
+		}
+		// Issuer/CredentialType/IssuedAt set best-effort; tenant left as
+		// zero-value (handler must not require it).
+		issuer := auth.IssuerOIDC
+		if vals := md.Get("x-gibson-identity-issuer"); len(vals) > 0 {
+			issuer = auth.Issuer(vals[0])
+		}
+		credType := auth.CredentialOIDCUser
+		if vals := md.Get("x-gibson-identity-credential-type"); len(vals) > 0 {
+			credType = auth.CredentialType(vals[0])
+		}
+		return auth.WithIdentity(ctx, auth.Identity{
+			Subject:        subject,
+			Issuer:         issuer,
+			CredentialType: credType,
+		})
+	}
 	sdkAuthUnary := auth.UnaryServerInterceptor()
 	sdkAuthStream := auth.StreamServerInterceptor()
 	registryAwareUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if entry, ok := registry.Registry[info.FullMethod]; ok && entry.Unauthenticated {
-			return handler(ctx, req)
+			return handler(looseIdentityFromMD(ctx), req)
 		}
 		return sdkAuthUnary(ctx, req, info, handler)
 	}
 	registryAwareStream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if entry, ok := registry.Registry[info.FullMethod]; ok && entry.Unauthenticated {
-			return handler(srv, ss)
+			wrapped := &serverStreamCtxOverride{ServerStream: ss, ctx: looseIdentityFromMD(ss.Context())}
+			return handler(srv, wrapped)
 		}
 		return sdkAuthStream(srv, ss, info, handler)
 	}
