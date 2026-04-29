@@ -35,6 +35,7 @@ import (
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	sdkregistry "github.com/zero-day-ai/sdk/auth/registry"
@@ -731,12 +732,60 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			compSvc.WithAuthorizer(d.authorizer)
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 
+			// Phase 11 (secrets-broker, Task 29): wire the SecretsCredentialStore
+			// into the ComponentService now that compSvc is constructed. The broker
+			// stack was initialised in Start() (initBrokerStack) with nil compSvc;
+			// we wire the credential store here where the ComponentServiceServer
+			// instance is available.
+			if d.secretsService != nil {
+				compCredStore, csErr := component.NewSecretsCredentialStore(d.secretsService)
+				if csErr != nil {
+					d.logger.Warn(ctx, "broker stack: SecretsCredentialStore construction failed; GetCredential RPCs unavailable",
+						"error", csErr)
+				} else {
+					compSvc.WithCredentialStore(compCredStore)
+					d.logger.Info(ctx, "broker stack: SecretsCredentialStore wired into ComponentService")
+				}
+			} else {
+				d.logger.Warn(ctx, "broker stack: secrets.Service not available; ComponentService GetCredential RPCs will return Unimplemented")
+			}
+
 			componentpb.RegisterComponentServiceServer(srv, compSvc)
 			d.logger.Info(ctx, "ComponentService initialized",
 				"registry_ttl", "30s",
 				"redis_mode", "standalone",
 				"memory_resolver", "redis",
 			)
+
+			// Wire the plugin runtime (Spec 2, plugin-runtime, Phase 7, Task 16).
+			//
+			// The PluginRegistry needs:
+			//   - dashboardDB: the operator-shared Postgres for plugin_install persistence
+			//   - redisClient: for transient install status (TTL-based liveness)
+			//   - compQueue: reuses the same WorkQueue as ComponentService
+			//
+			// On fresh installs with no plugins registered the PluginRegistry is
+			// a no-op: ListInstalls returns empty and PluginInvoke returns UNAVAILABLE.
+			//
+			// No background sweeper goroutine is started — Redis TTL expiry is the
+			// sweeper. When a key disappears, ListInstalls excludes the install.
+			if d.dashboardDB != nil {
+				pluginRegistry := component.NewPluginRegistry(
+					d.dashboardDB,
+					d.stateClient.Client(),
+					compQueue,
+					d.logger.WithComponent("plugin-registry").Slog(),
+				)
+				compSvc.WithPluginRegistry(pluginRegistry)
+				d.logger.Info(ctx, "PluginRegistry wired into ComponentService (Postgres + Redis transient state)")
+
+				// Register PluginInvokeService on the same gRPC port.
+				pluginInvokeSvc := component.NewPluginInvokeService(pluginRegistry, d.logger.WithComponent("plugin-invoke").Slog())
+				pluginpb.RegisterPluginInvokeServiceServer(srv, pluginInvokeSvc)
+				d.logger.Info(ctx, "PluginInvokeService gRPC endpoint registered")
+			} else {
+				d.logger.Warn(ctx, "PluginRegistry not wired: dashboardDB is nil; PluginInvoke will return UNAVAILABLE for all plugins")
+			}
 		} else {
 			d.logger.Warn(ctx, "ComponentService unavailable: Redis client is not standalone mode; requires *redis.Client")
 		}

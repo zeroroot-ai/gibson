@@ -18,7 +18,6 @@ import (
 	"github.com/zero-day-ai/sdk/mission"
 	"github.com/zero-day-ai/sdk/planning"
 	"github.com/zero-day-ai/sdk/plugin"
-	"github.com/zero-day-ai/sdk/schema"
 	"github.com/zero-day-ai/sdk/tool"
 	"github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
@@ -138,10 +137,12 @@ func (a *GibsonHarnessAdapter) ListPlugins(ctx context.Context) ([]plugin.Descri
 		methods := make([]plugin.MethodDescriptor, len(p.Methods))
 		for j, m := range p.Methods {
 			methods[j] = plugin.MethodDescriptor{
-				Name:         m.Name,
-				Description:  m.Description,
-				InputSchema:  schema.Any(),
-				OutputSchema: schema.Any(),
+				Name:        m.Name,
+				Description: m.Description,
+				// InputSchema / OutputSchema removed in plugin-runtime Spec 2 Phase 1.
+				// The new manifest-driven MethodDescriptor carries Name+Description only.
+				// Typed schema dispatch is handled via the plugin's proto FileDescriptorSet
+				// uploaded at registration (plugin_install.proto_descriptor_set).
 			}
 		}
 		sdkPlugins[i] = plugin.Descriptor{

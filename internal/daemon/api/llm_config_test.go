@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/state"
+	sdksecrets "github.com/zero-day-ai/sdk/secrets"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -94,10 +96,13 @@ func setupTestLLMConfigHandler(t *testing.T) (*LLMConfigHandler, *CredentialHand
 	// Create mock JSON store
 	jsonStore := newMockJSONStore(mr)
 
-	// Create credential handler
-	dao := newMockCredentialDAO()
-	keyProvider := newMockKeyProvider()
-	credHandler, err := NewCredentialHandler(dao, keyProvider)
+	// Create credential handler backed by a secrets.Service whose broker
+	// returns ErrNotFound for all Gets. The LLM config handler tests exercise
+	// credential-not-found paths; a real credential store is unavailable in unit tests.
+	credSvc := buildAPITestService(t, &apiTestBroker{
+		getErr: fmt.Errorf("not found: %w", sdksecrets.ErrNotFound),
+	})
+	credHandler, err := NewCredentialHandler(credSvc)
 	require.NoError(t, err)
 
 	// Create LLM config handler with mock store
@@ -120,9 +125,8 @@ func TestNewLLMConfigHandler(t *testing.T) {
 	stateClient, _ := state.NewStateClient(cfg)
 	defer stateClient.Close()
 
-	dao := newMockCredentialDAO()
-	keyProvider := newMockKeyProvider()
-	credHandler, _ := NewCredentialHandler(dao, keyProvider)
+	credSvc := buildAPITestService(t, &apiTestBroker{})
+	credHandler, _ := NewCredentialHandler(credSvc)
 
 	t.Run("success", func(t *testing.T) {
 		handler, err := NewLLMConfigHandler(stateClient, credHandler)

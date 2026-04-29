@@ -5,128 +5,162 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/zero-day-ai/gibson/internal/datapool"
+	"github.com/stretchr/testify/require"
+	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/zero-day-ai/sdk/auth"
 )
 
-// MockKeyProvider is a mock implementation of crypto.KeyProvider for testing.
-type MockKeyProvider struct {
-	mock.Mock
+// ---------------------------------------------------------------------------
+// Stubs satisfying the secrets.Service interface dependencies.
+// ---------------------------------------------------------------------------
+
+// credStoreTestBroker is a configurable fake SecretsBroker for credential store tests.
+type credStoreTestBroker struct {
+	getVal []byte
+	getErr error
 }
 
-func (m *MockKeyProvider) GetEncryptionKey(ctx context.Context) ([]byte, error) {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]byte), args.Error(1)
+func (b *credStoreTestBroker) Get(_ context.Context, _ auth.TenantID, _ string) ([]byte, error) {
+	return b.getVal, b.getErr
+}
+func (b *credStoreTestBroker) Put(_ context.Context, _ auth.TenantID, _ string, _ []byte) error {
+	return nil
+}
+func (b *credStoreTestBroker) Delete(_ context.Context, _ auth.TenantID, _ string) error { return nil }
+func (b *credStoreTestBroker) List(_ context.Context, _ auth.TenantID, _ sdksecrets.Filter) ([]string, error) {
+	return nil, nil
+}
+func (b *credStoreTestBroker) Health(_ context.Context) error { return nil }
+func (b *credStoreTestBroker) Probe(_ context.Context) error  { return nil }
+func (b *credStoreTestBroker) Capabilities() sdksecrets.ProviderCapabilities {
+	return sdksecrets.ProviderCapabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
 }
 
-func (m *MockKeyProvider) Name() string {
-	args := m.Called()
-	return args.String(0)
+var _ sdksecrets.SecretsBroker = (*credStoreTestBroker)(nil)
+
+// credStoreTestRegistry implements secrets.ServiceRegistry, returning a fixed broker.
+type credStoreTestRegistry struct {
+	broker sdksecrets.SecretsBroker
+	err    error
 }
 
-func (m *MockKeyProvider) Health(ctx context.Context) types.HealthStatus {
-	args := m.Called(ctx)
-	return args.Get(0).(types.HealthStatus)
+func (r *credStoreTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.SecretsBroker, error) {
+	return r.broker, r.err
 }
 
-func (m *MockKeyProvider) Close() error {
-	args := m.Called()
-	return args.Error(0)
+// credStoreTestCircuit implements secrets.ServiceCircuitBreaker, always allowing.
+type credStoreTestCircuit struct{}
+
+func (c *credStoreTestCircuit) Allow(_, _ string) error   { return nil }
+func (c *credStoreTestCircuit) RecordSuccess(_, _ string) {}
+func (c *credStoreTestCircuit) RecordFailure(_, _ string) {}
+
+// credStoreTestAuditor implements secrets.ServiceAuditWriter, discarding events.
+type credStoreTestAuditor struct{}
+
+func (a *credStoreTestAuditor) Audit(_ context.Context, _ secrets.AuditEvent) {}
+
+// buildTestSecretsService constructs a *secrets.Service with a fake broker returning
+// the given bytes/error from Get.
+func buildTestSecretsService(t *testing.T, resolveBytes []byte, resolveErr error) *secrets.Service {
+	t.Helper()
+	broker := &credStoreTestBroker{getVal: resolveBytes, getErr: resolveErr}
+	reg := &credStoreTestRegistry{broker: broker}
+	circuit := &credStoreTestCircuit{}
+	auditor := &credStoreTestAuditor{}
+	svc, err := secrets.NewService(reg, circuit, auditor)
+	require.NoError(t, err)
+	return svc
 }
 
-// stubPool is a minimal datapool.Pool for tests that returns an error on For().
-type stubPool struct{}
-
-func (s *stubPool) For(_ context.Context, _ auth.TenantID) (*datapool.Conn, error) {
-	return nil, datapool.ErrAdminPoolNotConfigured // any error is fine for tests
-}
-func (s *stubPool) Admin(_ context.Context) (*datapool.AdminConn, error) {
-	return nil, datapool.ErrAdminPoolNotConfigured
-}
-func (s *stubPool) SetAdminPool(_ datapool.AdminAcquirer) {}
-func (s *stubPool) Close() error                          { return nil }
-
-var _ datapool.Pool = (*stubPool)(nil)
-
-// newMockPool returns a Pool stub sufficient for constructor-level tests.
-func newMockPool(_ *testing.T) datapool.Pool {
-	return &stubPool{}
+// ctxWithTenantForCredStore returns a context with a tenant set.
+func ctxWithTenantForCredStore() context.Context {
+	return auth.WithTenant(context.Background(), auth.MustNewTenantID("test-tenant"))
 }
 
-// TestNewDaemonCredentialStore_NilPool verifies that a nil pool is rejected.
-func TestNewDaemonCredentialStore_NilPool(t *testing.T) {
-	mockKP := new(MockKeyProvider)
-	store, err := NewDaemonCredentialStore(nil, mockKP)
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+// TestNewDaemonCredentialStore_NilService verifies that a nil service is rejected.
+func TestNewDaemonCredentialStore_NilService(t *testing.T) {
+	store, err := NewDaemonCredentialStore(nil)
 	assert.Error(t, err)
 	assert.Nil(t, store)
-	assert.Contains(t, err.Error(), "pool must not be nil")
+	assert.Contains(t, err.Error(), "service must not be nil")
 }
 
-// TestNewDaemonCredentialStore_NilKeyProvider verifies that a nil key provider is rejected.
-func TestNewDaemonCredentialStore_NilKeyProvider(t *testing.T) {
-	mp := newMockPool(t)
-	store, err := NewDaemonCredentialStore(mp, nil)
-	assert.Error(t, err)
-	assert.Nil(t, store)
-	assert.Contains(t, err.Error(), "keyProvider must not be nil")
+// TestDaemonCredentialStore_GetCredential_NotFound verifies the not-found path returns
+// a user-facing "not found" error.
+func TestDaemonCredentialStore_GetCredential_NotFound(t *testing.T) {
+	svc := buildTestSecretsService(t, nil, status.Error(codes.NotFound, "secret not found"))
+	store, err := NewDaemonCredentialStore(svc)
+	require.NoError(t, err)
+
+	ctx := ctxWithTenantForCredStore()
+	_, _, err = store.GetCredential(ctx, "missing-cred")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }
 
-// TestDaemonCredentialStore_GetCredential_NoTenant verifies that a missing tenant returns an error.
-func TestDaemonCredentialStore_GetCredential_NoTenant(t *testing.T) {
-	mp := newMockPool(t)
-	mockKP := new(MockKeyProvider)
+// TestDaemonCredentialStore_GetCredential_Success verifies the happy path returns the
+// correct Credential shape and the plaintext secret.
+func TestDaemonCredentialStore_GetCredential_Success(t *testing.T) {
+	secretVal := []byte("super-secret-key")
+	svc := buildTestSecretsService(t, secretVal, nil)
+	store, err := NewDaemonCredentialStore(svc)
+	require.NoError(t, err)
 
-	store, err := NewDaemonCredentialStore(mp, mockKP)
-	assert.NoError(t, err)
-
-	// Context without a tenant — TenantFromContext returns (zero, false).
-	_, _, err = store.GetCredential(context.Background(), "test-cred")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no tenant in context")
+	ctx := ctxWithTenantForCredStore()
+	cred, secret, err := store.GetCredential(ctx, "my-cred")
+	require.NoError(t, err)
+	assert.Equal(t, "my-cred", cred.Name)
+	assert.NotEmpty(t, cred.ID)
+	assert.Equal(t, "super-secret-key", secret)
 }
 
-// TestDaemonCredentialStore_Health delegates to the key provider.
+// TestDaemonCredentialStore_GetCredential_UnavailableError verifies that non-NotFound
+// gRPC errors are passed through.
+func TestDaemonCredentialStore_GetCredential_UnavailableError(t *testing.T) {
+	svc := buildTestSecretsService(t, nil, status.Error(codes.Unavailable, "circuit open"))
+	store, err := NewDaemonCredentialStore(svc)
+	require.NoError(t, err)
+
+	ctx := ctxWithTenantForCredStore()
+	_, _, err = store.GetCredential(ctx, "my-cred")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Unavailable")
+}
+
+// TestDaemonCredentialStore_Health returns healthy.
 func TestDaemonCredentialStore_Health(t *testing.T) {
-	mp := newMockPool(t)
-	mockKP := new(MockKeyProvider)
+	svc := buildTestSecretsService(t, nil, nil)
+	store, err := NewDaemonCredentialStore(svc)
+	require.NoError(t, err)
 
-	store, err := NewDaemonCredentialStore(mp, mockKP)
-	assert.NoError(t, err)
-
-	ctx := context.Background()
-	expected := types.HealthStatus{State: types.HealthStateHealthy, Message: "ok"}
-	mockKP.On("Health", ctx).Return(expected)
-
-	health := store.Health(ctx)
-	assert.Equal(t, expected, health)
-	mockKP.AssertExpectations(t)
+	health := store.Health(context.Background())
+	assert.Equal(t, types.HealthStateHealthy, health.State)
 }
 
-// TestDaemonCredentialStore_Close delegates to the key provider.
+// TestDaemonCredentialStore_Close is a no-op that returns nil.
 func TestDaemonCredentialStore_Close(t *testing.T) {
-	mp := newMockPool(t)
-	mockKP := new(MockKeyProvider)
+	svc := buildTestSecretsService(t, nil, nil)
+	store, err := NewDaemonCredentialStore(svc)
+	require.NoError(t, err)
 
-	store, err := NewDaemonCredentialStore(mp, mockKP)
-	assert.NoError(t, err)
-
-	mockKP.On("Close").Return(nil)
 	assert.NoError(t, store.Close())
-	mockKP.AssertExpectations(t)
 }
 
 // TestDaemonCredentialStore_ImplementsInterface is a compile-time check via assertion.
 func TestDaemonCredentialStore_ImplementsInterface(t *testing.T) {
-	mp := newMockPool(t)
-	mockKP := new(MockKeyProvider)
-
-	store, err := NewDaemonCredentialStore(mp, mockKP)
-	assert.NoError(t, err)
+	svc := buildTestSecretsService(t, nil, nil)
+	store, err := NewDaemonCredentialStore(svc)
+	require.NoError(t, err)
 	assert.NotNil(t, store)
 	assert.Implements(t, (*interface {
 		GetCredential(ctx context.Context, name string) (*types.Credential, string, error)

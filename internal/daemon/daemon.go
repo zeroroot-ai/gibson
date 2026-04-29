@@ -14,6 +14,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/config"
@@ -30,6 +31,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/pkg/version"
+	"github.com/zero-day-ai/sdk/auth"
 	healthhttp "github.com/zero-day-ai/sdk/health/http"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 )
@@ -172,6 +174,19 @@ type daemonImpl struct {
 
 	// credentialHandler provides CRUD operations for credentials (used by dashboard API)
 	credentialHandler *api.CredentialHandler
+
+	// secretsRegistry is the broker registry; held on the daemon so /readyz can
+	// call Health() for the system tenant (Task 30).
+	secretsRegistry *secrets.Registry
+
+	// secretsService is the secrets.Service; held so LLM provider re-registration
+	// on config reload can pass it to NewProviderWithContext.
+	secretsService *secrets.Service
+
+	// vaultAuthCache caches Vault auth tokens per (tenant, provider) to prevent
+	// auth churn during registry Reload events. Constructed in initBrokerStack.
+	// Full per-call refresh wiring is a follow-up (see broker_init.go TODO).
+	vaultAuthCache *secrets.AuthCache
 
 	// llmConfigHandler provides LLM provider configuration management (used by dashboard API)
 	llmConfigHandler *api.LLMConfigHandler
@@ -576,41 +591,19 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				}
 			}
 
-			// Phase D: credentials routed through the per-tenant data-plane Pool.
-			// DaemonCredentialStore and CredentialHandler now accept a Pool and
-			// acquire a per-tenant Conn (conn.Credentials()) per RPC call, keyed
-			// by the tenant in the request context. This eliminates the Phase C
-			// credentialPGPool bridge that pointed at the shared dashboard Postgres.
+			// Phase 11 (secrets-broker, Task 29): initialize the broker stack now
+			// that the key provider and data-plane pool are both available.
+			// The ComponentService is built later in buildGRPCServer; we pass
+			// nil for compSvc here and wire it separately in grpc.go after the
+			// ComponentServiceServer is constructed.
 			if p != nil {
-				credentialStore, err := NewDaemonCredentialStore(p, keyProvider)
-				if err != nil {
-					d.logger.Warn(ctx, "failed to initialize credential store (credentials will not be available)",
-						"error", err)
-				} else {
-					d.credentialStore = credentialStore
-					d.callback.SetCredentialStore(credentialStore)
-					d.logger.Info(ctx, "configured callback service with pool-backed credential store (Phase D)")
-				}
-
-				// Initialize credential handler for dashboard API
-				credentialHandler, err := api.NewCredentialHandler(p, keyProvider)
-				if err != nil {
-					d.logger.Warn(ctx, "failed to initialize credential handler", "error", err)
-				} else {
-					d.credentialHandler = credentialHandler
-					d.logger.Info(ctx, "initialized pool-backed credential handler for dashboard API (Phase D)")
-
-					// Initialize LLM config handler for dashboard API
-					llmConfigHandler, err := api.NewLLMConfigHandler(d.stateClient, credentialHandler)
-					if err != nil {
-						d.logger.Warn(ctx, "failed to initialize LLM config handler", "error", err)
-					} else {
-						d.llmConfigHandler = llmConfigHandler
-						d.logger.Info(ctx, "initialized LLM config handler for dashboard API")
-					}
+				if brokerErr := d.initBrokerStack(ctx, nil); brokerErr != nil {
+					d.logger.Warn(ctx, "broker stack initialization failed; credential RPCs will be unavailable",
+						"error", brokerErr)
+					// Non-fatal: daemon continues without credential operations.
 				}
 			} else {
-				d.logger.Info(ctx, "data-plane pool not available — credentials unavailable until security.key_provider is configured")
+				d.logger.Info(ctx, "data-plane pool not available — broker stack initialization skipped; credential RPCs unavailable")
 			}
 
 			// Plugin access store still uses Redis (plugin store migration is Phase D).
@@ -865,6 +858,66 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			return sdktypes.NewUnhealthyStatus(status.Message, nil)
 		})
 		d.logger.Debug(ctx, "registered key provider readiness check")
+	}
+
+	// Register broker health check for /readyz (Task 30, secrets-broker Phase 11).
+	//
+	// SYSTEM-TENANT RULE: if the system-tenant (Postgres) broker is unreachable,
+	// flip readiness to 503 — the daemon cannot serve any tenant secrets.
+	//
+	// PER-TENANT RULE: per-tenant broker outages must NOT flip readiness; they
+	// only emit the gibson_secrets_broker_health{tenant,provider} Prometheus gauge
+	// so SRE can see which tenant's backend is unhealthy. The system-tenant health
+	// check is the sole gating condition here.
+	if d.secretsRegistry != nil {
+		brokerReg := d.secretsRegistry
+		sysTenant := auth.SystemTenant
+
+		// Background goroutine emits per-tenant health gauges periodically.
+		// It iterates only the cached registry entries (tenants that have done
+		// at least one secret operation since daemon start) to avoid enumerating
+		// all tenants on every scrape cycle.
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(30 * time.Second):
+					healthMap := brokerReg.Health(ctx)
+					for tenant, healthErr := range healthMap {
+						var gaugeValue float64 // 0 = healthy
+						if healthErr != nil {
+							gaugeValue = 1 // unhealthy
+						}
+						// Use the provider name via the tenant string as label proxy.
+						// Full (tenant, provider) labeling requires the registry to
+						// expose which provider is active per tenant; for now we label
+						// by tenant + "cached". A future Task 34 auth-token cache
+						// enhancement can surface the provider name properly.
+						brokerHealthGauge.WithLabelValues(tenant.String(), "cached").Set(gaugeValue)
+					}
+				}
+			}
+		}()
+
+		d.healthServer.RegisterReadinessCheck("secrets_broker", func(checkCtx context.Context) sdktypes.HealthStatus {
+			// Probe system tenant health. The Postgres provider's Health() checks
+			// connectivity (nil = healthy). Any non-nil error means the daemon's
+			// own secrets backend is unreachable; flip readiness to unhealthy.
+			healthMap := brokerReg.Health(checkCtx)
+			sysTenantErr, ok := healthMap[sysTenant]
+			if !ok {
+				// System tenant not yet in the cache (no secret operation issued yet) —
+				// attempt an eager probe by forcing a For() call which will populate the
+				// cache and run Health on the next tick. For now, report healthy.
+				return sdktypes.NewHealthyStatus("broker: system tenant not yet accessed; assuming healthy")
+			}
+			if sysTenantErr != nil {
+				return sdktypes.NewUnhealthyStatus("broker: system-tenant provider unhealthy: "+sysTenantErr.Error(), nil)
+			}
+			return sdktypes.NewHealthyStatus("broker: system-tenant provider healthy")
+		})
+		d.logger.Debug(ctx, "registered secrets broker readiness check (system-tenant gates /readyz; per-tenant emits gauge only)")
 	}
 
 	// Register FGA readiness check when authorization is enabled.

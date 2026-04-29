@@ -263,36 +263,16 @@ func (a *RegistryAdapter) DiscoverTool(ctx context.Context, name string) (tool.T
 	return NewGRPCToolClient(conn, *selected, a.resolver), nil
 }
 
-// DiscoverPlugin discovers and connects to a plugin by name.
-func (a *RegistryAdapter) DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error) {
-	tenant := a.resolveTenant(ctx)
-	instances, err := a.registry.Discover(ctx, tenant, "plugin", name)
-	if err != nil {
-		return nil, &RegistryUnavailableError{Cause: err}
-	}
-
-	if len(instances) == 0 {
-		available, _ := a.getAvailablePluginNames(ctx)
-		return nil, &PluginNotFoundError{Name: name, Available: available}
-	}
-
-	selected, err := a.loadBalancer.Select(ctx, tenant, "plugin", name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to select plugin instance: %w", err)
-	}
-
-	endpoint := selected.Metadata["grpc_endpoint"]
-	if endpoint == "" {
-		return nil, fmt.Errorf("plugin %s has no grpc_endpoint in metadata", name)
-	}
-
-	conn, err := a.pool.Get(ctx, endpoint)
-	if err != nil {
-		_ = a.pool.Remove(endpoint)
-		return nil, fmt.Errorf("failed to connect to plugin %s at %s: %w", name, endpoint, err)
-	}
-
-	return NewGRPCPluginClient(conn, *selected), nil
+// DiscoverPlugin is a placeholder stub.
+//
+// The pre-release GRPCPluginClient (backed by the deleted PluginService proto)
+// has been removed by the plugin-runtime spec (Spec 2, Phase 1-2).
+//
+// TODO(plugin-runtime Phase 7): replace with the production plugin dispatch
+// client once PluginInvokeService (invoke.proto, Phase 6) is generated and
+// the daemon-side plugin_registry.go/plugin_dispatch.go are wired up.
+func (a *RegistryAdapter) DiscoverPlugin(_ context.Context, name string) (plugin.Plugin, error) {
+	return nil, fmt.Errorf("DiscoverPlugin(%q): plugin runtime in flight, see plugin-runtime spec Phase 7", name)
 }
 
 // ListAgents returns information about all registered agents.

@@ -35,9 +35,27 @@
 //     database-per-tenant model, Conn.Redis is already scoped to the
 //     tenant's logical DB and plain keys are sufficient.
 //
+//   - secretsnolog: in core/sdk/secrets/, core/gibson/internal/secrets/,
+//     and provider packages, flags any []byte value returned from a
+//     Get/Resolve secrets source method being passed (directly or through
+//     a single rename) to a logging-shaped sink (slog/log/fmt.Print*/zap).
+//     Plaintext credential values must never appear in daemon logs.
+//
+//   - pluginlegacy: flags imports of the pre-release plugin paths deleted
+//     by the plugin-runtime spec (Spec 2, Phase 1): sdk/pluginkit (always),
+//     gibson/internal/plugin (always), and sdk/plugin with old symbol names
+//     (Initialize/Query/Shutdown/Health/Methods/MethodDescriptor/etc.).
+//     Scope: packages under github.com/zero-day-ai/sdk/ and
+//     github.com/zero-day-ai/gibson/internal/. Note that sdk/plugin itself
+//     is being reborn as the new production plugin SDK in Phases 2-8; only
+//     the deleted symbol names from the pre-release shape are flagged.
+//
 // Spec: unified-identity-and-authorization Requirements 6.6, 8.7, 14.1.
 // Spec: database-per-tenant-data-plane Requirements 11.5, 16.1.
 // Spec: daemon-mission-finding-per-tenant-cutover Requirements 5.3, 5.4.
+// Spec: secrets-broker NFR Security.
+// Spec: plugin-runtime Requirement 11.6.
+// Spec: non-plugin-secret-isolation Requirement 2.
 package main
 
 import (
@@ -66,6 +84,9 @@ func main() {
 			checks.ForbidRawStoreImportsAnalyzer,
 			checks.ForbidRedisKeyPrefixAnalyzer,
 			checks.ForbidRedisClientConstructionAnalyzer,
+			checks.SecretsNoLogAnalyzer,
+			checks.PluginLegacyAnalyzer,
+			checks.AgentSecretsImportAnalyzer,
 		}...,
 	)
 }

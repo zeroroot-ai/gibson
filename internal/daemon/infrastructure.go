@@ -337,8 +337,11 @@ func (d *daemonImpl) registerLLMProviders(ctx context.Context, registry llm.LLMR
 				},
 			}
 
-			// Create provider using factory
-			provider, err := providers.NewProvider(llmCfg)
+			// Create provider using broker-aware factory (Phase 11, Task 29).
+			// d.secretsService may be nil here (broker stack not yet wired at
+			// newInfrastructure time); NewProviderWithContext handles nil by
+			// falling back to cfg.Extra / cfg.APIKey / env-var chain.
+			provider, err := providers.NewProviderWithContext(ctx, d.secretsService, llmCfg)
 			if err != nil {
 				// Wrap auth errors with env var hint so operators know which variable to check
 				translatedErr := llm.TranslateErrorWithEnvHint(name, providerCfg.APIKeyEnv, err)

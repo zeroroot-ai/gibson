@@ -6,6 +6,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms/cohere"
 	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -17,8 +18,16 @@ type CohereProvider struct {
 }
 
 // NewCohereProvider constructs a Cohere provider.
+// Credentials are resolved from the broker (if available), then cfg.APIKey,
+// then env-var (dev only). See resolveCredential for the full chain.
 func NewCohereProvider(cfg llm.ProviderConfig) (*CohereProvider, error) {
-	token, err := resolveCredential(cfg, "cohere", "", "COHERE_API_KEY", true)
+	return newCohereProviderWithContext(context.Background(), nil, cfg)
+}
+
+// newCohereProviderWithContext constructs a Cohere provider with broker
+// credential resolution. service may be nil when the broker is not available.
+func newCohereProviderWithContext(ctx context.Context, service *secrets.Service, cfg llm.ProviderConfig) (*CohereProvider, error) {
+	token, err := resolveCredential(ctx, service, cfg, "cohere", "", "COHERE_API_KEY", true)
 	if err != nil {
 		return nil, err
 	}

@@ -282,3 +282,71 @@ type model
     define provider: [provider]
     define owner: [tenant]
     define can_use: [user, team#member, tenant#member] or can_use from provider
+
+# ----------------------------------------------------------------------
+# Secret resource type — spec `secrets-broker` Phase 8
+# ----------------------------------------------------------------------
+#
+# `secret` represents a named opaque value governed by the SecretsBroker.
+# The structural enforcement property: only plugin_principal callers may
+# resolve (read plaintext) a secret. agent_principal and tool_principal
+# have NO relation to secret — their absence from can_resolve is the
+# structural gate, not just a policy default.
+#
+# Relation semantics:
+#   belongs_to   — ties the secret to its owning tenant for scoped queries
+#   can_resolve  — grants plaintext read-back; plugin_principal ONLY
+#   can_write    — dashboard / admin CRUD (user direct or via tenant#admin)
+#   can_delete   — dashboard / admin delete (user direct or via tenant#admin)
+#
+# Tuple shape written by tenant-operator at plugin_principal provisioning:
+#   (plugin_principal:<install_id>, can_resolve, secret:tenant-<tenant_id>:*)
+#
+# Tuple shape written by tenant-operator at tenant provisioning for the
+# daemon's own service identity (LLM provider config resolution path):
+#   (user:<daemon_service_id>, can_resolve, secret:tenant-<tenant_id>:*)
+#
+# agent_principal and tool_principal get NO tuples to any secret:* object.
+
+type secret
+  relations
+    define belongs_to: [tenant]
+    define can_resolve: [plugin_principal]
+    define can_write: [user, tenant#admin]
+    define can_delete: [user, tenant#admin]
+
+# ----------------------------------------------------------------------
+# Plugin resource type — spec `plugin-runtime` Phase 10 (Task 25)
+# ----------------------------------------------------------------------
+#
+# `plugin` represents a registered plugin install reachable by tools via
+# the `gibson.plugin.v1.PluginInvokeService.PluginInvoke` RPC. The RPC's
+# authz annotation resolves the FGA object via `tenant_and_field('PluginName')`
+# producing object IDs of the form `plugin:<tenant>:<plugin_name>` (see
+# core/ext-authz/internal/fga/check.go:resolveObject). The relation checked
+# at request time is `tool_principal#can_invoke@plugin:<tenant>:<plugin_name>`.
+#
+# Relation semantics:
+#   belongs_to  — ties the plugin to its owning tenant for scoped queries
+#   can_invoke  — grants tool_principal (or any tenant member) the ability
+#                 to invoke this plugin's methods. agent_principal is
+#                 intentionally excluded: agents dispatch tools; tools
+#                 invoke plugins (per Requirement 5.2).
+#
+# Tuple shape written by tenant-operator at plugin registration (v1, tenant-wide):
+#   (tenant:<tenant_id>#member, can_invoke, plugin:<tenant_id>:<plugin_name>)
+#
+# This grants every tenant member (including every tool_principal that
+# inherits tenant membership) can_invoke on the registered plugin without
+# enumerating per-(tool, plugin) pairs. Per-tool granular grants are
+# out of scope for v1; the relation accepts `tool_principal` directly so
+# fine-grained tuples can be added later without a model change.
+#
+# agent_principal is NOT in the can_invoke type list; absent direct grants
+# combined with no computed-union path mean agents are structurally barred
+# from invoking plugins.
+
+type plugin
+  relations
+    define belongs_to: [tenant]
+    define can_invoke: [tool_principal, tenant#member]

@@ -25,6 +25,8 @@ func TestNewMistralProvider_MissingAPIKey(t *testing.T) {
 }
 
 func TestNewMistralProvider_EnvFallback(t *testing.T) {
+	// GIBSON_DEV_ENV_FALLBACK must be true to allow env-var credential fallback.
+	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
 	t.Setenv("MISTRAL_API_KEY", "env-key")
 	p, err := NewMistralProvider(llm.ProviderConfig{
 		Type:         llm.ProviderMistral,

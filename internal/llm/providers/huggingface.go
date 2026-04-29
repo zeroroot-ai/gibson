@@ -6,6 +6,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms/huggingface"
 	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -17,8 +18,17 @@ type HuggingFaceProvider struct {
 	config llm.ProviderConfig
 }
 
+// NewHuggingFaceProvider constructs a HuggingFace Inference API provider.
+// Credentials are resolved from the broker (if available), then cfg.APIKey,
+// then env-var (dev only). See resolveCredential for the full chain.
 func NewHuggingFaceProvider(cfg llm.ProviderConfig) (*HuggingFaceProvider, error) {
-	token, err := resolveCredential(cfg, "huggingface", "", "HUGGINGFACE_API_TOKEN", true)
+	return newHuggingFaceProviderWithContext(context.Background(), nil, cfg)
+}
+
+// newHuggingFaceProviderWithContext constructs a HuggingFace provider with broker
+// credential resolution. service may be nil when the broker is not available.
+func newHuggingFaceProviderWithContext(ctx context.Context, service *secrets.Service, cfg llm.ProviderConfig) (*HuggingFaceProvider, error) {
+	token, err := resolveCredential(ctx, service, cfg, "huggingface", "", "HUGGINGFACE_API_TOKEN", true)
 	if err != nil {
 		return nil, err
 	}

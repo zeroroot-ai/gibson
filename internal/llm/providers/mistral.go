@@ -6,6 +6,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms/mistral"
 	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -17,8 +18,16 @@ type MistralProvider struct {
 }
 
 // NewMistralProvider constructs a Mistral provider.
+// Credentials are resolved from the broker (if available), then cfg.APIKey,
+// then env-var (dev only). See resolveCredential for the full chain.
 func NewMistralProvider(cfg llm.ProviderConfig) (*MistralProvider, error) {
-	apiKey, err := resolveCredential(cfg, "mistral", "", "MISTRAL_API_KEY", true)
+	return newMistralProviderWithContext(context.Background(), nil, cfg)
+}
+
+// newMistralProviderWithContext constructs a Mistral provider with broker
+// credential resolution. service may be nil when the broker is not available.
+func newMistralProviderWithContext(ctx context.Context, service *secrets.Service, cfg llm.ProviderConfig) (*MistralProvider, error) {
+	apiKey, err := resolveCredential(ctx, service, cfg, "mistral", "", "MISTRAL_API_KEY", true)
 	if err != nil {
 		return nil, err
 	}

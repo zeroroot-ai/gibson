@@ -190,6 +190,152 @@ func TestDeriveEd25519_Deterministic(t *testing.T) {
 	}
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Spec: non-plugin-secret-isolation Requirement 4 — Mint refuses to
+// issue CG-JWTs that grant secret-resolution RPCs to non-plugin
+// recipients. Defense fails CLOSED for empty/unknown classes.
+// ────────────────────────────────────────────────────────────────────────────
+
+// newTestMinter constructs a Minter wired to a deterministic test
+// KEK. Used by the recipient-class deny tests below.
+func newTestMinter(t *testing.T) *Minter {
+	t.Helper()
+	master := strings.Repeat("k", 32)
+	m, err := NewMinter(context.Background(), Config{
+		Issuer:      "https://test.daemon",
+		Audience:    "test-daemon",
+		KeyProvider: kpAdapter{[]byte(master)},
+		KeyID:       "k1",
+	})
+	if err != nil {
+		t.Fatalf("NewMinter: %v", err)
+	}
+	return m
+}
+
+const harnessGetCredentialRPC = "/gibson.harness.v1.HarnessCallbackService/GetCredential"
+const componentGetCredentialRPC = "/gibson.component.v1.ComponentService/GetCredential"
+const llmCompleteRPC = "/gibson.harness.v1.HarnessCallbackService/LLMComplete"
+
+func TestMint_DeniesAgentRequestingHarnessGetCredential(t *testing.T) {
+	m := newTestMinter(t)
+	_, err := m.Mint(MintRequest{
+		Subject:        "agent-1",
+		Tenant:         "acme",
+		MissionID:      "m",
+		TaskID:         "t",
+		AllowedRPCs:    []string{harnessGetCredentialRPC},
+		RecipientClass: "agent",
+	})
+	if err == nil {
+		t.Fatal("expected CGMintDeniedByRecipientClassError, got nil")
+	}
+	var denied *CGMintDeniedByRecipientClassError
+	if !errors.As(err, &denied) {
+		t.Fatalf("expected *CGMintDeniedByRecipientClassError, got %T: %v", err, err)
+	}
+	if denied.RecipientClass != "agent" {
+		t.Errorf("RecipientClass = %q, want %q", denied.RecipientClass, "agent")
+	}
+	if denied.RejectedRPC != harnessGetCredentialRPC {
+		t.Errorf("RejectedRPC = %q, want %q", denied.RejectedRPC, harnessGetCredentialRPC)
+	}
+	if len(denied.AllowedClasses) != 1 || denied.AllowedClasses[0] != "plugin" {
+		t.Errorf("AllowedClasses = %v, want [plugin]", denied.AllowedClasses)
+	}
+	if !strings.Contains(denied.Error(), "CG_MINT_DENIED_BY_RECIPIENT_CLASS") {
+		t.Errorf("Error() missing structured code: %s", denied.Error())
+	}
+}
+
+func TestMint_DeniesToolRequestingComponentGetCredential(t *testing.T) {
+	m := newTestMinter(t)
+	_, err := m.Mint(MintRequest{
+		Subject:        "tool-1",
+		Tenant:         "acme",
+		MissionID:      "m",
+		TaskID:         "t",
+		AllowedRPCs:    []string{componentGetCredentialRPC},
+		RecipientClass: "tool",
+	})
+	var denied *CGMintDeniedByRecipientClassError
+	if !errors.As(err, &denied) {
+		t.Fatalf("expected *CGMintDeniedByRecipientClassError, got %T: %v", err, err)
+	}
+	if denied.RejectedRPC != componentGetCredentialRPC {
+		t.Errorf("RejectedRPC = %q, want %q", denied.RejectedRPC, componentGetCredentialRPC)
+	}
+}
+
+func TestMint_AllowsPluginRequestingGetCredential(t *testing.T) {
+	m := newTestMinter(t)
+	tok, err := m.Mint(MintRequest{
+		Subject:        "plugin-1",
+		Tenant:         "acme",
+		MissionID:      "m",
+		TaskID:         "t",
+		AllowedRPCs:    []string{harnessGetCredentialRPC},
+		RecipientClass: "plugin",
+		TTL:            5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("plugin recipient with GetCredential should mint, got %v", err)
+	}
+	if tok == "" {
+		t.Fatal("expected a non-empty CG-JWT for plugin recipient")
+	}
+}
+
+func TestMint_DeniesEmptyRecipientClassForSecretRPC(t *testing.T) {
+	// Defense-in-depth: an unset / unknown class is treated as
+	// not-permitted-to-call-secret-resolution. A caller that forgets
+	// to populate RecipientClass must not accidentally mint a
+	// secret-bearing CG.
+	m := newTestMinter(t)
+	_, err := m.Mint(MintRequest{
+		Subject:     "unknown-1",
+		Tenant:      "acme",
+		MissionID:   "m",
+		TaskID:      "t",
+		AllowedRPCs: []string{harnessGetCredentialRPC},
+		// RecipientClass intentionally left empty
+	})
+	var denied *CGMintDeniedByRecipientClassError
+	if !errors.As(err, &denied) {
+		t.Fatalf("expected *CGMintDeniedByRecipientClassError, got %T: %v", err, err)
+	}
+	if denied.RecipientClass != "" {
+		t.Errorf("expected empty RecipientClass on the error, got %q", denied.RecipientClass)
+	}
+	// Error message MUST clearly indicate the empty class so the
+	// missing-field cause is debuggable.
+	if !strings.Contains(denied.Error(), "<empty>") {
+		t.Errorf("Error() should label empty class as <empty>, got %s", denied.Error())
+	}
+}
+
+func TestMint_AllowsPluginWithNonSecretRPC(t *testing.T) {
+	// Sanity check: plugin with a non-secret RPC mints successfully
+	// (the deny check must not over-reach beyond the hardcoded
+	// secret-resolution set).
+	m := newTestMinter(t)
+	tok, err := m.Mint(MintRequest{
+		Subject:        "plugin-1",
+		Tenant:         "acme",
+		MissionID:      "m",
+		TaskID:         "t",
+		AllowedRPCs:    []string{llmCompleteRPC},
+		RecipientClass: "plugin",
+		TTL:            5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("plugin recipient with LLMComplete should mint, got %v", err)
+	}
+	if tok == "" {
+		t.Fatal("expected a non-empty CG-JWT for plugin LLMComplete request")
+	}
+}
+
 // kpAdapter satisfies the real crypto.KeyProvider interface for tests.
 type kpAdapter struct{ key []byte }
 

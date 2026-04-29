@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -108,13 +109,19 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 	}
 
 	// Mint the renewal. allowed_rpcs and tenant carry over verbatim;
-	// JTI/IAT/EXP are fresh.
+	// JTI/IAT/EXP are fresh. RecipientClass is recovered from the
+	// CG-JWT subject, which uses the "component:<kind>:<name>" shape
+	// produced by the harness mint path. Required for the Mint deny
+	// check (non-plugin-secret-isolation R4) — the renewal MUST inherit
+	// the original recipient class so legitimate plugin renewals are
+	// not rejected and non-plugin renewals carry the same isolation.
 	fresh, err := s.cgMinter.Mint(capabilitygrant.MintRequest{
-		Subject:     claims.Subject,
-		Tenant:      claims.Tenant.String(),
-		MissionID:   claims.MissionID,
-		TaskID:      claims.TaskID,
-		AllowedRPCs: claims.AllowedRPCs,
+		Subject:        claims.Subject,
+		Tenant:         claims.Tenant.String(),
+		MissionID:      claims.MissionID,
+		TaskID:         claims.TaskID,
+		AllowedRPCs:    claims.AllowedRPCs,
+		RecipientClass: recipientClassFromSubject(claims.Subject),
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "mint renewal: %s", err)
@@ -162,3 +169,21 @@ func capabilityGrantHeader(ctx context.Context) string {
 // to map the daemon's gRPC errors to HTTP status codes (kept here to
 // document the mapping rather than scatter status helpers).
 var _ = http.StatusBadRequest
+
+// recipientClassFromSubject extracts the workload class from a CG-JWT
+// subject of the form "component:<kind>:<name>" (the shape produced
+// by the harness mint path). Returns the empty string for any other
+// shape — the empty string fails the Mint deny check closed for
+// secret-resolution RPCs by design (non-plugin-secret-isolation R4).
+func recipientClassFromSubject(subject string) string {
+	const prefix = "component:"
+	if !strings.HasPrefix(subject, prefix) {
+		return ""
+	}
+	rest := subject[len(prefix):]
+	idx := strings.IndexByte(rest, ':')
+	if idx <= 0 {
+		return ""
+	}
+	return rest[:idx]
+}

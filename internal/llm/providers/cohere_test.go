@@ -25,6 +25,8 @@ func TestNewCohereProvider_MissingToken(t *testing.T) {
 }
 
 func TestNewCohereProvider_EnvFallback(t *testing.T) {
+	// GIBSON_DEV_ENV_FALLBACK must be true to allow env-var credential fallback.
+	t.Setenv("GIBSON_DEV_ENV_FALLBACK", "true")
 	t.Setenv("COHERE_API_KEY", "env-key")
 	p, err := NewCohereProvider(llm.ProviderConfig{
 		Type:         llm.ProviderCohere,

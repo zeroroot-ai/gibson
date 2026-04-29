@@ -2,75 +2,54 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	dbpostgres "github.com/zero-day-ai/gibson/internal/database/postgres"
-	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/auth"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// DaemonCredentialStore implements harness.CredentialStore using the
-// per-tenant data-plane Pool. Each GetCredential call acquires a Conn
-// for the calling tenant (resolved from context), calls conn.Credentials().Get,
-// and releases the Conn before returning.
+// DaemonCredentialStore implements harness.CredentialStore by delegating to
+// secrets.Service.Resolve. All broker routing (registry → circuit breaker →
+// provider → audit) happens inside the service; this type is a thin adapter
+// that maps the gRPC status errors returned by the service to the error shape
+// the harness expects.
 //
-// Phase D: this replaces the Phase C bridge (PostgresCredentialDAO wrapping a
-// shared credentialPGPool pointing at the dashboard Postgres). Credentials are
-// now stored in each tenant's own Postgres database, wrapped under the per-tenant
-// KEK via envelope encryption (see internal/database/postgres.CredentialOps).
+// Phase 10 (secrets-broker, Task 24): refactored from pool-and-Conn direct
+// call to secrets.Service.Resolve.
 type DaemonCredentialStore struct {
-	pool        datapool.Pool
-	keyProvider crypto.KeyProvider
+	service *secrets.Service
 }
 
-// NewDaemonCredentialStore creates a new pool-backed credential store.
-// pool must not be nil; it is used to acquire a per-tenant Conn per RPC call.
-// keyProvider is retained for Health() and Close().
-func NewDaemonCredentialStore(pool datapool.Pool, keyProvider crypto.KeyProvider) (*DaemonCredentialStore, error) {
-	if pool == nil {
-		return nil, fmt.Errorf("credential store: pool must not be nil")
+// NewDaemonCredentialStore creates a new service-backed credential store.
+// service must not be nil.
+func NewDaemonCredentialStore(service *secrets.Service) (*DaemonCredentialStore, error) {
+	if service == nil {
+		return nil, fmt.Errorf("credential store: service must not be nil")
 	}
-	if keyProvider == nil {
-		return nil, fmt.Errorf("credential store: keyProvider must not be nil")
-	}
-	return &DaemonCredentialStore{
-		pool:        pool,
-		keyProvider: keyProvider,
-	}, nil
+	return &DaemonCredentialStore{service: service}, nil
 }
 
 // GetCredential retrieves a credential by name for the tenant in context.
-// It acquires a per-tenant Conn, calls conn.Credentials().Get(ctx, name),
-// and releases the Conn. The decrypted plaintext secret is returned as the
+// It delegates to secrets.Service.Resolve and wraps the returned bytes as a
+// types.Credential value. The decrypted plaintext secret is returned as the
 // second return value.
 //
 // SECURITY: never log or persist the returned secret string.
 func (s *DaemonCredentialStore) GetCredential(ctx context.Context, name string) (*types.Credential, string, error) {
-	tenant, ok := auth.TenantFromContext(ctx)
-	if !ok || tenant.IsZero() {
-		return nil, "", fmt.Errorf("credential store: no tenant in context")
-	}
-
-	conn, err := s.pool.For(ctx, tenant)
+	secretBytes, err := s.service.Resolve(ctx, name)
 	if err != nil {
-		var npErr *datapool.NotProvisionedError
-		if errors.As(err, &npErr) {
-			return nil, "", fmt.Errorf("credential store: tenant %s not provisioned", tenant)
+		// secrets.Service returns gRPC status errors. Map NotFound to a
+		// user-facing message; surface others directly.
+		if st, ok := status.FromError(err); ok {
+			if st.Code() == codes.NotFound {
+				return nil, "", fmt.Errorf("credential %q not found", name)
+			}
+			return nil, "", fmt.Errorf("credential store: %s: %v", st.Code(), st.Message())
 		}
-		return nil, "", fmt.Errorf("credential store: acquire conn: %w", err)
-	}
-	defer conn.Release()
-
-	secretBytes, err := conn.Credentials().Get(ctx, name)
-	if err != nil {
-		if errors.Is(err, dbpostgres.ErrCredentialNotFound) {
-			return nil, "", fmt.Errorf("credential %q not found", name)
-		}
-		return nil, "", fmt.Errorf("credential store: get %q: %w", name, err)
+		return nil, "", fmt.Errorf("credential store: resolve %q: %w", name, err)
 	}
 
 	// Build a minimal Credential for the harness API.
@@ -83,14 +62,15 @@ func (s *DaemonCredentialStore) GetCredential(ctx context.Context, name string) 
 	return cred, string(secretBytes), nil
 }
 
-// Health returns the health status of the key provider.
-func (s *DaemonCredentialStore) Health(ctx context.Context) types.HealthStatus {
-	return s.keyProvider.Health(ctx)
+// Health returns a healthy status. The broker stack's health is tracked
+// separately via the registry; this store is a pass-through.
+func (s *DaemonCredentialStore) Health(_ context.Context) types.HealthStatus {
+	return types.HealthStatus{State: types.HealthStateHealthy, Message: "broker-backed"}
 }
 
-// Close releases resources.
+// Close is a no-op. The secrets.Service lifecycle is managed by the daemon.
 func (s *DaemonCredentialStore) Close() error {
-	return s.keyProvider.Close()
+	return nil
 }
 
 // Ensure DaemonCredentialStore implements harness.CredentialStore.

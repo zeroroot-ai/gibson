@@ -9,6 +9,35 @@ package capabilitygrant
 // the daemon's KeyProvider holds, with HKDF domain-separation so the
 // signing key is not the encryption key.
 //
+// ── Layered defense for non-plugin secret isolation ──────────────────
+//
+// Spec: non-plugin-secret-isolation Requirement 4 / 6, in concert with
+// secrets-broker (Spec 1) Requirement 8.
+//
+// Layer 3 (this file): the Mint() function refuses to issue a CG-JWT
+// when the recipient's workload class is not "plugin" AND the
+// requested AllowedRPCs include any secret-resolution RPC (the
+// HarnessCallbackService.GetCredential and ComponentService.GetCredential
+// methods). The deny set is hardcoded rather than introspecting proto
+// annotations: the guard stays simple, auditable, and decoupled from
+// the proto registry. Defense fails CLOSED — an empty or unknown
+// RecipientClass is treated as not-allowed-to-call-secret-resolution,
+// so any caller that omits the field will be rejected by design.
+//
+// Layer 4 (core/ext-authz/internal/check/cg.go): the ext-authz CG
+// verifier independently refuses to authorize any RPC against an
+// absent FGA tuple. Even if a forged CG-JWT were signed with the
+// daemon's signing key but with a mismatched recipient class, ext-
+// authz would still reject the call because the tenant-operator
+// (per Spec 1 R8 and Spec 3 R3) never writes a (agent_principal|
+// tool_principal, can_resolve, secret:*) tuple.
+//
+// The two layers are independent: a forged CG-JWT signed with the
+// daemon's KMS key but carrying a non-plugin class would be refused
+// at Layer 4 (no FGA tuple); a legitimate Mint request from a
+// confused caller never reaches the wire because Layer 3 refuses
+// at issuance. Cross-reference: Spec 1 R8 and Spec 3 R6.
+//
 // JWKS publication: JWKS exposes the public counterpart at
 // /.well-known/jwks.json so that ext-authz can verify CG-JWTs in its
 // short-circuit path. The endpoint is served via the daemon's HTTP
@@ -143,6 +172,62 @@ type MintRequest struct {
 	// TTL is the requested CG-JWT lifetime. Capped at MaxLifetime.
 	// Defaults to MaxLifetime when zero.
 	TTL time.Duration
+
+	// RecipientClass is the recipient workload's class as recorded on
+	// its Zitadel service-account. Acceptable values are "agent",
+	// "tool", and "plugin"; any other value (including the empty
+	// string) is treated as deny-all by the secret-resolution guard
+	// in Mint(). The class is consulted to refuse issuance of CG-JWTs
+	// that would let a non-plugin caller invoke a credential-resolving
+	// RPC. See spec non-plugin-secret-isolation Requirement 4 and the
+	// layered-defense block at the top of this file.
+	RecipientClass string
+}
+
+// secretResolutionRPCs is the hardcoded set of gRPC methods through
+// which a caller could obtain a tenant credential value. Mint refuses
+// to issue a CG-JWT that grants any of these to a non-plugin
+// recipient. The set is hardcoded rather than derived from proto
+// annotations to keep the guard auditable and decoupled from the
+// proto registry.
+var secretResolutionRPCs = map[string]struct{}{
+	"/gibson.harness.v1.HarnessCallbackService/GetCredential": {},
+	"/gibson.component.v1.ComponentService/GetCredential":     {},
+}
+
+// classCanCallSecretResolution maps recipient workload class to
+// whether that class is permitted to be granted any of the secret-
+// resolution RPCs above. Defense fails CLOSED: any class not present
+// in this map (including the empty string) is treated as forbidden.
+var classCanCallSecretResolution = map[string]bool{
+	"plugin": true,
+	"agent":  false,
+	"tool":   false,
+}
+
+// CGMintDeniedByRecipientClassError is returned by Mint when the
+// requested AllowedRPCs include a secret-resolution method but the
+// MintRequest.RecipientClass is not permitted to invoke them. The
+// error names the offending class, the rejected RPC, and the classes
+// that would have been allowed (currently just "plugin").
+//
+// Spec: non-plugin-secret-isolation Requirement 4.2 (structured error
+// with code CG_MINT_DENIED_BY_RECIPIENT_CLASS).
+type CGMintDeniedByRecipientClassError struct {
+	RecipientClass string
+	RejectedRPC    string
+	AllowedClasses []string
+}
+
+func (e *CGMintDeniedByRecipientClassError) Error() string {
+	cls := e.RecipientClass
+	if cls == "" {
+		cls = "<empty>"
+	}
+	return fmt.Sprintf(
+		"capabilitygrant: CG_MINT_DENIED_BY_RECIPIENT_CLASS: recipient class %q cannot be granted secret-resolution RPC %q (allowed classes: %v)",
+		cls, e.RejectedRPC, e.AllowedClasses,
+	)
 }
 
 // Mint produces a signed CG-JWT for the given request. Returns the
@@ -155,6 +240,25 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 	if len(req.AllowedRPCs) == 0 {
 		return "", errors.New("capabilitygrant: AllowedRPCs required and non-empty")
 	}
+
+	// Layer 3 (non-plugin-secret-isolation R4): refuse to issue a
+	// CG-JWT granting any secret-resolution RPC to a recipient whose
+	// workload class is not permitted to call them. Defense fails
+	// CLOSED — an empty or unknown RecipientClass is rejected for
+	// any secret-resolution RPC by virtue of classCanCallSecretResolution
+	// returning the zero-value (false) for missing keys.
+	if allowed := classCanCallSecretResolution[req.RecipientClass]; !allowed {
+		for _, rpc := range req.AllowedRPCs {
+			if _, isSecretRPC := secretResolutionRPCs[rpc]; isSecretRPC {
+				return "", &CGMintDeniedByRecipientClassError{
+					RecipientClass: req.RecipientClass,
+					RejectedRPC:    rpc,
+					AllowedClasses: []string{"plugin"},
+				}
+			}
+		}
+	}
+
 	ttl := req.TTL
 	if ttl <= 0 || ttl > MaxLifetime {
 		ttl = MaxLifetime

@@ -6,39 +6,30 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	dbpostgres "github.com/zero-day-ai/gibson/internal/database/postgres"
-	"github.com/zero-day-ai/gibson/internal/datapool"
+	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/auth"
+	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// CredentialHandler provides credential management operations for the daemon.
-// It acquires a per-tenant Conn from the data-plane Pool on each call,
-// delegates to conn.Credentials() (internal/database/postgres.CredentialOps), and releases the Conn.
+// CredentialHandler provides credential management operations for the daemon
+// dashboard API. All operations delegate to secrets.Service which routes
+// through the broker registry → circuit breaker → provider → audit pipeline.
 //
-// Phase D: the Phase C bridge (CredentialDAO wrapping a shared credentialPGPool)
-// is replaced by this pool-backed implementation. Credentials are stored in each
-// tenant's dedicated Postgres database, wrapped under the per-tenant KEK.
+// Phase 10 (secrets-broker, Task 27): refactored from pool-and-Conn direct
+// call to secrets.Service. The TODO planted during Phase 2 is resolved.
 type CredentialHandler struct {
-	pool        datapool.Pool
-	keyProvider crypto.KeyProvider
+	service *secrets.Service
 }
 
-// NewCredentialHandler creates a new pool-backed credential handler.
-// pool must not be nil; keyProvider is retained for compatibility with callers
-// that inspect it (e.g., health-check adapters).
-func NewCredentialHandler(pool datapool.Pool, keyProvider crypto.KeyProvider) (*CredentialHandler, error) {
-	if pool == nil {
-		return nil, fmt.Errorf("credential handler: pool must not be nil")
+// NewCredentialHandler creates a new broker-backed credential handler.
+// service must not be nil.
+func NewCredentialHandler(service *secrets.Service) (*CredentialHandler, error) {
+	if service == nil {
+		return nil, fmt.Errorf("credential handler: service must not be nil")
 	}
-	if keyProvider == nil {
-		return nil, fmt.Errorf("credential handler: keyProvider must not be nil")
-	}
-	return &CredentialHandler{
-		pool:        pool,
-		keyProvider: keyProvider,
-	}, nil
+	return &CredentialHandler{service: service}, nil
 }
 
 // CredentialCreateRequest contains the data needed to create a credential.
@@ -46,7 +37,7 @@ type CredentialCreateRequest struct {
 	Name        string
 	Type        types.CredentialType
 	Provider    string
-	APIKey      string // The plaintext API key to store (encrypted by CredentialOps)
+	APIKey      string // The plaintext API key to store (encrypted by the broker)
 	Description string
 	Tags        []string
 }
@@ -78,21 +69,7 @@ type CredentialUpdateRequest struct {
 	Status      *types.CredentialStatus
 }
 
-// credentialConn acquires a per-tenant Conn from the pool and returns it.
-// The caller is responsible for calling conn.Release().
-func (h *CredentialHandler) credentialConn(ctx context.Context) (*datapool.Conn, error) {
-	tenant, ok := auth.TenantFromContext(ctx)
-	if !ok || tenant.IsZero() {
-		return nil, fmt.Errorf("credential handler: no tenant in context")
-	}
-	conn, err := h.pool.For(ctx, tenant)
-	if err != nil {
-		return nil, fmt.Errorf("credential handler: acquire conn for tenant %s: %w", tenant, err)
-	}
-	return conn, nil
-}
-
-// Create creates a new credential. The APIKey is stored encrypted by CredentialOps.
+// Create creates a new credential. The APIKey is stored encrypted by the broker.
 func (h *CredentialHandler) Create(ctx context.Context, req CredentialCreateRequest) (*CredentialResponse, error) {
 	if req.Name == "" {
 		return nil, types.NewError(types.CREDENTIAL_INVALID, "credential name cannot be empty")
@@ -104,14 +81,8 @@ func (h *CredentialHandler) Create(ctx context.Context, req CredentialCreateRequ
 		return nil, types.NewError(types.CREDENTIAL_INVALID, fmt.Sprintf("invalid credential type: %s", req.Type))
 	}
 
-	conn, err := h.credentialConn(ctx)
-	if err != nil {
-		return nil, types.WrapError(types.DB_QUERY_FAILED, "failed to acquire connection", err)
-	}
-	defer conn.Release()
-
-	if err := conn.Credentials().Put(ctx, req.Name, []byte(req.APIKey)); err != nil {
-		return nil, types.WrapError(types.DB_QUERY_FAILED, "failed to create credential", err)
+	if err := h.service.Put(ctx, req.Name, []byte(req.APIKey)); err != nil {
+		return nil, mapServiceError(err, "failed to create credential")
 	}
 
 	now := time.Now()
@@ -132,29 +103,21 @@ func (h *CredentialHandler) Create(ctx context.Context, req CredentialCreateRequ
 	return resp, nil
 }
 
-// Get retrieves a credential by ID. Since CredentialOps is name-keyed,
+// Get retrieves a credential by ID. Since the broker is name-keyed,
 // this returns an unsupported-operation error; use GetByName.
-func (h *CredentialHandler) Get(ctx context.Context, id types.ID) (*CredentialResponse, error) {
-	// CredentialOps uses name as the primary key. ID-based lookup is not
-	// supported in the per-tenant model. Callers must use GetByName.
-	_ = id
+func (h *CredentialHandler) Get(_ context.Context, _ types.ID) (*CredentialResponse, error) {
 	return nil, types.NewError(types.CREDENTIAL_NOT_FOUND, "lookup by ID is not supported; use GetByName")
 }
 
-// GetByName retrieves a credential by name.
+// GetByName retrieves a credential by name. The returned MaskedKey shows only
+// prefix + suffix; the plaintext is not included in CredentialResponse.
 func (h *CredentialHandler) GetByName(ctx context.Context, name string) (*CredentialResponse, error) {
-	conn, err := h.credentialConn(ctx)
+	secret, err := h.service.Resolve(ctx, name)
 	if err != nil {
-		return nil, types.WrapError(types.CREDENTIAL_NOT_FOUND, "failed to acquire connection", err)
-	}
-	defer conn.Release()
-
-	secret, err := conn.Credentials().Get(ctx, name)
-	if err != nil {
-		if errors.Is(err, dbpostgres.ErrCredentialNotFound) {
+		if isNotFound(err) {
 			return nil, types.WrapError(types.CREDENTIAL_NOT_FOUND, "credential not found", err)
 		}
-		return nil, types.WrapError(types.CREDENTIAL_NOT_FOUND, "credential not found", err)
+		return nil, mapServiceError(err, "credential not found")
 	}
 
 	now := time.Now()
@@ -170,17 +133,14 @@ func (h *CredentialHandler) GetByName(ctx context.Context, name string) (*Creden
 }
 
 // GetDecrypted retrieves a credential with its plaintext value.
-// This is for internal use only — never expose via API.
+// This method is for internal/dashboard operator use only — access is gated
+// by the existing FGA roles on the calling dashboard user's RPC path.
+//
+// SECURITY: never log or persist the returned secret string.
 func (h *CredentialHandler) GetDecrypted(ctx context.Context, name string) (*types.Credential, string, error) {
-	conn, err := h.credentialConn(ctx)
+	secret, err := h.service.Resolve(ctx, name)
 	if err != nil {
-		return nil, "", types.WrapError(types.CREDENTIAL_NOT_FOUND, "failed to acquire connection", err)
-	}
-	defer conn.Release()
-
-	secret, err := conn.Credentials().Get(ctx, name)
-	if err != nil {
-		return nil, "", types.WrapError(types.CREDENTIAL_NOT_FOUND, "credential not found", err)
+		return nil, "", mapServiceError(err, "credential not found")
 	}
 
 	cred := &types.Credential{
@@ -190,18 +150,17 @@ func (h *CredentialHandler) GetDecrypted(ctx context.Context, name string) (*typ
 	return cred, string(secret), nil
 }
 
-// List retrieves credentials with optional filtering.
-// CredentialOps exposes a name-ordered scan; filters are applied in-memory.
+// List retrieves credential names with optional filtering.
 func (h *CredentialHandler) List(ctx context.Context, filter *types.CredentialFilter) ([]*CredentialResponse, error) {
-	conn, err := h.credentialConn(ctx)
-	if err != nil {
-		return nil, types.WrapError(types.DB_QUERY_FAILED, "failed to acquire connection", err)
+	f := sdksecrets.Filter{}
+	if filter != nil {
+		f.Limit = filter.Limit
+		f.Offset = filter.Offset
 	}
-	defer conn.Release()
 
-	names, err := conn.Credentials().ListNames(ctx, filter)
+	names, err := h.service.List(ctx, f)
 	if err != nil {
-		return nil, types.WrapError(types.DB_QUERY_FAILED, "failed to list credentials", err)
+		return nil, mapServiceError(err, "failed to list credentials")
 	}
 
 	responses := make([]*CredentialResponse, 0, len(names))
@@ -220,33 +179,28 @@ func (h *CredentialHandler) List(ctx context.Context, filter *types.CredentialFi
 	return responses, nil
 }
 
-// Update updates an existing credential. Only the APIKey can be rotated in the
-// per-tenant model; metadata updates (name, description, tags) are not supported
-// by CredentialOps and are no-ops in this implementation.
+// Update updates an existing credential. Only the APIKey can be rotated.
+// If the underlying provider declares CanPut=false, a structured error is
+// returned indicating that Update is not supported on this provider.
 func (h *CredentialHandler) Update(ctx context.Context, req CredentialUpdateRequest) (*CredentialResponse, error) {
 	if req.APIKey == nil {
-		return nil, types.NewError(types.CREDENTIAL_INVALID, "credential update: APIKey is required (metadata-only updates are not supported in Phase D)")
+		return nil, types.NewError(types.CREDENTIAL_INVALID, "credential update: APIKey is required (metadata-only updates are not supported)")
 	}
 
-	conn, err := h.credentialConn(ctx)
-	if err != nil {
-		return nil, types.WrapError(types.DB_QUERY_FAILED, "failed to acquire connection", err)
-	}
-	defer conn.Release()
-
-	// Determine the name to update. If Name is provided, use it; otherwise we
-	// cannot look up by ID in this model. This is a limitation of the bridge —
-	// callers should provide the Name in the request.
 	name := ""
 	if req.Name != nil {
 		name = *req.Name
 	}
 	if name == "" {
-		return nil, types.NewError(types.CREDENTIAL_INVALID, "credential update: Name is required (ID-based update not supported in Phase D)")
+		return nil, types.NewError(types.CREDENTIAL_INVALID, "credential update: Name is required (ID-based update not supported)")
 	}
 
-	if err := conn.Credentials().Put(ctx, name, []byte(*req.APIKey)); err != nil {
-		return nil, types.WrapError(types.DB_QUERY_FAILED, "failed to update credential", err)
+	if err := h.service.Put(ctx, name, []byte(*req.APIKey)); err != nil {
+		// Surface capability-level errors as a user-friendly message.
+		if isUnsupported(err) {
+			return nil, types.NewError(types.CREDENTIAL_INVALID, "Update not supported on read-only provider")
+		}
+		return nil, mapServiceError(err, "failed to update credential")
 	}
 
 	now := time.Now()
@@ -261,27 +215,75 @@ func (h *CredentialHandler) Update(ctx context.Context, req CredentialUpdateRequ
 	}, nil
 }
 
-// Delete deletes a credential by name.
-// Since CredentialOps is name-keyed, DeleteByName is used.
-func (h *CredentialHandler) Delete(ctx context.Context, id types.ID) error {
-	// ID-based delete is not supported in CredentialOps. Callers should use
-	// DeleteByName via the dashboard API RPC handler directly.
-	_ = id
-	return types.NewError(types.CREDENTIAL_NOT_FOUND, "delete by ID is not supported in Phase D; use DeleteByName")
+// Delete deletes a credential by ID. Use DeleteByName instead.
+func (h *CredentialHandler) Delete(_ context.Context, _ types.ID) error {
+	return types.NewError(types.CREDENTIAL_NOT_FOUND, "delete by ID is not supported; use DeleteByName")
 }
 
 // DeleteByName deletes a credential by name.
 func (h *CredentialHandler) DeleteByName(ctx context.Context, name string) error {
-	conn, err := h.credentialConn(ctx)
-	if err != nil {
-		return types.WrapError(types.CREDENTIAL_NOT_FOUND, "failed to acquire connection", err)
-	}
-	defer conn.Release()
-
-	if err := conn.Credentials().Delete(ctx, name); err != nil {
-		return types.WrapError(types.CREDENTIAL_NOT_FOUND, "credential not found", err)
+	if err := h.service.Delete(ctx, name); err != nil {
+		return mapServiceError(err, "credential not found")
 	}
 	return nil
+}
+
+// Exists returns true when a credential with the given name exists in the broker.
+func (h *CredentialHandler) Exists(ctx context.Context, name string) (bool, error) {
+	_, err := h.service.Resolve(ctx, name)
+	if err == nil {
+		return true, nil
+	}
+	if isNotFound(err) {
+		return false, nil
+	}
+	return false, mapServiceError(err, "exists check failed")
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+// mapServiceError translates a secrets.Service gRPC status error to a types.Error.
+// The op string is used only in the wrapper message; credential material must
+// never appear in op.
+func mapServiceError(err error, op string) error {
+	if err == nil {
+		return nil
+	}
+	if st, ok := status.FromError(err); ok {
+		switch st.Code() {
+		case codes.NotFound:
+			return types.WrapError(types.CREDENTIAL_NOT_FOUND, op, err)
+		case codes.FailedPrecondition:
+			return types.WrapError(types.CREDENTIAL_INVALID, op, err)
+		default:
+			return types.WrapError(types.DB_QUERY_FAILED, op, err)
+		}
+	}
+	return types.WrapError(types.DB_QUERY_FAILED, op, err)
+}
+
+// isNotFound reports whether err signals a not-found condition from secrets.Service.
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if st, ok := status.FromError(err); ok {
+		return st.Code() == codes.NotFound
+	}
+	return errors.Is(err, sdksecrets.ErrNotFound)
+}
+
+// isUnsupported reports whether err signals an unsupported operation from secrets.Service.
+func isUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	if st, ok := status.FromError(err); ok {
+		return st.Code() == codes.FailedPrecondition
+	}
+	return errors.Is(err, sdksecrets.ErrUnsupported)
 }
 
 // toResponse converts a Credential to a CredentialResponse.

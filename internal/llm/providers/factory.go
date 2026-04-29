@@ -1,16 +1,38 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zero-day-ai/gibson/internal/secrets"
 )
 
 // NewProvider constructs an LLMProvider for the given ProviderConfig.Type.
 // Every ProviderType in llm.SupportedProviderTypes() must have a matching case
 // in this switch — the factory_coverage_test enforces that invariant.
+//
+// NewProvider uses context.Background() and no broker service. For broker-aware
+// credential resolution use NewProviderWithContext.
 func NewProvider(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
+	return NewProviderWithContext(context.Background(), nil, cfg)
+}
+
+// NewProviderWithContext constructs an LLMProvider with broker-aware credential
+// resolution. service may be nil; when nil, credential lookup falls back to the
+// cfg.Extra / cfg.APIKey / env-var chain (subject to GIBSON_DEV_ENV_FALLBACK).
+//
+// Phase 10 (secrets-broker, Task 28): broker-first credential resolution for
+// Cloudflare, Mistral, Cohere, and HuggingFace providers. Bedrock, Anthropic,
+// OpenAI, and Google providers read credentials from cfg or env-var directly
+// (their credential handling is outside resolveCredential); they are not yet
+// wired to the broker — that is deferred to Task 29 / Phase 11 per-provider
+// rotation subscription work.
+//
+// TODO(Phase 11, Task 29): extend broker credential resolution to Bedrock,
+// Anthropic, OpenAI, and Google providers via the same provider_config: prefix.
+func NewProviderWithContext(ctx context.Context, service *secrets.Service, cfg llm.ProviderConfig) (llm.LLMProvider, error) {
 	switch cfg.Type {
 	case llm.ProviderAnthropic:
 		return NewAnthropicProvider(cfg)
@@ -23,15 +45,15 @@ func NewProvider(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
 	case llm.ProviderBedrock:
 		return NewBedrockProvider(cfg)
 	case llm.ProviderCloudflare:
-		return NewCloudflareProvider(cfg)
+		return newCloudflareProviderWithContext(ctx, service, cfg)
 	case llm.ProviderCohere:
-		return NewCohereProvider(cfg)
+		return newCohereProviderWithContext(ctx, service, cfg)
 	case llm.ProviderHuggingFace:
-		return NewHuggingFaceProvider(cfg)
+		return newHuggingFaceProviderWithContext(ctx, service, cfg)
 	case llm.ProviderLlamafile:
 		return NewLlamafileProvider(cfg)
 	case llm.ProviderMistral:
-		return NewMistralProvider(cfg)
+		return newMistralProviderWithContext(ctx, service, cfg)
 	case llm.ProviderCustom:
 		// Custom is a deliberate escape hatch for operators wiring a provider
 		// the daemon doesn't know about. Construction is their responsibility;

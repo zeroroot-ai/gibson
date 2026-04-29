@@ -7,6 +7,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms/cloudflare"
 	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -19,12 +20,20 @@ type CloudflareProvider struct {
 }
 
 // NewCloudflareProvider constructs a Cloudflare Workers AI provider.
+// Credentials are resolved from the broker (if service is non-nil), then
+// cfg.Extra, then env-var (dev only). See resolveCredential for the full chain.
 func NewCloudflareProvider(cfg llm.ProviderConfig) (*CloudflareProvider, error) {
-	accountID, err := resolveCredential(cfg, "cloudflare", "cloudflare_account_id", "CLOUDFLARE_ACCOUNT_ID", true)
+	return newCloudflareProviderWithContext(context.Background(), nil, cfg)
+}
+
+// newCloudflareProviderWithContext constructs a Cloudflare provider with broker
+// credential resolution. service may be nil when the broker is not available.
+func newCloudflareProviderWithContext(ctx context.Context, service *secrets.Service, cfg llm.ProviderConfig) (*CloudflareProvider, error) {
+	accountID, err := resolveCredential(ctx, service, cfg, "cloudflare", "cloudflare_account_id", "CLOUDFLARE_ACCOUNT_ID", true)
 	if err != nil {
 		return nil, err
 	}
-	token, err := resolveCredential(cfg, "cloudflare", "", "CLOUDFLARE_API_TOKEN", true)
+	token, err := resolveCredential(ctx, service, cfg, "cloudflare", "", "CLOUDFLARE_API_TOKEN", true)
 	if err != nil {
 		return nil, err
 	}

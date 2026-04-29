@@ -237,6 +237,15 @@ type ComponentServiceServer struct {
 	// May be nil; when nil (noop/disabled mode), all FGA writes are skipped silently.
 	// Set via WithAuthorizer. Added by agent-auth-fga-integration spec (task 3).
 	authorizer authz.Authorizer
+
+	// pluginRegistry is the daemon-side plugin install registry.
+	// When non-nil, RegisterComponent calls with kind="plugin" are forwarded to
+	// pluginRegistry.Register so install metadata is persisted and transient state
+	// is initialised in Redis. Heartbeat calls for plugin components are forwarded
+	// to pluginRegistry.Heartbeat to refresh the 90-second Redis TTL.
+	// When nil, plugin registration is handled via the standard component registry only.
+	// Set via WithPluginRegistry. Added by plugin-runtime spec (Task 16).
+	pluginRegistry PluginRegistry
 }
 
 // NewComponentServiceServer constructs a ComponentServiceServer with the core
@@ -422,6 +431,20 @@ func (s *ComponentServiceServer) WithAuthorizer(az authz.Authorizer) *ComponentS
 	return s
 }
 
+// WithPluginRegistry wires a PluginRegistry so that RegisterComponent calls with
+// kind="plugin" are forwarded to persist install metadata in Postgres and initialise
+// transient Redis state. Heartbeat calls for plugin components are forwarded to
+// refresh the 90-second TTL.
+//
+// When pr is nil, plugin-kind registrations are handled via the standard component
+// registry only (install metadata is not persisted to the plugin_install table).
+//
+// Added by the plugin-runtime spec (Task 16).
+func (s *ComponentServiceServer) WithPluginRegistry(pr PluginRegistry) *ComponentServiceServer {
+	s.pluginRegistry = pr
+	return s
+}
+
 // ---------------------------------------------------------------------------
 // RegisterComponent
 // ---------------------------------------------------------------------------
@@ -554,6 +577,45 @@ func (s *ComponentServiceServer) RegisterComponent(
 			)
 			// Non-fatal: registration already succeeded; counter mismatch will
 			// self-correct via decrementCounter's floor-at-zero logic.
+		}
+	}
+
+	// Forward plugin-kind registrations to the PluginRegistry for install persistence.
+	// The PluginRegistry persists install metadata in Postgres (plugin_install table) and
+	// initialises transient Redis state. Plugin-specific metadata keys are carried in
+	// req.Metadata using the "plugin:" prefix convention.
+	//
+	// Best-effort: a failed pluginRegistry call is logged but never fails the RPC —
+	// the component is already in the Redis registry and will heartbeat normally.
+	if req.Kind == "plugin" && s.pluginRegistry != nil {
+		tenantID, tenantParseErr := auth.NewTenantID(tenant)
+		if tenantParseErr != nil {
+			s.logger.WarnContext(ctx, "register component: invalid tenant for plugin registry forwarding; skipping",
+				slog.String("tenant", tenant), slog.String("error", tenantParseErr.Error()))
+		} else {
+			install := &PluginInstall{
+				ID:                 instanceID,
+				TenantID:           tenantID,
+				Name:               req.Name,
+				Version:            req.Version,
+				ManifestHash:       req.Metadata["plugin:manifest_hash"],
+				DeclaredMethods:    req.Methods,
+				ProtoDescriptorSet: req.FileDescriptorSet,
+				HostID:             req.Metadata["plugin:host_id"],
+				RuntimeMode:        req.Metadata["plugin:runtime_mode"],
+				SetecRequired:      req.Metadata["plugin:setec_required"] == "true",
+			}
+			if install.RuntimeMode == "" {
+				install.RuntimeMode = "process"
+			}
+			if prErr := s.pluginRegistry.Register(ctx, install); prErr != nil {
+				s.logger.WarnContext(ctx, "register component: plugin registry persistence failed (non-fatal)",
+					slog.String("tenant", tenant),
+					slog.String("plugin", req.Name),
+					slog.String("instance_id", instanceID),
+					slog.String("error", prErr.Error()),
+				)
+			}
 		}
 	}
 
@@ -696,6 +758,22 @@ func (s *ComponentServiceServer) Heartbeat(
 		slog.String("instance_id", req.InstanceId),
 		slog.String("health_status", req.HealthStatus),
 	)
+
+	// Forward plugin heartbeats to the PluginRegistry so the 90-second transient
+	// Redis TTL is refreshed and last_heartbeat_at is updated.
+	// The gRPC address is not available in HeartbeatRequest; pass "" so the registry
+	// preserves the address already stored from the prior heartbeat call.
+	if target.Kind == "plugin" && s.pluginRegistry != nil {
+		if prErr := s.pluginRegistry.Heartbeat(ctx, req.InstanceId, ""); prErr != nil {
+			s.logger.WarnContext(ctx, "heartbeat: plugin registry TTL refresh failed (non-fatal)",
+				slog.String("tenant", tenant),
+				slog.String("plugin", target.Name),
+				slog.String("instance_id", req.InstanceId),
+				slog.String("error", prErr.Error()),
+			)
+			// Non-fatal: component registry TTL is already refreshed above.
+		}
+	}
 
 	return &componentpb.HeartbeatResponse{
 		Registered:    true,

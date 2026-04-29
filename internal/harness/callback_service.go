@@ -2698,14 +2698,31 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *harness
 		}, nil
 	}
 
-	// Retrieve credential
+	// Retrieve credential. DaemonCredentialStore delegates to secrets.Service
+	// which returns gRPC status errors. Map them to the appropriate HarnessError
+	// code so callers can distinguish not-found from service-unavailable.
 	cred, secret, err := s.credentialStore.GetCredential(ctx, req.Name)
 	if err != nil {
 		s.logger.Warn("GetCredential failed", "name", req.Name, "error", err)
+		errCode := commonpb.ErrorCode_ERROR_CODE_NOT_FOUND
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.Unavailable:
+				errCode = commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE
+			case codes.PermissionDenied:
+				errCode = commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
+			case codes.InvalidArgument:
+				errCode = commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT
+			case codes.NotFound:
+				errCode = commonpb.ErrorCode_ERROR_CODE_NOT_FOUND
+			default:
+				errCode = commonpb.ErrorCode_ERROR_CODE_INTERNAL
+			}
+		}
 		return &harnesspb.GetCredentialResponse{
 			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
-				Message: fmt.Sprintf("credential %q not found: %v", req.Name, err),
+				Code:    errCode,
+				Message: fmt.Sprintf("credential %q: %v", req.Name, err),
 			},
 		}, nil
 	}

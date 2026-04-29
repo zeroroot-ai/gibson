@@ -1679,14 +1679,13 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 
 executePlugin:
 
-	// Determine if plugin is local or remote for logging
+	// Determine if plugin is local or remote for logging.
+	// GRPCPluginClient was removed in plugin-runtime Spec 2, Phase 1.
+	// All plugin dispatch now goes through PluginInvokeService (plugin_dispatch.go).
+	// isRemote is preserved for logging/metrics continuity but always false in
+	// this legacy harness path, which predates the new PollWork-based dispatch.
 	isRemote := false
-	if h.registryAdapter != nil {
-		// Check if plugin implements registry gRPC client (remote)
-		if _, ok := p.(*component.GRPCPluginClient); ok {
-			isRemote = true
-		}
-	}
+	_ = isRemote // consumed below in logger and metrics
 
 	// Query plugin
 	result, err := p.Query(ctx, method, params)
@@ -2915,11 +2914,18 @@ func (h *DefaultAgentHarness) mintCGForWork(componentName, kind string) string {
 	if tenant == "" || h.missionCtx.MissionRunID == "" {
 		return ""
 	}
+	// RecipientClass mirrors the dispatched component's kind ("tool" or
+	// "plugin"). Required by the Mint deny check (non-plugin-secret-
+	// isolation R4): an empty class fails closed for any secret-
+	// resolution RPC. The current AllowedRPCs list does not include
+	// such RPCs, so non-plugin recipients still mint successfully here;
+	// the field is wired for forward compatibility with broader grants.
 	tok, err := h.cgMinter.Mint(capabilitygrant.MintRequest{
-		Subject:   "component:" + kind + ":" + componentName,
-		Tenant:    tenant,
-		MissionID: h.missionCtx.ID.String(),
-		TaskID:    h.missionCtx.MissionRunID,
+		Subject:        "component:" + kind + ":" + componentName,
+		Tenant:         tenant,
+		MissionID:      h.missionCtx.ID.String(),
+		TaskID:         h.missionCtx.MissionRunID,
+		RecipientClass: kind,
 		AllowedRPCs: []string{
 			"/gibson.harness.v1.HarnessCallbackService/LLMComplete",
 			"/gibson.harness.v1.HarnessCallbackService/LLMCompleteWithTools",
