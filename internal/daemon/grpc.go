@@ -38,8 +38,8 @@ import (
 	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zero-day-ai/sdk/auth"
-	sdkregistry "github.com/zero-day-ai/sdk/auth/registry"
 
+	"github.com/zero-day-ai/gibson/internal/authz/registry"
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/mission"
@@ -49,7 +49,10 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
+	grpccodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	grpcmetadata "google.golang.org/grpc/metadata"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 // daemonMemoryStore wraps a single DefaultWorkingMemory so ComponentServiceServer
@@ -169,8 +172,47 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// trusts the headers because the Envoy↔daemon channel is SPIFFE-pinned mTLS.
 	// HMAC signing was removed (Spec: unified-identity-and-authorization
 	// Requirement 8.4); the secret-loading dance is gone with it.
-	unaryInterceptors = append(unaryInterceptors, auth.UnaryServerInterceptor())
-	streamInterceptors = append(streamInterceptors, auth.StreamServerInterceptor())
+	// TEMP DEBUG: log all incoming metadata keys when identity-check denies.
+	// Helps distinguish "Envoy didn't forward x-gibson-identity-* headers"
+	// from "ext-authz didn't emit them". Remove once root-caused.
+	debugDumpMetadata := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		resp, err := handler(ctx, req)
+		if err != nil && grpcstatus.Code(err) == grpccodes.PermissionDenied {
+			if md, ok := grpcmetadata.FromIncomingContext(ctx); ok {
+				keys := make([]string, 0, len(md))
+				for k := range md {
+					keys = append(keys, k)
+				}
+				d.logger.Info(ctx, "AUTH-DEBUG identity-check denied",
+					"method", info.FullMethod, "md_keys", keys, "err", err.Error())
+			}
+		}
+		return resp, err
+	}
+	unaryInterceptors = append(unaryInterceptors, debugDumpMetadata)
+
+	// Wrap sdk/auth's identity interceptor with a registry-aware shim
+	// that SKIPS identity validation for RPCs declared `unauthenticated:
+	// true` in the SDK auth registry (e.g. ListMyMemberships, which is
+	// the bootstrap call that DISCOVERS the user's tenants — chicken-
+	// and-egg if it required a tenant header). For everything else,
+	// the standard sdk/auth interceptor runs unchanged.
+	sdkAuthUnary := auth.UnaryServerInterceptor()
+	sdkAuthStream := auth.StreamServerInterceptor()
+	registryAwareUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if entry, ok := registry.Registry[info.FullMethod]; ok && entry.Unauthenticated {
+			return handler(ctx, req)
+		}
+		return sdkAuthUnary(ctx, req, info, handler)
+	}
+	registryAwareStream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if entry, ok := registry.Registry[info.FullMethod]; ok && entry.Unauthenticated {
+			return handler(srv, ss)
+		}
+		return sdkAuthStream(srv, ss, info, handler)
+	}
+	unaryInterceptors = append(unaryInterceptors, registryAwareUnary)
+	streamInterceptors = append(streamInterceptors, registryAwareStream)
 	d.logger.Info(ctx, "identity interceptor installed (header-trusting; channel security via SPIFFE mTLS)")
 
 	// Build server options with chained interceptors
@@ -821,7 +863,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 }
 
 // assertRegistryCoverage walks every registered service+method on
-// srv and verifies it has an entry in sdkregistry.Registry. Returns
+// srv and verifies it has an entry in registry.Registry. Returns
 // an error listing missing methods on mismatch. Called once at
 // daemon startup; safe to skip for tests via the daemon test scaffold.
 //
@@ -839,7 +881,7 @@ func assertRegistryCoverage(srv *grpc.Server) error {
 	for svcName, info := range srv.GetServiceInfo() {
 		for _, m := range info.Methods {
 			full := "/" + svcName + "/" + m.Name
-			if _, ok := sdkregistry.Registry[full]; !ok {
+			if _, ok := registry.Registry[full]; !ok {
 				missing = append(missing, full)
 			}
 		}
@@ -849,7 +891,7 @@ func assertRegistryCoverage(srv *grpc.Server) error {
 	}
 	sort.Strings(missing)
 	return fmt.Errorf(
-		"the following gRPC methods are registered on the daemon but missing from the SDK auth registry — regenerate sdk/auth/registry by running `make proto` in zero-day-ai/sdk and bumping the gibson SDK pin:\n  - %s",
+		"the following gRPC methods are registered on the daemon but missing from the authz registry — run `make authz-registry` in zero-day-ai/gibson after bumping the SDK pin:\n  - %s",
 		strings.Join(missing, "\n  - "),
 	)
 }
