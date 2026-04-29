@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin gibson-migrate test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id
+.PHONY: all build bin gibson-migrate test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id authz-registry
 
 # Go parameters
 GOCMD=go
@@ -198,10 +198,31 @@ proto-deps:
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 
-proto: proto-deps
+proto: proto-deps authz-registry
 	@echo "Generating Go code from daemon proto files via Buf..."
 	$(BUF) generate
 	@echo "Proto generation complete"
+
+# authz-registry: regenerate the four authz artifacts (registry.go, registry.yaml,
+# fga_model.fga, permissions.ts) from the pinned SDK version's proto annotations.
+# Writes to internal/authz/registry/. Run this target when the SDK version is bumped
+# or to verify the committed files are not drifted.
+#
+# Spec: private-authz-registry Component 2.
+authz-registry:
+	@echo "Building authz-registry-gen from pinned SDK..."
+	@mkdir -p $(BINARY_DIR) .tmp
+	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
+	  if [ -z "$$SDK_DIR" ]; then echo "ERROR: could not resolve github.com/zero-day-ai/sdk module dir" && exit 1; fi; \
+	  echo "  SDK dir: $$SDK_DIR"; \
+	  cd "$$SDK_DIR" && $(GOBUILD) -o $(CURDIR)/$(BINARY_DIR)/authz-registry-gen ./cmd/authz-registry-gen
+	@echo "Building FDS from SDK protos..."
+	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
+	  cd "$$SDK_DIR" && $(BUF) build -o $(CURDIR)/.tmp/sdk-fds.binpb
+	@echo "Generating registry artifacts..."
+	@$(BINARY_DIR)/authz-registry-gen -input .tmp/sdk-fds.binpb -output internal/authz/registry
+	@rm -f .tmp/sdk-fds.binpb
+	@echo "Registry artifacts written to internal/authz/registry/"
 
 proto-clean:
 	@echo "Cleaning generated proto files..."
@@ -229,7 +250,8 @@ help:
 	@echo "  make check-coverage - Enforce ≥95% coverage on internal/identity"
 	@echo "  make check-authz INTEGRATION=1 - Include FGA integration tests (requires Docker)"
 	@echo "  make check-no-tenant-id - Fail if any migration defines a tenant_id column"
-	@echo "  make proto         - Generate Go code from proto files"
+	@echo "  make proto         - Generate Go code from proto files (includes authz-registry)"
+	@echo "  make authz-registry - Regen authz artifacts from pinned SDK protos"
 	@echo "  make proto-deps    - Install protoc plugins"
 	@echo "  make proto-clean   - Remove generated proto files"
 	@echo "  make help          - Show this help message"

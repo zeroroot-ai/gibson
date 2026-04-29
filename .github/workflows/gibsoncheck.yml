@@ -3,6 +3,11 @@ name: gibsoncheck
 # Spec: unified-identity-and-authorization Requirement 14.1.
 # Runs the custom gibsoncheck Go analyzer (forbidden-imports +
 # notrustlocalhost + tenantfromcontext) on every PR.
+#
+# Also runs the authz-registry drift gate (spec: private-authz-registry NFR Reliability):
+# regenerates internal/authz/registry/ from the pinned SDK protos and fails if the
+# result differs from what is committed. Catches hand-edits and missed regen after
+# an SDK bump.
 
 on:
   push:
@@ -12,6 +17,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'tools/gibsoncheck/**'
+      - 'internal/authz/registry/**'
       - '.github/workflows/gibsoncheck.yml'
   pull_request:
     paths:
@@ -19,6 +25,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'tools/gibsoncheck/**'
+      - 'internal/authz/registry/**'
       - '.github/workflows/gibsoncheck.yml'
 
 concurrency:
@@ -72,3 +79,41 @@ jobs:
 
       - name: Check no Redis tenant-prefix patterns
         run: bash scripts/check-no-redis-prefix.sh
+
+  authz-registry-drift:
+    runs-on: ubuntu-latest
+    name: authz-registry drift gate
+    # Spec: private-authz-registry NFR Reliability.
+    # Regenerates internal/authz/registry/ from the SDK protos pinned in go.mod
+    # and fails if the result differs from committed content. Catches:
+    #   - Hand-edits to registry.go instead of running regen.
+    #   - SDK version bumps where `make authz-registry` was not re-run.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Install buf globally so `make authz-registry BUF=buf` works without
+      # needing the dashboard node_modules tree (same pattern as SDK CI).
+      - name: Install buf
+        run: npm install -g @bufbuild/buf
+
+      - name: Regenerate authz registry
+        run: make authz-registry BUF=buf
+
+      - name: Check for drift
+        run: |
+          if ! git diff --exit-code internal/authz/registry/; then
+            echo ""
+            echo "registry.go (or another artifact in internal/authz/registry/) has drifted"
+            echo "from the SDK protos pinned in go.mod."
+            echo ""
+            echo "Remediation: run \`make authz-registry\` and commit the result."
+            exit 1
+          fi
