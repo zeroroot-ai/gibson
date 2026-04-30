@@ -2293,15 +2293,23 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 		if i < len(adminFlags) && adminFlags[i] {
 			role = "admin"
 		}
+		// OpenFGA ListObjects returns object strings of the form
+		// "tenant:<id>". The wire contract for daemonpb.Membership.TenantId
+		// is the bare id — downstream consumers (dashboard's
+		// gibson_active_tenant cookie, x-gibson-tenant header, FGA's own
+		// resolveObject which re-adds the type prefix) expect the unprefixed
+		// form. Strip "tenant:" defensively; pass through anything that
+		// doesn't have the prefix.
+		bareID := strings.TrimPrefix(tid, "tenant:")
 		// Friendly name lookup is best-effort; on miss/timeout fall back to ID.
-		name := tid
+		name := bareID
 		if s.tenantNameResolver != nil {
-			if resolved, ok, _ := s.tenantNameResolver(ctx, tid); ok && resolved != "" {
+			if resolved, ok, _ := s.tenantNameResolver(ctx, bareID); ok && resolved != "" {
 				name = resolved
 			}
 		}
 		memberships = append(memberships, &daemonpb.Membership{
-			TenantId:   tid,
+			TenantId:   bareID,
 			TenantName: name,
 			Role:       role,
 		})
