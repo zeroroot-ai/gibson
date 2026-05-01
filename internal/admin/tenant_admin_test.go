@@ -47,8 +47,8 @@ func (f *fakeTenantConfigWriter) Set(_ context.Context, _ auth.TenantID, cfg sec
 }
 
 type fakeProbeFactory struct {
-	probeErr      error
-	constructErr  error
+	probeErr     error
+	constructErr error
 }
 
 func (f *fakeProbeFactory) Construct(_ string, _ []byte) (sdksecrets.SecretsBroker, error) {

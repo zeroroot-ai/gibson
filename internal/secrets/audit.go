@@ -132,7 +132,7 @@ var auditFailuresTotal = promauto.NewCounterVec(
 type AuditWriter struct {
 	logger *audit.AuditLogger
 	slog   *slog.Logger
-	clock  func() time.Time   // injectable for tests; nil uses time.Now
+	clock  func() time.Time    // injectable for tests; nil uses time.Now
 	sleep  func(time.Duration) // injectable for tests; nil uses time.Sleep
 }
 
@@ -230,13 +230,13 @@ func (w *AuditWriter) write(ctx context.Context, event AuditEvent) error {
 	// audit.AuditLogger stores these as JSON in the stream "details" field.
 	// We intentionally omit any field that could carry plaintext.
 	details := map[string]any{
-		"effect":          event.Effect,
-		"resource_type":   event.ResourceType,
-		"resource_uri":    event.ResourceURI,
-		"decision":        event.Decision,
-		"success":         event.Success,
-		"latency_ms":      event.LatencyMS,
-		"occurred_at":     now.Format(time.RFC3339Nano),
+		"effect":        event.Effect,
+		"resource_type": event.ResourceType,
+		"resource_uri":  event.ResourceURI,
+		"decision":      event.Decision,
+		"success":       event.Success,
+		"latency_ms":    event.LatencyMS,
+		"occurred_at":   now.Format(time.RFC3339Nano),
 	}
 	if event.DecisionReason != "" {
 		details["decision_reason"] = event.DecisionReason

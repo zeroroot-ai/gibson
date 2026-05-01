@@ -74,10 +74,11 @@ type mockPlugin struct {
 	methodsFunc func() []plugin.MethodDescriptor
 }
 
-func (m *mockPlugin) Name() string    { return m.name }
-func (m *mockPlugin) Version() string { return m.version }
+func (m *mockPlugin) Name() string        { return m.name }
+func (m *mockPlugin) Version() string     { return m.version }
+func (m *mockPlugin) Description() string { return "" }
 
-func (m *mockPlugin) Initialize(ctx context.Context, cfg plugin.PluginConfig) error {
+func (m *mockPlugin) Initialize(ctx context.Context, config map[string]any) error {
 	return nil
 }
 

@@ -9,10 +9,10 @@ package registry
 type IdentityClass uint8
 
 const (
-	IdentityUser              IdentityClass = 1
-	IdentityService           IdentityClass = 2
-	IdentityComponent         IdentityClass = 4
-	IdentityPlatformOperator  IdentityClass = 8
+	IdentityUser             IdentityClass = 1
+	IdentityService          IdentityClass = 2
+	IdentityComponent        IdentityClass = 4
+	IdentityPlatformOperator IdentityClass = 8
 )
 
 // Has reports whether c contains every bit set in want.
@@ -27,6 +27,7 @@ type Entry struct {
 	ObjectDeriver     string
 	AllowedIdentities IdentityClass
 	Unauthenticated   bool
+	Self              bool // self-mode-authz: authenticated user reading own data, no FGA Check
 }
 
 // Registry is the complete, sorted set of (method -> auth rule)
@@ -40,6 +41,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.GrantsAdminService/ListActiveGrants": {
 		Method:            "/gibson.admin.v1.GrantsAdminService/ListActiveGrants",
@@ -49,6 +51,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.GrantsAdminService/WriteAgentGrants": {
 		Method:            "/gibson.admin.v1.GrantsAdminService/WriteAgentGrants",
@@ -58,6 +61,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.PluginsAdminService/EditPluginSecretBinding": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/EditPluginSecretBinding",
@@ -67,6 +71,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.PluginsAdminService/GetPluginInstall": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/GetPluginInstall",
@@ -76,6 +81,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.PluginsAdminService/ListPluginInstalls": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/ListPluginInstalls",
@@ -85,6 +91,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.PluginsAdminService/RegisterPlugin": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/RegisterPlugin",
@@ -94,6 +101,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.PluginsAdminService/RevokePluginSecretBinding": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/RevokePluginSecretBinding",
@@ -103,6 +111,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.SecretsAdminService/DeleteSecret": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/DeleteSecret",
@@ -112,6 +121,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.SecretsAdminService/GetMissionAudit": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/GetMissionAudit",
@@ -121,6 +131,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.SecretsAdminService/GetSecret": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/GetSecret",
@@ -130,6 +141,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.SecretsAdminService/ListSecrets": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/ListSecrets",
@@ -139,6 +151,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.SecretsAdminService/RotateSecret": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/RotateSecret",
@@ -148,6 +161,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.SecretsAdminService/SetSecret": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/SetSecret",
@@ -157,6 +171,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.TenantAdminService/GetBrokerConfig": {
 		Method:            "/gibson.admin.v1.TenantAdminService/GetBrokerConfig",
@@ -166,6 +181,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.TenantAdminService/GetSupportedProviders": {
 		Method:            "/gibson.admin.v1.TenantAdminService/GetSupportedProviders",
@@ -175,6 +191,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.TenantAdminService/ListProviderModels": {
 		Method:            "/gibson.admin.v1.TenantAdminService/ListProviderModels",
@@ -184,6 +201,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig": {
 		Method:            "/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig",
@@ -193,6 +211,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.TenantAdminService/ProbeProvider": {
 		Method:            "/gibson.admin.v1.TenantAdminService/ProbeProvider",
@@ -202,6 +221,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.admin.v1.TenantAdminService/SetBrokerConfig": {
 		Method:            "/gibson.admin.v1.TenantAdminService/SetBrokerConfig",
@@ -211,6 +231,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.agent.v1.AgentService/Execute": {
 		Method:            "/gibson.agent.v1.AgentService/Execute",
@@ -220,6 +241,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.agent.v1.AgentService/GetDescriptor": {
 		Method:            "/gibson.agent.v1.AgentService/GetDescriptor",
@@ -229,6 +251,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.agent.v1.AgentService/GetSlotSchema": {
 		Method:            "/gibson.agent.v1.AgentService/GetSlotSchema",
@@ -238,6 +261,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.agent.v1.AgentService/Health": {
 		Method:            "/gibson.agent.v1.AgentService/Health",
@@ -247,6 +271,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.authz.v1.ModelAccessService/GrantAccess": {
 		Method:            "/gibson.authz.v1.ModelAccessService/GrantAccess",
@@ -256,6 +281,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.authz.v1.ModelAccessService/ListAccess": {
 		Method:            "/gibson.authz.v1.ModelAccessService/ListAccess",
@@ -265,6 +291,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.authz.v1.ModelAccessService/ListModelResolutionEvents": {
 		Method:            "/gibson.authz.v1.ModelAccessService/ListModelResolutionEvents",
@@ -274,6 +301,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.authz.v1.ModelAccessService/RevokeAccess": {
 		Method:            "/gibson.authz.v1.ModelAccessService/RevokeAccess",
@@ -283,6 +311,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.budget.v1.BudgetService/GetBudget": {
 		Method:            "/gibson.budget.v1.BudgetService/GetBudget",
@@ -292,6 +321,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.budget.v1.BudgetService/GetTenantDefaults": {
 		Method:            "/gibson.budget.v1.BudgetService/GetTenantDefaults",
@@ -301,6 +331,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.budget.v1.BudgetService/ListBudgets": {
 		Method:            "/gibson.budget.v1.BudgetService/ListBudgets",
@@ -310,6 +341,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.budget.v1.BudgetService/ListStatus": {
 		Method:            "/gibson.budget.v1.BudgetService/ListStatus",
@@ -319,6 +351,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.budget.v1.BudgetService/SetBudget": {
 		Method:            "/gibson.budget.v1.BudgetService/SetBudget",
@@ -328,6 +361,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.budget.v1.BudgetService/SetTenantDefaults": {
 		Method:            "/gibson.budget.v1.BudgetService/SetTenantDefaults",
@@ -337,6 +371,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CallTool": {
 		Method:            "/gibson.component.v1.ComponentService/CallTool",
@@ -346,6 +381,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CallToolStream": {
 		Method:            "/gibson.component.v1.ComponentService/CallToolStream",
@@ -355,6 +391,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CancelMission": {
 		Method:            "/gibson.component.v1.ComponentService/CancelMission",
@@ -364,6 +401,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/Complete": {
 		Method:            "/gibson.component.v1.ComponentService/Complete",
@@ -373,6 +411,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CompleteStream": {
 		Method:            "/gibson.component.v1.ComponentService/CompleteStream",
@@ -382,6 +421,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CompleteStructured": {
 		Method:            "/gibson.component.v1.ComponentService/CompleteStructured",
@@ -391,6 +431,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CompleteWithTools": {
 		Method:            "/gibson.component.v1.ComponentService/CompleteWithTools",
@@ -400,6 +441,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/CreateMission": {
 		Method:            "/gibson.component.v1.ComponentService/CreateMission",
@@ -409,6 +451,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/DelegateToAgent": {
 		Method:            "/gibson.component.v1.ComponentService/DelegateToAgent",
@@ -418,6 +461,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/DisablePlugin": {
 		Method:            "/gibson.component.v1.ComponentService/DisablePlugin",
@@ -427,6 +471,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/EnablePlugin": {
 		Method:            "/gibson.component.v1.ComponentService/EnablePlugin",
@@ -436,6 +481,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/FindSimilarAttacks": {
 		Method:            "/gibson.component.v1.ComponentService/FindSimilarAttacks",
@@ -445,6 +491,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/FindSimilarFindings": {
 		Method:            "/gibson.component.v1.ComponentService/FindSimilarFindings",
@@ -454,6 +501,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetAttackChains": {
 		Method:            "/gibson.component.v1.ComponentService/GetAttackChains",
@@ -463,6 +511,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetCredential": {
 		Method:            "/gibson.component.v1.ComponentService/GetCredential",
@@ -472,6 +521,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_and_field('Name')",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetFindings": {
 		Method:            "/gibson.component.v1.ComponentService/GetFindings",
@@ -481,6 +531,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetMissionResults": {
 		Method:            "/gibson.component.v1.ComponentService/GetMissionResults",
@@ -490,6 +541,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetMissionRunHistory": {
 		Method:            "/gibson.component.v1.ComponentService/GetMissionRunHistory",
@@ -499,6 +551,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetMissionStatus": {
 		Method:            "/gibson.component.v1.ComponentService/GetMissionStatus",
@@ -508,6 +561,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetPluginConfig": {
 		Method:            "/gibson.component.v1.ComponentService/GetPluginConfig",
@@ -517,6 +571,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetRelatedFindings": {
 		Method:            "/gibson.component.v1.ComponentService/GetRelatedFindings",
@@ -526,6 +581,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetRunFindings": {
 		Method:            "/gibson.component.v1.ComponentService/GetRunFindings",
@@ -535,6 +591,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/GetTaxonomySchema": {
 		Method:            "/gibson.component.v1.ComponentService/GetTaxonomySchema",
@@ -544,6 +601,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/Heartbeat": {
 		Method:            "/gibson.component.v1.ComponentService/Heartbeat",
@@ -553,6 +611,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListAgents": {
 		Method:            "/gibson.component.v1.ComponentService/ListAgents",
@@ -562,6 +621,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListAvailablePlugins": {
 		Method:            "/gibson.component.v1.ComponentService/ListAvailablePlugins",
@@ -571,6 +631,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListMissions": {
 		Method:            "/gibson.component.v1.ComponentService/ListMissions",
@@ -580,6 +641,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListTenantPlugins": {
 		Method:            "/gibson.component.v1.ComponentService/ListTenantPlugins",
@@ -589,6 +651,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ListTools": {
 		Method:            "/gibson.component.v1.ComponentService/ListTools",
@@ -598,6 +661,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/MemoryClear": {
 		Method:            "/gibson.component.v1.ComponentService/MemoryClear",
@@ -607,6 +671,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/MemoryDelete": {
 		Method:            "/gibson.component.v1.ComponentService/MemoryDelete",
@@ -616,6 +681,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/MemoryGet": {
 		Method:            "/gibson.component.v1.ComponentService/MemoryGet",
@@ -625,6 +691,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/MemoryGetPreviousRunValue": {
 		Method:            "/gibson.component.v1.ComponentService/MemoryGetPreviousRunValue",
@@ -634,6 +701,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/MemoryGetValueHistory": {
 		Method:            "/gibson.component.v1.ComponentService/MemoryGetValueHistory",
@@ -643,6 +711,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/MemoryHistory": {
 		Method:            "/gibson.component.v1.ComponentService/MemoryHistory",
@@ -652,6 +721,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/MemoryKeys": {
 		Method:            "/gibson.component.v1.ComponentService/MemoryKeys",
@@ -661,6 +731,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/MemorySearch": {
 		Method:            "/gibson.component.v1.ComponentService/MemorySearch",
@@ -670,6 +741,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/MemorySet": {
 		Method:            "/gibson.component.v1.ComponentService/MemorySet",
@@ -679,6 +751,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/PollWork": {
 		Method:            "/gibson.component.v1.ComponentService/PollWork",
@@ -688,6 +761,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/QueryNodes": {
 		Method:            "/gibson.component.v1.ComponentService/QueryNodes",
@@ -697,6 +771,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/QueryPlugin": {
 		Method:            "/gibson.component.v1.ComponentService/QueryPlugin",
@@ -706,6 +781,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/QueueToolWork": {
 		Method:            "/gibson.component.v1.ComponentService/QueueToolWork",
@@ -715,6 +791,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/RegisterComponent": {
 		Method:            "/gibson.component.v1.ComponentService/RegisterComponent",
@@ -724,6 +801,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ReportStepHints": {
 		Method:            "/gibson.component.v1.ComponentService/ReportStepHints",
@@ -733,6 +811,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/RunMission": {
 		Method:            "/gibson.component.v1.ComponentService/RunMission",
@@ -742,6 +821,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/StoreNode": {
 		Method:            "/gibson.component.v1.ComponentService/StoreNode",
@@ -751,6 +831,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/SubmitFinding": {
 		Method:            "/gibson.component.v1.ComponentService/SubmitFinding",
@@ -760,6 +841,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/SubmitResult": {
 		Method:            "/gibson.component.v1.ComponentService/SubmitResult",
@@ -769,6 +851,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/TestPluginConnection": {
 		Method:            "/gibson.component.v1.ComponentService/TestPluginConnection",
@@ -778,6 +861,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/ToolResults": {
 		Method:            "/gibson.component.v1.ComponentService/ToolResults",
@@ -787,6 +871,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/UpdatePluginConfig": {
 		Method:            "/gibson.component.v1.ComponentService/UpdatePluginConfig",
@@ -796,6 +881,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.component.v1.ComponentService/WaitMission": {
 		Method:            "/gibson.component.v1.ComponentService/WaitMission",
@@ -805,6 +891,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent",
@@ -814,6 +901,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin",
@@ -823,6 +911,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/DescribeTool": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/DescribeTool",
@@ -832,6 +921,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListAgents": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListAgents",
@@ -841,6 +931,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots",
@@ -850,6 +941,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins",
@@ -859,6 +951,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces",
@@ -868,6 +961,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ListTools": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ListTools",
@@ -877,6 +971,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability",
@@ -886,6 +981,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent",
@@ -895,6 +991,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI": {
 		Method:            "/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI",
@@ -904,6 +1001,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityPlatformOperator,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/BuildComponent": {
 		Method:            "/gibson.daemon.v1.DaemonService/BuildComponent",
@@ -913,6 +1011,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/Connect": {
 		Method:            "/gibson.daemon.v1.DaemonService/Connect",
@@ -922,6 +1021,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "",
 		AllowedIdentities: 0,
 		Unauthenticated:   true,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/CreateMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/CreateMission",
@@ -931,6 +1031,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/CreateMissionDefinition": {
 		Method:            "/gibson.daemon.v1.DaemonService/CreateMissionDefinition",
@@ -940,6 +1041,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetAgentStatus": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetAgentStatus",
@@ -949,6 +1051,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetCapabilityManifest": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetCapabilityManifest",
@@ -958,6 +1061,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetComponentLogs": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetComponentLogs",
@@ -967,6 +1071,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetMissionCheckpoints": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetMissionCheckpoints",
@@ -976,6 +1081,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetMissionHistory": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetMissionHistory",
@@ -985,15 +1091,17 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/GetMyPermissions": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetMyPermissions",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
+		Relation:          "",
+		ObjectType:        "",
+		ObjectDeriver:     "",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              true,
 	},
 	"/gibson.daemon.v1.DaemonService/ListAgents": {
 		Method:            "/gibson.daemon.v1.DaemonService/ListAgents",
@@ -1003,6 +1111,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListMissionDefinitions": {
 		Method:            "/gibson.daemon.v1.DaemonService/ListMissionDefinitions",
@@ -1012,6 +1121,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListMissions": {
 		Method:            "/gibson.daemon.v1.DaemonService/ListMissions",
@@ -1021,15 +1131,17 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListMyMemberships": {
 		Method:            "/gibson.daemon.v1.DaemonService/ListMyMemberships",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
+		Relation:          "",
+		ObjectType:        "",
+		ObjectDeriver:     "",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              true,
 	},
 	"/gibson.daemon.v1.DaemonService/ListPlugins": {
 		Method:            "/gibson.daemon.v1.DaemonService/ListPlugins",
@@ -1039,6 +1151,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ListTools": {
 		Method:            "/gibson.daemon.v1.DaemonService/ListTools",
@@ -1048,6 +1161,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/PauseMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/PauseMission",
@@ -1057,6 +1171,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/Ping": {
 		Method:            "/gibson.daemon.v1.DaemonService/Ping",
@@ -1066,6 +1181,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "",
 		AllowedIdentities: 0,
 		Unauthenticated:   true,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/QueryPlugin": {
 		Method:            "/gibson.daemon.v1.DaemonService/QueryPlugin",
@@ -1075,6 +1191,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/RenewCapabilityGrant": {
 		Method:            "/gibson.daemon.v1.DaemonService/RenewCapabilityGrant",
@@ -1084,6 +1201,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ResumeMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/ResumeMission",
@@ -1093,6 +1211,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/RunMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/RunMission",
@@ -1102,6 +1221,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ShowComponent": {
 		Method:            "/gibson.daemon.v1.DaemonService/ShowComponent",
@@ -1111,6 +1231,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/StartComponent": {
 		Method:            "/gibson.daemon.v1.DaemonService/StartComponent",
@@ -1120,6 +1241,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/Status": {
 		Method:            "/gibson.daemon.v1.DaemonService/Status",
@@ -1129,6 +1251,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/StopComponent": {
 		Method:            "/gibson.daemon.v1.DaemonService/StopComponent",
@@ -1138,6 +1261,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/StopMission": {
 		Method:            "/gibson.daemon.v1.DaemonService/StopMission",
@@ -1147,6 +1271,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/Subscribe": {
 		Method:            "/gibson.daemon.v1.DaemonService/Subscribe",
@@ -1156,6 +1281,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/WatchManifestInvalidations": {
 		Method:            "/gibson.daemon.v1.DaemonService/WatchManifestInvalidations",
@@ -1165,6 +1291,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/Authorize": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/Authorize",
@@ -1174,6 +1301,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CallToolProto": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/CallToolProto",
@@ -1183,6 +1311,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream",
@@ -1192,6 +1321,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CancelMission": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/CancelMission",
@@ -1201,6 +1331,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CreateGraphRelationship": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/CreateGraphRelationship",
@@ -1210,6 +1341,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CreateMission": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/CreateMission",
@@ -1219,6 +1351,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/DelegateToAgent": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/DelegateToAgent",
@@ -1228,6 +1361,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks",
@@ -1237,6 +1371,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/FindSimilarFindings": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/FindSimilarFindings",
@@ -1246,6 +1381,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GenerateNodeID": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GenerateNodeID",
@@ -1255,6 +1391,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetAttackChains": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GetAttackChains",
@@ -1264,6 +1401,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetCredential": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GetCredential",
@@ -1273,6 +1411,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_and_field('Name')",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetFindings": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GetFindings",
@@ -1282,6 +1421,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetMissionResults": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GetMissionResults",
@@ -1291,6 +1431,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetMissionStatus": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GetMissionStatus",
@@ -1300,6 +1441,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetPlanContext": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GetPlanContext",
@@ -1309,6 +1451,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetRelatedFindings": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GetRelatedFindings",
@@ -1318,6 +1461,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema",
@@ -1327,6 +1471,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GraphRAGHealth": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GraphRAGHealth",
@@ -1336,6 +1481,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/GraphRAGQuery": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/GraphRAGQuery",
@@ -1345,6 +1491,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LLMComplete": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/LLMComplete",
@@ -1354,6 +1501,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LLMCompleteStructured": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/LLMCompleteStructured",
@@ -1363,6 +1511,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LLMCompleteWithTools": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/LLMCompleteWithTools",
@@ -1372,6 +1521,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LLMStream": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/LLMStream",
@@ -1381,6 +1531,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ListAgents": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/ListAgents",
@@ -1390,6 +1541,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ListMissions": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/ListMissions",
@@ -1399,6 +1551,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ListPlugins": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/ListPlugins",
@@ -1408,6 +1561,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ListTools": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/ListTools",
@@ -1417,6 +1571,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LongTermMemoryDelete": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/LongTermMemoryDelete",
@@ -1426,6 +1581,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LongTermMemorySearch": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/LongTermMemorySearch",
@@ -1435,6 +1591,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/LongTermMemoryStore": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/LongTermMemoryStore",
@@ -1444,6 +1601,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/MemoryDelete": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/MemoryDelete",
@@ -1453,6 +1611,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/MemoryGet": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/MemoryGet",
@@ -1462,6 +1621,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/MemoryList": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/MemoryList",
@@ -1471,6 +1631,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/MemorySet": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/MemorySet",
@@ -1480,6 +1641,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/MissionMemoryContinuityMode": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/MissionMemoryContinuityMode",
@@ -1489,6 +1651,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetPreviousRunValue": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetPreviousRunValue",
@@ -1498,6 +1661,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetValueHistory": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetValueHistory",
@@ -1507,6 +1671,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/MissionMemoryHistory": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/MissionMemoryHistory",
@@ -1516,6 +1681,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/MissionMemorySearch": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/MissionMemorySearch",
@@ -1525,6 +1691,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/QueryNodes": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/QueryNodes",
@@ -1534,6 +1701,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/QueryPlugin": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/QueryPlugin",
@@ -1543,6 +1711,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/QueueToolWork": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/QueueToolWork",
@@ -1552,6 +1721,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/RecordSpan": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/RecordSpan",
@@ -1561,6 +1731,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/RecordSpans": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/RecordSpans",
@@ -1570,6 +1741,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ReportStepHints": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/ReportStepHints",
@@ -1579,6 +1751,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/RunMission": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/RunMission",
@@ -1588,6 +1761,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/StoreGraphBatch": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/StoreGraphBatch",
@@ -1597,6 +1771,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/StoreGraphNode": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/StoreGraphNode",
@@ -1606,6 +1781,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/StoreNode": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/StoreNode",
@@ -1615,6 +1791,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/SubmitFinding": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/SubmitFinding",
@@ -1624,6 +1801,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ToolResults": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/ToolResults",
@@ -1633,6 +1811,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/TraverseGraph": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/TraverseGraph",
@@ -1642,6 +1821,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ValidateFinding": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/ValidateFinding",
@@ -1651,6 +1831,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ValidateGraphNode": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/ValidateGraphNode",
@@ -1660,6 +1841,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/ValidateRelationship": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/ValidateRelationship",
@@ -1669,6 +1851,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/WaitForMission": {
 		Method:            "/gibson.harness.v1.HarnessCallbackService/WaitForMission",
@@ -1678,6 +1861,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.identity.v1.IdentityService/WhoAmI": {
 		Method:            "/gibson.identity.v1.IdentityService/WhoAmI",
@@ -1687,6 +1871,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService | IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent",
@@ -1696,6 +1881,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant",
@@ -1705,6 +1891,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples",
@@ -1714,6 +1901,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.platform.v1.PlatformOperatorService/RefreshToolCatalog": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/RefreshToolCatalog",
@@ -1723,6 +1911,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled",
@@ -1732,6 +1921,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.platform.v1.PlatformOperatorService/SetTenantQuota": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/SetTenantQuota",
@@ -1741,6 +1931,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.platform.v1.PlatformOperatorService/Shutdown": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/Shutdown",
@@ -1750,6 +1941,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota",
@@ -1759,6 +1951,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.platform.v1.PlatformOperatorService/WriteAccessTuples": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/WriteAccessTuples",
@@ -1768,6 +1961,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.plugin.v1.PluginInvokeService/PluginInvoke": {
 		Method:            "/gibson.plugin.v1.PluginInvokeService/PluginInvoke",
@@ -1777,6 +1971,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_and_field('PluginName')",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity",
@@ -1786,6 +1981,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/CreateProvider": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/CreateProvider",
@@ -1795,6 +1991,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/DeleteProvider": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/DeleteProvider",
@@ -1804,6 +2001,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/DeleteTenantLangfuseCredentials": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/DeleteTenantLangfuseCredentials",
@@ -1813,6 +2011,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/ExecuteLLM": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/ExecuteLLM",
@@ -1822,6 +2021,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/ExportFindings": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/ExportFindings",
@@ -1831,6 +2031,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/GetDefaultProvider": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetDefaultProvider",
@@ -1840,6 +2041,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/GetFallbackChain": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetFallbackChain",
@@ -1849,6 +2051,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/GetOnboardingState": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetOnboardingState",
@@ -1858,6 +2061,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/GetProvider": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetProvider",
@@ -1867,6 +2071,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/GetProviderHealth": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetProviderHealth",
@@ -1876,6 +2081,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/GetSupportedProviders": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetSupportedProviders",
@@ -1885,6 +2091,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/GetTenantLangfuseCredentials": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetTenantLangfuseCredentials",
@@ -1894,6 +2101,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/GetTenantQuota": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetTenantQuota",
@@ -1903,6 +2111,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/ListAgentIdentities": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/ListAgentIdentities",
@@ -1912,6 +2121,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/ListAuditEvents": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/ListAuditEvents",
@@ -1921,6 +2131,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/ListCatalogComponents": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/ListCatalogComponents",
@@ -1930,6 +2141,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/ListMissionDrafts": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/ListMissionDrafts",
@@ -1939,6 +2151,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/ListProviderModels": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/ListProviderModels",
@@ -1948,6 +2161,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/ListProviders": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/ListProviders",
@@ -1957,6 +2171,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/RevokeAgentIdentity": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/RevokeAgentIdentity",
@@ -1966,6 +2181,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/SaveMissionDraft": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/SaveMissionDraft",
@@ -1975,6 +2191,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/SetDefaultProvider": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/SetDefaultProvider",
@@ -1984,6 +2201,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/SetFallbackChain": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/SetFallbackChain",
@@ -1993,6 +2211,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/SetTenantLangfuseCredentials": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/SetTenantLangfuseCredentials",
@@ -2002,6 +2221,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/StreamLLM": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/StreamLLM",
@@ -2011,6 +2231,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/TestProvider": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/TestProvider",
@@ -2020,6 +2241,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/UpdateOnboardingState": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/UpdateOnboardingState",
@@ -2029,6 +2251,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tenant.v1.TenantAdminService/UpdateProvider": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/UpdateProvider",
@@ -2038,6 +2261,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tool.v1.ToolService/Execute": {
 		Method:            "/gibson.tool.v1.ToolService/Execute",
@@ -2047,6 +2271,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tool.v1.ToolService/GetDescriptor": {
 		Method:            "/gibson.tool.v1.ToolService/GetDescriptor",
@@ -2056,6 +2281,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tool.v1.ToolService/Health": {
 		Method:            "/gibson.tool.v1.ToolService/Health",
@@ -2065,6 +2291,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.tool.v1.ToolService/StreamExecute": {
 		Method:            "/gibson.tool.v1.ToolService/StreamExecute",
@@ -2074,6 +2301,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityComponent,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.usage.v1.UsageService/ListUsage": {
 		Method:            "/gibson.usage.v1.UsageService/ListUsage",
@@ -2083,6 +2311,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.user.v1.UserService/GetConversation": {
 		Method:            "/gibson.user.v1.UserService/GetConversation",
@@ -2092,6 +2321,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.user.v1.UserService/GetUserProfile": {
 		Method:            "/gibson.user.v1.UserService/GetUserProfile",
@@ -2101,6 +2331,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.user.v1.UserService/ListAlerts": {
 		Method:            "/gibson.user.v1.UserService/ListAlerts",
@@ -2110,6 +2341,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.user.v1.UserService/ListConversations": {
 		Method:            "/gibson.user.v1.UserService/ListConversations",
@@ -2119,6 +2351,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.user.v1.UserService/MarkAlertRead": {
 		Method:            "/gibson.user.v1.UserService/MarkAlertRead",
@@ -2128,6 +2361,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.user.v1.UserService/MarkAllAlertsRead": {
 		Method:            "/gibson.user.v1.UserService/MarkAllAlertsRead",
@@ -2137,6 +2371,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/gibson.user.v1.UserService/UpdateUserProfile": {
 		Method:            "/gibson.user.v1.UserService/UpdateUserProfile",
@@ -2146,6 +2381,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/intelligence.v1.IntelligenceService/GetAssetRiskScore": {
 		Method:            "/intelligence.v1.IntelligenceService/GetAssetRiskScore",
@@ -2155,6 +2391,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/intelligence.v1.IntelligenceService/GetAttackPatterns": {
 		Method:            "/intelligence.v1.IntelligenceService/GetAttackPatterns",
@@ -2164,6 +2401,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/intelligence.v1.IntelligenceService/GetRecurringVulnerabilities": {
 		Method:            "/intelligence.v1.IntelligenceService/GetRecurringVulnerabilities",
@@ -2173,6 +2411,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/intelligence.v1.IntelligenceService/GetRemediationMetrics": {
 		Method:            "/intelligence.v1.IntelligenceService/GetRemediationMetrics",
@@ -2182,6 +2421,7 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 	"/intelligence.v1.IntelligenceService/GetSimilarTargets": {
 		Method:            "/intelligence.v1.IntelligenceService/GetSimilarTargets",
@@ -2191,5 +2431,6 @@ var Registry = map[string]Entry{
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
+		Self:              false,
 	},
 }

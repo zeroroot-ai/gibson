@@ -49,9 +49,9 @@ var agentToolScopePrefixes = []string{
 // agentSecretsImportExemptSubstrings lists package-path substrings that
 // remove a package from scope even if a scope prefix matched.
 var agentSecretsImportExemptSubstrings = []string{
-	"github.com/zero-day-ai/sdk/plugin/",  // plugins legitimately use the broker
-	"/testdata/",                           // analysistest fixtures
-	"/cmd/gibsoncheck/",                    // the checker itself
+	"github.com/zero-day-ai/sdk/plugin/", // plugins legitimately use the broker
+	"/testdata/",                         // analysistest fixtures
+	"/cmd/gibsoncheck/",                  // the checker itself
 }
 
 // brokerImportPrefix is the import path prefix that is disallowed.

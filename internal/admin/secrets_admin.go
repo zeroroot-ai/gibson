@@ -62,11 +62,11 @@ type SecretsAdminAuditQuery interface {
 type SecretsAdminServer struct {
 	adminv1.UnimplementedSecretsAdminServiceServer
 
-	service       *secrets.Service
-	broker        SecretsAdminBroker
-	pluginAssocs  SecretsAdminPluginAssociations
-	auditQuery    SecretsAdminAuditQuery
-	now           func() time.Time
+	service        *secrets.Service
+	broker         SecretsAdminBroker
+	pluginAssocs   SecretsAdminPluginAssociations
+	auditQuery     SecretsAdminAuditQuery
+	now            func() time.Time
 	rotatedAuditor secrets.ServiceAuditWriter
 }
 
@@ -380,11 +380,11 @@ func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *adminv1.G
 
 	// aggregate maps ref -> aggregated stats.
 	type aggRow struct {
-		firstAt   time.Time
-		lastAt    time.Time
-		count     int32
-		installs  map[string]struct{}
-		category  adminv1.SecretCategory
+		firstAt  time.Time
+		lastAt   time.Time
+		count    int32
+		installs map[string]struct{}
+		category adminv1.SecretCategory
 	}
 	agg := map[string]*aggRow{}
 

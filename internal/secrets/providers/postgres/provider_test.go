@@ -20,12 +20,12 @@ import (
 // surface used by the provider. It stores secrets in a map and can be
 // configured to return specific errors.
 type fakeSecretsOps struct {
-	data          map[string][]byte
-	getErr        error
-	putErr        error
-	deleteErr     error
-	listErr       error
-	crossTenant   bool // when true, Get returns a cross-tenant error
+	data        map[string][]byte
+	getErr      error
+	putErr      error
+	deleteErr   error
+	listErr     error
+	crossTenant bool // when true, Get returns a cross-tenant error
 }
 
 func newFakeSecretsOps() *fakeSecretsOps {

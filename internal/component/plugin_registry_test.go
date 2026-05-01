@@ -88,11 +88,11 @@ func (s *fakeInstallStore) list(tenantID, pluginName string) []*fakeInstallRow {
 // ---------------------------------------------------------------------------
 
 type testPluginRegistry struct {
-	store      *fakeInstallStore
-	redis      *miniredis.Miniredis
+	store       *fakeInstallStore
+	redis       *miniredis.Miniredis
 	redisClient redis.UniversalClient
-	queue      WorkQueue
-	roundRobin *installRoundRobin
+	queue       WorkQueue
+	roundRobin  *installRoundRobin
 }
 
 func newTestPluginRegistry(t *testing.T) *testPluginRegistry {

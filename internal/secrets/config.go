@@ -127,36 +127,36 @@ func (cs *ConfigStore) Set(ctx context.Context, tenant auth.TenantID, cfg Broker
 	candidate, err := factory(cfg.ConfigBlob)
 	if err != nil {
 		cs.auditor.Audit(ctx, AuditEvent{
-			ActorID:         actor,
-			ActorTenantID:   tenant.String(),
-			Action:          ActionSecretConfigSet,
-			Effect:          EffectDeny,
-			ResourceType:    "secret_broker_config",
-			ResourceURI:     "secret_broker_config:tenant-" + tenant.String(),
-			Decision:        "deny",
-			DecisionReason:  "provider_construct_failed",
-			Success:         false,
-			ErrorCode:       "provider_construct_failed",
-			LatencyMS:       time.Since(start).Milliseconds(),
-			OccurredAt:      time.Now().UTC(),
+			ActorID:        actor,
+			ActorTenantID:  tenant.String(),
+			Action:         ActionSecretConfigSet,
+			Effect:         EffectDeny,
+			ResourceType:   "secret_broker_config",
+			ResourceURI:    "secret_broker_config:tenant-" + tenant.String(),
+			Decision:       "deny",
+			DecisionReason: "provider_construct_failed",
+			Success:        false,
+			ErrorCode:      "provider_construct_failed",
+			LatencyMS:      time.Since(start).Milliseconds(),
+			OccurredAt:     time.Now().UTC(),
 		})
 		return fmt.Errorf("config store: set tenant %s: construct provider %q: %w", tenant, cfg.Provider, err)
 	}
 
 	if err := candidate.Probe(ctx); err != nil {
 		cs.auditor.Audit(ctx, AuditEvent{
-			ActorID:         actor,
-			ActorTenantID:   tenant.String(),
-			Action:          ActionSecretConfigSet,
-			Effect:          EffectDeny,
-			ResourceType:    "secret_broker_config",
-			ResourceURI:     "secret_broker_config:tenant-" + tenant.String(),
-			Decision:        "deny",
-			DecisionReason:  "probe_failed",
-			Success:         false,
-			ErrorCode:       "probe_failed",
-			LatencyMS:       time.Since(start).Milliseconds(),
-			OccurredAt:      time.Now().UTC(),
+			ActorID:        actor,
+			ActorTenantID:  tenant.String(),
+			Action:         ActionSecretConfigSet,
+			Effect:         EffectDeny,
+			ResourceType:   "secret_broker_config",
+			ResourceURI:    "secret_broker_config:tenant-" + tenant.String(),
+			Decision:       "deny",
+			DecisionReason: "probe_failed",
+			Success:        false,
+			ErrorCode:      "probe_failed",
+			LatencyMS:      time.Since(start).Milliseconds(),
+			OccurredAt:     time.Now().UTC(),
 		})
 		return fmt.Errorf("config store: set tenant %s: probe provider %q: %w", tenant, cfg.Provider, err)
 	}
@@ -164,33 +164,33 @@ func (cs *ConfigStore) Set(ctx context.Context, tenant auth.TenantID, cfg Broker
 	// Probe succeeded — persist.
 	if err := cs.store.SetRaw(ctx, tenant, cfg.Provider, cfg.ConfigBlob, actor); err != nil {
 		cs.auditor.Audit(ctx, AuditEvent{
-			ActorID:         actor,
-			ActorTenantID:   tenant.String(),
-			Action:          ActionSecretConfigSet,
-			Effect:          EffectDeny,
-			ResourceType:    "secret_broker_config",
-			ResourceURI:     "secret_broker_config:tenant-" + tenant.String(),
-			Decision:        "deny",
-			DecisionReason:  "db_write_failed",
-			Success:         false,
-			ErrorCode:       "db_write_failed",
-			LatencyMS:       time.Since(start).Milliseconds(),
-			OccurredAt:      time.Now().UTC(),
+			ActorID:        actor,
+			ActorTenantID:  tenant.String(),
+			Action:         ActionSecretConfigSet,
+			Effect:         EffectDeny,
+			ResourceType:   "secret_broker_config",
+			ResourceURI:    "secret_broker_config:tenant-" + tenant.String(),
+			Decision:       "deny",
+			DecisionReason: "db_write_failed",
+			Success:        false,
+			ErrorCode:      "db_write_failed",
+			LatencyMS:      time.Since(start).Milliseconds(),
+			OccurredAt:     time.Now().UTC(),
 		})
 		return fmt.Errorf("config store: set tenant %s: persist: %w", tenant, err)
 	}
 
 	cs.auditor.Audit(ctx, AuditEvent{
-		ActorID:        actor,
-		ActorTenantID:  tenant.String(),
-		Action:         ActionSecretConfigSet,
-		Effect:         EffectAllow,
-		ResourceType:   "secret_broker_config",
-		ResourceURI:    "secret_broker_config:tenant-" + tenant.String(),
-		Decision:       "allow",
-		Success:        true,
-		LatencyMS:      time.Since(start).Milliseconds(),
-		OccurredAt:     time.Now().UTC(),
+		ActorID:       actor,
+		ActorTenantID: tenant.String(),
+		Action:        ActionSecretConfigSet,
+		Effect:        EffectAllow,
+		ResourceType:  "secret_broker_config",
+		ResourceURI:   "secret_broker_config:tenant-" + tenant.String(),
+		Decision:      "allow",
+		Success:       true,
+		LatencyMS:     time.Since(start).Milliseconds(),
+		OccurredAt:    time.Now().UTC(),
 	})
 	return nil
 }

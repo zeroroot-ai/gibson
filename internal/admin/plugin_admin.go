@@ -164,14 +164,14 @@ type PluginsAdminServer struct {
 
 // PluginsAdminConfig groups the constructor's required dependencies.
 type PluginsAdminConfig struct {
-	Registry             PluginRegistryReader
-	ManifestValidator    PluginManifestValidator
-	ZitadelClient        ZitadelPluginPrincipalClient
-	SecretWriter         SecretWriter
-	Authorizer           authz.Authorizer
-	BootstrapAuditor     BootstrapTokenAuditor
-	BootstrapTokenTTL    time.Duration // ≤24h per Spec 2 R3.1; default 1h
-	Now                  func() time.Time
+	Registry          PluginRegistryReader
+	ManifestValidator PluginManifestValidator
+	ZitadelClient     ZitadelPluginPrincipalClient
+	SecretWriter      SecretWriter
+	Authorizer        authz.Authorizer
+	BootstrapAuditor  BootstrapTokenAuditor
+	BootstrapTokenTTL time.Duration // ≤24h per Spec 2 R3.1; default 1h
+	Now               func() time.Time
 }
 
 // NewPluginsAdminServer constructs a PluginsAdminServer. All fields except
@@ -285,18 +285,18 @@ func (s *PluginsAdminServer) GetPluginInstall(ctx context.Context, req *adminv1.
 // The handler walks the following ordered steps. On any failure, the rollback
 // section reverses every step that succeeded.
 //
-//   1. Validate the manifest. On error, return INVALID_ARGUMENT with
-//      structured per-field errors. No state was created — no rollback.
-//   2. (dry_run only) return the validated manifest's metadata without
-//      side-effects.
-//   3. Create inline secrets for every binding with mode == "create".
-//      Track each created secret name for rollback.
-//   4. Create the Zitadel plugin_principal service account. Track the
-//      principal_id for rollback.
-//   5. Write FGA can_resolve tuples binding the plugin_principal to each
-//      bound secret. Track each tuple for rollback.
-//   6. Issue and audit a bootstrap token; return install_id +
-//      bootstrap_token to caller.
+//  1. Validate the manifest. On error, return INVALID_ARGUMENT with
+//     structured per-field errors. No state was created — no rollback.
+//  2. (dry_run only) return the validated manifest's metadata without
+//     side-effects.
+//  3. Create inline secrets for every binding with mode == "create".
+//     Track each created secret name for rollback.
+//  4. Create the Zitadel plugin_principal service account. Track the
+//     principal_id for rollback.
+//  5. Write FGA can_resolve tuples binding the plugin_principal to each
+//     bound secret. Track each tuple for rollback.
+//  6. Issue and audit a bootstrap token; return install_id +
+//     bootstrap_token to caller.
 //
 // Rollback semantics: each step's rollback is best-effort and idempotent; a
 // rollback failure is logged but does not block the user-visible error.
@@ -427,9 +427,9 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *adminv1.Re
 	})
 
 	return &adminv1.RegisterPluginResponse{
-		InstallId:                  installID,
-		PluginPrincipalId:          principalID,
-		BootstrapToken:             bootstrapToken,
+		InstallId:                   installID,
+		PluginPrincipalId:           principalID,
+		BootstrapToken:              bootstrapToken,
 		BootstrapTokenExpiresAtUnix: expiresAt.Unix(),
 	}, nil
 }

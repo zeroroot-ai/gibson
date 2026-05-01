@@ -44,8 +44,9 @@ func main() {
 
 	type row struct {
 		rpc, relation, objectType, deriver, identities string
-		unauthenticated                                 bool
-		sourceFile                                      string
+		unauthenticated                                bool
+		self                                           bool
+		sourceFile                                     string
 	}
 	var rows []row
 
@@ -65,6 +66,7 @@ func main() {
 					deriver:         rule.GetObjectDeriver(),
 					identities:      formatIdentities(rule.GetAllowedIdentities()),
 					unauthenticated: rule.GetUnauthenticated(),
+					self:            rule.GetSelf(),
 					sourceFile:      f.GetName(),
 				})
 			}
@@ -79,13 +81,14 @@ func main() {
 	}
 	defer out.Close()
 	w := csv.NewWriter(out)
-	if err := w.Write([]string{"rpc", "relation", "object_type", "deriver", "identities", "unauthenticated", "source_proto_file"}); err != nil {
+	// mode column is at the END for positional compatibility (self-mode-authz design.md decision).
+	if err := w.Write([]string{"rpc", "relation", "object_type", "deriver", "identities", "source_proto_file", "mode"}); err != nil {
 		fail("write header: %v", err)
 	}
 	for _, r := range rows {
 		if err := w.Write([]string{
 			r.rpc, r.relation, r.objectType, r.deriver, r.identities,
-			fmt.Sprintf("%t", r.unauthenticated), r.sourceFile,
+			r.sourceFile, csvMode(r.unauthenticated, r.self),
 		}); err != nil {
 			fail("write row: %v", err)
 		}
@@ -93,6 +96,20 @@ func main() {
 	w.Flush()
 	if err := w.Error(); err != nil {
 		fail("flush: %v", err)
+	}
+}
+
+// csvMode returns the mode string for a CSV row.
+// Values: "unauthenticated" | "self" | "rule".
+// Spec: self-mode-authz Req 5.1, 5.2, 5.3.
+func csvMode(unauthenticated, self bool) string {
+	switch {
+	case unauthenticated:
+		return "unauthenticated"
+	case self:
+		return "self"
+	default:
+		return "rule"
 	}
 }
 

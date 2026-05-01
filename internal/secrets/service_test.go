@@ -30,14 +30,14 @@ func (f *fakeServiceRegistry) For(_ context.Context, _ auth.TenantID) (sdksecret
 // fakeCircuit implements ServiceCircuitBreaker, always allowing unless
 // allowErr is set.
 type fakeCircuit struct {
-	allowErr        error
-	successCalls    int
-	failureCalls    int
+	allowErr     error
+	successCalls int
+	failureCalls int
 }
 
-func (f *fakeCircuit) Allow(_, _ string) error    { return f.allowErr }
-func (f *fakeCircuit) RecordSuccess(_, _ string)  { f.successCalls++ }
-func (f *fakeCircuit) RecordFailure(_, _ string)  { f.failureCalls++ }
+func (f *fakeCircuit) Allow(_, _ string) error   { return f.allowErr }
+func (f *fakeCircuit) RecordSuccess(_, _ string) { f.successCalls++ }
+func (f *fakeCircuit) RecordFailure(_, _ string) { f.failureCalls++ }
 
 // serviceFakeBroker is a configurable broker for service tests.
 type serviceFakeBroker struct {
@@ -63,8 +63,8 @@ func (b *serviceFakeBroker) Delete(_ context.Context, _ auth.TenantID, _ string)
 func (b *serviceFakeBroker) List(_ context.Context, _ auth.TenantID, _ sdksecrets.Filter) ([]string, error) {
 	return b.lstVal, b.lstErr
 }
-func (b *serviceFakeBroker) Health(_ context.Context) error                  { return nil }
-func (b *serviceFakeBroker) Probe(_ context.Context) error                   { return nil }
+func (b *serviceFakeBroker) Health(_ context.Context) error { return nil }
+func (b *serviceFakeBroker) Probe(_ context.Context) error  { return nil }
 func (b *serviceFakeBroker) Capabilities() sdksecrets.ProviderCapabilities {
 	return sdksecrets.ProviderCapabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
 }
