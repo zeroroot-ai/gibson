@@ -195,8 +195,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// emits and injects a typed Identity into the request context.
 	// Authorization (FGA) is enforced upstream by Envoy + ext_authz; the daemon
 	// trusts the headers because the Envoy↔daemon channel is SPIFFE-pinned mTLS.
-	// HMAC signing was removed (Spec: unified-identity-and-authorization
-	// Requirement 8.4); the secret-loading dance is gone with it.
+	// Transport security is the sole trust anchor between Envoy and the daemon;
+	// the daemon relies on SPIFFE X.509 mTLS to ensure only the Envoy sidecar
+	// (with the expected SVID) can reach the gRPC listener.
 	// TEMP DEBUG: log all incoming metadata keys when identity-check denies.
 	// Helps distinguish "Envoy didn't forward x-gibson-identity-* headers"
 	// from "ext-authz didn't emit them". Remove once root-caused.
@@ -1021,29 +1022,6 @@ func rejectNonLoopbackWithoutSPIFFE(addr string) error {
 	}
 
 	return nil
-}
-
-// loadHMACSecret reads the HMAC secret used to verify Envoy-signed
-// x-gibson-identity-* headers.
-//
-// Resolution order:
-//  1. File path from GIBSON_IDENTITY_HMAC_SECRET_PATH env (default /etc/gibson/hmac/secret)
-//  2. Contents must be at least 32 bytes — fail-fast if shorter.
-//
-// The secret must never be logged.
-func loadHMACSecret() ([]byte, error) {
-	path := os.Getenv("GIBSON_IDENTITY_HMAC_SECRET_PATH")
-	if path == "" {
-		path = "/etc/gibson/hmac/secret"
-	}
-	secret, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("cannot read HMAC secret from %q: %w", path, err)
-	}
-	if len(secret) < 32 {
-		return nil, fmt.Errorf("HMAC secret at %q is too short (%d bytes, minimum 32)", path, len(secret))
-	}
-	return secret, nil
 }
 
 // Implementation of api.DaemonInterface for delegation from gRPC server.

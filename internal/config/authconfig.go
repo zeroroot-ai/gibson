@@ -17,8 +17,9 @@ type BetterAuthConfig struct {
 	// Default: false
 	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
 
-	// Secret is the HMAC-SHA256 signing secret shared between the dashboard
-	// Better Auth server and the daemon.
+	// Secret is the shared signing secret for Better Auth session tokens issued
+	// by the dashboard. Must match the BETTER_AUTH_SECRET configured in the
+	// dashboard's Better Auth server.
 	// Override: BETTER_AUTH_SECRET env var is handled in the loader.
 	Secret string `mapstructure:"secret" yaml:"secret"`
 }
@@ -91,12 +92,15 @@ type AuthConfig struct {
 
 	// SPIFFE configures SPIFFE/SPIRE workload identity for mTLS authentication.
 	// When set, the daemon initialises an X509Source from the Workload API socket
-	// and configures the gRPC server with mTLS using tls.VerifyClientCertIfGiven.
-	// Optional — when absent the daemon runs without SPIFFE TLS.
+	// and configures the gRPC server with SPIFFE-pinned mTLS (tls.RequestClientCert
+	// with a go-spiffe VerifyPeerCertificate callback; see grpc.go for details).
+	// When absent and the listen address is non-loopback the daemon refuses to start
+	// (zero-trust-hardening Req 1.2).
+	// Optional — when absent and listen is loopback the daemon starts with a warning.
 	SPIFFE *SPIFFEConfig `mapstructure:"spiffe" yaml:"spiffe,omitempty"`
 
-	// BetterAuth configures HMAC-SHA256 session token validation for Better Auth
-	// sessions issued by the dashboard.
+	// BetterAuth configures session token validation for Better Auth sessions
+	// issued by the dashboard.
 	// Optional — omit when not using the dashboard's Better Auth integration.
 	BetterAuth BetterAuthConfig `mapstructure:"better_auth" yaml:"better_auth,omitempty"`
 
