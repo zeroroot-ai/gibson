@@ -4,6 +4,57 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## v0.25.0 — 2026-05-01
+
+### Security — self-mode-authz spec
+
+- **SDK bump to v0.95.0; authz registry regenerated.**
+  `GetMyPermissions` and `ListMyMemberships` now carry `self: true +
+  allowed_identities: [USER]` in the generated registry, replacing the
+  hotfix `unauthenticated: true` annotations. The `self` mode preserves
+  JWT authentication via Envoy `jwt_authn` and applies the identity-class
+  bitfield check (USER only) at ext-authz, while skipping the FGA tuple
+  lookup that was impossible for pre-tenant-context self-bootstrap calls.
+  Layer 4 of defense-in-depth (per-RPC identity-class enforcement) is
+  restored on these two RPCs. Spec: self-mode-authz Req 4.1–4.3.
+
+- **OCI registry artifact `ghcr.io/zero-day-ai/internal-authz-registry:v0.25.0`
+  is the first artifact containing `self: true` entries.**
+  Requires ext-authz v0.2.0+ to parse; see Req 6.1 for release order
+  requirements.
+
+### Audit trail
+
+- **`audit.csv` gains a `mode` column at the END of each row** (positional
+  compatibility per design.md decision). Values: `rule | self |
+  unauthenticated`. Self-mode rows populate `identities` while
+  `relation`/`object_type`/`deriver` remain empty strings. Spec:
+  self-mode-authz Req 5.1, 5.2, 5.3.
+
+### Tests
+
+- `TestGetMyPermissionsAndListMyMembershipsAreAuthenticated` — reworked to
+  assert the new self-mode shape: `Self==true`, `AllowedIdentities.Has(USER)`,
+  `Unauthenticated==false`, `Relation==""`. Failure message references spec
+  `self-mode-authz`.
+- `TestSelfModeEntriesAreUserOnly` — new test walking `registry.Registry`;
+  asserts every `Self==true` entry has the USER bit in `AllowedIdentities`.
+- `TestOnlyConnectAndPingAreUnauthenticated` — unchanged; the
+  `unauthenticated: true` set does not grow (Req 4.5).
+
+---
+
+## v0.24.0 — 2026-05-01
+
+### Fix — zero-trust-hardening follow-up
+
+- **Authz registry: revert `tenant_admin`/`tenant_member` relations back to
+  `admin`/`member`** on all `TenantAdminService` and `AdminService` RPCs.
+  The v0.23.0 registry regen introduced the wrong relation names from a
+  stale SDK proto snapshot; this fixes the drift.
+
+---
+
 ## v0.23.0 — 2026-05-01
 
 ### Security — zero-trust-hardening spec
