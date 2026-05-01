@@ -4,6 +4,38 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## v0.25.1 — 2026-05-01 — daemon loose-mode bypass for self-mode RPCs
+
+Bugfix on top of v0.25.0. The daemon's `registryAwareUnary` /
+`registryAwareStream` interceptors only bypassed strict tenant
+validation for `entry.Unauthenticated` (Connect, Ping). Self-mode RPCs
+(`ListMyMemberships`, `GetMyPermissions`) by design have no tenant
+context — sign-in calls them BEFORE the active-tenant cookie is set —
+but they fell through to the SDK's strict 5-header interceptor and
+denied with `auth: identity headers absent: missing
+[x-gibson-identity-tenant]`.
+
+### Fix
+
+Extended the bypass condition to `entry.Unauthenticated || entry.Self`.
+The handler still receives a `caller.Subject` extracted from
+ext-authz's verified identity header; tenant is left zero (handler
+self-scopes). The four-layer defense from zero-trust-hardening is
+unchanged: Envoy `jwt_authn` + ext-authz subject minting + daemon
+SPIFFE-mTLS-pinned listener + ext-authz `AllowedIdentities` bitfield.
+
+### Validation
+
+- `go build ./...` and `go vet ./...` clean.
+- Live verification on kind-gibson: sign-in flow's
+  `ListMyMemberships` now returns 200 OK; ext-authz logs show
+  `entry_mode=self result=allow`; daemon logs show no further
+  `identity-check denied` warnings on these RPCs.
+
+Closes self-mode-authz Req 4.6.
+
+---
+
 ## v0.25.0 — 2026-05-01
 
 ### Security — self-mode-authz spec

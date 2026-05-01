@@ -222,15 +222,19 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	unaryInterceptors = append(unaryInterceptors, debugDumpMetadata)
 
 	// Wrap sdk/auth's identity interceptor with a registry-aware shim
-	// that does LOOSE identity parsing for RPCs declared `unauthenticated:
-	// true` in the SDK auth registry. "Unauthenticated" here is a
-	// misnomer — it really means "no FGA / no tenant scope required".
-	// The handler still wants to know WHO is asking (e.g. ListMyMemberships
-	// uses callerID.Subject to look up memberships). So we extract the
-	// subject from ext-authz's identity header and attach a minimal
-	// Identity to the context, bypassing strict tenant validation.
-	// For everything else, the standard sdk/auth interceptor runs
-	// unchanged with strict 5-header validation.
+	// that does LOOSE identity parsing for RPCs that have no tenant
+	// scope by design — `unauthenticated: true` (Connect, Ping) and
+	// `self: true` (sign-in self-bootstrap: ListMyMemberships,
+	// GetMyPermissions). For both modes the handler still wants to know
+	// WHO is asking (handlers self-scope via callerID.Subject), so we
+	// extract the subject from ext-authz's identity header and attach a
+	// minimal Identity to the context, bypassing strict tenant
+	// validation. ext-authz is registry-aware too: it has already
+	// applied the per-RPC AllowedIdentities bitfield for self-mode
+	// entries before forwarding the request. For everything else the
+	// standard sdk/auth interceptor runs unchanged with strict 5-header
+	// validation.
+	// Spec: zero-trust-hardening Req 5; self-mode-authz Req 4.6.
 	looseIdentityFromMD := func(ctx context.Context) context.Context {
 		md, ok := grpcmetadata.FromIncomingContext(ctx)
 		if !ok {
@@ -261,14 +265,22 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 	sdkAuthUnary := auth.UnaryServerInterceptor()
 	sdkAuthStream := auth.StreamServerInterceptor()
+	// looseModeForEntry: both unauthenticated and self mode bypass
+	// strict tenant validation. ext-authz has already enforced the
+	// per-RPC AllowedIdentities bitfield for self-mode before reaching
+	// the daemon, and the handler is responsible for self-scoping via
+	// caller.Subject. Spec: self-mode-authz Req 4.6.
+	looseModeForEntry := func(entry registry.Entry) bool {
+		return entry.Unauthenticated || entry.Self
+	}
 	registryAwareUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if entry, ok := registry.Registry[info.FullMethod]; ok && entry.Unauthenticated {
+		if entry, ok := registry.Registry[info.FullMethod]; ok && looseModeForEntry(entry) {
 			return handler(looseIdentityFromMD(ctx), req)
 		}
 		return sdkAuthUnary(ctx, req, info, handler)
 	}
 	registryAwareStream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if entry, ok := registry.Registry[info.FullMethod]; ok && entry.Unauthenticated {
+		if entry, ok := registry.Registry[info.FullMethod]; ok && looseModeForEntry(entry) {
 			wrapped := &serverStreamCtxOverride{ServerStream: ss, ctx: looseIdentityFromMD(ss.Context())}
 			return handler(srv, wrapped)
 		}
