@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -350,13 +351,22 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 		}, nil
 	}
 
-	// If health is explicitly healthy, return success.
+	// If health is explicitly healthy, return success — and try to surface the
+	// live model catalogue so the dashboard's wizard can populate its model
+	// picker without a second round-trip. Spec: providers-wizard. Models() is
+	// best-effort: providers that don't expose a list endpoint return an empty
+	// slice or an error; the test still passes either way.
 	if healthStatus.IsHealthy() {
 		s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
+		var modelList []llm.ModelInfo
+		modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
+		modelList, _ = prov.Models(modelsCtx)
+		modelsCancel()
 		return &tenantv1.TestProviderResponse{
 			Ok:        true,
 			LatencyMs: latencyMS,
 			Model:     input.GetDefaultModel(),
+			Models:    modelsToProto(modelList),
 		}, nil
 	}
 
@@ -407,10 +417,17 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 			Error:     completeErr.Error(),
 		}, nil
 	}
+	// Best-effort live model fetch on the Complete-fallback success path —
+	// same rationale as the Health-success branch above.
+	var modelList []llm.ModelInfo
+	modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
+	modelList, _ = prov.Models(modelsCtx)
+	modelsCancel()
 	return &tenantv1.TestProviderResponse{
 		Ok:        true,
 		LatencyMs: latencyMS,
 		Model:     input.GetDefaultModel(),
+		Models:    modelsToProto(modelList),
 	}, nil
 }
 
@@ -553,6 +570,154 @@ func (s *DaemonServer) SetFallbackChain(ctx context.Context, req *tenantv1.SetFa
 	}
 	s.emitProviderAudit(ctx, tenantID, auditProviderFallbackChanged, fmt.Sprintf("%v", names))
 	return &tenantv1.SetFallbackChainResponse{ProviderNames: names}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Provider catalogue (spec: providers-wizard)
+// ---------------------------------------------------------------------------
+
+// GetSupportedProviders returns the daemon's static catalogue of LLM provider
+// types in the same deterministic order as llm.SupportedProviderTypes(). No
+// tenant context required at the data layer (the catalogue is process-wide),
+// but the auth interceptor still asserts tenant membership so unauthenticated
+// callers can't enumerate the surface.
+func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.GetSupportedProvidersRequest) (*tenantv1.GetSupportedProvidersResponse, error) {
+	if auth.TenantStringFromContext(ctx) == "" {
+		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
+	}
+	descriptors := providers.SupportedProviderDescriptors()
+	out := make([]*tenantv1.SupportedProvider, 0, len(descriptors))
+	for _, d := range descriptors {
+		out = append(out, descriptorToProto(d))
+	}
+	return &tenantv1.GetSupportedProvidersResponse{Providers: out}, nil
+}
+
+// ListProviderModels fetches the live model catalogue for an already-stored
+// provider config — credentials are read from the encrypted store; the caller
+// does not pass them. Mirrors TestProvider's "construct + call" pattern but
+// against a persisted record. Spec: providers-wizard.
+func (s *DaemonServer) ListProviderModels(ctx context.Context, req *tenantv1.ListProviderModelsRequest) (*tenantv1.ListProviderModelsResponse, error) {
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" {
+		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
+	}
+	if s.providerConfig == nil {
+		return nil, status_grpc.Errorf(codes.FailedPrecondition,
+			"daemon `security.key_provider` not configured — provider storage is disabled")
+	}
+	name := req.GetName()
+	if name == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "name is required")
+	}
+
+	// Decrypt the stored config via the store's Resolve helper. The decrypted
+	// credential map lives only on this goroutine's stack — we never log it or
+	// persist it.
+	dec, err := s.providerConfig.Resolve(ctx, tenantID, name)
+	if err != nil {
+		return nil, toGRPCProviderError("resolve provider", err)
+	}
+	provCfg := decryptedToLLMConfig(dec)
+
+	prov, err := providers.NewProvider(provCfg)
+	if err != nil {
+		return &tenantv1.ListProviderModelsResponse{
+			Ok:           false,
+			ErrorMessage: fmt.Sprintf("invalid provider configuration: %v", err),
+			ErrorClass:   "invalid_argument",
+		}, nil
+	}
+
+	// Bound the upstream call so a hung provider doesn't pin the gRPC handler.
+	modelsCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	start := time.Now()
+	models, mErr := prov.Models(modelsCtx)
+	latency := time.Since(start).Milliseconds()
+	if mErr != nil {
+		return &tenantv1.ListProviderModelsResponse{
+			Ok:           false,
+			ErrorMessage: mErr.Error(),
+			ErrorClass:   classifyProviderError(mErr),
+			LatencyMs:    latency,
+		}, nil
+	}
+	return &tenantv1.ListProviderModelsResponse{
+		Ok:        true,
+		Models:    modelsToProto(models),
+		LatencyMs: latency,
+	}, nil
+}
+
+// descriptorToProto translates the in-Go ProviderDescriptor to its proto
+// equivalent. Kept narrow on purpose: this is the only place the two shapes
+// touch each other.
+func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvider {
+	creds := make([]*tenantv1.CredentialField, 0, len(d.Credentials))
+	for _, c := range d.Credentials {
+		creds = append(creds, &tenantv1.CredentialField{
+			Key:         c.Key,
+			Label:       c.Label,
+			Required:    c.Required,
+			Secret:      c.Secret,
+			Placeholder: c.Placeholder,
+			Help:        c.Help,
+		})
+	}
+	return &tenantv1.SupportedProvider{
+		Type:          string(d.Type),
+		DisplayName:   d.DisplayName,
+		DocsUrl:       d.DocsURL,
+		SelfHosted:    d.SelfHosted,
+		Credentials:   creds,
+		DefaultModels: modelsToProto(d.DefaultModels),
+	}
+}
+
+// modelsToProto translates llm.ModelInfo entries into the proto shape used
+// by both ProbeProvider/TestProvider and ListProviderModels.
+func modelsToProto(models []llm.ModelInfo) []*tenantv1.ModelDescriptor {
+	out := make([]*tenantv1.ModelDescriptor, 0, len(models))
+	for _, m := range models {
+		out = append(out, &tenantv1.ModelDescriptor{
+			Name:          m.Name,
+			ContextWindow: int32(m.ContextWindow), //nolint:gosec // model context windows are at most ~10M
+		})
+	}
+	return out
+}
+
+// classifyProviderError translates a provider-side error into a stable
+// error_class string the dashboard can dispatch on. Keep the set tight —
+// add new classes only when the dashboard wants different UX for them.
+func classifyProviderError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case containsAny(msg, "invalid_api_key", "401", "unauthorized", "authentication"):
+		return "auth_failed"
+	case containsAny(msg, "rate", "429", "quota"):
+		return "rate_limited"
+	case containsAny(msg, "timeout", "deadline"):
+		return "timeout"
+	case containsAny(msg, "dial", "connection refused", "no such host", "network"):
+		return "network"
+	default:
+		return "unknown"
+	}
+}
+
+func containsAny(s string, substrs ...string) bool {
+	lower := strings.ToLower(s)
+	for _, sub := range substrs {
+		if strings.Contains(lower, strings.ToLower(sub)) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------

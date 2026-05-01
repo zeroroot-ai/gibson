@@ -38,6 +38,8 @@ const (
 	TenantAdminService_UpdateProvider_FullMethodName                  = "/gibson.tenant.v1.TenantAdminService/UpdateProvider"
 	TenantAdminService_DeleteProvider_FullMethodName                  = "/gibson.tenant.v1.TenantAdminService/DeleteProvider"
 	TenantAdminService_TestProvider_FullMethodName                    = "/gibson.tenant.v1.TenantAdminService/TestProvider"
+	TenantAdminService_GetSupportedProviders_FullMethodName           = "/gibson.tenant.v1.TenantAdminService/GetSupportedProviders"
+	TenantAdminService_ListProviderModels_FullMethodName              = "/gibson.tenant.v1.TenantAdminService/ListProviderModels"
 	TenantAdminService_GetProviderHealth_FullMethodName               = "/gibson.tenant.v1.TenantAdminService/GetProviderHealth"
 	TenantAdminService_GetDefaultProvider_FullMethodName              = "/gibson.tenant.v1.TenantAdminService/GetDefaultProvider"
 	TenantAdminService_SetDefaultProvider_FullMethodName              = "/gibson.tenant.v1.TenantAdminService/SetDefaultProvider"
@@ -111,6 +113,14 @@ type TenantAdminServiceClient interface {
 	DeleteProvider(ctx context.Context, in *DeleteProviderRequest, opts ...grpc.CallOption) (*DeleteProviderResponse, error)
 	// TestProvider validates a proposed provider config by making a minimal live request.
 	TestProvider(ctx context.Context, in *TestProviderRequest, opts ...grpc.CallOption) (*TestProviderResponse, error)
+	// GetSupportedProviders returns the daemon's static catalogue of LLM
+	// provider types with their per-provider credential field schemas. Backs
+	// the dashboard's Settings → Providers wizard. Spec: providers-wizard.
+	GetSupportedProviders(ctx context.Context, in *GetSupportedProvidersRequest, opts ...grpc.CallOption) (*GetSupportedProvidersResponse, error)
+	// ListProviderModels fetches the live model catalogue for an already-
+	// configured provider, looked up by name. Credentials are read from the
+	// encrypted store; the caller does not pass them. Spec: providers-wizard.
+	ListProviderModels(ctx context.Context, in *ListProviderModelsRequest, opts ...grpc.CallOption) (*ListProviderModelsResponse, error)
 	// GetProviderHealth returns the last-known health status of a stored provider.
 	GetProviderHealth(ctx context.Context, in *GetProviderHealthRequest, opts ...grpc.CallOption) (*GetProviderHealthResponse, error)
 	// GetDefaultProvider returns the tenant's currently configured default provider.
@@ -325,6 +335,26 @@ func (c *tenantAdminServiceClient) TestProvider(ctx context.Context, in *TestPro
 	return out, nil
 }
 
+func (c *tenantAdminServiceClient) GetSupportedProviders(ctx context.Context, in *GetSupportedProvidersRequest, opts ...grpc.CallOption) (*GetSupportedProvidersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSupportedProvidersResponse)
+	err := c.cc.Invoke(ctx, TenantAdminService_GetSupportedProviders_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantAdminServiceClient) ListProviderModels(ctx context.Context, in *ListProviderModelsRequest, opts ...grpc.CallOption) (*ListProviderModelsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProviderModelsResponse)
+	err := c.cc.Invoke(ctx, TenantAdminService_ListProviderModels_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *tenantAdminServiceClient) GetProviderHealth(ctx context.Context, in *GetProviderHealthRequest, opts ...grpc.CallOption) (*GetProviderHealthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetProviderHealthResponse)
@@ -468,6 +498,14 @@ type TenantAdminServiceServer interface {
 	DeleteProvider(context.Context, *DeleteProviderRequest) (*DeleteProviderResponse, error)
 	// TestProvider validates a proposed provider config by making a minimal live request.
 	TestProvider(context.Context, *TestProviderRequest) (*TestProviderResponse, error)
+	// GetSupportedProviders returns the daemon's static catalogue of LLM
+	// provider types with their per-provider credential field schemas. Backs
+	// the dashboard's Settings → Providers wizard. Spec: providers-wizard.
+	GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error)
+	// ListProviderModels fetches the live model catalogue for an already-
+	// configured provider, looked up by name. Credentials are read from the
+	// encrypted store; the caller does not pass them. Spec: providers-wizard.
+	ListProviderModels(context.Context, *ListProviderModelsRequest) (*ListProviderModelsResponse, error)
 	// GetProviderHealth returns the last-known health status of a stored provider.
 	GetProviderHealth(context.Context, *GetProviderHealthRequest) (*GetProviderHealthResponse, error)
 	// GetDefaultProvider returns the tenant's currently configured default provider.
@@ -548,6 +586,12 @@ func (UnimplementedTenantAdminServiceServer) DeleteProvider(context.Context, *De
 }
 func (UnimplementedTenantAdminServiceServer) TestProvider(context.Context, *TestProviderRequest) (*TestProviderResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TestProvider not implemented")
+}
+func (UnimplementedTenantAdminServiceServer) GetSupportedProviders(context.Context, *GetSupportedProvidersRequest) (*GetSupportedProvidersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSupportedProviders not implemented")
+}
+func (UnimplementedTenantAdminServiceServer) ListProviderModels(context.Context, *ListProviderModelsRequest) (*ListProviderModelsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListProviderModels not implemented")
 }
 func (UnimplementedTenantAdminServiceServer) GetProviderHealth(context.Context, *GetProviderHealthRequest) (*GetProviderHealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProviderHealth not implemented")
@@ -933,6 +977,42 @@ func _TenantAdminService_TestProvider_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TenantAdminService_GetSupportedProviders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSupportedProvidersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantAdminServiceServer).GetSupportedProviders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantAdminService_GetSupportedProviders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantAdminServiceServer).GetSupportedProviders(ctx, req.(*GetSupportedProvidersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantAdminService_ListProviderModels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProviderModelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantAdminServiceServer).ListProviderModels(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantAdminService_ListProviderModels_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantAdminServiceServer).ListProviderModels(ctx, req.(*ListProviderModelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TenantAdminService_GetProviderHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetProviderHealthRequest)
 	if err := dec(in); err != nil {
@@ -1134,6 +1214,14 @@ var TenantAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TestProvider",
 			Handler:    _TenantAdminService_TestProvider_Handler,
+		},
+		{
+			MethodName: "GetSupportedProviders",
+			Handler:    _TenantAdminService_GetSupportedProviders_Handler,
+		},
+		{
+			MethodName: "ListProviderModels",
+			Handler:    _TenantAdminService_ListProviderModels_Handler,
 		},
 		{
 			MethodName: "GetProviderHealth",

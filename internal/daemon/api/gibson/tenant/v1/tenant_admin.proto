@@ -113,6 +113,16 @@ service TenantAdminService {
   // TestProvider validates a proposed provider config by making a minimal live request.
   rpc TestProvider(TestProviderRequest) returns (TestProviderResponse);
 
+  // GetSupportedProviders returns the daemon's static catalogue of LLM
+  // provider types with their per-provider credential field schemas. Backs
+  // the dashboard's Settings → Providers wizard. Spec: providers-wizard.
+  rpc GetSupportedProviders(GetSupportedProvidersRequest) returns (GetSupportedProvidersResponse);
+
+  // ListProviderModels fetches the live model catalogue for an already-
+  // configured provider, looked up by name. Credentials are read from the
+  // encrypted store; the caller does not pass them. Spec: providers-wizard.
+  rpc ListProviderModels(ListProviderModelsRequest) returns (ListProviderModelsResponse);
+
   // GetProviderHealth returns the last-known health status of a stored provider.
   rpc GetProviderHealth(GetProviderHealthRequest) returns (GetProviderHealthResponse);
 
@@ -690,6 +700,65 @@ message TestProviderResponse {
   int64 latency_ms = 2;
   string model = 3;
   string error = 4;
+  // Live model catalogue returned by the provider's API for these credentials.
+  // Empty when ok=false. Tier-restricted models surface here exactly as the
+  // provider returns them. Spec: providers-wizard.
+  repeated ModelDescriptor models = 5;
+}
+
+// ---------------------------------------------------------------------------
+// Provider catalogue (spec: providers-wizard)
+// ---------------------------------------------------------------------------
+
+message GetSupportedProvidersRequest {}
+
+message GetSupportedProvidersResponse {
+  repeated SupportedProvider providers = 1;
+}
+
+message ListProviderModelsRequest {
+  string name = 1;
+}
+
+message ListProviderModelsResponse {
+  bool ok = 1;
+  string error_message = 2;
+  string error_class = 3;
+  repeated ModelDescriptor models = 4;
+  int64 latency_ms = 5;
+}
+
+// SupportedProvider describes one LLM provider type the daemon supports —
+// the dashboard renders one row per provider in the wizard's type picker.
+message SupportedProvider {
+  string type = 1;
+  string display_name = 2;
+  string docs_url = 3;
+  bool self_hosted = 4;
+  repeated CredentialField credentials = 5;
+  // Static catalogue surfaced when the daemon can enumerate models without
+  // calling the provider's API (e.g. AWS Bedrock's region-locked list).
+  // Empty for providers that require a live test+probe to discover models.
+  repeated ModelDescriptor default_models = 6;
+}
+
+// CredentialField describes one input the operator must supply when
+// configuring a provider — surfaced verbatim by the dashboard's dynamic
+// credential form.
+message CredentialField {
+  string key = 1;
+  string label = 2;
+  bool required = 3;
+  bool secret = 4;
+  string placeholder = 5;
+  string help = 6;
+}
+
+// ModelDescriptor describes one model offered by a provider.
+message ModelDescriptor {
+  string name = 1;
+  string family = 2;
+  int32 context_window = 3;
 }
 
 message GetProviderHealthRequest {
