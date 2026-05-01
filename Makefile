@@ -39,7 +39,10 @@ PROTO_OUT=api/gen/proto
 
 # Buf code generation (uses local buf.yaml + buf.gen.yaml in this directory)
 DASHBOARD_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../../enterprise/platform/dashboard)
-BUF := npx --prefix $(DASHBOARD_DIR) buf
+# Use locally-installed buf from the dashboard node_modules when the dashboard
+# checkout is present; fall back to buf from PATH (e.g. npm install -g @bufbuild/buf
+# in CI where only this repo is checked out).
+BUF := $(if $(wildcard $(DASHBOARD_DIR)/node_modules/.bin/buf),npx --prefix $(DASHBOARD_DIR) buf,buf)
 
 # Default target
 all: test build
