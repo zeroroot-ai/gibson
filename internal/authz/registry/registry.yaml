@@ -79,26 +79,7 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
-  "/gibson.admin.v1.TenantAdminService/GetSupportedProviders":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.admin.v1.TenantAdminService/ListProviderModels":
-    relation: "tenant_admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
   "/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig":
-    relation: "tenant_admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.admin.v1.TenantAdminService/ProbeProvider":
     relation: "tenant_admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -1180,6 +1161,318 @@ entries:
       - USER
       - SERVICE
   "/intelligence.v1.IntelligenceService/GetSimilarTargets":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant_id"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/RefreshToolCatalog":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant_id"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/SetTenantQuota":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant_id"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/Shutdown":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant_id"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/WriteAccessTuples":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant_id"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant_id"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant_id"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant_id"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant_id"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/DeleteTenantLangfuseCredentials":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/ExportFindings":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/GetOnboardingState":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/GetTenantLangfuseCredentials":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/GetTenantQuota":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/ListAgentIdentities":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/ListAuditEvents":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/ListMissionDrafts":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/RevokeAgentIdentity":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/SaveMissionDraft":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/SetTenantLangfuseCredentials":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/UpdateOnboardingState":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/ListProviders":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/GetProvider":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/CreateProvider":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/UpdateProvider":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/DeleteProvider":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/TestProvider":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  # Spec: providers-wizard. Member-readable static catalogue — same shape
+  # the dashboard's wizard renders for the type picker.
+  "/gibson.tenant.v1.TenantAdminService/GetSupportedProviders":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  # Spec: providers-wizard. Admin-only — reads decrypted credentials from
+  # the store to call the provider's API.
+  "/gibson.tenant.v1.TenantAdminService/ListProviderModels":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/GetProviderHealth":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/GetDefaultProvider":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/SetDefaultProvider":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/GetFallbackChain":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/SetFallbackChain":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/ExecuteLLM":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/StreamLLM":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/GetConversation":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/GetUserProfile":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/ListAlerts":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/ListConversations":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/MarkAlertRead":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/MarkAllAlertsRead":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.user.v1.UserService/UpdateUserProfile":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
