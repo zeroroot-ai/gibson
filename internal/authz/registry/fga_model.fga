@@ -23,7 +23,5 @@ type tenant
   relations
     define admin: [user]
     define member: [user]
-    define tenant_admin: [user]
-    define tenant_member: [user]
     define writer: [user]
 

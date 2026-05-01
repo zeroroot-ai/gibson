@@ -19,10 +19,28 @@ export interface AuthEntry {
 }
 
 export const AuthRegistry: Record<string, AuthEntry> = {
+  "/gibson.admin.v1.GrantsAdminService/DeleteAgentGrants": {
+    method: "/gibson.admin.v1.GrantsAdminService/DeleteAgentGrants",
+    service: "gibson.admin.v1.GrantsAdminService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+  },
   "/gibson.admin.v1.GrantsAdminService/ListActiveGrants": {
     method: "/gibson.admin.v1.GrantsAdminService/ListActiveGrants",
     service: "gibson.admin.v1.GrantsAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+  },
+  "/gibson.admin.v1.GrantsAdminService/WriteAgentGrants": {
+    method: "/gibson.admin.v1.GrantsAdminService/WriteAgentGrants",
+    service: "gibson.admin.v1.GrantsAdminService",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -31,7 +49,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.PluginsAdminService/EditPluginSecretBinding": {
     method: "/gibson.admin.v1.PluginsAdminService/EditPluginSecretBinding",
     service: "gibson.admin.v1.PluginsAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -40,7 +58,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.PluginsAdminService/GetPluginInstall": {
     method: "/gibson.admin.v1.PluginsAdminService/GetPluginInstall",
     service: "gibson.admin.v1.PluginsAdminService",
-    relation: "tenant_member",
+    relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -49,7 +67,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.PluginsAdminService/ListPluginInstalls": {
     method: "/gibson.admin.v1.PluginsAdminService/ListPluginInstalls",
     service: "gibson.admin.v1.PluginsAdminService",
-    relation: "tenant_member",
+    relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -58,7 +76,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.PluginsAdminService/RegisterPlugin": {
     method: "/gibson.admin.v1.PluginsAdminService/RegisterPlugin",
     service: "gibson.admin.v1.PluginsAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -67,7 +85,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.PluginsAdminService/RevokePluginSecretBinding": {
     method: "/gibson.admin.v1.PluginsAdminService/RevokePluginSecretBinding",
     service: "gibson.admin.v1.PluginsAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -76,7 +94,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.SecretsAdminService/DeleteSecret": {
     method: "/gibson.admin.v1.SecretsAdminService/DeleteSecret",
     service: "gibson.admin.v1.SecretsAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -85,7 +103,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.SecretsAdminService/GetMissionAudit": {
     method: "/gibson.admin.v1.SecretsAdminService/GetMissionAudit",
     service: "gibson.admin.v1.SecretsAdminService",
-    relation: "tenant_member",
+    relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -94,7 +112,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.SecretsAdminService/GetSecret": {
     method: "/gibson.admin.v1.SecretsAdminService/GetSecret",
     service: "gibson.admin.v1.SecretsAdminService",
-    relation: "tenant_member",
+    relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -103,7 +121,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.SecretsAdminService/ListSecrets": {
     method: "/gibson.admin.v1.SecretsAdminService/ListSecrets",
     service: "gibson.admin.v1.SecretsAdminService",
-    relation: "tenant_member",
+    relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -112,7 +130,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.SecretsAdminService/RotateSecret": {
     method: "/gibson.admin.v1.SecretsAdminService/RotateSecret",
     service: "gibson.admin.v1.SecretsAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -121,7 +139,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.SecretsAdminService/SetSecret": {
     method: "/gibson.admin.v1.SecretsAdminService/SetSecret",
     service: "gibson.admin.v1.SecretsAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -130,7 +148,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.TenantAdminService/GetBrokerConfig": {
     method: "/gibson.admin.v1.TenantAdminService/GetBrokerConfig",
     service: "gibson.admin.v1.TenantAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -148,7 +166,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.TenantAdminService/ListProviderModels": {
     method: "/gibson.admin.v1.TenantAdminService/ListProviderModels",
     service: "gibson.admin.v1.TenantAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -157,7 +175,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig": {
     method: "/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig",
     service: "gibson.admin.v1.TenantAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -166,7 +184,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.TenantAdminService/ProbeProvider": {
     method: "/gibson.admin.v1.TenantAdminService/ProbeProvider",
     service: "gibson.admin.v1.TenantAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -175,7 +193,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.admin.v1.TenantAdminService/SetBrokerConfig": {
     method: "/gibson.admin.v1.TenantAdminService/SetBrokerConfig",
     service: "gibson.admin.v1.TenantAdminService",
-    relation: "tenant_admin",
+    relation: "admin",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -958,7 +976,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/GetMyPermissions": {
     method: "/gibson.daemon.v1.DaemonService/GetMyPermissions",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "tenant_member",
+    relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -994,7 +1012,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/ListMyMemberships": {
     method: "/gibson.daemon.v1.DaemonService/ListMyMemberships",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "tenant_member",
+    relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
@@ -1646,6 +1664,15 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectType: "component",
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+  },
+  "/gibson.identity.v1.IdentityService/WhoAmI": {
+    method: "/gibson.identity.v1.IdentityService/WhoAmI",
+    service: "gibson.identity.v1.IdentityService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE | IdentityClass.COMPONENT,
     unauthenticated: false,
   },
   "/gibson.plugin.v1.PluginInvokeService/PluginInvoke": {

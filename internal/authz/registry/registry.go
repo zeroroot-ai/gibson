@@ -32,8 +32,26 @@ type Entry struct {
 // Registry is the complete, sorted set of (method -> auth rule)
 // mappings extracted from the SDK's proto annotations at codegen time.
 var Registry = map[string]Entry{
+	"/gibson.admin.v1.GrantsAdminService/DeleteAgentGrants": {
+		Method:            "/gibson.admin.v1.GrantsAdminService/DeleteAgentGrants",
+		Service:           "gibson.admin.v1.GrantsAdminService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+	},
 	"/gibson.admin.v1.GrantsAdminService/ListActiveGrants": {
 		Method:            "/gibson.admin.v1.GrantsAdminService/ListActiveGrants",
+		Service:           "gibson.admin.v1.GrantsAdminService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+	},
+	"/gibson.admin.v1.GrantsAdminService/WriteAgentGrants": {
+		Method:            "/gibson.admin.v1.GrantsAdminService/WriteAgentGrants",
 		Service:           "gibson.admin.v1.GrantsAdminService",
 		Relation:          "admin",
 		ObjectType:        "tenant",
@@ -1659,6 +1677,15 @@ var Registry = map[string]Entry{
 		ObjectType:        "component",
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+	},
+	"/gibson.identity.v1.IdentityService/WhoAmI": {
+		Method:            "/gibson.identity.v1.IdentityService/WhoAmI",
+		Service:           "gibson.identity.v1.IdentityService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService | IdentityComponent,
 		Unauthenticated:   false,
 	},
 	"/gibson.plugin.v1.PluginInvokeService/PluginInvoke": {

@@ -11,6 +11,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
+
+	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -328,14 +330,15 @@ func projectComponents(infos []component.ComponentInfo, perms map[string][]strin
 		}
 		seen[k] = struct{}{}
 		cc := &manifestpb.ComponentCapability{
-			Name:         info.Name,
-			Kind:         info.Kind,
-			ComponentRef: "component:" + info.Name,
-			Version:      info.Version,
-			Description:  info.Description,
-			IsSystem:     info.TenantID == "_system",
-			OwnerTenant:  info.TenantID,
-			Permissions:  permissions,
+			Name:          info.Name,
+			Kind:          info.Kind,
+			PrincipalKind: principalKindFromString(info.Kind),
+			ComponentRef:  "component:" + info.Name,
+			Version:       info.Version,
+			Description:   info.Description,
+			IsSystem:      info.TenantID == "_system",
+			OwnerTenant:   info.TenantID,
+			Permissions:   permissions,
 			Liveness: &manifestpb.ComponentLiveness{
 				Status:        "running",
 				LastHeartbeat: timestamppb.New(info.LastHeartbeat),
@@ -353,6 +356,27 @@ func projectComponents(infos []component.ComponentInfo, perms map[string][]strin
 		}
 	}
 	return agents, tools, plugins, scope
+}
+
+// principalKindFromString maps the legacy string kind on
+// ComponentCapability to the typed PrincipalKind. Returns
+// PRINCIPAL_KIND_UNSPECIFIED for unknown values, which the manifest
+// consumers (CLI validate, daemon RegisterPlugin) flag as a
+// deprecation warning rather than an error during the backward-compat
+// window.
+//
+// Spec: component-bootstrap-e2e Requirement 12.
+func principalKindFromString(kind string) identitypb.PrincipalKind {
+	switch kind {
+	case "agent":
+		return identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT
+	case "tool":
+		return identitypb.PrincipalKind_PRINCIPAL_KIND_TOOL
+	case "plugin":
+		return identitypb.PrincipalKind_PRINCIPAL_KIND_PLUGIN
+	default:
+		return identitypb.PrincipalKind_PRINCIPAL_KIND_UNSPECIFIED
+	}
 }
 
 func convertRules(rules []capabilitygrant.CrossRule) []*manifestpb.CrossComponentRule {

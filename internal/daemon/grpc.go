@@ -20,11 +20,13 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	discoverysvc "github.com/zero-day-ai/gibson/internal/api/discovery"
+	"github.com/zero-day-ai/gibson/internal/admin"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	"github.com/zero-day-ai/gibson/internal/identity"
 	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
@@ -32,9 +34,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
+	adminpb "github.com/zero-day-ai/sdk/api/gen/gibson/admin/v1"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zero-day-ai/sdk/auth"
@@ -695,6 +699,49 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 	tenantv1.RegisterTenantAdminServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered TenantAdminService gRPC endpoint")
+
+	// Register IdentityService — caller-side "what can I do?" RPC.
+	// Spec: component-bootstrap-e2e Requirement 10.
+	if d.authorizer != nil {
+		lookup := &identity.FGALookup{Authorizer: d.authorizer}
+		identityServer, idErr := identity.NewServer(identity.Config{
+			Authorizer: d.authorizer,
+			Lookup:     lookup,
+			Logger:     d.logger.Slog(),
+		})
+		if idErr != nil {
+			d.logger.Warn(ctx, "IdentityService not registered", slog.String("error", idErr.Error()))
+		} else {
+			identitypb.RegisterIdentityServiceServer(srv, identityServer)
+			d.logger.Info(ctx, "registered IdentityService gRPC endpoint")
+		}
+
+		// Register GrantsAdminService — per-agent FGA-grant editor +
+		// CG-JWT inspector. Reader for the inspector side is a no-op
+		// stub until the CG-JWT store is wired through; the write side
+		// (Write/DeleteAgentGrants) is the new surface from this spec.
+		// Spec: component-bootstrap-e2e Requirement 9.
+		var grantsAuditWriter *audit.Writer
+		if d.dashboardDB != nil {
+			grantsAuditWriter = audit.NewWriter(d.dashboardDB, d.logger.Slog())
+			grantsAuditWriter.Start(ctx)
+		}
+		grantsServer, gaErr := admin.NewGrantsAdminServer(admin.GrantsAdminConfig{
+			Reader:      noopGrantsReader{},
+			Authorizer:  d.authorizer,
+			Lookup:      lookup,
+			AuditWriter: grantsAuditWriter,
+			Logger:      d.logger.Slog(),
+		})
+		if gaErr != nil {
+			d.logger.Warn(ctx, "GrantsAdminService not registered", slog.String("error", gaErr.Error()))
+		} else {
+			adminpb.RegisterGrantsAdminServiceServer(srv, grantsServer)
+			d.logger.Info(ctx, "registered GrantsAdminService gRPC endpoint")
+		}
+	} else {
+		d.logger.Warn(ctx, "IdentityService and GrantsAdminService not registered: authorizer unavailable")
+	}
 
 	// Register DiscoveryService — the read-only introspection surface
 	// consumed by opensource/adk/cmd/gibson-mcp and the dashboard's
