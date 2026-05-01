@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	tenantpb "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	tenantpb "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -20,11 +20,11 @@ import (
 // requested (user, relation, objectType) triples so each test can
 // assert the caller's tenant flowed through correctly.
 type catalogStub struct {
-	calls          []listObjectsCall
-	componentRefs  []string
-	pluginRefs     []string
-	componentErr   error
-	pluginErr      error
+	calls         []listObjectsCall
+	componentRefs []string
+	pluginRefs    []string
+	componentErr  error
+	pluginErr     error
 }
 
 type listObjectsCall struct {

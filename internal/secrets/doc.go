@@ -72,8 +72,8 @@
 //
 // Prometheus metrics emitted:
 //
-//   gibson_secrets_circuit_open_total{tenant, provider}  — counter; each open
-//   gibson_secrets_circuit_state{tenant, provider}        — gauge; 0=closed, 1=open, 2=half_open
+//	gibson_secrets_circuit_open_total{tenant, provider}  — counter; each open
+//	gibson_secrets_circuit_state{tenant, provider}        — gauge; 0=closed, 1=open, 2=half_open
 //
 // The circuit does not auto-clear after 30 seconds without a probe: the open
 // period expires and the circuit enters half-open, meaning the next real call

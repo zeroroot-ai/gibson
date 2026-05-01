@@ -74,11 +74,11 @@ type TenantAdminServer struct {
 
 // TenantAdminConfig groups the constructor's required dependencies.
 type TenantAdminConfig struct {
-	Reader        TenantConfigStoreReader
-	Writer        TenantConfigStoreWriter
-	ProbeFactory  ProviderProbeFactory
-	Auditor       BootstrapTokenAuditor
-	Now           func() time.Time
+	Reader       TenantConfigStoreReader
+	Writer       TenantConfigStoreWriter
+	ProbeFactory ProviderProbeFactory
+	Auditor      BootstrapTokenAuditor
+	Now          func() time.Time
 }
 
 // NewTenantAdminServer constructs a TenantAdminServer. Reader, Writer,
@@ -344,16 +344,16 @@ func redactConfig(providerName string, blob []byte) (*adminv1.RedactedConfig, er
 	}
 
 	out := &adminv1.RedactedConfig{
-		Provider:          providerStringToEnum(providerName),
-		Address:           stringField(dict, "address"),
-		NamespaceOrPath:   stringField(dict, "namespace_or_path"),
-		Mount:             stringField(dict, "mount"),
-		AuthMethod:        stringField(dict, "auth_method"),
-		Region:            stringField(dict, "region"),
-		Project:           stringField(dict, "project"),
-		TenantIdExternal:  stringField(dict, "tenant_id_external"),
-		ClientId:          stringField(dict, "client_id"),
-		RoleArn:           stringField(dict, "role_arn"),
+		Provider:         providerStringToEnum(providerName),
+		Address:          stringField(dict, "address"),
+		NamespaceOrPath:  stringField(dict, "namespace_or_path"),
+		Mount:            stringField(dict, "mount"),
+		AuthMethod:       stringField(dict, "auth_method"),
+		Region:           stringField(dict, "region"),
+		Project:          stringField(dict, "project"),
+		TenantIdExternal: stringField(dict, "tenant_id_external"),
+		ClientId:         stringField(dict, "client_id"),
+		RoleArn:          stringField(dict, "role_arn"),
 	}
 
 	for _, sk := range sensitiveKeys {

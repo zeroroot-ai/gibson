@@ -134,6 +134,11 @@ func TestRegistryRelationsExistInModel(t *testing.T) {
 		if entry.Unauthenticated {
 			continue
 		}
+		// self-mode entries have no FGA rule fields; there is no object_type or
+		// relation to validate against the model. Spec: self-mode-authz.
+		if entry.Self {
+			continue
+		}
 		// Skip known pre-existing drift at the service-wide level.
 		if _, ok := knownDriftServices[methodService(method)]; ok {
 			continue

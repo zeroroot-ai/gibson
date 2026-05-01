@@ -45,9 +45,10 @@ func (m *mockToolWithPrompt) Prompts() []Prompt {
 // mockPlugin is a basic plugin implementation without prompts
 type mockPlugin struct{}
 
-func (m *mockPlugin) Name() string    { return "mock-plugin" }
-func (m *mockPlugin) Version() string { return "1.0.0" }
-func (m *mockPlugin) Initialize(ctx context.Context, cfg plugin.PluginConfig) error {
+func (m *mockPlugin) Name() string        { return "mock-plugin" }
+func (m *mockPlugin) Version() string     { return "1.0.0" }
+func (m *mockPlugin) Description() string { return "" }
+func (m *mockPlugin) Initialize(ctx context.Context, config map[string]any) error {
 	return nil
 }
 func (m *mockPlugin) Shutdown(ctx context.Context) error { return nil }

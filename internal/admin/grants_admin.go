@@ -38,15 +38,15 @@ import (
 // timestamp fields. The production wiring populates this from the daemon's
 // grant store (in-memory or Redis-backed).
 type GrantInfo struct {
-	JTI                 string
-	RecipientInstallID  string
-	RecipientClass      string // "agent" | "tool" | "plugin"
-	RecipientName       string
-	AllowedRPCs         []string
-	MissionID           string
-	TaskID              string
-	IssuedAt            time.Time
-	ExpiresAt           time.Time
+	JTI                string
+	RecipientInstallID string
+	RecipientClass     string // "agent" | "tool" | "plugin"
+	RecipientName      string
+	AllowedRPCs        []string
+	MissionID          string
+	TaskID             string
+	IssuedAt           time.Time
+	ExpiresAt          time.Time
 }
 
 // CapabilityGrantsReader is the narrow read-side contract this handler

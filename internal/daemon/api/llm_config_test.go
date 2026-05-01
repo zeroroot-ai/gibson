@@ -15,8 +15,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/state"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
 	"github.com/zero-day-ai/sdk/auth"
+	sdksecrets "github.com/zero-day-ai/sdk/secrets"
 )
 
 // testContextWithTenant returns a context carrying a test tenant identity.

@@ -16,8 +16,8 @@ type fakeClock struct {
 	now time.Time
 }
 
-func newFakeClock(t time.Time) *fakeClock { return &fakeClock{now: t} }
-func (f *fakeClock) Now() time.Time       { return f.now }
+func newFakeClock(t time.Time) *fakeClock    { return &fakeClock{now: t} }
+func (f *fakeClock) Now() time.Time          { return f.now }
 func (f *fakeClock) Advance(d time.Duration) { f.now = f.now.Add(d) }
 
 // --- helpers ---
@@ -127,7 +127,7 @@ func TestCircuitBreaker_ReOpensOnProbeFailure(t *testing.T) {
 	}
 	fc.Advance(cbOpenDuration + time.Millisecond)
 	require.NoError(t, cb.Allow(cbTenant, cbProvider)) // half-open
-	cb.RecordFailure(cbTenant, cbProvider)              // probe fails
+	cb.RecordFailure(cbTenant, cbProvider)             // probe fails
 
 	assert.Equal(t, circuitOpen, cb.State(cbTenant, cbProvider))
 	err := cb.Allow(cbTenant, cbProvider)

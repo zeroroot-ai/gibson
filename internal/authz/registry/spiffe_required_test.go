@@ -1,17 +1,19 @@
 package registry_test
 
-// spiffe_required_test.go asserts that the generated authz registry has
-// exactly two unauthenticated: true entries — Connect and Ping — and that
-// GetMyPermissions and ListMyMemberships are NOT in that set.
+// spiffe_required_test.go asserts the following invariants on the generated
+// authz registry:
 //
-// This is a regression guard: if a future proto change accidentally marks
-// another RPC as unauthenticated, or if the registry regeneration is skipped
-// after a proto annotation change, this test fails loudly before a release.
+//  1. Connect and Ping are the ONLY unauthenticated: true entries (the set
+//     must NOT grow — Req 4.5).
+//  2. GetMyPermissions and ListMyMemberships carry the self-mode shape:
+//     Self == true, AllowedIdentities includes USER, Unauthenticated == false,
+//     Relation == "" (no FGA rule fields).
+//  3. Every Self == true entry in the registry has the USER bit in
+//     AllowedIdentities (USER-only by design for self-bootstrap RPCs).
 //
-// Spec: zero-trust-hardening Requirement 5.3 (Connect and Ping are the ONLY
-// unauthenticated: true entries; GetMyPermissions and ListMyMemberships must
-// require authenticated USER tokens).
-
+// Spec: zero-trust-hardening Req 5.3 (Connect and Ping only unauthenticated);
+//
+//	self-mode-authz Req 4.4, 4.5 (self-mode shape + unauth set does not grow).
 import (
 	"fmt"
 	"sort"
@@ -34,8 +36,8 @@ var allowedUnauthenticated = map[string]bool{
 // allowedUnauthenticated, and every entry in allowedUnauthenticated has
 // Unauthenticated: true in the registry.
 //
-// This test reads the live registry.Registry var (generated code), so a
-// `make authz-registry` regen immediately surfaces any proto annotation change.
+// Spec: zero-trust-hardening Req 5.3; self-mode-authz Req 4.5 (the set must
+// NOT grow as a result of this spec).
 func TestOnlyConnectAndPingAreUnauthenticated(t *testing.T) {
 	// Collect methods marked unauthenticated in the generated registry.
 	var foundUnauthenticated []string
@@ -55,11 +57,11 @@ func TestOnlyConnectAndPingAreUnauthenticated(t *testing.T) {
 	}
 	if len(unexpected) > 0 {
 		t.Errorf(
-			"REGRESSION (zero-trust-hardening Req 5.3): "+
+			"REGRESSION (zero-trust-hardening Req 5.3 / self-mode-authz Req 4.5): "+
 				"the following methods are marked unauthenticated: true in the "+
 				"generated registry but are NOT in the allowed set %v:\n  - %s\n\n"+
 				"If this is intentional, update allowedUnauthenticated in this file "+
-				"AND ensure the spec (zero-trust-hardening) approves the change.",
+				"AND ensure the spec (zero-trust-hardening or self-mode-authz) approves the change.",
 			sortedKeys(allowedUnauthenticated),
 			strings.Join(unexpected, "\n  - "),
 		)
@@ -83,11 +85,19 @@ func TestOnlyConnectAndPingAreUnauthenticated(t *testing.T) {
 	}
 }
 
-// TestGetMyPermissionsAndListMyMembershipsAreAuthenticated explicitly asserts
-// the two RPCs that were previously misconfigured as unauthenticated (per the
-// zero-trust-hardening audit finding for Req 5 / 6 confused-deputy).
-// They must have a relation, object_type, object_deriver, and allowed_identities
-// that include the USER bit, and must NOT have Unauthenticated: true.
+// TestGetMyPermissionsAndListMyMembershipsAreAuthenticated asserts the
+// self-mode shape on the two self-bootstrap RPCs. These were previously
+// annotated as unauthenticated: true (hotfix); self-mode-authz migrated them
+// to self: true + allowed_identities: [USER], which preserves the authenticated
+// contract while skipping the FGA tuple lookup.
+//
+// Asserts:
+//   - Self == true (self-mode annotation, no FGA rule)
+//   - AllowedIdentities.Has(USER) (dashboard user sessions call these)
+//   - Unauthenticated == false (no bypass of Envoy jwt_authn)
+//   - Relation == "" (no FGA rule fields set)
+//
+// Spec: self-mode-authz Req 4.4.
 func TestGetMyPermissionsAndListMyMembershipsAreAuthenticated(t *testing.T) {
 	targets := []string{
 		"/gibson.daemon.v1.DaemonService/GetMyPermissions",
@@ -99,32 +109,90 @@ func TestGetMyPermissionsAndListMyMembershipsAreAuthenticated(t *testing.T) {
 			if !ok {
 				t.Fatalf("method %q is missing from the registry; re-run `make authz-registry`", method)
 			}
-			if entry.Unauthenticated {
+
+			// Must be in self-mode (self-mode-authz Req 4.1).
+			if !entry.Self {
 				t.Errorf(
-					"REGRESSION (zero-trust-hardening Req 5.1 / 5.2): "+
-						"method %q must NOT have Unauthenticated: true — "+
-						"it was previously a confused-deputy that allowed any caller to "+
-						"enumerate permissions for an arbitrary subject. "+
-						"Re-run `make authz-registry` after confirming the SDK proto "+
-						"annotation for this RPC does NOT set unauthenticated: true.",
+					"REGRESSION (self-mode-authz Req 4.4): "+
+						"method %q must have Self: true — "+
+						"it was migrated from unauthenticated:true to self:true by spec self-mode-authz. "+
+						"Re-run `make authz-registry` after confirming the SDK proto annotation "+
+						"for this RPC sets self: true.",
 					method,
 				)
 			}
-			if entry.Relation == "" {
-				t.Errorf("method %q has empty Relation; expected 'tenant_member'", method)
+
+			// Must NOT be marked unauthenticated (self-mode-authz Req 4.2).
+			if entry.Unauthenticated {
+				t.Errorf(
+					"REGRESSION (self-mode-authz Req 4.4): "+
+						"method %q must NOT have Unauthenticated: true — "+
+						"it was migrated to self:true by spec self-mode-authz; "+
+						"the hotfix unauthenticated annotation must not be re-introduced.",
+					method,
+				)
 			}
-			if entry.ObjectType == "" {
-				t.Errorf("method %q has empty ObjectType; expected 'tenant'", method)
+
+			// self-mode entries have no FGA rule fields.
+			if entry.Relation != "" {
+				t.Errorf(
+					"REGRESSION (self-mode-authz Req 4.4): "+
+						"method %q has non-empty Relation %q; "+
+						"self-mode entries must not carry FGA rule fields.",
+					method, entry.Relation,
+				)
 			}
+
 			// Must allow at least the USER identity class.
 			if !entry.AllowedIdentities.Has(registry.IdentityUser) {
 				t.Errorf(
-					"method %q AllowedIdentities (%d) does not include USER bit (%d); "+
-						"dashboard user sessions call these RPCs",
+					"REGRESSION (self-mode-authz Req 4.4): "+
+						"method %q AllowedIdentities (%d) does not include USER bit (%d); "+
+						"dashboard user sessions call these RPCs and must be permitted. "+
+						"Spec: self-mode-authz.",
 					method, entry.AllowedIdentities, registry.IdentityUser,
 				)
 			}
 		})
+	}
+}
+
+// TestSelfModeEntriesAreUserOnly walks registry.Registry and asserts that
+// every entry with Self == true has the USER bit set in AllowedIdentities.
+// Self-bootstrap RPCs are user-session-only by design; SERVICE and COMPONENT
+// tokens must never call them.
+//
+// Spec: self-mode-authz Req 4.4, 4.5.
+func TestSelfModeEntriesAreUserOnly(t *testing.T) {
+	for method, entry := range registry.Registry {
+		if !entry.Self {
+			continue
+		}
+		if !entry.AllowedIdentities.Has(registry.IdentityUser) {
+			t.Errorf(
+				"REGRESSION (self-mode-authz Req 4.4): "+
+					"self-mode entry %q does not have the USER bit in AllowedIdentities (%d); "+
+					"self-bootstrap RPCs are user-session-only. "+
+					"Spec: self-mode-authz.",
+				method, entry.AllowedIdentities,
+			)
+		}
+	}
+	// Sanity check: there must be at least one Self == true entry or this
+	// test is vacuously passing on a stale registry.
+	var selfCount int
+	for _, entry := range registry.Registry {
+		if entry.Self {
+			selfCount++
+		}
+	}
+	if selfCount == 0 {
+		t.Error(
+			"registry contains zero Self == true entries; " +
+				"expected at least GetMyPermissions and ListMyMemberships. " +
+				"Re-run `make authz-registry` — the registry may be stale. " +
+				"Spec: self-mode-authz.",
+		)
 	}
 }
 

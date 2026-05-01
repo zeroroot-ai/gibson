@@ -69,9 +69,9 @@ func (f *fakeBroker) List(_ context.Context, _ auth.TenantID, filter sdksecrets.
 	return out, nil
 }
 
-func (f *fakeBroker) Health(_ context.Context) error                      { return nil }
-func (f *fakeBroker) Probe(_ context.Context) error                       { return f.probe }
-func (f *fakeBroker) Capabilities() sdksecrets.ProviderCapabilities       { return f.caps }
+func (f *fakeBroker) Health(_ context.Context) error                { return nil }
+func (f *fakeBroker) Probe(_ context.Context) error                 { return f.probe }
+func (f *fakeBroker) Capabilities() sdksecrets.ProviderCapabilities { return f.caps }
 
 // fakeRegistry returns the same broker for every tenant.
 type fakeRegistry struct{ broker sdksecrets.SecretsBroker }
@@ -83,9 +83,9 @@ func (r *fakeRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.Secre
 // fakeCircuit always allows.
 type fakeCircuit struct{}
 
-func (fakeCircuit) Allow(_, _ string) error      { return nil }
-func (fakeCircuit) RecordSuccess(_, _ string)    {}
-func (fakeCircuit) RecordFailure(_, _ string)    {}
+func (fakeCircuit) Allow(_, _ string) error   { return nil }
+func (fakeCircuit) RecordSuccess(_, _ string) {}
+func (fakeCircuit) RecordFailure(_, _ string) {}
 
 // fakeAuditor captures emitted events.
 type fakeAuditor struct{ events []secrets.AuditEvent }

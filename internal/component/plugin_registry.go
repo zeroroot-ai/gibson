@@ -180,11 +180,11 @@ func (r *installRoundRobin) next(key string) uint64 {
 // It stores persistent metadata in the dashboard Postgres (plugin_install table)
 // and transient state in Redis.
 type postgresPluginRegistry struct {
-	db        *sql.DB
-	redis     redis.UniversalClient
-	queue     WorkQueue
+	db         *sql.DB
+	redis      redis.UniversalClient
+	queue      WorkQueue
 	roundRobin *installRoundRobin
-	logger    *slog.Logger
+	logger     *slog.Logger
 }
 
 // NewPluginRegistry constructs a PluginRegistry backed by Postgres and Redis.

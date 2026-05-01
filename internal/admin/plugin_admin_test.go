@@ -120,11 +120,11 @@ func (f *fakeSecretWriter) Exists(_ context.Context, _ auth.TenantID, name strin
 
 // fakeAuthorizer records FGA tuple writes / deletes.
 type fakeAuthorizer struct {
-	mu       sync.Mutex
-	writes   [][]authz.Tuple
-	deletes  [][]authz.Tuple
+	mu        sync.Mutex
+	writes    [][]authz.Tuple
+	deletes   [][]authz.Tuple
 	failWrite bool
-	listObjs map[string][]string // user -> objects
+	listObjs  map[string][]string // user -> objects
 }
 
 func (f *fakeAuthorizer) Check(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
@@ -348,7 +348,7 @@ func TestRegisterPlugin_ManifestValidationErrors(t *testing.T) {
 	}
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.RegisterPlugin(ctx, &adminv1.RegisterPluginRequest{ManifestYaml: []byte("..." )})
+	resp, err := srv.RegisterPlugin(ctx, &adminv1.RegisterPluginRequest{ManifestYaml: []byte("...")})
 	if err == nil {
 		t.Fatal("expected error on validation failure")
 	}

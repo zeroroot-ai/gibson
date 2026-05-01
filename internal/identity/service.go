@@ -152,12 +152,12 @@ func (s *IdentityServer) WhoAmI(ctx context.Context, req *identitypb.WhoAmIReque
 	}
 
 	resp := &identitypb.WhoAmIResponse{
-		PrincipalId:    target.PrincipalID,
-		Kind:           target.Kind,
-		Name:           target.Name,
-		TenantId:       target.TenantID,
+		PrincipalId:     target.PrincipalID,
+		Kind:            target.Kind,
+		Name:            target.Name,
+		TenantId:        target.TenantID,
 		ComponentGrants: componentGrants,
-		PluginGrants:   pluginGrants,
+		PluginGrants:    pluginGrants,
 		// active_capability_grants intentionally empty until the
 		// CG-JWT reader is wired into IdentityServer. Tracked as a
 		// follow-up task in component-bootstrap-e2e Phase 2.

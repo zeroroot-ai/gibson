@@ -32,7 +32,6 @@ type credentialJSONEnvelope struct {
 	Value string `json:"value"` // plaintext — SECURITY: never log this field
 }
 
-
 // SecretsCredentialStore implements component.CredentialStore by delegating
 // to secrets.Service.Resolve. The explicit tenant parameter is accepted for
 // interface compatibility but is not forwarded to the service — tenant is

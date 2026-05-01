@@ -44,9 +44,9 @@ func main() {
 
 	type row struct {
 		rpc, relation, objectType, deriver, identities string
-		unauthenticated                                 bool
-		self                                            bool
-		sourceFile                                      string
+		unauthenticated                                bool
+		self                                           bool
+		sourceFile                                     string
 	}
 	var rows []row
 

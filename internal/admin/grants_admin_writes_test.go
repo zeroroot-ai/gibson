@@ -56,7 +56,9 @@ func (s *stubAuthorizer) StoreID() string { return "test" }
 func (s *stubAuthorizer) ModelID() string { return "test" }
 func (s *stubAuthorizer) Close() error    { return nil }
 
-type stubLookup struct{ records map[string]identity.PrincipalRecord }
+type stubLookup struct {
+	records map[string]identity.PrincipalRecord
+}
 
 func (s *stubLookup) Resolve(_ context.Context, principalID string) (identity.PrincipalRecord, error) {
 	rec, ok := s.records[principalID]

@@ -18,7 +18,7 @@ import (
 //
 //   - secrets.Service.Resolve        — daemon internal service
 //   - SecretsBroker.Get              — any type whose method is named "Get"
-//                                      in a secrets-package context
+//     in a secrets-package context
 //   - TenantSecretsOps.Get           — Postgres DAO
 //
 // Logging sinks (calls that must never receive tainted values):
@@ -99,16 +99,16 @@ var loggingSinkPkgs = map[string]map[string]struct{}{
 // that accept variadic fields. We match by method name and check that the
 // receiver's package path contains "go.uber.org/zap".
 var zapSinkMethodNames = map[string]struct{}{
-	"Info":    {},
-	"Debug":   {},
-	"Warn":    {},
-	"Error":   {},
-	"Infow":   {},
-	"Debugw":  {},
-	"Warnw":   {},
-	"Errorw":  {},
-	"With":    {},
-	"Sugar":   {},
+	"Info":   {},
+	"Debug":  {},
+	"Warn":   {},
+	"Error":  {},
+	"Infow":  {},
+	"Debugw": {},
+	"Warnw":  {},
+	"Errorw": {},
+	"With":   {},
+	"Sugar":  {},
 }
 
 func runSecretsNoLog(pass *analysis.Pass) (any, error) {

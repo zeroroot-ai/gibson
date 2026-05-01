@@ -47,9 +47,10 @@ func (t *PortScannerTool) Prompts() []prompt.Prompt {
 // Example plugin that implements PluginWithPrompts
 type VulnDatabasePlugin struct{}
 
-func (p *VulnDatabasePlugin) Name() string    { return "vuln-database" }
-func (p *VulnDatabasePlugin) Version() string { return "1.0.0" }
-func (p *VulnDatabasePlugin) Initialize(ctx context.Context, cfg plugin.PluginConfig) error {
+func (p *VulnDatabasePlugin) Name() string        { return "vuln-database" }
+func (p *VulnDatabasePlugin) Version() string     { return "1.0.0" }
+func (p *VulnDatabasePlugin) Description() string { return "" }
+func (p *VulnDatabasePlugin) Initialize(ctx context.Context, config map[string]any) error {
 	return nil
 }
 func (p *VulnDatabasePlugin) Shutdown(ctx context.Context) error { return nil }
