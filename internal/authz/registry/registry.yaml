@@ -653,9 +653,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/GetMyPermissions":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
+    self: true
     allowed_identities:
       - USER
   "/gibson.daemon.v1.DaemonService/ListAgents":
@@ -680,9 +678,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/ListMyMemberships":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
+    self: true
     allowed_identities:
       - USER
   "/gibson.daemon.v1.DaemonService/ListPlugins":

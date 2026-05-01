@@ -16,6 +16,7 @@ export interface AuthEntry {
   objectDeriver: string
   allowedIdentities: number
   unauthenticated: boolean
+  self: boolean // self-mode-authz: authenticated user reading own data, no FGA Check
 }
 
 export const AuthRegistry: Record<string, AuthEntry> = {
@@ -27,6 +28,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.GrantsAdminService/ListActiveGrants": {
     method: "/gibson.admin.v1.GrantsAdminService/ListActiveGrants",
@@ -36,6 +38,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.GrantsAdminService/WriteAgentGrants": {
     method: "/gibson.admin.v1.GrantsAdminService/WriteAgentGrants",
@@ -45,6 +48,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.PluginsAdminService/EditPluginSecretBinding": {
     method: "/gibson.admin.v1.PluginsAdminService/EditPluginSecretBinding",
@@ -54,6 +58,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.PluginsAdminService/GetPluginInstall": {
     method: "/gibson.admin.v1.PluginsAdminService/GetPluginInstall",
@@ -63,6 +68,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.PluginsAdminService/ListPluginInstalls": {
     method: "/gibson.admin.v1.PluginsAdminService/ListPluginInstalls",
@@ -72,6 +78,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.PluginsAdminService/RegisterPlugin": {
     method: "/gibson.admin.v1.PluginsAdminService/RegisterPlugin",
@@ -81,6 +88,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.PluginsAdminService/RevokePluginSecretBinding": {
     method: "/gibson.admin.v1.PluginsAdminService/RevokePluginSecretBinding",
@@ -90,6 +98,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.SecretsAdminService/DeleteSecret": {
     method: "/gibson.admin.v1.SecretsAdminService/DeleteSecret",
@@ -99,6 +108,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.SecretsAdminService/GetMissionAudit": {
     method: "/gibson.admin.v1.SecretsAdminService/GetMissionAudit",
@@ -108,6 +118,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.SecretsAdminService/GetSecret": {
     method: "/gibson.admin.v1.SecretsAdminService/GetSecret",
@@ -117,6 +128,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.SecretsAdminService/ListSecrets": {
     method: "/gibson.admin.v1.SecretsAdminService/ListSecrets",
@@ -126,6 +138,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.SecretsAdminService/RotateSecret": {
     method: "/gibson.admin.v1.SecretsAdminService/RotateSecret",
@@ -135,6 +148,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.SecretsAdminService/SetSecret": {
     method: "/gibson.admin.v1.SecretsAdminService/SetSecret",
@@ -144,6 +158,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.TenantAdminService/GetBrokerConfig": {
     method: "/gibson.admin.v1.TenantAdminService/GetBrokerConfig",
@@ -153,6 +168,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.TenantAdminService/GetSupportedProviders": {
     method: "/gibson.admin.v1.TenantAdminService/GetSupportedProviders",
@@ -162,6 +178,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.TenantAdminService/ListProviderModels": {
     method: "/gibson.admin.v1.TenantAdminService/ListProviderModels",
@@ -171,6 +188,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig": {
     method: "/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig",
@@ -180,6 +198,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.TenantAdminService/ProbeProvider": {
     method: "/gibson.admin.v1.TenantAdminService/ProbeProvider",
@@ -189,6 +208,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.admin.v1.TenantAdminService/SetBrokerConfig": {
     method: "/gibson.admin.v1.TenantAdminService/SetBrokerConfig",
@@ -198,6 +218,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.agent.v1.AgentService/Execute": {
     method: "/gibson.agent.v1.AgentService/Execute",
@@ -207,6 +228,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.agent.v1.AgentService/GetDescriptor": {
     method: "/gibson.agent.v1.AgentService/GetDescriptor",
@@ -216,6 +238,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.agent.v1.AgentService/GetSlotSchema": {
     method: "/gibson.agent.v1.AgentService/GetSlotSchema",
@@ -225,6 +248,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.agent.v1.AgentService/Health": {
     method: "/gibson.agent.v1.AgentService/Health",
@@ -234,6 +258,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.authz.v1.ModelAccessService/GrantAccess": {
     method: "/gibson.authz.v1.ModelAccessService/GrantAccess",
@@ -243,6 +268,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.authz.v1.ModelAccessService/ListAccess": {
     method: "/gibson.authz.v1.ModelAccessService/ListAccess",
@@ -252,6 +278,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.authz.v1.ModelAccessService/ListModelResolutionEvents": {
     method: "/gibson.authz.v1.ModelAccessService/ListModelResolutionEvents",
@@ -261,6 +288,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.authz.v1.ModelAccessService/RevokeAccess": {
     method: "/gibson.authz.v1.ModelAccessService/RevokeAccess",
@@ -270,6 +298,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.budget.v1.BudgetService/GetBudget": {
     method: "/gibson.budget.v1.BudgetService/GetBudget",
@@ -279,6 +308,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.budget.v1.BudgetService/GetTenantDefaults": {
     method: "/gibson.budget.v1.BudgetService/GetTenantDefaults",
@@ -288,6 +318,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.budget.v1.BudgetService/ListBudgets": {
     method: "/gibson.budget.v1.BudgetService/ListBudgets",
@@ -297,6 +328,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.budget.v1.BudgetService/ListStatus": {
     method: "/gibson.budget.v1.BudgetService/ListStatus",
@@ -306,6 +338,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.budget.v1.BudgetService/SetBudget": {
     method: "/gibson.budget.v1.BudgetService/SetBudget",
@@ -315,6 +348,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.budget.v1.BudgetService/SetTenantDefaults": {
     method: "/gibson.budget.v1.BudgetService/SetTenantDefaults",
@@ -324,6 +358,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/CallTool": {
     method: "/gibson.component.v1.ComponentService/CallTool",
@@ -333,6 +368,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/CallToolStream": {
     method: "/gibson.component.v1.ComponentService/CallToolStream",
@@ -342,6 +378,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/CancelMission": {
     method: "/gibson.component.v1.ComponentService/CancelMission",
@@ -351,6 +388,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/Complete": {
     method: "/gibson.component.v1.ComponentService/Complete",
@@ -360,6 +398,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/CompleteStream": {
     method: "/gibson.component.v1.ComponentService/CompleteStream",
@@ -369,6 +408,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/CompleteStructured": {
     method: "/gibson.component.v1.ComponentService/CompleteStructured",
@@ -378,6 +418,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/CompleteWithTools": {
     method: "/gibson.component.v1.ComponentService/CompleteWithTools",
@@ -387,6 +428,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/CreateMission": {
     method: "/gibson.component.v1.ComponentService/CreateMission",
@@ -396,6 +438,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/DelegateToAgent": {
     method: "/gibson.component.v1.ComponentService/DelegateToAgent",
@@ -405,6 +448,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/DisablePlugin": {
     method: "/gibson.component.v1.ComponentService/DisablePlugin",
@@ -414,6 +458,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/EnablePlugin": {
     method: "/gibson.component.v1.ComponentService/EnablePlugin",
@@ -423,6 +468,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/FindSimilarAttacks": {
     method: "/gibson.component.v1.ComponentService/FindSimilarAttacks",
@@ -432,6 +478,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/FindSimilarFindings": {
     method: "/gibson.component.v1.ComponentService/FindSimilarFindings",
@@ -441,6 +488,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetAttackChains": {
     method: "/gibson.component.v1.ComponentService/GetAttackChains",
@@ -450,6 +498,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetCredential": {
     method: "/gibson.component.v1.ComponentService/GetCredential",
@@ -459,6 +508,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_and_field('Name')",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetFindings": {
     method: "/gibson.component.v1.ComponentService/GetFindings",
@@ -468,6 +518,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetMissionResults": {
     method: "/gibson.component.v1.ComponentService/GetMissionResults",
@@ -477,6 +528,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetMissionRunHistory": {
     method: "/gibson.component.v1.ComponentService/GetMissionRunHistory",
@@ -486,6 +538,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetMissionStatus": {
     method: "/gibson.component.v1.ComponentService/GetMissionStatus",
@@ -495,6 +548,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetPluginConfig": {
     method: "/gibson.component.v1.ComponentService/GetPluginConfig",
@@ -504,6 +558,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetRelatedFindings": {
     method: "/gibson.component.v1.ComponentService/GetRelatedFindings",
@@ -513,6 +568,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetRunFindings": {
     method: "/gibson.component.v1.ComponentService/GetRunFindings",
@@ -522,6 +578,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/GetTaxonomySchema": {
     method: "/gibson.component.v1.ComponentService/GetTaxonomySchema",
@@ -531,6 +588,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/Heartbeat": {
     method: "/gibson.component.v1.ComponentService/Heartbeat",
@@ -540,6 +598,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/ListAgents": {
     method: "/gibson.component.v1.ComponentService/ListAgents",
@@ -549,6 +608,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/ListAvailablePlugins": {
     method: "/gibson.component.v1.ComponentService/ListAvailablePlugins",
@@ -558,6 +618,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/ListMissions": {
     method: "/gibson.component.v1.ComponentService/ListMissions",
@@ -567,6 +628,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/ListTenantPlugins": {
     method: "/gibson.component.v1.ComponentService/ListTenantPlugins",
@@ -576,6 +638,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/ListTools": {
     method: "/gibson.component.v1.ComponentService/ListTools",
@@ -585,6 +648,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/MemoryClear": {
     method: "/gibson.component.v1.ComponentService/MemoryClear",
@@ -594,6 +658,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/MemoryDelete": {
     method: "/gibson.component.v1.ComponentService/MemoryDelete",
@@ -603,6 +668,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/MemoryGet": {
     method: "/gibson.component.v1.ComponentService/MemoryGet",
@@ -612,6 +678,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/MemoryGetPreviousRunValue": {
     method: "/gibson.component.v1.ComponentService/MemoryGetPreviousRunValue",
@@ -621,6 +688,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/MemoryGetValueHistory": {
     method: "/gibson.component.v1.ComponentService/MemoryGetValueHistory",
@@ -630,6 +698,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/MemoryHistory": {
     method: "/gibson.component.v1.ComponentService/MemoryHistory",
@@ -639,6 +708,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/MemoryKeys": {
     method: "/gibson.component.v1.ComponentService/MemoryKeys",
@@ -648,6 +718,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/MemorySearch": {
     method: "/gibson.component.v1.ComponentService/MemorySearch",
@@ -657,6 +728,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/MemorySet": {
     method: "/gibson.component.v1.ComponentService/MemorySet",
@@ -666,6 +738,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/PollWork": {
     method: "/gibson.component.v1.ComponentService/PollWork",
@@ -675,6 +748,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/QueryNodes": {
     method: "/gibson.component.v1.ComponentService/QueryNodes",
@@ -684,6 +758,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/QueryPlugin": {
     method: "/gibson.component.v1.ComponentService/QueryPlugin",
@@ -693,6 +768,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/QueueToolWork": {
     method: "/gibson.component.v1.ComponentService/QueueToolWork",
@@ -702,6 +778,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/RegisterComponent": {
     method: "/gibson.component.v1.ComponentService/RegisterComponent",
@@ -711,6 +788,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/ReportStepHints": {
     method: "/gibson.component.v1.ComponentService/ReportStepHints",
@@ -720,6 +798,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/RunMission": {
     method: "/gibson.component.v1.ComponentService/RunMission",
@@ -729,6 +808,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/StoreNode": {
     method: "/gibson.component.v1.ComponentService/StoreNode",
@@ -738,6 +818,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/SubmitFinding": {
     method: "/gibson.component.v1.ComponentService/SubmitFinding",
@@ -747,6 +828,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/SubmitResult": {
     method: "/gibson.component.v1.ComponentService/SubmitResult",
@@ -756,6 +838,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/TestPluginConnection": {
     method: "/gibson.component.v1.ComponentService/TestPluginConnection",
@@ -765,6 +848,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/ToolResults": {
     method: "/gibson.component.v1.ComponentService/ToolResults",
@@ -774,6 +858,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/UpdatePluginConfig": {
     method: "/gibson.component.v1.ComponentService/UpdatePluginConfig",
@@ -783,6 +868,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.component.v1.ComponentService/WaitMission": {
     method: "/gibson.component.v1.ComponentService/WaitMission",
@@ -792,6 +878,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent",
@@ -801,6 +888,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin",
@@ -810,6 +898,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/DescribeTool": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/DescribeTool",
@@ -819,6 +908,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/ListAgents": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/ListAgents",
@@ -828,6 +918,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots",
@@ -837,6 +928,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins",
@@ -846,6 +938,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces",
@@ -855,6 +948,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/ListTools": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/ListTools",
@@ -864,6 +958,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability",
@@ -873,6 +968,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent",
@@ -882,6 +978,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI": {
     method: "/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI",
@@ -891,6 +988,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.PLATFORM_OPERATOR,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/BuildComponent": {
     method: "/gibson.daemon.v1.DaemonService/BuildComponent",
@@ -900,6 +998,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/Connect": {
     method: "/gibson.daemon.v1.DaemonService/Connect",
@@ -909,6 +1008,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "",
     allowedIdentities: 0,
     unauthenticated: true,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/CreateMission": {
     method: "/gibson.daemon.v1.DaemonService/CreateMission",
@@ -918,6 +1018,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/CreateMissionDefinition": {
     method: "/gibson.daemon.v1.DaemonService/CreateMissionDefinition",
@@ -927,6 +1028,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/GetAgentStatus": {
     method: "/gibson.daemon.v1.DaemonService/GetAgentStatus",
@@ -936,6 +1038,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/GetCapabilityManifest": {
     method: "/gibson.daemon.v1.DaemonService/GetCapabilityManifest",
@@ -945,6 +1048,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/GetComponentLogs": {
     method: "/gibson.daemon.v1.DaemonService/GetComponentLogs",
@@ -954,6 +1058,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/GetMissionCheckpoints": {
     method: "/gibson.daemon.v1.DaemonService/GetMissionCheckpoints",
@@ -963,6 +1068,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/GetMissionHistory": {
     method: "/gibson.daemon.v1.DaemonService/GetMissionHistory",
@@ -972,15 +1078,17 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/GetMyPermissions": {
     method: "/gibson.daemon.v1.DaemonService/GetMyPermissions",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
-    objectType: "tenant",
-    objectDeriver: "tenant_from_identity",
+    relation: "",
+    objectType: "",
+    objectDeriver: "",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: true,
   },
   "/gibson.daemon.v1.DaemonService/ListAgents": {
     method: "/gibson.daemon.v1.DaemonService/ListAgents",
@@ -990,6 +1098,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/ListMissionDefinitions": {
     method: "/gibson.daemon.v1.DaemonService/ListMissionDefinitions",
@@ -999,6 +1108,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/ListMissions": {
     method: "/gibson.daemon.v1.DaemonService/ListMissions",
@@ -1008,15 +1118,17 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/ListMyMemberships": {
     method: "/gibson.daemon.v1.DaemonService/ListMyMemberships",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "member",
-    objectType: "tenant",
-    objectDeriver: "tenant_from_identity",
+    relation: "",
+    objectType: "",
+    objectDeriver: "",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: true,
   },
   "/gibson.daemon.v1.DaemonService/ListPlugins": {
     method: "/gibson.daemon.v1.DaemonService/ListPlugins",
@@ -1026,6 +1138,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/ListTools": {
     method: "/gibson.daemon.v1.DaemonService/ListTools",
@@ -1035,6 +1148,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/PauseMission": {
     method: "/gibson.daemon.v1.DaemonService/PauseMission",
@@ -1044,6 +1158,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/Ping": {
     method: "/gibson.daemon.v1.DaemonService/Ping",
@@ -1053,6 +1168,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "",
     allowedIdentities: 0,
     unauthenticated: true,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/QueryPlugin": {
     method: "/gibson.daemon.v1.DaemonService/QueryPlugin",
@@ -1062,6 +1178,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/RenewCapabilityGrant": {
     method: "/gibson.daemon.v1.DaemonService/RenewCapabilityGrant",
@@ -1071,6 +1188,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/ResumeMission": {
     method: "/gibson.daemon.v1.DaemonService/ResumeMission",
@@ -1080,6 +1198,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/RunMission": {
     method: "/gibson.daemon.v1.DaemonService/RunMission",
@@ -1089,6 +1208,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/ShowComponent": {
     method: "/gibson.daemon.v1.DaemonService/ShowComponent",
@@ -1098,6 +1218,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/StartComponent": {
     method: "/gibson.daemon.v1.DaemonService/StartComponent",
@@ -1107,6 +1228,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/Status": {
     method: "/gibson.daemon.v1.DaemonService/Status",
@@ -1116,6 +1238,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/StopComponent": {
     method: "/gibson.daemon.v1.DaemonService/StopComponent",
@@ -1125,6 +1248,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/StopMission": {
     method: "/gibson.daemon.v1.DaemonService/StopMission",
@@ -1134,6 +1258,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/Subscribe": {
     method: "/gibson.daemon.v1.DaemonService/Subscribe",
@@ -1143,6 +1268,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.daemon.v1.DaemonService/WatchManifestInvalidations": {
     method: "/gibson.daemon.v1.DaemonService/WatchManifestInvalidations",
@@ -1152,6 +1278,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/Authorize": {
     method: "/gibson.harness.v1.HarnessCallbackService/Authorize",
@@ -1161,6 +1288,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/CallToolProto": {
     method: "/gibson.harness.v1.HarnessCallbackService/CallToolProto",
@@ -1170,6 +1298,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream": {
     method: "/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream",
@@ -1179,6 +1308,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/CancelMission": {
     method: "/gibson.harness.v1.HarnessCallbackService/CancelMission",
@@ -1188,6 +1318,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/CreateGraphRelationship": {
     method: "/gibson.harness.v1.HarnessCallbackService/CreateGraphRelationship",
@@ -1197,6 +1328,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/CreateMission": {
     method: "/gibson.harness.v1.HarnessCallbackService/CreateMission",
@@ -1206,6 +1338,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/DelegateToAgent": {
     method: "/gibson.harness.v1.HarnessCallbackService/DelegateToAgent",
@@ -1215,6 +1348,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks": {
     method: "/gibson.harness.v1.HarnessCallbackService/FindSimilarAttacks",
@@ -1224,6 +1358,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/FindSimilarFindings": {
     method: "/gibson.harness.v1.HarnessCallbackService/FindSimilarFindings",
@@ -1233,6 +1368,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GenerateNodeID": {
     method: "/gibson.harness.v1.HarnessCallbackService/GenerateNodeID",
@@ -1242,6 +1378,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GetAttackChains": {
     method: "/gibson.harness.v1.HarnessCallbackService/GetAttackChains",
@@ -1251,6 +1388,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GetCredential": {
     method: "/gibson.harness.v1.HarnessCallbackService/GetCredential",
@@ -1260,6 +1398,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_and_field('Name')",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GetFindings": {
     method: "/gibson.harness.v1.HarnessCallbackService/GetFindings",
@@ -1269,6 +1408,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GetMissionResults": {
     method: "/gibson.harness.v1.HarnessCallbackService/GetMissionResults",
@@ -1278,6 +1418,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GetMissionStatus": {
     method: "/gibson.harness.v1.HarnessCallbackService/GetMissionStatus",
@@ -1287,6 +1428,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GetPlanContext": {
     method: "/gibson.harness.v1.HarnessCallbackService/GetPlanContext",
@@ -1296,6 +1438,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GetRelatedFindings": {
     method: "/gibson.harness.v1.HarnessCallbackService/GetRelatedFindings",
@@ -1305,6 +1448,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema": {
     method: "/gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema",
@@ -1314,6 +1458,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GraphRAGHealth": {
     method: "/gibson.harness.v1.HarnessCallbackService/GraphRAGHealth",
@@ -1323,6 +1468,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/GraphRAGQuery": {
     method: "/gibson.harness.v1.HarnessCallbackService/GraphRAGQuery",
@@ -1332,6 +1478,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/LLMComplete": {
     method: "/gibson.harness.v1.HarnessCallbackService/LLMComplete",
@@ -1341,6 +1488,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/LLMCompleteStructured": {
     method: "/gibson.harness.v1.HarnessCallbackService/LLMCompleteStructured",
@@ -1350,6 +1498,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/LLMCompleteWithTools": {
     method: "/gibson.harness.v1.HarnessCallbackService/LLMCompleteWithTools",
@@ -1359,6 +1508,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/LLMStream": {
     method: "/gibson.harness.v1.HarnessCallbackService/LLMStream",
@@ -1368,6 +1518,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/ListAgents": {
     method: "/gibson.harness.v1.HarnessCallbackService/ListAgents",
@@ -1377,6 +1528,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/ListMissions": {
     method: "/gibson.harness.v1.HarnessCallbackService/ListMissions",
@@ -1386,6 +1538,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/ListPlugins": {
     method: "/gibson.harness.v1.HarnessCallbackService/ListPlugins",
@@ -1395,6 +1548,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/ListTools": {
     method: "/gibson.harness.v1.HarnessCallbackService/ListTools",
@@ -1404,6 +1558,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/LongTermMemoryDelete": {
     method: "/gibson.harness.v1.HarnessCallbackService/LongTermMemoryDelete",
@@ -1413,6 +1568,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/LongTermMemorySearch": {
     method: "/gibson.harness.v1.HarnessCallbackService/LongTermMemorySearch",
@@ -1422,6 +1578,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/LongTermMemoryStore": {
     method: "/gibson.harness.v1.HarnessCallbackService/LongTermMemoryStore",
@@ -1431,6 +1588,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/MemoryDelete": {
     method: "/gibson.harness.v1.HarnessCallbackService/MemoryDelete",
@@ -1440,6 +1598,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/MemoryGet": {
     method: "/gibson.harness.v1.HarnessCallbackService/MemoryGet",
@@ -1449,6 +1608,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/MemoryList": {
     method: "/gibson.harness.v1.HarnessCallbackService/MemoryList",
@@ -1458,6 +1618,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/MemorySet": {
     method: "/gibson.harness.v1.HarnessCallbackService/MemorySet",
@@ -1467,6 +1628,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/MissionMemoryContinuityMode": {
     method: "/gibson.harness.v1.HarnessCallbackService/MissionMemoryContinuityMode",
@@ -1476,6 +1638,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetPreviousRunValue": {
     method: "/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetPreviousRunValue",
@@ -1485,6 +1648,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetValueHistory": {
     method: "/gibson.harness.v1.HarnessCallbackService/MissionMemoryGetValueHistory",
@@ -1494,6 +1658,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/MissionMemoryHistory": {
     method: "/gibson.harness.v1.HarnessCallbackService/MissionMemoryHistory",
@@ -1503,6 +1668,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/MissionMemorySearch": {
     method: "/gibson.harness.v1.HarnessCallbackService/MissionMemorySearch",
@@ -1512,6 +1678,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/QueryNodes": {
     method: "/gibson.harness.v1.HarnessCallbackService/QueryNodes",
@@ -1521,6 +1688,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/QueryPlugin": {
     method: "/gibson.harness.v1.HarnessCallbackService/QueryPlugin",
@@ -1530,6 +1698,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/QueueToolWork": {
     method: "/gibson.harness.v1.HarnessCallbackService/QueueToolWork",
@@ -1539,6 +1708,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/RecordSpan": {
     method: "/gibson.harness.v1.HarnessCallbackService/RecordSpan",
@@ -1548,6 +1718,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/RecordSpans": {
     method: "/gibson.harness.v1.HarnessCallbackService/RecordSpans",
@@ -1557,6 +1728,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/ReportStepHints": {
     method: "/gibson.harness.v1.HarnessCallbackService/ReportStepHints",
@@ -1566,6 +1738,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/RunMission": {
     method: "/gibson.harness.v1.HarnessCallbackService/RunMission",
@@ -1575,6 +1748,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/StoreGraphBatch": {
     method: "/gibson.harness.v1.HarnessCallbackService/StoreGraphBatch",
@@ -1584,6 +1758,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/StoreGraphNode": {
     method: "/gibson.harness.v1.HarnessCallbackService/StoreGraphNode",
@@ -1593,6 +1768,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/StoreNode": {
     method: "/gibson.harness.v1.HarnessCallbackService/StoreNode",
@@ -1602,6 +1778,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/SubmitFinding": {
     method: "/gibson.harness.v1.HarnessCallbackService/SubmitFinding",
@@ -1611,6 +1788,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/ToolResults": {
     method: "/gibson.harness.v1.HarnessCallbackService/ToolResults",
@@ -1620,6 +1798,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/TraverseGraph": {
     method: "/gibson.harness.v1.HarnessCallbackService/TraverseGraph",
@@ -1629,6 +1808,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/ValidateFinding": {
     method: "/gibson.harness.v1.HarnessCallbackService/ValidateFinding",
@@ -1638,6 +1818,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/ValidateGraphNode": {
     method: "/gibson.harness.v1.HarnessCallbackService/ValidateGraphNode",
@@ -1647,6 +1828,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/ValidateRelationship": {
     method: "/gibson.harness.v1.HarnessCallbackService/ValidateRelationship",
@@ -1656,6 +1838,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.harness.v1.HarnessCallbackService/WaitForMission": {
     method: "/gibson.harness.v1.HarnessCallbackService/WaitForMission",
@@ -1665,6 +1848,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.identity.v1.IdentityService/WhoAmI": {
     method: "/gibson.identity.v1.IdentityService/WhoAmI",
@@ -1674,6 +1858,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE | IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent": {
     method: "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent",
@@ -1683,6 +1868,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant": {
     method: "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant",
@@ -1692,6 +1878,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples": {
     method: "/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples",
@@ -1701,6 +1888,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.platform.v1.PlatformOperatorService/RefreshToolCatalog": {
     method: "/gibson.platform.v1.PlatformOperatorService/RefreshToolCatalog",
@@ -1710,6 +1898,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled": {
     method: "/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled",
@@ -1719,6 +1908,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.platform.v1.PlatformOperatorService/SetTenantQuota": {
     method: "/gibson.platform.v1.PlatformOperatorService/SetTenantQuota",
@@ -1728,6 +1918,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.platform.v1.PlatformOperatorService/Shutdown": {
     method: "/gibson.platform.v1.PlatformOperatorService/Shutdown",
@@ -1737,6 +1928,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota": {
     method: "/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota",
@@ -1746,6 +1938,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.platform.v1.PlatformOperatorService/WriteAccessTuples": {
     method: "/gibson.platform.v1.PlatformOperatorService/WriteAccessTuples",
@@ -1755,6 +1948,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "system_tenant",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.plugin.v1.PluginInvokeService/PluginInvoke": {
     method: "/gibson.plugin.v1.PluginInvokeService/PluginInvoke",
@@ -1764,6 +1958,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_and_field('PluginName')",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity": {
     method: "/gibson.tenant.v1.TenantAdminService/CreateAgentIdentity",
@@ -1773,6 +1968,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/CreateProvider": {
     method: "/gibson.tenant.v1.TenantAdminService/CreateProvider",
@@ -1782,6 +1978,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/DeleteProvider": {
     method: "/gibson.tenant.v1.TenantAdminService/DeleteProvider",
@@ -1791,6 +1988,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/DeleteTenantLangfuseCredentials": {
     method: "/gibson.tenant.v1.TenantAdminService/DeleteTenantLangfuseCredentials",
@@ -1800,6 +1998,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/ExecuteLLM": {
     method: "/gibson.tenant.v1.TenantAdminService/ExecuteLLM",
@@ -1809,6 +2008,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/ExportFindings": {
     method: "/gibson.tenant.v1.TenantAdminService/ExportFindings",
@@ -1818,6 +2018,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/GetDefaultProvider": {
     method: "/gibson.tenant.v1.TenantAdminService/GetDefaultProvider",
@@ -1827,6 +2028,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/GetFallbackChain": {
     method: "/gibson.tenant.v1.TenantAdminService/GetFallbackChain",
@@ -1836,6 +2038,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/GetOnboardingState": {
     method: "/gibson.tenant.v1.TenantAdminService/GetOnboardingState",
@@ -1845,6 +2048,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/GetProvider": {
     method: "/gibson.tenant.v1.TenantAdminService/GetProvider",
@@ -1854,6 +2058,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/GetProviderHealth": {
     method: "/gibson.tenant.v1.TenantAdminService/GetProviderHealth",
@@ -1863,6 +2068,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/GetSupportedProviders": {
     method: "/gibson.tenant.v1.TenantAdminService/GetSupportedProviders",
@@ -1872,6 +2078,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/GetTenantLangfuseCredentials": {
     method: "/gibson.tenant.v1.TenantAdminService/GetTenantLangfuseCredentials",
@@ -1881,6 +2088,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/GetTenantQuota": {
     method: "/gibson.tenant.v1.TenantAdminService/GetTenantQuota",
@@ -1890,6 +2098,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/ListAgentIdentities": {
     method: "/gibson.tenant.v1.TenantAdminService/ListAgentIdentities",
@@ -1899,6 +2108,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/ListAuditEvents": {
     method: "/gibson.tenant.v1.TenantAdminService/ListAuditEvents",
@@ -1908,6 +2118,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/ListCatalogComponents": {
     method: "/gibson.tenant.v1.TenantAdminService/ListCatalogComponents",
@@ -1917,6 +2128,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/ListMissionDrafts": {
     method: "/gibson.tenant.v1.TenantAdminService/ListMissionDrafts",
@@ -1926,6 +2138,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/ListProviderModels": {
     method: "/gibson.tenant.v1.TenantAdminService/ListProviderModels",
@@ -1935,6 +2148,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/ListProviders": {
     method: "/gibson.tenant.v1.TenantAdminService/ListProviders",
@@ -1944,6 +2158,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/RevokeAgentIdentity": {
     method: "/gibson.tenant.v1.TenantAdminService/RevokeAgentIdentity",
@@ -1953,6 +2168,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/SaveMissionDraft": {
     method: "/gibson.tenant.v1.TenantAdminService/SaveMissionDraft",
@@ -1962,6 +2178,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/SetDefaultProvider": {
     method: "/gibson.tenant.v1.TenantAdminService/SetDefaultProvider",
@@ -1971,6 +2188,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/SetFallbackChain": {
     method: "/gibson.tenant.v1.TenantAdminService/SetFallbackChain",
@@ -1980,6 +2198,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/SetTenantLangfuseCredentials": {
     method: "/gibson.tenant.v1.TenantAdminService/SetTenantLangfuseCredentials",
@@ -1989,6 +2208,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/StreamLLM": {
     method: "/gibson.tenant.v1.TenantAdminService/StreamLLM",
@@ -1998,6 +2218,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/TestProvider": {
     method: "/gibson.tenant.v1.TenantAdminService/TestProvider",
@@ -2007,6 +2228,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/UpdateOnboardingState": {
     method: "/gibson.tenant.v1.TenantAdminService/UpdateOnboardingState",
@@ -2016,6 +2238,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tenant.v1.TenantAdminService/UpdateProvider": {
     method: "/gibson.tenant.v1.TenantAdminService/UpdateProvider",
@@ -2025,6 +2248,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tool.v1.ToolService/Execute": {
     method: "/gibson.tool.v1.ToolService/Execute",
@@ -2034,6 +2258,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tool.v1.ToolService/GetDescriptor": {
     method: "/gibson.tool.v1.ToolService/GetDescriptor",
@@ -2043,6 +2268,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tool.v1.ToolService/Health": {
     method: "/gibson.tool.v1.ToolService/Health",
@@ -2052,6 +2278,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.tool.v1.ToolService/StreamExecute": {
     method: "/gibson.tool.v1.ToolService/StreamExecute",
@@ -2061,6 +2288,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.usage.v1.UsageService/ListUsage": {
     method: "/gibson.usage.v1.UsageService/ListUsage",
@@ -2070,6 +2298,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.user.v1.UserService/GetConversation": {
     method: "/gibson.user.v1.UserService/GetConversation",
@@ -2079,6 +2308,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.user.v1.UserService/GetUserProfile": {
     method: "/gibson.user.v1.UserService/GetUserProfile",
@@ -2088,6 +2318,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.user.v1.UserService/ListAlerts": {
     method: "/gibson.user.v1.UserService/ListAlerts",
@@ -2097,6 +2328,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.user.v1.UserService/ListConversations": {
     method: "/gibson.user.v1.UserService/ListConversations",
@@ -2106,6 +2338,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.user.v1.UserService/MarkAlertRead": {
     method: "/gibson.user.v1.UserService/MarkAlertRead",
@@ -2115,6 +2348,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.user.v1.UserService/MarkAllAlertsRead": {
     method: "/gibson.user.v1.UserService/MarkAllAlertsRead",
@@ -2124,6 +2358,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/gibson.user.v1.UserService/UpdateUserProfile": {
     method: "/gibson.user.v1.UserService/UpdateUserProfile",
@@ -2133,6 +2368,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/intelligence.v1.IntelligenceService/GetAssetRiskScore": {
     method: "/intelligence.v1.IntelligenceService/GetAssetRiskScore",
@@ -2142,6 +2378,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/intelligence.v1.IntelligenceService/GetAttackPatterns": {
     method: "/intelligence.v1.IntelligenceService/GetAttackPatterns",
@@ -2151,6 +2388,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/intelligence.v1.IntelligenceService/GetRecurringVulnerabilities": {
     method: "/intelligence.v1.IntelligenceService/GetRecurringVulnerabilities",
@@ -2160,6 +2398,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/intelligence.v1.IntelligenceService/GetRemediationMetrics": {
     method: "/intelligence.v1.IntelligenceService/GetRemediationMetrics",
@@ -2169,6 +2408,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
   "/intelligence.v1.IntelligenceService/GetSimilarTargets": {
     method: "/intelligence.v1.IntelligenceService/GetSimilarTargets",
@@ -2178,5 +2418,6 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     objectDeriver: "tenant_from_identity",
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
+    self: false,
   },
 }
