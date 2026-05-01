@@ -73,6 +73,15 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Hydrate Go module cache for SDK
+        # `make authz-registry` runs `go list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk`
+        # to resolve the pinned SDK source dir. On a fresh runner the module
+        # cache is empty until something downloads it; `setup-go`'s cache hit
+        # is keyed on go.sum and may miss. Pre-download to make resolution
+        # deterministic.
+        # Spec: zero-trust-hardening follow-up.
+        run: go mod download github.com/zero-day-ai/sdk
+
       - name: Regenerate authz registry and assert no drift
         # Runs `make authz-registry` which builds authz-registry-gen from the
         # SDK module cache, generates the four artifacts, then checks git diff.
