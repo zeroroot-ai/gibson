@@ -1922,6 +1922,15 @@ var Registry = map[string]Entry{
 		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
 	},
+	"/gibson.tenant.v1.TenantAdminService/ListCatalogComponents": {
+		Method:            "/gibson.tenant.v1.TenantAdminService/ListCatalogComponents",
+		Service:           "gibson.tenant.v1.TenantAdminService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+	},
 	"/gibson.tenant.v1.TenantAdminService/ListMissionDrafts": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/ListMissionDrafts",
 		Service:           "gibson.tenant.v1.TenantAdminService",

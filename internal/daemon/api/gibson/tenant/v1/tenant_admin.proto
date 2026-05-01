@@ -317,6 +317,28 @@ service TenantAdminService {
       allowed_identities: 3
     };
   }
+
+  // ---------------------------------------------------------------------------
+  // Catalog browsing (component-bootstrap-dashboard-completion R1)
+  // ---------------------------------------------------------------------------
+
+  // ListCatalogComponents returns the components and plugins available
+  // to the caller's tenant — i.e. those where in_tenant_catalog
+  // evaluates true (platform_enabled OR tenant_published, gated by
+  // tenant_enabled). Used by the dashboard's deploy-wizard Permissions
+  // step and the agent / tool detail Permissions tab to drive
+  // catalog-aware grant pickers without operators typing FGA refs by
+  // hand.
+  //
+  // Read-only; no audit emission.
+  rpc ListCatalogComponents(ListCatalogComponentsRequest) returns (ListCatalogComponentsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 1
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1007,4 +1029,46 @@ message StreamLLMResponse {
     StreamFinish finish = 3;
     ProviderHarnessError error = 4;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Catalog browsing messages (component-bootstrap-dashboard-completion R1)
+// ---------------------------------------------------------------------------
+
+// ListCatalogComponentsRequest is empty — caller's tenant is derived
+// from ext-authz-emitted identity headers, never from the request body.
+message ListCatalogComponentsRequest {}
+
+// ListCatalogComponentsResponse splits the catalog into components and
+// plugins. The split mirrors the FGA model's two object types
+// (`component` for the registry-entry data face, `plugin` for the
+// invocation edge) — see the auto-memory `project_component_taxonomy`
+// for why these are distinct.
+message ListCatalogComponentsResponse {
+  repeated CatalogComponent components = 1;
+  repeated CatalogPlugin plugins = 2;
+}
+
+// CatalogComponent is one row in the components list. Flat — no
+// per-action permissions enumeration here; that's what the dashboard's
+// CatalogPicker checkboxes drive against the FGA tuple writer
+// (GrantsAdminService.WriteAgentGrants).
+message CatalogComponent {
+  // name is the human-readable component name, e.g. "gitlab".
+  string name = 1;
+  // ref is the FGA object reference, e.g. "component:gitlab".
+  string ref = 2;
+  // description is the component manifest's description field.
+  string description = 3;
+  // version is the component manifest's version field.
+  string version = 4;
+}
+
+// CatalogPlugin is one row in the plugins list. Same shape as
+// CatalogComponent but the ref uses the `plugin:` prefix.
+message CatalogPlugin {
+  string name = 1;
+  string ref = 2;          // e.g. "plugin:gitlab"
+  string description = 3;
+  string version = 4;
 }

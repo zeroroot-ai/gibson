@@ -1909,6 +1909,15 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
     unauthenticated: false,
   },
+  "/gibson.tenant.v1.TenantAdminService/ListCatalogComponents": {
+    method: "/gibson.tenant.v1.TenantAdminService/ListCatalogComponents",
+    service: "gibson.tenant.v1.TenantAdminService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+  },
   "/gibson.tenant.v1.TenantAdminService/ListMissionDrafts": {
     method: "/gibson.tenant.v1.TenantAdminService/ListMissionDrafts",
     service: "gibson.tenant.v1.TenantAdminService",

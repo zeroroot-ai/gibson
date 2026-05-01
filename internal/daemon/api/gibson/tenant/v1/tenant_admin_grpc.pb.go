@@ -47,6 +47,7 @@ const (
 	TenantAdminService_SetFallbackChain_FullMethodName                = "/gibson.tenant.v1.TenantAdminService/SetFallbackChain"
 	TenantAdminService_ExecuteLLM_FullMethodName                      = "/gibson.tenant.v1.TenantAdminService/ExecuteLLM"
 	TenantAdminService_StreamLLM_FullMethodName                       = "/gibson.tenant.v1.TenantAdminService/StreamLLM"
+	TenantAdminService_ListCatalogComponents_FullMethodName           = "/gibson.tenant.v1.TenantAdminService/ListCatalogComponents"
 )
 
 // TenantAdminServiceClient is the client API for TenantAdminService service.
@@ -135,6 +136,16 @@ type TenantAdminServiceClient interface {
 	ExecuteLLM(ctx context.Context, in *ExecuteLLMRequest, opts ...grpc.CallOption) (*ExecuteLLMResponse, error)
 	// StreamLLM proxies a streaming LLM completion.
 	StreamLLM(ctx context.Context, in *StreamLLMRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamLLMResponse], error)
+	// ListCatalogComponents returns the components and plugins available
+	// to the caller's tenant — i.e. those where in_tenant_catalog
+	// evaluates true (platform_enabled OR tenant_published, gated by
+	// tenant_enabled). Used by the dashboard's deploy-wizard Permissions
+	// step and the agent / tool detail Permissions tab to drive
+	// catalog-aware grant pickers without operators typing FGA refs by
+	// hand.
+	//
+	// Read-only; no audit emission.
+	ListCatalogComponents(ctx context.Context, in *ListCatalogComponentsRequest, opts ...grpc.CallOption) (*ListCatalogComponentsResponse, error)
 }
 
 type tenantAdminServiceClient struct {
@@ -434,6 +445,16 @@ func (c *tenantAdminServiceClient) StreamLLM(ctx context.Context, in *StreamLLMR
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TenantAdminService_StreamLLMClient = grpc.ServerStreamingClient[StreamLLMResponse]
 
+func (c *tenantAdminServiceClient) ListCatalogComponents(ctx context.Context, in *ListCatalogComponentsRequest, opts ...grpc.CallOption) (*ListCatalogComponentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCatalogComponentsResponse)
+	err := c.cc.Invoke(ctx, TenantAdminService_ListCatalogComponents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TenantAdminServiceServer is the server API for TenantAdminService service.
 // All implementations must embed UnimplementedTenantAdminServiceServer
 // for forward compatibility.
@@ -520,6 +541,16 @@ type TenantAdminServiceServer interface {
 	ExecuteLLM(context.Context, *ExecuteLLMRequest) (*ExecuteLLMResponse, error)
 	// StreamLLM proxies a streaming LLM completion.
 	StreamLLM(*StreamLLMRequest, grpc.ServerStreamingServer[StreamLLMResponse]) error
+	// ListCatalogComponents returns the components and plugins available
+	// to the caller's tenant — i.e. those where in_tenant_catalog
+	// evaluates true (platform_enabled OR tenant_published, gated by
+	// tenant_enabled). Used by the dashboard's deploy-wizard Permissions
+	// step and the agent / tool detail Permissions tab to drive
+	// catalog-aware grant pickers without operators typing FGA refs by
+	// hand.
+	//
+	// Read-only; no audit emission.
+	ListCatalogComponents(context.Context, *ListCatalogComponentsRequest) (*ListCatalogComponentsResponse, error)
 	mustEmbedUnimplementedTenantAdminServiceServer()
 }
 
@@ -613,6 +644,9 @@ func (UnimplementedTenantAdminServiceServer) ExecuteLLM(context.Context, *Execut
 }
 func (UnimplementedTenantAdminServiceServer) StreamLLM(*StreamLLMRequest, grpc.ServerStreamingServer[StreamLLMResponse]) error {
 	return status.Error(codes.Unimplemented, "method StreamLLM not implemented")
+}
+func (UnimplementedTenantAdminServiceServer) ListCatalogComponents(context.Context, *ListCatalogComponentsRequest) (*ListCatalogComponentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCatalogComponents not implemented")
 }
 func (UnimplementedTenantAdminServiceServer) mustEmbedUnimplementedTenantAdminServiceServer() {}
 func (UnimplementedTenantAdminServiceServer) testEmbeddedByValue()                            {}
@@ -1132,6 +1166,24 @@ func _TenantAdminService_StreamLLM_Handler(srv interface{}, stream grpc.ServerSt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TenantAdminService_StreamLLMServer = grpc.ServerStreamingServer[StreamLLMResponse]
 
+func _TenantAdminService_ListCatalogComponents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCatalogComponentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantAdminServiceServer).ListCatalogComponents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantAdminService_ListCatalogComponents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantAdminServiceServer).ListCatalogComponents(ctx, req.(*ListCatalogComponentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TenantAdminService_ServiceDesc is the grpc.ServiceDesc for TenantAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1246,6 +1298,10 @@ var TenantAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExecuteLLM",
 			Handler:    _TenantAdminService_ExecuteLLM_Handler,
+		},
+		{
+			MethodName: "ListCatalogComponents",
+			Handler:    _TenantAdminService_ListCatalogComponents_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

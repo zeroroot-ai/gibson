@@ -209,6 +209,7 @@ rpc,relation,object_type,deriver,identities,unauthenticated,source_proto_file
 /gibson.tenant.v1.TenantAdminService/GetTenantQuota,admin,tenant,tenant_from_identity,USER|SERVICE,false,gibson/tenant/v1/tenant_admin.proto
 /gibson.tenant.v1.TenantAdminService/ListAgentIdentities,admin,tenant,tenant_from_identity,USER|SERVICE,false,gibson/tenant/v1/tenant_admin.proto
 /gibson.tenant.v1.TenantAdminService/ListAuditEvents,admin,tenant,tenant_from_identity,USER|SERVICE,false,gibson/tenant/v1/tenant_admin.proto
+/gibson.tenant.v1.TenantAdminService/ListCatalogComponents,member,tenant,tenant_from_identity,USER,false,gibson/tenant/v1/tenant_admin.proto
 /gibson.tenant.v1.TenantAdminService/ListMissionDrafts,admin,tenant,tenant_from_identity,USER|SERVICE,false,gibson/tenant/v1/tenant_admin.proto
 /gibson.tenant.v1.TenantAdminService/ListProviderModels,admin,tenant,tenant_from_identity,USER|SERVICE,false,gibson/tenant/v1/tenant_admin.proto
 /gibson.tenant.v1.TenantAdminService/ListProviders,admin,tenant,tenant_from_identity,USER|SERVICE,false,gibson/tenant/v1/tenant_admin.proto
