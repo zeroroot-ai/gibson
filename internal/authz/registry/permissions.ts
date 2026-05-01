@@ -187,7 +187,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
   },
   "/gibson.agent.v1.AgentService/GetDescriptor": {
@@ -196,7 +196,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
   },
   "/gibson.agent.v1.AgentService/GetSlotSchema": {
@@ -205,7 +205,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
   },
   "/gibson.agent.v1.AgentService/Health": {
@@ -214,7 +214,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
   },
   "/gibson.authz.v1.ModelAccessService/GrantAccess": {
@@ -958,11 +958,11 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/GetMyPermissions": {
     method: "/gibson.daemon.v1.DaemonService/GetMyPermissions",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "",
-    objectType: "",
-    objectDeriver: "",
-    allowedIdentities: 0,
-    unauthenticated: true,
+    relation: "tenant_member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
   },
   "/gibson.daemon.v1.DaemonService/ListAgents": {
     method: "/gibson.daemon.v1.DaemonService/ListAgents",
@@ -994,11 +994,11 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.daemon.v1.DaemonService/ListMyMemberships": {
     method: "/gibson.daemon.v1.DaemonService/ListMyMemberships",
     service: "gibson.daemon.v1.DaemonService",
-    relation: "",
-    objectType: "",
-    objectDeriver: "",
-    allowedIdentities: 0,
-    unauthenticated: true,
+    relation: "tenant_member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
   },
   "/gibson.daemon.v1.DaemonService/ListPlugins": {
     method: "/gibson.daemon.v1.DaemonService/ListPlugins",
@@ -1663,7 +1663,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
   },
   "/gibson.tool.v1.ToolService/GetDescriptor": {
@@ -1672,7 +1672,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
   },
   "/gibson.tool.v1.ToolService/Health": {
@@ -1681,7 +1681,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
   },
   "/gibson.tool.v1.ToolService/StreamExecute": {
@@ -1690,7 +1690,7 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     relation: "member",
     objectType: "tenant",
     objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    allowedIdentities: IdentityClass.COMPONENT,
     unauthenticated: false,
   },
   "/gibson.usage.v1.UsageService/ListUsage": {

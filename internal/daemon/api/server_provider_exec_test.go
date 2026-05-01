@@ -269,8 +269,9 @@ func TestExecuteLLM_ProviderNotFound(t *testing.T) {
 
 // TestExecuteLLM_NoTenantContext verifies that a context with no explicit tenant
 // is rejected with Unauthenticated. Under the Envoy/identity interceptor model,
-// the tenant is derived from the HMAC-verified identity headers. A context
-// with no identity (or _system tenant) cannot proceed to the provider store.
+// the tenant is derived from the SPIFFE-mTLS-authenticated identity headers
+// injected by ext-authz. A context with no identity (or _system tenant)
+// cannot proceed to the provider store.
 func TestExecuteLLM_NoTenantContext(t *testing.T) {
 	store := &stubProviderConfigStore{} // Resolve always returns ErrNotFound
 	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil })
@@ -539,8 +540,9 @@ func TestStreamLLM_CredentialNotLeaked(t *testing.T) {
 
 // TestStreamLLM_NoTenantContext verifies that a context with no explicit tenant
 // is rejected with Unauthenticated. Under the Envoy/identity interceptor model,
-// the tenant is derived from the HMAC-verified identity headers. A context with
-// no identity (or _system tenant) cannot proceed to the provider store.
+// the tenant is derived from the SPIFFE-mTLS-authenticated identity headers
+// injected by ext-authz. A context with no identity (or _system tenant)
+// cannot proceed to the provider store.
 func TestStreamLLM_NoTenantContext(t *testing.T) {
 	s := &DaemonServer{
 		logger:          slog.Default(),
