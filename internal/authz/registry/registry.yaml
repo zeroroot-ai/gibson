@@ -2,79 +2,79 @@
 # Spec: unified-identity-and-authorization Requirement 7.4.
 entries:
   "/gibson.admin.v1.GrantsAdminService/ListActiveGrants":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.PluginsAdminService/EditPluginSecretBinding":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.PluginsAdminService/GetPluginInstall":
-    relation: "tenant_member"
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.PluginsAdminService/ListPluginInstalls":
-    relation: "tenant_member"
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.PluginsAdminService/RegisterPlugin":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.PluginsAdminService/RevokePluginSecretBinding":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.SecretsAdminService/DeleteSecret":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.SecretsAdminService/GetMissionAudit":
-    relation: "tenant_member"
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.SecretsAdminService/GetSecret":
-    relation: "tenant_member"
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.SecretsAdminService/ListSecrets":
-    relation: "tenant_member"
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.SecretsAdminService/RotateSecret":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.SecretsAdminService/SetSecret":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.TenantAdminService/GetBrokerConfig":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -87,25 +87,25 @@ entries:
       - USER
       - SERVICE
   "/gibson.admin.v1.TenantAdminService/ListProviderModels":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.TenantAdminService/ProbeProvider":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
   "/gibson.admin.v1.TenantAdminService/SetBrokerConfig":
-    relation: "tenant_admin"
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -641,7 +641,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/GetMyPermissions":
-    relation: "tenant_member"
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -668,7 +668,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/ListMyMemberships":
-    relation: "tenant_member"
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

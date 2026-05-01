@@ -35,7 +35,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.GrantsAdminService/ListActiveGrants": {
 		Method:            "/gibson.admin.v1.GrantsAdminService/ListActiveGrants",
 		Service:           "gibson.admin.v1.GrantsAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -44,7 +44,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.PluginsAdminService/EditPluginSecretBinding": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/EditPluginSecretBinding",
 		Service:           "gibson.admin.v1.PluginsAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -53,7 +53,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.PluginsAdminService/GetPluginInstall": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/GetPluginInstall",
 		Service:           "gibson.admin.v1.PluginsAdminService",
-		Relation:          "tenant_member",
+		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -62,7 +62,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.PluginsAdminService/ListPluginInstalls": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/ListPluginInstalls",
 		Service:           "gibson.admin.v1.PluginsAdminService",
-		Relation:          "tenant_member",
+		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -71,7 +71,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.PluginsAdminService/RegisterPlugin": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/RegisterPlugin",
 		Service:           "gibson.admin.v1.PluginsAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -80,7 +80,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.PluginsAdminService/RevokePluginSecretBinding": {
 		Method:            "/gibson.admin.v1.PluginsAdminService/RevokePluginSecretBinding",
 		Service:           "gibson.admin.v1.PluginsAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -89,7 +89,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.SecretsAdminService/DeleteSecret": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/DeleteSecret",
 		Service:           "gibson.admin.v1.SecretsAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -98,7 +98,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.SecretsAdminService/GetMissionAudit": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/GetMissionAudit",
 		Service:           "gibson.admin.v1.SecretsAdminService",
-		Relation:          "tenant_member",
+		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -107,7 +107,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.SecretsAdminService/GetSecret": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/GetSecret",
 		Service:           "gibson.admin.v1.SecretsAdminService",
-		Relation:          "tenant_member",
+		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -116,7 +116,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.SecretsAdminService/ListSecrets": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/ListSecrets",
 		Service:           "gibson.admin.v1.SecretsAdminService",
-		Relation:          "tenant_member",
+		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -125,7 +125,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.SecretsAdminService/RotateSecret": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/RotateSecret",
 		Service:           "gibson.admin.v1.SecretsAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -134,7 +134,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.SecretsAdminService/SetSecret": {
 		Method:            "/gibson.admin.v1.SecretsAdminService/SetSecret",
 		Service:           "gibson.admin.v1.SecretsAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -143,7 +143,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.TenantAdminService/GetBrokerConfig": {
 		Method:            "/gibson.admin.v1.TenantAdminService/GetBrokerConfig",
 		Service:           "gibson.admin.v1.TenantAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -161,7 +161,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.TenantAdminService/ListProviderModels": {
 		Method:            "/gibson.admin.v1.TenantAdminService/ListProviderModels",
 		Service:           "gibson.admin.v1.TenantAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -170,7 +170,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig": {
 		Method:            "/gibson.admin.v1.TenantAdminService/ProbeBrokerConfig",
 		Service:           "gibson.admin.v1.TenantAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -179,7 +179,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.TenantAdminService/ProbeProvider": {
 		Method:            "/gibson.admin.v1.TenantAdminService/ProbeProvider",
 		Service:           "gibson.admin.v1.TenantAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -188,7 +188,7 @@ var Registry = map[string]Entry{
 	"/gibson.admin.v1.TenantAdminService/SetBrokerConfig": {
 		Method:            "/gibson.admin.v1.TenantAdminService/SetBrokerConfig",
 		Service:           "gibson.admin.v1.TenantAdminService",
-		Relation:          "tenant_admin",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -971,7 +971,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/GetMyPermissions": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetMyPermissions",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "tenant_member",
+		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
@@ -1007,7 +1007,7 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/ListMyMemberships": {
 		Method:            "/gibson.daemon.v1.DaemonService/ListMyMemberships",
 		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "tenant_member",
+		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
