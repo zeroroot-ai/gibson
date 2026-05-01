@@ -4,6 +4,8 @@ package gibson.user.v1;
 
 option go_package = "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1;userv1";
 
+import "gibson/auth/v1/options.proto";
+
 // UserService provides user self-service operations.
 // This service is restricted to the calling user acting on their own resources.
 service UserService {
@@ -13,12 +15,24 @@ service UserService {
 
   // GetUserProfile retrieves a user's profile information from the identity provider.
   // Accessible by the user themselves only (subject == req.user_id).
-  rpc GetUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse);
-
+  rpc GetUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // UpdateUserProfile updates mutable profile fields (display_name, preferred_locale)
   // for a user. Email is immutable and changes will be rejected with InvalidArgument.
-  rpc UpdateUserProfile(UpdateUserProfileRequest) returns (UpdateUserProfileResponse);
-
+  rpc UpdateUserProfile(UpdateUserProfileRequest) returns (UpdateUserProfileResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // Alerts — DEFER
   // ---------------------------------------------------------------------------
@@ -26,18 +40,36 @@ service UserService {
   // ListAlerts returns platform alerts for a tenant user.
   //
   // Unimplemented: <owner-pending>
-  rpc ListAlerts(ListAlertsRequest) returns (ListAlertsResponse);
-
+  rpc ListAlerts(ListAlertsRequest) returns (ListAlertsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // MarkAlertRead marks a single alert as read.
   //
   // Unimplemented: <owner-pending>
-  rpc MarkAlertRead(MarkAlertReadRequest) returns (MarkAlertReadResponse);
-
+  rpc MarkAlertRead(MarkAlertReadRequest) returns (MarkAlertReadResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // MarkAllAlertsRead marks all alerts for a user as read.
   //
   // Unimplemented: <owner-pending>
-  rpc MarkAllAlertsRead(MarkAllAlertsReadRequest) returns (MarkAllAlertsReadResponse);
-
+  rpc MarkAllAlertsRead(MarkAllAlertsReadRequest) returns (MarkAllAlertsReadResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // Conversations — DEFER
   // ---------------------------------------------------------------------------
@@ -45,12 +77,25 @@ service UserService {
   // ListConversations returns the conversation history list for a user.
   //
   // Unimplemented: <owner-pending>
-  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
-
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // GetConversation returns the full message history for a single conversation.
   //
   // Unimplemented: <owner-pending>
-  rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
+  rpc GetConversation(GetConversationRequest) returns (GetConversationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

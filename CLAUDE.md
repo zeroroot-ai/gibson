@@ -9,8 +9,15 @@ The authorization rule book lives at `internal/authz/registry/`:
 - `registry.yaml` — runtime YAML consumed by ext-authz via oras pull
 - `fga_model.fga` — OpenFGA model fed to the fga-init Job
 - `permissions.ts` — TypeScript map for the dashboard sister spec
+- `audit.csv` — auditor-friendly flat table (rpc, relation, object_type, deriver, identities, source_proto_file)
 
 These are **generated artifacts** — do NOT hand-edit them. Run regen instead.
+
+The annotations come from **two** proto sources, merged via `cmd/fds-merge` into a single FileDescriptorSet before codegen:
+- the pinned SDK at `core/sdk/api/proto/**` (gibson.admin.v1.*, gibson.daemon.v1.*, …)
+- daemon-local protos at `core/gibson/internal/daemon/api/**` (gibson.tenant.v1.*, gibson.platform.v1.*, gibson.user.v1.*)
+
+Both sets must carry `option (gibson.auth.v1.authz) = {…};` on every authenticated RPC. The codegen tool fails closed on any unannotated method.
 
 ### Regenerating
 
@@ -21,9 +28,11 @@ make authz-registry
 
 This will:
 1. Resolve the pinned SDK module dir from `go.mod`
-2. Build `cmd/authz-registry-gen` from that SDK version
-3. Run `buf build` against the SDK protos to produce a FileDescriptorSet
-4. Invoke the generator with `-output internal/authz/registry`
+2. Build `cmd/authz-registry-gen` from that SDK version, plus `cmd/fds-merge` and `cmd/audit-csv-gen` locally
+3. Run `buf build` against the SDK protos → `.tmp/sdk-fds.binpb`
+4. Run `buf build` against the daemon-local protos in a synthesized workspace (so `gibson/auth/v1/options.proto` resolves from the SDK) → `.tmp/gibson-fds.binpb`
+5. `fds-merge` concatenates the two FDSes → `.tmp/combined-fds.binpb`
+6. `authz-registry-gen` writes the four registry artifacts; `audit-csv-gen` writes `audit.csv`
 
 After regen, verify with:
 ```bash
@@ -34,7 +43,17 @@ CI runs the same check (`authz-registry-drift` step). A clean PR means no drift.
 ### When to regen
 
 - After bumping the SDK version in `go.mod` (mandatory — new RPCs may have been added)
+- After adding or modifying a daemon-local RPC under `internal/daemon/api/`
 - After CI fails the drift gate
+
+### When you add a daemon-local RPC
+
+1. Add the `rpc` to the relevant `.proto` under `internal/daemon/api/gibson/<pkg>/v1/`.
+2. In the same `rpc` block, add an `option (gibson.auth.v1.authz) = {…};` matching the rule you want enforced. If the file has no other authz-annotated RPCs yet, add `import "gibson/auth/v1/options.proto";` at the top.
+3. Run `make authz-registry` and `make proto`.
+4. Commit both the proto edit and the regenerated `internal/authz/registry/*` artifacts in the same change.
+
+There is no manual restoration step. Anything that previously had to be hand-merged into `registry.yaml` or `registry.go` is now driven entirely from proto annotations. Spec: `unified-authz-regen`.
 
 ### Drift suspicion
 

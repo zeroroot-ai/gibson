@@ -6,6 +6,7 @@ option go_package = "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/te
 
 import "google/protobuf/timestamp.proto";
 
+import "gibson/auth/v1/options.proto";
 // TenantAdminService provides tenant-admin operations for managing agent identities
 // and other tenant-scoped administrative tasks. This is the canonical tenant-admin
 // gRPC service, authoritative as of admin-services-completion spec.
@@ -15,41 +16,89 @@ import "google/protobuf/timestamp.proto";
 service TenantAdminService {
   // CreateAgentIdentity provisions a new machine identity for an agent, tool, or plugin.
   // Returns a one-time client_secret that cannot be recovered after this call.
-  rpc CreateAgentIdentity(CreateAgentIdentityRequest) returns (CreateAgentIdentityResponse);
-
+  rpc CreateAgentIdentity(CreateAgentIdentityRequest) returns (CreateAgentIdentityResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ListAgentIdentities returns all agent/tool/plugin identities provisioned in the
   // caller's tenant, with optional kind filtering and pagination.
-  rpc ListAgentIdentities(ListAgentIdentitiesRequest) returns (ListAgentIdentitiesResponse);
-
+  rpc ListAgentIdentities(ListAgentIdentitiesRequest) returns (ListAgentIdentitiesResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // RevokeAgentIdentity permanently revokes a machine identity. Existing JWTs stop
   // validating within the IdP token TTL (<=60 seconds). Idempotent on already-revoked
   // principals (returns NotFound).
-  rpc RevokeAgentIdentity(RevokeAgentIdentityRequest) returns (RevokeAgentIdentityResponse);
-
+  rpc RevokeAgentIdentity(RevokeAgentIdentityRequest) returns (RevokeAgentIdentityResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // Observability — Langfuse credentials
   // ---------------------------------------------------------------------------
 
   // GetTenantLangfuseCredentials retrieves the Langfuse project credentials for a tenant.
   // Returns NOT_FOUND if no credentials have been configured for the tenant.
-  rpc GetTenantLangfuseCredentials(GetTenantLangfuseCredentialsRequest) returns (GetTenantLangfuseCredentialsResponse);
-
+  rpc GetTenantLangfuseCredentials(GetTenantLangfuseCredentialsRequest) returns (GetTenantLangfuseCredentialsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
-  rpc SetTenantLangfuseCredentials(SetTenantLangfuseCredentialsRequest) returns (SetTenantLangfuseCredentialsResponse);
-
+  rpc SetTenantLangfuseCredentials(SetTenantLangfuseCredentialsRequest) returns (SetTenantLangfuseCredentialsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
-  rpc DeleteTenantLangfuseCredentials(DeleteTenantLangfuseCredentialsRequest) returns (DeleteTenantLangfuseCredentialsResponse);
-
+  rpc DeleteTenantLangfuseCredentials(DeleteTenantLangfuseCredentialsRequest) returns (DeleteTenantLangfuseCredentialsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // Onboarding
   // ---------------------------------------------------------------------------
 
   // GetOnboardingState queries the onboarding progress for a tenant.
-  rpc GetOnboardingState(GetOnboardingStateRequest) returns (GetOnboardingStateResponse);
-
+  rpc GetOnboardingState(GetOnboardingStateRequest) returns (GetOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // UpdateOnboardingState advances or modifies the onboarding state.
-  rpc UpdateOnboardingState(UpdateOnboardingStateRequest) returns (UpdateOnboardingStateResponse);
-
+  rpc UpdateOnboardingState(UpdateOnboardingStateRequest) returns (UpdateOnboardingStateResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // Quota — read (IMPLEMENT-NOW)
   // ---------------------------------------------------------------------------
@@ -57,8 +106,14 @@ service TenantAdminService {
   // GetTenantQuota retrieves the configured resource quotas for a tenant.
   // Returns zero values for any quota not explicitly set.
   // Requires FGA admin relation on the tenant.
-  rpc GetTenantQuota(GetTenantQuotaRequest) returns (GetTenantQuotaResponse);
-
+  rpc GetTenantQuota(GetTenantQuotaRequest) returns (GetTenantQuotaResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // Audit events (DEFER)
   // ---------------------------------------------------------------------------
@@ -66,8 +121,14 @@ service TenantAdminService {
   // ListAuditEvents returns audit events for a tenant.
   //
   // Unimplemented: <owner-pending>
-  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse);
-
+  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // Findings export (DEFER)
   // ---------------------------------------------------------------------------
@@ -75,8 +136,14 @@ service TenantAdminService {
   // ExportFindings exports findings to the requested format (json, csv, sarif).
   //
   // Unimplemented: <owner-pending>
-  rpc ExportFindings(ExportFindingsRequest) returns (ExportFindingsResponse);
-
+  rpc ExportFindings(ExportFindingsRequest) returns (ExportFindingsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // Mission drafts (DEFER)
   // ---------------------------------------------------------------------------
@@ -84,69 +151,172 @@ service TenantAdminService {
   // SaveMissionDraft persists a mission YAML draft for later use.
   //
   // Unimplemented: <owner-pending>
-  rpc SaveMissionDraft(SaveMissionDraftRequest) returns (SaveMissionDraftResponse);
-
+  rpc SaveMissionDraft(SaveMissionDraftRequest) returns (SaveMissionDraftResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ListMissionDrafts returns all saved mission drafts for a tenant.
   //
   // Unimplemented: <owner-pending>
-  rpc ListMissionDrafts(ListMissionDraftsRequest) returns (ListMissionDraftsResponse);
-
+  rpc ListMissionDrafts(ListMissionDraftsRequest) returns (ListMissionDraftsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // LLM Providers — tenant-admin CRUD operations (spec 25)
   // ---------------------------------------------------------------------------
 
   // ListProviders returns all provider configs for the calling tenant.
-  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
-
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // GetProvider returns a single provider config by name.
-  rpc GetProvider(GetProviderRequest) returns (GetProviderResponse);
-
+  rpc GetProvider(GetProviderRequest) returns (GetProviderResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // CreateProvider encrypts and stores a new provider config.
-  rpc CreateProvider(CreateProviderRequest) returns (CreateProviderResponse);
-
+  rpc CreateProvider(CreateProviderRequest) returns (CreateProviderResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // UpdateProvider replaces an existing provider config.
-  rpc UpdateProvider(UpdateProviderRequest) returns (UpdateProviderResponse);
-
+  rpc UpdateProvider(UpdateProviderRequest) returns (UpdateProviderResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // DeleteProvider removes a provider config from the store.
-  rpc DeleteProvider(DeleteProviderRequest) returns (DeleteProviderResponse);
-
+  rpc DeleteProvider(DeleteProviderRequest) returns (DeleteProviderResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // TestProvider validates a proposed provider config by making a minimal live request.
-  rpc TestProvider(TestProviderRequest) returns (TestProviderResponse);
-
+  rpc TestProvider(TestProviderRequest) returns (TestProviderResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // GetSupportedProviders returns the daemon's static catalogue of LLM
   // provider types with their per-provider credential field schemas. Backs
   // the dashboard's Settings → Providers wizard. Spec: providers-wizard.
-  rpc GetSupportedProviders(GetSupportedProvidersRequest) returns (GetSupportedProvidersResponse);
-
+  rpc GetSupportedProviders(GetSupportedProvidersRequest) returns (GetSupportedProvidersResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ListProviderModels fetches the live model catalogue for an already-
   // configured provider, looked up by name. Credentials are read from the
   // encrypted store; the caller does not pass them. Spec: providers-wizard.
-  rpc ListProviderModels(ListProviderModelsRequest) returns (ListProviderModelsResponse);
-
+  rpc ListProviderModels(ListProviderModelsRequest) returns (ListProviderModelsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // GetProviderHealth returns the last-known health status of a stored provider.
-  rpc GetProviderHealth(GetProviderHealthRequest) returns (GetProviderHealthResponse);
-
+  rpc GetProviderHealth(GetProviderHealthRequest) returns (GetProviderHealthResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // GetDefaultProvider returns the tenant's currently configured default provider.
-  rpc GetDefaultProvider(GetDefaultProviderRequest) returns (GetDefaultProviderResponse);
-
+  rpc GetDefaultProvider(GetDefaultProviderRequest) returns (GetDefaultProviderResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // SetDefaultProvider designates an existing stored provider as the default.
-  rpc SetDefaultProvider(SetDefaultProviderRequest) returns (SetDefaultProviderResponse);
-
+  rpc SetDefaultProvider(SetDefaultProviderRequest) returns (SetDefaultProviderResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // GetFallbackChain returns the ordered list of provider names.
-  rpc GetFallbackChain(GetFallbackChainRequest) returns (GetFallbackChainResponse);
-
+  rpc GetFallbackChain(GetFallbackChainRequest) returns (GetFallbackChainResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // SetFallbackChain replaces the tenant's provider fallback chain.
-  rpc SetFallbackChain(SetFallbackChainRequest) returns (SetFallbackChainResponse);
-
+  rpc SetFallbackChain(SetFallbackChainRequest) returns (SetFallbackChainResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // LLM Providers — execution (spec 25)
   // ---------------------------------------------------------------------------
 
   // ExecuteLLM proxies a single (non-streaming) LLM completion.
-  rpc ExecuteLLM(ExecuteLLMRequest) returns (ExecuteLLMResponse);
-
+  rpc ExecuteLLM(ExecuteLLMRequest) returns (ExecuteLLMResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
   // StreamLLM proxies a streaming LLM completion.
-  rpc StreamLLM(StreamLLMRequest) returns (stream StreamLLMResponse);
+  rpc StreamLLM(StreamLLMRequest) returns (stream StreamLLMResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

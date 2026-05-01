@@ -216,12 +216,28 @@ authz-registry:
 	  if [ -z "$$SDK_DIR" ]; then echo "ERROR: could not resolve github.com/zero-day-ai/sdk module dir" && exit 1; fi; \
 	  echo "  SDK dir: $$SDK_DIR"; \
 	  cd "$$SDK_DIR" && $(GOBUILD) -o $(CURDIR)/$(BINARY_DIR)/authz-registry-gen ./cmd/authz-registry-gen
+	@echo "Building fds-merge..."
+	@$(GOBUILD) -o $(BINARY_DIR)/fds-merge ./cmd/fds-merge
+	@echo "Building audit-csv-gen..."
+	@$(GOBUILD) -o $(BINARY_DIR)/audit-csv-gen ./cmd/audit-csv-gen
 	@echo "Building FDS from SDK protos..."
 	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
 	  cd "$$SDK_DIR" && $(BUF) build -o $(CURDIR)/.tmp/sdk-fds.binpb
+	@echo "Building FDS from gibson daemon-local protos (via temp workspace so gibson/auth/v1/options.proto resolves from the pinned SDK)..."
+	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
+	  rm -rf .tmp/ws && mkdir -p .tmp/ws && \
+	  ln -sfn $(CURDIR)/internal/daemon/api .tmp/ws/gibson-local && \
+	  ln -sfn $$SDK_DIR/api/proto .tmp/ws/sdk-proto && \
+	  printf 'version: v2\nmodules:\n  - path: gibson-local\n  - path: sdk-proto\nlint:\n  use:\n    - STANDARD\n  ignore:\n    - sdk-proto/google\n    - gibson-local/gibson/daemon/admin/v1/daemon_admin.proto\n' > .tmp/ws/buf.yaml && \
+	  cd .tmp/ws && $(BUF) build gibson-local -o $(CURDIR)/.tmp/gibson-fds.binpb
+	@rm -rf .tmp/ws
+	@echo "Merging FDSes (SDK + daemon-local)..."
+	@$(BINARY_DIR)/fds-merge -input .tmp/sdk-fds.binpb -input .tmp/gibson-fds.binpb -output .tmp/combined-fds.binpb
 	@echo "Generating registry artifacts..."
-	@$(BINARY_DIR)/authz-registry-gen -input .tmp/sdk-fds.binpb -output internal/authz/registry
-	@rm -f .tmp/sdk-fds.binpb
+	@$(BINARY_DIR)/authz-registry-gen -input .tmp/combined-fds.binpb -output internal/authz/registry
+	@echo "Generating audit CSV (Spec unified-authz-regen Req 1.4)..."
+	@$(BINARY_DIR)/audit-csv-gen -input .tmp/combined-fds.binpb -output internal/authz/registry/audit.csv
+	@rm -f .tmp/sdk-fds.binpb .tmp/gibson-fds.binpb .tmp/combined-fds.binpb
 	@echo "Registry artifacts written to internal/authz/registry/"
 
 proto-clean:

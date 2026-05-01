@@ -4,53 +4,110 @@ package gibson.platform.v1;
 
 option go_package = "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1;platformv1";
 
+import "gibson/auth/v1/options.proto";
+
 // PlatformOperatorService provides platform-team operations on the Gibson daemon.
 // This service is restricted to callers with the "platform_operator" FGA relation
 // on system_tenant:_system.
 service PlatformOperatorService {
   // Shutdown requests graceful shutdown of the daemon.
   // Only works for local daemons (not when GIBSON_DAEMON_ADDRESS is set to remote).
-  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
-
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3
+    };
+  }
   // ImpersonateTenant requests a time-limited context token for the given tenant.
   // Requires the "platform-operator" role.
-  rpc ImpersonateTenant(ImpersonateTenantRequest) returns (ImpersonateTenantResponse);
-
+  rpc ImpersonateTenant(ImpersonateTenantRequest) returns (ImpersonateTenantResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3
+    };
+  }
   // RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
   // catalog. Bypasses the scheduled interval — useful for CI to publish a
   // new tool-runner image and immediately surface its parsers to the
   // orchestrator. Only works on the replica currently holding the refresh
   // leader lease; followers accept the call but defer to the leader's
   // next scheduled tick. Requires the platform-operator FGA role.
-  rpc RefreshToolCatalog(RefreshToolCatalogRequest) returns (RefreshToolCatalogResponse);
-
+  rpc RefreshToolCatalog(RefreshToolCatalogRequest) returns (RefreshToolCatalogResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3
+    };
+  }
   // SetTenantQuota sets or updates the resource quotas for a tenant.
   // Requires platform-operator role.
   //
   // Unimplemented: <owner-pending>
-  rpc SetTenantQuota(SetTenantQuotaRequest) returns (SetTenantQuotaResponse);
-
+  rpc SetTenantQuota(SetTenantQuotaRequest) returns (SetTenantQuotaResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3
+    };
+  }
   // ---------------------------------------------------------------------------
   // Entitlements — operator RPCs called by the tenant-operator reconciler
   // ---------------------------------------------------------------------------
 
   // WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
   // an authenticated caller.
-  rpc WriteAccessTuples(WriteAccessTuplesRequest) returns (WriteAccessTuplesResponse);
-
+  rpc WriteAccessTuples(WriteAccessTuplesRequest) returns (WriteAccessTuplesResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3
+    };
+  }
   // UpsertTenantQuota writes the tenant's runtime quota record to Postgres.
   // Called by the operator's reconcile loop after resolving the plan.
-  rpc UpsertTenantQuota(UpsertTenantQuotaRequest) returns (UpsertTenantQuotaResponse);
-
+  rpc UpsertTenantQuota(UpsertTenantQuotaRequest) returns (UpsertTenantQuotaResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3
+    };
+  }
   // ListFeatureTuples enumerates the tenant feature tuples currently set.
-  rpc ListFeatureTuples(ListFeatureTuplesRequest) returns (ListFeatureTuplesResponse);
-
+  rpc ListFeatureTuples(ListFeatureTuplesRequest) returns (ListFeatureTuplesResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3
+    };
+  }
   // SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
-  rpc SeedCatalogTenantEnabled(SeedCatalogTenantEnabledRequest) returns (SeedCatalogTenantEnabledResponse);
-
+  rpc SeedCatalogTenantEnabled(SeedCatalogTenantEnabledRequest) returns (SeedCatalogTenantEnabledResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3
+    };
+  }
   // EmitAuditEvent lets an operator/platform workload forward a structured
   // audit event onto the daemon's emitter.
-  rpc EmitAuditEvent(EmitAuditEventRequest) returns (EmitAuditEventResponse);
+  rpc EmitAuditEvent(EmitAuditEventRequest) returns (EmitAuditEventResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -19,6 +19,10 @@ type secret
   relations
     define can_resolve: [user]
 
+type system_tenant
+  relations
+    define platform_operator: [user]
+
 type tenant
   relations
     define admin: [user]
