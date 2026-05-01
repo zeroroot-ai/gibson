@@ -108,6 +108,13 @@ type OTelConfig struct {
 
 	// Neo4jBrowserURL is the URL for Neo4j Browser (used for deep links in traces)
 	Neo4jBrowserURL string
+
+	// MetricsEnabled controls the OTel metric exporter independently of
+	// traces. Default: true. Set to false when the OTLP target is a
+	// trace-only backend (Langfuse, etc.) — the daemon installs a no-op
+	// MeterProvider and emits no /v1/metrics requests, leaving traces
+	// fully functional.
+	MetricsEnabled bool
 }
 
 // InitOTelObservability initializes the complete OpenTelemetry observability stack.
@@ -233,21 +240,29 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 		"batch_size", cfg.BatchSize,
 		"batch_timeout", cfg.BatchTimeout)
 
-	// Initialize metric exporter based on protocol
+	// Initialize metric exporter based on protocol — but only if metrics
+	// export is enabled. When disabled (e.g. against Langfuse, which is
+	// trace-only), skip the exporter entirely so we don't spam /v1/metrics
+	// 404s or 500s every export interval. The MeterProvider below falls
+	// back to its no-op shape when metricExporter is nil.
 	var metricExporter metric.Exporter
-	switch cfg.Protocol {
-	case "grpc":
-		metricExporter, err = createGRPCMetricExporter(ctx, cfg)
-	case "http":
-		metricExporter, err = createHTTPMetricExporter(ctx, cfg)
-	default:
-		return nil, fmt.Errorf("unsupported protocol: %s (must be grpc or http)", cfg.Protocol)
-	}
-	if err != nil {
-		// Warn but continue - metrics are less critical than traces
-		slog.Warn("failed to create metric exporter, continuing without metrics",
-			"error", err)
-		metricExporter = nil
+	if cfg.MetricsEnabled {
+		switch cfg.Protocol {
+		case "grpc":
+			metricExporter, err = createGRPCMetricExporter(ctx, cfg)
+		case "http":
+			metricExporter, err = createHTTPMetricExporter(ctx, cfg)
+		default:
+			return nil, fmt.Errorf("unsupported protocol: %s (must be grpc or http)", cfg.Protocol)
+		}
+		if err != nil {
+			// Warn but continue - metrics are less critical than traces
+			slog.Warn("failed to create metric exporter, continuing without metrics",
+				"error", err)
+			metricExporter = nil
+		}
+	} else {
+		slog.Info("otel metric exporter disabled by config (trace-only mode)")
 	}
 
 	// Create MeterProvider with periodic reader

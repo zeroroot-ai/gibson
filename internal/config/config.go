@@ -489,6 +489,27 @@ type OTelObservabilityConfig struct {
 	// Retry configures export retry behavior for transient failures.
 	// Exponential backoff prevents overwhelming failing backends.
 	Retry RetryExportConfig `mapstructure:"retry" yaml:"retry"`
+
+	// Metrics independently controls the metric exporter. Some OTLP backends
+	// (notably Langfuse) ingest traces only — sending metrics there yields
+	// 404s on every export interval. Disable metrics in those cases; the
+	// daemon still runs traces normally.
+	Metrics MetricsExportConfig `mapstructure:"metrics" yaml:"metrics"`
+}
+
+// MetricsExportConfig controls whether the OTel metric exporter is created.
+// When Enabled is false, the daemon installs a no-op MeterProvider — every
+// metric instrument keeps working in code but nothing is pushed over the
+// wire. Use this when the OTLP endpoint is a trace-only backend (Langfuse,
+// some Honeycomb tiers) or when metrics are scraped via Prometheus/pull
+// instead of pushed via OTLP.
+type MetricsExportConfig struct {
+	// Enabled determines whether the OTel metric exporter is active.
+	// When nil (unset), defaults to true so existing deployments keep
+	// their current behavior. When *false, MeterProvider is a no-op and
+	// no /v1/metrics requests are emitted. Pointer type lets us
+	// distinguish "field omitted" from "explicitly disabled".
+	Enabled *bool `mapstructure:"enabled" yaml:"enabled"`
 }
 
 // ContentLoggingSubConfig maps to observability.ContentLoggingConfig.
@@ -602,6 +623,14 @@ func (c *OTelObservabilityConfig) ApplyDefaults() {
 	}
 	if c.Retry.MaxElapsedTime == 0 {
 		c.Retry.MaxElapsedTime = 5 * time.Minute
+	}
+
+	// Metrics export defaults to enabled. Operators flip it off via
+	// otel_observability.metrics.enabled: false (or env GIBSON_OTEL_OBSERVABILITY_METRICS_ENABLED=false)
+	// when the OTLP target is trace-only (e.g. Langfuse).
+	if c.Metrics.Enabled == nil {
+		t := true
+		c.Metrics.Enabled = &t
 	}
 }
 

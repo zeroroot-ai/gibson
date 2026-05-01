@@ -625,6 +625,14 @@ func (d *daemonImpl) initOTelObservability(ctx context.Context) *observability.O
 		"protocol", d.config.OTelObservability.Protocol,
 		"service_name", d.config.OTelObservability.ServiceName)
 
+	// Resolve metrics-enabled with backward-compatible default (nil → true).
+	// ApplyDefaults runs before this point so the pointer should always be
+	// non-nil here, but guard anyway.
+	metricsEnabled := true
+	if d.config.OTelObservability.Metrics.Enabled != nil {
+		metricsEnabled = *d.config.OTelObservability.Metrics.Enabled
+	}
+
 	// Build OTelConfig from daemon configuration
 	cfg := observability.OTelConfig{
 		Enabled:         d.config.OTelObservability.Enabled,
@@ -640,6 +648,7 @@ func (d *daemonImpl) initOTelObservability(ctx context.Context) *observability.O
 		RetryMax:        d.config.OTelObservability.Retry.MaxInterval,
 		RetryMaxElapsed: d.config.OTelObservability.Retry.MaxElapsedTime,
 		Neo4jBrowserURL: d.config.Observability.Neo4jBrowserURL,
+		MetricsEnabled:  metricsEnabled,
 	}
 
 	// Convert ContentLoggingSubConfig to observability.ContentLoggingConfig
