@@ -4,6 +4,49 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## v0.26.0 — 2026-05-01 — discovery-bitfield-coherence
+
+Corrects the `allowed_identities` bitmask on the eleven
+`DiscoveryService` RPCs from `8` (PLATFORM_OPERATOR-only) to `7`
+(USER | SERVICE | COMPONENT). These RPCs carry `relation: "member"` —
+any tenant member should be able to call them — but the incoherent
+bitfield was silently blocking every USER caller after
+`zero-trust-hardening` Req 2 enabled per-RPC identity-class
+enforcement at ext-authz.
+
+Spec: `discovery-bitfield-coherence`.
+
+### Changes
+
+- **SDK bump:** `github.com/zero-day-ai/sdk` v0.95.0 → v0.96.0.
+- **Registry regen:** all five registry artifacts regenerated via
+  `make authz-registry`. The eleven affected RPCs (`WhoAmI`,
+  `ListPlugins`, `DescribePlugin`, `ListTools`, `DescribeTool`,
+  `ListAgents`, `DescribeAgent`, `ListLLMSlots`, `ListReportSurfaces`,
+  `ValidateComponent`, `SuggestMissingCapability`) now show
+  `allowed_identities: [USER, SERVICE, COMPONENT]` in `registry.yaml`
+  and `USER|SERVICE|COMPONENT` in `audit.csv`. The `fga_model.fga` is
+  unchanged — the FGA relations and object types are unaffected.
+- **OCI artifact:** `ghcr.io/zero-day-ai/internal-authz-registry:v0.26.0`
+  published by the `publish-private-authz-registry` CI workflow on tag
+  push.
+
+### No handler changes
+
+The daemon's `listCatalog` already unions the caller's tenant catalogue
+with the `_system` shared catalogue; no code change was required.
+Tenant-scoping is preserved at the FGA layer via
+`object_deriver: "tenant_from_identity"` — a USER cannot probe another
+tenant's catalogue.
+
+### Validation
+
+- `go build ./...` and `go test ./internal/authz/registry/...` clean.
+- Registry drift gate: `make authz-registry && git diff --exit-code
+  internal/authz/registry/` exits 0.
+
+---
+
 ## v0.25.1 — 2026-05-01 — daemon loose-mode bypass for self-mode RPCs
 
 Bugfix on top of v0.25.0. The daemon's `registryAwareUnary` /
