@@ -533,67 +533,89 @@ entries:
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/DescribeTool":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/ListAgents":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/ListLLMSlots":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/ListReportSurfaces":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/ListTools":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/SuggestMissingCapability":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/ValidateComponent":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
-      - PLATFORM_OPERATOR
+      - USER
+      - SERVICE
+      - COMPONENT
   "/gibson.daemon.v1.DaemonService/BuildComponent":
     relation: "admin"
     object_type: "tenant"
