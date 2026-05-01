@@ -140,6 +140,21 @@ func (s *grpcSubsystem) Serve(ctx context.Context) error {
 // All interceptor wiring, service registration, and SPIFFE mTLS setup is unchanged
 // from the original startGRPCServer; only the launch goroutine has been moved to Serve.
 func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error) {
+	// Zero-trust hardening Req 1.2: reject non-loopback bind when SPIFFE is unconfigured.
+	// Without SPIFFE mTLS the daemon trusts x-gibson-identity-* headers from any caller
+	// that can reach the gRPC port; binding to a non-loopback address without transport
+	// security would expose the identity-header trust path to in-cluster attackers.
+	noSPIFFE := d.config.Auth.SPIFFE == nil || d.config.Auth.SPIFFE.WorkloadAPISocket == ""
+	if noSPIFFE {
+		if err := rejectNonLoopbackWithoutSPIFFE(d.grpcAddr); err != nil {
+			return nil, err
+		}
+		d.logger.Warn(ctx, "SPIFFE mTLS is not configured; daemon will run without transport security",
+			"address", d.grpcAddr,
+			"note", "only loopback binds are permitted without SPIFFE (zero-trust-hardening Req 1.2)",
+		)
+	}
+
 	// Create listener
 	listener, err := net.Listen("tcp", d.grpcAddr)
 	if err != nil {
@@ -276,9 +291,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			),
 		)
 		if sourceErr != nil {
-			d.logger.Warn(ctx, "failed to initialize SPIFFE X509Source; running without mTLS",
-				"socket", d.config.Auth.SPIFFE.WorkloadAPISocket,
-				"error", sourceErr,
+			// Zero-trust hardening Req 1.1: fail-closed on SPIFFE init failure.
+			// A SPIRE outage must not silently downgrade the daemon to plaintext gRPC.
+			// Without mTLS any in-cluster workload that can reach the pod IP can forge
+			// x-gibson-identity-* headers and impersonate any user or SA.
+			return nil, fmt.Errorf(
+				"SPIFFE workload API unreachable: %w (socket=%s); "+
+					"daemon will not start without mTLS — "+
+					"spec: zero-trust-hardening Req 1.1",
+				sourceErr, d.config.Auth.SPIFFE.WorkloadAPISocket,
 			)
 		} else {
 			// Auth-review finding 4a (CRITICAL): pin mTLS to Envoy's SPIFFE SVID.
@@ -937,6 +958,69 @@ func assertRegistryCoverage(srv *grpc.Server) error {
 		"the following gRPC methods are registered on the daemon but missing from the authz registry — run `make authz-registry` in zero-day-ai/gibson after bumping the SDK pin:\n  - %s",
 		strings.Join(missing, "\n  - "),
 	)
+}
+
+// rejectNonLoopbackWithoutSPIFFE enforces Req 1.2 of zero-trust-hardening:
+// when SPIFFE mTLS is not configured the daemon may only bind to loopback
+// interfaces (127.0.0.0/8 or [::1]).  Any other address (0.0.0.0, a routable
+// IP, "[::]", etc.) is rejected with an informative error so that a
+// misconfigured deployment fails loudly rather than silently.
+//
+// "localhost" is resolved as loopback.  IPv6 loopback "[::1]:port" is also
+// accepted.  Anything else is treated as non-loopback.
+func rejectNonLoopbackWithoutSPIFFE(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		// If SplitHostPort fails the address may lack a port; treat as non-loopback
+		// to be safe.
+		return fmt.Errorf(
+			"daemon cannot bind to %q without SPIFFE: invalid address format (%w); "+
+				"set cfg.Auth.SPIFFE.WorkloadAPISocket to enable mTLS, "+
+				"or use a loopback address — spec: zero-trust-hardening Req 1.2",
+			addr, err,
+		)
+	}
+
+	// Empty host means the caller used ":port" which binds all interfaces.
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return fmt.Errorf(
+			"daemon refuses to bind to non-loopback address %q without SPIFFE mTLS: "+
+				"a non-loopback listener without transport security exposes "+
+				"the identity-header trust path to in-cluster attackers; "+
+				"configure cfg.Auth.SPIFFE.WorkloadAPISocket to enable mTLS, "+
+				"or restrict the listen address to 127.0.0.1 / [::1] — "+
+				"spec: zero-trust-hardening Req 1.2",
+			addr,
+		)
+	}
+
+	// "localhost" maps to 127.0.0.1 or [::1]; allow it.
+	if host == "localhost" {
+		return nil
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		// Non-IP hostname (e.g. FQDN): treat as non-loopback.
+		return fmt.Errorf(
+			"daemon refuses to bind to non-loopback hostname %q without SPIFFE mTLS; "+
+				"configure cfg.Auth.SPIFFE.WorkloadAPISocket or use 127.0.0.1/[::1] — "+
+				"spec: zero-trust-hardening Req 1.2",
+			addr,
+		)
+	}
+
+	if !ip.IsLoopback() {
+		return fmt.Errorf(
+			"daemon refuses to bind to non-loopback address %q without SPIFFE mTLS: "+
+				"configure cfg.Auth.SPIFFE.WorkloadAPISocket or restrict "+
+				"the listen address to a loopback interface — "+
+				"spec: zero-trust-hardening Req 1.2",
+			addr,
+		)
+	}
+
+	return nil
 }
 
 // loadHMACSecret reads the HMAC secret used to verify Envoy-signed
