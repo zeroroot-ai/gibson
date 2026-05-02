@@ -1,6 +1,10 @@
 // Tests for the ListMyMemberships handler. Exercises identity validation,
 // FGA wiring, the role lookup via BatchCheck, the tenant-name resolver
 // fallback, and the stable-sort behavior of the response.
+//
+// Task 1.3 (spec: tenant-role-taxonomy) added:
+//   - pickHighestRole table test
+//   - Four new cases for owner-only / admin-only / member-only / over-permissioned
 
 package api
 
@@ -69,6 +73,36 @@ func newServerForMembershipTest() *DaemonServer {
 	return &DaemonServer{logger: slog.Default()}
 }
 
+// ---------------------------------------------------------------------------
+// pickHighestRole table test (spec: tenant-role-taxonomy Req 2.1–2.3)
+// ---------------------------------------------------------------------------
+
+func TestPickHighestRole(t *testing.T) {
+	tests := []struct {
+		name    string
+		isOwner bool
+		isAdmin bool
+		want    string
+	}{
+		{name: "owner_only", isOwner: true, isAdmin: false, want: "owner"},
+		{name: "admin_only", isOwner: false, isAdmin: true, want: "admin"},
+		{name: "member_only", isOwner: false, isAdmin: false, want: "member"},
+		// Over-permissioned: both owner and admin true (FGA computed union can
+		// produce this). Owner wins.
+		{name: "owner_and_admin", isOwner: true, isAdmin: true, want: "owner"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := pickHighestRole(tt.isOwner, tt.isAdmin)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Existing handler tests (updated for 2*N BatchCheck layout)
+// ---------------------------------------------------------------------------
+
 func TestListMyMemberships_Unauthenticated(t *testing.T) {
 	s := newServerForMembershipTest()
 	_, err := s.ListMyMemberships(ctxNoIdentity(), &daemonpb.ListMyMembershipsRequest{})
@@ -110,6 +144,9 @@ func TestListMyMemberships_ZeroMemberships(t *testing.T) {
 	assert.Empty(t, resp.GetMemberships())
 }
 
+// TestListMyMemberships_HappyPath_RoleAndSorting verifies the 2*N BatchCheck
+// layout: for 3 tenants the stub receives 6 checks (owner+admin per tenant).
+// "acme" is marked admin-only → role "admin". Others get no flags → "member".
 func TestListMyMemberships_HappyPath_RoleAndSorting(t *testing.T) {
 	s := newServerForMembershipTest()
 	s.authorizer = &stubAuthorizer{
@@ -121,13 +158,15 @@ func TestListMyMemberships_HappyPath_RoleAndSorting(t *testing.T) {
 			return []string{"zeta", "acme", "beta"}, nil
 		},
 		batchCheck: func(_ context.Context, checks []authz.CheckRequest) ([]bool, error) {
-			require.Len(t, checks, 3)
-			// Mark "acme" as admin; others as member.
+			// Expect 2*3 = 6 checks: [owner:zeta, admin:zeta, owner:acme, admin:acme, owner:beta, admin:beta]
+			require.Len(t, checks, 6)
 			out := make([]bool, len(checks))
 			for i, c := range checks {
 				assert.Equal(t, "user:user-uuid-1", c.User)
-				assert.Equal(t, "admin", c.Relation)
-				if c.Object == "tenant:acme" {
+				assert.True(t, c.Relation == "owner" || c.Relation == "admin",
+					"unexpected relation: %s", c.Relation)
+				// Mark "acme" as admin-only.
+				if c.Object == "tenant:acme" && c.Relation == "admin" {
 					out[i] = true
 				}
 			}
@@ -193,4 +232,102 @@ func TestListMyMemberships_NameResolverNil_UsesIDFallback(t *testing.T) {
 	require.Len(t, resp.GetMemberships(), 1)
 	assert.Equal(t, "acme", resp.Memberships[0].GetTenantName())
 	assert.Equal(t, "acme", resp.Memberships[0].GetTenantId())
+}
+
+// ---------------------------------------------------------------------------
+// New role-derivation test cases (spec: tenant-role-taxonomy Req 2.5)
+// ---------------------------------------------------------------------------
+
+// batchCheckForSingleTenant is a helper that builds a 2-item BatchCheck stub
+// returning isOwner and isAdmin for the single tenant "acme".
+func batchCheckForSingleTenant(isOwner, isAdmin bool) func(context.Context, []authz.CheckRequest) ([]bool, error) {
+	return func(_ context.Context, checks []authz.CheckRequest) ([]bool, error) {
+		// Handler sends [owner, admin] for each tenant.
+		out := make([]bool, len(checks))
+		for i, c := range checks {
+			if c.Object == "tenant:acme" {
+				switch c.Relation {
+				case "owner":
+					out[i] = isOwner
+				case "admin":
+					out[i] = isAdmin
+				}
+			}
+		}
+		return out, nil
+	}
+}
+
+// TestListMyMemberships_RoleDerivation_OwnerOnly: owner tuple only → role "owner".
+// Spec: tenant-role-taxonomy Req 2.5.
+func TestListMyMemberships_RoleDerivation_OwnerOnly(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		listObjects: func(_ context.Context, _, _, _ string) ([]string, error) {
+			return []string{"acme"}, nil
+		},
+		batchCheck: batchCheckForSingleTenant(true, false),
+	}
+
+	resp, err := s.ListMyMemberships(ctxWithSubject(t, "u1"), &daemonpb.ListMyMembershipsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetMemberships(), 1)
+	assert.Equal(t, "owner", resp.Memberships[0].GetRole(),
+		"tenant-role-taxonomy Req 2.5: owner-only tuple must produce role 'owner'")
+}
+
+// TestListMyMemberships_RoleDerivation_AdminOnly: admin tuple only → role "admin".
+// Spec: tenant-role-taxonomy Req 2.5.
+func TestListMyMemberships_RoleDerivation_AdminOnly(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		listObjects: func(_ context.Context, _, _, _ string) ([]string, error) {
+			return []string{"acme"}, nil
+		},
+		batchCheck: batchCheckForSingleTenant(false, true),
+	}
+
+	resp, err := s.ListMyMemberships(ctxWithSubject(t, "u1"), &daemonpb.ListMyMembershipsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetMemberships(), 1)
+	assert.Equal(t, "admin", resp.Memberships[0].GetRole(),
+		"tenant-role-taxonomy Req 2.5: admin-only tuple must produce role 'admin'")
+}
+
+// TestListMyMemberships_RoleDerivation_MemberOnly: no owner or admin tuple → role "member".
+// Spec: tenant-role-taxonomy Req 2.5.
+func TestListMyMemberships_RoleDerivation_MemberOnly(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		listObjects: func(_ context.Context, _, _, _ string) ([]string, error) {
+			return []string{"acme"}, nil
+		},
+		batchCheck: batchCheckForSingleTenant(false, false),
+	}
+
+	resp, err := s.ListMyMemberships(ctxWithSubject(t, "u1"), &daemonpb.ListMyMembershipsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetMemberships(), 1)
+	assert.Equal(t, "member", resp.Memberships[0].GetRole(),
+		"tenant-role-taxonomy Req 2.5: no owner or admin tuple must produce role 'member'")
+}
+
+// TestListMyMemberships_RoleDerivation_OverPermissioned: all three tuples present
+// (owner + admin + member, as FGA computed union may produce) → role "owner" (highest).
+// Spec: tenant-role-taxonomy Req 2.5.
+func TestListMyMemberships_RoleDerivation_OverPermissioned(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		listObjects: func(_ context.Context, _, _, _ string) ([]string, error) {
+			return []string{"acme"}, nil
+		},
+		// Both owner and admin true — the BatchCheck for owner and admin both return true.
+		batchCheck: batchCheckForSingleTenant(true, true),
+	}
+
+	resp, err := s.ListMyMemberships(ctxWithSubject(t, "u1"), &daemonpb.ListMyMembershipsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetMemberships(), 1)
+	assert.Equal(t, "owner", resp.Memberships[0].GetRole(),
+		"tenant-role-taxonomy Req 2.5: over-permissioned (owner+admin) must produce highest role 'owner'")
 }

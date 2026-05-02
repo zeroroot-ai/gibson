@@ -15,6 +15,8 @@
 # When extending, add new types after system_tenant. Do NOT rename existing
 # relations or types — doing so breaks existing tuples in the FGA store.
 #
+# Spec: tenant-role-taxonomy
+#
 # MODEL SCOPE
 # -----------
 # user            — a human or service principal identified by UUID
@@ -25,10 +27,39 @@
 #                   cross-tenant platform-operator privilege
 # team            — a subdivision of a tenant for grouping users and controlling data access
 #
+# TENANT THREE-TIER ROLE HIERARCHY (spec: tenant-role-taxonomy)
+# -------------------------------------------------------------
+# The tenant type exposes three user-facing roles in a strict computed-union
+# hierarchy. Roles are additive upward: an owner implicitly satisfies admin
+# and member checks; an admin implicitly satisfies member checks.
+#
+#   owner  (highest) — founding user or explicitly-assigned owner.
+#                      Direct tuple grant only: [user].
+#                      Written by the tenant-owner-backfill Job on migration;
+#                      written by the signup action for new tenants.
+#
+#   admin  (middle)  — tenant administrator.
+#                      Direct grant OR inherited from owner via computed union.
+#                      Definition: [user] or owner
+#
+#   member (lowest)  — any authenticated tenant participant.
+#                      Direct grant OR inherited from admin (which includes owner).
+#                      Definition: [user] or admin
+#
+# This means:
+#   Check(user:alice, admin,  tenant:acme) → true  when alice is owner of acme
+#   Check(user:alice, member, tenant:acme) → true  when alice is owner or admin of acme
+#   Check(user:bob,   owner,  tenant:acme) → false when bob is only admin of acme
+#   Check(user:carol, owner,  tenant:acme) → false when carol is only member of acme
+#
 # RELATION SEMANTICS
 # ------------------
+# tenant.owner        → user is the founding/highest-privilege user of the tenant
+#                       (direct grant only; computed union propagates downward)
 # tenant.admin        → user is an administrator of the tenant
-# tenant.member       → user is a member (includes admin by computed union)
+#                       (direct grant OR inherited from owner via computed union)
+# tenant.member       → user is a member (direct grant OR inherited from admin,
+#                       which by computed union includes owner)
 # agent_principal.owner      → user that owns/created this agent principal
 # agent_principal.belongs_to → tenant this agent principal is scoped to
 # component.owner     → a tenant owns this component
@@ -41,9 +72,12 @@
 # team.member         → user is a member of the team (includes team admins)
 # team.can_view_data_from → team A has crosstalk visibility into team B's data
 #
-# Tuple examples:
-#   user:alice   | admin            | tenant:acme
-#   user:alice   | member           | tenant:acme       (or computed via admin)
+# Tuple examples (tenant three-tier hierarchy):
+#   user:alice   | owner            | tenant:acme       (founding user; satisfies admin + member checks)
+#   user:bob     | admin            | tenant:acme       (satisfies member checks; does NOT satisfy owner)
+#   user:carol   | member           | tenant:acme       (lowest role; does NOT satisfy admin or owner)
+#
+# Tuple examples (other types):
 #   tenant:acme  | owner            | component:nmap
 #   user:alice   | can_execute      | component:nmap    (computed: admin→member→can_execute)
 #   user:root    | platform_operator | system_tenant:_system
@@ -73,7 +107,8 @@ type user
 
 type tenant
   relations
-    define admin: [user]
+    define owner: [user]
+    define admin: [user] or owner
     define member: [user] or admin
     # Informational feature-availability flags written by the tenant-operator
     # from the resolved plan. These are self-referential (tenant:X#has_Y@tenant:X)

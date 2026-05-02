@@ -2268,31 +2268,35 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 		return &daemonpb.ListMyMembershipsResponse{Memberships: nil}, nil
 	}
 
-	// Batch-evaluate admin relations across all tenants in a single FGA call.
-	checks := make([]authz.CheckRequest, 0, len(tenantIDs))
+	// Batch-evaluate owner AND admin relations across all tenants in a single
+	// FGA call. For N tenants we push 2*N checks: checks[2*i] = owner check
+	// for tenant i, checks[2*i+1] = admin check for tenant i.
+	//
+	// Spec: tenant-role-taxonomy Req 2.1–2.3.
+	checks := make([]authz.CheckRequest, 0, 2*len(tenantIDs))
 	for _, tid := range tenantIDs {
-		checks = append(checks, authz.CheckRequest{
-			User:     "user:" + userID,
-			Relation: "admin",
-			Object:   "tenant:" + tid,
-		})
+		checks = append(checks,
+			authz.CheckRequest{User: "user:" + userID, Relation: "owner", Object: "tenant:" + tid},
+			authz.CheckRequest{User: "user:" + userID, Relation: "admin", Object: "tenant:" + tid},
+		)
 	}
-	adminFlags, err := s.authorizer.BatchCheck(ctx, checks)
+	results, err := s.authorizer.BatchCheck(ctx, checks)
 	if err != nil {
 		// Non-fatal: degrade to "everyone is member"; log for observability.
-		s.logger.WarnContext(ctx, "ListMyMemberships: BatchCheck for admin relation failed; defaulting roles to member",
+		// Req 2.4: fail-closed-to-member on BatchCheck error.
+		s.logger.WarnContext(ctx, "ListMyMemberships: BatchCheck failed; defaulting all roles to member",
 			slog.String("user_id", userID),
 			slog.String("error", err.Error()),
 		)
-		adminFlags = make([]bool, len(tenantIDs))
+		results = make([]bool, 2*len(tenantIDs))
 	}
 
 	memberships := make([]*daemonpb.Membership, 0, len(tenantIDs))
 	for i, tid := range tenantIDs {
-		role := "member"
-		if i < len(adminFlags) && adminFlags[i] {
-			role = "admin"
-		}
+		isOwner := 2*i < len(results) && results[2*i]
+		isAdmin := 2*i+1 < len(results) && results[2*i+1]
+		role := pickHighestRole(isOwner, isAdmin)
+
 		// OpenFGA ListObjects returns object strings of the form
 		// "tenant:<id>". The wire contract for daemonpb.Membership.TenantId
 		// is the bare id — downstream consumers (dashboard's
@@ -2308,6 +2312,13 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 				name = resolved
 			}
 		}
+
+		s.logger.InfoContext(ctx, "ListMyMemberships: resolved role",
+			slog.String("user_id", userID),
+			slog.String("tenant_id", bareID),
+			slog.String("role", role),
+		)
+
 		memberships = append(memberships, &daemonpb.Membership{
 			TenantId:   bareID,
 			TenantName: name,
@@ -2330,6 +2341,26 @@ func sortMembershipsByName(ms []*daemonpb.Membership) {
 		}
 		return ms[i].GetTenantId() < ms[j].GetTenantId()
 	})
+}
+
+// pickHighestRole returns the highest role the user holds for a tenant, given
+// the results of owner and admin BatchCheck calls.
+//
+// Role precedence (highest to lowest): owner > admin > member.
+// A user who holds owner inherits admin and member by FGA computed union, but
+// the daemon's BatchCheck observes the raw tuple-level result: if the owner
+// tuple exists, isOwner is true (and isAdmin may also be true due to the
+// computed union). We always return the highest explicit signal.
+//
+// Spec: tenant-role-taxonomy Req 2.1, 2.2, 2.3.
+func pickHighestRole(isOwner, isAdmin bool) string {
+	if isOwner {
+		return "owner"
+	}
+	if isAdmin {
+		return "admin"
+	}
+	return "member"
 }
 
 // traceSpanFromContext extracts the trace ID string using the grpc metadata
