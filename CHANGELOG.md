@@ -4,6 +4,31 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## v0.28.0 — 2026-05-02 — drop fga_model.fga coverage stub
+
+Bumps SDK to v0.98.1 (drops the generator's FGA coverage stub) and removes
+the now-unused `internal/authz/registry/fga_model.fga`. The OpenFGA model
+remains hand-maintained at `internal/authz/model.fga` (the only source the
+`gibson-fga-init` Job has ever consumed, via `files/fga-model.json`).
+
+### Changes
+
+- **`internal/authz/registry/fga_model.fga` deleted** — the generator no
+  longer emits it; the file existed only as a derived snapshot of the
+  proto-annotated relations and was never read at runtime.
+- **`internal/authz/model.fga` banner** simplified — the "DO NOT confuse
+  with the registry stub" warning is gone with the stub itself.
+- **`scripts/check-fga-model-headers.sh`** trimmed to only assert the
+  `AUTHORITATIVE-FGA-MODEL` marker on `model.fga`.
+- **`.github/workflows/publish-private-authz-registry.yml`** stops pushing
+  the `fga_model.fga` layer to `ghcr.io/zero-day-ai/internal-authz-registry`;
+  three layers ship now (`registry.yaml`, `permissions.ts`, `registry.go`).
+- **`go.mod`** bumped to `github.com/zero-day-ai/sdk v0.98.1`.
+
+Spec: ad-hoc cleanup informed by the cross-repo-cohesion-fixes audit.
+
+---
+
 ## v0.27.0 — 2026-05-02 — tenant-role-taxonomy
 
 Introduces the three-tier tenant role hierarchy (`owner > admin > member`)

@@ -102,12 +102,14 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login "${REGISTRY}" -u "${{ github.actor }}" --password-stdin
 
       - name: Push authz registry artifact
-        # Pushes all four artifact files as named layers. The ext-authz chart
+        # Pushes all three artifact files as named layers. The ext-authz chart
         # init container only needs registry.yaml; the others are pushed for
-        # completeness and future consumers (fga-init Job for fga_model.fga,
-        # dashboard-authz-ui-gating for permissions.ts).
+        # completeness and future consumers (dashboard-authz-ui-gating for
+        # permissions.ts). The OpenFGA model is hand-maintained at
+        # internal/authz/model.fga and embedded in the chart by gibson-fga-init,
+        # so it is intentionally NOT shipped here.
         # Uses application/yaml for text files; application/octet-stream for
-        # the binary-ish .go and .fga files (still text, but no dedicated MIME).
+        # the binary-ish .go file (still text, but no dedicated MIME).
         run: |
           cd internal/authz/registry
           oras push \
@@ -118,7 +120,6 @@ jobs:
             --annotation "org.opencontainers.image.version=${{ steps.tag.outputs.tag }}" \
             --annotation "org.opencontainers.image.description=Gibson private authz registry generated from SDK proto annotations" \
             registry.yaml:application/yaml \
-            fga_model.fga:application/yaml \
             permissions.ts:application/octet-stream \
             registry.go:application/octet-stream
 

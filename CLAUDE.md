@@ -7,9 +7,12 @@ Read this before editing the daemon (`core/gibson/`).
 The authorization rule book lives at `internal/authz/registry/`:
 - `registry.go` — Go map `Registry` (import path `github.com/zero-day-ai/gibson/internal/authz/registry`)
 - `registry.yaml` — runtime YAML consumed by ext-authz via oras pull
-- `fga_model.fga` — OpenFGA model fed to the fga-init Job
 - `permissions.ts` — TypeScript map for the dashboard sister spec
 - `audit.csv` — auditor-friendly flat table (rpc, relation, object_type, deriver, identities, source_proto_file)
+
+The OpenFGA model itself is hand-maintained at `internal/authz/model.fga`
+(loaded by `gibson-fga-init` via `files/fga-model.json`); the registry
+generator no longer emits an FGA stub.
 
 These are **generated artifacts** — do NOT hand-edit them. Run regen instead.
 

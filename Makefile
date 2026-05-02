@@ -216,8 +216,8 @@ proto: proto-deps authz-registry
 	$(BUF) generate
 	@echo "Proto generation complete"
 
-# authz-registry: regenerate the four authz artifacts (registry.go, registry.yaml,
-# fga_model.fga, permissions.ts) from the pinned SDK version's proto annotations.
+# authz-registry: regenerate the three authz artifacts (registry.go, registry.yaml,
+# permissions.ts) plus audit.csv from the pinned SDK version's proto annotations.
 # Writes to internal/authz/registry/. Run this target when the SDK version is bumped
 # or to verify the committed files are not drifted.
 #
