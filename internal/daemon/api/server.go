@@ -2272,12 +2272,22 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 	// FGA call. For N tenants we push 2*N checks: checks[2*i] = owner check
 	// for tenant i, checks[2*i+1] = admin check for tenant i.
 	//
+	// `tenantIDs` from `ListObjects` already includes the `tenant:` prefix
+	// (OpenFGA wire convention) — we MUST strip it before re-prefixing,
+	// otherwise the constructed Object becomes `tenant:tenant:<id>`, which
+	// FGA rejects as `invalid 'object' field format` and the entire
+	// BatchCheck errors out, degrading every caller's role to "member".
+	// (Pre-existing long-standing bug, exposed by tenant-role-taxonomy
+	// when the role string finally became visible in the dashboard.)
+	//
 	// Spec: tenant-role-taxonomy Req 2.1–2.3.
 	checks := make([]authz.CheckRequest, 0, 2*len(tenantIDs))
 	for _, tid := range tenantIDs {
+		bareTID := strings.TrimPrefix(tid, "tenant:")
+		objStr := "tenant:" + bareTID
 		checks = append(checks,
-			authz.CheckRequest{User: "user:" + userID, Relation: "owner", Object: "tenant:" + tid},
-			authz.CheckRequest{User: "user:" + userID, Relation: "admin", Object: "tenant:" + tid},
+			authz.CheckRequest{User: "user:" + userID, Relation: "owner", Object: objStr},
+			authz.CheckRequest{User: "user:" + userID, Relation: "admin", Object: objStr},
 		)
 	}
 	results, err := s.authorizer.BatchCheck(ctx, checks)
