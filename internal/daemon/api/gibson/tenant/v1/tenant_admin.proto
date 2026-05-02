@@ -21,7 +21,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ListAgentIdentities returns all agent/tool/plugin identities provisioned in the
@@ -31,7 +31,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // RevokeAgentIdentity permanently revokes a machine identity. Existing JWTs stop
@@ -42,7 +42,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
@@ -65,7 +65,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // DeleteTenantLangfuseCredentials removes the Langfuse project credentials for a tenant.
@@ -74,7 +74,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // UpdateOnboardingState advances or modifies the onboarding state.
@@ -96,7 +96,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ListMissionDrafts returns all saved mission drafts for a tenant.
@@ -167,7 +167,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // GetProvider returns a single provider config by name.
@@ -189,7 +189,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // CreateProvider encrypts and stores a new provider config.
@@ -198,7 +198,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // UpdateProvider replaces an existing provider config.
@@ -207,7 +207,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // DeleteProvider removes a provider config from the store.
@@ -216,7 +216,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // TestProvider validates a proposed provider config by making a minimal live request.
@@ -225,7 +225,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // GetSupportedProviders returns the daemon's static catalogue of LLM
@@ -236,7 +236,7 @@ service TenantAdminService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ListProviderModels fetches the live model catalogue for an already-
@@ -247,7 +247,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // GetProviderHealth returns the last-known health status of a stored provider.
@@ -256,7 +256,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // GetDefaultProvider returns the tenant's currently configured default provider.
@@ -265,7 +265,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // SetDefaultProvider designates an existing stored provider as the default.
@@ -274,7 +274,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // GetFallbackChain returns the ordered list of provider names.
@@ -283,7 +283,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // SetFallbackChain replaces the tenant's provider fallback chain.
@@ -292,7 +292,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -305,7 +305,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // StreamLLM proxies a streaming LLM completion.
@@ -314,7 +314,7 @@ service TenantAdminService {
       relation: "admin",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
 
@@ -336,7 +336,7 @@ service TenantAdminService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 1
+      allowed_identities: 1  // USER
     };
   }
 }

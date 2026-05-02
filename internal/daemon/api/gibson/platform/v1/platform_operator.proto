@@ -17,7 +17,7 @@ service PlatformOperatorService {
       relation: "platform_operator",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ImpersonateTenant requests a time-limited context token for the given tenant.
@@ -27,7 +27,7 @@ service PlatformOperatorService {
       relation: "platform_operator",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
@@ -41,7 +41,7 @@ service PlatformOperatorService {
       relation: "platform_operator",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // SetTenantQuota sets or updates the resource quotas for a tenant.
@@ -53,7 +53,7 @@ service PlatformOperatorService {
       relation: "platform_operator",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ service PlatformOperatorService {
       relation: "platform_operator",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // UpsertTenantQuota writes the tenant's runtime quota record to Postgres.
@@ -77,7 +77,7 @@ service PlatformOperatorService {
       relation: "platform_operator",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ListFeatureTuples enumerates the tenant feature tuples currently set.
@@ -86,7 +86,7 @@ service PlatformOperatorService {
       relation: "platform_operator",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
@@ -95,7 +95,7 @@ service PlatformOperatorService {
       relation: "platform_operator",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // EmitAuditEvent lets an operator/platform workload forward a structured
@@ -105,7 +105,7 @@ service PlatformOperatorService {
       relation: "platform_operator",
       object_type: "system_tenant",
       object_deriver: "system_tenant",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
 }

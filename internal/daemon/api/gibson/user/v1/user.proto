@@ -20,7 +20,7 @@ service UserService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // UpdateUserProfile updates mutable profile fields (display_name, preferred_locale)
@@ -30,7 +30,7 @@ service UserService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ service UserService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // MarkAlertRead marks a single alert as read.
@@ -56,7 +56,7 @@ service UserService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // MarkAllAlertsRead marks all alerts for a user as read.
@@ -67,7 +67,7 @@ service UserService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ service UserService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
   // GetConversation returns the full message history for a single conversation.
@@ -93,7 +93,7 @@ service UserService {
       relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
-      allowed_identities: 3
+      allowed_identities: 3  // USER | SERVICE
     };
   }
 }
