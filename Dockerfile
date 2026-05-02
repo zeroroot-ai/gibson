@@ -47,6 +47,11 @@ RUN if [ -n "$BUILD_TAGS" ]; then \
 # Tenant.spec.owner values. Idempotent.
 RUN go build -ldflags="-s -w" -o /out/lowercase-tenant-owner ./cmd/lowercase-tenant-owner
 
+# Spec tenant-role-taxonomy (Req 5.1–5.4): tenant-owner-backfill seeds the
+# FGA owner tuple for the founding user of each existing tenant. Runs as a
+# regular Kubernetes Job (no Helm hook) on helm upgrade to v0.27.0+. Idempotent.
+RUN go build -ldflags="-s -w" -o /out/tenant-owner-backfill ./cmd/tenant-owner-backfill
+
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
@@ -58,6 +63,7 @@ RUN apk add --no-cache ca-certificates
 # Copy gibson binary + auxiliary tools from builder
 COPY --from=builder /out/gibson /usr/local/bin/gibson
 COPY --from=builder /out/lowercase-tenant-owner /usr/local/bin/lowercase-tenant-owner
+COPY --from=builder /out/tenant-owner-backfill /usr/local/bin/tenant-owner-backfill
 
 # Create gibson home directory and HF model-cache mount point.
 # In production, /root/.cache/huggingface/ is mounted from EFS via the
