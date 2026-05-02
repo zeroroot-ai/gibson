@@ -1,0 +1,55 @@
+name: fga-smoke-test
+
+# Validates the OpenFGA authorization model (internal/authz/model.fga) against
+# a live ephemeral OpenFGA server via testcontainers. Runs the integration test
+# suite including the tenant-role-taxonomy hierarchy assertions (Req 1.5, 6.1).
+#
+# Why a separate workflow from gibsoncheck:
+#   - These tests start a Docker container (OpenFGA) and need Docker-in-Docker.
+#   - They run with the `integration` build tag and take ~60s.
+#   - Keeping them separate avoids slowing the fast gibsoncheck / unit-test jobs.
+#
+# Spec: tenant-role-taxonomy.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/authz/model.fga'
+      - 'internal/authz/**_test.go'
+      - '.github/workflows/fga-smoke-test.yml'
+  pull_request:
+    paths:
+      - 'internal/authz/model.fga'
+      - 'internal/authz/**_test.go'
+      - '.github/workflows/fga-smoke-test.yml'
+
+concurrency:
+  group: fga-smoke-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fga-smoke:
+    name: FGA model smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      # Docker is available on ubuntu-latest runners. The testcontainers library
+      # will start openfga/openfga:latest in-process; each sub-test creates its
+      # own ephemeral store so test isolation is guaranteed. The container is
+      # terminated by the test's defer cleanup regardless of pass/fail.
+      - name: Run FGA model integration tests (includes tenant-role-taxonomy hierarchy)
+        run: |
+          go test -v -tags=integration -timeout=300s \
+            ./internal/authz/... \
+            -run 'TestModel_TenantRoleHierarchy|TestModel_CatalogGating|TestIntegration_FGA'
+        # Failure message surfaced in CI output names the spec for easy triage.
+        # Individual assertions in model_hierarchy_test.go also name
+        # "tenant-role-taxonomy" so log grep is unambiguous.
