@@ -4,6 +4,65 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## v0.27.0 — 2026-05-02 — tenant-role-taxonomy
+
+Introduces the three-tier tenant role hierarchy (`owner > admin > member`)
+at the FGA level and surfaces the highest role through the daemon's
+`ListMyMemberships` RPC. Adds a one-shot backfill binary to seed owner
+tuples for existing tenants.
+
+Spec: `tenant-role-taxonomy`.
+
+### Changes
+
+- **FGA model:** `internal/authz/model.fga` — `type tenant` gains
+  `define owner: [user]` as the first relation. `define admin: [user]`
+  is rewritten to `define admin: [user] or owner` (computed union). The
+  existing `define member: [user] or admin` is unchanged. This means:
+  - Check(`owner`, `admin`) → true (downward propagation)
+  - Check(`owner`, `member`) → true (downward propagation)
+  - Check(`admin`, `owner`) → false (no upward propagation)
+  - Header documentation and `RELATION SEMANTICS` block updated with
+    worked tuple examples for each role.
+
+- **Daemon `ListMyMemberships`** — builds a `2*N`-item `BatchCheck`
+  (one owner check + one admin check per tenant) in a single FGA call.
+  New private helper `pickHighestRole(isOwner, isAdmin bool) string`
+  returns the highest role. Per-tenant audit log line names the resolved
+  role. Fail-closed-to-member degrade path on BatchCheck error preserved.
+
+- **`cmd/tenant-owner-backfill`** — new binary that:
+  - Lists all `Tenant` CRs (cluster-scoped).
+  - For each tenant: finds the founding `TenantMember` (earliest
+    `creationTimestamp` with non-empty `status.userId`).
+  - Calls FGA Check for the `owner` relation; writes the tuple if missing.
+  - Logs structured per-tenant outcome:
+    `outcome=backfilled|already_owner|no_founder_found`.
+  - Exits zero unconditionally (per-tenant skips do not fail the Job).
+  - Built into the gibson container image at
+    `/usr/local/bin/tenant-owner-backfill`.
+
+- **`fga-smoke-test` CI workflow** — new
+  `.github/workflows/fga-smoke-test.yml` runs `TestModel_TenantRoleHierarchy`
+  (three hierarchy assertions against an ephemeral OpenFGA container via
+  testcontainers) on every PR touching `internal/authz/model.fga`.
+
+### No OCI registry / proto changes
+
+The authz registry artifacts (`internal/authz/registry/`) are unchanged —
+no proto annotations were modified. The OCI artifact at
+`ghcr.io/zero-day-ai/internal-authz-registry:v0.27.0` is published by CI
+on tag push but its content is identical to v0.26.0.
+
+### Validation
+
+- `go build ./...` and `go test ./internal/authz/... ./internal/daemon/api/...` clean.
+- `TestPickHighestRole` table test: 4 input combinations, all pass.
+- `TestListMyMemberships_RoleDerivation_*`: 4 new cases, all pass.
+- `go build ./cmd/tenant-owner-backfill/...` succeeds.
+
+---
+
 ## v0.26.0 — 2026-05-01 — discovery-bitfield-coherence
 
 Corrects the `allowed_identities` bitmask on the eleven
