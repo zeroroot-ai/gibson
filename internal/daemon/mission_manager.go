@@ -14,6 +14,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/datapool"
+	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
@@ -306,21 +307,8 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 		"node_count", len(def.Nodes),
 	)
 
-	// Store mission definition in GraphRAG for cross-mission analysis (non-blocking).
-	// Errors are logged at WARN and must not prevent mission startup.
-	if m.infrastructure != nil && m.infrastructure.graphRAGClient != nil {
-		go func(d *mission.MissionDefinition) {
-			storeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := m.storeMissionInGraphRAG(storeCtx, d); err != nil {
-				m.logger.WarnContext(storeCtx, "failed to store mission definition in GraphRAG (best-effort)",
-					"error", err,
-					"mission_definition_id", missionDefinitionID,
-					"mission_name", d.Name,
-				)
-			}
-		}(def)
-	}
+	// Shared-Neo4j-backed mission graph storage removed (spec graphrag-tenant-scope).
+	// Per-tenant mission graph storage via Pool will be added in a follow-up spec.
 
 	// Resolve target ID via the target store. The caller may supply either a
 	// target UUID or a target name; try both.
@@ -635,22 +623,39 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		m.logger.Warn("failed to acquire store for status update", "error", storeErr, "mission_id", missionID)
 	}
 
-	// Check if GraphRAG is available - required for orchestrator
-	if m.infrastructure == nil || m.infrastructure.graphRAGClient == nil {
-		m.logger.Error("GraphRAG not available - orchestrator requires Neo4j",
+	// Acquire the per-tenant Neo4j session from the data-plane Pool.
+	// The pool is required for mission execution (per-call Neo4j).
+	if m.pool == nil {
+		m.logger.Error("data-plane pool not available - mission execution requires Neo4j",
 			"mission_id", missionID)
-
 		m.emitEvent(eventChan, api.MissionEventData{
 			EventType: "mission.failed",
 			Timestamp: time.Now(),
 			MissionID: missionID,
-			Error:     "GraphRAG (Neo4j) is required for mission execution but not configured",
+			Error:     "data-plane pool is required for mission execution but not configured",
 		})
 		return
 	}
+	poolConn, poolErr := m.pool.For(ctx, active.tenantID)
+	if poolErr != nil {
+		m.logger.Error("failed to acquire per-tenant Neo4j session",
+			"mission_id", missionID,
+			"tenant_id", active.tenantID,
+			"error", poolErr)
+		m.emitEvent(eventChan, api.MissionEventData{
+			EventType: "mission.failed",
+			Timestamp: time.Now(),
+			MissionID: missionID,
+			Error:     fmt.Sprintf("failed to acquire tenant Neo4j session: %v", poolErr),
+		})
+		return
+	}
+	defer poolConn.Release()
+
+	// Wrap the per-tenant session as a GraphClient for orchestrator query handlers.
+	graphClient := graph.NewSessionGraphClient(poolConn.Neo4j)
 
 	// Create query handlers for graph operations
-	graphClient := m.infrastructure.graphRAGClient
 	missionQueries := queries.NewMissionQueries(graphClient)
 	executionQueries := queries.NewExecutionQueries(graphClient)
 
@@ -781,7 +786,8 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Pass DiscoveryProcessor from infrastructure to enable automatic storage of discovered
 	// hosts, ports, services, etc. from agent outputs to Neo4j for use by downstream agents.
 	// ApprovalManager, EscalationManager, CheckpointManager, ReflectionEngine, and MemoryRecaller are nil for now - they will be configured later
-	actor := orchestrator.NewActor(harnessAdapter, executionQueries, missionQueries, graphClient, inventory, policyChecker, m.infrastructure.discoveryProcessor, nil, nil, nil, nil, nil, m.logger)
+	// discoveryProcessor removed from infrastructure (spec graphrag-tenant-scope); pass nil.
+	actor := orchestrator.NewActor(harnessAdapter, executionQueries, missionQueries, graphClient, inventory, policyChecker, nil, nil, nil, nil, nil, nil, m.logger)
 
 	// Create OTel DecisionLogWriterAdapter for tracing if OTel stack is available
 	var decisionLogWriter orchestrator.DecisionLogWriter
@@ -1564,58 +1570,11 @@ func buildMissionTraceSummary(result *orchestrator.OrchestratorResult, status mi
 	return summary
 }
 
-// storeMissionInGraphRAG stores a mission definition in the Neo4j knowledge graph.
-// This allows for cross-mission analysis and relationship discovery.
-func (m *missionManager) storeMissionInGraphRAG(ctx context.Context, def *mission.MissionDefinition) error {
-	// Check if GraphRAG is configured
-	if m.infrastructure == nil || m.infrastructure.graphRAGClient == nil {
-		m.logger.Debug("GraphRAG not configured, skipping mission storage")
-		return nil // GraphRAG not configured, skip storage
-	}
-
-	m.logger.Info("storing mission in GraphRAG",
-		"mission_id", def.ID,
-		"mission_name", def.Name,
-		"node_count", len(def.Nodes),
-		"edge_count", len(def.Edges))
-
-	// Convert mission definition to graph nodes
-	nodes := m.convertToGraphNodes(def)
-
-	// Store nodes in GraphRAG
-	for _, node := range nodes {
-		_, err := m.infrastructure.graphRAGClient.CreateNode(ctx, []string{node.Label}, node.Properties)
-		if err != nil {
-			m.logger.Warn("failed to add node to graph",
-				"error", err,
-				"node_label", node.Label,
-				"node_id", node.Properties["id"])
-			// Continue with other nodes even if one fails
-		}
-	}
-
-	// Convert mission definition to graph edges
-	edges := m.convertToGraphEdges(def)
-
-	// Store edges in GraphRAG
-	for _, edge := range edges {
-		if err := m.infrastructure.graphRAGClient.CreateRelationship(ctx,
-			edge.FromNode, edge.ToNode, edge.RelType, edge.Properties); err != nil {
-			m.logger.Warn("failed to add edge to graph",
-				"error", err,
-				"edge_type", edge.RelType,
-				"from", edge.FromNode,
-				"to", edge.ToNode)
-			// Continue with other edges even if one fails
-		}
-	}
-
-	m.logger.Info("mission stored in GraphRAG successfully",
-		"mission_id", def.ID,
-		"mission_name", def.Name,
-		"nodes_created", len(nodes),
-		"edges_created", len(edges))
-
+// storeMissionInGraphRAG stored a mission definition in the shared Neo4j knowledge graph.
+// The shared-Neo4j client has been removed (spec graphrag-tenant-scope). This stub
+// remains until per-tenant mission graph storage is implemented in a follow-up spec.
+func (m *missionManager) storeMissionInGraphRAG(_ context.Context, _ *mission.MissionDefinition) error {
+	m.logger.Debug("storeMissionInGraphRAG: shared-Neo4j client removed; skipping (spec graphrag-tenant-scope)")
 	return nil
 }
 

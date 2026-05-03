@@ -7,13 +7,6 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/finding"
-	"github.com/zero-day-ai/gibson/internal/graphrag"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
-	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/graphrag/provider"
-	graphragschema "github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
@@ -56,20 +49,12 @@ type Infrastructure struct {
 	// runLinker manages relationships between mission runs with the same name
 	runLinker mission.MissionRunLinker
 
-	// graphRAGClient for Neo4j knowledge graph operations
-	graphRAGClient *graph.Neo4jClient
-
-	// graphRAGBridge adapts Neo4j client for harness interface (async storage)
+	// graphRAGBridge provides per-tenant GraphRAG write operations.
+	// The bridge constructs Neo4j sessions lazily via the data-plane Pool.
 	graphRAGBridge harness.GraphRAGBridge
 
-	// graphRAGQueryBridge for querying the knowledge graph
+	// graphRAGQueryBridge provides per-tenant GraphRAG read/query operations.
 	graphRAGQueryBridge harness.GraphRAGQueryBridge
-
-	// intelligenceService provides cross-mission analytics queries
-	// (recurring vulnerabilities, remediation metrics, asset risk scores,
-	// attack patterns, similar targets). Wrapped by intelligence.NewGRPCServer
-	// for the IntelligenceService gRPC endpoint.
-	intelligenceService *intelligence.Service
 
 	// otelStack holds the unified OTel observability stack (nil when disabled)
 	otelStack *observability.OTelObservabilityStack
@@ -77,14 +62,6 @@ type Infrastructure struct {
 	// taxonomyRegistry manages core taxonomy and agent-installed extensions
 	// Stored as concrete type to satisfy both TaxonomyRegistry and TaxonomyIntrospector interfaces
 	taxonomyRegistry *sdkgraphrag.DefaultTaxonomyRegistry
-
-	// discoveryProcessor processes agent output discoveries to Neo4j
-	// This enables downstream agents to query discovered hosts, ports, services, etc.
-	discoveryProcessor *discoveryProcessorAdapter
-
-	// complianceSink routes compliance signals through the same
-	// DiscoveryProcessor pipeline. Nil when graphRAG is disabled.
-	complianceSink harness.SignalSink
 
 	// redisClient for tool execution queue management
 	redisClient queue.Client
@@ -169,68 +146,14 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		"url", d.config.Redis.URL,
 		"database", d.config.Redis.Database)
 
-	// Initialize Neo4j GraphRAG - this is REQUIRED as GraphRAG is a core component
-	// GraphRAG is always required - fail fast if initialization fails
-	graphRAGClient, err := d.initGraphRAG(ctx)
+	// Initialize GraphRAG bridges backed by the per-tenant data-plane Pool.
+	// No shared Neo4j cluster is required at startup; each bridge method resolves
+	// the tenant's Neo4j session lazily via pool.For(ctx, tenant).Neo4j.
+	graphRAGBridge, graphRAGQueryBridge, err := d.initGraphRAGBridges(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Neo4j GraphRAG (required): %w", err)
+		return nil, fmt.Errorf("failed to initialize GraphRAG bridges: %w", err)
 	}
-	d.logger.Info(ctx, "initialized Neo4j GraphRAG",
-		"uri", d.config.GraphRAG.Neo4j.URI)
-
-	// Run schema migrations immediately after the graph client connects.
-	// A constraint-violation error (legacy rows missing tenant_id) is stored in
-	// schemaMigrationErr so the /readyz probe can signal Degraded without
-	// touching liveness. Any other migration error is fatal.
-	migrator := graphragschema.NewSchemaMigrator(graphRAGClient, d.logger.Slog())
-	if err := migrator.Run(ctx); err != nil {
-		if graphragschema.IsConstraintViolationError(err) {
-			// Non-fatal: emit readiness degradation; store for probe.
-			d.logger.Warn(ctx, "Neo4j schema migration has constraint violations — daemon will fail readiness probe until legacy rows are cleaned",
-				"error", err)
-			d.schemaMigrationErr = err
-		} else {
-			return nil, fmt.Errorf("Neo4j schema migration failed: %w", err)
-		}
-	} else {
-		d.logger.Info(ctx, "Neo4j schema migrations applied successfully")
-	}
-
-	// Create the full GraphRAG stack: Provider -> Store -> BridgeAdapter
-	graphRAGBridge, graphRAGQueryBridge, err := d.initGraphRAGBridges(ctx, graphRAGClient)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize GraphRAG bridges (required): %w", err)
-	}
-	d.logger.Info(ctx, "initialized GraphRAG bridges with full store support")
-
-	// Create DiscoveryProcessor for processing agent output discoveries to Neo4j
-	// This enables downstream agents to query discovered hosts, ports, services, etc.
-	graphLoader := loader.NewGraphLoader(graphRAGClient).
-		WithTaxonomyRegistry(taxonomyRegistry)
-	discoveryProc := ingest.NewDiscoveryProcessor(graphLoader, graphRAGClient, d.logger.Slog())
-	discoveryProcessorAdapter := &discoveryProcessorAdapter{processor: discoveryProc}
-	d.logger.Info(ctx, "initialized DiscoveryProcessor for automatic discovery storage")
-
-	// Create compliance signal sink that routes signals through the same
-	// DiscoveryProcessor pipeline (audit-compliance-emitter Requirement 6.1).
-	complianceSink := newComplianceSignalSink(discoveryProc, d.logger.Slog())
-	if complianceSink != nil {
-		d.logger.Info(ctx, "initialized compliance signal sink for harness middleware")
-	}
-
-	// Create cross-mission analytics service backed by the same Neo4j driver.
-	// Wrapped by intelligence.NewGRPCServer in grpc.go for the
-	// IntelligenceService gRPC endpoint (per spec productionize-graph-intelligence).
-	var intelligenceService *intelligence.Service
-	if graphRAGClient != nil && graphRAGClient.Driver() != nil {
-		intelligenceService = intelligence.NewService(intelligence.ServiceConfig{
-			Driver: graphRAGClient.Driver(),
-			Logger: d.logger.Slog(),
-		})
-		d.logger.Info(ctx, "initialized cross-mission intelligence service")
-	} else {
-		d.logger.Warn(ctx, "cross-mission intelligence service disabled: neo4j driver unavailable")
-	}
+	d.logger.Info(ctx, "initialized GraphRAG bridges (per-tenant pool-backed)")
 
 	// Initialize OpenTelemetry observability stack (required for LLM tracing)
 	// This provides unified tracing and metrics to OTLP-compatible backends
@@ -259,15 +182,11 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 		llmRegistry:          llmRegistry,
 		slotManager:          slotManager,
 		memoryManagerFactory: memoryFactory,
-		graphRAGClient:       graphRAGClient,
 		graphRAGBridge:       graphRAGBridge,
 		graphRAGQueryBridge:  graphRAGQueryBridge,
 		otelStack:            otelStack,
 		taxonomyRegistry:     taxonomyRegistry,
-		discoveryProcessor:   discoveryProcessorAdapter,
-		complianceSink:       complianceSink,
 		redisClient:          redisClient,
-		intelligenceService:  intelligenceService,
 	}
 	d.infrastructure = infra
 
@@ -519,18 +438,17 @@ func (d *daemonImpl) checkInfrastructureHealth(ctx context.Context, infra *Infra
 	return health
 }
 
-// initGraphRAGBridges creates the full GraphRAG stack and returns bridge interfaces.
+// initGraphRAGBridges creates pool-backed GraphRAG bridge interfaces.
 //
-// This method creates:
-//  1. An embedder for vector operations (native by default, with fallback to mock)
-//  2. A vector store for semantic similarity search
-//  3. A GraphRAG provider using the Neo4j client
-//  4. A GraphRAG store that orchestrates the provider and embedder
-//  5. A bridge adapter that provides both GraphRAGBridge and GraphRAGQueryBridge interfaces
+// Unlike the old startup path, no shared Neo4j connection is established here.
+// The bridge resolves a per-tenant Neo4j session on each call via the
+// data-plane Pool, using the tenant extracted from the request context.
 //
-// Returns the bridge and query bridge, or an error if initialization fails.
-func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph.Neo4jClient) (harness.GraphRAGBridge, harness.GraphRAGQueryBridge, error) {
-	// Create embedder from config - fail fast if unavailable
+// An embedder is created once at startup (stateless, no Neo4j dependency) and
+// shared across all per-request provider instances for efficiency.
+func (d *daemonImpl) initGraphRAGBridges(ctx context.Context) (harness.GraphRAGBridge, harness.GraphRAGQueryBridge, error) {
+	// Create embedder from config once at startup. The embedder is stateless
+	// (no Neo4j dependency) and safe for concurrent use.
 	emb, err := embedder.CreateEmbedder(d.config.Embedder)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create embedder: %w", err)
@@ -540,64 +458,19 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context, neo4jClient *graph
 		"dimensions", emb.Dimensions(),
 		"model", emb.Model())
 
-	// Create vector store for semantic similarity search
-	// Use dimensions from the embedder to ensure compatibility
+	// Shared in-process vector store — per-tenant namespace prefix is applied
+	// by getVectorStore(ctx) inside LocalGraphRAGProvider on each call.
 	vectorStore := vector.NewEmbeddedVectorStore(emb.Dimensions())
-	d.logger.Info(ctx, "created vector store for GraphRAG",
-		"dimensions", emb.Dimensions(),
-		"type", "embedded")
+	d.logger.Info(ctx, "created shared vector store for GraphRAG",
+		"dimensions", emb.Dimensions())
 
-	// Convert daemon config.GraphRAGConfig to graphrag.GraphRAGConfig
-	// Provider specifies the graph database type (neo4j, neptune, memgraph)
-	// The factory maps these to the appropriate provider implementation
-	// GraphRAG is a required core component - always configured
-	graphRAGConfig := graphrag.GraphRAGConfig{
-		Provider: "neo4j", // Graph database type (required)
-		Neo4j: graphrag.Neo4jConfig{
-			URI:      d.config.GraphRAG.Neo4j.URI,
-			Username: d.config.GraphRAG.Neo4j.Username,
-			Password: d.config.GraphRAG.Neo4j.Password,
-			Database: "neo4j", // Default database
-			PoolSize: d.config.GraphRAG.Neo4j.MaxConnections,
-		},
-		Vector: graphrag.VectorConfig{
-			// Vector search is always enabled as part of GraphRAG
-		},
-	}
-	graphRAGConfig.ApplyDefaults()
-
-	// Create GraphRAG provider from config
-	prov, err := provider.NewProvider(graphRAGConfig)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create GraphRAG provider: %w", err)
-	}
-	d.logger.Info(ctx, "created GraphRAG provider",
-		"type", graphRAGConfig.Provider)
-
-	// Inject vector store into the provider BEFORE initialization
-	// The LocalGraphRAGProvider requires the vector store to be set before Initialize() is called
-	if localProv, ok := prov.(*provider.LocalGraphRAGProvider); ok {
-		localProv.SetVectorStore(vectorStore)
-		d.logger.Info(ctx, "injected vector store into GraphRAG provider")
-	}
-
-	// Initialize the provider (after vector store is set)
-	if err := prov.Initialize(ctx); err != nil {
-		return nil, nil, fmt.Errorf("failed to initialize GraphRAG provider: %w", err)
-	}
-
-	// Create GraphRAG store with the provider and embedder
-	store, err := graphrag.NewGraphRAGStoreWithProvider(graphRAGConfig, emb, prov)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create GraphRAG store: %w", err)
-	}
-	d.logger.Info(ctx, "created GraphRAG store")
-
-	// Create bridge adapter with the store
+	// Create bridge adapter — holds the pool, embedder, and shared vector
+	// store. Neo4j sessions are acquired lazily per-request from pool.
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Neo4jClient:   neo4jClient,
-		GraphRAGStore: store,
-		Logger:        d.logger.WithComponent("graphrag-bridge").Slog(),
+		Pool:        d.pool,
+		Embedder:    emb,
+		VectorStore: vectorStore,
+		Logger:      d.logger.WithComponent("graphrag-bridge").Slog(),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create GraphRAG bridge adapter: %w", err)

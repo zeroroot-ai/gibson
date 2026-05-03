@@ -124,6 +124,51 @@ func (gr *GraphRecord) WithEmbedContent(content string) *GraphRecord {
 	return gr
 }
 
+// NewGraphRAGStoreForSession creates a GraphRAGStore backed by a pre-opened session provider.
+// Unlike NewGraphRAGStoreWithProvider, it does NOT validate Neo4j URI/Username/Password
+// because the session is already open (from datapool.Conn.Neo4j). This is the per-call
+// construction path used by GraphRAGBridgeAdapter.
+//
+// The config's Neo4j fields are ignored; only the query pipeline defaults (TopK, weights,
+// etc.) are applied via ApplyDefaults. All other validation (provider type, vector, embedder)
+// is performed normally.
+func NewGraphRAGStoreForSession(emb embedder.Embedder, prov GraphRAGProvider) (GraphRAGStore, error) {
+	if emb == nil {
+		return nil, NewConfigError("embedder cannot be nil", nil)
+	}
+	if prov == nil {
+		return nil, NewConfigError("provider cannot be nil", nil)
+	}
+
+	// Build a minimal config sufficient for the query pipeline. Neo4j fields are
+	// not required here because the provider is already session-backed.
+	cfg := GraphRAGConfig{
+		Provider: "neo4j",
+		Vector: VectorConfig{
+			IndexType:  "hnsw",
+			Dimensions: emb.Dimensions(),
+			Metric:     "cosine",
+		},
+		Embedder: EmbedderConfig{
+			Provider:   "native",
+			Dimensions: emb.Dimensions(),
+		},
+	}
+	cfg.Query.ApplyDefaults()
+
+	pipeline, err := NewQueryPipelineFromConfig(cfg, emb, nil)
+	if err != nil {
+		return nil, NewConfigError("failed to create query pipeline for session store", err)
+	}
+
+	return &DefaultGraphRAGStore{
+		provider:  prov,
+		processor: pipeline,
+		embedder:  emb,
+		config:    cfg,
+	}, nil
+}
+
 // NewGraphRAGStoreWithProvider creates a new GraphRAGStore with an injected provider.
 // This is the recommended constructor when GraphRAG is enabled, as it allows
 // external creation of the provider via provider.NewProvider() to avoid import cycles.

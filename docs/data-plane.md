@@ -6,8 +6,8 @@ Spec: `.spec-workflow/specs/database-per-tenant-data-plane/`.
 ## What this is
 
 The daemon's data plane is **physically isolated per tenant** across four
-storage backends: a Postgres database, a Neo4j database, a Redis logical DB,
-and a vector-store collection — one of each per tenant. The chokepoint API is
+storage backends: a Postgres database, a dedicated Neo4j instance, a Redis logical
+DB, and a vector-store collection — one of each per tenant. The chokepoint API is
 `Pool.For(ctx, tenant) → *Conn` defined in
 [`internal/datapool/pool.go:102`](../internal/datapool/pool.go) and
 [`internal/datapool/conn.go:28`](../internal/datapool/conn.go). Every
@@ -33,7 +33,7 @@ and no `tenant:` key prefix anywhere in normal handler code.
                        │     .Tenant   auth.TenantID                │
                        │     .Postgres *pgxpool.Pool   ──▶ tenant_<id> DB
                        │     .Redis    *redis.Client   ──▶ logical DB N
-                       │     .Neo4j    SessionWith…    ──▶ tenant_<id> DB
+                       │     .Neo4j    SessionWith…    ──▶ tenant_<id>-neo4j-0
                        │     .Vector   vectordb.Client ──▶ tenant_<id> coll.
                        │     .KEK      []byte (HKDF, 32B, ephemeral)
                        └──────────────┬─────────────────────────────┘
@@ -183,8 +183,11 @@ from non-admin code.
 
 The daemon does **not** provision tenant data planes. The
 [`gibson-tenant-operator`](../../../enterprise/platform/tenant-operator/) owns
-the lifecycle: it creates the per-tenant Postgres database, role, Neo4j
-database, Redis logical-DB allocation, and Qdrant collection. See
+the lifecycle: it creates the per-tenant Postgres database, role, dedicated
+Neo4j StatefulSet, Redis logical-DB allocation, and Qdrant collection. Every
+tenant gets its own `tenant-<id>-neo4j-0` pod at onboarding — there is no
+shared Neo4j cluster; the daemon resolves per-tenant Neo4j sessions
+exclusively via `Pool.For(tenant).Neo4j()`. See
 [`../../../enterprise/platform/tenant-operator/docs/data-plane.md`](../../../enterprise/platform/tenant-operator/docs/data-plane.md).
 
 The daemon is a **read-consumer of provisioning state**. Before returning a

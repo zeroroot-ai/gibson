@@ -258,16 +258,8 @@ func (p *ConnectionPhase) Execute(ctx context.Context) error {
 		}
 	}
 
-	// Close Neo4j connection
-	if p.infrastructure != nil && p.infrastructure.graphRAGClient != nil {
-		p.logger.Info(ctx, "closing Neo4j connection")
-		if err := p.infrastructure.graphRAGClient.Close(ctx); err != nil {
-			p.logger.Warn(ctx, "failed to close Neo4j connection", "error", err)
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-	}
+	// No shared Neo4j client to close. Per-tenant sessions are managed by
+	// the data-plane Pool which is closed in a separate shutdown phase.
 
 	// Close Redis tool execution queue
 	if p.infrastructure != nil && p.infrastructure.redisClient != nil {

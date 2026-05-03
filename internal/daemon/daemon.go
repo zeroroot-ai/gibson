@@ -23,7 +23,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	dbredis "github.com/zero-day-ai/gibson/internal/database/redis"
 	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
@@ -576,10 +575,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			// Spec: per-tenant-data-plane-completion Task 16 / Req 5.5.
 			if d.config.GraphRAG.Neo4j.TenantMode == "multi-db" {
 				// multi-db: shared Enterprise cluster, tenant isolation via named databases.
+				// Credentials for the shared cluster are resolved from Vault (not config fields).
 				poolCfg.Neo4jResolver = datapool.NewMultiDBResolver(
 					d.config.GraphRAG.Neo4j.SharedClusterURI,
-					d.config.GraphRAG.Neo4j.Username,
-					d.config.GraphRAG.Neo4j.Password,
+					"", // username: resolved at runtime from Vault
+					"", // password: resolved at runtime from Vault
 				)
 				d.logger.Info(ctx, "neo4j resolver: multi-db mode configured",
 					"shared_cluster_uri", d.config.GraphRAG.Neo4j.SharedClusterURI)
@@ -608,13 +608,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 						d.logger.Info(ctx, "neo4j resolver: instance mode configured")
 					}
 				}
-			} else if d.config.GraphRAG.Neo4j.URI != "" {
-				// Backward-compat: single URI without resolver. pool_impl.go wraps
-				// this in a staticNeo4jResolver so existing single-tenant deployments
-				// and tests are not broken.
-				poolCfg.Neo4jURI = d.config.GraphRAG.Neo4j.URI
-				poolCfg.Neo4jUser = d.config.GraphRAG.Neo4j.Username
-				poolCfg.Neo4jPassword = d.config.GraphRAG.Neo4j.Password
 			}
 			// Wire TenantPostgres admin coordinates into the pool config so that
 			// pgxpool_per_tenant can connect to the per-tenant admin Postgres and
@@ -700,17 +693,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "configured callback service with event bus")
 	}
 
-	// Configure callback service with GraphLoader for persisting DiscoveryResult to Neo4j
-	if d.infrastructure.graphRAGClient != nil {
-		graphLoader := loader.NewGraphLoader(d.infrastructure.graphRAGClient)
-		d.callback.SetGraphLoader(graphLoader)
-		d.logger.Info(ctx, "configured callback service with GraphLoader for domain node persistence")
-
-		// Create DiscoveryProcessor for automatic discovery storage
-		// Note: Discovery processor is already initialized in infrastructure and set via adapter
-		// See infrastructure.go where discoveryProcessorAdapter is created
-		d.logger.Info(ctx, "DiscoveryProcessor configured via infrastructure")
-	}
+	// GraphLoader is no longer wired at startup. Domain node persistence via the
+	// graph is handled per-call by GraphRAGBridgeAdapter (spec graphrag-tenant-scope).
 
 	// Configure callback service with QueueManager for Redis-based tool execution
 	if d.infrastructure.redisClient != nil {
@@ -860,21 +844,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Debug(ctx, "registered redis readiness check")
 	}
 
-	// Neo4j check - use the Health method on the graphRAG client
-	if d.infrastructure != nil && d.infrastructure.graphRAGClient != nil {
-		graphRAGClient := d.infrastructure.graphRAGClient
-		d.healthServer.RegisterReadinessCheck("neo4j", func(ctx context.Context) sdktypes.HealthStatus {
-			status := graphRAGClient.Health(ctx)
-			// Convert internal types.HealthStatus to SDK types.HealthStatus
-			if status.IsHealthy() {
-				return sdktypes.NewHealthyStatus(status.Message)
-			} else if status.IsDegraded() {
-				return sdktypes.NewDegradedStatus(status.Message, nil)
-			}
-			return sdktypes.NewUnhealthyStatus(status.Message, nil)
-		})
-		d.logger.Debug(ctx, "registered neo4j readiness check")
-	}
+	// No shared Neo4j readiness check. Per-tenant Neo4j connectivity is verified
+	// lazily by Pool.For(tenant) at request time (spec graphrag-tenant-scope).
 
 	// Register shutdown state check - this signals Kubernetes to stop routing traffic during shutdown
 	d.healthServer.RegisterReadinessCheck("shutdown", d.healthState.CheckFunc())

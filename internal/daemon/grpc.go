@@ -29,7 +29,6 @@ import (
 	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
-	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
 	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
@@ -40,7 +39,6 @@ import (
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
-	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zero-day-ai/sdk/auth"
 
 	"github.com/zero-day-ai/gibson/internal/authz/registry"
@@ -776,12 +774,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Per spec productionize-graph-intelligence Task 2, this fills the
 	// long-missing daemon-side endpoint that the SDK proxy was always
 	// degrading against (Unimplemented fallback).
-	if d.infrastructure != nil && d.infrastructure.intelligenceService != nil {
-		intelligencepb.RegisterIntelligenceServiceServer(srv, intelligence.NewGRPCServer(d.infrastructure.intelligenceService))
-		d.logger.Info(ctx, "registered IntelligenceService gRPC endpoint")
-	} else {
-		d.logger.Warn(ctx, "IntelligenceService gRPC endpoint not registered: intelligence service unavailable (likely no neo4j driver)")
-	}
+	// IntelligenceService gRPC endpoint: intelligence service was backed by the
+	// shared Neo4j driver which has been removed (spec graphrag-tenant-scope).
+	// Per-tenant intelligence will be re-enabled in a follow-up spec.
+	d.logger.Warn(ctx, "IntelligenceService gRPC endpoint not registered: intelligence service unavailable (shared Neo4j removed)")
 
 	// Initialize and register the ComponentService on the same gRPC port.
 	//

@@ -111,7 +111,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// harness chain so every harness call emits a compliance_signal
 		// node to Neo4j. The sink adapts the DiscoveryProcessor.
 		// When nil (no graphRAG available), the middleware is skipped.
-		ComplianceSink: d.infrastructure.complianceSink,
+		ComplianceSink: nil, // shared-Neo4j-backed compliance sink removed (spec graphrag-tenant-scope)
 
 		// ToolRunnerEnabled flips CallToolProto's sandboxed lookup path
 		// from static sandbox.Registry to dynamic ComponentRegistry
@@ -138,9 +138,8 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// responses populate the knowledge graph alongside live-callback tools.
 		// nil when GraphRAG is disabled; sandboxed.Executor tolerates nil.
 		var sbxDiscovery ingest.DiscoveryProcessor
-		if d.infrastructure != nil && d.infrastructure.discoveryProcessor != nil {
-			sbxDiscovery = d.infrastructure.discoveryProcessor.processor
-		}
+		// discoveryProcessor removed from infrastructure (spec graphrag-tenant-scope);
+		// sbxDiscovery remains nil — sandboxed.Executor tolerates nil.
 		execer, err := NewSetecSandboxedExecutor(d.config.Sandbox, sandboxTracer, sandboxLogger, sbxDiscovery)
 		if err != nil {
 			d.logger.Warn(ctx, "sandboxed tool executor construction failed; continuing without sandboxed dispatch",

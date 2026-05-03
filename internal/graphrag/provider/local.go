@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 	"github.com/zero-day-ai/gibson/internal/graphrag"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
@@ -49,6 +50,31 @@ func NewLocalProvider(config graphrag.GraphRAGConfig) (*LocalGraphRAGProvider, e
 		config:      config,
 		initialized: false,
 	}, nil
+}
+
+// NewLocalGraphRAGProviderWithSession constructs a LocalGraphRAGProvider that uses a
+// pre-opened neo4j.SessionWithContext instead of opening a connection from a URI.
+// The provider is marked initialized so that Initialize(ctx) is a no-op — callers
+// using this constructor MUST NOT call Initialize.
+//
+// This is the per-call construction path used by GraphRAGBridgeAdapter: the session
+// comes from datapool.Conn.Neo4j (managed by the pool) and the vector store is
+// per-tenant scoped. No GraphRAGConfig is required; all provider-level defaults apply.
+//
+// Thread safety: the returned provider is not safe for concurrent use. Callers should
+// construct one provider per request and discard it after use.
+func NewLocalGraphRAGProviderWithSession(
+	session neo4j.SessionWithContext,
+	vectorStore vector.VectorStore,
+) *LocalGraphRAGProvider {
+	p := &LocalGraphRAGProvider{
+		config:      graphrag.GraphRAGConfig{Provider: "neo4j"},
+		graphClient: graph.NewSessionGraphClient(session),
+		vectorStore: vectorStore,
+		initialized: true,
+		graphHealthy: true,
+	}
+	return p
 }
 
 // Initialize establishes connections to Neo4j and vector store.

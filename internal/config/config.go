@@ -369,36 +369,24 @@ type LangfuseConfig struct {
 	SecretKey string `mapstructure:"secret_key" yaml:"secret_key"`
 }
 
-// Neo4jConfig contains Neo4j connection settings.
+// Neo4jConfig contains Neo4j connection settings for per-tenant GraphRAG.
 //
 // # TenantMode semantics
 //
 // Two modes control how the daemon resolves Neo4j endpoints:
 //
 //   - "instance" (default): one Neo4j StatefulSet per tenant, provisioned by
-//     the tenant-operator. The URI field is the optional bootstrap-test URI used
-//     only to verify cluster reachability at startup; it is NOT used for
-//     per-tenant session routing. Per-tenant URIs come from the endpoint registry
-//     (tenant_neo4j_endpoints Postgres table) via instanceResolver.
+//     the tenant-operator. Per-tenant URIs come from the endpoint registry
+//     (tenant_neo4j_endpoints Postgres table) via instanceResolver. No shared
+//     cluster is required; the daemon resolves Neo4j endpoints at request time.
 //
-//   - "multi-db": a shared Enterprise cluster. URI is unused; SharedClusterURI
-//     is the bolt address for the cluster, and each tenant uses the Neo4j
-//     database named tenant_<sanitized>. Enabled via multiDBResolver.
+//   - "multi-db": a shared Enterprise cluster. SharedClusterURI is the bolt
+//     address for the cluster, and each tenant uses the Neo4j database named
+//     tenant_<sanitized>. Enabled via multiDBResolver.
 //
-// URI/Username/Password are kept for backward compatibility and are used in
-// "multi-db" mode as the shared cluster credentials (Username/Password) and in
-// legacy single-tenant deployments.
+// There is no startup-time shared Neo4j connection. The daemon connects to
+// per-tenant Neo4j instances lazily, at the first request for each tenant.
 type Neo4jConfig struct {
-	// URI is the bolt:// connection string.
-	// instance mode: optional bootstrap-test URI (not used for session routing).
-	// multi-db mode: unused (replaced by SharedClusterURI).
-	// Legacy single-tenant: used directly.
-	URI               string        `mapstructure:"uri" yaml:"uri"`
-	Username          string        `mapstructure:"username" yaml:"username"`
-	Password          string        `mapstructure:"password" yaml:"password"`
-	MaxConnections    int           `mapstructure:"max_connections" yaml:"max_connections"`
-	ConnectionTimeout time.Duration `mapstructure:"connection_timeout" yaml:"connection_timeout"`
-
 	// TenantMode controls per-tenant endpoint resolution.
 	// Valid values: "instance" (default), "multi-db".
 	// validate:"oneof=instance multi-db" — enforced by config validator.

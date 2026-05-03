@@ -688,3 +688,35 @@ func TestLocalGraphRAGProvider_PerTenantVectorIsolation(t *testing.T) {
 	vsNoTenant := p.getVectorStore(context.Background())
 	assert.Same(t, sharedStore, vsNoTenant, "no-tenant context must return the shared store directly")
 }
+
+// TestNewLocalGraphRAGProviderWithSession exercises the session-bypass constructor
+// (D4 — spec graphrag-tenant-scope). The provider must be marked initialized and
+// graphHealthy without calling Initialize(ctx).
+func TestNewLocalGraphRAGProviderWithSession(t *testing.T) {
+	vs := newMockVectorStore()
+	prov := NewLocalGraphRAGProviderWithSession(nil, vs)
+
+	// Must be ready to accept operations without Initialize being called.
+	assert.True(t, prov.initialized, "NewLocalGraphRAGProviderWithSession must set initialized=true")
+	assert.True(t, prov.graphHealthy, "NewLocalGraphRAGProviderWithSession must set graphHealthy=true")
+	assert.Equal(t, "neo4j", prov.config.Provider)
+
+	// Initialize must be a no-op (idempotent guard).
+	err := prov.Initialize(context.Background())
+	assert.NoError(t, err, "Initialize on a session-bypass provider must be a no-op")
+
+	// Vector store must be the one supplied at construction.
+	vsReturned := prov.getVectorStore(context.Background())
+	assert.Equal(t, vs, vsReturned, "vector store must be the one passed at construction")
+}
+
+// TestNewLocalGraphRAGProviderWithSession_NilSession verifies that a nil session
+// is accepted (SessionGraphClient is nil-safe) and the provider is still operational.
+func TestNewLocalGraphRAGProviderWithSession_NilSession(t *testing.T) {
+	prov := NewLocalGraphRAGProviderWithSession(nil, nil)
+	assert.True(t, prov.initialized, "nil session must still mark provider as initialized")
+	// VectorSearch is unavailable without a vector store — that's acceptable.
+	ctx := context.Background()
+	_, err := prov.VectorSearch(ctx, []float64{0.1, 0.2}, 5, nil)
+	assert.Error(t, err, "VectorSearch with no vector store must return an error")
+}

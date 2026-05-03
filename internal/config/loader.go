@@ -331,19 +331,11 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
-	// Apply GraphRAG/Neo4j config interpolation
+	// Apply GraphRAG/Neo4j config interpolation (tenant_mode and shared_cluster_uri only;
+	// URI/username/password were removed — the daemon no longer holds a startup-time shared
+	// Neo4j connection; per-tenant URIs are resolved lazily by the Neo4jEndpointResolver).
 	if graphrag, ok := interpolated["graphrag"].(map[string]interface{}); ok {
 		if neo4j, ok := graphrag["neo4j"].(map[string]interface{}); ok {
-			if uri, ok := neo4j["uri"].(string); ok {
-				cfg.GraphRAG.Neo4j.URI = interpolateString(uri)
-			}
-			if username, ok := neo4j["username"].(string); ok {
-				cfg.GraphRAG.Neo4j.Username = interpolateString(username)
-			}
-			if password, ok := neo4j["password"].(string); ok {
-				cfg.GraphRAG.Neo4j.Password = interpolateString(password)
-			}
-			// TenantMode and SharedClusterURI added by spec per-tenant-data-plane-completion Task 11.
 			if tenantMode, ok := neo4j["tenant_mode"].(string); ok {
 				cfg.GraphRAG.Neo4j.TenantMode = interpolateString(tenantMode)
 			}

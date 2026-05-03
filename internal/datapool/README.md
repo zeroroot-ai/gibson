@@ -111,3 +111,28 @@ from the per-tenant Vault namespace at resolve time.
 Crossover for Neo4j sits around 75-100 tenants; revisit at fleet size 75.
 Runbook: [`MIGRATION-NEO4J.md`](./MIGRATION-NEO4J.md) — five steps,
 config-swap + per-tenant export/import, no code rewrite.
+
+---
+
+## GraphRAG per-call construction trade-off
+
+Every harness GraphRAG operation (`harness.GraphRAGBridge`,
+`harness.GraphRAGQueryBridge`) constructs an ephemeral `LocalGraphRAGProvider`
++ `GraphRAGStore` per call, bound to the calling tenant's Neo4j session
+resolved via `Pool.For(tenant).Neo4j()`. The bridge holds no long-lived
+provider — it holds the pool, the embedder, and the taxonomy registry, and
+rebuilds the per-tenant slice on each invocation.
+
+The cost is dominated by `NewSession` (cheap — no I/O, just a struct on the
+cached driver) plus provider/store struct construction (cheap, in-process,
+no allocation hot path). The expensive part — the TCP + Bolt handshake to
+the per-tenant Neo4j — happens **once per tenant**, amortized by the
+driver-level cache in [`neo4j_per_tenant.go`](./neo4j_per_tenant.go). After
+the first call for a tenant, every subsequent call reuses the cached
+driver.
+
+If profiling ever shows per-call provider/store construction is hot in
+production (it isn't today), the future spec `graphrag-tenant-cache` adds
+a per-tenant provider cache with TTL eviction. Until then the per-call
+shape is intentional: it keeps the bridge a thin tenant-resolver and avoids
+a second cache layer to reason about.
