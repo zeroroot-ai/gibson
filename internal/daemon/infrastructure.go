@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -467,7 +468,11 @@ func (d *daemonImpl) initGraphRAGBridges(ctx context.Context) (harness.GraphRAGB
 	// Create bridge adapter — holds the pool, embedder, and shared vector
 	// store. Neo4j sessions are acquired lazily per-request from pool.
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Pool:        d.pool,
+		// Deferred pool resolution — daemon's pool initializes after this
+		// adapter is constructed (pool depends on key provider + secrets
+		// broker, which come up later in Start). The closure captures &d
+		// and returns the current pool at call time.
+		PoolGetter:  func() datapool.Pool { return d.pool },
 		Embedder:    emb,
 		VectorStore: vectorStore,
 		Logger:      d.logger.WithComponent("graphrag-bridge").Slog(),

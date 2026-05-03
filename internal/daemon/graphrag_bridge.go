@@ -26,10 +26,18 @@ import (
 var errNoTenantInContext = errors.New("graphrag bridge: no tenant in context (FailedPrecondition)")
 
 // GraphRAGBridgeConfig holds the dependencies for GraphRAGBridgeAdapter.
-// All per-call Neo4j access is resolved through Pool; no shared driver is held.
+// All per-call Neo4j access is resolved through PoolGetter; no shared driver
+// is held. PoolGetter is a deferred accessor because the daemon's pool is
+// initialized later in Start() than the bridge — pool init depends on the
+// key provider + secrets broker, which come up after infrastructure init.
 type GraphRAGBridgeConfig struct {
-	// Pool is the per-tenant data-plane pool. Required.
-	Pool datapool.Pool
+	// PoolGetter returns the per-tenant data-plane pool. Required. The getter
+	// is invoked at request time (not at adapter construction) so callers may
+	// pass a closure that reads `&d.pool` even while pool is still nil at
+	// adapter-construction time. The getter MAY return nil if the pool has
+	// not yet initialized; the bridge surfaces this as a typed Unavailable
+	// error to the caller.
+	PoolGetter func() datapool.Pool
 
 	// Embedder generates vector embeddings. Shared across all tenants.
 	Embedder embedder.Embedder
@@ -53,7 +61,7 @@ type GraphRAGBridgeConfig struct {
 //
 // Thread-safety: safe for concurrent use. Each call is fully independent.
 type GraphRAGBridgeAdapter struct {
-	pool        datapool.Pool
+	getPool     func() datapool.Pool
 	embedder    embedder.Embedder
 	vectorStore vector.VectorStore
 	logger      *slog.Logger
@@ -63,10 +71,15 @@ type GraphRAGBridgeAdapter struct {
 	asyncBridge *asyncBridge
 }
 
+// errPoolNotReady is returned when the bridge is invoked before the daemon's
+// per-tenant pool has been initialized. Maps to codes.Unavailable at the gRPC
+// layer — transient, retry-safe.
+var errPoolNotReady = errors.New("graphrag bridge: data-plane pool not yet initialized (Unavailable)")
+
 // NewGraphRAGBridgeAdapter creates a new per-call GraphRAGBridgeAdapter.
 func NewGraphRAGBridgeAdapter(cfg GraphRAGBridgeConfig) (*GraphRAGBridgeAdapter, error) {
-	if cfg.Pool == nil {
-		return nil, fmt.Errorf("graphrag bridge: Pool cannot be nil")
+	if cfg.PoolGetter == nil {
+		return nil, fmt.Errorf("graphrag bridge: PoolGetter cannot be nil")
 	}
 	if cfg.Embedder == nil {
 		return nil, fmt.Errorf("graphrag bridge: Embedder cannot be nil")
@@ -79,7 +92,7 @@ func NewGraphRAGBridgeAdapter(cfg GraphRAGBridgeConfig) (*GraphRAGBridgeAdapter,
 	logger = logger.With("component", "graphrag_bridge_adapter")
 
 	a := &GraphRAGBridgeAdapter{
-		pool:        cfg.Pool,
+		getPool:     cfg.PoolGetter,
 		embedder:    cfg.Embedder,
 		vectorStore: cfg.VectorStore,
 		logger:      logger,
@@ -112,7 +125,12 @@ func (a *GraphRAGBridgeAdapter) buildEphemeralQueryBridge(ctx context.Context) (
 		return nil, func() {}, errNoTenantInContext
 	}
 
-	conn, poolErr := a.pool.For(ctx, tenant)
+	pool := a.getPool()
+	if pool == nil {
+		return nil, func() {}, errPoolNotReady
+	}
+
+	conn, poolErr := pool.For(ctx, tenant)
 	if poolErr != nil {
 		return nil, func() {}, poolErr
 	}
@@ -275,8 +293,8 @@ func (a *GraphRAGBridgeAdapter) QueryStructured(ctx context.Context, query sdkgr
 // Health implements harness.GraphRAGQueryBridge. Returns healthy when the adapter
 // is configured; actual Neo4j health is per-tenant and checked at call time.
 func (a *GraphRAGBridgeAdapter) Health(_ context.Context) types.HealthStatus {
-	if a.pool == nil {
-		return types.Unhealthy("graphrag bridge: pool not configured")
+	if a.getPool() == nil {
+		return types.Unhealthy("graphrag bridge: pool not yet initialized")
 	}
 	return types.Healthy("graphrag bridge: pool-backed, per-tenant (no shared Neo4j)")
 }

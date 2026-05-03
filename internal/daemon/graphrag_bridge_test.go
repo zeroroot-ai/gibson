@@ -60,7 +60,7 @@ func TestGraphRAGBridgeAdapter_MissingTenant(t *testing.T) {
 
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Pool:     &mockPool{conn: minimalConn()},
+		PoolGetter: func() datapool.Pool { return &mockPool{conn: minimalConn()} },
 		Embedder: emb,
 		Logger:   slog.Default(),
 	})
@@ -99,7 +99,7 @@ func TestGraphRAGBridgeAdapter_UnprovisionedTenant(t *testing.T) {
 
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Pool:     pool,
+		PoolGetter: func() datapool.Pool { return pool },
 		Embedder: emb,
 		Logger:   slog.Default(),
 	})
@@ -127,7 +127,7 @@ func TestGraphRAGBridgeAdapter_TransientUnavailable(t *testing.T) {
 
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Pool:     pool,
+		PoolGetter: func() datapool.Pool { return pool },
 		Embedder: emb,
 		Logger:   slog.Default(),
 	})
@@ -152,7 +152,7 @@ func TestGraphRAGBridgeAdapter_Health(t *testing.T) {
 
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Pool:     &mockPool{conn: minimalConn()},
+		PoolGetter: func() datapool.Pool { return &mockPool{conn: minimalConn()} },
 		Embedder: emb,
 		Logger:   slog.Default(),
 	})
@@ -173,7 +173,7 @@ func TestGraphRAGBridgeAdapter_AsyncBridge_MissingTenant(t *testing.T) {
 
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Pool:     &mockPool{conn: minimalConn()},
+		PoolGetter: func() datapool.Pool { return &mockPool{conn: minimalConn()} },
 		Embedder: emb,
 		Logger:   slog.Default(),
 	})
@@ -204,7 +204,7 @@ func TestGraphRAGBridgeAdapter_InterfaceShapes(t *testing.T) {
 
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Pool:     &mockPool{conn: minimalConn()},
+		PoolGetter: func() datapool.Pool { return &mockPool{conn: minimalConn()} },
 		Embedder: emb,
 	})
 	if err != nil {
@@ -223,17 +223,17 @@ func TestGraphRAGBridgeAdapter_InterfaceShapes(t *testing.T) {
 	}
 }
 
-// TestNewGraphRAGBridgeAdapter_NilPool verifies that a nil Pool returns an error.
-func TestNewGraphRAGBridgeAdapter_NilPool(t *testing.T) {
+// TestNewGraphRAGBridgeAdapter_NilPoolGetter verifies that a nil PoolGetter returns an error.
+func TestNewGraphRAGBridgeAdapter_NilPoolGetter(t *testing.T) {
 	t.Parallel()
 
 	emb := embedder.NewMockEmbedder()
 	_, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Pool:     nil,
-		Embedder: emb,
+		PoolGetter: nil,
+		Embedder:   emb,
 	})
 	if err == nil {
-		t.Fatal("expected error for nil Pool; got nil")
+		t.Fatal("expected error for nil PoolGetter; got nil")
 	}
 }
 
@@ -242,10 +242,30 @@ func TestNewGraphRAGBridgeAdapter_NilEmbedder(t *testing.T) {
 	t.Parallel()
 
 	_, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
-		Pool:     &mockPool{},
-		Embedder: nil,
+		PoolGetter: func() datapool.Pool { return &mockPool{} },
+		Embedder:   nil,
 	})
 	if err == nil {
 		t.Fatal("expected error for nil Embedder; got nil")
+	}
+}
+
+// TestGraphRAGBridge_PoolNotReady verifies the bridge returns errPoolNotReady
+// when the getter returns nil at request time (race against pool init).
+func TestGraphRAGBridge_PoolNotReady(t *testing.T) {
+	t.Parallel()
+
+	emb := embedder.NewMockEmbedder()
+	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
+		PoolGetter: func() datapool.Pool { return nil }, // never ready
+		Embedder:   emb,
+	})
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
+	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("zero-day-ai"))
+	_, _, err = adapter.buildEphemeralQueryBridge(ctx)
+	if !errors.Is(err, errPoolNotReady) {
+		t.Fatalf("expected errPoolNotReady; got %v", err)
 	}
 }
