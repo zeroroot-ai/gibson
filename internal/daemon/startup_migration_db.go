@@ -11,8 +11,10 @@ import (
 )
 
 // connectTimeout is the maximum time the startup migration check will wait
-// when probing individual tenant databases. Keeps daemon startup snappy even
-// when some tenant DBs are temporarily unreachable.
+// when probing individual tenant Postgres databases. Keeps daemon startup
+// snappy even when some tenant DBs are temporarily unreachable.
+// Note: Neo4j timeout is controlled by the pool's AcquireTimeout; this
+// constant applies only to the direct Postgres SQL path.
 const connectTimeout = 3 * time.Second
 
 // queryPostgresVersion connects to the given DSN and reads the highest version
@@ -42,34 +44,15 @@ func queryPostgresVersion(ctx context.Context, dsn string) (uint, error) {
 	return version, nil
 }
 
-// queryNeo4jVersion connects to Neo4j and reads the version property from the
-// singleton :_SchemaVersion node in the given database. Returns 0 when the
-// node does not exist.
-func queryNeo4jVersion(ctx context.Context, uri, user, password, dbName string) (uint, error) {
-	if uri == "" {
-		return 0, nil
-	}
-	auth := neo4j.BasicAuth(user, password, "")
-	driver, err := neo4j.NewDriverWithContext(uri, auth)
-	if err != nil {
-		return 0, fmt.Errorf("startup migration check: neo4j driver: %w", err)
-	}
-	defer driver.Close(ctx)
-
-	// Use a short timeout for the connectivity check.
-	verifyCtx, cancel := context.WithTimeout(ctx, connectTimeout)
-	defer cancel()
-	if err := driver.VerifyConnectivity(verifyCtx); err != nil {
-		// Neo4j unreachable — not fatal; treat as 0 applied.
-		return 0, nil
-	}
-
-	session := driver.NewSession(ctx, neo4j.SessionConfig{
-		DatabaseName: dbName,
-		AccessMode:   neo4j.AccessModeRead,
-	})
-	defer session.Close(ctx)
-
+// queryNeo4jVersionViaSession reads the version property from the singleton
+// :_SchemaVersion node using a pre-opened per-tenant session. The session
+// lifecycle is owned by the caller (via conn.Release); this function does not
+// close the session.
+//
+// Returns 0 when the node does not exist (no migrations applied yet). The
+// caller (pgAndNeo4jVersionReader.Neo4jVersion) controls the context timeout
+// via the pool's AcquireTimeout; no additional timeout is added here.
+func queryNeo4jVersionViaSession(ctx context.Context, session neo4j.SessionWithContext) (uint, error) {
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, err := tx.Run(ctx, "MATCH (v:_SchemaVersion) RETURN v.version AS version LIMIT 1", nil)
 		if err != nil {

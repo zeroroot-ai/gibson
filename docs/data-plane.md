@@ -236,6 +236,29 @@ The runner uses the admin pool for tenant enumeration; the
 analyzer allowlists `cmd/gibson-migrate/` for raw pgx and neo4j-go-driver
 imports.
 
+## Per-tenant intelligence + drift detection
+
+Spec: `graphrag-intelligence-tenant-scope` (closes the last shared-Neo4j coupling
+points after `graphrag-tenant-scope`).
+
+Three cross-mission consumers route through `pool.For(tenant).Neo4j()` rather
+than a shared cluster: the IntelligenceService gRPC handlers
+([`internal/daemon/intelligence_service.go`](../internal/daemon/intelligence_service.go),
+five RPCs — `GetRecurringVulnerabilities`, `GetRemediationMetrics`,
+`GetAssetRiskScore`, `GetAttackPatterns`, `GetSimilarTargets` — each
+constructs a per-tenant `*graph.SessionGraphClient` per call); the startup
+migration drift gate
+([`internal/daemon/startup_migration_check.go`](../internal/daemon/startup_migration_check.go),
+which iterates tenants via the Tenant CRD list with a worker-pool of
+configurable concurrency, default 4, max 16, total deadline 30 s, surfacing
+drift as `gibson_tenant_neo4j_migration_drift{tenant}`); and the orchestrator
+Observer's graph-intelligence enrichment
+([`internal/orchestrator/adapter.go`](../internal/orchestrator/adapter.go),
+which dispatches through the `graph.GraphClient` interface — both
+`*Neo4jClient` and `*SessionGraphClient` implement `ExecuteRead`/`ExecuteWrite`
+— so the per-tenant session is the production path with no type-assertion
+fallback). All three follow Pattern B per-call construction.
+
 ## Mission / finding / run stores — per-tenant cutover complete
 
 Spec: `daemon-mission-finding-per-tenant-cutover` (2026-04-26).

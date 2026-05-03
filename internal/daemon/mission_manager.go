@@ -764,12 +764,12 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	observerOpts := []orchestrator.ObserverOption{
 		orchestrator.WithInventoryBuilder(inventoryBuilder),
 	}
-	if graphClient != nil && graphClient.Driver() != nil {
+	if graphClient != nil {
 		observerOpts = append(observerOpts, orchestrator.WithGraphQueries(
-			orchestrator.NewNeo4jGraphQueries(graphClient.Driver(), m.logger),
+			orchestrator.NewNeo4jGraphQueries(graphClient, m.logger),
 		))
 	} else {
-		m.logger.Warn("graph intelligence disabled for mission: graphrag client does not expose a live neo4j driver",
+		m.logger.Warn("graph intelligence disabled for mission: no graphrag client configured",
 			"mission_id", missionID)
 	}
 	observer := orchestrator.NewObserver(missionQueries, executionQueries, observerOpts...)

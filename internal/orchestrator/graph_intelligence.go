@@ -28,6 +28,7 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -208,7 +209,7 @@ type GraphContext struct {
 // Neo4jGraphQueries implements GraphQueries using Neo4j Cypher queries.
 // It provides efficient graph queries with OpenTelemetry instrumentation and graceful degradation.
 type Neo4jGraphQueries struct {
-	driver  neo4j.DriverWithContext
+	client  graph.GraphClient
 	tracer  trace.Tracer
 	logger  *slog.Logger
 	metrics *graphQueryMetrics
@@ -297,25 +298,27 @@ func (m *graphQueryMetrics) register() error {
 // NewNeo4jGraphQueries creates a new Neo4jGraphQueries instance.
 //
 // Parameters:
-//   - driver: Neo4j driver for executing queries
-//   - logger: Structured logger for diagnostic output
+//   - client: GraphClient used to execute read queries; may be a Neo4jClient
+//     (shared driver pool) or a SessionGraphClient (per-tenant session).
+//   - logger: Structured logger for diagnostic output.
 //
 // Returns:
-//   - GraphQueries implementation ready to execute graph intelligence queries
-func NewNeo4jGraphQueries(driver neo4j.DriverWithContext, logger *slog.Logger) GraphQueries {
-	return NewNeo4jGraphQueriesWithMetrics(driver, logger, nil)
+//   - GraphQueries implementation ready to execute graph intelligence queries.
+func NewNeo4jGraphQueries(client graph.GraphClient, logger *slog.Logger) GraphQueries {
+	return NewNeo4jGraphQueriesWithMetrics(client, logger, nil)
 }
 
 // NewNeo4jGraphQueriesWithMetrics creates a new Neo4jGraphQueries instance with custom metrics registerer.
 //
 // Parameters:
-//   - driver: Neo4j driver for executing queries
-//   - logger: Structured logger for diagnostic output
-//   - registerer: Prometheus registerer for metrics (nil uses prometheus.DefaultRegisterer)
+//   - client: GraphClient used to execute read queries; may be a Neo4jClient
+//     (shared driver pool) or a SessionGraphClient (per-tenant session).
+//   - logger: Structured logger for diagnostic output.
+//   - registerer: Prometheus registerer for metrics (nil uses prometheus.DefaultRegisterer).
 //
 // Returns:
-//   - GraphQueries implementation ready to execute graph intelligence queries with metrics
-func NewNeo4jGraphQueriesWithMetrics(driver neo4j.DriverWithContext, logger *slog.Logger, registerer prometheus.Registerer) GraphQueries {
+//   - GraphQueries implementation ready to execute graph intelligence queries with metrics.
+func NewNeo4jGraphQueriesWithMetrics(client graph.GraphClient, logger *slog.Logger, registerer prometheus.Registerer) GraphQueries {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -326,7 +329,7 @@ func NewNeo4jGraphQueriesWithMetrics(driver neo4j.DriverWithContext, logger *slo
 	}
 
 	return &Neo4jGraphQueries{
-		driver:  driver,
+		client:  client,
 		tracer:  otel.Tracer("gibson.orchestrator.graph_queries"),
 		logger:  logger,
 		metrics: metrics,
@@ -369,28 +372,79 @@ func (q *Neo4jGraphQueries) GetTargetHistory(ctx context.Context, targetID strin
 		"target_id": targetID,
 	}
 
-	session := q.driver.NewSession(queryCtx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(queryCtx)
+	raw, execErr := q.client.ExecuteRead(queryCtx, func(tx neo4j.ManagedTransaction) (any, error) {
+		result, err := tx.Run(queryCtx, cypher, params)
+		if err != nil {
+			return nil, err
+		}
+		if !result.Next(queryCtx) {
+			return nil, nil
+		}
+		record := result.Record()
 
-	result, err := session.Run(queryCtx, cypher, params)
-	if err != nil {
+		scanCount := int64(0)
+		if val, ok := record.Get("scan_count"); ok {
+			if count, ok := val.(int64); ok {
+				scanCount = count
+			}
+		}
+		if scanCount == 0 {
+			return nil, nil
+		}
+
+		history := &TargetHistory{
+			TargetID:          targetID,
+			PreviousScanCount: int(scanCount),
+		}
+		if val, ok := record.Get("last_scan"); ok && val != nil {
+			if dateStr, ok := val.(string); ok {
+				if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
+					history.LastScanDate = &t
+				}
+			}
+		}
+		if val, ok := record.Get("total_findings"); ok {
+			if count, ok := val.(int64); ok {
+				history.TotalFindings = int(count)
+			}
+		}
+		if val, ok := record.Get("critical_count"); ok {
+			if count, ok := val.(int64); ok {
+				history.CriticalCount = int(count)
+			}
+		}
+		if val, ok := record.Get("high_count"); ok {
+			if count, ok := val.(int64); ok {
+				history.HighCount = int(count)
+			}
+		}
+		if val, ok := record.Get("medium_count"); ok {
+			if count, ok := val.(int64); ok {
+				history.MediumCount = int(count)
+			}
+		}
+		if val, ok := record.Get("low_count"); ok {
+			if count, ok := val.(int64); ok {
+				history.LowCount = int(count)
+			}
+		}
+		return history, nil
+	})
+
+	if execErr != nil {
 		q.logger.WarnContext(ctx, "Failed to query target history",
-			"error", err,
+			"error", execErr,
 			"target_id", targetID,
 		)
-		span.RecordError(err)
-		span.SetAttributes(attribute.String("error", err.Error()))
-
-		// Record error metrics
+		span.RecordError(execErr)
+		span.SetAttributes(attribute.String("error", execErr.Error()))
 		q.metrics.queriesTotal.WithLabelValues(queryType, "error").Inc()
 		q.metrics.queryErrors.WithLabelValues(queryType, "query_execution").Inc()
 		q.metrics.queryDuration.WithLabelValues(queryType).Observe(time.Since(startTime).Seconds())
-
-		return nil, nil // Graceful degradation - return nil on error
+		return nil, nil // Graceful degradation
 	}
 
-	if !result.Next(queryCtx) {
-		// No history found - record as success with zero results
+	if raw == nil {
 		duration := time.Since(startTime).Seconds()
 		q.metrics.queriesTotal.WithLabelValues(queryType, "success").Inc()
 		q.metrics.queryDuration.WithLabelValues(queryType).Observe(duration)
@@ -398,65 +452,9 @@ func (q *Neo4jGraphQueries) GetTargetHistory(ctx context.Context, targetID strin
 		return nil, nil
 	}
 
-	record := result.Record()
-
-	// Extract scan count
-	scanCount := int64(0)
-	if val, ok := record.Get("scan_count"); ok {
-		if count, ok := val.(int64); ok {
-			scanCount = count
-		}
-	}
-
-	// If no scans found, return nil
-	if scanCount == 0 {
-		return nil, nil
-	}
-
-	history := &TargetHistory{
-		TargetID:          targetID,
-		PreviousScanCount: int(scanCount),
-	}
-
-	// Extract last scan date
-	if val, ok := record.Get("last_scan"); ok && val != nil {
-		if dateStr, ok := val.(string); ok {
-			if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
-				history.LastScanDate = &t
-			}
-		}
-	}
-
-	// Extract finding counts
-	if val, ok := record.Get("total_findings"); ok {
-		if count, ok := val.(int64); ok {
-			history.TotalFindings = int(count)
-		}
-	}
-	if val, ok := record.Get("critical_count"); ok {
-		if count, ok := val.(int64); ok {
-			history.CriticalCount = int(count)
-		}
-	}
-	if val, ok := record.Get("high_count"); ok {
-		if count, ok := val.(int64); ok {
-			history.HighCount = int(count)
-		}
-	}
-	if val, ok := record.Get("medium_count"); ok {
-		if count, ok := val.(int64); ok {
-			history.MediumCount = int(count)
-		}
-	}
-	if val, ok := record.Get("low_count"); ok {
-		if count, ok := val.(int64); ok {
-			history.LowCount = int(count)
-		}
-	}
-
-	// Record success metrics
+	history := raw.(*TargetHistory)
 	duration := time.Since(startTime).Seconds()
-	resultCount := 1 // We return a single TargetHistory object
+	resultCount := 1
 
 	span.SetAttributes(
 		attribute.Int("scan_count", history.PreviousScanCount),
@@ -518,70 +516,70 @@ func (q *Neo4jGraphQueries) GetPriorFindings(ctx context.Context, domain string,
 		"limit":  int64(limit),
 	}
 
-	session := q.driver.NewSession(queryCtx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(queryCtx)
+	raw, execErr := q.client.ExecuteRead(queryCtx, func(tx neo4j.ManagedTransaction) (any, error) {
+		result, err := tx.Run(queryCtx, cypher, params)
+		if err != nil {
+			return nil, err
+		}
+		findings := []HistoricalFinding{}
+		for result.Next(queryCtx) {
+			record := result.Record()
+			finding := HistoricalFinding{}
+			if val, ok := record.Get("id"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					finding.ID = str
+				}
+			}
+			if val, ok := record.Get("title"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					finding.Title = str
+				}
+			}
+			if val, ok := record.Get("severity"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					finding.Severity = str
+				}
+			}
+			if val, ok := record.Get("category"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					finding.Category = str
+				}
+			}
+			if val, ok := record.Get("target_entity"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					finding.TargetEntity = str
+				}
+			}
+			if val, ok := record.Get("discovered_at"); ok && val != nil {
+				if dateStr, ok := val.(string); ok {
+					if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
+						finding.DiscoveredAt = t
+					}
+				}
+			}
+			findings = append(findings, finding)
+		}
+		return findings, nil
+	})
 
-	result, err := session.Run(queryCtx, cypher, params)
-	if err != nil {
+	if execErr != nil {
 		q.logger.WarnContext(ctx, "Failed to query prior findings",
-			"error", err,
+			"error", execErr,
 			"domain", domain,
 		)
-		span.RecordError(err)
-		span.SetAttributes(attribute.String("error", err.Error()))
-
-		// Record error metrics
+		span.RecordError(execErr)
+		span.SetAttributes(attribute.String("error", execErr.Error()))
 		q.metrics.queriesTotal.WithLabelValues(queryType, "error").Inc()
 		q.metrics.queryErrors.WithLabelValues(queryType, "query_execution").Inc()
 		q.metrics.queryDuration.WithLabelValues(queryType).Observe(time.Since(startTime).Seconds())
-
-		return []HistoricalFinding{}, nil // Graceful degradation - return empty slice
+		return []HistoricalFinding{}, nil // Graceful degradation
 	}
 
-	findings := []HistoricalFinding{}
-	for result.Next(queryCtx) {
-		record := result.Record()
-
-		finding := HistoricalFinding{}
-
-		// Extract fields with type assertions
-		if val, ok := record.Get("id"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				finding.ID = str
-			}
-		}
-		if val, ok := record.Get("title"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				finding.Title = str
-			}
-		}
-		if val, ok := record.Get("severity"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				finding.Severity = str
-			}
-		}
-		if val, ok := record.Get("category"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				finding.Category = str
-			}
-		}
-		if val, ok := record.Get("target_entity"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				finding.TargetEntity = str
-			}
-		}
-		if val, ok := record.Get("discovered_at"); ok && val != nil {
-			if dateStr, ok := val.(string); ok {
-				if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
-					finding.DiscoveredAt = t
-				}
-			}
-		}
-
-		findings = append(findings, finding)
+	findings, _ := raw.([]HistoricalFinding)
+	if findings == nil {
+		findings = []HistoricalFinding{}
 	}
 
-	// Record success metrics
 	duration := time.Since(startTime).Seconds()
 	resultCount := len(findings)
 
@@ -635,73 +633,72 @@ func (q *Neo4jGraphQueries) GetKnownEntities(ctx context.Context, targetID strin
 		"target_id": targetID,
 	}
 
-	session := q.driver.NewSession(queryCtx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(queryCtx)
-
-	result, err := session.Run(queryCtx, cypher, params)
-	if err != nil {
-		q.logger.WarnContext(ctx, "Failed to query known entities",
-			"error", err,
-			"target_id", targetID,
-		)
-		span.RecordError(err)
-		span.SetAttributes(attribute.String("error", err.Error()))
-
-		// Record error metrics
-		q.metrics.queriesTotal.WithLabelValues(queryType, "error").Inc()
-		q.metrics.queryErrors.WithLabelValues(queryType, "query_execution").Inc()
-		q.metrics.queryDuration.WithLabelValues(queryType).Observe(time.Since(startTime).Seconds())
-
-		return []EntitySummary{}, nil // Graceful degradation - return empty slice
-	}
-
-	entities := []EntitySummary{}
-	for result.Next(queryCtx) {
-		record := result.Record()
-
-		entity := EntitySummary{
-			Properties: make(map[string]any),
+	raw, execErr := q.client.ExecuteRead(queryCtx, func(tx neo4j.ManagedTransaction) (any, error) {
+		result, err := tx.Run(queryCtx, cypher, params)
+		if err != nil {
+			return nil, err
 		}
-
-		// Extract fields
-		if val, ok := record.Get("id"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				entity.ID = str
+		entities := []EntitySummary{}
+		for result.Next(queryCtx) {
+			record := result.Record()
+			entity := EntitySummary{
+				Properties: make(map[string]any),
 			}
-		}
-		if val, ok := record.Get("type"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				entity.Type = str
-			}
-		}
-		if val, ok := record.Get("identifier"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				entity.Identifier = str
-			}
-		}
-		if val, ok := record.Get("discovered_at"); ok && val != nil {
-			if dateStr, ok := val.(string); ok {
-				if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
-					entity.DiscoveredAt = t
+			if val, ok := record.Get("id"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					entity.ID = str
 				}
 			}
-		}
-		if val, ok := record.Get("properties"); ok && val != nil {
-			if props, ok := val.(map[string]any); ok {
-				// Filter out framework fields to keep only business properties
-				for k, v := range props {
-					if k != "id" && k != "discovered_at" && k != "discovered_by" &&
-						k != "mission_id" && k != "mission_run_id" && k != "agent_run_id" {
-						entity.Properties[k] = v
+			if val, ok := record.Get("type"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					entity.Type = str
+				}
+			}
+			if val, ok := record.Get("identifier"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					entity.Identifier = str
+				}
+			}
+			if val, ok := record.Get("discovered_at"); ok && val != nil {
+				if dateStr, ok := val.(string); ok {
+					if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
+						entity.DiscoveredAt = t
 					}
 				}
 			}
+			if val, ok := record.Get("properties"); ok && val != nil {
+				if props, ok := val.(map[string]any); ok {
+					for k, v := range props {
+						if k != "id" && k != "discovered_at" && k != "discovered_by" &&
+							k != "mission_id" && k != "mission_run_id" && k != "agent_run_id" {
+							entity.Properties[k] = v
+						}
+					}
+				}
+			}
+			entities = append(entities, entity)
 		}
+		return entities, nil
+	})
 
-		entities = append(entities, entity)
+	if execErr != nil {
+		q.logger.WarnContext(ctx, "Failed to query known entities",
+			"error", execErr,
+			"target_id", targetID,
+		)
+		span.RecordError(execErr)
+		span.SetAttributes(attribute.String("error", execErr.Error()))
+		q.metrics.queriesTotal.WithLabelValues(queryType, "error").Inc()
+		q.metrics.queryErrors.WithLabelValues(queryType, "query_execution").Inc()
+		q.metrics.queryDuration.WithLabelValues(queryType).Observe(time.Since(startTime).Seconds())
+		return []EntitySummary{}, nil // Graceful degradation
 	}
 
-	// Record success metrics
+	entities, _ := raw.([]EntitySummary)
+	if entities == nil {
+		entities = []EntitySummary{}
+	}
+
 	duration := time.Since(startTime).Seconds()
 	resultCount := len(entities)
 
@@ -762,74 +759,74 @@ func (q *Neo4jGraphQueries) GetSuccessfulPatterns(ctx context.Context, targetTyp
 		"target_type": targetType,
 	}
 
-	session := q.driver.NewSession(queryCtx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(queryCtx)
-
-	result, err := session.Run(queryCtx, cypher, params)
-	if err != nil {
-		q.logger.WarnContext(ctx, "Failed to query successful patterns",
-			"error", err,
-			"target_type", targetType,
-		)
-		span.RecordError(err)
-		span.SetAttributes(attribute.String("error", err.Error()))
-
-		// Record error metrics
-		q.metrics.queriesTotal.WithLabelValues(queryType, "error").Inc()
-		q.metrics.queryErrors.WithLabelValues(queryType, "query_execution").Inc()
-		q.metrics.queryDuration.WithLabelValues(queryType).Observe(time.Since(startTime).Seconds())
-
-		return []AttackPattern{}, nil // Graceful degradation - return empty slice
-	}
-
-	patterns := []AttackPattern{}
-	for result.Next(queryCtx) {
-		record := result.Record()
-
-		pattern := AttackPattern{
-			TargetTypes: []string{},
+	raw, execErr := q.client.ExecuteRead(queryCtx, func(tx neo4j.ManagedTransaction) (any, error) {
+		result, err := tx.Run(queryCtx, cypher, params)
+		if err != nil {
+			return nil, err
 		}
-
-		// Extract fields
-		if val, ok := record.Get("technique_id"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				pattern.TechniqueID = str
+		patterns := []AttackPattern{}
+		for result.Next(queryCtx) {
+			record := result.Record()
+			pattern := AttackPattern{
+				TargetTypes: []string{},
 			}
-		}
-		if val, ok := record.Get("technique_name"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				pattern.TechniqueName = str
+			if val, ok := record.Get("technique_id"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					pattern.TechniqueID = str
+				}
 			}
-		}
-		if val, ok := record.Get("description"); ok && val != nil {
-			if str, ok := val.(string); ok {
-				pattern.Description = str
+			if val, ok := record.Get("technique_name"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					pattern.TechniqueName = str
+				}
 			}
-		}
-		if val, ok := record.Get("success_rate"); ok && val != nil {
-			if rate, ok := val.(float64); ok {
-				pattern.SuccessRate = rate
+			if val, ok := record.Get("description"); ok && val != nil {
+				if str, ok := val.(string); ok {
+					pattern.Description = str
+				}
 			}
-		}
-		if val, ok := record.Get("sample_count"); ok && val != nil {
-			if count, ok := val.(int64); ok {
-				pattern.SampleCount = int(count)
+			if val, ok := record.Get("success_rate"); ok && val != nil {
+				if rate, ok := val.(float64); ok {
+					pattern.SuccessRate = rate
+				}
 			}
-		}
-		if val, ok := record.Get("target_types"); ok && val != nil {
-			if types, ok := val.([]any); ok {
-				for _, t := range types {
-					if typeStr, ok := t.(string); ok {
-						pattern.TargetTypes = append(pattern.TargetTypes, typeStr)
+			if val, ok := record.Get("sample_count"); ok && val != nil {
+				if count, ok := val.(int64); ok {
+					pattern.SampleCount = int(count)
+				}
+			}
+			if val, ok := record.Get("target_types"); ok && val != nil {
+				if tlist, ok := val.([]any); ok {
+					for _, t := range tlist {
+						if typeStr, ok := t.(string); ok {
+							pattern.TargetTypes = append(pattern.TargetTypes, typeStr)
+						}
 					}
 				}
 			}
+			patterns = append(patterns, pattern)
 		}
+		return patterns, nil
+	})
 
-		patterns = append(patterns, pattern)
+	if execErr != nil {
+		q.logger.WarnContext(ctx, "Failed to query successful patterns",
+			"error", execErr,
+			"target_type", targetType,
+		)
+		span.RecordError(execErr)
+		span.SetAttributes(attribute.String("error", execErr.Error()))
+		q.metrics.queriesTotal.WithLabelValues(queryType, "error").Inc()
+		q.metrics.queryErrors.WithLabelValues(queryType, "query_execution").Inc()
+		q.metrics.queryDuration.WithLabelValues(queryType).Observe(time.Since(startTime).Seconds())
+		return []AttackPattern{}, nil // Graceful degradation
 	}
 
-	// Record success metrics
+	patterns, _ := raw.([]AttackPattern)
+	if patterns == nil {
+		patterns = []AttackPattern{}
+	}
+
 	duration := time.Since(startTime).Seconds()
 	resultCount := len(patterns)
 

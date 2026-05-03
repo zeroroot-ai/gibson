@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
@@ -253,12 +252,12 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 	observerOpts := []ObserverOption{
 		WithInventoryBuilder(inventoryBuilder),
 	}
-	if neo4jClient, ok := m.config.GraphRAGClient.(*graph.Neo4jClient); ok && neo4jClient.Driver() != nil {
+	if m.config.GraphRAGClient != nil {
 		observerOpts = append(observerOpts, WithGraphQueries(
-			NewNeo4jGraphQueries(neo4jClient.Driver(), m.config.Logger.Slog()),
+			NewNeo4jGraphQueries(m.config.GraphRAGClient, m.config.Logger.Slog()),
 		))
 	} else {
-		m.config.Logger.Slog().Warn("graph intelligence disabled for mission: graphrag client does not expose a live neo4j driver",
+		m.config.Logger.Slog().Warn("graph intelligence disabled for mission: no graphrag client configured",
 			"mission_id", mis.ID.String())
 	}
 	observer := NewObserver(missionQueries, executionQueries, observerOpts...)

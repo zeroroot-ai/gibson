@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/events"
@@ -37,6 +38,14 @@ func (m *mockGraphClient) CreateRelationship(ctx context.Context, fromID, toID, 
 	return nil
 }
 func (m *mockGraphClient) DeleteNode(ctx context.Context, id string) error { return nil }
+
+func (m *mockGraphClient) ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	return fn(nil)
+}
+
+func (m *mockGraphClient) ExecuteWrite(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	return fn(nil)
+}
 
 // mockEventBus captures published events for testing
 type mockEventBus struct {

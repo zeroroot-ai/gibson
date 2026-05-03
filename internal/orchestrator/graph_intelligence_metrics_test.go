@@ -3,10 +3,10 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 )
 
 // TestGraphQueryMetrics verifies that metrics are properly initialized and registered
@@ -57,8 +57,8 @@ func TestGraphQueryMetrics(t *testing.T) {
 // TestNeo4jGraphQueriesWithMetrics verifies that the constructor with metrics works correctly
 func TestNeo4jGraphQueriesWithMetrics(t *testing.T) {
 	t.Run("creates instance with default registerer", func(t *testing.T) {
-		var driver neo4j.DriverWithContext
-		queries := NewNeo4jGraphQueries(driver, nil)
+		var client graph.GraphClient
+		queries := NewNeo4jGraphQueries(client, nil)
 
 		require.NotNil(t, queries)
 		impl, ok := queries.(*Neo4jGraphQueries)
@@ -69,9 +69,9 @@ func TestNeo4jGraphQueriesWithMetrics(t *testing.T) {
 	})
 
 	t.Run("creates instance with custom registerer", func(t *testing.T) {
-		var driver neo4j.DriverWithContext
+		var client graph.GraphClient
 		registry := prometheus.NewRegistry()
-		queries := NewNeo4jGraphQueriesWithMetrics(driver, nil, registry)
+		queries := NewNeo4jGraphQueriesWithMetrics(client, nil, registry)
 
 		require.NotNil(t, queries)
 		impl, ok := queries.(*Neo4jGraphQueries)
@@ -81,9 +81,9 @@ func TestNeo4jGraphQueriesWithMetrics(t *testing.T) {
 	})
 
 	t.Run("metrics are registered on creation", func(t *testing.T) {
-		var driver neo4j.DriverWithContext
+		var client graph.GraphClient
 		registry := prometheus.NewRegistry()
-		queries := NewNeo4jGraphQueriesWithMetrics(driver, nil, registry)
+		queries := NewNeo4jGraphQueriesWithMetrics(client, nil, registry)
 
 		impl, ok := queries.(*Neo4jGraphQueries)
 		require.True(t, ok)

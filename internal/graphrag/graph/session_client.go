@@ -166,6 +166,26 @@ func (c *SessionGraphClient) CreateRelationship(ctx context.Context, fromID, toI
 	return nil
 }
 
+// ExecuteRead runs fn inside a managed read transaction on the held per-tenant
+// session. The session lifecycle is owned by the datapool.Conn (closed via
+// conn.Release()); this method does NOT close the session after use.
+func (c *SessionGraphClient) ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	if c.session == nil {
+		return nil, types.NewError(ErrCodeGraphConnectionClosed, "session graph client: no session")
+	}
+	return c.session.ExecuteRead(ctx, fn)
+}
+
+// ExecuteWrite runs fn inside a managed write transaction on the held per-tenant
+// session. The session lifecycle is owned by the datapool.Conn (closed via
+// conn.Release()); this method does NOT close the session after use.
+func (c *SessionGraphClient) ExecuteWrite(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	if c.session == nil {
+		return nil, types.NewError(ErrCodeGraphConnectionClosed, "session graph client: no session")
+	}
+	return c.session.ExecuteWrite(ctx, fn)
+}
+
 // DeleteNode deletes a node by its Gibson id property.
 func (c *SessionGraphClient) DeleteNode(ctx context.Context, nodeID string) error {
 	if c.session == nil {

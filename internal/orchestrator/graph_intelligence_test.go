@@ -6,20 +6,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 )
 
 // TestNewNeo4jGraphQueries verifies the constructor initializes correctly
 func TestNewNeo4jGraphQueries(t *testing.T) {
-	// For unit testing, we'll use a nil driver (won't actually execute queries)
-	// Integration tests would use a real driver with testcontainers
-	var driver neo4j.DriverWithContext
+	// For unit testing, we use a nil GraphClient (won't actually execute queries).
+	// Integration tests would use a real Neo4jClient with testcontainers.
+	var client graph.GraphClient
 	logger := slog.Default()
 
-	queries := NewNeo4jGraphQueries(driver, logger)
+	queries := NewNeo4jGraphQueries(client, logger)
 
 	assert.NotNil(t, queries)
 	impl, ok := queries.(*Neo4jGraphQueries)
@@ -30,9 +30,9 @@ func TestNewNeo4jGraphQueries(t *testing.T) {
 
 // TestNewNeo4jGraphQueries_NilLogger verifies default logger is used when nil
 func TestNewNeo4jGraphQueries_NilLogger(t *testing.T) {
-	var driver neo4j.DriverWithContext
+	var client graph.GraphClient
 
-	queries := NewNeo4jGraphQueries(driver, nil)
+	queries := NewNeo4jGraphQueries(client, nil)
 
 	assert.NotNil(t, queries)
 	impl, ok := queries.(*Neo4jGraphQueries)
@@ -42,8 +42,8 @@ func TestNewNeo4jGraphQueries_NilLogger(t *testing.T) {
 
 // TestNeo4jGraphQueries_Interfaces verifies type implements GraphQueries
 func TestNeo4jGraphQueries_Interfaces(t *testing.T) {
-	var driver neo4j.DriverWithContext
-	queries := NewNeo4jGraphQueries(driver, nil)
+	var client graph.GraphClient
+	queries := NewNeo4jGraphQueries(client, nil)
 
 	// Verify it implements GraphQueries interface
 	var _ GraphQueries = queries
@@ -395,10 +395,10 @@ func TestNeo4jGraphQueries_QueryTypes(t *testing.T) {
 func TestNeo4jGraphQueries_MetricsRegistration(t *testing.T) {
 	t.Run("registers metrics with custom registerer", func(t *testing.T) {
 		registry := prometheus.NewRegistry()
-		var mockDriver neo4j.DriverWithContext
+		var mockClient graph.GraphClient
 		logger := slog.New(slog.NewTextHandler(nil, nil))
 
-		queries := NewNeo4jGraphQueriesWithMetrics(mockDriver, logger, registry)
+		queries := NewNeo4jGraphQueriesWithMetrics(mockClient, logger, registry)
 
 		assert.NotNil(t, queries)
 
@@ -415,19 +415,19 @@ func TestNeo4jGraphQueries_MetricsRegistration(t *testing.T) {
 	})
 
 	t.Run("handles nil registerer gracefully", func(t *testing.T) {
-		var mockDriver neo4j.DriverWithContext
+		var mockClient graph.GraphClient
 		logger := slog.New(slog.NewTextHandler(nil, nil))
 
 		// Should not panic with nil registerer
-		queries := NewNeo4jGraphQueriesWithMetrics(mockDriver, logger, nil)
+		queries := NewNeo4jGraphQueriesWithMetrics(mockClient, logger, nil)
 		assert.NotNil(t, queries)
 	})
 
 	t.Run("uses default registerer when nil provided", func(t *testing.T) {
-		var mockDriver neo4j.DriverWithContext
+		var mockClient graph.GraphClient
 		logger := slog.New(slog.NewTextHandler(nil, nil))
 
-		queries := NewNeo4jGraphQueries(mockDriver, logger)
+		queries := NewNeo4jGraphQueries(mockClient, logger)
 		assert.NotNil(t, queries)
 	})
 }

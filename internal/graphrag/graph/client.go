@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -37,6 +38,29 @@ type GraphClient interface {
 	// DeleteNode deletes a node by its ID.
 	// Note: This may fail if the node has relationships in some graph databases.
 	DeleteNode(ctx context.Context, nodeID string) error
+
+	// ExecuteRead runs fn inside a managed read transaction opened on the
+	// client's underlying session. The semantics differ by implementation:
+	//
+	//   - Neo4jClient opens a fresh session from the shared DriverWithContext
+	//     (the shared, cross-tenant connection pool). Use this for platform-level
+	//     reads that are not scoped to a specific tenant database.
+	//
+	//   - SessionGraphClient delegates to the pre-opened per-tenant session
+	//     injected via the data-plane Pool. Use this for tenant-scoped reads
+	//     that must run against the correct tenant database without re-routing.
+	//
+	// fn receives a neo4j.ManagedTransaction and must return (any, error).
+	// The driver retries fn on transient failures; fn must be idempotent.
+	ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error)
+
+	// ExecuteWrite runs fn inside a managed write transaction opened on the
+	// client's underlying session. The semantics mirror ExecuteRead — see that
+	// method's documentation for the per-tenant vs shared pool distinction.
+	//
+	// fn receives a neo4j.ManagedTransaction and must return (any, error).
+	// The driver retries fn on transient failures; fn must be idempotent.
+	ExecuteWrite(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error)
 }
 
 // QueryResult represents the result of a Cypher query execution.

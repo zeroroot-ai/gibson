@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
@@ -59,6 +60,16 @@ func (m *MockGraphClient) CreateRelationship(ctx context.Context, fromID, toID, 
 func (m *MockGraphClient) DeleteNode(ctx context.Context, nodeID string) error {
 	args := m.Called(ctx, nodeID)
 	return args.Error(0)
+}
+
+func (m *MockGraphClient) ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	args := m.Called(ctx, fn)
+	return args.Get(0), args.Error(1)
+}
+
+func (m *MockGraphClient) ExecuteWrite(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	args := m.Called(ctx, fn)
+	return args.Get(0), args.Error(1)
 }
 
 // Test helper to create a test execution context

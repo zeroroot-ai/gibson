@@ -2,14 +2,19 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/zero-day-ai/sdk/auth"
 
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/datapool/admin"
 	"github.com/zero-day-ai/gibson/migrations"
 
@@ -25,6 +30,19 @@ var (
 		Name: "gibson_tenant_migration_pending",
 		Help: "1 if the tenant's schema version is behind the latest local migration, 0 if current.",
 	}, []string{"tenant", "store"})
+
+	// metricNeo4jMigrationDrift tracks, per-tenant, the version delta between
+	// the latest embedded Neo4j migration and the tenant's actual schema version.
+	// Value is delta (latestNeo4j - actual); 0 when in sync.
+	metricNeo4jMigrationDrift = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "gibson_tenant_neo4j_migration_drift",
+		Help: "Version delta between latest embedded Neo4j migration and tenant actual schema version. 0 = in sync.",
+	}, []string{"tenant"})
+
+	// errTenantUnprovisioned is a package-level sentinel returned by
+	// pgAndNeo4jVersionReader.Neo4jVersion when pool.For returns a
+	// *datapool.NotProvisionedError. Callers map this to a DEBUG log + skip.
+	errTenantUnprovisioned = errors.New("tenant not yet provisioned")
 )
 
 // startupMigrationCheckConfig carries configuration for the migration check
@@ -49,12 +67,9 @@ type startupMigrationCheckConfig struct {
 	// When empty, Postgres migration checks are skipped.
 	PostgresAdminDSN string
 
-	// Neo4jURI, Neo4jUser, Neo4jPassword are used to query :_SchemaVersion
-	// nodes in each tenant Neo4j database. When Neo4jURI is empty, Neo4j
-	// checks are skipped.
-	Neo4jURI      string
-	Neo4jUser     string
-	Neo4jPassword string
+	// Concurrency controls how many tenant migration checks run in parallel.
+	// Default 4 when zero; capped at 16.
+	Concurrency int
 }
 
 // migrationVersionReader is the interface the startup check uses to read the
@@ -65,8 +80,9 @@ type migrationVersionReader interface {
 	PostgresVersion(ctx context.Context, tenantDSN string) (uint, error)
 
 	// Neo4jVersion returns the current _SchemaVersion.version for the given
-	// tenant database. Returns 0 when no version node exists.
-	Neo4jVersion(ctx context.Context, tenantDB string) (uint, error)
+	// tenant. Returns 0 when no version node exists. Returns errTenantUnprovisioned
+	// when the tenant's data-plane is not yet provisioned (caller should skip with DEBUG).
+	Neo4jVersion(ctx context.Context, tenant auth.TenantID) (uint, error)
 }
 
 // startupMigrationCheck scans all provisioned tenants and checks whether their
@@ -96,7 +112,7 @@ func (d *daemonImpl) startupMigrationCheck(ctx context.Context) error {
 		return nil
 	}
 
-	return runStartupMigrationCheck(ctx, cfg, &pgAndNeo4jVersionReader{cfg: cfg})
+	return runStartupMigrationCheck(ctx, cfg, &pgAndNeo4jVersionReader{cfg: cfg, pool: d.pool})
 }
 
 // runStartupMigrationCheck is the testable core of the startup check.
@@ -150,55 +166,105 @@ func runStartupMigrationCheck(
 		return nil
 	}
 
-	var staleTenants []string
+	// Determine worker concurrency: default 4, max 16.
+	concurrency := cfg.Concurrency
+	if concurrency <= 0 {
+		concurrency = 4
+	}
+	if concurrency > 16 {
+		concurrency = 16
+	}
+
+	// Apply a 30-second total deadline for the entire per-tenant sweep.
+	sweepCtx, sweepCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer sweepCancel()
+
+	type result struct {
+		staleKey string // non-empty if stale; e.g. "acme/postgres"
+	}
+
+	resultsCh := make(chan result, len(tenants)*2)
+	workCh := make(chan auth.TenantID, len(tenants))
 
 	for _, tid := range tenants {
-		tenantStr := tid.String()
+		workCh <- tid
+	}
+	close(workCh)
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for tid := range workCh {
+				tenantStr := tid.String()
 
-		if latestPostgres > 0 && cfg.PostgresAdminDSN != "" {
-			tenantDSN := buildTenantDSN(cfg.PostgresAdminDSN, tenantStr)
-			cur, err := reader.PostgresVersion(ctx, tenantDSN)
-			if err != nil {
-				logger.WarnContext(ctx, "startup migration check: could not read postgres version",
-					"tenant", tenantStr, "error", err)
-			} else if cur < latestPostgres {
-				metricMigrationPending.WithLabelValues(tenantStr, "postgres").Set(1)
-				logger.WarnContext(ctx, "startup migration check: tenant postgres schema is behind",
-					"tenant", tenantStr,
-					"current_version", cur,
-					"latest_version", latestPostgres,
-					"action", "run: gibson-migrate up --tenant "+tenantStr+" --store postgres",
-				)
-				staleTenants = append(staleTenants, tenantStr+"/postgres")
-			} else {
-				metricMigrationPending.WithLabelValues(tenantStr, "postgres").Set(0)
+				select {
+				case <-sweepCtx.Done():
+					return
+				default:
+				}
+
+				if latestPostgres > 0 && cfg.PostgresAdminDSN != "" {
+					tenantDSN := buildTenantDSN(cfg.PostgresAdminDSN, tenantStr)
+					cur, pgErr := reader.PostgresVersion(sweepCtx, tenantDSN)
+					if pgErr != nil {
+						logger.WarnContext(sweepCtx, "startup migration check: could not read postgres version",
+							"tenant", tenantStr, "error", pgErr)
+					} else if cur < latestPostgres {
+						metricMigrationPending.WithLabelValues(tenantStr, "postgres").Set(1)
+						logger.WarnContext(sweepCtx, "startup migration check: tenant postgres schema is behind",
+							"tenant", tenantStr,
+							"current_version", cur,
+							"latest_version", latestPostgres,
+							"action", "run: gibson-migrate up --tenant "+tenantStr+" --store postgres",
+						)
+						resultsCh <- result{staleKey: tenantStr + "/postgres"}
+					} else {
+						metricMigrationPending.WithLabelValues(tenantStr, "postgres").Set(0)
+						resultsCh <- result{}
+					}
+				}
+
+				if latestNeo4j > 0 {
+					cur, n4jErr := reader.Neo4jVersion(sweepCtx, tid)
+					if errors.Is(n4jErr, errTenantUnprovisioned) {
+						logger.DebugContext(sweepCtx, "startup migration check: skipping migration check for unprovisioned tenant",
+							"tenant", tenantStr)
+						resultsCh <- result{}
+					} else if n4jErr != nil {
+						logger.WarnContext(sweepCtx, "startup migration check: could not read neo4j version",
+							"tenant", tenantStr, "error", n4jErr)
+						resultsCh <- result{}
+					} else if cur < latestNeo4j {
+						delta := int64(latestNeo4j) - int64(cur)
+						metricMigrationPending.WithLabelValues(tenantStr, "neo4j").Set(1)
+						metricNeo4jMigrationDrift.WithLabelValues(tenantStr).Set(float64(delta))
+						logger.ErrorContext(sweepCtx, "startup migration check: tenant neo4j schema is behind",
+							"tenant", tenantStr,
+							"expected_version", latestNeo4j,
+							"actual_version", cur,
+							"delta", delta,
+							"action", "run: gibson-migrate up --tenant "+tenantStr+" --store neo4j",
+						)
+						resultsCh <- result{staleKey: tenantStr + "/neo4j"}
+					} else {
+						metricMigrationPending.WithLabelValues(tenantStr, "neo4j").Set(0)
+						metricNeo4jMigrationDrift.WithLabelValues(tenantStr).Set(0)
+						resultsCh <- result{}
+					}
+				}
 			}
-		}
+		}()
+	}
 
-		if latestNeo4j > 0 && cfg.Neo4jURI != "" {
-			tenantDB := "tenant_" + sanitizeTenantIDForDB(tenantStr)
-			cur, err := reader.Neo4jVersion(ctx, tenantDB)
-			if err != nil {
-				logger.WarnContext(ctx, "startup migration check: could not read neo4j version",
-					"tenant", tenantStr, "error", err)
-			} else if cur < latestNeo4j {
-				metricMigrationPending.WithLabelValues(tenantStr, "neo4j").Set(1)
-				logger.WarnContext(ctx, "startup migration check: tenant neo4j schema is behind",
-					"tenant", tenantStr,
-					"current_version", cur,
-					"latest_version", latestNeo4j,
-					"action", "run: gibson-migrate up --tenant "+tenantStr+" --store neo4j",
-				)
-				staleTenants = append(staleTenants, tenantStr+"/neo4j")
-			} else {
-				metricMigrationPending.WithLabelValues(tenantStr, "neo4j").Set(0)
-			}
+	wg.Wait()
+	close(resultsCh)
+
+	var staleTenants []string
+	for r := range resultsCh {
+		if r.staleKey != "" {
+			staleTenants = append(staleTenants, r.staleKey)
 		}
 	}
 
@@ -228,9 +294,6 @@ func (d *daemonImpl) buildMigrationCheckConfig(requireMigrations bool) (*startup
 		MigrationsRequired: requireMigrations,
 		Logger:             d.logger.Slog(),
 		PostgresAdminDSN:   os.Getenv("POSTGRES_ADMIN_DSN"),
-		Neo4jURI:           os.Getenv("NEO4J_ADMIN_URI"),
-		Neo4jUser:          os.Getenv("NEO4J_ADMIN_USER"),
-		Neo4jPassword:      os.Getenv("NEO4J_ADMIN_PASSWORD"),
 		K8sNamespace:       os.Getenv("GIBSON_K8S_NAMESPACE"),
 	}
 
@@ -285,7 +348,8 @@ func sanitizeTenantIDForDB(id string) string {
 // pgAndNeo4jVersionReader is the production implementation of
 // migrationVersionReader. It queries real databases.
 type pgAndNeo4jVersionReader struct {
-	cfg *startupMigrationCheckConfig
+	cfg  *startupMigrationCheckConfig
+	pool datapool.Pool
 }
 
 // PostgresVersion queries the schema_migrations table in the given tenant DSN
@@ -295,7 +359,22 @@ func (r *pgAndNeo4jVersionReader) PostgresVersion(ctx context.Context, tenantDSN
 	return queryPostgresVersion(ctx, tenantDSN)
 }
 
-// Neo4jVersion queries the :_SchemaVersion node in the given tenant database.
-func (r *pgAndNeo4jVersionReader) Neo4jVersion(ctx context.Context, tenantDB string) (uint, error) {
-	return queryNeo4jVersion(ctx, r.cfg.Neo4jURI, r.cfg.Neo4jUser, r.cfg.Neo4jPassword, tenantDB)
+// Neo4jVersion acquires a per-tenant connection from the pool and queries the
+// :_SchemaVersion node. Returns errTenantUnprovisioned when the tenant's
+// data-plane is not yet provisioned (caller maps this to a DEBUG log + skip).
+// Returns 0 when pool is nil (Neo4j check disabled).
+func (r *pgAndNeo4jVersionReader) Neo4jVersion(ctx context.Context, tenant auth.TenantID) (uint, error) {
+	if r.pool == nil {
+		return 0, nil
+	}
+	conn, err := r.pool.For(ctx, tenant)
+	if err != nil {
+		var notProvisioned *datapool.NotProvisionedError
+		if errors.As(err, &notProvisioned) {
+			return 0, errTenantUnprovisioned
+		}
+		return 0, fmt.Errorf("startup migration check: acquire pool conn for tenant %s: %w", tenant, err)
+	}
+	defer conn.Release()
+	return queryNeo4jVersionViaSession(ctx, conn.Neo4j)
 }

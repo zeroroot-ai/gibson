@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/events"
@@ -47,6 +48,14 @@ func (m *mockCheckpointGraphClient) CreateRelationship(ctx context.Context, from
 
 func (m *mockCheckpointGraphClient) DeleteNode(ctx context.Context, nodeID string) error {
 	return nil
+}
+
+func (m *mockCheckpointGraphClient) ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	return fn(nil)
+}
+
+func (m *mockCheckpointGraphClient) ExecuteWrite(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	return fn(nil)
 }
 
 // mockEventBus is a test double for EventBus

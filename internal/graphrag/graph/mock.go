@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -274,47 +275,48 @@ func (m *MockGraphClient) DeleteNode(ctx context.Context, nodeID string) error {
 	return nil
 }
 
-// ExecuteWrite records the call and simulates a write query execution.
-// For the mock, this behaves similarly to Query but uses a write transaction.
-func (m *MockGraphClient) ExecuteWrite(ctx context.Context, cypher string, params map[string]any) (QueryResult, error) {
+// ExecuteRead records the call and runs fn with a nil ManagedTransaction.
+// The mock does not execute real Cypher; fn is called with nil to satisfy the
+// interface. Tests that need real transaction behaviour should use a real driver.
+func (m *MockGraphClient) ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.calls = append(m.calls, MockCall{
+		Method:    "ExecuteRead",
+		Args:      []interface{}{fn},
+		Timestamp: time.Now(),
+	})
+
+	if !m.connected {
+		return nil, types.NewError(ErrCodeGraphConnectionClosed, "not connected")
+	}
+	if m.queryError != nil {
+		return nil, m.queryError
+	}
+	return fn(nil)
+}
+
+// ExecuteWrite records the call and runs fn with a nil ManagedTransaction.
+// The mock does not execute real Cypher; fn is called with nil to satisfy the
+// interface. Tests that need real transaction behaviour should use a real driver.
+func (m *MockGraphClient) ExecuteWrite(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.calls = append(m.calls, MockCall{
 		Method:    "ExecuteWrite",
-		Args:      []interface{}{cypher, params},
+		Args:      []interface{}{fn},
 		Timestamp: time.Now(),
 	})
 
 	if !m.connected {
-		return QueryResult{}, types.NewError(ErrCodeGraphConnectionClosed,
-			"not connected")
+		return nil, types.NewError(ErrCodeGraphConnectionClosed, "not connected")
 	}
-
 	if m.queryError != nil {
-		return QueryResult{}, m.queryError
+		return nil, m.queryError
 	}
-
-	// Return the next configured result (FIFO)
-	if len(m.queryResults) > 0 {
-		result := m.queryResults[0]
-		m.queryResults = m.queryResults[1:]
-		return result, nil
-	}
-
-	// Default empty result
-	return QueryResult{
-		Records: []map[string]any{},
-		Columns: []string{},
-		Summary: QuerySummary{
-			ExecutionTime:        time.Millisecond,
-			NodesCreated:         0,
-			NodesDeleted:         0,
-			RelationshipsCreated: 0,
-			RelationshipsDeleted: 0,
-			PropertiesSet:        0,
-		},
-	}, nil
+	return fn(nil)
 }
 
 // SetQueryResults configures what Query() should return (FIFO queue).

@@ -97,6 +97,13 @@ from the per-tenant Vault namespace at resolve time.
 9. **Migration doc.** Document Pattern B → Pattern A migration. See
    [`MIGRATION-NEO4J.md`](./MIGRATION-NEO4J.md) as the worked example.
 
+Cross-mission analytics consumers (IntelligenceService, Observer
+graph-intelligence enrichment, startup migration drift detection) follow the
+same Pattern B per-call construction; see
+[`internal/daemon/intelligence_service.go`](../daemon/intelligence_service.go)
+and [`internal/orchestrator/adapter.go`](../orchestrator/adapter.go) for
+current call sites.
+
 ---
 
 ## Decision tree — when to migrate Pattern B → Pattern A

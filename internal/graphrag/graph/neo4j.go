@@ -329,10 +329,12 @@ func (c *Neo4jClient) DeleteNode(ctx context.Context, nodeID string) error {
 	return nil
 }
 
-// ExecuteWrite executes a Cypher write query with the given parameters.
+// ExecuteWriteQuery executes a Cypher write query string with the given parameters.
 // This method is useful for executing custom write operations like MERGE, CREATE, SET, DELETE, etc.
 // The query is executed within a write transaction for consistency and automatic retries.
-func (c *Neo4jClient) ExecuteWrite(ctx context.Context, cypher string, params map[string]any) (QueryResult, error) {
+//
+// Deprecated: prefer ExecuteWrite (the interface method accepting a closure) for new callers.
+func (c *Neo4jClient) ExecuteWriteQuery(ctx context.Context, cypher string, params map[string]any) (QueryResult, error) {
 	if c.driver == nil {
 		return QueryResult{}, types.NewError(ErrCodeGraphConnectionClosed,
 			"driver not connected")
@@ -378,6 +380,38 @@ func (c *Neo4jClient) ExecuteWrite(ctx context.Context, cypher string, params ma
 	queryResult.Summary.ExecutionTime = time.Since(startTime)
 
 	return queryResult, nil
+}
+
+// ExecuteRead opens a fresh read-mode session from the shared driver pool and
+// runs fn inside a managed read transaction. The session is closed after fn
+// returns. Use this for platform-level reads that are not tied to a specific
+// tenant database (see GraphClient.ExecuteRead for the full contract).
+func (c *Neo4jClient) ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	if c.driver == nil {
+		return nil, types.NewError(ErrCodeGraphConnectionClosed, "driver not connected")
+	}
+	session := c.driver.NewSession(ctx, neo4j.SessionConfig{
+		DatabaseName: c.config.Database,
+		AccessMode:   neo4j.AccessModeRead,
+	})
+	defer session.Close(ctx)
+	return session.ExecuteRead(ctx, fn)
+}
+
+// ExecuteWrite opens a fresh write-mode session from the shared driver pool and
+// runs fn inside a managed write transaction. The session is closed after fn
+// returns. Use this for platform-level writes that are not tied to a specific
+// tenant database (see GraphClient.ExecuteWrite for the full contract).
+func (c *Neo4jClient) ExecuteWrite(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	if c.driver == nil {
+		return nil, types.NewError(ErrCodeGraphConnectionClosed, "driver not connected")
+	}
+	session := c.driver.NewSession(ctx, neo4j.SessionConfig{
+		DatabaseName: c.config.Database,
+		AccessMode:   neo4j.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+	return session.ExecuteWrite(ctx, fn)
 }
 
 // isWriteOperation detects if a Cypher query is a write operation.

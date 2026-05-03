@@ -39,6 +39,7 @@ import (
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
+	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zero-day-ai/sdk/auth"
 
 	"github.com/zero-day-ai/gibson/internal/authz/registry"
@@ -771,13 +772,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// GetAttackPatterns, GetSimilarTargets). The SDK's
 	// platformIntelligenceProxy is the canonical client; agents and operators
 	// reach this endpoint indirectly via SDK PlatformHarness.
-	// Per spec productionize-graph-intelligence Task 2, this fills the
-	// long-missing daemon-side endpoint that the SDK proxy was always
-	// degrading against (Unimplemented fallback).
-	// IntelligenceService gRPC endpoint: intelligence service was backed by the
-	// shared Neo4j driver which has been removed (spec graphrag-tenant-scope).
-	// Per-tenant intelligence will be re-enabled in a follow-up spec.
-	d.logger.Warn(ctx, "IntelligenceService gRPC endpoint not registered: intelligence service unavailable (shared Neo4j removed)")
+	// Per spec graphrag-intelligence-tenant-scope, the service resolves each
+	// RPC's tenant from ctx → pool.For → per-tenant Neo4j session.
+	// The poolGetter closure defers resolution to request time, so registration
+	// is safe here even though the pool is not yet initialized.
+	intelSvc := NewIntelligenceServer(
+		func() datapool.Pool { return d.pool },
+		d.logger.WithComponent("intelligence-service").Slog(),
+	)
+	intelligencepb.RegisterIntelligenceServiceServer(srv, intelSvc)
+	d.logger.Info(ctx, "registered IntelligenceService gRPC endpoint")
 
 	// Initialize and register the ComponentService on the same gRPC port.
 	//

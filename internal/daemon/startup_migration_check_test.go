@@ -12,6 +12,7 @@ import (
 	"github.com/zero-day-ai/sdk/auth"
 )
 
+
 // ---------------------------------------------------------------------------
 // Fakes
 // ---------------------------------------------------------------------------
@@ -21,16 +22,22 @@ import (
 type fakeVersionReader struct {
 	// postgresVersions maps tenantDSN → current version.
 	postgresVersions map[string]uint
-	// neo4jVersions maps tenantDB → current version.
+	// neo4jVersions maps tenant string ID → current version.
+	// A special sentinel value math.MaxUint signals errTenantUnprovisioned.
 	neo4jVersions map[string]uint
+	// neo4jUnprovisioned is the set of tenant IDs that should return errTenantUnprovisioned.
+	neo4jUnprovisioned map[string]bool
 }
 
 func (f *fakeVersionReader) PostgresVersion(_ context.Context, tenantDSN string) (uint, error) {
 	return f.postgresVersions[tenantDSN], nil
 }
 
-func (f *fakeVersionReader) Neo4jVersion(_ context.Context, tenantDB string) (uint, error) {
-	return f.neo4jVersions[tenantDB], nil
+func (f *fakeVersionReader) Neo4jVersion(_ context.Context, tenant auth.TenantID) (uint, error) {
+	if f.neo4jUnprovisioned != nil && f.neo4jUnprovisioned[tenant.String()] {
+		return 0, errTenantUnprovisioned
+	}
+	return f.neo4jVersions[tenant.String()], nil
 }
 
 // ---------------------------------------------------------------------------
@@ -42,9 +49,6 @@ func defaultCfg() *startupMigrationCheckConfig {
 		MigrationsRequired: false,
 		DynamicClient:      nil,
 		PostgresAdminDSN:   "postgres://admin:pw@localhost/admin",
-		Neo4jURI:           "bolt://localhost:7687",
-		Neo4jUser:          "neo4j",
-		Neo4jPassword:      "password",
 	}
 }
 
@@ -63,17 +67,20 @@ func runCheckWithTenants(
 
 	var staleTenants []string
 	for _, tenantStr := range tenantIDs {
+		tid, err := auth.NewTenantID(tenantStr)
+		if err != nil {
+			continue
+		}
 		if latestPg > 0 && cfg.PostgresAdminDSN != "" {
 			tenantDSN := buildTenantDSN(cfg.PostgresAdminDSN, tenantStr)
-			cur, err := reader.PostgresVersion(ctx, tenantDSN)
-			if err == nil && cur < latestPg {
+			cur, pgErr := reader.PostgresVersion(ctx, tenantDSN)
+			if pgErr == nil && cur < latestPg {
 				staleTenants = append(staleTenants, tenantStr+"/postgres")
 			}
 		}
-		if latestNeo4j > 0 && cfg.Neo4jURI != "" {
-			tenantDB := "tenant_" + sanitizeTenantIDForDB(tenantStr)
-			cur, err := reader.Neo4jVersion(ctx, tenantDB)
-			if err == nil && cur < latestNeo4j {
+		if latestNeo4j > 0 {
+			cur, n4jErr := reader.Neo4jVersion(ctx, tid)
+			if n4jErr == nil && cur < latestNeo4j {
 				staleTenants = append(staleTenants, tenantStr+"/neo4j")
 			}
 		}
@@ -162,8 +169,8 @@ func TestRunCheck_AllCurrent(t *testing.T) {
 			buildTenantDSN(cfg.PostgresAdminDSN, "bigcorp"): latestPg,
 		},
 		neo4jVersions: map[string]uint{
-			"tenant_acme":    latestNeo4j,
-			"tenant_bigcorp": latestNeo4j,
+			"acme":    latestNeo4j,
+			"bigcorp": latestNeo4j,
 		},
 	}
 	err = runCheckWithTenants(context.Background(), cfg, reader, []string{"acme", "bigcorp"})
@@ -233,7 +240,7 @@ func TestRunCheck_EnvRequiredOk(t *testing.T) {
 			buildTenantDSN(cfg.PostgresAdminDSN, "acme"): latestPg,
 		},
 		neo4jVersions: map[string]uint{
-			"tenant_acme": latestNeo4j,
+			"acme": latestNeo4j,
 		},
 	}
 	err = runCheckWithTenants(context.Background(), cfg, reader, []string{"acme"})

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -47,6 +48,14 @@ func (m *mockGraphClient) CreateRelationship(ctx context.Context, fromID, toID, 
 
 func (m *mockGraphClient) DeleteNode(ctx context.Context, nodeID string) error {
 	return nil
+}
+
+func (m *mockGraphClient) ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	return fn(nil)
+}
+
+func (m *mockGraphClient) ExecuteWrite(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+	return fn(nil)
 }
 
 // TestNewMissionGraphManager tests the constructor
