@@ -129,6 +129,12 @@ func (l *viperConfigLoader) LoadWithDefaults(path string) (*Config, error) {
 		return nil, fmt.Errorf("configuration error: %w", err)
 	}
 
+	// Ensure TenantMode has a valid default when not set in YAML.
+	// Spec: per-tenant-data-plane-completion Task 11 / Req 5.5.
+	if cfg.GraphRAG.Neo4j.TenantMode == "" {
+		cfg.GraphRAG.Neo4j.TenantMode = "instance"
+	}
+
 	// Validate the loaded configuration
 	if err := l.validator.Validate(cfg); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
@@ -337,6 +343,13 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 			if password, ok := neo4j["password"].(string); ok {
 				cfg.GraphRAG.Neo4j.Password = interpolateString(password)
 			}
+			// TenantMode and SharedClusterURI added by spec per-tenant-data-plane-completion Task 11.
+			if tenantMode, ok := neo4j["tenant_mode"].(string); ok {
+				cfg.GraphRAG.Neo4j.TenantMode = interpolateString(tenantMode)
+			}
+			if sharedClusterURI, ok := neo4j["shared_cluster_uri"].(string); ok {
+				cfg.GraphRAG.Neo4j.SharedClusterURI = interpolateString(sharedClusterURI)
+			}
 		}
 	}
 
@@ -401,6 +414,29 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 		if sslMode, ok := dp["ssl_mode"].(string); ok {
 			cfg.DashboardPostgres.SSLMode = interpolateString(sslMode)
+		}
+	}
+
+	// Apply TenantPostgres config interpolation. The chart ships the admin
+	// password as `${TENANT_POSTGRES_ADMIN_PASSWORD}` and relies on this
+	// hook to expand it at runtime. Without this block the daemon cannot
+	// connect to the per-tenant admin Postgres and all tenant data-plane
+	// bootstrap paths fail. See spec per-tenant-data-plane-completion Req 1.
+	if tp, ok := interpolated["tenant_postgres"].(map[string]interface{}); ok {
+		if host, ok := tp["host"].(string); ok {
+			cfg.TenantPostgres.Host = interpolateString(host)
+		}
+		if adminDatabase, ok := tp["admin_database"].(string); ok {
+			cfg.TenantPostgres.AdminDatabase = interpolateString(adminDatabase)
+		}
+		if adminUsername, ok := tp["admin_username"].(string); ok {
+			cfg.TenantPostgres.AdminUsername = interpolateString(adminUsername)
+		}
+		if adminPassword, ok := tp["admin_password"].(string); ok {
+			cfg.TenantPostgres.AdminPassword = interpolateString(adminPassword)
+		}
+		if sslMode, ok := tp["ssl_mode"].(string); ok {
+			cfg.TenantPostgres.SSLMode = interpolateString(sslMode)
 		}
 	}
 

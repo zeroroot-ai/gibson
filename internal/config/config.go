@@ -54,6 +54,55 @@ type DashboardPostgresConfig struct {
 	MaxConns int `mapstructure:"max_conns" yaml:"max_conns"`
 }
 
+// TenantPostgresConfig holds connection settings for the per-tenant admin
+// PostgreSQL instance. The daemon uses this database to bootstrap per-tenant
+// databases and roles. It requires a role with CREATEDB privilege.
+//
+// This is distinct from the dashboard Postgres instance (DashboardPostgresConfig)
+// and is used exclusively for tenant data-plane operations (CREATE DATABASE,
+// CREATE ROLE, cross-tenant admin queries). See spec per-tenant-data-plane-completion
+// Req 1.1–1.4 and design D1.
+//
+// Environment variable overrides (all GIBSON_TENANT_POSTGRES_* prefix, resolved
+// by the loader's env-interpolation block):
+//
+//	GIBSON_TENANT_POSTGRES_HOST           — server hostname
+//	GIBSON_TENANT_POSTGRES_PORT           — TCP port (default: 5432)
+//	GIBSON_TENANT_POSTGRES_ADMIN_DATABASE — admin database name (default: postgres)
+//	GIBSON_TENANT_POSTGRES_ADMIN_USERNAME — admin role (requires CREATEDB)
+//	GIBSON_TENANT_POSTGRES_ADMIN_PASSWORD — password (keep in K8s Secret)
+//	GIBSON_TENANT_POSTGRES_SSL_MODE       — sslmode value (default: disable)
+//	GIBSON_TENANT_POSTGRES_MAX_CONNS      — admin pool size (default: 5)
+type TenantPostgresConfig struct {
+	// Host is the PostgreSQL server hostname or IP address.
+	Host string `mapstructure:"host" yaml:"host"`
+
+	// Port is the TCP port PostgreSQL listens on.
+	// Default: 5432
+	Port int `mapstructure:"port" yaml:"port"`
+
+	// AdminDatabase is the name of the admin/maintenance database.
+	// Default: "postgres"
+	AdminDatabase string `mapstructure:"admin_database" yaml:"admin_database"`
+
+	// AdminUsername is the PostgreSQL role used to authenticate.
+	// This role must have CREATEDB privilege for tenant provisioning.
+	AdminUsername string `mapstructure:"admin_username" yaml:"admin_username"`
+
+	// AdminPassword is the PostgreSQL password. Store in a Kubernetes Secret.
+	// The chart injects this via ${TENANT_POSTGRES_ADMIN_PASSWORD} env var.
+	AdminPassword string `mapstructure:"admin_password" yaml:"admin_password"`
+
+	// SSLMode controls the SSL/TLS negotiation mode.
+	// Valid values: disable, require, verify-ca, verify-full.
+	// Default: "disable" (suitable for in-cluster communication).
+	SSLMode string `mapstructure:"ssl_mode" yaml:"ssl_mode"`
+
+	// MaxConns is the maximum number of open connections in the admin pool.
+	// Default: 5
+	MaxConns int `mapstructure:"max_conns" yaml:"max_conns"`
+}
+
 // Config is the root configuration for the Gibson Framework.
 type Config struct {
 	Core              CoreConfig              `mapstructure:"core" yaml:"core" validate:"required"`
@@ -82,6 +131,7 @@ type Config struct {
 	Checkpoint        CheckpointConfig        `mapstructure:"checkpoint" yaml:"checkpoint"`
 	Authz             AuthzConfig             `mapstructure:"authz" yaml:"authz"`
 	DashboardPostgres DashboardPostgresConfig `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
+	TenantPostgres    TenantPostgresConfig    `mapstructure:"tenant_postgres" yaml:"tenant_postgres,omitempty"`
 	Sandbox           SandboxConfig           `mapstructure:"sandbox" yaml:"sandbox,omitempty"`
 	ToolRunner        ToolRunnerConfig        `mapstructure:"tool_runner" yaml:"tool_runner,omitempty"`
 
@@ -320,12 +370,43 @@ type LangfuseConfig struct {
 }
 
 // Neo4jConfig contains Neo4j connection settings.
+//
+// # TenantMode semantics
+//
+// Two modes control how the daemon resolves Neo4j endpoints:
+//
+//   - "instance" (default): one Neo4j StatefulSet per tenant, provisioned by
+//     the tenant-operator. The URI field is the optional bootstrap-test URI used
+//     only to verify cluster reachability at startup; it is NOT used for
+//     per-tenant session routing. Per-tenant URIs come from the endpoint registry
+//     (tenant_neo4j_endpoints Postgres table) via instanceResolver.
+//
+//   - "multi-db": a shared Enterprise cluster. URI is unused; SharedClusterURI
+//     is the bolt address for the cluster, and each tenant uses the Neo4j
+//     database named tenant_<sanitized>. Enabled via multiDBResolver.
+//
+// URI/Username/Password are kept for backward compatibility and are used in
+// "multi-db" mode as the shared cluster credentials (Username/Password) and in
+// legacy single-tenant deployments.
 type Neo4jConfig struct {
+	// URI is the bolt:// connection string.
+	// instance mode: optional bootstrap-test URI (not used for session routing).
+	// multi-db mode: unused (replaced by SharedClusterURI).
+	// Legacy single-tenant: used directly.
 	URI               string        `mapstructure:"uri" yaml:"uri"`
 	Username          string        `mapstructure:"username" yaml:"username"`
 	Password          string        `mapstructure:"password" yaml:"password"`
 	MaxConnections    int           `mapstructure:"max_connections" yaml:"max_connections"`
 	ConnectionTimeout time.Duration `mapstructure:"connection_timeout" yaml:"connection_timeout"`
+
+	// TenantMode controls per-tenant endpoint resolution.
+	// Valid values: "instance" (default), "multi-db".
+	// validate:"oneof=instance multi-db" — enforced by config validator.
+	TenantMode string `mapstructure:"tenant_mode" yaml:"tenant_mode,omitempty"`
+
+	// SharedClusterURI is the bolt:// URI for the shared Enterprise cluster.
+	// Only consulted when TenantMode == "multi-db".
+	SharedClusterURI string `mapstructure:"shared_cluster_uri" yaml:"shared_cluster_uri,omitempty"`
 }
 
 // GraphRAGConfig contains Neo4j knowledge graph configuration.

@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // testConfig creates a valid test configuration for local provider
@@ -635,4 +636,55 @@ func TestQueryNodesFromVectorStore_VectorStoreFallback(t *testing.T) {
 	require.NoError(t, err)
 	// Mock returns all records; we expect at least one.
 	assert.GreaterOrEqual(t, len(nodes), 1)
+}
+
+// TestLocalGraphRAGProvider_PerTenantVectorIsolation verifies that getVectorStore
+// returns a per-tenant scoped wrapper when a tenant is present in context, so that
+// vector store operations for different tenants use separate key namespaces.
+//
+// Spec: per-tenant-data-plane-completion Req 3.3.
+func TestLocalGraphRAGProvider_PerTenantVectorIsolation(t *testing.T) {
+	cfg := testConfig()
+	p, err := NewLocalProvider(cfg)
+	require.NoError(t, err)
+
+	// Wire the shared underlying mock store.
+	sharedStore := newMockVectorStore()
+	p.SetVectorStore(sharedStore)
+
+	tenantA := auth.MustNewTenantID("graphrag-a")
+	tenantB := auth.MustNewTenantID("graphrag-b")
+
+	ctxA := auth.WithTenant(context.Background(), tenantA)
+	ctxB := auth.WithTenant(context.Background(), tenantB)
+
+	// getVectorStore with tenant A should return a scoped store.
+	vsA := p.getVectorStore(ctxA)
+	require.NotNil(t, vsA, "tenant A should get a non-nil scoped store")
+
+	vsB := p.getVectorStore(ctxB)
+	require.NotNil(t, vsB, "tenant B should get a non-nil scoped store")
+
+	// The scoped stores should be different objects (different prefix wrappers).
+	// They should NOT be the same instance.
+	assert.NotSame(t, vsA, vsB, "tenant A and B must get different scoped store instances")
+
+	// Store a record via tenant A's scoped store.
+	nodeID := types.NewID()
+	recA := vector.VectorRecord{
+		ID:        nodeID.String(),
+		Content:   "tenant A node",
+		Embedding: []float64{0.1, 0.2, 0.3},
+	}
+	require.NoError(t, vsA.Store(context.Background(), recA))
+
+	// Tenant B's store should NOT return tenant A's record under the same ID.
+	// The Get call may return an error (not-found) or nil, nil depending on the
+	// store implementation; either is acceptable — what matters is the record is nil.
+	gotB, _ := vsB.Get(context.Background(), nodeID.String())
+	assert.Nil(t, gotB, "tenant B must not see tenant A's vector record")
+
+	// No-tenant context falls back to shared store (non-tenant path).
+	vsNoTenant := p.getVectorStore(context.Background())
+	assert.Same(t, sharedStore, vsNoTenant, "no-tenant context must return the shared store directly")
 }

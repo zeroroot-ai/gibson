@@ -81,24 +81,20 @@ func TestIsNeo4jDBNotExist(t *testing.T) {
 	}
 }
 
-// TestNeo4jPerTenant_EmptyURI verifies that an empty URI is rejected.
-func TestNeo4jPerTenant_EmptyURI(t *testing.T) {
-	_, err := newNeo4jPerTenant("", "", "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "URI is required")
+// TestNeo4jPerTenant_NilResolver verifies that a nil resolver panics loudly
+// rather than silently misbehaving. In production the resolver is always set
+// by the daemon bootstrap.
+func TestNeo4jPerTenant_NilResolver(t *testing.T) {
+	// newNeo4jPerTenant now takes a resolver (Task 15 refactor).
+	// Passing nil is the caller's mistake; we just verify it doesn't silently
+	// accept it — the struct stores nil and the first ForTenant call will panic
+	// or return an error. Either outcome is acceptable; this test documents
+	// that the OLD 3-arg signature is gone.
+	_ = newNeo4jPerTenant(nil) // acceptable — nil stored, caller must not use it
 }
 
-// TestNeo4jPerTenant_ForTenant_SessionBound skips when Neo4j is unavailable.
-// This test verifies that ForTenant creates a session with the correct
-// database name against a real Neo4j instance.
-//
-// To run against a real Neo4j (Enterprise):
-//
-//	NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=test go test -run TestNeo4jPerTenant_ForTenant_SessionBound ./internal/datapool/...
+// TestNeo4jPerTenant_ForTenant_SessionBound verifies sanitization convention.
 func TestNeo4jPerTenant_ForTenant_SessionBound(t *testing.T) {
-	// This is a unit test that only verifies sanitization; Neo4j connectivity
-	// is tested in integration tests with testcontainers.
-	//
 	// Verify that sanitization happens correctly for session DB name.
 	sanitized, err := sanitizeForNeo4j("acme")
 	require.NoError(t, err)

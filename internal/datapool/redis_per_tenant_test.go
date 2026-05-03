@@ -2,6 +2,7 @@ package datapool
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -132,6 +133,34 @@ func TestRedisPerTenant_ForTenant_EmptyAddr(t *testing.T) {
 	_, err := newRedisPerTenant("")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "addr is required")
+}
+
+// TestRedisPerTenant_ForTenant_AdminClientUnreachable verifies that when the
+// Redis admin client cannot reach the server (service outage, not provisioning
+// gap), the returned error is NOT a *NotProvisionedError — it is a plain
+// wrapped Redis error. Spec: per-tenant-data-plane-completion Req 4.4.
+//
+// This distinction matters for MapPoolError: admin-unreachable → codes.Internal
+// (service outage), not codes.FailedPrecondition (tenant not provisioned).
+func TestRedisPerTenant_ForTenant_AdminClientUnreachable(t *testing.T) {
+	// Start miniredis, grab its addr, then close it so the port is no longer
+	// listening. This simulates a Redis service outage.
+	mr := startMiniredis(t)
+	addr := mr.Addr()
+	mr.Close() // address is now unreachable
+
+	r, err := newRedisPerTenant(addr)
+	require.NoError(t, err, "construction should succeed even with unreachable server")
+	defer r.Close()
+
+	tenant := auth.MustNewTenantID("unreachable")
+	_, err = r.ForTenant(context.Background(), tenant)
+	require.Error(t, err)
+
+	// MUST NOT be NotProvisionedError — this is a service outage path.
+	var npErr *NotProvisionedError
+	assert.False(t, errors.As(err, &npErr),
+		"admin-client-unreachable must NOT return NotProvisionedError (service outage != provisioning gap)")
 }
 
 func TestRedisPerTenant_Close(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // LocalGraphRAGProvider implements GraphRAGProvider using local Neo4j and vector store.
@@ -115,10 +116,35 @@ func (l *LocalGraphRAGProvider) Initialize(ctx context.Context) error {
 
 // SetVectorStore sets the vector store for the provider.
 // Must be called before Initialize() if vector search is enabled.
+// This setter is kept for test/non-tenant paths. Production code paths use
+// getVectorStore(ctx) which reads the tenant from context for per-tenant scoping.
 func (l *LocalGraphRAGProvider) SetVectorStore(store vector.VectorStore) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.vectorStore = store
+}
+
+// getVectorStore returns a per-tenant scoped VectorStore when a tenant is
+// present in ctx, or falls back to the process-level l.vectorStore for
+// non-tenant paths (tests, SetVectorStore callers).
+//
+// When a tenant is found in ctx, the returned store wraps l.vectorStore with
+// a "tenant_<sanitized>:" key prefix so that GraphRAG vector lookups are
+// isolated per tenant. The underlying store instance is shared (D4).
+//
+// Returns nil if no vector store is configured (callers must nil-check).
+// Spec: per-tenant-data-plane-completion Req 3.3.
+func (l *LocalGraphRAGProvider) getVectorStore(ctx context.Context) vector.VectorStore {
+	if l.vectorStore == nil {
+		return nil
+	}
+	tenantID, ok := auth.TenantFromContext(ctx)
+	if !ok || tenantID.IsZero() {
+		// No tenant in context — return the shared store as-is (non-tenant path).
+		return l.vectorStore
+	}
+	// Return a per-tenant scoped wrapper that prefixes all keys.
+	return vector.NewVectorStoreForTenantWithStore(l.vectorStore, tenantID)
 }
 
 // createIndices creates necessary Neo4j indices for performance.
@@ -249,7 +275,8 @@ func (l *LocalGraphRAGProvider) StoreNode(ctx context.Context, node graphrag.Gra
 	}
 
 	// Store in vector store if available and node has embedding
-	if l.vectorStore != nil && len(node.Embedding) > 0 {
+	vs := l.getVectorStore(ctx)
+	if vs != nil && len(node.Embedding) > 0 {
 		// Create vector record from node
 		metadata := make(map[string]any)
 		metadata["node_id"] = node.ID.String()
@@ -271,7 +298,7 @@ func (l *LocalGraphRAGProvider) StoreNode(ctx context.Context, node graphrag.Gra
 			CreatedAt: node.CreatedAt,
 		}
 
-		if err := l.vectorStore.Store(ctx, record); err != nil {
+		if err := vs.Store(ctx, record); err != nil {
 			// Vector storage failure is not critical if graph succeeded
 			// In production, you'd log this error
 			if !l.graphHealthy {
@@ -345,7 +372,7 @@ func (l *LocalGraphRAGProvider) QueryNodes(ctx context.Context, query graphrag.N
 	}
 
 	// Fallback to vector store if available
-	if l.vectorStore != nil {
+	if l.getVectorStore(ctx) != nil {
 		return l.queryNodesFromVectorStore(ctx, query)
 	}
 
@@ -490,7 +517,7 @@ func (l *LocalGraphRAGProvider) queryNodesFromVectorStore(ctx context.Context, q
 	}
 
 	// Fallback: vector store with metadata filters.
-	if l.vectorStore != nil {
+	if l.getVectorStore(ctx) != nil {
 		return l.queryNodesFromVectorStoreWithFilters(ctx, query)
 	}
 
@@ -590,7 +617,11 @@ func (l *LocalGraphRAGProvider) queryNodesFromVectorStoreWithFilters(ctx context
 	// TopK-only filtering is the intent.
 	vq.Text = "*"
 
-	results, err := l.vectorStore.Search(ctx, *vq)
+	vs := l.getVectorStore(ctx)
+	if vs == nil {
+		return []graphrag.GraphNode{}, nil
+	}
+	results, err := vs.Search(ctx, *vq)
 	if err != nil {
 		slog.WarnContext(ctx, "vector store metadata filter search failed",
 			slog.String("error", err.Error()),
@@ -803,7 +834,8 @@ func (l *LocalGraphRAGProvider) VectorSearch(ctx context.Context, embedding []fl
 		return nil, graphrag.NewGraphRAGError(graphrag.ErrCodeConnectionFailed, "provider not initialized")
 	}
 
-	if l.vectorStore == nil {
+	vs := l.getVectorStore(ctx)
+	if vs == nil {
 		return nil, graphrag.NewGraphRAGError(graphrag.ErrCodeProviderUnavailable, "vector search is unavailable (no vector store configured)")
 	}
 
@@ -814,7 +846,7 @@ func (l *LocalGraphRAGProvider) VectorSearch(ctx context.Context, embedding []fl
 	}
 
 	// Execute vector search
-	results, err := l.vectorStore.Search(ctx, *query)
+	results, err := vs.Search(ctx, *query)
 	if err != nil {
 		return nil, graphrag.WrapGraphRAGError(graphrag.ErrCodeQueryFailed, "vector search failed", err)
 	}

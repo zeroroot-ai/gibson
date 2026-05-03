@@ -67,6 +67,13 @@ type Config struct {
 
 	// VectorStoreAddr is the host:port of the vector store.
 	VectorStoreAddr string
+
+	// Neo4jResolver is the per-tenant endpoint resolver used to construct
+	// per-tenant Neo4j drivers. When set, Neo4jURI/Neo4jUser/Neo4jPassword are
+	// ignored for session routing (they may still be set for backward compat).
+	//
+	// Spec: per-tenant-data-plane-completion Task 16 / Req 5.5.
+	Neo4jResolver Neo4jEndpointResolver
 }
 
 // DefaultConfig returns a Config with all fields set to production-safe

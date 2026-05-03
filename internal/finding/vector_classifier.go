@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strings"
 
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/finding/classifier"
 	"github.com/zero-day-ai/sdk/finding/registry"
+	classifierstore "github.com/zero-day-ai/sdk/finding/classifier/store"
 )
 
 // VectorClassifier implements the SDK CategoryClassifier interface using vector embeddings
@@ -25,30 +29,109 @@ type VectorClassifier struct {
 	config   classifier.Config
 }
 
-// NewVectorClassifier creates a new vector-based category classifier.
+// classifierSanitizeRE matches characters safe in a key prefix.
+var classifierSanitizeRE = regexp.MustCompile(`[^a-z0-9_]`)
+
+// sanitizeClassifierTenantID converts a tenant ID to a safe prefix component.
+func sanitizeClassifierTenantID(id string) string {
+	replaced := strings.ReplaceAll(id, "-", "_")
+	return classifierSanitizeRE.ReplaceAllString(replaced, "")
+}
+
+// tenantClassifierStore wraps a classifier.VectorStore with per-tenant key
+// prefixing. All category IDs are namespaced as "tenant_<sanitized>:<id>" so
+// that tenant A's categories never collide with tenant B's in a shared store.
 //
-// Parameters:
-//   - embedder: The embedder to use for generating category embeddings (typically NativeEmbedder)
-//   - store: The vector store for storing and searching category embeddings
-//   - config: Configuration including similarity threshold and auto-registration behavior
+// This implements the per-tenant isolation requirement for the finding
+// classifier without spinning up per-tenant store instances (D4).
+// Spec: per-tenant-data-plane-completion Req 3.2, 3.4.
+type tenantClassifierStore struct {
+	prefix     string
+	underlying classifier.VectorStore
+}
+
+func (t *tenantClassifierStore) prefixID(id string) string  { return t.prefix + id }
+func (t *tenantClassifierStore) unprefixID(id string) string { return strings.TrimPrefix(id, t.prefix) }
+
+func (t *tenantClassifierStore) Upsert(ctx context.Context, id string, embedding []float64, metadata map[string]any) error {
+	return t.underlying.Upsert(ctx, t.prefixID(id), embedding, metadata)
+}
+
+func (t *tenantClassifierStore) Search(ctx context.Context, embedding []float64, topK int) ([]classifier.SearchResult, error) {
+	// Request extra results to account for cross-tenant filtering.
+	results, err := t.underlying.Search(ctx, embedding, topK*2)
+	if err != nil {
+		return nil, err
+	}
+	// Filter to only this tenant's results (IDs that start with our prefix),
+	// then strip the prefix so callers see original category names.
+	own := results[:0]
+	for _, r := range results {
+		if strings.HasPrefix(r.ID, t.prefix) {
+			r.ID = t.unprefixID(r.ID)
+			own = append(own, r)
+		}
+	}
+	// Trim to the requested topK.
+	if len(own) > topK {
+		own = own[:topK]
+	}
+	return own, nil
+}
+
+func (t *tenantClassifierStore) Delete(ctx context.Context, id string) error {
+	return t.underlying.Delete(ctx, t.prefixID(id))
+}
+
+func (t *tenantClassifierStore) Count(ctx context.Context) (int, error) {
+	// NOTE: Count returns the total count of ALL keys in the underlying store,
+	// not just this tenant's keys. This is a known limitation of the shared-store
+	// D4 design with the MemoryStore backend; it is acceptable for the current
+	// use case (classifier warm-up checks) where a higher-than-actual count is
+	// safe (never causes incorrect classification decisions).
+	return t.underlying.Count(ctx)
+}
+
+// NewVectorClassifierForTenant creates a VectorClassifier scoped to the given
+// tenant. All category embeddings stored by this classifier are namespaced under
+// "tenant_<sanitized>:" so they cannot collide with another tenant's categories.
 //
-// Returns a VectorClassifier ready for use. The classifier will gracefully degrade on errors,
-// logging warnings and returning proposed categories when classification fails.
+// An in-memory (shared) MemoryStore is created per call. For production paths
+// that need a process-wide shared store, pass a pre-constructed store via the
+// internal constructor or use NewVectorClassifierForTenantWithStore (if added).
 //
-// Example:
-//
-//	emb, err := embedder.CreateNativeEmbedder()
-//	if err != nil {
-//	    return nil, fmt.Errorf("failed to create embedder: %w", err)
-//	}
-//	store := store.NewMemoryStore()
-//	config := classifier.DefaultConfig()
-//	vc := NewVectorClassifier(emb, store, config)
-func NewVectorClassifier(emb embedder.Embedder, store classifier.VectorStore, config classifier.Config) *VectorClassifier {
+// The old NewVectorClassifier (without tenantID) has been removed. Every caller
+// MUST pass a tenant ID — this is enforced at compile time.
+// Spec: per-tenant-data-plane-completion Req 3.2, 3.4.
+func NewVectorClassifierForTenant(emb embedder.Embedder, tenantID auth.TenantID, cfg classifier.Config) *VectorClassifier {
+	sanitized := sanitizeClassifierTenantID(tenantID.String())
+	prefix := "tenant_" + sanitized + ":"
+	underlying := classifierstore.NewMemoryStore()
+	scopedStore := &tenantClassifierStore{
+		prefix:     prefix,
+		underlying: underlying,
+	}
 	return &VectorClassifier{
 		embedder: emb,
-		store:    store,
-		config:   config,
+		store:    scopedStore,
+		config:   cfg,
+	}
+}
+
+// NewVectorClassifierForTenantWithStore creates a VectorClassifier scoped to
+// the given tenant, wrapping an existing classifier.VectorStore. Use this
+// when sharing a store across multiple classifiers in the same process.
+func NewVectorClassifierForTenantWithStore(emb embedder.Embedder, tenantID auth.TenantID, store classifier.VectorStore, cfg classifier.Config) *VectorClassifier {
+	sanitized := sanitizeClassifierTenantID(tenantID.String())
+	prefix := "tenant_" + sanitized + ":"
+	scopedStore := &tenantClassifierStore{
+		prefix:     prefix,
+		underlying: store,
+	}
+	return &VectorClassifier{
+		embedder: emb,
+		store:    scopedStore,
+		config:   cfg,
 	}
 }
 

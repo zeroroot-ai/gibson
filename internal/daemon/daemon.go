@@ -10,6 +10,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/audit"
@@ -571,10 +572,63 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			if d.config.Redis.URL != "" {
 				poolCfg.RedisAddr = d.config.Redis.URL
 			}
-			if d.config.GraphRAG.Neo4j.URI != "" {
+			// Wire Neo4j per-tenant resolver based on TenantMode.
+			// Spec: per-tenant-data-plane-completion Task 16 / Req 5.5.
+			if d.config.GraphRAG.Neo4j.TenantMode == "multi-db" {
+				// multi-db: shared Enterprise cluster, tenant isolation via named databases.
+				poolCfg.Neo4jResolver = datapool.NewMultiDBResolver(
+					d.config.GraphRAG.Neo4j.SharedClusterURI,
+					d.config.GraphRAG.Neo4j.Username,
+					d.config.GraphRAG.Neo4j.Password,
+				)
+				d.logger.Info(ctx, "neo4j resolver: multi-db mode configured",
+					"shared_cluster_uri", d.config.GraphRAG.Neo4j.SharedClusterURI)
+			} else if d.config.TenantPostgres.Host != "" {
+				// instance mode: one StatefulSet per tenant; endpoint registry in Postgres.
+				// Build an admin pgxpool for the endpoint registry lookups.
+				adminPgDSN := buildTenantPostgresDSN(d.config)
+				if adminPgDSN != "" {
+					adminPgPool, pgErr := pgxpool.New(ctx, adminPgDSN)
+					if pgErr != nil {
+						d.logger.Warn(ctx, "neo4j instanceResolver: could not connect to admin postgres (neo4j resolution will be unavailable)",
+							"error", pgErr)
+					} else {
+						// Use a FuncSecretsReader so the resolver captures d.secretsService
+					// lazily. initBrokerStack runs after NewPool and sets d.secretsService;
+					// the resolver is only called at tenant-RPC time, well after startup.
+					// Spec: per-tenant-data-plane-completion Task 13a (D3 amended).
+					poolCfg.Neo4jResolver = datapool.NewInstanceResolver(adminPgPool,
+						datapool.FuncSecretsReader(func(ctx context.Context, name string) ([]byte, error) {
+							if d.secretsService == nil {
+								return nil, fmt.Errorf("instanceResolver: secrets broker not yet initialized")
+							}
+							return d.secretsService.Resolve(ctx, name)
+						}),
+					)
+						d.logger.Info(ctx, "neo4j resolver: instance mode configured")
+					}
+				}
+			} else if d.config.GraphRAG.Neo4j.URI != "" {
+				// Backward-compat: single URI without resolver. pool_impl.go wraps
+				// this in a staticNeo4jResolver so existing single-tenant deployments
+				// and tests are not broken.
 				poolCfg.Neo4jURI = d.config.GraphRAG.Neo4j.URI
 				poolCfg.Neo4jUser = d.config.GraphRAG.Neo4j.Username
 				poolCfg.Neo4jPassword = d.config.GraphRAG.Neo4j.Password
+			}
+			// Wire TenantPostgres admin coordinates into the pool config so that
+			// pgxpool_per_tenant can connect to the per-tenant admin Postgres and
+			// bootstrap per-tenant databases on demand.
+			// Spec: per-tenant-data-plane-completion Req 2.1, 2.5.
+			if d.config.TenantPostgres.Host != "" {
+				port := d.config.TenantPostgres.Port
+				if port == 0 {
+					port = 5432
+				}
+				poolCfg.PostgresHost = fmt.Sprintf("%s:%d", d.config.TenantPostgres.Host, port)
+				poolCfg.PostgresUser = d.config.TenantPostgres.AdminUsername
+			} else {
+				d.logger.Warn(ctx, "tenant_postgres.host is not configured; per-tenant Postgres bootstrap will be unavailable — set dataPlane.postgres.host in helm values")
 			}
 			p, poolErr := datapool.NewPool(ctx, poolCfg, keyProvider, nil)
 			if poolErr != nil {
@@ -1484,4 +1538,36 @@ func (d *daemonImpl) RefreshToolCatalog(ctx context.Context) (bool, string, erro
 // Returns nil if the LLM config handler was not initialized.
 func (d *daemonImpl) LLMConfigHandler() *api.LLMConfigHandler {
 	return d.llmConfigHandler
+}
+
+// buildTenantPostgresDSN constructs a pgxpool-compatible DSN for the admin
+// Postgres pool used by the Neo4j instanceResolver's endpoint registry.
+//
+// Returns an empty string when TenantPostgres.Host is not set.
+// Spec: per-tenant-data-plane-completion Task 16.
+func buildTenantPostgresDSN(cfg *config.Config) string {
+	if cfg.TenantPostgres.Host == "" {
+		return ""
+	}
+	port := cfg.TenantPostgres.Port
+	if port == 0 {
+		port = 5432
+	}
+	db := cfg.TenantPostgres.AdminDatabase
+	if db == "" {
+		db = "postgres"
+	}
+	sslMode := cfg.TenantPostgres.SSLMode
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+	return fmt.Sprintf(
+		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		cfg.TenantPostgres.AdminUsername,
+		cfg.TenantPostgres.AdminPassword,
+		cfg.TenantPostgres.Host,
+		port,
+		db,
+		sslMode,
+	)
 }

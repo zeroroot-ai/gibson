@@ -878,6 +878,23 @@ func containsString(haystack []string, needle string) bool {
 	return false
 }
 
+// preserveStatus returns the error unchanged if it already carries a gRPC
+// status code (e.g. codes.FailedPrecondition from datapool.MapPoolError),
+// otherwise wraps it as codes.Internal with the given message prefix.
+//
+// This prevents double-wrapping: daemon layer methods (list_missions.go,
+// grpc.go) call datapool.MapPoolError and return a FailedPrecondition status;
+// without this helper the server.go handlers would re-wrap that status as
+// codes.Internal, causing the dashboard to receive a 500 instead of a 412.
+// Spec: per-tenant-data-plane-completion Req 8.1–8.3.
+func preserveStatus(err error, internalMsg string) error {
+	if _, ok := status_grpc.FromError(err); ok {
+		// err already has a gRPC status code — preserve it.
+		return err
+	}
+	return status_grpc.Errorf(codes.Internal, "%s: %v", internalMsg, err)
+}
+
 // Connect establishes a client connection to the daemon.
 func (s *DaemonServer) Connect(ctx context.Context, req *daemonpb.ConnectRequest) (*daemonpb.ConnectResponse, error) {
 	s.logger.Info("client connecting",
@@ -973,7 +990,7 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 	eventChan, err := s.daemon.RunMission(stream.Context(), req.MissionDefinitionId, req.TargetId, req.Variables, req.MemoryContinuity)
 	if err != nil {
 		s.logger.Error("failed to start mission", "error", err)
-		return status_grpc.Errorf(codes.Internal, "failed to start mission: %v", err)
+		return preserveStatus(err, "failed to start mission")
 	}
 
 	// Mission accepted: increment the tenant's running mission counter.
@@ -1068,7 +1085,7 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissi
 	missions, total, err := s.daemon.ListMissions(ctx, req.ActiveOnly, req.StatusFilter, req.NamePattern, int(req.Limit), int(req.Offset))
 	if err != nil {
 		s.logger.Error("failed to list missions", "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to list missions: %v", err)
+		return nil, preserveStatus(err, "failed to list missions")
 	}
 
 	// Apply tenant filtering when auth is enabled.
@@ -1687,7 +1704,7 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetM
 	runs, total, err := s.daemon.GetMissionHistory(ctx, req.Name, limit, offset)
 	if err != nil {
 		s.logger.Error("failed to get mission history", "error", err, "name", req.Name)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to get mission history: %v", err)
+		return nil, preserveStatus(err, "failed to get mission history")
 	}
 
 	// Convert internal types to proto types
@@ -1734,7 +1751,7 @@ func (s *DaemonServer) GetMissionCheckpoints(ctx context.Context, req *daemonpb.
 			return nil, status_grpc.Errorf(codes.NotFound, "mission not found: %s", req.MissionId)
 		}
 
-		return nil, status_grpc.Errorf(codes.Internal, "failed to get mission checkpoints: %v", err)
+		return nil, preserveStatus(err, "failed to get mission checkpoints")
 	}
 
 	// Convert internal types to proto types
@@ -1944,7 +1961,7 @@ func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb
 	definitions, total, err := s.daemon.ListMissionDefinitions(ctx, limit, offset)
 	if err != nil {
 		s.logger.Error("failed to list mission definitions", "error", err)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to list mission definitions: %v", err)
+		return nil, preserveStatus(err, "failed to list mission definitions")
 	}
 
 	// Convert to proto format
@@ -2016,7 +2033,7 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 			return nil, status_grpc.Errorf(codes.AlreadyExists, "%v", err)
 		}
 
-		return nil, status_grpc.Errorf(codes.Internal, "failed to create mission: %v", err)
+		return nil, preserveStatus(err, "failed to create mission")
 	}
 
 	s.logger.Info("mission created successfully",
@@ -2068,7 +2085,7 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 		if strings.Contains(err.Error(), "already exists") {
 			return nil, status_grpc.Errorf(codes.AlreadyExists, "%v", err)
 		}
-		return nil, status_grpc.Errorf(codes.Internal, "failed to create mission definition: %v", err)
+		return nil, preserveStatus(err, "failed to create mission definition")
 	}
 
 	s.logger.Info("mission definition created",

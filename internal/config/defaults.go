@@ -118,6 +118,14 @@ func DefaultConfig() *Config {
 				},
 			},
 		},
+		// GraphRAG.Neo4j.TenantMode defaults to "instance" — one StatefulSet per tenant.
+		// Override to "multi-db" when migrating to a shared Enterprise cluster.
+		// Spec: per-tenant-data-plane-completion Task 11 / Req 5.5.
+		GraphRAG: GraphRAGConfig{
+			Neo4j: Neo4jConfig{
+				TenantMode: "instance",
+			},
+		},
 	}
 }
 

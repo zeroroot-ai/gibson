@@ -7,10 +7,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/finding/classifier"
 	"github.com/zero-day-ai/sdk/finding/classifier/store"
 	"github.com/zero-day-ai/sdk/finding/registry"
 )
+
+// testTenantID is the tenant used in unit tests; deterministic for reproducibility.
+var testTenantID = auth.MustNewTenantID("test-tenant")
 
 // TestVectorClassifier_Classify_MatchesExisting tests that Classify returns an existing
 // category when semantic similarity is above the threshold.
@@ -29,7 +33,7 @@ func TestVectorClassifier_Classify_MatchesExisting(t *testing.T) {
 		AutoRegister: true,
 		StoreType:    "memory",
 	}
-	vc := NewVectorClassifier(mockEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 	// Register an existing category "jailbreak"
 	jailbreakInfo := registry.CategoryInfo{
@@ -73,7 +77,7 @@ func TestVectorClassifier_Classify_RegistersNew(t *testing.T) {
 		AutoRegister: true,
 		StoreType:    "memory",
 	}
-	vc := NewVectorClassifier(mockEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 	// Register an existing category "jailbreak"
 	jailbreakInfo := registry.CategoryInfo{
@@ -116,7 +120,7 @@ func TestVectorClassifier_Classify_AutoRegisterDisabled(t *testing.T) {
 		AutoRegister: false, // Disabled
 		StoreType:    "memory",
 	}
-	vc := NewVectorClassifier(mockEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 	// Register an existing category
 	jailbreakInfo := registry.CategoryInfo{
@@ -154,7 +158,7 @@ func TestVectorClassifier_Register_Idempotent(t *testing.T) {
 
 	// Create classifier
 	config := classifier.DefaultConfig()
-	vc := NewVectorClassifier(mockEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 	// Register a category
 	jailbreakInfo := registry.CategoryInfo{
@@ -207,7 +211,7 @@ func TestVectorClassifier_Bootstrap(t *testing.T) {
 
 	// Create classifier
 	config := classifier.DefaultConfig()
-	vc := NewVectorClassifier(mockEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 	// Bootstrap from DefaultRegistry
 	defaultReg := registry.DefaultRegistry()
@@ -238,7 +242,7 @@ func TestVectorClassifier_Bootstrap_Empty(t *testing.T) {
 
 	// Create classifier
 	config := classifier.DefaultConfig()
-	vc := NewVectorClassifier(mockEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 	// Bootstrap from an empty registry
 	emptyReg := registry.NewCategoryRegistry()
@@ -264,7 +268,7 @@ func TestVectorClassifier_Search(t *testing.T) {
 
 	// Create classifier
 	config := classifier.DefaultConfig()
-	vc := NewVectorClassifier(mockEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 	// Register multiple categories
 	categories := []registry.CategoryInfo{
@@ -330,7 +334,7 @@ func TestVectorClassifier_Search_Empty(t *testing.T) {
 
 	// Create classifier
 	config := classifier.DefaultConfig()
-	vc := NewVectorClassifier(mockEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 	// Search in empty store
 	matches, err := vc.Search(ctx, "jailbreak", 5)
@@ -355,7 +359,7 @@ func TestVectorClassifier_GracefulDegradation(t *testing.T) {
 
 		// Create classifier
 		config := classifier.DefaultConfig()
-		vc := NewVectorClassifier(mockEmb, memStore, config)
+		vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 		// Use a canceled context
 		canceledCtx, cancel := context.WithCancel(ctx)
@@ -386,7 +390,7 @@ func TestVectorClassifier_ThresholdBehavior(t *testing.T) {
 			AutoRegister: true,
 			StoreType:    "memory",
 		}
-		vc := NewVectorClassifier(mockEmb, memStore, config)
+		vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore, config)
 
 		// Register a category
 		jailbreakInfo := registry.CategoryInfo{
@@ -413,7 +417,7 @@ func TestVectorClassifier_ThresholdBehavior(t *testing.T) {
 			AutoRegister: true,
 			StoreType:    "memory",
 		}
-		vc := NewVectorClassifier(mockEmb, memStore2, config)
+		vc := NewVectorClassifierForTenantWithStore(mockEmb, testTenantID, memStore2, config)
 
 		// Register a category
 		jailbreakInfo := registry.CategoryInfo{
@@ -431,4 +435,55 @@ func TestVectorClassifier_ThresholdBehavior(t *testing.T) {
 		// Result is either "jailbreak" (if matched) or "jailbreaking" (if registered new)
 		assert.Contains(t, []string{"jailbreak", "jailbreaking"}, result)
 	})
+}
+
+// TestVectorClassifier_CrossTenantIsolation verifies Req 3.4: tenant A's category
+// set does not pollute tenant B's Classify results when both use a shared underlying
+// MemoryStore via per-tenant scoped wrappers.
+//
+// This is the data-isolation test required by spec per-tenant-data-plane-completion
+// Req 3.4. Tenant B MUST NOT match categories registered only under tenant A.
+func TestVectorClassifier_CrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+
+	mockEmb := embedder.NewMockEmbedder()
+	sharedStore := store.NewMemoryStore()
+
+	tenantA := auth.MustNewTenantID("isolate-a")
+	tenantB := auth.MustNewTenantID("isolate-b")
+
+	config := classifier.Config{
+		Threshold:    0.80,
+		AutoRegister: false, // Don't auto-register so results are unambiguous
+		StoreType:    "memory",
+	}
+
+	vcA := NewVectorClassifierForTenantWithStore(mockEmb, tenantA, sharedStore, config)
+	vcB := NewVectorClassifierForTenantWithStore(mockEmb, tenantB, sharedStore, config)
+
+	// Register category "sql-injection" ONLY under tenant A.
+	infoA := registry.CategoryInfo{
+		Name:        "sql-injection",
+		Domain:      "security",
+		DisplayName: "SQL Injection",
+		Description: "Database query injection attack",
+	}
+	require.NoError(t, vcA.Register(ctx, infoA))
+
+	// Tenant B should NOT match "sql-injection" (it was only registered for A).
+	// AutoRegister is false, so if no match is found the proposed name is returned.
+	resultB, err := vcB.Classify(ctx, "sql-injection", "Database query injection attack")
+	require.NoError(t, err)
+	// Because tenant B's store is empty (no entries under its prefix), Classify
+	// returns the proposed name unchanged — "sql-injection" — NOT a match from A.
+	assert.Equal(t, "sql-injection", resultB,
+		"tenant B must return the proposed name (no match), not a result from tenant A's dataset")
+
+	// Sanity check: tenant A CAN classify its own category (regression guard).
+	resultA, err := vcA.Classify(ctx, "sql-injection", "Database query injection attack")
+	require.NoError(t, err)
+	// Tenant A has "sql-injection" registered; the mock embedder produces deterministic
+	// identical embeddings for the same text, so similarity = 1.0 ≥ threshold.
+	assert.Equal(t, "sql-injection", resultA,
+		"tenant A must find its own registered category")
 }

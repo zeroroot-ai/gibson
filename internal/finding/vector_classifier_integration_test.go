@@ -9,10 +9,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/finding/classifier"
 	"github.com/zero-day-ai/sdk/finding/classifier/store"
 	"github.com/zero-day-ai/sdk/finding/registry"
 )
+
+// integTenantID is a deterministic tenant used in integration tests.
+var integTenantID = auth.MustNewTenantID("integ-tenant")
 
 // TestVectorClassifier_RealEmbeddings_SemanticMatching tests semantic similarity
 // matching using the real NativeEmbedder (all-MiniLM-L6-v2 via ONNX).
@@ -34,7 +38,7 @@ func TestVectorClassifier_RealEmbeddings_SemanticMatching(t *testing.T) {
 		// Create fresh store for this subtest
 		memStore := store.NewMemoryStore()
 		config := classifier.DefaultConfig()
-		vc := NewVectorClassifier(nativeEmb, memStore, config)
+		vc := NewVectorClassifierForTenantWithStore(nativeEmb, integTenantID, memStore, config)
 
 		// Register the canonical "jailbreak" category
 		jailbreakInfo := registry.CategoryInfo{
@@ -66,7 +70,7 @@ func TestVectorClassifier_RealEmbeddings_SemanticMatching(t *testing.T) {
 		// Create fresh store for this subtest
 		memStore := store.NewMemoryStore()
 		config := classifier.DefaultConfig()
-		vc := NewVectorClassifier(nativeEmb, memStore, config)
+		vc := NewVectorClassifierForTenantWithStore(nativeEmb, integTenantID, memStore, config)
 
 		// Register "jailbreak"
 		jailbreakInfo := registry.CategoryInfo{
@@ -96,7 +100,7 @@ func TestVectorClassifier_RealEmbeddings_SemanticMatching(t *testing.T) {
 		// Create fresh store for this subtest
 		memStore := store.NewMemoryStore()
 		config := classifier.DefaultConfig()
-		vc := NewVectorClassifier(nativeEmb, memStore, config)
+		vc := NewVectorClassifierForTenantWithStore(nativeEmb, integTenantID, memStore, config)
 
 		// Register "jailbreak"
 		jailbreakInfo := registry.CategoryInfo{
@@ -137,7 +141,7 @@ func TestVectorClassifier_RealEmbeddings_BootstrapAndClassify(t *testing.T) {
 
 	// Create classifier
 	config := classifier.DefaultConfig()
-	vc := NewVectorClassifier(nativeEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(nativeEmb, integTenantID, memStore, config)
 
 	// Bootstrap from DefaultRegistry
 	defaultReg := registry.DefaultRegistry()
@@ -211,7 +215,7 @@ func TestVectorClassifier_RealEmbeddings_SearchSimilarity(t *testing.T) {
 
 	// Create classifier
 	config := classifier.DefaultConfig()
-	vc := NewVectorClassifier(nativeEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(nativeEmb, integTenantID, memStore, config)
 
 	// Bootstrap from DefaultRegistry
 	defaultReg := registry.DefaultRegistry()
@@ -277,7 +281,7 @@ func TestVectorClassifier_RealEmbeddings_DistinctCategories(t *testing.T) {
 
 	// Create classifier with default threshold (0.85)
 	config := classifier.DefaultConfig()
-	vc := NewVectorClassifier(nativeEmb, memStore, config)
+	vc := NewVectorClassifierForTenantWithStore(nativeEmb, integTenantID, memStore, config)
 
 	// Register several distinct security categories
 	categories := []registry.CategoryInfo{
@@ -368,7 +372,7 @@ func TestVectorClassifier_RealEmbeddings_ThresholdSensitivity(t *testing.T) {
 			AutoRegister: true,
 			StoreType:    "memory",
 		}
-		vc := NewVectorClassifier(nativeEmb, memStore, config)
+		vc := NewVectorClassifierForTenantWithStore(nativeEmb, integTenantID, memStore, config)
 
 		// Register "jailbreak"
 		jailbreakInfo := registry.CategoryInfo{
@@ -396,7 +400,7 @@ func TestVectorClassifier_RealEmbeddings_ThresholdSensitivity(t *testing.T) {
 			AutoRegister: true,
 			StoreType:    "memory",
 		}
-		vc := NewVectorClassifier(nativeEmb, memStore, config)
+		vc := NewVectorClassifierForTenantWithStore(nativeEmb, integTenantID, memStore, config)
 
 		// Register "jailbreak"
 		jailbreakInfo := registry.CategoryInfo{

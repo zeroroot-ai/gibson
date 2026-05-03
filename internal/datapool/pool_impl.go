@@ -101,11 +101,25 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 	}
 
 	var n4j *neo4jPerTenant
-	if cfg.Neo4jURI != "" {
-		n4j, err = newNeo4jPerTenant(cfg.Neo4jURI, cfg.Neo4jUser, cfg.Neo4jPassword)
-		if err != nil {
-			return nil, fmt.Errorf("datapool: NewPool: neo4j init: %w", err)
+	if cfg.Neo4jResolver != nil {
+		// Resolver-based path (Task 16): per-tenant driver pool via EndpointResolver.
+		// This is the forward path for both instance mode (instanceResolver) and
+		// multi-db mode (multiDBResolver).
+		n4j = newNeo4jPerTenant(cfg.Neo4jResolver)
+	} else if cfg.Neo4jURI != "" {
+		// Backward-compat path: single shared URI provided without a resolver.
+		// Wrap it in a one-off multiDBResolver-style static resolver so existing
+		// tests and single-tenant deployments keep working.
+		// NOTE: in this fallback the database name is empty (default "neo4j" DB).
+		staticResolver := &staticNeo4jResolver{
+			endpoint: &Neo4jEndpoint{
+				BoltURI:  cfg.Neo4jURI,
+				Username: cfg.Neo4jUser,
+				Password: cfg.Neo4jPassword,
+				Database: "", // default DB; matches pre-refactor behaviour
+			},
 		}
+		n4j = newNeo4jPerTenant(staticResolver)
 	}
 
 	closeCh := make(chan struct{})
@@ -344,4 +358,19 @@ func (p *pool) activeConnCount(tenant auth.TenantID) int64 {
 		return v.(*tenantEntry).activeConns.Load()
 	}
 	return 0
+}
+
+// staticNeo4jResolver is a backward-compat resolver that returns the same
+// endpoint for every tenant. Used when Neo4jURI is set in Config but no
+// Neo4jResolver is provided (legacy single-URI deployments and tests that
+// predate the resolver abstraction).
+//
+// In this mode all tenants share the same Neo4j connection with the default
+// database; this matches pre-Task-15 behaviour and preserves test compatibility.
+type staticNeo4jResolver struct {
+	endpoint *Neo4jEndpoint
+}
+
+func (s *staticNeo4jResolver) Resolve(_ context.Context, _ auth.TenantID) (*Neo4jEndpoint, error) {
+	return s.endpoint, nil
 }
