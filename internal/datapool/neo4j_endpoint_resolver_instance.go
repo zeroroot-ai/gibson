@@ -3,6 +3,7 @@ package datapool
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zero-day-ai/sdk/auth"
+
+	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
 )
 
 const (
@@ -165,86 +168,128 @@ func (r *instanceResolver) lookupRegistry() registryLookup {
 	return r.registry
 }
 
-// resolveAndCache performs the full registry lookup + Vault broker credential
-// read and stores the result in the cache. Returns NotProvisionedError on known
-// provisioning gaps; other errors indicate transient infrastructure failures.
+// resolveAndCache performs the Vault broker credential read (typed
+// Neo4jCredentials payload, including bolt URI) and stores the result
+// in the cache. Returns NotProvisionedError on known provisioning gaps;
+// other errors indicate transient infrastructure failures.
+//
+// Spec tenant-provisioning-unification-phase2 Phase 6.3: bolt URI now
+// comes from the Vault payload too, eliminating the cross-reference to
+// the tenant_neo4j_endpoints Postgres registry table. The legacy
+// registry-based lookup remains as a fallback when the Vault path
+// returns NotFound — for clusters in mid-cutover where the operator's
+// Phase 6.3 changes haven't shipped yet.
 func (r *instanceResolver) resolveAndCache(ctx context.Context, tenantID string) (*Neo4jEndpoint, error) {
 	if r.onLookup != nil {
 		r.onLookup()
 	}
 
-	// Step 1: registry lookup.
+	if r.secrets != nil {
+		if endpoint, ok, err := r.tryVaultPayload(ctx, tenantID); err != nil {
+			return nil, err
+		} else if ok {
+			r.cacheEndpoint(tenantID, endpoint)
+			return endpoint, nil
+		}
+	}
+
+	// Fallback path (parent-spec compatibility): registry lookup for
+	// bolt URI + per-key Vault reads for username/password. Removable
+	// once every cluster has the operator's Phase 6.3 writes flowing.
 	boltURI, _, err := r.lookupRegistry().Lookup(ctx, tenantID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &NotProvisionedError{
 				Tenant: tenantID,
-				Reason: "neo4j endpoint not yet registered",
+				Reason: "neo4j endpoint not yet registered (legacy fallback path)",
 			}
 		}
-		// Infrastructure failure — propagate unwrapped so MapPoolError returns Unavailable.
 		return nil, fmt.Errorf("instanceResolver: registry lookup: %w", err)
 	}
-
-	// Step 2: read credentials from the daemon's secrets broker. The broker
-	// routes to the per-tenant Vault namespace via the tenant in ctx. A
-	// not-found response means credentials have not been written yet (the
-	// tenant-operator's Provision step hasn't completed), which maps to
-	// NotProvisionedError. Any other error is an infrastructure failure.
-	username, password, err := r.readCredentials(ctx, tenantID)
+	username, password, err := r.readLegacyCredentials(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-
 	endpoint := &Neo4jEndpoint{
 		BoltURI:  boltURI,
 		Username: username,
 		Password: password,
-		Database: "", // empty = default database on the per-tenant instance
+		Database: "",
 	}
+	r.cacheEndpoint(tenantID, endpoint)
+	return endpoint, nil
+}
 
-	// Cache the resolved endpoint.
+// tryVaultPayload reads the typed pdataplane.Neo4jCredentials JSON
+// payload from infra/neo4j. Returns (nil, false, nil) when the payload
+// is absent so the caller can fall back to the legacy split-key path.
+// Any other error is propagated.
+func (r *instanceResolver) tryVaultPayload(ctx context.Context, tenantID string) (*Neo4jEndpoint, bool, error) {
+	raw, err := r.secrets.Resolve(ctx, pdataplane.VaultPathInfraNeo4j)
+	if err != nil {
+		if isNotFoundError(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("instanceResolver: read neo4j credentials for tenant %q: %w", tenantID, err)
+	}
+	var creds pdataplane.Neo4jCredentials
+	if err := json.Unmarshal(raw, &creds); err != nil {
+		// Malformed payload — likely an in-flight write or a legacy
+		// split-key payload. Treat as fall-through so the legacy path
+		// can satisfy the request; a permanent malformed payload will
+		// surface there with a clearer error.
+		return nil, false, nil
+	}
+	if creds.BoltURI == "" || creds.Username == "" || creds.Password == "" {
+		// Partial payload — legacy split-key writers may have written
+		// only username+password. Fall back.
+		return nil, false, nil
+	}
+	return &Neo4jEndpoint{
+		BoltURI:  creds.BoltURI,
+		Username: creds.Username,
+		Password: creds.Password,
+		Database: "",
+	}, true, nil
+}
+
+// readLegacyCredentials is the parent-spec split-key reader (kept for
+// the fallback path only).
+func (r *instanceResolver) readLegacyCredentials(ctx context.Context, tenantID string) (username, password string, err error) {
+	if r.secrets == nil {
+		return "", "", fmt.Errorf("instanceResolver: secrets broker not configured for tenant %q", tenantID)
+	}
+	usernameBytes, err := r.secrets.Resolve(ctx, "infra/neo4j/username")
+	if err != nil {
+		if isNotFoundError(err) {
+			return "", "", &NotProvisionedError{
+				Tenant: tenantID,
+				Reason: "neo4j credentials not yet written to Vault",
+			}
+		}
+		return "", "", fmt.Errorf("instanceResolver: read neo4j username for tenant %q: %w", tenantID, err)
+	}
+	passwordBytes, err := r.secrets.Resolve(ctx, "infra/neo4j/password")
+	if err != nil {
+		if isNotFoundError(err) {
+			return "", "", &NotProvisionedError{
+				Tenant: tenantID,
+				Reason: "neo4j credentials not yet written to Vault",
+			}
+		}
+		return "", "", fmt.Errorf("instanceResolver: read neo4j password for tenant %q: %w", tenantID, err)
+	}
+	return strings.TrimSpace(string(usernameBytes)), strings.TrimSpace(string(passwordBytes)), nil
+}
+
+// cacheEndpoint stores the resolved endpoint with TTL.
+func (r *instanceResolver) cacheEndpoint(tenantID string, endpoint *Neo4jEndpoint) {
 	r.mu.Lock()
 	r.cache[tenantID] = instanceCacheEntry{
 		endpoint: endpoint,
 		expiry:   time.Now().Add(instanceResolverCacheTTL),
 	}
 	r.mu.Unlock()
-
-	return endpoint, nil
-}
-
-// readCredentials reads the username and password for tenantID from the
-// secrets broker. The broker resolves ctx's tenant to the correct per-tenant
-// Vault namespace automatically. Path-not-found maps to NotProvisionedError.
-func (r *instanceResolver) readCredentials(ctx context.Context, tenantID string) (username, password string, err error) {
-	if r.secrets == nil {
-		return "", "", fmt.Errorf("instanceResolver: secrets broker not configured for tenant %q", tenantID)
-	}
-
-	usernameBytes, err := r.secrets.Resolve(ctx, "infra/neo4j/username")
-	if err != nil {
-		if isNotFoundError(err) {
-			return "", "", &NotProvisionedError{
-				Tenant: tenantID,
-				Reason: "neo4j credentials not yet written to Vault (infra/neo4j/username not found)",
-			}
-		}
-		return "", "", fmt.Errorf("instanceResolver: read neo4j username for tenant %q: %w", tenantID, err)
-	}
-
-	passwordBytes, err := r.secrets.Resolve(ctx, "infra/neo4j/password")
-	if err != nil {
-		if isNotFoundError(err) {
-			return "", "", &NotProvisionedError{
-				Tenant: tenantID,
-				Reason: "neo4j credentials not yet written to Vault (infra/neo4j/password not found)",
-			}
-		}
-		return "", "", fmt.Errorf("instanceResolver: read neo4j password for tenant %q: %w", tenantID, err)
-	}
-
-	return strings.TrimSpace(string(usernameBytes)), strings.TrimSpace(string(passwordBytes)), nil
 }
 
 // isNotFoundError returns true when the error is a gRPC NotFound status,
