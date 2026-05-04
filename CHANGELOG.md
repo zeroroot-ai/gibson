@@ -4,6 +4,52 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## v0.32.0 — 2026-05-04 — daemon reads per-tenant credentials from Vault (tenant-provisioning-unification-phase2 Phase 6)
+
+The daemon's per-tenant Postgres + Neo4j credential resolution now
+prefers typed Vault payloads over local KEK derivation and Postgres
+registry-table lookups. Operator-side counterpart (Phase 3 + Phase
+6.3 typed Neo4j writer) writes credentials to Vault during
+provisioning so the daemon never needs to hold MasterKEK or
+cross-reference a registry for the bolt URI.
+
+Spec: `tenant-provisioning-unification-phase2`.
+
+### Changed
+
+- **`internal/datapool/pgxpool_per_tenant.go`** — new `resolveDSN`
+  method routes between Vault-sourced (production) and KEK-derived
+  (parent-spec fallback) paths. When `Config.PostgresSecretsReader`
+  is wired, the daemon reads `pdataplane.PostgresCredentials` JSON
+  from Vault `infra/postgres` via `broker.Resolve(ctx, name)` and
+  uses `creds.DSN` unchanged (with `pool_max_conns` appended). When
+  the reader is nil, falls back to the legacy KEK-based derivation.
+
+- **`internal/datapool/neo4j_endpoint_resolver_instance.go`** — new
+  `tryVaultPayload` helper reads the typed
+  `pdataplane.Neo4jCredentials` JSON from a single Vault path
+  `infra/neo4j` (BoltURI + Username + Password). Eliminates the
+  cross-reference to the `tenant_neo4j_endpoints` Postgres registry
+  table for clusters where the operator has shipped Phase 6.3.
+  Legacy split-key reader (`infra/neo4j/username` +
+  `infra/neo4j/password`) + registry-table fallback retained for
+  clusters mid-cutover.
+
+- **`internal/daemon/daemon.go`** — wires `PostgresSecretsReader` via
+  `FuncSecretsReader` closure that defers to `d.secretsService`
+  resolve at RPC time (same pattern as the Neo4j resolver — captured
+  lazily because `secretsService` is initialized after `NewPool`).
+
+### Migration safety
+
+Both refactors preserve the parent-spec code paths as fallbacks. A
+cluster running this daemon with an older operator (no Vault writes)
+continues to work via the legacy paths. The fallbacks are removable
+once the chart's pre-upgrade backfill Job (Phase 8) has populated
+Vault for every existing tenant — that is a future release.
+
+---
+
 ## v0.31.0 — 2026-05-04 — platform package extensions (tenant-provisioning-unification-phase2 Phase 1)
 
 Adds the platform-package primitives the tenant-operator + daemon need
