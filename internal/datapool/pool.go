@@ -74,6 +74,23 @@ type Config struct {
 	//
 	// Spec: per-tenant-data-plane-completion Task 16 / Req 5.5.
 	Neo4jResolver Neo4jEndpointResolver
+
+	// PostgresSecretsReader resolves per-tenant Postgres credentials from
+	// the secrets broker (Vault). When set, pgPerTenant.ForTenant reads
+	// the canonical PostgresCredentials JSON from `infra/postgres` and
+	// uses creds.DSN directly — bypassing the legacy KEK-based password
+	// derivation. When nil, pgPerTenant falls back to KEK derivation
+	// (parent-spec compatibility shim).
+	//
+	// Same FuncSecretsReader pattern as Neo4j (see
+	// neo4j_endpoint_resolver_instance.go) — the daemon constructs a
+	// closure that defers to d.secretsService at RPC time, not at
+	// startup.
+	//
+	// Spec: tenant-provisioning-unification-phase2 Requirement 1.6.
+	PostgresSecretsReader interface {
+		Resolve(ctx context.Context, name string) ([]byte, error)
+	}
 }
 
 // DefaultConfig returns a Config with all fields set to production-safe

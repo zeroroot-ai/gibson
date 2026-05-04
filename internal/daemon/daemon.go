@@ -649,6 +649,21 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			} else {
 				d.logger.Warn(ctx, "tenant_postgres.host is not configured; per-tenant Postgres bootstrap will be unavailable — set dataPlane.postgres.host in helm values")
 			}
+
+			// Wire a SecretsReader so pgxpool_per_tenant can read the
+			// canonical Postgres credentials JSON from Vault at
+			// tenant/<id>/infra/postgres rather than deriving the
+			// password locally from MasterKEK. Same lazy-resolution
+			// pattern as the Neo4j resolver above — secretsService is
+			// initialized AFTER NewPool, so we capture it via closure.
+			//
+			// Spec: tenant-provisioning-unification-phase2 Requirement 1.6.
+			poolCfg.PostgresSecretsReader = datapool.FuncSecretsReader(func(ctx context.Context, name string) ([]byte, error) {
+				if d.secretsService == nil {
+					return nil, fmt.Errorf("postgres secrets reader: secrets broker not yet initialized")
+				}
+				return d.secretsService.Resolve(ctx, name)
+			})
 			p, poolErr := datapool.NewPool(ctx, poolCfg, keyProvider, nil)
 			if poolErr != nil {
 				d.logger.Warn(ctx, "data-plane pool initialization failed (per-tenant store ops will be unavailable)",
