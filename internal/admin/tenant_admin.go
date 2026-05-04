@@ -61,6 +61,26 @@ type ProviderProbeFactory interface {
 	Construct(provider string, configBlob []byte) (sdksecrets.SecretsBroker, error)
 }
 
+// Reloader invalidates the per-tenant cached SecretsBroker so the next
+// Resolve/Put/Delete/List call rebuilds it from the just-persisted config
+// row. Production wiring is *secrets.Registry; tests inject a fake.
+//
+// The signature mirrors *secrets.Registry.Reload exactly so the production
+// type satisfies the interface implicitly. Reload is best-effort — a
+// failure does not fail SetBrokerConfig because the next Registry.For
+// call rebuilds the cache from the persisted row regardless.
+type Reloader interface {
+	Reload(ctx context.Context, tenant auth.TenantID)
+}
+
+// SecretsLister returns the names of all secrets stored in the tenant's
+// active broker. Used only by CountSecrets, which projects len(names).
+// Production wiring is *secrets.Service; the signature matches
+// secrets.Service.List exactly.
+type SecretsLister interface {
+	List(ctx context.Context, filter sdksecrets.Filter) ([]string, error)
+}
+
 // TenantAdminServer implements adminv1.TenantAdminServiceServer.
 type TenantAdminServer struct {
 	adminv1.UnimplementedTenantAdminServiceServer
@@ -69,20 +89,24 @@ type TenantAdminServer struct {
 	writer   TenantConfigStoreWriter
 	probeFac ProviderProbeFactory
 	auditor  BootstrapTokenAuditor
+	reloader Reloader
+	svc      SecretsLister
 	now      func() time.Time
 }
 
 // TenantAdminConfig groups the constructor's required dependencies.
 type TenantAdminConfig struct {
-	Reader       TenantConfigStoreReader
-	Writer       TenantConfigStoreWriter
-	ProbeFactory ProviderProbeFactory
-	Auditor      BootstrapTokenAuditor
-	Now          func() time.Time
+	Reader         TenantConfigStoreReader
+	Writer         TenantConfigStoreWriter
+	ProbeFactory   ProviderProbeFactory
+	Auditor        BootstrapTokenAuditor
+	Reloader       Reloader
+	SecretsService SecretsLister
+	Now            func() time.Time
 }
 
 // NewTenantAdminServer constructs a TenantAdminServer. Reader, Writer,
-// ProbeFactory, Auditor are required.
+// ProbeFactory, Auditor, Reloader, SecretsService are required.
 func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 	if cfg.Reader == nil {
 		return nil, errors.New("tenant admin: Reader is required")
@@ -96,6 +120,12 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 	if cfg.Auditor == nil {
 		return nil, errors.New("tenant admin: Auditor is required")
 	}
+	if cfg.Reloader == nil {
+		return nil, errors.New("tenant admin: Reloader is required")
+	}
+	if cfg.SecretsService == nil {
+		return nil, errors.New("tenant admin: SecretsService is required")
+	}
 	now := cfg.Now
 	if now == nil {
 		now = time.Now
@@ -105,6 +135,8 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 		writer:   cfg.Writer,
 		probeFac: cfg.ProbeFactory,
 		auditor:  cfg.Auditor,
+		reloader: cfg.Reloader,
+		svc:      cfg.SecretsService,
 		now:      now,
 	}, nil
 }
@@ -193,6 +225,12 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *adminv1.Se
 		return nil, status.Errorf(codes.Internal, "persist broker config: %v", err)
 	}
 
+	// Invalidate the per-tenant cached SecretsBroker so the next
+	// Resolve/Put/Delete/List call rebuilds it from the just-persisted row.
+	// Without this, in-flight callers keep hitting the previously-cached
+	// provider until the daemon restarts.
+	s.reloader.Reload(ctx, tenant)
+
 	// Audit the change as tenant_secrets_backend_configured.
 	s.auditor.Audit(ctx, secrets.AuditEvent{
 		ActorID:       identity.Subject,
@@ -221,6 +259,28 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *adminv1.Se
 		Config:      redacted,
 		ProbeResult: probeRes,
 	}, nil
+}
+
+// CountSecrets returns the number of secrets currently stored in the
+// tenant's active broker. The response carries no names, values, or
+// per-row metadata — only an integer count. Used by the dashboard to gate
+// the migration-warning UX when switching providers (Spec
+// tenant-secrets-broker-completion R3).
+//
+// No dedicated audit event is emitted here; the underlying
+// secrets.Service.List path already audits via the existing AuditWriter
+// pipeline. Double-auditing on a count surface would inflate the audit
+// stream for an essentially-free read.
+func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *adminv1.CountSecretsRequest) (*adminv1.CountSecretsResponse, error) {
+	if _, ok := auth.TenantFromContext(ctx); !ok {
+		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+
+	names, err := s.svc.List(ctx, sdksecrets.Filter{})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list secrets: %v", err)
+	}
+	return &adminv1.CountSecretsResponse{Count: int64(len(names))}, nil
 }
 
 // ---------------------------------------------------------------------------

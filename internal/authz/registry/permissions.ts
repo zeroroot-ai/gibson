@@ -160,6 +160,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.admin.v1.TenantAdminService/CountSecrets": {
+    method: "/gibson.admin.v1.TenantAdminService/CountSecrets",
+    service: "gibson.admin.v1.TenantAdminService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.admin.v1.TenantAdminService/GetBrokerConfig": {
     method: "/gibson.admin.v1.TenantAdminService/GetBrokerConfig",
     service: "gibson.admin.v1.TenantAdminService",

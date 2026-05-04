@@ -183,6 +183,25 @@ type daemonImpl struct {
 	// on config reload can pass it to NewProviderWithContext.
 	secretsService *secrets.Service
 
+	// configStore is the per-tenant broker configuration store. Held on the
+	// daemon so grpc.go can construct the SDK admin v1 TenantAdminService
+	// against it. nil when initBrokerStack failed to build it (no KEK or
+	// dashboard Postgres) — grpc.go uses that as the "broker stack not
+	// initialised" sentinel and registers the unavailable stub instead.
+	// Spec: tenant-secrets-broker-completion (Task 10, 11).
+	configStore *secrets.ConfigStore
+
+	// brokerAuditWriter is the broker-stack audit writer. Held on the
+	// daemon so grpc.go can pass it to admin.NewTenantAdminServer.
+	// Spec: tenant-secrets-broker-completion (Task 10, 11).
+	brokerAuditWriter *secrets.AuditWriter
+
+	// brokerFactories maps each provider name (postgres/vault/awssm/gcpsm/
+	// azurekv) to its ProviderFactory. Held on the daemon so grpc.go can
+	// build the ProviderProbeFactory adapter for admin.NewTenantAdminServer.
+	// Spec: tenant-secrets-broker-completion (Task 10, 11).
+	brokerFactories map[string]secrets.ProviderFactory
+
 	// vaultAuthCache caches Vault auth tokens per (tenant, provider) to prevent
 	// auth churn during registry Reload events. Constructed in initBrokerStack.
 	// Full per-call refresh wiring is a follow-up (see broker_init.go TODO).

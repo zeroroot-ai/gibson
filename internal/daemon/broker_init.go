@@ -61,6 +61,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	}
 	auditLogger := audit.NewAuditLogger(d.stateClient, d.logger.Slog())
 	auditWriter := secrets.NewAuditWriter(auditLogger, d.logger.Slog())
+	d.brokerAuditWriter = auditWriter
 	d.logger.Info(ctx, "broker stack: audit writer initialized")
 
 	// --- 2. Circuit breaker ---
@@ -156,6 +157,8 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 						"error", err)
 				} else {
 					configStore = cs
+					d.configStore = cs
+					d.brokerFactories = configFactories
 					d.logger.Info(ctx, "broker stack: config store initialized (dashboard Postgres-backed)")
 				}
 			}

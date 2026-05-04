@@ -76,27 +76,56 @@ func (b *probeBroker) Capabilities() sdksecrets.ProviderCapabilities {
 	return sdksecrets.ProviderCapabilities{}
 }
 
+// fakeReloader records every Reload(tenant) call so tests can assert
+// SetBrokerConfig invokes it exactly once on persist success.
+type fakeReloader struct {
+	calls []auth.TenantID
+}
+
+func (f *fakeReloader) Reload(_ context.Context, tenant auth.TenantID) {
+	f.calls = append(f.calls, tenant)
+}
+
+// fakeSecretsLister returns a configurable name list for CountSecrets
+// tests. Setting err makes List return that error; otherwise it returns
+// names verbatim.
+type fakeSecretsLister struct {
+	names []string
+	err   error
+}
+
+func (f *fakeSecretsLister) List(_ context.Context, _ sdksecrets.Filter) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.names, nil
+}
+
 // ---------------------------------------------------------------------------
 // Test fixture
 // ---------------------------------------------------------------------------
 
-func newTenantTestServer(t *testing.T) (*TenantAdminServer, *fakeTenantConfigReader, *fakeTenantConfigWriter, *fakeProbeFactory, *fakeAuditor) {
+func newTenantTestServer(t *testing.T) (*TenantAdminServer, *fakeTenantConfigReader, *fakeTenantConfigWriter, *fakeProbeFactory, *fakeAuditor, *fakeReloader, *fakeSecretsLister) {
 	t.Helper()
 	r := &fakeTenantConfigReader{err: secrets.ErrBrokerConfigNotFound}
 	w := &fakeTenantConfigWriter{}
 	p := &fakeProbeFactory{}
 	au := &fakeAuditor{}
+	rl := &fakeReloader{}
+	sl := &fakeSecretsLister{}
 	srv, err := NewTenantAdminServer(TenantAdminConfig{
-		Reader:       r,
-		Writer:       w,
-		ProbeFactory: p,
-		Auditor:      au,
-		Now:          func() time.Time { return time.Unix(1700000000, 0).UTC() },
+		Reader:         r,
+		Writer:         w,
+		ProbeFactory:   p,
+		Auditor:        au,
+		Reloader:       rl,
+		SecretsService: sl,
+		Now:            func() time.Time { return time.Unix(1700000000, 0).UTC() },
 	})
 	if err != nil {
 		t.Fatalf("NewTenantAdminServer: %v", err)
 	}
-	return srv, r, w, p, au
+	return srv, r, w, p, au, rl, sl
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +133,7 @@ func newTenantTestServer(t *testing.T) (*TenantAdminServer, *fakeTenantConfigRea
 // ---------------------------------------------------------------------------
 
 func TestGetBrokerConfig_NotConfigured(t *testing.T) {
-	srv, _, _, _, _ := newTenantTestServer(t)
+	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 	resp, err := srv.GetBrokerConfig(ctx, &adminv1.GetBrokerConfigRequest{})
 	if err != nil {
@@ -116,7 +145,7 @@ func TestGetBrokerConfig_NotConfigured(t *testing.T) {
 }
 
 func TestGetBrokerConfig_Redacts(t *testing.T) {
-	srv, r, _, _, _ := newTenantTestServer(t)
+	srv, r, _, _, _, _, _ := newTenantTestServer(t)
 	r.err = nil
 	r.cfg = secrets.BrokerConfig{
 		Provider:   "vault",
@@ -152,7 +181,7 @@ func TestGetBrokerConfig_Redacts(t *testing.T) {
 }
 
 func TestGetBrokerConfig_RequiresTenant(t *testing.T) {
-	srv, _, _, _, _ := newTenantTestServer(t)
+	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	_, err := srv.GetBrokerConfig(context.Background(), &adminv1.GetBrokerConfigRequest{})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("want PermissionDenied, got %v", err)
@@ -164,7 +193,7 @@ func TestGetBrokerConfig_RequiresTenant(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestProbeBrokerConfig_Success(t *testing.T) {
-	srv, _, _, _, _ := newTenantTestServer(t)
+	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
 	resp, err := srv.ProbeBrokerConfig(ctx, &adminv1.ProbeBrokerConfigRequest{
@@ -183,7 +212,7 @@ func TestProbeBrokerConfig_Success(t *testing.T) {
 }
 
 func TestProbeBrokerConfig_Failure(t *testing.T) {
-	srv, _, _, p, _ := newTenantTestServer(t)
+	srv, _, _, p, _, _, _ := newTenantTestServer(t)
 	p.probeErr = errors.New("vault unauthorized: bad token")
 	ctx := ctxWithTenant(t, "acme")
 
@@ -202,7 +231,7 @@ func TestProbeBrokerConfig_Failure(t *testing.T) {
 }
 
 func TestProbeBrokerConfig_RequiresCandidate(t *testing.T) {
-	srv, _, _, _, _ := newTenantTestServer(t)
+	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 	_, err := srv.ProbeBrokerConfig(ctx, &adminv1.ProbeBrokerConfigRequest{})
 	if status.Code(err) != codes.InvalidArgument {
@@ -215,7 +244,7 @@ func TestProbeBrokerConfig_RequiresCandidate(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSetBrokerConfig_ProbeSuccess_PersistsAndAudits(t *testing.T) {
-	srv, _, w, _, au := newTenantTestServer(t)
+	srv, _, w, _, au, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
 	resp, err := srv.SetBrokerConfig(ctx, &adminv1.SetBrokerConfigRequest{
@@ -243,7 +272,7 @@ func TestSetBrokerConfig_ProbeSuccess_PersistsAndAudits(t *testing.T) {
 }
 
 func TestSetBrokerConfig_ProbeFailure_NoPersist(t *testing.T) {
-	srv, _, w, p, au := newTenantTestServer(t)
+	srv, _, w, p, au, _, _ := newTenantTestServer(t)
 	p.probeErr = errors.New("connection refused")
 	ctx := ctxWithTenant(t, "acme")
 
@@ -270,11 +299,125 @@ func TestSetBrokerConfig_ProbeFailure_NoPersist(t *testing.T) {
 }
 
 func TestSetBrokerConfig_RequiresCandidate(t *testing.T) {
-	srv, _, _, _, _ := newTenantTestServer(t)
+	srv, _, _, _, _, _, _ := newTenantTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 	_, err := srv.SetBrokerConfig(ctx, &adminv1.SetBrokerConfigRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
+	}
+}
+
+// TestSetBrokerConfig_CallsReloadOnSuccess locks in the spec's R2.1 contract:
+// after a successful probe + persist, the per-tenant cached SecretsBroker
+// MUST be invalidated via Reload(tenant), so the next Resolve/Put/Delete
+// rebuilds against the just-persisted config. Without this, in-flight
+// callers keep hitting the previously-cached provider until the daemon
+// restarts — the regression this whole spec exists to prevent.
+func TestSetBrokerConfig_CallsReloadOnSuccess(t *testing.T) {
+	srv, _, _, _, _, rl, _ := newTenantTestServer(t)
+	ctx := ctxWithTenant(t, "acme")
+
+	if _, err := srv.SetBrokerConfig(ctx, &adminv1.SetBrokerConfigRequest{
+		Candidate: &adminv1.CandidateConfig{
+			Provider:   adminv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+			Address:    "https://vault",
+			VaultToken: []byte("hvs.xyz"),
+		},
+	}); err != nil {
+		t.Fatalf("SetBrokerConfig: %v", err)
+	}
+	if len(rl.calls) != 1 {
+		t.Fatalf("expected exactly one Reload call, got %d", len(rl.calls))
+	}
+	if rl.calls[0].String() != "acme" {
+		t.Errorf("Reload(%q), want %q", rl.calls[0].String(), "acme")
+	}
+}
+
+// TestSetBrokerConfig_NoReloadOnProbeFailure asserts the cache is NOT
+// invalidated when the probe fails — there's nothing to invalidate yet.
+func TestSetBrokerConfig_NoReloadOnProbeFailure(t *testing.T) {
+	srv, _, _, p, _, rl, _ := newTenantTestServer(t)
+	p.probeErr = errors.New("connection refused")
+	ctx := ctxWithTenant(t, "acme")
+
+	_, _ = srv.SetBrokerConfig(ctx, &adminv1.SetBrokerConfigRequest{
+		Candidate: &adminv1.CandidateConfig{Provider: adminv1.BrokerProvider_BROKER_PROVIDER_VAULT},
+	})
+	if len(rl.calls) != 0 {
+		t.Errorf("expected no Reload call on probe failure, got %d", len(rl.calls))
+	}
+}
+
+// TestSetBrokerConfig_NoReloadOnPersistFailure asserts the cache is NOT
+// invalidated when the persist fails — the cache still reflects truth.
+func TestSetBrokerConfig_NoReloadOnPersistFailure(t *testing.T) {
+	srv, _, w, _, _, rl, _ := newTenantTestServer(t)
+	w.err = errors.New("db down")
+	ctx := ctxWithTenant(t, "acme")
+
+	_, err := srv.SetBrokerConfig(ctx, &adminv1.SetBrokerConfigRequest{
+		Candidate: &adminv1.CandidateConfig{
+			Provider:   adminv1.BrokerProvider_BROKER_PROVIDER_VAULT,
+			Address:    "https://vault",
+			VaultToken: []byte("hvs.xyz"),
+		},
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("want Internal, got %v", err)
+	}
+	if len(rl.calls) != 0 {
+		t.Errorf("expected no Reload call on persist failure, got %d", len(rl.calls))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CountSecrets tests
+// ---------------------------------------------------------------------------
+
+func TestCountSecrets_ReturnsLen(t *testing.T) {
+	srv, _, _, _, _, _, sl := newTenantTestServer(t)
+	sl.names = []string{"db_password", "stripe_key", "openai_key"}
+	ctx := ctxWithTenant(t, "acme")
+
+	resp, err := srv.CountSecrets(ctx, &adminv1.CountSecretsRequest{})
+	if err != nil {
+		t.Fatalf("CountSecrets: %v", err)
+	}
+	if resp.GetCount() != 3 {
+		t.Errorf("count: got %d, want 3", resp.GetCount())
+	}
+}
+
+func TestCountSecrets_Empty(t *testing.T) {
+	srv, _, _, _, _, _, _ := newTenantTestServer(t)
+	ctx := ctxWithTenant(t, "acme")
+
+	resp, err := srv.CountSecrets(ctx, &adminv1.CountSecretsRequest{})
+	if err != nil {
+		t.Fatalf("CountSecrets: %v", err)
+	}
+	if resp.GetCount() != 0 {
+		t.Errorf("count: got %d, want 0", resp.GetCount())
+	}
+}
+
+func TestCountSecrets_RequiresTenant(t *testing.T) {
+	srv, _, _, _, _, _, _ := newTenantTestServer(t)
+	_, err := srv.CountSecrets(context.Background(), &adminv1.CountSecretsRequest{})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("want PermissionDenied, got %v", err)
+	}
+}
+
+func TestCountSecrets_ListErrorPropagates(t *testing.T) {
+	srv, _, _, _, _, _, sl := newTenantTestServer(t)
+	sl.err = errors.New("broker timeout")
+	ctx := ctxWithTenant(t, "acme")
+
+	_, err := srv.CountSecrets(ctx, &adminv1.CountSecretsRequest{})
+	if status.Code(err) != codes.Internal {
+		t.Errorf("want Internal, got %v", err)
 	}
 }
 
@@ -326,14 +469,22 @@ func TestProviderEnumStringRoundtrip(t *testing.T) {
 }
 
 func TestNewTenantAdminServer_RequiresAllDeps(t *testing.T) {
+	r := &fakeTenantConfigReader{}
+	w := &fakeTenantConfigWriter{}
+	p := &fakeProbeFactory{}
+	au := &fakeAuditor{}
+	rl := &fakeReloader{}
+
 	cases := []struct {
 		name string
 		cfg  TenantAdminConfig
 	}{
 		{"missing Reader", TenantAdminConfig{}},
-		{"missing Writer", TenantAdminConfig{Reader: &fakeTenantConfigReader{}}},
-		{"missing ProbeFactory", TenantAdminConfig{Reader: &fakeTenantConfigReader{}, Writer: &fakeTenantConfigWriter{}}},
-		{"missing Auditor", TenantAdminConfig{Reader: &fakeTenantConfigReader{}, Writer: &fakeTenantConfigWriter{}, ProbeFactory: &fakeProbeFactory{}}},
+		{"missing Writer", TenantAdminConfig{Reader: r}},
+		{"missing ProbeFactory", TenantAdminConfig{Reader: r, Writer: w}},
+		{"missing Auditor", TenantAdminConfig{Reader: r, Writer: w, ProbeFactory: p}},
+		{"missing Reloader", TenantAdminConfig{Reader: r, Writer: w, ProbeFactory: p, Auditor: au}},
+		{"missing SecretsService", TenantAdminConfig{Reader: r, Writer: w, ProbeFactory: p, Auditor: au, Reloader: rl}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

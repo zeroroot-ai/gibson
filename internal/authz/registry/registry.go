@@ -173,6 +173,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.admin.v1.TenantAdminService/CountSecrets": {
+		Method:            "/gibson.admin.v1.TenantAdminService/CountSecrets",
+		Service:           "gibson.admin.v1.TenantAdminService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.admin.v1.TenantAdminService/GetBrokerConfig": {
 		Method:            "/gibson.admin.v1.TenantAdminService/GetBrokerConfig",
 		Service:           "gibson.admin.v1.TenantAdminService",

@@ -711,6 +711,38 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	tenantv1.RegisterTenantAdminServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered TenantAdminService gRPC endpoint")
 
+	// Register gibson.admin.v1.TenantAdminService — SDK admin surface that
+	// the dashboard's /settings/secrets-backend page calls. Coexists with
+	// the daemon-local gibson.tenant.v1.TenantAdminService registered above
+	// (different proto package). When the broker stack failed to construct
+	// (no system KEK or dashboard Postgres), we register the unavailable
+	// stub so the dashboard sees codes.Unavailable with an actionable
+	// message instead of codes.Unimplemented (which would look like a
+	// daemon-version mismatch). Spec: tenant-secrets-broker-completion
+	// (Task 11, design D2).
+	if d.configStore != nil && d.brokerAuditWriter != nil && d.brokerFactories != nil &&
+		d.secretsRegistry != nil && d.secretsService != nil {
+		sdkAdminSvc, taErr := admin.NewTenantAdminServer(admin.TenantAdminConfig{
+			Reader:         d.configStore,
+			Writer:         d.configStore,
+			ProbeFactory:   admin.NewMapProbeFactory(d.brokerFactories),
+			Auditor:        d.brokerAuditWriter,
+			Reloader:       d.secretsRegistry,
+			SecretsService: d.secretsService,
+		})
+		if taErr != nil {
+			d.logger.Warn(ctx, "broker admin stack: NewTenantAdminServer failed; registering Unavailable stub for gibson.admin.v1.TenantAdminService",
+				slog.String("error", taErr.Error()))
+			adminpb.RegisterTenantAdminServiceServer(srv, admin.NewUnavailableTenantAdminServer())
+		} else {
+			adminpb.RegisterTenantAdminServiceServer(srv, sdkAdminSvc)
+			d.logger.Info(ctx, "registered gibson.admin.v1.TenantAdminService gRPC endpoint")
+		}
+	} else {
+		d.logger.Warn(ctx, "broker stack not initialised: registering Unavailable stub for gibson.admin.v1.TenantAdminService")
+		adminpb.RegisterTenantAdminServiceServer(srv, admin.NewUnavailableTenantAdminServer())
+	}
+
 	// Register IdentityService — caller-side "what can I do?" RPC.
 	// Spec: component-bootstrap-e2e Requirement 10.
 	if d.authorizer != nil {

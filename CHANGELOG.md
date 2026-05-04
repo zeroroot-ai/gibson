@@ -4,6 +4,70 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## v0.29.0 — 2026-05-04 — tenant secrets broker completion
+
+Wires the per-tenant secrets-broker switch end-to-end. The dashboard's
+`/settings/secrets-backend` page now actually changes which broker serves a
+tenant's secrets — before this change, calls landed as `Unimplemented`
+because the SDK admin v1 service was never registered, and even if a
+config row had been written, the in-memory broker cache wouldn't have
+invalidated until the daemon restarted.
+
+Spec: `tenant-secrets-broker-completion`.
+
+### Added
+
+- **`gibson.admin.v1.TenantAdminService` is now registered in production.**
+  `internal/daemon/grpc.go` constructs `internal/admin.NewTenantAdminServer`
+  using the broker-stack outputs (`d.configStore`, `d.brokerAuditWriter`,
+  `d.brokerFactories`, `d.secretsRegistry`, `d.secretsService`) stored on
+  `daemonImpl` by `initBrokerStack`. Coexists alongside the daemon-local
+  `gibson.tenant.v1.TenantAdminService` (different proto package). When
+  the broker stack failed to initialize (no system KEK or dashboard
+  Postgres), the new `internal/admin.NewUnavailableTenantAdminServer()`
+  stub is registered instead, returning `codes.Unavailable` on each
+  broker-config RPC so dashboards see an actionable error rather than the
+  misleading `Unimplemented`.
+- **`SetBrokerConfig` now invalidates the per-tenant broker cache.** The
+  handler calls `Registry.Reload(ctx, tenant)` immediately after a
+  successful persist. Without this, a tenant who switched providers kept
+  hitting the previously-cached broker until the next pod restart.
+- **`CountSecrets` admin RPC handler.** Delegates to
+  `secrets.Service.List(ctx, sdksecrets.Filter{})` and returns
+  `int64(len(names))`. No names, values, or per-row metadata leak through
+  the response. Dashboard uses this to gate the migration-warning UX
+  before a provider switch.
+- **`MapProbeFactory`** in `internal/admin/probe_factory.go` adapts
+  `map[string]secrets.ProviderFactory` to the `ProviderProbeFactory`
+  interface for `TenantAdminConfig`.
+- **`TenantAdminConfig.Reloader` and `TenantAdminConfig.SecretsService`**
+  narrow interfaces (`Reload(ctx, tenant)` and `List(ctx, Filter)
+  ([]string, error)`) — `*secrets.Registry` and `*secrets.Service`
+  satisfy them implicitly, tests substitute fakes.
+
+### Changed
+
+- **SDK pin bumped to `v0.99.0`** (adds the `CountSecrets` RPC).
+- **Authz registry regenerated** — one new entry in each of
+  `registry.go`, `registry.yaml`, `permissions.ts`, `audit.csv` for
+  `/gibson.admin.v1.TenantAdminService/CountSecrets` (`relation: "admin"`,
+  `allowed_identities: USER`, same envelope as the rest of the
+  broker-config trio).
+
+### Tests
+
+- New `internal/admin/tenant_admin_integration_test.go` drives the full
+  handler → real `secrets.Registry` round-trip in-memory and asserts that
+  post-`Set`, `Registry.For` returns the just-configured provider — the
+  central regression-guard for this spec. Verified to fail red if the
+  `Reload` call is removed.
+- New unit tests cover `Reload`-on-success / no-`Reload`-on-probe-failure
+  / no-`Reload`-on-persist-failure, plus `CountSecrets` happy path /
+  empty / no-tenant-context / `List`-error-propagates, plus extended
+  constructor validation for the two new required deps.
+
+---
+
 ## v0.28.0 — 2026-05-02 — drop fga_model.fga coverage stub
 
 Bumps SDK to v0.98.1 (drops the generator's FGA coverage stub) and removes
