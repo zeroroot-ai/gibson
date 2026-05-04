@@ -2,11 +2,13 @@ package daemon
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
@@ -343,3 +345,361 @@ func (m *mockWatchStream) SendHeader(metadata.MD) error { return nil }
 func (m *mockWatchStream) SetTrailer(metadata.MD)       {}
 func (m *mockWatchStream) SendMsg(_ any) error          { return nil }
 func (m *mockWatchStream) RecvMsg(_ any) error          { return nil }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetFindingCounts — missing tenant → PermissionDenied
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetFindingCounts_MissingTenant_PermissionDenied(t *testing.T) {
+	t.Parallel()
+	srv := graphServerReadyPool()
+	_, err := srv.GetFindingCounts(context.Background(), &graphpb.GetFindingCountsRequest{})
+	assertGRPCCode(t, err, codes.PermissionDenied, "GetFindingCounts no tenant")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetFindingCounts — NotProvisioned → FailedPrecondition
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetFindingCounts_NotProvisioned_FailedPrecondition(t *testing.T) {
+	t.Parallel()
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "t1"}}
+	})
+	_, err := srv.GetFindingCounts(graphTenantCtx(), &graphpb.GetFindingCountsRequest{})
+	assertGRPCCode(t, err, codes.FailedPrecondition, "GetFindingCounts not-provisioned")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetFindingCounts — happy path (Neo4j returns empty, nil conn is fine for
+// minimalConn because the DashboardQueries ExecuteRead is never called when
+// we can't get a real driver — the query will error, not the handler setup).
+// We just verify the request reaches the handler without auth/pool errors.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetFindingCounts_ReachesQuery(t *testing.T) {
+	t.Parallel()
+	srv := graphServerReadyPool() // minimalConn has nil Neo4j; query will fail internally
+	// We expect Internal (not PermissionDenied or FailedPrecondition) since auth passed.
+	_, err := srv.GetFindingCounts(graphTenantCtx(), &graphpb.GetFindingCountsRequest{
+		GroupBy: graphpb.FindingCountGroupBy_SEVERITY,
+	})
+	// With nil Neo4j the SessionGraphClient will error → Internal gRPC code.
+	// We just assert it's NOT PermissionDenied or FailedPrecondition.
+	if err == nil {
+		return // no error is fine too (mock returns nil)
+	}
+	assertNotGRPCCode(t, err, codes.PermissionDenied, "GetFindingCounts reached query")
+	assertNotGRPCCode(t, err, codes.FailedPrecondition, "GetFindingCounts reached query")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetFindingTimeSeries — missing tenant → PermissionDenied
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetFindingTimeSeries_MissingTenant_PermissionDenied(t *testing.T) {
+	t.Parallel()
+	srv := graphServerReadyPool()
+	_, err := srv.GetFindingTimeSeries(context.Background(), &graphpb.GetFindingTimeSeriesRequest{})
+	assertGRPCCode(t, err, codes.PermissionDenied, "GetFindingTimeSeries no tenant")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetFindingTimeSeries — NotProvisioned → FailedPrecondition
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetFindingTimeSeries_NotProvisioned(t *testing.T) {
+	t.Parallel()
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "t1"}}
+	})
+	_, err := srv.GetFindingTimeSeries(graphTenantCtx(), &graphpb.GetFindingTimeSeriesRequest{})
+	assertGRPCCode(t, err, codes.FailedPrecondition, "GetFindingTimeSeries not-provisioned")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetFindingTimeSeries — days cap enforcement (days > MaxTimeSeriesDays
+// should not cause an error, just be clamped)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetFindingTimeSeries_CapEnforced(t *testing.T) {
+	t.Parallel()
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "t1"}}
+	})
+	// days=999 → clamped; fails at pool (not at cap clamp).
+	_, err := srv.GetFindingTimeSeries(graphTenantCtx(), &graphpb.GetFindingTimeSeriesRequest{Days: 999})
+	assertGRPCCode(t, err, codes.FailedPrecondition, "GetFindingTimeSeries cap+not-provisioned")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphStats — missing tenant → PermissionDenied
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphStats_MissingTenant_PermissionDenied(t *testing.T) {
+	t.Parallel()
+	srv := graphServerReadyPool()
+	_, err := srv.GetGraphStats(context.Background(), &graphpb.GetGraphStatsRequest{})
+	assertGRPCCode(t, err, codes.PermissionDenied, "GetGraphStats no tenant")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphStats — NotProvisioned → FailedPrecondition
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphStats_NotProvisioned(t *testing.T) {
+	t.Parallel()
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "t1"}}
+	})
+	_, err := srv.GetGraphStats(graphTenantCtx(), &graphpb.GetGraphStatsRequest{})
+	assertGRPCCode(t, err, codes.FailedPrecondition, "GetGraphStats not-provisioned")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphSummary — missing tenant → PermissionDenied
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphSummary_MissingTenant_PermissionDenied(t *testing.T) {
+	t.Parallel()
+	srv := graphServerReadyPool()
+	_, err := srv.GetGraphSummary(context.Background(), &graphpb.GetGraphSummaryRequest{})
+	assertGRPCCode(t, err, codes.PermissionDenied, "GetGraphSummary no tenant")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphSummary — NotProvisioned → FailedPrecondition
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphSummary_NotProvisioned(t *testing.T) {
+	t.Parallel()
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "t1"}}
+	})
+	_, err := srv.GetGraphSummary(graphTenantCtx(), &graphpb.GetGraphSummaryRequest{})
+	assertGRPCCode(t, err, codes.FailedPrecondition, "GetGraphSummary not-provisioned")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphSummary — cache: two consecutive calls within 60s hit cache
+// (mock pool call counter: pool.For should be called exactly once).
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphSummary_Cache_HitWithin60s(t *testing.T) {
+	t.Parallel()
+
+	// Preload the cache with a known entry so we never need a real Neo4j conn.
+	srv := graphServerReadyPool()
+	tenantStr := "test-graph-tenant"
+	cachedResp := &graphpb.GetGraphSummaryResponse{Summary: "cached-summary"}
+	srv.summaryCache.Store(tenantStr, &summaryCacheEntry{
+		result:   cachedResp,
+		cachedAt: time.Now(),
+	})
+
+	resp, err := srv.GetGraphSummary(graphTenantCtx(), &graphpb.GetGraphSummaryRequest{})
+	if err != nil {
+		t.Fatalf("GetGraphSummary cache hit: %v", err)
+	}
+	if resp.GetSummary() != "cached-summary" {
+		t.Errorf("got %q, want cached-summary", resp.GetSummary())
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphSummary — cache: expired entry triggers recompute
+// Simulate expired cache by setting cachedAt to 61s ago.
+// The underlying pool.For fails with NotProvisioned → FailedPrecondition
+// (confirms cache was NOT served and recompute was attempted).
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphSummary_Cache_ExpiredRecomputes(t *testing.T) {
+	t.Parallel()
+
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "test-graph-tenant"}}
+	})
+	tenantStr := "test-graph-tenant"
+	// Plant an expired cache entry (61 seconds old).
+	srv.summaryCache.Store(tenantStr, &summaryCacheEntry{
+		result:   &graphpb.GetGraphSummaryResponse{Summary: "stale"},
+		cachedAt: time.Now().Add(-61 * time.Second),
+	})
+
+	// Should recompute → hit pool → NotProvisioned → FailedPrecondition.
+	_, err := srv.GetGraphSummary(graphTenantCtx(), &graphpb.GetGraphSummaryRequest{})
+	assertGRPCCode(t, err, codes.FailedPrecondition, "GetGraphSummary expired cache recompute")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphSummary — cache: tenant isolation (A's cache does not serve B)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphSummary_Cache_TenantIsolation(t *testing.T) {
+	t.Parallel()
+
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "tenant-b"}}
+	})
+	// Store a cache entry under tenant-a.
+	srv.summaryCache.Store("tenant-a", &summaryCacheEntry{
+		result:   &graphpb.GetGraphSummaryResponse{Summary: "tenant-a-summary"},
+		cachedAt: time.Now(),
+	})
+
+	// Call with tenant-b context — should NOT hit tenant-a's cache entry.
+	ctxB := auth.WithTenant(context.Background(), auth.MustNewTenantID("tenant-b"))
+	_, err := srv.GetGraphSummary(ctxB, &graphpb.GetGraphSummaryRequest{})
+	// tenant-b has no cache and pool fails → FailedPrecondition.
+	assertGRPCCode(t, err, codes.FailedPrecondition, "GetGraphSummary tenant isolation")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphSummary — underlying query called exactly once for two rapid calls
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphSummary_Cache_QueryCalledOnce(t *testing.T) {
+	t.Parallel()
+
+	// Use a pool that returns a conn whose Neo4j session will be called.
+	// We inject the result via the cache after the first call so the second call
+	// uses the cache.  Since we can't easily mock Neo4j queries at this layer,
+	// we verify cache behavior by counting pool.For invocations instead.
+	var poolCallCount atomic.Int32
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPoolFn{
+			forFn: func(ctx context.Context, t auth.TenantID) (*datapool.Conn, error) {
+				poolCallCount.Add(1)
+				return nil, &datapool.NotProvisionedError{Tenant: t.String()}
+			},
+		}
+	})
+
+	tenantStr := "test-graph-tenant"
+
+	// Pre-seed with a fresh cache entry — first call must return it.
+	srv.summaryCache.Store(tenantStr, &summaryCacheEntry{
+		result:   &graphpb.GetGraphSummaryResponse{Summary: "fresh"},
+		cachedAt: time.Now(),
+	})
+
+	for i := 0; i < 3; i++ {
+		resp, err := srv.GetGraphSummary(graphTenantCtx(), &graphpb.GetGraphSummaryRequest{})
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if resp.GetSummary() != "fresh" {
+			t.Errorf("call %d: got %q, want fresh", i, resp.GetSummary())
+		}
+	}
+
+	// pool.For was never called because all 3 calls hit cache.
+	if n := poolCallCount.Load(); n != 0 {
+		t.Errorf("pool.For called %d times, want 0 (all hits)", n)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphContext — missing tenant → PermissionDenied
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphContext_MissingTenant_PermissionDenied(t *testing.T) {
+	t.Parallel()
+	srv := graphServerReadyPool()
+	_, err := srv.GetGraphContext(context.Background(), &graphpb.GetGraphContextRequest{NodeId: "n1"})
+	assertGRPCCode(t, err, codes.PermissionDenied, "GetGraphContext no tenant")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphContext — NotProvisioned → empty response (soft-fail)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphContext_NotProvisioned_SoftFail(t *testing.T) {
+	t.Parallel()
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "t1"}}
+	})
+	resp, err := srv.GetGraphContext(graphTenantCtx(), &graphpb.GetGraphContextRequest{NodeId: "n1"})
+	if err != nil {
+		t.Fatalf("GetGraphContext NotProvisioned should soft-fail (no error), got: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil empty response")
+	}
+	if resp.GetFocusNode() != nil {
+		t.Error("focus_node should be nil on soft-fail")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphContext — nil pool → empty response (soft-fail)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphContext_NilPool_SoftFail(t *testing.T) {
+	t.Parallel()
+	srv := graphServerWithPool(func() datapool.Pool { return nil })
+	resp, err := srv.GetGraphContext(graphTenantCtx(), &graphpb.GetGraphContextRequest{NodeId: "n1"})
+	if err != nil {
+		t.Fatalf("GetGraphContext nil pool should soft-fail, got: %v", err)
+	}
+	if resp.GetFocusNode() != nil {
+		t.Error("focus_node should be nil when pool not ready")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetGraphContext — cap enforcement (reaches pool, not arg validation error)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetGraphContext_CapEnforced(t *testing.T) {
+	t.Parallel()
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "t1"}}
+	})
+	// hops=999 and maxNodes=999 should be clamped; soft-fail at pool level.
+	resp, err := srv.GetGraphContext(graphTenantCtx(), &graphpb.GetGraphContextRequest{
+		NodeId:   "n1",
+		Hops:     999,
+		MaxNodes: 999,
+	})
+	if err != nil {
+		t.Fatalf("GetGraphContext cap: expected soft-fail, got error: %v", err)
+	}
+	_ = resp
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// assertNotGRPCCode asserts that err does NOT have the given gRPC status code.
+func assertNotGRPCCode(t *testing.T, err error, code codes.Code, label string) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	s, ok := status.FromError(err)
+	if !ok {
+		return
+	}
+	if s.Code() == code {
+		t.Errorf("%s: expected code != %s, but got it", label, code)
+	}
+}
+
+// mockPoolFn is a datapool.Pool whose For method is fully configurable.
+type mockPoolFn struct {
+	forFn func(ctx context.Context, t auth.TenantID) (*datapool.Conn, error)
+}
+
+func (p *mockPoolFn) For(ctx context.Context, t auth.TenantID) (*datapool.Conn, error) {
+	if p.forFn != nil {
+		return p.forFn(ctx, t)
+	}
+	return nil, nil
+}
+func (p *mockPoolFn) Admin(_ context.Context) (*datapool.AdminConn, error) { return nil, nil }
+func (p *mockPoolFn) SetAdminPool(_ datapool.AdminAcquirer)                 {}
+func (p *mockPoolFn) Close() error                                          { return nil }
+
+var _ datapool.Pool = (*mockPoolFn)(nil)

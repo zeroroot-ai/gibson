@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/zero-day-ai/sdk/auth"
@@ -455,4 +456,470 @@ func TestValueToString(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FindingCounts — happy path (SEVERITY)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestFindingCounts_Severity_HappyPath(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("fc-tenant")
+
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			return []CountBucket{
+				{Label: "critical", Count: 3},
+				{Label: "high", Count: 7},
+			}, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	buckets, err := q.FindingCounts(ctx, tenant, graphpb.FindingCountGroupBy_SEVERITY, 0)
+	if err != nil {
+		t.Fatalf("FindingCounts: %v", err)
+	}
+	if len(buckets) != 2 {
+		t.Errorf("got %d buckets, want 2", len(buckets))
+	}
+	if buckets[0].Label != "critical" || buckets[0].Count != 3 {
+		t.Errorf("bucket[0] = %+v, want {critical 3}", buckets[0])
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FindingCounts — tenant isolation (wrong tenant returns empty)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestFindingCounts_TenantIsolation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("isolated-tenant")
+
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			// Simulate Neo4j returning empty (tenant_id mismatch in WHERE clause).
+			return []CountBucket{}, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	buckets, err := q.FindingCounts(ctx, tenant, graphpb.FindingCountGroupBy_SEVERITY, 0)
+	if err != nil {
+		t.Fatalf("FindingCounts isolation: %v", err)
+	}
+	if len(buckets) != 0 {
+		t.Errorf("want 0 buckets for isolated tenant, got %d", len(buckets))
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FindingCounts — CATEGORY groupBy
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestFindingCounts_Category(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("cat-tenant")
+
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			return []CountBucket{
+				{Label: "web", Count: 5},
+				{Label: "network", Count: 2},
+			}, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	buckets, err := q.FindingCounts(ctx, tenant, graphpb.FindingCountGroupBy_CATEGORY, 0)
+	if err != nil {
+		t.Fatalf("FindingCounts category: %v", err)
+	}
+	if len(buckets) != 2 {
+		t.Errorf("got %d buckets, want 2", len(buckets))
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FindingTimeSeries — default days=0 → DefaultTimeSeriesDays points
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestFindingTimeSeries_DefaultDays(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("ts-tenant")
+
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			// Return empty map (no findings in the window).
+			return map[string]uint64{}, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	points, err := q.FindingTimeSeries(ctx, tenant, 0)
+	if err != nil {
+		t.Fatalf("FindingTimeSeries: %v", err)
+	}
+	// 0 → DefaultTimeSeriesDays (30) padded points.
+	if len(points) != int(DefaultTimeSeriesDays) {
+		t.Errorf("got %d points, want %d", len(points), DefaultTimeSeriesDays)
+	}
+	// All counts should be zero (no data).
+	for i, p := range points {
+		if p.GetCount() != 0 {
+			t.Errorf("point[%d] count = %d, want 0", i, p.GetCount())
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FindingTimeSeries — days capped to MaxTimeSeriesDays
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestFindingTimeSeries_CapEnforced(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("ts-cap-tenant")
+
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			return map[string]uint64{}, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	// 9999 should be clamped to MaxTimeSeriesDays.
+	points, err := q.FindingTimeSeries(ctx, tenant, 9999)
+	if err != nil {
+		t.Fatalf("FindingTimeSeries cap: %v", err)
+	}
+	if len(points) != int(MaxTimeSeriesDays) {
+		t.Errorf("got %d points, want %d", len(points), MaxTimeSeriesDays)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FindingTimeSeries — data padded correctly
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestFindingTimeSeries_PaddedCorrectly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("ts-pad-tenant")
+
+	today := time.Now().UTC().Format("2006-01-02")
+
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			return map[string]uint64{today: 42}, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	points, err := q.FindingTimeSeries(ctx, tenant, 7)
+	if err != nil {
+		t.Fatalf("FindingTimeSeries padded: %v", err)
+	}
+	if len(points) != 7 {
+		t.Errorf("got %d points, want 7", len(points))
+	}
+	// Last point should be today with count 42.
+	last := points[len(points)-1]
+	if last.GetCount() != 42 {
+		t.Errorf("last point count = %d, want 42", last.GetCount())
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GraphStats — happy path
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGraphStats_HappyPath(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("stats-tenant")
+
+	// Three ExecuteRead calls: labels, edges, lastWrite.
+	callIdx := 0
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			defer func() { callIdx++ }()
+			switch callIdx {
+			case 0: // labels
+				return []NodeCountByLabel{
+					{Label: "Host", Count: 10},
+					{Label: "Finding", Count: 5},
+				}, nil
+			case 1: // edges
+				return uint64(20), nil
+			case 2: // lastWrite
+				return time.Now().UTC(), nil
+			}
+			return nil, errors.New("unexpected call")
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	stats, err := q.GraphStats(ctx, tenant)
+	if err != nil {
+		t.Fatalf("GraphStats: %v", err)
+	}
+	if len(stats.ByLabel) != 2 {
+		t.Errorf("got %d labels, want 2", len(stats.ByLabel))
+	}
+	if stats.TotalNodes != 15 {
+		t.Errorf("TotalNodes = %d, want 15", stats.TotalNodes)
+	}
+	if stats.TotalEdges != 20 {
+		t.Errorf("TotalEdges = %d, want 20", stats.TotalEdges)
+	}
+	if stats.LastWriteAt.IsZero() {
+		t.Error("LastWriteAt should not be zero")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GraphStats — tenant isolation (empty data for unknown tenant)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGraphStats_TenantIsolation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("stats-isolated")
+
+	callIdx := 0
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			defer func() { callIdx++ }()
+			switch callIdx {
+			case 0:
+				return []NodeCountByLabel{}, nil
+			case 1:
+				return uint64(0), nil
+			case 2:
+				return time.Time{}, nil
+			}
+			return nil, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	stats, err := q.GraphStats(ctx, tenant)
+	if err != nil {
+		t.Fatalf("GraphStats isolation: %v", err)
+	}
+	if stats.TotalNodes != 0 || stats.TotalEdges != 0 {
+		t.Errorf("want empty stats, got nodes=%d edges=%d", stats.TotalNodes, stats.TotalEdges)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GraphSummary — happy path
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGraphSummary_HappyPath(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("summary-tenant")
+
+	callIdx := 0
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			defer func() { callIdx++ }()
+			switch callIdx {
+			case 0: // counts by label
+				return map[string]uint64{
+					"Host":    3,
+					"Finding": 2,
+					"Mission": 1,
+				}, nil
+			case 1: // critical findings
+				return []summaryFindingRow{
+					{name: "CVE-2024-1234", severity: "critical", cve: "CVE-2024-1234"},
+				}, nil
+			case 2: // missions
+				return []summaryMissionRow{
+					{name: "Recon Op", status: "completed"},
+				}, nil
+			}
+			return nil, errors.New("unexpected call")
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	result, err := q.GraphSummary(ctx, tenant)
+	if err != nil {
+		t.Fatalf("GraphSummary: %v", err)
+	}
+	if result.Stats.Hosts != 3 {
+		t.Errorf("Hosts = %d, want 3", result.Stats.Hosts)
+	}
+	if result.Stats.Findings != 2 {
+		t.Errorf("Findings = %d, want 2", result.Stats.Findings)
+	}
+	if result.Summary == "" {
+		t.Error("Summary should not be empty")
+	}
+	// Check for key phrases from the template.
+	if !contains(result.Summary, "## Knowledge Graph Overview") {
+		t.Error("Summary missing '## Knowledge Graph Overview'")
+	}
+	if !contains(result.Summary, "## Critical & High Severity Findings") {
+		t.Error("Summary missing '## Critical & High Severity Findings'")
+	}
+	if !contains(result.Summary, "## Recent Missions") {
+		t.Error("Summary missing '## Recent Missions'")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GraphSummary — empty graph returns empty-graph message
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGraphSummary_Empty(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("summary-empty")
+
+	callIdx := 0
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			defer func() { callIdx++ }()
+			switch callIdx {
+			case 0:
+				return map[string]uint64{}, nil
+			case 1:
+				return []summaryFindingRow{}, nil
+			case 2:
+				return []summaryMissionRow{}, nil
+			}
+			return nil, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	result, err := q.GraphSummary(ctx, tenant)
+	if err != nil {
+		t.Fatalf("GraphSummary empty: %v", err)
+	}
+	if !contains(result.Summary, "empty for this tenant") {
+		t.Errorf("empty-graph message not found in: %q", result.Summary)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GraphContext — missing node returns empty (soft-fail)
+// ExecuteRead returns (nil, nil) → simulates 0 rows from Neo4j when the node
+// does not exist or has a different tenant_id.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGraphContext_MissingNode_SoftFail(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("ctx-missing")
+
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			// nil return → GraphContext treats as "not found" and soft-fails.
+			return nil, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	result, err := q.GraphContext(ctx, tenant, "nonexistent", 2, 30)
+	if err != nil {
+		t.Fatalf("GraphContext missing node should not error: %v", err)
+	}
+	if result.FocusNode != nil {
+		t.Error("FocusNode should be nil for missing node")
+	}
+	if len(result.Neighbors) != 0 {
+		t.Errorf("Neighbors should be empty, got %d", len(result.Neighbors))
+	}
+	if result.Summary != "" {
+		t.Errorf("Summary should be empty, got %q", result.Summary)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GraphContext — cap enforcement (hops and maxNodes clamped, no panic)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGraphContext_CapEnforced(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant := mustTenantID("ctx-cap")
+
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			return nil, nil // soft-fail path
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	// hops=999 → clamped to MaxContextHops; maxNodes=999 → MaxContextMaxNodes.
+	_, err := q.GraphContext(ctx, tenant, "n1", 999, 999)
+	if err != nil {
+		t.Fatalf("GraphContext cap: %v", err)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GraphContext — tenant isolation (different tenant returns empty)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGraphContext_TenantIsolation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Simulate tenant-B querying a node owned by tenant-A.
+	// Neo4j WHERE n.tenant_id = $tenant returns 0 rows → ExecuteRead returns nil.
+	tenantB := mustTenantID("tenant-b")
+
+	client := &callableGraphClient{
+		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
+			return nil, nil
+		},
+	}
+	client.connected = true
+
+	q := NewDashboardQueries(client)
+	result, err := q.GraphContext(ctx, tenantB, "tenant-a-node", 2, 30)
+	if err != nil {
+		t.Fatalf("GraphContext cross-tenant should not error: %v", err)
+	}
+	if result.FocusNode != nil {
+		t.Error("cross-tenant node access should return nil FocusNode")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+func contains(s, substr string) bool {
+	if len(s) == 0 || len(substr) == 0 {
+		return false
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

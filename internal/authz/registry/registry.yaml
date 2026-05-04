@@ -808,6 +808,41 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.graph.v1.GraphService/GetFindingCounts":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.graph.v1.GraphService/GetFindingTimeSeries":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.graph.v1.GraphService/GetGraphContext":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.graph.v1.GraphService/GetGraphStats":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.graph.v1.GraphService/GetGraphSummary":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.graph.v1.GraphService/GetMissionGraph":
     relation: "member"
     object_type: "tenant"
