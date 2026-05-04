@@ -4,6 +4,89 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## v0.30.0 — 2026-05-04 — platform package foundation (tenant-provisioning-unification Phase 1)
+
+Adds `core/gibson/pkg/platform/` — a leaf package that holds the
+canonical naming, KEK derivation, saga step abstraction, and
+shared-store constants that both the gibson daemon and the
+tenant-operator must agree on byte-for-byte.
+
+This release is non-functional for the daemon itself (no internal/
+package consumes the new pkg/platform/ types yet — that wiring lands in
+later phases). It exists so the tenant-operator can pin against
+`gibson@v0.30.0` and start importing from `gibson/pkg/platform/...`
+without us having to maintain duplicate copies of the naming logic in
+two repos.
+
+Spec: `tenant-provisioning-unification`.
+
+### Added
+
+- **`pkg/platform/tenant.Names`** value type. Sealed wrapper around
+  `auth.TenantID` exposing typed methods for every per-tenant resource
+  name: `PostgresDB()`, `PostgresAppRole()`, `Neo4jStatefulSet()`,
+  `Neo4jBoltURI(operatorNs)`, `RedisIndexField()`, `QdrantCollection()`,
+  `VaultPathPrefix()`, `VaultPolicyName()`, `VaultJWTRoleName()`,
+  `FGAObject()`, `ZitadelOrgSlug()`, `LangfuseProject()`, `Namespace()`.
+  Replaces the duplicated sanitizer code that lived in both the operator
+  and the daemon. The Postgres role suffix is canonical `_app` (the
+  legacy `_role` is retired by spec Requirement 1.3).
+
+- **`pkg/platform/tenant.DeriveTenantKEK`** + `PostgresPasswordFromKEK`
+  + `Zeroize`. HKDF-SHA256 derivation with KEKInfo
+  `gibson/v1/tenant-kek` — byte-for-byte identical to the legacy
+  `internal/datapool/kek.go` and `tenant-operator/internal/dataplane/kek.go`
+  (verified by KAT vectors in tests). Used in dev mode; production paths
+  call Vault transit derive instead.
+
+- **`pkg/platform/saga.Step`** unified interface (`Name`, `Condition`,
+  `Requires`, `RequiredClients`, `Provision`, `Deprovision`, `Skip`),
+  plus `ConditionedObject` carrier interface. Replaces both the old
+  `tenant-operator/internal/saga.Step` struct and the parallel
+  `dataplane.Step` struct with a single abstraction.
+
+- **`pkg/platform/saga.ClientCapability`** enum (12 values: postgres-admin,
+  vault-admin, vault-transit, kubernetes, zitadel-admin, fga,
+  redis-admin, qdrant-admin, stripe, langfuse, daemon-grpc, smtp).
+  Each `Step` declares its required capabilities; the runner's
+  `ValidateAtStartup` check fails the operator pod startup in
+  production mode if any required capability isn't satisfied — killing
+  the silent-no-op bug class.
+
+- **`pkg/platform/saga.Runner`** with topological-order execution
+  (`TopoSort`), aggregated startup-gate validation, exponential
+  retry/backoff capped at MaxBackoff, condition writes via shared
+  `SetCondition`/`FindCondition`/`IsConditionTrue` helpers, and
+  pluggable `AuditHook` + `MetricsHook` so operator-specific Loki/
+  Prometheus integration plugs in cleanly without polluting the
+  platform package.
+
+- **`pkg/platform/dataplane`** constants: `RedisIndexHashKey =
+  "gibson:tenant:index"` (replacing the historical operator/daemon
+  mismatch), `PlatformDB = "gibson_platform"` (renamed from
+  `gibson_dashboard`; one-time chart Job handles the rename),
+  `LegacyPlatformDB`, `VaultMasterKEKKey`, plus the per-tenant Vault
+  path constants `VaultPathInfra{Postgres,Neo4j,Redis,Vector,Langfuse,KEK}`.
+
+### Tests
+
+22 new unit tests across `pkg/platform/{tenant,saga}/`. Including KAT
+vectors for KEK derivation, regression guards against the recurring
+`_role` vs `_app` and `tenant:index` vs `tenant_db_index` mistakes,
+topo-sort cycle/unknown-ref/duplicate-name detection, and
+ValidateAtStartup aggregation in both production and dev modes.
+
+### Module discipline
+
+`go list -deps github.com/zero-day-ai/gibson/pkg/platform/...` resolves
+only to stdlib + `github.com/zero-day-ai/sdk/auth` + the standard
+controller-runtime/k8s.io types needed for `metav1.Condition` and
+`record.EventRecorder`. No daemon-internal driver pulls — keeping the
+operator's go.sum footprint small when it adds the gibson dep in
+Phase 2.
+
+---
+
 ## v0.29.0 — 2026-05-04 — tenant secrets broker completion
 
 Wires the per-tenant secrets-broker switch end-to-end. The dashboard's
