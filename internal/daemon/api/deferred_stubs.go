@@ -29,11 +29,8 @@ import (
 // TenantAdminService — DEFER stubs
 // ---------------------------------------------------------------------------
 
-// ExportFindings is a DEFER stub.
-// Owner: <owner-pending> — findings export feature.
-func (s *DaemonServer) ExportFindings(_ context.Context, _ *tenantv1.ExportFindingsRequest) (*tenantv1.ExportFindingsResponse, error) {
-	return nil, status_grpc.Error(codes.Unimplemented, "ExportFindings: not yet implemented — pending findings-export feature delivery")
-}
+// ExportFindings is implemented in export_findings.go.
+// (stub removed in dashboard-neo4j-crud-removal Task 6)
 
 // SaveMissionDraft is a DEFER stub.
 // Owner: <owner-pending> — mission YAML editor draft persistence.

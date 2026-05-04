@@ -1500,3 +1500,201 @@ func toTimeValue(v any) time.Time {
 		return time.Time{}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// FindingsFilters + FindingRecord — Task 4 (dashboard-neo4j-crud-removal)
+// ---------------------------------------------------------------------------
+
+// FindingsFilters controls which findings the Findings method returns.
+// Empty string fields mean "no filter".
+type FindingsFilters struct {
+	Severity  string // exact match on n.severity
+	Category  string // exact match on n.type
+	MissionID string // restrict to findings reachable from the given mission
+	Search    string // case-insensitive substring on name + description
+	Limit     uint32 // default 100 when 0; clamped to 500
+	Offset    uint32 // default 0
+}
+
+// FindingRecord holds the result of a single findings row.
+type FindingRecord struct {
+	ID          string
+	Name        string
+	Description string
+	Type        string // category field (n.type)
+	Severity    string
+	MissionID   string
+	Properties  map[string]string
+	Labels      []string
+	CreatedAt   time.Time
+}
+
+const (
+	// DefaultFindingsLimit is applied when FindingsFilters.Limit is 0.
+	DefaultFindingsLimit uint32 = 100
+	// MaxFindingsLimit is the hard server-side cap enforced by Findings and GetFindings.
+	MaxFindingsLimit uint32 = 500
+)
+
+// Findings returns paginated findings (and Vulnerability nodes) for the given
+// tenant, applying optional filters.  It executes two Cypher queries: one for
+// the page and one for the total count (same WHERE clause, no SKIP/LIMIT).
+//
+// Cypher ported byte-for-byte from
+// enterprise/platform/dashboard/app/api/findings/route.ts.
+func (q *DashboardQueries) Findings(
+	ctx context.Context,
+	tenantID auth.TenantID,
+	f FindingsFilters,
+) (records []FindingRecord, total uint64, err error) {
+	// Apply defaults / caps.
+	limit := f.Limit
+	if limit == 0 {
+		limit = DefaultFindingsLimit
+	}
+	if limit > MaxFindingsLimit {
+		limit = MaxFindingsLimit
+	}
+
+	tenant := tenantID.String()
+
+	// Build the common WHERE clause (after the mandatory tenant filter).
+	// Mandatory base: (n:Finding OR n:Vulnerability) AND n.tenant_id = $tenant
+	params := map[string]any{
+		"tenant": tenant,
+		"offset": int64(f.Offset),
+		"limit":  int64(limit),
+	}
+
+	where := "WHERE (n:Finding OR n:Vulnerability) AND n.tenant_id = $tenant"
+	if f.Severity != "" {
+		where += "\n  AND n.severity = $severity"
+		params["severity"] = f.Severity
+	}
+	if f.Category != "" {
+		where += "\n  AND n.type = $category"
+		params["category"] = f.Category
+	}
+	if f.MissionID != "" {
+		// Ported from route.ts: OPTIONAL MATCH (m:Mission)-[*1..3]->(n) WHERE m.id = $missionId
+		// Rewritten as an EXISTS sub-query to stay in the same MATCH scope.
+		where += "\n  AND EXISTS { MATCH (m:Mission { id: $mission_id, tenant_id: $tenant })-[*1..3]->(n) }"
+		params["mission_id"] = f.MissionID
+	}
+	if f.Search != "" {
+		where += "\n  AND (toLower(n.name) CONTAINS toLower($search) OR toLower(coalesce(n.description, \"\")) CONTAINS toLower($search))"
+		params["search"] = f.Search
+	}
+
+	// --- page query ---
+	pageCypher := fmt.Sprintf(`
+MATCH (n)
+%s
+RETURN n, labels(n) AS labels
+ORDER BY CASE n.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, n.created_at DESC
+SKIP $offset LIMIT $limit
+`, where)
+
+	rawPage, pageErr := q.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx, pageCypher, params)
+		if err != nil {
+			return nil, err
+		}
+		recs, err := res.Collect(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]FindingRecord, 0, len(recs))
+		for _, rec := range recs {
+			rawNode, ok := rec.Get("n")
+			if !ok {
+				continue
+			}
+			neoNode, ok := rawNode.(dbtype.Node)
+			if !ok {
+				continue
+			}
+			lblRaw, _ := rec.Get("labels")
+			var lbls []string
+			if lArr, ok := lblRaw.([]any); ok {
+				for _, l := range lArr {
+					lbls = append(lbls, stringify(l))
+				}
+			}
+
+			props := coerceProps(neoNode.Props)
+			fr := FindingRecord{
+				ID:          orProp(props, "id", fmt.Sprintf("%d", neoNode.Id)),
+				Name:        props["name"],
+				Description: props["description"],
+				Type:        props["type"],
+				Severity:    props["severity"],
+				Properties:  props,
+				Labels:      lbls,
+			}
+			// Created-at: prefer created_at; fall back to discoveredAt.
+			for _, key := range []string{"created_at", "discoveredAt"} {
+				if v, ok := neoNode.Props[key]; ok {
+					if t := toTimeValue(v); !t.IsZero() {
+						fr.CreatedAt = t
+						break
+					}
+				}
+			}
+			out = append(out, fr)
+		}
+		return out, nil
+	})
+	if pageErr != nil {
+		return nil, 0, fmt.Errorf("findings page query: %w", pageErr)
+	}
+	if rawPage != nil {
+		records = rawPage.([]FindingRecord)
+	}
+
+	// --- count query (same WHERE, no SKIP/LIMIT) ---
+	countParams := make(map[string]any, len(params))
+	for k, v := range params {
+		countParams[k] = v
+	}
+	delete(countParams, "offset")
+	delete(countParams, "limit")
+
+	countCypher := fmt.Sprintf(`
+MATCH (n)
+%s
+RETURN count(n) AS total
+`, where)
+
+	rawCount, countErr := q.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx, countCypher, countParams)
+		if err != nil {
+			return nil, err
+		}
+		recs, err := res.Collect(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(recs) == 0 {
+			return uint64(0), nil
+		}
+		v, _ := recs[0].Get("total")
+		return toUint64(v), nil
+	})
+	if countErr != nil {
+		return nil, 0, fmt.Errorf("findings count query: %w", countErr)
+	}
+	if rawCount != nil {
+		total = rawCount.(uint64)
+	}
+
+	return records, total, nil
+}
+
+// orProp returns props[key] if non-empty, else fallback.
+func orProp(props map[string]string, key, fallback string) string {
+	if v, ok := props[key]; ok && v != "" {
+		return v
+	}
+	return fallback
+}

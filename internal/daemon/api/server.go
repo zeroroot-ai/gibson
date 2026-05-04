@@ -19,6 +19,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
@@ -129,6 +130,12 @@ type DaemonServer struct {
 	// May be nil; when nil, ExportFindings returns codes.Unavailable.
 	// Added by prod-unimplemented-apis spec.
 	findingStore findingStoreIface
+
+	// poolGetter returns the live per-tenant data-plane pool.
+	// Used by ExportFindings (Neo4j Cypher path) and GetMissionSourceYAML.
+	// May be nil; when nil those RPCs return codes.Unavailable.
+	// Wired by the daemon via WithPoolGetter. Spec: dashboard-neo4j-crud-removal.
+	poolGetter func() datapool.Pool
 
 	// quotaStore persists and retrieves per-tenant quota configuration.
 	// May be nil; when nil, GetTenantQuota/SetTenantQuota return codes.Unavailable.
@@ -656,6 +663,11 @@ type CreateMissionData struct {
 	Variables           map[string]string
 	MemoryContinuity    string
 	Metadata            map[string]string
+	// SourceYAML is the original dashboard-authored YAML, persisted on the
+	// mission record so GetMissionSourceYAML can serve it later.
+	// Empty for programmatic callers (clone flow returns codes.NotFound).
+	// Spec: dashboard-neo4j-crud-removal.
+	SourceYAML string
 }
 
 // CreateMissionResultData represents the result of creating a mission.
@@ -836,6 +848,15 @@ func (s *DaemonServer) WithTenantNameResolver(fn func(ctx context.Context, tenan
 // there). May be nil; handlers that require it return Unavailable.
 func (s *DaemonServer) WithDashboardDB(db *sql.DB) *DaemonServer {
 	s.dashboardDB = db
+	return s
+}
+
+// WithPoolGetter wires the per-tenant data-plane pool getter.
+// Required by ExportFindings (Neo4j DashboardQueries path) and
+// GetMissionSourceYAML. When nil those RPCs return codes.Unavailable.
+// Spec: dashboard-neo4j-crud-removal.
+func (s *DaemonServer) WithPoolGetter(getter func() datapool.Pool) *DaemonServer {
+	s.poolGetter = getter
 	return s
 }
 
@@ -2015,6 +2036,7 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 		Variables:           req.Variables,
 		MemoryContinuity:    req.MemoryContinuity,
 		Metadata:            req.Metadata,
+		SourceYAML:          req.GetSourceYaml(),
 	}
 
 	// Call daemon implementation

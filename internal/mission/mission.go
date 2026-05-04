@@ -279,6 +279,13 @@ type Mission struct {
 	// Error contains error message if mission failed.
 	Error string `json:"error,omitempty"`
 
+	// SourceYAML is the original YAML the dashboard supplied when creating this
+	// mission via the missions/create route. Empty for programmatic callers that
+	// omit source_yaml on CreateMissionRequest. When non-empty, GetMissionSourceYAML
+	// returns it; when empty GetMissionSourceYAML returns codes.NotFound.
+	// Spec: dashboard-neo4j-crud-removal (Task 7).
+	SourceYAML string `json:"source_yaml,omitempty"`
+
 	// CreatedAt is the timestamp when the mission was created.
 	// Stored as Unix epoch milliseconds for RediSearch NUMERIC compatibility.
 	CreatedAt UnixTime `json:"created_at"`

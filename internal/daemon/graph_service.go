@@ -527,4 +527,77 @@ func (s *graphServer) WatchGraphUpdates(
 }
 
 // compile-time interface check.
+// GetFindings implements GraphServiceServer.
+// Returns a paginated, filtered list of finding + vulnerability nodes for the
+// requesting tenant. Spec: dashboard-neo4j-crud-removal (Task 5).
+func (s *graphServer) GetFindings(
+	ctx context.Context,
+	req *graphpb.GetFindingsRequest,
+) (*graphpb.GetFindingsResponse, error) {
+	tenant, conn, release, err := s.acquireConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	// Clamp limit.
+	limit := req.GetLimit()
+	if limit == 0 {
+		limit = graph.DefaultFindingsLimit
+	}
+	if limit > graph.MaxFindingsLimit {
+		limit = graph.MaxFindingsLimit
+	}
+
+	qctx, cancel := context.WithTimeout(ctx, graphQueryTimeout)
+	defer cancel()
+
+	filters := graph.FindingsFilters{
+		Severity:  req.GetSeverityFilter(),
+		Category:  req.GetCategoryFilter(),
+		MissionID: req.GetMissionId(),
+		Search:    req.GetSearch(),
+		Limit:     limit,
+		Offset:    req.GetOffset(),
+	}
+
+	q := graph.NewDashboardQueries(graph.NewSessionGraphClient(conn.Neo4j))
+	records, total, err := q.Findings(qctx, tenant, filters)
+	if err != nil {
+		s.logger.WarnContext(ctx, "GetFindings: query failed",
+			slog.String("tenant", tenant.String()),
+			slog.String("error", err.Error()),
+		)
+		return nil, status.Errorf(codes.Internal, "findings query failed: %v", err)
+	}
+
+	// Marshal to proto Finding.
+	pbFindings := make([]*graphpb.Finding, 0, len(records))
+	for _, r := range records {
+		pbf := &graphpb.Finding{
+			Id:          r.ID,
+			Name:        r.Name,
+			Description: r.Description,
+			Type:        r.Type,
+			Severity:    r.Severity,
+			MissionId:   r.MissionID,
+			Properties:  r.Properties,
+			Labels:      r.Labels,
+		}
+		if !r.CreatedAt.IsZero() {
+			pbf.CreatedAt = timestamppb.New(r.CreatedAt)
+		}
+		pbFindings = append(pbFindings, pbf)
+	}
+
+	offset := req.GetOffset()
+	truncated := total > uint64(offset)+uint64(len(pbFindings))
+
+	return &graphpb.GetFindingsResponse{
+		Findings:  pbFindings,
+		Total:     total,
+		Truncated: truncated,
+	}, nil
+}
+
 var _ graphpb.GraphServiceServer = (*graphServer)(nil)

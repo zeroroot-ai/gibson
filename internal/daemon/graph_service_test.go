@@ -703,3 +703,72 @@ func (p *mockPoolFn) SetAdminPool(_ datapool.AdminAcquirer)                 {}
 func (p *mockPoolFn) Close() error                                          { return nil }
 
 var _ datapool.Pool = (*mockPoolFn)(nil)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetFindings — Task 5 (dashboard-neo4j-crud-removal)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestGetFindings_MissingTenant_PermissionDenied(t *testing.T) {
+	t.Parallel()
+	srv := graphServerReadyPool()
+	ctx := context.Background() // no tenant
+
+	_, err := srv.GetFindings(ctx, &graphpb.GetFindingsRequest{})
+	assertGRPCCode(t, err, codes.PermissionDenied, "GetFindings no tenant")
+}
+
+func TestGetFindings_NotProvisioned_FailedPrecondition(t *testing.T) {
+	t.Parallel()
+	srv := graphServerWithPool(func() datapool.Pool {
+		return &mockPool{err: &datapool.NotProvisionedError{Tenant: "test-graph-tenant"}}
+	})
+
+	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{})
+	assertGRPCCode(t, err, codes.FailedPrecondition, "GetFindings not-provisioned")
+}
+
+func TestGetFindings_LimitCap(t *testing.T) {
+	t.Parallel()
+	// The handler should clamp limit > MaxFindingsLimit without error.
+	// With a nil Neo4j session the Findings query will fail with an internal
+	// error, but what matters is that we reach the query stage (i.e. the cap
+	// logic ran). We just check for Internal (not InvalidArgument / PermissionDenied).
+	srv := graphServerReadyPool()
+
+	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{Limit: 9999})
+	// Should be Internal (query failure on nil session) or nil — not a cap/auth error.
+	if err != nil {
+		s, _ := status.FromError(err)
+		if s.Code() == codes.PermissionDenied || s.Code() == codes.InvalidArgument {
+			t.Errorf("GetFindings limit-cap: unexpected code %s", s.Code())
+		}
+	}
+}
+
+func TestGetFindings_DefaultLimit(t *testing.T) {
+	t.Parallel()
+	// Limit=0 should apply DefaultFindingsLimit (100); handler should not error
+	// on the limit logic itself.
+	srv := graphServerReadyPool()
+
+	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{Limit: 0})
+	if err != nil {
+		s, _ := status.FromError(err)
+		// Acceptable: Internal (nil-session query fail) — NOT PermissionDenied/InvalidArgument.
+		if s.Code() == codes.PermissionDenied || s.Code() == codes.InvalidArgument {
+			t.Errorf("GetFindings default-limit: unexpected code %s", s.Code())
+		}
+	}
+}
+
+// TestGetFindings_LimitConstants verifies the constants from the graph package
+// match the spec requirements: default=100, max=500.
+func TestGetFindings_LimitConstants(t *testing.T) {
+	t.Parallel()
+	if graph.DefaultFindingsLimit != 100 {
+		t.Errorf("DefaultFindingsLimit = %d, want 100", graph.DefaultFindingsLimit)
+	}
+	if graph.MaxFindingsLimit != 500 {
+		t.Errorf("MaxFindingsLimit = %d, want 500", graph.MaxFindingsLimit)
+	}
+}

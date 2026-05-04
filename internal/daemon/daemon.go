@@ -23,6 +23,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
 	dbredis "github.com/zero-day-ai/gibson/internal/database/redis"
 	"github.com/zero-day-ai/gibson/internal/datapool"
+	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
@@ -279,6 +280,12 @@ type daemonImpl struct {
 	// Initialized after the keyProvider is resolved during Start().
 	// Shutdown via pool.Close() in stopServices().
 	pool datapool.Pool
+
+	// graphBus is the in-process per-tenant graph-update bus.
+	// Created during buildGRPCServer and shared between graphServer (for
+	// WatchGraphUpdates SSE) and CreateMission (for NODE_ADDED publish).
+	// Spec: dashboard-neo4j-crud-removal (Task 8).
+	graphBus *graph.Bus
 
 	// spiffeX509Source is the SPIFFE Workload API X.509 SVID source used by the
 	// gRPC server for mTLS. It must be closed on daemon shutdown to release the

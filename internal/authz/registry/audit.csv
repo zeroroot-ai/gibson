@@ -106,6 +106,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.v1.DaemonService/GetComponentLogs,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetMissionCheckpoints,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetMissionHistory,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
+/gibson.daemon.v1.DaemonService/GetMissionSourceYAML,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetMyPermissions,,,,USER,gibson/daemon/v1/daemon.proto,self
 /gibson.daemon.v1.DaemonService/ListAgents,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/ListMissionDefinitions,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
@@ -128,6 +129,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.v1.DaemonService/WatchManifestInvalidations,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.graph.v1.GraphService/GetFindingCounts,member,tenant,tenant_from_identity,USER|SERVICE,gibson/graph/v1/graph.proto,rule
 /gibson.graph.v1.GraphService/GetFindingTimeSeries,member,tenant,tenant_from_identity,USER|SERVICE,gibson/graph/v1/graph.proto,rule
+/gibson.graph.v1.GraphService/GetFindings,member,tenant,tenant_from_identity,USER|SERVICE,gibson/graph/v1/graph.proto,rule
 /gibson.graph.v1.GraphService/GetGraphContext,member,tenant,tenant_from_identity,USER|SERVICE,gibson/graph/v1/graph.proto,rule
 /gibson.graph.v1.GraphService/GetGraphStats,member,tenant,tenant_from_identity,USER|SERVICE,gibson/graph/v1/graph.proto,rule
 /gibson.graph.v1.GraphService/GetGraphSummary,member,tenant,tenant_from_identity,USER|SERVICE,gibson/graph/v1/graph.proto,rule

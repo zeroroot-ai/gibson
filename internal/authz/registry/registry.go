@@ -1103,6 +1103,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.v1.DaemonService/GetMissionSourceYAML": {
+		Method:            "/gibson.daemon.v1.DaemonService/GetMissionSourceYAML",
+		Service:           "gibson.daemon.v1.DaemonService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.v1.DaemonService/GetMyPermissions": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetMyPermissions",
 		Service:           "gibson.daemon.v1.DaemonService",
@@ -1315,6 +1325,16 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.graph.v1.GraphService/GetFindingTimeSeries": {
 		Method:            "/gibson.graph.v1.GraphService/GetFindingTimeSeries",
+		Service:           "gibson.graph.v1.GraphService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.graph.v1.GraphService/GetFindings": {
+		Method:            "/gibson.graph.v1.GraphService/GetFindings",
 		Service:           "gibson.graph.v1.GraphService",
 		Relation:          "member",
 		ObjectType:        "tenant",

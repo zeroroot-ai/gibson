@@ -1090,6 +1090,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.daemon.v1.DaemonService/GetMissionSourceYAML": {
+    method: "/gibson.daemon.v1.DaemonService/GetMissionSourceYAML",
+    service: "gibson.daemon.v1.DaemonService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.v1.DaemonService/GetMyPermissions": {
     method: "/gibson.daemon.v1.DaemonService/GetMyPermissions",
     service: "gibson.daemon.v1.DaemonService",
@@ -1302,6 +1312,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.graph.v1.GraphService/GetFindingTimeSeries": {
     method: "/gibson.graph.v1.GraphService/GetFindingTimeSeries",
+    service: "gibson.graph.v1.GraphService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.graph.v1.GraphService/GetFindings": {
+    method: "/gibson.graph.v1.GraphService/GetFindings",
     service: "gibson.graph.v1.GraphService",
     relation: "member",
     objectType: "tenant",

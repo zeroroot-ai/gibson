@@ -130,12 +130,11 @@ service TenantAdminService {
     };
   }
   // ---------------------------------------------------------------------------
-  // Findings export (DEFER)
+  // Findings export
   // ---------------------------------------------------------------------------
 
   // ExportFindings exports findings to the requested format (json, csv, sarif).
-  //
-  // Unimplemented: <owner-pending>
+  // Implemented per spec dashboard-neo4j-crud-removal Req 2.
   rpc ExportFindings(ExportFindingsRequest) returns (ExportFindingsResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "admin",

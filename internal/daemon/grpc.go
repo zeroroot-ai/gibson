@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
@@ -45,6 +46,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/authz/registry"
 	"github.com/zero-day-ai/gibson/internal/datapool"
+	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
@@ -709,6 +711,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
 		d.logger.Info(ctx, "audit writer wired into TenantAdminService")
 	}
+	// Wire pool getter for ExportFindings (Neo4j DashboardQueries path) and
+	// GetMissionSourceYAML. Spec: dashboard-neo4j-crud-removal.
+	daemonSvc.WithPoolGetter(func() datapool.Pool { return d.pool })
 	tenantv1.RegisterTenantAdminServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered TenantAdminService gRPC endpoint")
 
@@ -818,14 +823,17 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	// Register gibson.graph.v1.GraphService — the daemon-mediated knowledge-graph
 	// read API for the dashboard. Routes through pool.For(tenant).Neo4j() per-RPC.
-	// The in-process update bus (graphbuspkg.Bus) is nil here; it is wired when
-	// Phase 3 Task 10 connects the bus (dashboard-knowledge-graph spec).
-	// The deferred-pool closure is safe to register before the pool initialises.
+	// The in-process update bus is created here and stored on the daemon so
+	// CreateMission can publish NODE_ADDED events (dashboard-neo4j-crud-removal Task 8).
 	// Spec: dashboard-knowledge-graph (Phase 2, Task 7).
+	//       dashboard-neo4j-crud-removal (Phase 2, Task 8).
+	if d.graphBus == nil {
+		d.graphBus = graph.NewBus(d.logger.WithComponent("graph-bus").Slog())
+	}
 	graphSvc := NewGraphServer(
 		func() datapool.Pool { return d.pool },
 		d.logger.WithComponent("graph-service").Slog(),
-		nil, // bus wired in Phase 3
+		d.graphBus,
 	)
 	graphpb.RegisterGraphServiceServer(srv, graphSvc)
 	d.logger.Info(ctx, "registered GraphService gRPC endpoint")
@@ -2102,6 +2110,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		MissionDefinitionID: missionDefinitionID,
 		CreatedAt:           mission.NewUnixTimeNow(),
 		UpdatedAt:           mission.NewUnixTimeNow(),
+		SourceYAML:          req.SourceYAML,
 	}
 	// Copy string metadata to map[string]any.
 	if req.Metadata != nil {
@@ -2120,6 +2129,89 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		"target_id", m.TargetID.String(),
 		"mission_definition_id", m.MissionDefinitionID.String(),
 	)
+
+	// Daemon-side Mission Neo4j MERGE (non-fatal on failure) — spec D6.
+	// After the authoritative Redis state is persisted, mirror the Mission node
+	// into per-tenant Neo4j and publish a GraphUpdate{NODE_ADDED} on the bus so
+	// live-ingest dashboards pick up the new Mission node immediately.
+	// Spec: dashboard-neo4j-crud-removal (Task 8).
+	missionIDStr := m.ID.String()
+	missionName := m.Name
+	missionStatus := string(m.Status)
+	missionTargetID := m.TargetID.String()
+	go func() {
+		bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer bgCancel()
+
+		neoConn, neoErr := d.pool.For(bgCtx, tenantForMission)
+		if neoErr != nil {
+			d.logger.Error(bgCtx, "CreateMission: Neo4j MERGE acquire failed (non-fatal)",
+				"mission_id", missionIDStr,
+				"tenant", tenantForMission.String(),
+				"error", neoErr,
+			)
+			return
+		}
+		defer neoConn.Release()
+
+		if neoConn.Neo4j == nil {
+			// Neo4j not configured for this tenant; skip silently.
+			return
+		}
+
+		const mergeCypher = `
+MERGE (m:Mission { id: $id, tenant_id: $tenant })
+SET m.name = $name,
+    m.target = $target,
+    m.status = $status,
+    m.created_by = $created_by,
+    m.created_at = datetime()
+RETURN m
+`
+		_, mergeErr := neoConn.Neo4j.ExecuteWrite(bgCtx, func(tx neo4j.ManagedTransaction) (any, error) {
+			result, err := tx.Run(bgCtx, mergeCypher, map[string]any{
+				"id":         missionIDStr,
+				"tenant":     tenantForMission.String(),
+				"name":       missionName,
+				"target":     missionTargetID,
+				"status":     missionStatus,
+				"created_by": missionName, // use mission name as proxy; updated when user attribution is wired
+			})
+			if err != nil {
+				return nil, err
+			}
+			_, err = result.Consume(bgCtx)
+			return nil, err
+		})
+		if mergeErr != nil {
+			d.logger.Error(bgCtx, "CreateMission: Neo4j MERGE failed (non-fatal)",
+				"mission_id", missionIDStr,
+				"tenant", tenantForMission.String(),
+				"error", mergeErr,
+			)
+			return
+		}
+
+		// Publish GraphUpdate{NODE_ADDED} on the bus so WatchGraphUpdates streams
+		// the new Mission node to live dashboard clients.
+		if d.graphBus != nil {
+			d.graphBus.Publish(tenantForMission, &graphpb.GraphUpdate{
+				Kind: graphpb.GraphUpdate_NODE_ADDED,
+				Entity: &graphpb.GraphUpdate_Node{
+					Node: &graphpb.Node{
+						Id:     missionIDStr,
+						Labels: []string{"Mission"},
+						Properties: map[string]string{
+							"id":        missionIDStr,
+							"name":      missionName,
+							"tenant_id": tenantForMission.String(),
+							"status":    missionStatus,
+						},
+					},
+				},
+			})
+		}
+	}()
 
 	return api.CreateMissionResultData{
 		MissionID:           m.ID.String(),
