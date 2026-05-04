@@ -38,6 +38,35 @@ func (e *ValidationError) Error() string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// ValidateAtStartupVerbose validates the step graph + deps and returns
+// a one-line success summary suitable for the operator's startup log.
+// On failure it returns the same *ValidationError that ValidateAtStartup
+// returns; the summary string in that case is empty.
+//
+// Use this from cmd/main.go so production-mode startup logs explicitly
+// state "validated N steps, all M capabilities satisfied (production
+// mode)" instead of leaving operators to infer success from absence-of-
+// error.
+func ValidateAtStartupVerbose(steps []Step, deps *Deps, devMode bool) (summary string, err error) {
+	if err := ValidateAtStartup(steps, deps, devMode); err != nil {
+		return "", err
+	}
+	// Capability count for the summary: distinct capabilities required
+	// by any step, irrespective of whether dev mode bypassed the check.
+	required := map[ClientCapability]struct{}{}
+	for _, s := range steps {
+		for _, c := range s.RequiredClients() {
+			required[c] = struct{}{}
+		}
+	}
+	mode := "production mode"
+	if devMode {
+		mode = "dev mode (capability checks bypassed)"
+	}
+	return fmt.Sprintf("saga: validated %d step(s), all %d capabilit(ies) satisfied (%s)",
+		len(steps), len(required), mode), nil
+}
+
 // ValidateAtStartup checks that every capability listed in any step's
 // RequiredClients() is satisfied by deps. In production mode (devMode=false),
 // any unsatisfied capability returns a *ValidationError aggregating every

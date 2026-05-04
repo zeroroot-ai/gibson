@@ -4,6 +4,56 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## v0.31.0 — 2026-05-04 — platform package extensions (tenant-provisioning-unification-phase2 Phase 1)
+
+Adds the platform-package primitives the tenant-operator + daemon need
+for the Vault-as-credential-store cutover (Phase 2-8 of
+tenant-provisioning-unification-phase2). Non-functional for the daemon
+itself; consumed by the operator and daemon refactors in subsequent
+releases.
+
+Spec: `tenant-provisioning-unification-phase2`.
+
+### Added
+
+- **`pkg/platform/dataplane/payloads.go`** — typed Vault credential
+  payload structs: `PostgresCredentials`, `Neo4jCredentials`,
+  `RedisCredentials`, `VectorCredentials`, `LangfuseCredentials`. The
+  operator marshals one of these to the canonical per-tenant Vault path
+  (`infra/postgres`, `infra/neo4j`, etc.); the daemon unmarshals the
+  same struct. Single source of truth for the JSON shape — no drift
+  between operator writer and daemon reader.
+
+- **`pkg/platform/saga/adapt.go`** — `FromStepFn` adapter wraps a
+  function-form step into the new `Step` interface, with `AdaptOption`
+  pattern (`WithRequires`, `WithRequiredClients`, `WithSkipFn`,
+  `WithDeprovisionFn`). Eases incremental migration of the operator's
+  flow files: a closure can be wrapped today and converted to a struct
+  implementation later without changing runner-side construction.
+
+- **`pkg/platform/saga.ValidateAtStartupVerbose`** — returns a one-line
+  success summary suitable for the operator's startup log:
+  `"saga: validated N step(s), all M capabilit(ies) satisfied
+  (production mode | dev mode (capability checks bypassed))"`. Existing
+  `ValidateAtStartup` signature unchanged for parent-spec callers;
+  verbose form delegates to it.
+
+### Tests
+
+12 new unit tests covering JSON round-trip for every payload struct,
+field-name regression guard, FromStepFn defaults + all options
+together + nil-fn panic, and ValidateAtStartupVerbose
+production/dev/failure paths.
+
+### Module discipline
+
+`go list -deps github.com/zero-day-ai/gibson/pkg/platform/...` still
+resolves only to stdlib + `github.com/zero-day-ai/sdk/auth` + the
+controller-runtime/k8s.io types from the parent spec. No new
+transitive deps.
+
+---
+
 ## v0.30.0 — 2026-05-04 — platform package foundation (tenant-provisioning-unification Phase 1)
 
 Adds `core/gibson/pkg/platform/` — a leaf package that holds the

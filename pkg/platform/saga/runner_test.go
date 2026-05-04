@@ -320,6 +320,50 @@ func TestRunner_Backoff_ExponentialCappedAtMax(t *testing.T) {
 	}
 }
 
+func TestValidateAtStartupVerbose_ProductionSummary(t *testing.T) {
+	s := &testStep{name: "S", condition: "S", caps: []saga.ClientCapability{saga.CapabilityKubernetes}}
+	deps := &saga.Deps{K8s: struct{}{}}
+	summary, err := saga.ValidateAtStartupVerbose([]saga.Step{s}, deps, false)
+	if err != nil {
+		t.Fatalf("ValidateAtStartupVerbose: %v", err)
+	}
+	if !strings.Contains(summary, "validated 1 step") {
+		t.Errorf("summary missing step count: %q", summary)
+	}
+	if !strings.Contains(summary, "1 capabilit") {
+		t.Errorf("summary missing capability count: %q", summary)
+	}
+	if !strings.Contains(summary, "production mode") {
+		t.Errorf("summary missing production-mode tag: %q", summary)
+	}
+}
+
+func TestValidateAtStartupVerbose_DevModeSummary(t *testing.T) {
+	s := &testStep{name: "S", condition: "S", caps: []saga.ClientCapability{saga.CapabilityVaultAdmin}}
+	deps := &saga.Deps{} // empty — dev mode tolerates
+	summary, err := saga.ValidateAtStartupVerbose([]saga.Step{s}, deps, true)
+	if err != nil {
+		t.Fatalf("ValidateAtStartupVerbose dev mode: %v", err)
+	}
+	if !strings.Contains(summary, "dev mode") {
+		t.Errorf("summary missing dev-mode tag: %q", summary)
+	}
+	if !strings.Contains(summary, "bypassed") {
+		t.Errorf("summary missing bypassed phrase: %q", summary)
+	}
+}
+
+func TestValidateAtStartupVerbose_FailureReturnsEmptySummary(t *testing.T) {
+	s := &testStep{name: "S", condition: "S", caps: []saga.ClientCapability{saga.CapabilityVaultAdmin}}
+	summary, err := saga.ValidateAtStartupVerbose([]saga.Step{s}, &saga.Deps{}, false)
+	if err == nil {
+		t.Fatal("expected error in production mode with missing cap")
+	}
+	if summary != "" {
+		t.Errorf("expected empty summary on failure, got %q", summary)
+	}
+}
+
 // Sanity that error messages from ValidationError are useful.
 func TestValidationError_ErrorMessageMentionsCapabilityAndSteps(t *testing.T) {
 	ve := &saga.ValidationError{
