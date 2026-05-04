@@ -7,17 +7,22 @@ import (
 	"sync"
 
 	redis "github.com/redis/go-redis/v9"
+
 	"github.com/zero-day-ai/sdk/auth"
+
+	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
 )
 
-const (
-	// redisMasterIndexKey is the hash key in db 0 that maps tenant ID →
-	// logical DB index. Written by the tenant-operator on tenant provision.
-	redisMasterIndexKey = "tenant:index"
+// redisMasterIndexKey is the hash key in db 0 that maps tenant ID →
+// logical DB index. Written by the tenant-operator on tenant provision.
+// Sourced from the canonical platform/dataplane constant so the daemon
+// and the operator cannot drift on this key (the historical bug:
+// operator wrote "tenant_db_index", daemon read "tenant:index"). Spec
+// tenant-provisioning-unification Requirement 1.4.
+var redisMasterIndexKey = pdataplane.RedisIndexHashKey
 
-	// redisDB0 is the master index database. Never returned to handler code.
-	redisDB0 = 0
-)
+// redisDB0 is the master index database. Never returned to handler code.
+const redisDB0 = 0
 
 // redisPerTenant manages per-tenant *redis.Client instances. Each tenant
 // gets a client bound to their dedicated logical DB (resolved from the master
@@ -112,12 +117,12 @@ func (r *redisPerTenant) resolveDBIndex(ctx context.Context, tenant auth.TenantI
 	}
 	r.mu.Unlock()
 
-	// HGET tenant:index <tenantID>
+	// HGET gibson:tenant:index <tenantID>
 	val, err := r.adminClient.HGet(ctx, redisMasterIndexKey, tenant.String()).Result()
 	if err == redis.Nil {
 		return 0, &NotProvisionedError{
 			Tenant: tenant.String(),
-			Reason: "no logical DB index found in Redis master index (tenant:index)",
+			Reason: "no logical DB index found in Redis master index (gibson:tenant:index)",
 		}
 	}
 	if err != nil {
