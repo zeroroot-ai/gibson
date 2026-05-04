@@ -13,7 +13,7 @@
 // both the Playwright browser driver and this Go cluster-side assertions file.
 //
 // Realignment notes (e2e-harness-realignment spec):
-//   - Tenant CRD group is gibson.gibson.io/v1alpha1 (tenantGVR in helpers).
+//   - Tenant CRD group is gibson.zero-day.ai/v1alpha1 (tenantGVR in helpers).
 //   - TenantMember founding owner role is "admin" (not "owner") — SIGNUP-B17.
 //   - Post-signup redirect is /login?callbackUrl=/dashboard — SIGNUP-B20.
 //   - No /verify-email or /signup/provisioning route waits — panel is in-page.
@@ -238,9 +238,9 @@ func TestSignup_FullChain_HappyPath(t *testing.T) {
 			"Namespace tenant-%s not found — Bug catalog: B10 (Envoy daemon cluster resolves to wrong Service name → operator can't call daemon → namespace never provisioned)",
 			env.slug)
 
-		gotLabel := ns.Labels["gibson.io/tenant"]
+		gotLabel := ns.Labels["gibson.zero-day.ai/tenant"]
 		assert.Equal(t, env.slug, gotLabel,
-			"Namespace tenant-%s is missing label gibson.io/tenant=%s (got %q) — namespace was created but without canonical labels",
+			"Namespace tenant-%s is missing label gibson.zero-day.ai/tenant=%s (got %q) — namespace was created but without canonical labels",
 			env.slug, env.slug, gotLabel)
 	})
 

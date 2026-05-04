@@ -45,7 +45,7 @@ func buildFakeClient(t *testing.T, tenants ...*unstructured.Unstructured) dynami
 // makeTenant creates an unstructured Tenant object with the given status.
 func makeTenant(name string, dataPlaneReady bool) *unstructured.Unstructured {
 	obj := map[string]any{
-		"apiVersion": "gibson.io/v1alpha1",
+		"apiVersion": "gibson.zero-day.ai/v1alpha1",
 		"kind":       "Tenant",
 		"metadata": map[string]any{
 			"name": name,
@@ -194,7 +194,7 @@ func TestProvisioningChecker_MissingDataPlaneField(t *testing.T) {
 	// Build a Tenant without dataPlane in status.
 	obj := &unstructured.Unstructured{
 		Object: map[string]any{
-			"apiVersion": "gibson.io/v1alpha1",
+			"apiVersion": "gibson.zero-day.ai/v1alpha1",
 			"kind":       "Tenant",
 			"metadata":   map[string]any{"name": "nophase"},
 			"status":     map[string]any{"phase": "Ready"},

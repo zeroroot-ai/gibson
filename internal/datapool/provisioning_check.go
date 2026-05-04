@@ -20,7 +20,7 @@ import (
 // tenant-operator module to avoid a cyclic dependency between gibson and
 // github.com/zero-day-ai/gibson/tenant-operator.
 var tenantGVR = schema.GroupVersionResource{
-	Group:    "gibson.io",
+	Group:    "gibson.zero-day.ai",
 	Version:  "v1alpha1",
 	Resource: "tenants",
 }

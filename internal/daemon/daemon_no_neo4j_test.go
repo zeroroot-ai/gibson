@@ -122,12 +122,12 @@ func TestDaemonStart_ZeroTenants_MigrationCheckClean(t *testing.T) {
 	// are registered yet (e.g. fresh install).
 	scheme := runtime.NewScheme()
 	tenantGVK := schema.GroupVersionKind{
-		Group:   "gibson.io",
+		Group:   "gibson.zero-day.ai",
 		Version: "v1alpha1",
 		Kind:    "Tenant",
 	}
 	tenantListGVK := schema.GroupVersionKind{
-		Group:   "gibson.io",
+		Group:   "gibson.zero-day.ai",
 		Version: "v1alpha1",
 		Kind:    "TenantList",
 	}

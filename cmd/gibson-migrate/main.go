@@ -580,7 +580,7 @@ func resolveTenants(ctx context.Context, tenantFlag string, allFlag bool, cfg *c
 
 // tenantGVR is the GroupVersionResource for the Tenant CRD.
 var tenantGVR = schema.GroupVersionResource{
-	Group:    "gibson.io",
+	Group:    "gibson.zero-day.ai",
 	Version:  "v1alpha1",
 	Resource: "tenants",
 }

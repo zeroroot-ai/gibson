@@ -43,12 +43,12 @@ import (
 // GVR definitions for Tenant and TenantMember CRs.
 var (
 	tenantsGVR = schema.GroupVersionResource{
-		Group:    "gibson.gibson.io",
+		Group:    "gibson.zero-day.ai",
 		Version:  "v1alpha1",
 		Resource: "tenants",
 	}
 	tenantMembersGVR = schema.GroupVersionResource{
-		Group:    "gibson.gibson.io",
+		Group:    "gibson.zero-day.ai",
 		Version:  "v1alpha1",
 		Resource: "tenantmembers",
 	}
