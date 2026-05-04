@@ -9,7 +9,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/prompt"
 )
 
-// DashboardPostgresConfig holds connection settings for the shared dashboard
+// PlatformPostgresConfig holds connection settings for the shared dashboard
 // PostgreSQL instance. The daemon uses this database to read and write the
 // tenant_provisioning table. It is the same PostgreSQL instance that the
 // dashboard's Better Auth server uses for user/session/organisation data.
@@ -25,7 +25,7 @@ import (
 //	GIBSON_DASHBOARD_POSTGRES_PASSWORD   — password (keep in K8s Secret)
 //	GIBSON_DASHBOARD_POSTGRES_SSL_MODE   — sslmode value (default: disable)
 //	GIBSON_DASHBOARD_POSTGRES_MAX_CONNS  — connection pool size (default: 5)
-type DashboardPostgresConfig struct {
+type PlatformPostgresConfig struct {
 	// Host is the PostgreSQL server hostname or IP address.
 	// Default: "dashboard-postgresql"
 	Host string `mapstructure:"host" yaml:"host"`
@@ -58,7 +58,7 @@ type DashboardPostgresConfig struct {
 // PostgreSQL instance. The daemon uses this database to bootstrap per-tenant
 // databases and roles. It requires a role with CREATEDB privilege.
 //
-// This is distinct from the dashboard Postgres instance (DashboardPostgresConfig)
+// This is distinct from the dashboard Postgres instance (PlatformPostgresConfig)
 // and is used exclusively for tenant data-plane operations (CREATE DATABASE,
 // CREATE ROLE, cross-tenant admin queries). See spec per-tenant-data-plane-completion
 // Req 1.1–1.4 and design D1.
@@ -130,7 +130,7 @@ type Config struct {
 	Auth              AuthConfig              `mapstructure:"auth" yaml:"auth"`
 	Checkpoint        CheckpointConfig        `mapstructure:"checkpoint" yaml:"checkpoint"`
 	Authz             AuthzConfig             `mapstructure:"authz" yaml:"authz"`
-	DashboardPostgres DashboardPostgresConfig `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
+	PlatformPostgres PlatformPostgresConfig `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
 	TenantPostgres    TenantPostgresConfig    `mapstructure:"tenant_postgres" yaml:"tenant_postgres,omitempty"`
 	Sandbox           SandboxConfig           `mapstructure:"sandbox" yaml:"sandbox,omitempty"`
 	ToolRunner        ToolRunnerConfig        `mapstructure:"tool_runner" yaml:"tool_runner,omitempty"`

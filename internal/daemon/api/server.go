@@ -108,11 +108,11 @@ type DaemonServer struct {
 	// Returning ("", false, nil) is a cache miss — also handled as fallback.
 	tenantNameResolver func(ctx context.Context, tenantID string) (string, bool, error)
 
-	// dashboardDB is the shared-dashboard Postgres pool used by the
+	// platformDB is the shared-dashboard Postgres pool used by the
 	// entitlements handlers (UpsertTenantQuota in particular). Wired via
-	// WithDashboardDB by the daemon; nil in dev/kind when the Postgres
+	// WithPlatformDB by the daemon; nil in dev/kind when the Postgres
 	// connection couldn't be established.
-	dashboardDB *sql.DB
+	platformDB *sql.DB
 
 	// auditLogger is the Redis-backed audit log reader/writer.
 	// May be nil; when nil, ListAuditEvents falls back to Loki only (or returns Unavailable).
@@ -843,11 +843,11 @@ func (s *DaemonServer) WithTenantNameResolver(fn func(ctx context.Context, tenan
 	return s
 }
 
-// WithDashboardDB wires the shared-dashboard Postgres pool used by the
+// WithPlatformDB wires the shared-dashboard Postgres pool used by the
 // entitlements handlers (UpsertTenantQuota writes the tenant_quotas row
 // there). May be nil; handlers that require it return Unavailable.
-func (s *DaemonServer) WithDashboardDB(db *sql.DB) *DaemonServer {
-	s.dashboardDB = db
+func (s *DaemonServer) WithPlatformDB(db *sql.DB) *DaemonServer {
+	s.platformDB = db
 	return s
 }
 

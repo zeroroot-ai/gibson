@@ -134,7 +134,7 @@ func (s *DaemonServer) GetTenantQuota(ctx context.Context, req *tenantv1.GetTena
 	// Plan-based limits from Postgres tenant_quotas. The dashboard Postgres
 	// is optional in dev; when absent we leave the extended fields at zero
 	// rather than failing the RPC.
-	if db := s.dashboardDB; db != nil {
+	if db := s.platformDB; db != nil {
 		limits, err := readTenantQuotasRow(ctx, db, tenantID)
 		if err != nil {
 			s.logger.WarnContext(ctx, "GetTenantQuota: postgres read failed (continuing with zero limits)",

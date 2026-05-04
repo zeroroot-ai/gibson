@@ -384,7 +384,7 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		}
 	}
 
-	// Apply DashboardPostgres config interpolation. Critical — the chart
+	// Apply PlatformPostgres config interpolation. Critical — the chart
 	// ships the password as `${DASHBOARD_DB_PASSWORD}` and relies on this
 	// hook to expand it; without this block the daemon tries to
 	// authenticate with the literal string and every capability-grant +
@@ -393,19 +393,19 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 	// depends on this pool being healthy.
 	if dp, ok := interpolated["dashboard_postgres"].(map[string]interface{}); ok {
 		if host, ok := dp["host"].(string); ok {
-			cfg.DashboardPostgres.Host = interpolateString(host)
+			cfg.PlatformPostgres.Host = interpolateString(host)
 		}
 		if database, ok := dp["database"].(string); ok {
-			cfg.DashboardPostgres.Database = interpolateString(database)
+			cfg.PlatformPostgres.Database = interpolateString(database)
 		}
 		if username, ok := dp["username"].(string); ok {
-			cfg.DashboardPostgres.Username = interpolateString(username)
+			cfg.PlatformPostgres.Username = interpolateString(username)
 		}
 		if password, ok := dp["password"].(string); ok {
-			cfg.DashboardPostgres.Password = interpolateString(password)
+			cfg.PlatformPostgres.Password = interpolateString(password)
 		}
 		if sslMode, ok := dp["ssl_mode"].(string); ok {
-			cfg.DashboardPostgres.SSLMode = interpolateString(sslMode)
+			cfg.PlatformPostgres.SSLMode = interpolateString(sslMode)
 		}
 	}
 

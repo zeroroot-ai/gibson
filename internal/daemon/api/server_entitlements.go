@@ -14,11 +14,11 @@ import (
 )
 
 // entitlementsDB returns the *sql.DB used for tenant_quotas writes. The
-// daemon wires this via WithDashboardDB; nil means the daemon booted without
+// daemon wires this via WithPlatformDB; nil means the daemon booted without
 // a dashboard Postgres connection (dev/kind clusters can still run the rest
 // of the RPCs, but UpsertTenantQuota returns Unavailable).
 func (s *DaemonServer) entitlementsDB() *sql.DB {
-	return s.dashboardDB
+	return s.platformDB
 }
 
 // WriteAccessTuples atomically adds and/or deletes FGA tuples. The operator

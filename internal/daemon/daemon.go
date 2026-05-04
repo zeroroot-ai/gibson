@@ -268,11 +268,11 @@ type daemonImpl struct {
 	// resolver's onResolve callback for model_resolved events.
 	auditWriter *audit.Writer
 
-	// dashboardDB is the connection pool for the shared dashboard PostgreSQL instance.
+	// platformDB is the connection pool for the shared dashboard PostgreSQL instance.
 	// It is used to read and write the tenant_provisioning table. May be nil when
-	// no DashboardPostgresConfig is provided or when the connection fails at startup
+	// no PlatformPostgresConfig is provided or when the connection fails at startup
 	// (degraded mode — provisioning unavailable but missions/tools/agents continue).
-	dashboardDB *sql.DB
+	platformDB *sql.DB
 
 	// pool is the per-tenant data-plane connection pool introduced in Phase B/C/D.
 	// It provides tenant-isolated Postgres, Redis, Neo4j, and vector store connections
@@ -493,7 +493,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// BEFORE Component Registry. A connection failure is non-fatal: the daemon
 	// continues with provisioning degraded (new signups cannot complete) but
 	// missions, tools, and agents are unaffected.
-	d.initDashboardPostgres(ctx)
+	d.initPlatformPostgres(ctx)
 
 	// Initialize Redis-backed component registry and registry adapter.
 	// The component registry uses Redis for runtime service discovery (registrations with TTL).
@@ -1245,12 +1245,12 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 	d.grpcSubsystem = nil
 
 	// Close dashboard PostgreSQL connection pool.
-	if d.dashboardDB != nil {
+	if d.platformDB != nil {
 		d.logger.Info(ctx, "closing dashboard PostgreSQL connection pool")
-		if err := d.dashboardDB.Close(); err != nil {
+		if err := d.platformDB.Close(); err != nil {
 			d.logger.Warn(ctx, "error closing dashboard PostgreSQL pool", "error", err)
 		}
-		d.dashboardDB = nil
+		d.platformDB = nil
 	}
 
 	// Close Phase D data-plane pool.
@@ -1272,13 +1272,13 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 	}
 }
 
-// initDashboardPostgres establishes the dashboard PostgreSQL connection pool and
+// initPlatformPostgres establishes the dashboard PostgreSQL connection pool and
 // runs the tenant_provisioning schema migration.
 //
-// Failure is non-fatal: the daemon logs an error and continues with dashboardDB=nil.
-// Provisioning RPCs will return an appropriate error when dashboardDB is nil.
-func (d *daemonImpl) initDashboardPostgres(ctx context.Context) {
-	pgCfg := d.config.DashboardPostgres
+// Failure is non-fatal: the daemon logs an error and continues with platformDB=nil.
+// Provisioning RPCs will return an appropriate error when platformDB is nil.
+func (d *daemonImpl) initPlatformPostgres(ctx context.Context) {
+	pgCfg := d.config.PlatformPostgres
 
 	// Skip if no host is configured — the feature is not enabled.
 	if pgCfg.Host == "" {
@@ -1344,7 +1344,7 @@ func (d *daemonImpl) initDashboardPostgres(ctx context.Context) {
 	// Schema migrations for provisioning tables now live in the standalone
 	// gibson-tenant-operator. The daemon simply relies on whatever schema
 	// the operator has provisioned.
-	d.dashboardDB = db
+	d.platformDB = db
 
 }
 

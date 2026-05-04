@@ -436,8 +436,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithAuthorizer(d.authorizer)
 		d.logger.Info(ctx, "FGA authorizer wired into DaemonServer for admin RPCs")
 	}
-	if d.dashboardDB != nil {
-		daemonSvc.WithDashboardDB(d.dashboardDB)
+	if d.platformDB != nil {
+		daemonSvc.WithPlatformDB(d.platformDB)
 		d.logger.Info(ctx, "dashboard Postgres pool wired into DaemonServer for entitlements RPCs")
 	}
 	if d.quotaManager != nil {
@@ -626,13 +626,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			_ = redisClient // retained for future wiring
 
 			// Wire the CapabilityGrantService for the Agent Auth Protocol RPCs.
-			// Requires dashboardDB and the FGA authorizer.
-			if d.dashboardDB != nil && d.authorizer != nil {
-				agentStore := capabilitygrant.NewCapabilityGrantStore(d.dashboardDB)
-				auditWriter := audit.NewWriter(d.dashboardDB, d.logger.Slog())
+			// Requires platformDB and the FGA authorizer.
+			if d.platformDB != nil && d.authorizer != nil {
+				agentStore := capabilitygrant.NewCapabilityGrantStore(d.platformDB)
+				auditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
 				auditWriter.Start(ctx)
 				d.auditWriter = auditWriter
-				auditQuery := audit.NewQuery(d.dashboardDB)
+				auditQuery := audit.NewQuery(d.platformDB)
 				// Wire the audit read path into ModelAccessService so the
 				// dashboard's audit drawer renders real model_resolved
 				// events. Spec: llm-user-attribution-governance R4.9.
@@ -657,7 +657,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				daemonSvc.WithCapabilityGrantService(capabilityGrantSvc)
 				d.logger.Info(ctx, "CapabilityGrantService wired into DaemonServer")
 			} else {
-				d.logger.Warn(ctx, "CapabilityGrantService not wired: requires dashboardDB and authorizer")
+				d.logger.Warn(ctx, "CapabilityGrantService not wired: requires platformDB and authorizer")
 			}
 
 			// Wire the onboarding store backed by Redis.
@@ -705,8 +705,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.logger.Info(ctx, "IdP admin client not configured (GIBSON_IDP_PROVIDER not set); TenantAdminService agent-identity RPCs will return Unavailable")
 	}
 	// Wire audit writer for TenantAdminService when Postgres is available.
-	if d.dashboardDB != nil {
-		tenantAuditWriter := audit.NewWriter(d.dashboardDB, d.logger.Slog())
+	if d.platformDB != nil {
+		tenantAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
 		tenantAuditWriter.Start(ctx)
 		daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
 		d.logger.Info(ctx, "audit writer wired into TenantAdminService")
@@ -771,8 +771,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// (Write/DeleteAgentGrants) is the new surface from this spec.
 		// Spec: component-bootstrap-e2e Requirement 9.
 		var grantsAuditWriter *audit.Writer
-		if d.dashboardDB != nil {
-			grantsAuditWriter = audit.NewWriter(d.dashboardDB, d.logger.Slog())
+		if d.platformDB != nil {
+			grantsAuditWriter = audit.NewWriter(d.platformDB, d.logger.Slog())
 			grantsAuditWriter.Start(ctx)
 		}
 		grantsServer, gaErr := admin.NewGrantsAdminServer(admin.GrantsAdminConfig{
@@ -981,7 +981,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// Wire the plugin runtime (Spec 2, plugin-runtime, Phase 7, Task 16).
 			//
 			// The PluginRegistry needs:
-			//   - dashboardDB: the operator-shared Postgres for plugin_install persistence
+			//   - platformDB: the operator-shared Postgres for plugin_install persistence
 			//   - redisClient: for transient install status (TTL-based liveness)
 			//   - compQueue: reuses the same WorkQueue as ComponentService
 			//
@@ -990,9 +990,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			//
 			// No background sweeper goroutine is started — Redis TTL expiry is the
 			// sweeper. When a key disappears, ListInstalls excludes the install.
-			if d.dashboardDB != nil {
+			if d.platformDB != nil {
 				pluginRegistry := component.NewPluginRegistry(
-					d.dashboardDB,
+					d.platformDB,
 					d.stateClient.Client(),
 					compQueue,
 					d.logger.WithComponent("plugin-registry").Slog(),
@@ -1005,7 +1005,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				pluginpb.RegisterPluginInvokeServiceServer(srv, pluginInvokeSvc)
 				d.logger.Info(ctx, "PluginInvokeService gRPC endpoint registered")
 			} else {
-				d.logger.Warn(ctx, "PluginRegistry not wired: dashboardDB is nil; PluginInvoke will return UNAVAILABLE for all plugins")
+				d.logger.Warn(ctx, "PluginRegistry not wired: platformDB is nil; PluginInvoke will return UNAVAILABLE for all plugins")
 			}
 		} else {
 			d.logger.Warn(ctx, "ComponentService unavailable: Redis client is not standalone mode; requires *redis.Client")

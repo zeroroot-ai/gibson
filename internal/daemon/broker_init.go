@@ -104,7 +104,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	// Postgres provider for all tenants (backward-compatible behaviour).
 	var configStore secrets.RegistryConfigGetter = &noopRegistryConfigGetter{}
 
-	if len(systemKEK) == 32 && d.config.DashboardPostgres.Host != "" {
+	if len(systemKEK) == 32 && d.config.PlatformPostgres.Host != "" {
 		pgxPool, err := d.dashboardPgxPool(ctx)
 		if err != nil {
 			d.logger.Warn(ctx, "broker stack: could not open pgxpool to dashboard Postgres; broker config CRUD unavailable",
@@ -335,7 +335,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 // per-tenant broker configurations. The pool is separate from the sql.DB pool
 // used by other daemon services because TenantConfigStore requires pgx v5.
 func (d *daemonImpl) dashboardPgxPool(ctx context.Context) (*pgxpool.Pool, error) {
-	pgCfg := d.config.DashboardPostgres
+	pgCfg := d.config.PlatformPostgres
 
 	if pgCfg.Host == "" {
 		return nil, fmt.Errorf("dashboard Postgres not configured")
