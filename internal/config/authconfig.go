@@ -5,25 +5,6 @@ import (
 	"time"
 )
 
-// BetterAuthConfig holds configuration for the Better Auth session token validator.
-//
-// The Secret is the shared BETTER_AUTH_SECRET that was used to sign session tokens
-// in the dashboard's Better Auth server. It must match exactly.
-//
-// When Enabled is false the BetterAuthValidator is not added to the authenticator
-// chain even if Secret is set.
-type BetterAuthConfig struct {
-	// Enabled controls whether Better Auth session token validation is active.
-	// Default: false
-	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
-
-	// Secret is the shared signing secret for Better Auth session tokens issued
-	// by the dashboard. Must match the BETTER_AUTH_SECRET configured in the
-	// dashboard's Better Auth server.
-	// Override: BETTER_AUTH_SECRET env var is handled in the loader.
-	Secret string `mapstructure:"secret" yaml:"secret"`
-}
-
 // SPIFFEConfig configures SPIFFE/SPIRE workload identity for in-cluster components.
 //
 // When configured, the daemon obtains its own SVID from the SPIRE Workload API
@@ -98,11 +79,6 @@ type AuthConfig struct {
 	// (zero-trust-hardening Req 1.2).
 	// Optional — when absent and listen is loopback the daemon starts with a warning.
 	SPIFFE *SPIFFEConfig `mapstructure:"spiffe" yaml:"spiffe,omitempty"`
-
-	// BetterAuth configures session token validation for Better Auth sessions
-	// issued by the dashboard.
-	// Optional — omit when not using the dashboard's Better Auth integration.
-	BetterAuth BetterAuthConfig `mapstructure:"better_auth" yaml:"better_auth,omitempty"`
 
 	// AutoProvisionTenants controls whether new tenants are automatically created
 	// when a token contains a tenant claim value that doesn't match any existing tenant.
