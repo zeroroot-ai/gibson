@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/graphrag/protoconv"
 	"github.com/zero-day-ai/sdk/graphrag/taxonomy"
@@ -85,6 +86,13 @@ type ExecContext struct {
 
 	// ToolExecutionID is the ID of the tool execution that produced these nodes (optional).
 	ToolExecutionID string
+
+	// TenantID is the owning tenant for this load operation. When set, it is
+	// used by callers (e.g. ingest.discoveryProcessor) to publish graph-update
+	// events to the in-process Bus after a successful write.
+	// Zero value means "tenant unknown" — callers that need to publish MUST
+	// set this field. Loaders that do not publish may leave it as zero.
+	TenantID auth.TenantID
 }
 
 // LoadResult contains statistics about a load operation.

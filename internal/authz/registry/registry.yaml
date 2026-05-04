@@ -808,6 +808,34 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.graph.v1.GraphService/GetMissionGraph":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.graph.v1.GraphService/GetTenantGraph":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.graph.v1.GraphService/QueryPaths":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.graph.v1.GraphService/WatchGraphUpdates":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.harness.v1.HarnessCallbackService/Authorize":
     relation: "can_use"
     object_type: "component"

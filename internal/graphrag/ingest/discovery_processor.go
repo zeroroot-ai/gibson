@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
+	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
@@ -85,6 +88,10 @@ type discoveryProcessor struct {
 	loader *loader.GraphLoader
 	client graph.GraphClient
 	logger *slog.Logger
+	// bus is optional; when non-nil, successful writes publish a NODE_ADDED
+	// GraphUpdate to the in-process bus so WatchGraphUpdates subscribers
+	// receive incremental notifications. Spec: dashboard-knowledge-graph Task 9.
+	bus *graph.Bus
 }
 
 // NewDiscoveryProcessor creates a new DiscoveryProcessor with the given dependencies.
@@ -105,6 +112,14 @@ func NewDiscoveryProcessor(loader *loader.GraphLoader, client graph.GraphClient,
 		client: client,
 		logger: logger,
 	}
+}
+
+// WithBus attaches an in-process graph Bus to the processor. When non-nil, each
+// successful LoadDiscovery call publishes a NODE_ADDED GraphUpdate per discovered node.
+// The bus pointer is set once at construction time and is safe for concurrent use.
+func (p *discoveryProcessor) WithBus(b *graph.Bus) *discoveryProcessor {
+	p.bus = b
+	return p
 }
 
 // Process implements DiscoveryProcessor.Process.
@@ -166,6 +181,16 @@ func (p *discoveryProcessor) Process(ctx context.Context, execCtx loader.ExecCon
 			"errors", len(result.Errors),
 			"duration_ms", time.Since(startTime).Milliseconds(),
 		)
+
+		// Publish graph-update events if a Bus is wired and tenant is known.
+		// Non-blocking: bus.Publish drops on full subscriber channels.
+		// Spec: dashboard-knowledge-graph Task 9.
+		if p.bus != nil && !execCtx.TenantID.IsZero() && result.NodesCreated > 0 {
+			p.bus.Publish(execCtx.TenantID, &graphpb.GraphUpdate{
+				Kind: graphpb.GraphUpdate_NODE_ADDED,
+				At:   timestamppb.Now(),
+			})
+		}
 	}
 
 	// Calculate total duration

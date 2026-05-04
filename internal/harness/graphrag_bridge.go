@@ -8,9 +8,12 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	graphbus "github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/types"
+	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // GraphRAGBridge defines the interface for storing findings to the GraphRAG
@@ -130,6 +133,7 @@ type DefaultGraphRAGBridge struct {
 	wg          sync.WaitGroup
 	semaphore   chan struct{}
 	graphLoader *loader.GraphLoader // may be nil; finding graph storage is skipped when nil
+	bus         *graphbus.Bus       // optional; publishes NODE_ADDED after successful findings writes
 }
 
 // NewGraphRAGBridge creates a new DefaultGraphRAGBridge with the given dependencies.
@@ -157,6 +161,15 @@ func NewGraphRAGBridge(logger *slog.Logger, config GraphRAGBridgeConfig) *Defaul
 // to the graph is skipped and findings are only written to the finding store.
 func (b *DefaultGraphRAGBridge) WithGraphLoader(gl *loader.GraphLoader) *DefaultGraphRAGBridge {
 	b.graphLoader = gl
+	return b
+}
+
+// WithBus attaches an in-process graph Bus. When non-nil, each successful
+// LoadFindings call publishes a NODE_ADDED GraphUpdate so WatchGraphUpdates
+// subscribers receive incremental notifications.
+// Spec: dashboard-knowledge-graph Task 9.
+func (b *DefaultGraphRAGBridge) WithBus(bus *graphbus.Bus) *DefaultGraphRAGBridge {
+	b.bus = bus
 	return b
 }
 
@@ -283,6 +296,16 @@ func (b *DefaultGraphRAGBridge) storeToGraphRAG(ctx context.Context, finding age
 		"mission_id", missionID,
 		"nodes_created", result.NodesCreated,
 	)
+
+	// Publish a graph-update event if a Bus is wired and the tenant is known
+	// via execCtx.TenantID (set by the caller, e.g. daemon mission_manager).
+	// Spec: dashboard-knowledge-graph Task 9.
+	if b.bus != nil && !execCtx.TenantID.IsZero() && result.NodesCreated > 0 {
+		b.bus.Publish(execCtx.TenantID, &graphpb.GraphUpdate{
+			Kind: graphpb.GraphUpdate_NODE_ADDED,
+			At:   timestamppb.Now(),
+		})
+	}
 }
 
 // Compile-time interface check for DefaultGraphRAGBridge

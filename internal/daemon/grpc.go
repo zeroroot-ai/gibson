@@ -39,6 +39,7 @@ import (
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
+	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zero-day-ai/sdk/auth"
 
@@ -814,6 +815,20 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	)
 	intelligencepb.RegisterIntelligenceServiceServer(srv, intelSvc)
 	d.logger.Info(ctx, "registered IntelligenceService gRPC endpoint")
+
+	// Register gibson.graph.v1.GraphService — the daemon-mediated knowledge-graph
+	// read API for the dashboard. Routes through pool.For(tenant).Neo4j() per-RPC.
+	// The in-process update bus (graphbuspkg.Bus) is nil here; it is wired when
+	// Phase 3 Task 10 connects the bus (dashboard-knowledge-graph spec).
+	// The deferred-pool closure is safe to register before the pool initialises.
+	// Spec: dashboard-knowledge-graph (Phase 2, Task 7).
+	graphSvc := NewGraphServer(
+		func() datapool.Pool { return d.pool },
+		d.logger.WithComponent("graph-service").Slog(),
+		nil, // bus wired in Phase 3
+	)
+	graphpb.RegisterGraphServiceServer(srv, graphSvc)
+	d.logger.Info(ctx, "registered GraphService gRPC endpoint")
 
 	// Initialize and register the ComponentService on the same gRPC port.
 	//
