@@ -300,14 +300,12 @@ func (s *DaemonServer) DiffCheckpoints(
 	return &daemonpb.DiffCheckpointsResponse{Diff: diff}, nil
 }
 
-// requireMissionViewer enforces mission-scoped FGA. When the daemon's
-// FGA Authorizer is wired, the caller subject is checked against the
-// `viewer` relation on the mission's tenant. When no Authorizer is
+// requireMissionViewer enforces mission-scoped FGA via `mission#viewer`,
+// which cascades from `tenant#member` per the OpenFGA model relation
+// `define viewer: [user] or admin or member from belongs_to` (see
+// internal/authz/model.fga `type mission`). When no Authorizer is
 // configured (dev / kind without FGA), the per-tenant Pool's tenant-id
 // scoping is the implicit guard.
-//
-// NOTE: until Phase 4C lands `mission#viewer` in the FGA model and
-// writes the corresponding tuples, this falls back to `tenant#member`.
 //
 // Spec: mission-checkpointing R13.2, R14.2.
 func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcName string) error {
@@ -331,12 +329,14 @@ func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcN
 		return nil
 	}
 
-	// Tenant-scoped viewer check. Phase 4C will switch this to
-	// mission#viewer once the FGA model carries the relation.
+	// Mission-scoped viewer check. The model relation cascades from
+	// tenant#member, so tenant members automatically pass without a
+	// per-mission tuple-write; per-mission shares (e.g. shared with a
+	// specific user) layer on top via `(user:<sub>, viewer, mission:<id>)`.
 	ok, err := s.authorizer.Check(ctx,
 		"user:"+id.Subject,
-		"member",
-		"tenant:"+tenantID,
+		"viewer",
+		"mission:"+missionID,
 	)
 	if err != nil {
 		s.logger.Warn(rpcName+": authz check failed",

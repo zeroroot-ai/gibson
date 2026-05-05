@@ -1934,14 +1934,14 @@ func (s *DaemonServer) buildResumeCheckpointMetadata(ctx context.Context, missio
 	}
 }
 
-// requireMissionAdminForRewind enforces the admin-tier FGA check needed
-// for rewind-and-resume per R16.3. When the FGA Authorizer is not wired
-// (kind dev), the per-tenant Pool's tenant-id scoping is the implicit
-// guard.
-//
-// NOTE: until Phase 4C lands `mission#admin` in the FGA model, this
-// falls back to `tenant#admin`. A tenant admin can rewind any mission
-// in their tenant.
+// requireMissionAdminForRewind enforces mission-scoped admin FGA via
+// `mission#admin`, which cascades from `tenant#admin` per the OpenFGA
+// model relation `define admin: [user] or admin from belongs_to` (see
+// internal/authz/model.fga `type mission`). Tenant admins can rewind any
+// mission in their tenant; per-mission admins (e.g. shared with a
+// specific user) layer on top via `(user:<sub>, admin, mission:<id>)`.
+// When the FGA Authorizer is not wired (kind dev), the per-tenant Pool's
+// tenant-id scoping is the implicit guard.
 //
 // Spec: mission-checkpointing R16.3, R17.8.
 func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, missionID string) error {
@@ -1962,12 +1962,12 @@ func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, mission
 		return nil
 	}
 
-	// Phase 4C will switch this to mission#admin once the FGA model
-	// carries the relation.
+	// Mission-scoped admin check. The model relation cascades from
+	// tenant#admin; per-mission admin shares layer on top.
 	ok, err := s.authorizer.Check(ctx,
 		"user:"+id.Subject,
 		"admin",
-		"tenant:"+tenantID,
+		"mission:"+missionID,
 	)
 	if err != nil {
 		s.logger.Warn("ResumeMission rewind: authz check failed",
@@ -1979,7 +1979,7 @@ func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, mission
 	}
 	if !ok {
 		return status_grpc.Errorf(codes.PermissionDenied,
-			"rewind requires admin on tenant %s", tenantID)
+			"rewind requires admin on mission %s", missionID)
 	}
 	return nil
 }
