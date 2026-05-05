@@ -39,8 +39,17 @@ func DefaultConfig() *Config {
 			Endpoint: "",
 		},
 		Metrics: MetricsConfig{
-			Enabled: false,
-			Port:    9090,
+			Enabled:       false,
+			Port:          9090,
+			ListenAddress: "",
+			TLS: MetricsTLSConfig{
+				// Defaults match the chart-mounted Secret paths
+				// (templates/cert-manager/component-certificates.yaml ->
+				// gibson-daemon-metrics-tls). Spec security-hardening R20.
+				CertPath:     "/etc/gibson/tls/metrics/tls.crt",
+				KeyPath:      "/etc/gibson/tls/metrics/tls.key",
+				ClientCAPath: "/etc/gibson/tls/metrics/ca.crt",
+			},
 		},
 		Registration: RegistrationConfig{
 			Enabled:          false,

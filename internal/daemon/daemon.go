@@ -161,6 +161,13 @@ type daemonImpl struct {
 	// healthState tracks shutdown state for health endpoints
 	healthState *healthStateManager
 
+	// metricsSrv owns the daemon's :9090 mTLS Prometheus listener.
+	// Constructed during Start when config.Metrics.Enabled=true; nil
+	// otherwise. Lifecycle is driven by Serve(ctx) on its own goroutine
+	// — cancellation of the parent ctx triggers a graceful shutdown.
+	// Spec: security-hardening R20.
+	metricsSrv *observability.MetricsServer
+
 	// checkpointer manages mission checkpointing during graceful shutdown
 	checkpointer *DaemonMissionCheckpointer
 
@@ -1035,6 +1042,42 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			d.logger.Warn(ctx, "health subsystem error (non-fatal)", "error", err)
 		}
 	}()
+
+	// Start :9090 mTLS metrics listener (Spec security-hardening R20 / Week-2
+	// task 18 — Option (a), daemon-owned listener). Fail fast if cert
+	// material is missing — there is no plaintext fallback.
+	if d.config.Metrics.Enabled {
+		metricsAddr := d.config.Metrics.ListenAddress
+		if metricsAddr == "" {
+			port := d.config.Metrics.Port
+			if port == 0 {
+				port = 9090
+			}
+			metricsAddr = fmt.Sprintf(":%d", port)
+		}
+		metricsSrv, mErr := observability.NewMetricsServer(observability.MetricsServerConfig{
+			Addr:         metricsAddr,
+			CertPath:     d.config.Metrics.TLS.CertPath,
+			KeyPath:      d.config.Metrics.TLS.KeyPath,
+			ClientCAPath: d.config.Metrics.TLS.ClientCAPath,
+			Handler:      observability.DefaultPrometheusHandler(),
+		})
+		if mErr != nil {
+			d.stopServices(ctx)
+			return fmt.Errorf("failed to construct metrics TLS listener: %w", mErr)
+		}
+		d.metricsSrv = metricsSrv
+		d.logger.Info(ctx, "starting metrics TLS listener",
+			"addr", metricsSrv.Addr(),
+			"cert", d.config.Metrics.TLS.CertPath)
+		go func() {
+			if err := metricsSrv.Serve(ctx); err != nil {
+				d.logger.Error(ctx, "metrics TLS listener error", "error", err)
+			}
+		}()
+	} else {
+		d.logger.Info(ctx, "metrics listener disabled (config.metrics.enabled=false)")
+	}
 
 	// Prepare daemon info for registration
 	pid := os.Getpid()

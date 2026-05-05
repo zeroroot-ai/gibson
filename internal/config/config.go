@@ -272,6 +272,46 @@ type TracingConfig struct {
 type MetricsConfig struct {
 	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
 	Port    int  `mapstructure:"port" yaml:"port"`
+
+	// ListenAddress overrides the host:port the daemon binds the Prometheus
+	// metrics handler to. When empty, the daemon falls back to ":<Port>"
+	// (i.e. all interfaces). Set explicitly to "0.0.0.0:9090" or "[::]:9090"
+	// in chart-managed deployments. Spec: security-hardening R20.
+	ListenAddress string `mapstructure:"listen_address" yaml:"listen_address,omitempty"`
+
+	// TLS controls the daemon-owned :9090 mTLS metrics listener (Spec
+	// security-hardening R20, week-2-hardening-ha-daemon-internal task 18).
+	//
+	// Decision (Phase A3, 2026-05-05): TLS termination is OWNED by the daemon
+	// — NOT by the SDK healthhttp.Server — so cert rotation, mTLS, and
+	// audit are kept inside the daemon binary's contract. The chart provisions
+	// `gibson-daemon-metrics-tls` via cert-manager and mounts it at
+	// /etc/gibson/tls/metrics/{tls.crt,tls.key,ca.crt}.
+	//
+	// When the metrics block is enabled, all three paths MUST resolve to
+	// readable files at startup. The daemon fails fast on missing material —
+	// there is no plaintext fallback.
+	TLS MetricsTLSConfig `mapstructure:"tls" yaml:"tls,omitempty"`
+}
+
+// MetricsTLSConfig holds the file paths for the daemon's mTLS metrics
+// listener. All three paths are required when metrics.enabled=true and TLS
+// is configured. Spec security-hardening R20.
+type MetricsTLSConfig struct {
+	// CertPath is the daemon's server certificate (cert-manager Secret
+	// `gibson-daemon-metrics-tls`, key tls.crt). Default mount:
+	// /etc/gibson/tls/metrics/tls.crt.
+	CertPath string `mapstructure:"cert_path" yaml:"cert_path,omitempty"`
+
+	// KeyPath is the daemon's private key matching CertPath (Secret key
+	// tls.key). Default mount: /etc/gibson/tls/metrics/tls.key.
+	KeyPath string `mapstructure:"key_path" yaml:"key_path,omitempty"`
+
+	// ClientCAPath is the CA bundle the daemon uses to verify Prometheus
+	// scrape clients (Secret key ca.crt). Default mount:
+	// /etc/gibson/tls/metrics/ca.crt. Required — clients without a valid
+	// cert signed by this CA are rejected at the TLS handshake.
+	ClientCAPath string `mapstructure:"client_ca_path" yaml:"client_ca_path,omitempty"`
 }
 
 // RegistrationConfig contains configuration for the optional agent self-announcement server.
