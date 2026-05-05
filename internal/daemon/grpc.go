@@ -52,6 +52,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/onboarding"
+	"github.com/zero-day-ai/gibson/internal/reservednames"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
@@ -678,6 +679,19 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			issuer := impersonation.New(impersonationKey, 15*time.Minute, d.logger.Slog())
 			daemonSvc.WithImpersonationIssuer(issuer)
 			d.logger.Info(ctx, "impersonation issuer wired into DaemonServer")
+
+			// Wire the reserved-names provider so PlatformOperatorService.
+			// GetReservedNames returns the chart-managed denylist. Spec
+			// tenant-provisioning-unification-phase2 Requirement 4.5.
+			if k8s, kerr := buildKubeClientForReservedNames(); kerr != nil {
+				d.logger.Warn(ctx, "reserved-names provider not wired: kube client init failed", "error", kerr)
+			} else if k8s == nil {
+				d.logger.Info(ctx, "reserved-names provider not wired (no kubeconfig / not in-cluster)")
+			} else {
+				rnp := reservednames.New(k8s, reservednames.LookupNamespace(), 30*time.Second)
+				daemonSvc.WithReservedNames(rnp)
+				d.logger.Info(ctx, "reserved-names provider wired into DaemonServer", "namespace", reservednames.LookupNamespace())
+			}
 
 		} else {
 			d.logger.Warn(ctx, "daemon runtime services not wired: Redis client is not standalone mode")

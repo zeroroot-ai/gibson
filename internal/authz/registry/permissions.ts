@@ -1990,6 +1990,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.platform.v1.PlatformOperatorService/GetReservedNames": {
+    method: "/gibson.platform.v1.PlatformOperatorService/GetReservedNames",
+    service: "gibson.platform.v1.PlatformOperatorService",
+    relation: "platform_operator",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant": {
     method: "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant",
     service: "gibson.platform.v1.PlatformOperatorService",

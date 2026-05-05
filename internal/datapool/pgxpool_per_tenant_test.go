@@ -51,34 +51,11 @@ func TestSanitizeForPostgres_Rejects(t *testing.T) {
 	}
 }
 
-func TestDerivePostgresPassword_Length(t *testing.T) {
-	kek := make([]byte, 32)
-	for i := range kek {
-		kek[i] = byte(i)
-	}
-	pw, err := derivePostgresPassword(kek)
-	require.NoError(t, err)
-	// hex of first 16 bytes = 32 hex chars
-	assert.Len(t, pw, 32)
-	assert.Equal(t, "000102030405060708090a0b0c0d0e0f", pw)
-}
-
-func TestDerivePostgresPassword_TooShortKEK(t *testing.T) {
-	_, err := derivePostgresPassword([]byte{0x01, 0x02})
-	require.Error(t, err)
-}
-
-func TestDerivePostgresPassword_Determinism(t *testing.T) {
-	kek := make([]byte, 32)
-	for i := range kek {
-		kek[i] = 0xAB
-	}
-	pw1, err := derivePostgresPassword(kek)
-	require.NoError(t, err)
-	pw2, err := derivePostgresPassword(kek)
-	require.NoError(t, err)
-	assert.Equal(t, pw1, pw2)
-}
+// TestDerivePostgresPassword_* removed in spec
+// tenant-provisioning-unification-phase2 Phase 6.2 — daemon no longer
+// derives the Postgres password locally; the DSN comes from Vault via
+// the broker. Equivalent KEK-derivation tests live in
+// gibson/pkg/platform/tenant/kek_test.go (used by the operator side).
 
 func TestIsPostgresDBNotExist(t *testing.T) {
 	tests := []struct {

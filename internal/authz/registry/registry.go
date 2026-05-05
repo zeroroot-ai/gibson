@@ -2003,6 +2003,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.platform.v1.PlatformOperatorService/GetReservedNames": {
+		Method:            "/gibson.platform.v1.PlatformOperatorService/GetReservedNames",
+		Service:           "gibson.platform.v1.PlatformOperatorService",
+		Relation:          "platform_operator",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant",
 		Service:           "gibson.platform.v1.PlatformOperatorService",

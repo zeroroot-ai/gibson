@@ -28,6 +28,7 @@ const (
 	PlatformOperatorService_ListFeatureTuples_FullMethodName        = "/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples"
 	PlatformOperatorService_SeedCatalogTenantEnabled_FullMethodName = "/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled"
 	PlatformOperatorService_EmitAuditEvent_FullMethodName           = "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent"
+	PlatformOperatorService_GetReservedNames_FullMethodName         = "/gibson.platform.v1.PlatformOperatorService/GetReservedNames"
 )
 
 // PlatformOperatorServiceClient is the client API for PlatformOperatorService service.
@@ -69,6 +70,15 @@ type PlatformOperatorServiceClient interface {
 	// EmitAuditEvent lets an operator/platform workload forward a structured
 	// audit event onto the daemon's emitter.
 	EmitAuditEvent(ctx context.Context, in *EmitAuditEventRequest, opts ...grpc.CallOption) (*EmitAuditEventResponse, error)
+	// GetReservedNames returns the chart-managed reserved-names denylist
+	// (exact + prefix matches) used by the Tenant CRD admission webhook
+	// and the dashboard signup form. Spec
+	// tenant-provisioning-unification-phase2 Requirement 4.5.
+	//
+	// The dashboard's signup-form fetch route proxies to this RPC and
+	// calls it with its SPIFFE service identity; users never hit the
+	// RPC directly.
+	GetReservedNames(ctx context.Context, in *GetReservedNamesRequest, opts ...grpc.CallOption) (*GetReservedNamesResponse, error)
 }
 
 type platformOperatorServiceClient struct {
@@ -169,6 +179,16 @@ func (c *platformOperatorServiceClient) EmitAuditEvent(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *platformOperatorServiceClient) GetReservedNames(ctx context.Context, in *GetReservedNamesRequest, opts ...grpc.CallOption) (*GetReservedNamesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetReservedNamesResponse)
+	err := c.cc.Invoke(ctx, PlatformOperatorService_GetReservedNames_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PlatformOperatorServiceServer is the server API for PlatformOperatorService service.
 // All implementations must embed UnimplementedPlatformOperatorServiceServer
 // for forward compatibility.
@@ -208,6 +228,15 @@ type PlatformOperatorServiceServer interface {
 	// EmitAuditEvent lets an operator/platform workload forward a structured
 	// audit event onto the daemon's emitter.
 	EmitAuditEvent(context.Context, *EmitAuditEventRequest) (*EmitAuditEventResponse, error)
+	// GetReservedNames returns the chart-managed reserved-names denylist
+	// (exact + prefix matches) used by the Tenant CRD admission webhook
+	// and the dashboard signup form. Spec
+	// tenant-provisioning-unification-phase2 Requirement 4.5.
+	//
+	// The dashboard's signup-form fetch route proxies to this RPC and
+	// calls it with its SPIFFE service identity; users never hit the
+	// RPC directly.
+	GetReservedNames(context.Context, *GetReservedNamesRequest) (*GetReservedNamesResponse, error)
 	mustEmbedUnimplementedPlatformOperatorServiceServer()
 }
 
@@ -244,6 +273,9 @@ func (UnimplementedPlatformOperatorServiceServer) SeedCatalogTenantEnabled(conte
 }
 func (UnimplementedPlatformOperatorServiceServer) EmitAuditEvent(context.Context, *EmitAuditEventRequest) (*EmitAuditEventResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EmitAuditEvent not implemented")
+}
+func (UnimplementedPlatformOperatorServiceServer) GetReservedNames(context.Context, *GetReservedNamesRequest) (*GetReservedNamesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetReservedNames not implemented")
 }
 func (UnimplementedPlatformOperatorServiceServer) mustEmbedUnimplementedPlatformOperatorServiceServer() {
 }
@@ -429,6 +461,24 @@ func _PlatformOperatorService_EmitAuditEvent_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PlatformOperatorService_GetReservedNames_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetReservedNamesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformOperatorServiceServer).GetReservedNames(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformOperatorService_GetReservedNames_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformOperatorServiceServer).GetReservedNames(ctx, req.(*GetReservedNamesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PlatformOperatorService_ServiceDesc is the grpc.ServiceDesc for PlatformOperatorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -471,6 +521,10 @@ var PlatformOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EmitAuditEvent",
 			Handler:    _PlatformOperatorService_EmitAuditEvent_Handler,
+		},
+		{
+			MethodName: "GetReservedNames",
+			Handler:    _PlatformOperatorService_GetReservedNames_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

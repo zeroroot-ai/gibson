@@ -1242,6 +1242,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.platform.v1.PlatformOperatorService/GetReservedNames":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant":
     relation: "platform_operator"
     object_type: "system_tenant"

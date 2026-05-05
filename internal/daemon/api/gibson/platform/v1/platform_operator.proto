@@ -108,6 +108,23 @@ service PlatformOperatorService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+
+  // GetReservedNames returns the chart-managed reserved-names denylist
+  // (exact + prefix matches) used by the Tenant CRD admission webhook
+  // and the dashboard signup form. Spec
+  // tenant-provisioning-unification-phase2 Requirement 4.5.
+  //
+  // The dashboard's signup-form fetch route proxies to this RPC and
+  // calls it with its SPIFFE service identity; users never hit the
+  // RPC directly.
+  rpc GetReservedNames(GetReservedNamesRequest) returns (GetReservedNamesResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -290,3 +307,20 @@ message EmitAuditEventRequest {
 
 // EmitAuditEventResponse confirms the event was emitted.
 message EmitAuditEventResponse {}
+
+// GetReservedNamesRequest is empty — the list is global.
+message GetReservedNamesRequest {}
+
+// GetReservedNamesResponse carries the chart-managed reserved-names
+// denylist parsed from the gibson-reserved-names ConfigMap.
+//
+// Each list is the newline-split contents of the corresponding key
+// in the ConfigMap's data block.
+message GetReservedNamesResponse {
+  // Exact tenant-name matches that the admission webhook rejects.
+  // Examples: "default", "kube-system", "gibson", "argocd".
+  repeated string exact = 1;
+  // Tenant-name prefixes that the admission webhook rejects.
+  // Examples: "kube-", "system-", "gibson-".
+  repeated string prefix = 2;
+}
