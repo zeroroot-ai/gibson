@@ -14,7 +14,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/protoresolver"
@@ -41,13 +40,21 @@ type CallbackManager interface {
 }
 
 // ComponentDiscovery provides a unified interface for discovering and connecting to
-// agents, tools, and plugins registered in the component registry.
+// agents and tools registered in the component registry.
 //
 // This interface abstracts away the complexity of:
 //   - Querying the registry for component instances
 //   - Load-balancing across multiple instances
 //   - Managing gRPC connection pooling
 //   - Wrapping gRPC clients with Gibson's component interfaces
+//
+// Plugin dispatch is intentionally NOT exposed here. The pre-release in-process
+// Plugin shape (Initialize/Query/Shutdown/Methods/Health) was deleted by the
+// plugin-runtime spec; the production dispatch lives on
+// PluginInvokeService (component/plugin_dispatch.go) which is a separate
+// service registered on the daemon's gRPC surface and called via the harness's
+// QueryPlugin path. ListPlugins is retained for inventory/UI consumers; it
+// returns metadata only and never returns an in-process Plugin object.
 //
 // Thread-safe: All methods can be called concurrently.
 type ComponentDiscovery interface {
@@ -56,9 +63,6 @@ type ComponentDiscovery interface {
 
 	// DiscoverTool finds a tool by name and returns a gRPC client implementing tool.Tool.
 	DiscoverTool(ctx context.Context, name string) (tool.Tool, error)
-
-	// DiscoverPlugin finds a plugin by name and returns a gRPC client implementing plugin.Plugin.
-	DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error)
 
 	// ListAgents returns information about all registered agents.
 	ListAgents(ctx context.Context) ([]AgentInfo, error)
@@ -261,18 +265,6 @@ func (a *RegistryAdapter) DiscoverTool(ctx context.Context, name string) (tool.T
 	}
 
 	return NewGRPCToolClient(conn, *selected, a.resolver), nil
-}
-
-// DiscoverPlugin is a placeholder stub.
-//
-// The pre-release GRPCPluginClient (backed by the deleted PluginService proto)
-// has been removed by the plugin-runtime spec (Spec 2, Phase 1-2).
-//
-// TODO(plugin-runtime Phase 7): replace with the production plugin dispatch
-// client once PluginInvokeService (invoke.proto, Phase 6) is generated and
-// the daemon-side plugin_registry.go/plugin_dispatch.go are wired up.
-func (a *RegistryAdapter) DiscoverPlugin(_ context.Context, name string) (plugin.Plugin, error) {
-	return nil, fmt.Errorf("DiscoverPlugin(%q): plugin runtime in flight, see plugin-runtime spec Phase 7", name)
 }
 
 // ListAgents returns information about all registered agents.

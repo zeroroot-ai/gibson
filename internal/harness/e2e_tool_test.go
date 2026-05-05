@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
@@ -331,9 +330,8 @@ func (m *mockComponentDiscovery) DiscoverAgent(ctx context.Context, name string)
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockComponentDiscovery) DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error) {
-	return nil, fmt.Errorf("not implemented")
-}
+// DiscoverPlugin was removed from component.ComponentDiscovery in plugin-runtime
+// Spec 2 Phase 7; the mock no longer needs to implement it.
 
 func (m *mockComponentDiscovery) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
 	return nil, fmt.Errorf("not implemented")
@@ -499,7 +497,6 @@ func createHarnessWithResolver(t *testing.T, mockRegistry component.ComponentDis
 
 	// Create minimal harness with resolver
 	harness := &DefaultAgentHarness{
-		pluginRegistry:  plugin.NewPluginRegistry(nil), // nil event bus for testing
 		registryAdapter: mockRegistry,
 		resolver:        resolver,
 		tracer:          noop.NewTracerProvider().Tracer("test"),

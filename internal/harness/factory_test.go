@@ -11,7 +11,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -72,7 +71,6 @@ var _ memory.MemoryManager = (*MockMemoryStore)(nil)
 type MockRegistryAdapter struct {
 	DiscoverAgentFn   func(ctx context.Context, name string) (agent.Agent, error)
 	DiscoverToolFn    func(ctx context.Context, name string) (tool.Tool, error)
-	DiscoverPluginFn  func(ctx context.Context, name string) (plugin.Plugin, error)
 	ListAgentsFn      func(ctx context.Context) ([]component.AgentInfo, error)
 	ListToolsFn       func(ctx context.Context) ([]component.ToolInfo, error)
 	ListPluginsFn     func(ctx context.Context) ([]component.PluginInfo, error)
@@ -91,13 +89,6 @@ func (m *MockRegistryAdapter) DiscoverTool(ctx context.Context, name string) (to
 		return m.DiscoverToolFn(ctx, name)
 	}
 	return nil, types.NewError("MOCK_ERROR", "DiscoverTool not implemented")
-}
-
-func (m *MockRegistryAdapter) DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error) {
-	if m.DiscoverPluginFn != nil {
-		return m.DiscoverPluginFn(ctx, name)
-	}
-	return nil, types.NewError("MOCK_ERROR", "DiscoverPlugin not implemented")
 }
 
 func (m *MockRegistryAdapter) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
@@ -146,7 +137,7 @@ func TestNewHarnessFactory_Success(t *testing.T) {
 	// Verify defaults were applied
 	storedConfig := factory.Config()
 	assert.NotNil(t, storedConfig.LLMRegistry)
-	assert.NotNil(t, storedConfig.PluginRegistry)
+	// PluginRegistry was removed in plugin-runtime Spec 2 Phase 7.
 	assert.NotNil(t, storedConfig.Logger)
 	assert.NotNil(t, storedConfig.FindingStore)
 	assert.NotNil(t, storedConfig.Metrics)
@@ -181,7 +172,7 @@ func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 
 	// Verify all defaults were applied
 	assert.NotNil(t, storedConfig.LLMRegistry, "LLMRegistry should be defaulted")
-	assert.NotNil(t, storedConfig.PluginRegistry, "PluginRegistry should be defaulted")
+	// PluginRegistry was removed in plugin-runtime Spec 2 Phase 7.
 	assert.NotNil(t, storedConfig.Logger, "Logger should be defaulted")
 	assert.NotNil(t, storedConfig.FindingStore, "FindingStore should be defaulted")
 	assert.NotNil(t, storedConfig.Metrics, "Metrics should be defaulted")
@@ -195,18 +186,16 @@ func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 	llmReg := llm.NewLLMRegistry()
 	slotMgr := llm.NewSlotManager(llmReg)
-	pluginReg := plugin.NewPluginRegistry(nil)
 	findingStore := NewInMemoryFindingStore()
 	metrics := NewNoOpMetricsRecorder()
 	memStore := &MockMemoryStore{}
 
 	config := HarnessConfig{
-		SlotManager:    slotMgr,
-		LLMRegistry:    llmReg,
-		PluginRegistry: pluginReg,
-		FindingStore:   findingStore,
-		Metrics:        metrics,
-		MemoryManager:  memStore,
+		SlotManager:   slotMgr,
+		LLMRegistry:   llmReg,
+		FindingStore:  findingStore,
+		Metrics:       metrics,
+		MemoryManager: memStore,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -217,7 +206,6 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 	// Verify provided values were preserved
 	assert.Equal(t, slotMgr, storedConfig.SlotManager)
 	assert.Equal(t, llmReg, storedConfig.LLMRegistry)
-	assert.Equal(t, pluginReg, storedConfig.PluginRegistry)
 	assert.Equal(t, findingStore, storedConfig.FindingStore)
 	assert.Equal(t, metrics, storedConfig.Metrics)
 	assert.Equal(t, memStore, storedConfig.MemoryManager)
@@ -233,7 +221,6 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	config := HarnessConfig{
 		SlotManager:         llm.NewSlotManager(llm.NewLLMRegistry()),
 		LLMRegistry:         llm.NewLLMRegistry(),
-		PluginRegistry:      plugin.NewPluginRegistry(nil),
 		FindingStore:        NewInMemoryFindingStore(),
 		Metrics:             NewNoOpMetricsRecorder(),
 		MemoryManager:       &MockMemoryStore{},
@@ -250,7 +237,7 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	// Verify all provided values are preserved
 	assert.NotNil(t, storedConfig.SlotManager)
 	assert.NotNil(t, storedConfig.LLMRegistry)
-	assert.NotNil(t, storedConfig.PluginRegistry)
+	// PluginRegistry was removed in plugin-runtime Spec 2 Phase 7.
 	assert.NotNil(t, storedConfig.FindingStore)
 	assert.NotNil(t, storedConfig.Metrics)
 	assert.NotNil(t, storedConfig.MemoryManager)

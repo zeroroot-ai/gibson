@@ -27,6 +27,12 @@ type CallbackConfig struct {
 
 	// Enabled controls whether the callback server is started
 	Enabled bool
+
+	// SPIFFEEnabled indicates that the callback server is wrapped with SPIFFE
+	// mTLS (configured via NewCallbackServerWithRegistry's SPIFFE wiring path).
+	// When true, the listener may bind to non-loopback addresses; when false,
+	// security-hardening R1.4 forces loopback-only binds.
+	SPIFFEEnabled bool
 }
 
 // CallbackManager coordinates the lifecycle of the CallbackServer and provides
@@ -143,6 +149,20 @@ func (m *CallbackManager) Start(ctx context.Context) error {
 	m.startOnce.Do(func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
+
+		// Refuse to start the callback listener on a non-loopback bind without
+		// SPIFFE mTLS — security-hardening R1.4. The chart-managed deployment
+		// flips SPIFFEEnabled=true once the SPIFFE wiring path in
+		// NewCallbackServerWithRegistry has supplied an *workloadapi.X509Source;
+		// any other configuration that binds to a non-loopback address is
+		// refused here, fail-closed.
+		if m.config.ListenAddress != "" && !m.config.SPIFFEEnabled {
+			if err := rejectNonLoopbackWithoutSPIFFE(m.config.ListenAddress); err != nil {
+				m.logger.Error("callback listener refused to start", "error", err)
+				startErr = err
+				return
+			}
+		}
 
 		// Create a cancellable context for the server
 		m.serverCtx, m.serverCancel = context.WithCancel(ctx)

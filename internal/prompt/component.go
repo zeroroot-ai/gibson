@@ -2,9 +2,24 @@ package prompt
 
 import (
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 )
+
+// PluginPromptSource is the minimal interface a plugin-shaped value must
+// satisfy to participate in the prompt collection helpers in this package.
+//
+// The pre-release in-process Plugin interface (Initialize/Query/Shutdown/
+// Methods/Health) was deleted by the plugin-runtime spec; under the new
+// runtime there is no in-process Plugin object — production plugins are
+// reached over PluginInvokeService gRPC and have no Go-level "plugin"
+// receiver to type-assert against. The interface below therefore captures
+// only the basic identity surface (Name/Version) so that callers (today,
+// chiefly tests) can build prompt-bearing in-process fakes without
+// depending on the deleted Plugin shape.
+type PluginPromptSource interface {
+	Name() string
+	Version() string
+}
 
 // ToolWithPrompt extends Tool with prompt capabilities.
 // Tools can contribute prompts that describe their usage, provide examples,
@@ -18,12 +33,12 @@ type ToolWithPrompt interface {
 	Prompts() []Prompt
 }
 
-// PluginWithPrompts extends Plugin with prompt capabilities.
+// PluginWithPrompts extends a plugin-shaped value with prompt capabilities.
 // Plugins can contribute prompts that explain their data sources, query methods,
 // or provide examples of how to use their capabilities. Plugin prompts typically
 // appear at PositionPlugins in the message sequence.
 type PluginWithPrompts interface {
-	plugin.Plugin
+	PluginPromptSource
 
 	// Prompts returns prompts contributed by this plugin
 	// Typically at PositionPlugins
@@ -78,17 +93,17 @@ func GetToolPrompts(t tool.Tool) []Prompt {
 	return []Prompt{}
 }
 
-// PluginHasPrompts checks if a plugin implements PluginWithPrompts interface.
+// PluginHasPrompts checks if a plugin-shaped value implements PluginWithPrompts.
 // Returns true if the plugin can contribute prompts to the message sequence.
-func PluginHasPrompts(p plugin.Plugin) bool {
+func PluginHasPrompts(p PluginPromptSource) bool {
 	_, ok := p.(PluginWithPrompts)
 	return ok
 }
 
-// GetPluginPrompts returns prompts from a plugin if it implements PluginWithPrompts.
-// Returns an empty slice if the plugin does not implement PluginWithPrompts or
-// if the plugin returns no prompts.
-func GetPluginPrompts(p plugin.Plugin) []Prompt {
+// GetPluginPrompts returns prompts from a plugin-shaped value if it implements
+// PluginWithPrompts. Returns an empty slice if the plugin does not implement
+// PluginWithPrompts or if the plugin returns no prompts.
+func GetPluginPrompts(p PluginPromptSource) []Prompt {
 	if pwp, ok := p.(PluginWithPrompts); ok {
 		prompts := pwp.Prompts()
 		if prompts == nil {

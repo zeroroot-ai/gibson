@@ -11,7 +11,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdktypes "github.com/zero-day-ai/sdk/types"
@@ -68,9 +67,8 @@ func (m *mockComponentDiscovery) DiscoverTool(ctx context.Context, name string) 
 	return nil, fmt.Errorf("not implemented in mock")
 }
 
-func (m *mockComponentDiscovery) DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error) {
-	return nil, fmt.Errorf("not implemented in mock")
-}
+// DiscoverPlugin was removed from component.ComponentDiscovery in plugin-runtime
+// Spec 2 Phase 7; plugin invocation now goes through PluginInvokeService.
 
 func (m *mockComponentDiscovery) DelegateToAgent(ctx context.Context, name string, task agent.Task, harness agent.AgentHarness) (agent.Result, error) {
 	return agent.Result{}, fmt.Errorf("not implemented in mock")

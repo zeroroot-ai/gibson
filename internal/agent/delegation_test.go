@@ -7,16 +7,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"google.golang.org/protobuf/proto"
 )
 
-// mockComponentDiscovery implements ComponentDiscovery for testing
+// mockComponentDiscovery implements ComponentDiscovery for testing.
+//
+// Note: post plugin-runtime Spec 2 Phase 7, ComponentDiscovery only carries
+// DiscoverTool — plugin discovery moved to the daemon-side
+// PluginInvokeService. Tests for plugin behaviour now exercise the
+// "DelegationHarness has no plugin dispatch path" error contract directly.
 type mockComponentDiscovery struct {
-	discoverToolFunc   func(ctx context.Context, name string) (tool.Tool, error)
-	discoverPluginFunc func(ctx context.Context, name string) (plugin.Plugin, error)
+	discoverToolFunc func(ctx context.Context, name string) (tool.Tool, error)
 }
 
 func (m *mockComponentDiscovery) DiscoverTool(ctx context.Context, name string) (tool.Tool, error) {
@@ -24,13 +27,6 @@ func (m *mockComponentDiscovery) DiscoverTool(ctx context.Context, name string) 
 		return m.discoverToolFunc(ctx, name)
 	}
 	return nil, errors.New("tool not found")
-}
-
-func (m *mockComponentDiscovery) DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error) {
-	if m.discoverPluginFunc != nil {
-		return m.discoverPluginFunc(ctx, name)
-	}
-	return nil, errors.New("plugin not found")
 }
 
 // mockTool implements tool.Tool for testing
@@ -63,44 +59,6 @@ func (m *mockTool) Health(ctx context.Context) types.HealthStatus {
 	if m.healthFunc != nil {
 		return m.healthFunc(ctx)
 	}
-	return types.Healthy("")
-}
-
-// mockPlugin implements plugin.Plugin for testing
-type mockPlugin struct {
-	name        string
-	version     string
-	queryFunc   func(ctx context.Context, method string, params map[string]any) (any, error)
-	methodsFunc func() []plugin.MethodDescriptor
-}
-
-func (m *mockPlugin) Name() string        { return m.name }
-func (m *mockPlugin) Version() string     { return m.version }
-func (m *mockPlugin) Description() string { return "" }
-
-func (m *mockPlugin) Initialize(ctx context.Context, config map[string]any) error {
-	return nil
-}
-
-func (m *mockPlugin) Shutdown(ctx context.Context) error {
-	return nil
-}
-
-func (m *mockPlugin) Query(ctx context.Context, method string, params map[string]any) (any, error) {
-	if m.queryFunc != nil {
-		return m.queryFunc(ctx, method, params)
-	}
-	return nil, nil
-}
-
-func (m *mockPlugin) Methods() []plugin.MethodDescriptor {
-	if m.methodsFunc != nil {
-		return m.methodsFunc()
-	}
-	return nil
-}
-
-func (m *mockPlugin) Health(ctx context.Context) types.HealthStatus {
 	return types.Healthy("")
 }
 
@@ -174,98 +132,19 @@ func TestRegistryToolExecutor(t *testing.T) {
 	}
 }
 
-// TestRegistryPluginExecutor tests the registryPluginExecutor implementation
+// TestRegistryPluginExecutor verifies that the DelegationHarness's plugin
+// executor returns a structured error directing callers to the live harness's
+// PluginInvokeService dispatch path. Pre-Phase-7 behaviour (in-process
+// Plugin.Query) is no longer supported.
 func TestRegistryPluginExecutor(t *testing.T) {
-	tests := []struct {
-		name           string
-		pluginName     string
-		method         string
-		params         map[string]any
-		discoverFunc   func(ctx context.Context, name string) (plugin.Plugin, error)
-		expectedResult any
-		expectError    bool
-		errorContains  string
-	}{
-		{
-			name:       "successful plugin query",
-			pluginName: "test-plugin",
-			method:     "search",
-			params:     map[string]any{"query": "test"},
-			discoverFunc: func(ctx context.Context, name string) (plugin.Plugin, error) {
-				return &mockPlugin{
-					name:    "test-plugin",
-					version: "1.0.0",
-					queryFunc: func(ctx context.Context, method string, params map[string]any) (any, error) {
-						return map[string]any{"results": []string{"result1", "result2"}}, nil
-					},
-				}, nil
-			},
-			expectedResult: map[string]any{"results": []string{"result1", "result2"}},
-			expectError:    false,
-		},
-		{
-			name:       "plugin not found",
-			pluginName: "nonexistent-plugin",
-			method:     "search",
-			params:     map[string]any{"query": "test"},
-			discoverFunc: func(ctx context.Context, name string) (plugin.Plugin, error) {
-				return nil, errors.New("plugin not found in registry")
-			},
-			expectError:   true,
-			errorContains: "failed to discover plugin",
-		},
-		{
-			name:       "plugin query failure",
-			pluginName: "test-plugin",
-			method:     "invalid-method",
-			params:     map[string]any{"query": "test"},
-			discoverFunc: func(ctx context.Context, name string) (plugin.Plugin, error) {
-				return &mockPlugin{
-					name:    "test-plugin",
-					version: "1.0.0",
-					queryFunc: func(ctx context.Context, method string, params map[string]any) (any, error) {
-						return nil, errors.New("method not supported")
-					},
-				}, nil
-			},
-			expectError:   true,
-			errorContains: "plugin test-plugin query failed",
-		},
-		{
-			name:       "registry unavailable",
-			pluginName: "test-plugin",
-			method:     "search",
-			params:     map[string]any{"query": "test"},
-			discoverFunc: func(ctx context.Context, name string) (plugin.Plugin, error) {
-				return nil, errors.New("registry connection failed")
-			},
-			expectError:   true,
-			errorContains: "failed to discover plugin",
-		},
-	}
+	discovery := &mockComponentDiscovery{}
+	executor := &registryPluginExecutor{discovery: discovery}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			discovery := &mockComponentDiscovery{
-				discoverPluginFunc: tt.discoverFunc,
-			}
-
-			executor := &registryPluginExecutor{
-				discovery: discovery,
-			}
-
-			ctx := context.Background()
-			result, err := executor.QueryPlugin(ctx, tt.pluginName, tt.method, tt.params)
-
-			if tt.expectError {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errorContains)
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, tt.expectedResult, result)
-			}
-		})
-	}
+	ctx := context.Background()
+	result, err := executor.QueryPlugin(ctx, "any-plugin", "any-method", map[string]any{"k": "v"})
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "DelegationHarness has no plugin dispatch path")
 }
 
 // TestDelegationHarnessWithRegistryExecutors tests the integration of registry executors in DelegationHarness
@@ -290,26 +169,15 @@ func TestDelegationHarnessWithRegistryExecutors(t *testing.T) {
 		assert.Nil(t, result)
 	})
 
-	t.Run("QueryPlugin with registry executor", func(t *testing.T) {
-		discovery := &mockComponentDiscovery{
-			discoverPluginFunc: func(ctx context.Context, name string) (plugin.Plugin, error) {
-				return &mockPlugin{
-					name:    "test-plugin",
-					version: "1.0.0",
-					queryFunc: func(ctx context.Context, method string, params map[string]any) (any, error) {
-						return map[string]any{"status": "success"}, nil
-					},
-				}, nil
-			},
-		}
-
+	t.Run("QueryPlugin returns the no-dispatch error", func(t *testing.T) {
+		discovery := &mockComponentDiscovery{}
 		harness := NewDelegationHarness(nil, discovery)
 		ctx := context.Background()
 
-		// Should discover plugin and execute query successfully
-		result, err := harness.QueryPlugin(ctx, "test-plugin", "status", nil)
-		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"status": "success"}, result)
+		result, err := harness.QueryPlugin(ctx, "any-plugin", "status", nil)
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "DelegationHarness has no plugin dispatch path")
 	})
 
 	t.Run("ExecuteTool discovery failure", func(t *testing.T) {
@@ -325,22 +193,6 @@ func TestDelegationHarnessWithRegistryExecutors(t *testing.T) {
 		result, err := harness.ExecuteTool(ctx, "missing-tool", map[string]any{"key": "value"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to discover tool")
-		assert.Nil(t, result)
-	})
-
-	t.Run("QueryPlugin discovery failure", func(t *testing.T) {
-		discovery := &mockComponentDiscovery{
-			discoverPluginFunc: func(ctx context.Context, name string) (plugin.Plugin, error) {
-				return nil, errors.New("plugin not found")
-			},
-		}
-
-		harness := NewDelegationHarness(nil, discovery)
-		ctx := context.Background()
-
-		result, err := harness.QueryPlugin(ctx, "missing-plugin", "method", nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to discover plugin")
 		assert.Nil(t, result)
 	})
 }

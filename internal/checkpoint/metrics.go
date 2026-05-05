@@ -34,6 +34,16 @@ type CheckpointMetrics struct {
 	// Gauges
 	activeThreads    *prometheus.GaugeVec
 	pendingApprovals prometheus.Gauge
+
+	// Spec 4 R7.1 series — orchestrator-driven write/restore observability.
+	// These intentionally have no per-mission labels (cardinality control).
+	writeDurationMs    prometheus.Histogram
+	writeSizeBytes     prometheus.Histogram
+	writeFailureTotal  *prometheus.CounterVec // labels: reason
+	restoreDurationMs  prometheus.Histogram
+	restoreTotal       *prometheus.CounterVec // labels: outcome
+	resumeFromScratch  prometheus.Counter
+	cadenceSkippedTotal *prometheus.CounterVec // labels: cadence_reason
 }
 
 // NewCheckpointMetrics creates a new CheckpointMetrics instance with all metrics initialized
@@ -139,15 +149,60 @@ func NewCheckpointMetrics() *CheckpointMetrics {
 				Help: "Current number of pending approval requests",
 			},
 		),
+
+		// Spec 4 R7.1 — orchestrator-driven write/restore observability.
+		writeDurationMs: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "gibson_checkpoint_write_duration_milliseconds",
+			Help:    "Time taken to persist a checkpoint payload (ms)",
+			Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500},
+		}),
+		writeSizeBytes: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "gibson_checkpoint_write_size_bytes",
+			Help:    "Persisted checkpoint payload size (bytes)",
+			Buckets: sizeBuckets,
+		}),
+		writeFailureTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gibson_checkpoint_write_failure_total",
+			Help: "Total number of checkpoint write failures by reason",
+		}, []string{"reason"}),
+		restoreDurationMs: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "gibson_checkpoint_restore_duration_milliseconds",
+			Help:    "Time taken to restore a checkpoint payload (ms)",
+			Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500},
+		}),
+		restoreTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gibson_checkpoint_restore_total",
+			Help: "Total number of checkpoint restore attempts by outcome",
+		}, []string{"outcome"}),
+		resumeFromScratch: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "gibson_mission_resume_from_scratch_total",
+			Help: "Total number of mission resumes that fell back to from-scratch (no usable checkpoint)",
+		}),
+		cadenceSkippedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gibson_checkpoint_cadence_skipped_total",
+			Help: "Total number of checkpoint writes skipped by the cadence policy",
+		}, []string{"cadence_reason"}),
 	}
 
 	return m
 }
 
 // MustRegister registers all metrics with the default Prometheus registry.
-// Panics if any metric cannot be registered.
+// Already-registered metrics (AlreadyRegisteredError) are tolerated so the
+// global registry initialization is idempotent across init paths.
 func (m *CheckpointMetrics) MustRegister() {
-	prometheus.MustRegister(
+	for _, c := range m.collectors() {
+		if err := prometheus.Register(c); err != nil {
+			if _, already := err.(prometheus.AlreadyRegisteredError); !already {
+				panic(err)
+			}
+		}
+	}
+}
+
+// collectors returns every metric collector owned by m.
+func (m *CheckpointMetrics) collectors() []prometheus.Collector {
+	return []prometheus.Collector{
 		m.checkpointsCreated,
 		m.checkpointsRestored,
 		m.checkpointsDeleted,
@@ -159,32 +214,27 @@ func (m *CheckpointMetrics) MustRegister() {
 		m.serializeDuration,
 		m.activeThreads,
 		m.pendingApprovals,
-	)
+		m.writeDurationMs,
+		m.writeSizeBytes,
+		m.writeFailureTotal,
+		m.restoreDurationMs,
+		m.restoreTotal,
+		m.resumeFromScratch,
+		m.cadenceSkippedTotal,
+	}
 }
 
 // Register registers all metrics with a custom Prometheus registry.
 // Returns an error if any metric cannot be registered.
 func (m *CheckpointMetrics) Register(registry prometheus.Registerer) error {
-	collectors := []prometheus.Collector{
-		m.checkpointsCreated,
-		m.checkpointsRestored,
-		m.checkpointsDeleted,
-		m.approvalsRequested,
-		m.approvalsReceived,
-		m.checkpointSize,
-		m.createDuration,
-		m.restoreDuration,
-		m.serializeDuration,
-		m.activeThreads,
-		m.pendingApprovals,
-	}
-
-	for _, collector := range collectors {
+	for _, collector := range m.collectors() {
 		if err := registry.Register(collector); err != nil {
+			if _, already := err.(prometheus.AlreadyRegisteredError); already {
+				continue
+			}
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -245,6 +295,57 @@ func (m *CheckpointMetrics) SetActiveThreads(missionID string, count int) {
 // SetPendingApprovals sets the current number of pending approval requests
 func (m *CheckpointMetrics) SetPendingApprovals(count int) {
 	m.pendingApprovals.Set(float64(count))
+}
+
+// RecordWriteOutcome records a single checkpoint write outcome for Spec 4 R7.1.
+//   - success    — true if the write completed; false on failure (also bumps
+//                  the write_failure_total counter with the supplied reason).
+//   - durationMs — observed write duration in milliseconds (any value when failed,
+//                  histogram is recorded only on success to keep latency clean).
+//   - sizeBytes  — observed payload size; not recorded on failure.
+//   - reason     — failure reason label (e.g. "store_unavailable",
+//                  "kms_unavailable", "integration_error"); ignored on success.
+func (m *CheckpointMetrics) RecordWriteOutcome(success bool, durationMs float64, sizeBytes int64, reason string) {
+	if success {
+		if durationMs >= 0 {
+			m.writeDurationMs.Observe(durationMs)
+		}
+		if sizeBytes > 0 {
+			m.writeSizeBytes.Observe(float64(sizeBytes))
+		}
+		return
+	}
+	if reason == "" {
+		reason = "unknown"
+	}
+	m.writeFailureTotal.WithLabelValues(reason).Inc()
+}
+
+// RecordRestoreOutcome records a checkpoint restore outcome for Spec 4 R7.1.
+func (m *CheckpointMetrics) RecordRestoreOutcome(success bool, durationMs float64) {
+	outcome := "success"
+	if !success {
+		outcome = "failure"
+	}
+	m.restoreTotal.WithLabelValues(outcome).Inc()
+	if success && durationMs >= 0 {
+		m.restoreDurationMs.Observe(durationMs)
+	}
+}
+
+// RecordResumeFromScratch counts a mission resume that fell back to executing
+// from scratch because no usable checkpoint was found. Spec 4 R7.1.
+func (m *CheckpointMetrics) RecordResumeFromScratch() {
+	m.resumeFromScratch.Inc()
+}
+
+// RecordCadenceSkipped counts a checkpoint write skipped by the cadence policy.
+// Spec 4 R2.2 / R7.1.
+func (m *CheckpointMetrics) RecordCadenceSkipped(reason string) {
+	if reason == "" {
+		reason = "min_interval"
+	}
+	m.cadenceSkippedTotal.WithLabelValues(reason).Inc()
 }
 
 // Global metrics instance management

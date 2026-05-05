@@ -15,7 +15,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
@@ -145,9 +144,10 @@ func (d *delegationRegistryAdapter) DiscoverAgent(ctx context.Context, name stri
 func (d *delegationRegistryAdapter) DiscoverTool(ctx context.Context, name string) (tool.Tool, error) {
 	return nil, fmt.Errorf("tools not supported in delegation test adapter")
 }
-func (d *delegationRegistryAdapter) DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error) {
-	return nil, fmt.Errorf("plugins not supported in delegation test adapter")
-}
+
+// DiscoverPlugin was removed from component.ComponentDiscovery in plugin-runtime
+// Spec 2 Phase 7; plugin invocation now goes through PluginInvokeService.
+
 func (d *delegationRegistryAdapter) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
 	return nil, nil
 }

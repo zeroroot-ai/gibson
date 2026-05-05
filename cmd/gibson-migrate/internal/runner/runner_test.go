@@ -37,7 +37,7 @@ func tempMigrationsDir(t *testing.T, files map[string]string) string {
 func TestPostgresRunner_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	r := &runner.PostgresRunner{
-		DSN:           "postgres://invalid:invalid@localhost:5432/nonexistent?sslmode=disable",
+		DSN:           "postgres://invalid:invalid@localhost:5432/nonexistent?sslmode=require",
 		MigrationsDir: dir,
 	}
 
@@ -54,7 +54,7 @@ func TestPostgresRunner_EmptyDir(t *testing.T) {
 // where Phase D has not yet authored the migration files.
 func TestPostgresRunner_MissingDir(t *testing.T) {
 	r := &runner.PostgresRunner{
-		DSN:           "postgres://invalid@localhost:5432/nonexistent?sslmode=disable",
+		DSN:           "postgres://invalid@localhost:5432/nonexistent?sslmode=require",
 		MigrationsDir: "/tmp/gibson-migrate-nonexistent-dir-12345",
 	}
 
@@ -89,7 +89,7 @@ func TestPostgresRunner_BadDSNWithMigrations(t *testing.T) {
 func TestPostgresRunner_StatusEmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	r := &runner.PostgresRunner{
-		DSN:           "postgres://invalid@localhost:5432/nonexistent?sslmode=disable",
+		DSN:           "postgres://invalid@localhost:5432/nonexistent?sslmode=require",
 		MigrationsDir: dir,
 	}
 
@@ -109,7 +109,7 @@ func TestPostgresRunner_StatusWithMigrationFiles(t *testing.T) {
 		"002_findings.up.sql":    "CREATE TABLE findings (id SERIAL);",
 	})
 	r := &runner.PostgresRunner{
-		DSN:           "postgres://invalid@localhost:9999/nonexistent?sslmode=disable&connect_timeout=1",
+		DSN:           "postgres://invalid@localhost:9999/nonexistent?sslmode=require&connect_timeout=1",
 		MigrationsDir: dir,
 	}
 

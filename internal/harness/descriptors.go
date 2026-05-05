@@ -2,9 +2,28 @@ package harness
 
 import (
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/sdk/schema"
+)
+
+// PluginMethodDescriptor describes a plugin method at the harness/discovery
+// layer. It is the harness-local equivalent of the SDK's plugin.MethodDescriptor
+// but is defined here so the harness has no dependency on the deleted
+// internal/plugin package or on the SDK's evolving plugin types.
+type PluginMethodDescriptor struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// PluginStatus represents plugin lifecycle status at the harness/descriptor
+// layer. The new component-service-backed plugin runtime tracks status in Redis
+// per install; the descriptor returned to agents only conveys a coarse string
+// for compatibility with the legacy ListPlugins() shape.
+type PluginStatus string
+
+const (
+	PluginStatusUninitialized PluginStatus = "uninitialized"
+	PluginStatusRunning       PluginStatus = "running"
 )
 
 // ToolDescriptor provides lightweight metadata about a tool without requiring
@@ -57,23 +76,11 @@ func FromTool(t tool.Tool) ToolDescriptor {
 // PluginDescriptor provides lightweight metadata about a plugin.
 // Used for discovery and capability queries without requiring plugin initialization.
 type PluginDescriptor struct {
-	Name       string                    `json:"name"`
-	Version    string                    `json:"version"`
-	Methods    []plugin.MethodDescriptor `json:"methods"`
-	IsExternal bool                      `json:"is_external"`
-	Status     plugin.PluginStatus       `json:"status"`
-}
-
-// FromPlugin creates a PluginDescriptor from a Plugin interface.
-// This extracts metadata and available methods from the plugin.
-func FromPlugin(p plugin.Plugin) PluginDescriptor {
-	return PluginDescriptor{
-		Name:       p.Name(),
-		Version:    p.Version(),
-		Methods:    p.Methods(),
-		IsExternal: false,
-		Status:     plugin.PluginStatusUninitialized,
-	}
+	Name       string                   `json:"name"`
+	Version    string                   `json:"version"`
+	Methods    []PluginMethodDescriptor `json:"methods"`
+	IsExternal bool                     `json:"is_external"`
+	Status     PluginStatus             `json:"status"`
 }
 
 // AgentDescriptor provides lightweight metadata about an agent.
@@ -111,7 +118,7 @@ func (p PluginDescriptor) HasMethod(methodName string) bool {
 }
 
 // GetMethod retrieves a method descriptor by name
-func (p PluginDescriptor) GetMethod(methodName string) *plugin.MethodDescriptor {
+func (p PluginDescriptor) GetMethod(methodName string) *PluginMethodDescriptor {
 	for i, method := range p.Methods {
 		if method.Name == methodName {
 			return &p.Methods[i]

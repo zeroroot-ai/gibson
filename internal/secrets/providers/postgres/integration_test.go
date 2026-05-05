@@ -26,12 +26,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	dbpostgres "github.com/zero-day-ai/gibson/internal/database/postgres"
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/datapool/envelope"
+	"github.com/zero-day-ai/gibson/tests/testhelpers"
 	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/secrets"
 	"github.com/zero-day-ai/sdk/secrets/contract"
@@ -54,53 +53,23 @@ func setupPostgres(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
 
-	// Skip gracefully when Docker is unavailable.
-	provider, err := testcontainers.ProviderDocker.GetProvider()
-	if err != nil {
-		t.Skipf("Docker not available, skipping Postgres integration test: %v", err)
-		return nil
-	}
-	if healthErr := provider.Health(ctx); healthErr != nil {
-		t.Skipf("Docker not running, skipping Postgres integration test: %v", healthErr)
-		return nil
-	}
-
-	req := testcontainers.ContainerRequest{
-		Image: "postgres:15-alpine",
-		Env: map[string]string{
-			"POSTGRES_USER":     intTestUser,
-			"POSTGRES_PASSWORD": intTestPassword,
-			"POSTGRES_DB":       intTestDB,
-		},
-		ExposedPorts: []string{"5432/tcp"},
-		WaitingFor: wait.ForAll(
-			wait.ForLog("database system is ready to accept connections"),
-			wait.ForListeningPort("5432/tcp"),
-		),
-	}
-
-	pgC, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
+	// Per first-deploy-unblock-and-ha:R7.13–R7.17 the daemon's tests
+	// must connect to Postgres over TLS — the `disable` SSL mode is
+	// forbidden anywhere in the source tree. testhelpers.StartPostgresTLS
+	// owns the testcontainer + self-signed CA setup and returns a DSN
+	// that already carries `sslmode=require`. The helper also handles
+	// the Docker availability skip.
+	pgTLS := testhelpers.StartPostgresTLS(t, testhelpers.PostgresOptions{
+		User:     intTestUser,
+		Password: intTestPassword,
+		Database: intTestDB,
 	})
-	require.NoError(t, err, "start Postgres container")
-	t.Cleanup(func() {
-		if termErr := pgC.Terminate(ctx); termErr != nil {
-			t.Logf("warning: failed to terminate Postgres container: %v", termErr)
-		}
-	})
+	dsn := pgTLS.DSN
 
-	host, err := pgC.Host(ctx)
-	require.NoError(t, err)
-	mappedPort, err := pgC.MappedPort(ctx, "5432")
-	require.NoError(t, err)
-
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, mappedPort.Port(), intTestUser, intTestPassword, intTestDB,
+	var (
+		pool *pgxpool.Pool
+		err  error
 	)
-
-	var pool *pgxpool.Pool
 	require.Eventually(t, func() bool {
 		pool, err = pgxpool.New(ctx, dsn)
 		if err != nil {

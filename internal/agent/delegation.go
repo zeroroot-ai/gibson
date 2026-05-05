@@ -10,7 +10,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 )
 
@@ -160,10 +159,16 @@ func (l *defaultLogger) Log(level, message string, fields map[string]any) {
 	fmt.Printf("[%s] %s %v\n", level, message, fields)
 }
 
-// ComponentDiscovery provides tool and plugin discovery via registry
+// ComponentDiscovery provides tool discovery via registry.
+//
+// Note: plugin discovery via this interface was removed when the in-process
+// Plugin shape (Initialize/Query/Shutdown/Methods/Health) was deleted by the
+// plugin-runtime spec. Plugin invocation now goes through the daemon's
+// PluginInvokeService (component-service-backed, gRPC), reached via
+// AgentHarness.QueryPlugin on the live harness — not through the
+// DelegationHarness. The DelegationHarness's QueryPlugin returns an error.
 type ComponentDiscovery interface {
 	DiscoverTool(ctx context.Context, name string) (tool.Tool, error)
-	DiscoverPlugin(ctx context.Context, name string) (plugin.Plugin, error)
 }
 
 // registryToolExecutor implements ToolExecutor using registry-based discovery
@@ -227,23 +232,16 @@ func (e *registryToolExecutor) ExecuteTool(ctx context.Context, name string, inp
 	return result, nil
 }
 
-// registryPluginExecutor implements PluginExecutor using registry-based discovery
+// registryPluginExecutor is the DelegationHarness's plugin executor.
+//
+// The pre-release in-process Plugin.Query path was deleted by the plugin-runtime
+// spec; the new dispatch goes through PluginInvokeService on the live harness.
+// The DelegationHarness has no direct hook into that dispatcher — its
+// QueryPlugin returns a clear error directing callers to the live harness.
 type registryPluginExecutor struct {
 	discovery ComponentDiscovery
 }
 
-func (e *registryPluginExecutor) QueryPlugin(ctx context.Context, pluginName, method string, params map[string]any) (any, error) {
-	// Discover the plugin from registry
-	p, err := e.discovery.DiscoverPlugin(ctx, pluginName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to discover plugin %s: %w", pluginName, err)
-	}
-
-	// Forward the query to the discovered plugin
-	result, err := p.Query(ctx, method, params)
-	if err != nil {
-		return nil, fmt.Errorf("plugin %s query failed: %w", pluginName, err)
-	}
-
-	return result, nil
+func (e *registryPluginExecutor) QueryPlugin(_ context.Context, pluginName, method string, _ map[string]any) (any, error) {
+	return nil, fmt.Errorf("plugin %s.%s: DelegationHarness has no plugin dispatch path; in-process Plugin.Query was removed by the plugin-runtime spec — invoke plugins via AgentHarness.QueryPlugin (PluginInvokeService) on the live harness instead", pluginName, method)
 }

@@ -645,6 +645,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.v1.DaemonService/DiffCheckpoints":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.v1.DaemonService/GetAgentStatus":
     relation: "member"
     object_type: "tenant"
@@ -653,6 +660,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/GetCapabilityManifest":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/GetCheckpoint":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -692,6 +706,13 @@ entries:
     allowed_identities:
       - USER
   "/gibson.daemon.v1.DaemonService/ListAgents":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/ListCheckpoints":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -945,6 +966,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/GetAllRunFindings":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/GetAttackChains":
     relation: "can_use"
     object_type: "component"
@@ -969,6 +996,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/GetMissionRunHistory":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/GetMissionStatus":
     relation: "can_use"
     object_type: "component"
@@ -976,6 +1009,12 @@ entries:
     allowed_identities:
       - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/GetPlanContext":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/GetPreviousRunFindings":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"

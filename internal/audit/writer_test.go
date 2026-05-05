@@ -26,8 +26,8 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/zero-day-ai/gibson/tests/testhelpers"
 )
 
 // ---------------------------------------------------------------------------
@@ -47,51 +47,19 @@ func setupAuditPostgres(t *testing.T) *sql.DB {
 	t.Helper()
 	ctx := context.Background()
 
-	// Skip gracefully when Docker is unavailable.
-	provider, err := testcontainers.ProviderDocker.GetProvider()
-	if err != nil {
-		t.Skipf("Docker not available, skipping Postgres integration test: %v", err)
-		return nil
-	}
-	if healthErr := provider.Health(ctx); healthErr != nil {
-		t.Skipf("Docker not running, skipping Postgres integration test: %v", healthErr)
-		return nil
-	}
-
-	req := testcontainers.ContainerRequest{
-		Image: "postgres:15-alpine",
-		Env: map[string]string{
-			"POSTGRES_USER":     pgUser,
-			"POSTGRES_PASSWORD": pgPassword,
-			"POSTGRES_DB":       pgDB,
-		},
-		ExposedPorts: []string{"5432/tcp"},
-		WaitingFor: wait.ForAll(
-			wait.ForLog("database system is ready to accept connections"),
-			wait.ForListeningPort("5432/tcp"),
-		),
-	}
-
-	pgC, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	require.NoError(t, err, "start Postgres container")
-	t.Cleanup(func() {
-		if termErr := pgC.Terminate(ctx); termErr != nil {
-			t.Logf("warning: failed to terminate Postgres container: %v", termErr)
-		}
+	// Per first-deploy-unblock-and-ha:R7.13–R7.17 the daemon's tests
+	// must connect to Postgres over TLS — the `disable` SSL mode is
+	// forbidden anywhere in the source tree. testhelpers.StartPostgresTLS
+	// owns the testcontainer + self-signed CA setup and returns a DSN
+	// that already carries `sslmode=require`. The helper also handles
+	// the Docker availability skip.
+	pg := testhelpers.StartPostgresTLS(t, testhelpers.PostgresOptions{
+		User:     pgUser,
+		Password: pgPassword,
+		Database: pgDB,
 	})
 
-	host, err := pgC.Host(ctx)
-	require.NoError(t, err)
-	mappedPort, err := pgC.MappedPort(ctx, "5432")
-	require.NoError(t, err)
-
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, mappedPort.Port(), pgUser, pgPassword, pgDB)
-
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("postgres", pg.DSN)
 	require.NoError(t, err, "open Postgres connection")
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -155,7 +123,7 @@ func stopWriter(t *testing.T, w *Writer) {
 func TestWriter_Log_IsNonBlocking(t *testing.T) {
 	// Open a DSN that will never be reachable; the Writer is never started so
 	// the DB is never actually dialled.
-	db, err := sql.Open("postgres", "host=localhost port=9999 dbname=noop sslmode=disable connect_timeout=1")
+	db, err := sql.Open("postgres", "host=localhost port=9999 dbname=noop sslmode=require connect_timeout=1")
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -186,7 +154,7 @@ func TestWriter_Log_IsNonBlocking(t *testing.T) {
 // TestWriter_Log_BufferOverflow_DropsGracefully verifies that Log() does not
 // panic and the buffer stays at capacity when it is already full.
 func TestWriter_Log_BufferOverflow_DropsGracefully(t *testing.T) {
-	db, err := sql.Open("postgres", "host=localhost port=9999 dbname=noop sslmode=disable connect_timeout=1")
+	db, err := sql.Open("postgres", "host=localhost port=9999 dbname=noop sslmode=require connect_timeout=1")
 	require.NoError(t, err)
 	defer db.Close()
 

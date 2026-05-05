@@ -16,7 +16,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
@@ -60,9 +59,6 @@ type DefaultAgentHarness struct {
 	// LLM components
 	slotManager llm.SlotManager
 	llmRegistry llm.LLMRegistry
-
-	// Plugin registry
-	pluginRegistry plugin.PluginRegistry
 
 	// Registry adapter for unified component discovery via the component registry
 	// Used for agent delegation operations (DelegateToAgent, ListAgents)
@@ -1470,13 +1466,20 @@ func (h *DefaultAgentHarness) GetAllToolCapabilities(ctx context.Context) (map[s
 
 // QueryPlugin calls a method on a registered plugin with the given parameters.
 //
-// Discovery order:
-//  1. Local plugin registry (in-process plugins registered at startup)
-//  2. ComponentRegistry (Redis-backed, tenant-scoped) — if configured:
-//     a. Component has grpc_endpoint metadata → call directly via registryAdapter
-//     b. No grpc_endpoint → enqueue work via WorkQueue and wait for result
-//  3. RegistryAdapter fallback — used when ComponentRegistry is not configured or
-//     did not find the plugin (e.g. plugins registered directly without ComponentService)
+// Dispatch path (post plugin-runtime Spec 2 Phase 7 — single path):
+//
+//	ComponentRegistry (Redis-backed, tenant-scoped) → WorkQueue dispatch.
+//	  • Tenant-scoped instances are tried first; if absent, PluginAccess gates a
+//	    fallthrough to a _system instance for tenants that have explicitly
+//	    enabled and configured the plugin.
+//	  • Live dispatch is via the WorkQueue (poll/result) — the same path the
+//	    daemon's PluginInvokeService (component/plugin_dispatch.go) drives.
+//
+// The pre-release in-process plugin registry (`internal/plugin`) and its
+// `Plugin.Query(...)` shape were removed by Phase 7 of the plugin-runtime spec;
+// there is no in-process Plugin object to fall back to. If the component
+// registry is unavailable or returns no usable instance, this method returns
+// ErrHarnessPluginNotFound.
 func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, method string, params map[string]any) (any, error) {
 	// Create span for distributed tracing
 	ctx, span := h.tracer.Start(ctx, "harness.QueryPlugin")
@@ -1487,292 +1490,186 @@ func (h *DefaultAgentHarness) QueryPlugin(ctx context.Context, name string, meth
 		"method", method,
 		"params", params)
 
-	// ── Path 1: Local plugin registry ────────────────────────────────────────
-	p, err := h.pluginRegistry.Get(name)
-	if err != nil {
-		// ── Path 2: ComponentRegistry (Redis-backed, tenant-scoped) ──────────
-		if h.componentRegistry != nil {
-			tenant := auth.TenantStringFromContext(ctx)
-			if tenant == "" {
-				h.logger.Warn("component registry configured but no tenant in context, skipping registry lookup",
-					"plugin", name)
-			} else {
-				// Check tenant-scoped instances first (never automatically falls back to _system).
-				tenantInstances, discErr := h.componentRegistry.DiscoverTenantOnly(ctx, tenant, "plugin", name)
-				if discErr != nil {
-					h.logger.Warn("component registry tenant discovery failed for plugin, falling back to registry adapter",
-						"plugin", name,
-						"tenant", tenant,
-						"error", discErr)
-				} else if len(tenantInstances) > 0 {
-					// Tenant has its own instance — dispatch directly, no access check needed.
-					info := tenantInstances[0]
-
-					grpcEndpoint := info.Metadata["grpc_endpoint"]
-					if grpcEndpoint != "" && h.registryAdapter != nil {
-						// In-cluster plugin with a direct gRPC endpoint.
-						h.logger.Debug("component registry: routing plugin query via direct gRPC endpoint (tenant instance)",
-							"plugin", name,
-							"tenant", tenant,
-							"endpoint", grpcEndpoint,
-							"instance_id", info.InstanceID,
-							"discovery", "component_registry")
-
-						remotePlugin, adapterErr := h.registryAdapter.DiscoverPlugin(ctx, name)
-						if adapterErr != nil {
-							h.logger.Warn("component registry directed to gRPC but adapter discovery failed for plugin, falling through",
-								"plugin", name,
-								"endpoint", grpcEndpoint,
-								"error", adapterErr)
-							// Fall through to legacy adapter path below.
-						} else {
-							p = remotePlugin
-							goto executePlugin
-						}
-					} else if h.workQueue != nil {
-						// Remote component — dispatch via WorkQueue.
-						h.logger.Debug("component registry: routing plugin query via work queue (tenant instance)",
-							"plugin", name,
-							"tenant", tenant,
-							"instance_id", info.InstanceID,
-							"discovery", "component_registry")
-
-						return h.callPluginViaWorkQueue(ctx, tenant, name, method, params, info)
-					} else {
-						h.logger.Warn("component registry found plugin but no work queue configured, falling back",
-							"plugin", name,
-							"tenant", tenant,
-							"instance_id", info.InstanceID)
-						// Fall through to legacy adapter path.
-					}
-				} else if h.pluginAccess != nil {
-					// No tenant instance found. Enforce access control before routing to a
-					// _system (platform-hosted) instance.
-					access, accessErr := h.pluginAccess.GetAccess(ctx, tenant, name)
-					if accessErr != nil {
-						if errors.Is(accessErr, component.ErrPluginNotEnabled) {
-							h.logger.Warn("plugin access denied: not enabled for tenant",
-								"plugin", name,
-								"tenant", tenant)
-							return nil, types.WrapError(
-								ErrHarnessPluginNotFound,
-								fmt.Sprintf("plugin %q is not enabled for tenant %q — enable it via the plugin catalog before use", name, tenant),
-								accessErr,
-							)
-						}
-						// Unexpected error — log and fall through to legacy path.
-						h.logger.Warn("plugin access check failed, falling through to legacy path",
-							"plugin", name,
-							"tenant", tenant,
-							"error", accessErr)
-					} else if access != nil && access.Enabled {
-						// Plugin is enabled. Retrieve the tenant's decrypted config.
-						_, configErr := h.pluginAccess.GetDecryptedConfig(ctx, tenant, name)
-						if configErr != nil {
-							if errors.Is(configErr, component.ErrPluginNotConfigured) {
-								h.logger.Warn("plugin access denied: enabled but not configured",
-									"plugin", name,
-									"tenant", tenant)
-								return nil, types.WrapError(
-									ErrHarnessPluginNotFound,
-									fmt.Sprintf("plugin %q is enabled for tenant %q but has no configuration — provide credentials via the plugin catalog", name, tenant),
-									configErr,
-								)
-							}
-							// Non-fatal config retrieval error — log and fall through.
-							h.logger.Warn("plugin config retrieval failed, falling through to legacy path",
-								"plugin", name,
-								"tenant", tenant,
-								"error", configErr)
-						} else {
-							// Access granted and config available — locate the _system instance.
-							systemInstances, sysErr := h.componentRegistry.DiscoverSystemOnly(ctx, "plugin", name)
-							if sysErr != nil {
-								h.logger.Warn("component registry system discovery failed for plugin, falling through",
-									"plugin", name,
-									"error", sysErr)
-							} else if len(systemInstances) > 0 {
-								info := systemInstances[0]
-
-								grpcEndpoint := info.Metadata["grpc_endpoint"]
-								if grpcEndpoint != "" && h.registryAdapter != nil {
-									h.logger.Debug("component registry: routing plugin query to _system instance via direct gRPC endpoint",
-										"plugin", name,
-										"tenant", tenant,
-										"endpoint", grpcEndpoint,
-										"instance_id", info.InstanceID,
-										"discovery", "component_registry_system")
-
-									remotePlugin, adapterErr := h.registryAdapter.DiscoverPlugin(ctx, name)
-									if adapterErr != nil {
-										h.logger.Warn("component registry directed to gRPC but adapter discovery failed for _system plugin, falling through",
-											"plugin", name,
-											"endpoint", grpcEndpoint,
-											"error", adapterErr)
-										// Fall through to legacy adapter path below.
-									} else {
-										p = remotePlugin
-										goto executePlugin
-									}
-								} else if h.workQueue != nil {
-									h.logger.Debug("component registry: routing plugin query to _system instance via work queue",
-										"plugin", name,
-										"tenant", tenant,
-										"instance_id", info.InstanceID,
-										"discovery", "component_registry_system")
-
-									return h.callPluginViaWorkQueue(ctx, tenant, name, method, params, info)
-								} else {
-									h.logger.Warn("component registry found _system plugin but no work queue configured, falling back",
-										"plugin", name,
-										"tenant", tenant,
-										"instance_id", info.InstanceID)
-									// Fall through to legacy adapter path.
-								}
-							}
-							// No _system instances found; fall through to legacy path.
-						}
-					}
-				}
-			}
-		}
-
-		// ── Path 3: RegistryAdapter fallback ──────────────────────────────────
-		// Reached when ComponentRegistry is not configured, returned no instances,
-		// or had no work queue available. RegistryAdapter is Redis-backed and covers
-		// plugins that registered directly (e.g. in-cluster gRPC plugins with
-		// grpc_endpoint but no ComponentService registration).
-		if h.registryAdapter != nil {
-			h.logger.Debug("plugin not found locally or via component registry, attempting registry adapter discovery",
-				"plugin", name,
-				"discovery", "registry_adapter")
-
-			remotePlugin, discErr := h.registryAdapter.DiscoverPlugin(ctx, name)
-			if discErr != nil {
-				h.logger.Error("plugin not found (local, component registry, or registry adapter)",
-					"plugin", name,
-					"local_error", err,
-					"discovery_error", discErr)
-				return nil, types.WrapError(
-					ErrHarnessPluginNotFound,
-					fmt.Sprintf("plugin not found: %s (local: %v, remote: %v)", name, err, discErr),
-					err,
-				)
-			}
-
-			p = remotePlugin
-			h.logger.Debug("discovered plugin via registry adapter",
-				"plugin", name,
-				"version", remotePlugin.Version(),
-				"discovery", "registry_adapter")
-		} else {
-			h.logger.Error("plugin not found and no discovery path available",
-				"plugin", name,
-				"error", err)
-			return nil, types.WrapError(
-				ErrHarnessPluginNotFound,
-				fmt.Sprintf("plugin not found: %s", name),
-				err,
-			)
-		}
-	}
-
-executePlugin:
-
-	// Determine if plugin is local or remote for logging.
-	// GRPCPluginClient was removed in plugin-runtime Spec 2, Phase 1.
-	// All plugin dispatch now goes through PluginInvokeService (plugin_dispatch.go).
-	// isRemote is preserved for logging/metrics continuity but always false in
-	// this legacy harness path, which predates the new PollWork-based dispatch.
-	isRemote := false
-	_ = isRemote // consumed below in logger and metrics
-
-	// Query plugin
-	result, err := p.Query(ctx, method, params)
-	if err != nil {
-		h.logger.Error("plugin query failed",
-			"plugin", name,
-			"method", method,
-			"remote", isRemote,
-			"error", err)
-
-		// Record failure metrics
-		h.metrics.RecordCounter("plugins.queries", 1, map[string]string{
-			"plugin": name,
-			"method": method,
-			"remote": fmt.Sprintf("%t", isRemote),
-			"status": "failed",
-		})
-
-		return nil, types.WrapError(
-			ErrHarnessPluginMethodNotFound,
-			fmt.Sprintf("plugin query failed: %s.%s", name, method),
-			err,
+	if h.componentRegistry == nil {
+		h.logger.Error("plugin query: component registry not configured",
+			"plugin", name)
+		return nil, types.NewError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin not found: %s (component registry not configured)", name),
 		)
 	}
 
-	// Record success metrics
-	h.metrics.RecordCounter("plugins.queries", 1, map[string]string{
-		"plugin": name,
-		"method": method,
-		"remote": fmt.Sprintf("%t", isRemote),
-		"status": "success",
-	})
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" {
+		h.logger.Warn("plugin query: no tenant in context",
+			"plugin", name)
+		return nil, types.NewError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin %s: no tenant in context — plugin dispatch is tenant-scoped", name),
+		)
+	}
 
-	h.logger.Debug("plugin query successful",
+	// ── Tenant-scoped instances ─────────────────────────────────────────────
+	tenantInstances, discErr := h.componentRegistry.DiscoverTenantOnly(ctx, tenant, "plugin", name)
+	if discErr != nil {
+		h.logger.Error("component registry tenant discovery failed for plugin",
+			"plugin", name,
+			"tenant", tenant,
+			"error", discErr)
+		return nil, types.WrapError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin not found: %s (component registry error)", name),
+			discErr,
+		)
+	}
+
+	if len(tenantInstances) > 0 {
+		info := tenantInstances[0]
+		if h.workQueue == nil {
+			h.logger.Warn("component registry found plugin but no work queue configured",
+				"plugin", name,
+				"tenant", tenant,
+				"instance_id", info.InstanceID)
+			return nil, types.NewError(
+				ErrHarnessPluginNotFound,
+				fmt.Sprintf("plugin %s found but harness has no work queue configured for dispatch", name),
+			)
+		}
+
+		h.logger.Debug("component registry: routing plugin query via work queue (tenant instance)",
+			"plugin", name,
+			"tenant", tenant,
+			"instance_id", info.InstanceID,
+			"discovery", "component_registry")
+
+		return h.callPluginViaWorkQueue(ctx, tenant, name, method, params, info)
+	}
+
+	// ── _system fallback (gated by PluginAccess) ────────────────────────────
+	if h.pluginAccess == nil {
+		h.logger.Error("plugin not found and no _system fallback path",
+			"plugin", name,
+			"tenant", tenant)
+		return nil, types.NewError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin not found: %s (no tenant instance, no _system access store)", name),
+		)
+	}
+
+	access, accessErr := h.pluginAccess.GetAccess(ctx, tenant, name)
+	if accessErr != nil {
+		if errors.Is(accessErr, component.ErrPluginNotEnabled) {
+			h.logger.Warn("plugin access denied: not enabled for tenant",
+				"plugin", name,
+				"tenant", tenant)
+			return nil, types.WrapError(
+				ErrHarnessPluginNotFound,
+				fmt.Sprintf("plugin %q is not enabled for tenant %q — enable it via the plugin catalog before use", name, tenant),
+				accessErr,
+			)
+		}
+		h.logger.Error("plugin access check failed",
+			"plugin", name,
+			"tenant", tenant,
+			"error", accessErr)
+		return nil, types.WrapError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin %q access check failed for tenant %q", name, tenant),
+			accessErr,
+		)
+	}
+	if access == nil || !access.Enabled {
+		return nil, types.NewError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin %q is not enabled for tenant %q", name, tenant),
+		)
+	}
+
+	if _, configErr := h.pluginAccess.GetDecryptedConfig(ctx, tenant, name); configErr != nil {
+		if errors.Is(configErr, component.ErrPluginNotConfigured) {
+			h.logger.Warn("plugin access denied: enabled but not configured",
+				"plugin", name,
+				"tenant", tenant)
+			return nil, types.WrapError(
+				ErrHarnessPluginNotFound,
+				fmt.Sprintf("plugin %q is enabled for tenant %q but has no configuration — provide credentials via the plugin catalog", name, tenant),
+				configErr,
+			)
+		}
+		h.logger.Error("plugin config retrieval failed",
+			"plugin", name,
+			"tenant", tenant,
+			"error", configErr)
+		return nil, types.WrapError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin %q config retrieval failed for tenant %q", name, tenant),
+			configErr,
+		)
+	}
+
+	systemInstances, sysErr := h.componentRegistry.DiscoverSystemOnly(ctx, "plugin", name)
+	if sysErr != nil {
+		h.logger.Error("component registry system discovery failed for plugin",
+			"plugin", name,
+			"error", sysErr)
+		return nil, types.WrapError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin not found: %s (system registry error)", name),
+			sysErr,
+		)
+	}
+	if len(systemInstances) == 0 {
+		return nil, types.NewError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin %s: no _system instances available", name),
+		)
+	}
+
+	info := systemInstances[0]
+	if h.workQueue == nil {
+		return nil, types.NewError(
+			ErrHarnessPluginNotFound,
+			fmt.Sprintf("plugin %s _system instance found but harness has no work queue configured", name),
+		)
+	}
+
+	h.logger.Debug("component registry: routing plugin query to _system instance via work queue",
 		"plugin", name,
-		"method", method,
-		"remote", isRemote)
+		"tenant", tenant,
+		"instance_id", info.InstanceID,
+		"discovery", "component_registry_system")
 
-	return result, nil
+	return h.callPluginViaWorkQueue(ctx, tenant, name, method, params, info)
 }
 
 // ListPlugins returns descriptors for all registered plugins.
+//
+// Post plugin-runtime Spec 2 Phase 7 there is no in-process plugin registry to
+// enumerate; all plugins live behind the component registry / PluginInvokeService.
+// This method aggregates plugin metadata from the registryAdapter only. If no
+// adapter is configured, an empty slice is returned.
 func (h *DefaultAgentHarness) ListPlugins() []PluginDescriptor {
-	// Get local plugins from registry
-	localPluginDescriptors := h.pluginRegistry.List()
-
-	// Convert from plugin.PluginDescriptor to harness.PluginDescriptor
-	descriptors := make([]PluginDescriptor, 0, len(localPluginDescriptors))
-	for _, p := range localPluginDescriptors {
-		descriptors = append(descriptors, PluginDescriptor{
-			Name:       p.Name,
-			Version:    p.Version,
-			Methods:    p.Methods,
-			IsExternal: p.IsExternal,
-			Status:     p.Status,
-		})
+	if h.registryAdapter == nil {
+		return []PluginDescriptor{}
 	}
 
-	// If registry adapter is available, add remote plugins
-	if h.registryAdapter != nil {
-		ctx := context.Background()
-		remotePlugins, err := h.registryAdapter.ListPlugins(ctx)
-		if err != nil {
-			h.logger.Warn("failed to list remote plugins",
-				"error", err)
-			// Continue with just local plugins
-		} else {
-			// Add remote plugins to the list
-			// Use a map to deduplicate by name (local takes precedence)
-			localNames := make(map[string]struct{})
-			for _, desc := range descriptors {
-				localNames[desc.Name] = struct{}{}
-			}
+	ctx := context.Background()
+	remotePlugins, err := h.registryAdapter.ListPlugins(ctx)
+	if err != nil {
+		h.logger.Warn("failed to list remote plugins",
+			"error", err)
+		return []PluginDescriptor{}
+	}
 
-			// Add remote plugins that don't exist locally
-			for _, remotePlugin := range remotePlugins {
-				if _, exists := localNames[remotePlugin.Name]; !exists {
-					descriptors = append(descriptors, PluginDescriptor{
-						Name:       remotePlugin.Name,
-						Version:    remotePlugin.Version,
-						Methods:    []plugin.MethodDescriptor{}, // Would require fetching from plugin
-						IsExternal: true,                        // All remote plugins are external
-						Status:     plugin.PluginStatusUninitialized,
-					})
-				}
-			}
-		}
+	descriptors := make([]PluginDescriptor, 0, len(remotePlugins))
+	for _, remotePlugin := range remotePlugins {
+		descriptors = append(descriptors, PluginDescriptor{
+			Name:       remotePlugin.Name,
+			Version:    remotePlugin.Version,
+			Methods:    []PluginMethodDescriptor{}, // method metadata lives in the manifest; not surfaced here
+			IsExternal: true,                      // all plugins are out-of-process under the new runtime
+			Status:     PluginStatusUninitialized,
+		})
 	}
 
 	return descriptors

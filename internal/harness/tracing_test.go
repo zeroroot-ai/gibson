@@ -11,7 +11,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/attribute"
@@ -40,9 +39,10 @@ func (f *fakeDiscovery) DiscoverTool(_ context.Context, name string) (tool.Tool,
 func (f *fakeDiscovery) DiscoverAgent(_ context.Context, _ string) (agent.Agent, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeDiscovery) DiscoverPlugin(_ context.Context, _ string) (plugin.Plugin, error) {
-	return nil, errors.New("not implemented")
-}
+
+// DiscoverPlugin was removed from component.ComponentDiscovery in plugin-runtime
+// Spec 2 Phase 7; plugin invocation now goes through PluginInvokeService.
+
 func (f *fakeDiscovery) ListAgents(_ context.Context) ([]component.AgentInfo, error) {
 	return nil, nil
 }

@@ -1291,7 +1291,7 @@ func (d *daemonImpl) initPlatformPostgres(ctx context.Context) {
 		pgCfg.Port = 5432
 	}
 	if pgCfg.SSLMode == "" {
-		pgCfg.SSLMode = "disable"
+		pgCfg.SSLMode = "require"
 	}
 	if pgCfg.MaxConns == 0 {
 		pgCfg.MaxConns = 5

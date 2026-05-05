@@ -153,18 +153,48 @@ type DefaultThreadedCheckpointer struct {
 }
 
 // NewThreadedCheckpointer creates a new DefaultThreadedCheckpointer with the provided configuration.
+//
+// If config.Encryption.Enabled is true the constructor REQUIRES a non-nil
+// KeyProvider — Spec 4 design "encrypted-or-nothing": passing
+// Enabled=true with a nil provider returns nil so callers fail fast at boot
+// rather than silently writing plaintext. Use NewThreadedCheckpointerOrError
+// when you need the explicit error for surfaced diagnostics.
 func NewThreadedCheckpointer(
 	store CheckpointStore,
 	threadStore ThreadStore,
 	blobStore BlobStore,
 	config CheckpointerConfig,
 ) *DefaultThreadedCheckpointer {
+	c, err := NewThreadedCheckpointerOrError(store, threadStore, blobStore, config)
+	if err != nil {
+		// Log via panic? No — keep this constructor non-panicking; surface
+		// the misconfiguration via nil so the daemon's own boot path
+		// (which checks for nil) refuses to launch. The error-returning
+		// variant is preferred for new call sites.
+		return nil
+	}
+	return c
+}
+
+// NewThreadedCheckpointerOrError is the error-returning constructor variant.
+// Spec 4 R11.5: encrypted-or-nothing — refuse to construct when Encryption.Enabled
+// is true without a non-nil KeyProvider.
+func NewThreadedCheckpointerOrError(
+	store CheckpointStore,
+	threadStore ThreadStore,
+	blobStore BlobStore,
+	config CheckpointerConfig,
+) (*DefaultThreadedCheckpointer, error) {
+	if config.Encryption.Enabled && config.Encryption.KeyProvider == nil {
+		return nil, fmt.Errorf("checkpointer: Encryption.Enabled=true requires a non-nil KeyProvider (encrypted-or-nothing — Spec 4 R11.5)")
+	}
+
 	// Initialize components
 	serializer := NewStateSerializer()
 	compressor := NewZstdCompressor(config.Compression)
 
 	var encryptionService EncryptionService
-	if config.Encryption.Enabled && config.Encryption.KeyProvider != nil {
+	if config.Encryption.Enabled {
 		encryptionService = NewAESGCMEncryptionService(config.Encryption.KeyProvider)
 	}
 
@@ -176,7 +206,7 @@ func NewThreadedCheckpointer(
 		serializer:  serializer,
 		compressor:  compressor,
 		encryption:  encryptionService,
-	}
+	}, nil
 }
 
 // CreateThread creates a new execution thread for the mission.
@@ -281,17 +311,29 @@ func (d *DefaultThreadedCheckpointer) Checkpoint(ctx context.Context, threadID s
 		checkpoint.Compressed = false
 	}
 
-	// Stage 3: Encrypt if configured
+	// Stage 3: Encrypt if configured.
+	//
+	// Spec 4 R11.5 — encrypted-or-nothing: when Encryption.Enabled is true
+	// the write MUST produce ciphertext; we never silently fall through to
+	// plaintext on a nil encryption service or on any encryption error. KMS
+	// failures are surfaced as fail-closed errors and bumped on the
+	// write_failure_total counter with an explanatory reason.
 	var finalData []byte
-	if d.config.Encryption.Enabled && d.encryption != nil {
+	if d.config.Encryption.Enabled {
+		if d.encryption == nil {
+			GetMetrics().RecordWriteOutcome(false, 0, 0, "kms_unavailable")
+			return nil, fmt.Errorf("encryption enabled but no encryption service configured (Spec 4 R11.5 — encrypted-or-nothing)")
+		}
 		encryptedPayload, err := d.encryption.Encrypt(ctx, compressedData)
 		if err != nil {
+			GetMetrics().RecordWriteOutcome(false, 0, 0, "kms_unavailable")
 			return nil, fmt.Errorf("encryption failed: %w", err)
 		}
 
 		// Serialize encrypted payload
 		finalData, err = msgpack.Marshal(encryptedPayload)
 		if err != nil {
+			GetMetrics().RecordWriteOutcome(false, 0, 0, "encrypt_marshal_error")
 			return nil, fmt.Errorf("failed to marshal encrypted payload: %w", err)
 		}
 
@@ -302,8 +344,15 @@ func (d *DefaultThreadedCheckpointer) Checkpoint(ctx context.Context, threadID s
 		checkpoint.Encrypted = false
 	}
 
-	// Handle large data by storing as blob
-	if int64(len(finalData)) > d.config.BlobThreshold {
+	// Handle large data by storing as blob.
+	//
+	// Spec 4 R11.5: when encryption is enabled, the encrypted payload MUST
+	// flow through the blob store regardless of size — otherwise the inline
+	// Checkpoint.WorkingMemory / MissionMemory / ConversationHistory
+	// plaintext byte slices would be persisted as-is by SaveCheckpoint,
+	// leaking plaintext into Redis.
+	mustStoreAsBlob := d.config.Encryption.Enabled || int64(len(finalData)) > d.config.BlobThreshold
+	if mustStoreAsBlob {
 		blobID, err := d.blobStore.Store(ctx, threadID, finalData)
 		if err != nil {
 			return nil, fmt.Errorf("failed to store blob: %w", err)
@@ -314,7 +363,8 @@ func (d *DefaultThreadedCheckpointer) Checkpoint(ctx context.Context, threadID s
 		}
 		checkpoint.LargeObjectRefs["checkpoint_data"] = blobID
 
-		// Clear inline data since it's stored as blob
+		// Clear inline data since it's stored as blob — also strips
+		// plaintext when encryption is enabled (Spec 4 R11.5).
 		checkpoint.WorkingMemory = nil
 		checkpoint.MissionMemory = nil
 		checkpoint.ConversationHistory = nil

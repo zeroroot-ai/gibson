@@ -45,15 +45,27 @@ type Actor struct {
 	execQueries        *queries.ExecutionQueries
 	missionQueries     *queries.MissionQueries
 	graphClient        graph.GraphClient
-	inventory          *ComponentInventory // Component inventory for validation
-	policyChecker      PolicyChecker       // Policy checker for data reuse enforcement (optional, can be nil)
-	discoveryProcessor DiscoveryProcessor  // Processes DiscoveryResult from agent outputs (optional, can be nil)
-	approvalManager    ApprovalManager     // Manages approval request lifecycle (optional, can be nil)
-	escalationManager  EscalationManager   // Manages escalation lifecycle (optional, can be nil)
-	checkpointManager  CheckpointManager   // Manages mission checkpoints and rollback (optional, can be nil)
-	reflectionEngine   ReflectionEngine    // Performs self-evaluation of strategy (optional, can be nil)
-	memoryRecaller     MemoryRecaller      // Queries memory tiers for context (optional, can be nil)
-	logger             *slog.Logger        // Logger for Actor operations
+	inventory          *ComponentInventory    // Component inventory for validation
+	policyChecker      PolicyChecker          // Policy checker for data reuse enforcement (optional, can be nil)
+	discoveryProcessor DiscoveryProcessor     // Processes DiscoveryResult from agent outputs (optional, can be nil)
+	approvalManager    ApprovalManager        // Manages approval request lifecycle (optional, can be nil)
+	escalationManager  EscalationManager      // Manages escalation lifecycle (optional, can be nil)
+	checkpointManager  CheckpointManager      // Manages mission checkpoints and rollback (optional, can be nil)
+	reflectionEngine   ReflectionEngine       // Performs self-evaluation of strategy (optional, can be nil)
+	memoryRecaller     MemoryRecaller         // Queries memory tiers for context (optional, can be nil)
+	checkpointHook     *CheckpointIntegration // Spec 4 R5 — synchronous approval-pause checkpoint hook (optional)
+	logger             *slog.Logger           // Logger for Actor operations
+}
+
+// SetCheckpointIntegration wires the Spec 4 mission-checkpointing integration
+// into the actor so requestApproval can synchronously checkpoint the
+// approval-paused state before persisting the approval request. Pass nil to
+// disable approval checkpointing.
+func (a *Actor) SetCheckpointIntegration(ci *CheckpointIntegration) {
+	if a == nil {
+		return
+	}
+	a.checkpointHook = ci
 }
 
 // ActorOption is a functional option for configuring Actor.
@@ -1066,6 +1078,26 @@ func (a *Actor) requestApproval(ctx context.Context, decision *Decision, mission
 		Context:       decision.ApprovalContext,
 		Timeout:       timeout,
 		TimeoutAction: timeoutAction,
+	}
+
+	// Spec 4 R5.1, R5.2, R5.3 — synchronously checkpoint the approval-paused
+	// mission state BEFORE persisting the approval request, so a daemon
+	// restart between checkpoint write and approval-store write cannot leave
+	// the mission "almost-paused-for-approval" without a recovery anchor.
+	// Checkpoint failure is treated as fatal here: callers MUST surface the
+	// error rather than proceed with an unsynchronized approval.
+	if a.checkpointHook != nil {
+		approvalState := &ExecutionState{
+			CurrentNodeID: decision.TargetNodeID,
+			Metadata: map[string]any{
+				"mission_id":     missionID.String(),
+				"approval_phase": "request_pending",
+				"approval_node":  decision.TargetNodeID,
+			},
+		}
+		if _, cpErr := a.checkpointHook.OnApprovalRequired(ctx, approvalState, decision.TargetNodeID, approvalReq); cpErr != nil {
+			return nil, fmt.Errorf("approval-pause checkpoint failed (refusing to persist approval request without durable state): %w", cpErr)
+		}
 	}
 
 	approvalID, err := a.approvalManager.CreateRequest(ctx, approvalReq)

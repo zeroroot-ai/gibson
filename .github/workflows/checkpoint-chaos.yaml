@@ -1,0 +1,62 @@
+name: checkpoint-chaos
+# Spec 4 / W4 chaos test — SIGKILL recovery in kind.
+#
+# Runs the SIGKILL recovery harness on every PR that touches:
+#   - core/gibson/internal/orchestrator/**
+#   - core/gibson/internal/checkpoint/**
+#   - core/gibson/internal/mission/**
+#   - core/gibson/internal/memory/**
+#
+# The harness lives at enterprise/deploy/tests/checkpoint/sigkill_recovery_test.sh.
+# This is a workspace-spanning path; CI runners must have read access to the
+# enterprise repo (or the harness must be vendored into core/gibson; today
+# this workflow assumes the repos are checked out side-by-side).
+
+on:
+  pull_request:
+    paths:
+      - "core/gibson/internal/orchestrator/**"
+      - "core/gibson/internal/checkpoint/**"
+      - "core/gibson/internal/mission/**"
+      - "core/gibson/internal/memory/**"
+      - "enterprise/deploy/tests/checkpoint/**"
+      - "enterprise/deploy/helm/gibson/**"
+
+jobs:
+  sigkill-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout core/gibson
+        uses: actions/checkout@v4
+        with:
+          path: core/gibson
+
+      - name: Checkout enterprise (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: zero-day-ai/enterprise
+          path: enterprise
+          token: ${{ secrets.ENTERPRISE_REPO_TOKEN }}
+
+      - name: Set up kind
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: gibson
+
+      - name: Install gibson-cli
+        run: |
+          cd opensource/adk
+          go build -o /usr/local/bin/gibson-cli ./cmd/gibson-cli
+
+      - name: Deploy daemon to kind
+        run: |
+          cd enterprise/deploy/helm/gibson
+          make deploy-local
+
+      - name: Wait for daemon Ready
+        run: |
+          kubectl wait --for=condition=Ready --timeout=180s -n gibson pod/gibson-0
+
+      - name: Run SIGKILL recovery harness
+        run: bash enterprise/deploy/tests/checkpoint/sigkill_recovery_test.sh

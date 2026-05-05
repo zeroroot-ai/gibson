@@ -154,6 +154,40 @@ type Orchestrator struct {
 	workspaceManager workspace.WorkspaceManager // Manages Git repositories for code operations
 	missionDef       *mission.MissionDefinition // Mission definition for workspace configuration
 	credStore        workspace.CredentialStore  // Credential store for repository access
+
+	// checkpointIntegration drives Spec 4 mission-checkpointing super-step
+	// boundary writes, parallel-group completion markers, and approval-pause
+	// checkpoints. Optional — when nil, the loop runs without checkpointing.
+	checkpointIntegration *CheckpointIntegration
+}
+
+// getCheckpointIntegration returns the configured CheckpointIntegration, or
+// nil if none is wired. The accessor exists so the loop / actor hooks
+// (checkpoint_loop_hook.go, checkpoint_actor_wrapper.go) can stay
+// out-of-package-locked.
+func (o *Orchestrator) getCheckpointIntegration() *CheckpointIntegration {
+	if o == nil {
+		return nil
+	}
+	return o.checkpointIntegration
+}
+
+// WithCheckpointIntegration wires the Spec 4 mission-checkpointing integration
+// into the orchestrator. The integration's OnSuperStepComplete /
+// OnParallelGroupComplete / OnApprovalRequired hooks fire from the Run loop
+// boundary and from actor.Act respectively when this is non-nil.
+//
+// If the orchestrator's actor is a *Actor (the canonical concrete type), the
+// integration is also propagated into the actor so that requestApproval can
+// emit a synchronous approval-pause checkpoint before persisting the approval
+// request (Spec 4 R5).
+func WithCheckpointIntegration(ci *CheckpointIntegration) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.checkpointIntegration = ci
+		if a, ok := o.actor.(*Actor); ok && a != nil {
+			a.SetCheckpointIntegration(ci)
+		}
+	}
 }
 
 // EventBus defines the interface for emitting orchestrator events.
@@ -632,6 +666,12 @@ func (o *Orchestrator) Run(ctx context.Context, missionID string) (*Orchestrator
 			"terminal", actionResult.IsTerminal,
 			"error", actionResult.Error,
 		)
+
+		// Spec 4 R2.1, R2.6 — at the super-step boundary (after Act returns,
+		// before the next iteration), drive the checkpoint integration.
+		// The hook respects policy.ShouldCheckpoint cadence; checkpoint
+		// failures are best-effort and never fail the mission.
+		o.runCheckpointHook(ctx, state, thinkResult, actionResult)
 
 		// Emit progress event
 		if o.eventBus != nil {

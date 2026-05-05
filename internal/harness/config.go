@@ -11,7 +11,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/protoresolver"
 	"go.opentelemetry.io/otel/trace"
@@ -29,7 +28,6 @@ import (
 //
 // Optional fields (will use defaults if nil):
 //   - LLMRegistry: Uses empty registry if nil (no providers available)
-//   - PluginRegistry: Uses empty registry if nil (no plugins available)
 //   - MemoryManager: Uses in-memory implementation if nil
 //   - Tracer: Uses no-op tracer if nil
 //   - Logger: Uses default slog logger if nil
@@ -51,11 +49,6 @@ type HarnessConfig struct {
 	// Used to convert structpb.Struct inputs to typed proto messages using FileDescriptorSets.
 	// Optional: defaults to DefaultProtoResolver with standard configuration if nil.
 	ProtoResolver protoresolver.ProtoResolver
-
-	// PluginRegistry provides access to registered plugins.
-	// Used for plugin query operations (QueryPlugin, ListPlugins).
-	// Optional: defaults to empty registry (no plugins available).
-	PluginRegistry plugin.PluginRegistry
 
 	// RegistryAdapter provides unified component discovery via the component registry.
 	// This is the preferred method for discovering and connecting to agents, tools, and plugins.
@@ -302,7 +295,6 @@ func (c *HarnessConfig) Validate() error {
 // Default implementations:
 //   - LLMRegistry: NewLLMRegistry() (empty registry)
 //   - ProtoResolver: NewDefaultProtoResolver() (default resolver with standard config)
-//   - PluginRegistry: NewPluginRegistry() (empty registry)
 //   - Tracer: trace.NewNoopTracerProvider().Tracer("gibson.harness")
 //   - Logger: slog.Default()
 //   - FindingStore: NewInMemoryFindingStore()
@@ -320,12 +312,6 @@ func (c *HarnessConfig) ApplyDefaults() {
 
 	if c.ProtoResolver == nil {
 		c.ProtoResolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
-	}
-
-	if c.PluginRegistry == nil {
-		// Pass EventBus if provided, otherwise pass nil
-		// Plugin registry will work without event publishing if EventBus is nil
-		c.PluginRegistry = plugin.NewPluginRegistry(c.EventBus)
 	}
 
 	if c.Tracer == nil {

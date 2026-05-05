@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"google.golang.org/protobuf/proto"
@@ -42,23 +41,15 @@ func (m *mockToolWithPrompt) Prompts() []Prompt {
 	return m.prompts
 }
 
-// mockPlugin is a basic plugin implementation without prompts
+// mockPlugin is a basic plugin-shaped value without prompts.
+//
+// Post plugin-runtime Spec 2 Phase 7, the in-process Plugin interface is gone;
+// PluginPromptSource only requires Name + Version, which is what the prompt
+// helpers test against.
 type mockPlugin struct{}
 
-func (m *mockPlugin) Name() string        { return "mock-plugin" }
-func (m *mockPlugin) Version() string     { return "1.0.0" }
-func (m *mockPlugin) Description() string { return "" }
-func (m *mockPlugin) Initialize(ctx context.Context, config map[string]any) error {
-	return nil
-}
-func (m *mockPlugin) Shutdown(ctx context.Context) error { return nil }
-func (m *mockPlugin) Query(ctx context.Context, method string, params map[string]any) (any, error) {
-	return nil, nil
-}
-func (m *mockPlugin) Methods() []plugin.MethodDescriptor { return nil }
-func (m *mockPlugin) Health(ctx context.Context) types.HealthStatus {
-	return types.Healthy("mock plugin is healthy")
-}
+func (m *mockPlugin) Name() string    { return "mock-plugin" }
+func (m *mockPlugin) Version() string { return "1.0.0" }
 
 // mockPluginWithPrompts is a plugin implementation with prompts
 type mockPluginWithPrompts struct {
@@ -209,7 +200,7 @@ func TestGetToolPrompts(t *testing.T) {
 func TestPluginHasPrompts(t *testing.T) {
 	tests := []struct {
 		name     string
-		plugin   plugin.Plugin
+		plugin   PluginPromptSource
 		expected bool
 	}{
 		{
@@ -235,7 +226,7 @@ func TestPluginHasPrompts(t *testing.T) {
 func TestGetPluginPrompts(t *testing.T) {
 	tests := []struct {
 		name     string
-		plugin   plugin.Plugin
+		plugin   PluginPromptSource
 		expected []Prompt
 	}{
 		{
@@ -449,7 +440,7 @@ func TestToolWithPromptTypeAssertion(t *testing.T) {
 }
 
 func TestPluginWithPromptsTypeAssertion(t *testing.T) {
-	var pluginWithPrompts plugin.Plugin = &mockPluginWithPrompts{
+	var pluginWithPrompts PluginPromptSource = &mockPluginWithPrompts{
 		prompts: []Prompt{
 			{
 				ID:       "test",

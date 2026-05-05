@@ -14,7 +14,7 @@ func TestPostgresCredentials_RoundTrip(t *testing.T) {
 		Database: "tenant_acme",
 		Role:     "tenant_acme_app",
 		Password: "deadbeef0000000000000000deadbeef",
-		DSN:      "postgres://tenant_acme_app:deadbeef0000000000000000deadbeef@gibson-tenant-postgresql:5432/tenant_acme?sslmode=disable",
+		DSN:      "postgres://tenant_acme_app:deadbeef0000000000000000deadbeef@gibson-tenant-postgresql:5432/tenant_acme?sslmode=require",
 	}
 	b, err := json.Marshal(want)
 	if err != nil {

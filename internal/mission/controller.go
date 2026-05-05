@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/checkpoint"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/sdk/auth"
@@ -69,6 +70,17 @@ type DefaultMissionController struct {
 	// HarnessCallbackService.Authorize can resolve run_id → (user_id, tenant_id).
 	// When nil, authz state tracking is skipped (dev mode or authz disabled).
 	authzStore MissionAuthzStore
+
+	// checkpointPolicy applies retention rules to a mission's checkpoint
+	// threads when the mission reaches a terminal state. Optional — when nil,
+	// terminal-state retention is skipped (the threaded checkpointer's own
+	// background TTL still applies).
+	checkpointPolicy checkpoint.CheckpointPolicy
+
+	// threadManager resolves the threads associated with a mission so that
+	// retention can be applied per-thread. Optional — when nil, terminal-
+	// state retention is skipped.
+	threadManager checkpoint.ThreadManager
 
 	// logger for structured mission controller logging.
 	logger *slog.Logger
@@ -150,6 +162,20 @@ func WithAuthzStore(store MissionAuthzStore) ControllerOption {
 	}
 }
 
+// WithCheckpointRetention wires a CheckpointPolicy + ThreadManager into the
+// controller so that terminal-state mission transitions trigger
+// policy.ApplyRetention(ctx, threadID, status) for every thread of the
+// mission. Spec 4 R6 (TTL retention).
+//
+// Both arguments are required for retention to fire — if either is nil the
+// option is a no-op.
+func WithCheckpointRetention(policy checkpoint.CheckpointPolicy, tm checkpoint.ThreadManager) ControllerOption {
+	return func(c *DefaultMissionController) {
+		c.checkpointPolicy = policy
+		c.threadManager = tm
+	}
+}
+
 // NewMissionController creates a new mission controller.
 func NewMissionController(
 	store MissionStore,
@@ -172,6 +198,57 @@ func NewMissionController(
 	}
 
 	return c
+}
+
+// applyRetention invokes the configured CheckpointPolicy.ApplyRetention for
+// every thread belonging to the mission. Errors are logged at WARN and never
+// propagate — retention is best-effort and must not affect mission lifecycle.
+//
+// Spec 4 R6 (TTL retention via per-mode policy at terminal-state transition).
+func (c *DefaultMissionController) applyRetention(ctx context.Context, missionID types.ID, status MissionStatus) {
+	if c == nil || c.checkpointPolicy == nil || c.threadManager == nil {
+		return
+	}
+	threads, err := c.threadManager.ListThreads(ctx, missionID)
+	if err != nil {
+		c.logger.Warn("checkpoint retention: failed to list threads",
+			slog.String("mission_id", missionID.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	cpStatus := mapMissionStatusToCheckpointStatus(status)
+	for _, t := range threads {
+		if t == nil {
+			continue
+		}
+		if err := c.checkpointPolicy.ApplyRetention(ctx, t.ID, cpStatus); err != nil {
+			c.logger.Warn("checkpoint retention: ApplyRetention failed",
+				slog.String("mission_id", missionID.String()),
+				slog.String("thread_id", t.ID),
+				slog.String("status", string(status)),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+}
+
+// mapMissionStatusToCheckpointStatus translates the mission package's terminal
+// status enum into the checkpoint package's equivalent. Both packages have
+// parallel constants so the mapping is direct.
+func mapMissionStatusToCheckpointStatus(s MissionStatus) checkpoint.MissionStatus {
+	switch s {
+	case MissionStatusCompleted:
+		return checkpoint.MissionStatusCompleted
+	case MissionStatusFailed:
+		return checkpoint.MissionStatusFailed
+	case MissionStatusCancelled:
+		return checkpoint.MissionStatusCancelled
+	case MissionStatusPaused:
+		return checkpoint.MissionStatusPaused
+	default:
+		return checkpoint.MissionStatusRunning
+	}
 }
 
 // acquireOperationLock attempts to acquire a lock for the specified mission to prevent
@@ -392,6 +469,14 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 			mission.Error = err.Error()
 			mission.CompletedAt = NewUnixTimePtrNow()
 			c.store.Update(context.Background(), mission)
+			c.applyRetention(context.Background(), missionID, MissionStatusFailed)
+		} else if result != nil {
+			// Mission terminated successfully — propagate the result status
+			// to retention. The controller already updated the store
+			// elsewhere; here we only fire the retention hook.
+			c.applyRetention(context.Background(), missionID, result.Status)
+		} else {
+			c.applyRetention(context.Background(), missionID, MissionStatusCompleted)
 		}
 	}()
 
@@ -454,7 +539,11 @@ func (c *DefaultMissionController) Stop(ctx context.Context, missionID types.ID)
 	mission.Status = MissionStatusCancelled
 	mission.CompletedAt = NewUnixTimePtrNow()
 
-	return c.store.Update(ctx, mission)
+	if err := c.store.Update(ctx, mission); err != nil {
+		return err
+	}
+	c.applyRetention(ctx, missionID, MissionStatusCancelled)
+	return nil
 }
 
 // Pause suspends mission at next checkpoint.
@@ -603,12 +692,14 @@ func (c *DefaultMissionController) Resume(ctx context.Context, missionID types.I
 			mission.Error = err.Error()
 			mission.CompletedAt = NewUnixTimePtrNow()
 			c.store.Update(context.Background(), mission)
+			c.applyRetention(context.Background(), missionID, MissionStatusFailed)
 		} else if result != nil {
 			// Update mission with result status
 			mission.Status = result.Status
 			mission.CompletedAt = NewUnixTimePtrNow()
 			mission.Metrics = result.Metrics
 			c.store.Update(context.Background(), mission)
+			c.applyRetention(context.Background(), missionID, result.Status)
 		}
 	}()
 

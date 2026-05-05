@@ -529,31 +529,35 @@ func (c *CheckpointIntegration) GetCheckpointPolicy() checkpoint.CheckpointPolic
 }
 
 // TrackParallelCompletion tracks completion of a node in a parallel group.
-// Returns true when all nodes in the group are complete.
+// Returns true exactly once when all expected nodes in the group complete —
+// requires that the expected total has been registered via the
+// WithParallelGroupTotals constructor option or SetParallelGroupTotal.
+//
+// When no expected total is registered, this returns false and the orchestrator
+// must call OnParallelGroupComplete explicitly.
 //
 // This is used to detect when a parallel group boundary is reached and
-// a checkpoint should be created.
+// a checkpoint should be created. Spec: mission-checkpointing R4.1, R4.4.
 //
 // Parameters:
 //   - groupID: The ID of the parallel group
 //   - nodeID: The ID of the node that just completed
 //
-// Returns true if this was the last node in the group.
+// Returns true exactly once when all expected nodes in the group are complete.
 func (c *CheckpointIntegration) TrackParallelCompletion(groupID string, nodeID string) bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	// Initialize group if not exists
 	if c.parallelGroups[groupID] == nil {
 		c.parallelGroups[groupID] = make(map[string]bool)
 	}
-
-	// Mark node as complete
+	// Mark node as complete (idempotent — duplicates are tracked once)
 	c.parallelGroups[groupID][nodeID] = true
+	completedCount := len(c.parallelGroups[groupID])
+	c.mu.Unlock()
 
-	// TODO: Need to know total nodes in group to detect completion
-	// For now, we'll rely on the orchestrator to call OnParallelGroupComplete explicitly
-	return false
+	// Defer to the parallel sidecar (defined in checkpoint_integration_parallel.go)
+	// which auto-fires when the registered expected total is reached.
+	return c.trackParallelCompletionAuto(groupID, completedCount)
 }
 
 // ClearParallelGroup removes tracking for a completed parallel group.

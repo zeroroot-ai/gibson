@@ -1445,26 +1445,22 @@ func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal,
 	return result, nil
 }
 
-// QueryPlugin executes a method on a plugin via the registry adapter.
-func (d *daemonImpl) QueryPlugin(ctx context.Context, name, method string, params map[string]any) (any, error) {
-	d.logger.Debug(ctx, "QueryPlugin called", "plugin", name, "method", method)
-
-	// Discover and connect to plugin via registry adapter
-	pluginClient, err := d.registryAdapter.DiscoverPlugin(ctx, name)
-	if err != nil {
-		d.logger.Error(ctx, "failed to discover plugin", "plugin", name, "error", err)
-		return nil, fmt.Errorf("failed to discover plugin %s: %w", name, err)
-	}
-
-	// Execute query via gRPC
-	result, err := pluginClient.Query(ctx, method, params)
-	if err != nil {
-		d.logger.Error(ctx, "plugin query failed", "plugin", name, "method", method, "error", err)
-		return nil, fmt.Errorf("plugin query failed: %w", err)
-	}
-
-	d.logger.Debug(ctx, "plugin query completed", "plugin", name, "method", method)
-	return result, nil
+// QueryPlugin is the legacy DaemonService.QueryPlugin handler.
+//
+// The pre-release in-process Plugin.Query path was deleted by plugin-runtime
+// Spec 2 Phase 7. The new dispatch surface is the standalone
+// gibson.plugin.v1.PluginInvokeService gRPC service (registered alongside
+// DaemonService on the same listener — see grpc.go above where
+// pluginpb.RegisterPluginInvokeServiceServer is called). Callers should issue
+// PluginInvokeRequest directly against PluginInvokeService rather than
+// DaemonService.QueryPlugin; this handler returns Unimplemented to flag any
+// remaining callers that need to migrate.
+func (d *daemonImpl) QueryPlugin(ctx context.Context, name, method string, _ map[string]any) (any, error) {
+	d.logger.Warn(ctx, "DaemonService.QueryPlugin is deprecated — use PluginInvokeService.PluginInvoke",
+		"plugin", name,
+		"method", method,
+	)
+	return nil, fmt.Errorf("DaemonService.QueryPlugin is no longer supported (plugin-runtime Spec 2 Phase 7); call gibson.plugin.v1.PluginInvokeService.PluginInvoke instead — plugin %s, method %s", name, method)
 }
 
 // RunMission starts a mission by reference and returns an event channel.

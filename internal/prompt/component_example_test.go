@@ -6,7 +6,6 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/plugin"
 	"github.com/zero-day-ai/gibson/internal/prompt"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -44,23 +43,14 @@ func (t *PortScannerTool) Prompts() []prompt.Prompt {
 	}
 }
 
-// Example plugin that implements PluginWithPrompts
+// Example plugin-shaped value that implements PluginWithPrompts.
+//
+// Post plugin-runtime Spec 2 Phase 7, in-process Plugin.Query is gone; the
+// example only needs Name + Version (PluginPromptSource) + Prompts.
 type VulnDatabasePlugin struct{}
 
-func (p *VulnDatabasePlugin) Name() string        { return "vuln-database" }
-func (p *VulnDatabasePlugin) Version() string     { return "1.0.0" }
-func (p *VulnDatabasePlugin) Description() string { return "" }
-func (p *VulnDatabasePlugin) Initialize(ctx context.Context, config map[string]any) error {
-	return nil
-}
-func (p *VulnDatabasePlugin) Shutdown(ctx context.Context) error { return nil }
-func (p *VulnDatabasePlugin) Query(ctx context.Context, method string, params map[string]any) (any, error) {
-	return nil, nil
-}
-func (p *VulnDatabasePlugin) Methods() []plugin.MethodDescriptor { return nil }
-func (p *VulnDatabasePlugin) Health(ctx context.Context) types.HealthStatus {
-	return types.Healthy("operational")
-}
+func (p *VulnDatabasePlugin) Name() string    { return "vuln-database" }
+func (p *VulnDatabasePlugin) Version() string { return "1.0.0" }
 
 // Prompts returns information about the vulnerability database
 func (p *VulnDatabasePlugin) Prompts() []prompt.Prompt {
@@ -171,7 +161,7 @@ func Example_toolWithPrompt() {
 
 // ExamplePluginWithPrompts demonstrates how to use PluginWithPrompts
 func Example_pluginWithPrompts() {
-	var p plugin.Plugin = &VulnDatabasePlugin{}
+	var p prompt.PluginPromptSource = &VulnDatabasePlugin{}
 
 	// Check if plugin provides prompts
 	if prompt.PluginHasPrompts(p) {

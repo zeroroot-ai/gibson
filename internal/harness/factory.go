@@ -223,7 +223,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 	var harness AgentHarness = &DefaultAgentHarness{
 		slotManager:         f.config.SlotManager,
 		llmRegistry:         f.config.LLMRegistry,
-		pluginRegistry:      f.config.PluginRegistry,
 		registryAdapter:     f.config.RegistryAdapter,
 		memoryStore:         memoryStore,
 		findingStore:        f.config.FindingStore,
