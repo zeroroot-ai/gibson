@@ -297,12 +297,17 @@ func (s *DaemonServer) DiffCheckpoints(
 
 // requireMissionViewer enforces mission-scoped FGA. When the daemon's
 // FGA Authorizer is wired, the caller subject is checked against the
-// `viewer` relation on the mission's tenant. When no Authorizer is
+// `viewer` relation on the mission object. When no Authorizer is
 // configured (dev / kind without FGA), the per-tenant Pool's tenant-id
 // scoping is the implicit guard — we accept the request and rely on the
 // downstream backend to fail closed if cross-tenant access is attempted.
 //
-// Spec: mission-checkpointing R13.2, R14.2.
+// `mission#viewer` cascades from `tenant#member` via the `belongs_to`
+// relation declared in model.fga, so every tenant member can read every
+// mission in their tenant by default. Per-mission user grants (e.g.
+// "share with this user") layer on top via direct viewer tuples.
+//
+// Spec: mission-checkpointing R13.2, R14.2, R17.1.
 func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcName string) error {
 	id, idErr := auth.IdentityFromContext(ctx)
 	if idErr != nil {
@@ -324,13 +329,13 @@ func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcN
 		return nil
 	}
 
-	// Tenant-scoped viewer check. The mission#viewer relation is not yet
-	// in the FGA model (Phase 2A defers it); fall back to tenant-member
-	// for now, which is what the registry annotations produce.
+	// Mission-scoped viewer check. The relation cascades from tenant#member
+	// via the mission's `belongs_to` tuple, so a tenant member who has not
+	// been explicitly removed from the mission still passes this check.
 	ok, err := s.authorizer.Check(ctx,
 		"user:"+id.Subject,
-		"member",
-		"tenant:"+tenantID,
+		"viewer",
+		"mission:"+missionID,
 	)
 	if err != nil {
 		s.logger.Warn(rpcName+": authz check failed",
@@ -342,7 +347,7 @@ func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcN
 	}
 	if !ok {
 		return status_grpc.Errorf(codes.PermissionDenied,
-			"caller is not a member of tenant %s", tenantID)
+			"caller is not a viewer of mission %s", missionID)
 	}
 	return nil
 }

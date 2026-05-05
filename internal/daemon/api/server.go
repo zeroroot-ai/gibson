@@ -1811,10 +1811,16 @@ func (s *DaemonServer) buildResumeCheckpointMetadata(ctx context.Context, missio
 	}
 }
 
-// requireMissionAdminForRewind enforces the admin-tier FGA check needed
-// for rewind-and-resume per R16.3. When the FGA Authorizer is not
+// requireMissionAdminForRewind enforces the mission-scoped admin FGA check
+// needed for rewind-and-resume per R16.3. When the FGA Authorizer is not
 // wired (kind dev), the per-tenant Pool's tenant-id scoping is the
 // implicit guard.
+//
+// `mission#admin` cascades from `tenant#admin` via the mission's
+// `belongs_to` tuple — so a tenant admin automatically passes this check.
+// Per-mission admin grants layer on top via direct admin tuples.
+//
+// Spec: mission-checkpointing R16.3, R17.8.
 func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, missionID string) error {
 	id, idErr := auth.IdentityFromContext(ctx)
 	if idErr != nil {
@@ -1836,7 +1842,7 @@ func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, mission
 	ok, err := s.authorizer.Check(ctx,
 		"user:"+id.Subject,
 		"admin",
-		"tenant:"+tenantID,
+		"mission:"+missionID,
 	)
 	if err != nil {
 		s.logger.Warn("ResumeMission rewind: authz check failed",
@@ -1848,7 +1854,7 @@ func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, mission
 	}
 	if !ok {
 		return status_grpc.Errorf(codes.PermissionDenied,
-			"rewind requires admin on tenant %s", tenantID)
+			"rewind requires mission#admin on mission %s", missionID)
 	}
 	return nil
 }
@@ -2255,6 +2261,41 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 		"target_id", result.TargetID,
 		"mission_definition_id", result.MissionDefinitionID,
 	)
+
+	// Write the FGA `mission:<id> belongs_to tenant:<tenant>` tuple so the
+	// cascading viewer/admin relations declared in model.fga resolve for
+	// every tenant member/admin without per-user grants. This is the only
+	// tuple the daemon writes on mission creation; per-user "share with"
+	// grants land separately when that UI ships.
+	//
+	// Best-effort: a write failure is logged at WARN and never aborts the
+	// RPC — the caller already has a successfully created mission, and the
+	// downstream tenant-scope Pool guard provides at-rest protection until
+	// the next reconciler run can backfill missing tuples.
+	//
+	// Spec: mission-checkpointing R13/R14/R15/R16, model.fga `type mission`.
+	if s.authorizer != nil {
+		tenantID := auth.TenantStringFromContext(ctx)
+		if tenantID != "" {
+			tuple := authz.Tuple{
+				User:     "tenant:" + tenantID,
+				Relation: "belongs_to",
+				Object:   "mission:" + result.MissionID,
+			}
+			if writeErr := s.authorizer.Write(ctx, []authz.Tuple{tuple}); writeErr != nil {
+				s.logger.Warn("CreateMission: mission belongs_to tuple write failed",
+					"mission_id", result.MissionID,
+					"tenant_id", tenantID,
+					"error", writeErr,
+				)
+			} else {
+				s.logger.Debug("CreateMission: mission belongs_to tuple written",
+					"mission_id", result.MissionID,
+					"tenant_id", tenantID,
+				)
+			}
+		}
+	}
 
 	// Build proto Mission response
 	protoMission := &daemonpb.Mission{
