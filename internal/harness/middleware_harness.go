@@ -10,6 +10,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkagent "github.com/zero-day-ai/sdk/agent"
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	sdktypes "github.com/zero-day-ai/sdk/types"
@@ -134,6 +135,15 @@ func (h *MiddlewareHarness) CallToolProto(ctx context.Context, name string, requ
 	return h.inner.CallToolProto(ctx, name, request, response)
 }
 
+// CallToolProtoStream delegates to the inner harness's streaming dispatch.
+// Mirrors the operation-type / mission-context capture pattern used by
+// CallToolProto so middleware sees both call shapes consistently.
+//
+// Spec: headline-feature-completion R1.3.
+func (h *MiddlewareHarness) CallToolProtoStream(ctx context.Context, name string, request, response proto.Message, callback sdkagent.ToolStreamCallback) error {
+	return h.inner.CallToolProtoStream(ctx, name, request, response, callback)
+}
+
 func (h *MiddlewareHarness) QueryPlugin(ctx context.Context, name string, method string, params map[string]any) (any, error) {
 	ctx = middleware.WithOperationType(ctx, middleware.OpQueryPlugin)
 	ctx = middleware.WithPluginInfo(ctx, name, method)
@@ -234,9 +244,18 @@ func (h *MiddlewareHarness) Log(level, message string, fields map[string]any) {
 
 var _ AgentHarness = (*MiddlewareHarness)(nil)
 
-// TODO: Re-enable SDK Harness interface check once CallToolProtoStream is implemented
-// The SDK agent.Harness interface now requires CallToolProtoStream which needs to be
-// implemented in MiddlewareHarness as a pass-through to the inner harness.
+// SDK Harness interface check.
+//
+// MiddlewareHarness now provides CallToolProtoStream (Week 4 task 49), so
+// the streaming-tool side of the SDK contract is satisfied. The full
+// sdkagent.Harness interface, however, is a sibling surface with
+// deliberately different ID types (string vs types.ID) and a different
+// Memory shape; that contract is enforced on the SDK-facing
+// PlatformHarness / CallbackHarness in core/sdk/serve/, not on this
+// internal middleware wrapper. Re-enabling the assertion below would
+// require MiddlewareHarness to grow SDK-specific surface area unrelated
+// to its purpose.
+//
 // var _ sdkagent.Harness = (*MiddlewareHarness)(nil)
 
 // GraphRAGSupport interface implementation - pass through to inner harness

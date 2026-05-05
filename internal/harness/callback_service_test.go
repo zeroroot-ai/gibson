@@ -15,6 +15,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkagent "github.com/zero-day-ai/sdk/agent"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
@@ -462,6 +463,19 @@ func (m *mockHarnessWithResolver) CallToolProto(ctx context.Context, name string
 		return m.toolHandler(ctx, name, request, response)
 	}
 	return fmt.Errorf("no tool handler configured")
+}
+
+func (m *mockHarnessWithResolver) CallToolProtoStream(ctx context.Context, name string, request proto.Message, response proto.Message, callback sdkagent.ToolStreamCallback) error {
+	if err := m.CallToolProto(ctx, name, request, response); err != nil {
+		if callback != nil {
+			callback.OnError(err, true)
+		}
+		return err
+	}
+	if callback != nil {
+		callback.OnPartial(response, false)
+	}
+	return nil
 }
 
 // Stub implementations of other required AgentHarness methods

@@ -8,6 +8,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkagent "github.com/zero-day-ai/sdk/agent"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -132,6 +133,33 @@ func (m *ComplianceMiddleware) CallToolProto(ctx context.Context, name string, r
 	}
 
 	err := m.inner.CallToolProto(ctx, name, request, response)
+
+	if response != nil {
+		size := int64(proto.Size(response))
+		sip.signal.BytesOut = &size
+	}
+
+	m.completeSignal(ctx, sip, err)
+	m.emit(ctx, sip)
+	return err
+}
+
+// CallToolProtoStream emits the same compliance signal envelope as
+// CallToolProto and forwards every streaming event verbatim through the
+// caller-supplied callback. Spec: headline-feature-completion R1.3.
+func (m *ComplianceMiddleware) CallToolProtoStream(ctx context.Context, name string, request, response proto.Message, callback sdkagent.ToolStreamCallback) error {
+	target := ToolCallTarget{
+		Name:    name,
+		Request: request,
+	}
+	sip := m.beginSignal(ctx, MethodCallToolProto, target)
+
+	if request != nil {
+		size := int64(proto.Size(request))
+		sip.signal.BytesIn = &size
+	}
+
+	err := m.inner.CallToolProtoStream(ctx, name, request, response, callback)
 
 	if response != nil {
 		size := int64(proto.Size(response))

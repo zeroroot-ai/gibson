@@ -94,6 +94,10 @@ func (m *mockInnerHarness) CallToolProto(ctx context.Context, name string, reque
 	return errors.New("not implemented")
 }
 
+func (m *mockInnerHarness) CallToolProtoStream(ctx context.Context, name string, request, response proto.Message, callback sdkAgent.ToolStreamCallback) error {
+	return errors.New("not implemented")
+}
+
 func (m *mockInnerHarness) ListTools() []gibsonHarness.ToolDescriptor {
 	return []gibsonHarness.ToolDescriptor{
 		{Name: "test_tool", Description: "A test tool", Version: "1.0"},

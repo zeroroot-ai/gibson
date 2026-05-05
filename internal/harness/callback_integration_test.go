@@ -17,6 +17,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkagent "github.com/zero-day-ai/sdk/agent"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zero-day-ai/sdk/serve"
 	sdktypes "github.com/zero-day-ai/sdk/types"
@@ -78,6 +79,19 @@ func (m *mockIntegrationHarness) CallToolProto(ctx context.Context, name string,
 		return nil
 	}
 	return fmt.Errorf("CallToolProto not configured for tool: %s", name)
+}
+
+func (m *mockIntegrationHarness) CallToolProtoStream(ctx context.Context, name string, request protobuf.Message, response protobuf.Message, callback sdkagent.ToolStreamCallback) error {
+	if err := m.CallToolProto(ctx, name, request, response); err != nil {
+		if callback != nil {
+			callback.OnError(err, true)
+		}
+		return err
+	}
+	if callback != nil {
+		callback.OnPartial(response, false)
+	}
+	return nil
 }
 
 func (m *mockIntegrationHarness) ListTools() []ToolDescriptor {

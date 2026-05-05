@@ -12,6 +12,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkagent "github.com/zero-day-ai/sdk/agent"
 	taxonomypb "github.com/zero-day-ai/sdk/api/gen/taxonomy/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	sdktypes "github.com/zero-day-ai/sdk/types"
@@ -84,6 +85,9 @@ func (*noopInnerHarness) CompleteStructuredAnyWithUsage(context.Context, string,
 	return nil, nil
 }
 func (*noopInnerHarness) CallToolProto(context.Context, string, proto.Message, proto.Message) error {
+	return nil
+}
+func (*noopInnerHarness) CallToolProtoStream(context.Context, string, proto.Message, proto.Message, sdkagent.ToolStreamCallback) error {
 	return nil
 }
 func (*noopInnerHarness) ListTools() []ToolDescriptor { return nil }

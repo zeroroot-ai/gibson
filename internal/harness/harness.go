@@ -8,6 +8,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkagent "github.com/zero-day-ai/sdk/agent"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -295,6 +296,25 @@ type AgentHarness interface {
 	//   resp := &portscannerpb.ScanResponse{}
 	//   err := harness.CallToolProto(ctx, "nmap_scan", req, resp)
 	CallToolProto(ctx context.Context, name string, request, response proto.Message) error
+
+	// CallToolProtoStream invokes a tool by name with streaming event callbacks.
+	// This is the streaming counterpart to CallToolProto. The tool reports
+	// progress, partial results, and warnings to the callback as it executes;
+	// the final output proto is populated on success and is also delivered to
+	// the callback as a partial just before this method returns.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and tracing
+	//   - name: Name of the tool to execute (must be registered)
+	//   - request: Tool input as a proto message (validated against tool's proto schema)
+	//   - response: Proto message to populate with tool output (final state)
+	//   - callback: Streaming callback receiving Progress / Partial / Warning / Error events
+	//
+	// Returns:
+	//   - error: Non-nil if tool not found, validation fails, or execution fails fatally
+	//
+	// Spec: headline-feature-completion R1.
+	CallToolProtoStream(ctx context.Context, name string, request, response proto.Message, callback sdkagent.ToolStreamCallback) error
 
 	// ListTools returns descriptors for all registered tools.
 	// This enables dynamic tool discovery and capability introspection.

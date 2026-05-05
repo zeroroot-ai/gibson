@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
+	sdkagent "github.com/zero-day-ai/sdk/agent"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -285,6 +286,19 @@ func (m *mockAgentHarness) CallToolProto(ctx context.Context, name string, reque
 	}
 	if protoOut, ok := m.toolProtoOutputs[name]; ok {
 		proto.Merge(response, protoOut)
+	}
+	return nil
+}
+
+func (m *mockAgentHarness) CallToolProtoStream(ctx context.Context, name string, request, response proto.Message, callback sdkagent.ToolStreamCallback) error {
+	if err := m.CallToolProto(ctx, name, request, response); err != nil {
+		if callback != nil {
+			callback.OnError(err, true)
+		}
+		return err
+	}
+	if callback != nil {
+		callback.OnPartial(response, false)
 	}
 	return nil
 }

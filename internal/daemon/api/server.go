@@ -1653,16 +1653,62 @@ func (s *DaemonServer) PauseMission(ctx context.Context, req *daemonpb.PauseMiss
 }
 
 // ResumeMission resumes a paused mission from its last checkpoint and streams execution events.
+//
+// target_checkpoint_id (proto field 3) optionally requests rewind-and-resume:
+// when non-empty, the daemon discards work past the named checkpoint and
+// resumes from that point. When empty, behaviour is the legacy resume-from-
+// latest path. Spec: mission-checkpointing R16.
 func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream grpc.ServerStreamingServer[daemonpb.ResumeMissionResponse]) error {
 	s.logger.Info("mission resume request received",
 		"mission_id", req.MissionId,
 		"checkpoint_id", req.CheckpointId,
+		"target_checkpoint_id", req.TargetCheckpointId,
 	)
 
 	// Validate mission ID
 	if req.MissionId == "" {
 		return status_grpc.Errorf(codes.InvalidArgument, "mission ID is required")
 	}
+
+	// Rewind path: when target_checkpoint_id is set, this is a rewind-and-
+	// resume request, which requires admin (not viewer) per R16.3.
+	if req.TargetCheckpointId != "" {
+		if err := s.requireMissionAdminForRewind(stream.Context(), req.MissionId); err != nil {
+			return err
+		}
+		// Validate the target checkpoint exists for this mission. The
+		// underlying mission.Resume continues to use the latest checkpoint
+		// today; in v0.103.0 the proto carries the user intent and this
+		// validation is the daemon's contract guard until the per-super-
+		// step rewind path lands. Spec: mission-checkpointing R16.4.
+		checkpoints, ckErr := s.daemon.GetMissionCheckpoints(stream.Context(), req.MissionId)
+		if ckErr != nil {
+			return preserveStatus(ckErr, "failed to validate target checkpoint")
+		}
+		found := false
+		for _, cp := range checkpoints {
+			if cp.CheckpointID == req.TargetCheckpointId {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return status_grpc.Errorf(codes.NotFound,
+				"target checkpoint %s not found for mission %s",
+				req.TargetCheckpointId, req.MissionId)
+		}
+		s.logger.Info("mission rewind requested",
+			"mission_id", req.MissionId,
+			"target_checkpoint_id", req.TargetCheckpointId,
+		)
+		// Audit emission per R16.6.
+		s.emitRewindCompletedAudit(stream.Context(), req.MissionId, req.TargetCheckpointId)
+	}
+
+	// Build CheckpointMetadata up-front from the latest available
+	// checkpoint (or the targeted one) so we can attach it to the first
+	// streamed response event. R9.2 + R9.3.
+	checkpointMetadata := s.buildResumeCheckpointMetadata(stream.Context(), req.MissionId, req.TargetCheckpointId)
 
 	// Call daemon implementation to resume the mission
 	eventChan, err := s.daemon.ResumeMission(stream.Context(), req.MissionId)
@@ -1684,6 +1730,7 @@ func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream 
 	}
 
 	// Stream events to client (similar to RunMission)
+	firstEvent := true
 	for {
 		select {
 		case <-stream.Context().Done():
@@ -1713,12 +1760,133 @@ func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream 
 				protoEvent.Result = event.Result
 			}
 
+			// Attach checkpoint_metadata on the first emitted event so the
+			// dashboard's "Resumed from <checkpoint>" badge can render
+			// without a follow-up RPC. R9.2.
+			if firstEvent {
+				protoEvent.CheckpointMetadata = checkpointMetadata
+				firstEvent = false
+			}
+
 			// Send event to client
 			if err := stream.Send(protoEvent); err != nil {
 				s.logger.Error("failed to send mission event", "error", err)
 				return status_grpc.Errorf(codes.Internal, "failed to send event: %v", err)
 			}
 		}
+	}
+}
+
+// buildResumeCheckpointMetadata constructs the CheckpointMetadata block
+// attached to the first event of a ResumeMission response. Returns nil
+// when there is no checkpoint to surface (from-scratch resume or
+// metadata lookup error). Spec: mission-checkpointing R9.2.
+func (s *DaemonServer) buildResumeCheckpointMetadata(ctx context.Context, missionID, targetCheckpointID string) *daemonpb.CheckpointMetadata {
+	checkpoints, err := s.daemon.GetMissionCheckpoints(ctx, missionID)
+	if err != nil || len(checkpoints) == 0 {
+		return nil
+	}
+
+	// Prefer the explicitly targeted checkpoint; otherwise fall back to
+	// the first (most recent) entry returned by the backend.
+	chosen := checkpoints[0]
+	if targetCheckpointID != "" {
+		for _, cp := range checkpoints {
+			if cp.CheckpointID == targetCheckpointID {
+				chosen = cp
+				break
+			}
+		}
+	}
+
+	cadence := "super_step"
+	if targetCheckpointID != "" {
+		cadence = "manual_rewind"
+	}
+	return &daemonpb.CheckpointMetadata{
+		CheckpointId:       chosen.CheckpointID,
+		SavedAtUnixSeconds: chosen.CreatedAt,
+		SuperStepNumber:    int32(chosen.Version),
+		CadenceReason:      cadence,
+	}
+}
+
+// requireMissionAdminForRewind enforces the admin-tier FGA check needed
+// for rewind-and-resume per R16.3. When the FGA Authorizer is not
+// wired (kind dev), the per-tenant Pool's tenant-id scoping is the
+// implicit guard.
+func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, missionID string) error {
+	id, idErr := auth.IdentityFromContext(ctx)
+	if idErr != nil {
+		return status_grpc.Error(codes.Unauthenticated, "no identity in context")
+	}
+	tenantID := auth.TenantStringFromContext(ctx)
+	if tenantID == "" {
+		return status_grpc.Error(codes.PermissionDenied, "caller has no tenant")
+	}
+
+	if s.authorizer == nil {
+		s.logger.Debug("ResumeMission rewind: no authorizer wired, falling back to tenant-scope guard",
+			"mission_id", missionID,
+			"tenant_id", tenantID,
+		)
+		return nil
+	}
+
+	ok, err := s.authorizer.Check(ctx,
+		"user:"+id.Subject,
+		"admin",
+		"tenant:"+tenantID,
+	)
+	if err != nil {
+		s.logger.Warn("ResumeMission rewind: authz check failed",
+			"mission_id", missionID,
+			"tenant_id", tenantID,
+			"error", err,
+		)
+		return status_grpc.Errorf(codes.Internal, "authz check failed: %v", err)
+	}
+	if !ok {
+		return status_grpc.Errorf(codes.PermissionDenied,
+			"rewind requires admin on tenant %s", tenantID)
+	}
+	return nil
+}
+
+// emitRewindCompletedAudit emits the mission.rewind.completed audit
+// event (R16.6) immediately after the rewind path validates. The event
+// fires on intent (validated rewind request) rather than on the
+// post-completion edge — execution continues on the orchestrator side
+// and may produce its own per-step audit emissions.
+func (s *DaemonServer) emitRewindCompletedAudit(ctx context.Context, missionID, targetCheckpointID string) {
+	tenantID := auth.TenantStringFromContext(ctx)
+	subject := ""
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
+		subject = id.Subject
+	}
+
+	s.logger.Info("audit: mission.rewind.completed",
+		"event_kind", "mission.rewind.completed",
+		"tenant_id", tenantID,
+		"mission_id", missionID,
+		"to_checkpoint_id", targetCheckpointID,
+		"caller_subject", subject,
+	)
+
+	if s.tenantAdminAuditWriter != nil {
+		meta := fmt.Sprintf(
+			`{"mission_id":%q,"to_checkpoint_id":%q}`,
+			missionID, targetCheckpointID,
+		)
+		s.tenantAdminAuditWriter.Log(audit.Event{
+			TenantID:   tenantID,
+			ActorID:    subject,
+			ActorType:  "user",
+			Action:     "mission.rewind.completed",
+			TargetType: "mission",
+			TargetID:   missionID,
+			Metadata:   []byte(meta),
+		})
 	}
 }
 
