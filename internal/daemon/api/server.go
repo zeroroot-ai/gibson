@@ -362,6 +362,26 @@ type DaemonInterface interface {
 	// GetMissionCheckpoints returns all checkpoints for a mission
 	GetMissionCheckpoints(ctx context.Context, missionID string) ([]CheckpointData, error)
 
+	// GetMissionCheckpointPayload returns the rich, per-super-step
+	// payload for a single checkpoint — the decrypted working memory,
+	// mission memory, DAG steps, findings, and parallel-group state.
+	// Implementations that lack the per-super-step store fall back to
+	// the legacy mission.MissionCheckpoint metadata view. The returned
+	// CheckpointData's heavy fields may be nil/empty on the fallback
+	// path; the mission handlers degrade gracefully in that case.
+	//
+	// Spec: mission-checkpointing R14.1-R14.3.
+	GetMissionCheckpointPayload(ctx context.Context, missionID, checkpointID string) (*CheckpointData, error)
+
+	// RewindMission rewinds a mission's state to the named target
+	// checkpoint, cancelling any in-flight tools per their declared
+	// idempotency runtime, dropping any super-steps newer than the
+	// target, and writing a CHECKPOINT_SOURCE_MANUAL marker checkpoint.
+	// Returns the ID of the marker checkpoint on success.
+	//
+	// Spec: mission-checkpointing R16.4 (rewind core).
+	RewindMission(ctx context.Context, missionID, targetCheckpointID string) (markerCheckpointID string, err error)
+
 	// BuildComponent rebuilds a component from source
 	BuildComponent(ctx context.Context, kind string, name string) (BuildComponentResult, error)
 
@@ -644,6 +664,17 @@ type MissionRunData struct {
 }
 
 // CheckpointData provides metadata about a mission checkpoint.
+//
+// The heavy fields below (WorkingMemory, MissionMemory, DagSteps,
+// FindingSnapshots, ParallelGroups, InFlightIdempotency, SizeBytes,
+// Source) are populated by the per-super-step payload exposure path
+// (Spec 4 Phase 2A — `ThreadedCheckpointer.OnSuperStepComplete`). The
+// legacy `daemonImpl.GetMissionCheckpoints` returns only the metadata
+// fields; the richer fields are zero in that case. The mission
+// handlers' `GetCheckpoint` and `DiffCheckpoints` opt into the rich
+// payload via `GetMissionCheckpointPayload` (see DaemonInterface).
+//
+// Spec: mission-checkpointing R13.1, R14.1, R15.1.
 type CheckpointData struct {
 	CheckpointID   string
 	CreatedAt      int64
@@ -651,6 +682,86 @@ type CheckpointData struct {
 	TotalNodes     int
 	FindingsCount  int
 	Version        int
+
+	// SizeBytes is the on-wire byte size of the persisted checkpoint
+	// (post-encryption + compression). Zero on the metadata-only path.
+	SizeBytes int64
+
+	// Source maps to daemonpb.CheckpointSource. Empty string falls back
+	// to CHECKPOINT_SOURCE_SUPER_STEP at proto-shape time.
+	// Valid: super_step / approval_gate / graceful_shutdown /
+	// parallel_group / manual.
+	Source string
+
+	// ParallelGroupID, when non-empty, indicates this checkpoint was
+	// captured at a parallel-group barrier.
+	ParallelGroupID string
+
+	// InFlightIdempotency surfaces the idempotency mode of any tool
+	// whose call was mid-flight at checkpoint time. Empty when no tool
+	// was in flight. Valid:
+	//   "AT_MOST_ONCE" / "AT_LEAST_ONCE" / "EXACTLY_ONCE"
+	InFlightIdempotency string
+
+	// InFlightNodeID is the node ID of the in-flight tool at checkpoint
+	// time, or empty if none was in flight.
+	InFlightNodeID string
+
+	// ResumptionToken is the EXACTLY_ONCE handshake token written by the
+	// tool at its last side-effecting step. Empty for AT_MOST_ONCE /
+	// AT_LEAST_ONCE.
+	ResumptionToken string
+
+	// WorkingMemory is the decrypted opaque bytes from per-super-step
+	// storage. Nil on the metadata-only path.
+	WorkingMemory []byte
+
+	// MissionMemory is the decrypted opaque bytes from per-super-step
+	// storage. Nil on the metadata-only path.
+	MissionMemory []byte
+
+	// DagSteps captures one snapshot row per node at checkpoint time.
+	// Nil on the metadata-only path.
+	DagSteps []DagStepData
+
+	// FindingSnapshots captures the per-finding slice of the checkpoint.
+	// Nil on the metadata-only path.
+	FindingSnapshots []FindingSnapshotData
+
+	// ParallelGroups maps group ID → state at checkpoint time. Nil on
+	// the metadata-only path.
+	ParallelGroups map[string]ParallelGroupStateData
+}
+
+// DagStepData is a single DAG node's snapshot at checkpoint time. The
+// inputs and outputs are opaque, agent-defined byte payloads.
+type DagStepData struct {
+	NodeID         string
+	State          string
+	StartedAtUnix  int64
+	FinishedAtUnix int64
+	Inputs         []byte
+	Outputs        []byte
+	RetryCount     int32
+	Error          string
+}
+
+// FindingSnapshotData is the per-finding row at checkpoint time.
+// Payload is the taxonomy-canonical Finding bytes.
+type FindingSnapshotData struct {
+	FindingID string
+	Severity  string
+	Title     string
+	NodeID    string
+	Payload   []byte
+}
+
+// ParallelGroupStateData captures the state of a parallel-group barrier.
+type ParallelGroupStateData struct {
+	GroupID          string
+	Expected         int32
+	Completed        int32
+	CompletedNodeIDs []string
 }
 
 // MissionDefinitionData represents an installed mission definition.
@@ -1676,33 +1787,45 @@ func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream 
 		if err := s.requireMissionAdminForRewind(stream.Context(), req.MissionId); err != nil {
 			return err
 		}
-		// Validate the target checkpoint exists for this mission. The
-		// underlying mission.Resume continues to use the latest checkpoint
-		// today; in v0.103.0 the proto carries the user intent and this
-		// validation is the daemon's contract guard until the per-super-
-		// step rewind path lands. Spec: mission-checkpointing R16.4.
-		checkpoints, ckErr := s.daemon.GetMissionCheckpoints(stream.Context(), req.MissionId)
-		if ckErr != nil {
-			return preserveStatus(ckErr, "failed to validate target checkpoint")
-		}
-		found := false
-		for _, cp := range checkpoints {
-			if cp.CheckpointID == req.TargetCheckpointId {
-				found = true
-				break
+		// Resolve the latest checkpoint as `from_checkpoint_id` BEFORE
+		// the rewind mutates state. R16.6 audit envelope wants both
+		// from_id and to_id.
+		fromCheckpointID := s.resolveLatestCheckpointID(stream.Context(), req.MissionId)
+
+		// Drive the orchestrator-side rewind core: validate the target,
+		// dispatch in-flight tools per their idempotency contract,
+		// write the marker checkpoint. The daemon's RewindMission
+		// returns the marker checkpoint ID on success.
+		markerID, rewindErr := s.daemon.RewindMission(stream.Context(), req.MissionId, req.TargetCheckpointId)
+		if rewindErr != nil {
+			s.logger.Warn("mission rewind failed",
+				"mission_id", req.MissionId,
+				"target_checkpoint_id", req.TargetCheckpointId,
+				"error", rewindErr,
+			)
+			if strings.Contains(rewindErr.Error(), "not found") {
+				return status_grpc.Errorf(codes.NotFound,
+					"target checkpoint %s not found for mission %s",
+					req.TargetCheckpointId, req.MissionId)
 			}
+			return preserveStatus(rewindErr, "rewind failed")
 		}
-		if !found {
-			return status_grpc.Errorf(codes.NotFound,
-				"target checkpoint %s not found for mission %s",
-				req.TargetCheckpointId, req.MissionId)
-		}
-		s.logger.Info("mission rewind requested",
+		s.logger.Info("mission rewind completed",
 			"mission_id", req.MissionId,
 			"target_checkpoint_id", req.TargetCheckpointId,
+			"marker_checkpoint_id", markerID,
+			"from_checkpoint_id", fromCheckpointID,
 		)
 		// Audit emission per R16.6.
-		s.emitRewindCompletedAudit(stream.Context(), req.MissionId, req.TargetCheckpointId)
+		s.emitRewindCompletedAudit(stream.Context(), req.MissionId, fromCheckpointID, req.TargetCheckpointId)
+
+		// Apply the orchestrator-side idempotency dispatch decision for
+		// any in-flight tool captured at the target checkpoint. The
+		// dispatcher emits per-tool audit hints; failures (EXACTLY_ONCE
+		// without resumption_token) abort the rewind early.
+		if err := s.applyRewindIdempotency(stream.Context(), req.MissionId, req.TargetCheckpointId); err != nil {
+			return err
+		}
 	}
 
 	// Build CheckpointMetadata up-front from the latest available
@@ -1811,14 +1934,14 @@ func (s *DaemonServer) buildResumeCheckpointMetadata(ctx context.Context, missio
 	}
 }
 
-// requireMissionAdminForRewind enforces the mission-scoped admin FGA check
-// needed for rewind-and-resume per R16.3. When the FGA Authorizer is not
-// wired (kind dev), the per-tenant Pool's tenant-id scoping is the
-// implicit guard.
+// requireMissionAdminForRewind enforces the admin-tier FGA check needed
+// for rewind-and-resume per R16.3. When the FGA Authorizer is not wired
+// (kind dev), the per-tenant Pool's tenant-id scoping is the implicit
+// guard.
 //
-// `mission#admin` cascades from `tenant#admin` via the mission's
-// `belongs_to` tuple — so a tenant admin automatically passes this check.
-// Per-mission admin grants layer on top via direct admin tuples.
+// NOTE: until Phase 4C lands `mission#admin` in the FGA model, this
+// falls back to `tenant#admin`. A tenant admin can rewind any mission
+// in their tenant.
 //
 // Spec: mission-checkpointing R16.3, R17.8.
 func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, missionID string) error {
@@ -1839,10 +1962,12 @@ func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, mission
 		return nil
 	}
 
+	// Phase 4C will switch this to mission#admin once the FGA model
+	// carries the relation.
 	ok, err := s.authorizer.Check(ctx,
 		"user:"+id.Subject,
 		"admin",
-		"mission:"+missionID,
+		"tenant:"+tenantID,
 	)
 	if err != nil {
 		s.logger.Warn("ResumeMission rewind: authz check failed",
@@ -1854,17 +1979,17 @@ func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, mission
 	}
 	if !ok {
 		return status_grpc.Errorf(codes.PermissionDenied,
-			"rewind requires mission#admin on mission %s", missionID)
+			"rewind requires admin on tenant %s", tenantID)
 	}
 	return nil
 }
 
 // emitRewindCompletedAudit emits the mission.rewind.completed audit
-// event (R16.6) immediately after the rewind path validates. The event
-// fires on intent (validated rewind request) rather than on the
-// post-completion edge — execution continues on the orchestrator side
-// and may produce its own per-step audit emissions.
-func (s *DaemonServer) emitRewindCompletedAudit(ctx context.Context, missionID, targetCheckpointID string) {
+// event (R16.6) after the rewind path validates and the orchestrator
+// has applied the idempotency contract. Carries both from_id (the
+// checkpoint the daemon was tracking pre-rewind) and to_id (the user-
+// chosen target).
+func (s *DaemonServer) emitRewindCompletedAudit(ctx context.Context, missionID, fromCheckpointID, toCheckpointID string) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	subject := ""
 	if id, err := auth.IdentityFromContext(ctx); err == nil {
@@ -1875,14 +2000,15 @@ func (s *DaemonServer) emitRewindCompletedAudit(ctx context.Context, missionID, 
 		"event_kind", "mission.rewind.completed",
 		"tenant_id", tenantID,
 		"mission_id", missionID,
-		"to_checkpoint_id", targetCheckpointID,
+		"from_checkpoint_id", fromCheckpointID,
+		"to_checkpoint_id", toCheckpointID,
 		"caller_subject", subject,
 	)
 
 	if s.tenantAdminAuditWriter != nil {
 		meta := fmt.Sprintf(
-			`{"mission_id":%q,"to_checkpoint_id":%q}`,
-			missionID, targetCheckpointID,
+			`{"mission_id":%q,"from_checkpoint_id":%q,"to_checkpoint_id":%q}`,
+			missionID, fromCheckpointID, toCheckpointID,
 		)
 		s.tenantAdminAuditWriter.Log(audit.Event{
 			TenantID:   tenantID,
@@ -1895,6 +2021,22 @@ func (s *DaemonServer) emitRewindCompletedAudit(ctx context.Context, missionID, 
 		})
 	}
 }
+
+// resolveLatestCheckpointID returns the most-recent checkpoint ID for
+// the given mission, or empty string when the lookup fails or the
+// mission has no checkpoints. Used as `from_checkpoint_id` in the
+// rewind audit envelope.
+func (s *DaemonServer) resolveLatestCheckpointID(ctx context.Context, missionID string) string {
+	checkpoints, err := s.daemon.GetMissionCheckpoints(ctx, missionID)
+	if err != nil || len(checkpoints) == 0 {
+		return ""
+	}
+	return checkpoints[0].CheckpointID
+}
+
+// applyRewindIdempotency / serverRewindEmitter live in mission_handlers.go
+// to keep the orchestrator import out of server.go's already-busy
+// import block. Spec: mission-checkpointing R6.3-R6.6, R16.4.
 
 // GetMissionHistory returns all runs for a mission name.
 func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetMissionHistoryRequest) (*daemonpb.GetMissionHistoryResponse, error) {

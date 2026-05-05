@@ -14,12 +14,21 @@
 // stack), tenant scoping via the per-tenant data-plane Pool is the
 // safety net.
 //
+// Phase 3B (this file) lands the byte-level surface — per-super-step
+// payload exposure, R14 secret redaction, R15 byte-level diff walk —
+// and stitches the orchestrator-side rewind path through to the
+// daemon's RewindMission method (Spec 4 R16.4). The `mission#viewer`
+// /`mission#admin` FGA gates remain on `tenant#member` /
+// `tenant#admin` until Phase 4C lands the model relations + tuple
+// writes; a follow-up edit then flips these checks.
+//
 // Spec: mission-checkpointing R13/R14/R15/R16, week-4-handlers-ui-e2e
 // §1 tasks 1-15.
 package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -29,7 +38,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zero-day-ai/gibson/internal/audit"
+	"github.com/zero-day-ai/gibson/internal/checkpoint"
+	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -51,9 +63,7 @@ const diffSizeLimitBytes = 10 * 1024 * 1024 // 10 MiB
 //
 // Backend: delegates to the existing daemon-layer `GetMissionCheckpoints`
 // which already enforces per-tenant Pool access. Pagination is applied
-// in-handler over the returned slice (the underlying store currently
-// returns at most one checkpoint per mission until the per-super-step
-// store wires up — see mission-checkpointing Phase 2A notes).
+// in-handler over the returned slice.
 //
 // Spec: mission-checkpointing R13.1, R13.2 (tenant scoping), R13.3, R13.4.
 func (s *DaemonServer) ListCheckpoints(
@@ -100,13 +110,12 @@ func (s *DaemonServer) ListCheckpoints(
 		end = len(checkpoints)
 	}
 
-	// Order: descending by default (newest first). The Order enum landed
-	// in v0.103.0 — explicit OLDEST_FIRST requests reverse the slice.
+	// Order: descending by default (newest first).
 	if req.GetOrder() == daemonpb.ListCheckpointsRequest_ORDER_OLDEST_FIRST {
 		// reverse copy
-		reversed := make([]checkpointDataView, len(checkpoints))
+		reversed := make([]CheckpointData, len(checkpoints))
 		for i, cp := range checkpoints {
-			reversed[len(checkpoints)-1-i] = toCheckpointDataView(cp)
+			reversed[len(checkpoints)-1-i] = cp
 		}
 		summaries := buildCheckpointSummaries(reversed[offset:end], req.GetMissionId())
 		nextToken := ""
@@ -120,11 +129,7 @@ func (s *DaemonServer) ListCheckpoints(
 		}, nil
 	}
 
-	page := make([]checkpointDataView, 0, end-offset)
-	for _, cp := range checkpoints[offset:end] {
-		page = append(page, toCheckpointDataView(cp))
-	}
-
+	page := checkpoints[offset:end]
 	summaries := buildCheckpointSummaries(page, req.GetMissionId())
 	nextToken := ""
 	if end < len(checkpoints) {
@@ -168,47 +173,53 @@ func (s *DaemonServer) GetCheckpoint(
 		return nil, err
 	}
 
-	checkpoints, err := s.daemon.GetMissionCheckpoints(ctx, req.GetMissionId())
-	if err != nil {
-		s.logger.Error("GetCheckpoint: backend lookup failed",
+	// Pull the rich per-super-step payload first; fall back to
+	// metadata-only if the per-super-step path is not wired.
+	payload, payloadErr := s.daemon.GetMissionCheckpointPayload(ctx, req.GetMissionId(), req.GetCheckpointId())
+	if payloadErr != nil {
+		if strings.Contains(payloadErr.Error(), "not found") {
+			return nil, status_grpc.Errorf(codes.NotFound,
+				"checkpoint %s not found for mission %s",
+				req.GetCheckpointId(), req.GetMissionId())
+		}
+		s.logger.Debug("GetCheckpoint: payload fetch failed, falling back to metadata path",
 			"mission_id", req.GetMissionId(),
 			"checkpoint_id", req.GetCheckpointId(),
-			"error", err,
+			"error", payloadErr,
 		)
-		if strings.Contains(err.Error(), "not found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "mission not found: %s", req.GetMissionId())
+	}
+	if payload == nil {
+		// Fallback: pull metadata only via the legacy path.
+		checkpoints, err := s.daemon.GetMissionCheckpoints(ctx, req.GetMissionId())
+		if err != nil {
+			s.logger.Error("GetCheckpoint: backend lookup failed",
+				"mission_id", req.GetMissionId(),
+				"checkpoint_id", req.GetCheckpointId(),
+				"error", err,
+			)
+			if strings.Contains(err.Error(), "not found") {
+				return nil, status_grpc.Errorf(codes.NotFound, "mission not found: %s", req.GetMissionId())
+			}
+			return nil, preserveStatus(err, "GetCheckpoint: backend lookup failed")
 		}
-		return nil, preserveStatus(err, "GetCheckpoint: backend lookup failed")
+		for i := range checkpoints {
+			if checkpoints[i].CheckpointID == req.GetCheckpointId() {
+				cp := checkpoints[i]
+				payload = &cp
+				break
+			}
+		}
 	}
 
-	var found *checkpointDataView
-	for _, cp := range checkpoints {
-		if cp.CheckpointID == req.GetCheckpointId() {
-			view := toCheckpointDataView(cp)
-			found = &view
-			break
-		}
-	}
-	if found == nil {
+	if payload == nil {
 		return nil, status_grpc.Errorf(codes.NotFound,
 			"checkpoint %s not found for mission %s",
 			req.GetCheckpointId(), req.GetMissionId())
 	}
 
-	summary := buildSingleCheckpointSummary(*found, req.GetMissionId())
-
-	// Build the proto Checkpoint shell. Working_memory / mission_memory
-	// remain nil here — the rich opaque-bytes path is wired up by the
-	// per-super-step ThreadedCheckpointer in Phase 2A; this handler
-	// surfaces the metadata-only shape that the dashboard's timeline
-	// + side-panel expects for the legacy mission-level checkpoint.
-	out := &daemonpb.Checkpoint{
-		Summary: summary,
-		// WorkingMemory / MissionMemory / Steps / Findings /
-		// ParallelGroups stay zero-valued: the legacy mission.Checkpoint
-		// does not surface those fields. The per-super-step store will
-		// populate them once wired through Phase 2A's ThreadedCheckpointer.
-	}
+	// Apply redaction unless caller is a platform_operator (R14.5).
+	redactSecrets := !s.callerIsPlatformOperator(ctx)
+	out := buildCheckpointProto(*payload, req.GetMissionId(), redactSecrets, req.GetIncludeBlobs())
 
 	// Audit emission (R14.6).
 	s.emitCheckpointReadAudit(ctx, req.GetMissionId(), req.GetCheckpointId(), req.GetIncludeBlobs())
@@ -217,10 +228,12 @@ func (s *DaemonServer) GetCheckpoint(
 }
 
 // DiffCheckpoints returns structured deltas between two checkpoints of
-// the same mission. Both checkpoints are loaded via the existing path,
-// then walked field-by-field; only differing fields produce deltas.
-// On overrun (>10 MiB serialized diff) the handler returns
-// codes.ResourceExhausted with the canonical client-side-fallback hint.
+// the same mission. Both checkpoints are loaded via the rich payload
+// path (with metadata fallback), then walked field-by-field; only
+// differing fields produce deltas. Secret-bearing values are redacted
+// for non-platform-operator callers (R15.6). On overrun (>10 MiB
+// serialized diff) the handler returns codes.ResourceExhausted with the
+// canonical client-side-fallback hint.
 //
 // Spec: mission-checkpointing R15.1–R15.6.
 func (s *DaemonServer) DiffCheckpoints(
@@ -238,21 +251,33 @@ func (s *DaemonServer) DiffCheckpoints(
 		return nil, err
 	}
 
-	// Load both checkpoints via the existing mission-checkpoints path.
-	// The loader is tenant-scoped through the daemon's per-tenant Pool.
-	checkpoints, err := s.daemon.GetMissionCheckpoints(ctx, req.GetMissionId())
-	if err != nil {
-		return nil, preserveStatus(err, "DiffCheckpoints: backend lookup failed")
+	a, aErr := s.daemon.GetMissionCheckpointPayload(ctx, req.GetMissionId(), req.GetCheckpointAId())
+	if aErr != nil && strings.Contains(aErr.Error(), "not found") {
+		return nil, status_grpc.Errorf(codes.NotFound, "checkpoint %s not found", req.GetCheckpointAId())
 	}
-	var a, b *checkpointDataView
-	for _, cp := range checkpoints {
-		switch cp.CheckpointID {
-		case req.GetCheckpointAId():
-			view := toCheckpointDataView(cp)
-			a = &view
-		case req.GetCheckpointBId():
-			view := toCheckpointDataView(cp)
-			b = &view
+	b, bErr := s.daemon.GetMissionCheckpointPayload(ctx, req.GetMissionId(), req.GetCheckpointBId())
+	if bErr != nil && strings.Contains(bErr.Error(), "not found") {
+		return nil, status_grpc.Errorf(codes.NotFound, "checkpoint %s not found", req.GetCheckpointBId())
+	}
+	// Fallback: when GetMissionCheckpointPayload returns nil with no error
+	// (e.g. dev/kind without rich path), use the legacy metadata view.
+	if a == nil || b == nil {
+		checkpoints, err := s.daemon.GetMissionCheckpoints(ctx, req.GetMissionId())
+		if err != nil {
+			return nil, preserveStatus(err, "DiffCheckpoints: backend lookup failed")
+		}
+		for i := range checkpoints {
+			cp := checkpoints[i]
+			switch cp.CheckpointID {
+			case req.GetCheckpointAId():
+				if a == nil {
+					a = &cp
+				}
+			case req.GetCheckpointBId():
+				if b == nil {
+					b = &cp
+				}
+			}
 		}
 	}
 	if a == nil {
@@ -262,31 +287,11 @@ func (s *DaemonServer) DiffCheckpoints(
 		return nil, status_grpc.Errorf(codes.NotFound, "checkpoint %s not found", req.GetCheckpointBId())
 	}
 
-	// Walk the metadata-level fields and emit deltas only for changed
-	// values. Working / mission memory deltas stay empty pending the
-	// Phase 2A per-super-step bytes path — same reason GetCheckpoint
-	// returns nil for those fields today.
-	diff := &daemonpb.CheckpointDiff{}
+	redactSecrets := !s.callerIsPlatformOperator(ctx)
+	diff := computeCheckpointDiff(*a, *b, redactSecrets)
 
-	if a.CompletedNodes != b.CompletedNodes ||
-		a.TotalNodes != b.TotalNodes ||
-		a.FindingsCount != b.FindingsCount ||
-		a.Version != b.Version {
-		// Encode the metadata change as a single MemoryKeyDelta with key
-		// "checkpoint:metadata" so the dashboard can render the
-		// completedness drift at minimum.
-		delta := &daemonpb.MemoryKeyDelta{
-			Key:    "checkpoint:metadata",
-			Op:     daemonpb.MemoryKeyDelta_OP_CHANGED,
-			Before: encodeMetadataLine(*a),
-			After:  encodeMetadataLine(*b),
-		}
-		diff.WorkingMemoryDeltas = append(diff.WorkingMemoryDeltas, delta)
-	}
-
-	// Size guard (R15.4). Compute the marshalled size and compare against
-	// the limit; on overrun, return the canonical hint so the dashboard
-	// flips to the client-side fallback path (R17.4 fallback clause).
+	// Size guard (R15.4). On overrun, return the canonical hint so the
+	// dashboard flips to the client-side fallback path.
 	if proto.Size(diff) > diffSizeLimitBytes {
 		return nil, status_grpc.Errorf(codes.ResourceExhausted,
 			"diff exceeds %d bytes; use GetCheckpoint and diff client-side", diffSizeLimitBytes)
@@ -297,17 +302,14 @@ func (s *DaemonServer) DiffCheckpoints(
 
 // requireMissionViewer enforces mission-scoped FGA. When the daemon's
 // FGA Authorizer is wired, the caller subject is checked against the
-// `viewer` relation on the mission object. When no Authorizer is
+// `viewer` relation on the mission's tenant. When no Authorizer is
 // configured (dev / kind without FGA), the per-tenant Pool's tenant-id
-// scoping is the implicit guard — we accept the request and rely on the
-// downstream backend to fail closed if cross-tenant access is attempted.
+// scoping is the implicit guard.
 //
-// `mission#viewer` cascades from `tenant#member` via the `belongs_to`
-// relation declared in model.fga, so every tenant member can read every
-// mission in their tenant by default. Per-mission user grants (e.g.
-// "share with this user") layer on top via direct viewer tuples.
+// NOTE: until Phase 4C lands `mission#viewer` in the FGA model and
+// writes the corresponding tuples, this falls back to `tenant#member`.
 //
-// Spec: mission-checkpointing R13.2, R14.2, R17.1.
+// Spec: mission-checkpointing R13.2, R14.2.
 func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcName string) error {
 	id, idErr := auth.IdentityFromContext(ctx)
 	if idErr != nil {
@@ -329,13 +331,12 @@ func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcN
 		return nil
 	}
 
-	// Mission-scoped viewer check. The relation cascades from tenant#member
-	// via the mission's `belongs_to` tuple, so a tenant member who has not
-	// been explicitly removed from the mission still passes this check.
+	// Tenant-scoped viewer check. Phase 4C will switch this to
+	// mission#viewer once the FGA model carries the relation.
 	ok, err := s.authorizer.Check(ctx,
 		"user:"+id.Subject,
-		"viewer",
-		"mission:"+missionID,
+		"member",
+		"tenant:"+tenantID,
 	)
 	if err != nil {
 		s.logger.Warn(rpcName+": authz check failed",
@@ -347,9 +348,33 @@ func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcN
 	}
 	if !ok {
 		return status_grpc.Errorf(codes.PermissionDenied,
-			"caller is not a viewer of mission %s", missionID)
+			"caller is not a member of tenant %s", tenantID)
 	}
 	return nil
+}
+
+// callerIsPlatformOperator reports whether the request context carries
+// a platform_operator identity. Used to bypass secret redaction (R14.5
+// final clause). When the authorizer is not wired, returns false (fail
+// closed — non-operator) so dev/kind never accidentally surfaces
+// plaintext secrets to a viewer subject.
+func (s *DaemonServer) callerIsPlatformOperator(ctx context.Context) bool {
+	if s.authorizer == nil {
+		return false
+	}
+	id, err := auth.IdentityFromContext(ctx)
+	if err != nil || id.Subject == "" {
+		return false
+	}
+	ok, err := s.authorizer.Check(ctx,
+		"user:"+id.Subject,
+		"platform_operator",
+		"system_tenant:_system",
+	)
+	if err != nil {
+		return false
+	}
+	return ok
 }
 
 // emitCheckpointReadAudit emits a `checkpoint.read` audit envelope on
@@ -371,7 +396,6 @@ func (s *DaemonServer) emitCheckpointReadAudit(ctx context.Context, missionID, c
 		"include_blobs", includeBlobs,
 	)
 
-	// When a Postgres-backed audit writer is wired, also emit there.
 	if s.tenantAdminAuditWriter != nil {
 		meta := fmt.Sprintf(
 			`{"mission_id":%q,"checkpoint_id":%q,"include_blobs":%t}`,
@@ -389,33 +413,13 @@ func (s *DaemonServer) emitCheckpointReadAudit(ctx context.Context, missionID, c
 	}
 }
 
-// checkpointDataView is a local shaping struct that bridges between the
-// internal `api.CheckpointData` value object and the proto wire types,
-// without forcing additional fields onto the public CheckpointData.
-type checkpointDataView struct {
-	CheckpointID   string
-	CreatedAt      int64 // Unix seconds
-	CompletedNodes int
-	TotalNodes     int
-	FindingsCount  int
-	Version        int
-}
+// ────────────────────────────────────────────────────────────────────────
+// Proto-shape builders
+// ────────────────────────────────────────────────────────────────────────
 
-// toCheckpointDataView converts an api.CheckpointData to the local view.
-func toCheckpointDataView(cp CheckpointData) checkpointDataView {
-	return checkpointDataView{
-		CheckpointID:   cp.CheckpointID,
-		CreatedAt:      cp.CreatedAt,
-		CompletedNodes: cp.CompletedNodes,
-		TotalNodes:     cp.TotalNodes,
-		FindingsCount:  cp.FindingsCount,
-		Version:        cp.Version,
-	}
-}
-
-// buildCheckpointSummaries lifts each view to a proto CheckpointSummary
-// the dashboard timeline can render.
-func buildCheckpointSummaries(views []checkpointDataView, missionID string) []*daemonpb.CheckpointSummary {
+// buildCheckpointSummaries lifts each CheckpointData to a proto
+// CheckpointSummary the dashboard timeline can render.
+func buildCheckpointSummaries(views []CheckpointData, missionID string) []*daemonpb.CheckpointSummary {
 	out := make([]*daemonpb.CheckpointSummary, 0, len(views))
 	for _, v := range views {
 		out = append(out, buildSingleCheckpointSummary(v, missionID))
@@ -424,18 +428,80 @@ func buildCheckpointSummaries(views []checkpointDataView, missionID string) []*d
 }
 
 // buildSingleCheckpointSummary produces the proto summary for one view.
-// Source defaults to CHECKPOINT_SOURCE_SUPER_STEP — the legacy
-// mission-level checkpoint is super-step-aligned in practice. When the
-// per-super-step store wires up, source will reflect the actual cadence
-// (parallel-group / approval-gate / shutdown / manual).
-func buildSingleCheckpointSummary(v checkpointDataView, missionID string) *daemonpb.CheckpointSummary {
+// Source defaults to CHECKPOINT_SOURCE_SUPER_STEP when the backend's
+// Source string is empty.
+func buildSingleCheckpointSummary(v CheckpointData, missionID string) *daemonpb.CheckpointSummary {
 	return &daemonpb.CheckpointSummary{
-		CheckpointId: v.CheckpointID,
-		MissionId:    missionID,
-		SuperStep:    int64(v.Version),
-		CapturedAt:   timestampFromUnix(v.CreatedAt),
-		Source:       daemonpb.CheckpointSource_CHECKPOINT_SOURCE_SUPER_STEP,
+		CheckpointId:        v.CheckpointID,
+		MissionId:           missionID,
+		SuperStep:           int64(v.Version),
+		CapturedAt:          timestampFromUnix(v.CreatedAt),
+		SizeBytes:           v.SizeBytes,
+		Source:              checkpointSourceFromString(v.Source),
+		InFlightIdempotency: idempotencyFromString(v.InFlightIdempotency),
+		ParallelGroupId:     v.ParallelGroupID,
 	}
+}
+
+// buildCheckpointProto produces the full Checkpoint proto from a
+// CheckpointData payload. Applies secret redaction to working/mission
+// memory bytes when redactSecrets is true.
+func buildCheckpointProto(v CheckpointData, missionID string, redactSecrets, includeBlobs bool) *daemonpb.Checkpoint {
+	out := &daemonpb.Checkpoint{
+		Summary: buildSingleCheckpointSummary(v, missionID),
+	}
+	if redactSecrets {
+		out.WorkingMemory = checkpoint.RedactSecretsInJSONBytes(v.WorkingMemory)
+		out.MissionMemory = checkpoint.RedactSecretsInJSONBytes(v.MissionMemory)
+	} else {
+		out.WorkingMemory = v.WorkingMemory
+		out.MissionMemory = v.MissionMemory
+	}
+
+	for _, step := range v.DagSteps {
+		ds := &daemonpb.DagStep{
+			NodeId:     step.NodeID,
+			State:      step.State,
+			StartedAt:  timestampFromUnix(step.StartedAtUnix),
+			FinishedAt: timestampFromUnix(step.FinishedAtUnix),
+		}
+		if includeBlobs {
+			if redactSecrets {
+				ds.Inputs = checkpoint.RedactSecretsInJSONBytes(step.Inputs)
+				ds.Outputs = checkpoint.RedactSecretsInJSONBytes(step.Outputs)
+			} else {
+				ds.Inputs = step.Inputs
+				ds.Outputs = step.Outputs
+			}
+		}
+		out.Steps = append(out.Steps, ds)
+	}
+
+	for _, f := range v.FindingSnapshots {
+		fs := &daemonpb.FindingSnapshot{
+			FindingId: f.FindingID,
+			Severity:  f.Severity,
+			Payload:   f.Payload,
+		}
+		if redactSecrets {
+			fs.Payload = checkpoint.RedactSecretsInJSONBytes(fs.Payload)
+		}
+		out.Findings = append(out.Findings, fs)
+	}
+
+	if len(v.ParallelGroups) > 0 {
+		out.ParallelGroups = make(map[string]*daemonpb.ParallelGroupState, len(v.ParallelGroups))
+		for gid, g := range v.ParallelGroups {
+			out.ParallelGroups[gid] = &daemonpb.ParallelGroupState{
+				GroupId:          g.GroupID,
+				Expected:         g.Expected,
+				Completed:        g.Completed,
+				CompletedNodeIds: g.CompletedNodeIDs,
+			}
+		}
+	}
+
+	return out
 }
 
 // timestampFromUnix builds a *timestamppb.Timestamp from a Unix-seconds
@@ -447,11 +513,428 @@ func timestampFromUnix(seconds int64) *timestamppb.Timestamp {
 	return &timestamppb.Timestamp{Seconds: seconds}
 }
 
+// checkpointSourceFromString maps the daemon's snake-case `source`
+// string to the proto enum.
+func checkpointSourceFromString(src string) daemonpb.CheckpointSource {
+	switch src {
+	case "super_step":
+		return daemonpb.CheckpointSource_CHECKPOINT_SOURCE_SUPER_STEP
+	case "approval_gate":
+		return daemonpb.CheckpointSource_CHECKPOINT_SOURCE_APPROVAL_GATE
+	case "graceful_shutdown":
+		return daemonpb.CheckpointSource_CHECKPOINT_SOURCE_GRACEFUL_SHUTDOWN
+	case "parallel_group":
+		return daemonpb.CheckpointSource_CHECKPOINT_SOURCE_PARALLEL_GROUP
+	case "manual":
+		return daemonpb.CheckpointSource_CHECKPOINT_SOURCE_MANUAL
+	case "":
+		// Empty falls back to super-step at the legacy path.
+		return daemonpb.CheckpointSource_CHECKPOINT_SOURCE_SUPER_STEP
+	}
+	return daemonpb.CheckpointSource_CHECKPOINT_SOURCE_UNSPECIFIED
+}
+
+// idempotencyFromString maps the daemon's idempotency mode string to
+// the proto enum.
+func idempotencyFromString(s string) manifestpb.ToolIdempotency {
+	switch s {
+	case "AT_MOST_ONCE":
+		return manifestpb.ToolIdempotency_TOOL_IDEMPOTENCY_AT_MOST_ONCE
+	case "AT_LEAST_ONCE":
+		return manifestpb.ToolIdempotency_TOOL_IDEMPOTENCY_AT_LEAST_ONCE
+	case "EXACTLY_ONCE":
+		return manifestpb.ToolIdempotency_TOOL_IDEMPOTENCY_EXACTLY_ONCE
+	}
+	return manifestpb.ToolIdempotency_TOOL_IDEMPOTENCY_UNSPECIFIED
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Diff walker (R15)
+// ────────────────────────────────────────────────────────────────────────
+
+// computeCheckpointDiff walks two CheckpointData payloads and emits a
+// per-domain CheckpointDiff. Memory deltas are computed by parsing the
+// JSON-encoded working/mission memory bytes; non-JSON bytes are
+// compared byte-for-byte and emitted as a single "<opaque>" delta.
+// DagStepDeltas are computed by node ID; FindingDeltas by finding ID;
+// ParallelGroupDeltas by group ID. Secret redaction is applied when
+// redactSecrets is true.
+func computeCheckpointDiff(a, b CheckpointData, redactSecrets bool) *daemonpb.CheckpointDiff {
+	diff := &daemonpb.CheckpointDiff{}
+
+	diff.WorkingMemoryDeltas = diffMemoryBytes(a.WorkingMemory, b.WorkingMemory, redactSecrets)
+	diff.MissionMemoryDeltas = diffMemoryBytes(a.MissionMemory, b.MissionMemory, redactSecrets)
+	diff.DagStepDeltas = diffDagSteps(a.DagSteps, b.DagSteps)
+	diff.FindingDeltas = diffFindings(a.FindingSnapshots, b.FindingSnapshots)
+	diff.ParallelGroupDeltas = diffParallelGroups(a.ParallelGroups, b.ParallelGroups)
+
+	// Always emit a metadata-level fallback delta when no rich-payload
+	// deltas were produced and the metadata diverges. Keeps the
+	// dashboard's diff view useful on the metadata-only fallback path.
+	if len(diff.WorkingMemoryDeltas) == 0 && len(diff.MissionMemoryDeltas) == 0 &&
+		len(diff.DagStepDeltas) == 0 && len(diff.FindingDeltas) == 0 &&
+		len(diff.ParallelGroupDeltas) == 0 &&
+		(a.CompletedNodes != b.CompletedNodes ||
+			a.TotalNodes != b.TotalNodes ||
+			a.FindingsCount != b.FindingsCount ||
+			a.Version != b.Version) {
+		diff.WorkingMemoryDeltas = append(diff.WorkingMemoryDeltas, &daemonpb.MemoryKeyDelta{
+			Key:    "checkpoint:metadata",
+			Op:     daemonpb.MemoryKeyDelta_OP_CHANGED,
+			Before: encodeMetadataLine(a),
+			After:  encodeMetadataLine(b),
+		})
+	}
+
+	return diff
+}
+
+// diffMemoryBytes parses a/b as JSON maps and emits per-key deltas. If
+// either side fails to parse, falls back to a single "<opaque>" delta.
+func diffMemoryBytes(a, b []byte, redactSecrets bool) []*daemonpb.MemoryKeyDelta {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	var aMap, bMap map[string]any
+	aOk := json.Unmarshal(a, &aMap) == nil && aMap != nil
+	bOk := json.Unmarshal(b, &bMap) == nil && bMap != nil
+	if !aOk || !bOk {
+		// Opaque path — neither side parses, so emit a single byte-level
+		// delta when the bytes differ.
+		if equalBytes(a, b) {
+			return nil
+		}
+		before, after := a, b
+		if redactSecrets {
+			before = checkpoint.RedactSecretsInJSONBytes(before)
+			after = checkpoint.RedactSecretsInJSONBytes(after)
+		}
+		return []*daemonpb.MemoryKeyDelta{{
+			Key:    "bytes:opaque",
+			Op:     daemonpb.MemoryKeyDelta_OP_CHANGED,
+			Before: before,
+			After:  after,
+		}}
+	}
+
+	// Walk the union of keys, emit ADDED / REMOVED / CHANGED.
+	keys := make(map[string]struct{}, len(aMap)+len(bMap))
+	for k := range aMap {
+		keys[k] = struct{}{}
+	}
+	for k := range bMap {
+		keys[k] = struct{}{}
+	}
+	out := make([]*daemonpb.MemoryKeyDelta, 0, len(keys))
+	placeholder := []byte(`"` + checkpoint.RedactedPlaceholder + `"`)
+	for k := range keys {
+		av, aHas := aMap[k]
+		bv, bHas := bMap[k]
+		switch {
+		case !aHas && bHas:
+			afterBytes := jsonBytesOf(bv)
+			if redactSecrets && checkpoint.IsSecretKey(k) {
+				afterBytes = placeholder
+			}
+			out = append(out, &daemonpb.MemoryKeyDelta{
+				Key:   k,
+				Op:    daemonpb.MemoryKeyDelta_OP_ADDED,
+				After: afterBytes,
+			})
+		case aHas && !bHas:
+			beforeBytes := jsonBytesOf(av)
+			if redactSecrets && checkpoint.IsSecretKey(k) {
+				beforeBytes = placeholder
+			}
+			out = append(out, &daemonpb.MemoryKeyDelta{
+				Key:    k,
+				Op:     daemonpb.MemoryKeyDelta_OP_REMOVED,
+				Before: beforeBytes,
+			})
+		case aHas && bHas:
+			ab := jsonBytesOf(av)
+			bb := jsonBytesOf(bv)
+			if equalBytes(ab, bb) {
+				continue
+			}
+			if redactSecrets && checkpoint.IsSecretKey(k) {
+				ab = placeholder
+				bb = placeholder
+			}
+			out = append(out, &daemonpb.MemoryKeyDelta{
+				Key:    k,
+				Op:     daemonpb.MemoryKeyDelta_OP_CHANGED,
+				Before: ab,
+				After:  bb,
+			})
+		}
+	}
+	return out
+}
+
+// diffDagSteps compares DAG step snapshots by node ID.
+func diffDagSteps(a, b []DagStepData) []*daemonpb.DagStepDelta {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	aIdx := make(map[string]DagStepData, len(a))
+	for _, s := range a {
+		aIdx[s.NodeID] = s
+	}
+	bIdx := make(map[string]DagStepData, len(b))
+	for _, s := range b {
+		bIdx[s.NodeID] = s
+	}
+	keys := make(map[string]struct{}, len(aIdx)+len(bIdx))
+	for k := range aIdx {
+		keys[k] = struct{}{}
+	}
+	for k := range bIdx {
+		keys[k] = struct{}{}
+	}
+	out := make([]*daemonpb.DagStepDelta, 0, len(keys))
+	for k := range keys {
+		as, aOk := aIdx[k]
+		bs, bOk := bIdx[k]
+		switch {
+		case !aOk && bOk:
+			out = append(out, &daemonpb.DagStepDelta{
+				NodeId: k,
+				Op:     daemonpb.DagStepDelta_OP_ADDED,
+				After:  encodeDagStepBytes(bs),
+			})
+		case aOk && !bOk:
+			out = append(out, &daemonpb.DagStepDelta{
+				NodeId: k,
+				Op:     daemonpb.DagStepDelta_OP_REMOVED,
+				Before: encodeDagStepBytes(as),
+			})
+		case aOk && bOk:
+			if dagStepEqual(as, bs) {
+				continue
+			}
+			out = append(out, &daemonpb.DagStepDelta{
+				NodeId: k,
+				Op:     daemonpb.DagStepDelta_OP_CHANGED,
+				Before: encodeDagStepBytes(as),
+				After:  encodeDagStepBytes(bs),
+			})
+		}
+	}
+	return out
+}
+
+// diffFindings compares finding snapshots by finding ID. Findings are
+// considered "changed" if their severity or payload differ.
+func diffFindings(a, b []FindingSnapshotData) []*daemonpb.FindingDelta {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	aIdx := make(map[string]FindingSnapshotData, len(a))
+	for _, f := range a {
+		aIdx[f.FindingID] = f
+	}
+	bIdx := make(map[string]FindingSnapshotData, len(b))
+	for _, f := range b {
+		bIdx[f.FindingID] = f
+	}
+	keys := make(map[string]struct{}, len(aIdx)+len(bIdx))
+	for k := range aIdx {
+		keys[k] = struct{}{}
+	}
+	for k := range bIdx {
+		keys[k] = struct{}{}
+	}
+	out := make([]*daemonpb.FindingDelta, 0, len(keys))
+	for k := range keys {
+		af, aOk := aIdx[k]
+		bf, bOk := bIdx[k]
+		switch {
+		case !aOk && bOk:
+			out = append(out, &daemonpb.FindingDelta{
+				FindingId: k,
+				Op:        daemonpb.FindingDelta_OP_ADDED,
+				After:     encodeFindingBytes(bf),
+			})
+		case aOk && !bOk:
+			out = append(out, &daemonpb.FindingDelta{
+				FindingId: k,
+				Op:        daemonpb.FindingDelta_OP_REMOVED,
+				Before:    encodeFindingBytes(af),
+			})
+		case aOk && bOk:
+			if findingEqual(af, bf) {
+				continue
+			}
+			out = append(out, &daemonpb.FindingDelta{
+				FindingId: k,
+				Op:        daemonpb.FindingDelta_OP_CHANGED,
+				Before:    encodeFindingBytes(af),
+				After:     encodeFindingBytes(bf),
+			})
+		}
+	}
+	return out
+}
+
+// diffParallelGroups compares the per-group barrier state.
+func diffParallelGroups(a, b map[string]ParallelGroupStateData) []*daemonpb.ParallelGroupDelta {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	keys := make(map[string]struct{}, len(a)+len(b))
+	for k := range a {
+		keys[k] = struct{}{}
+	}
+	for k := range b {
+		keys[k] = struct{}{}
+	}
+	out := make([]*daemonpb.ParallelGroupDelta, 0, len(keys))
+	for k := range keys {
+		ag, aOk := a[k]
+		bg, bOk := b[k]
+		switch {
+		case !aOk && bOk:
+			out = append(out, &daemonpb.ParallelGroupDelta{
+				GroupId: k,
+				Op:      daemonpb.ParallelGroupDelta_OP_ADDED,
+				After:   encodeParallelGroupBytes(bg),
+			})
+		case aOk && !bOk:
+			out = append(out, &daemonpb.ParallelGroupDelta{
+				GroupId: k,
+				Op:      daemonpb.ParallelGroupDelta_OP_REMOVED,
+				Before:  encodeParallelGroupBytes(ag),
+			})
+		case aOk && bOk:
+			if parallelGroupEqual(ag, bg) {
+				continue
+			}
+			out = append(out, &daemonpb.ParallelGroupDelta{
+				GroupId: k,
+				Op:      daemonpb.ParallelGroupDelta_OP_CHANGED,
+				Before:  encodeParallelGroupBytes(ag),
+				After:   encodeParallelGroupBytes(bg),
+			})
+		}
+	}
+	return out
+}
+
+// jsonBytesOf marshals an interface{} to its JSON-bytes form. Returns
+// `null` on marshal failure.
+func jsonBytesOf(v any) []byte {
+	out, err := json.Marshal(v)
+	if err != nil {
+		return []byte("null")
+	}
+	return out
+}
+
+func equalBytes(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func dagStepEqual(a, b DagStepData) bool {
+	return a.NodeID == b.NodeID &&
+		a.State == b.State &&
+		a.StartedAtUnix == b.StartedAtUnix &&
+		a.FinishedAtUnix == b.FinishedAtUnix &&
+		a.RetryCount == b.RetryCount &&
+		a.Error == b.Error &&
+		equalBytes(a.Inputs, b.Inputs) &&
+		equalBytes(a.Outputs, b.Outputs)
+}
+
+func findingEqual(a, b FindingSnapshotData) bool {
+	return a.FindingID == b.FindingID &&
+		a.Severity == b.Severity &&
+		a.Title == b.Title &&
+		a.NodeID == b.NodeID &&
+		equalBytes(a.Payload, b.Payload)
+}
+
+func parallelGroupEqual(a, b ParallelGroupStateData) bool {
+	if a.GroupID != b.GroupID || a.Expected != b.Expected || a.Completed != b.Completed {
+		return false
+	}
+	if len(a.CompletedNodeIDs) != len(b.CompletedNodeIDs) {
+		return false
+	}
+	for i := range a.CompletedNodeIDs {
+		if a.CompletedNodeIDs[i] != b.CompletedNodeIDs[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// encodeDagStepBytes produces a JSON-encoded summary of a DAG step
+// snapshot, used as the before/after byte payload on a DagStepDelta.
+func encodeDagStepBytes(s DagStepData) []byte {
+	body, _ := json.Marshal(struct {
+		NodeID         string `json:"node_id"`
+		State          string `json:"state"`
+		StartedAtUnix  int64  `json:"started_at,omitempty"`
+		FinishedAtUnix int64  `json:"finished_at,omitempty"`
+		RetryCount     int32  `json:"retry_count,omitempty"`
+		Error          string `json:"error,omitempty"`
+	}{
+		NodeID:         s.NodeID,
+		State:          s.State,
+		StartedAtUnix:  s.StartedAtUnix,
+		FinishedAtUnix: s.FinishedAtUnix,
+		RetryCount:     s.RetryCount,
+		Error:          s.Error,
+	})
+	return body
+}
+
+// encodeFindingBytes produces a JSON-encoded summary of a finding row.
+func encodeFindingBytes(f FindingSnapshotData) []byte {
+	body, _ := json.Marshal(struct {
+		FindingID string `json:"finding_id"`
+		Severity  string `json:"severity"`
+		Title     string `json:"title,omitempty"`
+		NodeID    string `json:"node_id,omitempty"`
+	}{
+		FindingID: f.FindingID,
+		Severity:  f.Severity,
+		Title:     f.Title,
+		NodeID:    f.NodeID,
+	})
+	return body
+}
+
+// encodeParallelGroupBytes produces a JSON-encoded summary of a
+// parallel-group barrier state row.
+func encodeParallelGroupBytes(g ParallelGroupStateData) []byte {
+	body, _ := json.Marshal(struct {
+		GroupID          string   `json:"group_id"`
+		Expected         int32    `json:"expected"`
+		Completed        int32    `json:"completed"`
+		CompletedNodeIDs []string `json:"completed_node_ids,omitempty"`
+	}{
+		GroupID:          g.GroupID,
+		Expected:         g.Expected,
+		Completed:        g.Completed,
+		CompletedNodeIDs: g.CompletedNodeIDs,
+	})
+	return body
+}
+
 // encodeMetadataLine produces a deterministic, human-readable byte line
-// summarising a checkpoint's metadata fields. Used as Before/After
-// payloads on a metadata-level MemoryKeyDelta until per-field memory
-// bytes are wired through the per-super-step store.
-func encodeMetadataLine(v checkpointDataView) []byte {
+// summarising a checkpoint's metadata fields. Used as the
+// fallback-path "metadata-only" delta payload.
+func encodeMetadataLine(v CheckpointData) []byte {
 	return []byte(fmt.Sprintf(
 		"checkpoint=%s super_step=%d completed=%d total=%d findings=%d",
 		v.CheckpointID, v.Version, v.CompletedNodes, v.TotalNodes, v.FindingsCount,
@@ -483,6 +966,76 @@ func parseListOffsetToken(token string) int {
 	return n
 }
 
+// applyRewindIdempotency runs the orchestrator-side rewind dispatcher
+// for the in-flight tool captured at the target checkpoint. When the
+// target carries no in-flight tool, this is a no-op. Emits per-tool
+// `mission.rewind.tool_cancelled` audit hints. Returns a
+// FailedPrecondition gRPC error when the contract demands FailMission
+// (EXACTLY_ONCE without resumption token).
+//
+// Spec: mission-checkpointing R6.3-R6.6, R16.4.
+func (s *DaemonServer) applyRewindIdempotency(ctx context.Context, missionID, targetCheckpointID string) error {
+	payload, err := s.daemon.GetMissionCheckpointPayload(ctx, missionID, targetCheckpointID)
+	if err != nil || payload == nil {
+		// Best effort — without payload visibility, fall through and let
+		// the orchestrator's resume loop apply default semantics.
+		return nil
+	}
+	if payload.InFlightNodeID == "" {
+		// Nothing was in flight at the target; resume cleanly.
+		return nil
+	}
+	dispatcher := orchestrator.NewRewindDispatcher(&serverRewindEmitter{server: s, ctx: ctx})
+	tool := orchestrator.InFlightTool{
+		NodeID:          payload.InFlightNodeID,
+		ResumptionToken: payload.ResumptionToken,
+		Idempotency:     orchestrator.ResolveIdempotencyFromString(payload.InFlightIdempotency),
+	}
+	if rerr := dispatcher.Rewind(ctx, missionID, []orchestrator.InFlightTool{tool}); rerr != nil {
+		return status_grpc.Errorf(codes.FailedPrecondition, "rewind blocked by idempotency contract: %v", rerr)
+	}
+	return nil
+}
+
+// serverRewindEmitter implements orchestrator.RewindEmitter against
+// the DaemonServer's audit writer + structured logger.
+type serverRewindEmitter struct {
+	server *DaemonServer
+	ctx    context.Context
+}
+
+func (e *serverRewindEmitter) OnToolDispatch(_ context.Context, missionID, nodeID string, mode manifestpb.ToolIdempotency, action orchestrator.IdempotencyAction) {
+	tenantID := auth.TenantStringFromContext(e.ctx)
+	subject := ""
+	if id, err := auth.IdentityFromContext(e.ctx); err == nil {
+		subject = id.Subject
+	}
+	e.server.logger.Info("audit: mission.rewind.tool_cancelled",
+		"event_kind", "mission.rewind.tool_cancelled",
+		"tenant_id", tenantID,
+		"mission_id", missionID,
+		"node_id", nodeID,
+		"idempotency_mode", mode.String(),
+		"action", action.String(),
+		"caller_subject", subject,
+	)
+	if e.server.tenantAdminAuditWriter != nil {
+		meta := fmt.Sprintf(
+			`{"mission_id":%q,"node_id":%q,"idempotency_mode":%q,"action":%q}`,
+			missionID, nodeID, mode.String(), action.String(),
+		)
+		e.server.tenantAdminAuditWriter.Log(audit.Event{
+			TenantID:   tenantID,
+			ActorID:    subject,
+			ActorType:  "user",
+			Action:     "mission.rewind.tool_cancelled",
+			TargetType: "mission",
+			TargetID:   missionID,
+			Metadata:   []byte(meta),
+		})
+	}
+}
+
 // formatListOffsetToken encodes a page-end offset.
 func formatListOffsetToken(offset int) string {
 	if offset <= 0 {
@@ -495,4 +1048,3 @@ func formatListOffsetToken(offset int) string {
 	}
 	return "offset:" + string(digits)
 }
-

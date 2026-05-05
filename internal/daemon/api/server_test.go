@@ -31,6 +31,8 @@ type mockDaemon struct {
 	resumeMissionFn           func(ctx context.Context, missionID string) (<-chan MissionEventData, error)
 	getMissionHistoryFn       func(ctx context.Context, name string, limit int, offset int) ([]MissionRunData, int, error)
 	getMissionCheckpointsFn   func(ctx context.Context, missionID string) ([]CheckpointData, error)
+	getCheckpointPayloadFn    func(ctx context.Context, missionID, checkpointID string) (*CheckpointData, error)
+	rewindMissionFn           func(ctx context.Context, missionID, targetCheckpointID string) (string, error)
 	buildComponentFn          func(ctx context.Context, kind string, name string) (BuildComponentResult, error)
 	showComponentFn           func(ctx context.Context, kind string, name string) (ComponentInfoInternal, error)
 	getComponentLogsFn        func(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan LogEntryData, error)
@@ -149,6 +151,20 @@ func (m *mockDaemon) GetMissionCheckpoints(ctx context.Context, missionID string
 		return m.getMissionCheckpointsFn(ctx, missionID)
 	}
 	return nil, nil
+}
+
+func (m *mockDaemon) GetMissionCheckpointPayload(ctx context.Context, missionID, checkpointID string) (*CheckpointData, error) {
+	if m.getCheckpointPayloadFn != nil {
+		return m.getCheckpointPayloadFn(ctx, missionID, checkpointID)
+	}
+	return nil, nil
+}
+
+func (m *mockDaemon) RewindMission(ctx context.Context, missionID, targetCheckpointID string) (string, error) {
+	if m.rewindMissionFn != nil {
+		return m.rewindMissionFn(ctx, missionID, targetCheckpointID)
+	}
+	return "", nil
 }
 
 func (m *mockDaemon) BuildComponent(ctx context.Context, kind string, name string) (BuildComponentResult, error) {

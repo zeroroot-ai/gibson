@@ -155,6 +155,12 @@ func (n nilDaemonStub) GetMissionHistory(_ context.Context, _ string, _, _ int) 
 func (n nilDaemonStub) GetMissionCheckpoints(_ context.Context, _ string) ([]CheckpointData, error) {
 	return nil, nil
 }
+func (n nilDaemonStub) GetMissionCheckpointPayload(_ context.Context, _, _ string) (*CheckpointData, error) {
+	return nil, nil
+}
+func (n nilDaemonStub) RewindMission(_ context.Context, _, _ string) (string, error) {
+	return "", nil
+}
 func (n nilDaemonStub) BuildComponent(_ context.Context, _, _ string) (BuildComponentResult, error) {
 	return BuildComponentResult{}, nil
 }
