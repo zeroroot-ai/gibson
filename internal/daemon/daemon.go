@@ -1384,9 +1384,23 @@ func (d *daemonImpl) initPlatformPostgres(ctx context.Context) {
 		"max_conns", pgCfg.MaxConns,
 	)
 
-	// Schema migrations for provisioning tables now live in the standalone
-	// gibson-tenant-operator. The daemon simply relies on whatever schema
-	// the operator has provisioned.
+	// Spec gibson-postgres-migrations Requirement 5: assert
+	// schema_migrations.version >= embedded MAX before serving
+	// traffic. Catches schema/binary skew (chart upgraded but the
+	// platform-db-migrate Job hasn't run yet). devMode downgrades
+	// to a warning so local-dev tooling without a real platform DB
+	// can boot.
+	if err := assertPlatformSchemaVersion(ctx, db, d.logger.Slog()); err != nil {
+		d.logger.Error(ctx, "platform schema gate failed (set --dev-mode to bypass)",
+			"error", err)
+		_ = db.Close()
+		// platformDB stays nil; the dashboard's per-tenant
+		// data-plane resolver will fail loudly per existing
+		// FailedPrecondition behaviour rather than 500ing
+		// silently. Spec design Component 7.
+		return
+	}
+
 	d.platformDB = db
 
 }

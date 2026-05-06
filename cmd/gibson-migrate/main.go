@@ -73,6 +73,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return cmdStatus(ctx, rest, stdout, stderr)
 	case "down":
 		return cmdDown(ctx, rest, stdout, stderr)
+	case "platform":
+		// `gibson-migrate platform {up|down|status}` operates on the
+		// dashboard / control-plane Postgres DB via the embedded
+		// platform migration set. Spec gibson-postgres-migrations
+		// Requirement 2.4 + design Component 3.
+		return runPlatform(ctx, rest, stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0

@@ -1,17 +1,16 @@
 // Package migrations provides the embedded schema migration files for the
 // Gibson daemon and the gibson-migrate CLI.
 //
-// Postgres migration files live under migrations/postgres/*.up.sql and
-// migrations/postgres/*.down.sql. Neo4j migration files live under
-// migrations/neo4j/*.up.cypher and migrations/neo4j/*.down.cypher.
+// Neo4j migration files live under migrations/neo4j/*.up.cypher and
+// migrations/neo4j/*.down.cypher.
 //
-// Migration files are authored by Phase D (tasks 4.8/4.9). Until Phase D
-// lands, the Postgres set contains only the initial credentials table
-// (001_credentials.up.sql authored by Phase C) and the Neo4j set is empty
-// (placeholder .gitkeep). Callers that call LatestPostgresVersion or
-// LatestNeo4jVersion receive 0 when no files matching the pattern exist.
+// Postgres migrations have moved to github.com/zero-day-ai/gibson/pkg/platform/migrations
+// per spec gibson-postgres-migrations — they are split into per-tenant and
+// platform sets there. The Neo4j path stays here until a follow-on spec
+// applies the same treatment.
 //
-// Spec: database-per-tenant-data-plane, Phase G.
+// Spec: database-per-tenant-data-plane, Phase G; gibson-postgres-migrations
+// (Postgres extraction).
 package migrations
 
 import (
@@ -23,24 +22,11 @@ import (
 	"strings"
 )
 
-// Postgres is the embedded FS for Postgres migration SQL files.
-// Paths inside the FS start with "postgres/".
-//
-//go:embed postgres
-var Postgres embed.FS
-
 // Neo4j is the embedded FS for Neo4j migration Cypher files.
 // Paths inside the FS start with "neo4j/".
 //
 //go:embed neo4j
 var Neo4j embed.FS
-
-// LatestPostgresVersion returns the highest version number present in the
-// embedded Postgres migration set (*.up.sql files). Returns 0 when no
-// migration files are available.
-func LatestPostgresVersion() (uint, error) {
-	return latestVersion(Postgres, "postgres", ".up.sql")
-}
 
 // LatestNeo4jVersion returns the highest version number present in the
 // embedded Neo4j migration set (*.up.cypher files). Returns 0 when no

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zero-day-ai/gibson/migrations"
+	pgmigrations "github.com/zero-day-ai/gibson/pkg/platform/migrations"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -62,7 +63,7 @@ func runCheckWithTenants(
 	reader migrationVersionReader,
 	tenantIDs []string,
 ) error {
-	latestPg, _ := migrations.LatestPostgresVersion()
+	latestPg, _ := pgmigrations.TenantMaxVersion()
 	latestNeo4j, _ := migrations.LatestNeo4jVersion()
 
 	var staleTenants []string
@@ -107,7 +108,7 @@ func (e *migrationPendingError) Error() string { return e.msg }
 // TestLatestPostgresVersion_HasFiles verifies that the Postgres embed returns
 // a non-zero version when migration files exist.
 func TestLatestPostgresVersion_HasFiles(t *testing.T) {
-	ver, err := migrations.LatestPostgresVersion()
+	ver, err := pgmigrations.TenantMaxVersion()
 	require.NoError(t, err)
 	assert.Greater(t, ver, uint(0), "postgres migrations should report at least version 1")
 }
@@ -157,7 +158,7 @@ func TestParseVersion(t *testing.T) {
 // version, the check returns nil.
 func TestRunCheck_AllCurrent(t *testing.T) {
 	// Use the actual latest versions from the embedded files.
-	latestPg, err := migrations.LatestPostgresVersion()
+	latestPg, err := pgmigrations.TenantMaxVersion()
 	require.NoError(t, err)
 	latestNeo4j, err := migrations.LatestNeo4jVersion()
 	require.NoError(t, err)
@@ -180,7 +181,7 @@ func TestRunCheck_AllCurrent(t *testing.T) {
 // TestRunCheck_MixedPending verifies that tenants behind the latest version
 // do NOT cause an error when MigrationsRequired is false.
 func TestRunCheck_MixedPending(t *testing.T) {
-	latestPg, err := migrations.LatestPostgresVersion()
+	latestPg, err := pgmigrations.TenantMaxVersion()
 	require.NoError(t, err)
 	if latestPg == 0 {
 		t.Skip("no postgres migrations embedded yet (Phase D pending)")
@@ -202,7 +203,7 @@ func TestRunCheck_MixedPending(t *testing.T) {
 // TestRunCheck_EnvRequiredFail verifies that with MigrationsRequired=true,
 // any stale tenant causes an error.
 func TestRunCheck_EnvRequiredFail(t *testing.T) {
-	latestPg, err := migrations.LatestPostgresVersion()
+	latestPg, err := pgmigrations.TenantMaxVersion()
 	require.NoError(t, err)
 	// Skip if no postgres migrations exist yet (Phase D pending).
 	if latestPg == 0 {
@@ -227,7 +228,7 @@ func TestRunCheck_EnvRequiredFail(t *testing.T) {
 // TestRunCheck_EnvRequiredOk verifies that with MigrationsRequired=true but
 // all tenants current, no error is returned.
 func TestRunCheck_EnvRequiredOk(t *testing.T) {
-	latestPg, err := migrations.LatestPostgresVersion()
+	latestPg, err := pgmigrations.TenantMaxVersion()
 	require.NoError(t, err)
 	latestNeo4j, err := migrations.LatestNeo4jVersion()
 	require.NoError(t, err)

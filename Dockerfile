@@ -52,6 +52,13 @@ RUN go build -ldflags="-s -w" -o /out/lowercase-tenant-owner ./cmd/lowercase-ten
 # regular Kubernetes Job (no Helm hook) on helm upgrade to v0.27.0+. Idempotent.
 RUN go build -ldflags="-s -w" -o /out/tenant-owner-backfill ./cmd/tenant-owner-backfill
 
+# Spec gibson-postgres-migrations (Req 4): the chart's pre-upgrade
+# platform-db-migrate Job runs `gibson-migrate platform up` from this
+# image to apply embedded dashboard-DB migrations before the daemon
+# StatefulSet rolls. Same image as the daemon — the binary is invoked
+# via explicit Job command override.
+RUN go build -ldflags="-s -w" -o /out/gibson-migrate ./cmd/gibson-migrate
+
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
@@ -64,6 +71,7 @@ RUN apk add --no-cache ca-certificates
 COPY --from=builder /out/gibson /usr/local/bin/gibson
 COPY --from=builder /out/lowercase-tenant-owner /usr/local/bin/lowercase-tenant-owner
 COPY --from=builder /out/tenant-owner-backfill /usr/local/bin/tenant-owner-backfill
+COPY --from=builder /out/gibson-migrate /usr/local/bin/gibson-migrate
 
 # Create gibson home directory and HF model-cache mount point.
 # In production, /root/.cache/huggingface/ is mounted from EFS via the

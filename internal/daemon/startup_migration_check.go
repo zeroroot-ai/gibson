@@ -17,6 +17,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/datapool/admin"
 	"github.com/zero-day-ai/gibson/migrations"
+	pgmigrations "github.com/zero-day-ai/gibson/pkg/platform/migrations"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -129,8 +130,10 @@ func runStartupMigrationCheck(
 	}
 
 	// Determine the latest versions from embedded migration files.
-	// The migrations package embeds the files from the module root migrations/ directory.
-	latestPostgres, err := migrations.LatestPostgresVersion()
+	// Per-tenant Postgres migrations live under pkg/platform/migrations
+	// (spec gibson-postgres-migrations); Neo4j stays on the legacy
+	// migrations package until a follow-on spec moves it.
+	latestPostgres, err := pgmigrations.TenantMaxVersion()
 	if err != nil {
 		logger.WarnContext(ctx, "startup migration check: could not determine latest postgres version",
 			"error", err)
