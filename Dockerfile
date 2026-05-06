@@ -62,7 +62,7 @@ RUN go build -ldflags="-s -w" -o /out/gibson-migrate ./cmd/gibson-migrate
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS runtime
+FROM alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11 AS runtime
 
 # Install ca-certificates for HTTPS connections
 RUN apk add --no-cache ca-certificates
