@@ -2183,6 +2183,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.TenantAdminService/DeleteMissionDraft": {
+		Method:            "/gibson.tenant.v1.TenantAdminService/DeleteMissionDraft",
+		Service:           "gibson.tenant.v1.TenantAdminService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.TenantAdminService/DeleteProvider": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/DeleteProvider",
 		Service:           "gibson.tenant.v1.TenantAdminService",
@@ -2235,6 +2245,16 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.tenant.v1.TenantAdminService/GetFallbackChain": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetFallbackChain",
+		Service:           "gibson.tenant.v1.TenantAdminService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.tenant.v1.TenantAdminService/GetMissionDraft": {
+		Method:            "/gibson.tenant.v1.TenantAdminService/GetMissionDraft",
 		Service:           "gibson.tenant.v1.TenantAdminService",
 		Relation:          "admin",
 		ObjectType:        "tenant",

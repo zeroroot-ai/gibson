@@ -1364,6 +1364,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/DeleteMissionDraft":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.TenantAdminService/DeleteProvider":
     relation: "admin"
     object_type: "tenant"
@@ -1400,6 +1407,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.TenantAdminService/GetFallbackChain":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/GetMissionDraft":
     relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"

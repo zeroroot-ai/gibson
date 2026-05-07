@@ -214,12 +214,14 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.plugin.v1.PluginInvokeService/PluginInvoke,can_invoke,plugin,tenant_and_field('PluginName'),COMPONENT,gibson/plugin/v1/invoke.proto,rule
 /gibson.tenant.v1.TenantAdminService/CreateAgentIdentity,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/CreateProvider,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
+/gibson.tenant.v1.TenantAdminService/DeleteMissionDraft,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/DeleteProvider,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/DeleteTenantLangfuseCredentials,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/ExecuteLLM,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/ExportFindings,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/GetDefaultProvider,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/GetFallbackChain,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
+/gibson.tenant.v1.TenantAdminService/GetMissionDraft,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/GetOnboardingState,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/GetProvider,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule
 /gibson.tenant.v1.TenantAdminService/GetProviderHealth,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant_admin.proto,rule

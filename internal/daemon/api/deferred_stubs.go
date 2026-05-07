@@ -16,30 +16,12 @@
 // listed here because they already return real data.
 package api
 
-import (
-	"context"
-
-	"google.golang.org/grpc/codes"
-	status_grpc "google.golang.org/grpc/status"
-
-	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
-)
-
-// ---------------------------------------------------------------------------
-// TenantAdminService — DEFER stubs
-// ---------------------------------------------------------------------------
-
-// ExportFindings is implemented in export_findings.go.
-// (stub removed in dashboard-neo4j-crud-removal Task 6)
-
-// SaveMissionDraft is a DEFER stub.
-// Owner: <owner-pending> — mission YAML editor draft persistence.
-func (s *DaemonServer) SaveMissionDraft(_ context.Context, _ *tenantv1.SaveMissionDraftRequest) (*tenantv1.SaveMissionDraftResponse, error) {
-	return nil, status_grpc.Error(codes.Unimplemented, "SaveMissionDraft: not yet implemented — pending mission-yaml-editor spec delivery")
-}
-
-// ListMissionDrafts is a DEFER stub.
-// Owner: <owner-pending> — mission YAML editor draft persistence.
-func (s *DaemonServer) ListMissionDrafts(_ context.Context, _ *tenantv1.ListMissionDraftsRequest) (*tenantv1.ListMissionDraftsResponse, error) {
-	return nil, status_grpc.Error(codes.Unimplemented, "ListMissionDrafts: not yet implemented — pending mission-yaml-editor spec delivery")
-}
+// No DEFER stubs currently registered.
+//
+// History:
+//   - ExportFindings: implemented in export_findings.go (dashboard-neo4j-crud-removal Task 6).
+//   - SaveMissionDraft / ListMissionDrafts / GetMissionDraft / DeleteMissionDraft:
+//     wired to missiondraft.Store in mission_draft.go (mission-draft-dashboard-wiring).
+//
+// Add a new stub here if a future spec adds an RPC whose implementation is
+// genuinely deferred — return codes.Unimplemented with an owner-named message.

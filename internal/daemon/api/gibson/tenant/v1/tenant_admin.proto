@@ -169,6 +169,26 @@ service TenantAdminService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+  // GetMissionDraft retrieves a single saved draft, including its YAML
+  // content (which ListMissionDrafts deliberately omits).
+  rpc GetMissionDraft(GetMissionDraftRequest) returns (GetMissionDraftResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // DeleteMissionDraft removes a saved draft. Idempotent: deleting a
+  // missing draft returns OK.
+  rpc DeleteMissionDraft(DeleteMissionDraftRequest) returns (DeleteMissionDraftResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
   // ---------------------------------------------------------------------------
   // LLM Providers — tenant-admin CRUD operations (spec 25)
   // ---------------------------------------------------------------------------
@@ -752,6 +772,55 @@ message ListMissionDraftsResponse {
   // drafts is the list of saved mission drafts, ordered by update time descending.
   repeated MissionDraft drafts = 1;
 }
+
+// GetMissionDraftRequest fetches a single draft's full content.
+message GetMissionDraftRequest {
+  // tenant_id is the tenant context for the draft.
+  string tenant_id = 1;
+
+  // draft_id is the unique identifier of the draft to fetch.
+  string draft_id = 2;
+}
+
+// GetMissionDraftResponse returns a single draft including its YAML content.
+message GetMissionDraftResponse {
+  // draft is the full draft record. Populated on success; absent on NotFound.
+  MissionDraftFull draft = 1;
+}
+
+// MissionDraftFull is MissionDraft plus the YAML content. The YAML field
+// is intentionally separated from the metadata-only MissionDraft message
+// (used by ListMissionDrafts) so that list responses stay small — drafts
+// can be up to 512 KB each.
+message MissionDraftFull {
+  // id is the unique identifier of the draft.
+  string id = 1;
+
+  // name is the human-readable name of the draft.
+  string name = 2;
+
+  // created_at is the RFC 3339 creation timestamp.
+  string created_at = 3;
+
+  // updated_at is the RFC 3339 last-update timestamp.
+  string updated_at = 4;
+
+  // yaml is the raw mission YAML content.
+  string yaml = 5;
+}
+
+// DeleteMissionDraftRequest removes a saved draft.
+message DeleteMissionDraftRequest {
+  // tenant_id is the tenant context for the draft.
+  string tenant_id = 1;
+
+  // draft_id is the unique identifier of the draft to remove.
+  string draft_id = 2;
+}
+
+// DeleteMissionDraftResponse is empty — Delete is idempotent and returns
+// OK on success regardless of whether the draft existed.
+message DeleteMissionDraftResponse {}
 
 // ---------------------------------------------------------------------------
 // LLM Provider messages — spec 25

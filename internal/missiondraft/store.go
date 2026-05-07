@@ -15,6 +15,7 @@ package missiondraft
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -22,6 +23,11 @@ import (
 	"github.com/google/uuid"
 	goredis "github.com/redis/go-redis/v9"
 )
+
+// ErrDraftNotFound is returned by Get when no draft exists for the given
+// (tenantID, draftID). Callers route this to codes.NotFound at the gRPC
+// boundary via errors.Is.
+var ErrDraftNotFound = errors.New("draft not found")
 
 const (
 	draftKeyPrefix = "missiondraft:"
@@ -179,7 +185,7 @@ func (s *RedisMissionDraftStore) Get(ctx context.Context, tenantID, draftID stri
 	key := draftKey(tenantID, draftID)
 	fields, err := s.client.HGetAll(ctx, key).Result()
 	if err == goredis.Nil || len(fields) == 0 {
-		return nil, fmt.Errorf("draft %s not found", draftID)
+		return nil, fmt.Errorf("%w: %s", ErrDraftNotFound, draftID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get draft: %w", err)

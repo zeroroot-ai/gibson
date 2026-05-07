@@ -270,11 +270,13 @@ type auditQueryIface interface {
 }
 
 // missionDraftStoreIface is the narrow interface the DaemonServer uses for
-// mission draft persistence (Save and List). Using an interface allows tests
-// to inject a mock without spinning up Redis.
+// mission draft persistence. Using an interface allows tests to inject a
+// mock without spinning up Redis.
 type missionDraftStoreIface interface {
 	Save(ctx context.Context, tenantID, name, yaml, draftID string) (string, error)
 	List(ctx context.Context, tenantID string) ([]*missiondraft.MissionDraft, error)
+	Get(ctx context.Context, tenantID, draftID string) (*missiondraft.MissionDraft, error)
+	Delete(ctx context.Context, tenantID, draftID string) error
 }
 
 // findingStoreIface is the narrow subset of finding.FindingStore used by ExportFindings.
