@@ -26,8 +26,19 @@ ARG BUILD_TAGS=""
 # Copy dependency manifests first for better layer caching
 COPY go.mod go.sum ./
 
-# Download dependencies
-RUN go mod download
+# Download dependencies. Private github.com/zero-day-ai/* modules
+# require auth — supplied via the optional `ghtoken` BuildKit secret
+# (a file containing a GitHub PAT or `gh auth token` output). When the
+# secret is absent (e.g. CI on a public-only build), this step still
+# runs but a private-module fetch will fail at build time with a
+# missing-auth error.
+ENV GOPRIVATE=github.com/zero-day-ai
+RUN --mount=type=secret,id=ghtoken,target=/run/secrets/ghtoken,required=false \
+    if [ -s /run/secrets/ghtoken ]; then \
+      git config --global url."https://x-access-token:$(cat /run/secrets/ghtoken)@github.com/".insteadOf "https://github.com/"; \
+    fi && \
+    go mod download && \
+    git config --global --unset-all url."https://x-access-token:$(cat /run/secrets/ghtoken 2>/dev/null)@github.com/".insteadOf 2>/dev/null || true
 
 # Copy source code
 COPY . .
