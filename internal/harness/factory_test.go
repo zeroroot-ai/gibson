@@ -1007,3 +1007,81 @@ func TestHarnessFactory_WithoutMiddleware(t *testing.T) {
 	_, ok := harness.(*DefaultAgentHarness)
 	assert.True(t, ok, "harness should be *DefaultAgentHarness when no middleware is configured")
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// ListPlugins bridge tests (task 13 / task 15)
+// ────────────────────────────────────────────────────────────────────────────
+
+// TestListPlugins_NonEmptyMethods asserts that when the registry adapter
+// returns a PluginInfo with a non-empty Methods slice, DefaultAgentHarness
+// produces PluginDescriptor entries with a matching non-empty Methods list
+// and each PluginMethodDescriptor carries the correct Name.
+func TestListPlugins_NonEmptyMethods(t *testing.T) {
+	adapter := &MockRegistryAdapter{
+		ListPluginsFn: func(_ context.Context) ([]component.PluginInfo, error) {
+			return []component.PluginInfo{
+				{
+					Name:    "debug-plugin",
+					Version: "1.0.0",
+					Methods: []string{"Echo", "Health"},
+				},
+			}, nil
+		},
+	}
+
+	h := &DefaultAgentHarness{
+		registryAdapter: adapter,
+	}
+
+	descriptors := h.ListPlugins()
+
+	require.Len(t, descriptors, 1)
+	desc := descriptors[0]
+	assert.Equal(t, "debug-plugin", desc.Name)
+	assert.Equal(t, "1.0.0", desc.Version)
+	assert.True(t, desc.IsExternal)
+	assert.Equal(t, PluginStatusUninitialized, desc.Status)
+
+	require.Len(t, desc.Methods, 2, "Methods must be non-empty when PluginInfo carries method names")
+	assert.Equal(t, "Echo", desc.Methods[0].Name)
+	assert.Equal(t, "Health", desc.Methods[1].Name)
+}
+
+// TestListPlugins_EmptyMethods asserts that when the registry adapter returns
+// a PluginInfo with an empty Methods slice, the harness bridge still returns
+// a valid PluginDescriptor with a non-nil, empty Methods slice.
+func TestListPlugins_EmptyMethods(t *testing.T) {
+	adapter := &MockRegistryAdapter{
+		ListPluginsFn: func(_ context.Context) ([]component.PluginInfo, error) {
+			return []component.PluginInfo{
+				{
+					Name:    "legacy-plugin",
+					Version: "0.9.0",
+					Methods: []string{},
+				},
+			}, nil
+		},
+	}
+
+	h := &DefaultAgentHarness{
+		registryAdapter: adapter,
+	}
+
+	descriptors := h.ListPlugins()
+
+	require.Len(t, descriptors, 1)
+	desc := descriptors[0]
+	assert.NotNil(t, desc.Methods, "Methods must be non-nil even for plugins with no declared methods")
+	assert.Len(t, desc.Methods, 0)
+}
+
+// TestListPlugins_NoAdapter asserts that ListPlugins returns an empty slice
+// (not nil) when no registry adapter is configured.
+func TestListPlugins_NoAdapter(t *testing.T) {
+	h := &DefaultAgentHarness{}
+
+	descriptors := h.ListPlugins()
+
+	assert.NotNil(t, descriptors)
+	assert.Len(t, descriptors, 0)
+}

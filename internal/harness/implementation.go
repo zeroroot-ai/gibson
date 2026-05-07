@@ -1663,11 +1663,15 @@ func (h *DefaultAgentHarness) ListPlugins() []PluginDescriptor {
 
 	descriptors := make([]PluginDescriptor, 0, len(remotePlugins))
 	for _, remotePlugin := range remotePlugins {
+		methods := make([]PluginMethodDescriptor, 0, len(remotePlugin.Methods))
+		for _, m := range remotePlugin.Methods {
+			methods = append(methods, PluginMethodDescriptor{Name: m})
+		}
 		descriptors = append(descriptors, PluginDescriptor{
 			Name:       remotePlugin.Name,
 			Version:    remotePlugin.Version,
-			Methods:    []PluginMethodDescriptor{}, // method metadata lives in the manifest; not surfaced here
-			IsExternal: true,                      // all plugins are out-of-process under the new runtime
+			Methods:    methods,
+			IsExternal: true, // all plugins are out-of-process under the new runtime
 			Status:     PluginStatusUninitialized,
 		})
 	}

@@ -73,6 +73,27 @@ func aggregateHealth(healthyCount, unhealthyCount int) string {
 	return HealthStatusDegraded
 }
 
+// extractMethodNames scans a component's metadata map for entries of the form
+// "method:<name>" = "true" and returns an ordered slice of method names.
+//
+// This mirrors how service.go writes method names at RegisterComponent time:
+//
+//	info.Metadata["method:"+method] = "true"
+//
+// The returned slice is always non-nil; it is empty when no method entries exist.
+func extractMethodNames(metadata map[string]string) []string {
+	result := make([]string, 0)
+	for key := range metadata {
+		if strings.HasPrefix(key, "method:") {
+			name := strings.TrimPrefix(key, "method:")
+			if name != "" {
+				result = append(result, name)
+			}
+		}
+	}
+	return result
+}
+
 // parseCommaSeparated parses a comma-separated string into a slice of trimmed strings.
 //
 // Empty strings and whitespace-only entries are filtered out.

@@ -12,6 +12,7 @@ import (
 
 	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
 	"github.com/zero-day-ai/sdk/auth"
+	pluginmanifest "github.com/zero-day-ai/sdk/plugin/manifest"
 )
 
 // ---------------------------------------------------------------------------
@@ -393,4 +394,84 @@ func TestFakePluginRegistry_DispatchOne_Default(t *testing.T) {
 
 // Ensure errors package is used (suppress import warning if tests are refactored).
 var _ = errors.New
+
+// ---------------------------------------------------------------------------
+// Task 19: manifest-derived dispatch tests
+// ---------------------------------------------------------------------------
+
+// TestDispatchEcho_ManifestDerived loads the debug-plugin manifest, registers
+// a test plugin install with DeclaredMethods derived from that manifest, and
+// asserts that PluginInvoke with method "Echo" succeeds (returns no error and
+// no PluginError). This test runs without a real daemon or Docker container.
+func TestDispatchEcho_ManifestDerived(t *testing.T) {
+	// Load the debug-plugin manifest from testdata (same YAML as
+	// enterprise/plugins/debug-plugin/plugin.yaml).
+	m, err := pluginmanifest.Load("testdata/debug-plugin.yaml")
+	if err != nil {
+		t.Fatalf("manifest.Load: %v", err)
+	}
+
+	// Build DeclaredMethods from the manifest.
+	declaredMethods := make([]string, 0, len(m.Spec.Methods))
+	for _, meth := range m.Spec.Methods {
+		declaredMethods = append(declaredMethods, meth.Name)
+	}
+	if len(declaredMethods) == 0 {
+		t.Fatal("manifest has no declared methods")
+	}
+
+	tenant := auth.MustNewTenantID("tenant-abc")
+	reg := newFakePluginRegistry()
+	reg.addInstall(tenant, m.Metadata.Name, declaredMethods)
+
+	// The fake dispatch returns a successful empty PluginInvokeResponse.
+	reg.dispatchFunc = func(_ context.Context, _ auth.TenantID, _, _ string, _ []byte, _ time.Duration) ([]byte, error) {
+		resp := &pluginpb.PluginInvokeResponse{}
+		return proto.Marshal(resp)
+	}
+
+	svc := NewPluginInvokeService(reg, nil)
+	ctx := buildPluginInvokeCtx("tenant-abc")
+
+	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
+		PluginName: m.Metadata.Name,
+		Method:     "Echo",
+		DeadlineMs: 5000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if resp.GetError() != nil {
+		t.Errorf("expected no plugin error, got: %v", resp.GetError())
+	}
+}
+
+// TestDispatchOne_MethodDeclaredCheck asserts that calling PluginInvoke with a
+// method name not in the plugin's DeclaredMethods list returns
+// PLUGIN_ERROR_KIND_METHOD_NOT_FOUND. This is the registry-level method guard
+// documented in design.md "Error Handling — Plugin Errors item 8".
+func TestDispatchOne_MethodDeclaredCheck(t *testing.T) {
+	tenant := auth.MustNewTenantID("tenant-abc")
+	reg := newFakePluginRegistry()
+	// Register debug-plugin with only "Echo" declared.
+	reg.addInstall(tenant, "debug-plugin", []string{"Echo"})
+
+	svc := NewPluginInvokeService(reg, nil)
+	ctx := buildPluginInvokeCtx("tenant-abc")
+
+	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
+		PluginName: "debug-plugin",
+		Method:     "NonExistent",
+		DeadlineMs: 5000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if resp.GetError() == nil {
+		t.Fatal("expected a plugin error for undeclared method")
+	}
+	if resp.GetError().GetKind() != pluginpb.PluginError_PLUGIN_ERROR_KIND_METHOD_NOT_FOUND {
+		t.Errorf("expected PLUGIN_ERROR_KIND_METHOD_NOT_FOUND, got %v", resp.GetError().GetKind())
+	}
+}
 var _ = json.Marshal

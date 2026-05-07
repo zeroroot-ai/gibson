@@ -109,6 +109,9 @@ type PluginInfo struct {
 	Instances   int      `json:"instances"`
 	Endpoints   []string `json:"endpoints"`
 	Health      string   `json:"health"`
+	// Methods is the list of declared method names for the plugin,
+	// derived from the component registry metadata set at registration time.
+	Methods []string `json:"methods,omitempty"`
 }
 
 // RegistryAdapter implements ComponentDiscovery using the Redis-backed ComponentRegistry
@@ -446,6 +449,7 @@ func (a *RegistryAdapter) ListPlugins(ctx context.Context) ([]PluginInfo, error)
 					Description: inst.Metadata["description"],
 					Instances:   1,
 					Endpoints:   endpoints,
+					Methods:     extractMethodNames(inst.Metadata),
 				},
 				healthyCount:   healthyCount,
 				unhealthyCount: unhealthyCount,

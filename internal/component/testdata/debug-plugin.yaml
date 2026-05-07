@@ -1,0 +1,18 @@
+apiVersion: plugin.gibson.zero-day.ai/v1
+kind: Plugin
+metadata:
+  name: debug-plugin
+  version: 1.0.0
+  description: Framework validation plugin for e2e testing
+  author: zero-day-ai
+spec:
+  workload_class: plugin
+  runtime: process
+  methods:
+    - name: Echo
+      description: Returns the input message unchanged
+      request_proto: gibson.plugins.debug.v1.EchoRequest
+      response_proto: gibson.plugins.debug.v1.EchoResponse
+  health:
+    startup_timeout: 10s
+    liveness_interval: 5s

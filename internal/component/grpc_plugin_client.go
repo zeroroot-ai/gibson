@@ -7,10 +7,11 @@ package component
 // The PluginService proto (core/sdk/api/proto/gibson/plugin/v1/plugin.proto)
 // and its generated bindings have been removed.
 //
-// TODO(plugin-runtime Phase 7): replace with the production daemon-side plugin
-// dispatch client that uses ComponentService PollWork/SubmitResult and the new
-// PluginInvokeService (invoke.proto) defined in Phase 6. The new client lives
-// in plugin_dispatch.go and plugin_registry.go (per the spec design).
+// The production daemon-side plugin dispatch client is implemented in
+// plugin_dispatch.go (PluginInvokeService) and plugin_registry.go
+// (postgresPluginRegistry). Both use ComponentService PollWork/SubmitResult
+// and the PluginInvokeService (invoke.proto) defined in Phase 6.
 //
 // The ComponentDiscovery.DiscoverPlugin interface method is retained but its
-// implementation is stubbed below until Phase 7.
+// implementation is stubbed below — it is exercised via the PluginInvokeService
+// path rather than a direct gRPC call to the plugin process.
