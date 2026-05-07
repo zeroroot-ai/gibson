@@ -450,7 +450,7 @@ func (d *daemonImpl) checkInfrastructureHealth(ctx context.Context, infra *Infra
 func (d *daemonImpl) initGraphRAGBridges(ctx context.Context) (harness.GraphRAGBridge, harness.GraphRAGQueryBridge, error) {
 	// Create embedder from config once at startup. The embedder is stateless
 	// (no Neo4j dependency) and safe for concurrent use.
-	emb, err := embedder.CreateEmbedder(d.config.Embedder)
+	emb, err := embedder.CreateEmbedder(d.config.Embedder, d.logger.WithComponent("embedder").Slog())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create embedder: %w", err)
 	}

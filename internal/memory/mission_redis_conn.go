@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -228,6 +229,71 @@ func (m *ConnBoundMissionMemory) Keys(ctx context.Context) ([]string, error) {
 		return nil, NewMissionMemoryStoreError("failed to retrieve keys", err)
 	}
 	return keys, nil
+}
+
+// GetAll returns a snapshot of every key-value pair in this mission's memory.
+// Uses the same SMEMBERS + pipelined JSON.GET approach as RedisMissionMemory.GetAll.
+func (m *ConnBoundMissionMemory) GetAll(ctx context.Context) (map[string]any, error) {
+	keys, err := m.Keys(ctx)
+	if err != nil {
+		return nil, NewMissionMemoryStoreError("GetAll: failed to retrieve key set", err)
+	}
+	if len(keys) == 0 {
+		return make(map[string]any), nil
+	}
+	sort.Strings(keys)
+
+	pipe := m.rdb.Pipeline()
+	cmds := make([]*goredis.Cmd, len(keys))
+	for i, key := range keys {
+		cmds[i] = pipe.Do(ctx, "JSON.GET", m.docKey(key), "$")
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
+		return nil, NewMissionMemoryStoreError("GetAll: pipeline execution failed", err)
+	}
+
+	result := make(map[string]any, len(keys))
+	for i, key := range keys {
+		raw, err := cmds[i].Text()
+		if err != nil {
+			if err == goredis.Nil {
+				continue
+			}
+			return nil, NewMissionMemoryStoreError(
+				fmt.Sprintf("GetAll: JSON.GET failed for key %q", key), err)
+		}
+		entry, err := parseMemoryEntry(raw)
+		if err != nil {
+			return nil, NewMissionMemoryStoreError(
+				fmt.Sprintf("GetAll: unmarshal MemoryEntry for key %q", key), err)
+		}
+		var value any
+		if entry.Value != "" {
+			if err := json.Unmarshal([]byte(entry.Value), &value); err != nil {
+				return nil, NewMissionMemoryStoreError(
+					fmt.Sprintf("GetAll: unmarshal value for key %q", key), err)
+			}
+		}
+		result[key] = value
+	}
+	return result, nil
+}
+
+// parseMemoryEntry parses a raw JSON string (possibly wrapped in a JSONPath array)
+// into a MemoryEntry. Used by GetAll.
+func parseMemoryEntry(raw string) (*MemoryEntry, error) {
+	trimmed := []byte(raw)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var arr []json.RawMessage
+		if err := json.Unmarshal(trimmed, &arr); err == nil && len(arr) == 1 {
+			trimmed = arr[0]
+		}
+	}
+	var entry MemoryEntry
+	if err := json.Unmarshal(trimmed, &entry); err != nil {
+		return nil, err
+	}
+	return &entry, nil
 }
 
 // GetPreviousRunValue retrieves a value from the prior run's memory.

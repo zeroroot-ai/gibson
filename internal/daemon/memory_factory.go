@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -246,7 +247,7 @@ func (f *MemoryManagerFactory) getOrCreateSharedLongTermMemory() (memory.LongTer
 	embedderCfg := embedder.EmbedderConfig{
 		Provider: f.config.LongTerm.Embedder.Provider,
 	}
-	emb, err := embedder.CreateEmbedder(embedderCfg)
+	emb, err := embedder.CreateEmbedder(embedderCfg, slog.Default())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create embedder: %w", err)
 	}
@@ -401,4 +402,20 @@ func (a *workingMemoryAdapter) MaxTokens() int {
 	// Redis-backed working memory doesn't enforce token limits
 	// Value-based limits (MaxValueSize) are enforced by SDK instead
 	return 0
+}
+
+// GetAll returns a snapshot of all key-value pairs in the adapter's working memory.
+// This implementation delegates to the SDK's working-memory list/get operations.
+// Non-serializable values are skipped (the SDK stores everything as JSON strings
+// so this case does not arise in practice).
+func (a *workingMemoryAdapter) GetAll() (map[string]any, error) {
+	keys := a.List()
+	result := make(map[string]any, len(keys))
+	for _, k := range keys {
+		v, ok := a.Get(k)
+		if ok {
+			result[k] = v
+		}
+	}
+	return result, nil
 }

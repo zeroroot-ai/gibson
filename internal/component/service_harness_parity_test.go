@@ -214,6 +214,7 @@ func (m *mockWorkingMemory) Set(_ string, _ interface{}) error { return nil }
 func (m *mockWorkingMemory) Delete(key string) bool            { m.deleted = append(m.deleted, key); return true }
 func (m *mockWorkingMemory) Clear()                            {}
 func (m *mockWorkingMemory) List() []string                    { return nil }
+func (m *mockWorkingMemory) GetAll() (map[string]any, error)   { return map[string]any{}, nil }
 func (m *mockWorkingMemory) TokenCount() int                   { return 0 }
 func (m *mockWorkingMemory) MaxTokens() int                    { return 0 }
 

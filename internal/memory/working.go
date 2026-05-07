@@ -1,6 +1,9 @@
 package memory
 
 import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -25,6 +28,12 @@ type WorkingMemory interface {
 
 	// List returns all stored keys in no particular order.
 	List() []string
+
+	// GetAll returns a snapshot of every key-value pair currently in working memory.
+	// The returned map is a copy — mutations do not affect the live memory.
+	// Safe to call concurrently with Set, Get, and Delete.
+	// Non-JSON-serializable values are skipped; each skip emits a level=warn log.
+	GetAll() (map[string]any, error)
 
 	// TokenCount returns the current total token usage.
 	TokenCount() int
@@ -173,6 +182,65 @@ func (w *DefaultWorkingMemory) TokenCount() int {
 // MaxTokens returns the configured token limit.
 func (w *DefaultWorkingMemory) MaxTokens() int {
 	return w.maxTokens
+}
+
+// GetAll returns a snapshot of every key-value pair currently in working memory.
+// Uses sync.Map.Range for a point-in-time atomic snapshot — no additional mutex
+// is held beyond what sync.Map already provides. tokensMu is NOT held during
+// Range, consistent with the design constraint.
+//
+// Non-JSON-serializable values (channels, func pointers, etc.) are skipped with
+// a level=warn log. The partial map and a nil error are returned.
+func (w *DefaultWorkingMemory) GetAll() (map[string]any, error) {
+	result := make(map[string]any)
+
+	w.entries.Range(func(k, v any) bool {
+		key := k.(string)
+		entry := v.(*workingMemoryEntry)
+
+		// Verify the value is JSON-serializable. Attempt a marshal probe.
+		if _, err := json.Marshal(entry.Value); err != nil {
+			var unsupported *json.UnsupportedTypeError
+			if ok := isUnsupportedTypeError(err, &unsupported); ok {
+				slog.Warn("working memory value skipped: not JSON-serializable",
+					"key", key,
+					"value_type", fmt.Sprintf("%T", entry.Value),
+				)
+				return true // continue Range
+			}
+			// Other marshal errors (e.g. cyclic struct) — also skip with warn.
+			slog.Warn("working memory value skipped: JSON marshal error",
+				"key", key,
+				"value_type", fmt.Sprintf("%T", entry.Value),
+				"err", err,
+			)
+			return true
+		}
+
+		result[key] = entry.Value
+		return true
+	})
+
+	return result, nil
+}
+
+// isUnsupportedTypeError checks if err wraps or is a *json.UnsupportedTypeError.
+func isUnsupportedTypeError(err error, target **json.UnsupportedTypeError) bool {
+	if err == nil {
+		return false
+	}
+	if e, ok := err.(*json.UnsupportedTypeError); ok {
+		if target != nil {
+			*target = e
+		}
+		return true
+	}
+	// Check for errors.As equivalent — json may wrap inside marshal error.
+	type unwrapper interface{ Unwrap() error }
+	if u, ok := err.(unwrapper); ok {
+		return isUnsupportedTypeError(u.Unwrap(), target)
+	}
+	return false
 }
 
 // evictIfNeeded removes least recently accessed entries until under budget.

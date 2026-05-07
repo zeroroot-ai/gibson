@@ -84,6 +84,14 @@ func (m *MockMissionMemory) GetValueHistory(ctx context.Context, key string) ([]
 	return args.Get(0).([]memory.HistoricalValue), args.Error(1)
 }
 
+func (m *MockMissionMemory) GetAll(ctx context.Context) (map[string]any, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]any), args.Error(1)
+}
+
 // MockLongTermMemory is a mock implementation of memory.LongTermMemory.
 type MockLongTermMemory struct {
 	mock.Mock

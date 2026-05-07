@@ -14,6 +14,7 @@ import (
 	gibsonMemory "github.com/zero-day-ai/gibson/internal/memory"
 	gibsonTypes "github.com/zero-day-ai/gibson/internal/types"
 	sdkAgent "github.com/zero-day-ai/sdk/agent"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	"github.com/zero-day-ai/sdk/finding"
 	"github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/llm"
@@ -205,6 +206,14 @@ func (m *mockInnerHarness) TokenUsage() *gibsonLLM.TokenTracker {
 
 func (m *mockInnerHarness) Checkpoint() gibsonHarness.CheckpointAccess {
 	return gibsonHarness.NewHarnessCheckpointMethods(nil, "", "", 0)
+}
+
+func (m *mockInnerHarness) Workspace() workspace.Workspace {
+	return nil
+}
+
+func (m *mockInnerHarness) Workspaces() map[string]workspace.Workspace {
+	return map[string]workspace.Workspace{}
 }
 
 // mockGibsonMemoryStore is a minimal implementation of gibsonMemory.MemoryStore for tests.

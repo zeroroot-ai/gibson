@@ -2,11 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/checkpoint"
+	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/mission"
@@ -45,9 +49,15 @@ type CheckpointIntegration struct {
 	// mu protects parallel group tracking state
 	mu sync.RWMutex
 
-	// parallelGroups tracks completion of nodes in parallel groups
-	// Maps group ID to set of completed node IDs
-	parallelGroups map[string]map[string]bool
+	// parallelGroups tracks per-child ChildStatus for each active parallel group.
+	// Maps group ID → (child node ID → ChildStatus).
+	// Replaces the former map[string]map[string]bool (completed-only) with full
+	// per-child status so the checkpoint payload can distinguish InFlight from Completed.
+	parallelGroups map[string]map[string]checkpoint.ChildStatus
+
+	// parallelGroupFailFast maps each group ID to its fail-fast semantics.
+	// true = one child failure immediately fails the group.
+	parallelGroupFailFast map[string]bool
 
 	// logger for checkpoint operations (optional)
 	logger Logger
@@ -81,12 +91,13 @@ func NewCheckpointIntegration(
 	opts ...CheckpointIntegrationOption,
 ) *CheckpointIntegration {
 	ci := &CheckpointIntegration{
-		checkpointer:   checkpointer,
-		policy:         policy,
-		missionID:      missionID,
-		threadID:       threadID,
-		enabled:        true, // Enabled by default, policy controls auto-checkpoint
-		parallelGroups: make(map[string]map[string]bool),
+		checkpointer:          checkpointer,
+		policy:                policy,
+		missionID:             missionID,
+		threadID:              threadID,
+		enabled:               true, // Enabled by default, policy controls auto-checkpoint
+		parallelGroups:        make(map[string]map[string]checkpoint.ChildStatus),
+		parallelGroupFailFast: make(map[string]bool),
 	}
 
 	for _, opt := range opts {
@@ -338,12 +349,14 @@ func (c *CheckpointIntegration) OnError(ctx context.Context, state *ExecutionSta
 // current runtime state. This captures everything needed to resume execution:
 //   - Mission state (node states, completed results, pending queue)
 //   - Working memory (ephemeral task-scoped data)
-//   - Mission memory (persistent mission-wide data)
+//   - Mission memory (persistent mission-wide data via Redis snapshot)
 //   - Conversation history (LLM messages)
 //   - Findings (discovered security findings)
 //
+// ctx is required for the MissionMemory.GetAll Redis call.
 // This is exported so the orchestrator can manually capture state for explicit checkpoints.
 func CaptureExecutionState(
+	ctx context.Context,
 	missionState *mission.MissionState,
 	workingMemory memory.WorkingMemory,
 	missionMemory memory.MissionMemory,
@@ -388,15 +401,44 @@ func CaptureExecutionState(
 	// Capture pending queue (ready nodes in execution order)
 	execState.PendingQueue = missionState.GetReadyNodes()
 
-	// Capture working memory
-	// TODO: WorkingMemory.GetAll() needs to be implemented
-	// For now, working memory is not persisted across checkpoints
-	_ = workingMemory
+	// Capture working memory via GetAll() — point-in-time sync.Map snapshot.
+	if workingMemory != nil {
+		wmSnapshot, err := workingMemory.GetAll()
+		if err != nil {
+			// GetAll only returns an error for catastrophic failures (not for skipped
+			// non-serializable values, which are already handled inside GetAll).
+			slog.Warn("failed to capture working memory at checkpoint",
+				"mission_id", missionState.MissionID,
+				"err", err,
+			)
+		} else {
+			// Redact secret-bearing fields before persisting.
+			checkpoint.RedactSecretsInMap(wmSnapshot)
 
-	// Capture mission memory
-	// TODO: MissionMemory.GetAll() needs to be implemented
-	// For now, mission memory is not persisted across checkpoints
-	_ = missionMemory
+			// Apply size-cap truncation (1 MB default per task scope).
+			cfg := config.DefaultCheckpointConfig()
+			wmSnapshot = truncateMemorySnapshot(wmSnapshot, cfg.LargeObjectThreshold,
+				string(missionState.MissionID))
+			execState.WorkingMemory = wmSnapshot
+		}
+	}
+
+	// Capture mission memory via GetAll() — Redis SMEMBERS + pipelined JSON.GET.
+	// This is a recovery-aid snapshot; Redis remains the authoritative source of
+	// truth on resume. Errors here are non-fatal at capture time (best-effort).
+	if missionMemory != nil {
+		mmSnapshot, err := missionMemory.GetAll(ctx)
+		if err != nil {
+			slog.Warn("failed to capture mission memory at checkpoint",
+				"mission_id", missionState.MissionID,
+				"err", err,
+			)
+		} else {
+			// Redact secret-bearing fields before persisting.
+			checkpoint.RedactSecretsInMap(mmSnapshot)
+			execState.MissionMemory = mmSnapshot
+		}
+	}
 
 	// Capture conversation history
 	if conversationHistory != nil {
@@ -417,11 +459,63 @@ func CaptureExecutionState(
 	return execState
 }
 
+// truncateMemorySnapshot trims a memory snapshot to fit within threshold bytes
+// (measured as the JSON-serialized size of the map). Keys are kept in
+// lexicographic order; entries from the lexicographic back are dropped until the
+// serialized size fits. Truncation emits a level=warn log event.
+//
+// taskID is included in the log event for per-task-scope attribution.
+// Returns the (possibly truncated) map. Never returns nil.
+func truncateMemorySnapshot(snapshot map[string]any, threshold int64, taskID string) map[string]any {
+	if threshold <= 0 || len(snapshot) == 0 {
+		return snapshot
+	}
+
+	// Fast path: already within budget.
+	b, err := json.Marshal(snapshot)
+	if err != nil || int64(len(b)) <= threshold {
+		return snapshot
+	}
+
+	// Sort keys for deterministic truncation (keep lexicographically first).
+	keys := make([]string, 0, len(snapshot))
+	for k := range snapshot {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	result := make(map[string]any, len(keys))
+	for _, k := range keys {
+		result[k] = snapshot[k]
+		serialized, err := json.Marshal(result)
+		if err != nil {
+			delete(result, k)
+			break
+		}
+		if int64(len(serialized)) > threshold {
+			delete(result, k)
+			break
+		}
+	}
+
+	slog.Warn("working memory snapshot truncated at checkpoint",
+		"task_id", taskID,
+		"original_keys", len(snapshot),
+		"retained_keys", len(result),
+		"threshold_bytes", threshold,
+	)
+
+	return result
+}
+
 // captureExecutionState is the internal version that uses the integration's stored state.
+// It also populates DAGState.ParallelGroupStates from c.parallelGroups so the
+// checkpoint payload carries per-child ChildStatus (InFlight vs Completed vs Failed)
+// for every active parallel group.
 func (c *CheckpointIntegration) captureExecutionState(state *ExecutionState) *checkpoint.ExecutionState {
 	execState := checkpoint.NewExecutionState(c.missionID, c.threadID)
 
-	// Copy all fields from the provided state
+	// Copy all fields from the provided state.
 	execState.CurrentNodeID = state.CurrentNodeID
 	execState.NodeStates = state.NodeStates
 	execState.CompletedResults = state.CompletedResults
@@ -433,6 +527,49 @@ func (c *CheckpointIntegration) captureExecutionState(state *ExecutionState) *ch
 	execState.DAGState = state.DAGState
 	execState.Findings = state.Findings
 	execState.Metadata = state.Metadata
+
+	// Populate ParallelGroupStates from the integration's live per-child status map.
+	// Hold only the read lock; do NOT access state.CompletedResults under c.mu.
+	c.mu.RLock()
+	if len(c.parallelGroups) > 0 {
+		if execState.DAGState == nil {
+			execState.DAGState = &checkpoint.DAGTraversalState{}
+		}
+		pgs := make(map[string]checkpoint.ParallelGroupState, len(c.parallelGroups))
+		for groupID, children := range c.parallelGroups {
+			childrenCopy := make(map[string]checkpoint.ChildStatus, len(children))
+			for nodeID, status := range children {
+				childrenCopy[nodeID] = status
+			}
+			failFast := c.parallelGroupFailFast[groupID]
+			pgs[groupID] = checkpoint.ParallelGroupState{
+				GroupID:  groupID,
+				Children: childrenCopy,
+				FailFast: failFast,
+			}
+		}
+		c.mu.RUnlock()
+
+		// Populate ChildOutputs for Completed children from CompletedResults.
+		// Access state.CompletedResults AFTER releasing c.mu.
+		for groupID, gs := range pgs {
+			for nodeID, status := range gs.Children {
+				if status == checkpoint.ChildStatusCompleted {
+					if result, ok := state.CompletedResults[nodeID]; ok && result != nil {
+						if gs.ChildOutputs == nil {
+							gs.ChildOutputs = make(map[string]map[string]any)
+						}
+						gs.ChildOutputs[nodeID] = result.Output
+						pgs[groupID] = gs
+					}
+				}
+			}
+		}
+
+		execState.DAGState.ParallelGroupStates = pgs
+	} else {
+		c.mu.RUnlock()
+	}
 
 	return execState
 }
@@ -544,20 +681,58 @@ func (c *CheckpointIntegration) GetCheckpointPolicy() checkpoint.CheckpointPolic
 //   - nodeID: The ID of the node that just completed
 //
 // Returns true exactly once when all expected nodes in the group are complete.
+// TrackParallelCompletion marks nodeID as ChildStatusCompleted in the given group.
+// Returns true exactly once when all expected nodes in the group complete —
+// requires that the expected total has been registered via WithParallelGroupTotals
+// or SetParallelGroupTotal.
+//
+// The return-bool contract is unchanged: callers depend on it returning true
+// exactly once per group completion. The inner map now stores ChildStatus
+// instead of bool to support the richer per-child state (InFlight, Completed,
+// Failed) for checkpoint capture.
 func (c *CheckpointIntegration) TrackParallelCompletion(groupID string, nodeID string) bool {
 	c.mu.Lock()
 	// Initialize group if not exists
 	if c.parallelGroups[groupID] == nil {
-		c.parallelGroups[groupID] = make(map[string]bool)
+		c.parallelGroups[groupID] = make(map[string]checkpoint.ChildStatus)
 	}
-	// Mark node as complete (idempotent — duplicates are tracked once)
-	c.parallelGroups[groupID][nodeID] = true
-	completedCount := len(c.parallelGroups[groupID])
+	// Mark node as Completed (idempotent — duplicate completions are not re-counted).
+	c.parallelGroups[groupID][nodeID] = checkpoint.ChildStatusCompleted
+	// Count only completed (terminal) nodes for the auto-fire threshold.
+	completedCount := 0
+	for _, status := range c.parallelGroups[groupID] {
+		if status == checkpoint.ChildStatusCompleted {
+			completedCount++
+		}
+	}
 	c.mu.Unlock()
 
 	// Defer to the parallel sidecar (defined in checkpoint_integration_parallel.go)
 	// which auto-fires when the registered expected total is reached.
 	return c.trackParallelCompletionAuto(groupID, completedCount)
+}
+
+// MarkChildDispatched transitions the given child node to ChildStatusInFlight.
+// Called by the orchestrator scheduler when it dispatches a child within a
+// parallel group. Creates the group entry if it does not yet exist.
+func (c *CheckpointIntegration) MarkChildDispatched(groupID, nodeID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.parallelGroups[groupID] == nil {
+		c.parallelGroups[groupID] = make(map[string]checkpoint.ChildStatus)
+	}
+	// Only transition from Pending (or unset) → InFlight; do not downgrade Completed.
+	if existing, ok := c.parallelGroups[groupID][nodeID]; !ok || existing == checkpoint.ChildStatusPending {
+		c.parallelGroups[groupID][nodeID] = checkpoint.ChildStatusInFlight
+	}
+}
+
+// SetParallelGroupFailFast registers the fail-fast semantics for a parallel group.
+// When failFast is true, one child failure immediately marks the group as Failed.
+func (c *CheckpointIntegration) SetParallelGroupFailFast(groupID string, failFast bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.parallelGroupFailFast[groupID] = failFast
 }
 
 // ClearParallelGroup removes tracking for a completed parallel group.
@@ -567,6 +742,7 @@ func (c *CheckpointIntegration) ClearParallelGroup(groupID string) {
 	defer c.mu.Unlock()
 
 	delete(c.parallelGroups, groupID)
+	delete(c.parallelGroupFailFast, groupID)
 }
 
 // Enable enables automatic checkpoint creation.

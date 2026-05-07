@@ -163,8 +163,22 @@ check-fga-headers:
 	@bash scripts/check-fga-model-headers.sh
 	@echo "check-fga-headers PASSED"
 
+# check-no-gibson-io asserts no gibson.io references exist outside the allowlist.
+# Spec: naming-and-config-standardization Requirement 1.6.
+check-no-gibson-io:
+	@echo "Checking for gibson.io references outside the allowlist..."
+	@bash scripts/check-no-gibson-io.sh
+	@echo "check-no-gibson-io PASSED"
+
+# check-no-skipped-tests asserts no bare t.Skip calls exist in non-exempt test files.
+# Spec: naming-and-config-standardization Requirement 3.5.
+check-no-skipped-tests:
+	@echo "Checking for skipped tests outside the allowlist..."
+	@bash scripts/check-no-skipped-tests.sh
+	@echo "check-no-skipped-tests PASSED"
+
 # Run all checks before commit
-check: fmt vet lint test-race check-no-tenant-id check-fga-headers
+check: fmt vet lint test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests
 	@echo "All checks passed!"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)

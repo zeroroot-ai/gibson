@@ -20,6 +20,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkagent "github.com/zero-day-ai/sdk/agent"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -288,6 +289,16 @@ func (m *MockHarness) GetToolCapabilities(ctx context.Context, toolName string) 
 // GetAllToolCapabilities implements harness.AgentHarness
 func (m *MockHarness) GetAllToolCapabilities(ctx context.Context) (map[string]*sdktypes.Capabilities, error) {
 	return nil, errors.New("GetAllToolCapabilities not implemented in mock")
+}
+
+// Workspace implements harness.AgentHarness — returns nil (mock has no workspace).
+func (m *MockHarness) Workspace() workspace.Workspace {
+	return nil
+}
+
+// Workspaces implements harness.AgentHarness — returns empty map (mock has no workspaces).
+func (m *MockHarness) Workspaces() map[string]workspace.Workspace {
+	return map[string]workspace.Workspace{}
 }
 
 // AddTool adds a tool to the mock harness

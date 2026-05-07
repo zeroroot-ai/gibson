@@ -39,16 +39,6 @@ func TestGetMissionSourceYAML_NilPool_Unavailable(t *testing.T) {
 	assertGRPCStatusCode(t, err, "Unavailable")
 }
 
-// TestGetMissionSourceYAML_MissingTenant_PermissionDenied verifies that a
-// context without a tenant returns PermissionDenied.
-// The ordering in the handler is: poolGetter nil → Unavailable; pool nil → Unavailable;
-// tenant missing → PermissionDenied. So to reach the tenant check we need a non-nil pool.
-// This is covered fully by the integration test suite; unit test is skipped.
-func TestGetMissionSourceYAML_MissingTenant_PermissionDenied(t *testing.T) {
-	t.Parallel()
-	t.Skip("requires mock pool — covered by integration test")
-}
-
 // TestSourceYAML_MissionStruct verifies the SourceYAML field is present on
 // the mission.Mission struct and survives JSON round-trip.
 func TestSourceYAML_MissionStruct(t *testing.T) {

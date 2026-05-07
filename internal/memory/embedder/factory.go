@@ -2,6 +2,7 @@ package embedder
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -24,10 +25,10 @@ const (
 //
 // Returns an error if embedder initialization fails. The daemon should fail fast
 // if the embedder cannot be created - vector search is a core feature.
-func CreateEmbedder(config EmbedderConfig) (Embedder, error) {
+func CreateEmbedder(config EmbedderConfig, logger *slog.Logger) (Embedder, error) {
 	switch EmbedderType(config.Provider) {
 	case EmbedderTypeNative, "":
-		return CreateNativeEmbedder()
+		return CreateNativeEmbedder(logger)
 
 	default:
 		return nil, types.NewError(ErrCodeInvalidConfig,

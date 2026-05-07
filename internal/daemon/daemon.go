@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
-	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
 	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/budget"
@@ -297,7 +300,18 @@ type daemonImpl struct {
 	// spiffeX509Source is the SPIFFE Workload API X.509 SVID source used by the
 	// gRPC server for mTLS. It must be closed on daemon shutdown to release the
 	// socket connection. Nil when SPIFFE is not configured.
+	//
+	// Initialized exactly once by initSPIFFEX509Source (called from Start before
+	// the callback manager and the main gRPC server are wired) and shared by
+	// both listeners. Spec: critical-tls-no-fallbacks Component 4.
 	spiffeX509Source spiffeX509Closer
+
+	// callbackPeerSVIDs is the parsed allowlist of peer SPIFFE IDs the harness
+	// callback listener accepts, sourced from GIBSON_CALLBACK_PEER_SVIDS at
+	// startup. Empty when SPIFFE is not configured. When SPIFFE IS configured
+	// initSPIFFEX509Source fails-closed if this list is empty (critical-tls-no-fallbacks
+	// Requirement 1.5). Each ID must be in cfg.Auth.SPIFFE.TrustDomain.
+	callbackPeerSVIDs []spiffeid.ID
 
 	// toolCatalogRefresher periodically launches gibson-runner --list-tools
 	// in a Setec microVM and writes the resulting catalog to ComponentRegistry.
@@ -399,6 +413,155 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	return d, nil
 }
 
+// initSPIFFEX509Source opens the SPIRE Workload API X.509 source exactly once
+// at daemon startup and stores it on d.spiffeX509Source so both the main gRPC
+// listener (buildGRPCServer) and the harness callback listener (callback_server)
+// can share a single Workload API connection. It also parses and validates the
+// peer SVID allowlist from GIBSON_CALLBACK_PEER_SVIDS.
+//
+// Fail-closed semantics:
+//   - If cfg.Auth.SPIFFE is nil (or WorkloadAPISocket is empty) the helper
+//     returns nil without opening anything; the daemon may then bind only to
+//     loopback addresses (rejectNonLoopbackWithoutSPIFFE enforces this on both
+//     listeners as defense-in-depth).
+//   - If SPIFFE IS configured but the Workload API socket is unreachable the
+//     helper returns an error; the daemon refuses to start (critical-tls-no-fallbacks
+//     Requirement 1.5 — no silent downgrade to plaintext).
+//   - If SPIFFE IS configured but cfg.Auth.SPIFFE.EnvoyID is empty (and the env
+//     var GIBSON_SPIFFE_ENVOY_ID is not set either) the helper returns an
+//     error.
+//   - If SPIFFE IS configured but GIBSON_CALLBACK_PEER_SVIDS is empty or
+//     contains invalid SPIFFE IDs / IDs from a wrong trust domain, the helper
+//     returns an error naming the chart values key the operator must populate.
+//
+// Idempotent: calling twice is a no-op the second time (the source is opened
+// only when d.spiffeX509Source is nil). Closing happens in Close()/stopServices.
+//
+// Spec: critical-tls-no-fallbacks Component 4.
+func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
+	if d.spiffeX509Source != nil {
+		return nil // already initialized
+	}
+	if d.config.Auth.SPIFFE == nil || d.config.Auth.SPIFFE.WorkloadAPISocket == "" {
+		// SPIFFE not configured — loopback-only mode is permitted; the per-listener
+		// rejectNonLoopbackWithoutSPIFFE guards block any non-loopback bind.
+		return nil
+	}
+
+	socketAddr := "unix://" + d.config.Auth.SPIFFE.WorkloadAPISocket
+	source, err := workloadapi.NewX509Source(ctx,
+		workloadapi.WithClientOptions(
+			workloadapi.WithAddr(socketAddr),
+		),
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"SPIFFE workload API unreachable: %w (socket=%s); "+
+				"daemon will not start without mTLS — "+
+				"spec: critical-tls-no-fallbacks Requirement 1.5",
+			err, d.config.Auth.SPIFFE.WorkloadAPISocket,
+		)
+	}
+
+	// Validate the configured Envoy SVID — the daemon refuses to start without
+	// it (mirrors the previous in-line validation at grpc.go:330-342 before
+	// Component 4 hoisted the source open out of buildGRPCServer).
+	envoyID := d.config.Auth.SPIFFE.EnvoyID
+	if envoyID == "" {
+		envoyID = os.Getenv("GIBSON_SPIFFE_ENVOY_ID")
+	}
+	if envoyID == "" {
+		_ = source.Close()
+		return fmt.Errorf(
+			"SPIFFE mTLS is enabled but GIBSON_SPIFFE_ENVOY_ID is not set; " +
+				"the daemon will not accept any mTLS connections. " +
+				"Set GIBSON_SPIFFE_ENVOY_ID to the Envoy sidecar's SPIFFE SVID " +
+				"(e.g. spiffe://zero-day.ai/ns/gibson/sa/envoy). " +
+				"Spec: admin-services-completion Requirement 6.1")
+	}
+	parsedEnvoyID, parseErr := spiffeid.FromString(envoyID)
+	if parseErr != nil {
+		_ = source.Close()
+		return fmt.Errorf(
+			"SPIFFE mTLS is enabled but GIBSON_SPIFFE_ENVOY_ID=%q is not a valid SPIFFE ID: %w",
+			envoyID, parseErr)
+	}
+
+	// Validate trust domain: every peer SVID and the Envoy SVID must live under
+	// the configured trust domain. An empty TrustDomain config is allowed for
+	// backward compat — when set, mismatches are rejected.
+	configuredTD := strings.TrimSpace(d.config.Auth.SPIFFE.TrustDomain)
+	if configuredTD != "" {
+		td, tdErr := spiffeid.TrustDomainFromString(configuredTD)
+		if tdErr != nil {
+			_ = source.Close()
+			return fmt.Errorf(
+				"cfg.Auth.SPIFFE.TrustDomain=%q is not a valid SPIFFE trust domain: %w",
+				configuredTD, tdErr)
+		}
+		if !parsedEnvoyID.MemberOf(td) {
+			_ = source.Close()
+			return fmt.Errorf(
+				"GIBSON_SPIFFE_ENVOY_ID=%q is not in the configured trust domain %q",
+				envoyID, configuredTD)
+		}
+	}
+
+	// Parse and validate the callback listener peer-SVID allowlist.
+	rawPeers := strings.TrimSpace(os.Getenv("GIBSON_CALLBACK_PEER_SVIDS"))
+	if rawPeers == "" {
+		_ = source.Close()
+		return fmt.Errorf(
+			"SPIFFE mTLS is enabled but GIBSON_CALLBACK_PEER_SVIDS is empty; " +
+				"the harness callback listener will not accept any peer. " +
+				"Populate gibson.config.callback.spiffe.peerSvids in the chart values " +
+				"with the SPIFFE IDs of agents/tools/dashboards that legitimately call " +
+				"the harness callback listener. " +
+				"Spec: critical-tls-no-fallbacks Component 4.")
+	}
+
+	peerSVIDs := make([]spiffeid.ID, 0, 4)
+	for _, raw := range strings.Split(rawPeers, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		id, err := spiffeid.FromString(raw)
+		if err != nil {
+			_ = source.Close()
+			return fmt.Errorf(
+				"GIBSON_CALLBACK_PEER_SVIDS contains invalid SPIFFE ID %q: %w",
+				raw, err)
+		}
+		if configuredTD != "" {
+			td, _ := spiffeid.TrustDomainFromString(configuredTD)
+			if !id.MemberOf(td) {
+				_ = source.Close()
+				return fmt.Errorf(
+					"GIBSON_CALLBACK_PEER_SVIDS entry %q is not in the configured trust domain %q",
+					raw, configuredTD)
+			}
+		}
+		peerSVIDs = append(peerSVIDs, id)
+	}
+	if len(peerSVIDs) == 0 {
+		_ = source.Close()
+		return fmt.Errorf(
+			"GIBSON_CALLBACK_PEER_SVIDS parsed to an empty allowlist after trimming; " +
+				"populate gibson.config.callback.spiffe.peerSvids in the chart values")
+	}
+
+	d.spiffeX509Source = source
+	d.callbackPeerSVIDs = peerSVIDs
+	d.logger.Info(ctx, "SPIFFE X509 source initialized",
+		"socket", d.config.Auth.SPIFFE.WorkloadAPISocket,
+		"trust_domain", configuredTD,
+		"envoy_id", envoyID,
+		"callback_peer_count", len(peerSVIDs),
+	)
+	return nil
+}
+
 // resolveHomeDir derives the Gibson home directory from config and environment.
 // Fallback: cfg.Core.HomeDir → $HOME/.gibson → /var/lib/gibson.
 func resolveHomeDir(cfg *config.Config) string {
@@ -456,6 +619,30 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Call the startup callback if set
 	if d.onRegistryReady != nil {
 		d.onRegistryReady()
+	}
+
+	// Initialize SPIFFE X.509 source once, before any listener is wired. Both
+	// the main gRPC listener (buildGRPCServer) and the harness callback
+	// listener (callback_server) consume d.spiffeX509Source. Fail-closed if
+	// SPIFFE is configured but the Workload API socket / EnvoyID /
+	// GIBSON_CALLBACK_PEER_SVIDS are missing or invalid.
+	// Spec: critical-tls-no-fallbacks Component 4.
+	if err := d.initSPIFFEX509Source(ctx); err != nil {
+		return fmt.Errorf("init SPIFFE X509 source: %w", err)
+	}
+	// Wire the SPIFFE source and peer-SVID allowlist onto the callback
+	// manager so that when callback.Start() runs the listener is wrapped in
+	// SPIFFE mTLS. d.spiffeX509Source is *workloadapi.X509Source — type-assert
+	// here for the manager's typed setter.
+	if d.spiffeX509Source != nil {
+		if src, ok := d.spiffeX509Source.(*workloadapi.X509Source); ok {
+			d.callback.SetSPIFFE(src, d.callbackPeerSVIDs)
+		} else {
+			return fmt.Errorf(
+				"daemon.spiffeX509Source is not a *workloadapi.X509Source (got %T); "+
+					"unable to wire SPIFFE mTLS onto callback listener",
+				d.spiffeX509Source)
+		}
 	}
 
 	// Initialize StateClient and Redis stores (required for Gibson)

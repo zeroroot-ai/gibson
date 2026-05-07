@@ -428,24 +428,17 @@ func IdentifySkippedNodes(checkpoint *Checkpoint) []string {
 }
 
 // ValidateCheckpointVersion checks if a checkpoint format version is compatible
-// with the current implementation. This enables graceful handling of version migrations.
+// with the current implementation. Only CurrentCheckpointVersion (2) is accepted;
+// older versions must be drained before upgrade per the release notes.
 func ValidateCheckpointVersion(version int) error {
-	// Current supported version
-	const currentVersion = 1
-	const minSupportedVersion = 1
-	const maxSupportedVersion = 1
-
-	if version < minSupportedVersion {
-		return fmt.Errorf("checkpoint version %d is too old (minimum supported: %d)",
-			version, minSupportedVersion)
+	if version != CurrentCheckpointVersion {
+		return fmt.Errorf(
+			"unsupported checkpoint schema version %d "+
+				"(this daemon requires version %d): "+
+				"drain in-flight missions before upgrading",
+			version, CurrentCheckpointVersion,
+		)
 	}
-
-	if version > maxSupportedVersion {
-		return fmt.Errorf("checkpoint version %d is too new (maximum supported: %d)",
-			version, maxSupportedVersion)
-	}
-
-	// Version is within supported range
 	return nil
 }
 

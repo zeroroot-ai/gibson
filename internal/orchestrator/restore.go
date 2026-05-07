@@ -3,10 +3,19 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 
+	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/mission"
 )
+
+// ErrMissionMemoryUnavailable is returned by RestoreFromCheckpoint when the
+// MissionMemory Redis backend is unreachable at resume time. Proceeding with
+// empty mission memory would silently corrupt the mission's expectations, so
+// we fail fast instead.
+var ErrMissionMemoryUnavailable = errors.New("mission memory unavailable at resume: Redis connection failed")
 
 // RestoredState represents the fully restored orchestrator state from a checkpoint.
 // This contains everything needed to resume mission execution from where it left off.
@@ -45,28 +54,44 @@ func NewStateRestorer() *StateRestorer {
 // RestoreFromCheckpoint converts a checkpoint into a RestoredState that the orchestrator can use.
 // It validates the checkpoint structure and deserializes all memory components.
 //
+// Parameters:
+//   - ctx: context for Redis calls
+//   - checkpoint: the persisted checkpoint to restore from
+//   - wm: optional live WorkingMemory instance. When non-nil, entries from the
+//     checkpoint's working-memory payload are written into wm via Set(k, v).
+//   - mm: optional live MissionMemory instance. When non-nil, its Redis availability
+//     is probed via Keys(ctx). If Redis is reachable, it is trusted as-is (the
+//     checkpoint snapshot is a recovery aid only). If Redis is unreachable,
+//     ErrMissionMemoryUnavailable is returned and the resume aborts.
+//
 // Returns an error if:
 //   - Checkpoint is nil
 //   - Required fields are missing
 //   - Memory deserialization fails (returns partial state with error)
-func (r *StateRestorer) RestoreFromCheckpoint(ctx context.Context, checkpoint *mission.Checkpoint) (*RestoredState, error) {
+//   - mm is non-nil and its Redis backend is unreachable
+func (r *StateRestorer) RestoreFromCheckpoint(
+	ctx context.Context,
+	checkpoint *mission.Checkpoint,
+	wm memory.WorkingMemory,
+	mm memory.MissionMemory,
+) (*RestoredState, error) {
 	if checkpoint == nil {
 		return nil, fmt.Errorf("checkpoint cannot be nil")
 	}
 
-	// Validate checkpoint has required fields
+	// Validate checkpoint has required fields.
 	if err := r.ValidateCheckpoint(checkpoint); err != nil {
 		return nil, fmt.Errorf("checkpoint validation failed: %w", err)
 	}
 
-	// Create restored state
+	// Create restored state.
 	restored := &RestoredState{
 		CompletedNodes: checkpoint.CompletedNodes,
 		CurrentNode:    checkpoint.CurrentNodeID,
 		PendingQueue:   []string{},
 	}
 
-	// Copy in-progress node state if present
+	// Copy in-progress node state if present.
 	if checkpoint.InProgressNode != nil {
 		restored.InProgressNode = &mission.InProgressNodeState{
 			NodeID:     checkpoint.InProgressNode.NodeID,
@@ -75,29 +100,62 @@ func (r *StateRestorer) RestoreFromCheckpoint(ctx context.Context, checkpoint *m
 		}
 	}
 
-	// Restore DAG traversal state
+	// Restore DAG traversal state.
 	if checkpoint.DAGState != nil {
 		restored.PendingQueue = checkpoint.DAGState.PendingNodes
 		restored.ParallelState = checkpoint.DAGState.ParallelState
 	}
 
-	// Deserialize working memory
+	// Deserialize working memory from checkpoint bytes.
 	if len(checkpoint.WorkingMemory) > 0 {
 		var workingMem map[string]any
 		if err := json.Unmarshal(checkpoint.WorkingMemory, &workingMem); err != nil {
-			// Return partial state with error - allow orchestrator to decide whether to continue
+			// Return partial state with error — allow orchestrator to decide whether to continue.
 			return restored, fmt.Errorf("failed to deserialize working memory (continuing with empty memory): %w", err)
 		}
 		restored.WorkingMemory = workingMem
+
+		// Re-hydrate the live WorkingMemory instance when provided.
+		if wm != nil {
+			// The caller constructs a fresh instance; do NOT call wm.Clear().
+			for k, v := range workingMem {
+				if err := wm.Set(k, v); err != nil {
+					// Token-budget eviction — log and continue; do not abort resume.
+					slog.Warn("working memory re-hydration: Set error (token budget?)",
+						"key", k,
+						"err", err,
+					)
+				}
+			}
+		}
 	} else {
 		restored.WorkingMemory = make(map[string]any)
 	}
 
-	// Deserialize mission memory
+	// Mission memory: probe Redis availability when mm is provided.
+	// The checkpoint snapshot is a recovery aid; Redis is the authoritative source.
+	if mm != nil {
+		_, err := mm.Keys(ctx)
+		if err != nil {
+			// Redis is unreachable — fail fast rather than silently resume with empty
+			// mission memory, which would corrupt the mission's expectations.
+			missionID := checkpoint.MissionID.String()
+			slog.Error("mission memory unavailable at resume: Redis connection failed",
+				"mission_id", missionID,
+				"err", err,
+			)
+			return nil, ErrMissionMemoryUnavailable
+		}
+		// Redis is reachable — trust it as-is. The checkpoint snapshot (below)
+		// is stored in RestoredState for operator debugging only; it is NOT
+		// re-hydrated back into Redis.
+	}
+
+	// Deserialize mission memory from checkpoint bytes (stored for operator reference).
 	if len(checkpoint.MissionMemory) > 0 {
 		var missionMem map[string]any
 		if err := json.Unmarshal(checkpoint.MissionMemory, &missionMem); err != nil {
-			// Return partial state with error - allow orchestrator to decide whether to continue
+			// Return partial state with error — allow orchestrator to decide whether to continue.
 			return restored, fmt.Errorf("failed to deserialize mission memory (continuing with empty memory): %w", err)
 		}
 		restored.MissionMemory = missionMem

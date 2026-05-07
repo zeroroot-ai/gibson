@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/sdk/protoresolver"
@@ -29,10 +31,26 @@ type CallbackConfig struct {
 	Enabled bool
 
 	// SPIFFEEnabled indicates that the callback server is wrapped with SPIFFE
-	// mTLS (configured via NewCallbackServerWithRegistry's SPIFFE wiring path).
-	// When true, the listener may bind to non-loopback addresses; when false,
-	// security-hardening R1.4 forces loopback-only binds.
+	// mTLS. After spec critical-tls-no-fallbacks, this is true whenever
+	// X509Source is non-nil; it remains in CallbackConfig solely so the
+	// loopback bind guard at Start() can answer "is this listener
+	// transport-secured" without depending on field-by-field nil checks.
+	// Loopback-only dev builds set this to false and bind to 127.0.0.1.
 	SPIFFEEnabled bool
+
+	// X509Source is the SPIFFE Workload API source used to wrap the callback
+	// listener in mTLS. When nil and ListenAddress is non-loopback, Start()
+	// returns an error (critical-tls-no-fallbacks Requirement 1.5 — fail-closed).
+	// Populated by daemon.New() / daemon.Start() from
+	// daemonImpl.spiffeX509Source so the same Workload API connection serves
+	// both the main and callback listeners.
+	X509Source *workloadapi.X509Source
+
+	// PeerSVIDs is the allowlist of peer SPIFFE IDs the callback listener
+	// accepts. Built from GIBSON_CALLBACK_PEER_SVIDS at daemon startup
+	// (parsed by initSPIFFEX509Source). MUST be non-empty when X509Source is set.
+	// Spec: critical-tls-no-fallbacks Requirement 1.3.
+	PeerSVIDs []spiffeid.ID
 }
 
 // CallbackManager coordinates the lifecycle of the CallbackServer and provides
@@ -111,6 +129,16 @@ func NewCallbackManager(cfg CallbackConfig, logger *slog.Logger) *CallbackManage
 	// Create server with registry for mission-based harness lookup
 	server := NewCallbackServerWithRegistry(logger, port, registry)
 
+	// Wire the SPIFFE source + peer-SVID allowlist into the server when the
+	// caller (daemon.New/Start) supplied them. Without this the listener falls
+	// back to plain TCP, which is forbidden by spec critical-tls-no-fallbacks
+	// Requirement 1.1 for non-loopback binds. The Start() guard at line 159
+	// rejects non-loopback binds without SPIFFE — this wiring is what makes
+	// SPIFFEEnabled=true in production.
+	if cfg.X509Source != nil {
+		server.SetSPIFFE(cfg.X509Source, cfg.PeerSVIDs)
+	}
+
 	return &CallbackManager{
 		server:      server,
 		registry:    registry,
@@ -151,12 +179,15 @@ func (m *CallbackManager) Start(ctx context.Context) error {
 		defer m.mu.Unlock()
 
 		// Refuse to start the callback listener on a non-loopback bind without
-		// SPIFFE mTLS — security-hardening R1.4. The chart-managed deployment
-		// flips SPIFFEEnabled=true once the SPIFFE wiring path in
-		// NewCallbackServerWithRegistry has supplied an *workloadapi.X509Source;
-		// any other configuration that binds to a non-loopback address is
-		// refused here, fail-closed.
-		if m.config.ListenAddress != "" && !m.config.SPIFFEEnabled {
+		// SPIFFE mTLS — critical-tls-no-fallbacks Requirement 1.5 (was
+		// security-hardening R1.4). After this spec, SPIFFE is the only
+		// supported posture for non-loopback binds; SPIFFEEnabled is true
+		// whenever NewCallbackManager received a non-nil X509Source via
+		// CallbackConfig. A non-loopback bind without SPIFFE fails here,
+		// fail-closed, with a message naming GIBSON_CALLBACK_PEER_SVIDS so
+		// operators have an actionable next step.
+		spiffeReady := m.config.SPIFFEEnabled || m.config.X509Source != nil
+		if m.config.ListenAddress != "" && !spiffeReady {
 			if err := rejectNonLoopbackWithoutSPIFFE(m.config.ListenAddress); err != nil {
 				m.logger.Error("callback listener refused to start", "error", err)
 				startErr = err
@@ -562,5 +593,27 @@ func (m *CallbackManager) SetAgentOwnerLookup(fn AgentOwnerLookup) {
 	if m.server != nil {
 		m.server.SetAgentOwnerLookup(fn)
 		m.logger.Debug("set agent owner lookup on callback service")
+	}
+}
+
+// SetSPIFFE wires the SPIFFE Workload API source and peer-SVID allowlist into
+// the underlying CallbackServer AND records the post-init state on
+// CallbackConfig so the loopback-bind guard at Start() correctly identifies
+// the listener as transport-secured. Must be called BEFORE Start().
+//
+// daemon.Start invokes this after initSPIFFEX509Source has populated
+// d.spiffeX509Source and d.callbackPeerSVIDs.
+//
+// Spec: critical-tls-no-fallbacks Component 4.
+func (m *CallbackManager) SetSPIFFE(source *workloadapi.X509Source, peerSVIDs []spiffeid.ID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config.X509Source = source
+	m.config.PeerSVIDs = peerSVIDs
+	m.config.SPIFFEEnabled = source != nil
+	if m.server != nil {
+		m.server.SetSPIFFE(source, peerSVIDs)
+		m.logger.Debug("wired SPIFFE source onto callback server",
+			"peer_svid_count", len(peerSVIDs))
 	}
 }

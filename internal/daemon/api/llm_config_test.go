@@ -150,13 +150,6 @@ func TestNewLLMConfigHandler(t *testing.T) {
 func TestLLMConfigHandler_CreateOrUpdateProvider(t *testing.T) {
 	ctx := testContextWithTenant()
 
-	t.Run("success", func(t *testing.T) {
-		// Requires a real per-tenant Postgres database (data-plane pool).
-		// The pool stub returns ErrAdminPoolNotConfigured on For(), so this
-		// test cannot pass in unit-test mode. Integration tests cover this path.
-		t.Skip("requires data-plane Postgres — run as integration test")
-	})
-
 	t.Run("empty name", func(t *testing.T) {
 		handler, _, _ := setupTestLLMConfigHandler(t)
 
@@ -200,10 +193,6 @@ func TestLLMConfigHandler_CreateOrUpdateProvider(t *testing.T) {
 func TestLLMConfigHandler_GetProvider(t *testing.T) {
 	ctx := testContextWithTenant()
 
-	t.Run("success", func(t *testing.T) {
-		t.Skip("requires data-plane Postgres — run as integration test")
-	})
-
 	t.Run("not found", func(t *testing.T) {
 		handler, _, _ := setupTestLLMConfigHandler(t)
 
@@ -223,17 +212,10 @@ func TestLLMConfigHandler_ListProviders(t *testing.T) {
 		assert.Empty(t, resp)
 	})
 
-	t.Run("multiple providers", func(t *testing.T) {
-		t.Skip("requires data-plane Postgres — run as integration test")
-	})
 }
 
 func TestLLMConfigHandler_UpdateProvider(t *testing.T) {
 	ctx := testContextWithTenant()
-
-	t.Run("update default model", func(t *testing.T) {
-		t.Skip("requires data-plane Postgres — run as integration test")
-	})
 
 	t.Run("not found", func(t *testing.T) {
 		handler, _, _ := setupTestLLMConfigHandler(t)
@@ -250,10 +232,6 @@ func TestLLMConfigHandler_UpdateProvider(t *testing.T) {
 func TestLLMConfigHandler_DeleteProvider(t *testing.T) {
 	ctx := testContextWithTenant()
 
-	t.Run("success", func(t *testing.T) {
-		t.Skip("requires data-plane Postgres — run as integration test")
-	})
-
 	t.Run("not found", func(t *testing.T) {
 		handler, _, _ := setupTestLLMConfigHandler(t)
 
@@ -264,10 +242,6 @@ func TestLLMConfigHandler_DeleteProvider(t *testing.T) {
 
 func TestLLMConfigHandler_DefaultProvider(t *testing.T) {
 	ctx := testContextWithTenant()
-
-	t.Run("set and get default", func(t *testing.T) {
-		t.Skip("requires data-plane Postgres — run as integration test")
-	})
 
 	t.Run("no default set", func(t *testing.T) {
 		handler, _, _ := setupTestLLMConfigHandler(t)
@@ -284,11 +258,6 @@ func TestLLMConfigHandler_DefaultProvider(t *testing.T) {
 	})
 }
 
-func TestLLMConfigHandler_GetProviderConfig(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		t.Skip("requires data-plane Postgres — run as integration test")
-	})
-}
 
 func TestProviderConfigStored_JSON(t *testing.T) {
 	now := time.Now()

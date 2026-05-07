@@ -73,11 +73,12 @@ type AuthConfig struct {
 
 	// SPIFFE configures SPIFFE/SPIRE workload identity for mTLS authentication.
 	// When set, the daemon initialises an X509Source from the Workload API socket
-	// and configures the gRPC server with SPIFFE-pinned mTLS (tls.RequestClientCert
-	// with a go-spiffe VerifyPeerCertificate callback; see grpc.go for details).
-	// When absent and the listen address is non-loopback the daemon refuses to start
-	// (zero-trust-hardening Req 1.2).
-	// Optional — when absent and listen is loopback the daemon starts with a warning.
+	// and configures the gRPC server with SPIFFE-pinned mTLS (RequireAndVerify
+	// posture, with a go-spiffe VerifyPeerCertificate callback; see grpc.go for
+	// details). When absent and the listen address is non-loopback the daemon
+	// refuses to start (zero-trust-hardening Req 1.2 / critical-tls-no-fallbacks
+	// Req 1.5). Optional — when absent and listen is loopback the daemon starts
+	// with a warning.
 	SPIFFE *SPIFFEConfig `mapstructure:"spiffe" yaml:"spiffe,omitempty"`
 
 	// AutoProvisionTenants controls whether new tenants are automatically created

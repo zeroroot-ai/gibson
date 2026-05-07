@@ -4,6 +4,64 @@ All notable changes to the gibson daemon are documented here.
 
 ---
 
+## Unreleased — working-memory-persistence
+
+### Breaking change: checkpoint schema version 2
+
+The checkpoint schema has been bumped from version 1 to version 2. The new
+schema persists working memory and mission memory across daemon crashes and
+records per-child execution status for parallel groups.
+
+**Before upgrading:** Run `gibson mission drain --all` to complete or cancel
+all in-flight missions. The new daemon refuses to resume version-1 checkpoints
+with a clear error message:
+
+```
+unsupported checkpoint schema version 1 (this daemon requires version 2):
+drain in-flight missions before upgrading
+```
+
+Completed or cancelled missions are unaffected.
+
+**No SDK changes required.** All changes are confined to `core/gibson/`. No
+`go.mod` bump is needed in any consumer repo (`core/ext-authz/`,
+`opensource/adk/`, `opensource/gibson-tool-runner/`).
+
+### Added
+
+- `WorkingMemory.GetAll()` — point-in-time snapshot of the agent's ephemeral
+  key-value scratchpad. Non-JSON-serializable values are skipped with a
+  `level=warn` log. Snapshots larger than 1 MB are truncated lexicographically.
+- `MissionMemory.GetAll(ctx)` — SMEMBERS + pipelined JSON.GET snapshot of the
+  mission's Redis-backed shared context. Used as a recovery aid in checkpoints;
+  Redis remains the authoritative source of truth on resume.
+- `ParallelGroupState` checkpoint struct — records per-child `ChildStatus`
+  (`pending`, `in_flight`, `completed`, `failed`) and child outputs for every
+  active parallel group. Replaces the former `ParallelState map[string][]string`
+  which only recorded completed-node IDs.
+- `CheckpointIntegration.MarkChildDispatched` — transitions a child to
+  `ChildStatusInFlight` when the scheduler dispatches it.
+- `CheckpointIntegration.SetParallelGroupFailFast` — registers fail-fast
+  semantics for a parallel group.
+- `StateRestorer.RestoreFromCheckpoint` — now accepts optional
+  `memory.WorkingMemory` and `memory.MissionMemory` parameters. When provided,
+  working-memory entries are re-hydrated via `Set`, and mission-memory Redis
+  availability is probed before resume (fail-fast on connection error).
+- `ErrMissionMemoryUnavailable` sentinel — returned when Redis is unreachable
+  at resume time.
+
+### Changed
+
+- `checkpoint.NewCheckpoint` — `Version` field now set to `CurrentCheckpoint
+  Version` (2) instead of hard-coded 1.
+- `checkpoint.FromCheckpoint` — fail-fast version guard at the top of the
+  function; rejects any checkpoint whose `Version` field does not equal 2.
+- `checkpoint.ValidateCheckpointVersion` — updated to accept only version 2.
+- `DAGTraversalState.ParallelState` — retagged `json:"-" msgpack:"-"`
+  (deprecated, excluded from wire in schema version 2).
+
+---
+
 ## v0.32.0 — 2026-05-04 — daemon reads per-tenant credentials from Vault (tenant-provisioning-unification-phase2 Phase 6)
 
 The daemon's per-tenant Postgres + Neo4j credential resolution now

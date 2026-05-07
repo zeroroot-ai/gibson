@@ -91,7 +91,10 @@ func NewExecutionState(missionID types.ID, threadID string) *ExecutionState {
 
 // ToCheckpoint converts ExecutionState to a Checkpoint for persistence.
 // This serializes the memory and conversation history into byte slices.
-func (s *ExecutionState) ToCheckpoint(checkpointID string, version int) (*Checkpoint, error) {
+// The version field is always set to CurrentCheckpointVersion regardless of the
+// caller-supplied version argument, making it impossible to accidentally write an
+// old-schema checkpoint.
+func (s *ExecutionState) ToCheckpoint(checkpointID string, _ int) (*Checkpoint, error) {
 	// Serialize working memory
 	workingMemBytes, err := SerializeMemory(s.WorkingMemory)
 	if err != nil {
@@ -112,7 +115,7 @@ func (s *ExecutionState) ToCheckpoint(checkpointID string, version int) (*Checkp
 
 	checkpoint := NewCheckpoint(s.MissionID, s.ThreadID)
 	checkpoint.ID = checkpointID
-	checkpoint.Version = version
+	checkpoint.Version = CurrentCheckpointVersion // always write current version
 	checkpoint.CurrentNodeID = s.CurrentNodeID
 	checkpoint.NodeStates = s.NodeStates
 	checkpoint.CompletedNodes = s.CompletedResults
@@ -134,7 +137,18 @@ func (s *ExecutionState) ToCheckpoint(checkpointID string, version int) (*Checkp
 
 // FromCheckpoint converts a Checkpoint back into ExecutionState for execution.
 // This deserializes the memory and conversation history from byte slices.
+// Fails fast if the checkpoint's schema version does not match CurrentCheckpointVersion.
 func FromCheckpoint(checkpoint *Checkpoint) (*ExecutionState, error) {
+	// Version guard: fail fast rather than silently mis-read an old payload.
+	if checkpoint.Version != CurrentCheckpointVersion {
+		return nil, fmt.Errorf(
+			"unsupported checkpoint schema version %d "+
+				"(this daemon requires version %d): "+
+				"drain in-flight missions before upgrading",
+			checkpoint.Version, CurrentCheckpointVersion,
+		)
+	}
+
 	// Deserialize working memory
 	workingMem, err := DeserializeMemory(checkpoint.WorkingMemory)
 	if err != nil {
@@ -296,18 +310,35 @@ func (s *ExecutionState) Clone() *ExecutionState {
 	// Copy DAG state
 	if s.DAGState != nil {
 		clone.DAGState = &DAGTraversalState{
-			PendingNodes:   make([]string, len(s.DAGState.PendingNodes)),
-			CurrentBranch:  s.DAGState.CurrentBranch,
-			ParallelState:  make(map[string][]string),
-			VisitedNodes:   make([]string, len(s.DAGState.VisitedNodes)),
-			ExecutionOrder: make([]string, len(s.DAGState.ExecutionOrder)),
+			PendingNodes:        make([]string, len(s.DAGState.PendingNodes)),
+			CurrentBranch:       s.DAGState.CurrentBranch,
+			ParallelGroupStates: make(map[string]ParallelGroupState),
+			VisitedNodes:        make([]string, len(s.DAGState.VisitedNodes)),
+			ExecutionOrder:      make([]string, len(s.DAGState.ExecutionOrder)),
 		}
 		copy(clone.DAGState.PendingNodes, s.DAGState.PendingNodes)
 		copy(clone.DAGState.VisitedNodes, s.DAGState.VisitedNodes)
 		copy(clone.DAGState.ExecutionOrder, s.DAGState.ExecutionOrder)
-		for k, v := range s.DAGState.ParallelState {
-			clone.DAGState.ParallelState[k] = make([]string, len(v))
-			copy(clone.DAGState.ParallelState[k], v)
+		// Deep-copy ParallelGroupStates: copy Children and ChildOutputs per group.
+		for groupID, gs := range s.DAGState.ParallelGroupStates {
+			childrenCopy := make(map[string]ChildStatus, len(gs.Children))
+			for nodeID, status := range gs.Children {
+				childrenCopy[nodeID] = status
+			}
+			outputsCopy := make(map[string]map[string]any, len(gs.ChildOutputs))
+			for nodeID, out := range gs.ChildOutputs {
+				outCopy := make(map[string]any, len(out))
+				for k, v := range out {
+					outCopy[k] = v
+				}
+				outputsCopy[nodeID] = outCopy
+			}
+			clone.DAGState.ParallelGroupStates[groupID] = ParallelGroupState{
+				GroupID:      gs.GroupID,
+				Children:     childrenCopy,
+				ChildOutputs: outputsCopy,
+				FailFast:     gs.FailFast,
+			}
 		}
 	}
 

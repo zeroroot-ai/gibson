@@ -61,18 +61,23 @@ func TestValidateCheckpointVersion(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "valid version 1",
-			version: 1,
+			name:    "valid version 2 (current)",
+			version: CurrentCheckpointVersion,
 			wantErr: false,
 		},
 		{
-			name:    "version too old",
+			name:    "version too old (version 1)",
+			version: 1,
+			wantErr: true,
+		},
+		{
+			name:    "version too old (version 0)",
 			version: 0,
 			wantErr: true,
 		},
 		{
-			name:    "version too new",
-			version: 2,
+			name:    "version too new (hypothetical version 3)",
+			version: 3,
 			wantErr: true,
 		},
 	}
@@ -186,7 +191,7 @@ func TestDefaultStateRestorer_Validate(t *testing.T) {
 		{
 			name: "missing ID",
 			checkpoint: &Checkpoint{
-				Version:   1,
+				Version:   CurrentCheckpointVersion,
 				ThreadID:  threadID,
 				MissionID: missionID,
 			},
@@ -197,7 +202,7 @@ func TestDefaultStateRestorer_Validate(t *testing.T) {
 			name: "missing thread ID",
 			checkpoint: &Checkpoint{
 				ID:        "checkpoint-123",
-				Version:   1,
+				Version:   CurrentCheckpointVersion,
 				MissionID: missionID,
 			},
 			wantErr: true,

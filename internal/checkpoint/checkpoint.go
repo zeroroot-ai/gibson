@@ -196,6 +196,47 @@ type InProgressNodeState struct {
 	Elapsed time.Duration `json:"elapsed" msgpack:"elapsed"`
 }
 
+// CurrentCheckpointVersion is the checkpoint schema version emitted by this
+// binary. Increment when adding new required fields to Checkpoint or
+// DAGTraversalState. Fail fast on load if the persisted version does not match.
+const CurrentCheckpointVersion = 2
+
+// ChildStatus tracks the execution status of a single child node within a
+// parallel group.
+type ChildStatus string
+
+const (
+	// ChildStatusPending means the child has been registered but not yet dispatched.
+	ChildStatusPending ChildStatus = "pending"
+
+	// ChildStatusInFlight means the child has been dispatched and is running.
+	ChildStatusInFlight ChildStatus = "in_flight"
+
+	// ChildStatusCompleted means the child finished successfully.
+	ChildStatusCompleted ChildStatus = "completed"
+
+	// ChildStatusFailed means the child finished with a failure.
+	ChildStatusFailed ChildStatus = "failed"
+)
+
+// ParallelGroupState records the per-child execution status for one parallel
+// group. It is embedded inside DAGTraversalState.ParallelGroupStates.
+type ParallelGroupState struct {
+	// GroupID is the identifier of the parallel group node in the mission DAG.
+	GroupID string `json:"group_id" msgpack:"group_id"`
+
+	// Children maps each child node ID to its current status.
+	Children map[string]ChildStatus `json:"children" msgpack:"children"`
+
+	// ChildOutputs maps completed child node IDs to their serialised output.
+	// Only populated for ChildStatusCompleted children.
+	ChildOutputs map[string]map[string]any `json:"child_outputs,omitempty" msgpack:"child_outputs,omitempty"`
+
+	// FailFast records the group's failure semantics: when true, one child
+	// failure transitions the group to Failed immediately.
+	FailFast bool `json:"fail_fast" msgpack:"fail_fast"`
+}
+
 // DAGTraversalState captures the DAG execution position for resumption.
 // This enables the orchestrator to continue from exactly where it left off.
 type DAGTraversalState struct {
@@ -207,9 +248,15 @@ type DAGTraversalState struct {
 	// Empty if not in a conditional branch.
 	CurrentBranch string `json:"current_branch,omitempty" msgpack:"current_branch,omitempty"`
 
-	// ParallelState tracks parallel execution state for each parallel group.
-	// Key is the parallel group ID, value is the list of completed node IDs in that group.
-	ParallelState map[string][]string `json:"parallel_state,omitempty" msgpack:"parallel_state,omitempty"`
+	// ParallelState is DEPRECATED in schema version 2. It is retained here so
+	// the struct compiles without breaking callers; it is excluded from
+	// serialization. Use ParallelGroupStates instead.
+	ParallelState map[string][]string `json:"-" msgpack:"-"`
+
+	// ParallelGroupStates replaces the former ParallelState []string map.
+	// It records full per-child status for every active parallel group.
+	// Schema version 2 required.
+	ParallelGroupStates map[string]ParallelGroupState `json:"parallel_group_states,omitempty" msgpack:"parallel_group_states,omitempty"`
 
 	// VisitedNodes tracks all nodes that have been visited (started or completed).
 	// Used to detect cycles and prevent infinite loops.
@@ -257,12 +304,12 @@ func (s NodeStatus) IsTerminal() bool {
 }
 
 // NewCheckpoint creates a new checkpoint with generated ID and timestamp.
-// The checkpoint format version is set to 1.
+// The checkpoint format version is set to CurrentCheckpointVersion.
 func NewCheckpoint(missionID types.ID, threadID string) *Checkpoint {
 	return &Checkpoint{
 		ID:             ulid.Make().String(),
 		ThreadID:       threadID,
-		Version:        1,
+		Version:        CurrentCheckpointVersion,
 		CreatedAt:      time.Now(),
 		MissionID:      missionID,
 		NodeStates:     make(map[string]*NodeState),
@@ -370,18 +417,35 @@ func (c *Checkpoint) Clone() *Checkpoint {
 	// Copy DAG state
 	if c.DAGState != nil {
 		clone.DAGState = &DAGTraversalState{
-			PendingNodes:   make([]string, len(c.DAGState.PendingNodes)),
-			CurrentBranch:  c.DAGState.CurrentBranch,
-			ParallelState:  make(map[string][]string),
-			VisitedNodes:   make([]string, len(c.DAGState.VisitedNodes)),
-			ExecutionOrder: make([]string, len(c.DAGState.ExecutionOrder)),
+			PendingNodes:        make([]string, len(c.DAGState.PendingNodes)),
+			CurrentBranch:       c.DAGState.CurrentBranch,
+			ParallelGroupStates: make(map[string]ParallelGroupState),
+			VisitedNodes:        make([]string, len(c.DAGState.VisitedNodes)),
+			ExecutionOrder:      make([]string, len(c.DAGState.ExecutionOrder)),
 		}
 		copy(clone.DAGState.PendingNodes, c.DAGState.PendingNodes)
 		copy(clone.DAGState.VisitedNodes, c.DAGState.VisitedNodes)
 		copy(clone.DAGState.ExecutionOrder, c.DAGState.ExecutionOrder)
-		for k, v := range c.DAGState.ParallelState {
-			clone.DAGState.ParallelState[k] = make([]string, len(v))
-			copy(clone.DAGState.ParallelState[k], v)
+		// Deep-copy ParallelGroupStates: copy Children and ChildOutputs per group.
+		for groupID, gs := range c.DAGState.ParallelGroupStates {
+			childrenCopy := make(map[string]ChildStatus, len(gs.Children))
+			for nodeID, status := range gs.Children {
+				childrenCopy[nodeID] = status
+			}
+			outputsCopy := make(map[string]map[string]any, len(gs.ChildOutputs))
+			for nodeID, out := range gs.ChildOutputs {
+				outCopy := make(map[string]any, len(out))
+				for k, v := range out {
+					outCopy[k] = v
+				}
+				outputsCopy[nodeID] = outCopy
+			}
+			clone.DAGState.ParallelGroupStates[groupID] = ParallelGroupState{
+				GroupID:      gs.GroupID,
+				Children:     childrenCopy,
+				ChildOutputs: outputsCopy,
+				FailFast:     gs.FailFast,
+			}
 		}
 	}
 

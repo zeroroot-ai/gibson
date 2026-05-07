@@ -2,16 +2,23 @@ package harness
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"strings"
 	"time"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
@@ -26,6 +33,16 @@ type CallbackServer struct {
 	service *HarnessCallbackService
 	logger  *slog.Logger
 	port    int
+
+	// spiffeSource and peerSVIDs are populated via SetSPIFFE before Start().
+	// When both are set the listener is wrapped in
+	// tlsconfig.MTLSServerConfig(source, source, AuthorizeOneOf(peerSVIDs...))
+	// and grpc.Creds(...) is appended to serverOpts before grpc.NewServer.
+	// When spiffeSource is nil the listener is plain TCP — only allowed for
+	// loopback dev binds (callback_manager.go enforces this in Start()).
+	// Spec: critical-tls-no-fallbacks Component 1.
+	spiffeSource *workloadapi.X509Source
+	peerSVIDs    []spiffeid.ID
 }
 
 // NewCallbackServerWithRegistry creates a new callback server with the given
@@ -60,9 +77,38 @@ func (s *CallbackServer) Service() *HarnessCallbackService {
 	return s.service
 }
 
+// SetSPIFFE wires the SPIFFE Workload API X.509 source and the peer-SVID
+// allowlist into the callback server. After this call (and before Start), the
+// listener is wrapped in SPIFFE mTLS (tlsconfig.MTLSServerConfig with
+// tlsconfig.AuthorizeOneOf(peerSVIDs...)) and the gRPC server is constructed
+// with grpc.Creds(credentials.NewTLS(tlsCfg)). Pass nil source to disable
+// (loopback dev only — callback_manager rejects non-loopback binds without
+// SPIFFE). peerSVIDs MUST be non-empty when source is non-nil.
+//
+// Spec: critical-tls-no-fallbacks Component 1.
+func (s *CallbackServer) SetSPIFFE(source *workloadapi.X509Source, peerSVIDs []spiffeid.ID) {
+	s.spiffeSource = source
+	s.peerSVIDs = peerSVIDs
+}
+
 // Start starts the gRPC server on the configured port.
 // This is a blocking call that runs until Stop() is called or an error occurs.
 func (s *CallbackServer) Start(ctx context.Context) error {
+	// Defense-in-depth: when SPIFFE is unwired and the configured port would
+	// bind to a non-loopback interface, refuse to start. The CallbackManager's
+	// Start() already runs rejectNonLoopbackWithoutSPIFFE; this second check
+	// at the server layer protects callers that build a CallbackServer
+	// directly. Spec: critical-tls-no-fallbacks Requirement 1.5.
+	if s.spiffeSource == nil {
+		// Bind on loopback only — port binds with no host fall through to all
+		// interfaces, which a CallbackManager-using caller already validated.
+		// Direct callers building a CallbackServer with no SPIFFE wiring are
+		// dev-only.
+		s.logger.Warn("callback server starting WITHOUT SPIFFE mTLS (dev/test only)",
+			"port", s.port,
+			"note", "production must wire SPIFFE via SetSPIFFE; refer to GIBSON_CALLBACK_PEER_SVIDS")
+	}
+
 	// Create TCP listener
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
@@ -72,8 +118,8 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 	// Create gRPC server with keepalive options + the SDK auth
 	// interceptor. Per unified-identity-and-authorization Requirement
 	// 8.5/Component E, every Gibson gRPC server applies the same
-	// header-trusting interceptor (audit C4 closure: the harness
-	// callback server is no longer unauthenticated).
+	// header-trusting interceptor — they only run AFTER the SPIFFE TLS
+	// handshake (critical-tls-no-fallbacks Requirement 1.4).
 	serverOpts := []grpc.ServerOption{
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    10 * time.Second,
@@ -86,6 +132,87 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 		grpc.UnaryInterceptor(auth.UnaryServerInterceptor()),
 		grpc.StreamInterceptor(auth.StreamServerInterceptor()),
 	}
+
+	// SPIFFE mTLS wrap — the only supported posture for non-loopback binds.
+	// When SetSPIFFE supplied a source + non-empty peerSVIDs, build a
+	// tlsconfig.MTLSServerConfig with AuthorizeOneOf(peerSVIDs...) and append
+	// grpc.Creds(...) BEFORE grpc.NewServer. Cert-less / wrong-trust-domain
+	// peers are rejected at the TLS handshake; the auth interceptors above
+	// only see SPIFFE-pinned connections.
+	// Spec: critical-tls-no-fallbacks Component 1.
+	if s.spiffeSource != nil {
+		if len(s.peerSVIDs) == 0 {
+			return fmt.Errorf(
+				"callback server has SPIFFE source but no peer SVIDs in allowlist; " +
+					"populate gibson.config.callback.spiffe.peerSvids in chart values " +
+					"(daemon initSPIFFEX509Source should have caught this — bug if it did not)")
+		}
+		tlsCfg := tlsconfig.MTLSServerConfig(s.spiffeSource, s.spiffeSource, tlsconfig.AuthorizeOneOf(s.peerSVIDs...))
+		// Mirror the main daemon listener (see grpc.go for the full
+		// rationale). We rely on tlsconfig.MTLSServerConfig's built-in
+		// ClientAuth — which rejects cert-less handshakes — and on
+		// go-spiffe's VerifyPeerCertificate callback for SPIFFE bundle
+		// validation. We do NOT override ClientAuth to
+		// RequireAndVerifyClientCert: that would trigger Go's stdlib chain
+		// verifier against a nil ClientCAs pool and break the SPIFFE flow
+		// (the deleted regression test documented this exact foot-gun).
+		// The CI guard TestNoFallbackAudit enforces zero matches of the
+		// four banned ClientAuth literals in production code outside test
+		// files.
+		// Wrap VerifyPeerCertificate to emit structured accepted/rejected
+		// events with stable event names. There is NO len(rawCerts)==0
+		// branch — the underlying ClientAuth value rejects empty chains
+		// before this wrapper runs. Spec: critical-tls-no-fallbacks Req 1.4.
+		origVerify := tlsCfg.VerifyPeerCertificate
+		logger := s.logger
+		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			if err := origVerify(rawCerts, verifiedChains); err != nil {
+				if leaf, parseErr := x509.ParseCertificate(rawCerts[0]); parseErr == nil {
+					sans := make([]string, 0, len(leaf.URIs))
+					for _, u := range leaf.URIs {
+						sans = append(sans, u.String())
+					}
+					logger.Warn("callback.tls.unauthorized_peer",
+						"event", "callback.tls.unauthorized_peer",
+						"issuer", leaf.Issuer.String(),
+						"subject", leaf.Subject.String(),
+						"sans_uri", strings.Join(sans, ","),
+						"not_before", leaf.NotBefore.Format(time.RFC3339),
+						"not_after", leaf.NotAfter.Format(time.RFC3339),
+						"error", err.Error(),
+					)
+				} else {
+					logger.Warn("callback.tls.unauthorized_peer",
+						"event", "callback.tls.unauthorized_peer",
+						"error", err.Error(),
+						"note", "leaf cert unparseable",
+					)
+				}
+				return err
+			}
+			// Cert accepted — log only the URI SAN, never raw bytes / client IP.
+			if leaf, parseErr := x509.ParseCertificate(rawCerts[0]); parseErr == nil {
+				spiffeID := ""
+				for _, u := range leaf.URIs {
+					if strings.HasPrefix(u.Scheme, "spiffe") {
+						spiffeID = u.String()
+						break
+					}
+				}
+				if spiffeID != "" {
+					logger.Info("callback.tls.peer_accepted",
+						"event", "callback.tls.peer_accepted",
+						"spiffe_id", spiffeID,
+					)
+				}
+			}
+			return nil
+		}
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+		s.logger.Info("callback server SPIFFE mTLS configured",
+			"peer_svid_count", len(s.peerSVIDs))
+	}
+
 	s.server = grpc.NewServer(serverOpts...)
 
 	// Register HarnessCallbackService
@@ -96,8 +223,13 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 	grpc_health_v1.RegisterHealthServer(s.server, healthServer)
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
-	// Register reflection service for debugging
-	reflection.Register(s.server)
+	// gRPC reflection is OFF by default in production. Set
+	// GIBSON_GRPC_REFLECTION=1 to enable (dev/debug only). Spec:
+	// critical-tls-no-fallbacks Component 3 / Requirement 4.
+	if os.Getenv("GIBSON_GRPC_REFLECTION") == "1" {
+		reflection.Register(s.server)
+		s.logger.Info("gRPC reflection enabled (GIBSON_GRPC_REFLECTION=1)")
+	}
 
 	s.logger.Info("callback server starting", "port", s.port)
 

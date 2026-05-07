@@ -52,7 +52,7 @@ func TestStateRestorer_RestoreFromCheckpoint(t *testing.T) {
 	}
 
 	// Restore the checkpoint
-	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint)
+	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, restored)
 
@@ -87,7 +87,7 @@ func TestStateRestorer_RestoreFromCheckpoint_NilCheckpoint(t *testing.T) {
 	restorer := NewStateRestorer()
 	ctx := context.Background()
 
-	restored, err := restorer.RestoreFromCheckpoint(ctx, nil)
+	restored, err := restorer.RestoreFromCheckpoint(ctx, nil, nil, nil)
 	assert.Error(t, err)
 	assert.Nil(t, restored)
 	assert.Contains(t, err.Error(), "checkpoint cannot be nil")
@@ -112,7 +112,7 @@ func TestStateRestorer_RestoreFromCheckpoint_EmptyMemory(t *testing.T) {
 		},
 	}
 
-	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint)
+	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, restored)
 
@@ -143,7 +143,7 @@ func TestStateRestorer_RestoreFromCheckpoint_CorruptedWorkingMemory(t *testing.T
 	}
 
 	// Should return partial state with error
-	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint)
+	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint, nil, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to deserialize working memory")
 	require.NotNil(t, restored) // Partial state should be returned
@@ -172,7 +172,7 @@ func TestStateRestorer_RestoreFromCheckpoint_CorruptedMissionMemory(t *testing.T
 	}
 
 	// Should return partial state with error
-	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint)
+	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint, nil, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to deserialize mission memory")
 	require.NotNil(t, restored) // Partial state should be returned
@@ -405,7 +405,7 @@ func TestStateRestorer_RestoreFromCheckpoint_ComplexMemory(t *testing.T) {
 		},
 	}
 
-	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint)
+	restored, err := restorer.RestoreFromCheckpoint(ctx, checkpoint, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, restored)
 

@@ -283,6 +283,14 @@ func (m *mockMissionMemory) GetValueHistory(ctx context.Context, key string) ([]
 	return []HistoricalValue{}, nil
 }
 
+func (m *mockMissionMemory) GetAll(_ context.Context) (map[string]any, error) {
+	result := make(map[string]any)
+	for k, item := range m.storage {
+		result[k] = item.Value
+	}
+	return result, nil
+}
+
 type mockLongTermMemory struct {
 	storage map[string]*MemoryItem
 }

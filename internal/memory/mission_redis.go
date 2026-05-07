@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -564,6 +565,87 @@ func (m *RedisMissionMemory) GetValueHistory(ctx context.Context, key string) ([
 	}
 
 	return history, nil
+}
+
+// GetAll returns a snapshot of every key-value pair in this mission's memory.
+//
+// Algorithm:
+//  1. Call Keys(ctx) to get the SMEMBERS set (O(N) with N = stored keys for this mission).
+//  2. Sort the key list for deterministic ordering.
+//  3. Pipeline one JSON.GET per document key.
+//  4. Unmarshal each MemoryEntry.Value (a JSON string) into any.
+//  5. On redis.Nil for a key (concurrent delete race), skip that key.
+//  6. On any other Redis error, return nil map + error (never partial map alongside error).
+//
+// The checkpoint consumer (CaptureExecutionState) uses this as a recovery-aid
+// snapshot. Redis remains the authoritative source of truth on resume.
+func (m *RedisMissionMemory) GetAll(ctx context.Context) (map[string]any, error) {
+	keys, err := m.Keys(ctx)
+	if err != nil {
+		return nil, NewMissionMemoryStoreError("GetAll: failed to retrieve key set", err)
+	}
+
+	if len(keys) == 0 {
+		return make(map[string]any), nil
+	}
+
+	// Deterministic order for reproducible snapshots.
+	sort.Strings(keys)
+
+	// Pipeline one JSON.GET command per document key.
+	pipe := m.client.Client().Pipeline()
+	cmds := make([]*redis.Cmd, len(keys))
+	for i, key := range keys {
+		docKey := m.buildDocKey(key)
+		cmds[i] = pipe.Do(ctx, "JSON.GET", docKey, "$")
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		// A pipeline-level error (connection refused, timeout, etc.) — fail fast.
+		return nil, NewMissionMemoryStoreError("GetAll: pipeline execution failed", err)
+	}
+
+	result := make(map[string]any, len(keys))
+	for i, key := range keys {
+		raw, err := cmds[i].Text()
+		if err != nil {
+			if err == redis.Nil {
+				// Key was deleted between SMEMBERS and JSON.GET — skip it.
+				continue
+			}
+			// Any other Redis command error — fail fast, return no partial map.
+			return nil, NewMissionMemoryStoreError(
+				fmt.Sprintf("GetAll: JSON.GET failed for key %q", key), err)
+		}
+
+		// RedisJSON with "$" path returns an array; unwrap single-element arrays.
+		trimmed := []byte(raw)
+		if len(trimmed) > 0 && trimmed[0] == '[' {
+			var arr []json.RawMessage
+			if err := json.Unmarshal(trimmed, &arr); err == nil && len(arr) == 1 {
+				trimmed = arr[0]
+			}
+		}
+
+		var entry MemoryEntry
+		if err := json.Unmarshal(trimmed, &entry); err != nil {
+			return nil, NewMissionMemoryStoreError(
+				fmt.Sprintf("GetAll: unmarshal MemoryEntry for key %q", key), err)
+		}
+
+		// Unmarshal the value from the JSON string stored in entry.Value.
+		var value any
+		if entry.Value != "" {
+			if err := json.Unmarshal([]byte(entry.Value), &value); err != nil {
+				return nil, NewMissionMemoryStoreError(
+					fmt.Sprintf("GetAll: unmarshal value for key %q", key), err)
+			}
+		}
+
+		result[key] = value
+	}
+
+	return result, nil
 }
 
 // buildDocKeyForMission constructs a doc key for a specific mission (used for cross-run reads).

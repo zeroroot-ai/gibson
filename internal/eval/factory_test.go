@@ -14,6 +14,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkagent "github.com/zero-day-ai/sdk/agent"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -183,6 +184,12 @@ func (m *mockAgentHarness) GetAllToolCapabilities(ctx context.Context) (map[stri
 }
 func (m *mockAgentHarness) Checkpoint() harness.CheckpointAccess {
 	return harness.NewHarnessCheckpointMethods(nil, "", "", 0)
+}
+func (m *mockAgentHarness) Workspace() workspace.Workspace {
+	return nil
+}
+func (m *mockAgentHarness) Workspaces() map[string]workspace.Workspace {
+	return map[string]workspace.Workspace{}
 }
 
 // TestNewEvalHarnessFactory tests factory creation

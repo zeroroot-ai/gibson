@@ -620,22 +620,6 @@ func TestTestProvider_ProviderConstructionFails_ReturnsFalseOkNoGRPCError(t *tes
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
-// TestTestProvider_SuccessfulHealthCheck verifies the happy path where a mock
-// provider's Health call returns healthy. No network calls are made.
-func TestTestProvider_SuccessfulHealthCheck(t *testing.T) {
-	// We test TestProvider with a real ollama ProviderConfig which constructs
-	// without any API key. In test mode, providers.NewProvider("ollama") will
-	// create a client but Health() will return healthy or not depending on
-	// whether ollama is running. Since we can't guarantee ollama is up in CI,
-	// we test the input-validation path and the no-store path only.
-	//
-	// The timeout / ok-false path is covered by TestTestProvider_InvalidType_InvalidArgument.
-	// The full flow (construct + Health success) requires either a running provider
-	// or integration tests with a mock transport — those belong in the integration
-	// test suite.
-	t.Skip("full TestProvider success path requires a live LLM provider or mock transport")
-}
-
 // TestTestProvider_CredentialsNotEchoedBack verifies that plaintext credentials
 // submitted in the request never appear in the response fields.
 func TestTestProvider_CredentialsNotEchoedBack(t *testing.T) {

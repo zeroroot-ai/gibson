@@ -3,7 +3,6 @@ package daemon
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
@@ -300,131 +299,110 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		grpc.ChainStreamInterceptor(streamInterceptors...),
 	}
 
-	// SPIFFE mTLS — initialize X509Source and configure TLS when SPIFFE is configured.
-	// tls.RequestClientCert allows both mTLS clients (in-cluster SPIFFE workloads)
-	// and standard TLS clients (Agent Auth, API key, Better Auth) to connect on the
-	// same listener. See the comment block below for why this specific value is used.
+	// SPIFFE mTLS — the only supported posture; cert-less connections are rejected at the TLS layer.
 	if d.config.Auth.SPIFFE != nil && d.config.Auth.SPIFFE.WorkloadAPISocket != "" {
-		socketAddr := "unix://" + d.config.Auth.SPIFFE.WorkloadAPISocket
-		x509Source, sourceErr := workloadapi.NewX509Source(ctx,
-			workloadapi.WithClientOptions(
-				workloadapi.WithAddr(socketAddr),
-			),
-		)
-		if sourceErr != nil {
-			// Zero-trust hardening Req 1.1: fail-closed on SPIFFE init failure.
-			// A SPIRE outage must not silently downgrade the daemon to plaintext gRPC.
-			// Without mTLS any in-cluster workload that can reach the pod IP can forge
-			// x-gibson-identity-* headers and impersonate any user or SA.
+		// d.spiffeX509Source is opened once in initSPIFFEX509Source (called from
+		// daemon.Start before any listener is wired); both the main listener and
+		// the harness callback listener consume it. If we got here without a
+		// source, initSPIFFEX509Source either wasn't called or was disabled —
+		// fail-closed.
+		if d.spiffeX509Source == nil {
 			return nil, fmt.Errorf(
-				"SPIFFE workload API unreachable: %w (socket=%s); "+
-					"daemon will not start without mTLS — "+
-					"spec: zero-trust-hardening Req 1.1",
-				sourceErr, d.config.Auth.SPIFFE.WorkloadAPISocket,
-			)
-		} else {
-			// Auth-review finding 4a (CRITICAL): pin mTLS to Envoy's SPIFFE SVID.
-			// The expected SVID is read from GIBSON_SPIFFE_ENVOY_ID (also stored in
-			// cfg.Auth.SPIFFE.EnvoyID after config loading). If the env var is not
-			// set we fail to start — accepting any SVID was the original finding.
-			envoyID := d.config.Auth.SPIFFE.EnvoyID
-			if envoyID == "" {
-				envoyID = os.Getenv("GIBSON_SPIFFE_ENVOY_ID")
-			}
-			if envoyID == "" {
-				return nil, fmt.Errorf(
-					"SPIFFE mTLS is enabled but GIBSON_SPIFFE_ENVOY_ID is not set; " +
-						"the daemon will not accept any mTLS connections. " +
-						"Set GIBSON_SPIFFE_ENVOY_ID to the Envoy sidecar's SPIFFE SVID " +
-						"(e.g. spiffe://example.com/ns/gibson/sa/envoy). " +
-						"Spec: admin-services-completion Requirement 6.1",
-				)
-			}
-			expectedEnvoyID := spiffeid.RequireFromString(envoyID)
-			tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(expectedEnvoyID))
-			d.logger.Info(ctx, "SPIFFE mTLS pinned to Envoy SVID",
-				"envoy_id", envoyID,
-			)
-			// tls.RequestClientCert: ask for the client cert but DO NOT let Go's
-			// stdlib chain verifier run on it. We rely entirely on go-spiffe's
-			// VerifyPeerCertificate callback (installed by tlsconfig.MTLSServerConfig
-			// above) for SPIFFE chain validation against the SPIRE bundle.
-			//
-			// DO NOT change to tls.VerifyClientCertIfGiven (the prior broken state):
-			// stdlib verifier finds no acceptable issuer (ClientCAs is unset) and
-			// emits `tlsv1 alert unknown_ca` post-handshake, killing the SPIFFE
-			// callback before it runs. See spec daemon-tls-clientauth-fix and the
-			// B-bug 1 entry in in-cluster-mtls-restoration/design.md.
-			//
-			// DO NOT change to tls.RequireAnyClientCert: would reject Bearer-only
-			// clients (Agent Auth, API key, Auth.js / Better Auth callers) that
-			// don't present a cert at all.
-			tlsCfg.ClientAuth = tls.RequestClientCert
-			// Go calls VerifyPeerCertificate even when no cert is presented (rawCerts
-			// is empty) under RequestClientCert. go-spiffe's callback returns an error
-			// for empty chains. Wrap it to:
-			//   (a) pass through the no-cert case so Bearer-only clients reach the
-			//       identity interceptor (original intent of the override),
-			//   (b) log accepted mTLS handshakes at INFO with the client's SPIFFE ID
-			//       (Requirement 1.4 — operators confirm mTLS is live without tcpdump),
-			//   (c) log rejected handshakes at WARN with structured detail
-			//       (NFR Usability — speeds up debugging vs opaque TLS alert 48).
-			origVerify := tlsCfg.VerifyPeerCertificate
-			logger := d.logger
-			tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-				if len(rawCerts) == 0 {
-					return nil // no cert presented — fall through to Bearer-token path
-				}
-				if err := origVerify(rawCerts, verifiedChains); err != nil {
-					// Parse the leaf cert for structured rejection detail.
-					// Best-effort: if parsing fails, log what we can.
-					logCtx := context.Background()
-					if leaf, parseErr := x509.ParseCertificate(rawCerts[0]); parseErr == nil {
-						sans := make([]string, 0, len(leaf.URIs))
-						for _, u := range leaf.URIs {
-							sans = append(sans, u.String())
-						}
-						logger.Warn(logCtx, "SPIFFE mTLS: rejected client cert",
-							"issuer", leaf.Issuer.String(),
-							"subject", leaf.Subject.String(),
-							"sans_uri", strings.Join(sans, ","),
-							"not_before", leaf.NotBefore.Format(time.RFC3339),
-							"not_after", leaf.NotAfter.Format(time.RFC3339),
-							"error", err.Error(),
-						)
-					} else {
-						logger.Warn(logCtx, "SPIFFE mTLS: rejected client cert (unparseable)",
-							"error", err.Error(),
-						)
-					}
-					return err
-				}
-				// Cert accepted — log the SPIFFE ID (URI SAN) from the leaf cert.
-				// Log ONLY the URI SAN — never raw cert bytes, never client IP.
-				if leaf, parseErr := x509.ParseCertificate(rawCerts[0]); parseErr == nil {
-					spiffeID := ""
-					for _, u := range leaf.URIs {
-						if strings.HasPrefix(u.Scheme, "spiffe") {
-							spiffeID = u.String()
-							break
-						}
-					}
-					if spiffeID != "" {
-						logger.Info(context.Background(), "mTLS handshake accepted",
-							"spiffe_id", spiffeID,
-						)
-					}
-				}
-				return nil
-			}
-			serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
-			// Store source on daemon for graceful shutdown close.
-			d.spiffeX509Source = x509Source
-			d.logger.Info(ctx, "SPIFFE mTLS configured on gRPC server",
-				"socket", d.config.Auth.SPIFFE.WorkloadAPISocket,
-				"trust_domain", d.config.Auth.SPIFFE.TrustDomain,
-			)
+				"SPIFFE mTLS is configured but d.spiffeX509Source is nil; " +
+					"initSPIFFEX509Source must be called from daemon.Start before buildGRPCServer; " +
+					"spec: critical-tls-no-fallbacks Component 4")
 		}
+		x509Source, ok := d.spiffeX509Source.(*workloadapi.X509Source)
+		if !ok {
+			return nil, fmt.Errorf(
+				"SPIFFE mTLS is configured but d.spiffeX509Source is not a *workloadapi.X509Source (got %T)",
+				d.spiffeX509Source)
+		}
+
+		// Auth-review finding 4a (CRITICAL): pin mTLS to Envoy's SPIFFE SVID.
+		// The expected SVID is read from GIBSON_SPIFFE_ENVOY_ID (also stored in
+		// cfg.Auth.SPIFFE.EnvoyID after config loading). initSPIFFEX509Source
+		// already validated this is set and parseable; we re-resolve here for
+		// the AuthorizeID call.
+		envoyID := d.config.Auth.SPIFFE.EnvoyID
+		if envoyID == "" {
+			envoyID = os.Getenv("GIBSON_SPIFFE_ENVOY_ID")
+		}
+		expectedEnvoyID := spiffeid.RequireFromString(envoyID)
+		tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(expectedEnvoyID))
+		d.logger.Info(ctx, "SPIFFE mTLS pinned to Envoy SVID",
+			"envoy_id", envoyID,
+		)
+		// Critical-tls-no-fallbacks Req 2.1, 2.3: cert-less connections are
+		// rejected at the TLS layer; there is no Bearer-token / API-key /
+		// Auth.js pass-through path on this listener anymore. We rely on
+		// tlsconfig.MTLSServerConfig's built-in ClientAuth value (which
+		// rejects cert-less handshakes) plus go-spiffe's VerifyPeerCertificate
+		// callback for SPIFFE bundle chain validation. We do NOT override
+		// ClientAuth to RequireAndVerifyClientCert because that triggers Go's
+		// stdlib chain verifier against a nil ClientCAs pool — exactly the
+		// VerifyClientCertIfGiven foot-gun the deleted regression test
+		// documented. The chain validation is owned by go-spiffe's
+		// VerifyPeerCertificate, which fetches the current SPIRE bundle
+		// dynamically. The CI guard TestNoFallbackAudit (in
+		// core/gibson/internal/tlsaudit) enforces zero matches of the four
+		// banned literals (RequestClientCert / NoClientCert /
+		// VerifyClientCertIfGiven / RequireAnyClientCert) in production code
+		// outside *_test.go.
+		// Wrap VerifyPeerCertificate to keep the structured accepted/rejected
+		// log events. There is NO len(rawCerts)==0 branch — go-spiffe's
+		// MTLSServerConfig sets ClientAuth such that an empty cert chain
+		// fails the handshake before VerifyPeerCertificate runs (Req 2.2).
+		origVerify := tlsCfg.VerifyPeerCertificate
+		logger := d.logger
+		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			if err := origVerify(rawCerts, verifiedChains); err != nil {
+				// Parse the leaf cert for structured rejection detail.
+				// Best-effort: if parsing fails, log what we can.
+				logCtx := context.Background()
+				if leaf, parseErr := x509.ParseCertificate(rawCerts[0]); parseErr == nil {
+					sans := make([]string, 0, len(leaf.URIs))
+					for _, u := range leaf.URIs {
+						sans = append(sans, u.String())
+					}
+					logger.Warn(logCtx, "SPIFFE mTLS: rejected client cert",
+						"issuer", leaf.Issuer.String(),
+						"subject", leaf.Subject.String(),
+						"sans_uri", strings.Join(sans, ","),
+						"not_before", leaf.NotBefore.Format(time.RFC3339),
+						"not_after", leaf.NotAfter.Format(time.RFC3339),
+						"error", err.Error(),
+					)
+				} else {
+					logger.Warn(logCtx, "SPIFFE mTLS: rejected client cert (unparseable)",
+						"error", err.Error(),
+					)
+				}
+				return err
+			}
+			// Cert accepted — log the SPIFFE ID (URI SAN) from the leaf cert.
+			// Log ONLY the URI SAN — never raw cert bytes, never client IP.
+			if leaf, parseErr := x509.ParseCertificate(rawCerts[0]); parseErr == nil {
+				spiffeID := ""
+				for _, u := range leaf.URIs {
+					if strings.HasPrefix(u.Scheme, "spiffe") {
+						spiffeID = u.String()
+						break
+					}
+				}
+				if spiffeID != "" {
+					logger.Info(context.Background(), "mTLS handshake accepted",
+						"spiffe_id", spiffeID,
+					)
+				}
+			}
+			return nil
+		}
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+		d.logger.Info(ctx, "SPIFFE mTLS configured on gRPC server",
+			"socket", d.config.Auth.SPIFFE.WorkloadAPISocket,
+			"trust_domain", d.config.Auth.SPIFFE.TrustDomain,
+		)
 	}
 
 	// Create gRPC server with options

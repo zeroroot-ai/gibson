@@ -3,6 +3,7 @@ package embedder
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -72,26 +73,28 @@ type NativeEmbedder struct {
 //	if err != nil {
 //	    return nil, fmt.Errorf("embedder required: %w", err)
 //	}
-func CreateNativeEmbedder() (*NativeEmbedder, error) {
+func CreateNativeEmbedder(logger *slog.Logger) (*NativeEmbedder, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	nativeEmbedderOnce.Do(func() {
-		fmt.Println("[embedder] Starting native embedder initialization...")
+		logger.Info("embedder.startup.begin")
 
 		// Initialize GoMLX backend (XLA/PJRT)
-		fmt.Println("[embedder] Initializing GoMLX backend...")
 		backend, err := backends.New()
 		if err != nil {
 			nativeEmbedderErr = gotypes.WrapError(ErrCodeEmbedderUnavailable,
 				"failed to initialize GoMLX backend", err)
 			return
 		}
-		fmt.Println("[embedder] GoMLX backend initialized")
+		logger.Info("embedder.gomlx.initialized")
 
 		// Try to find cached model files first to avoid network calls
 		// This is critical for Kubernetes deployments where network access may be limited
-		fmt.Println("[embedder] Looking for cached model files...")
+		logger.Info("embedder.cache.lookup")
 		modelPath, vocabPath, err := findCachedModelFiles()
 		if err != nil {
-			fmt.Printf("[embedder] Cache lookup failed: %v, trying network download...\n", err)
+			logger.Info("embedder.cache.miss", "cause", err)
 			// Fall back to HuggingFace Hub download with timeout
 			modelPath, vocabPath, err = downloadModelFilesWithTimeout(10 * time.Second)
 			if err != nil {
@@ -99,9 +102,9 @@ func CreateNativeEmbedder() (*NativeEmbedder, error) {
 					"failed to load model files (check network or pre-cache model)", err)
 				return
 			}
-			fmt.Println("[embedder] Downloaded model files from HuggingFace")
+			logger.Info("embedder.download.complete")
 		} else {
-			fmt.Printf("[embedder] Found cached model files: model=%s, vocab=%s\n", modelPath, vocabPath)
+			logger.Info("embedder.cache.hit", "model", modelPath, "vocab", vocabPath)
 		}
 
 		// Load ONNX model via onnx-gomlx
@@ -147,6 +150,7 @@ func CreateNativeEmbedder() (*NativeEmbedder, error) {
 			backend:   backend,
 			tokenizer: &featureFactory,
 		}
+		logger.Info("embedder.startup.complete")
 	})
 
 	if nativeEmbedderErr != nil {

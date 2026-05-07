@@ -241,6 +241,37 @@ func (w *tracedWorkingMemory) List() []string {
 	return keys
 }
 
+// GetAll returns a snapshot of all key-value pairs with tracing.
+// Creates a span "gibson.memory.working.get_all" with count attribute.
+func (w *tracedWorkingMemory) GetAll() (map[string]any, error) {
+	ctx := context.Background()
+	ctx, span := w.tracer.Start(ctx, "gibson.memory.working.get_all")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("gibson.memory.tier", "working"),
+		attribute.String("gibson.memory.operation", "get_all"),
+	)
+
+	startTime := time.Now()
+	result, err := w.inner.GetAll()
+	duration := time.Since(startTime)
+
+	span.SetAttributes(
+		attribute.Float64("gibson.memory.duration_ms", float64(duration.Milliseconds())),
+		attribute.Int("gibson.memory.count", len(result)),
+	)
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	span.SetStatus(codes.Ok, "get_all completed")
+	return result, nil
+}
+
 // TokenCount returns the current token usage.
 // This is a pass-through operation without additional tracing.
 func (w *tracedWorkingMemory) TokenCount() int {
@@ -452,6 +483,37 @@ func (m *tracedMissionMemory) Keys(ctx context.Context) ([]string, error) {
 	span.SetAttributes(attribute.Int("gibson.memory.count", len(keys)))
 	span.SetStatus(codes.Ok, "keys succeeded")
 	return keys, nil
+}
+
+// GetAll returns a snapshot of all mission memory with tracing.
+// Creates a span "gibson.memory.mission.get_all" with count attribute.
+func (m *tracedMissionMemory) GetAll(ctx context.Context) (map[string]any, error) {
+	ctx, span := m.tracer.Start(ctx, "gibson.memory.mission.get_all")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("gibson.memory.tier", "mission"),
+		attribute.String("gibson.memory.operation", "get_all"),
+		attribute.String("gibson.memory.mission_id", m.inner.MissionID().String()),
+	)
+
+	startTime := time.Now()
+	result, err := m.inner.GetAll(ctx)
+	duration := time.Since(startTime)
+
+	span.SetAttributes(
+		attribute.Float64("gibson.memory.duration_ms", float64(duration.Milliseconds())),
+		attribute.Int("gibson.memory.count", len(result)),
+	)
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	span.SetStatus(codes.Ok, "get_all completed")
+	return result, nil
 }
 
 // MissionID returns the mission this memory is scoped to.

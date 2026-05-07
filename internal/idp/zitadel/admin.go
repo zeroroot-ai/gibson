@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -52,6 +53,21 @@ type Config struct {
 
 	// HTTPTimeout is the per-request timeout. Defaults to 10 seconds.
 	HTTPTimeout time.Duration
+
+	// DiscoveryURL is the in-cluster URL the client dials for OIDC discovery
+	// (and the JWKS URL the discovery doc points at). When empty, falls back
+	// to Issuer.
+	//
+	// The `iss` claim used in token validation is ALWAYS Issuer regardless
+	// of this field — DiscoveryURL only affects the network path the daemon
+	// uses to fetch /.well-known/openid-configuration and the OAuth2 token
+	// endpoint that lives there. Use this knob when the issuer URL itself
+	// is externally-routable but you also have an in-cluster path (e.g. via
+	// Envoy by Service FQDN) that avoids egressing through DNS / a load
+	// balancer for daemon → IdP traffic.
+	//
+	// Spec: tier-2-host-aliases-cluster-dns.
+	DiscoveryURL string
 }
 
 // Client implements idp.AdminClient against the Zitadel Management API.
@@ -75,10 +91,29 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	}
 
 	// Discover the token endpoint from Zitadel's OIDC discovery document.
-	tokenEndpoint, err := discoverTokenEndpoint(ctx, cfg.Issuer, cfg.HTTPTimeout)
+	// Spec tier-2-host-aliases-cluster-dns: the daemon dials cfg.DiscoveryURL
+	// (in-cluster Envoy FQDN) for the discovery doc when set, falling back to
+	// cfg.Issuer otherwise. The `iss` claim used for token validation stays
+	// cfg.Issuer regardless — only the network path to the discovery doc is
+	// affected.
+	tokenEndpoint, err := discoverTokenEndpoint(ctx, cfg.Issuer, cfg.DiscoveryURL, cfg.HTTPTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("%w: discovering token endpoint: %s", idp.ErrUnreachable, err)
 	}
+
+	// Spec tier-2-host-aliases-cluster-dns Reqs 2.4 / 2.5 — log which path
+	// was taken so operators can confirm in-cluster vs external discovery
+	// without packet-capturing. We deliberately do not log the resolved
+	// token endpoint URL or the discovery URL itself; the issuer is the
+	// operator-known correlator and discovery_path is the bounded enum.
+	discoveryPath := "external"
+	if cfg.DiscoveryURL != "" {
+		discoveryPath = "in_cluster"
+	}
+	slog.Info("zitadel idp client started",
+		"issuer", cfg.Issuer,
+		"discovery_path", discoveryPath,
+	)
 
 	// Build an OAuth2 client_credentials token source for the admin account.
 	ccCfg := clientcredentials.Config{
@@ -476,11 +511,22 @@ func mapError(err error, operation string) error {
 
 // discoverTokenEndpoint fetches the OIDC discovery document and extracts the
 // token_endpoint field. Pure stdlib HTTP; no OIDC library dependency needed.
-func discoverTokenEndpoint(ctx context.Context, issuer string, timeout time.Duration) (string, error) {
+//
+// `issuer` is the externally-routable issuer URL (used as a fallback only);
+// `discoveryURL` is the optional in-cluster base URL the daemon dials when
+// non-empty. When `discoveryURL` is empty the function falls back to
+// `issuer` — preserving the pre-spec-tier-2-host-aliases-cluster-dns behavior.
+// The returned token_endpoint is whatever the discovery doc contains; callers
+// MUST NOT assume it shares a host with `issuer`.
+func discoverTokenEndpoint(ctx context.Context, issuer, discoveryURL string, timeout time.Duration) (string, error) {
+	base := discoveryURL
+	if base == "" {
+		base = issuer
+	}
 	client := &http.Client{Timeout: timeout}
-	discoveryURL := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
+	wellKnownURL := strings.TrimRight(base, "/") + "/.well-known/openid-configuration"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, wellKnownURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -491,7 +537,7 @@ func discoverTokenEndpoint(ctx context.Context, issuer string, timeout time.Dura
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("OIDC discovery returned HTTP %d from %s", resp.StatusCode, discoveryURL)
+		return "", fmt.Errorf("OIDC discovery returned HTTP %d from %s", resp.StatusCode, wellKnownURL)
 	}
 
 	var doc struct {

@@ -35,6 +35,18 @@ const (
 	// not a credential value.
 	envIDPAdminClientSecret = "GIBSON_IDP_ADMIN_CLIENT_SECRET" //nolint:gosec // env var name, not a credential
 
+	// envIDPAdminDiscoveryURL is the OPTIONAL in-cluster URL the daemon's
+	// IdP admin client dials for OIDC discovery and JWKS fetches. When
+	// empty (the default), discovery falls back to envIDPAdminIssuer. The
+	// `iss` claim used for token validation is always envIDPAdminIssuer
+	// regardless of this var; only the network path to the discovery doc
+	// is moved off the externally-routable hostname.
+	//
+	// Spec: tier-2-host-aliases-cluster-dns. Operators with the chart
+	// supply this from idp.zitadel.discoveryURL; without the chart it
+	// stays empty and discovery goes through cluster DNS to the issuer.
+	envIDPAdminDiscoveryURL = "GIBSON_IDP_ADMIN_DISCOVERY_URL"
+
 	// Zitadel-specific env vars (GIBSON_IDP_ZITADEL_*).
 
 	// envZitadelOrgID is the Zitadel organisation ID.
@@ -102,6 +114,9 @@ func initZitadelClient(ctx context.Context) (idp.AdminClient, error) {
 		OrgID:        os.Getenv(envZitadelOrgID),
 		ProjectID:    os.Getenv(envZitadelProjectID),
 		HTTPTimeout:  10 * time.Second,
+		// Spec tier-2-host-aliases-cluster-dns: optional in-cluster
+		// discovery URL. Empty → discovery falls back to Issuer.
+		DiscoveryURL: os.Getenv(envIDPAdminDiscoveryURL),
 	}
 
 	// zitadel.New performs the startup probe; if it fails the error wraps

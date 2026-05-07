@@ -191,7 +191,7 @@ func TestCheckpoint_NewWithULID(t *testing.T) {
 	// Verify basic fields
 	assert.Equal(t, missionID, checkpoint.MissionID)
 	assert.Equal(t, threadID, checkpoint.ThreadID)
-	assert.Equal(t, 1, checkpoint.Version)
+	assert.Equal(t, CurrentCheckpointVersion, checkpoint.Version)
 
 	// Verify initialized maps
 	assert.NotNil(t, checkpoint.NodeStates)
@@ -373,9 +373,21 @@ func TestCheckpoint_CloneWithComplexDAGState(t *testing.T) {
 	checkpoint.DAGState = &DAGTraversalState{
 		PendingNodes:  []string{"node-1", "node-2", "node-3"},
 		CurrentBranch: "feature-branch",
-		ParallelState: map[string][]string{
-			"group-1": {"node-a", "node-b"},
-			"group-2": {"node-c"},
+		// ParallelState is deprecated (json:"-"); use ParallelGroupStates instead.
+		ParallelGroupStates: map[string]ParallelGroupState{
+			"group-1": {
+				GroupID: "group-1",
+				Children: map[string]ChildStatus{
+					"node-a": ChildStatusCompleted,
+					"node-b": ChildStatusInFlight,
+				},
+			},
+			"group-2": {
+				GroupID: "group-2",
+				Children: map[string]ChildStatus{
+					"node-c": ChildStatusCompleted,
+				},
+			},
 		},
 		VisitedNodes:   []string{"node-0"},
 		ExecutionOrder: []string{"node-0"},
@@ -387,9 +399,14 @@ func TestCheckpoint_CloneWithComplexDAGState(t *testing.T) {
 	assert.Equal(t, checkpoint.DAGState.CurrentBranch, clone.DAGState.CurrentBranch)
 	assert.Equal(t, checkpoint.DAGState.PendingNodes, clone.DAGState.PendingNodes)
 
-	// Deep copy verification
-	clone.DAGState.ParallelState["group-1"] = append(clone.DAGState.ParallelState["group-1"], "node-d")
-	assert.NotEqual(t, len(checkpoint.DAGState.ParallelState["group-1"]), len(clone.DAGState.ParallelState["group-1"]))
+	// Deep copy verification: mutating the clone must not affect the original.
+	cloneGroup1 := clone.DAGState.ParallelGroupStates["group-1"]
+	cloneGroup1.Children["node-d"] = ChildStatusPending
+	clone.DAGState.ParallelGroupStates["group-1"] = cloneGroup1
+
+	// Original group-1 must still have 2 children.
+	assert.Equal(t, 2, len(checkpoint.DAGState.ParallelGroupStates["group-1"].Children),
+		"mutating clone must not affect original DAGState.ParallelGroupStates")
 }
 
 func TestCheckpoint_EmptyMetadata(t *testing.T) {

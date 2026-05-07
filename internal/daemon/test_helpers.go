@@ -462,6 +462,10 @@ func (m *mockMissionMemory) ContinuityMode() memory.MemoryContinuityMode {
 	return memory.MemoryIsolated
 }
 
+func (m *mockMissionMemory) GetAll(_ context.Context) (map[string]any, error) {
+	return make(map[string]any), nil
+}
+
 // mockLongTermMemory is a minimal mock implementation for testing.
 type mockLongTermMemory struct{}
 

@@ -218,62 +218,58 @@ func TestBuildGRPCServer_LoopbackWithoutSPIFFE(t *testing.T) {
 	assert.NoError(t, err, "localhost without SPIFFE must not be rejected by the bind guard")
 }
 
-// TestBuildGRPCServer_ClientAuthIsRequestClientCert is a value-lock regression test
-// for spec daemon-tls-clientauth-fix / B-bug 1 in in-cluster-mtls-restoration/design.md.
+// TestBuildGRPCServer_ClientAuthRejectsNoCert is a regression test for spec
+// critical-tls-no-fallbacks Requirements 2.1, 2.3.
 //
-// It asserts two things:
-//  1. The production source text in grpc.go contains the correct assignment
-//     `tlsCfg.ClientAuth = tls.RequestClientCert` and NOT `tls.VerifyClientCertIfGiven`.
-//     This FAILS if someone reverts grpc.go to the broken state.
-//  2. The TLS config produced by go-spiffe's MTLSServerConfig has ClientAuth overridden
-//     to tls.RequestClientCert — the value that lets the SPIFFE VerifyPeerCertificate
-//     callback run without the stdlib chain verifier killing the handshake first.
+// The production daemon listener uses tlsconfig.MTLSServerConfig WITHOUT
+// overriding ClientAuth — go-spiffe's built-in value rejects cert-less
+// handshakes, and SPIFFE bundle validation is owned by the library's
+// VerifyPeerCertificate callback. We assert two invariants:
 //
-// DO NOT change the expected value to tls.VerifyClientCertIfGiven (the prior broken state)
-// or tls.RequireAnyClientCert. See spec daemon-tls-clientauth-fix and B-bug 1 in
-// in-cluster-mtls-restoration/design.md for the full analysis.
-func TestBuildGRPCServer_ClientAuthIsRequestClientCert(t *testing.T) {
-	// Part 1: source-text value-lock — fails immediately on any revert of grpc.go.
-	// This is the primary regression guard. If grpc.go changes, this test fails
-	// before any TLS handshake is attempted.
+//  1. grpc.go does NOT contain ANY of the four banned ClientAuth literals
+//     (RequestClientCert / NoClientCert / VerifyClientCertIfGiven /
+//     RequireAnyClientCert) — that is enforced workspace-wide by
+//     TestNoFallbackAudit; this targeted assertion is for the daemon file
+//     specifically.
+//  2. The resulting TLS config rejects cert-less connections (ClientAuth
+//     value satisfies requiresClientCert from Go's crypto/tls — i.e. is one
+//     of RequireAnyClientCert or RequireAndVerifyClientCert; we accept
+//     either since the daemon does not override the library default).
+func TestBuildGRPCServer_ClientAuthRejectsNoCert(t *testing.T) {
+	// Part 1: source-text value-lock — grpc.go must NOT contain ANY of the
+	// banned literals.
 	src, err := os.ReadFile("grpc.go")
 	require.NoError(t, err, "could not read grpc.go; run test from core/gibson/ or internal/daemon/")
 	srcStr := string(src)
+	for _, banned := range []string{
+		"tls.RequestClientCert",
+		"tls.NoClientCert",
+		"tls.VerifyClientCertIfGiven",
+		"tls.RequireAnyClientCert",
+	} {
+		assert.NotContains(t, srcStr, banned,
+			"spec critical-tls-no-fallbacks Requirement 3.1: "+
+				"grpc.go must NOT reference %s — go-spiffe's built-in ClientAuth "+
+				"value (set by tlsconfig.MTLSServerConfig) is the only acceptable "+
+				"posture. The CI guard TestNoFallbackAudit covers all of core/.",
+			banned)
+	}
 
-	// The exact assignment that MUST exist in grpc.go.
-	const requiredAssignment = "tlsCfg.ClientAuth = tls.RequestClientCert"
-	assert.Contains(t, srcStr, requiredAssignment,
-		"REGRESSION (spec daemon-tls-clientauth-fix / B-bug 1): "+
-			"grpc.go must set tlsCfg.ClientAuth = tls.RequestClientCert. "+
-			"VerifyClientCertIfGiven triggers stdlib unknown_ca; "+
-			"RequireAnyClientCert breaks Bearer-only clients. "+
-			"See the comment block in grpc.go and the spec.")
-
-	// Confirm the broken value does NOT appear as an assignment (it may appear in comments).
-	const brokenAssignment = "tlsCfg.ClientAuth = tls.VerifyClientCertIfGiven"
-	assert.NotContains(t, srcStr, brokenAssignment,
-		"REGRESSION (spec daemon-tls-clientauth-fix / B-bug 1): "+
-			"grpc.go must NOT assign tls.VerifyClientCertIfGiven. "+
-			"See spec daemon-tls-clientauth-fix.")
-
-	// Part 2: TLS config value assertion — confirms tls.RequestClientCert numeric value
-	// is what the daemon's SPIFFE mTLS listener uses.
+	// Part 2: TLS config produced by tlsconfig.MTLSServerConfig (the same way
+	// production grpc.go builds it) rejects cert-less connections. We allow
+	// either RequireAnyClientCert (current go-spiffe v2.6.0 default) or
+	// RequireAndVerifyClientCert as ACCEPTABLE; the BANNED values are
+	// RequestClientCert / NoClientCert / VerifyClientCertIfGiven.
 	svidSource, bundleSource := newSyntheticSPIFFESources(t)
 	tlsCfg := tlsconfig.MTLSServerConfig(svidSource, bundleSource, tlsconfig.AuthorizeAny())
-
-	// Verify MTLSServerConfig baseline (RequireAnyClientCert) — documents that our
-	// override is the mechanism producing RequestClientCert.
-	assert.Equal(t, tls.RequireAnyClientCert, tlsCfg.ClientAuth,
-		"go-spiffe MTLSServerConfig baseline expected to be RequireAnyClientCert before override")
-
-	// Apply the production override exactly as grpc.go does.
-	tlsCfg.ClientAuth = tls.RequestClientCert
-
-	// Assert the resulting ClientAuth value.
-	assert.Equal(t, tls.RequestClientCert, tlsCfg.ClientAuth,
-		"REGRESSION (spec daemon-tls-clientauth-fix / B-bug 1): "+
-			"daemon SPIFFE TLS ClientAuth must be tls.RequestClientCert (value %d), got %d",
-		tls.RequestClientCert, tlsCfg.ClientAuth)
+	// requiresClientCert is true for RequireAnyClientCert and
+	// RequireAndVerifyClientCert; false for the banned values.
+	requiresCert := tlsCfg.ClientAuth == tls.RequireAnyClientCert ||
+		tlsCfg.ClientAuth == tls.RequireAndVerifyClientCert
+	assert.True(t, requiresCert,
+		"spec critical-tls-no-fallbacks Requirement 2.3: "+
+			"the daemon TLS config must reject cert-less connections; "+
+			"go-spiffe's MTLSServerConfig must produce a ClientAuth value that requires a client cert.")
 }
 
 // Stub implementations for other interface methods (not tested in this task)

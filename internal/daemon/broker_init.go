@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -167,51 +168,60 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 		d.logger.Info(ctx, "broker stack: config store not available (missing KEK or dashboard Postgres); all tenants use Postgres provider by default")
 	}
 
-	// --- 5b. Auth-token cache (Vault proof-of-concept) ---
+	// --- 5b. Auth-token cache (Vault) ---
 	//
 	// The AuthCache prevents auth churn when the Vault provider instance is
 	// rebuilt on registry Reload events. The refresh function decodes the
 	// tenant's Vault config blob and performs the configured auth method to
-	// obtain a fresh token; subsequent Reload calls within the token's
-	// effective TTL reuse the cached token instead of re-authenticating.
+	// obtain a fresh token; subsequent calls within the token's effective TTL
+	// reuse the cached token instead of re-authenticating.
 	//
-	// TODO(follow-up): wire the AuthCache into per-call token refresh inside
-	// the Vault provider itself (sdkvault.Provider.ReauthFn) so that
-	// long-lived provider instances can also refresh expired tokens via the
-	// cache without full reconstruction. AWS SM uses SDK-managed STS caching
-	// which provides an equivalent guarantee; full AuthCache integration for
-	// AWS SM is deferred to that follow-up.
+	// The AuthCache's singleflight semantics ensure only one refresh call is
+	// in-flight per tenant at any given moment, even under concurrent load.
 	//
-	// The per-tenant blob is used as the cache's AuthRefreshFn context because
-	// the tenant's Vault config (address, auth method, role) is embedded in
-	// the blob itself. We use the Vault address as a stable "provider" key
-	// within the singleflight group.
+	// The VaultFactory (below) calls vaultAuthCache.GetOrRefresh before
+	// constructing sdkvault.New, injecting the cached token as a static
+	// AuthMethodToken credential. This retires the per-factory authentication
+	// workaround and ensures token rotation is driven by the cache's 80%-TTL
+	// logic rather than by provider reconstruction.
 	//
-	// Spec: secrets-broker NFR Performance, Requirement 9.6.
+	// Spec: vault-refresh-and-plugin-runtime Window 1, Requirement 1.
 	vaultAuthCache := secrets.NewAuthCache(
 		func(ctx context.Context, tenantID, _ string) (string, time.Duration, error) {
-			// The refresh function is a no-op at the registry level because
-			// full per-call refresh requires a provider-side callback
-			// (see TODO above). At the registry level the cache prevents
-			// redundant vault.New() authentication during concurrent Reload
-			// calls for the same tenant.
-			//
-			// The actual token and TTL are obtained at provider construction
-			// time inside the VaultFactory closure; the AuthCache ensures
-			// that only one such construction (and hence one auth call) is
-			// in-flight per tenant at any given moment.
-			//
-			// For the production follow-up, this refreshFn will call the
-			// Vault auth endpoint directly and return the ClientToken +
-			// LeaseDuration. Until then we return a sentinel so the factory
-			// always calls sdkvault.New (which internally authenticates).
-			return "", 0, fmt.Errorf("vault auth cache: direct token refresh not yet wired (see broker_init.go TODO)")
+			// Fetch the tenant's Vault config blob from the config store.
+			brokerCfg, err := configStore.Get(ctx, auth.MustNewTenantID(tenantID))
+			if err != nil {
+				return "", 0, &sdkvault.VaultRefreshError{TenantID: tenantID, Cause: err}
+			}
+			// Unmarshal the provider-specific JSON config.
+			var vaultCfg sdkvault.Config
+			if err := json.Unmarshal(brokerCfg.ConfigBlob, &vaultCfg); err != nil {
+				return "", 0, &sdkvault.VaultRefreshError{TenantID: tenantID, Cause: err}
+			}
+			// Perform the Vault auth login and obtain a fresh token + TTL.
+			freshToken, ttl, err := sdkvault.RefreshToken(ctx, vaultCfg)
+			if err != nil {
+				return "", 0, &sdkvault.VaultRefreshError{
+					TenantID: tenantID,
+					Method:   vaultCfg.Auth.Method,
+					Cause:    err,
+				}
+			}
+			// Emit a structured log event confirming the refresh.
+			// The raw token MUST NOT appear in any log field — only its hash.
+			tokenHash := sha256.Sum256([]byte(freshToken))
+			d.logger.Info(ctx, "vault.token.refreshed",
+				"tenant_id", tenantID,
+				"lease_duration_seconds", ttl.Seconds(),
+				"token_hash", fmt.Sprintf("%x", tokenHash),
+			)
+			return freshToken, ttl, nil
 		},
 		d.logger.Slog(),
 		nil, // production clock
 	)
 	d.vaultAuthCache = vaultAuthCache
-	d.logger.Info(ctx, "broker stack: Vault auth cache initialized (proof-of-concept; full per-call refresh wiring is a follow-up)")
+	d.logger.Info(ctx, "broker stack: Vault auth cache initialized")
 
 	// --- 6. Cloud provider factories for the Registry ---
 	registryCfg := secrets.RegistryConfig{
@@ -221,12 +231,38 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 			if err := json.Unmarshal(blob, &cfg); err != nil {
 				return nil, fmt.Errorf("vault: unmarshal config: %w", err)
 			}
-			// The auth cache is not yet wired into the Vault provider's
-			// per-call refresh path (see TODO in section 5b above). When the
-			// follow-up lands, this factory will call:
-			//   vaultAuthCache.GetOrRefresh(ctx, tenant, "vault")
-			// and inject the cached token as AuthMethodToken before calling
-			// sdkvault.New. Until then, sdkvault.New authenticates directly.
+			// Obtain a cached token for this tenant from the AuthCache.
+			// GetOrRefresh uses singleflight internally to prevent concurrent
+			// re-authentications for the same tenant; the 80%-TTL cache
+			// ensures the token is refreshed before it expires.
+			//
+			// We derive the tenantID from the PathPrefix when present
+			// (Community Edition path-prefix isolation), or from the
+			// Namespace (Enterprise). If neither is set, we use the Vault
+			// address as a degenerate unique key so the cache still coalesces
+			// concurrent factory calls.
+			cacheKey := cfg.PathPrefix
+			if cacheKey == "" {
+				cacheKey = cfg.Namespace
+			}
+			if cacheKey == "" {
+				cacheKey = cfg.Address
+			}
+			freshToken, err := vaultAuthCache.GetOrRefresh(ctx, cacheKey, "vault")
+			if err != nil {
+				// Cache miss / refresh failed. Fall back to direct auth by
+				// calling sdkvault.New without a pre-cached token. This
+				// preserves the pre-cache behaviour for tenants whose config
+				// store is unavailable (e.g. during startup before the config
+				// store is seeded).
+				return sdkvault.New(ctx, cfg)
+			}
+			// Inject the cached token as a static credential so sdkvault.New
+			// does not trigger a redundant auth round-trip.
+			cfg.Auth = sdkvault.AuthConfig{
+				Method: sdkvault.AuthMethodToken,
+				Token:  freshToken,
+			}
 			return sdkvault.New(ctx, cfg)
 		},
 		AWSSMFactory: func(blob []byte) (sdksecrets.SecretsBroker, error) {

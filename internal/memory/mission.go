@@ -68,6 +68,13 @@ type MissionMemory interface {
 	// Keys returns all keys for this mission
 	Keys(ctx context.Context) ([]string, error)
 
+	// GetAll returns a snapshot of every key-value pair in this mission's memory.
+	// Implemented via SMEMBERS on the index key followed by pipelined JSON.GET calls.
+	// Keys are returned in deterministic (sorted) order.
+	// Returns an error if the Redis connection fails; never returns a partial map
+	// alongside a non-nil error.
+	GetAll(ctx context.Context) (map[string]any, error)
+
 	// MissionID returns the mission this memory is scoped to
 	MissionID() types.ID
 

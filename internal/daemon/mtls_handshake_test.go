@@ -110,25 +110,15 @@ func newSpiffeTestPKI(t *testing.T, trustDomainName, pathSuffix string) *spiffeT
 }
 
 // startMTLSTestServer spins up an in-process gRPC server using the daemon's
-// SPIFFE mTLS config (MTLSServerConfig + RequestClientCert override + callback wrapper).
-// Mirrors buildGRPCServer's SPIFFE TLS setup exactly.
+// SPIFFE mTLS config exactly as buildGRPCServer does post-spec
+// critical-tls-no-fallbacks: tlsconfig.MTLSServerConfig (no ClientAuth
+// override — go-spiffe's built-in value rejects cert-less handshakes), no
+// len(rawCerts)==0 pass-through, no Bearer-only fallthrough.
 // Returns the server and its listener address. Call t.Cleanup(srv.Stop).
 func startMTLSTestServer(t *testing.T, pki *spiffeTestPKI) (*grpc.Server, string) {
 	t.Helper()
 
-	// Build TLS config exactly as buildGRPCServer does (spec daemon-tls-clientauth-fix).
 	tlsCfg := tlsconfig.MTLSServerConfig(pki.svidSource, pki.bundleSource, tlsconfig.AuthorizeAny())
-	// The fix: RequestClientCert (not VerifyClientCertIfGiven, not RequireAnyClientCert).
-	tlsCfg.ClientAuth = tls.RequestClientCert
-	// Wrap callback to allow no-cert clients through (Bearer-only path).
-	// Mirrors the same wrapper in buildGRPCServer.
-	origVerify := tlsCfg.VerifyPeerCertificate
-	tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-		if len(rawCerts) == 0 {
-			return nil
-		}
-		return origVerify(rawCerts, verifiedChains)
-	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -386,19 +376,17 @@ func TestMTLS_NonSPIFFECert_HandshakeFails(t *testing.T) {
 	_ = err // already asserted non-nil above
 }
 
-// TestMTLS_NoCert_HandshakeSucceedsAndFallsThroughToBearer proves that a client
-// that presents NO client certificate can still complete the TLS handshake
-// (the tls.RequestClientCert value doesn't require a cert), and that the
-// resulting gRPC call reaches the application layer — not a transport rejection.
+// TestMTLS_NoCert_HandshakeRejected proves that a client that presents NO
+// client certificate is rejected at the TLS layer. The gRPC application
+// stack and the header-trusting identity interceptors NEVER see the
+// connection.
 //
-// The expected outcome for an unauthenticated call (no cert, no Bearer header)
-// is either a successful response (if the server has no auth interceptor) or
-// a gRPC Unauthenticated/Internal status from an auth gate. Either way, the
-// connection MUST reach the gRPC layer — a transport error here means
-// tls.RequestClientCert was changed to tls.RequireAnyClientCert.
+// This is the post-spec-critical-tls-no-fallbacks behavior. It replaces the
+// deleted `TestMTLS_NoCert_HandshakeSucceedsAndFallsThroughToBearer` which
+// pinned the now-removed Bearer-only pass-through path.
 //
-// Reference: spec daemon-tls-clientauth-fix Requirement 1.3 / Component 3(c).
-func TestMTLS_NoCert_HandshakeSucceedsAndFallsThroughToBearer(t *testing.T) {
+// Reference: spec critical-tls-no-fallbacks Requirements 2.1, 2.3, 5.3.
+func TestMTLS_NoCert_HandshakeRejected(t *testing.T) {
 	serverPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/server")
 	_, addr := startMTLSTestServer(t, serverPKI)
 
@@ -408,89 +396,19 @@ func TestMTLS_NoCert_HandshakeSucceedsAndFallsThroughToBearer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := healthClient.Check(ctx, &healthpb.HealthCheckRequest{})
+	_, err := healthClient.Check(ctx, &healthpb.HealthCheckRequest{})
+	require.Error(t, err,
+		"spec critical-tls-no-fallbacks Requirement 2.3: a TLS dial without a "+
+			"client cert MUST be rejected at handshake; the gRPC stack must NOT see it. "+
+			"If this passes (no error), the daemon's ClientAuth posture has regressed.")
 
-	// The TLS handshake MUST complete — RequestClientCert allows no-cert clients.
-	// If it fails with a transport error, tls.RequireAnyClientCert was set instead.
-	if err != nil {
-		st, ok := status.FromError(err)
-		if ok && (st.Code() == codes.Unavailable || st.Code() == codes.Internal) {
-			// Transport-level failure — this is the regression signal.
-			t.Fatalf(
-				"REGRESSION (spec daemon-tls-clientauth-fix / B-bug 1): "+
-					"no-cert client was rejected at transport layer (code=%s). "+
-					"tls.RequestClientCert must allow no-cert clients through to the gRPC layer. "+
-					"Did someone change ClientAuth to tls.RequireAnyClientCert? error: %v",
-				st.Code(), err,
-			)
-		}
-		// Any OTHER gRPC error (Unauthenticated, PermissionDenied, etc.) means
-		// the connection reached the application layer — that's the correct behaviour
-		// for the Bearer-only fallthrough path.
-	} else {
-		// No error: the test server's health handler returned SERVING, which also
-		// proves the handshake completed and application data flowed.
-		assert.Equal(t, healthpb.HealthCheckResponse_SERVING, resp.GetStatus())
+	st, ok := status.FromError(err)
+	if ok {
+		// gRPC frequently surfaces transport errors as Unavailable / Internal.
+		// The exact code is implementation-detail; what matters is that it's NOT OK.
+		assert.NotEqual(t, codes.OK, st.Code(),
+			"no-cert dial must NOT reach the application layer")
 	}
-}
-
-// TestMTLS_VerifyClientCertIfGiven_WouldBreakSPIFFE is a documentation test
-// that demonstrates WHY the old tls.VerifyClientCertIfGiven value was broken.
-// It is NOT testing production code — it shows the failure mode that was fixed.
-//
-// When ClientAuth = VerifyClientCertIfGiven AND ClientCAs is nil:
-//   - Go's stdlib verifier is invoked for cert-presented clients.
-//   - It fails with "unknown_ca" because it has no acceptable CA to verify against.
-//   - The SPIFFE VerifyPeerCertificate callback NEVER runs.
-//
-// Reference: spec daemon-tls-clientauth-fix B-bug 1 analysis.
-func TestMTLS_VerifyClientCertIfGiven_WouldBreakSPIFFE(t *testing.T) {
-	serverPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/server")
-	clientPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/client")
-
-	// Add client CA to server bundle (same as the valid test).
-	serverBundle := serverPKI.bundleSource.bundle.Clone()
-	serverBundle.AddX509Authority(clientPKI.caCert)
-	serverPKI.bundleSource.bundle = serverBundle
-
-	// Build the BROKEN config to demonstrate the failure mode.
-	brokenTLSCfg := tlsconfig.MTLSServerConfig(serverPKI.svidSource, serverPKI.bundleSource, tlsconfig.AuthorizeAny())
-	brokenTLSCfg.ClientAuth = tls.VerifyClientCertIfGiven // THE BUG
-	// Note: ClientCAs is nil — stdlib verifier finds no acceptable issuer.
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-
-	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(brokenTLSCfg)))
-	grpc_health_v1.RegisterHealthServer(srv, &alwaysHealthyServer{})
-	go func() { _ = srv.Serve(ln) }()
-	t.Cleanup(srv.Stop)
-
-	// A valid SPIFFE client connecting to the BROKEN server should fail.
-	clientTLSCfg := tlsconfig.MTLSClientConfig(clientPKI.svidSource, serverPKI.bundleSource, tlsconfig.AuthorizeAny())
-	cc, err := grpc.NewClient(ln.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(clientTLSCfg)))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = cc.Close() })
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	healthClient := healthpb.NewHealthClient(cc)
-	_, callErr := healthClient.Check(ctx, &healthpb.HealthCheckRequest{})
-
-	// This SHOULD fail (the broken config rejects SPIFFE clients).
-	// If it unexpectedly succeeds, go-spiffe's behaviour has changed — update this doc test.
-	if callErr == nil {
-		t.Log("WARNING: VerifyClientCertIfGiven did NOT fail for SPIFFE client. " +
-			"go-spiffe behaviour may have changed. Review the spec daemon-tls-clientauth-fix analysis.")
-	} else {
-		t.Logf("Confirmed: VerifyClientCertIfGiven breaks SPIFFE clients with error: %v", callErr)
-		// The error is expected — don't fail the test. This is a documentation test.
-		assert.Error(t, callErr, "VerifyClientCertIfGiven should reject SPIFFE cert-presented clients")
-	}
-
-	// The primary regression guard is TestBuildGRPCServer_ClientAuthIsRequestClientCert
-	// and TestMTLS_ValidSPIFFECert_HandshakeSucceeds. This test only documents why.
 }
 
 // Ensure the unused import doesn't cause compile errors.
