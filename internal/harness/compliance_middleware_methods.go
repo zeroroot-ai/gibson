@@ -9,6 +9,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkagent "github.com/zero-day-ai/sdk/agent"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -209,6 +210,18 @@ func (m *ComplianceMiddleware) MissionID() types.ID {
 
 func (m *ComplianceMiddleware) Mission() MissionContext {
 	return m.inner.Mission()
+}
+
+// Workspace returns the primary workspace from the inner harness.
+// Spec: callback-harness-workspace-rpcs.
+func (m *ComplianceMiddleware) Workspace() workspace.Workspace {
+	return m.inner.Workspace()
+}
+
+// Workspaces returns all workspaces from the inner harness.
+// Spec: callback-harness-workspace-rpcs.
+func (m *ComplianceMiddleware) Workspaces() map[string]workspace.Workspace {
+	return m.inner.Workspaces()
 }
 
 func (m *ComplianceMiddleware) MissionExecutionContext() MissionExecutionContextSDK {

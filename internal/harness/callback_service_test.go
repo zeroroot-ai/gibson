@@ -17,6 +17,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkagent "github.com/zero-day-ai/sdk/agent"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -541,6 +542,14 @@ func (m *mockHarnessWithResolver) GetPreviousRunFindings(ctx context.Context, fi
 
 func (m *mockHarnessWithResolver) Mission() MissionContext {
 	return MissionContext{}
+}
+
+func (m *mockHarnessWithResolver) Workspace() workspace.Workspace {
+	return nil
+}
+
+func (m *mockHarnessWithResolver) Workspaces() map[string]workspace.Workspace {
+	return map[string]workspace.Workspace{}
 }
 
 func (m *mockHarnessWithResolver) MissionID() types.ID {

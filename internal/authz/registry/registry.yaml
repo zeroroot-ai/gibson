@@ -1266,6 +1266,48 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/WorkspaceCommit":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/WorkspaceGetInfo":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/WorkspaceList":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/WorkspaceListFiles":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/WorkspacePush":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/WorkspaceReadFile":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/WorkspaceWriteFile":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.identity.v1.IdentityService/WhoAmI":
     relation: "member"
     object_type: "tenant"

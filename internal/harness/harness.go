@@ -9,6 +9,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkagent "github.com/zero-day-ai/sdk/agent"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -601,6 +602,19 @@ type AgentHarness interface {
 	//   mission := harness.Mission()
 	//   logger.Info("Executing mission", "name", mission.Name, "phase", mission.Phase)
 	Mission() MissionContext
+
+	// Workspace returns the primary workspace for single-repository
+	// missions. Returns nil if no workspaces are configured for this
+	// mission.
+	//
+	// Spec: callback-harness-workspace-rpcs (lifts the method onto the
+	// AgentHarness interface so the callback service handlers can
+	// route to it through any middleware wrapper).
+	Workspace() workspace.Workspace
+
+	// Workspaces returns all workspaces keyed by repository name.
+	// Returns an empty map if no workspaces are configured.
+	Workspaces() map[string]workspace.Workspace
 
 	// MissionExecutionContext returns comprehensive mission execution information.
 	// This includes run history, resume status, and memory continuity indicators

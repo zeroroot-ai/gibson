@@ -15,6 +15,7 @@ import (
 	sdkagent "github.com/zero-day-ai/sdk/agent"
 	taxonomypb "github.com/zero-day-ai/sdk/api/gen/taxonomy/v1"
 	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -135,6 +136,12 @@ func (*noopInnerHarness) Tracer() trace.Tracer          { return nil }
 func (*noopInnerHarness) Logger() *slog.Logger          { return slog.Default() }
 func (*noopInnerHarness) Metrics() MetricsRecorder      { return nil }
 func (*noopInnerHarness) TokenUsage() *llm.TokenTracker { return nil }
+func (*noopInnerHarness) Workspace() workspace.Workspace {
+	return nil
+}
+func (*noopInnerHarness) Workspaces() map[string]workspace.Workspace {
+	return map[string]workspace.Workspace{}
+}
 
 func TestComplianceMiddleware_IdentityStamping_Full(t *testing.T) {
 	sink := &fakeSink{}

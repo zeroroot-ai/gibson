@@ -14,6 +14,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkagent "github.com/zero-day-ai/sdk/agent"
+	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
@@ -349,6 +350,14 @@ func (m *mockAgentHarness) Memory() memory.MemoryStore {
 
 func (m *mockAgentHarness) Mission() harness.MissionContext {
 	return harness.MissionContext{}
+}
+
+func (m *mockAgentHarness) Workspace() workspace.Workspace {
+	return nil
+}
+
+func (m *mockAgentHarness) Workspaces() map[string]workspace.Workspace {
+	return map[string]workspace.Workspace{}
 }
 
 func (m *mockAgentHarness) MissionID() types.ID {
