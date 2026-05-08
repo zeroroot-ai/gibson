@@ -366,11 +366,14 @@ type model
 # Tuple shape written by tenant-operator at plugin_principal provisioning:
 #   (plugin_principal:<install_id>, can_resolve, secret:tenant-<tenant_id>:*)
 #
-# Tuple shape written by tenant-operator at tenant provisioning for the
-# daemon's own service identity (LLM provider config resolution path):
-#   (user:<daemon_service_id>, can_resolve, secret:tenant-<tenant_id>:*)
-#
-# agent_principal and tool_principal get NO tuples to any secret:* object.
+# Per spec non-plugin-secret-isolation, the model definition below restricts
+# can_resolve to [plugin_principal] ONLY. user-typed, agent_principal-typed,
+# and tool_principal-typed can_resolve writes are REJECTED at insert time.
+# The historical "user:<daemon_service_id> wildcard" tuple — formerly used
+# for the LLM-provider-config resolution path — is intentionally absent.
+# That path now routes through plugin_principal:llm-config with explicit
+# per-name object IDs (no wildcard) — see spec
+# secrets-blast-radius-reduction Layer 2.
 
 type secret
   relations
