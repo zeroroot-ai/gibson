@@ -120,8 +120,8 @@ func (g *gateWithSandboxUnhealthy) Decide(ctx context.Context, in dispatch.Input
 	return g.inner.Decide(ctx, in)
 }
 
-// dispatchNopProto is a minimal proto.Message for use as request/response.
-var dispatchNopProto proto.Message = &componentpb.ComponentDescriptor{}
+// dispatchNopProto is a minimal proto message for use as request/response.
+var dispatchNopProto = &componentpb.ComponentDescriptor{}
 
 // buildGateHarness builds a minimal DefaultAgentHarness with:
 //   - fakeDispatchRegistry returning one SANDBOXED entry
