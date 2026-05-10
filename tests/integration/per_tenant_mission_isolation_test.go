@@ -14,6 +14,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -62,14 +63,14 @@ func TestPerTenantMissionIsolation_TwoTenants(t *testing.T) {
 	storeB := mission.NewConnBoundMissionStore(connB.Redis)
 
 	// Create a mission definition in tenant A.
-	defA := &mission.MissionDefinition{
-		ID:   types.NewID(),
+	defA := &missionpb.MissionDefinition{
+		Id:   types.NewID().String(),
 		Name: "recon-tenant-a",
 	}
 	require.NoError(t, storeA.CreateDefinition(ctx, defA))
 
 	// Tenant B should not see tenant A's definition.
-	gotFromB, err := storeB.GetDefinition(ctx, defA.Name)
+	gotFromB, err := storeB.GetDefinition(ctx, defA.GetName())
 	require.NoError(t, err)
 	assert.Nil(t, gotFromB, "tenant B should not see tenant A's mission definition")
 

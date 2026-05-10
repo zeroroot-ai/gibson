@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -18,7 +19,7 @@ import (
 // all the information needed to create a mission.
 type CreateMissionRequest struct {
 	// Definition is the mission definition to execute.
-	Definition *MissionDefinition
+	Definition *missionv1.MissionDefinition
 
 	// TargetID is the ID of the target to test.
 	TargetID types.ID
@@ -182,15 +183,15 @@ func (c *MissionClient) Create(ctx context.Context, req *CreateMissionRequest) (
 	missionID := types.NewID()
 
 	// Generate definition ID if not set
-	if req.Definition.ID.IsZero() {
-		req.Definition.ID = types.NewID()
+	if req.Definition.GetId() == "" {
+		req.Definition.Id = types.NewID().String()
 	}
 
 	// Generate mission name if not provided
 	name := req.Name
 	if name == "" {
-		if req.Definition.Name != "" {
-			name = req.Definition.Name
+		if defName := req.Definition.GetName(); defName != "" {
+			name = defName
 		} else {
 			// Use first 8 characters of the ID for a shorter name
 			idStr := missionID.String()
@@ -211,7 +212,7 @@ func (c *MissionClient) Create(ctx context.Context, req *CreateMissionRequest) (
 	definitionJSON, err := c.serializeDefinition(req.Definition)
 	if err != nil {
 		c.logger.ErrorContext(ctx, "failed to serialize definition",
-			slog.String("definition_id", req.Definition.ID.String()),
+			slog.String("definition_id", req.Definition.GetId()),
 			slog.String("error", err.Error()))
 		return nil, fmt.Errorf("failed to serialize definition: %w", err)
 	}
@@ -230,7 +231,7 @@ func (c *MissionClient) Create(ctx context.Context, req *CreateMissionRequest) (
 		Description:           description,
 		Status:                MissionStatusPending,
 		TargetID:              req.TargetID,
-		MissionDefinitionID:   req.Definition.ID,
+		MissionDefinitionID:   types.ID(req.Definition.GetId()),
 		MissionDefinitionJSON: definitionJSON,
 		Constraints:           req.Constraints,
 		Metadata:              req.Metadata,
@@ -263,7 +264,7 @@ func (c *MissionClient) Create(ctx context.Context, req *CreateMissionRequest) (
 		slog.String("mission_id", missionID.String()),
 		slog.String("mission_name", name),
 		slog.String("target_id", req.TargetID.String()),
-		slog.String("definition_id", req.Definition.ID.String()),
+		slog.String("definition_id", req.Definition.GetId()),
 		slog.Int("depth", depth),
 		slog.String("parent_mission_id", func() string {
 			if req.ParentMissionID != nil {
@@ -290,7 +291,7 @@ func (c *MissionClient) validateCreateRequest(req *CreateMissionRequest) error {
 	}
 
 	// Validate definition has nodes
-	if len(req.Definition.Nodes) == 0 {
+	if len(req.Definition.GetNodes()) == 0 {
 		return fmt.Errorf("definition must contain at least one node")
 	}
 
@@ -313,8 +314,8 @@ func (c *MissionClient) validateCreateRequest(req *CreateMissionRequest) error {
 }
 
 // serializeDefinition converts a mission definition to JSON for storage.
-func (c *MissionClient) serializeDefinition(def *MissionDefinition) (string, error) {
-	data, err := json.Marshal(def)
+func (c *MissionClient) serializeDefinition(def *missionv1.MissionDefinition) (string, error) {
+	data, err := MarshalDefinitionJSON(def)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal definition: %w", err)
 	}

@@ -92,10 +92,9 @@ type DependencyResolver interface {
 // MissionDefinition is an interface that abstracts the mission package to avoid circular dependencies.
 // This allows the resolver to work with mission definitions without directly importing the mission package.
 //
-// Implementation note: The mission package should provide an adapter that implements this interface:
-//
-//	func (m *mission.MissionDefinition) Nodes() []MissionNode { ... }
-//	func (m *mission.MissionDefinition) Dependencies() []MissionDependency { ... }
+// Implementation note: callers wrap a *missionv1.MissionDefinition with an
+// adapter that satisfies this interface (Nodes()/Dependencies() projections
+// over proto getters).
 type MissionDefinition interface {
 	// Nodes returns all nodes (mission steps) in the mission.
 	// Each node may reference agents, tools, or plugins.
