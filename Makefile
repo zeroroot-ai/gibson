@@ -247,6 +247,7 @@ proto: proto-deps authz-registry
 authz-registry:
 	@echo "Building authz-registry-gen from pinned SDK..."
 	@mkdir -p $(BINARY_DIR) .tmp
+	@$(GOCMD) mod download github.com/zero-day-ai/sdk
 	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
 	  if [ -z "$$SDK_DIR" ]; then echo "ERROR: could not resolve github.com/zero-day-ai/sdk module dir" && exit 1; fi; \
 	  echo "  SDK dir: $$SDK_DIR"; \

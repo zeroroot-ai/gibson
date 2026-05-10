@@ -1,6 +1,6 @@
 module github.com/zero-day-ai/gibson
 
-go 1.25.3
+go 1.25.10
 
 require (
 	buf.build/go/protovalidate v1.2.0
