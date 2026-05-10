@@ -1,6 +1,7 @@
 package mission
 
 import (
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"context"
 	"testing"
 
@@ -273,19 +274,19 @@ func (m *mockMissionStore) Count(ctx context.Context, filter *MissionFilter) (in
 	return len(m.missions), nil
 }
 
-func (m *mockMissionStore) GetDefinition(ctx context.Context, name string) (*MissionDefinition, error) {
+func (m *mockMissionStore) GetDefinition(ctx context.Context, name string) (*missionv1.MissionDefinition, error) {
 	return nil, nil
 }
 
-func (m *mockMissionStore) CreateDefinition(ctx context.Context, def *MissionDefinition) error {
+func (m *mockMissionStore) CreateDefinition(ctx context.Context, def *missionv1.MissionDefinition) error {
 	return nil
 }
 
-func (m *mockMissionStore) ListDefinitions(ctx context.Context) ([]*MissionDefinition, error) {
+func (m *mockMissionStore) ListDefinitions(ctx context.Context) ([]*missionv1.MissionDefinition, error) {
 	return nil, nil
 }
 
-func (m *mockMissionStore) UpdateDefinition(ctx context.Context, def *MissionDefinition) error {
+func (m *mockMissionStore) UpdateDefinition(ctx context.Context, def *missionv1.MissionDefinition) error {
 	return nil
 }
 

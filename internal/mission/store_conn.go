@@ -13,6 +13,8 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ConnBoundMissionStore implements MissionStore against a tenant-bound Redis client.
@@ -548,35 +550,35 @@ func (s *ConnBoundMissionStore) FindOrCreateByName(ctx context.Context, mission 
 // ---------------------------------------------------------------------------
 
 // CreateDefinition stores a new mission definition.
-func (s *ConnBoundMissionStore) CreateDefinition(ctx context.Context, def *MissionDefinition) error {
+func (s *ConnBoundMissionStore) CreateDefinition(ctx context.Context, def *missionv1.MissionDefinition) error {
 	if def == nil {
 		return fmt.Errorf("mission definition cannot be nil")
 	}
-	if def.Name == "" {
+	if def.GetName() == "" {
 		return fmt.Errorf("mission definition name is required")
 	}
-	now := time.Now()
+	now := timestamppb.New(time.Now())
 	def.InstalledAt = now
-	if def.CreatedAt.IsZero() {
+	if def.GetCreatedAt() == nil {
 		def.CreatedAt = now
 	}
-	data, err := json.Marshal(def)
+	data, err := MarshalDefinitionJSON(def)
 	if err != nil {
 		return fmt.Errorf("failed to marshal definition: %w", err)
 	}
-	ok, err := s.rdb.SetNX(ctx, cbMissionDefinitionKey(def.Name), string(data), 0).Result()
+	ok, err := s.rdb.SetNX(ctx, cbMissionDefinitionKey(def.GetName()), string(data), 0).Result()
 	if err != nil {
 		return fmt.Errorf("failed to create definition: %w", err)
 	}
 	if !ok {
 		return ErrDefinitionExists
 	}
-	_ = s.rdb.SAdd(ctx, cbMissionDefinitionIndexKey(), def.Name).Err()
+	_ = s.rdb.SAdd(ctx, cbMissionDefinitionIndexKey(), def.GetName()).Err()
 	return nil
 }
 
 // GetDefinition retrieves a mission definition by name. Returns nil, nil when not found.
-func (s *ConnBoundMissionStore) GetDefinition(ctx context.Context, name string) (*MissionDefinition, error) {
+func (s *ConnBoundMissionStore) GetDefinition(ctx context.Context, name string) (*missionv1.MissionDefinition, error) {
 	data, err := s.rdb.Get(ctx, cbMissionDefinitionKey(name)).Result()
 	if err == goredis.Nil {
 		return nil, nil
@@ -584,20 +586,20 @@ func (s *ConnBoundMissionStore) GetDefinition(ctx context.Context, name string) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get definition: %w", err)
 	}
-	var def MissionDefinition
-	if err := json.Unmarshal([]byte(data), &def); err != nil {
+	def, err := UnmarshalDefinitionJSON([]byte(data))
+	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal definition: %w", err)
 	}
-	return &def, nil
+	return def, nil
 }
 
 // ListDefinitions returns all installed mission definitions.
-func (s *ConnBoundMissionStore) ListDefinitions(ctx context.Context) ([]*MissionDefinition, error) {
+func (s *ConnBoundMissionStore) ListDefinitions(ctx context.Context) ([]*missionv1.MissionDefinition, error) {
 	names, err := s.rdb.SMembers(ctx, cbMissionDefinitionIndexKey()).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list definition names: %w", err)
 	}
-	defs := make([]*MissionDefinition, 0, len(names))
+	defs := make([]*missionv1.MissionDefinition, 0, len(names))
 	for _, name := range names {
 		def, err := s.GetDefinition(ctx, name)
 		if err != nil || def == nil {
@@ -610,27 +612,27 @@ func (s *ConnBoundMissionStore) ListDefinitions(ctx context.Context) ([]*Mission
 }
 
 // UpdateDefinition updates an existing mission definition.
-func (s *ConnBoundMissionStore) UpdateDefinition(ctx context.Context, def *MissionDefinition) error {
+func (s *ConnBoundMissionStore) UpdateDefinition(ctx context.Context, def *missionv1.MissionDefinition) error {
 	if def == nil {
 		return fmt.Errorf("definition cannot be nil")
 	}
-	if def.Name == "" {
+	if def.GetName() == "" {
 		return fmt.Errorf("definition name is required")
 	}
-	existing, err := s.GetDefinition(ctx, def.Name)
+	existing, err := s.GetDefinition(ctx, def.GetName())
 	if err != nil {
 		return err
 	}
 	if existing == nil {
 		return ErrDefinitionNotFound
 	}
-	def.InstalledAt = existing.InstalledAt
-	def.CreatedAt = existing.CreatedAt
-	data, err := json.Marshal(def)
+	def.InstalledAt = existing.GetInstalledAt()
+	def.CreatedAt = existing.GetCreatedAt()
+	data, err := MarshalDefinitionJSON(def)
 	if err != nil {
 		return fmt.Errorf("failed to marshal definition: %w", err)
 	}
-	return s.rdb.Set(ctx, cbMissionDefinitionKey(def.Name), string(data), 0).Err()
+	return s.rdb.Set(ctx, cbMissionDefinitionKey(def.GetName()), string(data), 0).Err()
 }
 
 // DeleteDefinition removes a mission definition.

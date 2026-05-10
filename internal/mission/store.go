@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // MissionStore provides persistence for Mission entities.
@@ -69,18 +70,18 @@ type MissionStore interface {
 
 	// CreateDefinition stores a new mission definition in Redis.
 	// Returns error if a definition with the same name already exists.
-	CreateDefinition(ctx context.Context, def *MissionDefinition) error
+	CreateDefinition(ctx context.Context, def *missionv1.MissionDefinition) error
 
 	// GetDefinition retrieves a mission definition by name from Redis.
 	// Returns nil, nil if not found.
-	GetDefinition(ctx context.Context, name string) (*MissionDefinition, error)
+	GetDefinition(ctx context.Context, name string) (*missionv1.MissionDefinition, error)
 
 	// ListDefinitions returns all installed mission definitions from Redis.
-	ListDefinitions(ctx context.Context) ([]*MissionDefinition, error)
+	ListDefinitions(ctx context.Context) ([]*missionv1.MissionDefinition, error)
 
 	// UpdateDefinition updates an existing mission definition in Redis.
 	// Returns error if the definition does not exist.
-	UpdateDefinition(ctx context.Context, def *MissionDefinition) error
+	UpdateDefinition(ctx context.Context, def *missionv1.MissionDefinition) error
 
 	// DeleteDefinition removes a mission definition from Redis.
 	// Returns error if the definition does not exist.

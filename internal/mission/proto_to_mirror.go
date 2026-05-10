@@ -19,7 +19,7 @@ import (
 // then converts the resulting proto into the in-memory mirror struct
 // via protoToMirrorDefinition.
 //
-// PR3 deletes this helper alongside the mirror types — call sites that
+// PR4c deletes this helper alongside the mirror types — call sites that
 // can already work with *missionv1.MissionDefinition should use
 // UnmarshalDefinitionJSON directly.
 //
@@ -29,6 +29,16 @@ func UnmarshalToMirror(data []byte) (*MissionDefinition, error) {
 	if err != nil {
 		return nil, err
 	}
+	return protoToMirrorDefinition(def)
+}
+
+// ProtoToMirror is the transitional bridge that PR4a callers use to
+// pass a proto MissionDefinition into a daemon helper that still
+// consumes the mirror type. PR4b retypes those helpers and the bridge
+// goes away.
+//
+// Spec: mission-mirror-final-deletion (PR4a transitional bridge).
+func ProtoToMirror(def *missionv1.MissionDefinition) (*MissionDefinition, error) {
 	return protoToMirrorDefinition(def)
 }
 

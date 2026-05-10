@@ -23,6 +23,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -299,7 +300,7 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 		defs, listErr := defStore.ListDefinitions(ctx)
 		if listErr == nil {
 			for _, candidate := range defs {
-				if candidate.ID.String() == missionDefinitionID {
+				if candidate.GetId() == missionDefinitionID {
 					def = candidate
 					break
 				}
@@ -311,8 +312,8 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	}
 
 	m.logger.Debug("mission definition loaded",
-		"mission_name", def.Name,
-		"node_count", len(def.Nodes),
+		"mission_name", def.GetName(),
+		"node_count", len(def.GetNodes()),
 	)
 
 	// Shared-Neo4j-backed mission graph storage removed (spec graphrag-tenant-scope).
@@ -365,8 +366,8 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 		return nil, fmt.Errorf("mission %s is already running", missionID)
 	}
 
-	// Serialize mission definition to JSON for storage
-	definitionJSON, err := json.Marshal(def)
+	// Serialize mission definition to canonical protojson for storage.
+	definitionJSON, err := mission.MarshalDefinitionJSON(def)
 	if err != nil {
 		m.logger.Error("failed to serialize mission definition", "error", err)
 		return nil, fmt.Errorf("failed to serialize mission definition: %w", err)
@@ -376,10 +377,10 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	now := mission.NewUnixTimeNow()
 	missionTemplate := &mission.Mission{
 		ID:                    types.NewID(), // Template ID, may be replaced by existing
-		Name:                  def.Name,
-		Description:           def.Description,
+		Name:                  def.GetName(),
+		Description:           def.GetDescription(),
 		Status:                mission.MissionStatusPending,
-		MissionDefinitionID:   def.ID,
+		MissionDefinitionID:   types.ID(def.GetId()),
 		MissionDefinitionJSON: string(definitionJSON),
 		TargetID:              resolvedTargetID,
 		MemoryContinuity:      memoryContinuity,
@@ -387,7 +388,7 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 		UpdatedAt:             now,
 		FindingsCount:         0,
 		Metrics: &mission.MissionMetrics{
-			TotalNodes:     len(def.Nodes),
+			TotalNodes:     len(def.GetNodes()),
 			CompletedNodes: 0,
 		},
 		Metadata: make(map[string]any),
@@ -417,7 +418,7 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	if mStore != nil {
 		missionRecord, isNewMission, err = mStore.FindOrCreateByName(ctx, missionTemplate)
 		if err != nil {
-			m.logger.Error("failed to find or create mission", "error", err, "mission_name", def.Name)
+			m.logger.Error("failed to find or create mission", "error", err, "mission_name", def.GetName())
 			return nil, fmt.Errorf("failed to find or create mission: %w", err)
 		}
 		m.logger.Info("mission lookup result",
@@ -542,7 +543,7 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 // executeMission runs the mission execution using the orchestrator.
 // This handles the full mission lifecycle including setup, execution via
 // the Observe → Think → Act loop, and cleanup.
-func (m *missionManager) executeMission(ctx context.Context, missionID string, def *mission.MissionDefinition, eventChan chan api.MissionEventData) {
+func (m *missionManager) executeMission(ctx context.Context, missionID string, def *missionpb.MissionDefinition, eventChan chan api.MissionEventData) {
 	defer close(eventChan)
 
 	// Create mission execution span if OTel tracing is enabled
@@ -552,7 +553,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		ctx, span = tracer.Start(ctx, observability.SpanMissionExecute,
 			trace.WithAttributes(
 				attribute.String(observability.GibsonMissionID, missionID),
-				attribute.String(observability.GibsonMissionName, def.Name),
+				attribute.String(observability.GibsonMissionName, def.GetName()),
 			),
 		)
 		defer span.End()
@@ -691,9 +692,22 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		return
 	}
 
-	// Bootstrap mission graph structure before execution
+	// Bootstrap mission graph structure before execution. PR4a bridge:
+	// Bootstrap still consumes mirror MissionDefinition; convert via
+	// mission.ProtoToMirror until PR4b retypes Bootstrap.
+	bootstrapDef, ptmErr := mission.ProtoToMirror(def)
+	if ptmErr != nil {
+		m.logger.Error("failed to convert mission def for bootstrap", "error", ptmErr, "mission_id", missionID)
+		m.emitEvent(eventChan, api.MissionEventData{
+			EventType: "mission.failed",
+			Timestamp: time.Now(),
+			MissionID: missionID,
+			Error:     fmt.Sprintf("failed to convert mission for bootstrap: %v", ptmErr),
+		})
+		return
+	}
 	bootstrapper := NewGraphBootstrapper(graphClient, m.logger)
-	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.mission, def, missionRun)
+	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.mission, bootstrapDef, missionRun)
 	if err != nil {
 		m.logger.Error("failed to bootstrap mission graph", "error", err, "mission_id", missionID)
 		m.emitEvent(eventChan, api.MissionEventData{
@@ -797,16 +811,9 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		orchestrator.WithThinkerTemperature(0.2),
 	)
 
-	// Create PolicyChecker for data policy enforcement. NewMissionPolicySource
-	// consumes the proto MissionDefinition (proto's ReusePolicy is the canonical
-	// home for what the mirror called DataPolicy.{OutputScope,InputScope,Reuse}).
-	// PR4 retypes `def` everywhere so this conversion goes away.
-	defProto, mptErr := mission.MirrorToProto(def)
-	if mptErr != nil {
-		m.logger.Error("mission policy: failed to convert mirror def to proto", "error", mptErr, "mission_id", missionID)
-		return
-	}
-	policySource := orchestrator.NewMissionPolicySource(defProto)
+	// Create PolicyChecker for data policy enforcement. def is already
+	// proto after PR4a; NewMissionPolicySource consumes it directly.
+	policySource := orchestrator.NewMissionPolicySource(def)
 	nodeStore := orchestrator.NewGraphNodeStore(graphClient, active.missionRun.ID.String())
 	policyChecker := orchestrator.NewPolicyChecker(policySource, nodeStore, m.logger)
 
@@ -820,8 +827,10 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	var decisionLogWriter orchestrator.DecisionLogWriter
 	var otelDecisionLogAdapter *observability.OTelDecisionLogWriterAdapter // Keep reference for Close
 	if m.otelStack != nil && m.otelStack.MissionTracer != nil {
-		// Convert mission state to schema format for OTel
-		schemaMission := convertToSchemaMission(active.mission, def)
+		// Convert mission state to schema format for OTel. PR4a bridge:
+		// convertToSchemaMission still consumes mirror; reuse the
+		// bootstrapDef computed above. PR4b retypes convertToSchemaMission.
+		schemaMission := convertToSchemaMission(active.mission, bootstrapDef)
 
 		// Create OTel adapter with tracer and schema mission
 		logAdapter, err := observability.NewOTelDecisionLogWriterAdapter(ctx, m.otelStack.MissionTracer, schemaMission)
@@ -1170,13 +1179,13 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 		return nil, fmt.Errorf("cannot resume mission %s: status is %s (expected paused)", missionID, missionRecord.Status)
 	}
 
-	// Parse mission definition from stored JSON. UnmarshalToMirror is
-	// the dual-shape reader (proto-shape from PR2+ writers, legacy
-	// flat-mirror from earlier daemon versions). PR3 removes the
-	// mirror conversion once in-memory call sites consume proto.
-	var def *mission.MissionDefinition
+	// Parse mission definition from stored JSON. UnmarshalDefinitionJSON
+	// is the dual-shape reader (proto-shape from PR2+ writers, legacy
+	// flat-mirror via the in-package fallback). executeMission consumes
+	// proto, so we read directly into proto.
+	var def *missionpb.MissionDefinition
 	if missionRecord.MissionDefinitionJSON != "" {
-		def, err = mission.UnmarshalToMirror([]byte(missionRecord.MissionDefinitionJSON))
+		def, err = mission.UnmarshalDefinitionJSON([]byte(missionRecord.MissionDefinitionJSON))
 		if err != nil {
 			m.logger.Error("failed to parse mission definition", "error", err)
 			return nil, fmt.Errorf("failed to parse mission definition: %w", err)

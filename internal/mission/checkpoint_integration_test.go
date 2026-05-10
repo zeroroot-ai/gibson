@@ -3,6 +3,7 @@
 package mission
 
 import (
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"context"
 	"encoding/json"
 	"errors"
@@ -298,16 +299,16 @@ func (s *redisMissionStore) IncrementRunNumber(_ context.Context, _ string) (int
 func (s *redisMissionStore) FindOrCreateByName(_ context.Context, m *Mission) (*Mission, bool, error) {
 	return m, true, nil
 }
-func (s *redisMissionStore) CreateDefinition(_ context.Context, _ *MissionDefinition) error {
+func (s *redisMissionStore) CreateDefinition(_ context.Context, _ *missionv1.MissionDefinition) error {
 	return errors.New("not implemented")
 }
-func (s *redisMissionStore) GetDefinition(_ context.Context, _ string) (*MissionDefinition, error) {
+func (s *redisMissionStore) GetDefinition(_ context.Context, _ string) (*missionv1.MissionDefinition, error) {
 	return nil, errors.New("not implemented")
 }
-func (s *redisMissionStore) ListDefinitions(_ context.Context) ([]*MissionDefinition, error) {
+func (s *redisMissionStore) ListDefinitions(_ context.Context) ([]*missionv1.MissionDefinition, error) {
 	return nil, errors.New("not implemented")
 }
-func (s *redisMissionStore) UpdateDefinition(_ context.Context, _ *MissionDefinition) error {
+func (s *redisMissionStore) UpdateDefinition(_ context.Context, _ *missionv1.MissionDefinition) error {
 	return errors.New("not implemented")
 }
 func (s *redisMissionStore) DeleteDefinition(_ context.Context, _ string) error {

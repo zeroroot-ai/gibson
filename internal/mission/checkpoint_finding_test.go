@@ -1,6 +1,7 @@
 package mission
 
 import (
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"context"
 	"errors"
 	"testing"
@@ -74,16 +75,16 @@ func (s *checkpointTestStore) IncrementRunNumber(_ context.Context, _ string) (i
 func (s *checkpointTestStore) FindOrCreateByName(_ context.Context, m *Mission) (*Mission, bool, error) {
 	return m, true, nil
 }
-func (s *checkpointTestStore) CreateDefinition(_ context.Context, _ *MissionDefinition) error {
+func (s *checkpointTestStore) CreateDefinition(_ context.Context, _ *missionv1.MissionDefinition) error {
 	return nil
 }
-func (s *checkpointTestStore) GetDefinition(_ context.Context, _ string) (*MissionDefinition, error) {
+func (s *checkpointTestStore) GetDefinition(_ context.Context, _ string) (*missionv1.MissionDefinition, error) {
 	return nil, nil
 }
-func (s *checkpointTestStore) ListDefinitions(_ context.Context) ([]*MissionDefinition, error) {
+func (s *checkpointTestStore) ListDefinitions(_ context.Context) ([]*missionv1.MissionDefinition, error) {
 	return nil, nil
 }
-func (s *checkpointTestStore) UpdateDefinition(_ context.Context, _ *MissionDefinition) error {
+func (s *checkpointTestStore) UpdateDefinition(_ context.Context, _ *missionv1.MissionDefinition) error {
 	return nil
 }
 func (s *checkpointTestStore) DeleteDefinition(_ context.Context, _ string) error { return nil }

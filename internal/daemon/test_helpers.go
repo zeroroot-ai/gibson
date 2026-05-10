@@ -14,6 +14,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/tool"
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkagent "github.com/zero-day-ai/sdk/agent"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
@@ -222,19 +223,19 @@ func (m *mockMissionStore) FindOrCreateByName(ctx context.Context, mis *mission.
 	return mis, true, nil
 }
 
-func (m *mockMissionStore) CreateDefinition(ctx context.Context, def *mission.MissionDefinition) error {
+func (m *mockMissionStore) CreateDefinition(ctx context.Context, def *missionv1.MissionDefinition) error {
 	return nil
 }
 
-func (m *mockMissionStore) GetDefinition(ctx context.Context, name string) (*mission.MissionDefinition, error) {
+func (m *mockMissionStore) GetDefinition(ctx context.Context, name string) (*missionv1.MissionDefinition, error) {
 	return nil, nil
 }
 
-func (m *mockMissionStore) ListDefinitions(ctx context.Context) ([]*mission.MissionDefinition, error) {
+func (m *mockMissionStore) ListDefinitions(ctx context.Context) ([]*missionv1.MissionDefinition, error) {
 	return nil, nil
 }
 
-func (m *mockMissionStore) UpdateDefinition(ctx context.Context, def *mission.MissionDefinition) error {
+func (m *mockMissionStore) UpdateDefinition(ctx context.Context, def *missionv1.MissionDefinition) error {
 	return nil
 }
 
