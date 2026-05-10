@@ -1162,10 +1162,13 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) (<-chan a
 		return nil, fmt.Errorf("cannot resume mission %s: status is %s (expected paused)", missionID, missionRecord.Status)
 	}
 
-	// Parse mission definition from stored JSON
+	// Parse mission definition from stored JSON. UnmarshalToMirror is
+	// the dual-shape reader (proto-shape from PR2+ writers, legacy
+	// flat-mirror from earlier daemon versions). PR3 removes the
+	// mirror conversion once in-memory call sites consume proto.
 	var def *mission.MissionDefinition
 	if missionRecord.MissionDefinitionJSON != "" {
-		def, err = mission.ParseDefinitionFromJSON([]byte(missionRecord.MissionDefinitionJSON))
+		def, err = mission.UnmarshalToMirror([]byte(missionRecord.MissionDefinitionJSON))
 		if err != nil {
 			m.logger.Error("failed to parse mission definition", "error", err)
 			return nil, fmt.Errorf("failed to parse mission definition: %w", err)

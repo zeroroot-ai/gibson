@@ -92,32 +92,36 @@ func TestMarshalDefinitionJSON_UsesSnakeCaseFieldNames(t *testing.T) {
 	}
 }
 
-func TestUnmarshalDefinitionJSON_RejectsLegacyMirrorShape(t *testing.T) {
+func TestUnmarshalDefinitionJSON_FallsBackToLegacyMirrorShape(t *testing.T) {
 	// Legacy flat-mirror JSON: `agent_name` at the top level of the node
-	// rather than nested under `agent_config`. UnmarshalDefinitionJSON
-	// is intentionally strict about this — flat-shape bytes must go
-	// through the offline migrator (PR2), not through this helper.
+	// rather than nested under `agent_config`. Pre-PR2 writers produced
+	// this shape, so the reader must dual-read until PR3 deletes the
+	// mirror entirely. The fallback walks the mirror struct and folds
+	// flat fields into the proto's oneof config envelope.
 	legacy := []byte(`{
 		"name": "Legacy",
 		"version": "1.0",
 		"nodes": {
 			"node1": {
 				"id": "node1",
-				"type": "NODE_TYPE_AGENT",
+				"type": "agent",
 				"agent_name": "scout"
 			}
 		}
 	}`)
 	got, err := mission.UnmarshalDefinitionJSON(legacy)
 	if err != nil {
-		t.Fatalf("unmarshal must not fail; legacy fields are silently dropped: %v", err)
+		t.Fatalf("legacy fallback failed: %v", err)
 	}
 	node, ok := got.Nodes["node1"]
 	if !ok {
 		t.Fatal("expected node1 to be present")
 	}
-	if node.GetAgentConfig() != nil {
-		t.Error("legacy top-level agent_name should not have populated agent_config")
+	if node.GetAgentConfig() == nil {
+		t.Fatal("legacy fallback did not populate agent_config oneof envelope")
+	}
+	if g := node.GetAgentConfig().GetAgentName(); g != "scout" {
+		t.Errorf("agent_name: got %q want scout", g)
 	}
 }
 
