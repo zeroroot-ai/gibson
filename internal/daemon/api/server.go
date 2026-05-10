@@ -1129,15 +1129,10 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 		return preserveStatus(err, "failed to start mission")
 	}
 
-	// Mission accepted: increment the tenant's running mission counter.
-	if s.quotaManager != nil {
-		if err := s.quotaManager.IncrementMissionCount(stream.Context()); err != nil {
-			// Non-fatal: mission is already running. Log and continue — a
-			// counter mismatch here is harmless given the floor-at-zero
-			// semantics in DecrementMissionCount.
-			s.logger.Warn("failed to increment mission quota counter", "error", err)
-		}
-	}
+	// Spec plans-and-quotas-simplification: the concurrent_missions counter
+	// is now incremented by the missionManager at queued → running dispatch
+	// (mission_manager.go) and decremented at terminal-state transitions.
+	// Submission alone no longer counts toward the quota.
 
 	// Stream events to client
 	for {

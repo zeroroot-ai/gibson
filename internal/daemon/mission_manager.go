@@ -62,6 +62,12 @@ type missionManager struct {
 	// When nil, authz state tracking is skipped (dev mode or authz disabled).
 	authzStore mission.MissionAuthzStore
 
+	// quotaCounter maintains the per-tenant concurrent_missions Redis
+	// counter. INCR fires when execution begins (queued → running);
+	// DECR fires when the mission reaches a terminal state. nil-safe.
+	// Spec plans-and-quotas-simplification.
+	quotaCounter mission.QuotaCounter
+
 	// activeMissions tracks running missions keyed by (tenant, missionID).
 	// The outer key is the tenant; the inner key is the mission ID string.
 	// Pause/Resume/Stop operations traverse only the calling tenant's submap
@@ -102,6 +108,7 @@ func newMissionManager(
 	otelStack *observability.OTelObservabilityStack,
 	eventBus orchestrator.EventBus,
 	authzStore mission.MissionAuthzStore,
+	quotaCounter mission.QuotaCounter,
 ) *missionManager {
 	return &missionManager{
 		config:          cfg,
@@ -118,6 +125,7 @@ func newMissionManager(
 		otelStack:       otelStack,
 		eventBus:        eventBus,
 		authzStore:      authzStore,
+		quotaCounter:    quotaCounter,
 		activeMissions:  make(map[auth.TenantID]map[string]*activeMission),
 	}
 }
@@ -623,6 +631,17 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		m.logger.Warn("failed to acquire store for status update", "error", storeErr, "mission_id", missionID)
 	}
 
+	// Increment the concurrent_missions counter on dispatch (queued → running).
+	// DECR fires from the terminal-state block below. Failure is non-fatal:
+	// counter mismatches self-correct via floor-at-zero. Spec
+	// plans-and-quotas-simplification.
+	if m.quotaCounter != nil {
+		if incErr := m.quotaCounter.IncrementMissionCount(ctx); incErr != nil {
+			m.logger.Warn("mission manager: increment concurrent_missions failed (non-fatal)",
+				"mission_id", missionID, "error", incErr.Error())
+		}
+	}
+
 	// Acquire the per-tenant Neo4j session from the data-plane Pool.
 	// The pool is required for mission execution (per-call Neo4j).
 	if m.pool == nil {
@@ -1001,6 +1020,15 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 					slog.String("error", markErr.Error()),
 				)
 			}
+		}
+	}
+
+	// Decrement the concurrent_missions counter on terminal-state transition.
+	// Floored at zero. Spec plans-and-quotas-simplification.
+	if m.quotaCounter != nil {
+		if decErr := m.quotaCounter.DecrementMissionCount(ctx); decErr != nil {
+			m.logger.Warn("mission manager: decrement concurrent_missions failed (non-fatal)",
+				"mission_id", missionID, "error", decErr.Error())
 		}
 	}
 
