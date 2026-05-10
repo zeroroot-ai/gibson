@@ -95,25 +95,19 @@ func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *platformv1.Up
 	}
 
 	const q = `
-		INSERT INTO tenant_quotas (tenant_id, seats, concurrent_agents, storage_gb, retention_days, sandbox_launches_per_month, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		INSERT INTO tenant_quotas (tenant_id, concurrent_missions, concurrent_agents, updated_at)
+		VALUES ($1, $2, $3, NOW())
 		ON CONFLICT (tenant_id) DO UPDATE SET
-			seats = EXCLUDED.seats,
+			concurrent_missions = EXCLUDED.concurrent_missions,
 			concurrent_agents = EXCLUDED.concurrent_agents,
-			storage_gb = EXCLUDED.storage_gb,
-			retention_days = EXCLUDED.retention_days,
-			sandbox_launches_per_month = EXCLUDED.sandbox_launches_per_month,
 			updated_at = NOW()
 		RETURNING updated_at
 	`
 	var updatedAt time.Time
 	if err := db.QueryRowContext(ctx, q,
 		req.GetTenantId(),
-		req.GetSeats(),
+		req.GetConcurrentMissions(),
 		req.GetConcurrentAgents(),
-		req.GetStorageGb(),
-		req.GetRetentionDays(),
-		req.GetSandboxLaunchesPerMonth(),
 	).Scan(&updatedAt); err != nil {
 		return nil, status.Errorf(codes.Internal, "upsert: %v", err)
 	}
@@ -265,20 +259,26 @@ func indexByte(s string, c byte) int {
 // (internal/db/migrations/2026041801_create_tenant_quotas.sql) yet. The
 // migration is still the authoritative source in schema-managed environments.
 func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
-	const q = `
+	const create = `
 		CREATE TABLE IF NOT EXISTS tenant_quotas (
 			tenant_id TEXT PRIMARY KEY,
-			seats INT NOT NULL,
-			concurrent_agents INT NOT NULL,
-			storage_gb INT NOT NULL,
-			retention_days INT NOT NULL,
-			sandbox_launches_per_month INT NOT NULL,
+			concurrent_missions INT NOT NULL DEFAULT 0,
+			concurrent_agents INT NOT NULL DEFAULT 0,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
 	`
-	_, err := db.ExecContext(ctx, q)
-	if err != nil {
+	if _, err := db.ExecContext(ctx, create); err != nil {
 		return fmt.Errorf("create tenant_quotas: %w", err)
+	}
+	// Forward-compat: ALTER TABLE ... ADD COLUMN IF NOT EXISTS catches
+	// upgrades where the legacy schema already exists. Spec
+	// plans-and-quotas-simplification.
+	const ensure = `
+		ALTER TABLE tenant_quotas
+			ADD COLUMN IF NOT EXISTS concurrent_missions INT NOT NULL DEFAULT 0
+	`
+	if _, err := db.ExecContext(ctx, ensure); err != nil {
+		return fmt.Errorf("alter tenant_quotas (concurrent_missions): %w", err)
 	}
 	return nil
 }
