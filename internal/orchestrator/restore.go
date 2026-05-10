@@ -9,6 +9,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zero-day-ai/gibson/internal/mission/definitionutil"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // ErrMissionMemoryUnavailable is returned by RestoreFromCheckpoint when the
@@ -206,7 +208,7 @@ func (r *StateRestorer) ValidateCheckpoint(checkpoint *mission.Checkpoint) error
 //   - The current node ID exists in the definition
 //
 // This validation should be performed by the orchestrator before attempting to resume.
-func (r *StateRestorer) ValidateCheckpointWithDefinition(checkpoint *mission.Checkpoint, def *mission.MissionDefinition) error {
+func (r *StateRestorer) ValidateCheckpointWithDefinition(checkpoint *mission.Checkpoint, def *missionv1.MissionDefinition) error {
 	if err := r.ValidateCheckpoint(checkpoint); err != nil {
 		return err
 	}
@@ -217,14 +219,14 @@ func (r *StateRestorer) ValidateCheckpointWithDefinition(checkpoint *mission.Che
 
 	// Validate current node exists
 	if checkpoint.CurrentNodeID != "" {
-		if def.GetNode(checkpoint.CurrentNodeID) == nil {
+		if _, ok := definitionutil.GetNode(def, checkpoint.CurrentNodeID); !ok {
 			return fmt.Errorf("current node %q not found in mission definition", checkpoint.CurrentNodeID)
 		}
 	}
 
 	// Validate completed nodes exist
 	for nodeID := range checkpoint.CompletedNodes {
-		if def.GetNode(nodeID) == nil {
+		if _, ok := definitionutil.GetNode(def, nodeID); !ok {
 			return fmt.Errorf("completed node %q not found in mission definition", nodeID)
 		}
 	}
@@ -232,7 +234,7 @@ func (r *StateRestorer) ValidateCheckpointWithDefinition(checkpoint *mission.Che
 	// Validate pending nodes exist (if DAG state is present)
 	if checkpoint.DAGState != nil {
 		for _, nodeID := range checkpoint.DAGState.PendingNodes {
-			if def.GetNode(nodeID) == nil {
+			if _, ok := definitionutil.GetNode(def, nodeID); !ok {
 				return fmt.Errorf("pending node %q not found in mission definition", nodeID)
 			}
 		}

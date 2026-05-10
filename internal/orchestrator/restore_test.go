@@ -11,6 +11,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 func TestStateRestorer_RestoreFromCheckpoint(t *testing.T) {
@@ -256,21 +257,21 @@ func TestStateRestorer_ValidateCheckpoint(t *testing.T) {
 func TestStateRestorer_ValidateCheckpointWithDefinition(t *testing.T) {
 	restorer := NewStateRestorer()
 
-	// Create a test mission definition
-	def := &mission.MissionDefinition{
+	// Create a test mission definition (canonical proto type).
+	def := &missionv1.MissionDefinition{
 		Name:        "test-mission",
 		Description: "Test mission for validation",
-		Nodes: map[string]*mission.MissionNode{
-			"node-1": {ID: "node-1", Name: "Node 1", Type: mission.NodeTypeAgent},
-			"node-2": {ID: "node-2", Name: "Node 2", Type: mission.NodeTypeAgent},
-			"node-3": {ID: "node-3", Name: "Node 3", Type: mission.NodeTypeAgent},
+		Nodes: map[string]*missionv1.MissionNode{
+			"node-1": {Id: "node-1", Name: "Node 1", Type: missionv1.NodeType_NODE_TYPE_AGENT},
+			"node-2": {Id: "node-2", Name: "Node 2", Type: missionv1.NodeType_NODE_TYPE_AGENT},
+			"node-3": {Id: "node-3", Name: "Node 3", Type: missionv1.NodeType_NODE_TYPE_AGENT},
 		},
 	}
 
 	tests := []struct {
 		name        string
 		checkpoint  *mission.Checkpoint
-		definition  *mission.MissionDefinition
+		definition  *missionv1.MissionDefinition
 		expectError bool
 		errorMsg    string
 	}{
