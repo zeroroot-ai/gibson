@@ -46,6 +46,17 @@ type MissionController interface {
 	GetProgress(ctx context.Context, missionID types.ID) (*MissionProgress, error)
 }
 
+// QuotaCounter is the narrow interface the controller uses to maintain
+// per-tenant concurrent-mission counters. Spec
+// plans-and-quotas-simplification: INCR fires when the controller commits
+// to executing a mission (immediately before the orchestrator goroutine
+// launches), DECR fires from the deferred terminal-state block. Implemented
+// by *component.QuotaManager.
+type QuotaCounter interface {
+	IncrementMissionCount(ctx context.Context) error
+	DecrementMissionCount(ctx context.Context) error
+}
+
 // DefaultMissionController implements MissionController.
 type DefaultMissionController struct {
 	store             MissionStore
@@ -70,6 +81,12 @@ type DefaultMissionController struct {
 	// HarnessCallbackService.Authorize can resolve run_id → (user_id, tenant_id).
 	// When nil, authz state tracking is skipped (dev mode or authz disabled).
 	authzStore MissionAuthzStore
+
+	// quotaCounter increments concurrent_missions when execution begins and
+	// decrements on terminal-state transitions. Optional; when nil, the
+	// counter is not maintained (dev / no-quota deployments).
+	// Spec plans-and-quotas-simplification.
+	quotaCounter QuotaCounter
 
 	// checkpointPolicy applies retention rules to a mission's checkpoint
 	// threads when the mission reaches a terminal state. Optional — when nil,
@@ -173,6 +190,15 @@ func WithCheckpointRetention(policy checkpoint.CheckpointPolicy, tm checkpoint.T
 	return func(c *DefaultMissionController) {
 		c.checkpointPolicy = policy
 		c.threadManager = tm
+	}
+}
+
+// WithQuotaCounter wires a QuotaCounter so that the controller maintains
+// the concurrent_missions Redis counter on Start/Resume/terminal
+// transitions. Spec plans-and-quotas-simplification.
+func WithQuotaCounter(qc QuotaCounter) ControllerOption {
+	return func(c *DefaultMissionController) {
+		c.quotaCounter = qc
 	}
 }
 
@@ -412,6 +438,20 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 	execCtx, cancel := context.WithCancel(baseCtx)
 	c.activeMissions[missionID] = cancel
 
+	// Increment the concurrent_missions counter as the mission transitions
+	// queued → running (the goroutine below is the dispatch). DECR fires in
+	// the deferred terminal block. Failure here is non-fatal: the mission
+	// is already committed to executing and a counter mismatch self-corrects
+	// via decrementCounter's floor-at-zero. Spec plans-and-quotas-simplification.
+	if c.quotaCounter != nil {
+		if incErr := c.quotaCounter.IncrementMissionCount(baseCtx); incErr != nil {
+			c.logger.Warn("mission controller: increment concurrent_missions failed (non-fatal)",
+				slog.String("mission_id", missionID.String()),
+				slog.String("error", incErr.Error()),
+			)
+		}
+	}
+
 	// Start mission execution in background
 	go func() {
 		defer func() {
@@ -419,6 +459,19 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 			delete(c.activeMissions, missionID)
 			delete(c.activeRuns, missionID)
 			c.executionMu.Unlock()
+
+			// Decrement the concurrent_missions counter as the mission
+			// transitions to a terminal state. baseCtx still carries the
+			// tenant identity. Failure floors at zero. Spec
+			// plans-and-quotas-simplification.
+			if c.quotaCounter != nil {
+				if decErr := c.quotaCounter.DecrementMissionCount(baseCtx); decErr != nil {
+					c.logger.Warn("mission controller: decrement concurrent_missions failed (non-fatal)",
+						slog.String("mission_id", missionID.String()),
+						slog.String("error", decErr.Error()),
+					)
+				}
+			}
 		}()
 
 		result, err := c.orchestrator.Execute(execCtx, mission)
