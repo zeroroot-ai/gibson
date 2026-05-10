@@ -22,6 +22,7 @@ require (
 	github.com/gomlx/go-huggingface v0.3.1
 	github.com/gomlx/gomlx v0.26.0
 	github.com/gomlx/onnx-gomlx v0.3.4
+	github.com/google/cel-go v0.28.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/hashicorp/vault/api/auth/kubernetes v0.12.0
@@ -42,7 +43,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zero-day-ai/sdk v1.6.0
+	github.com/zero-day-ai/sdk v1.7.0
 	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.43.0
@@ -144,7 +145,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/gomlx/exceptions v0.0.3 // indirect
-	github.com/google/cel-go v0.28.0 // indirect
 	github.com/google/generative-ai-go v0.15.1 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
