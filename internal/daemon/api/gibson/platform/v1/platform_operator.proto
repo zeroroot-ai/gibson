@@ -44,18 +44,6 @@ service PlatformOperatorService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
-  // SetTenantQuota sets or updates the resource quotas for a tenant.
-  // Requires platform-operator role.
-  //
-  // Unimplemented: <owner-pending>
-  rpc SetTenantQuota(SetTenantQuotaRequest) returns (SetTenantQuotaResponse) {
-    option (gibson.auth.v1.authz) = {
-      relation: "platform_operator",
-      object_type: "system_tenant",
-      object_deriver: "system_tenant",
-      allowed_identities: 3  // USER | SERVICE
-    };
-  }
   // ---------------------------------------------------------------------------
   // Entitlements — operator RPCs called by the tenant-operator reconciler
   // ---------------------------------------------------------------------------
