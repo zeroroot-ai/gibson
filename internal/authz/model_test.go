@@ -327,16 +327,5 @@ func TestModel_CatalogGating(t *testing.T) {
 			"tenant_read_disabled kills agent's can_read_as_component")
 	})
 
-	// -- Informational feature flags (R7) ------------------------------------
-
-	t.Run("feature_flags/has_sso_self_referential", func(t *testing.T) {
-		c := newClient(t)
-		seed(c)
-		// has_sso is written as tenant:X#has_sso@tenant:X.
-		addTuples(c, fgaclient.ClientTupleKey{User: tenantA, Relation: "has_sso", Object: tenantA})
-		require.True(t, checkAllow(c, tenantA, "has_sso", tenantA),
-			"has_sso feature tuple should be present")
-		require.False(t, checkAllow(c, tenantA, "has_audit_logs", tenantA),
-			"has_audit_logs should be absent without its tuple")
-	})
+	// has_* feature-flag tests removed by spec plans-and-quotas-simplification.
 }

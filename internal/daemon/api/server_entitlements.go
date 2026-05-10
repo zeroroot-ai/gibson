@@ -114,32 +114,14 @@ func (s *DaemonServer) UpsertTenantQuota(ctx context.Context, req *platformv1.Up
 	return &platformv1.UpsertTenantQuotaResponse{UpdatedAt: updatedAt.UTC().Format(time.RFC3339Nano)}, nil
 }
 
-// ListFeatureTuples enumerates `tenant:{id}#has_*@tenant:{id}` relations
-// currently set on the given tenant. Implementation note: OpenFGA's
-// ListObjects is a (user, relation, objectType) query, so we iterate the
-// known has_* relation set and record which are currently present.
+// ListFeatureTuples returns an empty relation list. Spec
+// plans-and-quotas-simplification removed every has_* relation from the
+// FGA model; operator code that still calls this method gets a no-op.
 func (s *DaemonServer) ListFeatureTuples(ctx context.Context, req *platformv1.ListFeatureTuplesRequest) (*platformv1.ListFeatureTuplesResponse, error) {
-	if s.authorizer == nil {
-		return nil, status.Error(codes.Unavailable, "authorizer not configured")
-	}
-	tenantID := req.GetTenantId()
-	if tenantID == "" {
+	if req.GetTenantId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenant_id required")
 	}
-	tenantRef := "tenant:" + tenantID
-	features := []string{"has_sso", "has_audit_logs", "has_compliance_exports", "has_dedicated_slack", "has_dedicated_tenant", "has_private_registry"}
-	present := make([]string, 0, len(features))
-	for _, f := range features {
-		ok, err := s.authorizer.Check(ctx, tenantRef, f, tenantRef)
-		if err != nil {
-			s.logger.Warn("ListFeatureTuples: check failed", "feature", f, "err", err)
-			continue
-		}
-		if ok {
-			present = append(present, f)
-		}
-	}
-	return &platformv1.ListFeatureTuplesResponse{Relations: present}, nil
+	return &platformv1.ListFeatureTuplesResponse{Relations: nil}, nil
 }
 
 // SeedCatalogTenantEnabled writes tenant_enabled tuples for every catalog

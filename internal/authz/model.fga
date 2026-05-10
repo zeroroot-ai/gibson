@@ -109,16 +109,11 @@ type tenant
     define owner: [user]
     define admin: [user] or owner
     define member: [user] or admin
-    # Informational feature-availability flags written by the tenant-operator
-    # from the resolved plan. These are self-referential (tenant:X#has_Y@tenant:X)
-    # and gate UI affordances only; they do not participate in catalog
-    # access checks. Spec: agent-authoring-and-tenant-entitlements R4, R7.
-    define has_sso: [tenant]
-    define has_audit_logs: [tenant]
-    define has_compliance_exports: [tenant]
-    define has_dedicated_slack: [tenant]
-    define has_dedicated_tenant: [tenant]
-    define has_private_registry: [tenant]
+    # Spec plans-and-quotas-simplification removed the has_* feature-flag
+    # relations (has_sso / has_audit_logs / has_compliance_exports /
+    # has_dedicated_slack / has_dedicated_tenant / has_private_registry).
+    # None were enforced; the operator's tuple writers + plans.yaml fields
+    # are deleted alongside.
 
 type agent_principal
   relations
