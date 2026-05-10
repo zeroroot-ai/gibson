@@ -14,16 +14,12 @@ import (
 	// Per-noun packages register at their init(). Order is
 	// irrelevant — registration is via package init, not import
 	// order.
+	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/agent"
 	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/condition"
 	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/join"
 	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/parallel"
-
-	// AGENT, TOOL, PLUGIN executor packages are wired in
-	// follow-up tasks once their respective harness
-	// integrations land (Spec 2 Tasks 6, 7, 8). Until then the
-	// orchestrator continues to dispatch via the legacy
-	// act.go:executeAgent path for AGENT, and rejects TOOL /
-	// PLUGIN at submit time per the existing schema validation.
+	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/plugin"
+	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/tool"
 
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 )
@@ -33,15 +29,14 @@ import (
 // function so callers (e.g. the daemon's bootstrap) can invoke
 // it after constructing the orchestrator.
 //
-// In v1, AGENT, TOOL, and PLUGIN are deliberately not registered
-// via this aggregator package — they're dispatched through the
-// legacy actor path until the per-noun packages migrate (Tasks
-// 6-8). To allow this aggregator to be imported now, callers
-// pass `Skip` for any node type whose handler isn't yet wired.
+// All six concrete NodeTypes (AGENT, TOOL, PLUGIN, CONDITION,
+// PARALLEL, JOIN) register via this aggregator's blank imports.
+// AGENT / TOOL / PLUGIN executors delegate back to the Actor
+// via HandlerParams.Delegator; CONDITION / PARALLEL / JOIN
+// executors run pure / scoped-state-only logic.
 //
-// Once Tasks 6-8 land and AGENT/TOOL/PLUGIN have full handlers
-// registered via init(), the Skip arg becomes empty and
-// AssertExhaustive becomes a strict check.
+// `skip` is retained for tests that want to assert on a subset
+// (e.g. CONDITION-only registries).
 func AssertExhaustive(skip ...string) error {
 	skipSet := make(map[string]struct{}, len(skip))
 	for _, s := range skip {

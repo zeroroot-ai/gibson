@@ -35,6 +35,33 @@ type HandlerParams struct {
 	// referenced in its expression). Implementations must not
 	// mutate the map.
 	PriorResults map[string]*ActionResult
+
+	// Delegator surfaces the Actor's existing execution methods
+	// to per-noun executors that need full Actor-internal state
+	// (graph queries, harness, checkpoint manager, etc.) — AGENT
+	// / TOOL / PLUGIN executors. The interface keeps the registry
+	// pattern data-driven without forcing executors to be
+	// rewritten with full collaborator graphs.
+	//
+	// nil for executors that don't need it (CONDITION, PARALLEL,
+	// JOIN are pure / scoped-state-only).
+	Delegator NodeDelegator
+}
+
+// NodeDelegator exposes the Actor's existing per-action methods
+// to per-noun executor packages. The Actor implements this
+// interface; per-noun packages call back through it instead of
+// duplicating the Actor's body.
+//
+// Spec: mission-verb-noun-registry Tasks 6, 7, 8.
+type NodeDelegator interface {
+	// ExecuteAgentNode dispatches an agent node by ID. Equivalent
+	// to the existing Actor.executeAgent / execute_agent decision.
+	ExecuteAgentNode(ctx context.Context, nodeID string, missionID string) (*ActionResult, error)
+	// ExecuteToolNode dispatches a tool node by ID.
+	ExecuteToolNode(ctx context.Context, nodeID string, missionID string) (*ActionResult, error)
+	// ExecutePluginNode dispatches a plugin node by ID.
+	ExecutePluginNode(ctx context.Context, nodeID string, missionID string) (*ActionResult, error)
 }
 
 // nodeRegistry is the package-level registry. Populated at
