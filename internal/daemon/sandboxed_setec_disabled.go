@@ -1,5 +1,16 @@
 //go:build !setec_integration
 
+// BUILT-IN VARIANT WHEN setec_integration BUILD TAG IS NOT SET.
+// The default production build of the Gibson daemon DOES set
+// setec_integration; see core/gibson/Dockerfile (default
+// BUILD_TAGS=setec_integration) and the chart Makefile (passes
+// --build-arg BUILD_TAGS=setec_integration[,test_fixtures]).
+// This file exists for SDK and unit-test paths that build without
+// the Setec dependency. Do NOT conclude from this file's presence
+// that no-sandbox is the default — it is not.
+//
+// Spec: setec-sandbox-prod-default §"Cleanups → R11.3".
+//
 // No-op counterpart of sandboxed_setec_adapter.go. When the build tag
 // setec_integration is NOT set, NewSetecSandboxedExecutor returns (nil, nil)
 // so the daemon's harness init can call it unconditionally without a build-

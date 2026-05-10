@@ -86,3 +86,13 @@ The daemon's FGA Check uses the canonical Zitadel **numeric `sub`** forwarded fr
 The package `internal/auth/identityresolver` provides a numeric→readable lookup. It is for **log enrichment only** — never call it from a code path that reaches an allow/deny decision. The mounted source path is `/etc/gibson/sa-identity-map` (one file per SA, kubelet's native ConfigMap projection); the resolver also accepts a single JSON file for compatibility with the dashboard's init-container output.
 
 Spec: `canonical-service-identity`.
+
+## Deployment mode (`GIBSON_MODE`, never `GIBSON_ENV`)
+
+Production-vs-dev gates read `GIBSON_MODE` from the environment. The valid values are `saas`, `selfhost`, `dev` (defaults to `selfhost` when unset). Implementation lives at `core/gibson/internal/config/mode.go`; consumers access the resolved value via `cfg.Mode()`, which returns one of `config.ModeSaaS`, `config.ModeSelfhost`, `config.ModeDev`.
+
+Some older spec drafts referenced `GIBSON_ENV=prod` as a tentative env-var name. **`GIBSON_ENV` is not a thing** — do not introduce it. New gates that need a "production" check should compare `cfg.Mode() == config.ModeSaaS`.
+
+The setec-sandbox-prod-default spec's R1.4 fail-closed startup self-check (in `cmd/gibson/main.go`) follows this convention: it refuses startup when `cfg.Mode() == config.ModeSaaS && version.BuildTagSetecIntegration != "on"`.
+
+Spec: `setec-sandbox-prod-default` (Cleanup R1.4).
