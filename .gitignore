@@ -52,3 +52,8 @@ tests/e2e/fixtures/targets/test-target/test-target
 
 # Claude Code internal scheduler state
 .claude/
+
+# Build artifacts and codegen scratch (added 2026-05-10 cleanup)
+/.tmp/
+/audit-csv-gen
+/tenant-owner-backfill
