@@ -1,154 +1,92 @@
+// server_quota_test.go — tests for the GetTenantQuota and
+// GetTenantQuotaUsage handlers post spec plans-and-quotas-simplification.
 package api
 
 import (
 	"context"
+	"log/slog"
+	"os"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
-	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 )
 
-// ---------------------------------------------------------------------------
-// mockQuotaStore
-// ---------------------------------------------------------------------------
-
-type mockQuotaStore struct {
-	getErr error
-	setErr error
-	stored *storedQuota
+func newQuotaTestServer() *DaemonServer {
+	return &DaemonServer{
+		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+	}
 }
 
-func (m *mockQuotaStore) GetQuota(_ context.Context, _ string) (*storedQuota, error) {
-	if m.getErr != nil {
-		return nil, m.getErr
-	}
-	if m.stored != nil {
-		return m.stored, nil
-	}
-	return &storedQuota{}, nil
-}
-
-func (m *mockQuotaStore) SetQuota(_ context.Context, _ string, q *storedQuota) error {
-	if m.setErr != nil {
-		return m.setErr
-	}
-	m.stored = q
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// GetTenantQuota tests
-// ---------------------------------------------------------------------------
-
-func TestGetTenantQuota_EmptyTenantIDUsesContext_NilStore_Unavailable(t *testing.T) {
-	// Empty TenantId falls back to auth.TenantFromContext which returns SystemTenant.
-	// With nil quotaStore → Unavailable (not InvalidArgument).
-	srv := blankServer()
+func TestGetTenantQuota_MissingTenantID_InvalidArgument(t *testing.T) {
+	srv := newQuotaTestServer()
 	_, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: ""})
-	assert.Equal(t, codes.Unavailable, grpcCode(err))
+	requireGRPCStatus(t, err, codes.InvalidArgument)
 }
 
-func TestGetTenantQuota_NilStore_Unavailable(t *testing.T) {
-	srv := blankServer()
-	// authorizer is nil → requireTenantAdmin passes
-	_, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
-	assert.Equal(t, codes.Unavailable, grpcCode(err))
-}
-
-func TestGetTenantQuota_StoreError_Internal(t *testing.T) {
-	srv := blankServer()
-	srv.quotaStore = &mockQuotaStore{getErr: assert.AnError}
-	_, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
-	assert.Equal(t, codes.Internal, grpcCode(err))
-}
-
-func TestGetTenantQuota_ZeroValues_OK(t *testing.T) {
-	srv := blankServer()
-	srv.quotaStore = &mockQuotaStore{}
+func TestGetTenantQuota_NilPlatformDB_ReturnsZeroLimits(t *testing.T) {
+	srv := newQuotaTestServer()
+	srv.platformDB = nil
 	resp, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.NotNil(t, resp.Quota)
-	assert.Equal(t, int32(0), resp.Quota.MaxMissions)
-	assert.Equal(t, int64(0), resp.Quota.MaxFindings)
-}
-
-func TestGetTenantQuota_ExistingQuota_ReturnedCorrectly(t *testing.T) {
-	srv := blankServer()
-	srv.quotaStore = &mockQuotaStore{
-		stored: &storedQuota{
-			MaxMissions: 10,
-			MaxAgents:   5,
-			MaxFindings: 1000,
-			PlanTier:    "pro",
-		},
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	resp, err := srv.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
-	require.NoError(t, err)
-	require.NotNil(t, resp.Quota)
-	assert.Equal(t, int32(10), resp.Quota.MaxMissions)
-	assert.Equal(t, int32(5), resp.Quota.MaxAgents)
-	assert.Equal(t, int64(1000), resp.Quota.MaxFindings)
-	assert.Equal(t, "pro", resp.Quota.PlanTier)
+	if resp.GetConcurrentMissions() != 0 || resp.GetConcurrentAgents() != 0 {
+		t.Errorf("expected zero limits when platformDB is nil, got %+v", resp)
+	}
 }
 
-// ---------------------------------------------------------------------------
-// SetTenantQuota tests
-// ---------------------------------------------------------------------------
-
-func TestSetTenantQuota_MissingTenantID_InvalidArgument(t *testing.T) {
-	srv := blankServer()
-	_, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{TenantId: ""})
-	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+func TestGetTenantQuotaUsage_MissingTenantID_InvalidArgument(t *testing.T) {
+	srv := newQuotaTestServer()
+	_, err := srv.GetTenantQuotaUsage(context.Background(), &tenantv1.GetTenantQuotaUsageRequest{TenantId: ""})
+	requireGRPCStatus(t, err, codes.InvalidArgument)
 }
 
-func TestSetTenantQuota_NilQuota_InvalidArgument(t *testing.T) {
-	srv := blankServer()
-	_, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{TenantId: "acme", Quota: nil})
-	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+func TestGetTenantQuotaUsage_NilQuotaManager_Unavailable(t *testing.T) {
+	srv := newQuotaTestServer()
+	srv.quotaManager = nil
+	_, err := srv.GetTenantQuotaUsage(context.Background(), &tenantv1.GetTenantQuotaUsageRequest{TenantId: "acme"})
+	requireGRPCStatus(t, err, codes.Unavailable)
 }
 
-func TestSetTenantQuota_NilStore_Unavailable(t *testing.T) {
-	srv := blankServer()
-	_, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{
-		TenantId: "acme",
-		Quota:    &platformv1.TenantQuota{MaxMissions: 5},
-	})
-	assert.Equal(t, codes.Unavailable, grpcCode(err))
+type fakeQuotaUsageReader struct {
+	missions, agents int64
 }
 
-func TestSetTenantQuota_StoreError_Internal(t *testing.T) {
-	srv := blankServer()
-	srv.quotaStore = &mockQuotaStore{setErr: assert.AnError}
-	_, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{
-		TenantId: "acme",
-		Quota:    &platformv1.TenantQuota{MaxMissions: 5},
-	})
-	assert.Equal(t, codes.Internal, grpcCode(err))
+func (f *fakeQuotaUsageReader) ReadActiveCounters(_ context.Context, _ string) (int64, int64, error) {
+	return f.missions, f.agents, nil
+}
+func (f *fakeQuotaUsageReader) CheckMissionQuota(_ context.Context) error    { return nil }
+func (f *fakeQuotaUsageReader) CheckAgentQuota(_ context.Context) error      { return nil }
+func (f *fakeQuotaUsageReader) IncrementMissionCount(_ context.Context) error { return nil }
+
+func TestGetTenantQuotaUsage_ReturnsCounterValues(t *testing.T) {
+	srv := newQuotaTestServer()
+	srv.quotaManager = &fakeQuotaUsageReader{missions: 4, agents: 9}
+	resp, err := srv.GetTenantQuotaUsage(context.Background(), &tenantv1.GetTenantQuotaUsageRequest{TenantId: "acme"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.GetMissionsActive() != 4 {
+		t.Errorf("missions: got %d, want 4", resp.GetMissionsActive())
+	}
+	if resp.GetAgentsActive() != 9 {
+		t.Errorf("agents: got %d, want 9", resp.GetAgentsActive())
+	}
 }
 
-func TestSetTenantQuota_Success_ReturnsUpdatedQuota(t *testing.T) {
-	srv := blankServer()
-	store := &mockQuotaStore{}
-	srv.quotaStore = store
-	resp, err := srv.SetTenantQuota(context.Background(), &platformv1.SetTenantQuotaRequest{
-		TenantId: "acme",
-		Quota: &platformv1.TenantQuota{
-			MaxMissions: 20,
-			MaxAgents:   10,
-			MaxFindings: 5000,
-			PlanTier:    "enterprise",
-		},
-	})
-	require.NoError(t, err)
-	require.NotNil(t, resp.Quota)
-	assert.Equal(t, int32(20), resp.Quota.MaxMissions)
-	assert.Equal(t, "enterprise", resp.Quota.PlanTier)
-	// Verify persistence
-	require.NotNil(t, store.stored)
-	assert.Equal(t, int32(20), store.stored.MaxMissions)
+func requireGRPCStatus(t *testing.T, err error, want codes.Code) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected gRPC %s, got nil", want)
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status, got %T %v", err, err)
+	}
+	if st.Code() != want {
+		t.Fatalf("expected gRPC code %s, got %s (%v)", want, st.Code(), err)
+	}
 }
