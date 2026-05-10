@@ -22,6 +22,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -86,16 +87,18 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 	}
 	defer storeRelease()
 
-	// Parse the mission JSON into a MissionDefinition. UnmarshalToMirror
-	// is the dual-shape reader (proto-shape from PR2+ writers, legacy
-	// flat-mirror from earlier daemon versions / older clients).
-	var def mission.MissionDefinition
+	// Parse the mission JSON into a *missionpb.MissionDefinition.
+	// UnmarshalDefinitionJSON dual-reads proto-shape bytes and legacy
+	// flat-mirror bytes from earlier daemon versions / older clients.
+	var def *missionpb.MissionDefinition
 	if req.MissionDefinitionJSON != "" {
-		parsed, parseErr := mission.UnmarshalToMirror([]byte(req.MissionDefinitionJSON))
+		parsed, parseErr := mission.UnmarshalDefinitionJSON([]byte(req.MissionDefinitionJSON))
 		if parseErr != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "failed to parse mission JSON: %v", parseErr)
 		}
-		def = *parsed
+		def = parsed
+	} else {
+		def = &missionpb.MissionDefinition{}
 	}
 
 	// Overlay explicit name/description from the request.
@@ -107,8 +110,8 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 	}
 
 	// Generate a new mission ID if not already set.
-	if def.ID.IsZero() {
-		def.ID = types.NewID()
+	if def.GetId() == "" {
+		def.Id = types.NewID().String()
 	}
 
 	// Compute depth: root missions are depth 0, sub-missions are ParentDepth+1.
@@ -117,15 +120,21 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 		depth = req.ParentDepth + 1
 	}
 
+	// Re-marshal so the stored bytes reflect any name/description overlay.
+	defJSON, marshalErr := mission.MarshalDefinitionJSON(def)
+	if marshalErr != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal mission definition: %v", marshalErr)
+	}
+
 	// Build the mission record directly using the store.
 	m := &mission.Mission{
 		ID:                    types.NewID(),
-		Name:                  def.Name,
-		Description:           def.Description,
+		Name:                  def.GetName(),
+		Description:           def.GetDescription(),
 		Status:                mission.MissionStatusPending,
 		TargetID:              req.TargetID,
-		MissionDefinitionID:   def.ID,
-		MissionDefinitionJSON: req.MissionDefinitionJSON,
+		MissionDefinitionID:   types.ID(def.GetId()),
+		MissionDefinitionJSON: string(defJSON),
 		ParentMissionID:       req.ParentMissionID,
 		Depth:                 depth,
 		Metadata:              req.Metadata,

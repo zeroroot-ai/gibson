@@ -13,7 +13,30 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
+
+// mustProtoDef converts a mirror MissionDefinition fixture to proto.
+// PR4c retypes the fixtures themselves and deletes this helper.
+func mustProtoDef(t *testing.T, def *mission.MissionDefinition) *missionpb.MissionDefinition {
+	t.Helper()
+	out, err := mission.MirrorToProto(def)
+	if err != nil {
+		t.Fatalf("MirrorToProto: %v", err)
+	}
+	return out
+}
+
+// mustProtoNode converts a mirror MissionNode fixture to proto.
+// PR4c retypes the fixtures themselves and deletes this helper.
+func mustProtoNode(t *testing.T, id string, n *mission.MissionNode) *missionpb.MissionNode {
+	t.Helper()
+	out, err := mission.MirrorNodeToProto(id, n)
+	if err != nil {
+		t.Fatalf("MirrorNodeToProto: %v", err)
+	}
+	return out
+}
 
 // createTestMissionRun creates a test MissionRun for use in tests
 func createTestMissionRun(missionID types.ID) *mission.MissionRun {
@@ -138,7 +161,7 @@ func TestGraphBootstrapper_Bootstrap_SimpleMission(t *testing.T) {
 
 	// Bootstrap the mission
 	run := createTestMissionRun(m.ID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	_ = result // Bootstrap result contains MissionRunID
 	require.NoError(t, err, "Bootstrap should complete without error")
 
@@ -241,7 +264,7 @@ func TestGraphBootstrapper_Bootstrap_NoDependencies(t *testing.T) {
 
 	// Bootstrap the mission
 	run := createTestMissionRun(m.ID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	_ = result // Bootstrap result contains MissionRunID
 	require.NoError(t, err, "Bootstrap should complete without error")
 
@@ -307,7 +330,7 @@ func TestGraphBootstrapper_Bootstrap_CreateMissionError(t *testing.T) {
 
 	// Bootstrap should fail with error from CreateMission (first query)
 	run := createTestMissionRun(m.ID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	_ = result // Bootstrap result contains MissionRunID
 	require.Error(t, err, "Bootstrap should return error when CreateMission fails")
 	assert.Contains(t, err.Error(), "failed to create mission in graph", "Error should mention mission creation failure")
@@ -364,7 +387,7 @@ func TestGraphBootstrapper_Bootstrap_CreateMissionNodeError(t *testing.T) {
 
 	// Bootstrap should fail with error from CreateMissionNode
 	run := createTestMissionRun(m.ID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	_ = result // Bootstrap result contains MissionRunID
 	require.Error(t, err, "Bootstrap should return error when CreateMissionNode fails")
 	assert.Contains(t, err.Error(), "failed to create mission node", "Error should mention mission node creation failure")
@@ -458,7 +481,7 @@ func TestGraphBootstrapper_Bootstrap_ComplexDAG(t *testing.T) {
 
 	// Bootstrap the mission
 	run := createTestMissionRun(m.ID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	_ = result // Bootstrap result contains MissionRunID
 	require.NoError(t, err, "Bootstrap should complete without error")
 
@@ -522,7 +545,7 @@ func TestGraphBootstrapper_Bootstrap_MissionWithToolNode(t *testing.T) {
 
 	// Bootstrap the mission
 	run := createTestMissionRun(m.ID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	_ = result // Bootstrap result contains MissionRunID
 	require.NoError(t, err, "Bootstrap should complete without error")
 
@@ -587,7 +610,7 @@ func TestGraphBootstrapper_Bootstrap_MissionWithRetryPolicy(t *testing.T) {
 
 	// Bootstrap the mission
 	run := createTestMissionRun(m.ID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	_ = result // Bootstrap result contains MissionRunID
 	require.NoError(t, err, "Bootstrap should complete without error")
 
@@ -651,7 +674,7 @@ func TestGraphBootstrapper_Bootstrap_DependencyNotFound(t *testing.T) {
 
 	// Bootstrap should fail due to missing dependency in nodeIDMap
 	run := createTestMissionRun(m.ID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	_ = result // Bootstrap result contains MissionRunID
 	require.Error(t, err, "Bootstrap should fail when dependency doesn't exist")
 	assert.Contains(t, err.Error(), "dependency node ID", "Error should mention missing dependency")
@@ -681,7 +704,7 @@ func TestGraphBootstrapper_ConvertToSchemaMission(t *testing.T) {
 	}
 
 	// Convert to schema mission
-	schemaMission := convertToSchemaMission(m, def)
+	schemaMission := convertToSchemaMission(m, mustProtoDef(t, def))
 
 	// Verify conversion
 	assert.Equal(t, missionID, schemaMission.ID, "Mission ID should match")
@@ -712,7 +735,7 @@ func TestGraphBootstrapper_ConvertToSchemaNode(t *testing.T) {
 			Dependencies: []string{"dep-1"}, // Has dependencies
 		}
 
-		schemaNode := convertToSchemaNode(missionID, nodeDef, true)
+		schemaNode := convertToSchemaNode(missionID, mustProtoNode(t, nodeDef.ID, nodeDef), true)
 
 		assert.False(t, schemaNode.ID.IsZero(), "Node ID should be generated")
 		assert.Equal(t, missionID, schemaNode.MissionID, "Mission ID should match")
@@ -736,7 +759,7 @@ func TestGraphBootstrapper_ConvertToSchemaNode(t *testing.T) {
 			Dependencies: []string{}, // No dependencies
 		}
 
-		schemaNode := convertToSchemaNode(missionID, nodeDef, false)
+		schemaNode := convertToSchemaNode(missionID, mustProtoNode(t, nodeDef.ID, nodeDef), false)
 
 		assert.Equal(t, "tool-node-1", schemaNode.Name, "Node name should be definition ID")
 		assert.Equal(t, "port-scanner", schemaNode.ToolName, "Tool name should match")
