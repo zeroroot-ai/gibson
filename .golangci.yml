@@ -5,11 +5,16 @@ linters:
     - errcheck
     - ineffassign
     - unused
+    - exhaustive
 
 linters-settings:
   staticcheck:
     checks:
       - all
+  exhaustive:
+    default-signifies-exhaustive: false
+    check:
+      - switch
 
 issues:
   exclude-use-default: false

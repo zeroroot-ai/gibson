@@ -198,6 +198,17 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	unaryInterceptors = append(unaryInterceptors, unaryScrub)
 	streamInterceptors = append(streamInterceptors, streamScrub)
 
+	// 2.5. Protovalidate runtime — runs `(buf.validate.field).*`
+	// annotations against incoming proto.Message requests. Single
+	// validator instance, goroutine-safe, CEL-program-cached.
+	// Spec: mission-verb-noun-registry Requirement 10.
+	pvValidator, err := buildProtovalidateValidator()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build protovalidate validator: %w", err)
+	}
+	unaryInterceptors = append(unaryInterceptors, newProtovalidateUnaryInterceptor(pvValidator))
+	streamInterceptors = append(streamInterceptors, newProtovalidateStreamInterceptor(pvValidator))
+
 	// 3. Identity interceptor — reads x-gibson-identity-* headers ext-authz
 	// emits and injects a typed Identity into the request context.
 	// Authorization (FGA) is enforced upstream by Envoy + ext_authz; the daemon
