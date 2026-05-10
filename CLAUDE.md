@@ -1,5 +1,7 @@
 # Gibson daemon — CLAUDE.md
 
+> **Workflow rules:** see [`zero-day-ai/.github` → `AGENTS.md`](https://github.com/zero-day-ai/.github/blob/main/AGENTS.md) for branch / PR / commit / release / rebase rules. Conventional Commits MANDATORY (drives release-please). Never push to main, never merge your own PR. Repo-local rules below override only when explicitly noted.
+
 Read this before editing the daemon (`core/gibson/`).
 
 ## Authz registry pipeline
