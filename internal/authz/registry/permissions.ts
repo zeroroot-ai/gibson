@@ -2110,6 +2110,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.platform.v1.DispatchOverrideService/OverrideDispatchPolicy": {
+    method: "/gibson.platform.v1.DispatchOverrideService/OverrideDispatchPolicy",
+    service: "gibson.platform.v1.DispatchOverrideService",
+    relation: "platform_operator",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent": {
     method: "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent",
     service: "gibson.platform.v1.PlatformOperatorService",

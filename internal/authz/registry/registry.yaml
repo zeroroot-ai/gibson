@@ -1316,6 +1316,12 @@ entries:
       - USER
       - SERVICE
       - COMPONENT
+  "/gibson.platform.v1.DispatchOverrideService/OverrideDispatchPolicy":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
   "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent":
     relation: "platform_operator"
     object_type: "system_tenant"

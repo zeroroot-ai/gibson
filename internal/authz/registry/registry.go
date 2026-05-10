@@ -2123,6 +2123,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.platform.v1.DispatchOverrideService/OverrideDispatchPolicy": {
+		Method:            "/gibson.platform.v1.DispatchOverrideService/OverrideDispatchPolicy",
+		Service:           "gibson.platform.v1.DispatchOverrideService",
+		Relation:          "platform_operator",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent": {
 		Method:            "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent",
 		Service:           "gibson.platform.v1.PlatformOperatorService",

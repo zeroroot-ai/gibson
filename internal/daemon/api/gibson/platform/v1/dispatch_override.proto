@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package gibson.platform.v1;
+
+option go_package = "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1;platformv1";
+
+import "gibson/auth/v1/options.proto";
+
+// DispatchOverrideService is a daemon-local platform-operator escape hatch
+// that lets a platform operator temporarily allow PLUGIN/AGENT dispatch for
+// UNTRUSTED-content components on a named tenant when Setec is degraded
+// (R3.4 of the setec-sandbox-prod-default spec).
+//
+// Authorization is gated on the `platform_operator` FGA relation against
+// `system_tenant:_system` — the design's `can_override_policy` semantic
+// is implied by `platform_operator` (the FGA model intentionally does not
+// introduce a separate relation for this; the design's §C4 explicitly notes
+// "no model changes; can_override_policy already implied by platform_operator").
+//
+// Server-side enforcement (see the handler in
+// `core/gibson/internal/daemon/dispatch_override.go`):
+// - `ttl_seconds` is clamped to `min(req.ttl_seconds, 3600)` (1-hour upper bound).
+// - `reason` is mandatory; empty reason returns InvalidArgument.
+// - The override record is persisted in Redis with the absolute expiry; a
+//   daemon restart does not silently extend an active override.
+// - Every override emits a synchronous audit event (`audit.WriteSync`) with
+//   the operator's Zitadel `sub` (sourced from the `x-gibson-user-id` header
+//   forwarded by ext-authz), the affected tenant, the clamped TTL, and the
+//   reason text — the RPC reply is not sent until the audit write is acked.
+service DispatchOverrideService {
+  // OverrideDispatchPolicy creates a time-bounded override that flips the
+  // dispatch policy gate's deny-on-UNTRUSTED+PLUGIN/AGENT outcome to allow
+  // for the given tenant. The override auto-evicts at TTL expiry; clients
+  // can re-issue the call to extend (each extension emits its own audit event).
+  rpc OverrideDispatchPolicy(OverrideDispatchPolicyRequest)
+      returns (OverrideDispatchPolicyResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 1  // USER (human-only; FGA additionally requires platform_operator on system_tenant)
+    };
+  }
+}
+
+// OverrideDispatchPolicyRequest names the tenant and bounds the override.
+message OverrideDispatchPolicyRequest {
+  // tenant_id identifies the affected tenant. Required. Must reference an
+  // existing tenant — the handler validates against the tenant catalog.
+  string tenant_id = 1;
+
+  // allow, when true, installs the override; when false, revokes any active
+  // override for the tenant (idempotent — revoking when no override exists
+  // is a no-op that still emits an audit event for traceability).
+  bool allow = 2;
+
+  // ttl_seconds is the desired override lifetime in seconds. Server-side
+  // hard cap is 3600 (1 hour); larger values are silently clamped to 3600
+  // and the response.applied_ttl_seconds reflects the clamped value.
+  int32 ttl_seconds = 3;
+
+  // reason is mandatory free text written to the audit trail. The handler
+  // returns InvalidArgument on an empty reason.
+  string reason = 4;
+}
+
+// OverrideDispatchPolicyResponse confirms the override and echoes the
+// effective parameters after server-side clamping.
+message OverrideDispatchPolicyResponse {
+  // applied_ttl_seconds is the TTL actually applied (after clamping to the
+  // server-side 3600s hard cap).
+  int32 applied_ttl_seconds = 1;
+
+  // expires_at_unix is the absolute Unix epoch second at which the override
+  // auto-evicts. Operators rely on this to set runbook timers.
+  int64 expires_at_unix = 2;
+
+  // audit_event_id is the ID of the synchronous audit event emitted for
+  // this override; subsequent allow-decision audit events stamp this as
+  // their `parent_event_id` so an auditor can pivot from a dispatch event
+  // to the override that authorised it.
+  string audit_event_id = 3;
+}

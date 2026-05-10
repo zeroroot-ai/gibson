@@ -208,6 +208,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/WorkspaceReadFile,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/WorkspaceWriteFile,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.identity.v1.IdentityService/WhoAmI,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/identity/v1/identity.proto,rule
+/gibson.platform.v1.DispatchOverrideService/OverrideDispatchPolicy,platform_operator,system_tenant,system_tenant,USER,gibson/platform/v1/dispatch_override.proto,rule
 /gibson.platform.v1.PlatformOperatorService/EmitAuditEvent,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/platform/v1/platform_operator.proto,rule
 /gibson.platform.v1.PlatformOperatorService/GetReservedNames,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/platform/v1/platform_operator.proto,rule
 /gibson.platform.v1.PlatformOperatorService/ImpersonateTenant,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/platform/v1/platform_operator.proto,rule
