@@ -41,6 +41,7 @@ import (
 	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
 	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zero-day-ai/sdk/auth"
 
@@ -60,6 +61,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	grpcmetadata "google.golang.org/grpc/metadata"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // daemonMemoryStore wraps a single DefaultWorkingMemory so ComponentServiceServer
@@ -2210,13 +2212,13 @@ func (d *daemonImpl) ListMissionDefinitions(ctx context.Context, limit int, offs
 
 	result := make([]api.MissionDefinitionData, 0, len(defs))
 	for _, def := range defs {
-		nodeCount := len(def.Nodes)
+		nodeCount := len(def.GetNodes())
 		result = append(result, api.MissionDefinitionData{
-			Name:        def.Name,
-			Version:     def.Version,
-			Description: def.Description,
-			Source:      def.Source,
-			InstalledAt: def.InstalledAt,
+			Name:        def.GetName(),
+			Version:     def.GetVersion(),
+			Description: def.GetDescription(),
+			Source:      def.GetSource(),
+			InstalledAt: def.GetInstalledAt().AsTime(),
 			NodeCount:   nodeCount,
 		})
 	}
@@ -2400,7 +2402,7 @@ func (d *daemonImpl) CreateMissionDefinition(ctx context.Context, req api.Create
 		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("definition is required")
 	}
 	def := req.Definition
-	if def.Name == "" {
+	if def.GetName() == "" {
 		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("definition name is required")
 	}
 
@@ -2415,36 +2417,36 @@ func (d *daemonImpl) CreateMissionDefinition(ctx context.Context, req api.Create
 	defer connForCreate.Release()
 	mStoreForCreate := mission.NewConnBoundMissionStore(connForCreate.Redis)
 
-	if def.ID.IsZero() {
-		def.ID = types.NewID()
+	if def.GetId() == "" {
+		def.Id = types.NewID().String()
 	}
-	if def.CreatedAt.IsZero() {
-		def.CreatedAt = time.Now()
+	if def.GetCreatedAt() == nil {
+		def.CreatedAt = timestamppb.New(time.Now())
 	}
 	if def.Nodes == nil {
-		def.Nodes = make(map[string]*mission.MissionNode)
+		def.Nodes = make(map[string]*missionpb.MissionNode)
 	}
 
 	if err := mStoreForCreate.CreateDefinition(ctx, def); err != nil {
-		d.logger.Error(ctx, "failed to create mission definition", "error", err, "name", def.Name)
+		d.logger.Error(ctx, "failed to create mission definition", "error", err, "name", def.GetName())
 		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("failed to create mission definition: %w", err)
 	}
 
 	d.logger.Info(ctx, "mission definition registered",
-		"mission_definition_id", def.ID.String(),
-		"name", def.Name,
+		"mission_definition_id", def.GetId(),
+		"name", def.GetName(),
 	)
 
 	return api.CreateMissionDefinitionResultData{
-		MissionDefinitionID: def.ID.String(),
+		MissionDefinitionID: def.GetId(),
 		Info: api.MissionDefinitionData{
-			Name:        def.Name,
-			Version:     def.Version,
-			Description: def.Description,
-			Source:      def.Source,
-			InstalledAt: def.InstalledAt,
-			UpdatedAt:   def.InstalledAt,
-			NodeCount:   len(def.Nodes),
+			Name:        def.GetName(),
+			Version:     def.GetVersion(),
+			Description: def.GetDescription(),
+			Source:      def.GetSource(),
+			InstalledAt: def.GetInstalledAt().AsTime(),
+			UpdatedAt:   def.GetInstalledAt().AsTime(),
+			NodeCount:   len(def.GetNodes()),
 		},
 	}, nil
 }

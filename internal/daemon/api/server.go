@@ -28,7 +28,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/impersonation"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/manifest"
-	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
 	"github.com/zero-day-ai/gibson/internal/onboarding"
 	"github.com/zero-day-ai/gibson/internal/types"
@@ -806,7 +805,7 @@ type CreateMissionResultData struct {
 // definition with the daemon. The Definition is a fully-formed value; it is
 // validated and persisted by the handler.
 type CreateMissionDefinitionData struct {
-	Definition *mission.MissionDefinition
+	Definition *missionpb.MissionDefinition
 }
 
 // CreateMissionDefinitionResultData represents the result of registering a
@@ -2437,23 +2436,21 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition is required")
 	}
 
-	def, err := protoToMissionDefinition(req.Definition)
-	if err != nil {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid mission definition: %v", err)
+	def := req.Definition
+	if def == nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid mission definition: definition is nil")
 	}
 
-	// Minimal validation at the wire boundary. The proto MissionDefinition
-	// currently carries only the summary envelope (name, version, description,
-	// source, timestamps); the node/edge expansion is scheduled for Phase 3 of
-	// mission-api-only-cleanup. Once the proto carries nodes and edges we will
-	// call mission.Validate(def) here.
-	if def.Name == "" {
+	// Minimal validation at the wire boundary. Full structural validation
+	// happens at the protovalidate gRPC interceptor; this guard catches the
+	// summary envelope's required fields the runtime needs immediately.
+	if def.GetName() == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition name is required")
 	}
 
 	result, err := s.daemon.CreateMissionDefinition(ctx, CreateMissionDefinitionData{Definition: def})
 	if err != nil {
-		s.logger.Error("failed to create mission definition", "error", err, "name", def.Name)
+		s.logger.Error("failed to create mission definition", "error", err, "name", def.GetName())
 		if strings.Contains(err.Error(), "already exists") {
 			return nil, status_grpc.Errorf(codes.AlreadyExists, "%v", err)
 		}
@@ -2479,24 +2476,6 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 	}, nil
 }
 
-// protoToMissionDefinition converts the wire-format MissionDefinition to the
-// internal Go representation used by the mission package.
-func protoToMissionDefinition(p *missionpb.MissionDefinition) (*mission.MissionDefinition, error) {
-	if p == nil {
-		return nil, fmt.Errorf("definition is nil")
-	}
-
-	def := &mission.MissionDefinition{
-		Name:        p.Name,
-		Version:     p.Version,
-		Description: p.Description,
-		Source:      p.Source,
-	}
-	if ts := p.GetInstalledAt(); ts != nil {
-		def.InstalledAt = ts.AsTime()
-	}
-	return def, nil
-}
 
 // Shutdown, ImpersonateTenant, and RefreshToolCatalog have been relocated
 // to platform_operator_shutdown.go, platform_operator_impersonate.go, and
