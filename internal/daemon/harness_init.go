@@ -120,6 +120,12 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// driven by the catalog refresher. Gated by the same flag that
 		// starts the refresher goroutine.
 		ToolRunnerEnabled: d.config != nil && d.config.ToolRunner.Enabled,
+
+		// QuotaCounter maintains the per-tenant concurrent_agents Redis
+		// counter on agent idle→busy / busy→idle transitions inside
+		// DelegateToAgent. nil-safe in dev (no quota manager wired).
+		// Spec plans-and-quotas-simplification.
+		QuotaCounter: d.quotaManager,
 	}
 
 	// Sandboxed tool executor (Setec microVM dispatch) — constructed only

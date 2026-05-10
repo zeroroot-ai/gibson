@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
@@ -155,6 +156,23 @@ type DefaultAgentHarness struct {
 	// false, the legacy sandboxed.Registry + ComponentRegistry dual
 	// lookup is used. Flipped per deployment via tool_runner.enabled.
 	toolRunnerEnabled bool
+
+	// quotaCounter maintains the per-tenant concurrent_agents Redis
+	// counter on agent idle→busy / busy→idle transitions, gated by
+	// inFlightTasks bookkeeping below. nil disables agent-quota
+	// counting. Spec plans-and-quotas-simplification.
+	quotaCounter QuotaCounter
+
+	// inFlightTasks tracks per-(parent → child agent) outstanding
+	// DelegateToAgent calls. The child agent transitions idle→busy on
+	// the 0→1 increment of its entry, and busy→idle on the 1→0
+	// decrement. quotaCounter callbacks fire only on those transitions.
+	// Sibling siblings of a parent harness DO NOT share state (each
+	// DefaultAgentHarness instance owns its own map); the daemon's
+	// missionManager owns one parent harness per mission, and that
+	// parent's map is the authoritative source.
+	inFlightTasksMu sync.Mutex
+	inFlightTasks   map[string]int
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -1779,6 +1797,42 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	}
 
 	h.logger.Debug("using registry adapter for delegation", "agent", name)
+
+	// Concurrent_agents quota: per-agent inFlightTasks bookkeeping.
+	// 0 → 1 transition fires INCR; the deferred 1 → 0 transition fires
+	// DECR. nil quotaCounter disables the path entirely. Spec
+	// plans-and-quotas-simplification.
+	if h.quotaCounter != nil {
+		h.inFlightTasksMu.Lock()
+		if h.inFlightTasks == nil {
+			h.inFlightTasks = make(map[string]int)
+		}
+		prev := h.inFlightTasks[name]
+		h.inFlightTasks[name] = prev + 1
+		h.inFlightTasksMu.Unlock()
+		if prev == 0 {
+			if incErr := h.quotaCounter.IncrementAgentCount(ctx); incErr != nil {
+				h.logger.Warn("harness: increment concurrent_agents failed (non-fatal)",
+					"agent", name, "error", incErr.Error())
+			}
+		}
+		defer func() {
+			h.inFlightTasksMu.Lock()
+			h.inFlightTasks[name]--
+			now := h.inFlightTasks[name]
+			if now <= 0 {
+				delete(h.inFlightTasks, name)
+			}
+			h.inFlightTasksMu.Unlock()
+			if now == 0 {
+				if decErr := h.quotaCounter.DecrementAgentCount(ctx); decErr != nil {
+					h.logger.Warn("harness: decrement concurrent_agents failed (non-fatal)",
+						"agent", name, "error", decErr.Error())
+				}
+			}
+		}()
+	}
+
 	result, err := h.registryAdapter.DelegateToAgent(ctx, name, task, agentHarness)
 
 	if err != nil {
