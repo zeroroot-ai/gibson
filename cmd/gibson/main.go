@@ -15,6 +15,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon"
+	"github.com/zero-day-ai/gibson/internal/sandbox/health"
 	"github.com/zero-day-ai/gibson/pkg/version"
 )
 
@@ -133,6 +134,15 @@ func run(
 		fmt.Fprintf(stderr, "gibson: startup refused: GIBSON_MODE=saas requires the setec_integration build tag (BuildTagSetecIntegration=%q); rebuild with `-tags setec_integration` or run with GIBSON_MODE=selfhost/dev\n", version.BuildTagSetecIntegration)
 		return 1
 	}
+
+	// Spec setec-sandbox-prod-default Task 55 / R10.1 / R2.B.4:
+	// surface the active Setec tier as a Prometheus gauge for the
+	// dashboard's tier indicator panel. Reads GIBSON_SETEC_TIER from
+	// the env (set by the chart's values.yaml setec.tier default of
+	// "production"); empty value is a no-op for unit-test binaries
+	// that don't wire the chart env. SetTier is idempotent — repeated
+	// calls have no effect (the gauge MUST NOT flap).
+	health.SetTier(os.Getenv("GIBSON_SETEC_TIER"))
 
 	// Resolve home directory for daemon.
 	homeDir := resolveHome(cfg)
