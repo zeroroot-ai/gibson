@@ -137,16 +137,9 @@ type DaemonServer struct {
 	// Wired by the daemon via WithPoolGetter. Spec: dashboard-neo4j-crud-removal.
 	poolGetter func() datapool.Pool
 
-	// quotaStore persists and retrieves per-tenant quota configuration.
-	// May be nil; when nil, GetTenantQuota/SetTenantQuota return codes.Unavailable.
-	// Added by prod-feature-wiring spec.
-	quotaStore quotaStoreIface
-
-	// tenantUsage reads live usage counters for the Plan & Usage card's
-	// "current X / limit" display. May be nil; when nil GetTenantQuota
-	// returns zero-valued usage fields (valid for brand-new tenants).
-	// Added by access-matrix-finish spec.
-	tenantUsage tenantUsageReader
+	// quotaStore + tenantUsage fields removed by spec
+	// plans-and-quotas-simplification: quota limits are read from Postgres
+	// directly by GetTenantQuota; live counters via the QuotaManager.
 
 	// alertStore persists and retrieves per-user platform alerts.
 	// May be nil; when nil, ListAlerts/MarkAlertRead return codes.Unavailable.
@@ -925,21 +918,6 @@ func (s *DaemonServer) WithFindingStore(store findingStoreIface) *DaemonServer {
 	return s
 }
 
-// WithQuotaStore wires the Redis-backed quota store so that GetTenantQuota and
-// SetTenantQuota RPCs are backed by durable storage.
-// Added by prod-feature-wiring spec.
-func (s *DaemonServer) WithQuotaStore(store quotaStoreIface) *DaemonServer {
-	s.quotaStore = store
-	return s
-}
-
-// WithTenantUsageReader wires the live-usage-counter reader that populates
-// the current_* fields in GetTenantQuota responses. Optional; when unset
-// usage counters render as zero.
-func (s *DaemonServer) WithTenantUsageReader(r tenantUsageReader) *DaemonServer {
-	s.tenantUsage = r
-	return s
-}
 
 // WithAlertStore wires the Redis-backed alert store so that ListAlerts,
 // MarkAlertRead, and MarkAllAlertsRead RPCs are backed by durable storage.
