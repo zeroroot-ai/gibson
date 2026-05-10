@@ -21,12 +21,18 @@ func String() string {
 }
 
 // Info returns structured version information.
+//
+// `build_tag_setec_integration` is added per setec-sandbox-prod-default R1.3:
+// operators can read this field to confirm whether a running daemon has the
+// Setec sandbox adapter linked in. Value is "on" (production-default) or
+// "off" (SDK / dev stub).
 func Info() map[string]string {
 	return map[string]string{
-		"version":   Version,
-		"commit":    GitCommit,
-		"buildTime": BuildTime,
-		"goVersion": runtime.Version(),
-		"platform":  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		"version":                     Version,
+		"commit":                      GitCommit,
+		"buildTime":                   BuildTime,
+		"goVersion":                   runtime.Version(),
+		"platform":                    fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		"build_tag_setec_integration": BuildTagSetecIntegration,
 	}
 }

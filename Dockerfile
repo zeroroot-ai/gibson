@@ -18,10 +18,17 @@ RUN apk add --no-cache git ca-certificates
 
 WORKDIR /workspace
 
-# Optional Go build tags. Leave empty for the default daemon; set to
-# `setec_integration` (or a comma-separated list) to compile in the Setec
-# gRPC adapter for sandboxed tool dispatch.
-ARG BUILD_TAGS=""
+# Go build tags. Default is `setec_integration` so every published image
+# compiles in the Setec gRPC adapter for sandboxed tool dispatch — this is
+# the production-default path per spec setec-sandbox-prod-default (R1.1).
+#
+# Override to `""` (empty) to build the SDK-only / dev stub variant; that
+# binary fails the daemon's production self-check at startup (refuses to
+# run with `GIBSON_MODE=saas`) so it cannot be shipped to production by
+# accident. CI exercises both variants via a build-tags matrix.
+#
+# Comma-separated tag lists are supported (e.g. `setec_integration,test_fixtures`).
+ARG BUILD_TAGS="setec_integration"
 
 # Copy dependency manifests first for better layer caching
 COPY go.mod go.sum ./

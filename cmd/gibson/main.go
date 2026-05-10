@@ -99,6 +99,41 @@ func run(
 	// Build structured logger (text for interactive TTY, JSON elsewhere).
 	logger := newLogger(stdout, cfg)
 
+	// Spec setec-sandbox-prod-default R1.3: emit the build-tag status on every
+	// startup so operators have an immediate, log-grep-able signal that the
+	// running binary has the Setec sandbox adapter linked in.
+	logger.Info("setec_integration build tag",
+		"status", version.BuildTagSetecIntegration,
+		"version", version.Version,
+		"commit", version.GitCommit,
+	)
+
+	// Spec setec-sandbox-prod-default R1.4: production-mode (GIBSON_MODE=saas)
+	// fail-closed self-check. If the daemon was built without the
+	// setec_integration build tag and is starting in SaaS mode, refuse to
+	// continue. The check runs BEFORE any network dial, BEFORE the daemon
+	// constructor, so a misconfigured CI cannot ship a no-sandbox image to
+	// production by accident.
+	//
+	// The audit DB is not yet available here (daemon hasn't initialised), so
+	// the startup_refused event is emitted as a structured log line carrying
+	// the audit fields a downstream collector can persist; CLAUDE.md notes
+	// that pino/JSON logs are the canonical structured-event surface for
+	// pre-daemon failures.
+	if cfg.Mode() == config.ModeSaaS && version.BuildTagSetecIntegration != "on" {
+		logger.Error("startup_refused",
+			"event", "startup_refused",
+			"reason", "missing_build_tag_setec_integration",
+			"mode", cfg.Mode().String(),
+			"build_tag_setec_integration", version.BuildTagSetecIntegration,
+			"version", version.Version,
+			"commit", version.GitCommit,
+			"message", "GIBSON_MODE=saas requires the setec_integration build tag; refusing to start without sandbox adapter compiled in",
+		)
+		fmt.Fprintf(stderr, "gibson: startup refused: GIBSON_MODE=saas requires the setec_integration build tag (BuildTagSetecIntegration=%q); rebuild with `-tags setec_integration` or run with GIBSON_MODE=selfhost/dev\n", version.BuildTagSetecIntegration)
+		return 1
+	}
+
 	// Resolve home directory for daemon.
 	homeDir := resolveHome(cfg)
 
