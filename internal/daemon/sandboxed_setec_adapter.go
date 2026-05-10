@@ -27,20 +27,26 @@ package daemon
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	setecv1 "github.com/zero-day-ai/setec/api/grpc/v1alpha1"
 
 	"github.com/zero-day-ai/gibson/internal/config"
+	"github.com/zero-day-ai/gibson/internal/datapool"
+	"github.com/zero-day-ai/gibson/internal/datapool/envelope"
 	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
 	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
+	sdkauth "github.com/zero-day-ai/sdk/auth"
 )
 
 // NewSetecSandboxClient dials Setec with mTLS and returns a bare
@@ -60,7 +66,21 @@ func NewSetecSandboxClient(cfg config.SandboxConfig) (sandboxed.SandboxClient, e
 	if err != nil {
 		return nil, fmt.Errorf("dial setec %s: %w", cfg.Setec.Address, err)
 	}
-	return &setecClient{inner: setecv1.NewSandboxServiceClient(conn)}, nil
+	return &setecClient{
+		inner: setecv1.NewSandboxServiceClient(conn),
+		conn:  conn,
+	}, nil
+}
+
+// NewSetecPinger constructs a health.Pinger from the Setec gRPC connection.
+// Returns the same setecClient cast to the health.Pinger interface so the
+// startup health check and periodic probe can reuse the mTLS connection.
+func NewSetecPinger(cfg config.SandboxConfig) (interface{ Ping(context.Context) error }, error) {
+	sc, err := NewSetecSandboxClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return sc.(*setecClient), nil
 }
 
 // NewSetecSandboxedExecutor constructs a sandboxed.Executor backed by a real
@@ -105,14 +125,76 @@ func (a *sandboxedDiscoveryAdapter) Process(ctx context.Context, execCtx loader.
 	return a.inner.Process(ctx, execCtx, discovery)
 }
 
+// secretEnvPrefix is the env-var key prefix that identifies a value as
+// credential/secret material. Any env var whose key starts with this prefix
+// is envelope-wrapped under the tenant KEK before the Launch RPC is sent to
+// Setec (R8.2). The tool-runner inside the microVM decrypts these using the
+// same tenant KEK — forward-compatible once Setec ships R8.4.
+//
+// Currently GIBSON_SECRET_ is the sentinel; the tool-runner strips the prefix
+// and decrypts the hex-encoded envelope before placing the value in the
+// tool's environment.
+const secretEnvPrefix = "GIBSON_SECRET_"
+
 // setecClient adapts setecv1.SandboxServiceClient to sandboxed.SandboxClient.
-type setecClient struct{ inner setecv1.SandboxServiceClient }
+// It also implements health.Pinger so the daemon's startup check and periodic
+// probe can verify Setec frontend reachability without making a Launch call.
+type setecClient struct {
+	inner     setecv1.SandboxServiceClient
+	conn      *grpc.ClientConn     // kept for connectivity state checks
+	masterKEK []byte               // optional; when nil, KEK wrapping is skipped
+	tenantID  sdkauth.TenantID     // AAD for KEK wrapping
+}
+
+// Ping verifies that the Setec frontend gRPC connection is in a usable state.
+// It does NOT make an RPC call — it checks the connection's connectivity state.
+// This is intentionally lightweight so the 5-second startup probe does not
+// create unnecessary load on Setec during daemon startup.
+//
+// Implements health.Pinger (R5.2).
+func (c *setecClient) Ping(_ context.Context) error {
+	if c.conn == nil {
+		return fmt.Errorf("setec: no gRPC connection")
+	}
+	state := c.conn.GetState()
+	switch state {
+	case connectivity.Ready, connectivity.Idle:
+		return nil
+	case connectivity.Connecting:
+		// Connecting is optimistic — the dial hasn't failed yet.
+		return nil
+	default:
+		return fmt.Errorf("setec: connection state %s", state.String())
+	}
+}
 
 func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (sandboxed.LaunchResponse, error) {
+	// ── KEK envelope-wrap secret env vars (R8.2) ─────────────────────────────
+	// Any env var with key prefix `GIBSON_SECRET_` carries credential material.
+	// When a master KEK is wired (production), we derive the tenant KEK and
+	// envelope-encrypt those values before they cross the daemon→Setec boundary.
+	// The ciphertext is hex-encoded so it is safe to pass as a plain env-var
+	// string. The tool-runner inside the microVM decrypts them using the same
+	// tenant KEK (forward-compatible with Setec R8.4).
+	//
+	// When masterKEK is nil (dev/kind, tests), wrapping is skipped so that
+	// dev deployments without a KMS still function — intentional degraded mode.
+	env := req.Env
+	if c.masterKEK != nil && !c.tenantID.IsZero() {
+		wrapped, err := wrapSecretEnvVars(c.masterKEK, c.tenantID, req.Env)
+		if err != nil {
+			// Wrapping failure is fatal: never send plaintext credentials to Setec
+			// when we were supposed to wrap them (cross-tenant leakage risk).
+			return sandboxed.LaunchResponse{},
+				fmt.Errorf("setec: KEK envelope-wrap failed: %w", err)
+		}
+		env = wrapped
+	}
+
 	pbReq := &setecv1.LaunchRequest{
 		Image:   req.Image,
 		Command: req.Command,
-		Env:     req.Env,
+		Env:     env,
 		Resources: &setecv1.Resources{
 			Vcpu:   uint32(req.VCPU),
 			Memory: req.Memory,
@@ -126,6 +208,45 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 		return sandboxed.LaunchResponse{}, err
 	}
 	return sandboxed.LaunchResponse{SandboxID: resp.GetSandboxId()}, nil
+}
+
+// wrapSecretEnvVars envelope-wraps values whose key starts with secretEnvPrefix.
+// The AAD is bound to the tenant_id so cross-tenant decryption fails with an
+// authentication error (R8.2 "impossible by construction").
+//
+// Returns a new map; the original is not modified.
+func wrapSecretEnvVars(masterKEK []byte, tenantID sdkauth.TenantID, env map[string]string) (map[string]string, error) {
+	if len(env) == 0 {
+		return env, nil
+	}
+
+	tenantKEK, err := datapool.DeriveTenantKEK(masterKEK, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("derive tenant KEK: %w", err)
+	}
+	defer func() {
+		// Zero the derived KEK immediately after use to limit the window of
+		// exposure in process memory.
+		for i := range tenantKEK {
+			tenantKEK[i] = 0
+		}
+	}()
+
+	aad := []byte("sandbox:env:" + tenantID.String())
+
+	out := make(map[string]string, len(env))
+	for k, v := range env {
+		if !strings.HasPrefix(k, secretEnvPrefix) {
+			out[k] = v
+			continue
+		}
+		ciphertext, encErr := envelope.Encrypt(tenantKEK, []byte(v), aad)
+		if encErr != nil {
+			return nil, fmt.Errorf("encrypt env var %q: %w", k, encErr)
+		}
+		out[k] = hex.EncodeToString(ciphertext)
+	}
+	return out, nil
 }
 
 func (c *setecClient) StreamLogs(ctx context.Context, sandboxID string) (sandboxed.LogStream, error) {

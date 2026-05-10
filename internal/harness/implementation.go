@@ -168,6 +168,10 @@ type DefaultAgentHarness struct {
 	// (R3.5). May be nil when dispatchPolicy is nil or in test environments;
 	// production always wires a real *audit.Writer via HarnessConfig.
 	policyAuditWriter PolicyAuditWriter
+
+	// sandboxHealthProvider is queried before the dispatch gate to populate
+	// Input.SandboxHealthy. Nil defaults to healthy=true (R5.4, R5.5).
+	sandboxHealthProvider SandboxHealthProvider
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -611,13 +615,23 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 			// ── Dispatch policy gate (R3.1, R3.3, R3.5) ─────────────────
 			if h.dispatchPolicy != nil {
 				tenant := auth.TenantStringFromContext(ctx)
+
+				// Populate SandboxHealthy from the circuit-breaker / health probe
+				// (R5.4, R5.5). When no provider is wired the gate defaults to
+				// healthy=true (backward-compatible with deployments not yet running
+				// the health probe).
+				sandboxHealthy := true
+				if h.sandboxHealthProvider != nil {
+					sandboxHealthy = h.sandboxHealthProvider.IsHealthy()
+				}
+
 				gateInput := dispatch.Input{
 					Tenant:         tenant,
 					Mission:        h.missionCtx.ID.String(),
 					Tool:           name,
 					ToolMode:       componentpb.DispatchMode_DISPATCH_MODE_SANDBOXED,
 					ContentTrust:   trust,
-					SandboxHealthy: true, // breaker state wired in Task 45; default true until then
+					SandboxHealthy: sandboxHealthy,
 					OverrideActive: false, // override lookup wired in Task 30
 				}
 				decision := h.dispatchPolicy.Decide(ctx, gateInput)

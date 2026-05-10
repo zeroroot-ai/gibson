@@ -25,9 +25,13 @@ const (
 	minMasterKEKLen = 32
 )
 
-// deriveTenantKEK derives a 32-byte per-tenant key encryption key from the
+// DeriveTenantKEK derives a 32-byte per-tenant key encryption key from the
 // master KEK using HKDF-SHA256. The derivation is deterministic: the same
 // masterKEK and tenant always produce the same output.
+//
+// This is the public API used by cross-package callers (e.g., the Setec
+// adapter in the daemon package for R8.2 envelope-wrapping).
+// The unexported deriveTenantKEK calls through to this function.
 //
 // Parameters:
 //   - masterKEK: the daemon's master KEK loaded from KMS. Must be at least
@@ -37,7 +41,12 @@ const (
 //     and validated.
 //
 // The derived KEK must be zeroed by the caller when it is no longer needed.
-// On Conn, this happens in Release via connRelease.
+func DeriveTenantKEK(masterKEK []byte, tenant auth.TenantID) ([]byte, error) {
+	return deriveTenantKEK(masterKEK, tenant)
+}
+
+// deriveTenantKEK is the package-internal implementation. Callers outside
+// this package should use DeriveTenantKEK.
 func deriveTenantKEK(masterKEK []byte, tenant auth.TenantID) ([]byte, error) {
 	if len(masterKEK) < minMasterKEKLen {
 		return nil, fmt.Errorf("datapool: master KEK is too short (%d bytes, minimum %d)", len(masterKEK), minMasterKEKLen)

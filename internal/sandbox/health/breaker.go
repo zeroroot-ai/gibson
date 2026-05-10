@@ -18,7 +18,6 @@ package health
 
 import (
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"

@@ -307,6 +307,31 @@ type HarnessConfig struct {
 	// Spec: setec-sandbox-prod-default R3.5.
 	// Optional (but required alongside DispatchPolicy in production).
 	PolicyAuditWriter PolicyAuditWriter
+
+	// SandboxHealthProvider is consulted by the harness to populate
+	// Input.SandboxHealthy before calling the dispatch policy gate (Task 45).
+	// Returns true when the sandbox is reachable; false when the circuit
+	// breaker is open or the periodic health probe has marked the sandbox down.
+	//
+	// When nil, the harness defaults to SandboxHealthy=true (backward-compatible
+	// behaviour for deployments that have not yet wired the health probe).
+	//
+	// Spec: setec-sandbox-prod-default R5.4, R5.5.
+	// Optional.
+	SandboxHealthProvider SandboxHealthProvider
+}
+
+// SandboxHealthProvider is the narrow interface the harness uses to query
+// the sandbox's current health state before invoking the dispatch policy
+// gate. Implemented by *health.SandboxProbe.
+//
+// The interface is declared here rather than importing the health package
+// directly to keep the harness dependency footprint light and to allow
+// test stubs without importing Prometheus metrics.
+type SandboxHealthProvider interface {
+	// IsHealthy returns true when the Setec sandbox frontend is
+	// considered reachable (circuit breaker closed, periodic probe passing).
+	IsHealthy() bool
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.
