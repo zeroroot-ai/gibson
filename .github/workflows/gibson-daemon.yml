@@ -12,7 +12,83 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # gate-sandbox-e2e — cross-repo PR-blocking gate for production publishes.
+  #
+  # Spec setec-sandbox-prod-default Task 60 / R6.4.
+  #
+  # On a tag push (push.tags v*), this job MUST succeed before `build` runs.
+  # It calls the GitHub API to assert the most recent `sandbox-e2e` workflow
+  # run on the deploy repo (zero-day-ai/deploy, branch=main) has succeeded.
+  # If the deploy-side gate is not green, the publish is BLOCKED — no
+  # production image leaves main without the sandbox-e2e gate having passed
+  # on the corresponding deploy-repo SHA.
+  #
+  # Why a cross-repo API check rather than a `needs:` chain? The chart and
+  # daemon live in separate GitHub repos with separate SHAs; "needs: ..."
+  # only works within one workflow file. The API check is the
+  # equivalent-but-cross-repo pattern.
+  #
+  # Implementation rules (load-bearing):
+  #   - DO NOT use continue-on-error: the gate must fail-closed.
+  #   - DO NOT rely on repository-admin bypass: the gate is enforced via
+  #     job-level `needs:` here (build only runs if this job succeeds).
+  #   - DO NOT run on PRs: PR builds are not published.
+  #   - The check runs ONLY on tag pushes (push.tags == v*), not on every
+  #     main commit, to avoid unnecessary API calls.
+  # ---------------------------------------------------------------------------
+  gate-sandbox-e2e:
+    name: Gate — sandbox-e2e (deploy repo) green
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Verify deploy-repo sandbox-e2e workflow is green on main
+        env:
+          # GH_PAT_DEPLOY_RO is a fine-grained PAT scoped to the
+          # zero-day-ai/deploy repo with `actions: read` permission only.
+          # Provisioned out of band; rotation tracked in the deployment
+          # secrets registry.
+          GH_TOKEN: ${{ secrets.GH_PAT_DEPLOY_RO }}
+        run: |
+          set -euo pipefail
+          # Ask GH for the most recent sandbox-e2e run on deploy/main.
+          # `head_branch=main` filters out tag/PR runs.
+          response=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/zero-day-ai/deploy/actions/workflows/sandbox-e2e.yml/runs?branch=main&status=completed&per_page=1")
+          status=$(jq -r '.workflow_runs[0].status // "missing"' <<<"$response")
+          conclusion=$(jq -r '.workflow_runs[0].conclusion // "missing"' <<<"$response")
+          run_sha=$(jq -r '.workflow_runs[0].head_sha // "unknown"' <<<"$response")
+          run_url=$(jq -r '.workflow_runs[0].html_url // "unknown"' <<<"$response")
+          echo "Latest deploy-repo sandbox-e2e on main:"
+          echo "  status:     $status"
+          echo "  conclusion: $conclusion"
+          echo "  head_sha:   $run_sha"
+          echo "  url:        $run_url"
+          if [ "$status" != "completed" ] || [ "$conclusion" != "success" ]; then
+            echo
+            echo "FAIL: deploy-repo sandbox-e2e is not green (status=$status, conclusion=$conclusion)."
+            echo "Spec setec-sandbox-prod-default R6.4 forbids publishing a production"
+            echo "image from main without the sandbox-e2e gate passing on the deploy"
+            echo "repo. Investigate the failed run at: $run_url"
+            exit 1
+          fi
+          echo "ok: sandbox-e2e is green on deploy/main"
+
   build:
+    needs: [gate-sandbox-e2e]
+    # On non-tag pushes (PRs, main commits without a tag) the gate is
+    # skipped; build still runs because GHA treats a skipped `needs:`
+    # job as not-blocking by default. To keep the gate load-bearing on
+    # tag pushes, we use `if: always() && (skipped || success)`.
+    if: |
+      always() &&
+      (needs.gate-sandbox-e2e.result == 'success' ||
+       needs.gate-sandbox-e2e.result == 'skipped')
     uses: ./.github/workflows/reusable-image-build.yml
     permissions:
       contents: read
