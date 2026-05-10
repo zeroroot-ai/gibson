@@ -88,11 +88,30 @@ func ResolveNodeHandler(nt missionv1.NodeType) (NodeHandler, bool) {
 // check; the lint catches the regression at PR time, this catches
 // it at startup if the lint is somehow bypassed.
 func AssertNodeRegistryExhaustive() {
+	if err := AssertNodeRegistryExhaustiveWithSkip(nil); err != nil {
+		panic(err.Error())
+	}
+}
+
+// AssertNodeRegistryExhaustiveWithSkip is the error-returning
+// variant accepting an opt-out set of NodeType names (e.g.
+// "NODE_TYPE_TOOL") that the caller knows are deferred. Used by
+// internal/orchestrator/nodes/all during the migration window
+// (Spec 2 Tasks 6-8) when AGENT / TOOL / PLUGIN are still
+// dispatched via the legacy actor path.
+//
+// Returns nil when the registry covers every non-UNSPECIFIED
+// NodeType (modulo skips). Returns an error naming the missing
+// types otherwise.
+func AssertNodeRegistryExhaustiveWithSkip(skip map[string]struct{}) error {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	var missing []missionv1.NodeType
 	for name, value := range missionv1.NodeType_value {
 		if name == missionv1.NodeType_NODE_TYPE_UNSPECIFIED.String() {
+			continue
+		}
+		if _, deferred := skip[name]; deferred {
 			continue
 		}
 		nt := missionv1.NodeType(value)
@@ -101,8 +120,9 @@ func AssertNodeRegistryExhaustive() {
 		}
 	}
 	if len(missing) > 0 {
-		panic(fmt.Sprintf("node registry incomplete; missing handlers for: %v", missing))
+		return fmt.Errorf("node registry incomplete; missing handlers for: %v", missing)
 	}
+	return nil
 }
 
 // resetNodeRegistryForTesting clears the registry. Used only by
