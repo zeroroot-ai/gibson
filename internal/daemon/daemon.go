@@ -740,6 +740,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// degrades to "no limits" in that case.
 		d.quotaManager = component.NewQuotaManager(tenantStore, d.platformDB, d.logger.Slog())
 		d.logger.Info(ctx, "quota manager initialized")
+
+		// Single-use sweep of legacy quota Redis keys deleted by spec
+		// plans-and-quotas-simplification (quota:config / quota:memory /
+		// quota:*:count). Gated by an internal sentinel; later boots are
+		// no-ops. Failure is non-fatal — keys persist but production code
+		// never reads them.
+		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
+			if err := component.CleanupLegacyQuotaKeys(ctx, redisClient, d.logger.Slog()); err != nil {
+				d.logger.Warn(ctx, "legacy quota key cleanup failed (non-fatal)", "error", err)
+			}
+		}
 	} else {
 		d.logger.Warn(ctx, "quota manager not initialized - state client unavailable")
 	}
