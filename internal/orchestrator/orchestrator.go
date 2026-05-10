@@ -10,8 +10,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -152,7 +152,7 @@ type Orchestrator struct {
 
 	// Workspace management
 	workspaceManager workspace.WorkspaceManager // Manages Git repositories for code operations
-	missionDef       *mission.MissionDefinition // Mission definition for workspace configuration
+	missionDef       *missionv1.MissionDefinition // Mission definition for workspace configuration
 	credStore        workspace.CredentialStore  // Credential store for repository access
 
 	// checkpointIntegration drives Spec 4 mission-checkpointing super-step
@@ -307,7 +307,7 @@ func WithMetricsRecorder(recorder harness.MetricsRecorder) OrchestratorOption {
 
 // WithMissionDefinition sets the mission definition for workspace configuration.
 // This is used to extract workspace settings and repository configurations.
-func WithMissionDefinition(def *mission.MissionDefinition) OrchestratorOption {
+func WithMissionDefinition(def *missionv1.MissionDefinition) OrchestratorOption {
 	return func(o *Orchestrator) {
 		if def != nil {
 			o.missionDef = def
@@ -881,22 +881,24 @@ func (o *Orchestrator) RunMode() RunMode {
 // Returns an error if workspace initialization fails, causing the mission to fail fast.
 func (o *Orchestrator) initializeWorkspaces(ctx context.Context) error {
 	// Check if mission has workspace configuration
-	if o.missionDef == nil || o.missionDef.Workspace == nil {
+	workspaceConfig := o.missionDef.GetWorkspace()
+	if o.missionDef == nil || workspaceConfig == nil {
 		o.logger.Debug(ctx, "no workspace configuration found, skipping workspace initialization")
 		return nil
 	}
 
 	// Validate workspace configuration
-	workspaceConfig := o.missionDef.Workspace
-	if len(workspaceConfig.Repositories) == 0 {
+	repos := workspaceConfig.GetRepositories()
+	if len(repos) == 0 {
 		o.logger.Debug(ctx, "no repositories configured in workspace, skipping initialization")
 		return nil
 	}
 
+	settings := workspaceConfig.GetSettings()
 	o.logger.Info(ctx, "initializing workspaces",
-		"repository_count", len(workspaceConfig.Repositories),
-		"use_worktrees", workspaceConfig.Settings.UseWorktrees,
-		"lsp_enabled", workspaceConfig.Settings.LSPEnabled,
+		"repository_count", len(repos),
+		"use_worktrees", settings.GetUseWorktrees(),
+		"lsp_enabled", settings.GetLspEnabled(),
 	)
 
 	// Create workspace manager with credential store
@@ -911,35 +913,35 @@ func (o *Orchestrator) initializeWorkspaces(ctx context.Context) error {
 	}
 
 	o.logger.Info(ctx, "workspaces initialized successfully",
-		"repository_count", len(workspaceConfig.Repositories),
+		"repository_count", len(repos),
 	)
 
 	return nil
 }
 
-// convertWorkspaceConfig converts mission.WorkspaceConfig to workspace.WorkspaceConfig.
-// This handles the translation between mission configuration and SDK workspace types.
-func (o *Orchestrator) convertWorkspaceConfig(cfg *mission.WorkspaceConfig) workspace.WorkspaceConfig {
-	// Convert repositories
-	repos := make([]workspace.RepositoryConfig, len(cfg.Repositories))
-	for i, repo := range cfg.Repositories {
-		repos[i] = workspace.RepositoryConfig{
-			Name:           repo.Name,
-			URL:            repo.URL,
-			Branch:         repo.Branch,
-			CredentialName: repo.CredentialName,
-			Shallow:        repo.Shallow,
-			DependsOn:      repo.DependsOn,
-		}
+// convertWorkspaceConfig converts proto missionv1.WorkspaceConfig to SDK
+// workspace.WorkspaceConfig. The SDK type is the consumer-facing shape
+// for the workspace manager.
+func (o *Orchestrator) convertWorkspaceConfig(cfg *missionv1.WorkspaceConfig) workspace.WorkspaceConfig {
+	repos := make([]workspace.RepositoryConfig, 0, len(cfg.GetRepositories()))
+	for _, repo := range cfg.GetRepositories() {
+		repos = append(repos, workspace.RepositoryConfig{
+			Name:           repo.GetName(),
+			URL:            repo.GetUrl(),
+			Branch:         repo.GetBranch(),
+			CredentialName: repo.GetCredentialName(),
+			Shallow:        repo.GetShallow(),
+			DependsOn:      repo.GetDependsOn(),
+		})
 	}
 
-	// Convert settings
+	s := cfg.GetSettings()
 	settings := workspace.WorkspaceSettings{
-		CleanupOnComplete: cfg.Settings.CleanupOnComplete,
-		UseWorktrees:      cfg.Settings.UseWorktrees,
-		BaseDirectory:     cfg.Settings.BaseDirectory,
-		LSPEnabled:        cfg.Settings.LSPEnabled,
-		LSPTimeout:        cfg.Settings.LSPTimeout,
+		CleanupOnComplete: s.GetCleanupOnComplete(),
+		UseWorktrees:      s.GetUseWorktrees(),
+		BaseDirectory:     s.GetBaseDirectory(),
+		LSPEnabled:        s.GetLspEnabled(),
+		LSPTimeout:        s.GetLspTimeout().AsDuration(),
 	}
 
 	return workspace.WorkspaceConfig{

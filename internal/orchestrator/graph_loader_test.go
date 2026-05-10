@@ -13,7 +13,25 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
+
+// mustProto converts a mirror MissionDefinition fixture to its proto
+// equivalent for tests. Failures fail the test outright. Tests still
+// author fixtures with the mirror struct because PR3 keeps the mirror
+// alive for daemon callers; PR4 retypes both the daemon callers and
+// these fixtures simultaneously.
+func mustProto(t *testing.T, def *mission.MissionDefinition) *missionv1.MissionDefinition {
+	t.Helper()
+	if def == nil {
+		return nil
+	}
+	out, err := mission.MirrorToProto(def)
+	if err != nil {
+		t.Fatalf("mirror→proto: %v", err)
+	}
+	return out
+}
 
 // mockGraphClient is a mock implementation of graph.GraphClient for testing.
 type mockGraphClient struct {
@@ -169,7 +187,7 @@ func TestLoadMission_Success(t *testing.T) {
 			client := tt.setupMock(t)
 			loader := NewGraphLoader(client, nil)
 
-			definitionID, err := loader.LoadMission(context.Background(), tt.def)
+			definitionID, err := loader.LoadMission(context.Background(), mustProto(t, tt.def))
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.definitionID, definitionID)
@@ -207,7 +225,7 @@ func TestLoadMission_ValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := tt.loader.LoadMission(context.Background(), tt.def)
+			_, err := tt.loader.LoadMission(context.Background(), mustProto(t, tt.def))
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
@@ -273,7 +291,7 @@ func TestLoadMission_QueryErrors(t *testing.T) {
 				TargetRef: "target-123",
 			}
 
-			_, err := loader.LoadMission(context.Background(), def)
+			_, err := loader.LoadMission(context.Background(), mustProto(t, def))
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
@@ -323,10 +341,10 @@ func TestLoadMission_Deduplication(t *testing.T) {
 	}
 
 	// Load both definitions
-	_, err := loader.LoadMission(context.Background(), def1)
+	_, err := loader.LoadMission(context.Background(), mustProto(t, def1))
 	require.NoError(t, err)
 
-	_, err = loader.LoadMission(context.Background(), def2)
+	_, err = loader.LoadMission(context.Background(), mustProto(t, def2))
 	require.NoError(t, err)
 
 	// Verify same hash was produced for identical content
@@ -365,10 +383,10 @@ func TestLoadMission_DifferentDefinitions(t *testing.T) {
 		Version: "2.0.0", // Different version
 	}
 
-	_, err := loader.LoadMission(context.Background(), def1)
+	_, err := loader.LoadMission(context.Background(), mustProto(t, def1))
 	require.NoError(t, err)
 
-	_, err = loader.LoadMission(context.Background(), def2)
+	_, err = loader.LoadMission(context.Background(), mustProto(t, def2))
 	require.NoError(t, err)
 
 	// Verify different hashes
@@ -392,7 +410,7 @@ func TestGraphLoader_CypherQueries(t *testing.T) {
 			},
 		}
 		loader := NewGraphLoader(client, nil)
-		_, _ = loader.LoadMission(context.Background(), &mission.MissionDefinition{Name: "test"})
+		_, _ = loader.LoadMission(context.Background(), mustProto(t, &mission.MissionDefinition{Name: "test"}))
 	})
 
 	t.Run("creates DEFINES relationship to Mission node", func(t *testing.T) {
@@ -410,7 +428,7 @@ func TestGraphLoader_CypherQueries(t *testing.T) {
 			},
 		}
 		loader := NewGraphLoader(client, nil)
-		_, _ = loader.LoadMission(context.Background(), &mission.MissionDefinition{Name: "test", TargetRef: "target"})
+		_, _ = loader.LoadMission(context.Background(), mustProto(t, &mission.MissionDefinition{Name: "test", TargetRef: "target"}))
 	})
 
 	t.Run("stores all definition properties", func(t *testing.T) {
@@ -434,7 +452,7 @@ func TestGraphLoader_CypherQueries(t *testing.T) {
 			},
 		}
 		loader := NewGraphLoader(client, nil)
-		_, _ = loader.LoadMission(context.Background(), &mission.MissionDefinition{Name: "test"})
+		_, _ = loader.LoadMission(context.Background(), mustProto(t, &mission.MissionDefinition{Name: "test"}))
 	})
 }
 
@@ -449,10 +467,10 @@ func TestComputeDefinitionHash(t *testing.T) {
 			Version:     "1.0.0",
 		}
 
-		hash1, err := loader.computeDefinitionHash(def)
+		hash1, err := loader.computeDefinitionHash(mustProto(t, def))
 		require.NoError(t, err)
 
-		hash2, err := loader.computeDefinitionHash(def)
+		hash2, err := loader.computeDefinitionHash(mustProto(t, def))
 		require.NoError(t, err)
 
 		assert.Equal(t, hash1, hash2)
@@ -462,10 +480,10 @@ func TestComputeDefinitionHash(t *testing.T) {
 		def1 := &mission.MissionDefinition{Name: "test1"}
 		def2 := &mission.MissionDefinition{Name: "test2"}
 
-		hash1, err := loader.computeDefinitionHash(def1)
+		hash1, err := loader.computeDefinitionHash(mustProto(t, def1))
 		require.NoError(t, err)
 
-		hash2, err := loader.computeDefinitionHash(def2)
+		hash2, err := loader.computeDefinitionHash(mustProto(t, def2))
 		require.NoError(t, err)
 
 		assert.NotEqual(t, hash1, hash2)
@@ -481,10 +499,10 @@ func TestComputeDefinitionHash(t *testing.T) {
 			Name: "test",
 		}
 
-		hash1, err := loader.computeDefinitionHash(def1)
+		hash1, err := loader.computeDefinitionHash(mustProto(t, def1))
 		require.NoError(t, err)
 
-		hash2, err := loader.computeDefinitionHash(def2)
+		hash2, err := loader.computeDefinitionHash(mustProto(t, def2))
 		require.NoError(t, err)
 
 		assert.Equal(t, hash1, hash2, "hash should ignore ID field")
@@ -493,7 +511,7 @@ func TestComputeDefinitionHash(t *testing.T) {
 	t.Run("hash is valid hex string", func(t *testing.T) {
 		def := &mission.MissionDefinition{Name: "test"}
 
-		hash, err := loader.computeDefinitionHash(def)
+		hash, err := loader.computeDefinitionHash(mustProto(t, def))
 		require.NoError(t, err)
 
 		// SHA256 produces 64 hex characters

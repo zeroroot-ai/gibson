@@ -5,48 +5,55 @@ import (
 	"fmt"
 
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/mission"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // MissionPolicySource implements PolicySource by reading from a MissionDefinition.
-// It extracts data_policy configuration from mission nodes.
+// It extracts ReusePolicy (the canonical proto home for what the legacy mirror
+// called DataPolicy.{OutputScope,InputScope,Reuse}) from mission nodes.
 type MissionPolicySource struct {
-	definition *mission.MissionDefinition
+	definition *missionv1.MissionDefinition
 }
 
 // NewMissionPolicySource creates a PolicySource from a mission definition.
-func NewMissionPolicySource(def *mission.MissionDefinition) PolicySource {
+func NewMissionPolicySource(def *missionv1.MissionDefinition) PolicySource {
 	return &MissionPolicySource{
 		definition: def,
 	}
 }
 
-// GetDataPolicy retrieves the data policy for a specific agent from the mission definition.
-// Returns nil if no policy is defined for the agent.
+// GetDataPolicy retrieves the reuse/scope policy for a specific agent from
+// the mission definition. Returns nil if no policy is defined for the agent
+// or if the agent is not present in the definition.
+//
+// The proto schema separates storage concerns (DataPolicy: store_input,
+// retention, encryption) from reuse/scope concerns (ReusePolicy: output_scope,
+// input_scope, reuse). The orchestrator's PolicyChecker still uses the
+// internal `DataPolicy` struct shape (scope-based) — this loader reads the
+// proto's ReusePolicy and projects it into that shape.
 func (m *MissionPolicySource) GetDataPolicy(agentName string) (*DataPolicy, error) {
 	if m.definition == nil {
 		return nil, fmt.Errorf("mission definition is nil")
 	}
 
-	// Search through mission nodes to find the agent
-	for _, node := range m.definition.Nodes {
-		if node.Type == mission.NodeTypeAgent && node.AgentName == agentName {
-			// Found the agent node - check if it has a data policy
-			if node.DataPolicy == nil {
-				return nil, nil // No policy defined
-			}
-
-			// Convert mission.DataPolicy to orchestrator.DataPolicy
-			// They should have the same structure, but we need to copy
-			return &DataPolicy{
-				OutputScope: node.DataPolicy.OutputScope,
-				InputScope:  node.DataPolicy.InputScope,
-				Reuse:       node.DataPolicy.Reuse,
-			}, nil
+	for _, node := range m.definition.GetNodes() {
+		if node.GetType() != missionv1.NodeType_NODE_TYPE_AGENT {
+			continue
 		}
+		if node.GetAgentConfig().GetAgentName() != agentName {
+			continue
+		}
+		rp := node.GetReusePolicy()
+		if rp == nil {
+			return nil, nil
+		}
+		return &DataPolicy{
+			OutputScope: rp.GetOutputScope(),
+			InputScope:  rp.GetInputScope(),
+			Reuse:       rp.GetReuse(),
+		}, nil
 	}
 
-	// Agent not found in definition - return nil policy
 	return nil, nil
 }
 
