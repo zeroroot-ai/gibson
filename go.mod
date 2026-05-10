@@ -4,7 +4,7 @@ go 1.25.3
 
 require (
 	buf.build/go/protovalidate v1.2.0
-	cloud.google.com/go/secretmanager v1.19.0
+	cloud.google.com/go/secretmanager v1.20.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets v1.4.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
