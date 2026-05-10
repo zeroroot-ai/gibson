@@ -735,7 +735,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			RequireTenant: d.config.Auth.Mode == "saas",
 		}
 		tenantStore := state.NewTenantScopedStore(d.stateClient, tenantStoreCfg)
-		d.quotaManager = component.NewQuotaManager(tenantStore, d.logger.Slog())
+		// platformDB may be nil (e.g. in dev/kind where the dashboard
+		// Postgres pool isn't established yet). QuotaManager.GetQuota
+		// degrades to "no limits" in that case.
+		d.quotaManager = component.NewQuotaManager(tenantStore, d.platformDB, d.logger.Slog())
 		d.logger.Info(ctx, "quota manager initialized")
 	} else {
 		d.logger.Warn(ctx, "quota manager not initialized - state client unavailable")
