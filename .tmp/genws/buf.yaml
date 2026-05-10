@@ -1,0 +1,9 @@
+version: v2
+modules:
+  - path: gibson-local
+  - path: sdk-proto
+    excludes:
+      - sdk-proto/google
+lint:
+  use:
+    - STANDARD

@@ -1316,12 +1316,6 @@ entries:
       - USER
       - SERVICE
       - COMPONENT
-  "/gibson.platform.v1.DispatchOverrideService/OverrideDispatchPolicy":
-    relation: "platform_operator"
-    object_type: "system_tenant"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - USER
   "/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -1358,13 +1352,6 @@ entries:
       - USER
       - SERVICE
   "/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled":
-    relation: "platform_operator"
-    object_type: "system_tenant"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.platform.v1.PlatformOperatorService/SetTenantQuota":
     relation: "platform_operator"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
@@ -1505,6 +1492,13 @@ entries:
       - SERVICE
   "/gibson.tenant.v1.TenantAdminService/GetTenantQuota":
     relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantAdminService/GetTenantQuotaUsage":
+    relation: "viewer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

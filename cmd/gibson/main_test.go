@@ -235,68 +235,7 @@ func Test_malformedConfig(t *testing.T) {
 	_ = fmt.Sprintf("stderr: %s", stderr.String()) // suppress "declared and not used"
 }
 
-// Test_setecIntegrationSelfCheck covers the production-mode fail-closed
-// startup gate (spec setec-sandbox-prod-default R1.4). The check refuses to
-// start when GIBSON_MODE=saas and the setec_integration build tag is not set.
-//
-// The test toggles the package-level version.BuildTagSetecIntegration with
-// t.Cleanup to restore it, mirroring the production / dev tag combinations.
-func Test_setecIntegrationSelfCheck(t *testing.T) {
-	cases := []struct {
-		name       string
-		mode       string // GIBSON_MODE env value
-		buildTag   string // version.BuildTagSetecIntegration value
-		wantCode   int
-		wantStderr string // substring required in stderr; empty = no requirement
-	}{
-		{
-			name:       "saas + tag off refuses startup",
-			mode:       "saas",
-			buildTag:   "off",
-			wantCode:   1,
-			wantStderr: "startup refused",
-		},
-		{
-			name:       "saas + tag on starts normally",
-			mode:       "saas",
-			buildTag:   "on",
-			wantCode:   0,
-			wantStderr: "",
-		},
-		{
-			name:       "selfhost + tag off starts normally (warning only path)",
-			mode:       "selfhost",
-			buildTag:   "off",
-			wantCode:   0,
-			wantStderr: "",
-		},
-		{
-			name:       "dev + tag off starts normally",
-			mode:       "dev",
-			buildTag:   "off",
-			wantCode:   0,
-			wantStderr: "",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("GIBSON_MODE", tc.mode)
-			orig := version.BuildTagSetecIntegration
-			version.BuildTagSetecIntegration = tc.buildTag
-			t.Cleanup(func() { version.BuildTagSetecIntegration = orig })
-
-			path := writeTempConfig(t)
-			var stdout, stderr bytes.Buffer
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			code := run(ctx, []string{"--config", path}, &stdout, &stderr, fakeFactory(&fakeDaemon{}))
-			if code != tc.wantCode {
-				t.Errorf("exit code = %d, want %d\nstderr: %s", code, tc.wantCode, stderr.String())
-			}
-			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
-				t.Errorf("stderr missing %q; got: %s", tc.wantStderr, stderr.String())
-			}
-		})
-	}
-}
+// Test_setecIntegrationSelfCheck removed 2026-05-10 — startup self-check
+// dropped along with all Setec gating per operator decision (unlimited
+// usage). The build-tag is still emitted as a startup log line for
+// observability, but no longer gates startup.

@@ -26,25 +26,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// DetonationQuota is the narrow interface the executor uses for per-tenant
-// concurrent detonation quota enforcement (R4.1, R4.2).
-//
-// The concrete implementation lives in core/gibson/internal/sandbox/quota
-// (RedisQuota). The interface is declared here so the sandboxed package does
-// not need to import the quota package (which would not create a cycle in
-// practice, but keeping the dependency lightweight preserves testability).
-//
-// Acquire is called before launching a Setec microVM. Release must be called
-// exactly once after each successful Acquire, regardless of launch outcome.
-// When Acquire returns sandbox/quota.ErrQuotaExceeded the caller returns the
-// design Scenario 5 structured error; Release must NOT be called in that case.
-//
-// A nil DetonationQuota disables quota enforcement (dev mode / tests).
-type DetonationQuota interface {
-	Acquire(ctx context.Context, tenant string) error
-	Release(ctx context.Context, tenant string)
-}
-
 // DiscoveryProcessor processes proto DiscoveryResult from tool responses.
 // The executor invokes Process asynchronously after a successful tool call so
 // discoveries produced in sandboxed microVMs land in the knowledge graph with
@@ -87,38 +68,6 @@ const (
 	logBufferLimit = 1 << 20    // 1 MiB ring buffer for stdout marker extraction
 	killGrace      = 30 * time.Second
 )
-
-// Detonation outcome constants for the Prometheus counter.
-// These mirror the values in internal/sandbox/quota/metrics.go to avoid an
-// import dependency from this package on the quota package.
-const (
-	outcomeDetonationSuccess = "success"
-	outcomeDetonationTimeout = "timeout"
-	outcomeDetonationError   = "detonation_error"
-)
-
-// incrDetonationFromExecutor increments the per-tenant detonation counter via
-// the quota package's IncrDetonation function. The function variable is
-// replaceable in tests via package-level assignment.
-//
-// We avoid importing internal/sandbox/quota directly by using a hook.
-// The daemon wires the real function at startup via SetDetonationMetricFn.
-// When nil, metrics are silently skipped (dev mode).
-var incrDetonationHook func(tenant, outcome string)
-
-// SetDetonationMetricFn wires the quota package's IncrDetonation into the
-// executor at daemon startup. Call this once after both packages are imported.
-// This avoids an import cycle while still letting the executor emit metrics.
-func SetDetonationMetricFn(fn func(tenant, outcome string)) {
-	incrDetonationHook = fn
-}
-
-// incrDetonationFromExecutor invokes the wired hook (if any).
-func incrDetonationFromExecutor(tenant, outcome string) {
-	if incrDetonationHook != nil {
-		incrDetonationHook(tenant, outcome)
-	}
-}
 
 // SandboxClient is the minimal gRPC surface the executor needs from Setec.
 // It is implemented by an adapter around Setec's generated gRPC client —
@@ -171,14 +120,12 @@ type Executor struct {
 	tenant             string
 	callTimeout        time.Duration
 	discoveryProcessor DiscoveryProcessor // optional; nil disables graph persistence
-	quota              DetonationQuota    // optional; nil disables quota enforcement
 }
 
 // Config is the constructor input for the executor. All fields are required
 // except Tracer (no-op used when nil) and Logger (slog.Default when nil).
 // DiscoveryProcessor is optional — when nil, field-100 DiscoveryResult
 // extraction is skipped entirely and no warning is logged per-call.
-// Quota is optional — when nil, quota enforcement is disabled.
 type Config struct {
 	Client             SandboxClient
 	Tracer             trace.Tracer
@@ -186,7 +133,6 @@ type Config struct {
 	Tenant             string
 	CallTimeout        time.Duration // defaults to 5m when zero
 	DiscoveryProcessor DiscoveryProcessor
-	Quota              DetonationQuota // optional; nil disables quota enforcement
 }
 
 // New constructs an Executor. Returns a clear error on misconfiguration so
@@ -214,7 +160,6 @@ func New(cfg Config) (*Executor, error) {
 		tenant:             cfg.Tenant,
 		callTimeout:        cfg.CallTimeout,
 		discoveryProcessor: cfg.DiscoveryProcessor,
-		quota:              cfg.Quota,
 	}, nil
 }
 
@@ -234,32 +179,6 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 		return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
 			fmt.Sprintf("tool %q: empty image in ToolSpec", toolName), nil)
 	}
-
-	// ── Quota enforcement (R4.1, R4.2) ────────────────────────────────────
-	// Acquire must succeed before we make any Setec network calls. On quota
-	// exhaustion we return the design Scenario 5 structured error string.
-	// Callers (harness.CallToolProto) do not retry on quota_exceeded; they
-	// surface it as a mission-step error directly.
-	if e.quota != nil {
-		if err := e.quota.Acquire(ctx, e.tenant); err != nil {
-			// The quota package already formats:
-			// "quota_exceeded (max_concurrent_detonations=N)"
-			return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
-				fmt.Sprintf("tool %q: %s", toolName, err.Error()), err)
-		}
-		// Release must be deferred before any early returns below.
-		defer e.quota.Release(ctx, e.tenant)
-	}
-	// ── End quota enforcement ──────────────────────────────────────────────
-
-	// ── Detonation metrics (R4.4) ──────────────────────────────────────────
-	// Emit gibson_sandbox_detonation_total{tenant, outcome} on every exit
-	// path. The outcome is set to "success" initially and overwritten on
-	// error. The defer captures the outcome variable by pointer so any
-	// early return can set it before the counter is incremented.
-	outcome := outcomeDetonationSuccess
-	defer func() { incrDetonationFromExecutor(e.tenant, outcome) }()
-	// ── End detonation metrics ─────────────────────────────────────────────
 
 	// 1. Marshal + size-check + b64 encode request.
 	rawIn, err := protojson.Marshal(request)
@@ -325,19 +244,16 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 			killCtx, killCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_ = e.client.Kill(killCtx, launchResp.SandboxID)
 			killCancel()
-			outcome = outcomeDetonationTimeout
-			return types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
+				return types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
 				fmt.Sprintf("tool %q sandbox %s exceeded %s call timeout",
 					toolName, launchResp.SandboxID, e.callTimeout), waitErr)
 		}
-		outcome = outcomeDetonationError
 		return types.WrapError(types.SANDBOX_LAUNCH_FAILED,
 			fmt.Sprintf("wait for sandbox %s", launchResp.SandboxID), waitErr)
 	}
 
 	// 7. Non-zero exit: surface with last N log lines for diagnostic.
 	if waitResp.ExitCode != 0 {
-		outcome = outcomeDetonationError
 		return types.WrapError(types.SANDBOX_NON_ZERO_EXIT,
 			fmt.Sprintf("tool %q sandbox exited %d (%s): %s",
 				toolName, waitResp.ExitCode, waitResp.Reason, ringBuf.tail(32)), nil)

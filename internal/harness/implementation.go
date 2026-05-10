@@ -9,12 +9,10 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
 	"github.com/zero-day-ai/gibson/internal/component"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/dispatch"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/memory"
@@ -157,21 +155,6 @@ type DefaultAgentHarness struct {
 	// false, the legacy sandboxed.Registry + ComponentRegistry dual
 	// lookup is used. Flipped per deployment via tool_runner.enabled.
 	toolRunnerEnabled bool
-
-	// dispatchPolicy is the gate enforcing content_trust == UNTRUSTED ⟹
-	// dispatch_mode == SANDBOXED before any executor selection. Nil means
-	// the gate is skipped (backward-compatible with deployments that
-	// haven't yet wired the policy). Spec: setec-sandbox-prod-default §C3.
-	dispatchPolicy dispatch.Policy
-
-	// policyAuditWriter is the synchronous audit writer for gate decisions
-	// (R3.5). May be nil when dispatchPolicy is nil or in test environments;
-	// production always wires a real *audit.Writer via HarnessConfig.
-	policyAuditWriter PolicyAuditWriter
-
-	// sandboxHealthProvider is queried before the dispatch gate to populate
-	// Input.SandboxHealthy. Nil defaults to healthy=true (R5.4, R5.5).
-	sandboxHealthProvider SandboxHealthProvider
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -594,97 +577,15 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		"output_type", string(response.ProtoReflect().Descriptor().FullName()))
 
 	// ── Unified ComponentRegistry dispatch ────────────────────────────────
-	// Single lookup; route by dispatch_mode. DispatchMode=SANDBOXED
-	// entries dispatch via SandboxedExecutor with per-call ToolSpec
-	// sourced from the entry; plugin/agent entries fall through to the
-	// existing gRPC dispatch paths below. Post-task-16, this is the only
-	// sandboxed-dispatch path — the legacy static sandboxed.Registry
-	// fallback was removed.
-	//
-	// The dispatch policy gate (R3.1, R3.3, R3.5) runs BEFORE executor
-	// selection: a deny outcome short-circuits with a structured error and
-	// emits a synchronous audit event. The gate is a pure function
-	// (internal/dispatch.Policy.Decide) wired here via dispatchPolicy;
-	// when nil, the gate is skipped (backward-compatible for deployments
-	// that have not yet wired it).
+	// Single lookup; route by dispatch_mode. DispatchMode=SANDBOXED entries
+	// dispatch via SandboxedExecutor with per-call ToolSpec sourced from the
+	// entry; plugin/agent entries fall through to the existing gRPC dispatch
+	// paths below.
 	if h.componentRegistry != nil {
-		if spec, trust, found, err := h.lookupSandboxedToolSpec(ctx, name); err != nil {
+		if spec, _, found, err := h.lookupSandboxedToolSpec(ctx, name); err != nil {
 			h.logger.Warn("component registry sandboxed lookup errored, falling through",
 				"tool", name, "error", err)
 		} else if found {
-			// ── Dispatch policy gate (R3.1, R3.3, R3.5) ─────────────────
-			if h.dispatchPolicy != nil {
-				tenant := auth.TenantStringFromContext(ctx)
-
-				// Populate SandboxHealthy from the circuit-breaker / health probe
-				// (R5.4, R5.5). When no provider is wired the gate defaults to
-				// healthy=true (backward-compatible with deployments not yet running
-				// the health probe).
-				sandboxHealthy := true
-				if h.sandboxHealthProvider != nil {
-					sandboxHealthy = h.sandboxHealthProvider.IsHealthy()
-				}
-
-				gateInput := dispatch.Input{
-					Tenant:         tenant,
-					Mission:        h.missionCtx.ID.String(),
-					Tool:           name,
-					ToolMode:       componentpb.DispatchMode_DISPATCH_MODE_SANDBOXED,
-					ContentTrust:   trust,
-					SandboxHealthy: sandboxHealthy,
-					OverrideActive: false, // override lookup wired in Task 30
-				}
-				decision := h.dispatchPolicy.Decide(ctx, gateInput)
-
-				// Build the audit event payload (common fields).
-				auditDecision := "allow"
-				if !decision.Allowed {
-					auditDecision = "deny"
-				}
-				auditMeta, _ := json.Marshal(map[string]string{
-					"policy_decision": auditDecision,
-					"tool":            name,
-					"dispatch_mode":   "SANDBOXED",
-					"content_trust":   trust.String(),
-					"reason":          decision.Reason,
-				})
-				auditEvent := audit.Event{
-					TenantID:   tenant,
-					ActorID:    "system",
-					ActorType:  "system",
-					Action:     "dispatch_policy_decision",
-					TargetType: "tool",
-					TargetID:   name,
-					Decision:   auditDecision,
-					Metadata:   auditMeta,
-				}
-
-				if h.policyAuditWriter != nil {
-					if werr := h.policyAuditWriter.WriteSync(ctx, auditEvent); werr != nil {
-						// Audit failure on deny is fatal — fail closed.
-						if !decision.Allowed {
-							h.logger.Error("dispatch gate: audit write failed on deny; blocking dispatch for safety",
-								"tool", name, "reason", decision.Reason, "audit_error", werr)
-							return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
-								fmt.Sprintf("tool %q: dispatch policy audit failure: %v", name, werr), werr)
-						}
-						// Audit failure on allow is non-fatal: log and continue.
-						h.logger.Warn("dispatch gate: audit write failed on allow; dispatch proceeds",
-							"tool", name, "audit_error", werr)
-					}
-				}
-
-				if !decision.Allowed {
-					h.logger.Warn("dispatch gate denied tool call",
-						"tool", name,
-						"reason", decision.Reason,
-						"content_trust", trust.String())
-					return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
-						fmt.Sprintf("tool %q: dispatch denied: %s", name, decision.Reason), nil)
-				}
-			}
-			// ── End dispatch policy gate ──────────────────────────────────
-
 			if h.sandboxedExecutor == nil {
 				return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
 					fmt.Sprintf("tool %q dispatch_mode=SANDBOXED but no sandboxed executor wired", name), nil)

@@ -246,11 +246,8 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		workQueueTimeout:    f.config.WorkQueueTimeout,
 		pluginAccess:        f.config.PluginAccess,
 		maxDelegationDepth:  f.config.MaxDelegationDepth,
-		sandboxedExecutor:     f.config.SandboxedExecutor,
-		toolRunnerEnabled:     f.config.ToolRunnerEnabled,
-		dispatchPolicy:        f.config.DispatchPolicy,
-		policyAuditWriter:     f.config.PolicyAuditWriter,
-		sandboxHealthProvider: f.config.SandboxHealthProvider,
+		sandboxedExecutor: f.config.SandboxedExecutor,
+		toolRunnerEnabled: f.config.ToolRunnerEnabled,
 	}
 
 	// Wrap with ComplianceMiddleware BEFORE the OTel / Langfuse middleware so
