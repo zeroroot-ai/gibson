@@ -96,11 +96,9 @@ func (q *QuotaManager) GetQuota(ctx context.Context, tenant string) (*TenantQuot
 	if tenant == "" {
 		return nil, fmt.Errorf("tenant must not be empty")
 	}
-	if q.db == nil {
-		return nil, nil
-	}
 
-	// Fast path: cache hit.
+	// Fast path: cache hit. Honoured even when db == nil so tests (and
+	// future operator-driven write paths) can prime the cache directly.
 	q.cacheMu.RLock()
 	if entry, ok := q.cache[tenant]; ok && time.Now().Before(entry.expireAt) {
 		out := entry.q
@@ -108,6 +106,10 @@ func (q *QuotaManager) GetQuota(ctx context.Context, tenant string) (*TenantQuot
 		return &out, nil
 	}
 	q.cacheMu.RUnlock()
+
+	if q.db == nil {
+		return nil, nil
+	}
 
 	// Slow path: singleflight DB read so concurrent callers share one query.
 	tokenIface, _ := q.flight.LoadOrStore(tenant, &flightToken{})
