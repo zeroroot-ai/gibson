@@ -121,7 +121,7 @@ func TestStamp_LegacyPlatformState_StampsVersion2(t *testing.T) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS schema_migrations").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO schema_migrations").
-		WithArgs(uint(2)).
+		WithArgs(uint(3)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
