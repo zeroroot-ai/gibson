@@ -74,6 +74,16 @@ type ComponentInfo struct {
 	DefaultParseQuality   componentpb.ParseQuality `json:"default_parse_quality,omitempty"`
 	Description           string                   `json:"description,omitempty"`
 	Tags                  []string                 `json:"tags,omitempty"`
+
+	// ContentTrust classifies the trust level of input data this component
+	// processes at call-time. Consumed by the daemon's dispatch policy gate
+	// (`internal/dispatch.Policy.Decide`) along with DispatchMode to enforce
+	// the `content_trust=UNTRUSTED ⇒ dispatch_mode=SANDBOXED` invariant.
+	//
+	// Zero value (CONTENT_TRUST_UNSPECIFIED) is treated as TRUSTED at gate-
+	// evaluation time for backward compat with descriptors registered before
+	// the SDK shipped the field. Spec: setec-sandbox-prod-default R3.1, R3.2.
+	ContentTrust componentpb.ContentTrust `json:"content_trust,omitempty"`
 }
 
 // ComponentRegistry provides service-discovery for Gibson components.

@@ -329,6 +329,41 @@ type resourceHint struct {
 	Memory string `json:"memory"`
 }
 
+// toolContentTrust maps known tool names to their ContentTrust classification
+// per design §"Existing tools and content_trust migration". Tools absent from
+// this map register with CONTENT_TRUST_UNSPECIFIED, which the dispatch gate
+// treats as TRUSTED for backward compatibility (configurable via the daemon's
+// `strictDefaultUntrusted` flag).
+//
+// All current parsers consume external network output and are classified
+// UNTRUSTED. The `debug-plugin` long-running PLUGIN component is operator-
+// installed and is explicitly TRUSTED to avoid the strict-default-untrusted
+// warning when that flag flips.
+//
+// Adding a tool: pick UNTRUSTED if any of its inputs come from outside the
+// cluster (network responses, user-supplied targets, third-party feeds).
+// Pick TRUSTED only for vetted, in-cluster, operator-installed components.
+//
+// Spec: setec-sandbox-prod-default Phase 6 (Tasks 23-27). The longer-term
+// home for this declaration is in each tool's --list-tools JSON output from
+// gibson-tool-runner, but the runner-side wire-format extension is tracked
+// as a separate ticket; until it ships, this in-daemon map is the source of
+// truth for the catalog refresher.
+var toolContentTrust = map[string]componentpb.ContentTrust{
+	// UNTRUSTED — recon parsers consuming external data.
+	"nmap":      componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+	"httpx":     componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+	"nuclei":    componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+	"subfinder": componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+	"amass":     componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+	"dnsx":      componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+	"naabu":     componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+	"masscan":   componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+
+	// TRUSTED — operator-installed PLUGIN components.
+	"debug-plugin": componentpb.ContentTrust_CONTENT_TRUST_TRUSTED,
+}
+
 // collectCatalog launches --list-tools for each configured image and
 // returns the merged, de-duplicated set keyed by tool name. When two
 // images provide the same tool name, the entry from the earlier image in
@@ -432,6 +467,11 @@ func (r *CatalogRefresher) writeCatalog(ctx context.Context, merged map[string]i
 	var writeErr error
 	for _, name := range names {
 		ent := merged[name]
+		// Lookup ContentTrust from the per-tool migration table; absent tools
+		// register with UNSPECIFIED (gate treats as TRUSTED unless the daemon
+		// is in strict-default-untrusted mode). Spec: setec-sandbox-prod-default
+		// Phase 6 (Tasks 23-28).
+		trust := toolContentTrust[ent.Entry.Name]
 		info := component.ComponentInfo{
 			Kind:                  "tool",
 			Name:                  ent.Entry.Name,
@@ -441,6 +481,7 @@ func (r *CatalogRefresher) writeCatalog(ctx context.Context, merged map[string]i
 			StartedAt:             time.Now(),
 			LastHeartbeat:         time.Now(),
 			DispatchMode:          componentpb.DispatchMode_DISPATCH_MODE_SANDBOXED,
+			ContentTrust:          trust,
 			Image:                 ent.Image,
 			Command:               []string{"gibson-runner"},
 			Env:                   map[string]string{"GIBSON_TOOL_NAME": ent.Entry.Name},
