@@ -22,7 +22,6 @@ const (
 	PlatformOperatorService_Shutdown_FullMethodName                 = "/gibson.platform.v1.PlatformOperatorService/Shutdown"
 	PlatformOperatorService_ImpersonateTenant_FullMethodName        = "/gibson.platform.v1.PlatformOperatorService/ImpersonateTenant"
 	PlatformOperatorService_RefreshToolCatalog_FullMethodName       = "/gibson.platform.v1.PlatformOperatorService/RefreshToolCatalog"
-	PlatformOperatorService_SetTenantQuota_FullMethodName           = "/gibson.platform.v1.PlatformOperatorService/SetTenantQuota"
 	PlatformOperatorService_WriteAccessTuples_FullMethodName        = "/gibson.platform.v1.PlatformOperatorService/WriteAccessTuples"
 	PlatformOperatorService_UpsertTenantQuota_FullMethodName        = "/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota"
 	PlatformOperatorService_ListFeatureTuples_FullMethodName        = "/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples"
@@ -52,11 +51,6 @@ type PlatformOperatorServiceClient interface {
 	// leader lease; followers accept the call but defer to the leader's
 	// next scheduled tick. Requires the platform-operator FGA role.
 	RefreshToolCatalog(ctx context.Context, in *RefreshToolCatalogRequest, opts ...grpc.CallOption) (*RefreshToolCatalogResponse, error)
-	// SetTenantQuota sets or updates the resource quotas for a tenant.
-	// Requires platform-operator role.
-	//
-	// Unimplemented: <owner-pending>
-	SetTenantQuota(ctx context.Context, in *SetTenantQuotaRequest, opts ...grpc.CallOption) (*SetTenantQuotaResponse, error)
 	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
 	// an authenticated caller.
 	WriteAccessTuples(ctx context.Context, in *WriteAccessTuplesRequest, opts ...grpc.CallOption) (*WriteAccessTuplesResponse, error)
@@ -113,16 +107,6 @@ func (c *platformOperatorServiceClient) RefreshToolCatalog(ctx context.Context, 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RefreshToolCatalogResponse)
 	err := c.cc.Invoke(ctx, PlatformOperatorService_RefreshToolCatalog_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *platformOperatorServiceClient) SetTenantQuota(ctx context.Context, in *SetTenantQuotaRequest, opts ...grpc.CallOption) (*SetTenantQuotaResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SetTenantQuotaResponse)
-	err := c.cc.Invoke(ctx, PlatformOperatorService_SetTenantQuota_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -210,11 +194,6 @@ type PlatformOperatorServiceServer interface {
 	// leader lease; followers accept the call but defer to the leader's
 	// next scheduled tick. Requires the platform-operator FGA role.
 	RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error)
-	// SetTenantQuota sets or updates the resource quotas for a tenant.
-	// Requires platform-operator role.
-	//
-	// Unimplemented: <owner-pending>
-	SetTenantQuota(context.Context, *SetTenantQuotaRequest) (*SetTenantQuotaResponse, error)
 	// WriteAccessTuples atomically adds and/or deletes FGA tuples on behalf of
 	// an authenticated caller.
 	WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error)
@@ -255,9 +234,6 @@ func (UnimplementedPlatformOperatorServiceServer) ImpersonateTenant(context.Cont
 }
 func (UnimplementedPlatformOperatorServiceServer) RefreshToolCatalog(context.Context, *RefreshToolCatalogRequest) (*RefreshToolCatalogResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RefreshToolCatalog not implemented")
-}
-func (UnimplementedPlatformOperatorServiceServer) SetTenantQuota(context.Context, *SetTenantQuotaRequest) (*SetTenantQuotaResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetTenantQuota not implemented")
 }
 func (UnimplementedPlatformOperatorServiceServer) WriteAccessTuples(context.Context, *WriteAccessTuplesRequest) (*WriteAccessTuplesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method WriteAccessTuples not implemented")
@@ -349,24 +325,6 @@ func _PlatformOperatorService_RefreshToolCatalog_Handler(srv interface{}, ctx co
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PlatformOperatorServiceServer).RefreshToolCatalog(ctx, req.(*RefreshToolCatalogRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PlatformOperatorService_SetTenantQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetTenantQuotaRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PlatformOperatorServiceServer).SetTenantQuota(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PlatformOperatorService_SetTenantQuota_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PlatformOperatorServiceServer).SetTenantQuota(ctx, req.(*SetTenantQuotaRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -497,10 +455,6 @@ var PlatformOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RefreshToolCatalog",
 			Handler:    _PlatformOperatorService_RefreshToolCatalog_Handler,
-		},
-		{
-			MethodName: "SetTenantQuota",
-			Handler:    _PlatformOperatorService_SetTenantQuota_Handler,
 		},
 		{
 			MethodName: "WriteAccessTuples",
