@@ -62,6 +62,24 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.36.0](https://github.com/zero-day-ai/gibson/compare/v0.35.1...v0.36.0) (2026-05-10)
+
+
+### Features
+
+* **daemon:** collapse TenantQuota to two enforced fields + Postgres reader ([01a90b6](https://github.com/zero-day-ai/gibson/commit/01a90b64904f0d5c61a2c27f780d24800c89dba2))
+* install release-please and pr-title-lint ([#24](https://github.com/zero-day-ai/gibson/issues/24)) ([54e1375](https://github.com/zero-day-ai/gibson/commit/54e137584dac076976699d9a9d59e72ad4d95bc1))
+* **mission:** add protojson MarshalDefinitionJSON / UnmarshalDefinitionJSON ([#28](https://github.com/zero-day-ai/gibson/issues/28)) ([8d05586](https://github.com/zero-day-ai/gibson/commit/8d05586ee7aa6ae1da520af26656e4ecda3c6113))
+* **mission:** flip writer to protojson + dual-shape readers ([#30](https://github.com/zero-day-ai/gibson/issues/30)) ([e91ede9](https://github.com/zero-day-ai/gibson/commit/e91ede98207f3983927f2084fc193427fa71f9cc))
+* **mission:** MissionStore interface speaks proto MissionDefinition ([#33](https://github.com/zero-day-ai/gibson/issues/33)) ([6a5400c](https://github.com/zero-day-ai/gibson/commit/6a5400c4fa3c500ff52cb4bbc31446504dbdff8f))
+* **mission:** retype daemon helpers to proto MissionDefinition ([#34](https://github.com/zero-day-ai/gibson/issues/34)) ([a9f136a](https://github.com/zero-day-ai/gibson/commit/a9f136a720627aedf2d0b3d02d5d3cbfab71e890))
+* **mission:** swap orchestrator pkg to proto MissionDefinition ([#31](https://github.com/zero-day-ai/gibson/issues/31)) ([5e5731c](https://github.com/zero-day-ai/gibson/commit/5e5731c04369c05c03b3c898fb77835659b2f530))
+
+
+### Bug Fixes
+
+* **authz:** remove misleading user-typed wildcard tuple comment ([3ddd29b](https://github.com/zero-day-ai/gibson/commit/3ddd29bde209e7e16f5adadad49ae91c0ff92798))
+
 ## v0.32.0 — 2026-05-04 — daemon reads per-tenant credentials from Vault (tenant-provisioning-unification-phase2 Phase 6)
 
 The daemon's per-tenant Postgres + Neo4j credential resolution now
