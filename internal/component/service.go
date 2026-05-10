@@ -567,18 +567,11 @@ func (s *ComponentServiceServer) RegisterComponent(
 		slog.String("instance_id", instanceID),
 	)
 
-	// Track registered agent count for quota enforcement.
-	if req.Kind == "agent" && s.quotaManager != nil {
-		if err := s.quotaManager.IncrementAgentCount(ctx); err != nil {
-			s.logger.WarnContext(ctx, "failed to increment agent quota counter",
-				slog.String("tenant", tenant),
-				slog.String("name", req.Name),
-				slog.String("error", err.Error()),
-			)
-			// Non-fatal: registration already succeeded; counter mismatch will
-			// self-correct via decrementCounter's floor-at-zero logic.
-		}
-	}
+	// Spec plans-and-quotas-simplification: agent registration alone no
+	// longer consumes the concurrent_agents quota. Counters increment when
+	// an agent transitions idle→busy (first task pickup) and decrement on
+	// busy→idle. Wiring into the harness's per-agent inFlightTasks
+	// callbacks lives in the orchestrator/agent package.
 
 	// Forward plugin-kind registrations to the PluginRegistry for install persistence.
 	// The PluginRegistry persists install metadata in Postgres (plugin_install table) and
