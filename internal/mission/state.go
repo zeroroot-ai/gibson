@@ -7,6 +7,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // NodeStatus represents the execution status of a mission node
@@ -87,7 +88,7 @@ type MissionState struct {
 	MissionID types.ID
 
 	// Definition is a reference to the mission definition being executed
-	Definition *MissionDefinition
+	Definition *missionv1.MissionDefinition
 
 	// Status is the current execution status of the mission
 	Status MissionStatus
@@ -157,9 +158,9 @@ func (ms *MissionState) GetReadyNodes() []string {
 
 		// Check dependencies if definition is available
 		if ms.Definition != nil {
-			node := ms.Definition.GetNode(nodeID)
-			if node != nil && len(node.Dependencies) > 0 {
-				if !ms.areDependenciesCompleted(node.Dependencies) {
+			node := ms.Definition.GetNodes()[nodeID]
+			if node != nil && len(node.GetDependencies()) > 0 {
+				if !ms.areDependenciesCompleted(node.GetDependencies()) {
 					continue
 				}
 			}
@@ -512,12 +513,12 @@ func (ms *MissionState) validateDependencyOrder(order []string) error {
 
 	// Check each node's dependencies appear before it in the order
 	for i, nodeID := range order {
-		node := ms.Definition.GetNode(nodeID)
+		node := ms.Definition.GetNodes()[nodeID]
 		if node == nil {
 			continue
 		}
 
-		for _, depID := range node.Dependencies {
+		for _, depID := range node.GetDependencies() {
 			depPos, exists := position[depID]
 			if !exists {
 				// Dependency not in order - check if it's already completed
@@ -559,11 +560,11 @@ func (ms *MissionState) getPendingInDependencyOrder() []string {
 
 	// Count dependencies that are also pending
 	for _, nodeID := range pending {
-		node := ms.Definition.GetNode(nodeID)
+		node := ms.Definition.GetNodes()[nodeID]
 		if node == nil {
 			continue
 		}
-		for _, depID := range node.Dependencies {
+		for _, depID := range node.GetDependencies() {
 			if _, isPending := inDegree[depID]; isPending {
 				inDegree[nodeID]++
 			}
@@ -587,11 +588,11 @@ func (ms *MissionState) getPendingInDependencyOrder() []string {
 
 		// Find nodes that depend on this one and decrement their in-degree
 		for _, otherID := range pending {
-			node := ms.Definition.GetNode(otherID)
+			node := ms.Definition.GetNodes()[otherID]
 			if node == nil {
 				continue
 			}
-			for _, depID := range node.Dependencies {
+			for _, depID := range node.GetDependencies() {
 				if depID == nodeID {
 					inDegree[otherID]--
 					if inDegree[otherID] == 0 {

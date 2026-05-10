@@ -40,6 +40,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/checkpoint"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // E2ETestEnv encapsulates all dependencies for E2E checkpoint tests.
@@ -202,41 +203,32 @@ func setupE2EEnv(t *testing.T) (*E2ETestEnv, func()) {
 	return env, cleanup
 }
 
+// agentNode builds a minimal AGENT-typed proto node fixture.
+func agentNode(id, name, agentName string, deps ...string) *missionpb.MissionNode {
+	return &missionpb.MissionNode{
+		Id:           id,
+		Name:         name,
+		Type:         missionpb.NodeType_NODE_TYPE_AGENT,
+		Dependencies: deps,
+		Config: &missionpb.MissionNode_AgentConfig{
+			AgentConfig: &missionpb.AgentNodeConfig{AgentName: agentName},
+		},
+	}
+}
+
 // createTestMissionDef creates a test mission definition with sequential nodes.
-// Uses mission.MissionDefinition (the pre-registered definition type, not the
-// deleted mission.MissionConfig inline wrapper).
-func createTestMissionDef() *mission.MissionDefinition {
-	return &mission.MissionDefinition{
-		ID:          types.NewID(),
+func createTestMissionDef() *missionpb.MissionDefinition {
+	return &missionpb.MissionDefinition{
+		Id:          types.NewID().String(),
 		Name:        "Test Mission",
 		Description: "E2E test mission for checkpoint validation",
-		Nodes: map[string]*mission.MissionNode{
-			"node1": {
-				ID:        "node1",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Node 1",
-				AgentName: "tracking-agent",
-			},
-			"node2": {
-				ID:        "node2",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Node 2",
-				AgentName: "tracking-agent",
-			},
-			"node3": {
-				ID:        "node3",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Node 3",
-				AgentName: "tracking-agent",
-			},
-			"node4": {
-				ID:        "node4",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Node 4",
-				AgentName: "tracking-agent",
-			},
+		Nodes: map[string]*missionpb.MissionNode{
+			"node1": agentNode("node1", "Node 1", "tracking-agent"),
+			"node2": agentNode("node2", "Node 2", "tracking-agent"),
+			"node3": agentNode("node3", "Node 3", "tracking-agent"),
+			"node4": agentNode("node4", "Node 4", "tracking-agent"),
 		},
-		Edges: []mission.MissionEdge{
+		Edges: []*missionpb.MissionEdge{
 			{From: "node1", To: "node2"},
 			{From: "node2", To: "node3"},
 			{From: "node3", To: "node4"},
@@ -247,33 +239,19 @@ func createTestMissionDef() *mission.MissionDefinition {
 }
 
 // createApprovalMissionDef creates a mission definition with an approval-required node.
-func createApprovalMissionDef() *mission.MissionDefinition {
-	return &mission.MissionDefinition{
-		ID:          types.NewID(),
+func createApprovalMissionDef() *missionpb.MissionDefinition {
+	approvalNode := agentNode("approval", "Approval Node", "tracking-agent")
+	approvalNode.Metadata = map[string]string{"requires_approval": "true"}
+	return &missionpb.MissionDefinition{
+		Id:          types.NewID().String(),
 		Name:        "Approval Test Mission",
 		Description: "Mission with approval workflow",
-		Nodes: map[string]*mission.MissionNode{
-			"node1": {
-				ID:        "node1",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Pre-Approval Node",
-				AgentName: "tracking-agent",
-			},
-			"approval": {
-				ID:        "approval",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Approval Node",
-				AgentName: "tracking-agent",
-				Metadata:  map[string]any{"requires_approval": true},
-			},
-			"node2": {
-				ID:        "node2",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Post-Approval Node",
-				AgentName: "tracking-agent",
-			},
+		Nodes: map[string]*missionpb.MissionNode{
+			"node1":    agentNode("node1", "Pre-Approval Node", "tracking-agent"),
+			"approval": approvalNode,
+			"node2":    agentNode("node2", "Post-Approval Node", "tracking-agent"),
 		},
-		Edges: []mission.MissionEdge{
+		Edges: []*missionpb.MissionEdge{
 			{From: "node1", To: "approval"},
 			{From: "approval", To: "node2"},
 		},
@@ -283,39 +261,18 @@ func createApprovalMissionDef() *mission.MissionDefinition {
 }
 
 // createParallelMissionDef creates a mission definition with parallel nodes.
-func createParallelMissionDef() *mission.MissionDefinition {
-	return &mission.MissionDefinition{
-		ID:          types.NewID(),
+func createParallelMissionDef() *missionpb.MissionDefinition {
+	return &missionpb.MissionDefinition{
+		Id:          types.NewID().String(),
 		Name:        "Parallel Test Mission",
 		Description: "Mission with parallel node groups",
-		Nodes: map[string]*mission.MissionNode{
-			"start": {
-				ID:        "start",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Start Node",
-				AgentName: "tracking-agent",
-			},
-			"parallel1": {
-				ID:        "parallel1",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Parallel Node 1",
-				AgentName: "tracking-agent",
-			},
-			"parallel2": {
-				ID:        "parallel2",
-				Type:      mission.NodeTypeAgent,
-				Name:      "Parallel Node 2",
-				AgentName: "tracking-agent",
-			},
-			"join": {
-				ID:           "join",
-				Type:         mission.NodeTypeAgent,
-				Name:         "Join Node",
-				AgentName:    "tracking-agent",
-				Dependencies: []string{"parallel1", "parallel2"},
-			},
+		Nodes: map[string]*missionpb.MissionNode{
+			"start":     agentNode("start", "Start Node", "tracking-agent"),
+			"parallel1": agentNode("parallel1", "Parallel Node 1", "tracking-agent"),
+			"parallel2": agentNode("parallel2", "Parallel Node 2", "tracking-agent"),
+			"join":      agentNode("join", "Join Node", "tracking-agent", "parallel1", "parallel2"),
 		},
-		Edges: []mission.MissionEdge{
+		Edges: []*missionpb.MissionEdge{
 			{From: "start", To: "parallel1"},
 			{From: "start", To: "parallel2"},
 			{From: "parallel1", To: "join"},
