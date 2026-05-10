@@ -177,6 +177,14 @@ check-no-skipped-tests:
 	@bash scripts/check-no-skipped-tests.sh
 	@echo "check-no-skipped-tests PASSED"
 
+# check-noun-contract: enforce the verb/noun extension contract
+# from mission-verb-noun-registry Requirement 1. For every
+# NodeType enum value, asserts the four pieces are present:
+# config message in oneof, registered handler package,
+# e2e fixture, unit tests. Spec: mission-verb-noun-registry.
+check-noun-contract:
+	@bash scripts/check-noun-contract.sh
+
 # Run all checks before commit
 check: fmt vet lint test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests
 	@echo "All checks passed!"
