@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.37.0](https://github.com/zero-day-ai/gibson/compare/v0.36.0...v0.37.0) (2026-05-10)
+
+
+### Features
+
+* **mission:** delete mirror struct + ship offline storage migrator ([#35](https://github.com/zero-day-ai/gibson/issues/35)) ([44d9ea3](https://github.com/zero-day-ai/gibson/commit/44d9ea344af6e3f016b2d5575b6d05677e02361f))
+
 ## [0.36.0](https://github.com/zero-day-ai/gibson/compare/v0.35.1...v0.36.0) (2026-05-10)
 
 
