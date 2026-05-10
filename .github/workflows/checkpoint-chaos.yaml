@@ -28,12 +28,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout core/gibson
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: core/gibson
 
       - name: Checkout enterprise (sibling)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: zero-day-ai/enterprise
           path: enterprise

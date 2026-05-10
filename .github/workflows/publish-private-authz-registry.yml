@@ -41,7 +41,7 @@ jobs:
       REGISTRY: ghcr.io
       IMAGE: ghcr.io/${{ github.repository_owner }}/internal-authz-registry
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref_name }}
 
