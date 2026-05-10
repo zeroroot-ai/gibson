@@ -125,7 +125,7 @@ func TestMissionLifecycle(t *testing.T) {
 	run := newTestMissionRun(missionID)
 
 	// Bootstrap the mission into the graph.
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	require.NoError(t, err, "Bootstrap should succeed for a well-formed mission")
 	require.NotNil(t, result, "Bootstrap should return a non-nil BootstrapResult")
 	assert.NotEmpty(t, result.MissionRunID, "BootstrapResult should carry a MissionRunID")
@@ -203,7 +203,7 @@ func TestMissionEventStreamOrdering(t *testing.T) {
 	}
 
 	run := newTestMissionRun(missionID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	require.NoError(t, err, "Bootstrap should succeed for a parallel mission")
 	require.NotNil(t, result)
 
@@ -274,7 +274,7 @@ func TestMissionStop(t *testing.T) {
 		}
 
 		run := newTestMissionRun(missionID)
-		result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+		result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 		require.NoError(t, err)
 		require.NotNil(t, result)
 
@@ -317,7 +317,7 @@ func TestMissionStop(t *testing.T) {
 		}
 
 		run := newTestMissionRun(missionID)
-		result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+		result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 		require.NoError(t, err)
 		require.NotNil(t, result)
 
@@ -404,7 +404,7 @@ func TestMissionVariables(t *testing.T) {
 	// Bootstrap must succeed even with unresolved variable placeholders in inputs;
 	// variable resolution happens at runtime, not at bootstrap time.
 	run := newTestMissionRun(missionID)
-	result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+	result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 	require.NoError(t, err, "Bootstrap should succeed with unresolved variable placeholders")
 	require.NotNil(t, result)
 	assert.NotEmpty(t, result.MissionRunID)
@@ -489,7 +489,7 @@ func TestMultipleConcurrentMissions(t *testing.T) {
 			}
 
 			run := newTestMissionRun(missionID)
-			result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+			result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 			if err != nil {
 				results[i] = bootstrapResult{err: fmt.Errorf("bootstrap: %w", err)}
 				return
@@ -631,7 +631,7 @@ func TestMissionBootstrapAndObserve(t *testing.T) {
 	t.Run("Bootstrap Mission", func(t *testing.T) {
 		bootstrapper := daemon.NewGraphBootstrapper(graphClient, logger)
 		run := newTestMissionRun(missionID)
-		result, err := bootstrapper.Bootstrap(ctx, m, def, run)
+		result, err := bootstrapper.Bootstrap(ctx, m, mustProtoDef(t, def), run)
 		require.NoError(t, err, "Bootstrap should succeed")
 		require.NotNil(t, result, "Bootstrap result should not be nil")
 		assert.NotEmpty(t, result.MissionRunID, "Bootstrap result should carry a MissionRunID")

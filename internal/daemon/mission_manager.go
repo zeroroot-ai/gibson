@@ -692,22 +692,9 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		return
 	}
 
-	// Bootstrap mission graph structure before execution. PR4a bridge:
-	// Bootstrap still consumes mirror MissionDefinition; convert via
-	// mission.ProtoToMirror until PR4b retypes Bootstrap.
-	bootstrapDef, ptmErr := mission.ProtoToMirror(def)
-	if ptmErr != nil {
-		m.logger.Error("failed to convert mission def for bootstrap", "error", ptmErr, "mission_id", missionID)
-		m.emitEvent(eventChan, api.MissionEventData{
-			EventType: "mission.failed",
-			Timestamp: time.Now(),
-			MissionID: missionID,
-			Error:     fmt.Sprintf("failed to convert mission for bootstrap: %v", ptmErr),
-		})
-		return
-	}
+	// Bootstrap mission graph structure before execution.
 	bootstrapper := NewGraphBootstrapper(graphClient, m.logger)
-	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.mission, bootstrapDef, missionRun)
+	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.mission, def, missionRun)
 	if err != nil {
 		m.logger.Error("failed to bootstrap mission graph", "error", err, "mission_id", missionID)
 		m.emitEvent(eventChan, api.MissionEventData{
@@ -827,10 +814,8 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	var decisionLogWriter orchestrator.DecisionLogWriter
 	var otelDecisionLogAdapter *observability.OTelDecisionLogWriterAdapter // Keep reference for Close
 	if m.otelStack != nil && m.otelStack.MissionTracer != nil {
-		// Convert mission state to schema format for OTel. PR4a bridge:
-		// convertToSchemaMission still consumes mirror; reuse the
-		// bootstrapDef computed above. PR4b retypes convertToSchemaMission.
-		schemaMission := convertToSchemaMission(active.mission, bootstrapDef)
+		// Convert mission state to schema format for OTel.
+		schemaMission := convertToSchemaMission(active.mission, def)
 
 		// Create OTel adapter with tracer and schema mission
 		logAdapter, err := observability.NewOTelDecisionLogWriterAdapter(ctx, m.otelStack.MissionTracer, schemaMission)
@@ -1621,7 +1606,7 @@ func buildMissionTraceSummary(result *orchestrator.OrchestratorResult, status mi
 // storeMissionInGraphRAG stored a mission definition in the shared Neo4j knowledge graph.
 // The shared-Neo4j client has been removed (spec graphrag-tenant-scope). This stub
 // remains until per-tenant mission graph storage is implemented in a follow-up spec.
-func (m *missionManager) storeMissionInGraphRAG(_ context.Context, _ *mission.MissionDefinition) error {
+func (m *missionManager) storeMissionInGraphRAG(_ context.Context, _ *missionpb.MissionDefinition) error {
 	m.logger.Debug("storeMissionInGraphRAG: shared-Neo4j client removed; skipping (spec graphrag-tenant-scope)")
 	return nil
 }
@@ -1642,51 +1627,51 @@ type graphEdge struct {
 
 // convertToGraphNodes converts a mission definition to graph nodes.
 // This creates nodes for the mission itself, steps, agents, and tools.
-func (m *missionManager) convertToGraphNodes(def *mission.MissionDefinition) []graphNode {
+func (m *missionManager) convertToGraphNodes(def *missionpb.MissionDefinition) []graphNode {
 	var nodes []graphNode
 
+	missionID := def.GetId()
+
 	// Create mission node
-	missionNode := graphNode{
-		Label: "Mission",
-		Properties: map[string]any{
-			"id":          def.ID.String(),
-			"name":        def.Name,
-			"description": def.Description,
-			"version":     def.Version,
-			"target_ref":  def.TargetRef,
-			"created_at":  def.CreatedAt.Unix(),
-		},
+	missionProps := map[string]any{
+		"id":          missionID,
+		"name":        def.GetName(),
+		"description": def.GetDescription(),
+		"version":     def.GetVersion(),
+		"target_ref":  def.GetTargetRef(),
 	}
-	nodes = append(nodes, missionNode)
+	if ts := def.GetCreatedAt(); ts != nil {
+		missionProps["created_at"] = ts.AsTime().Unix()
+	}
+	nodes = append(nodes, graphNode{Label: "Mission", Properties: missionProps})
 
 	// Create nodes for each mission node (steps)
-	for nodeID, node := range def.Nodes {
+	for nodeID, node := range def.GetNodes() {
 		stepNode := graphNode{
 			Label: "MissionStep",
 			Properties: map[string]any{
 				"id":          nodeID,
-				"mission_id":  def.ID.String(),
-				"type":        string(node.Type),
-				"description": node.Description,
+				"mission_id":  missionID,
+				"type":        nodeTypeName(node.GetType()),
+				"description": node.GetDescription(),
 			},
 		}
 
-		// Add agent-specific properties
-		if node.Type == mission.NodeTypeAgent && node.AgentName != "" {
-			stepNode.Properties["agent_name"] = node.AgentName
-			if node.AgentTask != nil {
-				stepNode.Properties["agent_goal"] = node.AgentTask.Goal
-				stepNode.Properties["agent_description"] = node.AgentTask.Description
+		switch node.GetType() {
+		case missionpb.NodeType_NODE_TYPE_AGENT:
+			if name := node.GetAgentConfig().GetAgentName(); name != "" {
+				stepNode.Properties["agent_name"] = name
+				if t := node.GetAgentConfig().GetTask(); t != nil {
+					stepNode.Properties["agent_goal"] = t.GetGoal()
+				}
 			}
-		}
-
-		// Add tool-specific properties
-		if node.Type == mission.NodeTypeTool && node.ToolName != "" {
-			stepNode.Properties["tool_name"] = node.ToolName
-			if node.ToolInput != nil {
-				// Store tool input as JSON string
-				if inputJSON, err := json.Marshal(node.ToolInput); err == nil {
-					stepNode.Properties["tool_input"] = string(inputJSON)
+		case missionpb.NodeType_NODE_TYPE_TOOL:
+			if tname := node.GetToolConfig().GetToolName(); tname != "" {
+				stepNode.Properties["tool_name"] = tname
+				if input := node.GetToolConfig().GetInput(); len(input) > 0 {
+					if inputJSON, err := json.Marshal(input); err == nil {
+						stepNode.Properties["tool_input"] = string(inputJSON)
+					}
 				}
 			}
 		}
@@ -1699,36 +1684,36 @@ func (m *missionManager) convertToGraphNodes(def *mission.MissionDefinition) []g
 
 // convertToGraphEdges converts a mission definition to graph edges.
 // This creates relationships for dependencies and usage patterns.
-func (m *missionManager) convertToGraphEdges(def *mission.MissionDefinition) []graphEdge {
+func (m *missionManager) convertToGraphEdges(def *missionpb.MissionDefinition) []graphEdge {
 	var edges []graphEdge
 
+	missionID := def.GetId()
+
 	// Create edges for mission -> step relationships
-	for nodeID := range def.Nodes {
-		edge := graphEdge{
-			FromNode: def.ID.String(),
+	for nodeID := range def.GetNodes() {
+		edges = append(edges, graphEdge{
+			FromNode: missionID,
 			ToNode:   nodeID,
 			RelType:  "HAS_STEP",
 			Properties: map[string]any{
-				"mission_id": def.ID.String(),
+				"mission_id": missionID,
 			},
-		}
-		edges = append(edges, edge)
+		})
 	}
 
 	// Create edges for step dependencies (mission edges)
-	for _, missionEdge := range def.Edges {
+	for _, missionEdge := range def.GetEdges() {
 		edge := graphEdge{
-			FromNode: missionEdge.From,
-			ToNode:   missionEdge.To,
+			FromNode: missionEdge.GetFrom(),
+			ToNode:   missionEdge.GetTo(),
 			RelType:  "DEPENDS_ON",
 			Properties: map[string]any{
-				"mission_id": def.ID.String(),
+				"mission_id": missionID,
 			},
 		}
 
-		// Add condition if present
-		if missionEdge.Condition != "" {
-			edge.Properties["condition"] = missionEdge.Condition
+		if cond := missionEdge.GetCondition(); cond != "" {
+			edge.Properties["condition"] = cond
 		}
 
 		edges = append(edges, edge)

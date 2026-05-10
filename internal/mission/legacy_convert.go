@@ -26,6 +26,17 @@ func MirrorToProto(m *MissionDefinition) (*missionv1.MissionDefinition, error) {
 	return mirrorDefinitionToProto(m)
 }
 
+// MirrorNodeToProto converts a single mirror MissionNode to its proto
+// equivalent. Same transitional purpose as MirrorToProto. Used by test
+// fixtures that pass individual nodes into proto-typed daemon helpers
+// (e.g. convertToSchemaNode). PR4c removes both this helper and the
+// mirror struct.
+//
+// Spec: mission-mirror-final-deletion (PR4b transitional bridge).
+func MirrorNodeToProto(id string, mn *MissionNode) (*missionv1.MissionNode, error) {
+	return mirrorNodeToProto(id, mn)
+}
+
 // LegacyMirrorJSONToProto parses legacy flat-mirror-shape JSON bytes
 // (produced by encoding/json on *mission.MissionDefinition before the
 // PR2 mirror→proto migration) and returns the equivalent

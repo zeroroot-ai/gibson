@@ -12,6 +12,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
+	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // GraphBootstrapper handles bootstrapping mission data into Neo4j graph.
@@ -46,12 +48,13 @@ func NewGraphBootstrapper(client graph.GraphClient, logger *slog.Logger) *GraphB
 //   - def: The mission definition containing mission metadata
 //
 // Returns a schema.Mission ready for insertion into Neo4j.
-func convertToSchemaMission(m *mission.Mission, def *mission.MissionDefinition) *schema.Mission {
+func convertToSchemaMission(m *mission.Mission, def *missionpb.MissionDefinition) *schema.Mission {
 	// Extract objective from mission definition description
 	// Use first sentence as objective, or full description if no sentence boundary
-	objective := def.Description
-	if idx := strings.Index(def.Description, "."); idx > 0 {
-		objective = strings.TrimSpace(def.Description[:idx+1])
+	description := def.GetDescription()
+	objective := description
+	if idx := strings.Index(description, "."); idx > 0 {
+		objective = strings.TrimSpace(description[:idx+1])
 	}
 
 	// Get target reference - prefer metadata value (URL) over TargetID
@@ -128,95 +131,86 @@ func convertToSchemaMission(m *mission.Mission, def *mission.MissionDefinition) 
 // and sets up all execution parameters including timeout, retry policy, and task configuration.
 // Nodes with dependencies start in "pending" status, while nodes without dependencies (entry points)
 // start in "ready" status.
-func convertToSchemaNode(missionID types.ID, nodeDef *mission.MissionNode, hasDependencies bool) *schema.MissionNode {
+func convertToSchemaNode(missionID types.ID, nodeDef *missionpb.MissionNode, hasDependencies bool) *schema.MissionNode {
 	// Generate a new unique ID for this mission node instance
 	nodeID := types.NewID()
 
 	// Determine the node type and create the appropriate schema node
 	var node *schema.MissionNode
-	switch nodeDef.Type {
-	case mission.NodeTypeAgent:
-		// Create an agent node with agent name
+	switch nodeDef.GetType() {
+	case missionpb.NodeType_NODE_TYPE_AGENT:
 		node = schema.NewAgentNode(
 			nodeID,
 			missionID,
-			nodeDef.ID, // Use definition ID as the name
-			nodeDef.Description,
-			nodeDef.AgentName,
+			nodeDef.GetId(),
+			nodeDef.GetDescription(),
+			nodeDef.GetAgentConfig().GetAgentName(),
 		)
-	case mission.NodeTypeTool:
-		// Create a tool node with tool name
+	case missionpb.NodeType_NODE_TYPE_TOOL:
 		node = schema.NewToolNode(
 			nodeID,
 			missionID,
-			nodeDef.ID, // Use definition ID as the name
-			nodeDef.Description,
-			nodeDef.ToolName,
+			nodeDef.GetId(),
+			nodeDef.GetDescription(),
+			nodeDef.GetToolConfig().GetToolName(),
 		)
 	default:
 		// For other node types (plugin, condition, parallel, join), default to tool type
 		// These are not currently supported in the graph schema but we'll map them as tools
-		// to maintain consistency
+		// to maintain consistency.
 		node = schema.NewToolNode(
 			nodeID,
 			missionID,
-			nodeDef.ID,
-			nodeDef.Description,
-			string(nodeDef.Type), // Use the type name as the tool name
+			nodeDef.GetId(),
+			nodeDef.GetDescription(),
+			nodeTypeName(nodeDef.GetType()),
 		)
 	}
 
-	// Set timeout if specified in the definition
-	if nodeDef.Timeout > 0 {
-		node.Timeout = nodeDef.Timeout
+	if t := nodeDef.GetTimeout(); t != nil {
+		node.Timeout = t.AsDuration()
 	}
 
-	// Convert and set retry policy if present
-	if nodeDef.RetryPolicy != nil {
+	if rp := nodeDef.GetRetryPolicy(); rp != nil {
 		retryPolicy := &schema.RetryPolicy{
-			MaxRetries: nodeDef.RetryPolicy.MaxRetries,
-			Backoff:    nodeDef.RetryPolicy.InitialDelay,
-			Strategy:   string(nodeDef.RetryPolicy.BackoffStrategy),
-			MaxBackoff: nodeDef.RetryPolicy.MaxDelay,
+			MaxRetries: int(rp.GetMaxRetries()),
+			Strategy:   backoffStrategyName(rp.GetBackoffStrategy()),
+		}
+		if d := rp.GetInitialDelay(); d != nil {
+			retryPolicy.Backoff = d.AsDuration()
+		}
+		if d := rp.GetMaxDelay(); d != nil {
+			retryPolicy.MaxBackoff = d.AsDuration()
 		}
 		node.RetryPolicy = retryPolicy
 	}
 
-	// Set task configuration based on node type
-	// For agents, use the full task structure
-	// For tools, use the tool input
-	// For other types, use metadata or an empty map
+	// Set task configuration based on node type. The proto schema dropped
+	// the legacy mirror's per-task Name/Description/Input fields when the
+	// canonical types were lifted into the SDK; only Goal and Context
+	// survive on the proto Task. Tool/plugin inputs are typed map<string,
+	// string> on the proto so values flow through unchanged.
 	taskConfig := make(map[string]any)
-	switch nodeDef.Type {
-	case mission.NodeTypeAgent:
-		if nodeDef.AgentTask != nil {
-			// Convert agent task to map
-			taskConfig = nodeDef.AgentTask.Input
-			if taskConfig == nil {
-				taskConfig = make(map[string]any)
-			}
-			// Add task metadata
-			taskConfig["name"] = nodeDef.AgentTask.Name
-			taskConfig["description"] = nodeDef.AgentTask.Description
-			taskConfig["goal"] = nodeDef.AgentTask.Goal
-			if nodeDef.AgentTask.Context != nil {
-				taskConfig["context"] = nodeDef.AgentTask.Context
+	switch nodeDef.GetType() {
+	case missionpb.NodeType_NODE_TYPE_AGENT:
+		if t := nodeDef.GetAgentConfig().GetTask(); t != nil {
+			taskConfig["goal"] = t.GetGoal()
+			if ctx := t.GetContext(); len(ctx) > 0 {
+				taskConfig["context"] = typedValueMapToAnyMap(ctx)
 			}
 		}
-	case mission.NodeTypeTool:
-		if nodeDef.ToolInput != nil {
-			taskConfig = nodeDef.ToolInput
+	case missionpb.NodeType_NODE_TYPE_TOOL:
+		for k, v := range nodeDef.GetToolConfig().GetInput() {
+			taskConfig[k] = v
 		}
-	case mission.NodeTypePlugin:
-		// For plugins, include method and params
-		if nodeDef.PluginParams != nil {
-			taskConfig = nodeDef.PluginParams
+	case missionpb.NodeType_NODE_TYPE_PLUGIN:
+		for k, v := range nodeDef.GetPluginConfig().GetParams() {
+			taskConfig[k] = v
 		}
-		taskConfig["plugin_method"] = nodeDef.PluginMethod
+		taskConfig["plugin_method"] = nodeDef.GetPluginConfig().GetMethod()
 	default:
-		// For other types, use metadata if available
-		if nodeDef.Metadata != nil {
-			taskConfig = nodeDef.Metadata
+		for k, v := range nodeDef.GetMetadata() {
+			taskConfig[k] = v
 		}
 	}
 	node.TaskConfig = taskConfig
@@ -263,7 +257,7 @@ func convertToSchemaNode(missionID types.ID, nodeDef *mission.MissionNode, hasDe
 //
 // All operations use MERGE for Mission/MissionNodes to ensure idempotency.
 // MissionRuns always use CREATE to ensure each execution is tracked uniquely.
-func (b *GraphBootstrapper) Bootstrap(ctx context.Context, m *mission.Mission, def *mission.MissionDefinition, run *mission.MissionRun) (*BootstrapResult, error) {
+func (b *GraphBootstrapper) Bootstrap(ctx context.Context, m *mission.Mission, def *missionpb.MissionDefinition, run *mission.MissionRun) (*BootstrapResult, error) {
 	// Create MissionQueries instance for graph operations
 	missionQueries := queries.NewMissionQueries(b.graphClient)
 
@@ -299,55 +293,47 @@ func (b *GraphBootstrapper) Bootstrap(ctx context.Context, m *mission.Mission, d
 	// Map YAML node IDs to generated types.IDs for dependency creation
 	nodeIDMap := make(map[string]types.ID)
 
-	for _, nodeDef := range def.Nodes {
-		// Determine if node has dependencies
-		hasDependencies := len(nodeDef.Dependencies) > 0
+	for _, nodeDef := range def.GetNodes() {
+		hasDependencies := len(nodeDef.GetDependencies()) > 0
 
-		// Convert to schema node
 		schemaNode := convertToSchemaNode(m.ID, nodeDef, hasDependencies)
 
-		// Create node in graph
 		if err := missionQueries.CreateMissionNode(ctx, schemaNode); err != nil {
-			return nil, fmt.Errorf("failed to create mission node %s: %w", nodeDef.ID, err)
+			return nil, fmt.Errorf("failed to create mission node %s: %w", nodeDef.GetId(), err)
 		}
 
-		// Store mapping for dependency creation
-		nodeIDMap[nodeDef.ID] = schemaNode.ID
+		nodeIDMap[nodeDef.GetId()] = schemaNode.ID
 
 		b.logger.Debug("created mission node in graph",
-			"node_yaml_id", nodeDef.ID,
+			"node_yaml_id", nodeDef.GetId(),
 			"node_graph_id", schemaNode.ID,
-			"node_type", nodeDef.Type)
+			"node_type", nodeDef.GetType())
 	}
 
 	b.logger.Info("created mission nodes in graph",
 		"mission_id", m.ID,
-		"node_count", len(def.Nodes))
+		"node_count", len(def.GetNodes()))
 
 	// Step 4: Create dependency relationships
 	dependencyCount := 0
-	for _, nodeDef := range def.Nodes {
-		// Get the graph ID for this node
-		fromNodeID, ok := nodeIDMap[nodeDef.ID]
+	for _, nodeDef := range def.GetNodes() {
+		fromNodeID, ok := nodeIDMap[nodeDef.GetId()]
 		if !ok {
-			return nil, fmt.Errorf("node ID %s not found in mapping", nodeDef.ID)
+			return nil, fmt.Errorf("node ID %s not found in mapping", nodeDef.GetId())
 		}
 
-		// Create dependency relationships for each dependency
-		for _, depID := range nodeDef.Dependencies {
-			// Look up the dependency's graph ID
+		for _, depID := range nodeDef.GetDependencies() {
 			toNodeID, ok := nodeIDMap[depID]
 			if !ok {
 				return nil, fmt.Errorf("dependency node ID %s not found in mapping", depID)
 			}
 
-			// Create the DEPENDS_ON relationship
 			if err := missionQueries.CreateNodeDependency(ctx, fromNodeID, toNodeID); err != nil {
-				return nil, fmt.Errorf("failed to create dependency %s->%s: %w", nodeDef.ID, depID, err)
+				return nil, fmt.Errorf("failed to create dependency %s->%s: %w", nodeDef.GetId(), depID, err)
 			}
 
 			b.logger.Debug("created dependency relationship",
-				"from_yaml_id", nodeDef.ID,
+				"from_yaml_id", nodeDef.GetId(),
 				"to_yaml_id", depID,
 				"from_graph_id", fromNodeID,
 				"to_graph_id", toNodeID)
@@ -363,10 +349,80 @@ func (b *GraphBootstrapper) Bootstrap(ctx context.Context, m *mission.Mission, d
 	b.logger.Info("bootstrap complete",
 		"mission_id", m.ID,
 		"mission_run_id", run.ID,
-		"nodes_created", len(def.Nodes),
+		"nodes_created", len(def.GetNodes()),
 		"dependencies_created", dependencyCount)
 
 	return &BootstrapResult{
 		MissionRunID: run.ID.String(),
 	}, nil
+}
+
+// nodeTypeName returns a stable lower-case label for a proto NodeType,
+// matching the legacy mirror's NodeType string values that downstream
+// graph queries used to filter on.
+func nodeTypeName(t missionpb.NodeType) string {
+	switch t {
+	case missionpb.NodeType_NODE_TYPE_AGENT:
+		return "agent"
+	case missionpb.NodeType_NODE_TYPE_TOOL:
+		return "tool"
+	case missionpb.NodeType_NODE_TYPE_PLUGIN:
+		return "plugin"
+	case missionpb.NodeType_NODE_TYPE_CONDITION:
+		return "condition"
+	case missionpb.NodeType_NODE_TYPE_PARALLEL:
+		return "parallel"
+	case missionpb.NodeType_NODE_TYPE_JOIN:
+		return "join"
+	default:
+		return "unspecified"
+	}
+}
+
+// backoffStrategyName returns a stable lower-case label matching the
+// mirror's BackoffStrategy string constants ("constant", "linear",
+// "exponential") for downstream consumers.
+func backoffStrategyName(s missionpb.BackoffStrategy) string {
+	switch s {
+	case missionpb.BackoffStrategy_BACKOFF_STRATEGY_CONSTANT:
+		return "constant"
+	case missionpb.BackoffStrategy_BACKOFF_STRATEGY_LINEAR:
+		return "linear"
+	case missionpb.BackoffStrategy_BACKOFF_STRATEGY_EXPONENTIAL:
+		return "exponential"
+	default:
+		return ""
+	}
+}
+
+// typedValueMapToAnyMap projects a proto map<string,TypedValue> down to
+// a Go-native map[string]any for storage in schema.MissionNode.TaskConfig.
+// Only the kinds the orchestrator actually emits are unwrapped; unknown
+// kinds fall through to nil rather than crashing.
+func typedValueMapToAnyMap(in map[string]*commonpb.TypedValue) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = typedValueToAny(v)
+	}
+	return out
+}
+
+func typedValueToAny(tv *commonpb.TypedValue) any {
+	if tv == nil {
+		return nil
+	}
+	switch v := tv.GetKind().(type) {
+	case *commonpb.TypedValue_StringValue:
+		return v.StringValue
+	case *commonpb.TypedValue_IntValue:
+		return v.IntValue
+	case *commonpb.TypedValue_DoubleValue:
+		return v.DoubleValue
+	case *commonpb.TypedValue_BoolValue:
+		return v.BoolValue
+	case *commonpb.TypedValue_BytesValue:
+		return v.BytesValue
+	default:
+		return nil
+	}
 }
