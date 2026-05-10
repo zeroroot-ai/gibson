@@ -1,0 +1,26 @@
+# E2E mission fixture — single AGENT node.
+#
+# Spec: mission-verb-noun-registry Requirement 1 (extension
+# contract) + Task 19.
+#
+# Submit via gibson-cli mission submit, or load through the
+# daemon's CreateMission RPC. The AGENT executor (registered
+# via internal/orchestrator/nodes/agent) delegates back to
+# the Actor's executeAgent path, preserving every existing
+# behavior (policy gate, implicit checkpoint, harness
+# delegation, finding extraction).
+
+name: e2e-agent
+description: AGENT noun e2e fixture.
+version: "1.0.0"
+target_ref: ""
+
+nodes:
+  scan:
+    id: scan
+    type: NODE_TYPE_AGENT
+    agent_config:
+      agent_name: nmap-agent
+
+entry_points: ["scan"]
+exit_points: ["scan"]

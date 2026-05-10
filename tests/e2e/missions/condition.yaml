@@ -1,0 +1,49 @@
+# E2E mission fixture — CONDITION node with CEL expression.
+#
+# Spec: mission-verb-noun-registry Requirement 5 + Task 19.
+#
+# The CONDITION executor (internal/orchestrator/nodes/condition)
+# compiles ConditionNodeConfig.expression as CEL (default when
+# language is UNSPECIFIED). On true → true_branch nodes ready,
+# false_branch skipped. Inverted on false.
+
+name: e2e-condition
+description: CONDITION noun e2e fixture.
+version: "1.0.0"
+target_ref: ""
+
+nodes:
+  scan:
+    id: scan
+    type: NODE_TYPE_AGENT
+    agent_config:
+      agent_name: nmap-agent
+
+  has_findings:
+    id: has_findings
+    type: NODE_TYPE_CONDITION
+    condition_config:
+      expression: "size(nodes.scan.findings_count) > 0"
+      language: LANGUAGE_CEL
+      true_branch: ["enrich"]
+      false_branch: ["report_empty"]
+    dependencies: ["scan"]
+
+  enrich:
+    id: enrich
+    type: NODE_TYPE_AGENT
+    agent_config:
+      agent_name: shodan-agent
+
+  report_empty:
+    id: report_empty
+    type: NODE_TYPE_AGENT
+    agent_config:
+      agent_name: report-agent
+
+edges:
+  - from: scan
+    to: has_findings
+
+entry_points: ["scan"]
+exit_points: ["enrich", "report_empty"]

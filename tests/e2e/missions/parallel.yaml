@@ -1,0 +1,41 @@
+# E2E mission fixture — PARALLEL node with multiple sub-nodes.
+#
+# Spec: mission-verb-noun-registry Requirement 6 + Task 19.
+#
+# The PARALLEL executor (internal/orchestrator/nodes/parallel)
+# spawns one goroutine per sub-node, gated by a semaphore at
+# effectiveConcurrency = min(node.MaxConcurrency, orchestrator
+# global cap). Sibling failures are isolated — one failing
+# sub-node does not cancel its siblings.
+#
+# Existing checkpoint markers in
+# internal/orchestrator/checkpoint_integration_parallel.go fire
+# on group completion as they do today.
+
+name: e2e-parallel
+description: PARALLEL noun e2e fixture (3 concurrent agents).
+version: "1.0.0"
+target_ref: ""
+
+nodes:
+  fanout:
+    id: fanout
+    type: NODE_TYPE_PARALLEL
+    parallel_config:
+      max_concurrency: 3
+      sub_nodes:
+        - id: scan_a
+          type: NODE_TYPE_AGENT
+          agent_config:
+            agent_name: nmap-agent
+        - id: scan_b
+          type: NODE_TYPE_AGENT
+          agent_config:
+            agent_name: webcrawl-agent
+        - id: scan_c
+          type: NODE_TYPE_AGENT
+          agent_config:
+            agent_name: shodan-agent
+
+entry_points: ["fanout"]
+exit_points: ["fanout"]

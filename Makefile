@@ -186,7 +186,7 @@ check-noun-contract:
 	@bash scripts/check-noun-contract.sh
 
 # Run all checks before commit
-check: fmt vet lint test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests
+check: fmt vet lint test-race check-no-tenant-id check-fga-headers check-no-gibson-io check-no-skipped-tests check-noun-contract
 	@echo "All checks passed!"
 
 # Run authorization-specific checks: vet + unit tests + integration tests (requires Docker)

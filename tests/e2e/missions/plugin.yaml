@@ -1,0 +1,25 @@
+# E2E mission fixture — single PLUGIN node.
+#
+# Spec: mission-verb-noun-registry Requirement 4 + Task 19.
+#
+# The PLUGIN executor (internal/orchestrator/nodes/plugin)
+# validates plugin_name + method, then delegates to the
+# Actor's plugin gRPC dispatch.
+
+name: e2e-plugin
+description: PLUGIN noun e2e fixture.
+version: "1.0.0"
+target_ref: ""
+
+nodes:
+  enrich:
+    id: enrich
+    type: NODE_TYPE_PLUGIN
+    plugin_config:
+      plugin_name: shodan
+      method: host_lookup
+      params:
+        host: "127.0.0.1"
+
+entry_points: ["enrich"]
+exit_points: ["enrich"]

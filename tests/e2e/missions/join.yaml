@@ -1,0 +1,44 @@
+# E2E mission fixture — JOIN node merging non-parallel branches.
+#
+# Spec: mission-verb-noun-registry Requirement 7 + Task 19.
+#
+# Two upstream agent nodes (scan, enrich) run sequentially via
+# edges; a JOIN node merges their results via
+# MERGE_STRATEGY_CONCAT. This deliberately exercises JOIN's
+# separability from PARALLEL — JOIN waits on independently
+# scheduled siblings, not on a parallel-group's sub-nodes.
+
+name: e2e-join
+description: JOIN noun e2e fixture (CONCAT merge of two branches).
+version: "1.0.0"
+target_ref: ""
+
+nodes:
+  scan:
+    id: scan
+    type: NODE_TYPE_AGENT
+    agent_config:
+      agent_name: nmap-agent
+
+  enrich:
+    id: enrich
+    type: NODE_TYPE_AGENT
+    agent_config:
+      agent_name: shodan-agent
+
+  merge:
+    id: merge
+    type: NODE_TYPE_JOIN
+    join_config:
+      wait_for: ["scan", "enrich"]
+      strategy: MERGE_STRATEGY_CONCAT
+    dependencies: ["scan", "enrich"]
+
+edges:
+  - from: scan
+    to: merge
+  - from: enrich
+    to: merge
+
+entry_points: ["scan", "enrich"]
+exit_points: ["merge"]
