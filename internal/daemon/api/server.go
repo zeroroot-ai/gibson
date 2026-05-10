@@ -289,21 +289,23 @@ type findingStoreIface interface {
 
 // MissionQuotaChecker is the narrow interface the DaemonServer uses to enforce
 // per-tenant quotas. It is satisfied by *component.QuotaManager.
+//
+// Memory enforcement (CheckMemoryQuota) was removed by spec
+// plans-and-quotas-simplification — only concurrent_missions and
+// concurrent_agents are enforced going forward.
 type MissionQuotaChecker interface {
 	// CheckMissionQuota returns a codes.ResourceExhausted error when the tenant
-	// in ctx has met or exceeded its configured mission limit.
+	// in ctx has met or exceeded its configured concurrent_missions limit.
 	CheckMissionQuota(ctx context.Context) error
 
 	// CheckAgentQuota returns a codes.ResourceExhausted error when the tenant
-	// in ctx has met or exceeded its configured agent limit.
+	// in ctx has met or exceeded its configured concurrent_agents limit
+	// (counted only while bound to an in-flight task — idle agents do not
+	// count).
 	CheckAgentQuota(ctx context.Context) error
 
-	// CheckMemoryQuota returns a codes.ResourceExhausted error when allocating
-	// additionalMB would exceed the tenant's configured memory limit.
-	CheckMemoryQuota(ctx context.Context, additionalMB int64) error
-
-	// IncrementMissionCount increments the running mission counter for the
-	// tenant in ctx. Called after successful mission submission.
+	// IncrementMissionCount increments the active-mission counter for the
+	// tenant in ctx. Called when a mission transitions queued → running.
 	IncrementMissionCount(ctx context.Context) error
 }
 
@@ -1137,11 +1139,9 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 			s.logger.Warn("mission submission rejected: agent quota exceeded", "error", err)
 			return err
 		}
-		// Reserve a default memory budget per mission (10MB) for working + mission memory.
-		if err := s.quotaManager.CheckMemoryQuota(stream.Context(), 10); err != nil {
-			s.logger.Warn("mission submission rejected: memory quota exceeded", "error", err)
-			return err
-		}
+		// Memory-quota enforcement was removed by spec
+		// plans-and-quotas-simplification (it was unenforced and the Redis
+		// key family was dead). Future memory checks ship in their own spec.
 	}
 
 	// Start mission and get event channel
