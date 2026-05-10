@@ -14,7 +14,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"time"
 
@@ -87,12 +86,16 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 	}
 	defer storeRelease()
 
-	// Parse the mission JSON into a MissionDefinition.
+	// Parse the mission JSON into a MissionDefinition. UnmarshalToMirror
+	// is the dual-shape reader (proto-shape from PR2+ writers, legacy
+	// flat-mirror from earlier daemon versions / older clients).
 	var def mission.MissionDefinition
 	if req.MissionDefinitionJSON != "" {
-		if jsonErr := json.Unmarshal([]byte(req.MissionDefinitionJSON), &def); jsonErr != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "failed to parse mission JSON: %v", jsonErr)
+		parsed, parseErr := mission.UnmarshalToMirror([]byte(req.MissionDefinitionJSON))
+		if parseErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "failed to parse mission JSON: %v", parseErr)
 		}
+		def = *parsed
 	}
 
 	// Overlay explicit name/description from the request.

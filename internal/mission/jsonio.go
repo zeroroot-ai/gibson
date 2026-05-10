@@ -40,22 +40,28 @@ func MarshalDefinitionJSON(def *missionv1.MissionDefinition) ([]byte, error) {
 	return b, nil
 }
 
-// UnmarshalDefinitionJSON parses canonical (proto-shaped) JSON bytes into
-// a *missionv1.MissionDefinition using protojson.
+// UnmarshalDefinitionJSON parses JSON bytes into a *missionv1.MissionDefinition.
+// Accepts both the canonical proto shape (oneof config envelopes) and
+// the legacy flat-mirror shape produced by encoding/json on
+// mission.MissionDefinition before the mirror→proto migration.
 //
-// Unknown fields are discarded so the reader can outlive minor schema
-// extensions on the writer side without a coordinated bump. Strict
-// validation lives at the protovalidate gRPC interceptor; this helper is
-// the storage-layer reader and only enforces structural well-formedness.
+// Detection:
+//  1. Try protojson with DiscardUnknown=true. Bytes from PR1+ writers
+//     and from any legacy bytes that happen to carry no MissionNode
+//     entries succeed here.
+//  2. If the result has nodes but none of them populated their oneof
+//     config envelope, the bytes are flat-mirror shaped (proto's
+//     DiscardUnknown silently dropped the unrecognized top-level
+//     per-noun fields like `agent_name`). Re-parse via the legacy
+//     converter (LegacyMirrorJSONToProto), which walks the mirror
+//     struct and emits the proto with config envelopes filled in.
 //
-// Legacy flat-mirror JSON (where node fields like `agent_name` live at
-// the top level of MissionNode rather than inside `agent_config`) is
-// rejected. Stored mirror-shape data must be migrated before PR2's
-// writer flip lands. For dev clusters the migration is a Redis flush;
-// for any data that must be preserved, PR2 ships an offline mirror→proto
-// converter that walks the existing mirror-shape JSON tree.
+// This dual-read path is what lets writers flip to MarshalDefinitionJSON
+// without a coordinated storage migration: in-flight Redis / DB rows
+// from before the flip remain readable. PR3 removes the legacy fallback
+// once the mirror types are deleted.
 //
-// Spec: mission-schema-canonicalization (PR1 of mirror→proto migration).
+// Spec: mission-schema-canonicalization (PR2 of mirror→proto migration).
 func UnmarshalDefinitionJSON(data []byte) (*missionv1.MissionDefinition, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("mission definition: empty JSON")
@@ -65,8 +71,26 @@ func UnmarshalDefinitionJSON(data []byte) (*missionv1.MissionDefinition, error) 
 		DiscardUnknown: true,
 		AllowPartial:   true,
 	}
-	if err := opts.Unmarshal(data, def); err != nil {
-		return nil, fmt.Errorf("mission definition: protojson unmarshal: %w", err)
+	if err := opts.Unmarshal(data, def); err == nil && isProtoShaped(def) {
+		return def, nil
 	}
-	return def, nil
+	return LegacyMirrorJSONToProto(data)
+}
+
+// isProtoShaped returns true if the unmarshaled definition either has
+// no nodes (proto-shape and mirror-shape are indistinguishable here) or
+// has at least one node whose oneof config envelope is populated. The
+// legacy mirror shape leaves all oneof fields empty (since the flat
+// fields don't map into the envelope), so a node graph with universally
+// empty Config strongly indicates the bytes need the legacy fallback.
+func isProtoShaped(def *missionv1.MissionDefinition) bool {
+	if def == nil || len(def.Nodes) == 0 {
+		return true
+	}
+	for _, node := range def.Nodes {
+		if node != nil && node.GetConfig() != nil {
+			return true
+		}
+	}
+	return false
 }

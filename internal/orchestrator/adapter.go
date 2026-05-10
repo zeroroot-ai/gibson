@@ -81,9 +81,12 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 	var err error
 
 	if mis.MissionDefinitionJSON != "" {
-		// Parse mission definition from inline JSON
-		def = &mission.MissionDefinition{}
-		if err = json.Unmarshal([]byte(mis.MissionDefinitionJSON), def); err != nil {
+		// Dual-shape reader: tolerates both proto-shape bytes from
+		// PR2+ writers and legacy flat-mirror bytes from earlier
+		// daemon versions. PR3 deletes the mirror conversion when
+		// in-memory call sites switch to *missionv1.MissionDefinition.
+		def, err = mission.UnmarshalToMirror([]byte(mis.MissionDefinitionJSON))
+		if err != nil {
 			return nil, fmt.Errorf("failed to parse mission definition: %w", err)
 		}
 	} else if mis.MissionDefinitionID != "" {
@@ -576,23 +579,18 @@ func (m *MissionAdapter) parseCheckpointState(checkpoint *mission.MissionCheckpo
 	return state, nil
 }
 
-// ExecuteProto executes a mission using a proto MissionDefinition instead of MissionDefinition.
-// This provides type-safe mission execution with proto enum validation and oneof accessors.
+// ExecuteProto executes a mission using a proto MissionDefinition.
+// The proto is serialized via protojson (canonical wire/storage form
+// per mission-schema-canonicalization PR2) and stored on the mission
+// before delegating to Execute. The Execute reader path is dual-shape
+// tolerant via mission.UnmarshalToMirror, so legacy flat-mirror bytes
+// already in storage continue to work.
 func (m *MissionAdapter) ExecuteProto(ctx context.Context, mis *mission.Mission, missionDef *missionpb.MissionDefinition) (*mission.MissionResult, error) {
-	// Convert proto MissionDefinition to internal MissionDefinition
-	def, err := protoMissionToMissionDefinition(missionDef)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert proto mission to mission definition: %w", err)
-	}
-
-	// Store converted definition in mission for existing Execute method
-	defJSON, err := json.Marshal(def)
+	defJSON, err := mission.MarshalDefinitionJSON(missionDef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal mission definition: %w", err)
 	}
 	mis.MissionDefinitionJSON = string(defJSON)
-
-	// Use existing Execute method
 	return m.Execute(ctx, mis)
 }
 
