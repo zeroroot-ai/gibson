@@ -797,8 +797,16 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		orchestrator.WithThinkerTemperature(0.2),
 	)
 
-	// Create PolicyChecker for data policy enforcement
-	policySource := orchestrator.NewMissionPolicySource(def)
+	// Create PolicyChecker for data policy enforcement. NewMissionPolicySource
+	// consumes the proto MissionDefinition (proto's ReusePolicy is the canonical
+	// home for what the mirror called DataPolicy.{OutputScope,InputScope,Reuse}).
+	// PR4 retypes `def` everywhere so this conversion goes away.
+	defProto, mptErr := mission.MirrorToProto(def)
+	if mptErr != nil {
+		m.logger.Error("mission policy: failed to convert mirror def to proto", "error", mptErr, "mission_id", missionID)
+		return
+	}
+	policySource := orchestrator.NewMissionPolicySource(defProto)
 	nodeStore := orchestrator.NewGraphNodeStore(graphClient, active.missionRun.ID.String())
 	policyChecker := orchestrator.NewPolicyChecker(policySource, nodeStore, m.logger)
 

@@ -11,6 +11,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // GraphLoader implements MissionGraphLoader to store mission definitions in Neo4j.
@@ -62,7 +64,7 @@ func NewGraphLoader(client graph.GraphClient, logger *slog.Logger) *GraphLoader 
 //   - (MissionDefinition)-[:DEFINES]->(Mission)
 //
 // Returns the MissionDefinition node ID (existing or newly created).
-func (g *GraphLoader) LoadMission(ctx context.Context, def *mission.MissionDefinition) (string, error) {
+func (g *GraphLoader) LoadMission(ctx context.Context, def *missionv1.MissionDefinition) (string, error) {
 	if g.graphClient == nil {
 		return "", types.NewError("GRAPH_LOADER", "graph client is nil")
 	}
@@ -71,7 +73,7 @@ func (g *GraphLoader) LoadMission(ctx context.Context, def *mission.MissionDefin
 		return "", types.NewError("GRAPH_LOADER", "mission definition cannot be nil")
 	}
 
-	if def.Name == "" {
+	if def.GetName() == "" {
 		return "", types.NewError("GRAPH_LOADER", "mission definition name cannot be empty")
 	}
 
@@ -81,18 +83,53 @@ func (g *GraphLoader) LoadMission(ctx context.Context, def *mission.MissionDefin
 		return "", fmt.Errorf("failed to compute definition hash: %w", err)
 	}
 
-	// Serialize nodes, edges, and metadata to JSON
-	nodesJSON, err := json.Marshal(def.Nodes)
-	if err != nil {
-		return "", fmt.Errorf("failed to serialize nodes: %w", err)
+	// Serialize nodes, edges, and metadata to JSON via protojson so the
+	// stored bytes use the canonical proto wire shape (oneof envelopes
+	// for per-noun configs, etc.). No call site reads these blobs back
+	// into proto today; they are stored for downstream meta-analysis.
+	//
+	// Preserve the legacy nil → "null" wire format for absent nodes and
+	// edges so existing Neo4j queries that special-case "null" continue
+	// to behave identically.
+	marshalProto := protojson.MarshalOptions{UseProtoNames: true}
+
+	var nodesJSON []byte
+	if len(def.GetNodes()) == 0 {
+		nodesJSON = []byte("null")
+	} else {
+		nodesMap := make(map[string]json.RawMessage, len(def.GetNodes()))
+		for id, n := range def.GetNodes() {
+			raw, mErr := marshalProto.Marshal(n)
+			if mErr != nil {
+				return "", fmt.Errorf("failed to serialize node %s: %w", id, mErr)
+			}
+			nodesMap[id] = raw
+		}
+		nodesJSON, err = json.Marshal(nodesMap)
+		if err != nil {
+			return "", fmt.Errorf("failed to serialize nodes: %w", err)
+		}
 	}
 
-	edgesJSON, err := json.Marshal(def.Edges)
-	if err != nil {
-		return "", fmt.Errorf("failed to serialize edges: %w", err)
+	var edgesJSON []byte
+	if len(def.GetEdges()) == 0 {
+		edgesJSON = []byte("null")
+	} else {
+		edgesList := make([]json.RawMessage, 0, len(def.GetEdges()))
+		for _, e := range def.GetEdges() {
+			raw, mErr := marshalProto.Marshal(e)
+			if mErr != nil {
+				return "", fmt.Errorf("failed to serialize edge: %w", mErr)
+			}
+			edgesList = append(edgesList, raw)
+		}
+		edgesJSON, err = json.Marshal(edgesList)
+		if err != nil {
+			return "", fmt.Errorf("failed to serialize edges: %w", err)
+		}
 	}
 
-	metadataJSON, err := json.Marshal(def.Metadata)
+	metadataJSON, err := json.Marshal(def.GetMetadata())
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize metadata: %w", err)
 	}
@@ -125,10 +162,10 @@ func (g *GraphLoader) LoadMission(ctx context.Context, def *mission.MissionDefin
 	params := map[string]any{
 		"id":            newID.String(),
 		"hash":          hash,
-		"name":          def.Name,
-		"description":   def.Description,
-		"version":       def.Version,
-		"target_ref":    def.TargetRef,
+		"name":          def.GetName(),
+		"description":   def.GetDescription(),
+		"version":       def.GetVersion(),
+		"target_ref":    def.GetTargetRef(),
 		"nodes_json":    string(nodesJSON),
 		"edges_json":    string(edgesJSON),
 		"metadata_json": string(metadataJSON),
@@ -151,44 +188,38 @@ func (g *GraphLoader) LoadMission(ctx context.Context, def *mission.MissionDefin
 	g.logger.Info("mission definition stored",
 		"definition_id", definitionID,
 		"definition_hash", hash,
-		"name", def.Name,
-		"version", def.Version,
+		"name", def.GetName(),
+		"version", def.GetVersion(),
 	)
 
 	return definitionID, nil
 }
 
 // computeDefinitionHash generates a SHA256 hash of the mission definition's
-// canonical content for deduplication. The hash is computed from a deterministic
-// JSON serialization of the definition's semantic content.
-func (g *GraphLoader) computeDefinitionHash(def *mission.MissionDefinition) (string, error) {
-	// Create a canonical representation for hashing
-	// We exclude timestamps and IDs which may vary between loads of the same definition
-	canonical := struct {
-		Name        string                          `json:"name"`
-		Description string                          `json:"description"`
-		Version     string                          `json:"version"`
-		TargetRef   string                          `json:"target_ref"`
-		Nodes       map[string]*mission.MissionNode `json:"nodes"`
-		Edges       []mission.MissionEdge           `json:"edges"`
-		EntryPoints []string                        `json:"entry_points"`
-		ExitPoints  []string                        `json:"exit_points"`
-		Metadata    map[string]any                  `json:"metadata"`
-	}{
-		Name:        def.Name,
-		Description: def.Description,
-		Version:     def.Version,
-		TargetRef:   def.TargetRef,
-		Nodes:       def.Nodes,
-		Edges:       def.Edges,
-		EntryPoints: def.EntryPoints,
-		ExitPoints:  def.ExitPoints,
-		Metadata:    def.Metadata,
+// canonical content for deduplication. Uses protojson with UseProtoNames=true
+// for deterministic serialization (proto field IDs anchor field order, and
+// repeated/map fields are sorted by the marshaler).
+//
+// Note: protojson.Marshal does not promise byte-for-byte determinism across
+// versions of the protobuf library, but the combination of UseProtoNames +
+// stable field IDs + sorted map keys is deterministic enough for content-
+// addressed dedup in practice. If two equivalent definitions occasionally
+// hash differently, the worst case is two MissionDefinition nodes for the
+// same logical definition — a benign duplicate.
+func (g *GraphLoader) computeDefinitionHash(def *missionv1.MissionDefinition) (string, error) {
+	clone := &missionv1.MissionDefinition{
+		Name:        def.GetName(),
+		Description: def.GetDescription(),
+		Version:     def.GetVersion(),
+		TargetRef:   def.GetTargetRef(),
+		Nodes:       def.GetNodes(),
+		Edges:       def.GetEdges(),
+		EntryPoints: def.GetEntryPoints(),
+		ExitPoints:  def.GetExitPoints(),
+		Metadata:    def.GetMetadata(),
 	}
 
-	// Use json.Marshal for deterministic serialization
-	// Note: Go's json.Marshal sorts map keys alphabetically
-	data, err := json.Marshal(canonical)
+	data, err := mission.MarshalDefinitionJSON(clone)
 	if err != nil {
 		return "", err
 	}

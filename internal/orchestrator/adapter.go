@@ -7,14 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
 	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
-	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // MissionAdapter adapts the orchestrator to the mission.MissionOrchestrator interface.
@@ -32,7 +29,7 @@ type MissionAdapter struct {
 // This is used to track mission execution state in the graph.
 type MissionGraphLoader interface {
 	// LoadMission stores a mission definition in the graph and returns the mission ID
-	LoadMission(ctx context.Context, def *mission.MissionDefinition) (string, error)
+	LoadMission(ctx context.Context, def *missionpb.MissionDefinition) (string, error)
 }
 
 // MissionGraphManager defines the interface for managing Mission and MissionRun nodes.
@@ -76,16 +73,14 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 		}
 	}
 
-	// Parse mission definition from mission
-	var def *mission.MissionDefinition
+	// Parse mission definition from mission. Dual-shape reader: proto-shape
+	// bytes from PR2+ writers + legacy flat-mirror bytes from older daemon
+	// versions both produce a *missionpb.MissionDefinition.
+	var def *missionpb.MissionDefinition
 	var err error
 
 	if mis.MissionDefinitionJSON != "" {
-		// Dual-shape reader: tolerates both proto-shape bytes from
-		// PR2+ writers and legacy flat-mirror bytes from earlier
-		// daemon versions. PR3 deletes the mirror conversion when
-		// in-memory call sites switch to *missionv1.MissionDefinition.
-		def, err = mission.UnmarshalToMirror([]byte(mis.MissionDefinitionJSON))
+		def, err = mission.UnmarshalDefinitionJSON([]byte(mis.MissionDefinitionJSON))
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse mission definition: %w", err)
 		}
@@ -105,13 +100,13 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 			m.config.Logger.Warn(ctx, "failed to store mission definition in GraphRAG",
 				"error", err,
 				"mission_id", mis.ID,
-				"definition_name", def.Name,
+				"definition_name", def.GetName(),
 			)
 		} else {
 			m.config.Logger.Info(ctx, "mission definition stored in GraphRAG",
 				"graph_mission_id", graphMissionID,
 				"mission_id", mis.ID,
-				"definition_name", def.Name,
+				"definition_name", def.GetName(),
 			)
 		}
 	}
@@ -231,7 +226,7 @@ func (m *MissionAdapter) Execute(ctx context.Context, mis *mission.Mission) (*mi
 
 // createOrchestrator creates an orchestrator instance for a specific mission execution.
 // It creates the harness, adapters, and all orchestrator components (Observer, Thinker, Actor).
-func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mission, def *mission.MissionDefinition, missionRunID string, runNumber int) (*Orchestrator, error) {
+func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mission, def *missionpb.MissionDefinition, missionRunID string, runNumber int) (*Orchestrator, error) {
 	// Validate GraphRAG client
 	if m.config.GraphRAGClient == nil {
 		return nil, fmt.Errorf("GraphRAGClient not configured")
@@ -279,10 +274,10 @@ func (m *MissionAdapter) createOrchestrator(ctx context.Context, mis *mission.Mi
 
 	// Get first agent name from definition
 	agentName := "orchestrator" // Default agent name
-	if len(def.Nodes) > 0 {
-		for _, node := range def.Nodes {
-			if node.Type == mission.NodeTypeAgent && node.AgentName != "" {
-				agentName = node.AgentName
+	for _, node := range def.GetNodes() {
+		if node.GetType() == missionpb.NodeType_NODE_TYPE_AGENT {
+			if name := node.GetAgentConfig().GetAgentName(); name != "" {
+				agentName = name
 				break
 			}
 		}
@@ -582,9 +577,7 @@ func (m *MissionAdapter) parseCheckpointState(checkpoint *mission.MissionCheckpo
 // ExecuteProto executes a mission using a proto MissionDefinition.
 // The proto is serialized via protojson (canonical wire/storage form
 // per mission-schema-canonicalization PR2) and stored on the mission
-// before delegating to Execute. The Execute reader path is dual-shape
-// tolerant via mission.UnmarshalToMirror, so legacy flat-mirror bytes
-// already in storage continue to work.
+// before delegating to Execute.
 func (m *MissionAdapter) ExecuteProto(ctx context.Context, mis *mission.Mission, missionDef *missionpb.MissionDefinition) (*mission.MissionResult, error) {
 	defJSON, err := mission.MarshalDefinitionJSON(missionDef)
 	if err != nil {
@@ -592,273 +585,6 @@ func (m *MissionAdapter) ExecuteProto(ctx context.Context, mis *mission.Mission,
 	}
 	mis.MissionDefinitionJSON = string(defJSON)
 	return m.Execute(ctx, mis)
-}
-
-// protoMissionToMissionDefinition converts a proto MissionDefinition to internal MissionDefinition.
-// This function uses proto enum types and oneof accessors as specified in Phase 3 requirements.
-func protoMissionToMissionDefinition(proto *missionpb.MissionDefinition) (*mission.MissionDefinition, error) {
-	if proto == nil {
-		return nil, fmt.Errorf("proto mission definition is nil")
-	}
-
-	// Convert proto nodes to mission nodes
-	nodes := make(map[string]*mission.MissionNode)
-	for nodeID, protoNode := range proto.Nodes {
-		missionNode, err := protoNodeToMissionNode(nodeID, protoNode)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert node %s: %w", nodeID, err)
-		}
-		nodes[nodeID] = missionNode
-	}
-
-	// Convert proto edges to mission edges
-	edges := make([]mission.MissionEdge, len(proto.Edges))
-	for i, protoEdge := range proto.Edges {
-		edges[i] = mission.MissionEdge{
-			From:      protoEdge.From,
-			To:        protoEdge.To,
-			Condition: protoEdge.Condition,
-		}
-	}
-
-	// Convert dependencies if present
-	var deps *mission.MissionDependencies
-	if proto.Dependencies != nil {
-		deps = &mission.MissionDependencies{
-			Agents:  proto.Dependencies.Agents,
-			Tools:   proto.Dependencies.Tools,
-			Plugins: proto.Dependencies.Plugins,
-		}
-	}
-
-	// Convert metadata map
-	metadata := make(map[string]any)
-	for k, v := range proto.Metadata {
-		metadata[k] = v
-	}
-
-	def := &mission.MissionDefinition{
-		ID:           types.ID(proto.Id),
-		Name:         proto.Name,
-		Description:  proto.Description,
-		Version:      proto.Version,
-		TargetRef:    proto.TargetRef,
-		Nodes:        nodes,
-		Edges:        edges,
-		EntryPoints:  proto.EntryPoints,
-		ExitPoints:   proto.ExitPoints,
-		Metadata:     metadata,
-		Dependencies: deps,
-		Source:       proto.Source,
-	}
-
-	if proto.InstalledAt != nil {
-		def.InstalledAt = proto.InstalledAt.AsTime()
-	}
-	if proto.CreatedAt != nil {
-		def.CreatedAt = proto.CreatedAt.AsTime()
-	}
-
-	return def, nil
-}
-
-// protoNodeToMissionNode converts a proto MissionNode to internal MissionNode.
-// Uses proto enum types and oneof accessors for type-safe node configuration.
-func protoNodeToMissionNode(nodeID string, protoNode *missionpb.MissionNode) (*mission.MissionNode, error) {
-	if protoNode == nil {
-		return nil, fmt.Errorf("proto node is nil")
-	}
-
-	// Convert node type enum to internal type
-	var nodeType mission.NodeType
-	switch protoNode.Type {
-	case missionpb.NodeType_NODE_TYPE_AGENT:
-		nodeType = mission.NodeTypeAgent
-	case missionpb.NodeType_NODE_TYPE_TOOL:
-		nodeType = mission.NodeTypeTool
-	case missionpb.NodeType_NODE_TYPE_PLUGIN:
-		nodeType = mission.NodeTypePlugin
-	case missionpb.NodeType_NODE_TYPE_CONDITION:
-		nodeType = mission.NodeTypeCondition
-	case missionpb.NodeType_NODE_TYPE_PARALLEL:
-		nodeType = mission.NodeTypeParallel
-	case missionpb.NodeType_NODE_TYPE_JOIN:
-		nodeType = mission.NodeTypeJoin
-	default:
-		return nil, fmt.Errorf("unknown node type: %v", protoNode.Type)
-	}
-
-	node := &mission.MissionNode{
-		ID:           nodeID,
-		Type:         nodeType,
-		Name:         protoNode.Name,
-		Description:  protoNode.Description,
-		Dependencies: protoNode.Dependencies,
-	}
-
-	// Convert timeout if present
-	if protoNode.Timeout != nil {
-		node.Timeout = protoNode.Timeout.AsDuration()
-	}
-
-	// Convert retry policy if present
-	if protoNode.RetryPolicy != nil {
-		node.RetryPolicy = &mission.RetryPolicy{
-			MaxRetries: int(protoNode.RetryPolicy.MaxRetries),
-		}
-
-		// Convert backoff strategy enum
-		switch protoNode.RetryPolicy.BackoffStrategy {
-		case missionpb.BackoffStrategy_BACKOFF_STRATEGY_CONSTANT:
-			node.RetryPolicy.BackoffStrategy = mission.BackoffConstant
-		case missionpb.BackoffStrategy_BACKOFF_STRATEGY_LINEAR:
-			node.RetryPolicy.BackoffStrategy = mission.BackoffLinear
-		case missionpb.BackoffStrategy_BACKOFF_STRATEGY_EXPONENTIAL:
-			node.RetryPolicy.BackoffStrategy = mission.BackoffExponential
-		}
-
-		if protoNode.RetryPolicy.InitialDelay != nil {
-			node.RetryPolicy.InitialDelay = protoNode.RetryPolicy.InitialDelay.AsDuration()
-		}
-		if protoNode.RetryPolicy.MaxDelay != nil {
-			node.RetryPolicy.MaxDelay = protoNode.RetryPolicy.MaxDelay.AsDuration()
-		}
-		node.RetryPolicy.Multiplier = protoNode.RetryPolicy.Multiplier
-	}
-
-	// Convert metadata (string map to any map)
-	if protoNode.Metadata != nil {
-		node.Metadata = make(map[string]any, len(protoNode.Metadata))
-		for k, v := range protoNode.Metadata {
-			node.Metadata[k] = v
-		}
-	}
-
-	// Use oneof accessors to get node-specific configuration
-	switch nodeType {
-	case mission.NodeTypeAgent:
-		agentConfig := protoNode.GetAgentConfig()
-		if agentConfig != nil {
-			node.AgentName = agentConfig.AgentName
-			if agentConfig.Task != nil {
-				node.AgentTask = protoTaskToAgentTask(agentConfig.Task)
-			}
-		}
-
-	case mission.NodeTypeTool:
-		toolConfig := protoNode.GetToolConfig()
-		if toolConfig != nil {
-			node.ToolName = toolConfig.ToolName
-			if toolConfig.Input != nil {
-				node.ToolInput = make(map[string]any, len(toolConfig.Input))
-				for k, v := range toolConfig.Input {
-					node.ToolInput[k] = v
-				}
-			}
-		}
-
-	case mission.NodeTypePlugin:
-		pluginConfig := protoNode.GetPluginConfig()
-		if pluginConfig != nil {
-			node.PluginName = pluginConfig.PluginName
-			node.PluginMethod = pluginConfig.Method
-			if pluginConfig.Params != nil {
-				node.PluginParams = make(map[string]any, len(pluginConfig.Params))
-				for k, v := range pluginConfig.Params {
-					node.PluginParams[k] = v
-				}
-			}
-		}
-
-	case mission.NodeTypeCondition:
-		condConfig := protoNode.GetConditionConfig()
-		if condConfig != nil {
-			node.Condition = &mission.NodeCondition{
-				Expression:  condConfig.Expression,
-				TrueBranch:  condConfig.TrueBranch,
-				FalseBranch: condConfig.FalseBranch,
-			}
-		}
-
-	case mission.NodeTypeParallel:
-		parallelConfig := protoNode.GetParallelConfig()
-		if parallelConfig != nil {
-			// Convert sub-nodes
-			subNodes := make([]*mission.MissionNode, len(parallelConfig.SubNodes))
-			for i, subProtoNode := range parallelConfig.SubNodes {
-				subNode, err := protoNodeToMissionNode(subProtoNode.Id, subProtoNode)
-				if err != nil {
-					return nil, fmt.Errorf("failed to convert sub-node %s: %w", subProtoNode.Id, err)
-				}
-				subNodes[i] = subNode
-			}
-			node.SubNodes = subNodes
-		}
-	}
-
-	return node, nil
-}
-
-// protoTaskToAgentTask converts a proto Task to an internal agent.Task.
-func protoTaskToAgentTask(protoTask *typespb.Task) *agent.Task {
-	if protoTask == nil {
-		return nil
-	}
-
-	task := &agent.Task{
-		ID:   types.ID(protoTask.Id),
-		Goal: protoTask.Goal,
-	}
-
-	// Convert context (TypedValue map to any map)
-	if protoTask.Context != nil {
-		task.Context = make(map[string]any, len(protoTask.Context))
-		for k, v := range protoTask.Context {
-			task.Context[k] = typedValueToAny(v)
-		}
-	}
-
-	return task
-}
-
-// typedValueToAny converts a proto TypedValue to any.
-func typedValueToAny(tv *commonpb.TypedValue) any {
-	if tv == nil {
-		return nil
-	}
-
-	switch v := tv.GetKind().(type) {
-	case *commonpb.TypedValue_StringValue:
-		return v.StringValue
-	case *commonpb.TypedValue_IntValue:
-		return v.IntValue
-	case *commonpb.TypedValue_DoubleValue:
-		return v.DoubleValue
-	case *commonpb.TypedValue_BoolValue:
-		return v.BoolValue
-	case *commonpb.TypedValue_BytesValue:
-		return v.BytesValue
-	case *commonpb.TypedValue_ArrayValue:
-		if v.ArrayValue == nil {
-			return nil
-		}
-		list := make([]any, len(v.ArrayValue.Items))
-		for i, item := range v.ArrayValue.Items {
-			list[i] = typedValueToAny(item)
-		}
-		return list
-	case *commonpb.TypedValue_MapValue:
-		if v.MapValue == nil {
-			return nil
-		}
-		m := make(map[string]any, len(v.MapValue.Entries))
-		for k, item := range v.MapValue.Entries {
-			m[k] = typedValueToAny(item)
-		}
-		return m
-	default:
-		return nil
-	}
 }
 
 // StopMission implements mission.MissionOrchestrator interface.

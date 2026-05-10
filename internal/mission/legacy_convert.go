@@ -11,6 +11,21 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// MirrorToProto converts an in-memory mirror MissionDefinition to the
+// equivalent canonical *missionv1.MissionDefinition. This is the
+// transitional bridge daemon-side callers use to feed proto-typed
+// orchestrator entry points (NewMissionPolicySource, MissionGraphLoader,
+// etc.) while their own internal types remain mirror.
+//
+// PR4 deletes this helper alongside the mirror struct; once the daemon
+// callers also consume *missionv1.MissionDefinition in-memory, no bridge
+// is needed.
+//
+// Spec: mission-schema-canonicalization (PR3 of mirror→proto migration).
+func MirrorToProto(m *MissionDefinition) (*missionv1.MissionDefinition, error) {
+	return mirrorDefinitionToProto(m)
+}
+
 // LegacyMirrorJSONToProto parses legacy flat-mirror-shape JSON bytes
 // (produced by encoding/json on *mission.MissionDefinition before the
 // PR2 mirror→proto migration) and returns the equivalent
