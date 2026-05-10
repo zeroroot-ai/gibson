@@ -179,43 +179,6 @@ message RefreshToolCatalogResponse {
 }
 
 // ---------------------------------------------------------------------------
-// SetTenantQuota — request/response messages
-// ---------------------------------------------------------------------------
-
-// TenantQuota defines the resource limits for a tenant.
-message TenantQuota {
-  // max_missions is the maximum number of concurrent running missions allowed.
-  // Zero means no limit.
-  int32 max_missions = 1;
-
-  // max_agents is the maximum number of registered agents allowed.
-  // Zero means no limit.
-  int32 max_agents = 2;
-
-  // max_findings is the maximum number of findings stored across all missions.
-  // Zero means no limit.
-  int64 max_findings = 3;
-
-  // plan_tier identifies the subscription plan (e.g., "free", "pro", "enterprise").
-  string plan_tier = 4;
-}
-
-// SetTenantQuotaRequest sets the quota configuration for a tenant.
-message SetTenantQuotaRequest {
-  // tenant_id is the target tenant. Required.
-  string tenant_id = 1;
-
-  // quota contains the new limits to apply.
-  TenantQuota quota = 2;
-}
-
-// SetTenantQuotaResponse confirms the quota update.
-message SetTenantQuotaResponse {
-  // quota contains the updated limits as stored.
-  TenantQuota quota = 1;
-}
-
-// ---------------------------------------------------------------------------
 // Entitlements — request/response messages
 // ---------------------------------------------------------------------------
 
@@ -239,14 +202,23 @@ message WriteAccessTuplesResponse {
   int32 deleted = 2;
 }
 
-// UpsertTenantQuotaRequest writes the tenant's runtime quota record.
+// UpsertTenantQuotaRequest writes the tenant's runtime quota record. The
+// schema is governed by spec plans-and-quotas-simplification — only
+// concurrent_missions and concurrent_agents are enforced; 0 means
+// "unlimited" on either dimension.
 message UpsertTenantQuotaRequest {
   string tenant_id = 1;
-  int32 seats = 2;
+  // concurrent_missions is the cap on missions in non-terminal execution
+  // state at any moment. 0 = unlimited.
+  int32 concurrent_missions = 7;
+  // concurrent_agents is the cap on agents bound to in-flight mission
+  // tasks at any moment (idle agents do NOT count). 0 = unlimited.
   int32 concurrent_agents = 3;
-  int32 storage_gb = 4;
-  int32 retention_days = 5;
-  int32 sandbox_launches_per_month = 6;
+  // Field tags 2 (seats), 4 (storage_gb), 5 (retention_days), 6
+  // (sandbox_launches_per_month) are reserved against accidental reuse;
+  // they were the legacy unenforced quotas dropped by the spec.
+  reserved 2, 4, 5, 6;
+  reserved "seats", "storage_gb", "retention_days", "sandbox_launches_per_month";
 }
 
 // UpsertTenantQuotaResponse confirms the upsert.

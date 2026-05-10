@@ -103,12 +103,24 @@ service TenantAdminService {
   // Quota — read (IMPLEMENT-NOW)
   // ---------------------------------------------------------------------------
 
-  // GetTenantQuota retrieves the configured resource quotas for a tenant.
-  // Returns zero values for any quota not explicitly set.
+  // GetTenantQuota retrieves the configured resource quotas (limits) for a
+  // tenant. Returns zero values for any quota not explicitly set.
   // Requires FGA admin relation on the tenant.
   rpc GetTenantQuota(GetTenantQuotaRequest) returns (GetTenantQuotaResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "admin",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // GetTenantQuotaUsage returns the live counter values (current usage)
+  // from Redis. Cheap (single MGET); does not consult Postgres. Use
+  // alongside GetTenantQuota to render in-app usage UX. Spec
+  // plans-and-quotas-simplification R9.B.
+  rpc GetTenantQuotaUsage(GetTenantQuotaUsageRequest) returns (GetTenantQuotaUsageResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "viewer",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
       allowed_identities: 3  // USER | SERVICE
@@ -547,51 +559,56 @@ message UpdateOnboardingStateResponse {}
 // Quota — request/response messages
 // ---------------------------------------------------------------------------
 
-// TenantQuota defines the resource limits for a tenant.
-message TenantQuota {
-  // max_missions is the maximum number of concurrent running missions allowed.
-  // Zero means no limit.
-  int32 max_missions = 1;
-
-  // max_agents is the maximum number of registered agents allowed.
-  // Zero means no limit.
-  int32 max_agents = 2;
-
-  // max_findings is the maximum number of findings stored across all missions.
-  // Zero means no limit.
-  int64 max_findings = 3;
-
-  // plan_tier identifies the subscription plan (e.g., "free", "pro", "enterprise").
-  string plan_tier = 4;
-}
-
-// GetTenantQuotaRequest requests the quota configuration for a tenant.
+// GetTenantQuotaRequest requests the quota configuration (limits) for a tenant.
 message GetTenantQuotaRequest {
   // tenant_id is the target tenant. If empty, the caller's tenant is used.
   string tenant_id = 1;
 }
 
-// GetTenantQuotaResponse carries the tenant quota configuration plus the
-// current usage snapshot sourced from Redis counters.
+// GetTenantQuotaResponse carries the tenant quota limits sourced from
+// the platform Postgres tenant_quotas row. Spec
+// plans-and-quotas-simplification reduces the schema to two enforced
+// quotas; legacy fields (seats/storage_gb/retention_days/sandbox_launches/
+// max_findings/api_rate_limit/max_memory_mb) are dropped.
 message GetTenantQuotaResponse {
-  // quota contains the legacy runtime caps (max_missions/agents/findings).
-  TenantQuota quota = 1;
-
-  // Plan-based limits (mirroring UpsertTenantQuotaRequest).
-  int32 seats = 2;
+  // concurrent_missions caps missions in non-terminal execution state.
+  // 0 means unlimited.
+  int32 concurrent_missions = 12;
+  // concurrent_agents caps agents bound to in-flight mission tasks at any
+  // moment (idle agents do NOT count). 0 means unlimited.
   int32 concurrent_agents = 3;
-  int32 storage_gb = 4;
-  int32 retention_days = 5;
-  int32 sandbox_launches_per_month = 6;
-
   // updated_at is the Postgres row's last-written timestamp (RFC 3339).
   string updated_at = 7;
 
-  // Usage snapshot fields — zero when the underlying counter is missing.
-  int32 current_seats = 8;
-  int32 current_concurrent_agents = 9;
-  int32 current_storage_gb = 10;
-  int32 current_sandbox_launches_this_month = 11;
+  // Field tags used by the legacy schema before
+  // plans-and-quotas-simplification: 1 (TenantQuota), 2 (seats),
+  // 4 (storage_gb), 5 (retention_days), 6 (sandbox_launches_per_month),
+  // 8 (current_seats), 9 (current_concurrent_agents),
+  // 10 (current_storage_gb), 11 (current_sandbox_launches_this_month).
+  // Reserved against accidental reuse.
+  reserved 1, 2, 4, 5, 6, 8, 9, 10, 11;
+  reserved "quota", "seats", "storage_gb", "retention_days",
+           "sandbox_launches_per_month", "current_seats",
+           "current_concurrent_agents", "current_storage_gb",
+           "current_sandbox_launches_this_month";
+}
+
+// GetTenantQuotaUsageRequest requests the live counter snapshot (current
+// usage) from Redis for a tenant.
+message GetTenantQuotaUsageRequest {
+  // tenant_id is the target tenant. If empty, the caller's tenant is used.
+  string tenant_id = 1;
+}
+
+// GetTenantQuotaUsageResponse carries the live counter values for the
+// two enforced quotas. Sourced from Redis :active counters; cheap to read.
+message GetTenantQuotaUsageResponse {
+  // missions_active: count of missions currently in non-terminal
+  // execution state (queued→running INCR, terminal-state DECR).
+  int64 missions_active = 1;
+  // agents_active: count of agents currently bound to an in-flight task
+  // (idle→busy 0→1 INCR, busy→idle 1→0 DECR; disconnect-while-busy DECRs).
+  int64 agents_active = 2;
 }
 
 // ---------------------------------------------------------------------------
