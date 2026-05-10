@@ -1,11 +1,14 @@
 package harness
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/checkpoint"
 	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zero-day-ai/gibson/internal/dispatch"
 	"github.com/zero-day-ai/gibson/internal/events"
 	"github.com/zero-day-ai/gibson/internal/harness/middleware"
 	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
@@ -15,6 +18,21 @@ import (
 	"github.com/zero-day-ai/sdk/protoresolver"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// PolicyAuditWriter is the narrow interface the dispatch policy gate requires
+// from the audit subsystem. It matches the WriteSync method added to
+// *audit.Writer in the setec-sandbox-prod-default spec (R3.5): the call
+// blocks until the backend acks the INSERT, or returns an error.
+//
+// The interface is declared here (rather than importing audit.Writer directly)
+// so unit tests can supply a lightweight fake without wiring a real Postgres
+// connection.
+type PolicyAuditWriter interface {
+	// WriteSync persists a single audit event synchronously. The call
+	// returns only after the underlying database has acknowledged the
+	// INSERT, or with a non-nil error if the backend fails.
+	WriteSync(ctx context.Context, event audit.Event) error
+}
 
 // HarnessConfig contains all dependencies needed to create an AgentHarness.
 // All fields use interface types to support dependency injection and testing.
@@ -264,6 +282,31 @@ type HarnessConfig struct {
 	// the legacy path is preserved.
 	// Optional; defaults to false.
 	ToolRunnerEnabled bool
+
+	// DispatchPolicy is the gate that enforces the security invariant
+	//
+	//   content_trust == UNTRUSTED  ⟹  dispatch_mode == SANDBOXED
+	//
+	// on every tool dispatch. When non-nil, the gate's Decide method is
+	// called BEFORE the executor is selected; a deny outcome short-circuits
+	// with a structured error and emits a synchronous audit event via
+	// PolicyAuditWriter. When nil the gate is skipped (backward-compatible
+	// for deployments that have not yet wired the policy, e.g. tests that
+	// do not require security enforcement).
+	//
+	// Spec: setec-sandbox-prod-default §C3 (R3.1, R3.3).
+	// Optional.
+	DispatchPolicy dispatch.Policy
+
+	// PolicyAuditWriter is the synchronous audit writer the dispatch gate
+	// uses to record allow/deny decisions per R3.5. Must be non-nil when
+	// DispatchPolicy is non-nil in production. When nil, gate decisions
+	// are logged but no durable audit event is emitted (acceptable only in
+	// test environments — in production the daemon wires a real Writer).
+	//
+	// Spec: setec-sandbox-prod-default R3.5.
+	// Optional (but required alongside DispatchPolicy in production).
+	PolicyAuditWriter PolicyAuditWriter
 }
 
 // Validate checks that required fields are set and returns an error if validation fails.
