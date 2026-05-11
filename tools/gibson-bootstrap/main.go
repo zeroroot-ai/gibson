@@ -10,6 +10,7 @@
 //
 //	gibson-bootstrap zitadel-ensure-org <name>
 //	gibson-bootstrap zitadel-mint-oidc-client <client-name>
+//	gibson-bootstrap zitadel-mint-user-pat <username> [--rotate] [--roles=<list>]
 package main
 
 import (
@@ -17,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -34,7 +36,7 @@ func main() {
 // run dispatches to the appropriate subcommand handler.
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: gibson-bootstrap <subcommand> [args...]\n\nSubcommands:\n  zitadel-ensure-org <name>\n  zitadel-mint-oidc-client <client-name>")
+		return fmt.Errorf("usage: gibson-bootstrap <subcommand> [args...]\n\nSubcommands:\n  zitadel-ensure-org <name>\n  zitadel-mint-oidc-client <client-name>\n  zitadel-mint-user-pat <username> [--rotate] [--roles=<list>]")
 	}
 
 	subcommand := args[0]
@@ -45,9 +47,69 @@ func run(ctx context.Context, args []string) error {
 		return cmdEnsureOrg(ctx, rest)
 	case "zitadel-mint-oidc-client":
 		return cmdMintOIDCClient(ctx, rest)
+	case "zitadel-mint-user-pat":
+		return cmdMintUserPAT(ctx, rest)
 	default:
-		return fmt.Errorf("unknown subcommand %q; valid subcommands: zitadel-ensure-org, zitadel-mint-oidc-client", subcommand)
+		return fmt.Errorf("unknown subcommand %q; valid subcommands: zitadel-ensure-org, zitadel-mint-oidc-client, zitadel-mint-user-pat", subcommand)
 	}
+}
+
+// cmdMintUserPAT handles the zitadel-mint-user-pat subcommand.
+//
+// Required env:
+//
+//	ZITADEL_ISSUER    — Zitadel base URL
+//	ZITADEL_ADMIN_PAT — Personal access token with IAM_OWNER scope
+//
+// Args: <username> [--rotate] [--roles=<role1,role2,...>]
+//
+// Output: {"user_id":"<id>","pat":"<token>","rotated":true|false}
+//
+// Idempotently ensures a Zitadel service user, optionally grants IAM roles,
+// and emits a PAT. See user_pat.go for the rotation contract — when the
+// user already has an active PAT, --rotate must be passed (Zitadel's list
+// API does not return PAT secrets).
+func cmdMintUserPAT(ctx context.Context, args []string) error {
+	if len(args) == 0 || args[0] == "" {
+		return fmt.Errorf("usage: gibson-bootstrap zitadel-mint-user-pat <username> [--rotate] [--roles=<list>]")
+	}
+
+	username := args[0]
+	rotate := false
+	var roles []string
+	for _, a := range args[1:] {
+		switch {
+		case a == "--rotate":
+			rotate = true
+		case strings.HasPrefix(a, "--roles="):
+			raw := strings.TrimPrefix(a, "--roles=")
+			for _, r := range strings.Split(raw, ",") {
+				r = strings.TrimSpace(r)
+				if r != "" {
+					roles = append(roles, r)
+				}
+			}
+		default:
+			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+
+	cfg, err := loadPATClientConfig()
+	if err != nil {
+		return err
+	}
+
+	c := newPATClient(cfg)
+	result, err := c.MintUserPAT(ctx, MintUserPATRequest{
+		Username: username,
+		Roles:    roles,
+		Rotate:   rotate,
+	})
+	if err != nil {
+		return fmt.Errorf("zitadel-mint-user-pat: %w", err)
+	}
+
+	return writeJSON(result)
 }
 
 // cmdEnsureOrg handles the zitadel-ensure-org subcommand.
