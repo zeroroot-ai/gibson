@@ -22,6 +22,19 @@ on:
     paths:
       - 'tools/gibson-bootstrap/**'
       - '.github/workflows/gibson-bootstrap-image.yml'
+  # workflow_dispatch is the escape hatch when release-please's tag push
+  # doesn't trigger downstream workflows: GitHub Actions intentionally
+  # doesn't fire `on: push: tags:` events for tags pushed by the default
+  # GITHUB_TOKEN, which is what release-please uses. Until/unless we
+  # switch release-please to a GitHub App token, the post-release step
+  # is: `gh workflow run gibson-bootstrap-image.yml -f ref=gibson-bootstrap-v<ver>`
+  # to publish the tag-specific image.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag to build (e.g. gibson-bootstrap-v1.0.0). Defaults to main if empty."
+        required: false
+        type: string
 
 concurrency:
   group: gibson-bootstrap-image-${{ github.ref }}
