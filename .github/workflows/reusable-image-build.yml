@@ -4,7 +4,7 @@ name: Reusable image build
 # Spec: production-eks-deploy, task 20.
 #
 # Callers pass per-component inputs. This workflow:
-#   1. Builds multi-arch (linux/amd64 + linux/arm64) via docker buildx.
+#   1. Builds linux/amd64 via docker buildx.
 #   2. Pushes to ghcr.io/zero-day-ai/<image_name> on non-PR events.
 #   3. Generates SPDX SBOM via anchore/sbom-action.
 #   4. Scans with Trivy (fails on HIGH/CRITICAL with an available fix).
@@ -91,7 +91,7 @@ jobs:
         with:
           context: ${{ inputs.component_path }}
           file: ${{ inputs.dockerfile_path }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           push: ${{ github.event_name != 'pull_request' }}
