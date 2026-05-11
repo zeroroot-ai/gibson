@@ -62,6 +62,18 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.39.0](https://github.com/zero-day-ai/gibson/compare/v0.38.0...v0.39.0) (2026-05-11)
+
+
+### Features
+
+* **bootstrap:** zitadel-mint-user-pat subcommand (W4) ([#48](https://github.com/zero-day-ai/gibson/issues/48)) ([4e3a303](https://github.com/zero-day-ai/gibson/commit/4e3a30351672afd4fa5233829a2c61249a02bcd8))
+
+
+### Bug Fixes
+
+* **release:** collapse `-v` double-v in gibson-bootstrap tag + add workflow_dispatch ([#46](https://github.com/zero-day-ai/gibson/issues/46)) ([465c991](https://github.com/zero-day-ai/gibson/commit/465c99119e8d0d4eb7e6106b56514ffae42bd4d0))
+
 ## [0.38.0](https://github.com/zero-day-ai/gibson/compare/v0.37.1...v0.38.0) (2026-05-11)
 
 
