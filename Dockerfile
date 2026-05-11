@@ -40,6 +40,16 @@ COPY go.mod go.sum ./
 # runs but a private-module fetch will fail at build time with a
 # missing-auth error.
 ENV GOPRIVATE=github.com/zero-day-ai
+
+# Allow the Go toolchain to auto-fetch the version specified in go.mod when
+# the base image ships an older patch. The base FROM is SHA-pinned to a
+# specific golang:1.25-alpine digest; Docker Hub re-tagging that alias for
+# new patch releases lags by hours-to-days, so without GOTOOLCHAIN=auto a
+# fresh go.mod toolchain bump fails the build with "go.mod requires go
+# >= 1.X.Y (running go 1.X.Z; GOTOOLCHAIN=local)". This keeps reproducible
+# base-image pinning while letting go.mod choose the toolchain.
+ENV GOTOOLCHAIN=auto
+
 RUN --mount=type=secret,id=ghtoken,target=/run/secrets/ghtoken,required=false \
     if [ -s /run/secrets/ghtoken ]; then \
       git config --global url."https://x-access-token:$(cat /run/secrets/ghtoken)@github.com/".insteadOf "https://github.com/"; \
