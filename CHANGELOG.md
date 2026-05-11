@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.37.1](https://github.com/zero-day-ai/gibson/compare/v0.37.0...v0.37.1) (2026-05-11)
+
+
+### Bug Fixes
+
+* clear three gibson CI gates (Go 1.25.10, migrations selftest, authz-registry SDK lookup) ([#32](https://github.com/zero-day-ai/gibson/issues/32)) ([3247868](https://github.com/zero-day-ai/gibson/commit/324786862e363ec17b4c98811772f0e02eba11b7))
+
 ## [0.37.0](https://github.com/zero-day-ai/gibson/compare/v0.36.0...v0.37.0) (2026-05-10)
 
 
