@@ -62,6 +62,19 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.38.0](https://github.com/zero-day-ai/gibson/compare/v0.37.1...v0.38.0) (2026-05-11)
+
+
+### Features
+
+* **bootstrap:** add gibson-bootstrap binary for chart bootstrap-secrets Job ([#45](https://github.com/zero-day-ai/gibson/issues/45)) ([4d2c286](https://github.com/zero-day-ai/gibson/commit/4d2c286a977609bb98e1e09c92d6f0d6e8c408e1))
+* **build:** point Dockerfile FROM at ghcr.io mirror ([#44](https://github.com/zero-day-ai/gibson/issues/44)) ([9f9e8ec](https://github.com/zero-day-ai/gibson/commit/9f9e8ec4a565869f45f5f891e1d7931cd7c51d82))
+
+
+### Bug Fixes
+
+* **build:** set GOTOOLCHAIN=auto so Docker builds tolerate base-image lag ([#40](https://github.com/zero-day-ai/gibson/issues/40)) ([8bac2d9](https://github.com/zero-day-ai/gibson/commit/8bac2d9e162736d6d9c729ab66d34b1eff7fe7a9))
+
 ## [0.37.1](https://github.com/zero-day-ai/gibson/compare/v0.37.0...v0.37.1) (2026-05-11)
 
 
