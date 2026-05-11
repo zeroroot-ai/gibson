@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder - Pure Go compilation (no CGO)
 # ============================================================================
-FROM golang:1.25-alpine@sha256:5caaf1cca9dc351e13deafbc3879fd4754801acba8653fa9540cea125d01a71f AS builder
+FROM ghcr.io/zero-day-ai/mirror/golang:1.25-alpine AS builder
 
 # Install git and ca-certificates for dependency fetching
 RUN apk add --no-cache git ca-certificates
@@ -90,7 +90,7 @@ RUN go build -ldflags="-s -w" -o /out/gibson-migrate ./cmd/gibson-migrate
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS runtime
+FROM ghcr.io/zero-day-ai/mirror/alpine:3.21 AS runtime
 
 # Install ca-certificates for HTTPS connections
 RUN apk add --no-cache ca-certificates
