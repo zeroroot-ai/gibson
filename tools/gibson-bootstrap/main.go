@@ -36,7 +36,7 @@ func main() {
 // run dispatches to the appropriate subcommand handler.
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: gibson-bootstrap <subcommand> [args...]\n\nSubcommands:\n  zitadel-ensure-org <name>\n  zitadel-mint-oidc-client <client-name>\n  zitadel-mint-user-pat <username> [--rotate] [--roles=<list>]")
+		return fmt.Errorf("usage: gibson-bootstrap <subcommand> [args...]\n\nSubcommands:\n  zitadel-ensure-org <name>\n  zitadel-ensure-project <name>\n  zitadel-mint-oidc-client <client-name>\n  zitadel-mint-user-pat <username> [--rotate] [--roles=<list>]")
 	}
 
 	subcommand := args[0]
@@ -45,12 +45,14 @@ func run(ctx context.Context, args []string) error {
 	switch subcommand {
 	case "zitadel-ensure-org":
 		return cmdEnsureOrg(ctx, rest)
+	case "zitadel-ensure-project":
+		return cmdEnsureProject(ctx, rest)
 	case "zitadel-mint-oidc-client":
 		return cmdMintOIDCClient(ctx, rest)
 	case "zitadel-mint-user-pat":
 		return cmdMintUserPAT(ctx, rest)
 	default:
-		return fmt.Errorf("unknown subcommand %q; valid subcommands: zitadel-ensure-org, zitadel-mint-oidc-client, zitadel-mint-user-pat", subcommand)
+		return fmt.Errorf("unknown subcommand %q; valid subcommands: zitadel-ensure-org, zitadel-ensure-project, zitadel-mint-oidc-client, zitadel-mint-user-pat", subcommand)
 	}
 }
 
@@ -137,6 +139,42 @@ func cmdEnsureOrg(ctx context.Context, args []string) error {
 	result, err := c.EnsureOrg(ctx, name)
 	if err != nil {
 		return fmt.Errorf("zitadel-ensure-org: %w", err)
+	}
+
+	return writeJSON(result)
+}
+
+// cmdEnsureProject handles the zitadel-ensure-project subcommand.
+//
+// Required env:
+//
+//	ZITADEL_ISSUER    — Zitadel base URL
+//	ZITADEL_ADMIN_PAT — Personal access token with project-create scope
+//	ZITADEL_ORG_ID    — Organisation ID under which the project is created
+//
+// Args: <name>
+//
+// Output: {"project_id":"<id>","created":true|false}
+func cmdEnsureProject(ctx context.Context, args []string) error {
+	if len(args) != 1 || args[0] == "" {
+		return fmt.Errorf("usage: gibson-bootstrap zitadel-ensure-project <name>")
+	}
+	name := args[0]
+
+	cfg, err := loadPATClientConfig()
+	if err != nil {
+		return err
+	}
+
+	orgID := os.Getenv("ZITADEL_ORG_ID")
+	if orgID == "" {
+		return fmt.Errorf("ZITADEL_ORG_ID env must be set")
+	}
+
+	c := newPATClient(cfg)
+	result, err := c.EnsureProject(ctx, orgID, name)
+	if err != nil {
+		return fmt.Errorf("zitadel-ensure-project: %w", err)
 	}
 
 	return writeJSON(result)

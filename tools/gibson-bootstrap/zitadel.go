@@ -142,6 +142,92 @@ func (c *patClient) EnsureOrg(ctx context.Context, name string) (*EnsureOrgResul
 }
 
 // ---------------------------------------------------------------------------
+// EnsureProject
+// ---------------------------------------------------------------------------
+
+// EnsureProjectResult is the JSON output of zitadel-ensure-project.
+type EnsureProjectResult struct {
+	ProjectID string `json:"project_id"`
+	Created   bool   `json:"created"`
+}
+
+// EnsureProject idempotently creates or fetches a Zitadel project by name
+// within the given organisation. If the project already exists it returns
+// its existing ID with Created=false.
+//
+// Project APIs are namespaced under the Management surface and require the
+// caller's PAT to be scoped to (or for) the target org. The org ID is
+// forwarded as the `x-zitadel-orgid` header by doRequest.
+func (c *patClient) EnsureProject(ctx context.Context, orgID, name string) (*EnsureProjectResult, error) {
+	slog.Info("ensuring project", "name", name, "org_id", orgID)
+
+	// Search for an existing project with an exact-match name query.
+	type nameQuery struct {
+		Name   string `json:"name"`
+		Method string `json:"method"`
+	}
+	type projectQuery struct {
+		NameQuery nameQuery `json:"nameQuery"`
+	}
+	searchBody := map[string]interface{}{
+		"queries": []projectQuery{{NameQuery: nameQuery{
+			Name:   name,
+			Method: "TEXT_QUERY_METHOD_EQUALS",
+		}}},
+	}
+
+	var searchResp struct {
+		Result []struct {
+			ProjectID string `json:"id"`
+		} `json:"result"`
+	}
+
+	if err := c.doRequest(ctx, http.MethodPost, "/management/v1/projects/_search", orgID, searchBody, &searchResp); err != nil {
+		return nil, fmt.Errorf("searching for project: %w", err)
+	}
+
+	if len(searchResp.Result) > 0 && searchResp.Result[0].ProjectID != "" {
+		projectID := searchResp.Result[0].ProjectID
+		slog.Info("project already exists", "project_id", projectID, "name", name)
+		return &EnsureProjectResult{ProjectID: projectID, Created: false}, nil
+	}
+
+	// Project not found — create it.
+	slog.Info("project not found, creating", "name", name, "org_id", orgID)
+
+	createBody := map[string]interface{}{
+		"name":                   name,
+		"projectRoleAssertion":   true,
+		"projectRoleCheck":       false,
+		"hasProjectCheck":        false,
+	}
+	var createResp struct {
+		ProjectID string `json:"id"`
+	}
+
+	if err := c.doRequest(ctx, http.MethodPost, "/management/v1/projects", orgID, createBody, &createResp); err != nil {
+		if isConflict(err) {
+			slog.Info("project creation conflict (race), re-searching", "name", name)
+			if err2 := c.doRequest(ctx, http.MethodPost, "/management/v1/projects/_search", orgID, searchBody, &searchResp); err2 != nil {
+				return nil, fmt.Errorf("re-searching after conflict: %w", err2)
+			}
+			if len(searchResp.Result) > 0 && searchResp.Result[0].ProjectID != "" {
+				return &EnsureProjectResult{ProjectID: searchResp.Result[0].ProjectID, Created: false}, nil
+			}
+			return nil, fmt.Errorf("project conflict on create but not found on re-search (name=%s, org=%s)", name, orgID)
+		}
+		return nil, fmt.Errorf("creating project: %w", err)
+	}
+
+	if createResp.ProjectID == "" {
+		return nil, fmt.Errorf("create project response missing id field")
+	}
+
+	slog.Info("project created", "project_id", createResp.ProjectID, "name", name)
+	return &EnsureProjectResult{ProjectID: createResp.ProjectID, Created: true}, nil
+}
+
+// ---------------------------------------------------------------------------
 // MintOIDCClient
 // ---------------------------------------------------------------------------
 
