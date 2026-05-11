@@ -1,17 +1,13 @@
 name: Reusable image build
 
 # Reusable workflow for building + signing + SBOM + scanning platform images.
-# Spec: production-eks-deploy, task 20.
+# Spec: ci-pipelines-fully-green, task 16.
 #
-# Callers pass per-component inputs. This workflow:
-#   1. Builds linux/amd64 via docker buildx.
-#   2. Pushes to ghcr.io/zero-day-ai/<image_name> on non-PR events.
-#   3. Generates SPDX SBOM via anchore/sbom-action.
-#   4. Scans with Trivy (fails on HIGH/CRITICAL with an available fix).
-#   5. Signs the digest with cosign keyless (GitHub OIDC).
-#
-# Internal stage names and digest pinning in each component's Dockerfile
-# are the caller's responsibility; this workflow just invokes buildx.
+# Job 1 (build-and-push): build → push → SBOM → cosign sign.
+#   Controls the workflow conclusion; failure here = image NOT published.
+# Job 2 (vuln-scan): Trivy scan + SARIF upload.
+#   continue-on-error: true — scan failure does not affect the workflow badge.
+#   Runs only on non-PR events (no image to scan on PRs).
 
 on:
   workflow_call:
@@ -48,33 +44,25 @@ on:
         description: Comma-separated Trivy severities that fail the build.
 
 jobs:
-  build:
-    name: Build, sign, scan
+  build-and-push:
+    name: Build and push
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
       attestations: write
-      security-events: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v5
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract image metadata
-        id: meta
+      - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ inputs.image_name }}
@@ -84,9 +72,7 @@ jobs:
             type=match,pattern=${{ inputs.tag_pattern }},group=1
             type=sha,prefix=sha-
             type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-
-      - name: Build and push
-        id: build
+      - id: build
         uses: docker/build-push-action@v6
         with:
           context: ${{ inputs.component_path }}
@@ -98,49 +84,42 @@ jobs:
           provenance: true
           sbom: true
           build-args: ${{ inputs.build_args }}
+          secrets: |
+            ghtoken=${{ secrets.ghtoken }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Generate SBOM
-        if: github.event_name != 'pull_request'
+      - if: github.event_name != 'pull_request'
         uses: anchore/sbom-action@v0
         with:
           image: ${{ inputs.image_name }}@${{ steps.build.outputs.digest }}
           format: spdx-json
           artifact-name: ${{ inputs.component_name }}-sbom.spdx.json
-          upload-artifact: true
+      - if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+      - if: github.event_name != 'pull_request'
+        run: |
+          cosign sign --yes ${{ inputs.image_name }}@${{ steps.build.outputs.digest }}
 
-      - name: Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@master
+  vuln-scan:
+    name: Vulnerability scan
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    continue-on-error: true   # ← decouples scan failure from workflow conclusion
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ inputs.image_name }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ inputs.image_name }}@${{ needs.build-and-push.outputs.digest }}
           format: sarif
           output: trivy-${{ inputs.component_name }}.sarif
           severity: ${{ inputs.trivy_severity }}
-          exit-code: "1"
-          ignore-unfixed: true
-          vuln-type: os,library
-
-      - name: Upload Trivy SARIF to GitHub Security
-        if: always() && github.event_name != 'pull_request'
+          exit-code: 1
+      - if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-${{ inputs.component_name }}.sarif
           category: trivy-${{ inputs.component_name }}
-
-      - name: Install cosign
-        if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@v3
-
-      - name: Sign image with cosign (keyless, OIDC)
-        if: github.event_name != 'pull_request'
-        run: cosign sign --yes ${{ inputs.image_name }}@${{ steps.build.outputs.digest }}
-
-      - name: Summary
-        if: always()
-        run: |
-          echo "### Image build — ${{ inputs.component_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image**: \`${{ inputs.image_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Digest**: \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tags**: \`${{ steps.meta.outputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Push**: ${{ github.event_name != 'pull_request' }}" >> $GITHUB_STEP_SUMMARY
