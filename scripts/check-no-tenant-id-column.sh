@@ -47,6 +47,7 @@ if [[ "${SELFTEST:-0}" == "1" ]]; then
     log_info "Self-test mode: writing synthetic violating fixture..."
     trap cleanup_fixture EXIT
 
+    mkdir -p "$(dirname "${SELFTEST_FIXTURE}")"
     cat > "${SELFTEST_FIXTURE}" <<'SQL'
 -- Synthetic fixture for self-test. Do not commit.
 CREATE TABLE example (
