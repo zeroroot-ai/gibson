@@ -175,6 +175,99 @@ func TestEnsureOrg_APIError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// EnsureProject tests
+// ---------------------------------------------------------------------------
+
+func TestEnsureProject_Created(t *testing.T) {
+	calls := 0
+	_, cfg := setupBootstrapServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/projects/_search"):
+			jsonRespB(w, http.StatusOK, map[string]interface{}{"result": []interface{}{}})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/projects"):
+			jsonRespB(w, http.StatusOK, map[string]string{"id": "proj-new-1"})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+
+	c := newPATClient(cfg)
+	result, err := c.EnsureProject(context.Background(), "org-1", "gibson")
+	if err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+	if result.ProjectID != "proj-new-1" {
+		t.Errorf("ProjectID = %q, want proj-new-1", result.ProjectID)
+	}
+	if !result.Created {
+		t.Error("Created should be true for a freshly created project")
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 API calls (search + create), got %d", calls)
+	}
+}
+
+func TestEnsureProject_AlreadyExists(t *testing.T) {
+	_, cfg := setupBootstrapServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/projects/_search") {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		jsonRespB(w, http.StatusOK, map[string]interface{}{
+			"result": []map[string]string{{"id": "proj-existing-2"}},
+		})
+	})
+
+	c := newPATClient(cfg)
+	result, err := c.EnsureProject(context.Background(), "org-1", "gibson")
+	if err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+	if result.ProjectID != "proj-existing-2" {
+		t.Errorf("ProjectID = %q, want proj-existing-2", result.ProjectID)
+	}
+	if result.Created {
+		t.Error("Created should be false for an existing project")
+	}
+}
+
+func TestEnsureProject_Conflict_ResolvesOnResearch(t *testing.T) {
+	searchCount := 0
+	_, cfg := setupBootstrapServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/projects/_search"):
+			searchCount++
+			if searchCount == 1 {
+				jsonRespB(w, http.StatusOK, map[string]interface{}{"result": []interface{}{}})
+			} else {
+				jsonRespB(w, http.StatusOK, map[string]interface{}{
+					"result": []map[string]string{{"id": "proj-race-3"}},
+				})
+			}
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/projects"):
+			errorRespB(w, http.StatusConflict, "ALREADY_EXISTS", "project already exists")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	c := newPATClient(cfg)
+	result, err := c.EnsureProject(context.Background(), "org-1", "gibson")
+	if err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+	if result.ProjectID != "proj-race-3" {
+		t.Errorf("ProjectID = %q, want proj-race-3", result.ProjectID)
+	}
+	if result.Created {
+		t.Error("Created should be false when resolved via re-search")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // MintOIDCClient tests
 // ---------------------------------------------------------------------------
 
