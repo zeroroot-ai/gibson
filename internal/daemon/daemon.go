@@ -1585,14 +1585,24 @@ func (d *daemonImpl) initPlatformPostgres(ctx context.Context) {
 		"max_conns", pgCfg.MaxConns,
 	)
 
-	// Spec gibson-postgres-migrations Requirement 5: assert
-	// schema_migrations.version >= embedded MAX before serving
-	// traffic. Catches schema/binary skew (chart upgraded but the
-	// platform-db-migrate Job hasn't run yet). devMode downgrades
-	// to a warning so local-dev tooling without a real platform DB
-	// can boot.
+	// Phase 6.1 (deploy-architecture-refactor): run any pending platform
+	// migrations before serving traffic. This replaces the Helm
+	// pre-install platform-db-migrate Job. On failure the daemon exits
+	// non-zero; K8s restarts with backoff. Set SKIP_MIGRATIONS=true
+	// for emergencies.
+	if err := runPlatformMigrations(ctx, db, d.logger.Slog()); err != nil {
+		d.logger.Error(ctx, "platform migrations failed — pod will exit for K8s retry",
+			"error", err)
+		_ = db.Close()
+		return
+	}
+
+	// Spec gibson-postgres-migrations Requirement 5: after running
+	// migrations, assert version >= embedded MAX to catch any residual
+	// skew (e.g. SKIP_MIGRATIONS was set, or the source driver returned
+	// an unexpected version).
 	if err := assertPlatformSchemaVersion(ctx, db, d.logger.Slog()); err != nil {
-		d.logger.Error(ctx, "platform schema gate failed (set --dev-mode to bypass)",
+		d.logger.Error(ctx, "platform schema gate failed after migrations",
 			"error", err)
 		_ = db.Close()
 		// platformDB stays nil; the dashboard's per-tenant
