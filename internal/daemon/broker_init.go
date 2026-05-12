@@ -15,6 +15,7 @@ import (
 	daemonapi "github.com/zero-day-ai/gibson/internal/daemon/api"
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/secrets"
+	"github.com/zero-day-ai/gibson/internal/secrets/configstore"
 	pgprovider "github.com/zero-day-ai/gibson/internal/secrets/providers/postgres"
 	"github.com/zero-day-ai/sdk/auth"
 	sdksecrets "github.com/zero-day-ai/sdk/secrets"
@@ -112,7 +113,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 				"error", err)
 			// Non-fatal: continue with noop config getter.
 		} else {
-			tenantCfgStore, err := secrets.NewTenantConfigStore(pgxPool, systemKEK)
+			tenantCfgStore, err := configstore.NewStore(pgxPool, systemKEK)
 			if err != nil {
 				d.logger.Warn(ctx, "broker stack: TenantConfigStore construction failed; broker config CRUD unavailable",
 					"error", err)

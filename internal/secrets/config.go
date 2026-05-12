@@ -9,13 +9,21 @@ import (
 
 	"github.com/zero-day-ai/sdk/auth"
 	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+
+	"github.com/zero-day-ai/gibson/internal/secrets/configstore"
 )
+
+// ErrBrokerConfigNotFound is returned by ConfigStore.Get when no
+// configuration row exists for the requested tenant. Re-exported from the
+// configstore sub-package so callers under internal/secrets/* don't need
+// to import the sub-package directly.
+var ErrBrokerConfigNotFound = configstore.ErrNotFound
 
 // BrokerConfig is the decrypted, in-memory representation of a tenant's
 // broker configuration. Provider is the short provider name ("postgres",
 // "vault", "awssm", "gcpsm", "azurekv"). ConfigBlob is the raw JSON bytes
 // of the provider-specific configuration (before encryption). The blob is
-// never persisted in plaintext — TenantConfigStore.SetRaw encrypts it
+// never persisted in plaintext — configstore.Store.SetRaw encrypts it
 // before writing.
 type BrokerConfig struct {
 	// Provider is one of: "postgres", "vault", "awssm", "gcpsm", "azurekv".
@@ -47,7 +55,7 @@ type ConfigStoreAuditWriter interface {
 //
 // ConfigStore is safe for concurrent use.
 type ConfigStore struct {
-	store     *TenantConfigStore
+	store     *configstore.Store
 	factories map[string]ProviderFactory
 	auditor   ConfigStoreAuditWriter
 }
@@ -57,12 +65,12 @@ type ConfigStore struct {
 // to probe the candidate). auditor receives audit events on Set and Delete;
 // it must never be nil.
 func NewConfigStore(
-	store *TenantConfigStore,
+	store *configstore.Store,
 	factories map[string]ProviderFactory,
 	auditor ConfigStoreAuditWriter,
 ) (*ConfigStore, error) {
 	if store == nil {
-		return nil, errors.New("config store: TenantConfigStore must not be nil")
+		return nil, errors.New("config store: underlying store must not be nil")
 	}
 	if auditor == nil {
 		return nil, errors.New("config store: auditor must not be nil")
