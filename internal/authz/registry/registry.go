@@ -2386,7 +2386,7 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.TenantAdminService/GetTenantQuotaUsage": {
 		Method:            "/gibson.tenant.v1.TenantAdminService/GetTenantQuotaUsage",
 		Service:           "gibson.tenant.v1.TenantAdminService",
-		Relation:          "viewer",
+		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,

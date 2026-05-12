@@ -1498,7 +1498,7 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.TenantAdminService/GetTenantQuotaUsage":
-    relation: "viewer"
+    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

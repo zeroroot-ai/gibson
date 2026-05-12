@@ -115,8 +115,8 @@ func (s *DaemonServer) GetTenantQuotaUsage(ctx context.Context, req *tenantv1.Ge
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant_id is required")
 	}
-	// FGA viewer relation enforced by the auth interceptor (proto annotation
-	// `relation: "viewer"`) — no re-check needed here.
+	// FGA member relation enforced by the auth interceptor (proto annotation
+	// `relation: "member"`) — no re-check needed here.
 
 	reader, ok := s.quotaManager.(quotaUsageReader)
 	if !ok || reader == nil {
