@@ -1,0 +1,54 @@
+# ============================================================================
+# gibson-bootstrap-runner — chart's bootstrap-secrets Job container
+# ============================================================================
+# The chart's bootstrap-secrets Job runs a bash script that drives the
+# gibson-bootstrap binary plus shells out to kubectl / aws-cli / jq. The
+# `gibson-bootstrap` image is distroless (Go binary only) and has none of
+# those tools, so the chart's Job command spec
+# `command: ["/bin/bash", "/scripts/bootstrap.sh"]` crashed with
+# `exec: "/bin/bash": no such file or directory`.
+#
+# This runner image layers the gibson-bootstrap binary onto an alpine base
+# with bash + jq + curl + ca-certificates + aws-cli + kubectl. Used only
+# by the chart's bootstrap-secrets Job; direct CLI use stays on the
+# distroless `gibson-bootstrap` image.
+#
+# Spec: .spec-workflow/specs/kind-dashboard-bringup-e2e (D1).
+#
+# Build (from repo root):
+#   docker buildx build \
+#     -f tools/gibson-bootstrap/Dockerfile.runner \
+#     -t ghcr.io/zero-day-ai/gibson-bootstrap-runner:latest \
+#     .
+# ============================================================================
+
+ARG BOOTSTRAP_TAG=latest
+
+# Stage 1: pull the published gibson-bootstrap binary
+FROM ghcr.io/zero-day-ai/gibson-bootstrap:${BOOTSTRAP_TAG} AS bootstrap
+
+# Stage 2: alpine runner with the tools the chart's bootstrap.sh needs
+FROM ghcr.io/zero-day-ai/mirror/alpine:3.21
+
+# bash         — the chart's bootstrap.sh shebang + helper functions
+# jq           — parse JSON output from `gibson-bootstrap zitadel-ensure-*`
+# curl         — health checks; not used by the script today but commonly
+#                added when extending it
+# ca-certificates — for HTTPS to Zitadel and AWS
+# aws-cli      — bootstrap-secrets `aws` backend (AWS Secrets Manager)
+# kubectl      — bootstrap-secrets `kubernetes` backend (in-cluster Secret)
+RUN apk add --no-cache \
+        bash \
+        jq \
+        curl \
+        ca-certificates \
+        aws-cli \
+        kubectl
+
+COPY --from=bootstrap /gibson-bootstrap /usr/local/bin/gibson-bootstrap
+
+# Reset entrypoint so the chart's command:[/bin/bash, /scripts/bootstrap.sh]
+# spec is honoured. Default CMD lands at bash if the chart is misconfigured,
+# which surfaces faster than a silent no-op.
+ENTRYPOINT []
+CMD ["/bin/bash"]
