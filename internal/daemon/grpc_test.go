@@ -147,38 +147,50 @@ func TestRejectNonLoopbackWithoutSPIFFE(t *testing.T) {
 	}
 }
 
-// TestSPIFFEInitFailClosed is a source-code value-lock asserting that
-// grpc.go returns an error (fail-closed) when workloadapi.NewX509Source
+// TestSPIFFEInitFailClosed is a source-code value-lock asserting that the
+// daemon returns an error (fail-closed) when workloadapi.NewX509Source
 // fails, rather than falling back to a plaintext listener.
 //
-// This test reads the source text of grpc.go and asserts:
-//  1. The old warn-and-continue pattern is NOT present.
-//  2. A return-with-error pattern following the sourceErr != nil check IS present.
+// The actual SPIFFE source initialisation lives in initSPIFFEX509Source
+// in daemon.go (was hoisted there by spec critical-tls-no-fallbacks
+// Component 4); buildGRPCServer in grpc.go consumes the already-open
+// source. This test reads both files so the regression check still
+// catches a future move back to grpc.go OR a soft-fail regression in
+// either file.
 //
-// Covers Requirement 1.1 of the zero-trust-hardening spec.
+// Covers spec: critical-tls-no-fallbacks Requirement 1.5 (originally
+// zero-trust-hardening Req 1.1; the requirement was renumbered when
+// the SPIFFE init was moved out of grpc.go).
 func TestSPIFFEInitFailClosed(t *testing.T) {
-	src, err := os.ReadFile("grpc.go")
-	require.NoError(t, err, "could not read grpc.go; run test from core/gibson/ or internal/daemon/")
-	srcStr := string(src)
+	// Read both files so the regression check is robust to the next
+	// refactor that moves the init back or splits it further.
+	var srcStr string
+	for _, name := range []string{"grpc.go", "daemon.go"} {
+		b, err := os.ReadFile(name)
+		require.NoError(t, err, "could not read %s; run test from internal/daemon/", name)
+		srcStr += string(b)
+	}
 
 	// The old soft-fail pattern must be gone.
 	const oldWarnFallback = `d.logger.Warn(ctx, "failed to initialize SPIFFE X509Source; running without mTLS"`
 	assert.NotContains(t, srcStr, oldWarnFallback,
-		"REGRESSION (zero-trust-hardening Req 1.1): "+
-			"grpc.go must NOT fall back to plaintext on SPIFFE init failure; "+
+		"REGRESSION (critical-tls-no-fallbacks Req 1.5 / "+
+			"zero-trust-hardening Req 1.1): "+
+			"daemon must NOT fall back to plaintext on SPIFFE init failure; "+
 			"the warn-and-continue pattern was replaced with return nil, fmt.Errorf(...).")
 
-	// The fail-closed return must be present immediately after the sourceErr check.
+	// The fail-closed return must be present.
 	const failClosedPattern = `"SPIFFE workload API unreachable:`
 	assert.Contains(t, srcStr, failClosedPattern,
-		"REGRESSION (zero-trust-hardening Req 1.1): "+
-			"grpc.go must return a non-nil error when workloadapi.NewX509Source fails. "+
-			"Expected to find the fail-closed error message.")
+		"REGRESSION (critical-tls-no-fallbacks Req 1.5 / "+
+			"zero-trust-hardening Req 1.1): "+
+			"the daemon must return a non-nil error when "+
+			"workloadapi.NewX509Source fails. Expected to find the "+
+			"fail-closed error message.")
 
 	// Confirm the spec reference is in the error message.
-	assert.Contains(t, srcStr, "zero-trust-hardening Req 1.1",
-		"REGRESSION (zero-trust-hardening Req 1.1): "+
-			"the fail-closed error message must reference the spec.")
+	assert.Contains(t, srcStr, "critical-tls-no-fallbacks Requirement 1.5",
+		"REGRESSION: the fail-closed error message must reference its spec.")
 }
 
 // TestBuildGRPCServer_NonLoopbackWithoutSPIFFE verifies that the non-loopback
@@ -371,7 +383,10 @@ func TestListAgents_NoInstances(t *testing.T) {
 	assert.Equal(t, "healthy", agents[0].Health) // Registry agents default to healthy
 }
 
-// TestListAgents_RegistryError tests ListAgents graceful degradation when registry fails.
+// TestListAgents_RegistryError asserts that ListAgents propagates registry
+// errors to the caller. The earlier "graceful degradation" expectation was
+// replaced — for an authz-relevant listing, silent empty on registry failure
+// is a security smell; the caller should see the error and decide.
 func TestListAgents_RegistryError(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
 		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
@@ -387,9 +402,10 @@ func TestListAgents_RegistryError(t *testing.T) {
 	ctx := context.Background()
 	agents, err := daemon.ListAgents(ctx, "")
 
-	// Registry error is gracefully degraded - returns empty results, not error
-	require.NoError(t, err)
-	assert.Empty(t, agents)
+	require.Error(t, err, "registry errors must propagate")
+	assert.Contains(t, err.Error(), "list agents")
+	assert.Contains(t, err.Error(), "registry connection failed")
+	assert.Nil(t, agents)
 }
 
 // TestGetAgentStatus_Success tests GetAgentStatus with existing agent.
@@ -480,16 +496,18 @@ func TestListTools_Success(t *testing.T) {
 		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
 			return []component.ToolInfo{
 				{
-					Name:      "nmap",
-					Version:   "7.92",
-					Endpoints: []string{"localhost:50300"},
-					Instances: 1,
+					Name:        "nmap",
+					Version:     "7.92",
+					Description: "Network scanner",
+					Endpoints:   []string{"localhost:50300"},
+					Instances:   1,
 				},
 				{
-					Name:      "sqlmap",
-					Version:   "1.5",
-					Endpoints: []string{"localhost:50301"},
-					Instances: 1,
+					Name:        "sqlmap",
+					Version:     "1.5",
+					Description: "SQL injection tool",
+					Endpoints:   []string{"localhost:50301"},
+					Instances:   1,
 				},
 			}, nil
 		},
@@ -621,7 +639,9 @@ func TestListPlugins_EmptyResults(t *testing.T) {
 	assert.Empty(t, plugins)
 }
 
-// TestListPlugins_RegistryError tests ListPlugins graceful degradation when registry fails.
+// TestListPlugins_RegistryError asserts that ListPlugins propagates registry
+// errors to the caller. See the symmetrical TestListAgents_RegistryError for
+// the rationale (silent empty on registry failure is a security smell).
 func TestListPlugins_RegistryError(t *testing.T) {
 	mockRegistry := &mockComponentDiscovery{
 		listPluginsFunc: func(ctx context.Context) ([]component.PluginInfo, error) {
@@ -637,9 +657,10 @@ func TestListPlugins_RegistryError(t *testing.T) {
 	ctx := context.Background()
 	plugins, err := daemon.ListPlugins(ctx)
 
-	// Registry error is gracefully degraded - returns empty results, not error
-	require.NoError(t, err)
-	assert.Empty(t, plugins)
+	require.Error(t, err, "registry errors must propagate")
+	assert.Contains(t, err.Error(), "list plugins")
+	assert.Contains(t, err.Error(), "plugin registry error")
+	assert.Nil(t, plugins)
 }
 
 // TestListAgents_NoEndpoints tests handling of agents with no endpoints.
