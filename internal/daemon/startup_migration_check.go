@@ -15,7 +15,7 @@ import (
 	"github.com/zero-day-ai/sdk/auth"
 
 	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/datapool/admin"
+	"github.com/zero-day-ai/gibson/internal/tenants"
 	"github.com/zero-day-ai/gibson/migrations"
 	pgmigrations "github.com/zero-day-ai/gibson/pkg/platform/migrations"
 
@@ -156,7 +156,7 @@ func runStartupMigrationCheck(
 		return nil
 	}
 
-	lister := admin.NewK8sTenantLister(cfg.DynamicClient, cfg.K8sNamespace)
+	lister := tenants.NewK8sLister(cfg.DynamicClient, cfg.K8sNamespace)
 	tenants, err := lister.ListTenants(ctx)
 	if err != nil {
 		logger.WarnContext(ctx, "startup migration check: could not list tenants (check skipped)",

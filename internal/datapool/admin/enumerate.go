@@ -5,11 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-
 	"github.com/zero-day-ai/gibson/internal/datapool"
+	"github.com/zero-day-ai/gibson/internal/tenants"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -17,68 +14,6 @@ import (
 // to signal that iteration should halt immediately. It is not treated as a
 // failure — ForEachTenant returns nil when this is the only "error" received.
 var ErrStopIteration = errors.New("admin: stop iteration")
-
-// tenantGVR is the GroupVersionResource for the Tenant CRD.
-var tenantGVR = schema.GroupVersionResource{
-	Group:    "gibson.zero-day.ai",
-	Version:  "v1alpha1",
-	Resource: "tenants",
-}
-
-// TenantLister abstracts the source of tenant IDs for ForEachTenant.
-// In production, a k8sLister backed by a Kubernetes dynamic client is used.
-// In tests, a fake implementation is injected.
-type TenantLister interface {
-	// ListTenants returns the IDs of all known tenants. The returned slice
-	// may be empty when no tenants exist; the caller iterates it as-is.
-	ListTenants(ctx context.Context) ([]auth.TenantID, error)
-}
-
-// k8sLister is the production TenantLister that reads the Tenant CRD list
-// from the Kubernetes API server using the same GVR as provisioning_check.go.
-type k8sLister struct {
-	client    dynamic.Interface
-	namespace string
-}
-
-// NewK8sTenantLister creates a TenantLister backed by the Kubernetes dynamic
-// client. namespace may be empty for cluster-scoped resources.
-func NewK8sTenantLister(client dynamic.Interface, namespace string) TenantLister {
-	return &k8sLister{client: client, namespace: namespace}
-}
-
-func (l *k8sLister) ListTenants(ctx context.Context) ([]auth.TenantID, error) {
-	var resource dynamic.ResourceInterface
-	if l.namespace != "" {
-		resource = l.client.Resource(tenantGVR).Namespace(l.namespace)
-	} else {
-		resource = l.client.Resource(tenantGVR)
-	}
-
-	list, err := resource.List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("admin: ListTenants: %w", err)
-	}
-
-	tenants := make([]auth.TenantID, 0, len(list.Items))
-	for _, item := range list.Items {
-		meta, ok := item.Object["metadata"].(map[string]any)
-		if !ok {
-			continue
-		}
-		tenantStr, ok := meta["name"].(string)
-		if !ok || tenantStr == "" {
-			continue
-		}
-		tid, err := auth.NewTenantID(tenantStr)
-		if err != nil {
-			// Skip tenants with invalid IDs rather than aborting the list.
-			continue
-		}
-		tenants = append(tenants, tid)
-	}
-	return tenants, nil
-}
 
 // ForEachTenant enumerates all tenant IDs from lister, acquires a per-tenant
 // Conn for each via tenantPool, and calls fn with the tenant ID and its Conn.
@@ -98,10 +33,15 @@ func (l *k8sLister) ListTenants(ctx context.Context) ([]auth.TenantID, error) {
 //
 // ForEachTenant is safe to call concurrently from separate goroutines; each
 // call manages its own per-tenant Conn lifecycles independently.
+//
+// The Lister source (Kubernetes Tenant CRDs in production, fakes in tests)
+// is intentionally injected so the admin pool stays loosely coupled to the
+// tenant-enumeration concern. See internal/tenants for the canonical
+// production implementation.
 func ForEachTenant(
 	ctx context.Context,
 	adminConn *datapool.AdminConn,
-	lister TenantLister,
+	lister tenants.Lister,
 	tenantPool datapool.Pool,
 	fn func(tenant auth.TenantID, conn *datapool.Conn) error,
 ) error {
@@ -109,13 +49,13 @@ func ForEachTenant(
 		return fmt.Errorf("admin: ForEachTenant: adminConn must not be nil")
 	}
 
-	tenants, err := lister.ListTenants(ctx)
+	tenantList, err := lister.ListTenants(ctx)
 	if err != nil {
 		return fmt.Errorf("admin: ForEachTenant: listing tenants: %w", err)
 	}
 
 	var errs []error
-	for _, tenant := range tenants {
+	for _, tenant := range tenantList {
 		// Check for context cancellation between tenants.
 		select {
 		case <-ctx.Done():
