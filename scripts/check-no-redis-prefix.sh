@@ -64,9 +64,9 @@ while IFS= read -r f; do
             ;;
     esac
     REDIS_FILES+=("${f}")
-done < <(rg --files-with-matches \
-             --type go \
-             --glob '!*_test.go' \
+done < <(grep --recursive --files-with-matches \
+             --include='*.go' \
+             --exclude='*_test.go' \
              '"github.com/redis/go-redis' \
              "${REPO_ROOT}" 2>/dev/null || true)
 
@@ -84,7 +84,7 @@ log_info "Checking ${#REDIS_FILES[@]} redis-importing file(s) for tenant-prefix 
 PATTERN='(tenant:|gibson:tenant:)'
 
 for file in "${REDIS_FILES[@]}"; do
-    hits=$(rg --line-number "${PATTERN}" "${file}" 2>/dev/null || true)
+    hits=$(grep --line-number --extended-regexp "${PATTERN}" "${file}" 2>/dev/null || true)
     if [[ -n "${hits}" ]]; then
         log_error "Tenant-prefix Redis key pattern in ${file}:"
         echo "${hits}" | while IFS= read -r line; do
