@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package testhelpers provides shared test scaffolding for gibson integration
 // tests. The postgres_tls helper here exists because of the workspace-wide
 // directive that deletes the `disable` SSL mode from every DSN
