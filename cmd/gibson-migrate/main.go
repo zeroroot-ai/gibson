@@ -36,7 +36,7 @@ import (
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"github.com/zero-day-ai/gibson/cmd/gibson-migrate/internal/runner"
-	"github.com/zero-day-ai/gibson/internal/datapool/admin"
+	"github.com/zero-day-ai/gibson/internal/tenants"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -570,7 +570,7 @@ func resolveTenants(ctx context.Context, tenantFlag string, allFlag bool, cfg *c
 		return nil, fmt.Errorf("kubernetes dynamic client: %w", err)
 	}
 
-	lister := admin.NewK8sTenantLister(dynClient, "")
+	lister := tenants.NewK8sLister(dynClient, "")
 	tids, err := lister.ListTenants(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list tenants: %w", err)

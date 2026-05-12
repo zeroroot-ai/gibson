@@ -24,7 +24,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/datapool/admin"
+	"github.com/zero-day-ai/gibson/internal/tenants"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -55,7 +55,7 @@ func (d *daemonImpl) recoverRunningMissionsAcrossTenants(ctx context.Context) er
 	}
 
 	namespace := os.Getenv("GIBSON_K8S_NAMESPACE")
-	lister := admin.NewK8sTenantLister(dynClient, namespace)
+	lister := tenants.NewK8sLister(dynClient, namespace)
 
 	tenants, err := lister.ListTenants(ctx)
 	if err != nil {
