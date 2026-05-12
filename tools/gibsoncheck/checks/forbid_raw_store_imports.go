@@ -88,8 +88,8 @@ var allowedStorePackages = []string{
 	"/internal/ratelimit",      // Phase D/4.x: rate limiter on shared Redis
 	"/internal/providerconfig", // Phase C/3.3: provider config store pending Conn-bound
 	"/internal/apikeys",        // Phase D/4.x: API key store pending Conn-bound refactor
-	"/internal/orchestrator",   // Phase D/4.4: Neo4j graph querier pending Conn-bound refactor
-	"/internal/secrets",        // TenantConfigStore uses pgxpool directly against the operator-shared Postgres; pending relocation into internal/admin/ (same shape as the admin pool consumers) or wrapping by a new datapool.OperatorPool helper.
+	"/internal/orchestrator",        // Phase D/4.4: Neo4j graph querier pending Conn-bound refactor
+	"/internal/secrets/configstore", // sub-package that owns raw pgx access for the secrets broker stack against the operator-shared Postgres; the parent internal/secrets/ stays free of raw store imports.
 }
 
 func runForbidRawStoreImports(pass *analysis.Pass) (any, error) {
