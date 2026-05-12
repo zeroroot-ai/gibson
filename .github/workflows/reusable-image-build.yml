@@ -71,7 +71,13 @@ jobs:
             type=ref,event=pr
             type=match,pattern=${{ inputs.tag_pattern }},group=1
             type=sha,prefix=sha-
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            # Tag `latest` on push to main AND on workflow_dispatch from main.
+            # workflow_dispatch is the operator escape hatch for force-rebuilds
+            # (e.g. after rotating an upstream base image, or to bust a stale
+            # buildx layer cache). Without `latest` on dispatch, the rebuild
+            # produces a fresh image but consumers pinning `:latest` keep
+            # pulling the stale one — defeating the rebuild's purpose.
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
       - id: build
         uses: docker/build-push-action@v6
         with:
