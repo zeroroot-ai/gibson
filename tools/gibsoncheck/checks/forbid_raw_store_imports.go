@@ -62,9 +62,10 @@ var allowedStorePackages = []string{
 	"/internal/admin",
 	"/internal/migrate",
 	"/cmd/gibson-migrate",
-	"/cmd/daemon",      // cmd/daemon binary entry point (bootstrap wiring)
-	"/internal/daemon", // daemon bootstrap and subsystems (wires raw clients into Conn factory)
+	"/cmd/daemon",                  // cmd/daemon binary entry point (bootstrap wiring)
+	"/internal/daemon",             // daemon bootstrap and subsystems (wires raw clients into Conn factory)
 	"/tools/gibsoncheck",
+	"/cmd/mission-storage-migrate", // one-off offline mission-storage migrator; peer of cmd/gibson-migrate (spec: mirror-delete-and-offline-migrator).
 
 	// Transitional allowlist — Phase D migration in progress.
 	// These packages are targeted for refactor/deletion; remove entries here
@@ -88,6 +89,7 @@ var allowedStorePackages = []string{
 	"/internal/providerconfig", // Phase C/3.3: provider config store pending Conn-bound
 	"/internal/apikeys",        // Phase D/4.x: API key store pending Conn-bound refactor
 	"/internal/orchestrator",   // Phase D/4.4: Neo4j graph querier pending Conn-bound refactor
+	"/internal/secrets",        // TenantConfigStore uses pgxpool directly against the operator-shared Postgres; pending relocation into internal/admin/ (same shape as the admin pool consumers) or wrapping by a new datapool.OperatorPool helper.
 }
 
 func runForbidRawStoreImports(pass *analysis.Pass) (any, error) {
