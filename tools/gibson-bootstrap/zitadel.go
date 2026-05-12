@@ -35,7 +35,12 @@ func loadPATClientConfig() (PATClientConfig, error) {
 		return PATClientConfig{}, fmt.Errorf("ZITADEL_ISSUER env must be set")
 	}
 
-	pat := os.Getenv("ZITADEL_ADMIN_PAT")
+	// Trim surrounding whitespace — Zitadel's setup Job writes its PAT to
+	// a file with a trailing newline, which propagates into the
+	// `iam-admin-pat` Secret. Without trimming, the value goes into an
+	// HTTP Authorization header and Go's net/http rejects it with
+	// "invalid header field value for Authorization".
+	pat := strings.TrimSpace(os.Getenv("ZITADEL_ADMIN_PAT"))
 	if pat == "" {
 		return PATClientConfig{}, fmt.Errorf("ZITADEL_ADMIN_PAT env must be set")
 	}
