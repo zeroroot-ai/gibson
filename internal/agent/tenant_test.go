@@ -40,9 +40,12 @@ func TestFinding_TenantSerialization(t *testing.T) {
 
 // TestFinding_BackwardCompatibility verifies findings without TenantID can be loaded
 func TestFinding_BackwardCompatibility(t *testing.T) {
-	// Simulate old JSON without tenant_id field
+	// Simulate old JSON without tenant_id field. The ID must be a valid UUID
+	// because types.ID.UnmarshalJSON now validates UUID v4 format; older
+	// findings from before that validation landed should be re-keyed during
+	// migration, not bypass validation here.
 	oldJSON := `{
-		"id": "test-123",
+		"id": "550e8400-e29b-41d4-a716-446655440000",
 		"title": "Old Finding",
 		"description": "Old Description",
 		"severity": "high",
@@ -58,11 +61,12 @@ func TestFinding_BackwardCompatibility(t *testing.T) {
 	err := json.Unmarshal([]byte(oldJSON), &finding)
 	require.NoError(t, err, "Should unmarshal old JSON without tenant_id")
 
-	// Verify TenantID is empty (zero value)
+	// Verify TenantID is empty (zero value) — the actual backward-compat
+	// contract under test is that missing tenant_id parses as empty.
 	assert.Equal(t, "", finding.TenantID, "TenantID should be empty for old data")
 
 	// Verify other fields are loaded correctly
-	assert.Equal(t, types.ID("test-123"), finding.ID)
+	assert.Equal(t, types.ID("550e8400-e29b-41d4-a716-446655440000"), finding.ID)
 	assert.Equal(t, "Old Finding", finding.Title)
 	assert.Equal(t, SeverityHigh, finding.Severity)
 }

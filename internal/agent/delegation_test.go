@@ -82,8 +82,12 @@ func TestRegistryToolExecutor(t *testing.T) {
 					version: "1.0.0",
 				}, nil
 			},
-			expectError:   true, // proto-to-map conversion not implemented yet
-			errorContains: "proto-to-map conversion not yet implemented",
+			// Proto-to-map conversion IS implemented (see delegation.go's
+			// ExecuteTool), but a tool that doesn't declare its input
+			// proto type (mockTool with empty inputMessageType) is
+			// rejected before the conversion runs.
+			expectError:   true,
+			errorContains: "has no InputMessageType",
 		},
 		{
 			name:     "tool not found",
@@ -162,10 +166,12 @@ func TestDelegationHarnessWithRegistryExecutors(t *testing.T) {
 		harness := NewDelegationHarness(nil, discovery)
 		ctx := context.Background()
 
-		// Should discover tool but fail on proto conversion
+		// Discovers the tool but rejects it because mockTool does not
+		// declare an InputMessageType (proto conversion now works for
+		// tools that declare it; this fixture intentionally does not).
 		result, err := harness.ExecuteTool(ctx, "test-tool", map[string]any{"key": "value"})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "proto-to-map conversion not yet implemented")
+		assert.Contains(t, err.Error(), "has no InputMessageType")
 		assert.Nil(t, result)
 	})
 
