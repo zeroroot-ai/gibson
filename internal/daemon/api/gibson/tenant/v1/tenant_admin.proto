@@ -120,7 +120,7 @@ service TenantAdminService {
   // plans-and-quotas-simplification R9.B.
   rpc GetTenantQuotaUsage(GetTenantQuotaUsageRequest) returns (GetTenantQuotaUsageResponse) {
     option (gibson.auth.v1.authz) = {
-      relation: "viewer",
+      relation: "member",
       object_type: "tenant",
       object_deriver: "tenant_from_identity",
       allowed_identities: 3  // USER | SERVICE
