@@ -1381,13 +1381,23 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 			}
 		}
 
+		// Default an unset Health to "healthy" to match the ListAgents
+		// behaviour just above (a registry entry without a self-reported
+		// health is treated as healthy; offline-detection happens via the
+		// Instances=0 path in GetToolStatus rather than via a missing
+		// Health field).
+		health := t.Health
+		if health == "" {
+			health = "healthy"
+		}
+
 		result[i] = api.ToolInfoInternal{
 			ID:           t.Name,
 			Name:         t.Name,
 			Version:      t.Version,
 			Endpoint:     endpoint,
 			Description:  t.Description,
-			Health:       t.Health,
+			Health:       health,
 			LastSeen:     time.Now(),
 			Capabilities: caps,
 		}
