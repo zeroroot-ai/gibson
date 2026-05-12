@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	pgmigrations "github.com/zero-day-ai/gibson/pkg/platform/migrations"
 )
 
 func TestAssertPlatformSchemaVersion_Missing(t *testing.T) {
@@ -56,14 +58,35 @@ func TestAssertPlatformSchemaVersion_VersionBehind(t *testing.T) {
 	}
 }
 
+// TestRunPlatformMigrations_SkipEnvVar verifies that SKIP_MIGRATIONS=true
+// causes runPlatformMigrations to return nil without touching the database.
+func TestRunPlatformMigrations_SkipEnvVar(t *testing.T) {
+	t.Setenv("SKIP_MIGRATIONS", "true")
+
+	// Pass a nil db — if the function tries to use it, it will panic/error.
+	if err := runPlatformMigrations(context.Background(), nil, nil); err != nil {
+		t.Fatalf("expected nil with SKIP_MIGRATIONS=true, got: %v", err)
+	}
+}
+
 func TestAssertPlatformSchemaVersion_OK(t *testing.T) {
-	db, mock, err := sqlmock.New()
+	// Use the actual embedded max version rather than a hardcoded constant
+	// so the test stays green as new migrations are added.
+	maxVer, err := pgmigrations.PlatformMaxVersion()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("PlatformMaxVersion: %v", err)
+	}
+	if maxVer == 0 {
+		t.Skip("no platform migrations embedded yet")
+	}
+
+	db, mock, sqlErr := sqlmock.New()
+	if sqlErr != nil {
+		t.Fatal(sqlErr)
 	}
 	defer db.Close()
 	mock.ExpectQuery("SELECT version, dirty FROM schema_migrations").
-		WillReturnRows(sqlmock.NewRows([]string{"version", "dirty"}).AddRow(2, false))
+		WillReturnRows(sqlmock.NewRows([]string{"version", "dirty"}).AddRow(maxVer, false))
 
 	if err := assertPlatformSchemaVersion(context.Background(), db, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
