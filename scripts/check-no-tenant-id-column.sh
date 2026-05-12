@@ -86,8 +86,7 @@ scan_files() {
 
         SCANNED=$((SCANNED + 1))
 
-        # Use ripgrep to find whole-word "tenant_id" (case-insensitive),
-        # then filter out:
+        # Find whole-word "tenant_id" (case-insensitive), then filter out:
         #   1. Pure comment lines (first non-whitespace chars are -- or //).
         #   2. Lines that contain a "no tenant_id" explanatory phrase — these
         #      are self-documenting comments inside SQL COMMENT ON TABLE strings
@@ -95,10 +94,14 @@ scan_files() {
         #      desired state. Examples:
         #        COMMENT ON TABLE foo IS '... No tenant_id — isolation is by database.'
         #        -- No tenant_id column — the tenant is implied ...
+        #
+        # We use POSIX grep so the script works on ubuntu-latest CI runners
+        # without an extra ripgrep install step; the GNU grep flags used here
+        # (-i, -n, -w, -E) are present on every GitHub-hosted runner.
         local hits
-        hits=$(rg --ignore-case --word-regexp --line-number \
+        hits=$(grep --line-number --word-regexp --ignore-case \
                'tenant_id' "${file_path}" 2>/dev/null \
-               | grep -Ev "^\s*[0-9]+:?\s*${comment_prefix}" \
+               | grep -Ev "^[0-9]+:[[:space:]]*${comment_prefix}" \
                | grep -Eiv "no[[:space:]]+tenant_id|tenant_id[[:space:]]+—|tenant_id.*absent|no.*tenant_id" \
                || true)
 
