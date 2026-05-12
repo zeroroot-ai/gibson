@@ -179,8 +179,13 @@ func TestGetCheckpoint_OperatorBypassesRedaction(t *testing.T) {
 		CheckpointID:  "cp-1",
 		WorkingMemory: wm,
 	})
+	// requireMissionViewer (mission_handlers.go) checks
+	// (user:<sub>, viewer, mission:<id>) directly. In production the FGA model
+	// cascades viewer from tenant#member; the fakeAuthorizer here does not
+	// model that cascade, so the test seeds the resolved tuple explicitly.
 	a := newFakeAuthorizer().
 		allow("user:u-alice", "member", "tenant:acme").
+		allow("user:u-alice", "viewer", "mission:mission-1").
 		allow("user:u-alice", "platform_operator", "system_tenant:_system")
 	srv := &DaemonServer{daemon: d, logger: testSlogLogger, authorizer: a}
 	ctx := auth.WithIdentity(context.Background(), auth.Identity{
@@ -412,9 +417,14 @@ func TestDiffCheckpoints_DagStepDeltas(t *testing.T) {
 
 func TestResumeMission_RewindGoesThroughDaemonRewindMission(t *testing.T) {
 	d := newFakeDaemon().withCheckpoint("mission-1", CheckpointData{CheckpointID: "cp-target"})
+	// requireMissionAdminForRewind (server.go) checks
+	// (user:<sub>, admin, mission:<id>) directly. In production the FGA model
+	// cascades admin from tenant#admin; the fakeAuthorizer here does not
+	// model that cascade, so the test seeds the resolved tuple explicitly.
 	a := newFakeAuthorizer().
 		allow("user:u-bob", "member", "tenant:acme").
-		allow("user:u-bob", "admin", "tenant:acme")
+		allow("user:u-bob", "admin", "tenant:acme").
+		allow("user:u-bob", "admin", "mission:mission-1")
 	w := newFakeAuditWriter()
 	srv := &DaemonServer{
 		daemon:                 d,
