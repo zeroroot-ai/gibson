@@ -122,7 +122,12 @@ func (c *patClient) EnsureOrg(ctx context.Context, name string) (*EnsureOrgResul
 		OrgID string `json:"id"`
 	}
 
-	if err := c.doRequest(ctx, http.MethodPost, "/admin/v1/orgs", "", createBody, &createResp); err != nil {
+	// Org creation is at /management/v1/orgs in Zitadel v4+; the
+	// previous /admin/v1/orgs endpoint returns 404. Search still lives
+	// on /admin/v1/orgs/_search (admin = system-level inspection,
+	// management = CRUD requiring IAM-level token, which the
+	// iam-admin PAT carries).
+	if err := c.doRequest(ctx, http.MethodPost, "/management/v1/orgs", "", createBody, &createResp); err != nil {
 		// 409 means another process raced us; treat as idempotent success by
 		// re-searching once.
 		if isConflict(err) {
