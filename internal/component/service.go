@@ -34,6 +34,7 @@ import (
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zero-day-ai/sdk/auth"
+	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 )
 
 // ---------------------------------------------------------------------------
@@ -659,25 +660,27 @@ func (s *ComponentServiceServer) RegisterComponent(
 
 	// Register ontology extension contributed by this component, if any.
 	//
-	// The current proto for RegisterComponentRequest does not yet carry an
-	// OntologyExtension payload — that field is deferred to a follow-up SDK +
-	// daemon + dashboard coordinated change. This block establishes the wiring
-	// so that once the proto field lands, a single line of call code here
-	// activates the extension. Until then s.ontologyReasoner is wired but
-	// called with nothing (proto field absence means no extension to register).
+	// The OntologyExtension payload arrives over the wire on
+	// RegisterComponentRequest (sdk v1.9.0+). When a reasoner is wired and the
+	// component sent a non-empty extension, hand it off to the reasoner so
+	// hierarchies / equivalences / IFPs / prefixes contributed by this
+	// component become live in the tenant's closure.
 	//
-	// Best-effort: a registration failure is logged at WARN and never fails the
-	// enrollment RPC — missing ontology hierarchy is a soft degradation, not a
-	// hard failure.
-	//
-	// TODO(ontology-extension-system): once RegisterComponentRequest.ontology_extension
-	// is added to the proto, replace the nil guard below with:
-	//   if s.ontologyReasoner != nil && req.OntologyExtension != nil {
-	//       ext := sdkgraphrag.OntologyExtensionFromProto(req.OntologyExtension)
-	//       if err := s.ontologyReasoner.RegisterExtension(req.Name, ext); err != nil { ... }
-	//   }
-	// (Deferred: proto changes require a coordinated SDK fan-out PR.)
-	_ = s.ontologyReasoner // ensure field is used; actual call site is deferred
+	// Best-effort: a registration failure is logged at WARN and never fails
+	// the enrollment RPC — missing ontology hierarchy is a soft degradation,
+	// not a hard failure (the component still registers and can serve work;
+	// hierarchy-aware queries simply won't see this component's contribution
+	// until a successful retry).
+	if s.ontologyReasoner != nil && req.GetOntologyExtension() != nil {
+		ext := sdkgraphrag.OntologyExtensionFromProto(req.GetOntologyExtension())
+		if err := s.ontologyReasoner.RegisterExtension(req.GetName(), ext); err != nil {
+			s.logger.WarnContext(ctx, "register component: ontology extension registration failed",
+				slog.String("component", req.GetName()),
+				slog.String("tenant", tenant),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
 
 	// Write FGA component ownership tuple so the "admin from owner" computed
 	// relation fires: any tenant admin automatically has full access to all
