@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.42.0](https://github.com/zero-day-ai/gibson/compare/v0.41.0...v0.42.0) (2026-05-13)
+
+
+### Features
+
+* **daemon:** activate ontology-extension registration in RegisterComponent ([#82](https://github.com/zero-day-ai/gibson/issues/82)) ([6dd36ae](https://github.com/zero-day-ai/gibson/commit/6dd36aeffe2420d3686367151ad428b1583d2b5e))
+
 ## [0.41.0](https://github.com/zero-day-ai/gibson/compare/v0.40.0...v0.41.0) (2026-05-13)
 
 
