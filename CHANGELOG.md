@@ -62,6 +62,29 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.40.0](https://github.com/zero-day-ai/gibson/compare/v0.39.0...v0.40.0) (2026-05-13)
+
+
+### Features
+
+* add in-process ontology reasoner and semantic query methods ([#76](https://github.com/zero-day-ai/gibson/issues/76)) ([f511471](https://github.com/zero-day-ai/gibson/commit/f5114713a8aeffee418ae7d1d9b510c439a94a6a))
+* **bootstrap:** add zitadel-ensure-project subcommand ([#49](https://github.com/zero-day-ai/gibson/issues/49)) ([36a83c4](https://github.com/zero-day-ai/gibson/commit/36a83c4988734ed690a397801b1bcae3aa774424))
+* **bootstrap:** publish gibson-bootstrap-runner image ([#51](https://github.com/zero-day-ai/gibson/issues/51)) ([e03a7eb](https://github.com/zero-day-ai/gibson/commit/e03a7eb5b7e50102d4700e83f79f419d2386a060))
+* **daemon:** own postgres migrations on startup ([#54](https://github.com/zero-day-ai/gibson/issues/54)) ([c32e658](https://github.com/zero-day-ai/gibson/commit/c32e6580e523ef1fbd6554178b14314f046c548c))
+
+
+### Bug Fixes
+
+* **agent:** update three stale test fixtures to match current behavior ([#66](https://github.com/zero-day-ai/gibson/issues/66)) ([5ec29d8](https://github.com/zero-day-ai/gibson/commit/5ec29d822fe69462ed74fe698a21074271d4ae94))
+* **authz:** GetTenantQuotaUsage references nonexistent tenant.viewer relation ([#64](https://github.com/zero-day-ai/gibson/issues/64)) ([43bf6eb](https://github.com/zero-day-ai/gibson/commit/43bf6eb745bfa468818ed63d867109edd0b19635))
+* **bootstrap:** trim whitespace from ZITADEL_ADMIN_PAT to drop trailing newline ([#52](https://github.com/zero-day-ai/gibson/issues/52)) ([21426de](https://github.com/zero-day-ai/gibson/commit/21426dec2445f96d59c1d8ffa75db2185c3a0b18))
+* **ci:** replace ripgrep with grep in migration guards so they actually run on CI ([#68](https://github.com/zero-day-ai/gibson/issues/68)) ([b025813](https://github.com/zero-day-ai/gibson/commit/b025813139ec705c5a80952c88e0b1c78060a26b))
+* **ci:** tag latest on workflow_dispatch from main, not only push ([#53](https://github.com/zero-day-ai/gibson/issues/53)) ([1167c5b](https://github.com/zero-day-ai/gibson/commit/1167c5b847dea086945082a0c3efeade94ef9694))
+* **daemon/api:** seed mission-level authz tuples missing from two test fixtures ([#69](https://github.com/zero-day-ai/gibson/issues/69)) ([881f1cf](https://github.com/zero-day-ai/gibson/commit/881f1cf2ce9348b7fb61cd65fe04e77ca7eda7a6))
+* **daemon:** unwedge five red tests in internal/daemon ([#71](https://github.com/zero-day-ai/gibson/issues/71)) ([978daa8](https://github.com/zero-day-ai/gibson/commit/978daa8f70f44f7a327eb77eadc9c8f82221daaf))
+* **deps:** gate postgres_tls helper behind integration build tag so govulncheck stops flagging docker ([#72](https://github.com/zero-day-ai/gibson/issues/72)) ([60eb57b](https://github.com/zero-day-ai/gibson/commit/60eb57b69f562b81be1bcaf509f85cd16cccfe63))
+* **gibsoncheck:** allowlist cmd/mission-storage-migrate and internal/secrets in forbidrawstoreimports ([#73](https://github.com/zero-day-ai/gibson/issues/73)) ([ed60eea](https://github.com/zero-day-ai/gibson/commit/ed60eeadb9f9fe1671875c48927c9680af0cecea))
+
 ## [0.39.0](https://github.com/zero-day-ai/gibson/compare/v0.38.0...v0.39.0) (2026-05-11)
 
 
