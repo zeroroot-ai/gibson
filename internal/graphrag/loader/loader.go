@@ -11,7 +11,6 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/neo4j"
 	"github.com/zero-day-ai/gibson/internal/types"
-	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/graphrag"
@@ -815,7 +814,7 @@ func (l *GraphLoader) loadProtoNodes(
 
 		// Inject mission context
 		if execCtx.MissionID != "" {
-			props[sdkgraphrag.PropMissionID] = execCtx.MissionID
+			props["mission_id"] = execCtx.MissionID
 		}
 		if execCtx.MissionRunID != "" {
 			props["mission_run_id"] = execCtx.MissionRunID

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/zero-day-ai/gibson/internal/types"
-	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
 )
 
 // StoreAttackPattern stores a MITRE ATT&CK pattern with technique relationships.
@@ -130,17 +129,17 @@ func graphNodeToAttackPattern(node GraphNode) AttackPattern {
 	pattern := AttackPattern{
 		ID:          node.ID,
 		TechniqueID: node.GetStringProperty("technique_id"),
-		Name:        node.GetStringProperty(sdkgraphrag.PropName),
-		Description: node.GetStringProperty(sdkgraphrag.PropDescription),
+		Name:        node.GetStringProperty(PropName),
+		Description: node.GetStringProperty(PropDescription),
 		Embedding:   node.Embedding,
 		CreatedAt:   node.CreatedAt,
 		UpdatedAt:   node.UpdatedAt,
 	}
 
 	// Extract arrays from properties
-	if tactics, ok := node.Properties[sdkgraphrag.PropTactics].([]string); ok {
+	if tactics, ok := node.Properties[PropTactics].([]string); ok {
 		pattern.Tactics = tactics
-	} else if tactics, ok := node.Properties[sdkgraphrag.PropTactics].([]interface{}); ok {
+	} else if tactics, ok := node.Properties[PropTactics].([]interface{}); ok {
 		pattern.Tactics = make([]string, 0, len(tactics))
 		for _, t := range tactics {
 			if str, ok := t.(string); ok {
@@ -149,9 +148,9 @@ func graphNodeToAttackPattern(node GraphNode) AttackPattern {
 		}
 	}
 
-	if platforms, ok := node.Properties[sdkgraphrag.PropPlatforms].([]string); ok {
+	if platforms, ok := node.Properties[PropPlatforms].([]string); ok {
 		pattern.Platforms = platforms
-	} else if platforms, ok := node.Properties[sdkgraphrag.PropPlatforms].([]interface{}); ok {
+	} else if platforms, ok := node.Properties[PropPlatforms].([]interface{}); ok {
 		pattern.Platforms = make([]string, 0, len(platforms))
 		for _, p := range platforms {
 			if str, ok := p.(string); ok {

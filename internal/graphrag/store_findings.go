@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
-	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
 )
 
 // StoreFinding stores a security finding with contextual relationships.
@@ -35,7 +34,7 @@ func (s *DefaultGraphRAGStore) StoreFinding(ctx context.Context, finding Finding
 			finding.ID,
 			*finding.TargetID,
 			RelationType("discovered_on"),
-		).WithProperty(sdkgraphrag.PropSeverity, finding.Severity)
+		).WithProperty(PropSeverity, finding.Severity)
 
 		if err := s.provider.StoreRelationship(ctx, *rel); err != nil {
 			// Don't fail the entire operation
@@ -176,16 +175,16 @@ func graphNodeToFindingNode(node GraphNode) FindingNode {
 	finding := FindingNode{
 		ID:          node.ID,
 		Title:       node.GetStringProperty("title"),
-		Description: node.GetStringProperty(sdkgraphrag.PropDescription),
-		Severity:    node.GetStringProperty(sdkgraphrag.PropSeverity),
-		Category:    node.GetStringProperty(sdkgraphrag.PropCategory),
+		Description: node.GetStringProperty(PropDescription),
+		Severity:    node.GetStringProperty(PropSeverity),
+		Category:    node.GetStringProperty(PropCategory),
 		Embedding:   node.Embedding,
 		CreatedAt:   node.CreatedAt,
 		UpdatedAt:   node.UpdatedAt,
 	}
 
 	// Extract confidence
-	if conf, ok := node.Properties[sdkgraphrag.PropConfidence].(float64); ok {
+	if conf, ok := node.Properties[PropConfidence].(float64); ok {
 		finding.Confidence = conf
 	}
 

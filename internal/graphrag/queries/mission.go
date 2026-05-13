@@ -10,7 +10,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/types"
-	sdkgraphrag "github.com/zero-day-ai/gibson/sdk/graphrag"
+	"github.com/zero-day-ai/gibson/internal/graphrag"
 )
 
 // toInt64 safely converts various numeric types to int64.
@@ -80,14 +80,14 @@ func (mq *MissionQueries) CreateMission(ctx context.Context, m *schema.Mission) 
 
 	// Build parameters map
 	params := map[string]any{
-		sdkgraphrag.PropID:          m.ID.String(),
-		sdkgraphrag.PropName:        m.Name,
-		sdkgraphrag.PropDescription: m.Description,
+		graphrag.PropID:          m.ID.String(),
+		graphrag.PropName:        m.Name,
+		graphrag.PropDescription: m.Description,
 		"objective":                 m.Objective,
 		"target_ref":                m.TargetRef,
-		sdkgraphrag.PropStatus:      m.Status.String(),
+		graphrag.PropStatus:      m.Status.String(),
 		"yaml_source":               m.YAMLSource,
-		sdkgraphrag.PropCreatedAt:   m.CreatedAt.UTC().Format(time.RFC3339Nano),
+		graphrag.PropCreatedAt:   m.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
 
 	// Add optional started_at timestamp
@@ -121,7 +121,7 @@ func (mq *MissionQueries) GetMission(ctx context.Context, missionID types.ID) (*
 	`
 
 	params := map[string]any{
-		sdkgraphrag.PropMissionID: missionID.String(),
+		graphrag.PropMissionID: missionID.String(),
 	}
 
 	result, err := mq.client.Query(ctx, cypher, params)
@@ -145,7 +145,7 @@ func (mq *MissionQueries) GetMissionNodes(ctx context.Context, missionID types.I
 	`
 
 	params := map[string]any{
-		sdkgraphrag.PropMissionID: missionID.String(),
+		graphrag.PropMissionID: missionID.String(),
 	}
 
 	result, err := mq.client.Query(ctx, cypher, params)
@@ -174,7 +174,7 @@ func (mq *MissionQueries) GetMissionDecisions(ctx context.Context, missionID typ
 	`
 
 	params := map[string]any{
-		sdkgraphrag.PropMissionID: missionID.String(),
+		graphrag.PropMissionID: missionID.String(),
 	}
 
 	result, err := mq.client.Query(ctx, cypher, params)
@@ -238,7 +238,7 @@ func (mq *MissionQueries) GetReadyNodes(ctx context.Context, missionID types.ID)
 	`
 
 	params := map[string]any{
-		sdkgraphrag.PropMissionID: missionID.String(),
+		graphrag.PropMissionID: missionID.String(),
 	}
 
 	result, err := mq.client.Query(ctx, cypher, params)
@@ -299,7 +299,7 @@ func (mq *MissionQueries) GetMissionNodeDependencies(ctx context.Context, missio
 	`
 
 	params := map[string]any{
-		sdkgraphrag.PropMissionID: missionID.String(),
+		graphrag.PropMissionID: missionID.String(),
 	}
 
 	result, err := mq.client.Query(ctx, cypher, params)
@@ -480,7 +480,7 @@ func (mq *MissionQueries) GetMissionStats(ctx context.Context, missionID types.I
 	`
 
 	params := map[string]any{
-		sdkgraphrag.PropMissionID: missionID.String(),
+		graphrag.PropMissionID: missionID.String(),
 	}
 
 	result, err := mq.client.Query(ctx, cypher, params)
@@ -727,7 +727,7 @@ func (mq *MissionQueries) CreateMissionRun(ctx context.Context, missionID types.
 	`
 
 	params := map[string]any{
-		sdkgraphrag.PropMissionID: missionID.String(),
+		graphrag.PropMissionID: missionID.String(),
 		"run_id":                  runID.String(),
 		"run_number":              runNumber,
 	}
