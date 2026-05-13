@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.41.0](https://github.com/zero-day-ai/gibson/compare/v0.40.0...v0.41.0) (2026-05-13)
+
+
+### Features
+
+* **daemon:** wire ontology reasoner into daemon + component service ([#79](https://github.com/zero-day-ai/gibson/issues/79)) ([5eb766a](https://github.com/zero-day-ai/gibson/commit/5eb766af3281346221edaf6c75cd1cb739ca9180))
+
 ## [0.40.0](https://github.com/zero-day-ai/gibson/compare/v0.39.0...v0.40.0) (2026-05-13)
 
 
