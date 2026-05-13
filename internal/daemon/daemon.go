@@ -28,6 +28,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zero-day-ai/gibson/internal/ontology"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/reconciler"
@@ -318,6 +319,14 @@ type daemonImpl struct {
 	// Nil when ToolRunner.Enabled is false. Started asynchronously during
 	// daemon.Start so startup does not block on Setec health.
 	toolCatalogRefresher *CatalogRefresher
+
+	// reasoner is the singleton in-process ontology reasoner. Constructed
+	// during initOntologyReasoner (called from newInfrastructure) and shared
+	// by the intelligence service (for hierarchy-rollup queries) and the
+	// component service (for RegisterExtension at enrollment time). Never nil
+	// after a successful Start; may be nil during unit tests that bypass
+	// newInfrastructure.
+	reasoner *ontology.Reasoner
 }
 
 // spiffeX509Closer is the narrow interface for closing an X.509 source on shutdown.

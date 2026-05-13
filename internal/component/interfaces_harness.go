@@ -9,7 +9,27 @@ import (
 	"context"
 
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 )
+
+// OntologyReasoner is the narrow interface of ontology.Reasoner that the
+// ComponentService needs. It matches sdk/graphrag.Reasoner so the concrete
+// ontology.Reasoner can be injected directly without an adapter.
+//
+// The full sdk/graphrag.Reasoner interface is used rather than a subset because
+// callers (RegisterComponent, future ontology-extension RPCs) may eventually
+// call any of the expansion methods. Keeping the interface identical to the SDK
+// type avoids drift and makes mock generation straightforward.
+type OntologyReasoner interface {
+	// RegisterExtension adds ontology triples contributed by an enrolling
+	// component. Called during RegisterComponent when the request carries an
+	// OntologyExtension payload.
+	RegisterExtension(name string, ext sdkgraphrag.OntologyExtension) error
+
+	// UnregisterExtension removes the extension previously registered under name.
+	// Called when the component is deregistered or the daemon shuts down.
+	UnregisterExtension(name string) error
+}
 
 // GraphRAGQuerier handles knowledge graph operations for remote agents.
 // May be nil on ComponentServiceServer; GraphRAG RPCs return Unimplemented when nil.
