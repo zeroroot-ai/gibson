@@ -8,6 +8,8 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zero-day-ai/gibson/internal/graphrag"
+	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
@@ -66,6 +68,33 @@ type Infrastructure struct {
 
 	// redisClient for tool execution queue management
 	redisClient queue.Client
+
+	// reasoner is the shared ontology reasoner. Populated during
+	// newInfrastructure from d.reasoner so callers that hold only an
+	// Infrastructure pointer can reach it.
+	reasoner interface{ Descendants(string) []string }
+
+	// semanticQuerierFactory builds a per-request SemanticQuerier for a given
+	// GraphClient (typically a SessionGraphClient wrapping a pool-acquired
+	// neo4j.SessionWithContext). Call it at RPC time after resolving the
+	// tenant's Neo4j session.
+	//
+	// Example:
+	//   conn, _ := pool.For(ctx, tenant)
+	//   defer conn.Release()
+	//   sq := infra.SemanticQuerier(graph.NewSessionGraphClient(conn.Neo4j))
+	//   results, _ := sq.FindingsByControl(ctx, tenantID, controlIRI)
+	semanticQuerierFactory func(client graph.GraphClient) *graphrag.SemanticQuerier
+}
+
+// SemanticQuerier constructs a per-request SemanticQuerier backed by client.
+// Returns nil when no ontology reasoner is available (e.g. in tests that
+// bypass newInfrastructure).
+func (i *Infrastructure) SemanticQuerier(client graph.GraphClient) *graphrag.SemanticQuerier {
+	if i.semanticQuerierFactory == nil {
+		return nil
+	}
+	return i.semanticQuerierFactory(client)
 }
 
 // newInfrastructure creates and initializes all infrastructure components.
@@ -137,6 +166,16 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	d.logger.Info(ctx, "initialized taxonomy registry",
 		"taxonomy_version", coreTaxonomy.Version())
 
+	// Initialize the ontology reasoner: loads embedded SDK vocabulary and
+	// registers Prometheus metrics. Non-fatal file errors are logged inside
+	// initOntologyReasoner; the daemon proceeds with a sparse reasoner on
+	// partial load.
+	reasoner, err := d.initOntologyReasoner(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize ontology reasoner: %w", err)
+	}
+	d.reasoner = reasoner
+
 	// Initialize Redis client for tool execution
 	// Redis is required for distributed tool execution via work queues
 	redisClient, err := d.initRedis(ctx)
@@ -175,19 +214,32 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	planExecutor := plan.NewPlanExecutor(planExecutorOpts...)
 	d.logger.Info(ctx, "initialized plan executor")
 
+	// Build the semantic querier factory. The factory closes over d.reasoner so
+	// each per-request SemanticQuerier uses the same live reasoner singleton.
+	// If reasoner is nil (not expected in production), the factory produces nil.
+	var sqFactory func(graph.GraphClient) *graphrag.SemanticQuerier
+	if d.reasoner != nil {
+		r := d.reasoner // capture to avoid capturing *d in the closure
+		sqFactory = func(client graph.GraphClient) *graphrag.SemanticQuerier {
+			return graphrag.NewSemanticQuerier(client, r)
+		}
+	}
+
 	// Store infrastructure components temporarily so newHarnessFactory can access them.
 	// findingStore is nil: findings are persisted via per-tenant Pool at handler time.
 	infra := &Infrastructure{
-		planExecutor:         planExecutor,
-		findingStore:         nil, // migrated to pool-backed per-tenant path
-		llmRegistry:          llmRegistry,
-		slotManager:          slotManager,
-		memoryManagerFactory: memoryFactory,
-		graphRAGBridge:       graphRAGBridge,
-		graphRAGQueryBridge:  graphRAGQueryBridge,
-		otelStack:            otelStack,
-		taxonomyRegistry:     taxonomyRegistry,
-		redisClient:          redisClient,
+		planExecutor:           planExecutor,
+		findingStore:           nil, // migrated to pool-backed per-tenant path
+		llmRegistry:            llmRegistry,
+		slotManager:            slotManager,
+		memoryManagerFactory:   memoryFactory,
+		graphRAGBridge:         graphRAGBridge,
+		graphRAGQueryBridge:    graphRAGQueryBridge,
+		otelStack:              otelStack,
+		taxonomyRegistry:       taxonomyRegistry,
+		redisClient:            redisClient,
+		reasoner:               d.reasoner,
+		semanticQuerierFactory: sqFactory,
 	}
 	d.infrastructure = infra
 

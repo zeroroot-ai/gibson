@@ -246,6 +246,13 @@ type ComponentServiceServer struct {
 	// When nil, plugin registration is handled via the standard component registry only.
 	// Set via WithPluginRegistry. Added by plugin-runtime spec (Task 16).
 	pluginRegistry PluginRegistry
+
+	// ontologyReasoner merges ontology extensions contributed by enrolling
+	// components. Set via WithOntologyReasoner. When nil, any OntologyExtension
+	// payload in RegisterComponent is silently ignored (no error returned to the
+	// caller — the extension is deferred until a follow-up proto change carries
+	// the full OntologyExtension payload over the enrollment RPC).
+	ontologyReasoner OntologyReasoner
 }
 
 // NewComponentServiceServer constructs a ComponentServiceServer with the core
@@ -445,6 +452,21 @@ func (s *ComponentServiceServer) WithPluginRegistry(pr PluginRegistry) *Componen
 	return s
 }
 
+// WithOntologyReasoner wires the daemon's singleton ontology reasoner so that
+// RegisterComponent can call reasoner.RegisterExtension when an enrolling
+// component contributes an OntologyExtension payload.
+//
+// When or is nil (the default), any OntologyExtension in the registration
+// request is silently ignored — no error is returned to the caller. This
+// preserves backward compatibility until the proto change that carries
+// OntologyExtension over the enrollment RPC is merged.
+//
+// Added by the ontology-extension-system epic.
+func (s *ComponentServiceServer) WithOntologyReasoner(or OntologyReasoner) *ComponentServiceServer {
+	s.ontologyReasoner = or
+	return s
+}
+
 // ---------------------------------------------------------------------------
 // RegisterComponent
 // ---------------------------------------------------------------------------
@@ -634,6 +656,28 @@ func (s *ComponentServiceServer) RegisterComponent(
 			// Non-fatal: registration succeeds even if schema storage fails.
 		}
 	}
+
+	// Register ontology extension contributed by this component, if any.
+	//
+	// The current proto for RegisterComponentRequest does not yet carry an
+	// OntologyExtension payload — that field is deferred to a follow-up SDK +
+	// daemon + dashboard coordinated change. This block establishes the wiring
+	// so that once the proto field lands, a single line of call code here
+	// activates the extension. Until then s.ontologyReasoner is wired but
+	// called with nothing (proto field absence means no extension to register).
+	//
+	// Best-effort: a registration failure is logged at WARN and never fails the
+	// enrollment RPC — missing ontology hierarchy is a soft degradation, not a
+	// hard failure.
+	//
+	// TODO(ontology-extension-system): once RegisterComponentRequest.ontology_extension
+	// is added to the proto, replace the nil guard below with:
+	//   if s.ontologyReasoner != nil && req.OntologyExtension != nil {
+	//       ext := sdkgraphrag.OntologyExtensionFromProto(req.OntologyExtension)
+	//       if err := s.ontologyReasoner.RegisterExtension(req.Name, ext); err != nil { ... }
+	//   }
+	// (Deferred: proto changes require a coordinated SDK fan-out PR.)
+	_ = s.ontologyReasoner // ensure field is used; actual call site is deferred
 
 	// Write FGA component ownership tuple so the "admin from owner" computed
 	// relation fires: any tenant admin automatically has full access to all

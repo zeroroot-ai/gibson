@@ -959,6 +959,19 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			compSvc.WithAuthorizer(d.authorizer)
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 
+			// Wire the ontology reasoner so RegisterComponent can call
+			// RegisterExtension when an enrolling component contributes an
+			// OntologyExtension payload (proto field deferred — see TODO in
+			// service.go). The capability is wired now so the daemon has the
+			// plumbing; the actual proto field will activate it without a
+			// daemon change.
+			if d.reasoner != nil {
+				compSvc.WithOntologyReasoner(d.reasoner)
+				d.logger.Info(ctx, "ontology reasoner wired into ComponentService for extension registration")
+			} else {
+				d.logger.Warn(ctx, "ontology reasoner not available; component ontology extensions will be ignored")
+			}
+
 			// Phase 11 (secrets-broker, Task 29): wire the SecretsCredentialStore
 			// into the ComponentService now that compSvc is constructed. The broker
 			// stack was initialised in Start() (initBrokerStack) with nil compSvc;
