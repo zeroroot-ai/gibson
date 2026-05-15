@@ -285,6 +285,14 @@ func toGRPCError(err error, op string) error {
 	if err == nil {
 		return nil
 	}
+	// Tenant has no row in tenant_secrets_broker_config — the data-plane
+	// provisioning saga hasn't seeded credentials for this tenant. This
+	// is FailedPrecondition (not Unavailable) so gRPC clients don't
+	// retry-loop on a deterministic configuration condition. See
+	// gibson#101.
+	if errors.Is(err, ErrBrokerConfigNotFound) {
+		return status.Errorf(codes.FailedPrecondition, "secrets %s: %v", op, err)
+	}
 	if errors.Is(err, sdksecrets.ErrNotFound) {
 		return status.Errorf(codes.NotFound, "secrets %s: %v", op, err)
 	}

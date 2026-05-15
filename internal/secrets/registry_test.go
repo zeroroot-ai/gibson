@@ -82,14 +82,22 @@ var (
 	regTenantB = auth.MustNewTenantID("beta-co")
 )
 
-func TestRegistry_DefaultFallbackToPostgres(t *testing.T) {
+// TestRegistry_NoConfigRowSurfacesAsError — gibson#101 replaced the
+// implicit Postgres fallback (which caused infinite-recursion-style
+// 60s timeouts) with a hard error. The previous test name
+// (TestRegistry_DefaultFallbackToPostgres) asserted the broken
+// behavior; the new assertion confirms callers see
+// ErrBrokerConfigNotFound, which daemon handlers map to
+// codes.FailedPrecondition.
+func TestRegistry_NoConfigRowSurfacesAsError(t *testing.T) {
 	pg := newNamedProv("postgres")
-	getter := newFakeConfigGetter() // no rows → fallback
+	getter := newFakeConfigGetter() // no rows
 	reg := buildTestRegistry(t, getter, pg, nil)
 
 	broker, err := reg.For(context.Background(), regTenantA)
-	require.NoError(t, err)
-	assert.Same(t, pg, broker.(*namedProvider))
+	require.Error(t, err)
+	require.Nil(t, broker)
+	require.ErrorIs(t, err, ErrBrokerConfigNotFound)
 }
 
 func TestRegistry_ConfiguredProviderReturned(t *testing.T) {
@@ -112,6 +120,7 @@ func TestRegistry_ConfiguredProviderReturned(t *testing.T) {
 func TestRegistry_CachesProvider(t *testing.T) {
 	pg := newNamedProv("postgres")
 	getter := newFakeConfigGetter()
+	getter.Set(regTenantA, BrokerConfig{Provider: "postgres", ConfigBlob: []byte(`{}`)})
 	reg := buildTestRegistry(t, getter, pg, nil)
 
 	b1, err := reg.For(context.Background(), regTenantA)
@@ -125,6 +134,7 @@ func TestRegistry_CachesProvider(t *testing.T) {
 func TestRegistry_ReloadEvictsCache(t *testing.T) {
 	pg := newNamedProv("postgres")
 	getter := newFakeConfigGetter()
+	getter.Set(regTenantA, BrokerConfig{Provider: "postgres", ConfigBlob: []byte(`{}`)})
 	reg := buildTestRegistry(t, getter, pg, nil)
 
 	_, err := reg.For(context.Background(), regTenantA)
@@ -143,7 +153,10 @@ func TestRegistry_TenantIsolation(t *testing.T) {
 
 	getter := newFakeConfigGetter()
 	getter.Set(regTenantA, BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{}`)})
-	// regTenantB has no config → falls back to Postgres.
+	// regTenantB is explicitly configured to use Postgres (gibson#101
+	// removed the implicit fallback — every tenant now needs an
+	// explicit broker config row).
+	getter.Set(regTenantB, BrokerConfig{Provider: "postgres", ConfigBlob: []byte(`{}`)})
 
 	extras := map[string]ProviderConstructor{
 		"vault": func(_ []byte) (sdksecrets.SecretsBroker, error) { return vaultProv, nil },
@@ -162,6 +175,11 @@ func TestRegistry_TenantIsolation(t *testing.T) {
 func TestRegistry_HealthReturnsPerTenant(t *testing.T) {
 	pg := newNamedProv("postgres")
 	getter := newFakeConfigGetter()
+	// Seed an explicit "postgres" broker config row for both tenants so
+	// the Registry returns the configured provider (gibson#101 removed
+	// the implicit Postgres fallback when no row exists).
+	getter.Set(regTenantA, BrokerConfig{Provider: "postgres", ConfigBlob: []byte(`{}`)})
+	getter.Set(regTenantB, BrokerConfig{Provider: "postgres", ConfigBlob: []byte(`{}`)})
 	reg := buildTestRegistry(t, getter, pg, nil)
 
 	_, _ = reg.For(context.Background(), regTenantA)
@@ -172,6 +190,24 @@ func TestRegistry_HealthReturnsPerTenant(t *testing.T) {
 	require.Contains(t, h, regTenantB)
 	assert.NoError(t, h[regTenantA])
 	assert.NoError(t, h[regTenantB])
+}
+
+// TestRegistry_NoConfigRowReturnsNotProvisioned — gibson#101: the
+// implicit Postgres fallback for tenants without a broker config row
+// caused an infinite-recursion-style 60s timeout on every list call.
+// Verify that the registry now surfaces ErrBrokerConfigNotFound to
+// callers so the daemon handler can return a clean
+// codes.FailedPrecondition instead of looping.
+func TestRegistry_NoConfigRowReturnsNotProvisioned(t *testing.T) {
+	pg := newNamedProv("postgres")
+	getter := newFakeConfigGetter()
+	reg := buildTestRegistry(t, getter, pg, nil)
+
+	_, err := reg.For(context.Background(), regTenantA)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrBrokerConfigNotFound)
+	assert.Contains(t, err.Error(), "has no broker config row")
+	assert.Contains(t, err.Error(), "gibson#101")
 }
 
 func TestRegistry_UnknownProviderReturnsError(t *testing.T) {
@@ -205,6 +241,10 @@ func TestRegistry_ConstructorFailureReturnsError(t *testing.T) {
 func TestRegistry_ConcurrentForSameTenant(t *testing.T) {
 	pg := newNamedProv("postgres")
 	getter := newFakeConfigGetter()
+	// Seed an explicit Postgres broker config row so every concurrent
+	// caller gets the configured provider (gibson#101 removed the
+	// implicit fallback).
+	getter.Set(regTenantA, BrokerConfig{Provider: "postgres", ConfigBlob: []byte(`{}`)})
 	reg := buildTestRegistry(t, getter, pg, nil)
 
 	const goroutines = 50
