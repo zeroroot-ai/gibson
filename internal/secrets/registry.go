@@ -189,13 +189,34 @@ func registeredConstructors(m map[string]ProviderConstructor) []string {
 // buildProvider reads the tenant's broker config and constructs the
 // appropriate provider. Must be called with r.mu write-locked (or from
 // code that is otherwise the sole writer, e.g. during construction).
+//
+// When no broker config row exists for the tenant, this used to fall back
+// to r.postgresProvider for backward-compatibility with pre-spec tenants.
+// That fallback caused an infinite-recursion-style deadlock: the Postgres
+// provider's ConnAcquirer is wired to the per-tenant data-plane pool
+// (`pool.For`), and `pool.For` itself resolves Postgres credentials via
+// THIS registry — so when the registry returns the fallback Postgres
+// provider for an unprovisioned tenant, the secrets resolution chain
+// loops until it hits the gRPC timeout (60s). End user impact was that
+// every authenticated list call from the dashboard timed out for any
+// tenant whose data-plane saga had not run. See gibson#101.
+//
+// The fix is to surface ErrBrokerConfigNotFound to the caller as a
+// well-typed "not provisioned" condition. Daemon handlers map it to
+// gRPC FailedPrecondition with a clear message; operators can then
+// drive the tenant-operator's provisioning saga (or, in dev,
+// hand-seed a row via the admin RPCs). The postgresProvider field is
+// kept on Registry so an explicit `provider="postgres"` config row
+// still works for tenants that opt into Postgres-backed secrets.
 func (r *Registry) buildProvider(ctx context.Context, tenant auth.TenantID) (sdksecrets.SecretsBroker, error) {
 	cfg, err := r.configStore.Get(ctx, tenant)
 	if err != nil {
 		if errors.Is(err, ErrBrokerConfigNotFound) {
-			// No config row: use the Postgres provider as the default
-			// fallback (backward-compatible for pre-spec tenants).
-			return r.postgresProvider, nil
+			return nil, fmt.Errorf(
+				"registry: tenant %s has no broker config row in "+
+					"tenant_secrets_broker_config; data-plane has not "+
+					"been provisioned (gibson#101): %w",
+				tenant, err)
 		}
 		return nil, fmt.Errorf("registry: read broker config for tenant %s: %w", tenant, err)
 	}

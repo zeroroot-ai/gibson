@@ -86,7 +86,13 @@ func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
 	pgFake := &labelledBroker{label: "postgres"}
 	vaultFake := &labelledBroker{label: "vault"}
 
-	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{}}
+	tenant := mustTenant(t, "acme")
+	// gibson#101: every tenant needs an explicit broker config row;
+	// the implicit Postgres fallback was removed because it caused
+	// 60s timeout-loops on unprovisioned tenants. Seed the row here.
+	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{
+		tenant: {Provider: "postgres", ConfigBlob: []byte(`{}`)},
+	}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
 		PostgresProvider: pgFake,
 		VaultFactory: func(_ []byte) (sdksecrets.SecretsBroker, error) {
@@ -97,10 +103,9 @@ func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 
-	tenant := mustTenant(t, "acme")
 	ctx := context.Background()
 
-	// Tenant has no row → default-fallback Postgres.
+	// Initial state: explicit Postgres config row → Postgres provider.
 	got, err := reg.For(ctx, tenant)
 	if err != nil {
 		t.Fatalf("For(initial): %v", err)
@@ -170,7 +175,13 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 	tenant := mustTenant(t, "acme")
 	ctx := withTenant(t, "acme")
 
-	// Initial: no row → default-fallback Postgres.
+	// gibson#101: seed an explicit Postgres row (the implicit fallback
+	// was removed). The "pre-Set" assertion below remains valid.
+	getter.rows[tenant] = secrets.BrokerConfig{
+		Provider: "postgres", ConfigBlob: []byte(`{}`),
+	}
+
+	// Initial: explicit Postgres row → Postgres provider.
 	if got, _ := reg.For(ctx, tenant); got != pgFake {
 		t.Fatalf("pre-Set: got %v, want postgres", got)
 	}
@@ -235,7 +246,13 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 	tenant := mustTenant(t, "acme")
 	ctx := withTenant(t, "acme")
 
-	// Warm the cache with the fallback Postgres.
+	// gibson#101: seed an explicit Postgres row so the warm-up path
+	// resolves cleanly. The implicit fallback was removed.
+	getter.rows[tenant] = secrets.BrokerConfig{
+		Provider: "postgres", ConfigBlob: []byte(`{}`),
+	}
+
+	// Warm the cache with the configured Postgres provider.
 	if got, _ := reg.For(ctx, tenant); got != pgFake {
 		t.Fatalf("warm-up: got %v, want postgres", got)
 	}
