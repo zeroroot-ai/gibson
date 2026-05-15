@@ -20,6 +20,10 @@ name: publish-private-authz-registry
 # Related: enterprise/deploy/helm/gibson/values.yaml sdk.registry
 
 on:
+  # Tag-push trigger kept for hand-pushed tags (operator emergencies, manual
+  # restores). NOTE: release-please's tag pushes use the default GITHUB_TOKEN
+  # which does NOT fire this workflow (GitHub anti-recursion behavior). The
+  # automatic path is workflow_call from release-please.yml — see gibson#96.
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
@@ -29,6 +33,14 @@ on:
       tag:
         description: 'Gibson tag to publish the registry artifact for (e.g. v0.45.0)'
         required: true
+  # Called by release-please.yml in the same workflow run that cuts a
+  # release, sidestepping the GITHUB_TOKEN tag-trigger gap. See gibson#96.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Gibson tag whose registry artifact to publish'
+        required: true
+        type: string
 
 permissions:
   contents: read
