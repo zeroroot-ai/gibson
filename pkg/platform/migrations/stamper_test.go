@@ -102,7 +102,12 @@ func TestStamp_LegacyTenantState_StampsVersion6(t *testing.T) {
 	}
 }
 
-func TestStamp_LegacyPlatformState_StampsVersion2(t *testing.T) {
+// TestStamp_LegacyPlatformState_StampsCurrentVersion verifies that the
+// legacy-state stamper inserts the *current* PlatformMaxVersion() row
+// (not a hardcoded constant). The expected value tracks
+// platformMaxVersionWant in migrations_test.go; bump alongside any new
+// platform migration.
+func TestStamp_LegacyPlatformState_StampsCurrentVersion(t *testing.T) {
 	t.Parallel()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -121,7 +126,7 @@ func TestStamp_LegacyPlatformState_StampsVersion2(t *testing.T) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS schema_migrations").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO schema_migrations").
-		WithArgs(uint(3)).
+		WithArgs(uint(4)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 

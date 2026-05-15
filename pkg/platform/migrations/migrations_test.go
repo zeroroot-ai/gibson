@@ -20,11 +20,11 @@ func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	t.Parallel()
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 3 {
-		t.Errorf("platform: expected 3 up.sql files, got %d", upCount)
+	if upCount != 4 {
+		t.Errorf("platform: expected 4 up.sql files, got %d", upCount)
 	}
-	if downCount != 3 {
-		t.Errorf("platform: expected 3 down.sql files, got %d", downCount)
+	if downCount != 4 {
+		t.Errorf("platform: expected 4 down.sql files, got %d", downCount)
 	}
 }
 
@@ -76,14 +76,21 @@ func TestTenantMaxVersion(t *testing.T) {
 	}
 }
 
+// PlatformMaxVersion must match the highest NNN in
+// postgres/platform/*.up.sql. Bump alongside any added migration:
+//
+//	001 — tenant_secrets_broker_config
+//	002 — plugin_install
+//	003 — tenant_quotas_simplify
+//	004 — tenant_id_text (UUID → TEXT, gibson#99)
 func TestPlatformMaxVersion(t *testing.T) {
 	t.Parallel()
 	v, err := PlatformMaxVersion()
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 3 {
-		t.Errorf("PlatformMaxVersion: got %d, want 3", v)
+	if v != 4 {
+		t.Errorf("PlatformMaxVersion: got %d, want 4", v)
 	}
 }
 
