@@ -7,13 +7,50 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  packages: write  # publish-authz-registry pushes to ghcr.io
 
 jobs:
   release-please:
     name: release-please
     runs-on: ubuntu-latest
+    outputs:
+      # Forward release-please's outputs so the publish job can decide
+      # whether to fire and which tag to publish. release-please-config.json
+      # has two packages: root `.` (daemon, tag pattern `v<semver>`) and
+      # `tools/gibson-bootstrap` (separate component, tag pattern
+      # `gibson-bootstrap-v<semver>`). The authz registry only tracks the
+      # daemon, so we gate on the ROOT-package outputs only.
+      #
+      # Multi-package outputs are keyed by `<package_path>--<output_name>`;
+      # for the root they're `.--release_created` and `.--tag_name`.
+      daemon_release_created: ${{ steps.release.outputs['.--release_created'] }}
+      daemon_tag_name: ${{ steps.release.outputs['.--tag_name'] }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # publish-authz-registry: piggyback on release-please so the OCI artifact
+  # is published in the SAME workflow run that cuts the release.
+  #
+  # Why not let publish-private-authz-registry.yml fire from its own
+  # `on: push: tags: v*` trigger? Because release-please's tag push uses
+  # the default GITHUB_TOKEN, and GitHub deliberately does not fire
+  # downstream workflows from GITHUB_TOKEN pushes (anti-recursion). This
+  # silently broke the publish workflow for v0.36.0 → v0.42.0 — 13 days
+  # of registry artifacts never published. See gibson#96 and the workspace
+  # memory note `project-release-please-tag-trigger-gap`.
+  #
+  # Chaining via job-needs in the same workflow avoids the trigger
+  # problem entirely: this job runs in the same workflow run, on the
+  # same token, with the same checked-out commit.
+  publish-authz-registry:
+    name: publish-authz-registry
+    needs: release-please
+    if: ${{ needs.release-please.outputs.daemon_release_created == 'true' }}
+    uses: ./.github/workflows/publish-private-authz-registry.yml
+    with:
+      tag: ${{ needs.release-please.outputs.daemon_tag_name }}
+    secrets: inherit
