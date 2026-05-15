@@ -22,7 +22,7 @@ require (
 	github.com/gomlx/go-huggingface v0.3.1
 	github.com/gomlx/gomlx v0.26.0
 	github.com/gomlx/onnx-gomlx v0.3.4
-	github.com/google/cel-go v0.28.0
+	github.com/google/cel-go v0.28.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/hashicorp/vault/api/auth/kubernetes v0.12.0
