@@ -38,10 +38,10 @@ import (
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
-	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
-	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
 	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
+	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zero-day-ai/sdk/auth"
 
@@ -332,19 +332,29 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				d.spiffeX509Source)
 		}
 
-		// Auth-review finding 4a (CRITICAL): pin mTLS to Envoy's SPIFFE SVID.
-		// The expected SVID is read from GIBSON_SPIFFE_ENVOY_ID (also stored in
-		// cfg.Auth.SPIFFE.EnvoyID after config loading). initSPIFFEX509Source
-		// already validated this is set and parseable; we re-resolve here for
-		// the AuthorizeID call.
+		// Auth-review finding 4a (CRITICAL): pin mTLS to a closed set of
+		// SPIFFE SVIDs. The Envoy edge gateway is always accepted; additional
+		// control-plane callers (today: the tenant-operator) are added via
+		// GIBSON_SPIFFE_ALLOWED_PEER_IDS so they can dial the daemon directly
+		// without an Envoy hairpin. ADR-0002 (zero-day-ai/docs).
 		envoyID := d.config.Auth.SPIFFE.EnvoyID
 		if envoyID == "" {
 			envoyID = os.Getenv("GIBSON_SPIFFE_ENVOY_ID")
 		}
-		expectedEnvoyID := spiffeid.RequireFromString(envoyID)
-		tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeID(expectedEnvoyID))
-		d.logger.Info(ctx, "SPIFFE mTLS pinned to Envoy SVID",
+		allowed := []spiffeid.ID{spiffeid.RequireFromString(envoyID)}
+		for _, raw := range d.config.Auth.SPIFFE.AllowedPeerIDs {
+			id, err := spiffeid.FromString(raw)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"SPIFFE mTLS: GIBSON_SPIFFE_ALLOWED_PEER_IDS entry %q is not a parseable SPIFFE ID: %w",
+					raw, err)
+			}
+			allowed = append(allowed, id)
+		}
+		tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeOneOf(allowed...))
+		d.logger.Info(ctx, "SPIFFE mTLS pinned to allow-list",
 			"envoy_id", envoyID,
+			"additional_peer_ids", d.config.Auth.SPIFFE.AllowedPeerIDs,
 		)
 		// Critical-tls-no-fallbacks Req 2.1, 2.3: cert-less connections are
 		// rejected at the TLS layer; there is no Bearer-token / API-key /

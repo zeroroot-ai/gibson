@@ -28,9 +28,9 @@ import (
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/ontology"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zero-day-ai/gibson/internal/ontology"
 	"github.com/zero-day-ai/gibson/internal/reconciler"
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/state"
@@ -516,6 +516,34 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 		}
 	}
 
+	// ADR-0002: read the additional inbound-peer-SVID allow-list (today: the
+	// tenant-operator). Comma-separated, each entry validated against the
+	// trust domain. Empty is fine — Envoy is always accepted.
+	if rawAllowed := strings.TrimSpace(os.Getenv("GIBSON_SPIFFE_ALLOWED_PEER_IDS")); rawAllowed != "" {
+		td, tdErr := spiffeid.TrustDomainFromString(configuredTD)
+		hasTD := tdErr == nil && configuredTD != ""
+		for _, raw := range strings.Split(rawAllowed, ",") {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
+			id, err := spiffeid.FromString(raw)
+			if err != nil {
+				_ = source.Close()
+				return fmt.Errorf(
+					"GIBSON_SPIFFE_ALLOWED_PEER_IDS entry %q is not a parseable SPIFFE ID: %w",
+					raw, err)
+			}
+			if hasTD && !id.MemberOf(td) {
+				_ = source.Close()
+				return fmt.Errorf(
+					"GIBSON_SPIFFE_ALLOWED_PEER_IDS entry %q is not in the configured trust domain %q",
+					raw, configuredTD)
+			}
+			d.config.Auth.SPIFFE.AllowedPeerIDs = append(d.config.Auth.SPIFFE.AllowedPeerIDs, raw)
+		}
+	}
+
 	// Parse and validate the callback listener peer-SVID allowlist.
 	rawPeers := strings.TrimSpace(os.Getenv("GIBSON_CALLBACK_PEER_SVIDS"))
 	if rawPeers == "" {
@@ -837,17 +865,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 							"error", pgErr)
 					} else {
 						// Use a FuncSecretsReader so the resolver captures d.secretsService
-					// lazily. initBrokerStack runs after NewPool and sets d.secretsService;
-					// the resolver is only called at tenant-RPC time, well after startup.
-					// Spec: per-tenant-data-plane-completion Task 13a (D3 amended).
-					poolCfg.Neo4jResolver = datapool.NewInstanceResolver(adminPgPool,
-						datapool.FuncSecretsReader(func(ctx context.Context, name string) ([]byte, error) {
-							if d.secretsService == nil {
-								return nil, fmt.Errorf("instanceResolver: secrets broker not yet initialized")
-							}
-							return d.secretsService.Resolve(ctx, name)
-						}),
-					)
+						// lazily. initBrokerStack runs after NewPool and sets d.secretsService;
+						// the resolver is only called at tenant-RPC time, well after startup.
+						// Spec: per-tenant-data-plane-completion Task 13a (D3 amended).
+						poolCfg.Neo4jResolver = datapool.NewInstanceResolver(adminPgPool,
+							datapool.FuncSecretsReader(func(ctx context.Context, name string) ([]byte, error) {
+								if d.secretsService == nil {
+									return nil, fmt.Errorf("instanceResolver: secrets broker not yet initialized")
+								}
+								return d.secretsService.Resolve(ctx, name)
+							}),
+						)
 						d.logger.Info(ctx, "neo4j resolver: instance mode configured")
 					}
 				}
