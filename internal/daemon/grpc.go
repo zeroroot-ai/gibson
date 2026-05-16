@@ -60,6 +60,7 @@ import (
 	grpccodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	grpcmetadata "google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -289,15 +290,66 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	looseModeForEntry := func(entry registry.Entry) bool {
 		return entry.Unauthenticated || entry.Self
 	}
+
+	// ADR-0002: when the request arrives over SPIFFE mTLS from a known
+	// platform-control-plane peer (today: the tenant-operator), synthesise
+	// an Identity from the peer's SVID and skip the ext-authz-shaped
+	// header expectation. Envoy/ext-authz is the source of the headers on
+	// the browser path; direct control-plane callers don't transit Envoy
+	// and there's nothing to forward. Workload identity (the leaf cert's
+	// URI SAN) is the trust anchor, validated by tlsconfig.AuthorizeOneOf
+	// at the TLS handshake (gibson#107).
+	spiffePlatformBypass := func(ctx context.Context) (context.Context, bool) {
+		p, ok := peer.FromContext(ctx)
+		if !ok {
+			return ctx, false
+		}
+		tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+		if !ok || len(tlsInfo.State.PeerCertificates) == 0 {
+			return ctx, false
+		}
+		var svid string
+		for _, u := range tlsInfo.State.PeerCertificates[0].URIs {
+			if u != nil && strings.HasPrefix(u.Scheme, "spiffe") {
+				svid = u.String()
+				break
+			}
+		}
+		if svid == "" {
+			return ctx, false
+		}
+		// Trust only SVIDs the daemon already explicitly allow-listed at
+		// the TLS layer via AllowedPeerIDs. EnvoyID is not bypassed —
+		// browser-path traffic always carries the ext-authz headers and
+		// must continue to do so.
+		for _, allowed := range d.config.Auth.SPIFFE.AllowedPeerIDs {
+			if svid == allowed {
+				return auth.WithIdentity(ctx, auth.Identity{
+					Subject:        svid,
+					Issuer:         auth.Issuer("spiffe"),
+					CredentialType: auth.CredentialType("spiffe"),
+				}), true
+			}
+		}
+		return ctx, false
+	}
+
 	registryAwareUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if entry, ok := registry.Registry[info.FullMethod]; ok && looseModeForEntry(entry) {
 			return handler(looseIdentityFromMD(ctx), req)
+		}
+		if bypassCtx, ok := spiffePlatformBypass(ctx); ok {
+			return handler(bypassCtx, req)
 		}
 		return sdkAuthUnary(ctx, req, info, handler)
 	}
 	registryAwareStream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if entry, ok := registry.Registry[info.FullMethod]; ok && looseModeForEntry(entry) {
 			wrapped := &serverStreamCtxOverride{ServerStream: ss, ctx: looseIdentityFromMD(ss.Context())}
+			return handler(srv, wrapped)
+		}
+		if bypassCtx, ok := spiffePlatformBypass(ss.Context()); ok {
+			wrapped := &serverStreamCtxOverride{ServerStream: ss, ctx: bypassCtx}
 			return handler(srv, wrapped)
 		}
 		return sdkAuthStream(srv, ss, info, handler)
