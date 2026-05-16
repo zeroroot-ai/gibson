@@ -26,11 +26,22 @@ type SPIFFEConfig struct {
 
 	// EnvoyID is the expected SPIFFE ID of the Envoy sidecar that presents its
 	// SVID on the mTLS connection to the daemon's gRPC listener.
-	// When set, the daemon pins mTLS to accept ONLY this SVID.
-	// When empty the daemon refuses to start (fail-closed per auth-review finding 4a).
+	// When set, the daemon pins mTLS to accept this SVID.
+	// When empty AND AllowedPeerIDs is empty the daemon refuses to start
+	// (fail-closed per auth-review finding 4a).
 	// Populated from env var GIBSON_SPIFFE_ENVOY_ID.
 	// Spec: admin-services-completion Requirement 6.1.
 	EnvoyID string `mapstructure:"envoy_id" yaml:"envoy_id,omitempty"`
+
+	// AllowedPeerIDs is the optional list of additional SPIFFE IDs the
+	// daemon's gRPC mTLS listener accepts beyond EnvoyID. Used for direct
+	// control-plane callers that don't go through Envoy — currently the
+	// tenant-operator's EntitlementsGRPCClient. The complete accepted set
+	// is EnvoyID ∪ AllowedPeerIDs; all entries are validated against
+	// TrustDomain. Populated from env var GIBSON_SPIFFE_ALLOWED_PEER_IDS
+	// (comma-separated).
+	// ADR: zero-day-ai/docs adr/0002-operator-to-daemon-transport.md.
+	AllowedPeerIDs []string `mapstructure:"allowed_peer_ids" yaml:"allowed_peer_ids,omitempty"`
 }
 
 // AuthConfig contains authentication configuration.
