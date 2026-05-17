@@ -100,6 +100,7 @@ jobs:
           image: ${{ inputs.image_name }}@${{ steps.build.outputs.digest }}
           format: spdx-json
           artifact-name: ${{ inputs.component_name }}-sbom.spdx.json
+          upload-release-assets: 'false'
       - if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@v3
       - if: github.event_name != 'pull_request'
