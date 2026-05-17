@@ -14,6 +14,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -109,14 +110,14 @@ func TestListMissions_NotProvisionedReturnsFailedPrecondition(t *testing.T) {
 
 type nilDaemonStub struct{}
 
-func (n nilDaemonStub) Status() (DaemonStatus, error)         { return DaemonStatus{}, nil }
+func (n nilDaemonStub) Status() (DaemonStatus, error) { return DaemonStatus{}, nil }
 func (n nilDaemonStub) ListAgents(_ context.Context, _ string) ([]AgentInfoInternal, error) {
 	return nil, nil
 }
 func (n nilDaemonStub) GetAgentStatus(_ context.Context, _ string) (AgentStatusInternal, error) {
 	return AgentStatusInternal{}, nil
 }
-func (n nilDaemonStub) ListTools(_ context.Context) ([]ToolInfoInternal, error)   { return nil, nil }
+func (n nilDaemonStub) ListTools(_ context.Context) ([]ToolInfoInternal, error) { return nil, nil }
 func (n nilDaemonStub) ListPlugins(_ context.Context) ([]PluginInfoInternal, error) {
 	return nil, nil
 }
@@ -174,6 +175,9 @@ func (n nilDaemonStub) GetComponentLogs(_ context.Context, _, _ string, _ bool, 
 }
 func (n nilDaemonStub) ListMissionDefinitions(_ context.Context, _, _ int) ([]MissionDefinitionData, int, error) {
 	return nil, 0, nil
+}
+func (n nilDaemonStub) GetMissionDefinition(_ context.Context, _ string) (*missionpb.MissionDefinition, error) {
+	return nil, nil
 }
 func (n nilDaemonStub) CreateMission(_ context.Context, _ CreateMissionData) (CreateMissionResultData, error) {
 	return CreateMissionResultData{}, nil

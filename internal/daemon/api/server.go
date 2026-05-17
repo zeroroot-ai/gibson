@@ -19,10 +19,10 @@ import (
 	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
-	"github.com/zero-day-ai/gibson/internal/datapool"
 	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
+	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/finding"
 	"github.com/zero-day-ai/gibson/internal/idp"
 	"github.com/zero-day-ai/gibson/internal/impersonation"
@@ -389,6 +389,10 @@ type DaemonInterface interface {
 
 	// ListMissionDefinitions returns all installed mission definitions
 	ListMissionDefinitions(ctx context.Context, limit int, offset int) ([]MissionDefinitionData, int, error)
+
+	// GetMissionDefinition returns the full structured proto for a single installed
+	// mission definition by name. Returns nil, ErrNotFound when the name is not registered.
+	GetMissionDefinition(ctx context.Context, name string) (*missionpb.MissionDefinition, error)
 
 	// CreateMission creates a new mission by reference (target_id + mission_definition_id).
 	// Inline target / inline mission are not supported.
@@ -916,7 +920,6 @@ func (s *DaemonServer) WithFindingStore(store findingStoreIface) *DaemonServer {
 	s.findingStore = store
 	return s
 }
-
 
 // WithAlertStore wires the Redis-backed alert store so that ListAlerts,
 // MarkAlertRead, and MarkAllAlertsRead RPCs are backed by durable storage.
@@ -2475,7 +2478,6 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 		},
 	}, nil
 }
-
 
 // Shutdown, ImpersonateTenant, and RefreshToolCatalog have been relocated
 // to platform_operator_shutdown.go, platform_operator_impersonate.go, and

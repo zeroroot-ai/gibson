@@ -242,3 +242,9 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2-0.20260122202528-d9cc6641c482 // indirect
 )
+
+// TEMPORARY: replace directive for development only — must be removed before merge.
+// This PR is blocked on sdk PR#63 (feat: add GetMissionDefinition RPC) merging
+// and the fan-out bump reaching this repo. The no-monorepo-shortcuts CI gate will
+// correctly block merge while this replace is present.
+replace github.com/zero-day-ai/sdk => /home/anthony/Code/zero-day.ai/opensource/sdk/.worktrees/m5-get-mission-def

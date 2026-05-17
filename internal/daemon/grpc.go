@@ -2325,6 +2325,34 @@ func (d *daemonImpl) ListMissionDefinitions(ctx context.Context, limit int, offs
 	return result, total, nil
 }
 
+// GetMissionDefinition returns the full proto for a single mission definition.
+// Returns nil, mission.ErrDefinitionNotFound when the name is not registered.
+func (d *daemonImpl) GetMissionDefinition(ctx context.Context, name string) (*missionpb.MissionDefinition, error) {
+	d.logger.Debug(ctx, "GetMissionDefinition called", "name", name)
+
+	tenantForDef := tenantFromCtxOrSystem(ctx)
+	if d.pool == nil {
+		d.logger.Warn(ctx, "pool not configured; mission definition unavailable")
+		return nil, mission.ErrDefinitionNotFound
+	}
+	conn, connErr := d.pool.For(ctx, tenantForDef)
+	if connErr != nil {
+		return nil, datapool.MapPoolError(connErr)
+	}
+	defer conn.Release()
+
+	store := mission.NewConnBoundMissionStore(conn.Redis)
+	def, err := store.GetDefinition(ctx, name)
+	if err != nil {
+		d.logger.Error(ctx, "failed to get mission definition", "name", name, "error", err)
+		return nil, fmt.Errorf("failed to get mission definition: %w", err)
+	}
+	if def == nil {
+		return nil, mission.ErrDefinitionNotFound
+	}
+	return def, nil
+}
+
 // CreateMission creates a new mission by reference. The mission definition
 // and target must already be registered (via CreateMissionDefinition and the
 // target API respectively). Inline construction was removed under spec

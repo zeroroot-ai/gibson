@@ -16,6 +16,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
+	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // fakeDaemon is a programmable DaemonInterface that records calls and
@@ -23,10 +24,10 @@ import (
 type fakeDaemon struct {
 	mu sync.RWMutex
 
-	checkpoints map[string][]CheckpointData       // missionID -> checkpoints
-	payloads    map[string]*CheckpointData        // missionID|checkpointID -> rich payload
-	rewindCalls []rewindCall                      // recorded RewindMission calls
-	rewindError error                             // override error on RewindMission
+	checkpoints map[string][]CheckpointData // missionID -> checkpoints
+	payloads    map[string]*CheckpointData  // missionID|checkpointID -> rich payload
+	rewindCalls []rewindCall                // recorded RewindMission calls
+	rewindError error                       // override error on RewindMission
 }
 
 type rewindCall struct {
@@ -160,6 +161,9 @@ func (f *fakeDaemon) GetComponentLogs(_ context.Context, _, _ string, _ bool, _ 
 }
 func (f *fakeDaemon) ListMissionDefinitions(_ context.Context, _, _ int) ([]MissionDefinitionData, int, error) {
 	return nil, 0, nil
+}
+func (f *fakeDaemon) GetMissionDefinition(_ context.Context, _ string) (*missionpb.MissionDefinition, error) {
+	return nil, nil
 }
 func (f *fakeDaemon) CreateMission(_ context.Context, _ CreateMissionData) (CreateMissionResultData, error) {
 	return CreateMissionResultData{}, nil

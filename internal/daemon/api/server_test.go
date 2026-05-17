@@ -37,6 +37,7 @@ type mockDaemon struct {
 	showComponentFn           func(ctx context.Context, kind string, name string) (ComponentInfoInternal, error)
 	getComponentLogsFn        func(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan LogEntryData, error)
 	listMissionDefinitionsFn  func(ctx context.Context, limit int, offset int) ([]MissionDefinitionData, int, error)
+	getMissionDefinitionFn    func(ctx context.Context, name string) (*missionpb.MissionDefinition, error)
 	createMissionFn           func(ctx context.Context, req CreateMissionData) (CreateMissionResultData, error)
 	createMissionDefinitionFn func(ctx context.Context, req CreateMissionDefinitionData) (CreateMissionDefinitionResultData, error)
 }
@@ -193,6 +194,13 @@ func (m *mockDaemon) ListMissionDefinitions(ctx context.Context, limit int, offs
 		return m.listMissionDefinitionsFn(ctx, limit, offset)
 	}
 	return nil, 0, nil
+}
+
+func (m *mockDaemon) GetMissionDefinition(ctx context.Context, name string) (*missionpb.MissionDefinition, error) {
+	if m.getMissionDefinitionFn != nil {
+		return m.getMissionDefinitionFn(ctx, name)
+	}
+	return nil, nil
 }
 
 func (m *mockDaemon) CreateMission(ctx context.Context, req CreateMissionData) (CreateMissionResultData, error) {
