@@ -495,8 +495,8 @@ github.com/yuin/gopher-lua v1.1.1 h1:kYKnWBjvbNP4XLT3+bPEwAXJx262OhaHDWDVOPjL46M
 github.com/yuin/gopher-lua v1.1.1/go.mod h1:GBR0iDaNXjAgGg9zfCvksxSRnQx76gclCIb7kdAd1Pw=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-github.com/zero-day-ai/sdk v1.9.0 h1:6uU1gtPx/vpckhlJWWidLDEHTHrJAWktjpM/92elmzQ=
-github.com/zero-day-ai/sdk v1.9.0/go.mod h1:WM9RF1LZ8h3V3X+xZZXiHTVbM2zGB3Dr4I/aAkpDY6A=
+github.com/zero-day-ai/sdk v0.104.0 h1:tEeQmLM6tWOmdSzu6D2E+slfSqKVOKg7pGV7IKIQylg=
+github.com/zero-day-ai/sdk v0.104.0/go.mod h1:WM9RF1LZ8h3V3X+xZZXiHTVbM2zGB3Dr4I/aAkpDY6A=
 github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66 h1:7hZeaP1CwGKTEJgSiyXL1GEyCAFWSZ4O6rCYMFThy8U=
 github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66/go.mod h1:toFwwA5SpWeL0/Pr3XOelvHRZrzs7Ex9vpul5lA1SCY=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
