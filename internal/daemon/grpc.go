@@ -201,6 +201,19 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	unaryInterceptors = append(unaryInterceptors, unaryScrub)
 	streamInterceptors = append(streamInterceptors, streamScrub)
 
+	// 2.25. Correlation ID — reads `x-correlation-id` from incoming
+	// metadata (forwarded by the dashboard / ext-authz) or mints a
+	// fresh `req-<base32 of uuid7>` ID when absent. The ID is
+	// attached to the handler context (via CorrelationIDFromContext)
+	// so structured-log lines emitted by business logic carry the
+	// same correlation ID as the daemon's per-RPC log entry. The ID
+	// is also echoed back as a gRPC response header so the
+	// dashboard's `x-correlation-id` response header matches the
+	// daemon's log line. Spec: deploy#207.
+	unaryCorrelation, streamCorrelation := correlationIDInterceptors(d.logger.Slog())
+	unaryInterceptors = append(unaryInterceptors, unaryCorrelation)
+	streamInterceptors = append(streamInterceptors, streamCorrelation)
+
 	// 2.5. Protovalidate runtime — runs `(buf.validate.field).*`
 	// annotations against incoming proto.Message requests. Single
 	// validator instance, goroutine-safe, CEL-program-cached.
