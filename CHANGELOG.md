@@ -62,6 +62,24 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.43.0](https://github.com/zero-day-ai/gibson/compare/v0.42.0...v0.43.0) (2026-05-17)
+
+
+### Features
+
+* **one-code-path/195:** FGA must be reachable — delete noopAuthorizer + require_ready=false + every s.authz==nil branch ([#111](https://github.com/zero-day-ai/gibson/issues/111)) ([28a38d9](https://github.com/zero-day-ai/gibson/commit/28a38d912dbdb64a5773f5f512fd9049482857a8))
+* **one-code-path/205:** delete GIBSON_MODE — one binary every environment ([#112](https://github.com/zero-day-ai/gibson/issues/112)) ([20b2f31](https://github.com/zero-day-ai/gibson/commit/20b2f3168dc343b92ce32aca83b358c0ca0c8171))
+* **one-code-path/207:** add per-RPC correlation ID interceptor ([#113](https://github.com/zero-day-ai/gibson/issues/113)) ([7313736](https://github.com/zero-day-ai/gibson/commit/731373657f04c2fab204b8aebbb9610da458aaad))
+
+
+### Bug Fixes
+
+* **ci:** chain authz-registry publish off release-please instead of tag trigger ([#97](https://github.com/zero-day-ai/gibson/issues/97)) ([75dd1e6](https://github.com/zero-day-ai/gibson/commit/75dd1e676bb167a9fe3730c3dcd396a3fdd3cfb4))
+* **daemon:** allow multiple inbound peer SVIDs on gRPC mTLS listener ([#107](https://github.com/zero-day-ai/gibson/issues/107)) ([77820d0](https://github.com/zero-day-ai/gibson/commit/77820d02fb026740fecb9409d5e5c356d02feaa2))
+* **daemon:** spiffe-bypass at gRPC auth interceptor for platform peers ([#108](https://github.com/zero-day-ai/gibson/issues/108)) ([b950e28](https://github.com/zero-day-ai/gibson/commit/b950e2897e8b36d845a49ed079f3caa29e1d9b28))
+* remove infinite-recursion postgresProvider fallback in secrets registry ([#105](https://github.com/zero-day-ai/gibson/issues/105)) ([9c90d7e](https://github.com/zero-day-ai/gibson/commit/9c90d7eca68c5a088f4487a876c6c69084f6bbce)), closes [#101](https://github.com/zero-day-ai/gibson/issues/101)
+* tenant_id columns must be TEXT, not UUID (configstore + plugin_install) ([#100](https://github.com/zero-day-ai/gibson/issues/100)) ([bbb6c23](https://github.com/zero-day-ai/gibson/commit/bbb6c2329aaaa4e090cc7482f23b61cc4ee26c69))
+
 ## [0.42.0](https://github.com/zero-day-ai/gibson/compare/v0.41.0...v0.42.0) (2026-05-13)
 
 
