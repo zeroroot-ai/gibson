@@ -635,13 +635,8 @@ func (d *daemonImpl) SetOnRegistryReady(fn func()) {
 func (d *daemonImpl) Start(ctx context.Context) error {
 	d.logger.Info(ctx, "starting Gibson daemon",
 		"callback_enabled", d.config.Callback.Enabled,
-		"mode", d.config.Mode().String(),
 		"strict_tenant", d.config.StrictTenant(),
 	)
-
-	// Emit the gibson_mode_info{mode} Prometheus gauge so operators can
-	// observe the resolved deployment mode from dashboards and alerts.
-	config.EmitModeMetric(d.config)
 
 	// Record start time
 	d.startTime = time.Now()

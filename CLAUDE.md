@@ -89,12 +89,8 @@ The package `internal/auth/identityresolver` provides a numeric→readable looku
 
 Spec: `canonical-service-identity`.
 
-## Deployment mode (`GIBSON_MODE`, never `GIBSON_ENV`)
+## Deployment mode (deleted)
 
-Production-vs-dev gates read `GIBSON_MODE` from the environment. The valid values are `saas`, `selfhost`, `dev` (defaults to `selfhost` when unset). Implementation lives at `core/gibson/internal/config/mode.go`; consumers access the resolved value via `cfg.Mode()`, which returns one of `config.ModeSaaS`, `config.ModeSelfhost`, `config.ModeDev`.
+The `GIBSON_MODE` env var, the `Mode`/`ModeSaaS`/`ModeSelfhost`/`ModeDev` types, and the `cfg.Mode()` accessor were deleted as part of the one-code-path epic (`deploy#205`). The daemon binary boots identically in every environment — kind, staging, prod, customer self-hosted. Per-environment differences live ONLY in helm values (which fail-loud on missing dependencies).
 
-Some older spec drafts referenced `GIBSON_ENV=prod` as a tentative env-var name. **`GIBSON_ENV` is not a thing** — do not introduce it. New gates that need a "production" check should compare `cfg.Mode() == config.ModeSaaS`.
-
-The setec-sandbox-prod-default spec's R1.4 fail-closed startup self-check (in `cmd/gibson/main.go`) follows this convention: it refuses startup when `cfg.Mode() == config.ModeSaaS && version.BuildTagSetecIntegration != "on"`.
-
-Spec: `setec-sandbox-prod-default` (Cleanup R1.4).
+Do NOT re-introduce a deployment-mode env var. Per-feature gates that genuinely need a knob should consume a dedicated, single-purpose env var (e.g. `GIBSON_STRICT_TENANT`), validated at config-load time, NOT a multi-valued mode enum.

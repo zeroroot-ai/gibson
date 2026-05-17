@@ -9,6 +9,28 @@ import (
 	"github.com/spf13/viper"
 )
 
+// loadStrictTenant reads GIBSON_STRICT_TENANT from the environment and returns
+// the resolved bool. Accepts "1", "true", "yes" (case-insensitive) as true;
+// empty string or "0", "false", "no" as false. Any other value is a config
+// load error.
+//
+// Default (unset / empty): false — preserves current (non-strict) behaviour in
+// Phase 1. Phase 5 will flip the default and remove this flag.
+func loadStrictTenant() (bool, error) {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("GIBSON_STRICT_TENANT")))
+	switch raw {
+	case "", "0", "false", "no":
+		return false, nil
+	case "1", "true", "yes":
+		return true, nil
+	default:
+		return false, fmt.Errorf(
+			"config: invalid GIBSON_STRICT_TENANT value %q; accepted values are 1/true/yes (enable) or 0/false/no/empty (disable)",
+			os.Getenv("GIBSON_STRICT_TENANT"),
+		)
+	}
+}
+
 // ConfigLoader handles loading configuration from files.
 type ConfigLoader interface {
 	Load(path string) (*Config, error)
@@ -60,7 +82,7 @@ func (l *viperConfigLoader) Load(path string) (*Config, error) {
 		}
 	}
 
-	// Apply runtime env-var overrides (GIBSON_MODE, GIBSON_STRICT_TENANT).
+	// Apply runtime env-var overrides (GIBSON_STRICT_TENANT).
 	// These are env-only knobs not sourced from YAML.
 	if err := applyRuntimeEnvOverrides(&cfg); err != nil {
 		return nil, fmt.Errorf("configuration error: %w", err)
@@ -123,7 +145,7 @@ func (l *viperConfigLoader) LoadWithDefaults(path string) (*Config, error) {
 		}
 	}
 
-	// Apply runtime env-var overrides (GIBSON_MODE, GIBSON_STRICT_TENANT).
+	// Apply runtime env-var overrides (GIBSON_STRICT_TENANT).
 	// These are env-only knobs not sourced from YAML.
 	if err := applyRuntimeEnvOverrides(cfg); err != nil {
 		return nil, fmt.Errorf("configuration error: %w", err)
@@ -143,19 +165,16 @@ func (l *viperConfigLoader) LoadWithDefaults(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// applyRuntimeEnvOverrides reads GIBSON_MODE and GIBSON_STRICT_TENANT from the
-// environment and writes the resolved values into the unexported mode and
-// strictTenant fields of cfg. This is called after YAML unmarshalling so that
-// env vars always win over file values for these two knobs, and so that env-var
-// reads are concentrated in the config loader rather than scattered across the
-// daemon codebase.
+// applyRuntimeEnvOverrides reads GIBSON_STRICT_TENANT from the environment and
+// writes the resolved value into the unexported strictTenant field of cfg.
+// This is called after YAML unmarshalling so that env vars always win over
+// file values for this knob, and so that env-var reads are concentrated in
+// the config loader rather than scattered across the daemon codebase.
+//
+// GIBSON_MODE was removed as part of the one-code-path epic (deploy#205):
+// the daemon binary boots identically in every environment; per-environment
+// differences live in helm values (which fail-loud on missing dependencies).
 func applyRuntimeEnvOverrides(cfg *Config) error {
-	mode, err := loadMode()
-	if err != nil {
-		return err
-	}
-	cfg.mode = mode
-
 	strict, err := loadStrictTenant()
 	if err != nil {
 		return err

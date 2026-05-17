@@ -29,7 +29,7 @@ func (e *ValidationError) Error() string {
 	sort.Slice(caps, func(i, j int) bool { return caps[i] < caps[j] })
 
 	var sb strings.Builder
-	sb.WriteString("saga: missing required client capabilities (run with --dev-mode=true to bypass in development):\n")
+	sb.WriteString("saga: missing required client capabilities:\n")
 	for _, c := range caps {
 		steps := e.Missing[c]
 		sort.Strings(steps)
@@ -44,51 +44,45 @@ func (e *ValidationError) Error() string {
 // returns; the summary string in that case is empty.
 //
 // Use this from cmd/main.go so production-mode startup logs explicitly
-// state "validated N steps, all M capabilities satisfied (production
-// mode)" instead of leaving operators to infer success from absence-of-
-// error.
-func ValidateAtStartupVerbose(steps []Step, deps *Deps, devMode bool) (summary string, err error) {
-	if err := ValidateAtStartup(steps, deps, devMode); err != nil {
+// state "validated N steps, all M capabilities satisfied" instead of
+// leaving operators to infer success from absence-of-error.
+//
+// The dev-mode bypass parameter was deleted as part of the one-code-path
+// epic (deploy#205): the operator binary boots identically in every
+// environment; capability misses always fail-fast.
+func ValidateAtStartupVerbose(steps []Step, deps *Deps) (summary string, err error) {
+	if err := ValidateAtStartup(steps, deps); err != nil {
 		return "", err
 	}
 	// Capability count for the summary: distinct capabilities required
-	// by any step, irrespective of whether dev mode bypassed the check.
+	// by any step.
 	required := map[ClientCapability]struct{}{}
 	for _, s := range steps {
 		for _, c := range s.RequiredClients() {
 			required[c] = struct{}{}
 		}
 	}
-	mode := "production mode"
-	if devMode {
-		mode = "dev mode (capability checks bypassed)"
-	}
-	return fmt.Sprintf("saga: validated %d step(s), all %d capabilit(ies) satisfied (%s)",
-		len(steps), len(required), mode), nil
+	return fmt.Sprintf("saga: validated %d step(s), all %d capabilit(ies) satisfied",
+		len(steps), len(required)), nil
 }
 
 // ValidateAtStartup checks that every capability listed in any step's
-// RequiredClients() is satisfied by deps. In production mode (devMode=false),
-// any unsatisfied capability returns a *ValidationError aggregating every
-// missing capability and the steps that require it.
-//
-// In dev mode (devMode=true), missing capabilities are tolerated — the
-// caller is expected to install stub clients for the missing ones before
-// running steps, OR steps will receive nil clients and may fail. Returns
-// nil in dev mode regardless.
+// RequiredClients() is satisfied by deps. Any unsatisfied capability
+// returns a *ValidationError aggregating every missing capability and the
+// steps that require it.
 //
 // Topology problems (unknown step references, cycles) are also reported
 // here so a misconfigured operator pod fails to start instead of silently
 // producing a broken DAG.
-func ValidateAtStartup(steps []Step, deps *Deps, devMode bool) error {
-	// Topology check is mandatory regardless of dev mode — a cyclic graph
-	// is a code bug, not a configuration problem.
+//
+// The dev-mode bypass parameter was deleted as part of the one-code-path
+// epic (deploy#205): one binary, every environment, capability misses
+// always fail-fast.
+func ValidateAtStartup(steps []Step, deps *Deps) error {
+	// Topology check is mandatory — a cyclic graph is a code bug, not a
+	// configuration problem.
 	if _, err := TopoSort(steps); err != nil {
 		return fmt.Errorf("saga: invalid step graph: %w", err)
-	}
-
-	if devMode {
-		return nil
 	}
 
 	missing := map[ClientCapability][]string{}

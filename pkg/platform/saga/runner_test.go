@@ -141,7 +141,7 @@ func TestTopoSort_EmptyName(t *testing.T) {
 func TestValidateAtStartup_AllSatisfied(t *testing.T) {
 	s := &testStep{name: "S", condition: "S", caps: []saga.ClientCapability{saga.CapabilityKubernetes}}
 	deps := &saga.Deps{K8s: struct{}{}}
-	if err := saga.ValidateAtStartup([]saga.Step{s}, deps, false); err != nil {
+	if err := saga.ValidateAtStartup([]saga.Step{s}, deps); err != nil {
 		t.Errorf("ValidateAtStartup: %v", err)
 	}
 }
@@ -150,9 +150,9 @@ func TestValidateAtStartup_MissingCapabilities_Aggregated(t *testing.T) {
 	s1 := &testStep{name: "S1", condition: "S1", caps: []saga.ClientCapability{saga.CapabilityVaultAdmin, saga.CapabilityFGA}}
 	s2 := &testStep{name: "S2", condition: "S2", requires: []string{"S1"}, caps: []saga.ClientCapability{saga.CapabilityVaultAdmin}}
 	deps := &saga.Deps{} // empty
-	err := saga.ValidateAtStartup([]saga.Step{s1, s2}, deps, false)
+	err := saga.ValidateAtStartup([]saga.Step{s1, s2}, deps)
 	if err == nil {
-		t.Fatal("ValidateAtStartup accepted empty deps in production mode")
+		t.Fatal("ValidateAtStartup accepted empty deps")
 	}
 	var ve *saga.ValidationError
 	if !errors.As(err, &ve) {
@@ -167,19 +167,16 @@ func TestValidateAtStartup_MissingCapabilities_Aggregated(t *testing.T) {
 	}
 }
 
-func TestValidateAtStartup_DevModeBypassesMissingCaps(t *testing.T) {
-	s := &testStep{name: "S", condition: "S", caps: []saga.ClientCapability{saga.CapabilityVaultAdmin}}
-	deps := &saga.Deps{} // no vault
-	if err := saga.ValidateAtStartup([]saga.Step{s}, deps, true); err != nil {
-		t.Errorf("ValidateAtStartup in dev mode: %v", err)
-	}
-}
-
-func TestValidateAtStartup_TopologyErrorEvenInDevMode(t *testing.T) {
+// TestValidateAtStartup_TopologyErrorAlwaysReported asserts that a cyclic
+// step graph is reported as a startup error regardless of capability
+// satisfaction. After the one-code-path epic (deploy#205) removed the
+// devMode bypass, this is the only remaining "is the graph structurally
+// valid?" check.
+func TestValidateAtStartup_TopologyErrorAlwaysReported(t *testing.T) {
 	a := &testStep{name: "A", condition: "A", requires: []string{"B"}}
 	b := &testStep{name: "B", condition: "B", requires: []string{"A"}}
-	if err := saga.ValidateAtStartup([]saga.Step{a, b}, &saga.Deps{}, true); err == nil {
-		t.Error("ValidateAtStartup accepted cycle in dev mode")
+	if err := saga.ValidateAtStartup([]saga.Step{a, b}, &saga.Deps{}); err == nil {
+		t.Error("ValidateAtStartup accepted cycle")
 	}
 }
 
@@ -320,10 +317,10 @@ func TestRunner_Backoff_ExponentialCappedAtMax(t *testing.T) {
 	}
 }
 
-func TestValidateAtStartupVerbose_ProductionSummary(t *testing.T) {
+func TestValidateAtStartupVerbose_Summary(t *testing.T) {
 	s := &testStep{name: "S", condition: "S", caps: []saga.ClientCapability{saga.CapabilityKubernetes}}
 	deps := &saga.Deps{K8s: struct{}{}}
-	summary, err := saga.ValidateAtStartupVerbose([]saga.Step{s}, deps, false)
+	summary, err := saga.ValidateAtStartupVerbose([]saga.Step{s}, deps)
 	if err != nil {
 		t.Fatalf("ValidateAtStartupVerbose: %v", err)
 	}
@@ -333,31 +330,13 @@ func TestValidateAtStartupVerbose_ProductionSummary(t *testing.T) {
 	if !strings.Contains(summary, "1 capabilit") {
 		t.Errorf("summary missing capability count: %q", summary)
 	}
-	if !strings.Contains(summary, "production mode") {
-		t.Errorf("summary missing production-mode tag: %q", summary)
-	}
-}
-
-func TestValidateAtStartupVerbose_DevModeSummary(t *testing.T) {
-	s := &testStep{name: "S", condition: "S", caps: []saga.ClientCapability{saga.CapabilityVaultAdmin}}
-	deps := &saga.Deps{} // empty — dev mode tolerates
-	summary, err := saga.ValidateAtStartupVerbose([]saga.Step{s}, deps, true)
-	if err != nil {
-		t.Fatalf("ValidateAtStartupVerbose dev mode: %v", err)
-	}
-	if !strings.Contains(summary, "dev mode") {
-		t.Errorf("summary missing dev-mode tag: %q", summary)
-	}
-	if !strings.Contains(summary, "bypassed") {
-		t.Errorf("summary missing bypassed phrase: %q", summary)
-	}
 }
 
 func TestValidateAtStartupVerbose_FailureReturnsEmptySummary(t *testing.T) {
 	s := &testStep{name: "S", condition: "S", caps: []saga.ClientCapability{saga.CapabilityVaultAdmin}}
-	summary, err := saga.ValidateAtStartupVerbose([]saga.Step{s}, &saga.Deps{}, false)
+	summary, err := saga.ValidateAtStartupVerbose([]saga.Step{s}, &saga.Deps{})
 	if err == nil {
-		t.Fatal("expected error in production mode with missing cap")
+		t.Fatal("expected error with missing cap")
 	}
 	if summary != "" {
 		t.Errorf("expected empty summary on failure, got %q", summary)
@@ -378,8 +357,10 @@ func TestValidationError_ErrorMessageMentionsCapabilityAndSteps(t *testing.T) {
 	if !strings.Contains(msg, "ProvisionPostgres") {
 		t.Errorf("error msg %q missing step name", msg)
 	}
-	if !strings.Contains(msg, "--dev-mode") {
-		t.Errorf("error msg %q missing dev-mode hint", msg)
+	// After deploy#205 the --dev-mode bypass hint is gone — one binary,
+	// every environment, capability misses always fail-fast.
+	if strings.Contains(msg, "--dev-mode") {
+		t.Errorf("error msg %q must no longer reference --dev-mode (deleted in deploy#205)", msg)
 	}
 }
 
