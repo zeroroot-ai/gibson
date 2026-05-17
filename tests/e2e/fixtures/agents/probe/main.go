@@ -5,14 +5,34 @@
 //
 //	Register → PollWork (loop) → Complete (LLM) → SubmitFinding → terminate
 //
+// Auth model:
+//
+// The probe authenticates as a customer agent would — through the SDK's
+// agent.Connect path. That single call:
+//
+//  1. Reads the credentials file at PROBE_CREDENTIALS_PATH (or the default
+//     ~/.gibson/agent/credentials when unset), which the e2e harness writes
+//     after minting a `client_id` / `client_secret` pair via the dashboard's
+//     RegisterAgent flow.
+//  2. Performs an OIDC client_credentials grant against the Gibson identity
+//     service to obtain a short-lived JWT.
+//  3. Dials the Gibson edge gateway at GIBSON_URL (Envoy + ext-authz upstream
+//     of the daemon's ComponentService) with TLS, attaching the JWT on every
+//     RPC via a refreshing interceptor.
+//
+// The harness is responsible for the credential lifecycle. This binary
+// reads them, talks to the edge, and exits — it has no knowledge of the
+// underlying IdP, ext-authz, FGA, or HMAC identity chain. That is the
+// point: a customer-runnable test path validates the customer surface.
+//
 // Environment variables:
 //
-//	GIBSON_DAEMON_ADDR    — daemon gRPC address (default: gibson.gibson.svc.cluster.local:50002)
-//	GIBSON_TENANT_ID      — tenant ID for authentication
-//	GIBSON_API_KEY        — API key for authentication (gsk_-prefixed)
-//	PROBE_SEED            — deterministic seed for finding content (default: "e2e-probe-seed-v1")
-//	PROBE_WORK_TIMEOUT_MS — PollWork timeout in ms (default: 30000)
-//	PROBE_MAX_ITEMS       — maximum work items to process before exiting (default: 1)
+//	GIBSON_URL              — Gibson edge gateway URL (e.g. https://api.zero-day.ai).
+//	                          Falls back to the gibson_url field in the credentials INI.
+//	PROBE_CREDENTIALS_PATH  — override path for the agent credentials INI (default: ~/.gibson/agent/credentials).
+//	PROBE_SEED              — deterministic seed for finding content (default: "e2e-probe-seed-v1").
+//	PROBE_WORK_TIMEOUT_MS   — PollWork timeout in ms (default: 30000).
+//	PROBE_MAX_ITEMS         — maximum work items to process before exiting (default: 1).
 //
 // Requirements: R2.1, R2.3, R2.4, NFR Security (no external network beyond target).
 package main
@@ -27,14 +47,11 @@ import (
 
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
+	"github.com/zero-day-ai/sdk/agent"
 	"google.golang.org/protobuf/proto"
 )
 
 const (
-	defaultDaemonAddr    = "gibson.gibson.svc.cluster.local:50002"
 	defaultSeed          = "e2e-probe-seed-v1"
 	defaultWorkTimeoutMS = 30_000
 	defaultMaxItems      = 1
@@ -54,40 +71,45 @@ func main() {
 	slog.Info("probe: work complete — exiting")
 }
 
+// connectLogger adapts slog to the minimal agent.ConnectLogger interface so
+// agent.Connect emits its single successful-connect line into the same JSON
+// stream as the rest of the probe.
+type connectLogger struct{}
+
+func (connectLogger) Info(msg string, keysAndValues ...any) {
+	slog.Info(msg, keysAndValues...)
+}
+
 func run() error {
 	// Read configuration from env vars.
-	daemonAddr := envOrDefault("GIBSON_DAEMON_ADDR", defaultDaemonAddr)
-	tenantID := os.Getenv("GIBSON_TENANT_ID")
-	apiKey := os.Getenv("GIBSON_API_KEY")
 	seed := envOrDefault("PROBE_SEED", defaultSeed)
 	maxItems := envIntOrDefault("PROBE_MAX_ITEMS", defaultMaxItems)
 	workTimeoutMS := envIntOrDefault("PROBE_WORK_TIMEOUT_MS", defaultWorkTimeoutMS)
 
-	slog.Info("probe: starting", "addr", daemonAddr, "seed", seed, "max_items", maxItems)
+	slog.Info("probe: starting", "seed", seed, "max_items", maxItems)
 
-	// Connect to the daemon.
-	conn, err := grpc.NewClient(
-		daemonAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	// Connect to the Gibson edge gateway as a customer agent would. The
+	// credentials file path defaults to ~/.gibson/agent/credentials; the
+	// e2e harness writes to PROBE_CREDENTIALS_PATH when overriding for
+	// isolation.
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer connectCancel()
+
+	agentClient, err := agent.Connect(connectCtx, agent.ConnectConfig{
+		CredentialsPath: os.Getenv("PROBE_CREDENTIALS_PATH"),
+		Logger:          connectLogger{},
+	})
 	if err != nil {
-		return fmt.Errorf("probe: dial daemon %s: %w", daemonAddr, err)
+		return fmt.Errorf("probe: agent.Connect: %w", err)
 	}
-	defer conn.Close()
+	defer agentClient.Close() //nolint:errcheck // best-effort on shutdown
 
-	client := componentpb.NewComponentServiceClient(conn)
+	client := componentpb.NewComponentServiceClient(agentClient.Conn())
 
-	// Build gRPC metadata for authentication.
-	md := metadata.New(map[string]string{})
-	if tenantID != "" {
-		md.Set("x-tenant-id", tenantID)
-	}
-	if apiKey != "" {
-		md.Set("authorization", "Bearer "+apiKey)
-	}
-	ctx := metadata.NewOutgoingContext(context.Background(), md)
-
-	// Register with the daemon's component registry.
+	// Register with the daemon's component registry. The bearer-JWT
+	// interceptor wired by agent.Connect attaches authorization on every
+	// call — no explicit metadata setup needed.
+	ctx := context.Background()
 	registerCtx, registerCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer registerCancel()
 
