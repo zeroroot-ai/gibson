@@ -10,7 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 )
 
 // defaultStepMaxAttempts is how many consecutive failures a step may
@@ -33,7 +33,10 @@ type Runner struct {
 	Deps *Deps
 
 	// EventRecorder records K8s Events on step transitions. May be nil.
-	EventRecorder record.EventRecorder
+	// Uses the modern events.k8s.io API (k8s.io/client-go/tools/events) —
+	// the legacy core/v1 events API (k8s.io/client-go/tools/record) is
+	// deprecated.
+	EventRecorder events.EventRecorder
 
 	// AuditHook is called at every step transition (started, completed,
 	// failed, skipped) with structured event data. May be nil.
@@ -363,7 +366,11 @@ func (r *Runner) event(obj runtime.Object, eventType, reason, message string) {
 	if r.EventRecorder == nil {
 		return
 	}
-	r.EventRecorder.Event(obj, eventType, reason, message)
+	// events.EventRecorder.Eventf signature: (regarding, related, eventtype,
+	// reason, action, note, args...). We pass nil for `related` (no second
+	// object), and use the same `reason` value for `action` since saga step
+	// transitions are reason-as-verb already ("StepStarted", "StepFailed").
+	r.EventRecorder.Eventf(obj, nil, eventType, reason, reason, message)
 }
 
 func kindOf(obj runtime.Object) string {
