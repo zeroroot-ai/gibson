@@ -7,12 +7,14 @@
     ".": {
       "release-type": "go",
       "include-component-in-tag": false,
-      "tag-separator": "v"
+      "tag-separator": "v",
+      "bump-minor-pre-major": true
     },
     "tools/gibson-bootstrap": {
       "release-type": "go",
       "component": "gibson-bootstrap",
-      "package-name": "gibson-bootstrap"
+      "package-name": "gibson-bootstrap",
+      "bump-minor-pre-major": true
     }
   }
 }
