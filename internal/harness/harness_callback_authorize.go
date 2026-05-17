@@ -59,8 +59,9 @@ var ErrRunNotFound = errors.New("run authz state not found")
 // WithAuthzStore wires the RunAuthzLookup into HarnessCallbackService so that
 // the Authorize RPC handler can look up the run's owning user and mission status.
 //
-// When not set, the Authorize handler returns codes.Unimplemented, preserving
-// the SDK-side graceful-degradation path (old daemon → allow).
+// One-code-path slice deploy#195: required for every daemon. The previous
+// "not set → Unimplemented (SDK falls back to allow)" branch was a silent
+// authz-bypass surface and has been removed.
 func WithAuthzStore(store RunAuthzLookup) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.authzStore = store
@@ -71,8 +72,9 @@ func WithAuthzStore(store RunAuthzLookup) CallbackServiceOption {
 // The authorizer is called for every component Authorize RPC after the mission
 // run state has been verified as active.
 //
-// When not set (or authorizer is nil), the Authorize handler returns allowed=true
-// after validating the mission state (authz-disabled / dev mode behaviour).
+// One-code-path slice deploy#195: required for every daemon. The previous
+// "not set → allowed=true" branch was a silent authz-bypass surface and has
+// been removed.
 func WithComponentAuthorizer(a authz.Authorizer) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.componentAuthorizer = a
@@ -89,11 +91,11 @@ func WithComponentAuthorizer(a authz.Authorizer) CallbackServiceOption {
 //  5. Return AuthorizeResponse{allowed, reason}.
 //  6. Emit audit event with decision.
 func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.AuthorizeRequest) (*harnesspb.AuthorizeResponse, error) {
-	if s.authzStore == nil {
-		// No store configured; return Unimplemented so the SDK degrades to
-		// allow (rolling-upgrade path).
-		return nil, status.Errorf(codes.Unimplemented, "authorize: authz store not configured")
-	}
+	// One-code-path slice deploy#195: authzStore and componentAuthorizer are
+	// required at daemon startup. We deliberately do NOT add a nil-guard here
+	// — the old "graceful Unimplemented" / "graceful allow" branches were
+	// silent authz-bypasses. A misconfigured daemon now panics on the first
+	// Authorize call instead of silently allowing every component.
 
 	runID := req.GetRunId()
 	action := req.GetAction()
@@ -134,18 +136,9 @@ func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.A
 		return nil, status.Errorf(codes.FailedPrecondition, "authorize: mission run is not active (status=%s)", runState.Status)
 	}
 
-	// 3. When no FGA authorizer is wired, allow (authz disabled / dev mode).
-	if s.componentAuthorizer == nil {
-		s.logger.Debug("authorize: no authorizer configured, allowing (dev mode)",
-			slog.String("run_id", runID),
-			slog.String("action", action),
-			slog.String("resource", resource),
-		)
-		s.emitComponentAuthzAudit(ctx, runState, action, resource, true, "authz_disabled")
-		return &harnesspb.AuthorizeResponse{Allowed: true, Reason: "authz_disabled"}, nil
-	}
-
-	// 4. Derive FGA check parameters.
+	// 3. Derive FGA check parameters.
+	// One-code-path slice deploy#195: the daemon always has a real FGA
+	// authorizer — there is no longer a "no authorizer wired → allow" branch.
 	// user format:   "user:<subject>"
 	// relation:      "can_<action>"  (FGA model uses "can_execute", "can_read", etc.)
 	// object format: caller-provided resource string (e.g., "tool:nmap", "system:192.168.1.1")
@@ -166,7 +159,7 @@ func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.A
 		return nil, status.Errorf(codes.Unavailable, "authorize: authorization service error")
 	}
 
-	// 5. Emit audit event and metrics.
+	// 4. Emit audit event and metrics.
 	reason := "fga_allow"
 	if !allowed {
 		reason = "fga_deny"

@@ -107,7 +107,8 @@ type daemonImpl struct {
 	stateClient *state.StateClient
 
 	// missionAuthzStore tracks the owning user per run for component authz callback resolution.
-	// When nil (authz.enabled=false or no Redis), authz state tracking is skipped.
+	// One-code-path slice deploy#195: required; set unconditionally in the
+	// Redis init phase of Start().
 	missionAuthzStore mission.MissionAuthzStore
 
 	// checkpointStore provides checkpoint persistence for pause/resume
@@ -261,9 +262,9 @@ type daemonImpl struct {
 	onRegistryReady func()
 
 	// authorizer is the authorization service client.
-	// Set during initAuthorizer() in Start(). Always non-nil after startup:
-	// either a real fgaAuthorizer (authz.enabled=true) or a noopAuthorizer
-	// (authz.enabled=false or FGA unreachable in dev mode).
+	// Set during initAuthorizer() in Start(). Always a real fgaAuthorizer
+	// after startup — one-code-path slice deploy#195 deleted the noop
+	// fallback. If FGA is unreachable, the daemon exits.
 	authorizer authz.Authorizer
 
 	// budgetEnforcer is the per-user/team/tenant LLM budget enforcer.
@@ -705,7 +706,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	)
 
 	// Authorization Service phase — must run AFTER State Client and BEFORE Component Registry.
-	// When authz.enabled=false (default) this is a fast no-op that injects a noopAuthorizer.
+	// One-code-path slice deploy#195: FGA is a hard dependency.
+	// Daemon exits 1 if FGA is unreachable at startup (no more noop fallback).
 	if err := d.initAuthorizer(ctx); err != nil {
 		d.stopServices(ctx)
 		return fmt.Errorf("failed to initialize authorization service: %w", err)
@@ -999,17 +1001,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Configure callback service with authz store for component authorization callbacks.
 	// The adapter bridges mission.MissionAuthzStore → harness.RunAuthzLookup to break
 	// the import cycle (harness→mission→eval→harness).
-	if d.missionAuthzStore != nil {
-		d.callback.SetAuthzStore(newMissionAuthzStoreAdapter(d.missionAuthzStore))
-		d.logger.Info(ctx, "configured callback service with mission authz store")
-	}
+	// One-code-path slice deploy#195: missionAuthzStore is wired unconditionally
+	// during Redis init; no more nil-guard.
+	d.callback.SetAuthzStore(newMissionAuthzStoreAdapter(d.missionAuthzStore))
+	d.logger.Info(ctx, "configured callback service with mission authz store")
 
 	// Wire the FGA Authorizer into the callback service for component-level authz.
-	// d.authorizer is always non-nil after initAuthorizer(): either real FGA or noop.
-	if d.authorizer != nil {
-		d.callback.SetComponentAuthorizer(d.authorizer)
-		d.logger.Info(ctx, "configured callback service with FGA component authorizer")
-	}
+	// One-code-path slice deploy#195: d.authorizer is always a real FGA client
+	// after initAuthorizer (the noop fallback was deleted), so no more nil-guard.
+	d.callback.SetComponentAuthorizer(d.authorizer)
+	d.logger.Info(ctx, "configured callback service with FGA component authorizer")
 
 	// Wire the OTel metrics recorder into the Authorize handler so that each
 	// component authz decision increments gibson_component_authz_total.
@@ -1226,11 +1227,15 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Debug(ctx, "registered secrets broker readiness check (system-tenant gates /readyz; per-tenant emits gauge only)")
 	}
 
-	// Register FGA readiness check when authorization is enabled.
+	// Register FGA readiness check. After one-code-path slice deploy#195
+	// d.authorizer is always a real FGA client (no more noop fallback) —
+	// startup would have failed if FGA was unreachable. The nil-guard is
+	// kept defensively for parallel-test daemon constructions that skip
+	// initAuthorizer.
 	// Uses a 10s TTL cached result to avoid hammering FGA on every scrape.
 	// Returns Degraded (not Unhealthy) so Kubernetes removes the pod from
 	// service endpoints without triggering a restart.
-	if d.config.Authz.Enabled && d.authorizer != nil {
+	if d.authorizer != nil {
 		a := d.authorizer
 		var (
 			cacheMu      sync.Mutex

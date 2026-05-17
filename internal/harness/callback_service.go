@@ -121,12 +121,17 @@ type HarnessCallbackService struct {
 	missionManager MissionOperator
 
 	// authzStore provides per-run authz state lookup (run_id → user_id, tenant_id).
-	// Required for the Authorize RPC handler. When nil, Authorize returns Unimplemented.
 	// Typed as RunAuthzLookup to avoid a circular import (mission→eval→harness).
+	// One-code-path slice deploy#195: required for any callback service that
+	// will actually serve Authorize calls — the daemon wires this in setup.
+	// Tests that build the service directly without it MUST NOT exercise
+	// Authorize.
 	authzStore RunAuthzLookup
 
 	// componentAuthorizer is the FGA-backed authorizer for component authz decisions.
-	// When nil (authz disabled / dev mode), Authorize allows all active-mission requests.
+	// One-code-path slice deploy#195: required for any callback service that
+	// will actually serve Authorize calls. The daemon wires this in setup
+	// after FGA has been reached.
 	componentAuthorizer authz.Authorizer
 
 	// componentAuthzMetrics emits counters for every component Authorize decision.
