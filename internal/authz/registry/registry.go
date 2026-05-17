@@ -1113,6 +1113,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.v1.DaemonService/GetMissionDefinition": {
+		Method:            "/gibson.daemon.v1.DaemonService/GetMissionDefinition",
+		Service:           "gibson.daemon.v1.DaemonService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.v1.DaemonService/GetMissionHistory": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetMissionHistory",
 		Service:           "gibson.daemon.v1.DaemonService",

@@ -6,41 +6,17 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/agent"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
-// MissionConstraints defines execution boundaries for a mission.
-// Constraints are enforced during mission execution to prevent runaway costs,
-// excessive findings, or operations outside acceptable parameters.
-type MissionConstraints struct {
-	// MaxDuration is the maximum allowed execution time.
-	// If exceeded, the mission will be failed with a timeout error.
-	MaxDuration time.Duration `json:"max_duration,omitempty" yaml:"max_duration,omitempty"`
-
-	// MaxFindings is the maximum number of findings before stopping.
-	// When reached, the mission will complete with findings limit status.
-	MaxFindings int `json:"max_findings,omitempty" yaml:"max_findings,omitempty"`
-
-	// SeverityThreshold is the minimum severity level to trigger action.
-	// If a finding with this severity or higher is discovered, the configured action is taken.
-	SeverityThreshold agent.FindingSeverity `json:"severity_threshold,omitempty" yaml:"severity_threshold,omitempty"`
-
-	// SeverityAction is the action to take when severity threshold is exceeded.
-	SeverityAction ConstraintAction `json:"severity_action,omitempty" yaml:"severity_action,omitempty"`
-
-	// RequireEvidence indicates whether findings must include evidence.
-	// If true, findings without evidence will be rejected.
-	RequireEvidence bool `json:"require_evidence,omitempty" yaml:"require_evidence,omitempty"`
-
-	// MaxTokens is the maximum total token usage allowed.
-	// When exceeded, the mission will pause for budget approval.
-	MaxTokens int64 `json:"max_tokens,omitempty" yaml:"max_tokens,omitempty"`
-
-	// MaxCost is the maximum cost in dollars for LLM usage.
-	// When exceeded, the mission will pause for budget approval.
-	MaxCost float64 `json:"max_cost,omitempty" yaml:"max_cost,omitempty"`
-}
-
 // ConstraintAction defines what action to take when a constraint is violated.
+// SeverityAction is intentionally NOT a field on missionv1.MissionConstraints —
+// it is a platform-policy decision (pause vs fail on severity exceeded) that
+// belongs in the daemon's runtime configuration, not in the wire shape.
+// The DefaultConstraintChecker accepts it as a construction-time parameter.
+//
+// ADR 0004 mandates missionv1.MissionConstraints as the single platform-wide
+// constraint shape; any daemon-local augmentation goes here or in config.
 type ConstraintAction string
 
 const (
@@ -85,82 +61,97 @@ func (v *ConstraintViolation) Error() string {
 type ConstraintChecker interface {
 	// Check evaluates all constraints and returns a violation if any constraint is violated.
 	// Returns nil if all constraints are satisfied.
-	Check(ctx context.Context, constraints *MissionConstraints, metrics *MissionMetrics) (*ConstraintViolation, error)
+	Check(ctx context.Context, constraints *missionv1.MissionConstraints, metrics *MissionMetrics) (*ConstraintViolation, error)
 }
 
 // DefaultConstraintChecker implements ConstraintChecker with standard validation logic.
-type DefaultConstraintChecker struct{}
+//
+// SeverityAction is a daemon runtime-policy decision: when a finding breaches the
+// severity threshold declared on the proto constraints, the checker uses
+// DefaultSeverityAction to decide whether to pause or fail the mission.
+// This keeps the wire shape (missionv1.MissionConstraints) free of policy knobs
+// while letting operators configure the daemon's response behaviour.
+type DefaultConstraintChecker struct {
+	// DefaultSeverityAction is the action taken when the severity threshold is breached.
+	// Defaults to ConstraintActionPause if not set.
+	DefaultSeverityAction ConstraintAction
+}
 
-// NewDefaultConstraintChecker creates a new DefaultConstraintChecker.
+// NewDefaultConstraintChecker creates a new DefaultConstraintChecker with pause
+// as the default severity action.
 func NewDefaultConstraintChecker() *DefaultConstraintChecker {
-	return &DefaultConstraintChecker{}
+	return &DefaultConstraintChecker{
+		DefaultSeverityAction: ConstraintActionPause,
+	}
 }
 
 // Check evaluates all constraints and returns the first violation found.
 // Constraints are checked in order of severity (cost, duration, findings, severity).
-func (c *DefaultConstraintChecker) Check(ctx context.Context, constraints *MissionConstraints, metrics *MissionMetrics) (*ConstraintViolation, error) {
+func (c *DefaultConstraintChecker) Check(ctx context.Context, constraints *missionv1.MissionConstraints, metrics *MissionMetrics) (*ConstraintViolation, error) {
 	if constraints == nil || metrics == nil {
 		return nil, nil
 	}
 
 	// Check max cost constraint (highest priority)
-	if constraints.MaxCost > 0 && metrics.TotalCost > constraints.MaxCost {
+	if constraints.GetMaxCost() > 0 && metrics.TotalCost > constraints.GetMaxCost() {
 		return &ConstraintViolation{
 			Constraint:     "max_cost",
-			Message:        fmt.Sprintf("Mission cost %.2f exceeds maximum allowed cost %.2f", metrics.TotalCost, constraints.MaxCost),
+			Message:        fmt.Sprintf("Mission cost %.2f exceeds maximum allowed cost %.2f", metrics.TotalCost, constraints.GetMaxCost()),
 			Action:         ConstraintActionPause, // Cost violations always pause for approval
 			CurrentValue:   metrics.TotalCost,
-			ThresholdValue: constraints.MaxCost,
+			ThresholdValue: constraints.GetMaxCost(),
 		}, nil
 	}
 
 	// Check max tokens constraint
-	if constraints.MaxTokens > 0 && metrics.TotalTokens > constraints.MaxTokens {
+	if constraints.GetMaxTokens() > 0 && metrics.TotalTokens > constraints.GetMaxTokens() {
 		return &ConstraintViolation{
 			Constraint:     "max_tokens",
-			Message:        fmt.Sprintf("Mission tokens %d exceeds maximum allowed tokens %d", metrics.TotalTokens, constraints.MaxTokens),
+			Message:        fmt.Sprintf("Mission tokens %d exceeds maximum allowed tokens %d", metrics.TotalTokens, constraints.GetMaxTokens()),
 			Action:         ConstraintActionPause, // Token violations always pause for approval
 			CurrentValue:   metrics.TotalTokens,
-			ThresholdValue: constraints.MaxTokens,
+			ThresholdValue: constraints.GetMaxTokens(),
 		}, nil
 	}
 
 	// Check max duration constraint
-	if constraints.MaxDuration > 0 && metrics.Duration > constraints.MaxDuration {
-		return &ConstraintViolation{
-			Constraint:     "max_duration",
-			Message:        fmt.Sprintf("Mission duration %s exceeds maximum allowed duration %s", metrics.Duration, constraints.MaxDuration),
-			Action:         ConstraintActionFail, // Duration violations always fail
-			CurrentValue:   metrics.Duration.String(),
-			ThresholdValue: constraints.MaxDuration.String(),
-		}, nil
+	if maxDur := constraints.GetMaxDuration(); maxDur != nil {
+		maxDuration := maxDur.AsDuration()
+		if maxDuration > 0 && metrics.Duration > maxDuration {
+			return &ConstraintViolation{
+				Constraint:     "max_duration",
+				Message:        fmt.Sprintf("Mission duration %s exceeds maximum allowed duration %s", metrics.Duration, maxDuration),
+				Action:         ConstraintActionFail, // Duration violations always fail
+				CurrentValue:   metrics.Duration.String(),
+				ThresholdValue: maxDuration.String(),
+			}, nil
+		}
 	}
 
 	// Check max findings constraint
-	if constraints.MaxFindings > 0 && metrics.TotalFindings >= constraints.MaxFindings {
+	if constraints.GetMaxFindings() > 0 && int64(metrics.TotalFindings) >= int64(constraints.GetMaxFindings()) {
 		return &ConstraintViolation{
 			Constraint:     "max_findings",
-			Message:        fmt.Sprintf("Mission findings %d reached maximum allowed findings %d", metrics.TotalFindings, constraints.MaxFindings),
+			Message:        fmt.Sprintf("Mission findings %d reached maximum allowed findings %d", metrics.TotalFindings, constraints.GetMaxFindings()),
 			Action:         ConstraintActionPause, // Findings limit pauses to allow review
 			CurrentValue:   metrics.TotalFindings,
-			ThresholdValue: constraints.MaxFindings,
+			ThresholdValue: constraints.GetMaxFindings(),
 		}, nil
 	}
 
 	// Check severity threshold constraint
-	if constraints.SeverityThreshold != "" && metrics.FindingsBySeverity != nil {
-		if c.checkSeverityThreshold(constraints.SeverityThreshold, metrics.FindingsBySeverity) {
-			action := constraints.SeverityAction
+	if threshold := constraints.GetSeverityThreshold(); threshold != "" && metrics.FindingsBySeverity != nil {
+		if c.checkSeverityThreshold(agent.FindingSeverity(threshold), metrics.FindingsBySeverity) {
+			action := c.DefaultSeverityAction
 			if action == "" {
-				action = ConstraintActionPause // Default action for severity violations
+				action = ConstraintActionPause
 			}
-
 			return &ConstraintViolation{
 				Constraint:     "severity_threshold",
-				Message:        fmt.Sprintf("Finding with severity %s or higher discovered", constraints.SeverityThreshold),
+				Message:        fmt.Sprintf("Finding with severity %s or higher discovered", threshold),
 				Action:         action,
 				CurrentValue:   metrics.FindingsBySeverity,
-				ThresholdValue: constraints.SeverityThreshold,
+				ThresholdValue: threshold,
 			}, nil
 		}
 	}
@@ -202,36 +193,33 @@ func (c *DefaultConstraintChecker) checkSeverityThreshold(threshold agent.Findin
 	return false
 }
 
-// DefaultConstraints returns a reasonable set of default constraints.
-func DefaultConstraints() *MissionConstraints {
-	return &MissionConstraints{
-		MaxDuration:       24 * time.Hour,         // 24 hour max runtime
-		MaxFindings:       1000,                   // Max 1000 findings
-		SeverityThreshold: agent.SeverityCritical, // Alert on critical findings
-		SeverityAction:    ConstraintActionPause,  // Pause for critical findings
-		RequireEvidence:   false,                  // Don't require evidence by default
-		MaxTokens:         10000000,               // 10M tokens (generous default)
-		MaxCost:           100.0,                  // $100 max cost
+// ValidateConstraints checks if the proto MissionConstraints are valid.
+// This replaces the method formerly on the deleted daemon-local MissionConstraints struct.
+func ValidateConstraints(c *missionv1.MissionConstraints) error {
+	if c == nil {
+		return nil
 	}
-}
 
-// Validate checks if the constraints are valid.
-func (c *MissionConstraints) Validate() error {
-	if c.MaxDuration < 0 {
-		return fmt.Errorf("max_duration cannot be negative")
+	if maxDur := c.GetMaxDuration(); maxDur != nil {
+		if d := maxDur.AsDuration(); d < 0 {
+			return fmt.Errorf("max_duration cannot be negative")
+		}
 	}
-	if c.MaxFindings < 0 {
+
+	if c.GetMaxFindings() < 0 {
 		return fmt.Errorf("max_findings cannot be negative")
 	}
-	if c.MaxTokens < 0 {
+
+	if c.GetMaxTokens() < 0 {
 		return fmt.Errorf("max_tokens cannot be negative")
 	}
-	if c.MaxCost < 0 {
+
+	if c.GetMaxCost() < 0 {
 		return fmt.Errorf("max_cost cannot be negative")
 	}
 
 	// Validate severity threshold if set
-	if c.SeverityThreshold != "" {
+	if threshold := c.GetSeverityThreshold(); threshold != "" {
 		validSeverities := []agent.FindingSeverity{
 			agent.SeverityInfo,
 			agent.SeverityLow,
@@ -241,25 +229,44 @@ func (c *MissionConstraints) Validate() error {
 		}
 		valid := false
 		for _, sev := range validSeverities {
-			if c.SeverityThreshold == sev {
+			if agent.FindingSeverity(threshold) == sev {
 				valid = true
 				break
 			}
 		}
 		if !valid {
-			return fmt.Errorf("invalid severity_threshold: %s", c.SeverityThreshold)
-		}
-	}
-
-	// Validate severity action if set
-	if c.SeverityAction != "" {
-		if c.SeverityAction != ConstraintActionPause && c.SeverityAction != ConstraintActionFail {
-			return fmt.Errorf("invalid severity_action: %s (must be 'pause' or 'fail')", c.SeverityAction)
+			return fmt.Errorf("invalid severity_threshold: %s", threshold)
 		}
 	}
 
 	return nil
 }
 
+// DefaultConstraintsProto returns a proto MissionConstraints with reasonable defaults.
+// Per ADR 0004, zero-value proto fields mean "unlimited"; this function exists only
+// when an explicit default baseline is required by callers.
+func DefaultConstraintsProto() *missionv1.MissionConstraints {
+	return &missionv1.MissionConstraints{
+		MaxTokens:         10000000, // 10M tokens (generous default)
+		MaxCost:           100.0,    // $100 max cost
+		MaxFindings:       1000,
+		SeverityThreshold: string(agent.SeverityCritical),
+		// MaxDuration uses durationpb.New(24 * time.Hour) if callers need it;
+		// omitting here keeps the proto zero-safe.
+	}
+}
+
 // Ensure DefaultConstraintChecker implements ConstraintChecker at compile time
 var _ ConstraintChecker = (*DefaultConstraintChecker)(nil)
+
+// constraintsDuration is a helper to extract the MaxDuration as a Go time.Duration.
+// Returns 0 if unset (meaning no duration limit).
+func constraintsDuration(c *missionv1.MissionConstraints) time.Duration {
+	if c == nil {
+		return 0
+	}
+	if d := c.GetMaxDuration(); d != nil {
+		return d.AsDuration()
+	}
+	return 0
+}

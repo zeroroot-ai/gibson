@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -46,7 +48,8 @@ type CreateMissionByReferenceRequest struct {
 	MissionDefinitionID types.ID
 
 	// Constraints optionally overrides default execution constraints.
-	Constraints *MissionConstraints
+	// Uses the canonical SDK proto type per ADR 0004.
+	Constraints *missionv1.MissionConstraints
 
 	// Metadata is free-form key/value metadata for the mission instance.
 	Metadata map[string]string
@@ -144,23 +147,23 @@ func (s *DefaultMissionService) ValidateMission(ctx context.Context, mission *Mi
 
 	// Validate constraints are reasonable if set
 	if mission.Constraints != nil {
-		if err := mission.Constraints.Validate(); err != nil {
+		if err := ValidateConstraints(mission.Constraints); err != nil {
 			return fmt.Errorf("constraints validation failed: %w", err)
 		}
 
-		// Additional reasonableness checks
-		if mission.Constraints.MaxDuration > 0 && mission.Constraints.MaxDuration < 1*time.Minute {
+		// Additional reasonableness checks against platform minimums.
+		// Proto zero = unlimited (ADR 0004), so only check when a limit is set.
+		if d := constraintsDuration(mission.Constraints); d > 0 && d < 1*time.Minute {
 			return fmt.Errorf("max_duration too short: minimum 1 minute required")
 		}
 
 		// Note: MaxFindings == 0 is treated as "unlimited/not set"
-		// Only validate if a positive value is specified but is invalid (which can't happen for int)
 
-		if mission.Constraints.MaxCost > 0 && mission.Constraints.MaxCost < 0.01 {
+		if mission.Constraints.GetMaxCost() > 0 && mission.Constraints.GetMaxCost() < 0.01 {
 			return fmt.Errorf("max_cost too low: minimum $0.01 required")
 		}
 
-		if mission.Constraints.MaxTokens > 0 && mission.Constraints.MaxTokens < 1000 {
+		if mission.Constraints.GetMaxTokens() > 0 && mission.Constraints.GetMaxTokens() < 1000 {
 			return fmt.Errorf("max_tokens too low: minimum 1000 tokens required")
 		}
 	}

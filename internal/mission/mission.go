@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
@@ -224,7 +226,8 @@ type Mission struct {
 	MissionDefinitionJSON string `json:"mission_definition_json,omitempty"`
 
 	// Constraints define execution boundaries for the mission.
-	Constraints *MissionConstraints `json:"constraints,omitempty"`
+	// Uses the canonical SDK proto type per ADR 0004.
+	Constraints *missionv1.MissionConstraints `json:"constraints,omitempty"`
 
 	// Metrics tracks mission execution statistics.
 	Metrics *MissionMetrics `json:"metrics,omitempty"`

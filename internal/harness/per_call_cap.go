@@ -15,7 +15,6 @@
 package harness
 
 import (
-	daemonv1 "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
@@ -29,7 +28,7 @@ import (
 //
 // `constraints` may be nil; in that case only the per-noun
 // override is considered.
-func EffectivePerCallCap(node *missionv1.MissionNode, constraints *daemonv1.MissionConstraints) int32 {
+func EffectivePerCallCap(node *missionv1.MissionNode, constraints *missionv1.MissionConstraints) int32 {
 	if cap, ok := perNounCap(node); ok {
 		return cap
 	}

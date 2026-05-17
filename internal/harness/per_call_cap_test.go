@@ -3,7 +3,6 @@ package harness
 import (
 	"testing"
 
-	daemonv1 "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 )
 
@@ -47,7 +46,7 @@ func pluginNode(cap *int32) *missionv1.MissionNode {
 }
 
 func TestEffectivePerCallCap_node_override_wins(t *testing.T) {
-	cs := &daemonv1.MissionConstraints{MaxTokensPerCall: 1000}
+	cs := &missionv1.MissionConstraints{MaxTokensPerCall: 1000}
 	got := EffectivePerCallCap(agentNode(ptr32(2048)), cs)
 	if got != 2048 {
 		t.Errorf("got=%d want=2048 (per-node override)", got)
@@ -55,7 +54,7 @@ func TestEffectivePerCallCap_node_override_wins(t *testing.T) {
 }
 
 func TestEffectivePerCallCap_zero_node_override_disables_cap(t *testing.T) {
-	cs := &daemonv1.MissionConstraints{MaxTokensPerCall: 1000}
+	cs := &missionv1.MissionConstraints{MaxTokensPerCall: 1000}
 	got := EffectivePerCallCap(agentNode(ptr32(0)), cs)
 	if got != 0 {
 		t.Errorf("got=%d want=0 (explicit 0 shadows mission cap)", got)
@@ -63,7 +62,7 @@ func TestEffectivePerCallCap_zero_node_override_disables_cap(t *testing.T) {
 }
 
 func TestEffectivePerCallCap_unset_node_falls_back_to_mission(t *testing.T) {
-	cs := &daemonv1.MissionConstraints{MaxTokensPerCall: 1000}
+	cs := &missionv1.MissionConstraints{MaxTokensPerCall: 1000}
 	got := EffectivePerCallCap(agentNode(nil), cs)
 	if got != 1000 {
 		t.Errorf("got=%d want=1000 (mission default)", got)
@@ -78,7 +77,7 @@ func TestEffectivePerCallCap_no_constraints_no_node(t *testing.T) {
 }
 
 func TestEffectivePerCallCap_tool_override(t *testing.T) {
-	cs := &daemonv1.MissionConstraints{MaxTokensPerCall: 100}
+	cs := &missionv1.MissionConstraints{MaxTokensPerCall: 100}
 	got := EffectivePerCallCap(toolNode(ptr32(500)), cs)
 	if got != 500 {
 		t.Errorf("got=%d want=500", got)
@@ -86,7 +85,7 @@ func TestEffectivePerCallCap_tool_override(t *testing.T) {
 }
 
 func TestEffectivePerCallCap_plugin_override(t *testing.T) {
-	cs := &daemonv1.MissionConstraints{MaxTokensPerCall: 100}
+	cs := &missionv1.MissionConstraints{MaxTokensPerCall: 100}
 	got := EffectivePerCallCap(pluginNode(ptr32(300)), cs)
 	if got != 300 {
 		t.Errorf("got=%d want=300", got)
@@ -94,7 +93,7 @@ func TestEffectivePerCallCap_plugin_override(t *testing.T) {
 }
 
 func TestEffectivePerCallCap_nil_node(t *testing.T) {
-	cs := &daemonv1.MissionConstraints{MaxTokensPerCall: 750}
+	cs := &missionv1.MissionConstraints{MaxTokensPerCall: 750}
 	got := EffectivePerCallCap(nil, cs)
 	if got != 750 {
 		t.Errorf("got=%d want=750", got)
@@ -102,7 +101,7 @@ func TestEffectivePerCallCap_nil_node(t *testing.T) {
 }
 
 func TestEffectivePerCallCap_zero_mission_no_cap(t *testing.T) {
-	cs := &daemonv1.MissionConstraints{MaxTokensPerCall: 0}
+	cs := &missionv1.MissionConstraints{MaxTokensPerCall: 0}
 	got := EffectivePerCallCap(agentNode(nil), cs)
 	if got != 0 {
 		t.Errorf("got=%d want=0", got)
@@ -118,7 +117,7 @@ func TestEffectivePerCallCap_condition_node_no_overhead(t *testing.T) {
 			ConditionConfig: &missionv1.ConditionNodeConfig{Expression: "true"},
 		},
 	}
-	cs := &daemonv1.MissionConstraints{MaxTokensPerCall: 600}
+	cs := &missionv1.MissionConstraints{MaxTokensPerCall: 600}
 	got := EffectivePerCallCap(node, cs)
 	if got != 600 {
 		t.Errorf("got=%d want=600 (CONDITION → mission cap)", got)
