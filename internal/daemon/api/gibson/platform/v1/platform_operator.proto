@@ -113,6 +113,36 @@ service PlatformOperatorService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+
+  // ListTeams enumerates the teams in the caller's tenant. Backed by FGA
+  // ListObjects(tenant:X, parent, team). Each Team carries its display name
+  // and current member count (member + admin relations combined). Pagination
+  // is opaque — clients pass back the next_page_token from the previous
+  // response. dashboard#143/#148.
+  //
+  // The dashboard's Server Action gates this call on members:invite; the
+  // daemon-side authz is platform_operator, matching every other read/write
+  // RPC on this service.
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListTeamMembers enumerates the members of a single team. Backed by FGA
+  // ListUsers(team:Y, member) ∪ ListUsers(team:Y, admin); is_admin reflects
+  // whether the user holds the admin relation. dashboard#143/#148.
+  rpc ListTeamMembers(ListTeamMembersRequest) returns (ListTeamMembersResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -283,4 +313,74 @@ message GetReservedNamesResponse {
   // Tenant-name prefixes that the admission webhook rejects.
   // Examples: "kube-", "system-", "gibson-".
   repeated string prefix = 2;
+}
+
+// ---------------------------------------------------------------------------
+// ListTeams / ListTeamMembers — request/response messages
+// ---------------------------------------------------------------------------
+
+// ListTeamsRequest enumerates the teams in the caller's tenant.
+message ListTeamsRequest {
+  // tenant_id is the FGA id of the parent tenant (e.g. "tenant:acme").
+  // The daemon does not derive this from the caller identity — the dashboard
+  // server action supplies it explicitly to avoid silent cross-tenant reads.
+  string tenant_id = 1;
+  // page_token is opaque. Empty for the first page; pass the
+  // next_page_token returned by the previous response to fetch the next page.
+  string page_token = 2;
+  // page_size caps the response. 0 → default (50). Maximum 200.
+  int32 page_size = 3;
+}
+
+// Team is a single row in the ListTeams response.
+message Team {
+  // id is the FGA team id without the type prefix (e.g. "red-team", not
+  // "team:red-team"). Stable across renames.
+  string id = 1;
+  // display_name is reserved for the human-readable label. The current
+  // team data model stores only the id; this field is populated from a
+  // sidecar store once dashboard#148 wires display names through.
+  string display_name = 2;
+  // member_count is the sum of `member` + `admin` relations on the team.
+  int32 member_count = 3;
+}
+
+// ListTeamsResponse carries the paginated team list.
+message ListTeamsResponse {
+  repeated Team teams = 1;
+  // next_page_token is empty on the final page.
+  string next_page_token = 2;
+}
+
+// ListTeamMembersRequest enumerates a team's members.
+message ListTeamMembersRequest {
+  // tenant_id is the FGA id of the parent tenant (e.g. "tenant:acme").
+  // Required for cross-tenant denial.
+  string tenant_id = 1;
+  // team_id is the FGA team id without the type prefix.
+  string team_id = 2;
+  // page_token / page_size — same semantics as ListTeamsRequest.
+  string page_token = 3;
+  int32 page_size = 4;
+}
+
+// TeamMember is a single row in the ListTeamMembers response.
+message TeamMember {
+  // user_id is the FGA user id without the type prefix (e.g. the Zitadel
+  // numeric sub).
+  string user_id = 1;
+  // email + display_name come from the dashboard's identity-resolver lookup
+  // when the dashboard server action joins this response with Zitadel data.
+  // The daemon leaves them empty.
+  string email = 2;
+  string display_name = 3;
+  // is_admin is true when the user holds the team's `admin` relation;
+  // false for plain members.
+  bool is_admin = 4;
+}
+
+// ListTeamMembersResponse carries the paginated team roster.
+message ListTeamMembersResponse {
+  repeated TeamMember members = 1;
+  string next_page_token = 2;
 }
