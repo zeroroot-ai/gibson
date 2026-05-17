@@ -9,10 +9,10 @@ package registry
 type IdentityClass uint8
 
 const (
-	IdentityUser             IdentityClass = 1
-	IdentityService          IdentityClass = 2
-	IdentityComponent        IdentityClass = 4
-	IdentityPlatformOperator IdentityClass = 8
+	IdentityUser              IdentityClass = 1
+	IdentityService           IdentityClass = 2
+	IdentityComponent         IdentityClass = 4
+	IdentityPlatformOperator  IdentityClass = 8
 )
 
 // Has reports whether c contains every bit set in want.
