@@ -62,6 +62,23 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.105.0](https://github.com/zero-day-ai/gibson/compare/v0.104.0...v0.105.0) (2026-05-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* bump sdk to v0.105.1 + delete daemon-local MissionConstraints (M2-gibson) ([#140](https://github.com/zero-day-ai/gibson/issues/140))
+
+### Bug Fixes
+
+* **ci:** disable anchore/sbom-action release-asset upload ([#130](https://github.com/zero-day-ai/gibson/issues/130)) ([e96d128](https://github.com/zero-day-ai/gibson/commit/e96d128072f4da313a3ef21cdd5472bd4f250f90))
+* **llm:** enforce budget check and record usage in StreamLLM ([#136](https://github.com/zero-day-ai/gibson/issues/136)) ([05536cf](https://github.com/zero-day-ai/gibson/commit/05536cfd4051d7dac9e927a2e23f84ad23a0adc2)), closes [#135](https://github.com/zero-day-ai/gibson/issues/135)
+
+
+### Code Refactoring
+
+* bump sdk to v0.105.1 + delete daemon-local MissionConstraints (M2-gibson) ([#140](https://github.com/zero-day-ai/gibson/issues/140)) ([e4bbc4d](https://github.com/zero-day-ai/gibson/commit/e4bbc4ddb1666cd07d15ea6a11c916b650a3211b))
+
 ## [0.43.0](https://github.com/zero-day-ai/gibson/compare/v0.42.0...v0.43.0) (2026-05-17)
 
 
