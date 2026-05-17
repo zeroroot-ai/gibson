@@ -247,4 +247,3 @@ require (
 // This PR is blocked on sdk PR#63 (feat: add GetMissionDefinition RPC) merging
 // and the fan-out bump reaching this repo. The no-monorepo-shortcuts CI gate will
 // correctly block merge while this replace is present.
-replace github.com/zero-day-ai/sdk => /home/anthony/Code/zero-day.ai/opensource/sdk/.worktrees/m5-get-mission-def
