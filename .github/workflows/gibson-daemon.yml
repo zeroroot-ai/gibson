@@ -91,7 +91,7 @@ jobs:
        needs.gate-sandbox-e2e.result == 'skipped')
     uses: ./.github/workflows/reusable-image-build.yml
     permissions:
-      contents: read
+      contents: write
       packages: write
       id-token: write
       attestations: write

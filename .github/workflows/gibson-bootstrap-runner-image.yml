@@ -35,7 +35,7 @@ jobs:
   build:
     uses: ./.github/workflows/reusable-image-build.yml
     permissions:
-      contents: read
+      contents: write
       packages: write
       id-token: write
       attestations: write
