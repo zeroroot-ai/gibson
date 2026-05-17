@@ -135,22 +135,11 @@ type Config struct {
 	Sandbox           SandboxConfig           `mapstructure:"sandbox" yaml:"sandbox,omitempty"`
 	ToolRunner        ToolRunnerConfig        `mapstructure:"tool_runner" yaml:"tool_runner,omitempty"`
 
-	// mode is the deployment mode resolved from GIBSON_MODE at config load time.
-	// Read via Mode(). Not sourced from YAML — env-var only.
-	// Default: ModeSelfhost (preserves current behaviour for self-hosted deployments).
-	mode Mode
-
 	// strictTenant controls whether TenantFromContext and related helpers use
 	// the fail-closed strict behaviour introduced in Phase 1. Read via
 	// StrictTenant(). Not sourced from YAML — env-var only.
 	// Default: false in Phase 1; Phase 5 flips this default and removes the flag.
 	strictTenant bool
-}
-
-// Mode returns the resolved deployment mode (GIBSON_MODE env var).
-// Defaults to ModeSelfhost when GIBSON_MODE is unset or empty.
-func (c *Config) Mode() Mode {
-	return c.mode
 }
 
 // StrictTenant returns true when strict tenant-context enforcement is enabled
