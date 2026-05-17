@@ -40,7 +40,8 @@ type CreateMissionRequest struct {
 	Description string
 
 	// Constraints defines execution limits for the mission.
-	Constraints *MissionConstraints
+	// Uses the canonical SDK proto type per ADR 0004.
+	Constraints *missionv1.MissionConstraints
 
 	// Metadata contains arbitrary key-value pairs for storing
 	// additional mission context.
@@ -297,7 +298,7 @@ func (c *MissionClient) validateCreateRequest(req *CreateMissionRequest) error {
 
 	// Validate constraints if provided
 	if req.Constraints != nil {
-		if err := req.Constraints.Validate(); err != nil {
+		if err := ValidateConstraints(req.Constraints); err != nil {
 			return fmt.Errorf("invalid constraints: %w", err)
 		}
 	}

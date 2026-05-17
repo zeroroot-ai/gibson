@@ -8,6 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	"github.com/zero-day-ai/gibson/internal/agent"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -350,37 +353,44 @@ func TestConstraintViolation_Error(t *testing.T) {
 	assert.Equal(t, expected, violation.Error())
 }
 
-// TestMissionConstraints_Validate tests constraint validation
-func TestMissionConstraints_Validate(t *testing.T) {
+// TestValidateConstraints tests the ValidateConstraints free function which replaced
+// the method formerly on the deleted daemon-local MissionConstraints struct.
+// SeverityAction is no longer a proto field — it lives in DefaultConstraintChecker
+// as a daemon runtime-policy knob (see constraints.go for rationale).
+func TestValidateConstraints(t *testing.T) {
 	tests := []struct {
 		name        string
-		constraints *MissionConstraints
+		constraints *missionv1.MissionConstraints
 		wantErr     bool
 		errMsg      string
 	}{
 		{
 			name: "valid constraints",
-			constraints: &MissionConstraints{
-				MaxDuration:       1 * time.Hour,
+			constraints: &missionv1.MissionConstraints{
+				MaxDuration:       durationpb.New(1 * time.Hour),
 				MaxFindings:       100,
-				SeverityThreshold: agent.SeverityHigh,
-				SeverityAction:    ConstraintActionPause,
+				SeverityThreshold: string(agent.SeverityHigh),
 				MaxTokens:         10000,
 				MaxCost:           50.0,
 			},
 			wantErr: false,
 		},
 		{
+			name:        "nil constraints",
+			constraints: nil,
+			wantErr:     false,
+		},
+		{
 			name: "negative duration",
-			constraints: &MissionConstraints{
-				MaxDuration: -1 * time.Hour,
+			constraints: &missionv1.MissionConstraints{
+				MaxDuration: durationpb.New(-1 * time.Hour),
 			},
 			wantErr: true,
 			errMsg:  "max_duration cannot be negative",
 		},
 		{
 			name: "negative findings",
-			constraints: &MissionConstraints{
+			constraints: &missionv1.MissionConstraints{
 				MaxFindings: -1,
 			},
 			wantErr: true,
@@ -388,7 +398,7 @@ func TestMissionConstraints_Validate(t *testing.T) {
 		},
 		{
 			name: "negative tokens",
-			constraints: &MissionConstraints{
+			constraints: &missionv1.MissionConstraints{
 				MaxTokens: -1,
 			},
 			wantErr: true,
@@ -396,7 +406,7 @@ func TestMissionConstraints_Validate(t *testing.T) {
 		},
 		{
 			name: "negative cost",
-			constraints: &MissionConstraints{
+			constraints: &missionv1.MissionConstraints{
 				MaxCost: -1.0,
 			},
 			wantErr: true,
@@ -404,26 +414,17 @@ func TestMissionConstraints_Validate(t *testing.T) {
 		},
 		{
 			name: "invalid severity threshold",
-			constraints: &MissionConstraints{
-				SeverityThreshold: agent.FindingSeverity("invalid"),
+			constraints: &missionv1.MissionConstraints{
+				SeverityThreshold: "invalid",
 			},
 			wantErr: true,
 			errMsg:  "invalid severity_threshold",
-		},
-		{
-			name: "invalid severity action",
-			constraints: &MissionConstraints{
-				SeverityThreshold: agent.SeverityHigh,
-				SeverityAction:    ConstraintAction("invalid"),
-			},
-			wantErr: true,
-			errMsg:  "invalid severity_action",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.constraints.Validate()
+			err := ValidateConstraints(tt.constraints)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errMsg)
@@ -434,18 +435,22 @@ func TestMissionConstraints_Validate(t *testing.T) {
 	}
 }
 
-// TestDefaultConstraintChecker_Check tests constraint checking
+// TestDefaultConstraintChecker_Check tests constraint checking against the
+// canonical missionv1.MissionConstraints proto type.
+// SeverityAction is a daemon runtime-policy knob on DefaultConstraintChecker
+// (not a proto field), so tests that need a specific action construct the
+// checker with the required DefaultSeverityAction.
 func TestDefaultConstraintChecker_Check(t *testing.T) {
-	checker := NewDefaultConstraintChecker()
 	ctx := context.Background()
 
 	tests := []struct {
-		name            string
-		constraints     *MissionConstraints
-		metrics         *MissionMetrics
-		expectViolation bool
-		expectedCode    string
-		expectedAction  ConstraintAction
+		name                  string
+		defaultSeverityAction ConstraintAction // set on the checker
+		constraints           *missionv1.MissionConstraints
+		metrics               *MissionMetrics
+		expectViolation       bool
+		expectedCode          string
+		expectedAction        ConstraintAction
 	}{
 		{
 			name:            "nil constraints",
@@ -455,13 +460,13 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 		},
 		{
 			name:            "nil metrics",
-			constraints:     &MissionConstraints{},
+			constraints:     &missionv1.MissionConstraints{},
 			metrics:         nil,
 			expectViolation: false,
 		},
 		{
 			name: "cost exceeded",
-			constraints: &MissionConstraints{
+			constraints: &missionv1.MissionConstraints{
 				MaxCost: 10.0,
 			},
 			metrics: &MissionMetrics{
@@ -473,7 +478,7 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 		},
 		{
 			name: "tokens exceeded",
-			constraints: &MissionConstraints{
+			constraints: &missionv1.MissionConstraints{
 				MaxTokens: 1000,
 			},
 			metrics: &MissionMetrics{
@@ -485,8 +490,8 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 		},
 		{
 			name: "duration exceeded",
-			constraints: &MissionConstraints{
-				MaxDuration: 1 * time.Hour,
+			constraints: &missionv1.MissionConstraints{
+				MaxDuration: durationpb.New(1 * time.Hour),
 			},
 			metrics: &MissionMetrics{
 				Duration: 2 * time.Hour,
@@ -497,7 +502,7 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 		},
 		{
 			name: "findings limit reached",
-			constraints: &MissionConstraints{
+			constraints: &missionv1.MissionConstraints{
 				MaxFindings: 10,
 			},
 			metrics: &MissionMetrics{
@@ -508,10 +513,10 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 			expectedAction:  ConstraintActionPause,
 		},
 		{
-			name: "severity threshold exceeded - critical",
-			constraints: &MissionConstraints{
-				SeverityThreshold: agent.SeverityCritical,
-				SeverityAction:    ConstraintActionFail,
+			name:                  "severity threshold exceeded - uses checker DefaultSeverityAction fail",
+			defaultSeverityAction: ConstraintActionFail,
+			constraints: &missionv1.MissionConstraints{
+				SeverityThreshold: string(agent.SeverityCritical),
 			},
 			metrics: &MissionMetrics{
 				FindingsBySeverity: map[string]int{
@@ -523,10 +528,10 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 			expectedAction:  ConstraintActionFail,
 		},
 		{
-			name: "severity threshold exceeded - high includes critical",
-			constraints: &MissionConstraints{
-				SeverityThreshold: agent.SeverityHigh,
-				SeverityAction:    ConstraintActionPause,
+			name:                  "severity threshold exceeded - high includes critical",
+			defaultSeverityAction: ConstraintActionPause,
+			constraints: &missionv1.MissionConstraints{
+				SeverityThreshold: string(agent.SeverityHigh),
 			},
 			metrics: &MissionMetrics{
 				FindingsBySeverity: map[string]int{
@@ -539,8 +544,8 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 		},
 		{
 			name: "severity threshold not exceeded",
-			constraints: &MissionConstraints{
-				SeverityThreshold: agent.SeverityCritical,
+			constraints: &missionv1.MissionConstraints{
+				SeverityThreshold: string(agent.SeverityCritical),
 			},
 			metrics: &MissionMetrics{
 				FindingsBySeverity: map[string]int{
@@ -551,12 +556,12 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 		},
 		{
 			name: "all constraints within limits",
-			constraints: &MissionConstraints{
-				MaxDuration:       2 * time.Hour,
+			constraints: &missionv1.MissionConstraints{
+				MaxDuration:       durationpb.New(2 * time.Hour),
 				MaxFindings:       100,
 				MaxTokens:         10000,
 				MaxCost:           50.0,
-				SeverityThreshold: agent.SeverityCritical,
+				SeverityThreshold: string(agent.SeverityCritical),
 			},
 			metrics: &MissionMetrics{
 				Duration:      1 * time.Hour,
@@ -573,6 +578,10 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			checker := NewDefaultConstraintChecker()
+			if tt.defaultSeverityAction != "" {
+				checker.DefaultSeverityAction = tt.defaultSeverityAction
+			}
 			violation, err := checker.Check(ctx, tt.constraints, tt.metrics)
 			require.NoError(t, err)
 
@@ -587,17 +596,41 @@ func TestDefaultConstraintChecker_Check(t *testing.T) {
 	}
 }
 
-// TestDefaultConstraints tests default constraints
-func TestDefaultConstraints(t *testing.T) {
-	defaults := DefaultConstraints()
+// TestDefaultConstraintsProto tests the proto-based default constraints helper.
+// The SeverityAction default (pause) is now a field on DefaultConstraintChecker,
+// not on the proto constraints shape (ADR 0004 / M2-gibson rip-out decision).
+func TestDefaultConstraintsProto(t *testing.T) {
+	defaults := DefaultConstraintsProto()
 
-	assert.Equal(t, 24*time.Hour, defaults.MaxDuration)
-	assert.Equal(t, 1000, defaults.MaxFindings)
-	assert.Equal(t, agent.SeverityCritical, defaults.SeverityThreshold)
-	assert.Equal(t, ConstraintActionPause, defaults.SeverityAction)
-	assert.Equal(t, false, defaults.RequireEvidence)
-	assert.Equal(t, int64(10000000), defaults.MaxTokens)
-	assert.Equal(t, 100.0, defaults.MaxCost)
+	assert.Equal(t, int32(1000), defaults.GetMaxFindings())
+	assert.Equal(t, string(agent.SeverityCritical), defaults.GetSeverityThreshold())
+	assert.Equal(t, false, defaults.GetRequireEvidence())
+	assert.Equal(t, int64(10000000), defaults.GetMaxTokens())
+	assert.Equal(t, 100.0, defaults.GetMaxCost())
+}
+
+// TestDefaultConstraintChecker_DefaultSeverityAction tests that the
+// DefaultSeverityAction on the checker is respected.
+func TestDefaultConstraintChecker_DefaultSeverityAction(t *testing.T) {
+	ctx := context.Background()
+	constraints := &missionv1.MissionConstraints{
+		SeverityThreshold: string(agent.SeverityCritical),
+	}
+	metrics := &MissionMetrics{
+		FindingsBySeverity: map[string]int{"critical": 1},
+	}
+
+	checkerPause := NewDefaultConstraintChecker() // default is pause
+	v, err := checkerPause.Check(ctx, constraints, metrics)
+	require.NoError(t, err)
+	require.NotNil(t, v)
+	assert.Equal(t, ConstraintActionPause, v.Action)
+
+	checkerFail := &DefaultConstraintChecker{DefaultSeverityAction: ConstraintActionFail}
+	v, err = checkerFail.Check(ctx, constraints, metrics)
+	require.NoError(t, err)
+	require.NotNil(t, v)
+	assert.Equal(t, ConstraintActionFail, v.Action)
 }
 
 // TestMissionError_Error tests error string formatting
