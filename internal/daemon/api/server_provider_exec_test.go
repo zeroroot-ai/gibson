@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zero-day-ai/gibson/internal/budget"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
@@ -741,4 +742,183 @@ func TestWithExecLimiter_NilLimiterSkipsCheck(t *testing.T) {
 func TestErrRateLimited_IsSentinel(t *testing.T) {
 	wrapped := errors.Join(errors.New("outer"), ratelimit.ErrRateLimited)
 	assert.True(t, errors.Is(wrapped, ratelimit.ErrRateLimited))
+}
+
+// ---------------------------------------------------------------------------
+// stubBudgetEnforcer
+// ---------------------------------------------------------------------------
+
+// stubBudgetEnforcer implements budgetEnforcerIface for unit tests.
+// checkErr controls whether Check returns an error (simulating exhausted budget).
+// recordCalls records how many times Record was called and the total tokens seen.
+type stubBudgetEnforcer struct {
+	checkErr      error
+	recordCalls   int
+	recordedTotal int64
+}
+
+func (e *stubBudgetEnforcer) Check(_ context.Context, _ int64) (*budget.Status, error) {
+	return nil, e.checkErr
+}
+
+func (e *stubBudgetEnforcer) Record(_ context.Context, tokens int64, _ int64) error {
+	e.recordCalls++
+	e.recordedTotal += tokens
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// ExecuteLLM budget tests
+// ---------------------------------------------------------------------------
+
+// TestExecuteLLM_BudgetExhaustedBlocked verifies that ExecuteLLM returns
+// ResourceExhausted before dispatching to the provider when the budget enforcer
+// denies the call. No tokens must be consumed.
+func TestExecuteLLM_BudgetExhaustedBlocked(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	providerCalled := false
+	prov := &stubMockProvider{
+		completeFunc: func(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			providerCalled = true
+			return &llm.CompletionResponse{Message: llm.Message{Content: "should not reach here"}}, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
+
+	budgetErr := status_grpc.Errorf(codes.ResourceExhausted, "monthly token limit exceeded")
+	enforcer := &stubBudgetEnforcer{checkErr: budgetErr}
+	s.WithBudgetEnforcer(enforcer)
+
+	ctx := tenantCtx("tenant-budget")
+	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+	})
+
+	require.Error(t, err)
+	st, _ := status_grpc.FromError(err)
+	assert.Equal(t, codes.ResourceExhausted, st.Code(), "exhausted budget must yield ResourceExhausted")
+	assert.False(t, providerCalled, "provider must not be called when budget is exhausted")
+	assert.Equal(t, 0, enforcer.recordCalls, "Record must not be called when budget check fails")
+}
+
+// TestExecuteLLM_BudgetRecordedAfterDispatch verifies that successful
+// ExecuteLLM calls record authoritative token usage via the budget enforcer.
+func TestExecuteLLM_BudgetRecordedAfterDispatch(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	prov := &stubMockProvider{
+		completeFunc: func(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			return &llm.CompletionResponse{
+				Message: llm.Message{Content: "ok"},
+				Usage: llm.CompletionTokenUsage{
+					PromptTokens:     10,
+					CompletionTokens: 20,
+					TotalTokens:      30,
+				},
+			}, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
+
+	enforcer := &stubBudgetEnforcer{}
+	s.WithBudgetEnforcer(enforcer)
+
+	ctx := tenantCtx("tenant-record")
+	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello world"}},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, enforcer.recordCalls, "Record must be called once after dispatch")
+	assert.Equal(t, int64(30), enforcer.recordedTotal, "recorded tokens must equal provider's total usage")
+}
+
+// ---------------------------------------------------------------------------
+// StreamLLM budget tests
+// ---------------------------------------------------------------------------
+
+// TestStreamLLM_BudgetExhaustedBlocked verifies that StreamLLM returns
+// ResourceExhausted BEFORE any tokens are delivered when the budget enforcer
+// denies the call. This is the primary regression test for gibson#135.
+func TestStreamLLM_BudgetExhaustedBlocked(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	providerCalled := false
+	prov := &stubMockProvider{
+		streamFunc: func(_ context.Context, _ llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
+			providerCalled = true
+			ch := make(chan llm.StreamChunk, 1)
+			ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "should not arrive"}}
+			close(ch)
+			return ch, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
+
+	budgetErr := status_grpc.Errorf(codes.ResourceExhausted, "monthly token limit exceeded")
+	enforcer := &stubBudgetEnforcer{checkErr: budgetErr}
+	s.WithBudgetEnforcer(enforcer)
+
+	stream := &stubStreamServer{ctx: tenantCtx("tenant-budget-stream")}
+	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
+		ProviderName: "p",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+	}, stream)
+
+	require.Error(t, err)
+	st, _ := status_grpc.FromError(err)
+	assert.Equal(t, codes.ResourceExhausted, st.Code(), "exhausted budget must yield ResourceExhausted")
+	assert.Empty(t, stream.sent, "no chunks must be delivered to the caller when budget is exhausted")
+	assert.False(t, providerCalled, "provider stream must not be opened when budget is exhausted")
+	assert.Equal(t, 0, enforcer.recordCalls, "Record must not be called when budget check fails")
+}
+
+// TestStreamLLM_BudgetRecordedAfterStream verifies that completed StreamLLM
+// calls record token usage via the budget enforcer on stream close.
+func TestStreamLLM_BudgetRecordedAfterStream(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	prov := &stubMockProvider{
+		streamFunc: func(_ context.Context, _ llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
+			ch := make(chan llm.StreamChunk, 3)
+			// "hello" = 5 chars → 1 token each; "world" = 5 chars → 1 token each
+			ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "hello"}}
+			ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "world"}}
+			ch <- llm.StreamChunk{FinishReason: llm.FinishReasonStop}
+			close(ch)
+			return ch, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
+
+	enforcer := &stubBudgetEnforcer{}
+	s.WithBudgetEnforcer(enforcer)
+
+	// "hi" = 2 chars in message → 0 input tokens (2/4 rounds to 0) + 4096 default max_tokens.
+	// output chars: "hello"(5) + "world"(5) = 10 chars → 2 output tokens (10/4 = 2).
+	// Total recorded ≥ 1 (just verify Record is called with a positive count).
+	stream := &stubStreamServer{ctx: tenantCtx("tenant-record-stream")}
+	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
+		ProviderName: "p",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+	}, stream)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, enforcer.recordCalls, "Record must be called once after stream completes")
+	assert.Positive(t, enforcer.recordedTotal, "recorded token count must be positive")
 }

@@ -340,6 +340,15 @@ func (s *DaemonServer) StreamLLM(req *tenantv1.StreamLLMRequest, stream tenantv1
 		}
 	}
 
+	// 2b. Budget check — returns ResourceExhausted with a typed
+	// gibson.budget.v1.BudgetExceeded detail when denied. Mirrors the same
+	// pre-dispatch check in ExecuteLLM so exhausted budgets cannot bypass
+	// enforcement by using the streaming surface.
+	// Spec: llm-user-attribution-governance Requirement 3.3, 3.4.
+	if err := s.enforceBudgetCheck(ctx, streamEstimateTokens(req)); err != nil {
+		return err
+	}
+
 	// 3. Resolve the named provider.
 	if s.providerConfig == nil {
 		return status_grpc.Errorf(codes.FailedPrecondition,
@@ -390,6 +399,14 @@ func (s *DaemonServer) StreamLLM(req *tenantv1.StreamLLMRequest, stream tenantv1
 	}
 
 	// 7. Forward chunks to the gRPC stream.
+	//
+	// outputChars accumulates the characters of generated content across all
+	// text_delta chunks. This is used to derive an authoritative post-dispatch
+	// token count (chars/4 heuristic, same as the pre-dispatch estimate) and
+	// record it via the budget enforcer on stream close. The streaming provider
+	// interface does not surface a terminal usage event on the channel, so we
+	// approximate from the content we forwarded.
+	var outputChars int64
 	for chunk := range chunks {
 		var msg *tenantv1.StreamLLMResponse
 
@@ -421,6 +438,8 @@ func (s *DaemonServer) StreamLLM(req *tenantv1.StreamLLMRequest, stream tenantv1
 					},
 				},
 			}
+			// Count tool-call argument chars toward output.
+			outputChars += int64(len(tcd.Arguments))
 
 		case chunk.FinishReason != "":
 			msg = &tenantv1.StreamLLMResponse{
@@ -432,6 +451,7 @@ func (s *DaemonServer) StreamLLM(req *tenantv1.StreamLLMRequest, stream tenantv1
 			}
 
 		case chunk.Delta.Content != "":
+			outputChars += int64(len(chunk.Delta.Content))
 			msg = &tenantv1.StreamLLMResponse{
 				Payload: &tenantv1.StreamLLMResponse_TextDelta{
 					TextDelta: chunk.Delta.Content,
@@ -449,7 +469,25 @@ func (s *DaemonServer) StreamLLM(req *tenantv1.StreamLLMRequest, stream tenantv1
 
 		// Stop after forwarding a finish or error chunk.
 		if msg.GetFinish() != nil || msg.GetError() != nil {
-			return nil
+			break
+		}
+	}
+
+	// 8. Budget record — authoritative usage post-dispatch. Mirrors ExecuteLLM's
+	// record step. The streaming provider does not surface a terminal usage event,
+	// so we derive the token count from accumulated output chars (same chars/4
+	// heuristic as the pre-dispatch estimate). Input tokens are re-derived from
+	// the request so the recorded total includes both sides.
+	// Spec: llm-user-attribution-governance Requirement 3.10.
+	if s.budgetEnforcer != nil {
+		inputTokens := streamEstimateTokens(req)
+		outputTokens := outputChars / 4
+		totalTokens := inputTokens + outputTokens
+		if totalTokens > 0 {
+			if recErr := s.budgetEnforcer.Record(ctx, totalTokens, 0); recErr != nil {
+				s.logger.WarnContext(ctx, "budget record failed (non-blocking)",
+					"error", recErr, "tenant", tenantID)
+			}
 		}
 	}
 
