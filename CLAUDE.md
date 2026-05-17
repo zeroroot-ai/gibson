@@ -81,6 +81,37 @@ startup. The chart's `sdk.version` value must track the gibson release version.
 
 Spec: `private-authz-registry`.
 
+## Proto regeneration
+
+The daemon-local protos live at `internal/daemon/api/gibson/<pkg>/v1/*.proto`. Their `.pb.go` + `_grpc.pb.go` bindings are checked into the same directory; CI does not regenerate them, so committing-the-output-of-`make proto` alongside any `.proto` change is mandatory.
+
+```bash
+make proto
+```
+
+The recipe synthesises a buf workspace at `.tmp/proto-ws/` with symlinks to the daemon-local protos (`gibson-local/`) and the pinned SDK protos (`sdk-proto/`), so `gibson/auth/v1/options.proto` resolves from the SDK during codegen. Without the synthesised workspace, a standalone `buf generate` would fail on that cross-tree import (gibson#122). The same synthesised-workspace pattern is used by the `authz-registry` recipe above.
+
+Codegen settings worth knowing:
+
+- `buf.gen.yaml` enables managed mode but disables the `go_package` override, so the daemon protos keep the import paths declared in-file. Managed mode auto-emits java/csharp/php/ruby file options for consistency with the upstream protos.
+- `inputs: directory: gibson-local` restricts code generation to the daemon-local tree. The SDK protos are visible for import resolution but no Go is emitted for them (Go bindings for the SDK ship via the published `github.com/zero-day-ai/sdk` module).
+- An `M`-mapping redirects `google/protobuf/descriptor.proto` to `google.golang.org/protobuf/types/descriptorpb`. The SDK vendors `descriptor.proto` with `option go_package = "descriptor"` (a leftover from an upstream copy), and without the override protoc-gen-go rejects it.
+
+After regen, verify with:
+
+```bash
+git diff --exit-code internal/daemon/api/
+```
+
+CI does not run `make proto` itself, but the `authz-registry-drift` gate exercises the same workspace setup; if your `make proto` output drifts you'll see the breakage when downstream code fails to compile.
+
+### When you add a daemon-local RPC
+
+1. Add the `rpc` to the relevant `.proto` under `internal/daemon/api/gibson/<pkg>/v1/`.
+2. In the same `rpc` block, add `option (gibson.auth.v1.authz) = {…};`. If the file has no other authz-annotated RPCs yet, add `import "gibson/auth/v1/options.proto";` at the top.
+3. Run `make proto` (which depends on `proto-deps` + `authz-registry`). This regenerates both the `.pb.go` / `_grpc.pb.go` and the four `internal/authz/registry/*` artifacts in one pass.
+4. Commit the `.proto` edit, the regenerated bindings, and the regenerated authz-registry files in the same change.
+
 ## Service-account identity (canonical sub)
 
 The daemon's FGA Check uses the canonical Zitadel **numeric `sub`** forwarded from ext-authz as `X-Gibson-Identity-Subject`. The fga-init Helm Job seeds platform_operator tuples keyed by that numeric form, sourced from the chart-managed `gibson-sa-identity-map` ConfigMap. No translation in the daemon hot path.
