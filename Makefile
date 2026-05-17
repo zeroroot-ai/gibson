@@ -231,11 +231,34 @@ test-daemon-identity-roundtrip:
 proto-deps:
 	@echo "Installing protoc plugins..."
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
-	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.0
 
 proto: proto-deps authz-registry
 	@echo "Generating Go code from daemon proto files via Buf..."
-	$(BUF) generate
+	@# Synthesise a workspace so `gibson/auth/v1/options.proto` (lives in
+	@# the pinned SDK) resolves while generating daemon-local pb.go.
+	@# Mirrors the authz-registry recipe above; without this, a standalone
+	@# `buf generate` fails with "import gibson/auth/v1/options.proto:
+	@# file does not exist". The workspace lists both proto trees as
+	@# modules so cross-tree imports resolve, but the buf.gen.yaml's
+	@# `inputs: directory: gibson-local` restricts codegen to the
+	@# daemon-local tree — Go bindings for the SDK already ship as a
+	@# published Go module. gibson#122.
+	@$(GOCMD) mod download github.com/zero-day-ai/sdk
+	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
+	  if [ -z "$$SDK_DIR" ]; then echo "ERROR: could not resolve github.com/zero-day-ai/sdk module dir" && exit 1; fi; \
+	  rm -rf .tmp/proto-ws && mkdir -p .tmp/proto-ws/out && \
+	  ln -sfn $(CURDIR)/internal/daemon/api .tmp/proto-ws/gibson-local && \
+	  ln -sfn $$SDK_DIR/api/proto .tmp/proto-ws/sdk-proto && \
+	  printf 'version: v2\nmodules:\n  - path: gibson-local\n  - path: sdk-proto\n    excludes:\n      - sdk-proto/google\nlint:\n  use:\n    - STANDARD\n  ignore:\n    - gibson-local/gibson/daemon/admin/v1/daemon_admin.proto\n' > .tmp/proto-ws/buf.yaml && \
+	  printf 'version: v2\nmanaged:\n  enabled: true\n  disable:\n    - file_option: go_package\nplugins:\n  - local: protoc-gen-go\n    out: out\n    opt:\n      - module=github.com/zero-day-ai/gibson\n      - Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb\n  - local: protoc-gen-go-grpc\n    out: out\n    opt:\n      - module=github.com/zero-day-ai/gibson\n      - Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb\ninputs:\n  - directory: gibson-local\n' > .tmp/proto-ws/buf.gen.yaml && \
+	  cd .tmp/proto-ws && $(BUF) generate
+	@# rsync the generated *.pb.go files back into the daemon tree. buf's
+	@# `module=` opt emits paths rooted at the Go module, so the layout
+	@# under .tmp/proto-ws/out/ matches internal/daemon/api/... already.
+	@rsync -a --include='*/' --include='*.pb.go' --exclude='*' \
+	  .tmp/proto-ws/out/internal/daemon/api/ internal/daemon/api/
+	@rm -rf .tmp/proto-ws
 	@echo "Proto generation complete"
 
 # authz-registry: regenerate the three authz artifacts (registry.go, registry.yaml,
