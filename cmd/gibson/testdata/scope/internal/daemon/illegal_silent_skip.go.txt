@@ -1,0 +1,39 @@
+// Fixture for TestNoGracefulNilInRequestPaths.
+//
+// This file is .go.txt (not .go) so `go test` and `go build` don't compile
+// it. The walker parses it from disk as raw source.
+//
+// ILLEGAL: a daemon RPC handler silently returns success when its
+// dependency is nil. This is the one-code-path anti-pattern the test
+// exists to prevent. The walker MUST flag it.
+
+package daemon
+
+import "context"
+
+type fakeAuthz struct{}
+type fakePool struct{}
+
+type illegalServer struct {
+	authz *fakeAuthz
+	pool  *fakePool
+}
+
+// RPC handler should always run. A nil dep must fail startup, never
+// silently skip at request time.
+func (s *illegalServer) Handle(ctx context.Context) error {
+	if s.authz == nil {
+		// ANTI-PATTERN: silent skip. Walker must flag THIS line.
+		return nil
+	}
+	return nil
+}
+
+// Same anti-pattern in a different return shape.
+func (s *illegalServer) HandleTuple(ctx context.Context) (bool, error) {
+	if s.pool == nil {
+		// ANTI-PATTERN: silent skip. Walker must flag THIS line too.
+		return true, nil
+	}
+	return true, nil
+}
