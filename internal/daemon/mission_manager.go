@@ -60,7 +60,7 @@ type missionManager struct {
 
 	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
 	// can resolve run_id → (user_id, tenant_id) during component callbacks.
-	// When nil, authz state tracking is skipped (dev mode or authz disabled).
+	// One-code-path slice deploy#195: required, never nil after daemon startup.
 	authzStore mission.MissionAuthzStore
 
 	// quotaCounter maintains the per-tenant concurrent_missions Redis
@@ -491,7 +491,9 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID string, ta
 	// Record authz state so HarnessCallbackService.Authorize can resolve
 	// run_id → (user_id, tenant_id) during component callbacks. Errors are
 	// logged and do not abort mission start — authz state is advisory.
-	if m.authzStore != nil {
+	// One-code-path slice deploy#195: authzStore is required (no more nil
+	// guard).
+	{
 		userID := ""
 		tenantID := auth.TenantStringFromContext(ctx)
 		if id, err := auth.IdentityFromContext(ctx); err == nil {
@@ -1005,7 +1007,10 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Transition authz state so that late-arriving component callbacks receive a
 	// proper inactive-mission error rather than stale "active" state. Errors are
 	// logged and do not block mission lifecycle cleanup.
-	if m.authzStore != nil && missionRun != nil {
+	// One-code-path slice deploy#195: authzStore is required (no more nil
+	// guard). missionRun may still be nil if the mission failed before a run
+	// row was allocated.
+	if missionRun != nil {
 		bgCtx := context.Background()
 		runIDStr := missionRun.ID.String()
 		if finalStatus == mission.MissionStatusCompleted {

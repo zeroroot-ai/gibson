@@ -1015,9 +1015,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// Wire the FGA authorizer so RegisterComponent writes component
 			// ownership tuples. This enables the "admin from owner" computed
 			// relation: tenant admins automatically have access to all
-			// components owned by their tenant. The authorizer is always
-			// non-nil here (noop when authz.enabled=false), so the nil guard
-			// inside WithAuthorizer / RegisterComponent handles the disabled case.
+			// components owned by their tenant.
+			// One-code-path slice deploy#195: d.authorizer is always a real
+			// FGA client after initAuthorizer.
 			compSvc.WithAuthorizer(d.authorizer)
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 

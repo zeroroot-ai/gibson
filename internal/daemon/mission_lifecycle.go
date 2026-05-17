@@ -72,7 +72,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.infrastructure,
 			d.infrastructure.otelStack,
 			NewOrchestratorEventBusAdapterWithRedis(d.eventBus, d.redisEventStream, d.registryTenant), // Bridge events to Redis Streams
-			d.missionAuthzStore, // May be nil when authz is disabled — manager guards against that
+			d.missionAuthzStore, // Required (one-code-path slice deploy#195); set during Redis init phase
 			d.quotaManager,      // Spec plans-and-quotas-simplification: may be nil in dev
 		)
 

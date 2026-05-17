@@ -79,7 +79,10 @@ type DefaultMissionController struct {
 
 	// authzStore tracks which user owns each running mission run so that
 	// HarnessCallbackService.Authorize can resolve run_id → (user_id, tenant_id).
-	// When nil, authz state tracking is skipped (dev mode or authz disabled).
+	// One-code-path slice deploy#195: every running daemon has FGA wired and
+	// a real authzStore. Callsites assume non-nil. Tests that construct a
+	// DefaultMissionController directly must inject a (real or fake) store
+	// via WithAuthzStore.
 	authzStore MissionAuthzStore
 
 	// quotaCounter increments concurrent_missions when execution begins and
@@ -171,8 +174,9 @@ func WithControllerLogger(l *slog.Logger) ControllerOption {
 // the owning user for each run. This enables HarnessCallbackService.Authorize
 // to resolve run_id → (user_id, tenant_id) during component callbacks.
 //
-// When not set, authz state tracking is silently skipped (dev mode or when
-// authz is disabled via authz.enabled=false).
+// One-code-path slice deploy#195: required for every running daemon.
+// Tests that construct a controller without it will get panics from
+// downstream callsites that assume non-nil.
 func WithAuthzStore(store MissionAuthzStore) ControllerOption {
 	return func(c *DefaultMissionController) {
 		c.authzStore = store
@@ -371,7 +375,10 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 	// Record authz state so that HarnessCallbackService.Authorize can look up
 	// the owning user during component callbacks. Errors are logged but do not
 	// abort the mission start — authz state is advisory.
-	if c.authzStore != nil && !runID.IsZero() {
+	// One-code-path slice deploy#195: authzStore is required (no more nil
+	// guard). The runID check remains because some code paths can produce a
+	// zero runID early in startup before a run row has been allocated.
+	if !runID.IsZero() {
 		tenantID := auth.TenantStringFromContext(ctx)
 		if putErr := c.authzStore.Put(ctx, runID.String(), initiatorUserID, tenantID); putErr != nil {
 			c.logger.Warn("mission controller: failed to record authz state on start",
@@ -479,7 +486,9 @@ func (c *DefaultMissionController) Start(ctx context.Context, missionID types.ID
 		// Transition authz state so that late-arriving callbacks get a clean
 		// inactive-mission error rather than stale "active" state. Log and
 		// continue on errors — mission lifecycle must not be blocked.
-		if c.authzStore != nil && !runID.IsZero() {
+		// One-code-path slice deploy#195: authzStore is required (no more nil
+		// guard).
+		if !runID.IsZero() {
 			bgCtx := context.Background()
 			if err != nil {
 				if markErr := c.authzStore.MarkCancelled(bgCtx, runID.String()); markErr != nil {
@@ -576,15 +585,15 @@ func (c *DefaultMissionController) Stop(ctx context.Context, missionID types.ID)
 
 	// Mark authz state cancelled so that late-arriving component callbacks
 	// receive a proper inactive-mission error. Log and continue on failure.
-	if c.authzStore != nil {
-		if runID, hasRun := c.activeRuns[missionID]; hasRun {
-			if markErr := c.authzStore.MarkCancelled(ctx, runID.String()); markErr != nil {
-				c.logger.Warn("mission controller: failed to mark authz state cancelled on stop",
-					slog.String("mission_id", missionID.String()),
-					slog.String("run_id", runID.String()),
-					slog.String("error", markErr.Error()),
-				)
-			}
+	// One-code-path slice deploy#195: authzStore is required (no more nil
+	// guard).
+	if runID, hasRun := c.activeRuns[missionID]; hasRun {
+		if markErr := c.authzStore.MarkCancelled(ctx, runID.String()); markErr != nil {
+			c.logger.Warn("mission controller: failed to mark authz state cancelled on stop",
+				slog.String("mission_id", missionID.String()),
+				slog.String("run_id", runID.String()),
+				slog.String("error", markErr.Error()),
+			)
 		}
 	}
 

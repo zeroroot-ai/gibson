@@ -113,9 +113,9 @@ func DefaultConfig() *Config {
 		},
 		Checkpoint: *DefaultCheckpointConfig(),
 		Authz: AuthzConfig{
-			Enabled:           false, // Disabled by default — flip in dev/prod values
+			// One-code-path slice deploy#195: FGA is always required.
+			// No more `enabled` or `require_ready` toggles.
 			Provider:          "openfga",
-			RequireReady:      true,
 			EnforcementSource: "fga", // Only valid value
 			Fga: FgaClientConfig{
 				Endpoint:  "gibson-fga:8080",

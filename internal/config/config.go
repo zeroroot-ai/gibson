@@ -777,16 +777,16 @@ func (c *RedisConfig) ApplyDefaults() {
 
 // AuthzConfig contains all OpenFGA authorization configuration.
 //
-// When Enabled is false (the default), the daemon wires a no-op Authorizer and
-// never connects to FGA. Flip Enabled to true in cluster values to enable the
-// FGA integration.
+// One-code-path epic (slice deploy#195): FGA is a hard dependency. There is no
+// `enabled` / `require_ready` toggle anymore — every environment dials a real
+// OpenFGA endpoint at startup and the daemon refuses to come up if it is
+// unreachable. The legacy fields are silently accepted in the YAML for
+// backwards compatibility, but they no longer change behaviour.
 //
 // Example config:
 //
 //	authz:
-//	  enabled: false
 //	  provider: openfga
-//	  require_ready: true
 //	  enforcement_source: fga
 //	  fga:
 //	    endpoint: gibson-fga:8080
@@ -796,17 +796,8 @@ func (c *RedisConfig) ApplyDefaults() {
 //	    tls:
 //	      enabled: false
 type AuthzConfig struct {
-	// Enabled controls whether FGA is active. Default false (no-op authorizer used).
-	// Override via env: GIBSON_AUTHZ_ENABLED=true
-	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
-
 	// Provider is the authorization provider name. Only "openfga" is supported.
 	Provider string `mapstructure:"provider" yaml:"provider"`
-
-	// RequireReady controls startup behavior when FGA is unreachable.
-	// true  → daemon fails to start (production-safe, fail-closed)
-	// false → daemon logs WARN and falls back to no-op (dev-mode)
-	RequireReady bool `mapstructure:"require_ready" yaml:"require_ready"`
 
 	// EnforcementSource is retained for config-file backwards compatibility.
 	// The only valid value is "fga"; the daemon ignores any other value and

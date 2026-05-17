@@ -2,8 +2,13 @@
 //
 // It wraps OpenFGA (a Google Zanzibar-based relationship-authorization service)
 // behind a mockable interface, keeping all FGA-specific code isolated from the
-// rest of the daemon. When authz.enabled is false in config, a no-op implementation
-// is injected instead.
+// rest of the daemon.
+//
+// One-code-path slice deploy#195: the noopAuthorizer was deleted. Every running
+// daemon dials a real OpenFGA endpoint at startup; if that endpoint is
+// unreachable the daemon exits 1. Tests inject their own fake or stub
+// Authorizer implementations (see internal/datapool/admin and internal/admin
+// for reference patterns).
 package authz
 
 import "context"
@@ -11,8 +16,7 @@ import "context"
 // Authorizer is the single authorization contract used across the entire Gibson codebase.
 //
 // All callers — gRPC interceptors, CLI subcommands, the harness — use this interface.
-// The concrete implementation wraps github.com/openfga/go-sdk; a no-op implementation
-// is used when authz is disabled or FGA is unreachable in dev mode.
+// The concrete implementation wraps github.com/openfga/go-sdk.
 //
 // Implementations must be safe for concurrent use.
 type Authorizer interface {
