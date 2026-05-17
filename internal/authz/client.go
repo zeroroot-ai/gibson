@@ -166,6 +166,22 @@ func (f *fgaAuthorizer) startSpan(ctx context.Context, name string, attrs ...att
 	return f.tracer.Start(ctx, name, trace.WithAttributes(attrs...))
 }
 
+// isAlreadyExistsError reports whether err is OpenFGA's "tuple already
+// exists" failure, raised when WriteTuples is called with a tuple that is
+// already present in the store. The Write godoc on the Authorizer interface
+// promises idempotent writes, so callers turn this into a no-op rather than
+// surfacing it as a transport failure (which mapSDKError would otherwise do).
+//
+// The OpenFGA Go SDK does not export a typed error for this case; we match
+// on the substring that the FGA server includes in its error response
+// ("cannot write a tuple which already exists").
+func isAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "tuple which already exists")
+}
+
 // mapSDKError converts OpenFGA SDK errors into typed authz errors.
 //
 // The FGA SDK returns errors as error strings. We check for common patterns:

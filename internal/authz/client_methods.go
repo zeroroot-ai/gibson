@@ -157,6 +157,19 @@ func (f *fgaAuthorizer) Write(ctx context.Context, tuples []Tuple) error {
 	span.SetAttributes(attribute.Int64("authz.duration_ms", durationMs))
 
 	if err != nil {
+		// Honor the interface contract: if every tuple in the batch already
+		// exists, treat as a no-op. OpenFGA's batched write fails the whole
+		// transaction with "cannot write a tuple which already exists", so a
+		// retry of a previously-applied write would otherwise surface as an
+		// error to callers that expect idempotency (see Write godoc).
+		if isAlreadyExistsError(err) {
+			span.SetStatus(codes.Ok, "")
+			f.logger.Debug("authz: Write (no-op, tuples already exist)",
+				"tuple_count", len(tuples),
+				"duration_ms", durationMs,
+			)
+			return nil
+		}
 		typedErr := mapSDKError(err)
 		f.recordSpanError(span, typedErr, "Write")
 		return typedErr
