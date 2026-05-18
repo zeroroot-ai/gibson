@@ -738,12 +738,23 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			daemonSvc.WithMissionDraftStore(draftStore)
 			d.logger.Info(ctx, "mission draft store wired into DaemonServer")
 
-			// Wire the impersonation token issuer.
-			var impersonationKey []byte
-			if envKey := os.Getenv("GIBSON_IMPERSONATION_KEY"); envKey != "" {
-				impersonationKey = []byte(envKey)
+			// Wire the impersonation token issuer. The current signing
+			// key is REQUIRED — fail-closed if GIBSON_IMPERSONATION_KEY
+			// is unset or under-sized. A randomly-minted in-process key
+			// would invalidate every previously-issued token on each
+			// daemon restart and diverge silently across HA replicas
+			// (gibson#103). The chart materialises the env from an
+			// ExternalSecret backed by gibson-secrets-backend.
+			//
+			// GIBSON_IMPERSONATION_KEY_PREVIOUS is OPTIONAL. When set
+			// during a rotation, Verify accepts tokens signed by either
+			// key until the old key's tokens expire naturally (≤ 1h).
+			impersonationKey := []byte(os.Getenv("GIBSON_IMPERSONATION_KEY"))
+			impersonationKeyPrev := []byte(os.Getenv("GIBSON_IMPERSONATION_KEY_PREVIOUS"))
+			issuer, err := impersonation.New(impersonationKey, impersonationKeyPrev, 15*time.Minute, d.logger.Slog())
+			if err != nil {
+				return nil, fmt.Errorf("daemon: impersonation issuer init failed: %w", err)
 			}
-			issuer := impersonation.New(impersonationKey, 15*time.Minute, d.logger.Slog())
 			daemonSvc.WithImpersonationIssuer(issuer)
 			d.logger.Info(ctx, "impersonation issuer wired into DaemonServer")
 
