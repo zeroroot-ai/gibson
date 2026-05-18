@@ -258,7 +258,6 @@ func TestLLMConfigHandler_DefaultProvider(t *testing.T) {
 	})
 }
 
-
 func TestProviderConfigStored_JSON(t *testing.T) {
 	now := time.Now()
 	stored := &ProviderConfigStored{

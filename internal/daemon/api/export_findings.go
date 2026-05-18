@@ -20,9 +20,9 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -158,14 +158,14 @@ func tenantv1FindingFiltersToGraph(f *tenantv1.FindingFilters) graph.FindingsFil
 // findingExportRow is the common intermediate representation used by all three
 // format serialisers.  Field order matches the TypeScript interface FindingRow.
 type findingExportRow struct {
-	ID          string
-	Type        string
-	Title       string
-	Severity    string
-	CVE         string
-	MissionID   string
-	MissionName string
-	Description string
+	ID           string
+	Type         string
+	Title        string
+	Severity     string
+	CVE          string
+	MissionID    string
+	MissionName  string
+	Description  string
 	DiscoveredAt string
 }
 
@@ -242,14 +242,14 @@ func serializeCSV(rows []findingExportRow) ([]byte, error) {
 
 // jsonFindingRow is the JSON-exported shape; matches FindingRow from route.ts.
 type jsonFindingRow struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	Title       string `json:"title"`
-	Severity    string `json:"severity"`
-	CVE         string `json:"cve"`
-	MissionID   string `json:"missionId"`
-	MissionName string `json:"missionName"`
-	Description string `json:"description"`
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	Title        string `json:"title"`
+	Severity     string `json:"severity"`
+	CVE          string `json:"cve"`
+	MissionID    string `json:"missionId"`
+	MissionName  string `json:"missionName"`
+	Description  string `json:"description"`
 	DiscoveredAt string `json:"discoveredAt"`
 }
 
@@ -257,14 +257,14 @@ func serializeJSON(rows []findingExportRow, tenantID string) ([]byte, error) {
 	jsonRows := make([]jsonFindingRow, len(rows))
 	for i, r := range rows {
 		jsonRows[i] = jsonFindingRow{
-			ID:          r.ID,
-			Type:        r.Type,
-			Title:       r.Title,
-			Severity:    r.Severity,
-			CVE:         r.CVE,
-			MissionID:   r.MissionID,
-			MissionName: r.MissionName,
-			Description: r.Description,
+			ID:           r.ID,
+			Type:         r.Type,
+			Title:        r.Title,
+			Severity:     r.Severity,
+			CVE:          r.CVE,
+			MissionID:    r.MissionID,
+			MissionName:  r.MissionName,
+			Description:  r.Description,
 			DiscoveredAt: r.DiscoveredAt,
 		}
 	}
@@ -283,13 +283,13 @@ func serializeJSON(rows []findingExportRow, tenantID string) ([]byte, error) {
 
 // sarifDoc is the minimal SARIF 2.1.0 envelope sufficient for security tooling.
 type sarifDoc struct {
-	Version string      `json:"version"`
-	Schema  string      `json:"$schema"`
-	Runs    []sarifRun  `json:"runs"`
+	Version string     `json:"version"`
+	Schema  string     `json:"$schema"`
+	Runs    []sarifRun `json:"runs"`
 }
 
 type sarifRun struct {
-	Tool    sarifTool    `json:"tool"`
+	Tool    sarifTool     `json:"tool"`
 	Results []sarifResult `json:"results"`
 }
 
@@ -303,9 +303,9 @@ type sarifDriver struct {
 }
 
 type sarifResult struct {
-	RuleID  string        `json:"ruleId"`
-	Level   string        `json:"level"`
-	Message sarifMessage  `json:"message"`
+	RuleID  string       `json:"ruleId"`
+	Level   string       `json:"level"`
+	Message sarifMessage `json:"message"`
 }
 
 type sarifMessage struct {
@@ -331,8 +331,8 @@ func serializeSARIF(rows []findingExportRow) ([]byte, error) {
 			msg = r.Title + ": " + r.Description
 		}
 		results = append(results, sarifResult{
-			RuleID: r.ID,
-			Level:  severityToSARIFLevel(r.Severity),
+			RuleID:  r.ID,
+			Level:   severityToSARIFLevel(r.Severity),
 			Message: sarifMessage{Text: msg},
 		})
 	}
@@ -341,7 +341,7 @@ func serializeSARIF(rows []findingExportRow) ([]byte, error) {
 		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
 		Runs: []sarifRun{
 			{
-				Tool: sarifTool{Driver: sarifDriver{Name: "Gibson", Version: "1.0"}},
+				Tool:    sarifTool{Driver: sarifDriver{Name: "Gibson", Version: "1.0"}},
 				Results: results,
 			},
 		},

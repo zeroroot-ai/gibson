@@ -199,10 +199,10 @@ func TestCsvEscape(t *testing.T) {
 func TestRecordToRow(t *testing.T) {
 	t.Parallel()
 	r := graph.FindingRecord{
-		ID:       "f99",
-		Name:     "Test Finding",
-		Severity: "high",
-		MissionID: "m1",
+		ID:         "f99",
+		Name:       "Test Finding",
+		Severity:   "high",
+		MissionID:  "m1",
 		Properties: map[string]string{"cve": "CVE-1234"},
 	}
 	row := recordToRow(r)

@@ -552,9 +552,9 @@ func (m *mockServerStreamForResume) Send(e *daemonpb.ResumeMissionResponse) erro
 	m.events = append(m.events, e)
 	return nil
 }
-func (m *mockServerStreamForResume) Context() context.Context        { return m.ctx }
-func (m *mockServerStreamForResume) SetHeader(_ metadata.MD) error   { return nil }
-func (m *mockServerStreamForResume) SendHeader(_ metadata.MD) error  { return nil }
-func (m *mockServerStreamForResume) SetTrailer(_ metadata.MD)        {}
-func (m *mockServerStreamForResume) SendMsg(_ interface{}) error     { return nil }
-func (m *mockServerStreamForResume) RecvMsg(_ interface{}) error     { return nil }
+func (m *mockServerStreamForResume) Context() context.Context       { return m.ctx }
+func (m *mockServerStreamForResume) SetHeader(_ metadata.MD) error  { return nil }
+func (m *mockServerStreamForResume) SendHeader(_ metadata.MD) error { return nil }
+func (m *mockServerStreamForResume) SetTrailer(_ metadata.MD)       {}
+func (m *mockServerStreamForResume) SendMsg(_ interface{}) error    { return nil }
+func (m *mockServerStreamForResume) RecvMsg(_ interface{}) error    { return nil }

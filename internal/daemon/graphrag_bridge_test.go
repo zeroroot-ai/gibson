@@ -61,8 +61,8 @@ func TestGraphRAGBridgeAdapter_MissingTenant(t *testing.T) {
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
 		PoolGetter: func() datapool.Pool { return &mockPool{conn: minimalConn()} },
-		Embedder: emb,
-		Logger:   slog.Default(),
+		Embedder:   emb,
+		Logger:     slog.Default(),
 	})
 	if err != nil {
 		t.Fatalf("NewGraphRAGBridgeAdapter: %v", err)
@@ -100,8 +100,8 @@ func TestGraphRAGBridgeAdapter_UnprovisionedTenant(t *testing.T) {
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
 		PoolGetter: func() datapool.Pool { return pool },
-		Embedder: emb,
-		Logger:   slog.Default(),
+		Embedder:   emb,
+		Logger:     slog.Default(),
 	})
 	if err != nil {
 		t.Fatalf("NewGraphRAGBridgeAdapter: %v", err)
@@ -128,8 +128,8 @@ func TestGraphRAGBridgeAdapter_TransientUnavailable(t *testing.T) {
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
 		PoolGetter: func() datapool.Pool { return pool },
-		Embedder: emb,
-		Logger:   slog.Default(),
+		Embedder:   emb,
+		Logger:     slog.Default(),
 	})
 	if err != nil {
 		t.Fatalf("NewGraphRAGBridgeAdapter: %v", err)
@@ -153,8 +153,8 @@ func TestGraphRAGBridgeAdapter_Health(t *testing.T) {
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
 		PoolGetter: func() datapool.Pool { return &mockPool{conn: minimalConn()} },
-		Embedder: emb,
-		Logger:   slog.Default(),
+		Embedder:   emb,
+		Logger:     slog.Default(),
 	})
 	if err != nil {
 		t.Fatalf("NewGraphRAGBridgeAdapter: %v", err)
@@ -174,8 +174,8 @@ func TestGraphRAGBridgeAdapter_AsyncBridge_MissingTenant(t *testing.T) {
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
 		PoolGetter: func() datapool.Pool { return &mockPool{conn: minimalConn()} },
-		Embedder: emb,
-		Logger:   slog.Default(),
+		Embedder:   emb,
+		Logger:     slog.Default(),
 	})
 	if err != nil {
 		t.Fatalf("NewGraphRAGBridgeAdapter: %v", err)
@@ -205,7 +205,7 @@ func TestGraphRAGBridgeAdapter_InterfaceShapes(t *testing.T) {
 	emb := embedder.NewMockEmbedder()
 	adapter, err := NewGraphRAGBridgeAdapter(GraphRAGBridgeConfig{
 		PoolGetter: func() datapool.Pool { return &mockPool{conn: minimalConn()} },
-		Embedder: emb,
+		Embedder:   emb,
 	})
 	if err != nil {
 		t.Fatalf("NewGraphRAGBridgeAdapter: %v", err)
