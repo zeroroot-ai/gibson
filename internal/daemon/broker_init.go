@@ -189,8 +189,29 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	// Spec: vault-refresh-and-plugin-runtime Window 1, Requirement 1.
 	vaultAuthCache := secrets.NewAuthCache(
 		func(ctx context.Context, tenantID, _ string) (string, time.Duration, error) {
+			// The VaultFactory below may invoke us with a non-tenant-ID
+			// cacheKey (cfg.Address fallback when both PathPrefix and
+			// Namespace are empty — the OSS / kind-dev Vault shape). The
+			// AuthCache contract only requires that the key uniquely
+			// identifies the refresh group; it makes no claim that the
+			// key is a valid tenant ID. So we MUST parse defensively
+			// here instead of calling MustNewTenantID, which panics on
+			// non-tenant-shaped inputs and brings down every authenticated
+			// daemon RPC.
+			//
+			// On parse failure, return a typed error; the factory's
+			// caller treats a refresh error as a cache miss and falls
+			// back to direct sdkvault.New auth, preserving correctness
+			// at the cost of cross-call coalescing (gibson#165).
+			parsedTenantID, err := auth.NewTenantID(tenantID)
+			if err != nil {
+				return "", 0, &sdkvault.VaultRefreshError{
+					TenantID: tenantID,
+					Cause:    fmt.Errorf("auth cache key %q is not a tenant id: %w", tenantID, err),
+				}
+			}
 			// Fetch the tenant's Vault config blob from the config store.
-			brokerCfg, err := configStore.Get(ctx, auth.MustNewTenantID(tenantID))
+			brokerCfg, err := configStore.Get(ctx, parsedTenantID)
 			if err != nil {
 				return "", 0, &sdkvault.VaultRefreshError{TenantID: tenantID, Cause: err}
 			}
