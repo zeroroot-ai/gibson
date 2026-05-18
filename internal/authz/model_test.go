@@ -66,8 +66,11 @@ func TestModel_CatalogGating(t *testing.T) {
 			{User: tenantA, Relation: "owner", Object: compOne},
 			{User: sysTenant, Relation: "platform_enabled", Object: compOne},
 			{User: tenantA, Relation: "tenant_enabled", Object: compOne},
-			// direct grants so alice has can_*_by-role (via tenant#member)
-			{User: userAlice, Relation: "member", Object: tenantA}, // idempotent
+			// NOTE: the alice/member/tenantA tuple is already written above as
+			// part of the "tenant membership" block. FGA's WriteTuples rejects
+			// duplicate keys within a single request
+			// (cannot_allow_duplicate_tuples_in_one_request), so do NOT repeat
+			// it here as a "for clarity" duplicate.
 		}
 		_, err := c.Write(ctx).Body(fgaclient.ClientWriteRequest{Writes: writes}).Execute()
 		require.NoError(t, err, "seed writes")
@@ -116,7 +119,7 @@ func TestModel_CatalogGating(t *testing.T) {
 		t.Helper()
 		mgmt := newRawFGAClient(t, baseURL)
 		storeResp, err := mgmt.CreateStore(ctx).Body(fgaclient.ClientCreateStoreRequest{
-			Name: fmt.Sprintf("test-%s", t.Name()),
+			Name: storeNameFor("catalog", t),
 		}).Execute()
 		require.NoError(t, err)
 		storeID := storeResp.GetId()

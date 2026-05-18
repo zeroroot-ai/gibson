@@ -18,7 +18,8 @@ package authz_test
 
 import (
 	"context"
-	"fmt"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -26,6 +27,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// storeNameFor returns a deterministic OpenFGA store name derived from the
+// test name. OpenFGA enforces the regex
+// ^[a-zA-Z0-9\s\.\-/^_&@]{3,64}$ on store names, and table-driven sub-test
+// names like "TestModel_TenantRoleHierarchy/owner_implies_admin_and_member"
+// blow past the 64-char ceiling. Hashing keeps every store name a fixed
+// 39 chars while preserving 1:1 mapping to the originating sub-test for
+// debuggability (the hash prefix is reproducible from the test name).
+func storeNameFor(prefix string, t *testing.T) string {
+	sum := sha256.Sum256([]byte(t.Name()))
+	return prefix + "-" + hex.EncodeToString(sum[:16])
+}
 
 func TestModel_TenantRoleHierarchy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -41,7 +54,7 @@ func TestModel_TenantRoleHierarchy(t *testing.T) {
 
 		mgmt := newRawFGAClient(t, baseURL)
 		storeResp, err := mgmt.CreateStore(ctx).Body(fgaclient.ClientCreateStoreRequest{
-			Name: fmt.Sprintf("hierarchy-test-%s", t.Name()),
+			Name: storeNameFor("hierarchy", t),
 		}).Execute()
 		require.NoError(t, err, "tenant-role-taxonomy: create FGA store")
 
