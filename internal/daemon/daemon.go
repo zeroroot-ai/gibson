@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -35,6 +36,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
+	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
 	"github.com/zero-day-ai/gibson/pkg/version"
 	"github.com/zero-day-ai/sdk/auth"
 	healthhttp "github.com/zero-day-ai/sdk/health/http"
@@ -892,19 +894,50 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				d.logger.Warn(ctx, "tenant_postgres.host is not configured; per-tenant Postgres bootstrap will be unavailable — set dataPlane.postgres.host in helm values")
 			}
 
-			// Wire a SecretsReader so pgxpool_per_tenant can read the
-			// canonical Postgres credentials JSON from Vault at
-			// tenant/<id>/infra/postgres rather than deriving the
-			// password locally from MasterKEK. Same lazy-resolution
-			// pattern as the Neo4j resolver above — secretsService is
-			// initialized AFTER NewPool, so we capture it via closure.
+			// Wire a DSN resolver so pgxpool_per_tenant can obtain the
+			// per-tenant Postgres DSN without depending on the
+			// secrets-broker abstraction at the datapool layer
+			// (gibson#106). The closure below is the ONLY place that
+			// knows the DSN currently comes from Vault via the broker;
+			// the datapool sees a narrow "give me a DSN for tenant"
+			// contract and nothing more.
 			//
-			// Spec: tenant-provisioning-unification-phase2 Requirement 1.6.
-			poolCfg.PostgresSecretsReader = datapool.FuncSecretsReader(func(ctx context.Context, name string) ([]byte, error) {
+			// Lazy resolution: secretsService is initialised AFTER
+			// NewPool, so we capture d by reference and defer the
+			// lookup until the first ForTenant call (same pattern as
+			// the Neo4j FuncSecretsReader above).
+			//
+			// Spec: tenant-provisioning-unification-phase2 Requirement
+			// 1.6 (Vault as the credential source); gibson#106 (layer
+			// boundary between datapool and secrets broker).
+			poolCfg.PostgresDSNResolver = datapool.PostgresDSNResolverFunc(func(ctx context.Context, tenant auth.TenantID) (string, string, error) {
 				if d.secretsService == nil {
-					return nil, fmt.Errorf("postgres secrets reader: secrets broker not yet initialized")
+					return "", "", &datapool.NotProvisionedError{
+						Tenant: tenant.String(),
+						Reason: "postgres DSN resolver: secrets broker not yet initialized",
+					}
 				}
-				return d.secretsService.Resolve(ctx, name)
+				// Push the tenant onto ctx so the broker's per-tenant
+				// routing resolves to the correct Vault path.
+				ctxWithTenant := auth.WithTenant(ctx, tenant)
+				raw, getErr := d.secretsService.Resolve(ctxWithTenant, pdataplane.VaultPathInfraPostgres)
+				if getErr != nil {
+					return "", "", &datapool.NotProvisionedError{
+						Tenant: tenant.String(),
+						Reason: fmt.Sprintf("vault read of %s failed: %v", pdataplane.VaultPathInfraPostgres, getErr),
+					}
+				}
+				var creds pdataplane.PostgresCredentials
+				if jsonErr := json.Unmarshal(raw, &creds); jsonErr != nil {
+					return "", "", fmt.Errorf("postgres DSN resolver: malformed PostgresCredentials JSON in Vault: %w", jsonErr)
+				}
+				if creds.DSN == "" {
+					return "", "", &datapool.NotProvisionedError{
+						Tenant: tenant.String(),
+						Reason: "vault entry for infra/postgres has empty dsn field",
+					}
+				}
+				return creds.DSN, creds.Database, nil
 			})
 			p, poolErr := datapool.NewPool(ctx, poolCfg, keyProvider, nil)
 			if poolErr != nil {

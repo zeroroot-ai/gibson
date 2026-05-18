@@ -75,22 +75,51 @@ type Config struct {
 	// Spec: per-tenant-data-plane-completion Task 16 / Req 5.5.
 	Neo4jResolver Neo4jEndpointResolver
 
-	// PostgresSecretsReader resolves per-tenant Postgres credentials from
-	// the secrets broker (Vault). When set, pgPerTenant.ForTenant reads
-	// the canonical PostgresCredentials JSON from `infra/postgres` and
-	// uses creds.DSN directly — bypassing the legacy KEK-based password
-	// derivation. When nil, pgPerTenant falls back to KEK derivation
-	// (parent-spec compatibility shim).
+	// PostgresDSNResolver resolves the per-tenant Postgres DSN + database
+	// name for ForTenant. The daemon wires a closure that knows how to
+	// produce these — typically by reading the canonical
+	// PostgresCredentials payload from Vault at tenant/<id>/infra/postgres,
+	// but the datapool layer is intentionally agnostic to the source.
 	//
-	// Same FuncSecretsReader pattern as Neo4j (see
-	// neo4j_endpoint_resolver_instance.go) — the daemon constructs a
-	// closure that defers to d.secretsService at RPC time, not at
-	// startup.
+	// Layer rationale (gibson#106): the data-plane pool is the lowest
+	// connection primitive. It MUST NOT reach back into upper layers
+	// (secrets broker, audit chain, FGA) to resolve its own credentials —
+	// any back-reference risks the recursion documented in gibson#101 +
+	// gibson#105 and couples a foundational primitive to higher-level
+	// abstractions. Inject a narrow, datapool-shaped resolver instead;
+	// the daemon's closure adapts to whatever credential source the
+	// platform happens to use (Vault today, file-mount or KMS-direct
+	// tomorrow) without changing the datapool API surface.
 	//
-	// Spec: tenant-provisioning-unification-phase2 Requirement 1.6.
-	PostgresSecretsReader interface {
-		Resolve(ctx context.Context, name string) ([]byte, error)
-	}
+	// Required: pgPerTenant.ForTenant returns *NotProvisionedError when
+	// nil so misconfiguration surfaces as a fast, named error.
+	PostgresDSNResolver PostgresDSNResolver
+}
+
+// PostgresDSNResolver is the narrow interface pgPerTenant.ForTenant uses
+// to obtain per-tenant Postgres connection coordinates. Implementations
+// must be safe for concurrent use.
+//
+// Spec: gibson#106 (replaces the broker-chain-shaped PostgresSecretsReader
+// interface; see file-level docstring above for layer rationale).
+type PostgresDSNResolver interface {
+	// ResolveDSN returns the libpq/pgx DSN and the Postgres database name
+	// for tenant. The pool appends its own sizing parameters
+	// (pool_max_conns, etc.) on top of the returned DSN — implementations
+	// should NOT bake those in.
+	ResolveDSN(ctx context.Context, tenant auth.TenantID) (dsn, dbName string, err error)
+}
+
+// PostgresDSNResolverFunc adapts a plain function to PostgresDSNResolver.
+// This is the form daemon bootstrap uses to defer resolution until the
+// secrets broker has finished initialising (the closure captures
+// d.secretsService by reference; cf. the Neo4j FuncSecretsReader pattern
+// in neo4j_endpoint_resolver_instance.go).
+type PostgresDSNResolverFunc func(ctx context.Context, tenant auth.TenantID) (dsn, dbName string, err error)
+
+// ResolveDSN implements PostgresDSNResolver.
+func (f PostgresDSNResolverFunc) ResolveDSN(ctx context.Context, tenant auth.TenantID) (string, string, error) {
+	return f(ctx, tenant)
 }
 
 // DefaultConfig returns a Config with all fields set to production-safe

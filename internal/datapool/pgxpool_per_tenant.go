@@ -2,7 +2,7 @@ package datapool
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -10,8 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zero-day-ai/sdk/auth"
-
-	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
 )
 
 // pgSanitizeRE matches only characters that are safe in a Postgres database
@@ -54,11 +52,12 @@ func newPgPerTenant(cfg Config) *pgPerTenant {
 }
 
 // ForTenant returns (or lazily creates) a *pgxpool.Pool connected to
-// the tenant's dedicated Postgres database. The DSN comes from Vault
-// via cfg.PostgresSecretsReader (broker.Resolve on infra/postgres);
-// Phase 6.2 removed the legacy KEK-based fallback.
+// the tenant's dedicated Postgres database. The DSN is produced by
+// cfg.PostgresDSNResolver — a narrow, datapool-shaped interface the
+// daemon adapts to whatever credential source the platform happens to
+// use (today: Vault, via the secrets broker; see daemon.go bootstrap).
 //
-// Returns *NotProvisionedError if the broker is not wired, has no
+// Returns *NotProvisionedError if the resolver is not wired, has no
 // entry for this tenant, or the Postgres database does not exist.
 //
 // The tenantKEK argument is retained for signature stability with
@@ -130,58 +129,65 @@ func (p *pgPerTenant) ForTenant(ctx context.Context, tenant auth.TenantID, tenan
 	return pool, nil
 }
 
-// resolveDSN returns the per-tenant DSN + database name from Vault
-// via the secrets broker. The operator writes the canonical
-// PostgresCredentials JSON to tenant/<id>/infra/postgres; the broker
-// returns the unwrapped bytes (SDK's secrets/providers/vault/
-// provider.go:127). The daemon never derives the password locally.
+// resolveDSN returns the per-tenant DSN + database name by delegating
+// to the constructor-injected cfg.PostgresDSNResolver. The datapool
+// layer is intentionally agnostic to the credential source — the
+// daemon's resolver closure adapts to whatever the platform uses
+// (today: Vault via the secrets broker; cf. daemon.initBrokerStack).
 //
-// Spec tenant-provisioning-unification-phase2 Phase 6.2: removed the
-// legacy KEK-based fallback path. Clusters that have not deployed the
-// operator's Phase 3 Vault writes need to opt into the chart's
-// pre-upgrade tenant-credentials-backfill Job before upgrading the
-// daemon (Phase 8.5 + migration-safety NFR).
+// gibson#106: this used to call into the secrets-broker chain
+// directly (cfg.PostgresSecretsReader.Resolve(ctx, "infra/postgres") +
+// PostgresCredentials JSON unmarshal). That was a layer violation —
+// the lowest-level connection primitive reaching back into upper-layer
+// abstractions, with a documented recursion path (gibson#101, mitigated
+// by gibson#105). The DSN-resolver indirection breaks that coupling:
+// the JSON unmarshal and broker-chain knowledge now live in the daemon
+// bootstrap closure, where they belong.
 //
 // tenantKEK is retained as an argument for caller-signature stability
 // but is no longer used here — Conn.KEK is still derived in
 // pool_impl.go for user-secret encryption (a separate concern from
 // Postgres password derivation, which has moved to Vault).
 func (p *pgPerTenant) resolveDSN(ctx context.Context, tenant auth.TenantID, _ []byte) (dsn, dbName string, err error) {
-	if p.cfg.PostgresSecretsReader == nil {
+	if p.cfg.PostgresDSNResolver == nil {
 		return "", "", &NotProvisionedError{
 			Tenant: tenant.String(),
-			Reason: "datapool.Config.PostgresSecretsReader not wired — daemon cannot resolve per-tenant Postgres credentials",
+			Reason: "datapool.Config.PostgresDSNResolver not wired — daemon cannot resolve per-tenant Postgres credentials",
 		}
 	}
-	// Push the tenant onto ctx so the broker's per-tenant routing
-	// resolves to the correct path.
-	ctxWithTenant := auth.WithTenant(ctx, tenant)
-	raw, getErr := p.cfg.PostgresSecretsReader.Resolve(ctxWithTenant, pdataplane.VaultPathInfraPostgres)
-	if getErr != nil {
+	rawDSN, db, resolveErr := p.cfg.PostgresDSNResolver.ResolveDSN(ctx, tenant)
+	if resolveErr != nil {
+		// Resolver-side NotProvisionedError surfaces unchanged so callers
+		// (e.g. mission/finding/component handlers) can map it to a
+		// fast FailedPrecondition without retry. Any other error is
+		// wrapped as a generic NotProvisionedError — we cannot
+		// distinguish "transient infra issue" from "credentials never
+		// written" at this layer without leaking the broker error
+		// taxonomy upward.
+		var notProv *NotProvisionedError
+		if errors.As(resolveErr, &notProv) {
+			return "", "", notProv
+		}
 		return "", "", &NotProvisionedError{
 			Tenant: tenant.String(),
-			Reason: fmt.Sprintf("vault read of %s failed: %v", pdataplane.VaultPathInfraPostgres, getErr),
+			Reason: fmt.Sprintf("DSN resolver failed: %v", resolveErr),
 		}
 	}
-	var creds pdataplane.PostgresCredentials
-	if jsonErr := json.Unmarshal(raw, &creds); jsonErr != nil {
-		return "", "", fmt.Errorf("datapool: postgres: malformed PostgresCredentials JSON in Vault: %w", jsonErr)
-	}
-	if creds.DSN == "" {
+	if rawDSN == "" {
 		return "", "", &NotProvisionedError{
 			Tenant: tenant.String(),
-			Reason: "vault entry for infra/postgres has empty dsn field",
+			Reason: "DSN resolver returned empty DSN",
 		}
 	}
 	// Append pool_max_conns query param so caller-side ParseConfig
-	// honors our pool sizing without the operator needing to know
+	// honors our pool sizing without the resolver needing to know
 	// about it.
 	sep := "&"
-	if !strings.Contains(creds.DSN, "?") {
+	if !strings.Contains(rawDSN, "?") {
 		sep = "?"
 	}
-	fullDSN := fmt.Sprintf("%s%spool_max_conns=%d", creds.DSN, sep, p.cfg.PoolMaxConns)
-	return fullDSN, creds.Database, nil
+	fullDSN := fmt.Sprintf("%s%spool_max_conns=%d", rawDSN, sep, p.cfg.PoolMaxConns)
+	return fullDSN, db, nil
 }
 
 // EvictTenant closes and removes the tenant's pool if present.
