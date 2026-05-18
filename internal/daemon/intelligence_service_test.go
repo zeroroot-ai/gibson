@@ -317,11 +317,11 @@ func TestIntelligenceService_AllRPCs_ReachPoolFor(t *testing.T) {
 	srv := intelServerWithPool(getter)
 	ctx := tenantCtx()
 
-	srv.GetRecurringVulnerabilities(ctx, &intelligencepb.GetRecurringVulnerabilitiesRequest{})   //nolint:errcheck
-	srv.GetRemediationMetrics(ctx, &intelligencepb.GetRemediationMetricsRequest{})               //nolint:errcheck
-	srv.GetAssetRiskScore(ctx, &intelligencepb.GetAssetRiskScoreRequest{})                       //nolint:errcheck
-	srv.GetAttackPatterns(ctx, &intelligencepb.GetAttackPatternsRequest{})                       //nolint:errcheck
-	srv.GetSimilarTargets(ctx, &intelligencepb.GetSimilarTargetsRequest{})                       //nolint:errcheck
+	srv.GetRecurringVulnerabilities(ctx, &intelligencepb.GetRecurringVulnerabilitiesRequest{}) //nolint:errcheck
+	srv.GetRemediationMetrics(ctx, &intelligencepb.GetRemediationMetricsRequest{})             //nolint:errcheck
+	srv.GetAssetRiskScore(ctx, &intelligencepb.GetAssetRiskScoreRequest{})                     //nolint:errcheck
+	srv.GetAttackPatterns(ctx, &intelligencepb.GetAttackPatternsRequest{})                     //nolint:errcheck
+	srv.GetSimilarTargets(ctx, &intelligencepb.GetSimilarTargetsRequest{})                     //nolint:errcheck
 
 	if poolCallCount != 5 {
 		t.Errorf("expected pool getter called 5 times (once per RPC), got %d", poolCallCount)

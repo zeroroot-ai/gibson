@@ -141,9 +141,9 @@ const secretEnvPrefix = "GIBSON_SECRET_"
 // probe can verify Setec frontend reachability without making a Launch call.
 type setecClient struct {
 	inner     setecv1.SandboxServiceClient
-	conn      *grpc.ClientConn     // kept for connectivity state checks
-	masterKEK []byte               // optional; when nil, KEK wrapping is skipped
-	tenantID  sdkauth.TenantID     // AAD for KEK wrapping
+	conn      *grpc.ClientConn // kept for connectivity state checks
+	masterKEK []byte           // optional; when nil, KEK wrapping is skipped
+	tenantID  sdkauth.TenantID // AAD for KEK wrapping
 }
 
 // Ping verifies that the Setec frontend gRPC connection is in a usable state.

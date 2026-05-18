@@ -699,8 +699,8 @@ func (p *mockPoolFn) For(ctx context.Context, t auth.TenantID) (*datapool.Conn, 
 	return nil, nil
 }
 func (p *mockPoolFn) Admin(_ context.Context) (*datapool.AdminConn, error) { return nil, nil }
-func (p *mockPoolFn) SetAdminPool(_ datapool.AdminAcquirer)                 {}
-func (p *mockPoolFn) Close() error                                          { return nil }
+func (p *mockPoolFn) SetAdminPool(_ datapool.AdminAcquirer)                {}
+func (p *mockPoolFn) Close() error                                         { return nil }
 
 var _ datapool.Pool = (*mockPoolFn)(nil)
 

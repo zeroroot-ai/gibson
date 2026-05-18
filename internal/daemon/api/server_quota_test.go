@@ -58,8 +58,8 @@ type fakeQuotaUsageReader struct {
 func (f *fakeQuotaUsageReader) ReadActiveCounters(_ context.Context, _ string) (int64, int64, error) {
 	return f.missions, f.agents, nil
 }
-func (f *fakeQuotaUsageReader) CheckMissionQuota(_ context.Context) error    { return nil }
-func (f *fakeQuotaUsageReader) CheckAgentQuota(_ context.Context) error      { return nil }
+func (f *fakeQuotaUsageReader) CheckMissionQuota(_ context.Context) error     { return nil }
+func (f *fakeQuotaUsageReader) CheckAgentQuota(_ context.Context) error       { return nil }
 func (f *fakeQuotaUsageReader) IncrementMissionCount(_ context.Context) error { return nil }
 
 func TestGetTenantQuotaUsage_ReturnsCounterValues(t *testing.T) {

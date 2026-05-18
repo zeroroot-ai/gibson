@@ -228,9 +228,9 @@ func (s *graphServer) QueryPaths(
 	}
 
 	return &graphpb.QueryPathsResponse{
-		Paths:         paths,
-		Nodes:         nodes,
-		Edges:         edges,
+		Paths:          paths,
+		Nodes:          nodes,
+		Edges:          edges,
 		TruncatedPaths: truncated,
 	}, nil
 }

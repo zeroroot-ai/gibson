@@ -16,8 +16,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/auth"
 	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // TestMission_SourceYAMLField verifies that the SourceYAML field on
