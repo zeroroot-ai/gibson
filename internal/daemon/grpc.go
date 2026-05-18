@@ -80,6 +80,39 @@ type serverStreamCtxOverride struct {
 
 func (s *serverStreamCtxOverride) Context() context.Context { return s.ctx }
 
+// impersonationKeyDirOverride is the volume-mount path for the
+// gibson-impersonation-key Secret. The chart mounts the entire Secret
+// at this path; each key in the Secret becomes a file named after the
+// key (kubelet's standard projection). Migration tracked at deploy#315.
+//
+// Declared as a var (not const) so unit tests can swap it to a temp
+// dir. Production callers MUST NOT mutate this.
+var impersonationKeyDirOverride = "/etc/gibson/impersonation"
+
+// loadImpersonationKey returns the value for the given key name,
+// preferring the file mount over the env var so a NUL byte in the
+// backing-store value cannot silently truncate the key (deploy#182
+// check 16 hazard). Returns nil when neither source has a value; the
+// caller's empty-key handling is unchanged from when only the env-var
+// path existed.
+//
+// Trailing newlines are stripped — Kubernetes does not append one to
+// projected Secret files, but operators occasionally add one when
+// hand-editing the backing-store value.
+func loadImpersonationKey(name string) []byte {
+	path := impersonationKeyDirOverride + "/" + name
+	if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+		for len(b) > 0 && (b[len(b)-1] == '\n' || b[len(b)-1] == '\r') {
+			b = b[:len(b)-1]
+		}
+		return b
+	}
+	if v := os.Getenv(name); v != "" {
+		return []byte(v)
+	}
+	return nil
+}
+
 type daemonMemoryStore struct {
 	working memory.WorkingMemory
 }
@@ -743,14 +776,22 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// is unset or under-sized. A randomly-minted in-process key
 			// would invalidate every previously-issued token on each
 			// daemon restart and diverge silently across HA replicas
-			// (gibson#103). The chart materialises the env from an
+			// (gibson#103). The chart materialises the value from an
 			// ExternalSecret backed by gibson-secrets-backend.
 			//
 			// GIBSON_IMPERSONATION_KEY_PREVIOUS is OPTIONAL. When set
 			// during a rotation, Verify accepts tokens signed by either
 			// key until the old key's tokens expire naturally (≤ 1h).
-			impersonationKey := []byte(os.Getenv("GIBSON_IMPERSONATION_KEY"))
-			impersonationKeyPrev := []byte(os.Getenv("GIBSON_IMPERSONATION_KEY_PREVIOUS"))
+			//
+			// SOURCE PRIORITY (deploy#315): prefer file at
+			//   /etc/gibson/impersonation/GIBSON_IMPERSONATION_KEY[_PREVIOUS]
+			// (volume-mounted Secret — NUL-transparent, length-based read)
+			// over the env var (secretKeyRef — C-string semantics, silently
+			// truncated at the first NUL byte). The chart can roll the
+			// volume mount independently of this code change; until the
+			// file is present, the env path remains the fallback.
+			impersonationKey := loadImpersonationKey("GIBSON_IMPERSONATION_KEY")
+			impersonationKeyPrev := loadImpersonationKey("GIBSON_IMPERSONATION_KEY_PREVIOUS")
 			issuer, err := impersonation.New(impersonationKey, impersonationKeyPrev, 15*time.Minute, d.logger.Slog())
 			if err != nil {
 				return nil, fmt.Errorf("daemon: impersonation issuer init failed: %w", err)
