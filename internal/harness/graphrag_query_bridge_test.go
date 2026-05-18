@@ -1007,24 +1007,41 @@ func TestDefaultGraphRAGQueryBridge_Traverse(t *testing.T) {
 	startNodeID := types.NewID().String()
 
 	tests := []struct {
-		name string
-		opts sdkgraphrag.TraversalOptions
+		name        string
+		opts        sdkgraphrag.TraversalOptions
+		shouldFail  bool
+		checkResult func(t *testing.T, results []sdkgraphrag.TraversalResult)
 	}{
 		{
-			name: "traverse returns not implemented",
+			name: "successful traversal returns empty results",
 			opts: sdkgraphrag.TraversalOptions{
 				MaxDepth:          3,
 				Direction:         "outbound",
 				RelationshipTypes: []string{"SIMILAR_TO"},
 				NodeTypes:         []string{"Finding"},
 			},
+			shouldFail: false,
+			checkResult: func(t *testing.T, results []sdkgraphrag.TraversalResult) {
+				// Mock returns nil,nil from TraverseGraph → empty result slice
+				assert.NotNil(t, results)
+				assert.Len(t, results, 0)
+			},
+		},
+		{
+			name: "traversal store error propagates",
+			opts: sdkgraphrag.TraversalOptions{
+				MaxDepth:  2,
+				Direction: "outbound",
+			},
+			shouldFail: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &MockGraphRAGStore{
-				IsHealthy: true,
+				IsHealthy:   true,
+				ShouldFailQuery: tt.shouldFail,
 			}
 
 			bridge := NewGraphRAGQueryBridge(mock, nil)
@@ -1032,10 +1049,15 @@ func TestDefaultGraphRAGQueryBridge_Traverse(t *testing.T) {
 
 			results, err := bridge.Traverse(ctx, startNodeID, tt.opts)
 
-			// Traverse should return "not yet implemented" error
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "not yet implemented")
-			assert.Nil(t, results)
+			if tt.shouldFail {
+				assert.Error(t, err)
+				assert.Nil(t, results)
+			} else {
+				require.NoError(t, err)
+				if tt.checkResult != nil {
+					tt.checkResult(t, results)
+				}
+			}
 		})
 	}
 }
