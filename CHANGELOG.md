@@ -62,6 +62,27 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.106.0](https://github.com/zero-day-ai/gibson/compare/v0.105.0...v0.106.0) (2026-05-18)
+
+
+### Features
+
+* add GetMissionDefinition RPC; return full structured proto (M5, gibson[#134](https://github.com/zero-day-ai/gibson/issues/134)) ([#138](https://github.com/zero-day-ai/gibson/issues/138)) ([b489a70](https://github.com/zero-day-ai/gibson/commit/b489a7063f6f2e7bd2ffd4f61e9042fe58be78fe))
+* wire EffectivePerCallCap into LLM dispatch + document token-budget precedence (M4) ([#148](https://github.com/zero-day-ai/gibson/issues/148)) ([da83427](https://github.com/zero-day-ai/gibson/commit/da834275145c9e5bd1ace69e8d030cab9d00df6e)), closes [#133](https://github.com/zero-day-ai/gibson/issues/133)
+
+
+### Bug Fixes
+
+* **authz:** FGA smoke — idempotent Write + sha256 store names ([#114](https://github.com/zero-day-ai/gibson/issues/114)) ([#146](https://github.com/zero-day-ai/gibson/issues/146)) ([d4a6671](https://github.com/zero-day-ai/gibson/commit/d4a6671dcf964a6f15f0eb945f04d1b7d2dd498e))
+* **checkpoint:** add thread and checkpoint reverse indexes to fix GetThread ([#155](https://github.com/zero-day-ai/gibson/issues/155)) ([eeab862](https://github.com/zero-day-ai/gibson/commit/eeab8620ab240f712d449c3cf2f571ea82bfffbb)), closes [#137](https://github.com/zero-day-ai/gibson/issues/137)
+* **daemon:** prefer file-mount over env for impersonation signing keys ([#162](https://github.com/zero-day-ai/gibson/issues/162)) ([ab23d5a](https://github.com/zero-day-ai/gibson/commit/ab23d5a21be96d160358c27381bdfbe449c87e4a))
+* **datapool:** inject PostgresDSNResolver — drop broker-shaped dependency ([#106](https://github.com/zero-day-ai/gibson/issues/106)) ([#152](https://github.com/zero-day-ai/gibson/issues/152)) ([f6f5700](https://github.com/zero-day-ai/gibson/commit/f6f57004491c4e429b7005be640d4a11f4d67ede))
+* **harness:** update stale Traverse test to match implemented behaviour ([#154](https://github.com/zero-day-ai/gibson/issues/154)) ([a0b1967](https://github.com/zero-day-ai/gibson/commit/a0b1967601aa64a56ede681987deb2c362499030)), closes [#147](https://github.com/zero-day-ai/gibson/issues/147)
+* **impersonation:** require persistent signing key + add rotation support ([#159](https://github.com/zero-day-ai/gibson/issues/159)) ([b231ec6](https://github.com/zero-day-ai/gibson/commit/b231ec642c3ac8b79d9a27b17b0a8fb732d30aac))
+* **lint:** repair check-no-gibson-io allowlist and update eviction comment ([#156](https://github.com/zero-day-ai/gibson/issues/156)) ([c7df684](https://github.com/zero-day-ai/gibson/commit/c7df6842be87c81e1110feee9ebd74beec73b421)), closes [#142](https://github.com/zero-day-ai/gibson/issues/142)
+* **mission:** probe RedisJSON before running checkpoint store tests ([#157](https://github.com/zero-day-ai/gibson/issues/157)) ([e1c2a5d](https://github.com/zero-day-ai/gibson/commit/e1c2a5d1431a0ea086316019afa908f453f52904)), closes [#141](https://github.com/zero-day-ai/gibson/issues/141)
+* **tenant/names:** Namespace() returns tenant-&lt;slug&gt;, matching cluster reality ([#160](https://github.com/zero-day-ai/gibson/issues/160)) ([67b5340](https://github.com/zero-day-ai/gibson/commit/67b53403a7f3b85dcf9998b19f11b3abca8b183e))
+
 ## [0.105.0](https://github.com/zero-day-ai/gibson/compare/v0.104.0...v0.105.0) (2026-05-17)
 
 
