@@ -13,30 +13,37 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// setupTestRedisCheckpointStore creates a test checkpoint store with miniredis
+// setupTestRedisCheckpointStore creates a test checkpoint store backed by miniredis.
+//
+// miniredis does not implement the RedisJSON module (JSON.SET, JSON.GET, JSON.DEL),
+// so these tests are skipped unless the probe write succeeds. Use a real Redis Stack
+// instance (or the integration tests under tests/integration/checkpoint/) when you
+// need to exercise the full store.
 func setupTestRedisCheckpointStore(t *testing.T) (*RedisCheckpointStore, *miniredis.Miniredis) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
 
-	// Create state client without NewStateClient to bypass module checks
 	cfg := state.DefaultConfig()
 	cfg.URL = "redis://" + mr.Addr()
 
-	stateClient := &state.StateClient{}
-	// Use reflection to set private fields (or create a helper in state package)
-	// For now, we'll create our own minimal client wrapper
-
-	// Actually, let's use a different approach - mock the state.StateClient methods
-	// or create a test-specific version
-
-	// Better approach: create the state client and handle module errors gracefully
+	// NewStateClient runs a MODULE LIST health check; miniredis returns an error
+	// for that command which the client currently treats as "skip check" (returns
+	// nil). Probe the actual JSON.SET command instead so we skip correctly when
+	// RedisJSON is not available.
 	stateClient, err := state.NewStateClient(cfg)
 	if err != nil {
-		// If module check fails (expected with miniredis), create a minimal client
-		// This is a workaround for testing
-		t.Skip("Skipping test - requires Redis with JSON module (use real Redis or RedisStack for testing)")
+		t.Skipf("Skipping: could not create Redis state client: %v", err)
 	}
+
+	// Probe RedisJSON availability. miniredis will fail with "unknown command".
+	probeCtx := context.Background()
+	if err := stateClient.JSONSet(probeCtx, "__probe__", "$", struct{}{}); err != nil {
+		t.Skipf("Skipping: RedisJSON module not available (%v) — "+
+			"run a Redis Stack instance or use tests/integration/checkpoint/", err)
+	}
+	// Clean up the probe key (best-effort).
+	_ = stateClient.JSONDel(probeCtx, "__probe__", "$")
 
 	store := NewRedisCheckpointStore(stateClient)
 	return store, mr
