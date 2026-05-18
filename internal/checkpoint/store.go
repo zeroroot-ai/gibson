@@ -210,6 +210,11 @@ func (s *RedisCheckpointStore) Save(ctx context.Context, checkpoint *Checkpoint)
 		Member: checkpoint.ID,
 	})
 
+	// Write reverse index: checkpointID → threadID so Load/GetCheckpoint can
+	// resolve the full document without the caller supplying the thread ID.
+	ridKey := s.checkpointRidKey(checkpoint.ID)
+	pipe.Set(ctx, ridKey, checkpoint.ThreadID, s.config.DefaultTTL)
+
 	// Update latest pointer
 	pipe.Set(ctx, latestKey, checkpoint.ID, 0)
 
@@ -221,17 +226,34 @@ func (s *RedisCheckpointStore) Save(ctx context.Context, checkpoint *Checkpoint)
 	return nil
 }
 
-// Load retrieves a checkpoint by ID.
-// Note: This requires a thread ID to be efficient. For now it returns an error.
-// Callers should use GetLatest or ListByThread which include the thread ID.
+// Load retrieves a checkpoint by ID using the reverse index.
+// The reverse index (written by Save) maps checkpointID → threadID so the
+// full document can be fetched without the caller supplying the thread ID.
 func (s *RedisCheckpointStore) Load(ctx context.Context, checkpointID string) (*Checkpoint, error) {
 	if checkpointID == "" {
 		return nil, fmt.Errorf("checkpoint ID cannot be empty")
 	}
 
-	// This is inefficient without a reverse index from checkpoint ID to thread ID.
-	// In production, we'd maintain a global checkpoint ID -> thread ID mapping.
-	return nil, fmt.Errorf("Load by ID alone requires a reverse index; use GetLatest or ListByThread instead")
+	// Resolve thread ID via the reverse index.
+	rdb := s.client.Client()
+	threadID, err := rdb.Get(ctx, s.checkpointRidKey(checkpointID)).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, ErrCheckpointNotFound
+		}
+		return nil, fmt.Errorf("failed to read checkpoint reverse index: %w", err)
+	}
+
+	checkpointKey := s.checkpointKey(threadID, checkpointID)
+	var checkpoint Checkpoint
+	if err := s.client.JSONGet(ctx, checkpointKey, "$", &checkpoint); err != nil {
+		if state.IsNotFound(err) {
+			return nil, ErrCheckpointNotFound
+		}
+		return nil, fmt.Errorf("failed to load checkpoint: %w", err)
+	}
+
+	return &checkpoint, nil
 }
 
 // ListByThread is an alias for ListCheckpoints.
@@ -444,14 +466,22 @@ func (s *RedisCheckpointStore) SaveThread(ctx context.Context, thread *Thread) e
 	// Build Redis keys
 	threadKey := s.threadKey(thread.MissionID, thread.ID)
 	indexKey := s.threadIndexKey(thread.MissionID)
+	ridKey := s.threadRidKey(thread.ID)
 
 	// Store thread document
 	if err := s.client.JSONSet(ctx, threadKey, "$", thread); err != nil {
 		return fmt.Errorf("failed to save thread: %w", err)
 	}
 
-	// Add to mission's thread index (score = creation timestamp)
 	rdb := s.client.Client()
+
+	// Write the reverse index: threadID → missionID (plain string, no JSON).
+	// This lets GetThread(threadID) resolve the mission ID without a scan.
+	if err := rdb.Set(ctx, ridKey, thread.MissionID.String(), s.config.DefaultTTL).Err(); err != nil {
+		return fmt.Errorf("failed to save thread reverse index: %w", err)
+	}
+
+	// Add to mission's thread index (score = creation timestamp)
 	score := float64(thread.CreatedAt.UnixNano())
 	if err := rdb.ZAdd(ctx, indexKey, redis.Z{
 		Score:  score,
@@ -463,17 +493,30 @@ func (s *RedisCheckpointStore) SaveThread(ctx context.Context, thread *Thread) e
 	return nil
 }
 
-// GetThread retrieves thread metadata by thread ID.
-// Note: This requires mission ID for proper key construction.
-// For now, it searches through all missions (inefficient).
+// GetThread retrieves thread metadata by thread ID using the reverse index.
+// The reverse index (written by SaveThread) maps threadID → missionID so
+// a single Redis GET is all that is needed before fetching the thread document.
 func (s *RedisCheckpointStore) GetThread(ctx context.Context, threadID string) (*Thread, error) {
 	if threadID == "" {
 		return nil, fmt.Errorf("thread ID cannot be empty")
 	}
 
-	// This requires the mission ID to construct the key
-	// Without a reverse index, we cannot efficiently look up a thread by ID alone
-	return nil, fmt.Errorf("GetThread by ID alone requires a reverse index; use ListThreads with mission ID")
+	// Resolve mission ID via the reverse index.
+	rdb := s.client.Client()
+	missionIDStr, err := rdb.Get(ctx, s.threadRidKey(threadID)).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, ErrThreadNotFound
+		}
+		return nil, fmt.Errorf("failed to read thread reverse index: %w", err)
+	}
+
+	missionID, err := types.ParseID(missionIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("corrupt thread reverse index (mission ID %q): %w", missionIDStr, err)
+	}
+
+	return s.GetThreadByMission(ctx, missionID, threadID)
 }
 
 // ListThreads returns all threads for a mission, ordered by creation time (newest first).
@@ -515,11 +558,39 @@ func (s *RedisCheckpointStore) ListThreads(ctx context.Context, missionID types.
 	return threads, nil
 }
 
-// DeleteThread is an alias for DeleteThreadCheckpoints.
-// Note: For ThreadStore interface, this deletes checkpoints. For thread metadata deletion,
-// use DeleteThreadByMission which requires both mission ID and thread ID.
+// DeleteThread removes thread metadata, the reverse index entry, and removes the thread
+// from its mission's sorted-set index. It does NOT delete checkpoints; callers that need
+// checkpoint cleanup must call DeleteThreadCheckpoints separately (DefaultThreadManager
+// does this via checkpointStore.DeleteThreadCheckpoints before calling this method).
 func (s *RedisCheckpointStore) DeleteThread(ctx context.Context, threadID string) error {
-	return s.DeleteThreadCheckpoints(ctx, threadID)
+	if threadID == "" {
+		return fmt.Errorf("thread ID cannot be empty")
+	}
+
+	// Look up mission ID via reverse index so we can clean up the sorted-set index.
+	thread, err := s.GetThread(ctx, threadID)
+	if err != nil {
+		if err == ErrThreadNotFound {
+			// Already gone; treat as success to make deletion idempotent.
+			return nil
+		}
+		return fmt.Errorf("failed to resolve thread for deletion: %w", err)
+	}
+
+	rdb := s.client.Client()
+	threadKey := s.threadKey(thread.MissionID, threadID)
+	indexKey := s.threadIndexKey(thread.MissionID)
+	ridKey := s.threadRidKey(threadID)
+
+	pipe := rdb.Pipeline()
+	pipe.Del(ctx, threadKey)
+	pipe.Del(ctx, ridKey)
+	pipe.ZRem(ctx, indexKey, threadID)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to delete thread: %w", err)
+	}
+
+	return nil
 }
 
 // UpdateThread updates an existing thread.
@@ -642,6 +713,23 @@ func (s *RedisCheckpointStore) threadKey(missionID types.ID, threadID string) st
 // Format: {prefix}:thread:index:{mission_id}
 func (s *RedisCheckpointStore) threadIndexKey(missionID types.ID) string {
 	return fmt.Sprintf("%s:thread:index:%s", s.config.KeyPrefix, missionID.String())
+}
+
+// threadRidKey builds the Redis key for the thread reverse index.
+// The reverse index maps a threadID to its missionID so that GetThread can
+// resolve the full thread document without requiring the caller to supply the
+// mission ID.
+// Format: {prefix}:thread:rid:{thread_id}
+func (s *RedisCheckpointStore) threadRidKey(threadID string) string {
+	return fmt.Sprintf("%s:thread:rid:%s", s.config.KeyPrefix, threadID)
+}
+
+// checkpointRidKey builds the Redis key for the checkpoint reverse index.
+// The reverse index maps a checkpointID to its threadID so that Load/GetCheckpoint
+// can resolve the full document without requiring the caller to supply the thread ID.
+// Format: {prefix}:checkpoint:rid:{checkpoint_id}
+func (s *RedisCheckpointStore) checkpointRidKey(checkpointID string) string {
+	return fmt.Sprintf("%s:checkpoint:rid:%s", s.config.KeyPrefix, checkpointID)
 }
 
 // checkpointKey builds the Redis key for checkpoint data.
