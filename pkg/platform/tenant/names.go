@@ -51,13 +51,25 @@ func (n Names) Underscore() string {
 
 // Namespace returns the K8s namespace name for this tenant.
 //
-// Format: <slug>. Per spec tenant-provisioning-unification Requirement 1.5,
-// the namespace name equals the tenant ID exactly — no "tenant-" prefix.
-// Reserved-name protection (e.g., "default", "kube-system") is enforced
-// by the operator's admission webhook against a chart-managed denylist,
-// not by string transformation.
+// Format: tenant-<slug>. Every per-tenant K8s namespace in the platform
+// carries the "tenant-" prefix — the tenant-operator's ProvisionNamespace
+// path and the chart-shipped RoleBinding templates both produce / target
+// this form, and every live cluster has tenant-<slug> namespaces (e.g.
+// tenant-acme, tenant-zero-day-ai). The prefix is part of the contract,
+// not a transformation, because it cleanly avoids collision with K8s
+// reserved names ("default", "kube-system", "kube-public", etc.) — a
+// "tenant-" prefix can never collide with a K8s-managed namespace by
+// construction. The operator's admission webhook is a second line of
+// defense against pathological tenant IDs (e.g. an ID that itself
+// starts with "tenant-", which the platform-side tenant-ID validator
+// already rejects).
+//
+// History: this function previously returned bare <slug> per a draft
+// spec rule. The operator + chart never matched that contract and the
+// production cluster shape diverged silently; tenant-operator#87 flipped
+// this function to match the cluster reality.
 func (n Names) Namespace() string {
-	return n.id.String()
+	return "tenant-" + n.id.String()
 }
 
 // PostgresDB returns the per-tenant Postgres database name.

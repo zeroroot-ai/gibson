@@ -31,7 +31,7 @@ func TestNames_AllFormats(t *testing.T) {
 			name:     "single short",
 			tenantID: "acme",
 			want: want{
-				slug: "acme", underscore: "acme", namespace: "acme",
+				slug: "acme", underscore: "acme", namespace: "tenant-acme",
 				pgDB: "tenant_acme", pgRole: "tenant_acme_app",
 				neo4jSS: "tenant-acme-neo4j", neo4jSecret: "tenant-acme-neo4j-auth",
 				neo4jPVCRoot: "data-tenant-acme-neo4j",
@@ -48,7 +48,7 @@ func TestNames_AllFormats(t *testing.T) {
 			name:     "hyphenated multi-word",
 			tenantID: "zero-day-ai",
 			want: want{
-				slug: "zero-day-ai", underscore: "zero_day_ai", namespace: "zero-day-ai",
+				slug: "zero-day-ai", underscore: "zero_day_ai", namespace: "tenant-zero-day-ai",
 				pgDB: "tenant_zero_day_ai", pgRole: "tenant_zero_day_ai_app",
 				neo4jSS: "tenant-zero-day-ai-neo4j", neo4jSecret: "tenant-zero-day-ai-neo4j-auth",
 				neo4jPVCRoot: "data-tenant-zero-day-ai-neo4j",
@@ -65,7 +65,7 @@ func TestNames_AllFormats(t *testing.T) {
 			name:     "underscore separator",
 			tenantID: "smoke_solo",
 			want: want{
-				slug: "smoke_solo", underscore: "smoke_solo", namespace: "smoke_solo",
+				slug: "smoke_solo", underscore: "smoke_solo", namespace: "tenant-smoke_solo",
 				pgDB: "tenant_smoke_solo", pgRole: "tenant_smoke_solo_app",
 				neo4jSS: "tenant-smoke_solo-neo4j", neo4jSecret: "tenant-smoke_solo-neo4j-auth",
 				neo4jPVCRoot: "data-tenant-smoke_solo-neo4j",
@@ -82,7 +82,7 @@ func TestNames_AllFormats(t *testing.T) {
 			name:     "single character",
 			tenantID: "a",
 			want: want{
-				slug: "a", underscore: "a", namespace: "a",
+				slug: "a", underscore: "a", namespace: "tenant-a",
 				pgDB: "tenant_a", pgRole: "tenant_a_app",
 				neo4jSS: "tenant-a-neo4j", neo4jSecret: "tenant-a-neo4j-auth",
 				neo4jPVCRoot: "data-tenant-a-neo4j",
@@ -176,12 +176,24 @@ func TestNames_RedisIndexField_NotHashKey(t *testing.T) {
 	}
 }
 
-// TestNames_NamespaceMatchesSlug enforces Requirement 1.5: the K8s
-// namespace name equals the tenant ID exactly, no "tenant-" prefix.
-func TestNames_NamespaceMatchesSlug(t *testing.T) {
+// TestNames_NamespaceHasTenantPrefix enforces the contract surfaced
+// in tenant-operator#87: the per-tenant K8s namespace name is
+// "tenant-" + slug. Every artifact in the platform — the operator's
+// ProvisionNamespace path, the chart RoleBindings, the live cluster
+// namespaces — uses this form. The previous "Namespace == Slug"
+// contract was a draft-spec rule the operator + chart never matched.
+func TestNames_NamespaceHasTenantPrefix(t *testing.T) {
 	id := auth.MustNewTenantID("zero-day-ai")
 	n := tenant.FromTenantID(id)
-	if n.Namespace() != n.Slug() {
-		t.Errorf("Namespace() = %q, Slug() = %q — must be equal per Requirement 1.5", n.Namespace(), n.Slug())
+
+	const want = "tenant-zero-day-ai"
+	if got := n.Namespace(); got != want {
+		t.Errorf("Namespace() = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(n.Namespace(), "tenant-") {
+		t.Errorf("Namespace() = %q, must start with %q", n.Namespace(), "tenant-")
+	}
+	if n.Namespace() == n.Slug() {
+		t.Errorf("Namespace() = Slug() = %q — must differ (Namespace must carry tenant- prefix)", n.Slug())
 	}
 }
