@@ -100,6 +100,18 @@ const (
 	// read it when stamping the signal.
 	// Added by audit-compliance-emitter task 11.
 	AuthzDecision Key = "gibson.authz_decision"
+
+	// PerCallTokenCap stores the effective per-call LLM token cap derived from
+	// EffectivePerCallCap(node, constraints). When present and > 0, the daemon
+	// ExecuteLLM / StreamLLM handlers clamp MaxTokens before dispatch.
+	// When absent or 0, no cap from this mechanism is applied.
+	//
+	// The value type is int32 (matching MissionConstraints.MaxTokensPerCall).
+	// Callers that have mission context set this via harness.WithPerCallCapCtx;
+	// the daemon handlers read it via harness.PerCallTokenCapFromCtx.
+	//
+	// Spec: mission-author-experience M4 (gibson#133).
+	PerCallTokenCap Key = "gibson.per_call_token_cap"
 )
 
 // AuthzDecisionValue is the payload stored under the AuthzDecision context
@@ -211,5 +223,28 @@ func WithCallerComponentVersion(ctx context.Context, v string) context.Context {
 // Returns ("", false) if not set.
 func GetCallerComponentVersion(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(CallerComponentVersion).(string)
+	return v, ok
+}
+
+// WithPerCallTokenCap returns a new context carrying cap as the effective
+// per-call LLM token cap. cap == 0 means "no cap from this mechanism"
+// and is a no-op (the handler ignores zero caps).
+//
+// Intended to be set by orchestrator / harness code that has already
+// resolved EffectivePerCallCap(node, constraints) and wants to propagate
+// the result into daemon RPC handlers (ExecuteLLM, StreamLLM).
+//
+// Spec: mission-author-experience M4 (gibson#133).
+func WithPerCallTokenCap(ctx context.Context, cap int32) context.Context {
+	if cap <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, PerCallTokenCap, cap)
+}
+
+// GetPerCallTokenCap retrieves the effective per-call token cap from context.
+// Returns (0, false) when no cap has been set.
+func GetPerCallTokenCap(ctx context.Context) (int32, bool) {
+	v, ok := ctx.Value(PerCallTokenCap).(int32)
 	return v, ok
 }

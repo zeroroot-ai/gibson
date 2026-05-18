@@ -9,6 +9,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
+	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
@@ -139,6 +140,27 @@ func budgetScopeToProto(s budget.Scope) budgetpb.BudgetScope {
 	return budgetpb.BudgetScope_BUDGET_SCOPE_UNSPECIFIED
 }
 
+// applyContextPerCallCap clamps req.MaxTokens to the effective per-call cap
+// stored in context (if any). The cap is injected by harness / orchestrator
+// code that has already resolved EffectivePerCallCap(node, constraints) for
+// the executing mission node.
+//
+// When no cap is present in context, or when the cap is 0, req.MaxTokens is
+// left unchanged. When the caller already requested fewer tokens than the cap,
+// the lower value is preserved (the cap is a ceiling, not a floor).
+//
+// Spec: mission-author-experience M4 (gibson#133).
+func applyContextPerCallCap(ctx context.Context, req *llm.CompletionRequest) {
+	cap, ok := contextkeys.GetPerCallTokenCap(ctx)
+	if !ok || cap <= 0 {
+		return
+	}
+	capInt := int(cap)
+	if req.MaxTokens == 0 || req.MaxTokens > capInt {
+		req.MaxTokens = capInt
+	}
+}
+
 // estimateTokens returns a conservative input-token + max-tokens estimate
 // for an LLM call. Used by the budget pre-check. The estimate is
 // intentionally conservative — over-reserving is preferable to letting
@@ -254,6 +276,12 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	if req.TopP != nil {
 		completionReq.TopP = req.GetTopP()
 	}
+
+	// 6b. Apply per-call token cap from context (set by mission-aware callers
+	// that have resolved EffectivePerCallCap for the executing node).
+	// When no cap is present in context this is a no-op.
+	// Spec: mission-author-experience M4 (gibson#133).
+	applyContextPerCallCap(ctx, &completionReq)
 
 	// 7. Dispatch: tools → CompleteWithTools, json_schema → CompleteStructured, else Complete.
 	var resp *llm.CompletionResponse
@@ -390,6 +418,10 @@ func (s *DaemonServer) StreamLLM(req *tenantv1.StreamLLMRequest, stream tenantv1
 	if req.TopP != nil {
 		completionReq.TopP = req.GetTopP()
 	}
+
+	// 5b. Apply per-call token cap from context (mirrors ExecuteLLM step 6b).
+	// Spec: mission-author-experience M4 (gibson#133).
+	applyContextPerCallCap(ctx, &completionReq)
 
 	// 6. Open streaming channel.
 	chunks, err := prov.Stream(ctx, completionReq)

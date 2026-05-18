@@ -14,6 +14,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
+	"github.com/zero-day-ai/gibson/internal/contextkeys"
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
@@ -921,4 +922,151 @@ func TestStreamLLM_BudgetRecordedAfterStream(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, enforcer.recordCalls, "Record must be called once after stream completes")
 	assert.Positive(t, enforcer.recordedTotal, "recorded token count must be positive")
+}
+
+// ---------------------------------------------------------------------------
+// Per-call token cap tests (M4 — gibson#133)
+// ---------------------------------------------------------------------------
+
+// TestExecuteLLM_PerCallCap_clampsMaxTokens verifies that when a per-call cap is
+// placed in context via contextkeys.WithPerCallTokenCap, the ExecuteLLM handler
+// clamps req.MaxTokens to the cap before dispatching to the provider.
+// Scenario: caller requests 4096 tokens; context cap = 100; provider must see 100.
+func TestExecuteLLM_PerCallCap_clampsMaxTokens(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+
+	var capturedReq llm.CompletionRequest
+	prov := &stubMockProvider{
+		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			capturedReq = req
+			return &llm.CompletionResponse{
+				Message: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+			}, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
+		return prov, nil
+	})
+
+	maxReq := int32(4096)
+	ctx := contextkeys.WithPerCallTokenCap(tenantCtx("tenant-cap"), 100)
+	req := &tenantv1.ExecuteLLMRequest{
+		ProviderName: "my-openai",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
+		MaxTokens:    &maxReq,
+	}
+
+	_, err := s.ExecuteLLM(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, 100, capturedReq.MaxTokens,
+		"per-call cap (100) must override caller's max_tokens (4096)")
+}
+
+// TestExecuteLLM_PerCallCap_lowerCallerWins verifies that when the caller already
+// set MaxTokens below the context cap, the lower caller value is preserved.
+func TestExecuteLLM_PerCallCap_lowerCallerWins(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+
+	var capturedReq llm.CompletionRequest
+	prov := &stubMockProvider{
+		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			capturedReq = req
+			return &llm.CompletionResponse{Message: llm.Message{Content: "ok"}}, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
+		return prov, nil
+	})
+
+	callerMax := int32(50) // below the 500 cap
+	ctx := contextkeys.WithPerCallTokenCap(tenantCtx("tenant-cap2"), 500)
+	req := &tenantv1.ExecuteLLMRequest{
+		ProviderName: "my-openai",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
+		MaxTokens:    &callerMax,
+	}
+
+	_, err := s.ExecuteLLM(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, 50, capturedReq.MaxTokens,
+		"caller's lower MaxTokens (50) must be preserved; cap (500) is a ceiling")
+}
+
+// TestExecuteLLM_PerCallCap_noCapNoChange verifies that without a cap in context,
+// MaxTokens is passed through exactly as the caller set it.
+func TestExecuteLLM_PerCallCap_noCapNoChange(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+
+	var capturedReq llm.CompletionRequest
+	prov := &stubMockProvider{
+		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			capturedReq = req
+			return &llm.CompletionResponse{Message: llm.Message{Content: "ok"}}, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
+		return prov, nil
+	})
+
+	callerMax := int32(8192)
+	ctx := tenantCtx("tenant-nocap") // no cap in context
+	req := &tenantv1.ExecuteLLMRequest{
+		ProviderName: "my-openai",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
+		MaxTokens:    &callerMax,
+	}
+
+	_, err := s.ExecuteLLM(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, 8192, capturedReq.MaxTokens,
+		"no cap in context: MaxTokens must pass through unchanged")
+}
+
+// TestStreamLLM_PerCallCap_clampsMaxTokens verifies the StreamLLM handler applies
+// the context per-call cap identically to ExecuteLLM.
+func TestStreamLLM_PerCallCap_clampsMaxTokens(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+
+	var capturedReq llm.CompletionRequest
+	prov := &stubMockProvider{
+		streamFunc: func(_ context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
+			capturedReq = req
+			ch := make(chan llm.StreamChunk, 1)
+			ch <- llm.StreamChunk{FinishReason: llm.FinishReasonStop}
+			close(ch)
+			return ch, nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
+		return prov, nil
+	})
+
+	maxReq := int32(4096)
+	baseCtx := contextkeys.WithPerCallTokenCap(tenantCtx("tenant-stream-cap"), 100)
+	stream := &stubStreamServer{ctx: baseCtx}
+	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
+		ProviderName: "my-openai",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
+		MaxTokens:    &maxReq,
+	}, stream)
+
+	require.NoError(t, err)
+	assert.Equal(t, 100, capturedReq.MaxTokens,
+		"per-call cap (100) must override caller's max_tokens (4096) in StreamLLM")
 }

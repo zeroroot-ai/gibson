@@ -21,6 +21,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
@@ -173,6 +174,21 @@ type DefaultAgentHarness struct {
 	// parent's map is the authoritative source.
 	inFlightTasksMu sync.Mutex
 	inFlightTasks   map[string]int
+
+	// currentNode is the mission node being executed by this harness instance.
+	// When set, EffectivePerCallCap reads per-noun max_tokens_per_call from
+	// the node config and uses it to clamp LLM requests. nil disables the
+	// per-node override (mission-level cap still applies if missionConstraints
+	// is set).
+	// Spec: mission-author-experience M4 (gibson#133).
+	currentNode *missionv1.MissionNode
+
+	// missionConstraints carries the mission-level token budget constraints
+	// for this execution. EffectivePerCallCap falls back to
+	// missionConstraints.MaxTokensPerCall when no per-node override is
+	// present. nil means no mission-level cap from this mechanism.
+	// Spec: mission-author-experience M4 (gibson#133).
+	missionConstraints *missionv1.MissionConstraints
 }
 
 // Ensure DefaultAgentHarness implements AgentHarness
@@ -180,6 +196,44 @@ var _ AgentHarness = (*DefaultAgentHarness)(nil)
 
 // Ensure DefaultAgentHarness implements agent.AgentHarness (the minimal interface)
 var _ agent.AgentHarness = (*DefaultAgentHarness)(nil)
+
+// WithPerCallCapContext wires the per-call token cap into the harness.
+//
+// node is the mission node being executed by this harness (may be nil when
+// no per-node override applies). constraints carries the mission-level
+// MissionConstraints (may be nil when no mission-level cap is configured).
+//
+// When both are set, EffectivePerCallCap applies the cascade documented in
+// per_call_cap.go: per-noun MaxTokensPerCall → mission-level MaxTokensPerCall
+// → 0 (no cap). The effective cap is applied before every LLM provider call
+// in Complete, CompleteWithTools, and Stream.
+//
+// This method returns the receiver so it can be chained at construction time.
+// Spec: mission-author-experience M4 (gibson#133).
+func (h *DefaultAgentHarness) WithPerCallCapContext(node *missionv1.MissionNode, constraints *missionv1.MissionConstraints) *DefaultAgentHarness {
+	h.currentNode = node
+	h.missionConstraints = constraints
+	return h
+}
+
+// applyPerCallCap clamps req.MaxTokens to the effective per-call cap.
+//
+// If no cap applies (EffectivePerCallCap returns 0), req.MaxTokens is left
+// unchanged. If the caller already set a lower MaxTokens, that lower value
+// is preserved (the cap is a ceiling, not a floor).
+//
+// Called immediately before each provider call in Complete, CompleteWithTools,
+// and Stream.
+func (h *DefaultAgentHarness) applyPerCallCap(req *llm.CompletionRequest) {
+	cap := EffectivePerCallCap(h.currentNode, h.missionConstraints)
+	if cap <= 0 {
+		return
+	}
+	capInt := int(cap)
+	if req.MaxTokens == 0 || req.MaxTokens > capInt {
+		req.MaxTokens = capInt
+	}
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // LLM Access Methods
@@ -235,6 +289,12 @@ func (h *DefaultAgentHarness) Complete(ctx context.Context, slot string, message
 			llm.NewSystemMessage(*options.SystemPrompt),
 		}, req.Messages...)
 	}
+
+	// Apply per-call token cap (per-node override → mission-level → no cap).
+	// Must be called after all caller-provided options are applied so it
+	// acts as a ceiling, never a floor.
+	// Spec: mission-author-experience M4 (gibson#133).
+	h.applyPerCallCap(&req)
 
 	// Emit LLM request event
 	if h.eventLogger != nil {
@@ -366,6 +426,10 @@ func (h *DefaultAgentHarness) CompleteWithTools(ctx context.Context, slot string
 		}, req.Messages...)
 	}
 
+	// Apply per-call token cap (per-node override → mission-level → no cap).
+	// Spec: mission-author-experience M4 (gibson#133).
+	h.applyPerCallCap(&req)
+
 	// Emit LLM request event
 	if h.eventLogger != nil {
 		h.eventLogger.Event(ctx, EventLLMRequest, "llm request with tools", LLMRequestEventData{
@@ -495,6 +559,10 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 			llm.NewSystemMessage(*options.SystemPrompt),
 		}, req.Messages...)
 	}
+
+	// Apply per-call token cap (per-node override → mission-level → no cap).
+	// Spec: mission-author-experience M4 (gibson#133).
+	h.applyPerCallCap(&req)
 
 	// Execute streaming completion
 	chunks, err := provider.Stream(ctx, req)
