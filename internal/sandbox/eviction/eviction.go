@@ -1,7 +1,7 @@
 // Package eviction implements the in-daemon spot-instance eviction drain
 // handler. It watches /var/run/aws/spot-interruption-notice (a hostPath
 // file written by the aws-node-termination-handler DaemonSet on each
-// gibson.io/sandbox-host node) and, on notice, gracefully drains all
+// zero-day.ai/sandbox-host node) and, on notice, gracefully drains all
 // in-flight Setec detonations before the 2-minute AWS eviction deadline.
 //
 // Design: setec-sandbox-prod-default §C7 / §"Spot eviction handling"

@@ -7,11 +7,24 @@
 # across the workspace for the pattern "gibson.io" and exits non-zero if any
 # match falls outside the allowlisted comment-only files.
 #
-# Allowlist (four files with intentional historical references):
-#   enterprise/deploy/helm/gibson/templates/_spiffe-id.tpl
-#   enterprise/deploy/helm/gibson/values-aws-prod.yaml
-#   enterprise/platform/dashboard/scripts/check-no-direct-daemon-grpc.mjs
+# WORKSPACE_ROOT is computed as three levels up from platform/gibson/scripts/,
+# which resolves to the enterprise/ directory.  Allowlist paths below are
+# relative to that root (i.e. they do NOT start with "enterprise/").
+#
+# Allowlist (intentional historical or pending-migration references):
+#   deploy/helm/gibson/templates/_spiffe-id.tpl
+#   deploy/helm/gibson/values-aws-prod.yaml
+#   platform/dashboard/scripts/check-no-direct-daemon-grpc.mjs
 #   CLAUDE.md
+#   deploy/helm/gibson-workloads/values.yaml
+#     ↑ live Kubernetes node-selector label "gibson.io/sandbox-host" used on
+#       EKS bare-metal nodes; rename requires cluster re-labelling — tracked at
+#       zero-day-ai/gibson#156
+#   deploy/helm/gibson-workloads/templates/_spiffe-id.tpl
+#   deploy/helm/gibson-workloads/templates/_validators.tpl
+#     ↑ same pending rename; validator error messages reference the live label
+#   deploy/helm/gibson-workloads/templates/gibson/statefulset.yaml
+#     ↑ comment referencing the live label
 #
 # Exit codes:
 #   0  No violations found.
@@ -24,11 +37,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Workspace root is five levels up from core/gibson/scripts/
+# Workspace root is three levels up from platform/gibson/scripts/
+# enterprise/platform/gibson/scripts/ → enterprise/platform/gibson/ →
+# enterprise/platform/ → enterprise/
 WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 GUARD_NAME="check-no-gibson-io"
-SELFTEST_FIXTURE="${WORKSPACE_ROOT}/core/gibson/scripts/_check_no_gibson_io_selftest_fixture.txt"
+SELFTEST_FIXTURE="${WORKSPACE_ROOT}/platform/gibson/scripts/_check_no_gibson_io_selftest_fixture.txt"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,14 +58,27 @@ cleanup_fixture() {
 
 # ---------------------------------------------------------------------------
 # Allowlist — exact workspace-relative paths whose gibson.io references are
-# intentional historical documentation. Do not use glob patterns here.
+# intentional (historical documentation or pending infra migration).
+# Paths are relative to WORKSPACE_ROOT (enterprise/), NOT zero-day.ai/.
+# Do not use glob patterns here.
 # ---------------------------------------------------------------------------
 
 ALLOWLIST=(
-    "enterprise/deploy/helm/gibson/templates/_spiffe-id.tpl"
-    "enterprise/deploy/helm/gibson/values-aws-prod.yaml"
-    "enterprise/platform/dashboard/scripts/check-no-direct-daemon-grpc.mjs"
+    # Gibson Helm chart — legacy spiffe-id comment and prod values
+    "deploy/helm/gibson/templates/_spiffe-id.tpl"
+    "deploy/helm/gibson/values-aws-prod.yaml"
+    # Dashboard guard — comment explaining what the regex does NOT match
+    "platform/dashboard/scripts/check-no-direct-daemon-grpc.mjs"
+    # Root workspace map
     "CLAUDE.md"
+    # Gibson-workloads Helm chart — live Kubernetes node label / taint key
+    # "gibson.io/sandbox-host" is a real k8s label applied to EKS bare-metal
+    # sandbox-host nodes. Renaming to "zero-day.ai/sandbox-host" requires
+    # re-labelling cluster nodes — tracked at zero-day-ai/gibson#156.
+    "deploy/helm/gibson-workloads/values.yaml"
+    "deploy/helm/gibson-workloads/templates/_spiffe-id.tpl"
+    "deploy/helm/gibson-workloads/templates/_validators.tpl"
+    "deploy/helm/gibson-workloads/templates/gibson/statefulset.yaml"
 )
 
 is_allowlisted() {
@@ -113,7 +141,7 @@ while IFS= read -r -d '' file; do
 
     # Skip spec-workflow snapshots, docs history, changelogs — read-only reference material
     case "${rel}" in
-        .spec-workflow/*|enterprise/docs/*|"CHANGELOG.md"|"*CHANGELOG*") continue ;;
+        .spec-workflow/*|docs/*|"CHANGELOG.md"|"*CHANGELOG*") continue ;;
     esac
 
     # Grep for the pattern (ERE, not PCRE — portable)
@@ -131,6 +159,7 @@ done < <(find "${WORKSPACE_ROOT}" \
     \( -path "*/.git" -prune \) \
     -o \( -path "*/.claude" -prune \) \
     -o \( -path "*/.worktrees" -prune \) \
+    -o \( -path "*/dashboard-worktrees" -prune \) \
     -o \( -path "*/node_modules" -prune \) \
     -o \( -path "*/vendor" -prune \) \
     -o \( -path "*/.next" -prune \) \
