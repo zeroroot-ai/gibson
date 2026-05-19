@@ -1,18 +1,17 @@
-// Package tenants provides tenant metadata enumeration utilities that are
-// intentionally OUTSIDE internal/datapool/admin/.
+package admin
+
+// lister.go — relocated from internal/tenants/ per ADR-0023.
 //
-// The admin pool (internal/datapool/admin/) is the cross-tenant data-plane
-// gate — its import is restricted to internal/admin/, internal/datapool/admin/,
-// internal/migrate/, and cmd/gibson-migrate/ per the gibsoncheck
-// adminpoolacquire rule (database-per-tenant-data-plane Requirement 11.5).
+// Tenant enumeration via the Kubernetes API server is an administrative
+// concern and lives behind the gibsoncheck `adminpoolacquire` import
+// restriction. Daemon hot-path code cannot reach it; only admin and
+// migration call sites can.
 //
-// Tenant metadata enumeration (reading the Kubernetes Tenant CRD list) is a
-// separate concern from cross-tenant data access. It does not touch any
-// tenant data and so does not need the same restrictions. Callers that need
-// "list me every tenant id" (e.g. the daemon's startup migration check, the
-// in-flight-mission recovery loop, the gibson-migrate CLI) use this package
-// instead of importing internal/datapool/admin.
-package tenants
+// The K8sLister filters tenants whose metadata.deletionTimestamp is set
+// — those are mid-teardown and consumers (mission recovery, migration
+// check) should not act on them. The 2026-05-19 testa123 incident bit
+// the previous mission-recovery loop precisely because the lister
+// returned a tenant whose finalizer was stuck.
 
 import (
 	"context"
@@ -35,8 +34,12 @@ var tenantGVR = schema.GroupVersionResource{
 // Lister abstracts the source of tenant IDs. In production, a K8s-backed
 // lister is used; tests inject fakes.
 type Lister interface {
-	// ListTenants returns the IDs of all known tenants. The returned slice
-	// may be empty when no tenants exist; the caller iterates as-is.
+	// ListTenants returns the IDs of all known tenants whose data plane
+	// is in scope for admin work — i.e. tenants whose Kubernetes Tenant
+	// CRD exists and does NOT have a deletionTimestamp set. Tenants in
+	// the middle of teardown are excluded; callers that genuinely want
+	// to act on dying tenants should use a future ListAllIncludingDying
+	// method instead.
 	ListTenants(ctx context.Context) ([]auth.TenantID, error)
 }
 
@@ -49,6 +52,12 @@ type k8sLister struct {
 
 // NewK8sLister creates a Lister backed by the Kubernetes dynamic client.
 // namespace may be empty for cluster-scoped resources.
+//
+// NOTE: this constructor MUST NOT be invoked from daemon hot-path code.
+// The gibsoncheck `adminpoolacquire` rule restricts imports of this
+// package to `internal/admin/`, `internal/datapool/admin/`,
+// `internal/migrate/`, and `cmd/gibson-migrate/`. See ADR-0023 for the
+// underlying decision.
 func NewK8sLister(client dynamic.Interface, namespace string) Lister {
 	return &k8sLister{client: client, namespace: namespace}
 }
@@ -63,13 +72,19 @@ func (l *k8sLister) ListTenants(ctx context.Context) ([]auth.TenantID, error) {
 
 	list, err := resource.List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("tenants: ListTenants: %w", err)
+		return nil, fmt.Errorf("admin: ListTenants: %w", err)
 	}
 
 	out := make([]auth.TenantID, 0, len(list.Items))
 	for _, item := range list.Items {
 		meta, ok := item.Object["metadata"].(map[string]any)
 		if !ok {
+			continue
+		}
+		// Skip tenants mid-teardown: a non-empty deletionTimestamp means
+		// the controller is winding down this tenant; admin / migration
+		// work should not run against it.
+		if deletionTs, hasDeletion := meta["deletionTimestamp"].(string); hasDeletion && deletionTs != "" {
 			continue
 		}
 		tenantStr, ok := meta["name"].(string)

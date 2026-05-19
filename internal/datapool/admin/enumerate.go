@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/tenants"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -41,7 +40,7 @@ var ErrStopIteration = errors.New("admin: stop iteration")
 func ForEachTenant(
 	ctx context.Context,
 	adminConn *datapool.AdminConn,
-	lister tenants.Lister,
+	lister Lister,
 	tenantPool datapool.Pool,
 	fn func(tenant auth.TenantID, conn *datapool.Conn) error,
 ) error {
