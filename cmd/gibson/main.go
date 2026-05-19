@@ -34,6 +34,27 @@ var defaultDaemonFactory daemonFactory = func(cfg *config.Config, opts ...daemon
 	return daemon.New(cfg, opts...)
 }
 
+// vaultJWTSourceCloser is the minimum surface main.go needs from a JWT
+// source: it must satisfy jwtsource.JWTSource (so daemon.WithVaultJWTSource
+// accepts it) AND expose Close() so the shutdown path can release the
+// underlying SPIRE Workload API connection.
+type vaultJWTSourceCloser interface {
+	jwtsource.JWTSource
+	Close() error
+}
+
+// vaultJWTSourceFactory constructs the daemon's Vault JWT source.
+// Replaceable in tests so they can avoid blocking on a real SPIRE
+// Workload API socket.
+type vaultJWTSourceFactory func(ctx context.Context, socketPath string) (vaultJWTSourceCloser, error)
+
+// defaultVaultJWTSourceFactory wraps jwtsource.NewSPIREJWTSource. This is
+// the production path: blocks until the SPIRE Workload API has pushed
+// the first JWT bundle, returns an error if the socket is unreachable.
+var defaultVaultJWTSourceFactory vaultJWTSourceFactory = func(ctx context.Context, socketPath string) (vaultJWTSourceCloser, error) {
+	return jwtsource.NewSPIREJWTSource(ctx, socketPath)
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -46,7 +67,7 @@ func main() {
 		select {}
 	}()
 
-	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr, defaultDaemonFactory))
+	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr, defaultDaemonFactory, defaultVaultJWTSourceFactory))
 }
 
 // run is the fully-testable entry point. It returns an exit code.
@@ -55,6 +76,7 @@ func run(
 	args []string,
 	stdout, stderr io.Writer,
 	factory daemonFactory,
+	jwtSourceFactory vaultJWTSourceFactory,
 ) int {
 	fs := flag.NewFlagSet("gibson", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -133,12 +155,35 @@ func run(
 	// gibson#169 wires SPIREJWTSource the audience becomes mandatory.
 	vaultJWTAudience := os.Getenv("GIBSON_DAEMON_VAULT_JWT_AUDIENCE")
 
-	// Vault JWT source — TODO gibson#169: replace DisabledJWTSource with
-	// SPIREJWTSource(ctx, GIBSON_DAEMON_SPIRE_SOCKET) once the SPIRE
-	// Workload API socket is mounted on the gibson pod. Until then,
-	// every AuthMethodJWT broker config surfaces a clear
-	// ErrJWTSourceDisabled diagnostic naming this TODO.
-	var vaultJWTSource jwtsource.JWTSource = jwtsource.DisabledJWTSource{}
+	// Vault JWT source — SPIRE Workload API JWT-SVID source (gibson#169).
+	//
+	// The chart mounts the SPIRE agent's Workload API socket on the
+	// gibson statefulset (deploy#354). The socket path is sourced from
+	// GIBSON_DAEMON_SPIRE_SOCKET; empty value falls back to
+	// jwtsource.DefaultSPIRESocketPath (unix:///run/spire/sockets/api.sock).
+	//
+	// Fail-loud: if the socket is unreachable at boot, the daemon
+	// refuses to start. There is no silent fallback to
+	// DisabledJWTSource — that would let the daemon come up but fail
+	// every AuthMethodJWT broker refresh with a confusing per-tenant
+	// error. Missing socket means the chart is misconfigured.
+	//
+	// Spec: ADR-0009 amendment (docs#34); gibson#167 PRD.
+	vaultJWTSource, err := jwtSourceFactory(ctx, os.Getenv("GIBSON_DAEMON_SPIRE_SOCKET"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gibson: SPIRE JWT source init error: %v\n", err)
+		return 1
+	}
+	// Close the SPIRE Workload API connection on shutdown. The daemon's
+	// graceful-shutdown chain handles its own resources; the JWT source
+	// is owned by main and closed alongside the daemon. The defer
+	// ordering — Close after Run returns — matches the pattern used for
+	// other process-lifetime resources.
+	defer func() {
+		if cerr := vaultJWTSource.Close(); cerr != nil {
+			fmt.Fprintf(stderr, "gibson: SPIRE JWT source close error: %v\n", cerr)
+		}
+	}()
 
 	// Construct and start daemon.
 	d, err := factory(cfg,

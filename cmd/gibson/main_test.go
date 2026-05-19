@@ -12,8 +12,48 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon"
+	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
 	"github.com/zero-day-ai/gibson/pkg/version"
 )
+
+// fakeJWTSource is a test double for vaultJWTSourceCloser. It tracks
+// whether Close has been called so tests can assert main.go threads the
+// shutdown lifecycle correctly.
+type fakeJWTSource struct {
+	closed bool
+}
+
+func (f *fakeJWTSource) Token(_ context.Context, _ string) (string, error) {
+	return "fake-jwt-from-test", nil
+}
+
+func (f *fakeJWTSource) Close() error {
+	f.closed = true
+	return nil
+}
+
+// passthroughJWTSourceFactory returns a vaultJWTSourceFactory that hands
+// back a pre-constructed fakeJWTSource. Used by every Test_run subtest
+// that gets past the config-load step so we don't block on a real SPIRE
+// Workload API socket dial.
+func passthroughJWTSourceFactory(src *fakeJWTSource) vaultJWTSourceFactory {
+	return func(_ context.Context, _ string) (vaultJWTSourceCloser, error) {
+		return src, nil
+	}
+}
+
+// failingJWTSourceFactory returns a factory that always errors. Used to
+// test the fail-loud branch when the SPIRE socket is unreachable.
+func failingJWTSourceFactory(err error) vaultJWTSourceFactory {
+	return func(_ context.Context, _ string) (vaultJWTSourceCloser, error) {
+		return nil, err
+	}
+}
+
+// assertSatisfiesJWTSource is a compile-time check that fakeJWTSource
+// satisfies jwtsource.JWTSource (and thus vaultJWTSourceCloser via the
+// inherited Close method).
+var _ jwtsource.JWTSource = (*fakeJWTSource)(nil)
 
 // fakeDaemon is a test double for daemonRunner.
 type fakeDaemon struct {
@@ -68,18 +108,22 @@ func Test_run(t *testing.T) {
 	// Each subtest provides its own factory to inject fake daemons.
 
 	tests := []struct {
-		name       string
-		args       func(t *testing.T) []string
-		factory    func(t *testing.T) daemonFactory
-		wantCode   int
-		wantStdout string // substring that must appear in stdout
-		wantStderr string // substring that must appear in stderr
+		name             string
+		args             func(t *testing.T) []string
+		factory          func(t *testing.T) daemonFactory
+		jwtSourceFactory func(t *testing.T) vaultJWTSourceFactory
+		wantCode         int
+		wantStdout       string // substring that must appear in stdout
+		wantStderr       string // substring that must appear in stderr
 	}{
 		{
 			name: "--version prints version",
 			args: func(*testing.T) []string { return []string{"--version"} },
 			factory: func(*testing.T) daemonFactory {
 				return fakeFactory(&fakeDaemon{})
+			},
+			jwtSourceFactory: func(*testing.T) vaultJWTSourceFactory {
+				return passthroughJWTSourceFactory(&fakeJWTSource{})
 			},
 			wantCode:   0,
 			wantStdout: version.Version,
@@ -90,6 +134,9 @@ func Test_run(t *testing.T) {
 			factory: func(*testing.T) daemonFactory {
 				return fakeFactory(&fakeDaemon{})
 			},
+			jwtSourceFactory: func(*testing.T) vaultJWTSourceFactory {
+				return passthroughJWTSourceFactory(&fakeJWTSource{})
+			},
 			wantCode: 0,
 		},
 		{
@@ -97,6 +144,9 @@ func Test_run(t *testing.T) {
 			args: func(*testing.T) []string { return []string{"--not-a-flag"} },
 			factory: func(*testing.T) daemonFactory {
 				return fakeFactory(&fakeDaemon{})
+			},
+			jwtSourceFactory: func(*testing.T) vaultJWTSourceFactory {
+				return passthroughJWTSourceFactory(&fakeJWTSource{})
 			},
 			wantCode:   1,
 			wantStderr: "flag provided but not defined",
@@ -109,6 +159,9 @@ func Test_run(t *testing.T) {
 			factory: func(*testing.T) daemonFactory {
 				return fakeFactory(&fakeDaemon{})
 			},
+			jwtSourceFactory: func(*testing.T) vaultJWTSourceFactory {
+				return passthroughJWTSourceFactory(&fakeJWTSource{})
+			},
 			wantCode: 0,
 		},
 		{
@@ -118,6 +171,9 @@ func Test_run(t *testing.T) {
 			},
 			factory: func(*testing.T) daemonFactory {
 				return fakeFactory(&fakeDaemon{})
+			},
+			jwtSourceFactory: func(*testing.T) vaultJWTSourceFactory {
+				return passthroughJWTSourceFactory(&fakeJWTSource{})
 			},
 			wantCode: 1,
 		},
@@ -135,6 +191,15 @@ func Test_run(t *testing.T) {
 				})
 				return fakeFactory(fd)
 			},
+			jwtSourceFactory: func(t *testing.T) vaultJWTSourceFactory {
+				src := &fakeJWTSource{}
+				t.Cleanup(func() {
+					if !src.closed {
+						t.Error("expected JWT source Close to be called on shutdown")
+					}
+				})
+				return passthroughJWTSourceFactory(src)
+			},
 			wantCode: 0,
 		},
 		{
@@ -144,6 +209,18 @@ func Test_run(t *testing.T) {
 			},
 			factory: func(*testing.T) daemonFactory {
 				return errorFactory(errors.New("init failed"))
+			},
+			jwtSourceFactory: func(t *testing.T) vaultJWTSourceFactory {
+				// JWT source is constructed before daemon factory;
+				// even when daemon factory fails, the deferred Close
+				// must still fire to release the SPIRE socket.
+				src := &fakeJWTSource{}
+				t.Cleanup(func() {
+					if !src.closed {
+						t.Error("expected JWT source Close to be called even when daemon factory fails")
+					}
+				})
+				return passthroughJWTSourceFactory(src)
 			},
 			wantCode:   1,
 			wantStderr: "init failed",
@@ -156,8 +233,25 @@ func Test_run(t *testing.T) {
 			factory: func(*testing.T) daemonFactory {
 				return fakeFactory(&fakeDaemon{runErr: errors.New("port already in use")})
 			},
+			jwtSourceFactory: func(*testing.T) vaultJWTSourceFactory {
+				return passthroughJWTSourceFactory(&fakeJWTSource{})
+			},
 			wantCode:   1,
 			wantStderr: "port already in use",
+		},
+		{
+			name: "JWT source init error exits 1",
+			args: func(t *testing.T) []string {
+				return []string{"--config", writeTempConfig(t)}
+			},
+			factory: func(*testing.T) daemonFactory {
+				return fakeFactory(&fakeDaemon{})
+			},
+			jwtSourceFactory: func(*testing.T) vaultJWTSourceFactory {
+				return failingJWTSourceFactory(errors.New("spire-agent socket unreachable"))
+			},
+			wantCode:   1,
+			wantStderr: "spire-agent socket unreachable",
 		},
 	}
 
@@ -169,8 +263,9 @@ func Test_run(t *testing.T) {
 
 			args := tc.args(t)
 			factory := tc.factory(t)
+			jwtFactory := tc.jwtSourceFactory(t)
 
-			code := run(ctx, args, &stdout, &stderr, factory)
+			code := run(ctx, args, &stdout, &stderr, factory, jwtFactory)
 
 			if code != tc.wantCode {
 				t.Errorf("exit code = %d, want %d\nstdout: %s\nstderr: %s",
@@ -228,7 +323,10 @@ func Test_malformedConfig(t *testing.T) {
 	path := writeMalformedConfig(t)
 	var stdout, stderr bytes.Buffer
 	ctx := context.Background()
-	code := run(ctx, []string{"--config", path}, &stdout, &stderr, fakeFactory(&fakeDaemon{}))
+	code := run(ctx, []string{"--config", path}, &stdout, &stderr,
+		fakeFactory(&fakeDaemon{}),
+		passthroughJWTSourceFactory(&fakeJWTSource{}),
+	)
 	if code != 1 {
 		t.Errorf("expected exit 1 for malformed config, got %d\nstderr: %s", code, stderr.String())
 	}
