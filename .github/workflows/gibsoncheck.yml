@@ -42,7 +42,21 @@ jobs:
         with:
           go-version: '1.25'
 
+      # Configure git so the Go toolchain can fetch private github.com/zero-day-ai/*
+      # modules (e.g. testfixtures) that are not on the public module proxy.
+      # GONOSUMDB tells Go not to verify these against sum.golang.org (private repos
+      # cannot appear there). GOPRIVATE disables the proxy for the same scope.
+      - name: Configure private module access
+        run: |
+          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
+        env:
+          GONOSUMDB: github.com/zero-day-ai/*
+          GOPRIVATE: github.com/zero-day-ai/*
+
       - name: Run gibsoncheck against the daemon
+        env:
+          GONOSUMDB: github.com/zero-day-ai/*
+          GOPRIVATE: github.com/zero-day-ai/*
         run: |
           set -e
           go build -o bin/gibsoncheck ./tools/gibsoncheck
@@ -56,8 +70,14 @@ jobs:
 
       - name: Run gibsoncheck self-tests
         run: go test -race ./tools/gibsoncheck/...
+        env:
+          GONOSUMDB: github.com/zero-day-ai/*
+          GOPRIVATE: github.com/zero-day-ai/*
 
       - name: Run adminpoolacquire guard on full codebase
+        env:
+          GONOSUMDB: github.com/zero-day-ai/*
+          GOPRIVATE: github.com/zero-day-ai/*
         run: |
           set -e
           go build -o bin/gibsoncheck ./tools/gibsoncheck
