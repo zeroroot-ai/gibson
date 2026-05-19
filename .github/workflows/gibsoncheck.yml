@@ -46,13 +46,19 @@ jobs:
 
       # Configure git credentials BEFORE setup-go so that module download works.
       # The PRIVATE_REPO_TOKEN is a PAT with read access to all zero-day-ai repos.
-      # We write .netrc because git uses it for HTTPS credential resolution and it
-      # is honoured by both git and the Go module VCS fetch layer.
+      # We write both .netrc (for git) and configure the credential store (for
+      # go/packages which may invoke git outside the repo working dir).
       - name: Configure git credentials for private modules
         run: |
-          echo "machine github.com login x-access-token password ${{ secrets.PRIVATE_REPO_TOKEN }}" \
-            >> "$HOME/.netrc"
+          # .netrc provides credentials for git HTTPS without a credential helper.
+          printf 'machine github.com\nlogin oauth2\npassword %s\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.netrc"
           chmod 0600 "$HOME/.netrc"
+          # Also set via git config so go/packages.Load (which calls git ls-remote)
+          # picks up auth even when running outside the working tree.
+          git config --global credential.helper store
+          printf 'https://oauth2:%s@github.com\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.git-credentials"
 
       - uses: actions/setup-go@v5
         with:
