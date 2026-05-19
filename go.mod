@@ -16,6 +16,7 @@ require (
 	github.com/buckhx/gobert v0.0.0-20190731141805-265756fed232
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.9.0
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
@@ -42,6 +43,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
+	github.com/zero-day-ai/ast-checks v0.1.1
 	github.com/zero-day-ai/sdk v0.105.1
 	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
 	go.opentelemetry.io/otel v1.43.0
@@ -132,7 +134,6 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gage-technologies/mistral-go v1.1.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
