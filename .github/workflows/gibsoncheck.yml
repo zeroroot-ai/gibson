@@ -48,7 +48,7 @@ jobs:
       # cannot appear there). GOPRIVATE disables the proxy for the same scope.
       - name: Configure private module access
         run: |
-          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "https://github.com/"
         env:
           GONOSUMDB: github.com/zero-day-ai/*
           GOPRIVATE: github.com/zero-day-ai/*
