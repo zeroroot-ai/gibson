@@ -35,29 +35,35 @@ concurrency:
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    env:
+      # GONOSUMDB + GOPRIVATE tell the Go toolchain to skip the public checksum
+      # database for private zero-day-ai modules and fetch them directly via git.
+      # This must be set before setup-go (which may invoke go mod download).
+      GONOSUMDB: github.com/zero-day-ai/*
+      GOPRIVATE: github.com/zero-day-ai/*
     steps:
       - uses: actions/checkout@v4
+
+      # Configure git credentials BEFORE setup-go so that module download works.
+      # The PRIVATE_REPO_TOKEN is a PAT with read access to all zero-day-ai repos.
+      # We write .netrc because git uses it for HTTPS credential resolution and it
+      # is honoured by both git and the Go module VCS fetch layer.
+      - name: Configure git credentials for private modules
+        run: |
+          echo "machine github.com login x-access-token password ${{ secrets.PRIVATE_REPO_TOKEN }}" \
+            >> "$HOME/.netrc"
+          chmod 0600 "$HOME/.netrc"
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
 
-      # Configure git so the Go toolchain can fetch private github.com/zero-day-ai/*
-      # modules (e.g. testfixtures) that are not on the public module proxy.
-      # GONOSUMDB tells Go not to verify these against sum.golang.org (private repos
-      # cannot appear there). GOPRIVATE disables the proxy for the same scope.
-      - name: Configure private module access
-        run: |
-          git config --global "http.https://github.com/.extraheader" \
-            "Authorization: Bearer ${{ secrets.PRIVATE_REPO_TOKEN }}"
-        env:
-          GONOSUMDB: github.com/zero-day-ai/*
-          GOPRIVATE: github.com/zero-day-ai/*
+      # Pre-download all modules so gibsoncheck's go/packages.Load can resolve imports
+      # without network access.  This is a no-op on cache-warm runners.
+      - name: Download Go modules
+        run: go mod download
 
       - name: Run gibsoncheck against the daemon
-        env:
-          GONOSUMDB: github.com/zero-day-ai/*
-          GOPRIVATE: github.com/zero-day-ai/*
         run: |
           set -e
           go build -o bin/gibsoncheck ./tools/gibsoncheck
@@ -71,14 +77,8 @@ jobs:
 
       - name: Run gibsoncheck self-tests
         run: go test -race ./tools/gibsoncheck/...
-        env:
-          GONOSUMDB: github.com/zero-day-ai/*
-          GOPRIVATE: github.com/zero-day-ai/*
 
       - name: Run adminpoolacquire guard on full codebase
-        env:
-          GONOSUMDB: github.com/zero-day-ai/*
-          GOPRIVATE: github.com/zero-day-ai/*
         run: |
           set -e
           go build -o bin/gibsoncheck ./tools/gibsoncheck
