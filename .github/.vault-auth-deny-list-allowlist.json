@@ -7,19 +7,19 @@
   },
   {
     "file": "go.mod",
-    "line": 167,
+    "line": 168,
     "token": "auth/kubernetes",
     "reason": "pre-ADR-0009 cross-reference"
   },
   {
     "file": "go.mod",
-    "line": 167,
+    "line": 168,
     "token": "hashicorp/vault/api/auth/kubernetes",
     "reason": "pre-ADR-0009 cross-reference"
   },
   {
     "file": "go.mod",
-    "line": 167,
+    "line": 168,
     "token": "vault/api/auth/kubernetes",
     "reason": "pre-ADR-0009 cross-reference"
   },
