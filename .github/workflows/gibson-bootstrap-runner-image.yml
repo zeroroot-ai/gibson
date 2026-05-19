@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   build:
-    uses: zero-day-ai/.github/.github/workflows/reusable-image-build.yml@main
+    uses: ./.github/workflows/reusable-image-build.yml
     permissions:
       contents: write
       packages: write

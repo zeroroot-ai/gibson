@@ -89,7 +89,7 @@ jobs:
       always() &&
       (needs.gate-sandbox-e2e.result == 'success' ||
        needs.gate-sandbox-e2e.result == 'skipped')
-    uses: zero-day-ai/.github/.github/workflows/reusable-image-build.yml@main
+    uses: ./.github/workflows/reusable-image-build.yml
     permissions:
       contents: write
       packages: write
