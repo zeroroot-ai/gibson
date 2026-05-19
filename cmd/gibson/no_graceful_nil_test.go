@@ -8,13 +8,37 @@ you may not use this file except in compliance with the License.
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
 	astchecks "github.com/zero-day-ai/ast-checks"
 )
+
+// internalScopeDirs returns every first-level directory under repoRoot/internal/.
+// Used to widen the walker scope to every gibson internal package — per
+// slice 3.2 of the production-readiness epic. Adding a new internal/
+// package automatically brings it into scope; no manual list to maintain.
+func internalScopeDirs(t *testing.T, repoRoot string) []string {
+	t.Helper()
+	internalRoot := filepath.Join(repoRoot, "internal")
+	entries, err := os.ReadDir(internalRoot)
+	if err != nil {
+		t.Fatalf("read internal/: %v", err)
+	}
+	var dirs []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dirs = append(dirs, filepath.Join(internalRoot, e.Name()))
+	}
+	sort.Strings(dirs)
+	return dirs
+}
 
 // TestNoGracefulNilInRequestPaths walks every request-path Go file in
 // the daemon and flags any `if X == nil { return ... }` pattern where
@@ -47,7 +71,8 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 	// Fixture subtest: assert walker correctness against known fixtures.
 	t.Run("fixtures", func(t *testing.T) {
 		fixturesRoot := filepath.Join(filepath.Dir(thisFile), "testdata", "scope")
-		matchers := []astchecks.Matcher{astchecks.NewNilGuard(false)}
+		// Narrowed pattern: receiver-field shape only. Per slice 3.2.
+		matchers := []astchecks.Matcher{astchecks.NewNilGuard(true)}
 		// Two known-illegal fixtures, no allowlist for fixtures.
 		opts := astchecks.WalkOpts{
 			ScopeDirs:     []string{filepath.Join(fixturesRoot, "internal")},
@@ -183,28 +208,106 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/state/client.go:229": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "nil-client shim for tests"},
 		"internal/state/tenant_names.go:83": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite nil-client / empty-tenant guard"},
 		"internal/state/tenant_names.go:93": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite nil-client / empty-tenant guard"},
+
+		// --- Slice 3.2: newly-in-scope dirs (the other 43 internal/* dirs) ---
+		// Triaged on first widened-scan run. Conservative defaults: DEFENSIVE-GUARD
+		// for proto/value-shape fields that legitimately accept nil; LEGACY-OPTIONAL
+		// for receiver-field deps that should be reasserted as always-on; RECEIVER-NIL-GUARD
+		// for composite nil-receiver shims (typically `r == nil || r.X == nil`).
+
+		// internal/budget
+		"internal/budget/enforcer.go:191": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "teams dep optional in budget enforcer; reassert via budget-required follow-up"},
+
+		// internal/checkpoint
+		"internal/checkpoint/approval.go:235": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Decision.ExpiresAt field, legitimately nil-able"},
+		"internal/checkpoint/state.go:401":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto WorkingMemory field, legitimately nil-able"},
+		"internal/checkpoint/state.go:418":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto MissionMemory field, legitimately nil-able"},
+
+		// internal/component
+		"internal/component/installer.go:1702": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "manifest.Dependencies value-shape field"},
+		"internal/component/installer.go:2393": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "taxonomy registry conditionally wired; reassert with taxonomy-required follow-up"},
+		"internal/component/quota.go:110":      astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "quota DB optional; reassert with platform-Postgres-required follow-up"},
+
+		// internal/finding — Metadata proto field is legitimately nil-able
+		"internal/finding/export/sarif_exporter.go:414": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Metadata field on Finding, legitimately nil-able"},
+		"internal/finding/export/sarif_exporter.go:493": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Metadata field on Finding, legitimately nil-able"},
+		"internal/finding/export/sarif_exporter.go:611": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Metadata field on Finding, legitimately nil-able"},
+		"internal/finding/types.go:242":                 astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Metadata field on Finding, legitimately nil-able"},
+		"internal/finding/types.go:257":                 astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Metadata field on Finding, legitimately nil-able"},
+
+		// internal/graphrag — Neo4j driver mirrors the existing daemon/grpc.go:2504 entry
+		"internal/graphrag/graph/neo4j.go:103":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver optional in non-graphrag deployments (mirrors daemon/grpc.go:2504)"},
+		"internal/graphrag/intelligence/risk.go:450":  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver optional in non-graphrag deployments"},
+		"internal/graphrag/provider/local.go:164":     astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "vector store optional in non-graphrag deployments"},
+
+		// internal/llm — pricing/config/ratelimit values that legitimately accept nil
+		"internal/llm/config.go:264":     astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Features field on llm config, legitimately nil-able"},
+		"internal/llm/config.go:297":     astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Models field on llm config, legitimately nil-able"},
+		"internal/llm/pricing.go:280":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Pricing field, legitimately nil-able when provider has no pricing config"},
+		"internal/llm/pricing.go:368":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite nil-check on other-side comparison"},
+		"internal/llm/ratelimit.go:123":  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "requestLimit nil means unlimited (legitimate semantic)"},
+		"internal/llm/ratelimit.go:136":  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tokenLimit nil means unlimited (legitimate semantic)"},
+
+		// internal/memory
+		"internal/memory/vector/embedded.go:217": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Metadata field on vector record, legitimately nil-able"},
+
+		// internal/observability
+		"internal/observability/otel_decision_log_adapter.go:211": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "action.AgentExecution proto field, legitimately nil-able"},
+		"internal/observability/otel_decision_log_adapter.go:318": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "action.NewNode proto field, legitimately nil-able"},
+		// otel_metrics.go uses `if r == nil || r.<metric> == nil { return }` — composite nil-receiver shim
+		// allowing the metrics struct to be called from contexts where metrics are disabled.
+		"internal/observability/otel_metrics.go:366": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim — metrics methods callable when metrics disabled"},
+		"internal/observability/otel_metrics.go:448": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:491": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:525": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:569": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:612": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:644": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:675": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:714": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:742": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:770": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:798": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:825": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+		"internal/observability/otel_metrics.go:838": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim"},
+
+		// internal/orchestrator
+		"internal/orchestrator/checkpoint_loop_hook.go:62": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite action+metadata proto-shape guard"},
+		"internal/orchestrator/inventory_validator.go:45": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "inventory dep conditionally wired"},
+		"internal/orchestrator/inventory_validator.go:91": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "inventory dep conditionally wired"},
+		"internal/orchestrator/observe.go:506":             astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "graphQueries dep optional in non-graphrag deployments"},
+		"internal/orchestrator/orchestrator.go:955":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "metrics dep optional; reassert with otel-required follow-up"},
+		"internal/orchestrator/orchestrator.go:973":        astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "metrics dep optional; reassert with otel-required follow-up"},
+
+		// internal/plan
+		"internal/plan/step_executor.go:253": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "guardrails dep optional; reassert with guardrails-required follow-up"},
+		"internal/plan/step_executor.go:298": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "guardrails dep optional; reassert with guardrails-required follow-up"},
+
+		// internal/prompt — composite value-shape guards
+		"internal/prompt/condition.go:89": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite field/value shape — both-nil is a valid match shape"},
+		"internal/prompt/condition.go:92": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite field/value shape — either-nil short-circuit"},
+
+		// internal/secrets — composite nil-receiver shim for the SPIRE JWT source
+		"internal/secrets/jwtsource/spire.go:136": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim for SPIRE JWT source"},
+
+		// internal/types — proto Capabilities field
+		"internal/types/target.go:329": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Capabilities field on Target, legitimately nil-able"},
 	}
 
-	// Real-code subtest: walk in-scope request-path subdirectories and
-	// fail on any new finding. Scope mirrors the issue spec (deploy#210):
-	// the "request path" for the daemon is the set of directories where
-	// gRPC handlers, mission execution, and the authz spine live. Files
-	// outside this scope are excluded; widening to all 48 internal/ dirs
-	// lands in slice 3.2.
-	scopeDirs := []string{
-		filepath.Join(repoRoot, "internal", "daemon"),
-		filepath.Join(repoRoot, "internal", "datapool"),
-		filepath.Join(repoRoot, "internal", "harness"),
-		filepath.Join(repoRoot, "internal", "mission"),
-		filepath.Join(repoRoot, "internal", "state"),
-		filepath.Join(repoRoot, "internal", "authz"),
-	}
-
+	// Real-code subtest: walk every gibson `internal/` package and fail
+	// on any new finding. Slice 3.2 widened the scope from 6 hand-picked
+	// dirs to every internal/* subdir; the allowlist absorbs the new
+	// surface area inline. `cmd/` and `tests/` remain out of scope
+	// (startup wiring + test fixtures are legitimate nil-check sites).
 	t.Run("real_code", func(t *testing.T) {
+		scopeDirs := internalScopeDirs(t, repoRoot)
 		opts := astchecks.WalkOpts{
 			ScopeDirs:     scopeDirs,
 			RepoRoot:      repoRoot,
-			Matchers:      []astchecks.Matcher{astchecks.NewNilGuard(false)},
+			// Narrowed pattern: receiver-field shape only.
+			// Bare-ident shapes (`if cfg == nil`) are excluded; they're
+			// parameter-shape guards, not dependency-shape graceful-nil.
+			Matchers:      []astchecks.Matcher{astchecks.NewNilGuard(true)},
 			Allowlist:     requestPathAllowlist,
 			SkipTestFiles: true,
 			SkipGenerated: true,
