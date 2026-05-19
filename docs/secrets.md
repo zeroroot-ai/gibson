@@ -78,7 +78,7 @@ These all share a single property: **the consumer cannot reach Vault yet**, so a
 
 | Credential | Source | Notes |
 |---|---|---|
-| Master KEK | `KeyProvider` abstraction at `internal/crypto/providers/`. In kind: `kubernetes` provider (reads K8s Secret `gibson-master-kek`). In production: `vault` provider (reads from Vault root namespace) is also supported. | The master KEK derives every per-tenant KEK and every Layer 2 (computed) credential. **Root of trust for Vault itself**, so cannot live in Vault for the kubernetes provider. The vault-provider variant moves the KEK into Vault's root namespace; the operator still needs the Vault root token from somewhere outside Vault. |
+| Master KEK | `KeyProvider` abstraction at `internal/crypto/providers/`. In kind: `kubernetes` provider (reads K8s Secret `gibson-master-kek`). In production: `vault` provider (reads from Vault root namespace) is also supported. | The master KEK derives every per-tenant KEK and every Layer 2 (computed) credential. **Root of trust for Vault itself**, so cannot live in Vault for the kubernetes provider. The vault-provider variant moves the KEK into Vault's root namespace; the operator pre-provisions a Vault client token via the standard `VAULT_TOKEN` env var (the daemon does NOT initiate any Vault `auth/kubernetes` login — see ADR-0009 / jwt-spiffe-everywhere). |
 
 ### Layer 6 — Workload identity (not credentials)
 

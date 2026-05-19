@@ -42,12 +42,16 @@ type KubernetesKeyConfig struct {
 }
 
 // VaultKeyConfig configures the HashiCorp Vault provider.
+//
+// Authentication is delegated to the standard Vault env-var surface (e.g.
+// VAULT_TOKEN). Per ADR-0009 (jwt-spiffe-everywhere), this provider does
+// not initiate a Vault `auth/kubernetes` login, and the previous `Role`
+// field used solely for that login has been removed.
 type VaultKeyConfig struct {
 	Address    string `yaml:"address" mapstructure:"address"`
 	MountPath  string `yaml:"mount_path,omitempty" mapstructure:"mount_path"`
 	SecretPath string `yaml:"secret_path" mapstructure:"secret_path"`
 	KeyField   string `yaml:"key_field" mapstructure:"key_field"`
-	Role       string `yaml:"role" mapstructure:"role"`
 }
 
 // AWSKeyConfig configures the AWS Secrets Manager provider.

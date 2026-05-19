@@ -7,12 +7,20 @@ import (
 	"time"
 
 	"github.com/hashicorp/vault/api"
-	"github.com/hashicorp/vault/api/auth/kubernetes"
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
 // VaultProvider retrieves encryption keys from HashiCorp Vault.
+//
+// Authentication: per ADR-0009 (jwt-spiffe-everywhere), this provider does
+// NOT initiate a Vault `auth/kubernetes` login. The hashicorp
+// `vault/api/auth/kubernetes` helper has been removed entirely. Operators
+// who run the daemon against a remote Vault must supply a pre-issued client
+// token via the standard `VAULT_TOKEN` environment variable (honoured by
+// `api.DefaultConfig()`), or run the SDK-side broker pipeline (which
+// supports AppRole/JWT/AWS IAM via `internal/daemon/broker_init_vault_auth.go`)
+// instead of this KEK shortcut.
 type VaultProvider struct {
 	client *api.Client
 	config *crypto.VaultKeyConfig
@@ -22,7 +30,12 @@ type VaultProvider struct {
 	keyErr  error
 }
 
-// NewVaultProvider creates a new HashiCorp Vault key provider using Kubernetes auth.
+// NewVaultProvider creates a new HashiCorp Vault key provider.
+//
+// The returned client picks up `VAULT_TOKEN`, `VAULT_ADDR`, and the rest of
+// the standard Vault env-var surface via `api.DefaultConfig()`; cfg.Address
+// overrides VAULT_ADDR when set. No auth/kubernetes login is performed
+// (see ADR-0009).
 func NewVaultProvider(cfg *crypto.VaultKeyConfig) (*VaultProvider, error) {
 	if cfg.Address == "" {
 		return nil, fmt.Errorf("vault.address is required")
@@ -33,9 +46,6 @@ func NewVaultProvider(cfg *crypto.VaultKeyConfig) (*VaultProvider, error) {
 	if cfg.KeyField == "" {
 		return nil, fmt.Errorf("vault.key_field is required")
 	}
-	if cfg.Role == "" {
-		return nil, fmt.Errorf("vault.role is required for kubernetes auth")
-	}
 
 	vaultConfig := api.DefaultConfig()
 	vaultConfig.Address = cfg.Address
@@ -44,23 +54,6 @@ func NewVaultProvider(cfg *crypto.VaultKeyConfig) (*VaultProvider, error) {
 	client, err := api.NewClient(vaultConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create vault client: %w", err)
-	}
-
-	// Authenticate using Kubernetes auth method
-	k8sAuth, err := kubernetes.NewKubernetesAuth(
-		cfg.Role,
-		kubernetes.WithServiceAccountTokenPath("/var/run/secrets/kubernetes.io/serviceaccount/token"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes auth: %w", err)
-	}
-
-	authInfo, err := client.Auth().Login(context.Background(), k8sAuth)
-	if err != nil {
-		return nil, fmt.Errorf("vault kubernetes auth failed (check role %q exists and is configured): %w", cfg.Role, err)
-	}
-	if authInfo == nil {
-		return nil, fmt.Errorf("vault auth returned nil auth info")
 	}
 
 	return &VaultProvider{
