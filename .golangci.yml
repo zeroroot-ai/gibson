@@ -29,7 +29,9 @@ linters:
     - fatcontext
 
     # --- boundary enforcement ---
-    - depguard
+    # depguard disabled — requires per-repo rules config to avoid blocking
+    # all third-party imports; see zero-day-ai/.github#93 for the org-level
+    # fix. TODO: configure deny-rules for gibson's module boundary needs.
 
     # --- style + idiom ---
     - gocritic
