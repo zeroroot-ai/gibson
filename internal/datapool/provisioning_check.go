@@ -2,173 +2,160 @@ package datapool
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
-
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 
 	dpmetrics "github.com/zero-day-ai/gibson/internal/datapool/metrics"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
-// tenantGVR is the GroupVersionResource for the Tenant CRD managed by the
-// tenant-operator. We use unstructured access rather than importing the
-// tenant-operator module to avoid a cyclic dependency between gibson and
-// github.com/zero-day-ai/gibson/tenant-operator.
-var tenantGVR = schema.GroupVersionResource{
-	Group:    "gibson.zero-day.ai",
-	Version:  "v1alpha1",
-	Resource: "tenants",
-}
-
 // provisioningState caches the last-known provisioning status for a tenant.
+//
+// The cache distinguishes the negative cases so callers see the same typed
+// error on a cache hit as they would on a cache miss:
+//   - brokerMissing: tenant_secrets_broker_config row absent → NotProvisionedError
+//   - dbMissing:     broker row present but per-tenant DB absent → DataPlaneUnreachableError
+//   - ready:         both probes positive
 type provisioningState struct {
-	ready     bool
-	fetchedAt time.Time
+	ready         bool
+	brokerMissing bool
+	dbMissing     bool
+	fetchedAt     time.Time
 }
 
 // provisioningChecker verifies whether a tenant's data-plane has been
 // provisioned by the tenant-operator before Pool.For returns a Conn.
 //
-// It uses the Kubernetes dynamic client to read the Tenant CRD's
-// status.dataPlane field (to be populated by Phase F). The result is cached
-// in-process; stale entries expire after cacheTTL.
+// It consults a DataPlaneProbe (broker_config row existence + per-tenant
+// database existence) rather than the Kubernetes Tenant CRD. This is
+// the post-ADR-0023 shape — the previous K8s-GET path made one bad Tenant
+// CRD a daemon-wide outage (2026-05-19 testa123 incident).
 //
-// Fail-closed: on persistent CRD unavailability, isProvisioned returns
-// NotProvisionedError rather than falling through to a happy path.
+// The result is cached in-process; stale entries expire after cacheTTL.
+//
+// Fail-closed: on persistent probe failure, isProvisioned returns a typed
+// error rather than falling through to a happy path.
 type provisioningChecker struct {
 	mu       sync.RWMutex
 	cache    map[auth.TenantID]provisioningState
 	cacheTTL time.Duration
-	client   dynamic.Interface
-	// namespace is where Tenant CRDs live; empty means cluster-scoped.
-	namespace string
+	probe    DataPlaneProbe
 }
 
 // newProvisioningChecker creates a provisioningChecker backed by the given
-// Kubernetes dynamic client. cacheTTL controls how long a cached status is
-// trusted before a re-fetch is performed.
-func newProvisioningChecker(client dynamic.Interface, cacheTTL time.Duration) *provisioningChecker {
+// DataPlaneProbe. cacheTTL controls how long a cached status is trusted
+// before a re-fetch is performed. A nil probe behaves as fail-closed
+// (every isProvisioned call returns NotProvisionedError) — that matches
+// the previous "nil Kubernetes client" semantics in dev environments.
+func newProvisioningChecker(probe DataPlaneProbe, cacheTTL time.Duration) *provisioningChecker {
 	if cacheTTL <= 0 {
 		cacheTTL = 30 * time.Second
 	}
 	return &provisioningChecker{
 		cache:    make(map[auth.TenantID]provisioningState),
 		cacheTTL: cacheTTL,
-		client:   client,
+		probe:    probe,
 	}
 }
 
-// isProvisioned returns true if the tenant's data-plane is ready. It checks
-// the in-process cache first; on a miss (or stale entry) it performs a
-// synchronous API call.
+// isProvisioned returns true if the tenant's data-plane is ready. It
+// checks the in-process cache first; on a miss (or stale entry) it
+// invokes the probe.
 //
-// Fail-closed: if the Tenant CRD does not exist or the API call fails, the
-// method returns a NotProvisionedError rather than a nil error.
+// Fail-closed: any probe failure or negative-shaped result returns a
+// typed error rather than nil/true.
 func (c *provisioningChecker) isProvisioned(ctx context.Context, tenant auth.TenantID) (bool, error) {
-	// Fast path: check cache.
 	c.mu.RLock()
-	state, ok := c.cache[tenant]
+	state, hit := c.cache[tenant]
 	c.mu.RUnlock()
 
-	if ok && time.Since(state.fetchedAt) < c.cacheTTL {
-		if !state.ready {
-			return false, &NotProvisionedError{
-				Tenant: tenant.String(),
-				Reason: "cached status: data-plane not ready",
-			}
-		}
-		return true, nil
+	if hit && time.Since(state.fetchedAt) < c.cacheTTL {
+		return c.resultFromState(tenant, state)
 	}
 
-	// Slow path: synchronous fetch from the API server.
-	ready, err := c.fetchFromAPI(ctx, tenant)
+	state, err := c.refresh(ctx, tenant)
 	if err != nil {
-		return false, err
+		// Probe failures (e.g. platform postgres unreachable) are reported
+		// as DataPlaneUnreachableError — distinct from NotProvisionedError.
+		// The caller can retry; we deliberately do NOT cache the failure.
+		return false, &DataPlaneUnreachableError{
+			Tenant: tenant.String(),
+			Reason: err.Error(),
+		}
 	}
 
-	// Update cache.
 	c.mu.Lock()
-	c.cache[tenant] = provisioningState{
-		ready:     ready,
-		fetchedAt: time.Now(),
-	}
+	c.cache[tenant] = state
 	c.mu.Unlock()
 
-	if !ready {
-		return false, &NotProvisionedError{
-			Tenant: tenant.String(),
-			Reason: "Tenant CRD found but status.dataPlane is not ready (Phase F not yet complete)",
-		}
-	}
-	return true, nil
+	return c.resultFromState(tenant, state)
 }
 
-// fetchFromAPI performs a synchronous GET of the Tenant CRD and inspects
-// status.dataPlane.ready.
-//
-// Note: status.dataPlane is populated by Phase F of this spec. Until Phase F
-// lands, the field will be absent and this method returns NotProvisionedError.
-// This is intentional: "absent = not provisioned" is the safe default.
-func (c *provisioningChecker) fetchFromAPI(ctx context.Context, tenant auth.TenantID) (bool, error) {
-	if c.client == nil {
-		// No Kubernetes client configured — behave as if not provisioned.
-		// This happens in test/dev environments without a cluster.
-		return false, &NotProvisionedError{
-			Tenant: tenant.String(),
-			Reason: "no Kubernetes client configured (dev mode)",
-		}
+// refresh invokes both probe methods and returns the composite state.
+// The probe itself returns booleans for the negative-case answers; only
+// genuine probe failures (e.g. platform postgres unreachable) come back
+// as errors.
+func (c *provisioningChecker) refresh(ctx context.Context, tenant auth.TenantID) (provisioningState, error) {
+	if c.probe == nil {
+		return provisioningState{
+			brokerMissing: true,
+			fetchedAt:     time.Now(),
+		}, nil
 	}
 
-	name := tenant.String()
-	resource := c.client.Resource(tenantGVR)
-
-	obj, err := resource.Get(ctx, name, metav1.GetOptions{})
+	brokerOK, err := c.probe.BrokerConfigExists(ctx, tenant)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			dpmetrics.IncProvisioningCheckFailure(dpmetrics.ReasonNotProvisioned)
-			return false, &NotProvisionedError{
-				Tenant: tenant.String(),
-				Reason: fmt.Sprintf("Tenant CRD %q not found in cluster", name),
-			}
-		}
-		// Transient API error — fail closed.
+		return provisioningState{}, err
+	}
+	if !brokerOK {
+		dpmetrics.IncProvisioningCheckFailure(dpmetrics.ReasonNotProvisioned)
+		return provisioningState{
+			brokerMissing: true,
+			fetchedAt:     time.Now(),
+		}, nil
+	}
+
+	pingOK, err := c.probe.Pingable(ctx, tenant)
+	if err != nil {
+		return provisioningState{}, err
+	}
+	if !pingOK {
 		dpmetrics.IncProvisioningCheckFailure(dpmetrics.ReasonCRDUnavailable)
-		return false, &NotProvisionedError{
-			Tenant: tenant.String(),
-			Reason: fmt.Sprintf("Tenant CRD lookup failed: %v", err),
-		}
+		return provisioningState{
+			dbMissing: true,
+			fetchedAt: time.Now(),
+		}, nil
 	}
 
-	// Navigate: .status.dataPlane.ready
-	//
-	// Phase F (task 6.7) adds status.dataPlane to the CRD. Until then, this
-	// field is absent and we return not-provisioned.
-	status, ok := obj.Object["status"].(map[string]any)
-	if !ok {
-		dpmetrics.IncProvisioningCheckFailure(dpmetrics.ReasonNotProvisioned)
+	return provisioningState{
+		ready:     true,
+		fetchedAt: time.Now(),
+	}, nil
+}
+
+// resultFromState translates a cached or freshly-fetched state into the
+// (bool, error) return shape callers expect.
+func (c *provisioningChecker) resultFromState(tenant auth.TenantID, state provisioningState) (bool, error) {
+	switch {
+	case state.ready:
+		return true, nil
+	case state.brokerMissing:
 		return false, &NotProvisionedError{
 			Tenant: tenant.String(),
-			Reason: "Tenant CRD status field absent or wrong type",
+			Reason: "tenant_secrets_broker_config row absent",
 		}
-	}
-
-	dataPlane, ok := status["dataPlane"].(map[string]any)
-	if !ok {
-		// Phase F has not populated the dataPlane field yet.
-		dpmetrics.IncProvisioningCheckFailure(dpmetrics.ReasonNotProvisioned)
+	case state.dbMissing:
+		return false, &DataPlaneUnreachableError{
+			Tenant: tenant.String(),
+			Reason: "per-tenant database does not exist in cluster",
+		}
+	default:
+		// Defensive: a zero-value state with no flags set. Treat as not provisioned.
 		return false, &NotProvisionedError{
 			Tenant: tenant.String(),
-			Reason: "status.dataPlane absent (Phase F not yet deployed)",
+			Reason: "indeterminate cache state",
 		}
 	}
-
-	ready, _ := dataPlane["ready"].(bool)
-	return ready, nil
 }
 
 // Invalidate removes a tenant's cached state, forcing a re-fetch on next
