@@ -35,12 +35,39 @@ concurrency:
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    env:
+      # GONOSUMDB + GOPRIVATE tell the Go toolchain to skip the public checksum
+      # database for private zero-day-ai modules and fetch them directly via git.
+      # This must be set before setup-go (which may invoke go mod download).
+      GONOSUMDB: github.com/zero-day-ai/*
+      GOPRIVATE: github.com/zero-day-ai/*
     steps:
       - uses: actions/checkout@v4
+
+      # Configure git credentials BEFORE setup-go so that module download works.
+      # The PRIVATE_REPO_TOKEN is a PAT with read access to all zero-day-ai repos.
+      # We write both .netrc (for git) and configure the credential store (for
+      # go/packages which may invoke git outside the repo working dir).
+      - name: Configure git credentials for private modules
+        run: |
+          # .netrc provides credentials for git HTTPS without a credential helper.
+          printf 'machine github.com\nlogin oauth2\npassword %s\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.netrc"
+          chmod 0600 "$HOME/.netrc"
+          # Also set via git config so go/packages.Load (which calls git ls-remote)
+          # picks up auth even when running outside the working tree.
+          git config --global credential.helper store
+          printf 'https://oauth2:%s@github.com\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.git-credentials"
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+
+      # Pre-download all modules so gibsoncheck's go/packages.Load can resolve imports
+      # without network access.  This is a no-op on cache-warm runners.
+      - name: Download Go modules
+        run: go mod download
 
       - name: Run gibsoncheck against the daemon
         run: |
