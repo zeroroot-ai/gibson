@@ -1,5 +1,14 @@
+# Shared golangci-lint v2 baseline — adopted from
+# zero-day-ai/.github/templates/golangci-base.yml (slice 2.2, gibson#172).
+# Linter set lives in the base; per-repo section below is the only place
+# to add repo-specific exclusions.
+
+version: "2"
+
 linters:
+  default: none
   enable:
+    # --- existing 6 (previously enabled) ---
     - staticcheck
     - govet
     - errcheck
@@ -7,14 +16,71 @@ linters:
     - unused
     - exhaustive
 
-linters-settings:
-  staticcheck:
-    checks:
-      - all
-  exhaustive:
-    default-signifies-exhaustive: false
-    check:
-      - switch
+    # --- security ---
+    - gosec
+
+    # --- error handling ---
+    - errorlint
+    - wrapcheck
+    - nilerr
+
+    # --- context propagation ---
+    - contextcheck
+    - fatcontext
+
+    # --- boundary enforcement ---
+    - depguard
+
+    # --- style + idiom ---
+    - gocritic
+    - revive
+    - gocyclo
+    - prealloc
+    - dupl
+    - copyloopvar
+    - gocheckcompilerdirectives
+    - intrange
+    - mirror
+    - perfsprint
+    - sloglint
+    - testifylint
+    - thelper
+    - usestdlibvars
+    - whitespace
+
+  settings:
+    staticcheck:
+      checks: ["all"]
+    gosec:
+      severity: medium
+    exhaustive:
+      default-signifies-exhaustive: false
+      check: [switch]
+    gocyclo:
+      min-complexity: 20
+    dupl:
+      threshold: 150
+    gocritic:
+      enabled-tags: [diagnostic, performance, style]
+      disabled-checks: [hugeParam, rangeValCopy] # noise-heavy on small structs
+
+  exclusions:
+    # Generated code is exempt from every linter — we don't author it.
+    paths:
+      - ".*\\.pb\\.go$"
+      - ".*_grpc\\.pb\\.go$"
+      - "zz_generated.*\\.go$"
+      - "api/gen/.*"
+    # Per-rule exclusions go here. New exclusions require a tracked issue per ADR-0013.
+    rules: []
 
 issues:
-  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+# allowlist:
+# Per-repo opt-outs go here with a TODO referencing a follow-up issue.
+# Format:
+#   linters:
+#     disable:
+#       - <linter-name>  # TODO: zero-day-ai/gibson#<issue>
