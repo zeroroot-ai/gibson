@@ -34,6 +34,40 @@ func (e *NotProvisionedError) Is(target error) bool {
 	return ok
 }
 
+// DataPlaneUnreachableError is returned by Pool.For when the requested
+// tenant's broker config row exists (so the tenant is provisioned in
+// principle) but the per-tenant database is not currently reachable. The
+// caller should treat this as a transient infrastructure problem and may
+// retry; daemon handlers should translate this to gRPC codes.Unavailable.
+//
+// This is distinct from NotProvisionedError, which is a terminal "tenant
+// has never been (fully) provisioned" condition. The dashboard renders
+// different empty-states for the two.
+//
+// Spec: ADR-0023.
+type DataPlaneUnreachableError struct {
+	// Tenant is the string representation of the tenant whose data plane is unreachable.
+	Tenant string
+	// Reason carries optional detail about what failed (e.g. "platform
+	// postgres query failed", "per-tenant DB does not exist in cluster").
+	Reason string
+}
+
+func (e *DataPlaneUnreachableError) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("datapool: tenant %q data plane unreachable: %s", e.Tenant, e.Reason)
+	}
+	return fmt.Sprintf("datapool: tenant %q data plane unreachable", e.Tenant)
+}
+
+// Is satisfies errors.Is so callers can write:
+//
+//	errors.Is(err, &DataPlaneUnreachableError{})
+func (e *DataPlaneUnreachableError) Is(target error) bool {
+	_, ok := target.(*DataPlaneUnreachableError)
+	return ok
+}
+
 // EvictedError is returned when a caller holds a reference to a Conn whose
 // underlying per-tenant pool was evicted while the Conn was still considered
 // checked out. This indicates a programming error (the caller held the Conn
