@@ -293,8 +293,6 @@ github.com/hashicorp/vault/api/auth/approle v0.12.0 h1:PhF7jrQjydK1DC05EboosXmZg
 github.com/hashicorp/vault/api/auth/approle v0.12.0/go.mod h1:J7BJLpXeQXhuMAWi31Puunu5QOeCoRAgLh2iDti7OLA=
 github.com/hashicorp/vault/api/auth/aws v0.12.0 h1:onkMrv49rQCF5Zx1/BdIEvwyhh9R2mXkgfZFWdW+kfM=
 github.com/hashicorp/vault/api/auth/aws v0.12.0/go.mod h1:Cuyla0RLfTnPkaJCaHGfNGsNIY1GqB2G79T7XI/9N+I=
-github.com/hashicorp/vault/api/auth/kubernetes v0.12.0 h1:DTrUMNXjpWEFMcU0FY1Eza+l4nSSz/+yUr6JN2GpzF0=
-github.com/hashicorp/vault/api/auth/kubernetes v0.12.0/go.mod h1:njyxrmFPtMuEPpPMZeemwhHovzC22hq2OuJtScI3iFc=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
@@ -497,8 +495,8 @@ github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
 github.com/zero-day-ai/ast-checks v0.1.1 h1:9DgwK2q0HhH3xCcWRqxOdtRTb8/ocKcSCn2z/QtQEe4=
 github.com/zero-day-ai/ast-checks v0.1.1/go.mod h1:+XwNxajlzZUo2JERFGdBtgks/EuppFg9JYyNNz6TD4Q=
-github.com/zero-day-ai/sdk v0.105.1 h1:hABVEuL8E81NAixDpSC6OROfzoE/0om8Hq8ifLcRYcA=
-github.com/zero-day-ai/sdk v0.105.1/go.mod h1:WM9RF1LZ8h3V3X+xZZXiHTVbM2zGB3Dr4I/aAkpDY6A=
+github.com/zero-day-ai/sdk v0.106.0 h1:19ySX7oqRDDY4QNUXvd2Xw1iZ8wc30bLoJPsLZTMhok=
+github.com/zero-day-ai/sdk v0.106.0/go.mod h1:BURfnxcQGthJKN2Ng6/Jh5Pe3w9SV5WTGnEkolHeGfY=
 github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66 h1:7hZeaP1CwGKTEJgSiyXL1GEyCAFWSZ4O6rCYMFThy8U=
 github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66/go.mod h1:toFwwA5SpWeL0/Pr3XOelvHRZrzs7Ex9vpul5lA1SCY=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

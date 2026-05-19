@@ -44,7 +44,7 @@ require (
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zero-day-ai/ast-checks v0.1.1
-	github.com/zero-day-ai/sdk v0.105.1
+	github.com/zero-day-ai/sdk v0.106.0
 	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.43.0
@@ -165,7 +165,6 @@ require (
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
 	github.com/hashicorp/vault/api/auth/approle v0.12.0 // indirect
 	github.com/hashicorp/vault/api/auth/aws v0.12.0 // indirect
-	github.com/hashicorp/vault/api/auth/kubernetes v0.12.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
