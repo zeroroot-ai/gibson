@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -22,13 +21,11 @@ import (
 //
 // Supported auth methods (in order of common production usage):
 //
-//   - kubernetes: reads the projected ServiceAccount token from
-//     cfg.Auth.ServiceAccountTokenPath (defaulting to the standard in-cluster
-//     path) and POSTs to /v1/auth/kubernetes/login with {jwt, role}.
-//
 //   - approle: POSTs to /v1/auth/approle/login with {role_id, secret_id}.
 //
-//   - jwt: POSTs to /v1/auth/<JWTPath>/login with {role, jwt}.
+//   - jwt: POSTs to /v1/auth/<JWTPath>/login with {role, jwt}. The JWT can
+//     be SPIFFE-issued or Zitadel-issued; this is the canonical
+//     workload→Vault auth path per ADR-0009.
 //
 //   - token: returns the static token immediately with a zero TTL — the
 //     auth-cache substitutes a 5-minute default in that case so static
@@ -36,6 +33,15 @@ import (
 //
 // All other methods (aws_iam, etc.) fall back to building a transient
 // sdkvault.Provider via sdkvault.New and reading the resulting client token.
+//
+// Vault `auth/kubernetes` is intentionally NOT supported: per ADR-0009
+// (jwt-spiffe-everywhere), TokenReview-based authentication to non-Kubernetes
+// services is forbidden. Workloads on Kubernetes authenticate to Vault via
+// JWT (SPIFFE- or Zitadel-issued) or AppRole. The SDK's
+// AuthMethodKubernetes constant was removed in sdk#81; switching on it here
+// has been deleted accordingly. An incoming config with Auth.Method =
+// "kubernetes" falls through to the SDK fallback and surfaces the SDK's
+// "unsupported auth method" error.
 //
 // vaultAuthLogin never returns the secret material in any logged form. The
 // returned token is opaque to the caller — it will be set on the next
@@ -56,9 +62,6 @@ func vaultAuthLogin(ctx context.Context, cfg sdkvault.Config) (string, time.Dura
 		// applies its default minimum effective TTL.
 		return cfg.Auth.Token, 0, nil
 
-	case sdkvault.AuthMethodKubernetes:
-		return loginKubernetes(ctx, cfg)
-
 	case sdkvault.AuthMethodAppRole:
 		return loginAppRole(ctx, cfg)
 
@@ -69,32 +72,11 @@ func vaultAuthLogin(ctx context.Context, cfg sdkvault.Config) (string, time.Dura
 		// Fallback path: build a transient sdkvault.Provider and let the SDK
 		// run its full auth flow. We then return the *bare* token via a
 		// lookup-self call. Cost is one extra RPC; benefit is method
-		// coverage without re-implementing aws_iam etc.
+		// coverage without re-implementing aws_iam etc. An auth method of
+		// "kubernetes" lands here and surfaces the SDK's clean
+		// "unsupported auth method" error (see ADR-0009).
 		return loginFallbackViaProvider(ctx, cfg)
 	}
-}
-
-// defaultK8sSATokenPath matches sdkvault.defaultSATokenPath but is duplicated
-// here because that constant is unexported.
-const defaultK8sSATokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-
-func loginKubernetes(ctx context.Context, cfg sdkvault.Config) (string, time.Duration, error) {
-	if cfg.Auth.Role == "" {
-		return "", 0, fmt.Errorf("vault auth (kubernetes): Auth.Role is required")
-	}
-	saPath := cfg.Auth.ServiceAccountTokenPath
-	if saPath == "" {
-		saPath = defaultK8sSATokenPath
-	}
-	jwtBytes, err := os.ReadFile(saPath)
-	if err != nil {
-		return "", 0, fmt.Errorf("vault auth (kubernetes): read SA token at %s: %w", saPath, err)
-	}
-	body := map[string]string{
-		"jwt":  strings.TrimSpace(string(jwtBytes)),
-		"role": cfg.Auth.Role,
-	}
-	return postLogin(ctx, cfg, "auth/kubernetes/login", body)
 }
 
 func loginAppRole(ctx context.Context, cfg sdkvault.Config) (string, time.Duration, error) {
@@ -169,7 +151,7 @@ func newVaultBareClient(cfg sdkvault.Config) (*api.Client, error) {
 // loginFallbackViaProvider builds a transient sdkvault.Provider and then
 // issues a sys/lookup-self call to recover the lease TTL of the resulting
 // client token. This path supports auth methods (e.g. aws_iam) that
-// loginKubernetes/AppRole/JWT do not.
+// loginAppRole/loginJWT do not.
 func loginFallbackViaProvider(ctx context.Context, cfg sdkvault.Config) (string, time.Duration, error) {
 	prov, err := sdkvault.New(ctx, cfg)
 	if err != nil {

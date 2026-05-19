@@ -11,7 +11,6 @@ func TestNewVaultProvider_MissingAddress(t *testing.T) {
 	cfg := &crypto.VaultKeyConfig{
 		SecretPath: "secret/gibson/encryption-key",
 		KeyField:   "key",
-		Role:       "gibson",
 	}
 	_, err := NewVaultProvider(cfg)
 	assert.Error(t, err)
@@ -22,7 +21,6 @@ func TestNewVaultProvider_MissingSecretPath(t *testing.T) {
 	cfg := &crypto.VaultKeyConfig{
 		Address:  "https://vault.example.com",
 		KeyField: "key",
-		Role:     "gibson",
 	}
 	_, err := NewVaultProvider(cfg)
 	assert.Error(t, err)
@@ -33,22 +31,10 @@ func TestNewVaultProvider_MissingKeyField(t *testing.T) {
 	cfg := &crypto.VaultKeyConfig{
 		Address:    "https://vault.example.com",
 		SecretPath: "secret/gibson/encryption-key",
-		Role:       "gibson",
 	}
 	_, err := NewVaultProvider(cfg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "key_field is required")
-}
-
-func TestNewVaultProvider_MissingRole(t *testing.T) {
-	cfg := &crypto.VaultKeyConfig{
-		Address:    "https://vault.example.com",
-		SecretPath: "secret/gibson/encryption-key",
-		KeyField:   "key",
-	}
-	_, err := NewVaultProvider(cfg)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "role is required")
 }
 
 func TestNewVaultProvider_EmptyConfig(t *testing.T) {
