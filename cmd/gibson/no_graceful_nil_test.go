@@ -126,7 +126,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 
 		// internal/daemon — core
 		"internal/daemon/compliance_sink_adapter.go:32": "LEGACY-OPTIONAL: compliance sink registered conditionally; remove with compliance-required slice",
-		"internal/daemon/daemon.go:457":                 "LEGACY-OPTIONAL: SPIFFE wiring optional in non-SPIFFE deployments; reassert when SPIFFE-everywhere lands",
+		"internal/daemon/daemon.go:481":                 "LEGACY-OPTIONAL: SPIFFE wiring optional in non-SPIFFE deployments; reassert when SPIFFE-everywhere lands",
 		"internal/daemon/grpc.go:2030":                  "RECEIVER-NIL-GUARD: pool nil-guard during shutdown race",
 		"internal/daemon/grpc.go:2040":                  "DEFENSIVE-GUARD: composite err/m/Checkpoint guard for caller-shape",
 		"internal/daemon/grpc.go:2504":                  "LEGACY-OPTIONAL: Neo4j connection optional in non-graphrag deployments",
