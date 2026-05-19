@@ -8,16 +8,12 @@ you may not use this file except in compliance with the License.
 package main
 
 import (
-	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"testing"
+
+	astchecks "github.com/zero-day-ai/ast-checks"
 )
 
 // TestNoGracefulNilInRequestPaths walks every request-path Go file in
@@ -25,28 +21,23 @@ import (
 // the body silently returns success (return nil / return true, nil /
 // return false, nil / return nil, nil) without recording an error.
 //
-// Why: the "one-code-path" PRD (deploy#186) forbids degraded-mode
-// branches in request paths. Every dependency must be validated at
-// startup (in cmd/gibson/main.go) — once the daemon is running,
-// every callsite assumes deps are non-nil. A silent skip on a missing
-// dep produces a user-visible "Failed to load" with no log trail
-// pointing at the dropped step. The "noopAuthorizer" anti-pattern
-// (gibson#111) and the FGA-nil-check anti-pattern (gibson#111) both
-// derive from this same root cause.
+// Why: the "one-code-path" PRD (deploy#186, codified in [[0003]]) forbids
+// degraded-mode branches in request paths. Every dependency must be
+// validated at startup (in cmd/gibson/main.go) — once the daemon is
+// running, every callsite assumes deps are non-nil. A silent skip on a
+// missing dep produces a user-visible "Failed to load" with no log trail.
 //
-// The walker is intentionally narrow:
-//   - condition must be `X == nil` (or `nil == X`)
-//   - X must be a field selector (`s.deps.Foo`, `a.b.c`) or a bare
-//     identifier — the "dependency" shape
-//   - X's rightmost identifier must NOT match err/Err — we don't
-//     want to flag legitimate "no error" branches like
-//     `if err == nil { return nil }`
-//   - the body must be a single ReturnStmt returning only nil-y
-//     values (nil, true/false + nil, nil + nil)
+// Implementation: this test is a thin caller of the shared ast-checks
+// harness (zero-day-ai/ast-checks). The harness owns the walking, the
+// pattern matcher, and the allowlist-filtering machinery. Per slice 3.1
+// of the production-readiness epic, this is the gibson refactor proof
+// of the harness design.
 //
-// Scope: only files under `internal/` are walked. `cmd/` (startup
-// wiring), test files, and generated files are excluded. Existing
-// debt is tracked in `requestPathAllowlist`; new violations fail.
+// Scope: files under `internal/{daemon,datapool,harness,mission,state,authz}`.
+// The widening to all 48 gibson internal/ dirs is slice 3.2's work
+// (board #16) — narrowing the matcher to receiver-field shape lands in
+// the same slice. This file ships the broad-mode matcher pending that
+// work, preserving today's allowlist exactly.
 func TestNoGracefulNilInRequestPaths(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	// thisFile lives at cmd/gibson/no_graceful_nil_test.go; repo root
@@ -56,148 +47,150 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 	// Fixture subtest: assert walker correctness against known fixtures.
 	t.Run("fixtures", func(t *testing.T) {
 		fixturesRoot := filepath.Join(filepath.Dir(thisFile), "testdata", "scope")
-
-		findings := walkScopeForGracefulNil(t, fixturesRoot)
-
+		matchers := []astchecks.Matcher{astchecks.NewNilGuard(false)}
+		// Two known-illegal fixtures, no allowlist for fixtures.
+		opts := astchecks.WalkOpts{
+			ScopeDirs:     []string{filepath.Join(fixturesRoot, "internal")},
+			RepoRoot:      fixturesRoot,
+			Matchers:      matchers,
+			SkipTestFiles: true,
+			SkipGenerated: true,
+		}
+		findings, err := astchecks.Walk(opts)
+		if err != nil {
+			t.Fatalf("Walk fixtures: %v", err)
+		}
 		if want := 2; len(findings) != want {
 			t.Errorf("fixture scan: got %d findings, want %d:\n%s",
-				len(findings), want, strings.Join(findings, "\n"))
+				len(findings), want, astchecks.RenderFindings(findings))
 		}
 		for _, f := range findings {
-			if !strings.Contains(f, "illegal_silent_skip") {
+			if !strings.Contains(f.Coord, "illegal_silent_skip") {
 				t.Errorf("fixture scan: unexpected finding (should only flag illegal_*): %s", f)
-			}
-			rel, err := filepath.Rel(fixturesRoot, strings.SplitN(f, ":", 2)[0])
-			if err == nil && pathHasComponent(rel, "cmd") {
-				t.Errorf("fixture scan: walker leaked into cmd/ scope: %s", f)
 			}
 		}
 	})
 
 	// Existing-debt allowlist. Each entry is a "<file>:<line>" coordinate
 	// (relative path from repo root) where the request-path graceful-nil
-	// branch is known but has not yet been ripped out (or is a
-	// defensive guard the walker over-flags). New findings (not on this
-	// list) fail the test loud.
+	// branch is known but has not yet been ripped out (or is a defensive
+	// guard the walker over-flags). New findings (not on this list) fail
+	// the test loud.
 	//
 	// Categories (each entry tagged):
 	//
-	//   - DEFENSIVE-GUARD: nil-check on a parameter/local that is a
-	//     value-shape guard, not a dependency. E.g. converter helpers
-	//     returning nil when input is nil; observability span checks
-	//     where a nil span legitimately means "no tracing active".
-	//     These are walker over-flags — the anti-pattern only applies
-	//     to *injected dependencies*. Future iterations of the walker
-	//     may narrow further (e.g. only flag `s.X` field selectors on
-	//     a method receiver) and shrink this list.
+	//   - astchecks.CategoryDefensiveGuard: nil-check on a parameter/local
+	//     that is a value-shape guard, not a dependency. E.g. converter
+	//     helpers returning nil when input is nil; observability span
+	//     checks where a nil span legitimately means "no tracing active".
+	//     Walker over-flags — the anti-pattern only applies to *injected
+	//     dependencies*. Slice 3.2 narrows the matcher to receiver-field
+	//     shape and shrinks this list.
 	//
-	//   - LEGACY-OPTIONAL: a dependency that today is genuinely
-	//     wired conditionally, and reasserting it as always-on is
-	//     blocked on a follow-up slice. Each entry names the
-	//     follow-up.
+	//   - astchecks.CategoryLegacyOptional: a dependency that today is
+	//     genuinely wired conditionally, and reasserting it as always-on
+	//     is blocked on a follow-up slice. Each reason names the slice.
 	//
-	//   - RECEIVER-NIL-GUARD: nil-check on the method receiver
-	//     itself (`if s == nil`). Used as a defensive shim for tests
-	//     that pass a zero-value server; not the dependency
+	//   - astchecks.CategoryReceiverNilGuard: nil-check on the method
+	//     receiver itself (`if s == nil`). Used as a defensive shim for
+	//     tests that pass a zero-value server; not the dependency
 	//     anti-pattern.
 	//
 	// Generated by the first run of this test against main on 2026-05-17
 	// after the gibson slices for one-code-path/195 (#111),
 	// one-code-path/205 (#112), one-code-path/207 (#113) merged.
-	requestPathAllowlist := map[string]string{
+	requestPathAllowlist := astchecks.Allowlist{
 		// internal/daemon/api — handlers + helpers
-		"internal/daemon/api/mission_handlers.go:362":          "LEGACY-OPTIONAL: s.authorizer nil-check predates noopAuthorizer deletion; reassert via authorizer-required follow-up",
-		"internal/daemon/api/mission_handlers.go:979":          "DEFENSIVE-GUARD: err check followed by payload nil-check (caller-shape, not dep)",
-		"internal/daemon/api/server_audit.go:218":              "LEGACY-OPTIONAL: s.authorizer nil-check predates noopAuthorizer deletion",
-		"internal/daemon/api/server_budget.go:88":              "RECEIVER-NIL-GUARD: nil-receiver shim for budget API helper",
-		"internal/daemon/api/server_budget.go:122":             "RECEIVER-NIL-GUARD: nil-receiver shim for budget API helper",
-		"internal/daemon/api/server_entitlements_audit.go:122": "LEGACY-OPTIONAL: entitlements audit emitter conditionally wired",
-		"internal/daemon/api/server_entitlements_audit.go:160": "LEGACY-OPTIONAL: entitlements audit emitter conditionally wired",
-		"internal/daemon/api/server.go:1529":                   "DEFENSIVE-GUARD: response helper, nil data means empty response",
-		"internal/daemon/api/server.go:1554":                   "DEFENSIVE-GUARD: response helper, nil data means empty response",
-		"internal/daemon/api/server.go:1581":                   "DEFENSIVE-GUARD: response helper, nil data means empty response",
-		"internal/daemon/api/server_provider_config.go:75":     "DEFENSIVE-GUARD: nil cfg means no provider overlay",
-		"internal/daemon/api/server_provider_config.go:153":    "LEGACY-OPTIONAL: audit logger conditionally wired",
-		"internal/daemon/api/server_provider_exec.go:104":      "LEGACY-OPTIONAL: budget enforcer conditionally wired; remove with budget-required slice",
-		"internal/daemon/api/typed_value_helpers.go:25":        "DEFENSIVE-GUARD: typed-value converter, nil input → nil output",
-		"internal/daemon/api/typed_value_helpers.go:77":        "DEFENSIVE-GUARD: typed-value converter, nil input → nil output",
-		"internal/daemon/api/typed_value_helpers.go:89":        "DEFENSIVE-GUARD: typed-value converter, nil input → nil output",
-		"internal/daemon/api/typed_value_helpers.go:106":       "DEFENSIVE-GUARD: typed-value converter, nil input → nil output",
+		"internal/daemon/api/mission_handlers.go:362": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check predates noopAuthorizer deletion; reassert via authorizer-required follow-up"},
+		"internal/daemon/api/mission_handlers.go:979": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "err check followed by payload nil-check (caller-shape, not dep)"},
+		"internal/daemon/api/server_audit.go:218": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check predates noopAuthorizer deletion"},
+		"internal/daemon/api/server_budget.go:88": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "nil-receiver shim for budget API helper"},
+		"internal/daemon/api/server_budget.go:122": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "nil-receiver shim for budget API helper"},
+		"internal/daemon/api/server_entitlements_audit.go:122": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "entitlements audit emitter conditionally wired"},
+		"internal/daemon/api/server_entitlements_audit.go:160": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "entitlements audit emitter conditionally wired"},
+		"internal/daemon/api/server.go:1529": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response helper, nil data means empty response"},
+		"internal/daemon/api/server.go:1554": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response helper, nil data means empty response"},
+		"internal/daemon/api/server.go:1581": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response helper, nil data means empty response"},
+		"internal/daemon/api/server_provider_config.go:75": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil cfg means no provider overlay"},
+		"internal/daemon/api/server_provider_config.go:153": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "audit logger conditionally wired"},
+		"internal/daemon/api/server_provider_exec.go:104": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "budget enforcer conditionally wired; remove with budget-required slice"},
+		"internal/daemon/api/typed_value_helpers.go:25": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
+		"internal/daemon/api/typed_value_helpers.go:77": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
+		"internal/daemon/api/typed_value_helpers.go:89": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
+		"internal/daemon/api/typed_value_helpers.go:106": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
 
 		// internal/daemon — core
-		"internal/daemon/compliance_sink_adapter.go:32": "LEGACY-OPTIONAL: compliance sink registered conditionally; remove with compliance-required slice",
-		"internal/daemon/daemon.go:481":                 "LEGACY-OPTIONAL: SPIFFE wiring optional in non-SPIFFE deployments; reassert when SPIFFE-everywhere lands",
-		"internal/daemon/grpc.go:2030":                  "RECEIVER-NIL-GUARD: pool nil-guard during shutdown race",
-		"internal/daemon/grpc.go:2040":                  "DEFENSIVE-GUARD: composite err/m/Checkpoint guard for caller-shape",
-		"internal/daemon/grpc.go:2504":                  "LEGACY-OPTIONAL: Neo4j connection optional in non-graphrag deployments",
-		"internal/daemon/graph_bootstrap.go:411":        "DEFENSIVE-GUARD: tenant-value lookup helper, nil means no scoping",
-		"internal/daemon/infrastructure.go:94":          "LEGACY-OPTIONAL: semantic querier factory optional in non-graphrag deployments",
-		"internal/daemon/log_watcher.go:197":            "DEFENSIVE-GUARD: log watcher file handle nil-guard during teardown",
-		"internal/daemon/manifest_loader.go:34":         "DEFENSIVE-GUARD: manifest helper, nil component means no-op",
-		"internal/daemon/otel_adapter.go:105":           "LEGACY-OPTIONAL: OTel infrastructure conditionally wired",
-		"internal/daemon/otel_adapter.go:125":           "LEGACY-OPTIONAL: OTel infrastructure conditionally wired",
-		"internal/daemon/otel_adapter.go:146":           "LEGACY-OPTIONAL: OTel infrastructure conditionally wired",
+		"internal/daemon/compliance_sink_adapter.go:32": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "compliance sink registered conditionally; remove with compliance-required slice"},
+		"internal/daemon/daemon.go:481": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "SPIFFE wiring optional in non-SPIFFE deployments; reassert when SPIFFE-everywhere lands"},
+		"internal/daemon/grpc.go:2030": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "pool nil-guard during shutdown race"},
+		"internal/daemon/grpc.go:2040": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite err/m/Checkpoint guard for caller-shape"},
+		"internal/daemon/grpc.go:2504": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection optional in non-graphrag deployments"},
+		"internal/daemon/graph_bootstrap.go:411": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tenant-value lookup helper, nil means no scoping"},
+		"internal/daemon/infrastructure.go:94": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},
+		"internal/daemon/log_watcher.go:197": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "log watcher file handle nil-guard during teardown"},
+		"internal/daemon/manifest_loader.go:34": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "manifest helper, nil component means no-op"},
+		"internal/daemon/otel_adapter.go:105": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "OTel infrastructure conditionally wired"},
+		"internal/daemon/otel_adapter.go:125": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "OTel infrastructure conditionally wired"},
+		"internal/daemon/otel_adapter.go:146": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "OTel infrastructure conditionally wired"},
 
 		// internal/datapool
-		"internal/datapool/conn_ops_finding.go:62":  "DEFENSIVE-GUARD: goredis.Nil sentinel + nil result handling",
-		"internal/datapool/conn_ops_mission.go:159": "DEFENSIVE-GUARD: goredis.Nil sentinel + nil result handling",
-		"internal/datapool/conn_ops_mission.go:375": "LEGACY-OPTIONAL: redis client nil-guard predates pool-required hardening",
+		"internal/datapool/conn_ops_finding.go:62": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "goredis.Nil sentinel + nil result handling"},
+		"internal/datapool/conn_ops_mission.go:159": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "goredis.Nil sentinel + nil result handling"},
+		"internal/datapool/conn_ops_mission.go:375": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "redis client nil-guard predates pool-required hardening"},
 
 		// internal/harness — middleware + adapters
-		"internal/harness/callback_service.go:2366":             "DEFENSIVE-GUARD: composite data/tracerProvider nil-guard for observability",
-		"internal/harness/callback_service.go:2808":             "LEGACY-OPTIONAL: event bus optional; remove with eventbus-required slice",
-		"internal/harness/callback_service.go:3045":             "DEFENSIVE-GUARD: typed-value converter",
-		"internal/harness/callback_service.go:3230":             "DEFENSIVE-GUARD: nil-input → nil-output converter",
-		"internal/harness/callback_service.go:3259":             "DEFENSIVE-GUARD: nil-input → nil-output converter",
-		"internal/harness/callback_service.go:3532":             "DEFENSIVE-GUARD: nil-input → nil-output converter",
-		"internal/harness/callback_service.go:3792":             "DEFENSIVE-GUARD: nil-input → nil-output converter",
-		"internal/harness/callback_service.go:3864":             "DEFENSIVE-GUARD: nil-input → nil-output converter",
-		"internal/harness/callback_service.go:4018":             "DEFENSIVE-GUARD: nil-input → nil-output converter",
-		"internal/harness/compliance_evaluator.go:37":           "DEFENSIVE-GUARD: nil signature input means no eval",
-		"internal/harness/compliance_middleware_methods.go:101": "DEFENSIVE-GUARD: nil resp passthrough in middleware",
-		"internal/harness/compliance_rule_registry.go:79":       "LEGACY-OPTIONAL: rule loader optional in unit-test boot path",
-		"internal/harness/filter.go:77":                         "DEFENSIVE-GUARD: nil target ID means no filter match",
-		"internal/harness/filter.go:110":                        "DEFENSIVE-GUARD: nil CVSS means no min-score match",
-		"internal/harness/filter.go:117":                        "DEFENSIVE-GUARD: nil CVSS means no max-score match",
-		"internal/harness/graphrag_query_bridge.go:1095":        "DEFENSIVE-GUARD: nil props passthrough",
-		"internal/harness/implementation.go:2426":               "DEFENSIVE-GUARD: nil-input → nil-output converter",
-		"internal/harness/implementation.go:3046":               "DEFENSIVE-GUARD: nil-input → nil-output converter",
-		"internal/harness/middleware/events.go:170":             "DEFENSIVE-GUARD: nil result means middleware drops event",
-		"internal/harness/middleware/tracing.go:162":            "DEFENSIVE-GUARD: nil response passthrough",
-		"internal/harness/middleware_harness.go:53":             "DEFENSIVE-GUARD: nil result passthrough",
-		"internal/harness/middleware_harness.go:73":             "DEFENSIVE-GUARD: nil result passthrough",
-		"internal/harness/middleware_harness.go:93":             "DEFENSIVE-GUARD: nil result passthrough",
-		"internal/harness/middleware_harness.go:126":            "DEFENSIVE-GUARD: nil result passthrough",
-		"internal/harness/mission_context_provider.go:259":      "DEFENSIVE-GUARD: nil PreviousRunID means first run",
-		"internal/harness/relationship_resolver.go:288":         "DEFENSIVE-GUARD: nil relationship means no-op",
-		"internal/harness/schema_convert.go:14":                 "DEFENSIVE-GUARD: empty schema shape means no conversion",
-		"internal/harness/structured.go:1216":                   "DEFENSIVE-GUARD: nil-input → nil-output converter",
+		"internal/harness/callback_service.go:2366": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite data/tracerProvider nil-guard for observability"},
+		"internal/harness/callback_service.go:2808": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional; remove with eventbus-required slice"},
+		"internal/harness/callback_service.go:3045": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter"},
+		"internal/harness/callback_service.go:3230": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
+		"internal/harness/callback_service.go:3259": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
+		"internal/harness/callback_service.go:3532": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
+		"internal/harness/callback_service.go:3792": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
+		"internal/harness/callback_service.go:3864": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
+		"internal/harness/callback_service.go:4018": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
+		"internal/harness/compliance_evaluator.go:37": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil signature input means no eval"},
+		"internal/harness/compliance_middleware_methods.go:101": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil resp passthrough in middleware"},
+		"internal/harness/compliance_rule_registry.go:79": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "rule loader optional in unit-test boot path"},
+		"internal/harness/filter.go:77": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil target ID means no filter match"},
+		"internal/harness/filter.go:110": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no min-score match"},
+		"internal/harness/filter.go:117": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil CVSS means no max-score match"},
+		"internal/harness/graphrag_query_bridge.go:1095": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil props passthrough"},
+		"internal/harness/implementation.go:2426": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
+		"internal/harness/implementation.go:3046": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
+		"internal/harness/middleware/events.go:170": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil result means middleware drops event"},
+		"internal/harness/middleware/tracing.go:162": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil response passthrough"},
+		"internal/harness/middleware_harness.go:53": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil result passthrough"},
+		"internal/harness/middleware_harness.go:73": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil result passthrough"},
+		"internal/harness/middleware_harness.go:93": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil result passthrough"},
+		"internal/harness/middleware_harness.go:126": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil result passthrough"},
+		"internal/harness/mission_context_provider.go:259": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil PreviousRunID means first run"},
+		"internal/harness/relationship_resolver.go:288": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil relationship means no-op"},
+		"internal/harness/schema_convert.go:14": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "empty schema shape means no conversion"},
+		"internal/harness/structured.go:1216": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil-input → nil-output converter"},
 
 		// internal/mission
-		"internal/mission/checkpoint.go:112":                   "DEFENSIVE-GUARD: nil memory means empty checkpoint",
-		"internal/mission/checkpoint_manager.go:173":           "DEFENSIVE-GUARD: nil checkpoint means no-op",
-		"internal/mission/constraints.go:91":                   "DEFENSIVE-GUARD: nil constraints/metrics means no eval",
-		"internal/mission/constraints.go:199":                  "DEFENSIVE-GUARD: nil constraints means no validation (sdk#64 M2 canonical_constraints helper)",
-		"internal/mission/controller.go:239":                   "RECEIVER-NIL-GUARD: composite nil-receiver shim for controller",
-		"internal/mission/controller_checkpoint.go:533":        "LEGACY-OPTIONAL: event bus optional in non-streaming deployments",
-		"internal/mission/controller_checkpoint.go:559":        "LEGACY-OPTIONAL: event bus optional in non-streaming deployments",
-		"internal/mission/definitionutil/definitionutil.go:18": "DEFENSIVE-GUARD: nil definition means empty traverse",
-		"internal/mission/state.go:504":                        "DEFENSIVE-GUARD: nil Definition means no-op",
+		"internal/mission/checkpoint.go:112": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil memory means empty checkpoint"},
+		"internal/mission/checkpoint_manager.go:173": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil checkpoint means no-op"},
+		"internal/mission/constraints.go:91": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil constraints/metrics means no eval"},
+		"internal/mission/constraints.go:199": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil constraints means no validation (sdk#64 M2 canonical_constraints helper)"},
+		"internal/mission/controller.go:239": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim for controller"},
+		"internal/mission/controller_checkpoint.go:533": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional in non-streaming deployments"},
+		"internal/mission/controller_checkpoint.go:559": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "event bus optional in non-streaming deployments"},
+		"internal/mission/definitionutil/definitionutil.go:18": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil definition means empty traverse"},
+		"internal/mission/state.go:504": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil Definition means no-op"},
 
 		// internal/state
-		"internal/state/client.go:229":      "RECEIVER-NIL-GUARD: nil-client shim for tests",
-		"internal/state/tenant_names.go:83": "DEFENSIVE-GUARD: composite nil-client / empty-tenant guard",
-		"internal/state/tenant_names.go:93": "DEFENSIVE-GUARD: composite nil-client / empty-tenant guard",
+		"internal/state/client.go:229": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "nil-client shim for tests"},
+		"internal/state/tenant_names.go:83": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite nil-client / empty-tenant guard"},
+		"internal/state/tenant_names.go:93": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite nil-client / empty-tenant guard"},
 	}
 
 	// Real-code subtest: walk in-scope request-path subdirectories and
-	// fail on any new finding. Scope mirrors the issue spec
-	// (deploy#210): the "request path" for the daemon is the set of
-	// directories where gRPC handlers, mission execution, and the
-	// authz spine live. Files outside this scope (helper packages
-	// shared with cmd/, generated code, etc.) are intentionally
-	// excluded — they'll be brought into scope as those subsystems
-	// land their own one-code-path slices.
+	// fail on any new finding. Scope mirrors the issue spec (deploy#210):
+	// the "request path" for the daemon is the set of directories where
+	// gRPC handlers, mission execution, and the authz spine live. Files
+	// outside this scope are excluded; widening to all 48 internal/ dirs
+	// lands in slice 3.2.
 	scopeDirs := []string{
 		filepath.Join(repoRoot, "internal", "daemon"),
 		filepath.Join(repoRoot, "internal", "datapool"),
@@ -208,255 +201,30 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 	}
 
 	t.Run("real_code", func(t *testing.T) {
-		var allFindings []string
-		for _, dir := range scopeDirs {
-			if _, err := os.Stat(dir); err != nil {
-				continue
-			}
-			allFindings = append(allFindings, walkDirForGracefulNil(t, dir)...)
-		}
-		sort.Strings(allFindings)
-
-		var newFindings []string
-		for _, f := range allFindings {
-			coord := repoRelCoord(f, repoRoot)
-			if _, ok := requestPathAllowlist[coord]; !ok {
-				newFindings = append(newFindings, f)
-			}
+		opts := astchecks.WalkOpts{
+			ScopeDirs:     scopeDirs,
+			RepoRoot:      repoRoot,
+			Matchers:      []astchecks.Matcher{astchecks.NewNilGuard(false)},
+			Allowlist:     requestPathAllowlist,
+			SkipTestFiles: true,
+			SkipGenerated: true,
 		}
 
-		if len(newFindings) > 0 {
-			t.Errorf("NEW graceful-nil branches in request paths (forbidden by one-code-path PRD deploy#186):\n%s\n\n"+
+		findings, err := astchecks.Walk(opts)
+		if err != nil {
+			t.Fatalf("Walk: %v", err)
+		}
+
+		if len(findings) > 0 {
+			t.Errorf("NEW graceful-nil branches in request paths (forbidden by [[0003]]):\n%s\n\n"+
 				"Each is a `if X == nil { return [...] nil }` pattern in a request-path file. The fix is one of:\n"+
 				"  (1) Validate the dep at startup (cmd/gibson/main.go) so it can never be nil at request time.\n"+
-				"  (2) If this is a legitimate exception, add it to requestPathAllowlist with a linked follow-up issue.\n",
-				strings.Join(newFindings, "\n"))
+				"  (2) If this is a legitimate exception, add it to requestPathAllowlist with a category tag + reason.\n",
+				astchecks.RenderFindings(findings))
 		}
 
-		for coord, reason := range requestPathAllowlist {
-			t.Logf("allowlisted: %s — %s", coord, reason)
-		}
+		// Keep the allowlist visible in test output so reviewers see what's
+		// tolerated. Matches the pre-refactor format.
+		t.Log(astchecks.FormatAllowlistLog(requestPathAllowlist))
 	})
-}
-
-// walkScopeForGracefulNil walks dir recursively, treating it like a
-// fake repo root where path components include "cmd/" (excluded) and
-// "internal/" (scanned). Used by the fixtures sub-test.
-func walkScopeForGracefulNil(t *testing.T, dir string) []string {
-	t.Helper()
-	var findings []string
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".go.txt") {
-			return nil
-		}
-		if strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-		if pathHasComponent(rel, "cmd") {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		findings = append(findings, analyzeSource(t, path, string(src))...)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", dir, err)
-	}
-	return findings
-}
-
-// walkDirForGracefulNil parses every non-test .go file under dir and
-// returns "<file>:<line>: <snippet>" findings.
-func walkDirForGracefulNil(t *testing.T, dir string) []string {
-	t.Helper()
-	var findings []string
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if info.Name() == "testdata" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-		if strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		findings = append(findings, analyzeSource(t, path, string(src))...)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", dir, err)
-	}
-	return findings
-}
-
-func pathHasComponent(path, want string) bool {
-	for _, p := range strings.Split(path, string(os.PathSeparator)) {
-		if p == want {
-			return true
-		}
-	}
-	return false
-}
-
-func analyzeSource(t *testing.T, filename, src string) []string {
-	t.Helper()
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, filename, src, parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatalf("parse %s: %v", filename, err)
-	}
-
-	var findings []string
-	ast.Inspect(file, func(n ast.Node) bool {
-		ifs, ok := n.(*ast.IfStmt)
-		if !ok {
-			return true
-		}
-		if !isDependencyNilCheck(ifs.Cond) {
-			return true
-		}
-		if !isSilentReturnBody(ifs.Body) {
-			return true
-		}
-		pos := fset.Position(ifs.Pos())
-		snippet := renderIfHead(ifs, fset, src)
-		findings = append(findings, fmt.Sprintf("%s:%d: %s", filename, pos.Line, snippet))
-		return true
-	})
-	return findings
-}
-
-func isDependencyNilCheck(expr ast.Expr) bool {
-	be, ok := expr.(*ast.BinaryExpr)
-	if !ok {
-		return false
-	}
-
-	if be.Op == token.LOR || be.Op == token.LAND {
-		return isDependencyNilCheck(be.X) || isDependencyNilCheck(be.Y)
-	}
-
-	if be.Op != token.EQL {
-		return false
-	}
-	var subject ast.Expr
-	switch {
-	case isNilIdent(be.Y):
-		subject = be.X
-	case isNilIdent(be.X):
-		subject = be.Y
-	default:
-		return false
-	}
-
-	switch s := subject.(type) {
-	case *ast.SelectorExpr:
-		return !looksLikeError(s.Sel.Name)
-	case *ast.Ident:
-		return !looksLikeError(s.Name)
-	default:
-		return false
-	}
-}
-
-func isSilentReturnBody(body *ast.BlockStmt) bool {
-	if body == nil || len(body.List) == 0 {
-		return false
-	}
-	if len(body.List) != 1 {
-		return false
-	}
-	r, ok := body.List[0].(*ast.ReturnStmt)
-	if !ok {
-		return false
-	}
-	return isNilyReturn(r)
-}
-
-func isNilyReturn(r *ast.ReturnStmt) bool {
-	if len(r.Results) == 0 {
-		return true
-	}
-	for _, res := range r.Results {
-		if !isNilOrBoolLiteral(res) {
-			return false
-		}
-	}
-	return true
-}
-
-func isNilOrBoolLiteral(expr ast.Expr) bool {
-	id, ok := expr.(*ast.Ident)
-	if !ok {
-		return false
-	}
-	switch id.Name {
-	case "nil", "true", "false":
-		return true
-	}
-	return false
-}
-
-func isNilIdent(expr ast.Expr) bool {
-	id, ok := expr.(*ast.Ident)
-	return ok && id.Name == "nil"
-}
-
-func looksLikeError(name string) bool {
-	lower := strings.ToLower(name)
-	return lower == "err" || strings.HasSuffix(lower, "err") || strings.HasSuffix(lower, "error")
-}
-
-func renderIfHead(ifs *ast.IfStmt, fset *token.FileSet, src string) string {
-	start := fset.Position(ifs.Pos()).Offset
-	end := fset.Position(ifs.Body.Lbrace).Offset
-	if start < 0 || end < start || end > len(src) {
-		return "<unrenderable>"
-	}
-	line := strings.TrimSpace(src[start:end])
-	line = strings.ReplaceAll(line, "\n", " ")
-	line = strings.ReplaceAll(line, "\t", " ")
-	for strings.Contains(line, "  ") {
-		line = strings.ReplaceAll(line, "  ", " ")
-	}
-	return line + " { ... }"
-}
-
-func repoRelCoord(finding, repoRoot string) string {
-	parts := strings.SplitN(finding, ": ", 2)
-	pathLine := parts[0]
-	idx := strings.LastIndex(pathLine, ":")
-	if idx < 0 {
-		return pathLine
-	}
-	abs := pathLine[:idx]
-	line := pathLine[idx+1:]
-	if rel, err := filepath.Rel(repoRoot, abs); err == nil {
-		return rel + ":" + line
-	}
-	return pathLine
 }
