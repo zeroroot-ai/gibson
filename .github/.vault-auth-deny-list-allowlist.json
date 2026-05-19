@@ -1,0 +1,104 @@
+[
+  {
+    "file": "docs/secrets.md",
+    "line": 81,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "go.mod",
+    "line": 168,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "go.mod",
+    "line": 168,
+    "token": "hashicorp/vault/api/auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "go.mod",
+    "line": 168,
+    "token": "vault/api/auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/crypto/keyprovider.go",
+    "line": 48,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/crypto/providers/vault.go",
+    "line": 17,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/crypto/providers/vault.go",
+    "line": 18,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/crypto/providers/vault.go",
+    "line": 18,
+    "token": "vault/api/auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/crypto/providers/vault.go",
+    "line": 37,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/daemon/broker_init_vault_auth.go",
+    "line": 94,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/daemon/broker_init_vault_auth.go",
+    "line": 98,
+    "token": "AuthMethodKubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/daemon/broker_init_vault_auth_test.go",
+    "line": 13,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/daemon/broker_init_vault_auth_test.go",
+    "line": 18,
+    "token": "AuthMethodKubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/daemon/broker_init_vault_auth_test.go",
+    "line": 18,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/daemon/broker_init_vault_auth_test.go",
+    "line": 51,
+    "token": "AuthMethodKubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/secrets/jwtsource/source.go",
+    "line": 8,
+    "token": "auth/kubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  },
+  {
+    "file": "internal/secrets/jwtsource/source.go",
+    "line": 9,
+    "token": "AuthMethodKubernetes",
+    "reason": "pre-ADR-0009 cross-reference"
+  }
+]
