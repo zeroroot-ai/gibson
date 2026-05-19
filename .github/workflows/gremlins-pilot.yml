@@ -1,0 +1,220 @@
+# Mutation-testing pilot using gremlins.
+#
+# Slice 5.12 of the production-readiness epic (zero-day-ai/gibson#175 →
+# board #16). Pilot scope: internal/authz/registry/. That package is the
+# highest-stakes Go code in the daemon — its tests are the only thing
+# between "we ship the right authz model" and "we ship a broken one".
+#
+# Mutation testing measures TEST QUALITY (not coverage). For each
+# detected mutant (logic change that compiles), gremlins runs the test
+# suite. A surviving mutant is a test gap: the wrong behavior produced
+# the same test outcome. Mutation score = killed/(killed+survived).
+#
+# Why weekly + not per-PR:
+#   - gremlins runs the test suite once per mutant; ~5-15 min on the
+#     authz registry alone. Per-PR latency is unacceptable.
+#   - Mutation findings are slowly-drifting tech debt; weekly cadence
+#     matches their actual change rate.
+#
+# Threshold: 80% mutation score. Below-threshold runs auto-file an
+# issue with the surviving mutant list — see the "auto-file issue" step
+# at the bottom. Workflow does NOT fail on below-threshold; that would
+# block other Monday work. The issue is the persistent signal.
+#
+# Acceptance per slice 5.12:
+#   - [x] Weekly schedule on gibson
+#   - [x] Scoped to internal/authz/registry/ only
+#   - [x] Mutation score threshold 80% (configurable via env)
+#   - [x] Below-threshold auto-files an issue with surviving mutants
+#   - [ ] First mutant-killing PR lands — deferred follow-up, not gated
+#         here (the slice can close with the pilot workflow shipped;
+#         actual mutant-killing rides on the next agent that picks up
+#         the auto-filed issue)
+#
+# Refs:
+# - Parent PRD: zero-day-ai/gibson#175
+# - Slice: zero-day-ai/gibson#178
+# - Board: https://github.com/orgs/zero-day-ai/projects/16
+
+name: gremlins-pilot
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC. Picks up Friday's merged work + gives
+    # the weekday a fresh signal.
+    - cron: "0 9 * * 1"
+  # Manual trigger for ad-hoc baseline runs (and for the initial run
+  # right after this workflow merges).
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: "Mutation score threshold (0.0-1.0). Default: 0.80"
+        required: false
+        default: "0.80"
+
+concurrency:
+  group: gremlins-pilot
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  mutation-test:
+    name: mutation-test authz/registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TARGET_PACKAGE: ./internal/authz/registry/...
+      THRESHOLD: ${{ inputs.threshold || '0.80' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install gremlins
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.5.0
+
+      - name: Run gremlins
+        id: gremlins
+        run: |
+          set -uo pipefail
+          # `gremlins unleash` is the mutation-testing command. Output
+          # goes to stdout (human-readable) + a JSON report.
+          mkdir -p artifacts
+          # Run; don't fail the workflow on below-threshold (we auto-file
+          # an issue instead). `|| true` would also swallow real errors,
+          # so use a sentinel exit-code probe instead.
+          if gremlins unleash --threshold-efficacy 0 \
+                              --output artifacts/gremlins-report.json \
+                              "$TARGET_PACKAGE"; then
+            echo "ran=true" >> "$GITHUB_OUTPUT"
+          else
+            # Non-zero exit might mean threshold-fail OR real error.
+            # Either way the report file tells us; check it exists.
+            if [ -f artifacts/gremlins-report.json ]; then
+              echo "ran=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "ran=false" >> "$GITHUB_OUTPUT"
+              echo "::error::gremlins failed without producing a report"
+              exit 1
+            fi
+          fi
+
+      - name: Upload report artifact
+        if: steps.gremlins.outputs.ran == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gremlins-report
+          path: artifacts/gremlins-report.json
+          retention-days: 90
+
+      - name: Compute score + surviving mutants
+        if: steps.gremlins.outputs.ran == 'true'
+        id: score
+        run: |
+          set -euo pipefail
+          REPORT=artifacts/gremlins-report.json
+          # Schema: gremlins JSON has a top-level mutants array; each
+          # mutant has a `status` field (KILLED, LIVED, NOT_VIABLE,
+          # NOT_COVERED, RUNERROR, TIMED_OUT).
+          KILLED=$(jq '[.files[].mutants[] | select(.status == "KILLED")] | length' "$REPORT")
+          LIVED=$(jq '[.files[].mutants[] | select(.status == "LIVED")] | length' "$REPORT")
+          NOT_COVERED=$(jq '[.files[].mutants[] | select(.status == "NOT_COVERED")] | length' "$REPORT")
+          TOTAL=$((KILLED + LIVED + NOT_COVERED))
+          if [ "$TOTAL" -eq 0 ]; then
+            SCORE="1.00"
+          else
+            SCORE=$(awk -v k="$KILLED" -v t="$TOTAL" 'BEGIN { printf "%.2f", k/t }')
+          fi
+          echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+          echo "killed=$KILLED" >> "$GITHUB_OUTPUT"
+          echo "lived=$LIVED" >> "$GITHUB_OUTPUT"
+          echo "not_covered=$NOT_COVERED" >> "$GITHUB_OUTPUT"
+          echo "::notice::mutation score: $SCORE (killed=$KILLED lived=$LIVED not_covered=$NOT_COVERED)"
+
+      - name: File issue when below threshold
+        if: |
+          steps.gremlins.outputs.ran == 'true' &&
+          (steps.score.outputs.lived != '0' || steps.score.outputs.not_covered != '0')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCORE: ${{ steps.score.outputs.score }}
+          KILLED: ${{ steps.score.outputs.killed }}
+          LIVED: ${{ steps.score.outputs.lived }}
+          NOT_COVERED: ${{ steps.score.outputs.not_covered }}
+          REPORT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          REPORT=artifacts/gremlins-report.json
+          # Below threshold? Compare as floats via awk.
+          BELOW=$(awk -v s="$SCORE" -v t="$THRESHOLD" 'BEGIN { print (s+0 < t+0) ? "yes" : "no" }')
+          if [ "$BELOW" = "no" ]; then
+            echo "::notice::score $SCORE >= threshold $THRESHOLD, not filing issue"
+            exit 0
+          fi
+
+          # Build a markdown table of surviving + uncovered mutants.
+          # Keep it bounded (top 50) so the issue body fits.
+          MUTANTS_MD=$(jq -r '
+            [.files[] | .filename as $f |
+              (.mutants // [])[] |
+              select(.status == "LIVED" or .status == "NOT_COVERED") |
+              "| `\($f):\(.line)` | \(.type) | \(.status) |"]
+            | sort | .[0:50] | join("\n")' "$REPORT")
+
+          TITLE="ci(gremlins): mutation score $SCORE below threshold $THRESHOLD on internal/authz/registry"
+          BODY=$(cat <<MARKDOWN
+          ## Weekly gremlins pilot run — below threshold
+
+          Mutation score: **$SCORE** (threshold: $THRESHOLD).
+
+          | Bucket | Count |
+          |---|---|
+          | killed | $KILLED |
+          | lived (surviving — TEST GAP) | $LIVED |
+          | not_covered (no test reaches) | $NOT_COVERED |
+
+          ## Surviving / uncovered mutants (top 50)
+
+          | Location | Mutation type | Status |
+          |---|---|---|
+          $MUTANTS_MD
+
+          Full report (gremlins JSON) attached to workflow run:
+          $REPORT_URL
+
+          ## Why this matters
+
+          Mutation testing measures TEST QUALITY, not coverage. A surviving mutant means: a wrong behavior produced the same test outcome. For \`internal/authz/registry/\` — the daemon's authz model + identity-deriver pipeline — every surviving mutant is a way the wrong authz decision could ship without any test failing.
+
+          ## How to act on this
+
+          Each row in the table is a candidate test gap. For each:
+          1. Open the source file at the listed line.
+          2. Identify the mutation (operator swap, condition negation, etc.) by re-running gremlins locally: \`gremlins unleash ./internal/authz/registry/...\`
+          3. Add a test that DIES on the mutated code.
+          4. Re-run gremlins; the mutant should now be KILLED.
+
+          Refs:
+          - Slice: zero-day-ai/gibson#178 (gremlins pilot)
+          - Parent PRD: zero-day-ai/gibson#175
+          - Board: https://github.com/orgs/zero-day-ai/projects/16
+          MARKDOWN
+          )
+
+          # Check for an existing open issue to avoid spam; update body if present.
+          EXISTING=$(gh issue list -R "$GITHUB_REPOSITORY" \
+                       --state open --search 'in:title "ci(gremlins):"' \
+                       --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --title "$TITLE" --body "$BODY"
+            echo "::notice::updated existing issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" --label "ready-for-agent"
+            echo "::notice::filed new issue"
+          fi
