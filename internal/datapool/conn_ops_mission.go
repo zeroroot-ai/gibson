@@ -365,8 +365,9 @@ type runningMissionDoc struct {
 }
 
 // ListRunning returns all missions currently in the "running" or "paused"
-// state in this tenant's Redis logical DB. It is used exclusively during
-// daemon start-up crash recovery (recoverRunningMissionsAcrossTenants).
+// state in this tenant's Redis logical DB. Used by the per-tenant lazy
+// recovery hook (internal/datapool/recovery_hook.go) on first Pool.For
+// dial after a daemon restart — see ADR-0023.
 //
 // The scan covers all gibson:mission:* keys that are not secondary-index
 // keys. Keys carrying no-tenant prefixes are exactly the pattern produced by

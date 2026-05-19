@@ -1076,15 +1076,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "configured callback service with component authz metrics recorder")
 	}
 
-	// Perform crash recovery: find any missions that were running when daemon stopped
-	// and transition them to paused status before accepting new connections.
-	// Phase D: recoverRunningMissionsAcrossTenants fans out across tenant CRDs and uses
-	// per-tenant Conns (conn.Missions().ListRunning) rather than the global RedisMissionStore.
-	d.logger.Info(ctx, "checking for missions to recover after daemon restart")
-	if err := d.recoverRunningMissionsAcrossTenants(ctx); err != nil {
-		d.logger.Warn(ctx, "failed to recover running missions", "error", err)
-		// Don't fail startup on recovery error - continue with normal operation
-	}
+	// Mission crash recovery is now lazy and per-tenant: the datapool's
+	// RecoveryHook fires on the first Pool.For dial of each tenant per
+	// process, transitioning any missions left `running` by the previous
+	// daemon process to `paused`. This replaces the eager startup
+	// enumeration of Tenant CRDs that crashed the daemon on 2026-05-19
+	// (testa123 incident). See ADR-0023 and gibson#207.
+	d.logger.Info(ctx, "lazy mission recovery armed; will fire per-tenant on first Pool.For dial")
 
 	// Initialize mission checkpointer for graceful shutdown.
 	// The checkpointer uses the pool to acquire per-tenant connections for mission updates.
@@ -1767,14 +1765,6 @@ func (d *daemonImpl) countRegisteredAgents(ctx context.Context) int {
 		return 0
 	}
 	return len(agents)
-}
-
-// recoverRunningMissions is the legacy global-store crash-recovery path, superseded
-// by recoverRunningMissionsAcrossTenants (Phase D). This stub is retained to satisfy
-// any callers that have not yet been migrated; it delegates to the per-tenant path.
-// Deprecated: use recoverRunningMissionsAcrossTenants instead.
-func (d *daemonImpl) recoverRunningMissions(ctx context.Context) error {
-	return d.recoverRunningMissionsAcrossTenants(ctx)
 }
 
 // formatDuration formats a duration into a human-readable string.

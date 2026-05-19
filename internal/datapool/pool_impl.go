@@ -44,6 +44,16 @@ type pool struct {
 	adminAcquirer AdminAcquirer
 	adminMu       sync.RWMutex
 
+	// recoveryHook is invoked on the first successful For() dial of each
+	// tenant per process lifetime — see ADR-0023 lazy mission recovery.
+	// Defaults to a no-op; production wires via SetRecoveryHook.
+	recoveryHook RecoveryHook
+	recoveryMu   sync.RWMutex
+	// firedRecovery tracks which tenants have already had their hook run
+	// this process. Map of auth.TenantID → struct{}; entries persist for
+	// the process lifetime (cheap; one entry per tenant ever dialled).
+	firedRecovery sync.Map
+
 	// tenantEntries tracks per-tenant eviction state.
 	tenantEntries sync.Map // map[auth.TenantID]*tenantEntry
 
@@ -125,14 +135,15 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 	closeCh := make(chan struct{})
 
 	p := &pool{
-		cfg:         cfg,
-		pg:          pg,
-		redisPool:   rp,
-		neo4j:       n4j,
-		keyProvider: keyProvider,
-		masterKEK:   masterKEK,
-		checker:     checker,
-		closeCh:     closeCh,
+		cfg:          cfg,
+		pg:           pg,
+		redisPool:    rp,
+		neo4j:        n4j,
+		keyProvider:  keyProvider,
+		masterKEK:    masterKEK,
+		checker:      checker,
+		recoveryHook: noopRecoveryHook{},
+		closeCh:      closeCh,
 	}
 
 	// For now, the vector driver is nil (B2 TODO stub). Wired when Phase B2 is
@@ -241,7 +252,46 @@ func (p *pool) For(ctx context.Context, tenant auth.TenantID) (*Conn, error) {
 		dpmetrics.DecPoolActiveConns(tenantStr)
 	}
 
+	// Lazy mission recovery (ADR-0023): on the first successful For() dial
+	// of each tenant per process, run the recovery hook to transition any
+	// missions left in `running` state by the previous daemon process to
+	// `paused`. Replaces the eager startup-enumeration loop that crashed
+	// the daemon on 2026-05-19 (testa123 incident).
+	//
+	// LoadOrStore guarantees exactly-once semantics across concurrent
+	// callers for the same tenant. Hook errors are logged by the hook
+	// itself and do NOT propagate as For() failures — recovery is
+	// best-effort cleanup, not a dispatch gate.
+	if _, fired := p.firedRecovery.LoadOrStore(tenant, struct{}{}); !fired {
+		p.recoveryMu.RLock()
+		hook := p.recoveryHook
+		p.recoveryMu.RUnlock()
+		if hook != nil {
+			if err := hook.Run(ctx, tenant, conn); err != nil {
+				// Failure isolation: log and continue. Conn is still returned.
+				dpmetrics.IncPoolInitFailure(tenantStr, dpmetrics.StoreRedis, "recovery_hook")
+			}
+		}
+	}
+
 	return conn, nil
+}
+
+// SetRecoveryHook wires the RecoveryHook into this pool. Thread-safe; may
+// be called at any time. Subsequent first-dial-per-tenant invocations of
+// Pool.For use the newly-set hook. Existing per-tenant "already fired"
+// markers are preserved — a hook swap does not retroactively re-fire on
+// tenants already dialled. Pass NewNoopRecoveryHook() to disable recovery
+// for tests.
+//
+// Spec: ADR-0023.
+func (p *pool) SetRecoveryHook(hook RecoveryHook) {
+	if hook == nil {
+		hook = noopRecoveryHook{}
+	}
+	p.recoveryMu.Lock()
+	p.recoveryHook = hook
+	p.recoveryMu.Unlock()
 }
 
 // initTenant performs the first-time initialization for a tenant's sub-pools.
