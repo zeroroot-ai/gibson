@@ -293,9 +293,17 @@ func (t *LogTailer) processLines(componentID string, watcher *LogWatcher, buffer
 }
 
 // handleSubscription manages a subscription lifecycle.
+//
+// Teardown ordering matters for race-freedom: processLines fans entries out
+// to sub.Output under t.mu.RLock(). To close sub.Output safely we must
+// guarantee no concurrent sender can still be inside that critical section.
+// We do that by removing the subscription from t.subscribers under
+// t.mu.Lock() FIRST (which blocks until every in-flight RLock-protected
+// fan-out has finished) and only then close the channel. After removal,
+// processLines can no longer observe this sub and so cannot send to it.
 func (t *LogTailer) handleSubscription(sub *Subscription) {
 	defer t.wg.Done()
-	defer close(sub.Output)
+	defer t.removeSubscriberAndClose(sub)
 
 	// Send historical entries first
 	if sub.Options.TailLines > 0 || sub.Options.Since != nil {
@@ -309,6 +317,40 @@ func (t *LogTailer) handleSubscription(sub *Subscription) {
 
 	// Wait for subscription to be cancelled
 	<-sub.ctx.Done()
+}
+
+// removeSubscriberAndClose detaches sub from t.subscribers under the write
+// lock (excluding concurrent processLines fan-outs that hold the read lock)
+// and then closes sub.Output. Safe to call multiple times: after the first
+// call the channel is closed and the sub is no longer in t.subscribers.
+func (t *LogTailer) removeSubscriberAndClose(sub *Subscription) {
+	t.mu.Lock()
+	for _, componentID := range sub.ComponentIDs {
+		subs, exists := t.subscribers[componentID]
+		if !exists {
+			continue
+		}
+		// Allocate a fresh backing array — never reuse subs[:0] because
+		// processLines snapshots the slice header under RLock and may still
+		// be iterating that array after we release the write lock.
+		filtered := make([]*Subscription, 0, len(subs))
+		for _, s := range subs {
+			if s.ID != sub.ID {
+				filtered = append(filtered, s)
+			}
+		}
+		if len(filtered) > 0 {
+			t.subscribers[componentID] = filtered
+		} else {
+			delete(t.subscribers, componentID)
+		}
+	}
+	t.mu.Unlock()
+
+	// Now safe to close: no future processLines iteration can observe
+	// this sub (it's no longer in t.subscribers), and any prior iteration
+	// has already released its RLock before we acquired the write Lock above.
+	close(sub.Output)
 }
 
 // sendHistoricalEntries sends historical log entries to a subscription.
