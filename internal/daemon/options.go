@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
 )
 
 // ErrInvalidConfig is returned by New when the provided config is nil.
@@ -44,5 +45,41 @@ func WithHomeDir(dir string) Option {
 func WithMetricsRegisterer(reg prometheus.Registerer) Option {
 	return func(d *daemonImpl) {
 		d.metricsRegisterer = reg
+	}
+}
+
+// WithVaultJWTSource sets the JWTSource used by the daemon's broker stack
+// to mint SPIRE JWT-SVIDs for Vault auth/jwt logins.
+//
+// Passing nil is equivalent to not calling this option: the daemon falls
+// back to jwtsource.DisabledJWTSource{}, which surfaces a clear
+// ErrJWTSourceDisabled error on any tenant whose broker config selects
+// AuthMethodJWT — pointing operators at gibson#169 (the SPIREJWTSource
+// concrete implementation).
+//
+// Spec: ADR-0009 amendment (docs#34); gibson#167 PRD; gibson#168.
+func WithVaultJWTSource(src jwtsource.JWTSource) Option {
+	return func(d *daemonImpl) {
+		d.vaultJWTSource = src
+	}
+}
+
+// WithVaultJWTAudience sets the SPIRE JWT-SVID audience the daemon requests
+// when minting Vault auth/jwt logins. It must match bound_audiences on the
+// per-tenant Vault role (gibson-plugin-<tenant_id>) written by
+// tenant-operator#148.
+//
+// Today the audience is sourced from the env var
+// GIBSON_DAEMON_VAULT_JWT_AUDIENCE (read in cmd/gibson/main.go). If the
+// audience is empty AND a real JWTSource (i.e. anything other than
+// DisabledJWTSource) is wired, broker init will reject any AuthMethodJWT
+// refresh with a clear error.
+//
+// Passing "" is equivalent to not calling this option.
+//
+// Spec: ADR-0009 amendment (docs#34); gibson#168.
+func WithVaultJWTAudience(audience string) Option {
+	return func(d *daemonImpl) {
+		d.vaultJWTAudience = audience
 	}
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/ontology"
 	"github.com/zero-day-ai/gibson/internal/reconciler"
 	"github.com/zero-day-ai/gibson/internal/secrets"
+	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/internal/types"
 	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
@@ -222,6 +223,23 @@ type daemonImpl struct {
 	// Full per-call refresh wiring is a follow-up (see broker_init.go TODO).
 	vaultAuthCache *secrets.AuthCache
 
+	// vaultJWTSource mints SPIRE JWT-SVIDs the daemon stamps onto every
+	// per-tenant Vault auth/jwt login. Wired via WithVaultJWTSource.
+	// Defaults to jwtsource.DisabledJWTSource{} (any tenant whose broker
+	// config selects AuthMethodJWT will get a clear "no source" error
+	// until gibson#169 lands SPIREJWTSource).
+	//
+	// Spec: gibson#167 PRD; ADR-0009 amendment (docs#34).
+	vaultJWTSource jwtsource.JWTSource
+
+	// vaultJWTAudience is the SPIRE JWT-SVID audience the daemon requests
+	// when minting tokens for Vault. It must match bound_audiences on the
+	// per-tenant Vault role written by tenant-operator#148. Sourced from
+	// GIBSON_DAEMON_VAULT_JWT_AUDIENCE in cmd/gibson/main.go; empty when
+	// no real JWTSource is wired (DisabledJWTSource always errors before
+	// audience matters).
+	vaultJWTAudience string
+
 	// llmConfigHandler provides LLM provider configuration management (used by dashboard API)
 	llmConfigHandler *api.LLMConfigHandler
 
@@ -372,6 +390,12 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		activeMissions:    make(map[string]context.CancelFunc),
 		agentState:        make(map[string]*AgentRuntimeState),
 		metricsRegisterer: prometheus.DefaultRegisterer,
+		// Default vault JWT source: DisabledJWTSource{}. cmd/gibson/main.go
+		// replaces this with SPIREJWTSource once gibson#169 lands. Using
+		// a typed-value sentinel rather than nil avoids nil-dereference
+		// panics if a code path mistakenly forgets to wire the option;
+		// instead callers see a clear ErrJWTSourceDisabled. Spec: gibson#168.
+		vaultJWTSource: jwtsource.DisabledJWTSource{},
 	}
 	for _, opt := range opts {
 		opt(d)

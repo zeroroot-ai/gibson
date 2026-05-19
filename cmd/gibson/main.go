@@ -16,6 +16,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/config"
 	"github.com/zero-day-ai/gibson/internal/daemon"
 	"github.com/zero-day-ai/gibson/internal/sandbox/health"
+	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
 	"github.com/zero-day-ai/gibson/pkg/version"
 )
 
@@ -122,8 +123,30 @@ func run(
 	// Resolve home directory for daemon.
 	homeDir := resolveHome(cfg)
 
+	// Vault auth/jwt audience — ADR-0009 amendment (docs#34). When set, the
+	// daemon's broker stack will mint SPIRE JWT-SVIDs against this audience
+	// for every AuthMethodJWT Vault login. The bound_audiences on each
+	// per-tenant Vault role (gibson-plugin-<tenant_id>, written by
+	// tenant-operator#148) MUST include this exact value. Empty audience is
+	// permitted today: it means the daemon will fail any AuthMethodJWT
+	// refresh with a clear error pointing operators at this env var. Once
+	// gibson#169 wires SPIREJWTSource the audience becomes mandatory.
+	vaultJWTAudience := os.Getenv("GIBSON_DAEMON_VAULT_JWT_AUDIENCE")
+
+	// Vault JWT source — TODO gibson#169: replace DisabledJWTSource with
+	// SPIREJWTSource(ctx, GIBSON_DAEMON_SPIRE_SOCKET) once the SPIRE
+	// Workload API socket is mounted on the gibson pod. Until then,
+	// every AuthMethodJWT broker config surfaces a clear
+	// ErrJWTSourceDisabled diagnostic naming this TODO.
+	var vaultJWTSource jwtsource.JWTSource = jwtsource.DisabledJWTSource{}
+
 	// Construct and start daemon.
-	d, err := factory(cfg, daemon.WithLogger(logger), daemon.WithHomeDir(homeDir))
+	d, err := factory(cfg,
+		daemon.WithLogger(logger),
+		daemon.WithHomeDir(homeDir),
+		daemon.WithVaultJWTSource(vaultJWTSource),
+		daemon.WithVaultJWTAudience(vaultJWTAudience),
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "gibson: daemon init error: %v\n", err)
 		return 1

@@ -12,9 +12,66 @@ import (
 
 	"github.com/hashicorp/vault/api"
 	"github.com/zero-day-ai/gibson/internal/secrets"
+	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
 	sdksecrets "github.com/zero-day-ai/sdk/secrets"
 	sdkvault "github.com/zero-day-ai/sdk/secrets/providers/vault"
 )
+
+// stampVaultJWTOnConfig mints a SPIRE JWT-SVID via src and writes it onto
+// cfg.Auth.JWT when the broker config selects AuthMethodJWT but carries
+// no static JWT.
+//
+// Why this exists (ADR-0009 + amendment docs#34): the tenant-operator
+// writes per-tenant broker configs that reference a Vault auth/jwt role
+// (gibson-plugin-<tenant_id>) but never the bearer JWT itself — the
+// JWT must be minted by the daemon, per request, from the daemon's own
+// SPIRE identity. This helper is the single point at which that mint
+// happens, before any sdkvault call. Both the AuthCache refresh closure
+// (broker_init.go) and the direct-auth fallback in the Vault factory
+// (broker_init.go) call it.
+//
+// Behaviour matrix:
+//
+//   - cfg.Auth.Method != AuthMethodJWT → no-op (returns nil, cfg unchanged).
+//   - cfg.Auth.Method == AuthMethodJWT AND cfg.Auth.JWT != "" → no-op
+//     (caller-supplied JWTs win; allows local-dev short-circuit and
+//     migration scenarios without touching this code path).
+//   - cfg.Auth.Method == AuthMethodJWT AND cfg.Auth.JWT == "" AND src is
+//     nil OR audience is "" → error. Fail-loud: AuthMethodJWT without a
+//     JWTSource + audience is a misconfiguration the daemon must surface
+//     rather than silently fall back to a non-JWT method.
+//   - Otherwise → call src.Token(ctx, audience); on success, write the
+//     returned token onto cfg.Auth.JWT and return nil.
+//
+// The returned JWT MUST NOT be logged by this helper or any caller.
+// Spec: ADR-0009 amendment (docs#34); gibson#167 PRD; gibson#168.
+func stampVaultJWTOnConfig(ctx context.Context, cfg *sdkvault.Config, src jwtsource.JWTSource, audience string) error {
+	if cfg == nil {
+		return fmt.Errorf("stamp jwt: nil config")
+	}
+	if cfg.Auth.Method != sdkvault.AuthMethodJWT {
+		return nil
+	}
+	if cfg.Auth.JWT != "" {
+		// Caller already supplied a JWT (local-dev short-circuit / test).
+		return nil
+	}
+	if src == nil {
+		return fmt.Errorf("stamp jwt: AuthMethodJWT requires a JWTSource but none was wired (set WithVaultJWTSource in daemon.New; spec: gibson#168)")
+	}
+	if audience == "" {
+		return fmt.Errorf("stamp jwt: AuthMethodJWT requires a non-empty audience (set GIBSON_DAEMON_VAULT_JWT_AUDIENCE in the daemon env; spec: gibson#168)")
+	}
+	tok, err := src.Token(ctx, audience)
+	if err != nil {
+		return fmt.Errorf("stamp jwt: mint token for audience %q: %w", audience, err)
+	}
+	if tok == "" {
+		return fmt.Errorf("stamp jwt: source returned an empty JWT for audience %q", audience)
+	}
+	cfg.Auth.JWT = tok
+	return nil
+}
 
 // vaultAuthLogin performs a Vault auth-method login for the supplied
 // sdkvault.Config and returns the resulting (clientToken, leaseDuration).

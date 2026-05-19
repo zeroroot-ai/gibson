@@ -220,6 +220,23 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 			if err := json.Unmarshal(brokerCfg.ConfigBlob, &vaultCfg); err != nil {
 				return "", 0, &sdkvault.VaultRefreshError{TenantID: tenantID, Cause: err}
 			}
+			// JWT-SVID mint step (ADR-0009 + amendment docs#34).
+			//
+			// Per-tenant Vault roles (gibson-plugin-<tenant_id>) authenticate
+			// via auth/jwt. The operator never writes the bearer JWT into the
+			// broker config blob — only the auth method + role name. The
+			// daemon mints a fresh SPIRE JWT-SVID per refresh and stamps it
+			// onto cfg.Auth.JWT before handing off to sdkvault.RefreshToken.
+			//
+			// This call is a no-op for non-JWT auth methods (token, approle,
+			// aws_iam) — they get RefreshToken called with cfg as-is.
+			if err := stampVaultJWTOnConfig(ctx, &vaultCfg, d.vaultJWTSource, d.vaultJWTAudience); err != nil {
+				return "", 0, &sdkvault.VaultRefreshError{
+					TenantID: tenantID,
+					Method:   vaultCfg.Auth.Method,
+					Cause:    err,
+				}
+			}
 			// Perform the Vault auth login and obtain a fresh token + TTL.
 			freshToken, ttl, err := sdkvault.RefreshToken(ctx, vaultCfg)
 			if err != nil {
@@ -276,7 +293,12 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 				// calling sdkvault.New without a pre-cached token. This
 				// preserves the pre-cache behaviour for tenants whose config
 				// store is unavailable (e.g. during startup before the config
-				// store is seeded).
+				// store is seeded). The same JWT-SVID mint step the cache
+				// closure performs is applied here so that the direct-auth
+				// fallback path works for AuthMethodJWT broker configs.
+				if stampErr := stampVaultJWTOnConfig(ctx, &cfg, d.vaultJWTSource, d.vaultJWTAudience); stampErr != nil {
+					return nil, fmt.Errorf("vault: stamp jwt: %w", stampErr)
+				}
 				return sdkvault.New(ctx, cfg)
 			}
 			// Inject the cached token as a static credential so sdkvault.New
