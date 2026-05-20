@@ -34,14 +34,15 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 		"endpoint", cfg.Fga.Endpoint,
 	)
 
-	// Resolve store/model IDs from config → ConfigMap → env vars.
-	// ResolveWithRetry polls with exponential backoff for up to 5 minutes so
-	// the daemon does not depend on the FGA init job completing before pod start.
+	// Resolve store/model IDs from config → env vars (chart projects the
+	// gibson-fga-config ConfigMap via envFrom per ADR-0023). ResolveWithRetry
+	// polls with exponential backoff for up to 5 minutes so the daemon does
+	// not depend on the gibson-fga-init Job completing before pod start.
 	// The daemon remains healthy (serving /healthz) throughout the wait.
 	storeID, modelID, err := authz.ResolveWithRetry(ctx, authz.IDConfig{
 		StoreID: cfg.Fga.StoreID,
 		ModelID: cfg.Fga.ModelID,
-	}, nil, d.logger.Slog(), 5*time.Minute) // nil → auto-detect in-cluster config
+	}, d.logger.Slog(), 5*time.Minute)
 	if err != nil {
 		return fmt.Errorf("authorization service: failed to resolve FGA IDs (FGA is required — no fallback): %w", err)
 	}
