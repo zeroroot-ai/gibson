@@ -31,6 +31,7 @@ import (
 	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zero-day-ai/gibson/internal/idempotency"
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
@@ -403,6 +404,29 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	unaryInterceptors = append(unaryInterceptors, registryAwareUnary)
 	streamInterceptors = append(streamInterceptors, registryAwareStream)
 	d.logger.Info(ctx, "identity interceptor installed (header-trusting; channel security via SPIFFE mTLS)")
+
+	// 4. Idempotency-key dedup (mutating-RPC convention from
+	// platform-sdk CONVENTIONS.md, added in platform-sdk#2). Activates
+	// dedup ONLY when the request message has a non-empty
+	// `idempotency_key` field — protoreflect-discovered, no SDK pin
+	// or method-name allowlist. Requires the Redis state client; if
+	// absent we skip the interceptor entirely and log a warning so
+	// the missing-dep is visible (the daemon already warns about
+	// every other Redis-dependent subsystem in this same shape).
+	// Spec: gibson#228 / zero-day-ai/.github#101.
+	if d.stateClient != nil {
+		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
+			idemStore := idempotency.NewRedisStore(redisClient, d.logger.Slog())
+			d.idempotencyStore = idemStore
+			unaryInterceptors = append(unaryInterceptors,
+				idempotencyUnaryInterceptor(idemStore, idempotency.DefaultTTL, d.logger.Slog()))
+			d.logger.Info(ctx, "idempotency dedup interceptor installed (Redis-backed; 24h default TTL)")
+		} else {
+			d.logger.Warn(ctx, "idempotency dedup interceptor not installed: state client is not a *redis.Client")
+		}
+	} else {
+		d.logger.Warn(ctx, "idempotency dedup interceptor not installed: stateClient is nil")
+	}
 
 	// Build server options with chained interceptors
 	serverOpts := []grpc.ServerOption{

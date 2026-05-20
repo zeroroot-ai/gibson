@@ -29,6 +29,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zero-day-ai/gibson/internal/idempotency"
 	"github.com/zero-day-ai/gibson/internal/mission"
 	"github.com/zero-day-ai/gibson/internal/observability"
 	"github.com/zero-day-ai/gibson/internal/ontology"
@@ -108,6 +109,13 @@ type daemonImpl struct {
 	// stateClient provides unified Redis client for state stores
 	// This is initialized when GIBSON_USE_REDIS_STORES=true
 	stateClient *state.StateClient
+
+	// idempotencyStore deduplicates mutating RPCs by `idempotency_key`.
+	// Set in buildGRPCServer when stateClient is a *redis.Client; nil
+	// otherwise. Held on the daemon so future subsystems (e.g.
+	// background workers replaying a paused mission) can reuse the
+	// same store. Spec: gibson#228 / zero-day-ai/.github#101.
+	idempotencyStore idempotency.Store
 
 	// missionAuthzStore tracks the owning user per run for component authz callback resolution.
 	// One-code-path slice deploy#195: required; set unconditionally in the
