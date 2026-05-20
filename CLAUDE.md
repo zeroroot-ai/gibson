@@ -18,11 +18,15 @@ generator no longer emits an FGA stub.
 
 These are **generated artifacts** — do NOT hand-edit them. Run regen instead.
 
-The annotations come from **two** proto sources, merged via `cmd/fds-merge` into a single FileDescriptorSet before codegen:
-- the pinned SDK at `core/sdk/api/proto/**` (gibson.admin.v1.*, gibson.daemon.v1.*, …)
-- daemon-local protos at `core/gibson/internal/daemon/api/**` (gibson.tenant.v1.*, gibson.platform.v1.*, gibson.user.v1.*)
+The annotations come from **three** proto sources after the two-surface refactor (docs ADR-0025), merged via `cmd/fds-merge` into a single FileDescriptorSet before codegen:
 
-Both sets must carry `option (gibson.auth.v1.authz) = {…};` on every authenticated RPC. The codegen tool fails closed on any unannotated method.
+- **OSS SDK** at the pinned `github.com/zero-day-ai/sdk` module (`gibson.daemon.v1.*` — customer-callable `DaemonService` RPCs only; admin protos no longer live here per sdk#105).
+- **platform-sdk** at the pinned `github.com/zero-day-ai/platform-sdk` module (`gibson.daemon.admin.v1.*`, `gibson.platform.v1.*`, `gibson.tenant.v1.*`, `gibson.user.v1.*`, `gibson.usage.v1.*`). This is the **private** internal proto module that hosts admin shapes. Cross-module proto sharing flows through BSR (`buf.build/zero-day-ai-platform/platform-sdk`); no local proto includes (docs ADR-0028 Clause 6).
+- **daemon-local** protos at `core/gibson/internal/daemon/api/**` — anything no other repo consumes. If another repo needs a type from here, promote it to `platform-sdk` and consume via BSR. Do not vendor.
+
+All three sets must carry `option (gibson.auth.v1.authz) = {…};` on every authenticated RPC. The codegen tool fails closed on any unannotated method.
+
+The annotation extension itself (`gibson.auth.v1.options.proto`) lives in EXACTLY ONE module — the OSS SDK — and every other proto module imports it via BSR.
 
 ### Regenerating
 
@@ -47,9 +51,10 @@ CI runs the same check (`authz-registry-drift` step). A clean PR means no drift.
 
 ### When to regen
 
-- After bumping the SDK version in `go.mod` (mandatory — new RPCs may have been added)
-- After adding or modifying a daemon-local RPC under `internal/daemon/api/`
-- After CI fails the drift gate
+- After bumping the OSS SDK version (`github.com/zero-day-ai/sdk`) in `go.mod` (mandatory — new customer-callable RPCs may have been added).
+- After bumping the platform-sdk version (`github.com/zero-day-ai/platform-sdk`) in `go.mod` (mandatory — new admin RPCs may have been added).
+- After adding or modifying a daemon-local RPC under `internal/daemon/api/`.
+- After CI fails the drift gate.
 
 ### When you add a daemon-local RPC
 
@@ -111,6 +116,33 @@ CI does not run `make proto` itself, but the `authz-registry-drift` gate exercis
 2. In the same `rpc` block, add `option (gibson.auth.v1.authz) = {…};`. If the file has no other authz-annotated RPCs yet, add `import "gibson/auth/v1/options.proto";` at the top.
 3. Run `make proto` (which depends on `proto-deps` + `authz-registry`). This regenerates both the `.pb.go` / `_grpc.pb.go` and the four `internal/authz/registry/*` artifacts in one pass.
 4. Commit the `.proto` edit, the regenerated bindings, and the regenerated authz-registry files in the same change.
+
+## Two-surface platform contract (post-2026-05 refactor)
+
+The daemon consumes:
+
+- **OSS SDK** (`github.com/zero-day-ai/sdk`) — customer-facing types. Imports here are visible to customers via the public surface. Per docs ADR-0025: agent / tool / plugin interfaces, customer-callable `DaemonService`, `gibson.budget.v1` types, the `gibson.auth.v1` annotation extension.
+- **platform-sdk** (`github.com/zero-day-ai/platform-sdk`) — internal proto module. Hosts every admin proto and service stub (`DaemonAdminService`, `PlatformOperatorService`, `TenantAdminService`). Private; never re-exported through OSS SDK; never vendored. Cross-module proto sharing flows through BSR (`buf.build/zero-day-ai-platform/platform-sdk`).
+- **platform-clients** (`github.com/zero-day-ai/platform-clients`) — shared Go primitives. Mandated for transport, secrets, readiness, pools, observability, authz per docs ADR-0026. Do NOT reinvent these primitives in this repo; CI greps for ad-hoc OTel init / interceptor chains / pool constructors.
+
+The daemon registers **two services on `:50051`**:
+
+- `gibson.daemon.v1.DaemonService` (proto in OSS SDK; FGA relation `member` / `can_use`).
+- `gibson.daemon.admin.v1.DaemonAdminService` (proto in platform-sdk; FGA relation `admin` / `writer`).
+
+Envoy's route table gates the admin prefix `/gibson.daemon.admin.v1.*` with the admin JWT requirement (deploy#172). The daemon does NOT maintain a second listener; the route-gate enforcement on Envoy keeps the two surfaces distinct on the wire.
+
+Admin protos are imported from platform-sdk:
+
+```go
+import (
+    daemonadminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/admin/v1"
+    platformv1   "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
+    tenantv1     "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+)
+```
+
+A daemon handler that imports `github.com/zero-day-ai/sdk/gen/gibson/admin/...` is post-purge dead code; that path no longer exists.
 
 ## Service-account identity (canonical sub)
 
