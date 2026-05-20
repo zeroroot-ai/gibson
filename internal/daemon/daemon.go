@@ -1396,12 +1396,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		"callback_endpoint", d.callback.CallbackEndpoint(),
 	)
 
-	// Async network policy validation (warning only, never blocks startup)
-	podNamespace := os.Getenv("POD_NAMESPACE")
-	if podNamespace == "" {
-		podNamespace = "default"
-	}
-	validateNetworkPolicies(d.logger, podNamespace, d.config.Auth.Mode == "saas")
+	// NetworkPolicy presence audit moved out of the daemon per ADR-0023.
+	// Observing the cluster's NetworkPolicy resources is a control-plane
+	// concern; it belongs in the tenant-operator's startup audit or a
+	// chart-managed CronJob, not in the daemon's hot path. Tracked at
+	// gibson#209.
 
 	// Start the catalog-fan-out reconciler — ensures every platform_enabled
 	// catalog item has a tenant_enabled tuple on every existing tenant so
