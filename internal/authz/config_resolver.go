@@ -6,36 +6,33 @@ import (
 	"log/slog"
 	"os"
 	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
+// Per ADR-0023, the daemon does not call the Kubernetes API at runtime.
+// The previous resolver path that GETted the gibson-fga-config ConfigMap
+// is deleted. The chart now projects the same ConfigMap's keys as env
+// vars on the daemon container via:
+//
+//	envFrom:
+//	  - configMapRef:
+//	      name: gibson-fga-config
+//
+// The ConfigMap's data keys are `store_id` and `model_id`, which kubelet
+// projects as the env vars below.
+
 const (
-	// fgaConfigMapName is the Kubernetes ConfigMap populated by the gibson-fga-init Job.
-	fgaConfigMapName = "gibson-fga-config"
-
-	// fgaConfigMapNamespace is the namespace where the ConfigMap lives.
-	// Matches the Gibson deployment namespace.
-	fgaConfigMapNamespace = "gibson"
-
-	// cmKeyStoreID is the ConfigMap key for the FGA store ID.
-	cmKeyStoreID = "store_id"
-
-	// cmKeyModelID is the ConfigMap key for the FGA model ID.
-	cmKeyModelID = "model_id"
-
-	// envStoreID is the environment variable name for the FGA store ID fallback.
+	// envStoreID is the environment variable the daemon reads for the
+	// FGA store ID. Populated by the chart's envFrom on gibson-fga-config.
 	envStoreID = "GIBSON_AUTHZ_FGA_STORE_ID"
 
-	// envModelID is the environment variable name for the FGA model ID fallback.
+	// envModelID is the environment variable the daemon reads for the
+	// FGA model ID. Same projection mechanism.
 	envModelID = "GIBSON_AUTHZ_FGA_MODEL_ID"
 )
 
-// IDConfig holds pre-populated store/model IDs read from the daemon config file.
-// Both fields may be empty, in which case ResolveStoreAndModelIDs falls through
-// to the ConfigMap and then to environment variables.
+// IDConfig holds pre-populated store/model IDs read from the daemon
+// config file. Both fields may be empty, in which case
+// ResolveStoreAndModelIDs falls through to environment variables.
 type IDConfig struct {
 	// StoreID from the daemon config file (may be empty).
 	StoreID string
@@ -43,42 +40,27 @@ type IDConfig struct {
 	ModelID string
 }
 
-// ResolveStoreAndModelIDs determines the FGA store ID and model ID from one
-// of three sources, in priority order:
+// ResolveStoreAndModelIDs determines the FGA store ID and model ID from
+// two sources, in priority order:
 //
 //  1. Config file values (cfg.StoreID and cfg.ModelID) — highest priority
-//  2. Kubernetes ConfigMap "gibson-fga-config" in namespace "gibson" (in-cluster)
-//  3. Environment variables GIBSON_AUTHZ_FGA_STORE_ID and GIBSON_AUTHZ_FGA_MODEL_ID
+//  2. Environment variables GIBSON_AUTHZ_FGA_STORE_ID and
+//     GIBSON_AUTHZ_FGA_MODEL_ID, populated by the chart from the
+//     gibson-fga-config ConfigMap.
 //
-// If both IDs are already populated in cfg, the function returns immediately
-// without touching Kubernetes or environment variables.
+// If both IDs are already populated in cfg, the function returns
+// immediately without touching the environment.
 //
-// The k8sClient parameter is optional. If nil, the function attempts to create
-// a client from in-cluster config. If not running in Kubernetes, it falls
-// through gracefully to the env var source.
+// Returns a descriptive error when both sources fail to produce both
+// IDs. The error names the env vars that need to be set so a
+// chart-render-vs-runtime mismatch is debuggable from a single log line.
 //
-// Returns a descriptive error if all three sources fail to produce both IDs.
-func ResolveStoreAndModelIDs(ctx context.Context, cfg IDConfig, k8sClient kubernetes.Interface) (storeID, modelID string, err error) {
-	// Source 1: config file values.
-	if cfg.StoreID != "" && cfg.ModelID != "" {
-		return cfg.StoreID, cfg.ModelID, nil
-	}
-
+// Spec: ADR-0023 (daemon-no-K8s-API); supersedes the previous
+// ConfigMap-GET path.
+func ResolveStoreAndModelIDs(_ context.Context, cfg IDConfig) (storeID, modelID string, err error) {
 	storeID = cfg.StoreID
 	modelID = cfg.ModelID
 
-	// Source 2: Kubernetes ConfigMap (only if at least one ID is missing).
-	cmStoreID, cmModelID, cmErr := resolveFromConfigMap(ctx, k8sClient)
-	if cmErr == nil {
-		if storeID == "" {
-			storeID = cmStoreID
-		}
-		if modelID == "" {
-			modelID = cmModelID
-		}
-	}
-
-	// Source 3: environment variables.
 	if storeID == "" {
 		storeID = os.Getenv(envStoreID)
 	}
@@ -86,18 +68,10 @@ func ResolveStoreAndModelIDs(ctx context.Context, cfg IDConfig, k8sClient kubern
 		modelID = os.Getenv(envModelID)
 	}
 
-	// Validate — both IDs must be non-empty.
 	if storeID == "" || modelID == "" {
 		return "", "", fmt.Errorf(
-			"authz: FGA store_id and model_id could not be resolved — tried: "+
-				"(1) config file [store_id=%q model_id=%q], "+
-				"(2) ConfigMap %s/%s [err=%v], "+
-				"(3) env vars %s=%q %s=%q — "+
-				"ensure the gibson-fga-init Job has run successfully",
-			cfg.StoreID, cfg.ModelID,
-			fgaConfigMapNamespace, fgaConfigMapName, cmErr,
-			envStoreID, os.Getenv(envStoreID),
-			envModelID, os.Getenv(envModelID),
+			"authz: FGA store/model IDs not resolved — set via daemon config file or %s + %s env vars (chart wires both via `envFrom: configMapRef: gibson-fga-config`)",
+			envStoreID, envModelID,
 		)
 	}
 
@@ -105,16 +79,19 @@ func ResolveStoreAndModelIDs(ctx context.Context, cfg IDConfig, k8sClient kubern
 }
 
 // ResolveWithRetry polls for FGA store/model IDs with exponential backoff.
-// Used during daemon startup to wait for the FGA init job to complete.
+// Used during daemon startup to wait for the gibson-fga-init Job to
+// complete — the Job writes the ConfigMap whose keys the chart projects
+// into the daemon's env. Until the Job finishes the env vars are absent
+// (or empty), so this loop blocks until both arrive.
 //
-// The function calls ResolveStoreAndModelIDs in a loop, starting at a 2s
-// interval and doubling up to a 15s maximum interval. It returns as soon as
-// both IDs are non-empty.
+// Starts at a 2s interval and doubles up to a 15s maximum. Returns as
+// soon as both IDs are non-empty. Returns an error only if ctx is
+// cancelled or maxWait is exceeded. If logger is nil, retry logs are
+// suppressed.
 //
-// Returns an error only if ctx is cancelled or maxWait is exceeded. When
-// maxWait is exceeded the last error from ResolveStoreAndModelIDs is returned.
-// If logger is nil, retry logs are suppressed.
-func ResolveWithRetry(ctx context.Context, cfg IDConfig, k8sClient kubernetes.Interface, logger *slog.Logger, maxWait time.Duration) (storeID, modelID string, err error) {
+// Spec: ADR-0023. The previous signature took a kubernetes.Interface;
+// it is gone — the env-only path needs no K8s client.
+func ResolveWithRetry(ctx context.Context, cfg IDConfig, logger *slog.Logger, maxWait time.Duration) (storeID, modelID string, err error) {
 	const (
 		minInterval = 2 * time.Second
 		maxInterval = 15 * time.Second
@@ -126,26 +103,24 @@ func ResolveWithRetry(ctx context.Context, cfg IDConfig, k8sClient kubernetes.In
 
 	for {
 		attempt++
-		storeID, modelID, err = ResolveStoreAndModelIDs(ctx, cfg, k8sClient)
+		storeID, modelID, err = ResolveStoreAndModelIDs(ctx, cfg)
 		if err == nil {
 			return storeID, modelID, nil
 		}
 
 		if logger != nil {
-			logger.Info("authz: waiting for FGA ConfigMap",
+			logger.Info("authz: waiting for FGA env vars",
 				"attempt", attempt,
 				"error", err,
 				"retry_in", interval,
 			)
 		}
 
-		// Check deadline before sleeping so we return promptly on expiry.
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			return "", "", fmt.Errorf("authz: FGA IDs not available after %s (%d attempts): %w", maxWait, attempt, err)
 		}
 
-		// Sleep for min(interval, remaining), then back off.
 		sleep := interval
 		if sleep > remaining {
 			sleep = remaining
@@ -157,47 +132,9 @@ func ResolveWithRetry(ctx context.Context, cfg IDConfig, k8sClient kubernetes.In
 		case <-time.After(sleep):
 		}
 
-		// Exponential backoff capped at maxInterval.
 		interval *= 2
 		if interval > maxInterval {
 			interval = maxInterval
 		}
 	}
-}
-
-// resolveFromConfigMap reads the FGA store and model IDs from the
-// gibson-fga-config ConfigMap in the gibson namespace.
-//
-// If k8sClient is nil it attempts to build one from in-cluster config.
-// Returns ("", "", err) if the ConfigMap is unreachable or the keys are missing.
-func resolveFromConfigMap(ctx context.Context, k8sClient kubernetes.Interface) (storeID, modelID string, err error) {
-	if k8sClient == nil {
-		cfg, cfgErr := rest.InClusterConfig()
-		if cfgErr != nil {
-			// Not running in Kubernetes — fall through to env vars.
-			return "", "", fmt.Errorf("not running in-cluster: %w", cfgErr)
-		}
-		k8sClient, err = kubernetes.NewForConfig(cfg)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to build k8s client: %w", err)
-		}
-	}
-
-	cm, err := k8sClient.CoreV1().ConfigMaps(fgaConfigMapNamespace).Get(ctx, fgaConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		return "", "", fmt.Errorf("ConfigMap %s/%s not found: %w", fgaConfigMapNamespace, fgaConfigMapName, err)
-	}
-
-	storeID = cm.Data[cmKeyStoreID]
-	modelID = cm.Data[cmKeyModelID]
-
-	if storeID == "" || modelID == "" {
-		return "", "", fmt.Errorf(
-			"ConfigMap %s/%s exists but is missing keys (store_id=%q model_id=%q) — "+
-				"has the gibson-fga-init Job completed successfully?",
-			fgaConfigMapNamespace, fgaConfigMapName, storeID, modelID,
-		)
-	}
-
-	return storeID, modelID, nil
 }
