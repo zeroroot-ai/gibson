@@ -43,36 +43,36 @@ func TestTenantIDSource(t *testing.T) {
 		// tenant being acted upon), not the authz SUBJECT. The authz
 		// subject comes from the x-gibson-identity-tenant header on the
 		// caller's identity (typically platform-operator for these).
-		"internal/daemon/api/platform_operator_impersonate.go:26": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/platform_operator_impersonate.go:38": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/platform_operator_impersonate.go:43": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/platform_operator_impersonate.go:53": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/platform_operator_impersonate.go:56": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/server_model_access.go:257": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_delete.go:22": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_delete.go:27": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_delete.go:35": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_delete.go:39": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_delete.go:40": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_delete.go:44": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_delete.go:48": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_get.go:25": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_get.go:30": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_get.go:38": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_get.go:42": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_get.go:43": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_get.go:48": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_set.go:25": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_set.go:30": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_set.go:47": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_set.go:51": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_set.go:62": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_set.go:71": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_set.go:74": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_langfuse_set.go:79": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_get.go:20": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_get.go:28": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
-		"internal/daemon/api/tenant_admin_onboarding_get.go:30": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/platform_operator_impersonate.go:26":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/platform_operator_impersonate.go:38":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/platform_operator_impersonate.go:43":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/platform_operator_impersonate.go:53":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/platform_operator_impersonate.go:56":  "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/server_model_access.go:257":           "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_delete.go:22":   "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_delete.go:27":   "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_delete.go:35":   "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_delete.go:39":   "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_delete.go:40":   "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_delete.go:44":   "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_delete.go:48":   "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_get.go:25":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_get.go:30":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_get.go:38":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_get.go:42":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_get.go:43":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_get.go:48":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_set.go:25":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_set.go:30":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_set.go:47":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_set.go:51":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_set.go:62":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_set.go:71":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_set.go:74":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_langfuse_set.go:79":      "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_onboarding_get.go:20":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_onboarding_get.go:28":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
+		"internal/daemon/api/tenant_admin_onboarding_get.go:30":    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
 		"internal/daemon/api/tenant_admin_onboarding_update.go:20": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
 		"internal/daemon/api/tenant_admin_onboarding_update.go:28": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
 		"internal/daemon/api/tenant_admin_onboarding_update.go:29": "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
@@ -153,7 +153,9 @@ func TestTenantIDSource(t *testing.T) {
 }
 
 func sprintInt(n int) string {
-	if n == 0 { return "0" }
+	if n == 0 {
+		return "0"
+	}
 	digits := ""
 	for n > 0 {
 		digits = string(rune('0'+(n%10))) + digits

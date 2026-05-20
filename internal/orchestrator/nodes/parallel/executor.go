@@ -97,10 +97,10 @@ func Execute(ctx context.Context, node *missionv1.MissionNode, params orchestrat
 	out := &orchestrator.ActionResult{
 		TargetNodeID: node.GetId(),
 		Metadata: map[string]any{
-			"parallel_sub_nodes":      countSubNodes(subs),
-			"parallel_failures":       failures,
-			"parallel_effective_cap":  cap,
-			"parallel_results":        merged,
+			"parallel_sub_nodes":     countSubNodes(subs),
+			"parallel_failures":      failures,
+			"parallel_effective_cap": cap,
+			"parallel_results":       merged,
 		},
 	}
 	if len(errs) > 0 {

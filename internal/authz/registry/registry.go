@@ -9,10 +9,10 @@ package registry
 type IdentityClass uint8
 
 const (
-	IdentityUser              IdentityClass = 1
-	IdentityService           IdentityClass = 2
-	IdentityComponent         IdentityClass = 4
-	IdentityPlatformOperator  IdentityClass = 8
+	IdentityUser             IdentityClass = 1
+	IdentityService          IdentityClass = 2
+	IdentityComponent        IdentityClass = 4
+	IdentityPlatformOperator IdentityClass = 8
 )
 
 // Has reports whether c contains every bit set in want.
@@ -900,6 +900,46 @@ var Registry = map[string]Entry{
 		ObjectType:        "component",
 		ObjectDeriver:     "system_tenant",
 		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.daemon.admin.v1.DaemonAdminService/BuildComponent": {
+		Method:            "/gibson.daemon.admin.v1.DaemonAdminService/BuildComponent",
+		Service:           "gibson.daemon.admin.v1.DaemonAdminService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.daemon.admin.v1.DaemonAdminService/CreateMissionDefinition": {
+		Method:            "/gibson.daemon.admin.v1.DaemonAdminService/CreateMissionDefinition",
+		Service:           "gibson.daemon.admin.v1.DaemonAdminService",
+		Relation:          "writer",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.daemon.admin.v1.DaemonAdminService/StartComponent": {
+		Method:            "/gibson.daemon.admin.v1.DaemonAdminService/StartComponent",
+		Service:           "gibson.daemon.admin.v1.DaemonAdminService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.daemon.admin.v1.DaemonAdminService/StopComponent": {
+		Method:            "/gibson.daemon.admin.v1.DaemonAdminService/StopComponent",
+		Service:           "gibson.daemon.admin.v1.DaemonAdminService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
 		Unauthenticated:   false,
 		Self:              false,
 	},

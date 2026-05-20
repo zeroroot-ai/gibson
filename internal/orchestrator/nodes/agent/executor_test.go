@@ -11,11 +11,11 @@ import (
 )
 
 type stubDelegator struct {
-	called    bool
-	lastID    string
+	called      bool
+	lastID      string
 	lastMission string
-	ret       *orchestrator.ActionResult
-	err       error
+	ret         *orchestrator.ActionResult
+	err         error
 }
 
 func (s *stubDelegator) ExecuteAgentNode(ctx context.Context, nodeID, missionID string) (*orchestrator.ActionResult, error) {

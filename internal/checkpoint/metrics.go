@@ -37,12 +37,12 @@ type CheckpointMetrics struct {
 
 	// Spec 4 R7.1 series — orchestrator-driven write/restore observability.
 	// These intentionally have no per-mission labels (cardinality control).
-	writeDurationMs    prometheus.Histogram
-	writeSizeBytes     prometheus.Histogram
-	writeFailureTotal  *prometheus.CounterVec // labels: reason
-	restoreDurationMs  prometheus.Histogram
-	restoreTotal       *prometheus.CounterVec // labels: outcome
-	resumeFromScratch  prometheus.Counter
+	writeDurationMs     prometheus.Histogram
+	writeSizeBytes      prometheus.Histogram
+	writeFailureTotal   *prometheus.CounterVec // labels: reason
+	restoreDurationMs   prometheus.Histogram
+	restoreTotal        *prometheus.CounterVec // labels: outcome
+	resumeFromScratch   prometheus.Counter
 	cadenceSkippedTotal *prometheus.CounterVec // labels: cadence_reason
 }
 
@@ -299,12 +299,12 @@ func (m *CheckpointMetrics) SetPendingApprovals(count int) {
 
 // RecordWriteOutcome records a single checkpoint write outcome for Spec 4 R7.1.
 //   - success    — true if the write completed; false on failure (also bumps
-//                  the write_failure_total counter with the supplied reason).
+//     the write_failure_total counter with the supplied reason).
 //   - durationMs — observed write duration in milliseconds (any value when failed,
-//                  histogram is recorded only on success to keep latency clean).
+//     histogram is recorded only on success to keep latency clean).
 //   - sizeBytes  — observed payload size; not recorded on failure.
 //   - reason     — failure reason label (e.g. "store_unavailable",
-//                  "kms_unavailable", "integration_error"); ignored on success.
+//     "kms_unavailable", "integration_error"); ignored on success.
 func (m *CheckpointMetrics) RecordWriteOutcome(success bool, durationMs float64, sizeBytes int64, reason string) {
 	if success {
 		if durationMs >= 0 {

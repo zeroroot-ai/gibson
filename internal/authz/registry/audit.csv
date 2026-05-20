@@ -86,6 +86,10 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/ToolResults,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/UpdatePluginConfig,can_configure,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/WaitMission,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
+/gibson.daemon.admin.v1.DaemonAdminService/BuildComponent,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/admin/v1/daemon_admin.proto,rule
+/gibson.daemon.admin.v1.DaemonAdminService/CreateMissionDefinition,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/admin/v1/daemon_admin.proto,rule
+/gibson.daemon.admin.v1.DaemonAdminService/StartComponent,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/admin/v1/daemon_admin.proto,rule
+/gibson.daemon.admin.v1.DaemonAdminService/StopComponent,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/admin/v1/daemon_admin.proto,rule
 /gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule
 /gibson.daemon.discovery.v1.DiscoveryService/DescribePlugin,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule
 /gibson.daemon.discovery.v1.DiscoveryService/DescribeTool,member,tenant,tenant_from_identity,USER|SERVICE|COMPONENT,gibson/daemon/discovery/v1/discovery.proto,rule

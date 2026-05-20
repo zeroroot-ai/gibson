@@ -31,8 +31,8 @@ func sanitizeTenantID(tenantID string) string {
 //
 // Spec: per-tenant-data-plane-completion Req 3.1, 3.5, D4.
 type tenantScopedStore struct {
-	prefix    string // "tenant_<sanitized>:"
-	tenantID  auth.TenantID
+	prefix     string // "tenant_<sanitized>:"
+	tenantID   auth.TenantID
 	underlying VectorStore
 }
 

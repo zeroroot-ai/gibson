@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zero-day-ai/gibson/internal/graphrag"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
 	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/gibson/internal/graphrag"
 )
 
 // toInt64 safely converts various numeric types to int64.
@@ -83,10 +83,10 @@ func (mq *MissionQueries) CreateMission(ctx context.Context, m *schema.Mission) 
 		graphrag.PropID:          m.ID.String(),
 		graphrag.PropName:        m.Name,
 		graphrag.PropDescription: m.Description,
-		"objective":                 m.Objective,
-		"target_ref":                m.TargetRef,
+		"objective":              m.Objective,
+		"target_ref":             m.TargetRef,
 		graphrag.PropStatus:      m.Status.String(),
-		"yaml_source":               m.YAMLSource,
+		"yaml_source":            m.YAMLSource,
 		graphrag.PropCreatedAt:   m.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
 
@@ -728,8 +728,8 @@ func (mq *MissionQueries) CreateMissionRun(ctx context.Context, missionID types.
 
 	params := map[string]any{
 		graphrag.PropMissionID: missionID.String(),
-		"run_id":                  runID.String(),
-		"run_number":              runNumber,
+		"run_id":               runID.String(),
+		"run_number":           runNumber,
 	}
 
 	result, err := mq.client.Query(ctx, cypher, params)

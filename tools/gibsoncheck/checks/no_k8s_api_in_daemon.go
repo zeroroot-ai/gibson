@@ -32,11 +32,11 @@ import (
 //   - github.com/zero-day-ai/gibson/tests/**     (e2e test fixtures)
 //   - github.com/zero-day-ai/gibson/tools/**     (build tools; including this analyzer)
 //   - github.com/zero-day-ai/gibson/internal/datapool/admin/**
-//                                                (gated by adminpoolacquire — legitimate enumeration)
+//     (gated by adminpoolacquire — legitimate enumeration)
 //   - github.com/zero-day-ai/gibson/pkg/platform/saga/**
-//                                                (operator-shared library; tenant-operator imports it)
+//     (operator-shared library; tenant-operator imports it)
 //   - github.com/zero-day-ai/gibson/internal/sandbox/eviction/**
-//                                                (until gibson#211/S9 relocates to a sidecar)
+//     (until gibson#211/S9 relocates to a sidecar)
 //   - any file path containing "/testdata/"      (analysistest fixtures)
 //
 // Deferred-deletion file paths: NONE. S10 (gibson#212) landed and

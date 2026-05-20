@@ -33,11 +33,12 @@ import (
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
+	adminpb "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
+	daemonadminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/admin/v1"
+	discoverypb "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
 	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
 	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
-	adminpb "github.com/zero-day-ai/sdk/api/gen/gibson/admin/v1"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
 	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
@@ -846,6 +847,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
 	platformv1.RegisterPlatformOperatorServiceServer(srv, daemonSvc)
 	userv1.RegisterUserServiceServer(srv, daemonSvc)
+
+	// Register DaemonAdminService — the platform-sdk-published admin/writer
+	// RPC surface (StartComponent, StopComponent, BuildComponent,
+	// CreateMissionDefinition). Wraps the same DaemonServer instance so admin
+	// and member calls share orchestration state. Routed by Envoy under
+	// /gibson.daemon.admin.v1.DaemonAdminService/ (deploy#444); FGA in
+	// ext-authz applies the admin-tier rules per method. Parent PRD
+	// zero-day-ai/.github#101.
+	daemonAdminSvc := api.NewDaemonAdminServer(daemonSvc, d.logger.Slog())
+	daemonadminv1.RegisterDaemonAdminServiceServer(srv, daemonAdminSvc)
 
 	// Register TenantAdminService — the new tenant-admin surface.
 	// Initialise the IdP admin client from env vars; fail-closed if the env

@@ -32,8 +32,24 @@ jobs:
       fail-fast: false
       matrix:
         build_tags: ["setec_integration", ""]
+    env:
+      # GOPRIVATE + GONOSUMDB tell the Go toolchain to skip the public checksum
+      # database for private zero-day-ai modules and fetch them directly via
+      # git. Must be set before setup-go (which may invoke go mod download).
+      GOPRIVATE: github.com/zero-day-ai/*
+      GONOSUMDB: github.com/zero-day-ai/*
     steps:
       - uses: actions/checkout@v4
+
+      # Configure git credentials BEFORE setup-go so module download works.
+      # GH_PAT_GIBSON_RO is a fine-grained PAT with read-only access to the
+      # zero-day-ai org's private Go modules (platform-sdk, platform-clients,
+      # etc.). Same pattern as tenant-operator#176 / ext-authz#56.
+      - name: Configure git for private modules
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
 
       - uses: actions/setup-go@v5
         with:

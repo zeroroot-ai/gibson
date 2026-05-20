@@ -9,7 +9,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
-	usagepb "github.com/zero-day-ai/sdk/api/gen/gibson/usage/v1"
+	usagepb "github.com/zero-day-ai/platform-sdk/gen/gibson/usage/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 

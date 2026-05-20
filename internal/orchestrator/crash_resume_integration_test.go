@@ -96,7 +96,7 @@ func TestCrashResume_3StepMissionWithParallelGroup(t *testing.T) {
 	// --- Pre-crash setup ---
 	// Build a checkpoint that simulates step 1 output + mid-step-2 state.
 	wmEntries := map[string]any{
-		"context_key": "v1",
+		"context_key":  "v1",
 		"agent_result": "result-from-step-1",
 	}
 	cp := buildSimpleCheckpoint(t, missionID, wmEntries)

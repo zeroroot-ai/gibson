@@ -26,12 +26,19 @@ type testStep struct {
 	provisionFn func(context.Context, saga.ConditionedObject, *saga.Deps) (bool, error)
 }
 
-func (s *testStep) Name() string                                                                  { return s.name }
-func (s *testStep) Condition() string                                                             { return s.condition }
-func (s *testStep) Requires() []string                                                            { return s.requires }
-func (s *testStep) RequiredClients() []saga.ClientCapability                                      { return s.caps }
-func (s *testStep) Skip(o saga.ConditionedObject) bool                                            { if s.skipFn != nil { return s.skipFn(o) }; return false }
-func (s *testStep) Deprovision(_ context.Context, _ saga.ConditionedObject, _ *saga.Deps) error   { return nil }
+func (s *testStep) Name() string                             { return s.name }
+func (s *testStep) Condition() string                        { return s.condition }
+func (s *testStep) Requires() []string                       { return s.requires }
+func (s *testStep) RequiredClients() []saga.ClientCapability { return s.caps }
+func (s *testStep) Skip(o saga.ConditionedObject) bool {
+	if s.skipFn != nil {
+		return s.skipFn(o)
+	}
+	return false
+}
+func (s *testStep) Deprovision(_ context.Context, _ saga.ConditionedObject, _ *saga.Deps) error {
+	return nil
+}
 func (s *testStep) Provision(ctx context.Context, o saga.ConditionedObject, d *saga.Deps) (bool, error) {
 	if s.provisionFn != nil {
 		return s.provisionFn(ctx, o, d)

@@ -59,23 +59,23 @@ type legacyDefinition struct {
 }
 
 type legacyNode struct {
-	ID           string                 `json:"id"`
-	Type         string                 `json:"type"`
-	Name         string                 `json:"name,omitempty"`
-	Description  string                 `json:"description,omitempty"`
-	AgentName    string                 `json:"agent_name,omitempty"`
-	AgentTask    *legacyAgentTask       `json:"agent_task,omitempty"`
-	ToolName     string                 `json:"tool_name,omitempty"`
-	ToolInput    map[string]any         `json:"tool_input,omitempty"`
-	PluginName   string                 `json:"plugin_name,omitempty"`
-	PluginMethod string                 `json:"plugin_method,omitempty"`
-	PluginParams map[string]any         `json:"plugin_params,omitempty"`
-	Condition    *legacyCondition       `json:"condition,omitempty"`
-	SubNodes     []*legacyNode          `json:"sub_nodes,omitempty"`
-	Dependencies []string               `json:"dependencies,omitempty"`
-	Timeout      time.Duration          `json:"timeout,omitempty"`
-	RetryPolicy  *legacyRetryPolicy     `json:"retry_policy,omitempty"`
-	Metadata     map[string]any         `json:"metadata,omitempty"`
+	ID           string             `json:"id"`
+	Type         string             `json:"type"`
+	Name         string             `json:"name,omitempty"`
+	Description  string             `json:"description,omitempty"`
+	AgentName    string             `json:"agent_name,omitempty"`
+	AgentTask    *legacyAgentTask   `json:"agent_task,omitempty"`
+	ToolName     string             `json:"tool_name,omitempty"`
+	ToolInput    map[string]any     `json:"tool_input,omitempty"`
+	PluginName   string             `json:"plugin_name,omitempty"`
+	PluginMethod string             `json:"plugin_method,omitempty"`
+	PluginParams map[string]any     `json:"plugin_params,omitempty"`
+	Condition    *legacyCondition   `json:"condition,omitempty"`
+	SubNodes     []*legacyNode      `json:"sub_nodes,omitempty"`
+	Dependencies []string           `json:"dependencies,omitempty"`
+	Timeout      time.Duration      `json:"timeout,omitempty"`
+	RetryPolicy  *legacyRetryPolicy `json:"retry_policy,omitempty"`
+	Metadata     map[string]any     `json:"metadata,omitempty"`
 }
 
 type legacyAgentTask struct {

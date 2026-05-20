@@ -355,9 +355,9 @@ func TestWatch_FileAppearanceTriggersDrain(t *testing.T) {
 	}
 
 	h, err := eviction.NewForTest(eviction.TestConfig{
-		NodeName:  "watch-node",
-		Cordonner: cordonner,
-		Clock:     fc,
+		NodeName:   "watch-node",
+		Cordonner:  cordonner,
+		Clock:      fc,
 		FileExists: fakeFileExists,
 		OnHealthChange: func(s eviction.HealthState) {
 			select {

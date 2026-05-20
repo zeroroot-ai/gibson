@@ -217,17 +217,17 @@ type inFlight struct {
 // Handler watches for spot-interruption notices and drains in-flight
 // detonations gracefully. Safe for concurrent use.
 type Handler struct {
-	mu       sync.Mutex
-	cfg      Config
-	clk      clock
+	mu        sync.Mutex
+	cfg       Config
+	clk       clock
 	cordonner NodeCordonner
-	logger   *slog.Logger
-	flying   map[string]*inFlight // keyed by detonation ID
-	health   HealthState
+	logger    *slog.Logger
+	flying    map[string]*inFlight // keyed by detonation ID
+	health    HealthState
 
 	// draining is closed once BeginDrain has been called to prevent
 	// multiple concurrent drain attempts.
-	draining chan struct{}
+	draining  chan struct{}
 	drainOnce sync.Once
 }
 
@@ -262,13 +262,13 @@ func New(cfg Config) (*Handler, error) {
 	cfg.fileExists = fe
 
 	return &Handler{
-		cfg:      cfg,
-		clk:      clk,
+		cfg:       cfg,
+		clk:       clk,
 		cordonner: cordonner,
-		logger:   cfg.Logger,
-		flying:   make(map[string]*inFlight),
-		health:   HealthUp,
-		draining: make(chan struct{}),
+		logger:    cfg.Logger,
+		flying:    make(map[string]*inFlight),
+		health:    HealthUp,
+		draining:  make(chan struct{}),
 	}, nil
 }
 

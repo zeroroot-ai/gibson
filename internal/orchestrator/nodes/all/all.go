@@ -7,7 +7,8 @@
 // before AssertNodeRegistryExhaustive runs.
 //
 // Spec: mission-verb-noun-registry Requirement 2 ACs 1, 4 +
-//       Task 9.
+//
+//	Task 9.
 package all
 
 import (

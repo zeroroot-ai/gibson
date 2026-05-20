@@ -244,7 +244,7 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 			killCtx, killCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_ = e.client.Kill(killCtx, launchResp.SandboxID)
 			killCancel()
-				return types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
+			return types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
 				fmt.Sprintf("tool %q sandbox %s exceeded %s call timeout",
 					toolName, launchResp.SandboxID, e.callTimeout), waitErr)
 		}

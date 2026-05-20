@@ -126,8 +126,8 @@ func (a *fgaStoreAuthorizer) ListUsers(_ context.Context, objectType, object, re
 }
 
 func (a *fgaStoreAuthorizer) StoreID() string { return "fake" }
-func (a *fgaStoreAuthorizer) ModelID() string  { return "fake" }
-func (a *fgaStoreAuthorizer) Close() error     { return nil }
+func (a *fgaStoreAuthorizer) ModelID() string { return "fake" }
+func (a *fgaStoreAuthorizer) Close() error    { return nil }
 
 // ---------------------------------------------------------------------------
 // Test cases

@@ -96,8 +96,8 @@ func (a *fgaBackedAuthorizer) ListUsers(_ context.Context, _, _, _ string) ([]st
 	return nil, nil
 }
 func (a *fgaBackedAuthorizer) StoreID() string { return "fake" }
-func (a *fgaBackedAuthorizer) ModelID() string  { return "fake" }
-func (a *fgaBackedAuthorizer) Close() error     { return nil }
+func (a *fgaBackedAuthorizer) ModelID() string { return "fake" }
+func (a *fgaBackedAuthorizer) Close() error    { return nil }
 
 // ---------------------------------------------------------------------------
 // stubRunAuthzLookup: minimal RunAuthzLookup for Authorize tests.

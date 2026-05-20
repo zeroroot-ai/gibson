@@ -17,9 +17,10 @@
 //
 // Environment variables (read from the gibson-fga-config ConfigMap injected
 // into the Job's env):
-//   EXT_AUTHZ_FGA_ADDR      — HTTP endpoint of the OpenFGA server
-//   EXT_AUTHZ_FGA_STORE_ID  — FGA store ID
-//   EXT_AUTHZ_FGA_MODEL_ID  — FGA authorization model ID
+//
+//	EXT_AUTHZ_FGA_ADDR      — HTTP endpoint of the OpenFGA server
+//	EXT_AUTHZ_FGA_STORE_ID  — FGA store ID
+//	EXT_AUTHZ_FGA_MODEL_ID  — FGA authorization model ID
 //
 // Spec: tenant-role-taxonomy Req 5.1–5.4.
 package main

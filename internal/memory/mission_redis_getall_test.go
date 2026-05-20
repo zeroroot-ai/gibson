@@ -91,8 +91,8 @@ func (s *stubMissionMemory) GetAll(ctx context.Context) (map[string]any, error) 
 	}
 	return result, nil
 }
-func (s *stubMissionMemory) MissionID() types.ID                          { return s.missionID }
-func (s *stubMissionMemory) ContinuityMode() MemoryContinuityMode         { return MemoryIsolated }
+func (s *stubMissionMemory) MissionID() types.ID                  { return s.missionID }
+func (s *stubMissionMemory) ContinuityMode() MemoryContinuityMode { return MemoryIsolated }
 func (s *stubMissionMemory) GetPreviousRunValue(_ context.Context, _ string) (any, error) {
 	return nil, ErrContinuityNotSupported
 }

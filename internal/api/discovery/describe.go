@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	discoverypb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/discovery/v1"
+	discoverypb "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
 
 	"github.com/zero-day-ai/gibson/internal/component"
 )

@@ -474,4 +474,5 @@ func TestDispatchOne_MethodDeclaredCheck(t *testing.T) {
 		t.Errorf("expected PLUGIN_ERROR_KIND_METHOD_NOT_FOUND, got %v", resp.GetError().GetKind())
 	}
 }
+
 var _ = json.Marshal

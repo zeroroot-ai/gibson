@@ -6,9 +6,9 @@
 // declaration cannot accept under the current edit budget.
 //
 // Production wiring path:
-//   1. Construct a CheckpointIntegration with the daemon's checkpointer and policy.
-//   2. Pass orchestrator.WithCheckpointIntegration(ci) to NewOrchestrator.
-//   3. (Done — the Run loop's super-step hook below picks it up automatically.)
+//  1. Construct a CheckpointIntegration with the daemon's checkpointer and policy.
+//  2. Pass orchestrator.WithCheckpointIntegration(ci) to NewOrchestrator.
+//  3. (Done — the Run loop's super-step hook below picks it up automatically.)
 //
 // Spec: mission-checkpointing R1.x, R5.x.
 package orchestrator
