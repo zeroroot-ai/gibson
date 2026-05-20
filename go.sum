@@ -463,8 +463,8 @@ github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
 github.com/zero-day-ai/ast-checks v0.1.1 h1:9DgwK2q0HhH3xCcWRqxOdtRTb8/ocKcSCn2z/QtQEe4=
 github.com/zero-day-ai/ast-checks v0.1.1/go.mod h1:+XwNxajlzZUo2JERFGdBtgks/EuppFg9JYyNNz6TD4Q=
-github.com/zero-day-ai/platform-sdk v0.0.0-20260520181925-8e1fe0cda26b h1:M5RX0QBAegYBAwOal7RZC+wU7WKWd/rDjkHKpAQaxJ8=
-github.com/zero-day-ai/platform-sdk v0.0.0-20260520181925-8e1fe0cda26b/go.mod h1:AJAFi+bt4QXpYT5TWIzXVBb49PlfEAl1OuxhQ2Kzp+I=
+github.com/zero-day-ai/platform-sdk v0.0.0-20260520182202-02d8dcdb02cf h1:qgc3VHgjsMR6NMHT0ZtLrUD1R0u4VWKaRDvhJehv9iQ=
+github.com/zero-day-ai/platform-sdk v0.0.0-20260520182202-02d8dcdb02cf/go.mod h1:AJAFi+bt4QXpYT5TWIzXVBb49PlfEAl1OuxhQ2Kzp+I=
 github.com/zero-day-ai/sdk v0.107.0 h1:jucq4Y0sVMQt+b2tgDjLgduU8G3UDqoyoLYDb2thCUs=
 github.com/zero-day-ai/sdk v0.107.0/go.mod h1:6Ksvf/3xRsrCqRfipiy4kwKBb9HEiT68BwcHnwklTdc=
 github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66 h1:7hZeaP1CwGKTEJgSiyXL1GEyCAFWSZ4O6rCYMFThy8U=
