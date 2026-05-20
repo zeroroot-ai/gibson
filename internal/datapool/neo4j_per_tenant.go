@@ -5,10 +5,27 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	neo4jconfig "github.com/neo4j/neo4j-go-driver/v5/neo4j/config"
+	pcpools "github.com/zero-day-ai/platform-clients/pools"
 	"github.com/zero-day-ai/sdk/auth"
 )
+
+// neo4jProductionOpts are the required connection lifecycle settings for
+// per-tenant Neo4j drivers, enforced via platform-clients/pools so that
+// the daemon uses the same validated defaults as every other platform service.
+//
+// Values:
+//   - MaxConnectionLifetime: 1 h — connections older than this are recycled.
+//   - ConnectionAcquisitionTimeout: 60 s — max wait for a connection from pool.
+//
+// Spec: zero-day-ai/.github#101 audit P1 (missing MaxConnectionLifetime).
+var neo4jProductionOpts = pcpools.Neo4jOptions{
+	MaxConnectionLifetime:        1 * time.Hour,
+	ConnectionAcquisitionTimeout: 60 * time.Second,
+}
 
 // neo4jPerTenant manages per-tenant Neo4j sessions. It holds a cache of
 // DriverWithContext instances keyed by tenant ID (one driver per endpoint)
@@ -99,7 +116,15 @@ func (n *neo4jPerTenant) driverForTenant(ctx context.Context, tenant auth.Tenant
 		return nil, fmt.Errorf("datapool: neo4j: resolving endpoint for tenant %s: %w", tenant, err)
 	}
 
-	driver, err = neo4j.NewDriverWithContext(ep.BoltURI, neo4j.BasicAuth(ep.Username, ep.Password, ""))
+	// Apply required connection lifecycle settings enforced by platform-clients/pools.
+	// MaxConnectionLifetime is required; omitting it leaves connections open
+	// indefinitely (audit finding P1, zero-day-ai/.github#101).
+	driver, err = neo4j.NewDriverWithContext(ep.BoltURI, neo4j.BasicAuth(ep.Username, ep.Password, ""),
+		func(c *neo4jconfig.Config) {
+			c.MaxConnectionLifetime = neo4jProductionOpts.MaxConnectionLifetime
+			c.ConnectionAcquisitionTimeout = neo4jProductionOpts.ConnectionAcquisitionTimeout
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("datapool: neo4j: creating driver for tenant %s: %w", tenant, err)
 	}

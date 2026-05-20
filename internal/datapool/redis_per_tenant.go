@@ -5,13 +5,34 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
-
+	pcpools "github.com/zero-day-ai/platform-clients/pools"
 	"github.com/zero-day-ai/sdk/auth"
 
 	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
 )
+
+// redisProductionOpts are the required connection lifecycle settings for
+// per-tenant Redis clients, enforced via platform-clients/pools so that the
+// daemon uses the same validated defaults as every other platform service.
+//
+// Values:
+//   - PoolSize: 10 connections per tenant (matches DefaultPoolMaxConns).
+//   - DialTimeout: 5 s — connection establishment timeout.
+//   - ReadTimeout: 3 s — per-command socket read timeout.
+//   - WriteTimeout: 3 s — per-command socket write timeout.
+//   - ConnMaxLifetime: 30 m — connections older than this are recycled.
+//
+// Spec: zero-day-ai/.github#101 audit P1 (missing ConnMaxLifetime).
+var redisProductionOpts = pcpools.RedisOptions{
+	PoolSize:        10,
+	DialTimeout:     5 * time.Second,
+	ReadTimeout:     3 * time.Second,
+	WriteTimeout:    3 * time.Second,
+	ConnMaxLifetime: 30 * time.Minute,
+}
 
 // redisMasterIndexKey is the hash key in db 0 that maps tenant ID →
 // logical DB index. Written by the tenant-operator on tenant provision.
@@ -44,8 +65,13 @@ func newRedisPerTenant(addr string) (*redisPerTenant, error) {
 		return nil, fmt.Errorf("datapool: redis: addr is required")
 	}
 	adminClient := redis.NewClient(&redis.Options{
-		Addr: addr,
-		DB:   redisDB0,
+		Addr:            addr,
+		DB:              redisDB0,
+		PoolSize:        redisProductionOpts.PoolSize,
+		DialTimeout:     redisProductionOpts.DialTimeout,
+		ReadTimeout:     redisProductionOpts.ReadTimeout,
+		WriteTimeout:    redisProductionOpts.WriteTimeout,
+		ConnMaxLifetime: redisProductionOpts.ConnMaxLifetime,
 	})
 	return &redisPerTenant{
 		clients:     make(map[auth.TenantID]*redis.Client),
@@ -87,9 +113,17 @@ func (r *redisPerTenant) ForTenant(ctx context.Context, tenant auth.TenantID) (*
 		}
 	}
 
+	// Apply required connection lifecycle settings enforced by platform-clients/pools.
+	// ConnMaxLifetime is required; omitting it leaves connections open indefinitely
+	// (audit finding P1, zero-day-ai/.github#101).
 	client := redis.NewClient(&redis.Options{
-		Addr: r.addr,
-		DB:   dbIndex,
+		Addr:            r.addr,
+		DB:              dbIndex,
+		PoolSize:        redisProductionOpts.PoolSize,
+		DialTimeout:     redisProductionOpts.DialTimeout,
+		ReadTimeout:     redisProductionOpts.ReadTimeout,
+		WriteTimeout:    redisProductionOpts.WriteTimeout,
+		ConnMaxLifetime: redisProductionOpts.ConnMaxLifetime,
 	})
 
 	r.mu.Lock()

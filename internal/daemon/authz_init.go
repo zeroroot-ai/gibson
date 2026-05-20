@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/gibson/internal/authz"
+	pcauthz "github.com/zero-day-ai/platform-clients/authz"
 )
 
 // initAuthorizer sets up the Authorization Service phase during daemon startup.
@@ -46,6 +47,35 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("authorization service: failed to resolve FGA IDs (FGA is required — no fallback): %w", err)
 	}
+
+	// Enforce the per-call timeout floor via platform-clients/authz.
+	//
+	// The timeout MUST be strictly below the Envoy ext_authz budget
+	// (pcauthz.EnvoyExtAuthzBudgetDefault = 5s). A value at or above the
+	// budget means an OpenFGA stall surfaces as an opaque Envoy upstream-timeout
+	// error rather than a structured FGA timeout metric — exactly the class of
+	// invisible stall the audit finding P1 documented.
+	//
+	// We resolve the timeout once and log it; the actual enforcement is inside
+	// the fgaAuthorizer's callContext helper (which uses the same value).
+	fgaTimeoutMs := cfg.Fga.TimeoutMs
+	if fgaTimeoutMs <= 0 {
+		fgaTimeoutMs = 500 // default from authz.defaultTimeoutMs
+	}
+	fgaTimeout := time.Duration(fgaTimeoutMs) * time.Millisecond
+	if fgaTimeout >= pcauthz.EnvoyExtAuthzBudgetDefault {
+		return fmt.Errorf(
+			"authorization service: FGA per-call timeout (%s) must be strictly less than the Envoy ext_authz budget (%s) — "+
+				"a timeout at or above the budget defeats the per-call floor (platform-clients/authz.EnvoyExtAuthzBudgetDefault=%s); "+
+				"set authz.fga.timeoutMs to a value strictly below %d ms",
+			fgaTimeout, pcauthz.EnvoyExtAuthzBudgetDefault, pcauthz.EnvoyExtAuthzBudgetDefault,
+			pcauthz.EnvoyExtAuthzBudgetDefault.Milliseconds(),
+		)
+	}
+	d.logger.Info(ctx, "authorization service: per-call timeout validated against Envoy ext_authz budget",
+		"timeout", fgaTimeout,
+		"envoy_budget", pcauthz.EnvoyExtAuthzBudgetDefault,
+	)
 
 	// Construct the real FGA authorizer.
 	a, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{

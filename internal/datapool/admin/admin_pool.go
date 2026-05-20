@@ -33,10 +33,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	neo4jconfig "github.com/neo4j/neo4j-go-driver/v5/neo4j/config"
 	redis "github.com/redis/go-redis/v9"
+	pcpools "github.com/zero-day-ai/platform-clients/pools"
 	"google.golang.org/grpc"
 
 	"github.com/zero-day-ai/gibson/internal/authz"
@@ -147,8 +150,13 @@ func New(cfg AdminPoolConfig, tenantPool datapool.Pool, fgaClient authz.Authoriz
 	}
 
 	// Connect admin Postgres pool when a DSN is provided.
+	// Apply required connection lifecycle settings via platform-clients/pools
+	// (audit finding P1, zero-day-ai/.github#101).
 	if cfg.PostgresDSN != "" {
-		pgPool, err := pgxpool.New(context.Background(), cfg.PostgresDSN)
+		pgPool, err := pcpools.NewPgxPool(context.Background(), cfg.PostgresDSN, pcpools.PgxPoolOptions{
+			MaxConnLifetime: 1 * time.Hour,
+			MaxConnIdleTime: 30 * time.Minute,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("admin.New: postgres: %w", err)
 		}
@@ -156,19 +164,30 @@ func New(cfg AdminPoolConfig, tenantPool datapool.Pool, fgaClient authz.Authoriz
 	}
 
 	// Connect admin Redis client (db 0 — master index).
+	// Apply required connection lifecycle settings via platform-clients/pools.
 	if cfg.RedisAddr != "" {
 		ap.redisAdmin = redis.NewClient(&redis.Options{
-			Addr:     cfg.RedisAddr,
-			Password: cfg.RedisPassword,
-			DB:       0, // always db 0; admin code is the only code that may do this
+			Addr:            cfg.RedisAddr,
+			Password:        cfg.RedisPassword,
+			DB:              0, // always db 0; admin code is the only code that may do this
+			PoolSize:        10,
+			DialTimeout:     5 * time.Second,
+			ReadTimeout:     3 * time.Second,
+			WriteTimeout:    3 * time.Second,
+			ConnMaxLifetime: 30 * time.Minute,
 		})
 	}
 
 	// Connect admin Neo4j driver when a URI is provided.
+	// Apply required connection lifecycle settings via platform-clients/pools.
 	if cfg.Neo4jURI != "" {
 		driver, err := neo4j.NewDriverWithContext(
 			cfg.Neo4jURI,
 			neo4j.BasicAuth(cfg.Neo4jUser, cfg.Neo4jPassword, ""),
+			func(c *neo4jconfig.Config) {
+				c.MaxConnectionLifetime = 1 * time.Hour
+				c.ConnectionAcquisitionTimeout = 60 * time.Second
+			},
 		)
 		if err != nil {
 			return nil, fmt.Errorf("admin.New: neo4j: %w", err)

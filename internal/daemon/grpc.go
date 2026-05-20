@@ -57,6 +57,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/onboarding"
 	"github.com/zero-day-ai/gibson/internal/reservednames"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
 	grpccodes "google.golang.org/grpc/codes"
@@ -223,7 +224,23 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	unaryInterceptors = append(unaryInterceptors, unaryRecovery)
 	streamInterceptors = append(streamInterceptors, streamRecovery)
 
-	// 2. Error scrubbing (strips internal paths, YAML parse details, Go types from responses)
+	// 2. OTel gRPC server instrumentation — the recommended otelgrpc v0.68+
+	// pattern is a stats.Handler rather than per-interceptor injection.
+	// The stats handler attaches to the server via grpc.StatsHandler(…) and
+	// handles span lifecycle, trace propagation, and attribute enrichment for
+	// every RPC.
+	//
+	// Audit P0 finding (zero-day-ai/.github#101): otelgrpc server instrumentation
+	// was missing; the daemon initialised OTel providers but never installed the
+	// gRPC server-side instrumentation, so no daemon RPC spans appeared in Langfuse.
+	//
+	// NOTE: otelgrpc.UnaryServerInterceptor / StreamServerInterceptor were removed
+	// in v0.68.0 (they were deprecated in v0.47). The stats.Handler replacement
+	// is semantically equivalent and is the upstream-recommended form.
+	otelServerHandler := otelgrpc.NewServerHandler()
+	d.logger.Info(ctx, "otelgrpc stats handler registered (audit P0: otelgrpc was missing)")
+
+	// 3. Error scrubbing (strips internal paths, YAML parse details, Go types from responses)
 	var scrubMeter metric.Meter
 	if d.infrastructure != nil && d.infrastructure.otelStack != nil &&
 		d.infrastructure.otelStack.MeterProvider != nil {
@@ -236,7 +253,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	unaryInterceptors = append(unaryInterceptors, unaryScrub)
 	streamInterceptors = append(streamInterceptors, streamScrub)
 
-	// 2.25. Correlation ID — reads `x-correlation-id` from incoming
+	// 4. Correlation ID — reads `x-correlation-id` from incoming
 	// metadata (forwarded by the dashboard / ext-authz) or mints a
 	// fresh `req-<base32 of uuid7>` ID when absent. The ID is
 	// attached to the handler context (via CorrelationIDFromContext)
@@ -249,7 +266,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	unaryInterceptors = append(unaryInterceptors, unaryCorrelation)
 	streamInterceptors = append(streamInterceptors, streamCorrelation)
 
-	// 2.5. Protovalidate runtime — runs `(buf.validate.field).*`
+	// 5. Protovalidate runtime — runs `(buf.validate.field).*`
 	// annotations against incoming proto.Message requests. Single
 	// validator instance, goroutine-safe, CEL-program-cached.
 	// Spec: mission-verb-noun-registry Requirement 10.
@@ -429,10 +446,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.logger.Warn(ctx, "idempotency dedup interceptor not installed: stateClient is nil")
 	}
 
-	// Build server options with chained interceptors
+	// Build server options with chained interceptors and the OTel stats handler.
+	// grpc.StatsHandler(otelServerHandler) is the otelgrpc v0.68+ replacement
+	// for the deprecated UnaryServerInterceptor/StreamServerInterceptor pair.
+	// It attaches a span to every RPC including streaming RPCs.
 	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 		grpc.ChainStreamInterceptor(streamInterceptors...),
+		grpc.StatsHandler(otelServerHandler),
 	}
 
 	// SPIFFE mTLS — the only supported posture; cert-less connections are rejected at the TLS layer.

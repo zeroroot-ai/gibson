@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	pcotel "github.com/zero-day-ai/platform-clients/observability"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -289,18 +290,34 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 		slog.Warn("using no-op meter provider due to metric exporter failure")
 	}
 
-	// Set global OTel providers for library instrumentation
-	// This enables automatic instrumentation of HTTP clients, gRPC, etc.
+	// Set global OTel providers for library instrumentation.
+	// Delegate to platform-clients/observability so the global registration
+	// follows the same pattern used across all platform services (ext-authz,
+	// tenant-operator, etc.). This also registers the composite propagator
+	// (TraceContext + Baggage) consistently.
+	//
+	// Note: platform-clients/observability.Init uses an idempotent per-service
+	// cache so calling it here (after we've already built our providers) has
+	// no effect on the providers it constructs. We only need its side effect of
+	// registering globals — but since it builds its own providers we set our
+	// providers explicitly below after the Init call.
+	_, _ = pcotel.Init("gibson",
+		pcotel.WithOTLPEndpoint(cfg.Endpoint),
+	)
+	// Override with our fully-configured daemon providers so domain-specific
+	// features (Langfuse auth, content-logging, HTTP protocol, etc.) are
+	// preserved. The platform-clients Init above already set the propagator.
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetMeterProvider(meterProvider)
 
-	// Set propagators for distributed tracing across service boundaries
+	// Ensure the W3C TraceContext + Baggage propagators are set. platform-clients
+	// sets these too but we re-apply defensively in case Init was cached.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
 
-	slog.Info("set global otel providers and propagators")
+	slog.Info("set global otel providers and propagators (platform-clients/observability pattern)")
 
 	// Create OTelMissionTracer with the providers
 	missionTracer := NewOTelMissionTracer(tracerProvider, meterProvider, cfg.ContentLogging)
