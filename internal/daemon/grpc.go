@@ -800,16 +800,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			d.logger.Info(ctx, "impersonation issuer wired into DaemonServer")
 
 			// Wire the reserved-names provider so PlatformOperatorService.
-			// GetReservedNames returns the chart-managed denylist. Spec
-			// tenant-provisioning-unification-phase2 Requirement 4.5.
-			if k8s, kerr := buildKubeClientForReservedNames(); kerr != nil {
-				d.logger.Warn(ctx, "reserved-names provider not wired: kube client init failed", "error", kerr)
-			} else if k8s == nil {
-				d.logger.Info(ctx, "reserved-names provider not wired (no kubeconfig / not in-cluster)")
+			// GetReservedNames returns the chart-mounted denylist. The chart
+			// projects the gibson-reserved-names ConfigMap as a volume at
+			// reservednames.DefaultMountDir; the provider reads from disk
+			// and watches with fsnotify (ADR-0023). No K8s API client.
+			// Spec: tenant-provisioning-unification-phase2 Requirement 4.5.
+			if rnp, rerr := reservednames.New(reservednames.DefaultMountDir, nil); rerr != nil {
+				d.logger.Warn(ctx, "reserved-names provider not wired: fsnotify init failed", "error", rerr)
 			} else {
-				rnp := reservednames.New(k8s, reservednames.LookupNamespace(), 30*time.Second)
 				daemonSvc.WithReservedNames(rnp)
-				d.logger.Info(ctx, "reserved-names provider wired into DaemonServer", "namespace", reservednames.LookupNamespace())
+				d.logger.Info(ctx, "reserved-names provider wired into DaemonServer", "mount_dir", reservednames.DefaultMountDir)
 			}
 
 		} else {

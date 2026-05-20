@@ -1,111 +1,217 @@
-// Package reservednames reads the chart-managed gibson-reserved-names
-// ConfigMap and exposes the (exact, prefix) denylist used by:
+// Package reservednames reads the chart-mounted gibson-reserved-names
+// denylist files and exposes the (exact, prefix) lists used by:
 //
 //   - the dashboard signup form (via PlatformOperatorService.GetReservedNames)
 //   - the K8s admission webhook (via the operator's own reader)
 //
-// Spec: tenant-provisioning-unification-phase2 Requirement 4.5.
+// Per ADR-0023, the daemon does not consume the Kubernetes API at runtime.
+// The chart projects the `gibson-reserved-names` ConfigMap as a volume at
+// /etc/gibson/reserved-names/; the provider reads the files on disk and
+// watches them with fsnotify so kubelet's in-place projection updates
+// (symlink swap) reload the denylist without a daemon restart.
+//
+// Spec: tenant-provisioning-unification-phase2 Requirement 4.5 +
+// ADR-0023 (gibson daemon does not consume the Kubernetes API).
 package reservednames
 
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	"github.com/fsnotify/fsnotify"
 )
 
-// ConfigMapName is the well-known name of the chart-managed denylist
-// ConfigMap. It lives in the namespace the daemon pod runs in (see
-// LookupNamespace).
-const ConfigMapName = "gibson-reserved-names"
+// DefaultMountDir is the chart's projected ConfigMap mount path.
+const DefaultMountDir = "/etc/gibson/reserved-names"
 
-// ConfigMap data keys. The chart writes newline-separated entries.
+// File names inside the mount directory. The chart writes one file per
+// ConfigMap data key.
 const (
-	keyExact  = "exact"
-	keyPrefix = "prefix"
+	fileExact  = "exact"
+	filePrefix = "prefix"
 )
 
-// LookupNamespace returns the namespace the daemon pod is running in,
-// falling back to "gibson" when POD_NAMESPACE is unset (kind dev path).
-func LookupNamespace() string {
-	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
-		return ns
-	}
-	if ns := os.Getenv("GIBSON_NAMESPACE"); ns != "" {
-		return ns
-	}
-	return "gibson"
-}
-
-// Provider is a 30-second-cached reader for the gibson-reserved-names
-// ConfigMap. Safe for concurrent use.
+// Provider holds the in-memory snapshot of the denylist files and a
+// background fsnotify watcher that reloads on disk-change events.
+//
+// Construction does an initial synchronous read so callers see populated
+// data immediately. Subsequent reads from ReservedNames are lock-free in
+// the steady state; updates from the watcher swap the snapshot under a
+// brief lock.
+//
+// Safe for concurrent use.
 type Provider struct {
-	client    kubernetes.Interface
-	namespace string
-	ttl       time.Duration
+	dir    string
+	logger *slog.Logger
 
-	mu       sync.Mutex
-	expires  time.Time
-	exact    []string
-	prefix   []string
-	lastErr  error
+	mu     sync.RWMutex
+	exact  []string
+	prefix []string
+
+	watcher  *fsnotify.Watcher
+	stopOnce sync.Once
+	stopCh   chan struct{}
 }
 
-// New constructs a Provider that reads the ConfigMap from the given
-// namespace using the supplied K8s client. ttl bounds how stale the
-// cached snapshot can be; passing 0 picks 30 seconds.
-func New(client kubernetes.Interface, namespace string, ttl time.Duration) *Provider {
-	if ttl <= 0 {
-		ttl = 30 * time.Second
+// New constructs a Provider that reads <dir>/exact and <dir>/prefix.
+// logger may be nil (uses slog.Default()). The returned Provider has
+// performed its initial read; callers can call ReservedNames immediately.
+//
+// Missing files are tolerated (treated as empty denylist). A malformed
+// file is logged at WARN and the previous good state is retained — this
+// mirrors the K8s ConfigMap path's tolerance for partially-written data.
+func New(dir string, logger *slog.Logger) (*Provider, error) {
+	if dir == "" {
+		dir = DefaultMountDir
 	}
-	return &Provider{client: client, namespace: namespace, ttl: ttl}
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, fmt.Errorf("reservednames: fsnotify watcher: %w", err)
+	}
+
+	p := &Provider{
+		dir:     dir,
+		logger:  logger,
+		watcher: w,
+		stopCh:  make(chan struct{}),
+	}
+
+	// Initial synchronous read so callers see populated data immediately.
+	// Errors are surfaced via the logger but do not block construction —
+	// the daemon must boot even when the chart hasn't projected the
+	// ConfigMap yet.
+	p.reload()
+
+	// Watch the directory (not the individual files) so kubelet's
+	// symlink-swap projection updates fire INotify events the watcher
+	// can pick up. Watching the files directly misses the events because
+	// kubelet replaces the entire `..data/` symlink target on update.
+	if err := w.Add(dir); err != nil {
+		// Watch failure is non-fatal: the initial snapshot still works,
+		// it just won't auto-reload. Log loud and continue.
+		p.logger.Warn("reservednames: failed to add directory to watcher; auto-reload disabled",
+			"dir", dir, "error", err)
+	}
+
+	go p.watchLoop()
+	return p, nil
 }
 
-// ReservedNames returns the cached (exact, prefix) lists. On a fresh
-// cache it issues a single ConfigMap GET; on subsequent calls within
-// the TTL it returns the cached snapshot. NotFound is treated as
-// "denylist intentionally empty" — not an error.
-func (p *Provider) ReservedNames(ctx context.Context) (exact, prefix []string, err error) {
+// ReservedNames returns the cached (exact, prefix) lists. Reads are
+// lock-free in the steady state; the only contention is when the
+// fsnotify watcher swaps the snapshot.
+//
+// The ctx parameter is preserved for interface compatibility with the
+// previous K8s-backed Provider — the file-mount path has no I/O so ctx
+// is unused.
+func (p *Provider) ReservedNames(_ context.Context) (exact, prefix []string, err error) {
 	if p == nil {
 		return nil, nil, errors.New("reservednames: nil Provider")
 	}
-	p.mu.Lock()
-	if time.Now().Before(p.expires) {
-		exact, prefix, err = p.exact, p.prefix, p.lastErr
-		p.mu.Unlock()
-		return
-	}
-	p.mu.Unlock()
-
-	cm, getErr := p.client.CoreV1().ConfigMaps(p.namespace).Get(ctx, ConfigMapName, metav1.GetOptions{})
-	if getErr != nil {
-		if apierrors.IsNotFound(getErr) {
-			p.store(nil, nil, nil)
-			return nil, nil, nil
-		}
-		// Surface the error this round but cache no result.
-		return nil, nil, getErr
-	}
-	exact = parseList(cm.Data[keyExact])
-	prefix = parseList(cm.Data[keyPrefix])
-	p.store(exact, prefix, nil)
-	return exact, prefix, nil
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	// Return defensive copies so callers cannot mutate the cached state.
+	return cloneSlice(p.exact), cloneSlice(p.prefix), nil
 }
 
-func (p *Provider) store(exact, prefix []string, err error) {
+// Close stops the background watcher. Safe to call multiple times.
+func (p *Provider) Close() error {
+	if p == nil {
+		return nil
+	}
+	p.stopOnce.Do(func() {
+		close(p.stopCh)
+	})
+	if p.watcher != nil {
+		return p.watcher.Close()
+	}
+	return nil
+}
+
+// reload reads both files and atomically swaps the in-memory snapshot.
+// On a per-file read error, the previous good slice for that file is
+// retained (and a WARN is logged). Missing files are treated as empty.
+func (p *Provider) reload() {
+	newExact, exactErr := readListFile(filepath.Join(p.dir, fileExact))
+	newPrefix, prefixErr := readListFile(filepath.Join(p.dir, filePrefix))
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.exact = exact
-	p.prefix = prefix
-	p.lastErr = err
-	p.expires = time.Now().Add(p.ttl)
+
+	if exactErr == nil {
+		p.exact = newExact
+	} else if !errors.Is(exactErr, os.ErrNotExist) {
+		p.logger.Warn("reservednames: failed to read exact denylist; retaining previous snapshot",
+			"file", filepath.Join(p.dir, fileExact), "error", exactErr)
+	} else {
+		// Missing file → empty list. Matches the K8s NotFound semantics.
+		p.exact = nil
+	}
+
+	if prefixErr == nil {
+		p.prefix = newPrefix
+	} else if !errors.Is(prefixErr, os.ErrNotExist) {
+		p.logger.Warn("reservednames: failed to read prefix denylist; retaining previous snapshot",
+			"file", filepath.Join(p.dir, filePrefix), "error", prefixErr)
+	} else {
+		p.prefix = nil
+	}
+}
+
+// watchLoop pumps fsnotify events. Any event on either denylist file
+// triggers a full reload. We deliberately do NOT filter by event type —
+// kubelet's ConfigMap projection involves Create/Remove/Rename events on
+// the `..data` symlink, and the safest reaction to "something happened"
+// is to re-read both files.
+func (p *Provider) watchLoop() {
+	if p.watcher == nil {
+		return
+	}
+	for {
+		select {
+		case <-p.stopCh:
+			return
+		case event, ok := <-p.watcher.Events:
+			if !ok {
+				return
+			}
+			// React to events touching the projected files. kubelet's
+			// ConfigMap projection lands as a symlink swap on `..data`,
+			// which manifests as Create/Remove/Rename events in the
+			// parent directory; the per-file paths through the symlink
+			// then resolve to the new content.
+			base := filepath.Base(event.Name)
+			if base == fileExact || base == filePrefix || strings.HasPrefix(base, "..") {
+				p.reload()
+			}
+		case err, ok := <-p.watcher.Errors:
+			if !ok {
+				return
+			}
+			p.logger.Warn("reservednames: fsnotify error", "error", err)
+		}
+	}
+}
+
+// readListFile reads a newline-separated denylist file, ignoring blank
+// lines and comment lines that start with '#'. Returns nil for an empty
+// file. Returns os.ErrNotExist (wrapped) when the file does not exist.
+func readListFile(path string) ([]string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseList(string(raw)), nil
 }
 
 // parseList trims whitespace and skips blank or comment ('#') lines.
@@ -128,4 +234,13 @@ func parseList(raw string) []string {
 	return out
 }
 
-var _ = corev1.ConfigMap{} // keep import explicit for readability
+// cloneSlice returns a copy of s. Callers of ReservedNames must not be
+// able to mutate the cached snapshot.
+func cloneSlice(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
+}
