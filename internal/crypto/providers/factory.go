@@ -13,11 +13,11 @@ func NewKeyProvider(cfg *crypto.KeyProviderConfig) (crypto.KeyProvider, error) {
 	}
 
 	switch cfg.Type {
-	case "kubernetes":
-		if cfg.Kubernetes == nil {
-			return nil, fmt.Errorf("security.key_provider.kubernetes configuration required when type is 'kubernetes'")
+	case "file":
+		if cfg.File == nil {
+			return nil, fmt.Errorf("security.key_provider.file configuration required when type is 'file' (path is required)")
 		}
-		return NewKubernetesProvider(cfg.Kubernetes)
+		return NewFileProvider(cfg.File)
 	case "vault":
 		if cfg.Vault == nil {
 			return nil, fmt.Errorf("security.key_provider.vault configuration required when type is 'vault'")
@@ -39,6 +39,6 @@ func NewKeyProvider(cfg *crypto.KeyProviderConfig) (crypto.KeyProvider, error) {
 		}
 		return NewGCPProvider(cfg.GCP)
 	default:
-		return nil, fmt.Errorf("unknown key provider type: %q (valid types: kubernetes, vault, aws, azure, gcp)", cfg.Type)
+		return nil, fmt.Errorf("unknown key provider type: %q (valid types: file, vault, aws, azure, gcp) — the previous 'kubernetes' value was removed by ADR-0023 (gibson#212/S10); use 'file' with a chart-mounted Secret volume", cfg.Type)
 	}
 }
