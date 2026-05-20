@@ -28,11 +28,22 @@ func TestNewKeyProvider_UnknownType(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown")
 }
 
-func TestNewKeyProvider_KubernetesMissingConfig(t *testing.T) {
+func TestNewKeyProvider_KubernetesTypeRemoved(t *testing.T) {
+	// ADR-0023 (gibson#212/S10): the 'kubernetes' provider type was
+	// removed. Asking for it now produces the "unknown type" error with
+	// a hint pointing at the file-mount replacement.
 	cfg := &crypto.KeyProviderConfig{Type: "kubernetes"}
 	_, err := NewKeyProvider(cfg)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "kubernetes")
+	assert.Contains(t, err.Error(), "unknown key provider type")
+	assert.Contains(t, err.Error(), "file")
+}
+
+func TestNewKeyProvider_FileMissingConfig(t *testing.T) {
+	cfg := &crypto.KeyProviderConfig{Type: "file"}
+	_, err := NewKeyProvider(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "file")
 	assert.Contains(t, err.Error(), "configuration required")
 }
 

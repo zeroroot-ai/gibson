@@ -39,11 +39,10 @@ import (
 //                                                (until gibson#211/S9 relocates to a sidecar)
 //   - any file path containing "/testdata/"      (analysistest fixtures)
 //
-// Deferred-deletion file paths (kept on the allow-list until the
-// pre-requisite slices land; remove these entries when the underlying
-// issues close):
-//   - internal/crypto/providers/kubernetes.go        (gibson#212 / S10)
-//   - internal/checkpoint/keyprovider/kubernetes.go  (gibson#212 / S10)
+// Deferred-deletion file paths: NONE. S10 (gibson#212) landed and
+// deleted both K8s key/crypto providers. The file-grained exemption
+// list below is intentionally empty; new entries should not be added
+// unless a future slice has a similar staged-rip need.
 //
 // Forbidden imports (the rule flags any of these in an in-scope file):
 //   - k8s.io/client-go/                  (any subpackage)
@@ -102,13 +101,9 @@ var noK8sAPIInDaemonExemptSubstrings = []string{
 //
 // REMOVE entries from this list as the corresponding deletion slices
 // land. Each entry should reference its tracking issue in the comment.
-var noK8sAPIInDaemonExemptFiles = []string{
-	// S10 (gibson#212) deletes both of these once the file-mount
-	// KeyProvider prerequisite ships. Until then they remain on disk
-	// but are not exempt from new K8s-client introductions.
-	"internal/crypto/providers/kubernetes.go",
-	"internal/checkpoint/keyprovider/kubernetes.go",
-}
+// Currently empty: S10 (gibson#212) deleted the two K8s key/crypto
+// provider files that previously needed an exemption.
+var noK8sAPIInDaemonExemptFiles = []string{}
 
 // forbiddenK8sImportPrefixes lists the import-path prefixes that the
 // rule flags. Substring/prefix matching catches subpackages.

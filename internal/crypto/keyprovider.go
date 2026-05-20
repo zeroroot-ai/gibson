@@ -25,20 +25,27 @@ type KeyProvider interface {
 }
 
 // KeyProviderConfig holds configuration for key provider instantiation.
+//
+// The previous `Kubernetes *KubernetesKeyConfig` field was removed by
+// ADR-0023 (gibson#212/S10); the daemon now reads the master KEK from
+// a chart-mounted file via the File provider, not via the K8s API.
 type KeyProviderConfig struct {
-	Type       string               `yaml:"type" mapstructure:"type"`
-	Kubernetes *KubernetesKeyConfig `yaml:"kubernetes,omitempty" mapstructure:"kubernetes"`
-	Vault      *VaultKeyConfig      `yaml:"vault,omitempty" mapstructure:"vault"`
-	AWS        *AWSKeyConfig        `yaml:"aws,omitempty" mapstructure:"aws"`
-	Azure      *AzureKeyConfig      `yaml:"azure,omitempty" mapstructure:"azure"`
-	GCP        *GCPKeyConfig        `yaml:"gcp,omitempty" mapstructure:"gcp"`
+	Type  string          `yaml:"type" mapstructure:"type"`
+	File  *FileKeyConfig  `yaml:"file,omitempty" mapstructure:"file"`
+	Vault *VaultKeyConfig `yaml:"vault,omitempty" mapstructure:"vault"`
+	AWS   *AWSKeyConfig   `yaml:"aws,omitempty" mapstructure:"aws"`
+	Azure *AzureKeyConfig `yaml:"azure,omitempty" mapstructure:"azure"`
+	GCP   *GCPKeyConfig   `yaml:"gcp,omitempty" mapstructure:"gcp"`
 }
 
-// KubernetesKeyConfig configures the Kubernetes Secrets provider.
-type KubernetesKeyConfig struct {
-	SecretName      string `yaml:"secret_name" mapstructure:"secret_name"`
-	SecretNamespace string `yaml:"secret_namespace,omitempty" mapstructure:"secret_namespace"`
-	SecretKey       string `yaml:"secret_key" mapstructure:"secret_key"`
+// FileKeyConfig configures the file-mount KeyProvider. The chart mounts
+// a Secret as a volume at Path; the daemon reads from disk and never
+// calls the K8s API (ADR-0023).
+type FileKeyConfig struct {
+	// Path is the file the daemon reads the 32-byte master KEK from.
+	// Default in the kind dev cluster is /etc/gibson/master-kek; prod
+	// overlays may project the Secret at a different path.
+	Path string `yaml:"path" mapstructure:"path"`
 }
 
 // VaultKeyConfig configures the HashiCorp Vault provider.
