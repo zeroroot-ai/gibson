@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
+	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
 )
 
 // AdminClient is a minimal gRPC client for the PlatformOperatorService.

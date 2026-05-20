@@ -10,9 +10,9 @@ import (
 	// Blank imports pull the generated Go proto packages into the test
 	// binary so their init() funcs register their service/method descriptors
 	// with protoregistry.GlobalFiles.
-	_ "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
-	_ "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	_ "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
+	_ "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
+	_ "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
 	_ "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	_ "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	_ "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"

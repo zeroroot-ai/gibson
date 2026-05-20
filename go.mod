@@ -44,6 +44,7 @@ require (
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zero-day-ai/ast-checks v0.1.1
+	github.com/zero-day-ai/platform-sdk v0.0.0-20260520182202-02d8dcdb02cf
 	github.com/zero-day-ai/sdk v0.107.0
 	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
 	github.com/zero-day-ai/testfixtures v0.1.0
@@ -65,7 +66,7 @@ require (
 	golang.org/x/term v0.42.0
 	golang.org/x/time v0.15.0
 	golang.org/x/tools v0.44.0
-	google.golang.org/grpc v1.81.0
+	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.35.2

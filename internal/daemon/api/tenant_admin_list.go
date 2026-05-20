@@ -5,8 +5,8 @@ import (
 	"context"
 	"log/slog"
 
-	tenantpb "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/idp"
+	tenantpb "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"

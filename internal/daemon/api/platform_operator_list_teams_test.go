@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/authz"
-	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
+	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
 )
 
 // listTeamsFake is a programmable authorizer that scripts ListObjects/

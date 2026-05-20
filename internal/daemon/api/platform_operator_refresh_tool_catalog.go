@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	platformv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/platform/v1"
+	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
 )
 
 // RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
