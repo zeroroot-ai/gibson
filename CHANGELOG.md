@@ -62,6 +62,32 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.107.0](https://github.com/zero-day-ai/gibson/compare/v0.106.0...v0.107.0) (2026-05-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **crypto:** file-mount KeyProvider; delete K8s key/crypto providers (ADR-0023, gibson#212/S10) ([#224](https://github.com/zero-day-ai/gibson/issues/224))
+* **authz:** FGA config resolver env-only (ADR-0023, gibson#205) ([#222](https://github.com/zero-day-ai/gibson/issues/222))
+* **daemon:** reserved-names provider via file-mount (ADR-0023, gibson#204) ([#221](https://github.com/zero-day-ai/gibson/issues/221))
+* **daemon:** delete network_policy_check; audit moves to tenant-operator (ADR-0023, gibson#209) ([#220](https://github.com/zero-day-ai/gibson/issues/220))
+* **daemon:** relocate internal/tenants → internal/datapool/admin; delete startup_migration_check (ADR-0023, gibson#210 + gibson#208 daemon half) ([#219](https://github.com/zero-day-ai/gibson/issues/219))
+* **datapool:** provisioning checker uses DataPlaneProbe (ADR-0023, gibson#206) ([#216](https://github.com/zero-day-ai/gibson/issues/216))
+
+### Features
+
+* **authz:** FGA config resolver env-only (ADR-0023, gibson[#205](https://github.com/zero-day-ai/gibson/issues/205)) ([#222](https://github.com/zero-day-ai/gibson/issues/222)) ([33f2940](https://github.com/zero-day-ai/gibson/commit/33f29407c662cb7192eb4df4de1441f065cb8be6))
+* **crypto:** file-mount KeyProvider; delete K8s key/crypto providers (ADR-0023, gibson[#212](https://github.com/zero-day-ai/gibson/issues/212)/S10) ([#224](https://github.com/zero-day-ai/gibson/issues/224)) ([71c5be3](https://github.com/zero-day-ai/gibson/commit/71c5be3f87944b70a94407d3866e22c9772e257e))
+* **daemon:** delete network_policy_check; audit moves to tenant-operator (ADR-0023, gibson[#209](https://github.com/zero-day-ai/gibson/issues/209)) ([#220](https://github.com/zero-day-ai/gibson/issues/220)) ([ee89d9d](https://github.com/zero-day-ai/gibson/commit/ee89d9d15bafc89d69ff497b66edf32b855845eb))
+* **daemon:** relocate internal/tenants → internal/datapool/admin; delete startup_migration_check (ADR-0023, gibson[#210](https://github.com/zero-day-ai/gibson/issues/210) + gibson[#208](https://github.com/zero-day-ai/gibson/issues/208) daemon half) ([#219](https://github.com/zero-day-ai/gibson/issues/219)) ([9e990fd](https://github.com/zero-day-ai/gibson/commit/9e990fd5d6f9c07e9ede3c22e8f57d67807a3e03))
+* **daemon:** reserved-names provider via file-mount (ADR-0023, gibson[#204](https://github.com/zero-day-ai/gibson/issues/204)) ([#221](https://github.com/zero-day-ai/gibson/issues/221)) ([273c6d0](https://github.com/zero-day-ai/gibson/commit/273c6d004489c921291793481a4c0c1d7ec973f2))
+* **datapool:** provisioning checker uses DataPlaneProbe (ADR-0023, gibson[#206](https://github.com/zero-day-ai/gibson/issues/206)) ([#216](https://github.com/zero-day-ai/gibson/issues/216)) ([b25aee1](https://github.com/zero-day-ai/gibson/commit/b25aee1914532f4aeee41264db7aa4204e2a339d))
+* **gibsoncheck:** nok8sapiindaemon — ban K8s API client construction from daemon source (ADR-0023, gibson[#214](https://github.com/zero-day-ai/gibson/issues/214)) ([#223](https://github.com/zero-day-ai/gibson/issues/223)) ([7f3a0f5](https://github.com/zero-day-ai/gibson/commit/7f3a0f5de22850918a0051cf5838c42c5dbf2795))
+* **walker:** authz_annotation_completeness — check registry entries for missing fields (slice 3.7) ([#196](https://github.com/zero-day-ai/gibson/issues/196)) ([c74a918](https://github.com/zero-day-ai/gibson/commit/c74a9187476ecaf3029e715c59968dcc7437f3e3))
+* **walker:** narrow to receiver-field shape + widen scope to all 49 internal/* (slice 3.2) ([#190](https://github.com/zero-day-ai/gibson/issues/190)) ([bf5e993](https://github.com/zero-day-ai/gibson/commit/bf5e9937d33a40efc79977175d0dc13e8ef47be5))
+* **walker:** no_context_background + no_time_now walkers on RPC handlers (slice 3.6 partial) ([#193](https://github.com/zero-day-ai/gibson/issues/193)) ([999dc32](https://github.com/zero-day-ai/gibson/commit/999dc32a68a1d2e8f41ee18b0a4e18ff0c7be48e))
+* **walker:** tenant_id_source + tenant_client_only walkers (slice 3.5) ([#198](https://github.com/zero-day-ai/gibson/issues/198)) ([e9e5606](https://github.com/zero-day-ai/gibson/commit/e9e5606c6d97a3789674dc67f01b83ff8e5ce6f9))
+
 ## [0.106.0](https://github.com/zero-day-ai/gibson/compare/v0.105.0...v0.106.0) (2026-05-19)
 
 
