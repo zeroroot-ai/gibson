@@ -87,6 +87,7 @@ func main() {
 			checks.SecretsNoLogAnalyzer,
 			checks.PluginLegacyAnalyzer,
 			checks.AgentSecretsImportAnalyzer,
+			checks.NoK8sAPIInDaemonAnalyzer,
 		}...,
 	)
 }
