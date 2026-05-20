@@ -25,12 +25,13 @@ import (
 // Spec: secrets-blast-radius-reduction R4.2.
 //
 // Why this test exists:
-//   The model.fga file's old comment block (pre-cleanup) described a
-//   tuple shape `(user:<daemon_service_id>, can_resolve, secret:tenant
-//   -<tenant_id>:*)` which CANNOT be written today and MUST not be
-//   re-introduced by a future contributor "fixing" the model to match
-//   the comment. This test fails closed if anyone widens can_resolve
-//   to accept additional subject types.
+//
+//	The model.fga file's old comment block (pre-cleanup) described a
+//	tuple shape `(user:<daemon_service_id>, can_resolve, secret:tenant
+//	-<tenant_id>:*)` which CANNOT be written today and MUST not be
+//	re-introduced by a future contributor "fixing" the model to match
+//	the comment. This test fails closed if anyone widens can_resolve
+//	to accept additional subject types.
 func TestModel_RejectsUserCanResolve(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

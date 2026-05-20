@@ -130,7 +130,7 @@ type Config struct {
 	Auth              AuthConfig              `mapstructure:"auth" yaml:"auth"`
 	Checkpoint        CheckpointConfig        `mapstructure:"checkpoint" yaml:"checkpoint"`
 	Authz             AuthzConfig             `mapstructure:"authz" yaml:"authz"`
-	PlatformPostgres PlatformPostgresConfig `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
+	PlatformPostgres  PlatformPostgresConfig  `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
 	TenantPostgres    TenantPostgresConfig    `mapstructure:"tenant_postgres" yaml:"tenant_postgres,omitempty"`
 	Sandbox           SandboxConfig           `mapstructure:"sandbox" yaml:"sandbox,omitempty"`
 	ToolRunner        ToolRunnerConfig        `mapstructure:"tool_runner" yaml:"tool_runner,omitempty"`

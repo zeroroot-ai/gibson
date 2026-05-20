@@ -249,4 +249,3 @@ func TestApprovalManagerConfigDefaults(t *testing.T) {
 	assert.Equal(t, 500*time.Millisecond, manager.config.ResumeDelay)
 	assert.Equal(t, "gibson", manager.config.KeyPrefix)
 }
-

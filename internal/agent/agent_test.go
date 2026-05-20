@@ -451,6 +451,7 @@ func TestNewEvidence(t *testing.T) {
 	assert.Equal(t, data, evidence.Data)
 	assert.False(t, evidence.Timestamp.IsZero())
 }
+
 // TestSlotMergeConfig_AllFields tests all merge paths
 func TestSlotMergeConfig_AllFields(t *testing.T) {
 	slot := NewSlotDefinition("test", "Test", true).

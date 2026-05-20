@@ -151,9 +151,9 @@ type Orchestrator struct {
 	runMode       RunMode // Error handling behavior mode
 
 	// Workspace management
-	workspaceManager workspace.WorkspaceManager // Manages Git repositories for code operations
+	workspaceManager workspace.WorkspaceManager   // Manages Git repositories for code operations
 	missionDef       *missionv1.MissionDefinition // Mission definition for workspace configuration
-	credStore        workspace.CredentialStore  // Credential store for repository access
+	credStore        workspace.CredentialStore    // Credential store for repository access
 
 	// checkpointIntegration drives Spec 4 mission-checkpointing super-step
 	// boundary writes, parallel-group completion markers, and approval-pause

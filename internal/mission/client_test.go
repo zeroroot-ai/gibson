@@ -8,11 +8,11 @@
 package mission
 
 import (
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"sync"
 	"testing"
 	"time"

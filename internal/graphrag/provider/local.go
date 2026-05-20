@@ -68,10 +68,10 @@ func NewLocalGraphRAGProviderWithSession(
 	vectorStore vector.VectorStore,
 ) *LocalGraphRAGProvider {
 	p := &LocalGraphRAGProvider{
-		config:      graphrag.GraphRAGConfig{Provider: "neo4j"},
-		graphClient: graph.NewSessionGraphClient(session),
-		vectorStore: vectorStore,
-		initialized: true,
+		config:       graphrag.GraphRAGConfig{Provider: "neo4j"},
+		graphClient:  graph.NewSessionGraphClient(session),
+		vectorStore:  vectorStore,
+		initialized:  true,
 		graphHealthy: true,
 	}
 	return p

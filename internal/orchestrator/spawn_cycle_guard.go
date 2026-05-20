@@ -18,7 +18,7 @@ import (
 //
 // Spec: mission-verb-noun-registry Requirement 8.
 type spawnCycleGuard struct {
-	mu       sync.RWMutex
+	mu sync.RWMutex
 	// mission → node → record
 	missions map[string]map[string]spawnRecord
 }

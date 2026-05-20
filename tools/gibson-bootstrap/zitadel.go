@@ -206,10 +206,10 @@ func (c *patClient) EnsureProject(ctx context.Context, orgID, name string) (*Ens
 	slog.Info("project not found, creating", "name", name, "org_id", orgID)
 
 	createBody := map[string]interface{}{
-		"name":                   name,
-		"projectRoleAssertion":   true,
-		"projectRoleCheck":       false,
-		"hasProjectCheck":        false,
+		"name":                 name,
+		"projectRoleAssertion": true,
+		"projectRoleCheck":     false,
+		"hasProjectCheck":      false,
 	}
 	var createResp struct {
 		ProjectID string `json:"id"`
@@ -277,19 +277,19 @@ func (c *patClient) MintOIDCClient(ctx context.Context, req MintOIDCClientReques
 
 	// Build the OIDC application body matching the post-install Job's shape.
 	appBody := map[string]interface{}{
-		"name":                       req.ClientName,
-		"redirectUris":               []string{issuerURL + "/callback"},
-		"responseTypes":              []string{"OIDC_RESPONSE_TYPE_CODE"},
-		"grantTypes":                 []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"},
-		"appType":                    "OIDC_APP_TYPE_WEB",
-		"authMethodType":             "OIDC_AUTH_METHOD_TYPE_BASIC",
-		"version":                    "OIDC_VERSION_1_0",
-		"devMode":                    false,
-		"accessTokenType":            "OIDC_TOKEN_TYPE_JWT",
-		"accessTokenRoleAssertion":   true,
-		"idTokenRoleAssertion":       true,
-		"idTokenUserinfoAssertion":   true,
-		"clockSkew":                  "1s",
+		"name":                     req.ClientName,
+		"redirectUris":             []string{issuerURL + "/callback"},
+		"responseTypes":            []string{"OIDC_RESPONSE_TYPE_CODE"},
+		"grantTypes":               []string{"OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"},
+		"appType":                  "OIDC_APP_TYPE_WEB",
+		"authMethodType":           "OIDC_AUTH_METHOD_TYPE_BASIC",
+		"version":                  "OIDC_VERSION_1_0",
+		"devMode":                  false,
+		"accessTokenType":          "OIDC_TOKEN_TYPE_JWT",
+		"accessTokenRoleAssertion": true,
+		"idTokenRoleAssertion":     true,
+		"idTokenUserinfoAssertion": true,
+		"clockSkew":                "1s",
 	}
 
 	path := "/management/v1/projects/" + req.ProjectID + "/apps/oidc"

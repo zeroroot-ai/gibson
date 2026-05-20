@@ -108,3 +108,10 @@ jobs:
       # production-default contract obvious in the workflow surface.
       build_args: |
         BUILD_TAGS=setec_integration
+    secrets:
+      # Dockerfile mounts this as a BuildKit secret (id=ghtoken) and writes a
+      # git insteadOf rule so `go mod download` can fetch the private
+      # zero-day-ai modules (platform-sdk, platform-clients, etc.). Without
+      # this the image build fails with "could not read Username for github".
+      # See tenant-operator#52 / tenant-operator#176 for the same pattern.
+      ghtoken: ${{ secrets.GH_PAT_GIBSON_RO }}

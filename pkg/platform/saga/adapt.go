@@ -68,10 +68,10 @@ type adaptedStep struct {
 	deprovisionFn func(context.Context, ConditionedObject, *Deps) error
 }
 
-func (a *adaptedStep) Name() string                          { return a.name }
-func (a *adaptedStep) Condition() string                     { return a.condition }
-func (a *adaptedStep) Requires() []string                    { return a.requires }
-func (a *adaptedStep) RequiredClients() []ClientCapability   { return a.caps }
+func (a *adaptedStep) Name() string                        { return a.name }
+func (a *adaptedStep) Condition() string                   { return a.condition }
+func (a *adaptedStep) Requires() []string                  { return a.requires }
+func (a *adaptedStep) RequiredClients() []ClientCapability { return a.caps }
 
 func (a *adaptedStep) Skip(obj ConditionedObject) bool {
 	if a.skipFn != nil {

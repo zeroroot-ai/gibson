@@ -10,8 +10,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/finding/classifier"
-	"github.com/zero-day-ai/sdk/finding/registry"
 	classifierstore "github.com/zero-day-ai/sdk/finding/classifier/store"
+	"github.com/zero-day-ai/sdk/finding/registry"
 )
 
 // VectorClassifier implements the SDK CategoryClassifier interface using vector embeddings
@@ -50,7 +50,7 @@ type tenantClassifierStore struct {
 	underlying classifier.VectorStore
 }
 
-func (t *tenantClassifierStore) prefixID(id string) string  { return t.prefix + id }
+func (t *tenantClassifierStore) prefixID(id string) string   { return t.prefix + id }
 func (t *tenantClassifierStore) unprefixID(id string) string { return strings.TrimPrefix(id, t.prefix) }
 
 func (t *tenantClassifierStore) Upsert(ctx context.Context, id string, embedding []float64, metadata map[string]any) error {

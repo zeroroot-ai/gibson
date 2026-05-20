@@ -254,4 +254,3 @@ func TestOrProp(t *testing.T) {
 		t.Errorf("orProp empty = %q, want 'fallback'", got)
 	}
 }
-

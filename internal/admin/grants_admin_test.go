@@ -8,7 +8,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	adminv1 "github.com/zero-day-ai/sdk/api/gen/gibson/admin/v1"
+	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
+	capabilityv1 "github.com/zero-day-ai/sdk/api/gen/gibson/capability/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -99,7 +100,7 @@ func TestListActiveGrants_FilterByClass(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 
 	resp, err := srv.ListActiveGrants(ctx, &adminv1.ListActiveGrantsRequest{
-		RecipientClassFilter: adminv1.RecipientClass_RECIPIENT_CLASS_PLUGIN,
+		RecipientClassFilter: capabilityv1.RecipientClass_RECIPIENT_CLASS_PLUGIN,
 	})
 	if err != nil {
 		t.Fatalf("ListActiveGrants: %v", err)

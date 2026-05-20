@@ -22,9 +22,9 @@ import (
 // parallelGroupState carries per-CheckpointIntegration parallel-group
 // metadata that complements the in-struct `parallelGroups` map.
 type parallelGroupState struct {
-	mu      sync.Mutex
-	totals  map[string]int  // expected node count per groupID
-	fired   map[string]bool // groupIDs that have already fired
+	mu     sync.Mutex
+	totals map[string]int  // expected node count per groupID
+	fired  map[string]bool // groupIDs that have already fired
 }
 
 // parallelGroupRegistry maps each *CheckpointIntegration pointer to its

@@ -18,11 +18,11 @@ type stubStep struct {
 	requires  []saga.ClientCapability
 }
 
-func (s *stubStep) Name() string                                    { return s.name }
-func (s *stubStep) Condition() string                               { return s.condition }
-func (s *stubStep) Requires() []string                              { return nil }
-func (s *stubStep) RequiredClients() []saga.ClientCapability        { return s.requires }
-func (s *stubStep) Skip(_ saga.ConditionedObject) bool              { return false }
+func (s *stubStep) Name() string                             { return s.name }
+func (s *stubStep) Condition() string                        { return s.condition }
+func (s *stubStep) Requires() []string                       { return nil }
+func (s *stubStep) RequiredClients() []saga.ClientCapability { return s.requires }
+func (s *stubStep) Skip(_ saga.ConditionedObject) bool       { return false }
 func (s *stubStep) Deprovision(_ context.Context, _ saga.ConditionedObject, _ *saga.Deps) error {
 	return nil
 }

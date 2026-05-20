@@ -62,11 +62,11 @@ type fakeWorkspace struct {
 	readContent   []byte
 }
 
-func (w *fakeWorkspace) Name() string                                 { return w.name }
-func (w *fakeWorkspace) Path() string                                 { return w.path }
-func (w *fakeWorkspace) Editor() editor.Editor                        { return nil }
-func (w *fakeWorkspace) Git() git.GitOps                              { return nil }
-func (w *fakeWorkspace) Close() error                                 { return nil }
+func (w *fakeWorkspace) Name() string          { return w.name }
+func (w *fakeWorkspace) Path() string          { return w.path }
+func (w *fakeWorkspace) Editor() editor.Editor { return nil }
+func (w *fakeWorkspace) Git() git.GitOps       { return nil }
+func (w *fakeWorkspace) Close() error          { return nil }
 
 func (w *fakeWorkspace) ReadFile(_ context.Context, p string) ([]byte, error) {
 	w.lastReadPath = p
@@ -109,10 +109,10 @@ type fakeHarness struct {
 	missionCtx MissionContext
 }
 
-func (h *fakeHarness) Workspace() workspace.Workspace                  { return h.primary }
-func (h *fakeHarness) Workspaces() map[string]workspace.Workspace      { return h.all }
-func (h *fakeHarness) Mission() MissionContext                         { return h.missionCtx }
-func (h *fakeHarness) MissionID() (out interface{ String() string })   { panic("unused") }
+func (h *fakeHarness) Workspace() workspace.Workspace                { return h.primary }
+func (h *fakeHarness) Workspaces() map[string]workspace.Workspace    { return h.all }
+func (h *fakeHarness) Mission() MissionContext                       { return h.missionCtx }
+func (h *fakeHarness) MissionID() (out interface{ String() string }) { panic("unused") }
 
 // AgentHarness has many other methods we don't care about for these
 // handler tests. We compose the rest via an embedded panicking stub.

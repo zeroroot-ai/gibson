@@ -12,7 +12,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/secrets"
 
-	adminv1 "github.com/zero-day-ai/sdk/api/gen/gibson/admin/v1"
+	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	sdksecrets "github.com/zero-day-ai/sdk/secrets"
 )

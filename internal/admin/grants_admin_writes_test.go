@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	adminv1 "github.com/zero-day-ai/sdk/api/gen/gibson/admin/v1"
+	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
 	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	"google.golang.org/grpc/codes"

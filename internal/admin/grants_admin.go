@@ -24,7 +24,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	adminv1 "github.com/zero-day-ai/sdk/api/gen/gibson/admin/v1"
+	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
+	capabilityv1 "github.com/zero-day-ai/sdk/api/gen/gibson/capability/v1"
 	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	"github.com/zero-day-ai/sdk/auth"
 
@@ -160,7 +161,7 @@ func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *adminv1.L
 	rpcFilter := req.GetRpcFilter()
 	nearOnly := req.GetIncludeNearExpiryOnly()
 
-	out := make([]*adminv1.CapabilityGrantInfo, 0, len(grants))
+	out := make([]*capabilityv1.CapabilityGrantInfo, 0, len(grants))
 	for _, g := range grants {
 		// Defense-in-depth: skip expired grants the reader may still return.
 		if !g.ExpiresAt.IsZero() && !g.ExpiresAt.After(now) {
@@ -177,7 +178,7 @@ func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *adminv1.L
 		}
 
 		class := classFromString(g.RecipientClass)
-		if classFilter != adminv1.RecipientClass_RECIPIENT_CLASS_UNSPECIFIED && class != classFilter {
+		if classFilter != capabilityv1.RecipientClass_RECIPIENT_CLASS_UNSPECIFIED && class != classFilter {
 			continue
 		}
 
@@ -185,7 +186,7 @@ func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *adminv1.L
 			continue
 		}
 
-		out = append(out, &adminv1.CapabilityGrantInfo{
+		out = append(out, &capabilityv1.CapabilityGrantInfo{
 			Jti:                g.JTI,
 			RecipientInstallId: g.RecipientInstallID,
 			RecipientClass:     class,
@@ -235,16 +236,16 @@ func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *adminv1.L
 }
 
 // classFromString maps the lowercase string class label to the proto enum.
-func classFromString(s string) adminv1.RecipientClass {
+func classFromString(s string) capabilityv1.RecipientClass {
 	switch s {
 	case "agent":
-		return adminv1.RecipientClass_RECIPIENT_CLASS_AGENT
+		return capabilityv1.RecipientClass_RECIPIENT_CLASS_AGENT
 	case "tool":
-		return adminv1.RecipientClass_RECIPIENT_CLASS_TOOL
+		return capabilityv1.RecipientClass_RECIPIENT_CLASS_TOOL
 	case "plugin":
-		return adminv1.RecipientClass_RECIPIENT_CLASS_PLUGIN
+		return capabilityv1.RecipientClass_RECIPIENT_CLASS_PLUGIN
 	default:
-		return adminv1.RecipientClass_RECIPIENT_CLASS_UNSPECIFIED
+		return capabilityv1.RecipientClass_RECIPIENT_CLASS_UNSPECIFIED
 	}
 }
 

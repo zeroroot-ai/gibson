@@ -1,8 +1,8 @@
 package mission
 
 import (
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"context"
+	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

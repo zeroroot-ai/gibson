@@ -1040,7 +1040,7 @@ func TestDefaultGraphRAGQueryBridge_Traverse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &MockGraphRAGStore{
-				IsHealthy:   true,
+				IsHealthy:       true,
 				ShouldFailQuery: tt.shouldFail,
 			}
 

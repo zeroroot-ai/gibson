@@ -100,9 +100,9 @@ func (a *recordingAuthorizer) BatchCheck(context.Context, []authz.CheckRequest) 
 	return nil, nil
 }
 func (a *recordingAuthorizer) Delete(context.Context, []authz.Tuple) error { return nil }
-func (a *recordingAuthorizer) StoreID() string                              { return "" }
-func (a *recordingAuthorizer) ModelID() string                              { return "" }
-func (a *recordingAuthorizer) Close() error                                 { return nil }
+func (a *recordingAuthorizer) StoreID() string                             { return "" }
+func (a *recordingAuthorizer) ModelID() string                             { return "" }
+func (a *recordingAuthorizer) Close() error                                { return nil }
 
 // sortTuples returns a deterministic copy so reflect.DeepEqual doesn't care
 // about insertion order.

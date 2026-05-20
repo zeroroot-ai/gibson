@@ -13,7 +13,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/authz"
-	modelaccesspb "github.com/zero-day-ai/sdk/api/gen/gibson/authz/v1"
+	modelaccesspb "github.com/zero-day-ai/platform-sdk/gen/gibson/authz/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
