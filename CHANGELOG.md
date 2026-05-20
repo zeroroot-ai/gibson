@@ -62,6 +62,14 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.108.0](https://github.com/zero-day-ai/gibson/compare/v0.107.0...v0.108.0) (2026-05-20)
+
+
+### Features
+
+* add idempotency_key dedup store with redis backend and server interceptor ([#231](https://github.com/zero-day-ai/gibson/issues/231)) ([529677e](https://github.com/zero-day-ai/gibson/commit/529677ecc48cc70550186758f39fea12a056b383))
+* consume platform.v1 and tenant.v1 protos from platform-sdk ([#233](https://github.com/zero-day-ai/gibson/issues/233)) ([683186b](https://github.com/zero-day-ai/gibson/commit/683186bda2403903d322521c7929d94705caf167))
+
 ## [0.107.0](https://github.com/zero-day-ai/gibson/compare/v0.106.0...v0.107.0) (2026-05-20)
 
 
