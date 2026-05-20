@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.109.0](https://github.com/zero-day-ai/gibson/compare/v0.108.0...v0.109.0) (2026-05-20)
+
+
+### Features
+
+* migrate admin imports to platform-sdk; register daemonadminservice ([#235](https://github.com/zero-day-ai/gibson/issues/235)) ([fa1c311](https://github.com/zero-day-ai/gibson/commit/fa1c311499a23667bfb39654ac4de4b8c04040dc))
+
 ## [0.108.0](https://github.com/zero-day-ai/gibson/compare/v0.107.0...v0.108.0) (2026-05-20)
 
 

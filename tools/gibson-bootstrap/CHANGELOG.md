@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/zero-day-ai/gibson/compare/gibson-bootstrap-v1.2.0...gibson-bootstrap-v1.3.0) (2026-05-20)
+
+
+### Features
+
+* migrate admin imports to platform-sdk; register daemonadminservice ([#235](https://github.com/zero-day-ai/gibson/issues/235)) ([fa1c311](https://github.com/zero-day-ai/gibson/commit/fa1c311499a23667bfb39654ac4de4b8c04040dc))
+
 ## [1.2.0](https://github.com/zero-day-ai/gibson/compare/gibson-bootstrap-v1.1.0...gibson-bootstrap-v1.2.0) (2026-05-13)
 
 
