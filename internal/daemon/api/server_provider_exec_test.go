@@ -15,11 +15,11 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/budget"
 	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	"github.com/zero-day-ai/gibson/internal/types"
+	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 

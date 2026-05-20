@@ -290,13 +290,19 @@ authz-registry:
 	  printf 'version: v2\nmodules:\n  - path: gibson-local\n  - path: sdk-proto\nlint:\n  use:\n    - STANDARD\n  ignore:\n    - sdk-proto/google\n    - gibson-local/gibson/daemon/admin/v1/daemon_admin.proto\n' > .tmp/ws/buf.yaml && \
 	  cd .tmp/ws && $(BUF) build gibson-local -o $(CURDIR)/.tmp/gibson-fds.binpb
 	@rm -rf .tmp/ws
-	@echo "Merging FDSes (SDK + daemon-local)..."
-	@$(BINARY_DIR)/fds-merge -input .tmp/sdk-fds.binpb -input .tmp/gibson-fds.binpb -output .tmp/combined-fds.binpb
+	@echo "Building FDS from platform-sdk protos (gibson.platform.v1, gibson.tenant.v1, gibson.user.v1)..."
+	@$(GOCMD) mod download github.com/zero-day-ai/platform-sdk
+	@PSDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/platform-sdk); \
+	  if [ -z "$$PSDK_DIR" ]; then echo "ERROR: could not resolve github.com/zero-day-ai/platform-sdk module dir" && exit 1; fi; \
+	  echo "  platform-sdk dir: $$PSDK_DIR"; \
+	  cd "$$PSDK_DIR" && $(BUF) build -o $(CURDIR)/.tmp/platform-sdk-fds.binpb
+	@echo "Merging FDSes (SDK + daemon-local + platform-sdk)..."
+	@$(BINARY_DIR)/fds-merge -input .tmp/sdk-fds.binpb -input .tmp/gibson-fds.binpb -input .tmp/platform-sdk-fds.binpb -output .tmp/combined-fds.binpb
 	@echo "Generating registry artifacts..."
 	@$(BINARY_DIR)/authz-registry-gen -input .tmp/combined-fds.binpb -output internal/authz/registry
 	@echo "Generating audit CSV (Spec unified-authz-regen Req 1.4)..."
 	@$(BINARY_DIR)/audit-csv-gen -input .tmp/combined-fds.binpb -output internal/authz/registry/audit.csv
-	@rm -f .tmp/sdk-fds.binpb .tmp/gibson-fds.binpb .tmp/combined-fds.binpb
+	@rm -f .tmp/sdk-fds.binpb .tmp/gibson-fds.binpb .tmp/platform-sdk-fds.binpb .tmp/combined-fds.binpb
 	@echo "Registry artifacts written to internal/authz/registry/"
 
 proto-clean:

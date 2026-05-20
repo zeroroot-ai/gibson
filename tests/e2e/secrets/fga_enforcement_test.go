@@ -70,7 +70,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
+	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 )

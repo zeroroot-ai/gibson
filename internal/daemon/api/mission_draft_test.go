@@ -16,8 +16,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	"github.com/zero-day-ai/gibson/internal/missiondraft"
+	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
 )
 
 func newDraftTestServer(t *testing.T) *DaemonServer {

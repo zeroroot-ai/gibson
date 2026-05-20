@@ -17,7 +17,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
+	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

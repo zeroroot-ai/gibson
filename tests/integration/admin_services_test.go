@@ -25,9 +25,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	tenantv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/tenant/v1"
 	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
 	"github.com/zero-day-ai/gibson/internal/idp"
+	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
