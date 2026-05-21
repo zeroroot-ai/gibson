@@ -16,11 +16,13 @@ import (
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	"github.com/zero-day-ai/gibson/internal/types"
 	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
-	// NOTE: budget remains imported from the OSS SDK while sdk#106 (extract
-	// budget *status* types to gibson.budget_status.v1) is in flight. See
-	// the longer comment in server_budget.go. platform-sdk#10 + v0.4.0
-	// removed the dual descriptor that was panicking the daemon at init().
-	budgetpb "github.com/zero-day-ai/sdk/api/gen/gibson/budget/v1"
+	// As of sdk#106 the budget surface is split: customer-visible value
+	// types (`BudgetExceeded` + `BudgetScope`) live in the OSS SDK at
+	// `gibson.budget_status.v1`; the admin `BudgetService` lives in
+	// platform-sdk at `gibson.budget.v1`. This file only attaches the
+	// status-detail wire shape to a gRPC error and never references the
+	// service descriptor, so it imports the OSS path only.
+	budgetstatuspb "github.com/zero-day-ai/sdk/api/gen/gibson/budget_status/v1"
 	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/schema"
 )
@@ -116,7 +118,7 @@ func (s *DaemonServer) enforceBudgetCheck(ctx context.Context, estimatedTokens i
 	detail, hasDetail := budget.DetailFromError(err)
 	st := status_grpc.New(codes.ResourceExhausted, err.Error())
 	if hasDetail {
-		pbDetail := &budgetpb.BudgetExceeded{
+		pbDetail := &budgetstatuspb.BudgetExceeded{
 			Scope:             budgetScopeToProto(detail.Scope),
 			Dimension:         detail.Dimension,
 			CurrentUsage:      detail.CurrentUsage,
@@ -132,16 +134,16 @@ func (s *DaemonServer) enforceBudgetCheck(ctx context.Context, estimatedTokens i
 }
 
 // budgetScopeToProto maps the internal Scope string to the proto enum.
-func budgetScopeToProto(s budget.Scope) budgetpb.BudgetScope {
+func budgetScopeToProto(s budget.Scope) budgetstatuspb.BudgetScope {
 	switch s {
 	case budget.ScopeUser:
-		return budgetpb.BudgetScope_BUDGET_SCOPE_USER
+		return budgetstatuspb.BudgetScope_BUDGET_SCOPE_USER
 	case budget.ScopeTeam:
-		return budgetpb.BudgetScope_BUDGET_SCOPE_TEAM
+		return budgetstatuspb.BudgetScope_BUDGET_SCOPE_TEAM
 	case budget.ScopeTenant:
-		return budgetpb.BudgetScope_BUDGET_SCOPE_TENANT
+		return budgetstatuspb.BudgetScope_BUDGET_SCOPE_TENANT
 	}
-	return budgetpb.BudgetScope_BUDGET_SCOPE_UNSPECIFIED
+	return budgetstatuspb.BudgetScope_BUDGET_SCOPE_UNSPECIFIED
 }
 
 // applyContextPerCallCap clamps req.MaxTokens to the effective per-call cap
