@@ -32,8 +32,8 @@ import (
 	"github.com/zero-day-ai/gibson/internal/datapool/envelope"
 	"github.com/zero-day-ai/gibson/tests/testhelpers"
 	"github.com/zero-day-ai/sdk/auth"
-	"github.com/zero-day-ai/sdk/secrets"
-	"github.com/zero-day-ai/sdk/secrets/contract"
+	"github.com/zero-day-ai/platform-clients/secrets"
+	"github.com/zero-day-ai/platform-clients/secrets/contract"
 )
 
 // ---------------------------------------------------------------------------

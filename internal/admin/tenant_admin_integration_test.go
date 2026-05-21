@@ -10,7 +10,7 @@ import (
 
 	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // This file is the regression-guard for the spec's central bug.
@@ -69,8 +69,8 @@ func (b *labelledBroker) List(context.Context, auth.TenantID, sdksecrets.Filter)
 }
 func (b *labelledBroker) Health(context.Context) error { return nil }
 func (b *labelledBroker) Probe(context.Context) error  { return nil }
-func (b *labelledBroker) Capabilities() sdksecrets.ProviderCapabilities {
-	return sdksecrets.ProviderCapabilities{}
+func (b *labelledBroker) Capabilities() sdksecrets.Capabilities {
+	return sdksecrets.Capabilities{}
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
 	}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
 		PostgresProvider: pgFake,
-		VaultFactory: func(_ []byte) (sdksecrets.SecretsBroker, error) {
+		VaultFactory: func(_ []byte) (sdksecrets.Broker, error) {
 			return vaultFake, nil
 		},
 	})
@@ -151,7 +151,7 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
 		PostgresProvider: pgFake,
-		VaultFactory: func(_ []byte) (sdksecrets.SecretsBroker, error) {
+		VaultFactory: func(_ []byte) (sdksecrets.Broker, error) {
 			return vaultFake, nil
 		},
 	})
@@ -220,7 +220,7 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
 		PostgresProvider: pgFake,
-		VaultFactory: func(_ []byte) (sdksecrets.SecretsBroker, error) {
+		VaultFactory: func(_ []byte) (sdksecrets.Broker, error) {
 			return vaultFake, nil
 		},
 	})

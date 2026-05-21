@@ -10,13 +10,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // ServiceRegistry is the narrow interface Service needs from the broker
 // registry. Production passes *Registry; tests inject a fake.
 type ServiceRegistry interface {
-	For(ctx context.Context, tenant auth.TenantID) (sdksecrets.SecretsBroker, error)
+	For(ctx context.Context, tenant auth.TenantID) (sdksecrets.Broker, error)
 }
 
 // ServiceCircuitBreaker is the narrow interface Service needs from the
@@ -267,7 +267,7 @@ func (s *Service) emitAuditWithReason(
 // providerName returns a stable string identifying the provider type for use
 // as a circuit breaker key. It introspects the Capabilities to infer the
 // name, or falls back to the type name.
-func providerName(broker sdksecrets.SecretsBroker) string {
+func providerName(broker sdksecrets.Broker) string {
 	if broker == nil {
 		return "unknown"
 	}

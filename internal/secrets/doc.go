@@ -40,7 +40,7 @@
 //     on failure calls CircuitBreaker.RecordFailure.
 //  5. Emits an AuditEvent with effect allow (on success) or deny (on failure).
 //  6. Maps errors to gRPC status codes via the typed sentinels in
-//     github.com/zero-day-ai/sdk/secrets.
+//     github.com/zero-day-ai/platform-clients/secrets.
 //
 // # Registry
 //

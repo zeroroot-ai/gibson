@@ -16,7 +16,7 @@ import (
 
 	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // ---------------------------------------------------------------------------
@@ -24,14 +24,14 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeBroker struct {
-	caps  sdksecrets.ProviderCapabilities
+	caps  sdksecrets.Capabilities
 	store map[string][]byte
 	probe error
 }
 
 func newFakeBroker() *fakeBroker {
 	return &fakeBroker{
-		caps: sdksecrets.ProviderCapabilities{
+		caps: sdksecrets.Capabilities{
 			CanPut:    true,
 			CanDelete: true,
 			CanList:   true,
@@ -71,12 +71,12 @@ func (f *fakeBroker) List(_ context.Context, _ auth.TenantID, filter sdksecrets.
 
 func (f *fakeBroker) Health(_ context.Context) error                { return nil }
 func (f *fakeBroker) Probe(_ context.Context) error                 { return f.probe }
-func (f *fakeBroker) Capabilities() sdksecrets.ProviderCapabilities { return f.caps }
+func (f *fakeBroker) Capabilities() sdksecrets.Capabilities { return f.caps }
 
 // fakeRegistry returns the same broker for every tenant.
-type fakeRegistry struct{ broker sdksecrets.SecretsBroker }
+type fakeRegistry struct{ broker sdksecrets.Broker }
 
-func (r *fakeRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.SecretsBroker, error) {
+func (r *fakeRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.Broker, error) {
 	return r.broker, nil
 }
 

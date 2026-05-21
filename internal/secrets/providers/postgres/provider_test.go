@@ -9,7 +9,7 @@ import (
 	dbpostgres "github.com/zero-day-ai/gibson/internal/database/postgres"
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/sdk/auth"
-	"github.com/zero-day-ai/sdk/secrets"
+	"github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // ---------------------------------------------------------------------------
@@ -174,10 +174,10 @@ func TestCapabilities(t *testing.T) {
 }
 
 func TestCompileTimeInterface(t *testing.T) {
-	// var _ secrets.SecretsBroker is already asserted in provider.go.
+	// var _ secrets.Broker is already asserted in provider.go.
 	// This test ensures the package compiles with the assertion.
 	p := New(failAcquirer(errors.New("unused")))
-	var _ secrets.SecretsBroker = p
+	var _ secrets.Broker = p
 }
 
 // ---------------------------------------------------------------------------

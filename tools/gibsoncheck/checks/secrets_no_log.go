@@ -52,6 +52,7 @@ var SecretsNoLogAnalyzer = &analysis.Analyzer{
 // common method names like "Get".
 var secretsPackagePrefixes = []string{
 	"github.com/zero-day-ai/sdk/secrets",
+	"github.com/zero-day-ai/platform-clients/secrets",
 	"github.com/zero-day-ai/gibson/internal/secrets",
 	"github.com/zero-day-ai/gibson/internal/database/postgres",
 }

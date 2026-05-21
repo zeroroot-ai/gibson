@@ -29,7 +29,7 @@ import (
 
 	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // SecretsAdminBroker is the narrow read-side interface SecretsAdminServer
@@ -37,7 +37,7 @@ import (
 // production implementation is a closure over secrets.Registry that returns
 // (broker, err) for a given tenant.
 type SecretsAdminBroker interface {
-	For(ctx context.Context, tenant auth.TenantID) (sdksecrets.SecretsBroker, error)
+	For(ctx context.Context, tenant auth.TenantID) (sdksecrets.Broker, error)
 }
 
 // SecretsAdminPluginAssociations resolves which plugin install IDs hold an

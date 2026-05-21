@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // --- fakes ---
@@ -58,13 +58,13 @@ func (f *fakeAuditCapture) Audit(_ context.Context, event AuditEvent) {
 	f.events = append(f.events, event)
 }
 
-// fakeSecretsBroker is a minimal sdksecrets.SecretsBroker used for probe
+// fakeSecretsBroker is a minimal sdksecrets.Broker used for probe
 // testing.
 type fakeSecretsBroker struct {
 	probeErr error
 }
 
-var _ sdksecrets.SecretsBroker = (*fakeSecretsBroker)(nil)
+var _ sdksecrets.Broker = (*fakeSecretsBroker)(nil)
 
 func (f *fakeSecretsBroker) Get(_ context.Context, _ auth.TenantID, _ string) ([]byte, error) {
 	return nil, nil
@@ -78,8 +78,8 @@ func (f *fakeSecretsBroker) List(_ context.Context, _ auth.TenantID, _ sdksecret
 }
 func (f *fakeSecretsBroker) Health(_ context.Context) error { return nil }
 func (f *fakeSecretsBroker) Probe(_ context.Context) error  { return f.probeErr }
-func (f *fakeSecretsBroker) Capabilities() sdksecrets.ProviderCapabilities {
-	return sdksecrets.ProviderCapabilities{CanPut: true, CanDelete: true, CanList: true}
+func (f *fakeSecretsBroker) Capabilities() sdksecrets.Capabilities {
+	return sdksecrets.Capabilities{CanPut: true, CanDelete: true, CanList: true}
 }
 
 // configRowStoreI is the testability interface mirroring TenantConfigStore's
@@ -190,7 +190,7 @@ func TestConfigStore_SetProbeSuccess_PersistsRow(t *testing.T) {
 	row := newFakeRowStore()
 	aud := &fakeAuditCapture{}
 	factories := map[string]ProviderFactory{
-		"postgres": func(_ []byte) (sdksecrets.SecretsBroker, error) {
+		"postgres": func(_ []byte) (sdksecrets.Broker, error) {
 			return &fakeSecretsBroker{}, nil
 		},
 	}
@@ -214,7 +214,7 @@ func TestConfigStore_SetProbeFailure_BlocksWrite(t *testing.T) {
 	aud := &fakeAuditCapture{}
 	probeErr := errors.New("vault: connection refused")
 	factories := map[string]ProviderFactory{
-		"vault": func(_ []byte) (sdksecrets.SecretsBroker, error) {
+		"vault": func(_ []byte) (sdksecrets.Broker, error) {
 			return &fakeSecretsBroker{probeErr: probeErr}, nil
 		},
 	}
@@ -266,7 +266,7 @@ func TestConfigStore_ConstructorFailBlocksWrite(t *testing.T) {
 	aud := &fakeAuditCapture{}
 	constructErr := errors.New("bad config JSON")
 	factories := map[string]ProviderFactory{
-		"vault": func(_ []byte) (sdksecrets.SecretsBroker, error) {
+		"vault": func(_ []byte) (sdksecrets.Broker, error) {
 			return nil, constructErr
 		},
 	}
