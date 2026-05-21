@@ -44,7 +44,9 @@ jobs:
         with:
           repository: zero-day-ai/deploy
           ref: main
-          token: ${{ secrets.GHCR_RO_PAT }}
+          # PRIVATE_REPO_TOKEN is a PAT with read access to all zero-day-ai
+          # private repos (see gibson/.github/workflows/gibsoncheck.yml).
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: deploy
 
       - name: Checkout gitops repo (dev branch)
@@ -52,7 +54,7 @@ jobs:
         with:
           repository: zero-day-ai/gitops
           ref: dev
-          token: ${{ secrets.GITOPS_RO_PAT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: gitops
 
       - name: Set up kind cluster
@@ -74,7 +76,8 @@ jobs:
 
       - name: Pre-create ghcr-credentials Secret
         env:
-          GHCR_RO_PAT: ${{ secrets.GHCR_RO_PAT }}
+          # GH_PAT_GIBSON_RO has read:packages scope for GHCR pulls.
+          GHCR_TOKEN: ${{ secrets.GH_PAT_GIBSON_RO }}
         run: |
           set -euo pipefail
           kubectl create namespace gibson \
@@ -82,7 +85,7 @@ jobs:
           kubectl -n gibson create secret docker-registry ghcr-credentials \
             --docker-server=ghcr.io \
             --docker-username=script-kid-io \
-            --docker-password="$GHCR_RO_PAT" \
+            --docker-password="$GHCR_TOKEN" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Phase 0 — ESO install
@@ -92,13 +95,19 @@ jobs:
       - name: Phase 0 — kind-bootstrap (dev secrets backend + CNPG cluster)
         working-directory: deploy
         env:
-          GH_TOKEN: ${{ secrets.GHCR_RO_PAT }}
+          # kind-bootstrap uses $GH_TOKEN to authenticate gh CLI for
+          # pulling kind-bootstrap chart from GHCR. GH_PAT_GIBSON_RO
+          # has the necessary read:packages scope.
+          GH_TOKEN: ${{ secrets.GH_PAT_GIBSON_RO }}
         run: make kind-bootstrap
 
       - name: Phase 0 — ArgoCD install + repo creds
         working-directory: deploy
         env:
-          GH_TOKEN: ${{ secrets.GITOPS_RO_PAT }}
+          # argo-repo-creds feeds GH_TOKEN into the Argo repo credential
+          # secret so ArgoCD can clone zero-day-ai/* private repos.
+          # Needs repo:read scope — PRIVATE_REPO_TOKEN has this.
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: make argo-install argo-repo-creds
 
       - name: Apply root-dev.yaml from gitops dev branch
@@ -164,7 +173,7 @@ jobs:
         with:
           repository: zero-day-ai/dashboard
           ref: main
-          token: ${{ secrets.GHCR_RO_PAT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: dashboard
 
       - name: Set up pnpm
