@@ -1,0 +1,278 @@
+name: signup-smoke
+
+# Validates that gibson daemon changes do not break the signup cascade.
+# Gibson PRs affect the daemon's ListMyMemberships RPC, FGA tuple writes,
+# the per-tenant Vault broker-init chain, and ext-authz header signing —
+# all of which are on the critical path of tenant-operator#76's 13-step
+# signup saga.
+#
+# Required check on gibson PRs via rulesets/repo/gibson.json. Rulesets
+# are in `evaluate` (warn-only) mode during the soft-launch period;
+# flip to `active` once ≥5 consecutive green runs are confirmed.
+#
+# This workflow stands up a full kind cluster using deploy:main's chart
+# and gitops:dev's Argo app tree. It does NOT bake the PR's daemon image —
+# it runs whatever :main image the gitops dev branch pins. A separate
+# image-bake step is tracked in tenant-operator#120. The value here is
+# catching config/dependency regressions introduced by daemon PRs that
+# touch authz, FGA model, or proto changes.
+
+on:
+  pull_request:
+    paths:
+      - 'internal/authz/**'
+      - 'internal/broker/**'
+      - 'internal/membership/**'
+      - 'internal/daemon/**'
+      - 'api/proto/**'
+      - '.github/workflows/signup-smoke.yml'
+
+jobs:
+  signup-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      KIND_CLUSTER: gibson
+      NAMESPACE: gibson
+      GITOPS_BRANCH: dev
+
+    steps:
+      - name: Checkout deploy repo (main)
+        uses: actions/checkout@v5
+        with:
+          repository: zero-day-ai/deploy
+          ref: main
+          token: ${{ secrets.GHCR_RO_PAT }}
+          path: deploy
+
+      - name: Checkout gitops repo (dev branch)
+        uses: actions/checkout@v5
+        with:
+          repository: zero-day-ai/gitops
+          ref: dev
+          token: ${{ secrets.GITOPS_RO_PAT }}
+          path: gitops
+
+      - name: Set up kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: gibson
+          config: deploy/helm/kind-config.yaml
+          wait: 60s
+
+      - name: Set up helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+
+      - name: Map *.zero-day.local hostnames to 127.0.0.1
+        run: |
+          echo "127.0.0.1 app.zero-day.local auth.zero-day.local api.zero-day.local" \
+            | sudo tee -a /etc/hosts
+
+      - name: Pre-create ghcr-credentials Secret
+        env:
+          GHCR_RO_PAT: ${{ secrets.GHCR_RO_PAT }}
+        run: |
+          set -euo pipefail
+          kubectl create namespace gibson \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n gibson create secret docker-registry ghcr-credentials \
+            --docker-server=ghcr.io \
+            --docker-username=script-kid-io \
+            --docker-password="$GHCR_RO_PAT" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Phase 0 — ESO install
+        working-directory: deploy
+        run: make eso-install
+
+      - name: Phase 0 — kind-bootstrap (dev secrets backend + CNPG cluster)
+        working-directory: deploy
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_RO_PAT }}
+        run: make kind-bootstrap
+
+      - name: Phase 0 — ArgoCD install + repo creds
+        working-directory: deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_RO_PAT }}
+        run: make argo-install argo-repo-creds
+
+      - name: Apply root-dev.yaml from gitops dev branch
+        run: kubectl apply -f gitops/root-dev.yaml
+
+      - name: Wait for every Argo Application Synced + Healthy
+        timeout-minutes: 22
+        run: |
+          set -euo pipefail
+          DEADLINE=$(( $(date +%s) + 1200 ))   # 20 min
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            kubectl -n argocd get applications.argoproj.io \
+              -o custom-columns='NAME:.metadata.name,HEALTH:.status.health.status,SYNC:.status.sync.status' \
+              --no-headers 2>/dev/null > /tmp/apps.txt || true
+
+            if [ ! -s /tmp/apps.txt ]; then
+              echo "  ...no Applications visible yet"
+              sleep 10
+              continue
+            fi
+
+            BAD=$(awk '$2 != "Healthy" || $3 != "Synced" { print "    " $0 }' /tmp/apps.txt)
+            if [ -z "$BAD" ]; then
+              echo "All Applications Synced + Healthy"
+              cat /tmp/apps.txt
+              exit 0
+            fi
+            echo "Waiting on:"
+            echo "$BAD"
+            sleep 15
+          done
+
+          echo "::error::Argo Applications did not reach Synced + Healthy within 20 min"
+          kubectl -n argocd get applications.argoproj.io \
+            -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status'
+          echo ""
+          echo "=== Non-healthy Application conditions ==="
+          kubectl -n argocd get applications.argoproj.io -o json \
+            | jq -r '.items[] | select(.status.health.status != "Healthy" or .status.sync.status != "Synced") | "\(.metadata.name):\n  health=\(.status.health.status) sync=\(.status.sync.status)\n  conditions=\(.status.conditions // [])"' \
+            2>/dev/null || true
+          echo ""
+          echo "=== Pods (all namespaces) ==="
+          kubectl get pods -A || true
+          exit 1
+
+      - name: Verify dashboard reachable
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl -ksSf -o /dev/null \
+                "https://app.zero-day.local:30443/api/healthz" 2>&1; then
+              echo "dashboard reachable"
+              exit 0
+            fi
+            printf "  ...waiting on dashboard [%d/30]\r" "$i"
+            sleep 5
+          done
+          echo "::error::dashboard never came up at https://app.zero-day.local:30443"
+          exit 1
+
+      - name: Checkout dashboard repo
+        uses: actions/checkout@v5
+        with:
+          repository: zero-day-ai/dashboard
+          ref: main
+          token: ${{ secrets.GHCR_RO_PAT }}
+          path: dashboard
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+
+      - name: Install dashboard deps
+        working-directory: dashboard
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: dashboard
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Record signup-smoke start timestamp
+        id: smoke_window
+        run: |
+          set -euo pipefail
+          ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "since=${ts}" >> "$GITHUB_OUTPUT"
+          echo "Signup-smoke window opens at ${ts}"
+
+      - name: Run signup smoke
+        working-directory: dashboard
+        env:
+          PLAYWRIGHT_BASE_URL: https://app.zero-day.local:30443
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+          SIGNUP_SMOKE_PLAN: team
+          SIGNUP_SMOKE_READY_TIMEOUT_MS: '180000'
+          CI: 'true'
+        run: pnpm exec playwright test --project=chromium e2e/signup-smoke.spec.ts
+
+      - name: Assert daemon logs are free of broker-init errors
+        # deploy#352 regression cordon for gibson#167.
+        run: |
+          set -euo pipefail
+          since="${{ steps.smoke_window.outputs.since }}"
+          echo "Scraping gibson-workloads logs since ${since}..."
+          logs=$(kubectl -n gibson logs statefulset/gibson-workloads \
+                   --since-time="${since}" --all-containers=true 2>/dev/null || true)
+          if [ -z "${logs}" ]; then
+            echo "::warning::no daemon logs visible in test window — falling back to last 500 lines"
+            logs=$(kubectl -n gibson logs statefulset/gibson-workloads \
+                     --tail=500 --all-containers=true 2>/dev/null || true)
+          fi
+          forbidden_patterns=(
+            'MustNewTenantID'
+            'unsupported auth method'
+            "vault auth method 'jwt': Role is required"
+            'failed_precondition'
+          )
+          failed=0
+          for pat in "${forbidden_patterns[@]}"; do
+            matches=$(printf '%s\n' "${logs}" | grep -F -- "${pat}" || true)
+            if [ -n "${matches}" ]; then
+              failed=1
+              echo "::error::Daemon log contains forbidden signal '${pat}' (regression of gibson#167):"
+              printf '%s\n' "${matches}" | head -20 | sed 's/^/    /'
+            fi
+          done
+          if [ "${failed}" -ne 0 ]; then
+            echo "::error::signup-smoke daemon-log gate FAILED"
+            exit 1
+          fi
+          echo "Daemon log clean."
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signup-smoke-playwright-report
+          path: dashboard/playwright-report/
+          retention-days: 7
+
+      - name: Dump cluster state on failure
+        if: failure()
+        run: |
+          echo "==== Argo Applications ===="
+          kubectl -n argocd get applications.argoproj.io \
+            -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status' || true
+          echo ""
+          echo "==== Non-Healthy Application conditions ===="
+          kubectl -n argocd get applications.argoproj.io -o json \
+            | jq -r '.items[] | select(.status.health.status != "Healthy" or .status.sync.status != "Synced") | "\(.metadata.name): \(.status.conditions // [])"' \
+            2>/dev/null || true
+          echo ""
+          echo "==== Pods (all namespaces) ===="
+          kubectl get pods -A || true
+          echo ""
+          echo "==== Events (gibson namespace, last 50) ===="
+          kubectl -n gibson get events --sort-by=.lastTimestamp 2>/dev/null | tail -50 || true
+          echo ""
+          echo "==== Dashboard logs ===="
+          kubectl -n gibson logs deploy/gibson-dashboard --tail=200 2>/dev/null || true
+          echo ""
+          echo "==== Daemon logs ===="
+          kubectl -n gibson logs statefulset/gibson-workloads --tail=200 2>/dev/null || true
+          echo ""
+          echo "==== Tenant-operator logs ===="
+          kubectl -n gibson logs deploy/gibson-tenant-operator --tail=200 2>/dev/null || true
+          echo ""
+          echo "==== ArgoCD application-controller logs ===="
+          kubectl -n argocd logs deploy/argocd-application-controller --tail=100 2>/dev/null || true
