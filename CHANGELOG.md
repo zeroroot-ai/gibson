@@ -62,6 +62,15 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.113.1](https://github.com/zero-day-ai/gibson/compare/v0.113.0...v0.113.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **ci:** restore build-and-push green — root-cause 20+ test classes ([#266](https://github.com/zero-day-ai/gibson/issues/266)) ([da2f601](https://github.com/zero-day-ai/gibson/commit/da2f601f8bafefc07dd6d156da064d6d2be4fdad))
+* **ci:** second-pass test fixes following post-merge CI validation ([519dc58](https://github.com/zero-day-ai/gibson/commit/519dc587fa89ff99530a9e0e50bb17b59d266d18))
+* **saga:** remove already-completed short-circuit; idempotent steps re-run when artifact missing ([#270](https://github.com/zero-day-ai/gibson/issues/270)) ([68e7f1f](https://github.com/zero-day-ai/gibson/commit/68e7f1fa71b1007d3dd896682246fe4f968c9cd2))
+
 ## [0.113.0](https://github.com/zero-day-ai/gibson/compare/v0.112.0...v0.113.0) (2026-05-21)
 
 
