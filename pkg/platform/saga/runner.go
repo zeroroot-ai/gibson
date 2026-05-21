@@ -60,6 +60,21 @@ type Runner struct {
 	// failures before a step is marked Blocked. Default 20.
 	StepMaxAttempts int
 
+	// ContinueOnBlocked changes permanent-fail semantics from "halt the
+	// saga immediately" to "record the per-step Blocked condition + event
+	// + metric exactly as before, but keep iterating remaining steps".
+	// At end-of-run, if ANY step blocked, RunResult.Blocked is true and
+	// Err is the FIRST blocked step's error.
+	//
+	// Designed for teardown sagas where steps are mostly independent
+	// cleanup work (delete Langfuse project, delete OpenBao namespace,
+	// delete Zitadel org, etc.) and a single permanent fail on step N
+	// must NOT silently skip the cleanup work on steps N+1..end. See
+	// gibson#TBD / tenant-operator#184 for the regression of #157.
+	//
+	// Default false (provision semantics — halt on permanent).
+	ContinueOnBlocked bool
+
 	// Clock is injectable for tests. If nil, time.Now is used.
 	Clock func() time.Time
 }
@@ -114,6 +129,12 @@ type RunResult struct {
 //   - Provision returns permanent err (or transient errors past
 //     StepMaxAttempts) → Blocked=true, condition False/StepFailed, no
 //     requeue (a human must intervene or the operator must restart).
+//     EXCEPT when ContinueOnBlocked is true: the per-step Blocked/Ready
+//     conditions + StepBlocked event + audit-failed(blocked=true) hook
+//     + error-outcome metric fire exactly as before, but the loop
+//     continues to subsequent steps. At end-of-loop, if any step
+//     blocked, RunResult.Blocked is true and Err is the FIRST blocked
+//     step's error. Designed for teardown sagas (tenant-operator#184).
 //   - All steps complete → set Ready=True, set finalPhase, return
 //     AllComplete=true.
 //
@@ -128,6 +149,13 @@ func (r *Runner) Run(ctx context.Context, obj ConditionedObject, steps []Step, f
 	kind := kindOf(obj)
 	reconcileStart := r.now()
 	reconcileOutcome := "ok"
+
+	// ContinueOnBlocked accumulator: when set, a permanent step failure
+	// records the per-step Blocked/Ready conditions + event + metric
+	// exactly as the non-continue path, but the loop keeps iterating.
+	// At end-of-loop, if firstBlockedErr is non-nil, we return as if
+	// the saga had blocked on the first such step.
+	var firstBlockedErr error
 
 	for _, step := range sorted {
 		// Skip predicate.
@@ -202,6 +230,17 @@ func (r *Runner) Run(ctx context.Context, obj ConditionedObject, steps []Step, f
 				if r.AuditHook != nil {
 					r.AuditHook.OnStepFailed(ctx, obj, step, err, duration, true)
 				}
+				if r.ContinueOnBlocked {
+					// Teardown semantics: record the failure but keep
+					// iterating. Subsequent independent cleanup steps
+					// (Vault namespace, Zitadel org, FGA tuples, ...)
+					// must still get a chance to run. See tenant-operator#184.
+					if firstBlockedErr == nil {
+						firstBlockedErr = err
+					}
+					reconcileOutcome = "error"
+					continue
+				}
 				if r.MetricsHook != nil {
 					r.MetricsHook.ObserveReconcile(kind, "error", r.now().Sub(reconcileStart))
 				}
@@ -265,6 +304,18 @@ func (r *Runner) Run(ctx context.Context, obj ConditionedObject, steps []Step, f
 		if r.AuditHook != nil {
 			r.AuditHook.OnStepCompleted(ctx, obj, step, duration)
 		}
+	}
+
+	// End-of-loop: in ContinueOnBlocked mode, if any step blocked, return
+	// the structured Blocked outcome (mirrors the non-continue early-return
+	// path). The per-step Blocked/Ready conditions + Blocked object
+	// condition are already set by the in-loop block above; we don't
+	// overwrite them with "Ready=True / AllStepsComplete" here.
+	if firstBlockedErr != nil {
+		if r.MetricsHook != nil {
+			r.MetricsHook.ObserveReconcile(kind, "error", r.now().Sub(reconcileStart))
+		}
+		return RunResult{Blocked: true, Err: firstBlockedErr}
 	}
 
 	// All steps done.
