@@ -17,12 +17,12 @@ import (
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/secrets/configstore"
 	pgprovider "github.com/zero-day-ai/gibson/internal/secrets/providers/postgres"
-	"github.com/zero-day-ai/sdk/auth"
 	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 	sdkawssm "github.com/zero-day-ai/platform-clients/secrets/awssm"
 	sdkazurekv "github.com/zero-day-ai/platform-clients/secrets/azurekv"
 	sdkgcpsm "github.com/zero-day-ai/platform-clients/secrets/gcpsm"
 	sdkvault "github.com/zero-day-ai/platform-clients/secrets/vault"
+	"github.com/zero-day-ai/sdk/auth"
 )
 
 // brokerHealthGauge tracks per-(tenant, provider) broker health for SRE
@@ -172,85 +172,64 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	// --- 5b. Auth-token cache (Vault) ---
 	//
 	// The AuthCache prevents auth churn when the Vault provider instance is
-	// rebuilt on registry Reload events. The refresh function decodes the
-	// tenant's Vault config blob and performs the configured auth method to
-	// obtain a fresh token; subsequent calls within the token's effective TTL
-	// reuse the cached token instead of re-authenticating.
+	// rebuilt on registry Reload events. Both the factory (constructor) and
+	// the refresh closure cooperate via a process-wide vaultRefreshLookup
+	// keyed by a stable hash of the per-tenant Vault config blob. The
+	// factory deposits the unmarshalled `sdkvault.Config` under the hash
+	// key before calling `GetOrRefresh`; the refresh closure retrieves it,
+	// mints a SPIRE JWT-SVID if the auth method requires one, and performs
+	// the Vault login.
 	//
-	// The AuthCache's singleflight semantics ensure only one refresh call is
-	// in-flight per tenant at any given moment, even under concurrent load.
+	// This replaces an earlier design where the factory used
+	// `cfg.Namespace` (e.g. "tenant-<id>") as the cache key and the
+	// refresh closure tried to parse the same string as a TenantID and
+	// look up the broker_config row in Postgres. That conflated two
+	// different identifiers — the SaaS rendered template
+	// "tenant-{tenant_id}" is NOT the tenant_id used to key the
+	// `tenant_secrets_broker_config` table. Result: every authenticated
+	// RPC after a fresh signup got `configstore: broker config not found`
+	// and the circuit breaker opened (gibson#262).
 	//
-	// The VaultFactory (below) calls vaultAuthCache.GetOrRefresh before
-	// constructing sdkvault.New, injecting the cached token as a static
-	// AuthMethodToken credential. This retires the per-factory authentication
-	// workaround and ensures token rotation is driven by the cache's 80%-TTL
-	// logic rather than by provider reconstruction.
+	// The blob-hash key sidesteps the problem entirely: identical configs
+	// (same Address + Namespace + Auth) hash to the same key — exactly
+	// what AuthCache needs for singleflight coalescing — and the refresh
+	// closure no longer queries the config store at all because the
+	// factory already supplied the live config via the lookup.
 	//
-	// Spec: vault-refresh-and-plugin-runtime Window 1, Requirement 1.
+	// Spec: vault-refresh-and-plugin-runtime Window 1, Requirement 1;
+	// ADR-0009 (JWT-SPIFFE-everywhere); gibson#262 (regression close).
+	vaultLookup := newVaultRefreshLookup()
 	vaultAuthCache := secrets.NewAuthCache(
-		func(ctx context.Context, tenantID, _ string) (string, time.Duration, error) {
-			// The VaultFactory below may invoke us with a non-tenant-ID
-			// cacheKey (cfg.Address fallback when both PathPrefix and
-			// Namespace are empty — the OSS / kind-dev Vault shape). The
-			// AuthCache contract only requires that the key uniquely
-			// identifies the refresh group; it makes no claim that the
-			// key is a valid tenant ID. So we MUST parse defensively
-			// here instead of calling MustNewTenantID, which panics on
-			// non-tenant-shaped inputs and brings down every authenticated
-			// daemon RPC.
-			//
-			// On parse failure, return a typed error; the factory's
-			// caller treats a refresh error as a cache miss and falls
-			// back to direct sdkvault.New auth, preserving correctness
-			// at the cost of cross-call coalescing (gibson#165).
-			parsedTenantID, err := auth.NewTenantID(tenantID)
-			if err != nil {
+		func(ctx context.Context, key, _ string) (string, time.Duration, error) {
+			cfg, ok := vaultLookup.get(key)
+			if !ok {
 				return "", 0, &sdkvault.VaultRefreshError{
-					TenantID: tenantID,
-					Cause:    fmt.Errorf("auth cache key %q is not a tenant id: %w", tenantID, err),
+					TenantID: key,
+					Cause:    fmt.Errorf("vault refresh: no config registered for cache key %s", key),
 				}
 			}
-			// Fetch the tenant's Vault config blob from the config store.
-			brokerCfg, err := configStore.Get(ctx, parsedTenantID)
-			if err != nil {
-				return "", 0, &sdkvault.VaultRefreshError{TenantID: tenantID, Cause: err}
-			}
-			// Unmarshal the provider-specific JSON config.
-			var vaultCfg sdkvault.Config
-			if err := json.Unmarshal(brokerCfg.ConfigBlob, &vaultCfg); err != nil {
-				return "", 0, &sdkvault.VaultRefreshError{TenantID: tenantID, Cause: err}
-			}
-			// JWT-SVID mint step (ADR-0009 + amendment docs#34).
-			//
-			// Per-tenant Vault roles (gibson-plugin-<tenant_id>) authenticate
-			// via auth/jwt. The operator never writes the bearer JWT into the
-			// broker config blob — only the auth method + role name. The
-			// daemon mints a fresh SPIRE JWT-SVID per refresh and stamps it
-			// onto cfg.Auth.JWT before handing off to sdkvault.RefreshToken.
-			//
-			// This call is a no-op for non-JWT auth methods (token, approle,
-			// aws_iam) — they get RefreshToken called with cfg as-is.
-			if err := stampVaultJWTOnConfig(ctx, &vaultCfg, d.vaultJWTSource, d.vaultJWTAudience); err != nil {
+			// JWT-SVID mint step (ADR-0009 + amendment docs#34) — no-op
+			// for non-JWT auth methods.
+			if err := stampVaultJWTOnConfig(ctx, &cfg, d.vaultJWTSource, d.vaultJWTAudience); err != nil {
 				return "", 0, &sdkvault.VaultRefreshError{
-					TenantID: tenantID,
-					Method:   vaultCfg.Auth.Method,
+					TenantID: key,
+					Method:   cfg.Auth.Method,
 					Cause:    err,
 				}
 			}
-			// Perform the Vault auth login and obtain a fresh token + TTL.
-			freshToken, ttl, err := sdkvault.RefreshToken(ctx, vaultCfg)
+			freshToken, ttl, err := sdkvault.RefreshToken(ctx, cfg)
 			if err != nil {
 				return "", 0, &sdkvault.VaultRefreshError{
-					TenantID: tenantID,
-					Method:   vaultCfg.Auth.Method,
+					TenantID: key,
+					Method:   cfg.Auth.Method,
 					Cause:    err,
 				}
 			}
-			// Emit a structured log event confirming the refresh.
-			// The raw token MUST NOT appear in any log field — only its hash.
+			// Hash-only logging — raw token MUST NOT appear in any log
+			// field.
 			tokenHash := sha256.Sum256([]byte(freshToken))
 			d.logger.Info(ctx, "vault.token.refreshed",
-				"tenant_id", tenantID,
+				"cache_key", key,
 				"lease_duration_seconds", ttl.Seconds(),
 				"token_hash", fmt.Sprintf("%x", tokenHash),
 			)
@@ -270,32 +249,19 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 			if err := json.Unmarshal(blob, &cfg); err != nil {
 				return nil, fmt.Errorf("vault: unmarshal config: %w", err)
 			}
-			// Obtain a cached token for this tenant from the AuthCache.
-			// GetOrRefresh uses singleflight internally to prevent concurrent
-			// re-authentications for the same tenant; the 80%-TTL cache
-			// ensures the token is refreshed before it expires.
-			//
-			// We derive the tenantID from the PathPrefix when present
-			// (Community Edition path-prefix isolation), or from the
-			// Namespace (Enterprise). If neither is set, we use the Vault
-			// address as a degenerate unique key so the cache still coalesces
-			// concurrent factory calls.
-			cacheKey := cfg.PathPrefix
-			if cacheKey == "" {
-				cacheKey = cfg.Namespace
-			}
-			if cacheKey == "" {
-				cacheKey = cfg.Address
-			}
-			freshToken, err := vaultAuthCache.GetOrRefresh(ctx, cacheKey, "vault")
+			// Deposit the live config under a blob-hash key so the
+			// refresh closure can find it without needing to consult
+			// configStore. Coalesces concurrent factory invocations for
+			// the same tenant onto a single auth round-trip via the
+			// AuthCache's singleflight.
+			key := vaultConfigCacheKey(blob)
+			vaultLookup.put(key, cfg)
+			freshToken, err := vaultAuthCache.GetOrRefresh(ctx, key, "vault")
 			if err != nil {
-				// Cache miss / refresh failed. Fall back to direct auth by
-				// calling sdkvault.New without a pre-cached token. This
-				// preserves the pre-cache behaviour for tenants whose config
-				// store is unavailable (e.g. during startup before the config
-				// store is seeded). The same JWT-SVID mint step the cache
-				// closure performs is applied here so that the direct-auth
-				// fallback path works for AuthMethodJWT broker configs.
+				// Cache miss / refresh failed. Fall back to direct auth
+				// by calling sdkvault.New without a pre-cached token,
+				// applying the SPIRE JWT mint step so the AuthMethodJWT
+				// path works for the fallback too.
 				if stampErr := stampVaultJWTOnConfig(ctx, &cfg, d.vaultJWTSource, d.vaultJWTAudience); stampErr != nil {
 					return nil, fmt.Errorf("vault: stamp jwt: %w", stampErr)
 				}
