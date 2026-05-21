@@ -359,9 +359,9 @@ func TestRedisStore_DeleteCheckpoint(t *testing.T) {
 	missionID := types.NewID()
 	threadID := "test-thread"
 
-	// Note: DeleteCheckpoint by ID alone is not implemented in the current store
-	// because it requires a thread ID for efficient key construction.
-	// This test documents the current limitation.
+	// DeleteCheckpoint by ID uses the reverse index written by Save to resolve
+	// the thread ID without the caller supplying it. This was the limitation
+	// documented before fix(ci) #266 which implemented the reverse-index lookup.
 
 	cp := checkpoint.NewCheckpoint(missionID, threadID)
 	checksum, _ := cp.ComputeChecksum()
@@ -370,9 +370,13 @@ func TestRedisStore_DeleteCheckpoint(t *testing.T) {
 	err := store.Save(ctx, cp)
 	require.NoError(t, err)
 
-	// Attempt to delete by ID alone should return an error
+	// Delete by ID alone now succeeds via the reverse index.
 	err = store.DeleteCheckpoint(ctx, cp.ID)
-	assert.Error(t, err, "DeleteCheckpoint by ID alone should require reverse index")
+	assert.NoError(t, err, "DeleteCheckpoint should succeed via reverse index")
+
+	// Verify the checkpoint is gone
+	_, err = store.Load(ctx, cp.ID)
+	assert.Error(t, err, "checkpoint should not be found after deletion")
 }
 
 // TestRedisStore_DeleteByThread tests deleting all checkpoints for a thread.

@@ -45,10 +45,10 @@ func TestTaxonomyRegistry_WithRegistry(t *testing.T) {
 	nodeTypes := registry.NodeTypes()
 	assert.NotEmpty(t, nodeTypes, "expected core taxonomy to have node types")
 
-	// Verify core types exist
-	hostInfo := registry.NodeTypeInfo("Host")
-	require.NotNil(t, hostInfo, "expected Host node type to exist in core taxonomy")
-	assert.Equal(t, "Host", hostInfo.Name)
+	// Verify core types exist (taxonomy uses lowercase names)
+	hostInfo := registry.NodeTypeInfo("host")
+	require.NotNil(t, hostInfo, "expected host node type to exist in core taxonomy")
+	assert.Equal(t, "host", hostInfo.Name)
 }
 
 // TestTaxonomyRegistry_Extensions tests that agents can query extensions
@@ -110,9 +110,9 @@ func TestTaxonomyRegistry_Extensions(t *testing.T) {
 	source := registry.NodeTypeSource("test_node")
 	assert.Equal(t, "test-agent", source, "expected test_node to belong to test-agent")
 
-	// Query core type source
-	hostSource := registry.NodeTypeSource("Host")
-	assert.Equal(t, "core", hostSource, "expected Host to belong to core taxonomy")
+	// Query core type source (taxonomy uses lowercase names)
+	hostSource := registry.NodeTypeSource("host")
+	assert.Equal(t, "core", hostSource, "expected host to belong to core taxonomy")
 }
 
 // TestTaxonomyRegistry_MultipleExtensions tests that multiple agent extensions
@@ -165,7 +165,7 @@ func TestTaxonomyRegistry_MultipleExtensions(t *testing.T) {
 	// Verify node type sources
 	assert.Equal(t, "cloud-agent", registry.NodeTypeSource("cloud_instance"))
 	assert.Equal(t, "secrets-agent", registry.NodeTypeSource("api_key"))
-	assert.Equal(t, "core", registry.NodeTypeSource("Host"))
+	assert.Equal(t, "core", registry.NodeTypeSource("host")) // lowercase
 	assert.Equal(t, "unknown", registry.NodeTypeSource("nonexistent"))
 }
 

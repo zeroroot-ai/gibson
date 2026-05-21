@@ -137,9 +137,10 @@ tenant_postgres:
   ssl_mode: disable
 `)
 
-	// Missing env var → interpolateString returns "" (not the placeholder string).
-	// The daemon will refuse to connect at runtime with an empty password.
-	assert.Equal(t, "", cfg.TenantPostgres.AdminPassword)
+	// Missing env var → interpolateString preserves the original placeholder.
+	// The daemon will refuse to connect at runtime when the placeholder is
+	// not a valid password.
+	assert.Equal(t, "${NONEXISTENT_TENANT_PG_PASS}", cfg.TenantPostgres.AdminPassword)
 }
 
 // TestTenantPostgresInterpolation_AbsentSection verifies that omitting the

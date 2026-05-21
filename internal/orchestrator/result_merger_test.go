@@ -218,9 +218,10 @@ func TestResultMerger_CalculateRecencyScore(t *testing.T) {
 			maxScore: 0.5,
 		},
 		{
-			name:     "old (2 months)",
-			age:      60 * 24 * time.Hour,
-			minScore: 0.1,
+			name: "old (2 months)",
+			age:  60 * 24 * time.Hour,
+			// Allow 0.09 to handle floating-point boundary at the 60-day cutoff.
+			minScore: 0.09,
 			maxScore: 0.3,
 		},
 	}

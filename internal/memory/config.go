@@ -154,9 +154,9 @@ func (c *LongTermMemoryConfig) Validate() error {
 			fmt.Sprintf("invalid backend '%s', must be one of: embedded, redis, qdrant, milvus", c.Backend))
 	}
 
-	// If using an external backend that requires a connection URL (not redis, not embedded),
-	// ConnectionURL is required. Redis reuses the daemon's existing StateClient connection.
-	connectionURLRequired := c.Backend != "" && c.Backend != "embedded" && c.Backend != "redis"
+	// All external backends (redis, qdrant, milvus) require a ConnectionURL.
+	// The "embedded" backend runs in-memory and needs no external connection.
+	connectionURLRequired := c.Backend != "" && c.Backend != "embedded"
 	if connectionURLRequired && c.ConnectionURL == "" {
 		return types.NewError(types.CONFIG_VALIDATION_FAILED,
 			fmt.Sprintf("connection_url is required for backend '%s'", c.Backend))

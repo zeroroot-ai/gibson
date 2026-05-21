@@ -459,9 +459,10 @@ func TestCredentialEntityIntegration(t *testing.T) {
 				cred.Provider = "openai"
 				cred.Description = "Test credential"
 				cred.Tags = []string{"test"}
-				// Validate() requires EncryptedValue (credentials must be encrypted
-				// before storage; set a stub to satisfy the invariant).
+				// Validate() requires all three encryption fields.
 				cred.EncryptedValue = []byte("mock-encrypted-value")
+				cred.EncryptionIV = []byte("mock-iv-16-bytes!")
+				cred.KeyDerivationSalt = []byte("mock-salt-value!")
 				return cred
 			},
 			wantErr: false,
@@ -546,8 +547,10 @@ func TestCredentialEntityIntegration(t *testing.T) {
 				cred.Rotation.Enabled = true
 				cred.Rotation.AutoRotate = true
 				cred.Rotation.Interval = "90d"
-				// Validate() requires EncryptedValue.
+				// Validate() requires all three encryption fields.
 				cred.EncryptedValue = []byte("mock-encrypted-value")
+				cred.EncryptionIV = []byte("mock-iv-16-bytes!")
+				cred.KeyDerivationSalt = []byte("mock-salt-value!")
 				return cred
 			},
 			wantErr: false,
@@ -665,8 +668,10 @@ func TestCrossTypeIntegration(t *testing.T) {
 		// Create credential
 		cred := NewCredential("OpenAI Key", CredentialTypeAPIKey)
 		cred.Provider = "openai"
-		// Validate() requires EncryptedValue.
+		// Validate() requires all three encryption fields.
 		cred.EncryptedValue = []byte("mock-encrypted-value")
+		cred.EncryptionIV = []byte("mock-iv-16-bytes!")
+		cred.KeyDerivationSalt = []byte("mock-salt-value!")
 		require.NoError(t, cred.Validate())
 
 		// Create target referencing credential

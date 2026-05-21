@@ -295,7 +295,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/secrets/jwtsource/spire.go:136": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim for SPIRE JWT source"},
 
 		// internal/types — proto Capabilities field
-		"internal/types/target.go:329": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Capabilities field on Target, legitimately nil-able"},
+		"internal/types/target.go:334": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "proto Capabilities field on Target, legitimately nil-able"},
 	}
 
 	// Real-code subtest: walk every gibson `internal/` package and fail

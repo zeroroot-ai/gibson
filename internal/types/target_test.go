@@ -58,35 +58,39 @@ func TestTargetType_IsValid(t *testing.T) {
 // TestTargetType_JSON tests JSON marshaling and unmarshaling
 func TestTargetType_JSON(t *testing.T) {
 	tests := []struct {
-		name    string
-		tt      TargetType
-		json    string
-		wantErr bool
+		name         string
+		tt           TargetType
+		json         string
+		wantMarshal  string
+		marshalErr   bool
+		unmarshalErr bool
 	}{
-		{"valid llm_chat", TargetTypeLLMChat, `"llm_chat"`, false},
-		{"valid rag", TargetTypeRAG, `"rag"`, false},
-		{"invalid type", TargetType(""), `"invalid"`, true},
+		{"valid llm_chat", TargetTypeLLMChat, `"llm_chat"`, `"llm_chat"`, false, false},
+		{"valid rag", TargetTypeRAG, `"rag"`, `"rag"`, false, false},
+		// MarshalJSON returns an error for invalid types (added by fix(ci) #266).
+		// UnmarshalJSON also returns an error when the string is not a valid type.
+		{"invalid type", TargetType(""), `"invalid"`, "", true, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name+"_marshal", func(t *testing.T) {
 			got, err := json.Marshal(tt.tt)
-			if err != nil {
-				t.Fatalf("json.Marshal() error = %v", err)
+			if (err != nil) != tt.marshalErr {
+				t.Fatalf("json.Marshal() error = %v, wantErr %v", err, tt.marshalErr)
 			}
-			if string(got) != tt.json && !tt.wantErr {
-				t.Errorf("json.Marshal() = %v, want %v", string(got), tt.json)
+			if !tt.marshalErr && string(got) != tt.wantMarshal {
+				t.Errorf("json.Marshal() = %v, want %v", string(got), tt.wantMarshal)
 			}
 		})
 
 		t.Run(tt.name+"_unmarshal", func(t *testing.T) {
 			var got TargetType
 			err := json.Unmarshal([]byte(tt.json), &got)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("json.Unmarshal() error = %v, wantErr %v", err, tt.wantErr)
+			if (err != nil) != tt.unmarshalErr {
+				t.Errorf("json.Unmarshal() error = %v, wantErr %v", err, tt.unmarshalErr)
 				return
 			}
-			if !tt.wantErr && got != tt.tt {
+			if !tt.unmarshalErr && got != tt.tt {
 				t.Errorf("json.Unmarshal() = %v, want %v", got, tt.tt)
 			}
 		})

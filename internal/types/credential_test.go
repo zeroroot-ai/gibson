@@ -119,9 +119,11 @@ func TestNewCredential(t *testing.T) {
 
 func TestCredential_Validate(t *testing.T) {
 	validCred := NewCredential("valid", CredentialTypeAPIKey)
-	// Validate() requires EncryptedValue to be non-empty (security hardening:
-	// credentials must be encrypted before they are considered valid for storage).
+	// Validate() requires all three encryption fields (security hardening:
+	// credentials must be fully encrypted before storage).
 	validCred.EncryptedValue = []byte("mock-encrypted-value")
+	validCred.EncryptionIV = []byte("mock-iv-16-bytes!")
+	validCred.KeyDerivationSalt = []byte("mock-salt-value!")
 
 	tests := []struct {
 		name    string
