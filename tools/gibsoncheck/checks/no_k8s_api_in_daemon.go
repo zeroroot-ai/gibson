@@ -28,15 +28,14 @@ import (
 // K8s-API-free at compile time.
 //
 // Allow-list (the rule SKIPS these paths even when they import K8s):
-//   - github.com/zero-day-ai/gibson/cmd/**       (administrative CLIs)
+//   - github.com/zero-day-ai/gibson/cmd/**       (administrative CLIs and
+//     the sandbox-eviction-handler sidecar binary; per ADR-0023 §Allow-list)
 //   - github.com/zero-day-ai/gibson/tests/**     (e2e test fixtures)
 //   - github.com/zero-day-ai/gibson/tools/**     (build tools; including this analyzer)
 //   - github.com/zero-day-ai/gibson/internal/datapool/admin/**
 //     (gated by adminpoolacquire — legitimate enumeration)
 //   - github.com/zero-day-ai/gibson/pkg/platform/saga/**
 //     (operator-shared library; tenant-operator imports it)
-//   - github.com/zero-day-ai/gibson/internal/sandbox/eviction/**
-//     (until gibson#211/S9 relocates to a sidecar)
 //   - any file path containing "/testdata/"      (analysistest fixtures)
 //
 // Deferred-deletion file paths: NONE. S10 (gibson#212) landed and
@@ -82,10 +81,6 @@ var noK8sAPIInDaemonExemptSubstrings = []string{
 	// binary's build graph does not reach it; it's in pkg/ only because
 	// the gibson repo currently houses the source.
 	"/pkg/platform/saga",
-
-	// Sandbox eviction handler — relocates to a sidecar binary in S9
-	// (gibson#211, HITL). Remove this exemption once S9 merges.
-	"/internal/sandbox/eviction",
 
 	// Analyzer tests and analysistest fixtures.
 	"/testdata/",

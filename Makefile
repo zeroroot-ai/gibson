@@ -1,7 +1,7 @@
 # Gibson Framework Makefile
 # Stage 1 - Foundation
 
-.PHONY: all build bin gibson-migrate test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers authz-registry
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers authz-registry
 
 # Go parameters
 GOCMD=go
@@ -55,7 +55,7 @@ bin:
 	@echo "Build complete: $(BINARY_DIR)/$(BINARY_NAME)"
 
 # Full build (for Docker/CI/CD)
-build: bin gibson-migrate
+build: bin gibson-migrate sandbox-eviction-handler
 	@echo "Full build complete"
 
 # Build the gibson-migrate CLI for backfilling tenant DB migrations
@@ -64,6 +64,18 @@ gibson-migrate:
 	@mkdir -p $(BINARY_DIR)
 	$(GOBUILD) $(BUILD_TAGS) $(LDFLAGS) -o $(BINARY_DIR)/gibson-migrate ./cmd/gibson-migrate
 	@echo "Build complete: $(BINARY_DIR)/gibson-migrate"
+
+# Build the sandbox-eviction-handler sidecar binary. Runs as a sidecar in
+# the sandbox-host DaemonSet per ADR-0023 + gibson#211 (Option B): watches
+# the aws-node-termination-handler notice file and cordons its own node so
+# no new sandbox pods land on a node about to be terminated. The daemon
+# itself stays K8s-API-free; this binary is the one place node-cordon
+# logic lives.
+sandbox-eviction-handler:
+	@echo "Building sandbox-eviction-handler..."
+	@mkdir -p $(BINARY_DIR)
+	$(GOBUILD) $(BUILD_TAGS) $(LDFLAGS) -o $(BINARY_DIR)/sandbox-eviction-handler ./cmd/sandbox-eviction-handler
+	@echo "Build complete: $(BINARY_DIR)/sandbox-eviction-handler"
 
 # Run tests
 test:
