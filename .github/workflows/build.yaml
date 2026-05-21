@@ -88,6 +88,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Inject commit SHA + build timestamp so pkg/version.GitCommit and
+          # pkg/version.BuildTime are populated via ldflags (gibson#251).
+          build-args: |
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

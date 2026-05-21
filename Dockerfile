@@ -30,6 +30,12 @@ WORKDIR /workspace
 # Comma-separated tag lists are supported (e.g. `setec_integration,test_fixtures`).
 ARG BUILD_TAGS="setec_integration"
 
+# Git commit SHA and build timestamp — injected by CI via --build-arg.
+# Default to "unknown" so local `docker build` without args still works;
+# the daemon logs these at startup for operator diagnostics.
+ARG COMMIT="unknown"
+ARG BUILD_TIME="unknown"
+
 # Copy dependency manifests first for better layer caching
 COPY go.mod go.sum ./
 
@@ -63,10 +69,13 @@ COPY . .
 # Build static binary with CGO disabled
 ENV CGO_ENABLED=0
 
-RUN if [ -n "$BUILD_TAGS" ]; then \
-        go build -tags="$BUILD_TAGS" -ldflags="-s -w" -o /out/gibson ./cmd/gibson; \
+RUN LDFLAGS="-s -w \
+      -X github.com/zero-day-ai/gibson/pkg/version.GitCommit=${COMMIT} \
+      -X github.com/zero-day-ai/gibson/pkg/version.BuildTime=${BUILD_TIME}"; \
+    if [ -n "$BUILD_TAGS" ]; then \
+        go build -tags="$BUILD_TAGS" -ldflags="$LDFLAGS" -o /out/gibson ./cmd/gibson; \
     else \
-        go build -ldflags="-s -w" -o /out/gibson ./cmd/gibson; \
+        go build -ldflags="$LDFLAGS" -o /out/gibson ./cmd/gibson; \
     fi
 
 # Build the auxiliary one-shot tools shipped alongside the daemon.
