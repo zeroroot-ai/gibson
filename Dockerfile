@@ -87,6 +87,15 @@ RUN go build -ldflags="-s -w" -o /out/tenant-owner-backfill ./cmd/tenant-owner-b
 # via explicit Job command override.
 RUN go build -ldflags="-s -w" -o /out/gibson-migrate ./cmd/gibson-migrate
 
+# Spec setec-sandbox-prod-default §C7 / ADR-0023 / gibson#211: the chart's
+# sandbox-host DaemonSet runs `sandbox-eviction-handler` as a sidecar/peer
+# pod on each sandbox-host node. The binary watches the
+# aws-node-termination-handler notice file (/var/run/aws/spot-interruption-notice)
+# and cordons its own Kubernetes node on appearance. Daemon never imports
+# this binary's code — they share only the image. Same image as the daemon;
+# the binary is invoked via explicit DaemonSet command override.
+RUN go build -ldflags="-s -w" -o /out/sandbox-eviction-handler ./cmd/sandbox-eviction-handler
+
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
@@ -100,6 +109,7 @@ COPY --from=builder /out/gibson /usr/local/bin/gibson
 COPY --from=builder /out/lowercase-tenant-owner /usr/local/bin/lowercase-tenant-owner
 COPY --from=builder /out/tenant-owner-backfill /usr/local/bin/tenant-owner-backfill
 COPY --from=builder /out/gibson-migrate /usr/local/bin/gibson-migrate
+COPY --from=builder /out/sandbox-eviction-handler /usr/local/bin/sandbox-eviction-handler
 
 # Create gibson home directory and HF model-cache mount point.
 # In production, /root/.cache/huggingface/ is mounted from EFS via the
