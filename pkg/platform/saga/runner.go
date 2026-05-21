@@ -120,7 +120,6 @@ type RunResult struct {
 //
 // Semantics:
 //   - Step.Skip(obj) → true: condition True with Reason=Skipped, continue.
-//   - Step previously completed with current ObservedGeneration: skipped.
 //   - Provision returns done=true, err=nil → condition True, continue.
 //   - Provision returns done=false, err=nil → condition False/InProgress,
 //     return RequeueAfter=RequeueInterval.
@@ -176,14 +175,12 @@ func (r *Runner) Run(ctx context.Context, obj ConditionedObject, steps []Step, f
 			continue
 		}
 
-		// Already-completed short-circuit (current generation only).
-		if IsConditionTrue(*conditions, step.Condition()) {
-			existing := FindCondition(*conditions, step.Condition())
-			if existing != nil && existing.ObservedGeneration == obj.GetGeneration() {
-				continue
-			}
-		}
-
+		// NOTE: There is intentionally NO short-circuit here based on the
+		// existing condition value. Idempotency is a step-level invariant
+		// (ADR-0033): each Provision implementation must check for an existing
+		// artifact and no-op if it is already consistent. Skipping at the
+		// runner level hides missing-artifact bugs and prevents operator
+		// code-upgrades from healing existing tenants (gibson#265).
 		if r.AuditHook != nil {
 			r.AuditHook.OnStepStarted(ctx, obj, step)
 		}

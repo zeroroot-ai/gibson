@@ -474,6 +474,79 @@ func TestRunner_Run_ContinueOnBlocked_OffByDefault(t *testing.T) {
 	}
 }
 
+// TestRunner_Run_RerunsStepWhenArtifactMissingDespiteCompletedCondition locks in
+// ADR-0033: the runner must NOT skip a step solely because its status condition
+// is True. A step whose Provision writes a durable artifact (e.g. a Vault key)
+// must still be called on every reconcile so that if the artifact has been
+// externally deleted the step can restore it.
+//
+// This is the regression test for gibson#265: tenant `whatwhat` had
+// DataPlaneProvisioned=True after a partial provisioning run, so after the
+// operator upgrade that added WriteInfraRedis/WriteInfraVector the runner
+// never re-called those writes, leaving the Vault keys missing.
+//
+// Test structure:
+//  1. First Run: step succeeds, sets a "written" flag. Condition set True.
+//  2. Simulate external artifact deletion: flip the "written" flag to false
+//     (test-fixture equivalent of `bao kv delete secret/infra/redis`).
+//  3. Second Run with condition still True from step 1: step must be called
+//     again so it can restore the artifact.
+func TestRunner_Run_RerunsStepWhenArtifactMissingDespiteCompletedCondition(t *testing.T) {
+	// artifactExists simulates a durable external artifact (Vault key, Qdrant
+	// collection, Redis slot). The step writes it on Provision and checks for
+	// it at the start of Provision to simulate idempotent behaviour.
+	artifactExists := false
+	provisionCallCount := 0
+
+	step := &testStep{
+		name:      "WriteInfraRedis",
+		condition: "WriteInfraRedisCond",
+		provisionFn: func(_ context.Context, _ saga.ConditionedObject, _ *saga.Deps) (bool, error) {
+			provisionCallCount++
+			// Idempotent: write the artifact if missing, no-op if present.
+			artifactExists = true
+			return true, nil
+		},
+	}
+
+	r := &saga.Runner{Deps: &saga.Deps{}}
+	obj := &fakeObj{ObjectMeta: metav1.ObjectMeta{Name: "test", Generation: 1}}
+
+	// First run — step runs, artifact written, condition True.
+	res := r.Run(context.Background(), obj, []saga.Step{step}, "Ready")
+	if !res.AllComplete {
+		t.Fatalf("first Run not AllComplete (err=%v)", res.Err)
+	}
+	if provisionCallCount != 1 {
+		t.Fatalf("expected 1 Provision call after first Run, got %d", provisionCallCount)
+	}
+	if !artifactExists {
+		t.Fatal("artifact not written after first Run")
+	}
+
+	cond := saga.FindCondition(*obj.GetConditions(), "WriteInfraRedisCond")
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition not True after first Run; got %+v", cond)
+	}
+
+	// Simulate external artifact deletion (test-fixture only — not a runtime path).
+	artifactExists = false
+
+	// Second run — condition is still True from the first run, but the
+	// runner MUST call Provision again so the step can detect and restore
+	// the missing artifact (ADR-0033: no short-circuit on condition value).
+	res = r.Run(context.Background(), obj, []saga.Step{step}, "Ready")
+	if !res.AllComplete {
+		t.Fatalf("second Run not AllComplete (err=%v)", res.Err)
+	}
+	if provisionCallCount != 2 {
+		t.Errorf("Provision not called on second Run despite missing artifact: provisionCallCount=%d, want 2 (ADR-0033 regression)", provisionCallCount)
+	}
+	if !artifactExists {
+		t.Error("artifact still missing after second Run — step was skipped when it should have re-run")
+	}
+}
+
 // Compile-time check that fakeObj satisfies ConditionedObject.
 var _ saga.ConditionedObject = (*fakeObj)(nil)
 
