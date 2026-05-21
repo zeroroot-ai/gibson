@@ -36,29 +36,28 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     env:
-      # GONOSUMDB + GOPRIVATE tell the Go toolchain to skip the public checksum
-      # database for private zero-day-ai modules and fetch them directly via git.
-      # This must be set before setup-go (which may invoke go mod download).
-      GONOSUMDB: github.com/zero-day-ai/*
-      GOPRIVATE: github.com/zero-day-ai/*
+      # GOPRIVATE tells the Go toolchain to skip the public proxy and
+      # checksum database for private zero-day-ai modules and fetch them
+      # directly via git. Must be set before setup-go (which may invoke
+      # go mod download).
+      GOPRIVATE: github.com/zero-day-ai
     steps:
       - uses: actions/checkout@v4
 
-      # Configure git credentials BEFORE setup-go so that module download works.
-      # The PRIVATE_REPO_TOKEN is a PAT with read access to all zero-day-ai repos.
-      # We write both .netrc (for git) and configure the credential store (for
-      # go/packages which may invoke git outside the repo working dir).
-      - name: Configure git credentials for private modules
+      # Configure git credentials BEFORE setup-go so module download works.
+      # GH_PAT_GIBSON_RO is the same PAT the gibson-daemon Docker build
+      # uses for `go mod download` of private modules, and is the same
+      # secret tenant-operator + dashboard use across their CI. The
+      # insteadOf rule rewrites every github.com URL with the token so
+      # subprocess git invocations (`go/packages.Load`, `git ls-remote`
+      # under `go mod download`, buf's git fetch under `make
+      # authz-registry`) all pick it up uniformly — the .netrc /
+      # credential-helper approach previously used here was intermittent.
+      - name: Configure git for private modules
         run: |
-          # .netrc provides credentials for git HTTPS without a credential helper.
-          printf 'machine github.com\nlogin oauth2\npassword %s\n' \
-            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.netrc"
-          chmod 0600 "$HOME/.netrc"
-          # Also set via git config so go/packages.Load (which calls git ls-remote)
-          # picks up auth even when running outside the working tree.
-          git config --global credential.helper store
-          printf 'https://oauth2:%s@github.com\n' \
-            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.git-credentials"
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
 
       - uses: actions/setup-go@v5
         with:
@@ -119,19 +118,15 @@ jobs:
       # `make authz-registry` does `go run`/`go build` against pinned
       # platform-sdk + platform-clients (private). Same auth pattern
       # as the `analyze` job above.
-      GONOSUMDB: github.com/zero-day-ai/*
-      GOPRIVATE: github.com/zero-day-ai/*
+      GOPRIVATE: github.com/zero-day-ai
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure git credentials for private modules
+      - name: Configure git for private modules
         run: |
-          printf 'machine github.com\nlogin oauth2\npassword %s\n' \
-            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.netrc"
-          chmod 0600 "$HOME/.netrc"
-          git config --global credential.helper store
-          printf 'https://oauth2:%s@github.com\n' \
-            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.git-credentials"
+          git config --global \
+            url."https://x-access-token:${{ secrets.GH_PAT_GIBSON_RO }}@github.com/".insteadOf \
+            "https://github.com/"
 
       - uses: actions/setup-go@v5
         with:
