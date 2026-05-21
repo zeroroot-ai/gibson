@@ -301,8 +301,19 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 	// no effect on the providers it constructs. We only need its side effect of
 	// registering globals — but since it builds its own providers we set our
 	// providers explicitly below after the Init call.
+	//
+	// platform-clients/observability.Init always creates a gRPC exporter, which
+	// expects a bare "host:port" target — NOT a URL with a scheme. Strip the
+	// http:// or https:// prefix before passing the endpoint so the gRPC dialer
+	// does not produce "host:port:443" (too many colons). See gibson#252.
+	pcotelEndpoint := cfg.Endpoint
+	if strings.HasPrefix(pcotelEndpoint, "https://") {
+		pcotelEndpoint = pcotelEndpoint[8:]
+	} else if strings.HasPrefix(pcotelEndpoint, "http://") {
+		pcotelEndpoint = pcotelEndpoint[7:]
+	}
 	_, _ = pcotel.Init("gibson",
-		pcotel.WithOTLPEndpoint(cfg.Endpoint),
+		pcotel.WithOTLPEndpoint(pcotelEndpoint),
 	)
 	// Override with our fully-configured daemon providers so domain-specific
 	// features (Langfuse auth, content-logging, HTTP protocol, etc.) are
