@@ -62,6 +62,25 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.112.0](https://github.com/zero-day-ai/gibson/compare/v0.111.0...v0.112.0) (2026-05-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sandbox:** relocate spot-eviction handler to node-local sidecar binary ([#247](https://github.com/zero-day-ai/gibson/issues/247))
+
+### Features
+
+* add signup-smoke CI workflow for daemon PR validation ([#256](https://github.com/zero-day-ai/gibson/issues/256)) ([64a7e3a](https://github.com/zero-day-ai/gibson/commit/64a7e3acf47bc19d550b3ce3c00d3216ebb0056e))
+* **docker:** bundle sandbox-eviction-handler into the gibson image ([#250](https://github.com/zero-day-ai/gibson/issues/250)) ([ff6c874](https://github.com/zero-day-ai/gibson/commit/ff6c874f56e9a3d8a236535839f4936df8d157eb))
+* **sandbox:** relocate spot-eviction handler to node-local sidecar binary ([#247](https://github.com/zero-day-ai/gibson/issues/247)) ([478b377](https://github.com/zero-day-ai/gibson/commit/478b3774064867c28cadd2ad02ebc4a673b254fd))
+
+
+### Bug Fixes
+
+* **build:** inject git sha and build time via ldflags ([#253](https://github.com/zero-day-ai/gibson/issues/253)) ([0b2c636](https://github.com/zero-day-ai/gibson/commit/0b2c6368b3ddcad8b146e26abeb34003636c4a3b))
+* **observability:** strip URL scheme before passing endpoint to pcotel.Init ([#254](https://github.com/zero-day-ai/gibson/issues/254)) ([f11e59c](https://github.com/zero-day-ai/gibson/commit/f11e59c4c533f8b1a7621cfab0feae966e5a841c))
+
 ## [0.111.0](https://github.com/zero-day-ai/gibson/compare/v0.110.0...v0.111.0) (2026-05-21)
 
 
