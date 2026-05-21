@@ -106,8 +106,16 @@ jobs:
       # the Setec gRPC adapter by default. The Dockerfile's ARG default is also
       # `setec_integration`, but we declare it explicitly here to make CI's
       # production-default contract obvious in the workflow surface.
+      #
+      # COMMIT + BUILD_TIME are injected so pkg/version.GitCommit and
+      # pkg/version.BuildTime are populated via ldflags (gibson#251).
+      # github.sha is always available; head_commit.timestamp is set on
+      # push events — on workflow_dispatch it falls back to the empty
+      # string which the Dockerfile ARG default ("unknown") covers.
       build_args: |
         BUILD_TAGS=setec_integration
+        COMMIT=${{ github.sha }}
+        BUILD_TIME=${{ github.event.head_commit.timestamp }}
     secrets:
       # Dockerfile mounts this as a BuildKit secret (id=ghtoken) and writes a
       # git insteadOf rule so `go mod download` can fetch the private
