@@ -115,8 +115,23 @@ jobs:
     # and fails if the result differs from committed content. Catches:
     #   - Hand-edits to registry.go instead of running regen.
     #   - SDK version bumps where `make authz-registry` was not re-run.
+    env:
+      # `make authz-registry` does `go run`/`go build` against pinned
+      # platform-sdk + platform-clients (private). Same auth pattern
+      # as the `analyze` job above.
+      GONOSUMDB: github.com/zero-day-ai/*
+      GOPRIVATE: github.com/zero-day-ai/*
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure git credentials for private modules
+        run: |
+          printf 'machine github.com\nlogin oauth2\npassword %s\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.netrc"
+          chmod 0600 "$HOME/.netrc"
+          git config --global credential.helper store
+          printf 'https://oauth2:%s@github.com\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.git-credentials"
 
       - uses: actions/setup-go@v5
         with:
