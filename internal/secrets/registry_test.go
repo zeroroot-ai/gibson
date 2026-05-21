@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // --- fakes ---
@@ -53,7 +53,7 @@ func newNamedProv(name string) *namedProvider { return &namedProvider{name: name
 func buildTestRegistry(
 	t *testing.T,
 	getter RegistryConfigGetter,
-	pgProv sdksecrets.SecretsBroker,
+	pgProv sdksecrets.Broker,
 	extras map[string]ProviderConstructor,
 ) *Registry {
 	t.Helper()
@@ -108,7 +108,7 @@ func TestRegistry_ConfiguredProviderReturned(t *testing.T) {
 	getter.Set(regTenantA, BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{}`)})
 
 	extras := map[string]ProviderConstructor{
-		"vault": func(_ []byte) (sdksecrets.SecretsBroker, error) { return vaultProv, nil },
+		"vault": func(_ []byte) (sdksecrets.Broker, error) { return vaultProv, nil },
 	}
 	reg := buildTestRegistry(t, getter, pg, extras)
 
@@ -159,7 +159,7 @@ func TestRegistry_TenantIsolation(t *testing.T) {
 	getter.Set(regTenantB, BrokerConfig{Provider: "postgres", ConfigBlob: []byte(`{}`)})
 
 	extras := map[string]ProviderConstructor{
-		"vault": func(_ []byte) (sdksecrets.SecretsBroker, error) { return vaultProv, nil },
+		"vault": func(_ []byte) (sdksecrets.Broker, error) { return vaultProv, nil },
 	}
 	reg := buildTestRegistry(t, getter, pg, extras)
 
@@ -227,7 +227,7 @@ func TestRegistry_ConstructorFailureReturnsError(t *testing.T) {
 	getter.Set(regTenantA, BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{"bad":"config"}`)})
 
 	extras := map[string]ProviderConstructor{
-		"vault": func(_ []byte) (sdksecrets.SecretsBroker, error) {
+		"vault": func(_ []byte) (sdksecrets.Broker, error) {
 			return nil, errors.New("vault: invalid config")
 		},
 	}
@@ -248,7 +248,7 @@ func TestRegistry_ConcurrentForSameTenant(t *testing.T) {
 	reg := buildTestRegistry(t, getter, pg, nil)
 
 	const goroutines = 50
-	results := make([]sdksecrets.SecretsBroker, goroutines)
+	results := make([]sdksecrets.Broker, goroutines)
 	errs := make([]error, goroutines)
 	var wg sync.WaitGroup
 	wg.Add(goroutines)

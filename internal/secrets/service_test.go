@@ -12,18 +12,18 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // --- fakes ---
 
 // fakeServiceRegistry implements ServiceRegistry.
 type fakeServiceRegistry struct {
-	broker sdksecrets.SecretsBroker
+	broker sdksecrets.Broker
 	err    error
 }
 
-func (f *fakeServiceRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.SecretsBroker, error) {
+func (f *fakeServiceRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.Broker, error) {
 	return f.broker, f.err
 }
 
@@ -49,7 +49,7 @@ type serviceFakeBroker struct {
 	lstErr error
 }
 
-var _ sdksecrets.SecretsBroker = (*serviceFakeBroker)(nil)
+var _ sdksecrets.Broker = (*serviceFakeBroker)(nil)
 
 func (b *serviceFakeBroker) Get(_ context.Context, _ auth.TenantID, _ string) ([]byte, error) {
 	return b.getVal, b.getErr
@@ -65,8 +65,8 @@ func (b *serviceFakeBroker) List(_ context.Context, _ auth.TenantID, _ sdksecret
 }
 func (b *serviceFakeBroker) Health(_ context.Context) error { return nil }
 func (b *serviceFakeBroker) Probe(_ context.Context) error  { return nil }
-func (b *serviceFakeBroker) Capabilities() sdksecrets.ProviderCapabilities {
-	return sdksecrets.ProviderCapabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
+func (b *serviceFakeBroker) Capabilities() sdksecrets.Capabilities {
+	return sdksecrets.Capabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
 }
 
 // ctxWithTestTenant returns a context carrying the given tenant via
@@ -78,7 +78,7 @@ func ctxWithTestTenant(tenant auth.TenantID) context.Context {
 var svcTenant = auth.MustNewTenantID("acme-corp")
 
 func buildService(
-	broker sdksecrets.SecretsBroker,
+	broker sdksecrets.Broker,
 	circuit ServiceCircuitBreaker,
 	auditor ServiceAuditWriter,
 ) *Service {

@@ -7,14 +7,14 @@ import (
 	"sync"
 
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // ProviderConstructor is a function that builds a SecretsBroker from the raw
 // JSON config blob stored in the tenant's broker config row. The Postgres
 // constructor is a special case — it takes no config blob and returns a
 // pre-shared instance (see Registry.postgresFactory).
-type ProviderConstructor func(configBlob []byte) (sdksecrets.SecretsBroker, error)
+type ProviderConstructor func(configBlob []byte) (sdksecrets.Broker, error)
 
 // RegistryConfigGetter is the narrow interface Registry needs from the config
 // store. The concrete implementation is *ConfigStore; tests may substitute a
@@ -41,10 +41,10 @@ type Registry struct {
 	// postgresProvider is the pre-constructed Postgres provider used as the
 	// default fallback. It is shared across all tenants (the Postgres
 	// provider is stateless beyond its ConnAcquirer callback).
-	postgresProvider sdksecrets.SecretsBroker
+	postgresProvider sdksecrets.Broker
 
 	mu    sync.RWMutex
-	cache map[auth.TenantID]sdksecrets.SecretsBroker
+	cache map[auth.TenantID]sdksecrets.Broker
 }
 
 // RegistryConfig carries the factory functions used to construct provider
@@ -58,7 +58,7 @@ type Registry struct {
 type RegistryConfig struct {
 	// PostgresProvider is the pre-constructed default-fallback Postgres
 	// provider. Must be non-nil.
-	PostgresProvider sdksecrets.SecretsBroker
+	PostgresProvider sdksecrets.Broker
 
 	// VaultFactory constructs a Vault provider from the tenant's JSON config
 	// blob. May be nil if vault is not supported in this deployment (unusual
@@ -87,7 +87,7 @@ func NewRegistry(configStore RegistryConfigGetter, cfg RegistryConfig) (*Registr
 	}
 
 	constructors := map[string]ProviderConstructor{
-		"postgres": func(_ []byte) (sdksecrets.SecretsBroker, error) {
+		"postgres": func(_ []byte) (sdksecrets.Broker, error) {
 			return cfg.PostgresProvider, nil
 		},
 	}
@@ -108,7 +108,7 @@ func NewRegistry(configStore RegistryConfigGetter, cfg RegistryConfig) (*Registr
 		configStore:      configStore,
 		constructors:     constructors,
 		postgresProvider: cfg.PostgresProvider,
-		cache:            make(map[auth.TenantID]sdksecrets.SecretsBroker),
+		cache:            make(map[auth.TenantID]sdksecrets.Broker),
 	}, nil
 }
 
@@ -118,7 +118,7 @@ func NewRegistry(configStore RegistryConfigGetter, cfg RegistryConfig) (*Registr
 //
 // Constructed providers are cached; subsequent calls for the same tenant
 // return the cached instance without re-reading the config store.
-func (r *Registry) For(ctx context.Context, tenant auth.TenantID) (sdksecrets.SecretsBroker, error) {
+func (r *Registry) For(ctx context.Context, tenant auth.TenantID) (sdksecrets.Broker, error) {
 	// Fast path: check the read-locked cache.
 	r.mu.RLock()
 	if broker, ok := r.cache[tenant]; ok {
@@ -163,7 +163,7 @@ func (r *Registry) Reload(_ context.Context, tenant auth.TenantID) {
 // provider is healthy.
 func (r *Registry) Health(ctx context.Context) map[auth.TenantID]error {
 	r.mu.RLock()
-	snapshot := make(map[auth.TenantID]sdksecrets.SecretsBroker, len(r.cache))
+	snapshot := make(map[auth.TenantID]sdksecrets.Broker, len(r.cache))
 	for k, v := range r.cache {
 		snapshot[k] = v
 	}
@@ -208,7 +208,7 @@ func registeredConstructors(m map[string]ProviderConstructor) []string {
 // hand-seed a row via the admin RPCs). The postgresProvider field is
 // kept on Registry so an explicit `provider="postgres"` config row
 // still works for tenants that opt into Postgres-backed secrets.
-func (r *Registry) buildProvider(ctx context.Context, tenant auth.TenantID) (sdksecrets.SecretsBroker, error) {
+func (r *Registry) buildProvider(ctx context.Context, tenant auth.TenantID) (sdksecrets.Broker, error) {
 	cfg, err := r.configStore.Get(ctx, tenant)
 	if err != nil {
 		if errors.Is(err, ErrBrokerConfigNotFound) {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

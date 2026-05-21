@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 
 	"github.com/zero-day-ai/gibson/internal/secrets/configstore"
 )
@@ -40,7 +40,7 @@ type BrokerConfig struct {
 // ProviderFactory is a function that constructs a SecretsBroker from a raw
 // JSON config blob. It is used by ConfigStore.Set to probe the candidate
 // provider before persisting its configuration.
-type ProviderFactory func(configBlob []byte) (sdksecrets.SecretsBroker, error)
+type ProviderFactory func(configBlob []byte) (sdksecrets.Broker, error)
 
 // ConfigStoreAuditWriter is the narrow interface ConfigStore uses to emit
 // audit events. The concrete implementation is AuditWriter (audit.go);

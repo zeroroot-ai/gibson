@@ -13,7 +13,7 @@ import (
 func TestSecretsNoLog_Violation(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.SecretsNoLogAnalyzer,
-		"github.com/zero-day-ai/sdk/secrets/secretslogviolation")
+		"github.com/zero-day-ai/platform-clients/secrets/secretslogviolation")
 }
 
 // TestSecretsNoLog_Clean verifies that a secrets-package function that uses
@@ -23,5 +23,5 @@ func TestSecretsNoLog_Clean(t *testing.T) {
 	testdata := analysistest.TestData()
 	// No // want comments in the clean fixture — zero diagnostics expected.
 	analysistest.Run(t, testdata, checks.SecretsNoLogAnalyzer,
-		"github.com/zero-day-ai/sdk/secrets/secretslogclean")
+		"github.com/zero-day-ai/platform-clients/secrets/secretslogclean")
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/secrets"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 
 	"github.com/zero-day-ai/sdk/auth"
 )
@@ -36,18 +36,18 @@ func (b *credTestBroker) List(_ context.Context, _ auth.TenantID, _ sdksecrets.F
 }
 func (b *credTestBroker) Health(_ context.Context) error { return nil }
 func (b *credTestBroker) Probe(_ context.Context) error  { return nil }
-func (b *credTestBroker) Capabilities() sdksecrets.ProviderCapabilities {
-	return sdksecrets.ProviderCapabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
+func (b *credTestBroker) Capabilities() sdksecrets.Capabilities {
+	return sdksecrets.Capabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
 }
 
-var _ sdksecrets.SecretsBroker = (*credTestBroker)(nil)
+var _ sdksecrets.Broker = (*credTestBroker)(nil)
 
 type credTestRegistry struct {
-	broker sdksecrets.SecretsBroker
+	broker sdksecrets.Broker
 	err    error
 }
 
-func (r *credTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.SecretsBroker, error) {
+func (r *credTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.Broker, error) {
 	return r.broker, r.err
 }
 

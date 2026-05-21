@@ -14,7 +14,7 @@ import (
 	"fmt"
 
 	"github.com/zero-day-ai/gibson/internal/secrets"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // MapProbeFactory implements ProviderProbeFactory by looking up the
@@ -31,7 +31,7 @@ func NewMapProbeFactory(factories map[string]secrets.ProviderFactory) *MapProbeF
 
 // Construct looks up the named factory and invokes it with the config
 // blob. Returns an error when the provider is not registered.
-func (m *MapProbeFactory) Construct(provider string, configBlob []byte) (sdksecrets.SecretsBroker, error) {
+func (m *MapProbeFactory) Construct(provider string, configBlob []byte) (sdksecrets.Broker, error) {
 	if m == nil || m.factories == nil {
 		return nil, fmt.Errorf("probe factory: factories map is nil")
 	}

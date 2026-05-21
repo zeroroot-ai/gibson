@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -37,19 +37,19 @@ func (b *credStoreTestBroker) List(_ context.Context, _ auth.TenantID, _ sdksecr
 }
 func (b *credStoreTestBroker) Health(_ context.Context) error { return nil }
 func (b *credStoreTestBroker) Probe(_ context.Context) error  { return nil }
-func (b *credStoreTestBroker) Capabilities() sdksecrets.ProviderCapabilities {
-	return sdksecrets.ProviderCapabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
+func (b *credStoreTestBroker) Capabilities() sdksecrets.Capabilities {
+	return sdksecrets.Capabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
 }
 
-var _ sdksecrets.SecretsBroker = (*credStoreTestBroker)(nil)
+var _ sdksecrets.Broker = (*credStoreTestBroker)(nil)
 
 // credStoreTestRegistry implements secrets.ServiceRegistry, returning a fixed broker.
 type credStoreTestRegistry struct {
-	broker sdksecrets.SecretsBroker
+	broker sdksecrets.Broker
 	err    error
 }
 
-func (r *credStoreTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.SecretsBroker, error) {
+func (r *credStoreTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.Broker, error) {
 	return r.broker, r.err
 }
 

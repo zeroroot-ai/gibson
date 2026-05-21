@@ -54,8 +54,15 @@ var agentSecretsImportExemptSubstrings = []string{
 	"/cmd/gibsoncheck/",                  // the checker itself
 }
 
-// brokerImportPrefix is the import path prefix that is disallowed.
-const brokerImportPrefix = "github.com/zero-day-ai/sdk/secrets"
+// brokerImportPrefixes are the import path prefixes that are disallowed.
+// Historical: sdk/secrets used to host the broker. The broker now lives in
+// platform-clients/secrets; sdk/secrets is being retired. Both paths remain
+// in the deny-list during the transition so legacy and current imports are
+// equally forbidden from agent/tool packages.
+var brokerImportPrefixes = []string{
+	"github.com/zero-day-ai/sdk/secrets",
+	"github.com/zero-day-ai/platform-clients/secrets",
+}
 
 func runAgentSecretsImport(pass *analysis.Pass) (any, error) {
 	pkgPath := pass.Pkg.Path()
@@ -85,11 +92,13 @@ func runAgentSecretsImport(pass *analysis.Pass) (any, error) {
 			if err != nil {
 				continue
 			}
-			// Flag any import of sdk/secrets or a subpackage of it.
-			if path == brokerImportPrefix || strings.HasPrefix(path, brokerImportPrefix+"/") {
-				pass.Reportf(imp.Pos(),
-					"forbidden import %q in %q: agent and tool SDKs cannot import the broker; dispatch a tool that uses a plugin (non-plugin-secret-isolation Req 2)",
-					path, pkgPath)
+			for _, prefix := range brokerImportPrefixes {
+				if path == prefix || strings.HasPrefix(path, prefix+"/") {
+					pass.Reportf(imp.Pos(),
+						"forbidden import %q in %q: agent and tool SDKs cannot import the broker; dispatch a tool that uses a plugin (non-plugin-secret-isolation Req 2)",
+						path, pkgPath)
+					break
+				}
 			}
 		}
 	}

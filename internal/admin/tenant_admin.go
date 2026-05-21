@@ -36,7 +36,7 @@ import (
 
 	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // TenantConfigStoreReader is the narrow contract this handler uses to read
@@ -58,7 +58,7 @@ type ProviderProbeFactory interface {
 	// Construct builds a candidate provider for one provider name. Returns
 	// an error when the provider name is unknown or the config blob fails
 	// validation.
-	Construct(provider string, configBlob []byte) (sdksecrets.SecretsBroker, error)
+	Construct(provider string, configBlob []byte) (sdksecrets.Broker, error)
 }
 
 // Reloader invalidates the per-tenant cached SecretsBroker so the next

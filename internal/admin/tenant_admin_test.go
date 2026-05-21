@@ -14,7 +14,7 @@ import (
 
 	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ type fakeProbeFactory struct {
 	constructErr error
 }
 
-func (f *fakeProbeFactory) Construct(_ string, _ []byte) (sdksecrets.SecretsBroker, error) {
+func (f *fakeProbeFactory) Construct(_ string, _ []byte) (sdksecrets.Broker, error) {
 	if f.constructErr != nil {
 		return nil, f.constructErr
 	}
@@ -72,8 +72,8 @@ func (b *probeBroker) List(_ context.Context, _ auth.TenantID, _ sdksecrets.Filt
 }
 func (b *probeBroker) Health(_ context.Context) error { return nil }
 func (b *probeBroker) Probe(_ context.Context) error  { return b.err }
-func (b *probeBroker) Capabilities() sdksecrets.ProviderCapabilities {
-	return sdksecrets.ProviderCapabilities{}
+func (b *probeBroker) Capabilities() sdksecrets.Capabilities {
+	return sdksecrets.Capabilities{}
 }
 
 // fakeReloader records every Reload(tenant) call so tests can assert

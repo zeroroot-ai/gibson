@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zero-day-ai/gibson/internal/secrets"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -36,18 +36,18 @@ func (b *compTestBroker) List(_ context.Context, _ auth.TenantID, _ sdksecrets.F
 }
 func (b *compTestBroker) Health(_ context.Context) error { return nil }
 func (b *compTestBroker) Probe(_ context.Context) error  { return nil }
-func (b *compTestBroker) Capabilities() sdksecrets.ProviderCapabilities {
-	return sdksecrets.ProviderCapabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
+func (b *compTestBroker) Capabilities() sdksecrets.Capabilities {
+	return sdksecrets.Capabilities{CanPut: true, CanDelete: true, CanList: true, MaxValueBytes: 1 << 20}
 }
 
-var _ sdksecrets.SecretsBroker = (*compTestBroker)(nil)
+var _ sdksecrets.Broker = (*compTestBroker)(nil)
 
 type compTestRegistry struct {
-	broker sdksecrets.SecretsBroker
+	broker sdksecrets.Broker
 	err    error
 }
 
-func (r *compTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.SecretsBroker, error) {
+func (r *compTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.Broker, error) {
 	return r.broker, r.err
 }
 

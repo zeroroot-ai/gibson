@@ -18,11 +18,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/secrets/configstore"
 	pgprovider "github.com/zero-day-ai/gibson/internal/secrets/providers/postgres"
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
-	sdkawssm "github.com/zero-day-ai/sdk/secrets/providers/awssm"
-	sdkazurekv "github.com/zero-day-ai/sdk/secrets/providers/azurekv"
-	sdkgcpsm "github.com/zero-day-ai/sdk/secrets/providers/gcpsm"
-	sdkvault "github.com/zero-day-ai/sdk/secrets/providers/vault"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	sdkawssm "github.com/zero-day-ai/platform-clients/secrets/awssm"
+	sdkazurekv "github.com/zero-day-ai/platform-clients/secrets/azurekv"
+	sdkgcpsm "github.com/zero-day-ai/platform-clients/secrets/gcpsm"
+	sdkvault "github.com/zero-day-ai/platform-clients/secrets/vault"
 )
 
 // brokerHealthGauge tracks per-(tenant, provider) broker health for SRE
@@ -121,31 +121,31 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 			} else {
 				// Build the provider factories for the config-store probe step.
 				configFactories := map[string]secrets.ProviderFactory{
-					"postgres": func(_ []byte) (sdksecrets.SecretsBroker, error) {
+					"postgres": func(_ []byte) (sdksecrets.Broker, error) {
 						return pgProvider, nil
 					},
-					"vault": func(blob []byte) (sdksecrets.SecretsBroker, error) {
+					"vault": func(blob []byte) (sdksecrets.Broker, error) {
 						var cfg sdkvault.Config
 						if err := json.Unmarshal(blob, &cfg); err != nil {
 							return nil, fmt.Errorf("vault: unmarshal config: %w", err)
 						}
 						return sdkvault.New(ctx, cfg)
 					},
-					"awssm": func(blob []byte) (sdksecrets.SecretsBroker, error) {
+					"awssm": func(blob []byte) (sdksecrets.Broker, error) {
 						var cfg sdkawssm.Config
 						if err := json.Unmarshal(blob, &cfg); err != nil {
 							return nil, fmt.Errorf("awssm: unmarshal config: %w", err)
 						}
 						return sdkawssm.New(ctx, cfg)
 					},
-					"gcpsm": func(blob []byte) (sdksecrets.SecretsBroker, error) {
+					"gcpsm": func(blob []byte) (sdksecrets.Broker, error) {
 						var cfg sdkgcpsm.Config
 						if err := json.Unmarshal(blob, &cfg); err != nil {
 							return nil, fmt.Errorf("gcpsm: unmarshal config: %w", err)
 						}
 						return sdkgcpsm.New(ctx, cfg)
 					},
-					"azurekv": func(blob []byte) (sdksecrets.SecretsBroker, error) {
+					"azurekv": func(blob []byte) (sdksecrets.Broker, error) {
 						var cfg sdkazurekv.Config
 						if err := json.Unmarshal(blob, &cfg); err != nil {
 							return nil, fmt.Errorf("azurekv: unmarshal config: %w", err)
@@ -265,7 +265,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	// --- 6. Cloud provider factories for the Registry ---
 	registryCfg := secrets.RegistryConfig{
 		PostgresProvider: pgProvider,
-		VaultFactory: func(blob []byte) (sdksecrets.SecretsBroker, error) {
+		VaultFactory: func(blob []byte) (sdksecrets.Broker, error) {
 			var cfg sdkvault.Config
 			if err := json.Unmarshal(blob, &cfg); err != nil {
 				return nil, fmt.Errorf("vault: unmarshal config: %w", err)
@@ -309,21 +309,21 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 			}
 			return sdkvault.New(ctx, cfg)
 		},
-		AWSSMFactory: func(blob []byte) (sdksecrets.SecretsBroker, error) {
+		AWSSMFactory: func(blob []byte) (sdksecrets.Broker, error) {
 			var cfg sdkawssm.Config
 			if err := json.Unmarshal(blob, &cfg); err != nil {
 				return nil, fmt.Errorf("awssm: unmarshal config: %w", err)
 			}
 			return sdkawssm.New(ctx, cfg)
 		},
-		GCPSMFactory: func(blob []byte) (sdksecrets.SecretsBroker, error) {
+		GCPSMFactory: func(blob []byte) (sdksecrets.Broker, error) {
 			var cfg sdkgcpsm.Config
 			if err := json.Unmarshal(blob, &cfg); err != nil {
 				return nil, fmt.Errorf("gcpsm: unmarshal config: %w", err)
 			}
 			return sdkgcpsm.New(ctx, cfg)
 		},
-		AzureKVFactory: func(blob []byte) (sdksecrets.SecretsBroker, error) {
+		AzureKVFactory: func(blob []byte) (sdksecrets.Broker, error) {
 			var cfg sdkazurekv.Config
 			if err := json.Unmarshal(blob, &cfg); err != nil {
 				return nil, fmt.Errorf("azurekv: unmarshal config: %w", err)

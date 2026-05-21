@@ -20,7 +20,7 @@ import (
 	dbpostgres "github.com/zero-day-ai/gibson/internal/database/postgres"
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/sdk/auth"
-	"github.com/zero-day-ai/sdk/secrets"
+	"github.com/zero-day-ai/platform-clients/secrets"
 )
 
 const (
@@ -37,7 +37,7 @@ const (
 // decouples the provider from the concrete Pool type.
 type ConnAcquirer func(ctx context.Context, tenant auth.TenantID) (*datapool.Conn, error)
 
-// Provider implements secrets.SecretsBroker against the per-tenant Postgres
+// Provider implements secrets.Broker against the per-tenant Postgres
 // database via TenantSecretsOps. All methods are safe for concurrent use.
 type Provider struct {
 	acquirer ConnAcquirer
@@ -51,12 +51,12 @@ func New(acquirer ConnAcquirer) *Provider {
 	return &Provider{acquirer: acquirer}
 }
 
-// Ensure Provider implements secrets.SecretsBroker at compile time.
-var _ secrets.SecretsBroker = (*Provider)(nil)
+// Ensure Provider implements secrets.Broker at compile time.
+var _ secrets.Broker = (*Provider)(nil)
 
 // Capabilities returns the fixed capabilities of the Postgres provider.
-func (p *Provider) Capabilities() secrets.ProviderCapabilities {
-	return secrets.ProviderCapabilities{
+func (p *Provider) Capabilities() secrets.Capabilities {
+	return secrets.Capabilities{
 		CanPut:          true,
 		CanDelete:       true,
 		CanList:         true,

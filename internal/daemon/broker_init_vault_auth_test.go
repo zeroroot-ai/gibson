@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	sdkvault "github.com/zero-day-ai/sdk/secrets/providers/vault"
+	sdkvault "github.com/zero-day-ai/platform-clients/secrets/vault"
 )
 
 // TestVaultAuthLogin_KubernetesIsDenied is the daemon-side mirror of the SDK's

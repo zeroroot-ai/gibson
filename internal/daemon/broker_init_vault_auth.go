@@ -13,8 +13,8 @@ import (
 	"github.com/hashicorp/vault/api"
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
-	sdksecrets "github.com/zero-day-ai/sdk/secrets"
-	sdkvault "github.com/zero-day-ai/sdk/secrets/providers/vault"
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	sdkvault "github.com/zero-day-ai/platform-clients/secrets/vault"
 )
 
 // stampVaultJWTOnConfig mints a SPIRE JWT-SVID via src and writes it onto
@@ -307,8 +307,8 @@ func makeVaultRefreshFn(lookup *vaultRefreshLookup) secrets.AuthRefreshFn {
 // from the same broker_init call site so the wiring matches.
 //
 // Spec: headline-feature-completion R3 (VaultFactory consults AuthCache).
-func makeVaultFactory(ctx context.Context, vaultAuthCache *secrets.AuthCache, lookup *vaultRefreshLookup) func(blob []byte) (sdksecrets.SecretsBroker, error) {
-	return func(blob []byte) (sdksecrets.SecretsBroker, error) {
+func makeVaultFactory(ctx context.Context, vaultAuthCache *secrets.AuthCache, lookup *vaultRefreshLookup) func(blob []byte) (sdksecrets.Broker, error) {
+	return func(blob []byte) (sdksecrets.Broker, error) {
 		var cfg sdkvault.Config
 		if err := json.Unmarshal(blob, &cfg); err != nil {
 			return nil, fmt.Errorf("vault: unmarshal config: %w", err)
