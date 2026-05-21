@@ -62,6 +62,18 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.113.0](https://github.com/zero-day-ai/gibson/compare/v0.112.0...v0.113.0) (2026-05-21)
+
+
+### Features
+
+* **psaga:** add Runner.ContinueOnBlocked for teardown step-isolation ([#255](https://github.com/zero-day-ai/gibson/issues/255)) ([a8c18da](https://github.com/zero-day-ai/gibson/commit/a8c18da253c853760f82eaa4f90961c6308b9897))
+
+
+### Bug Fixes
+
+* **daemon:** broker_init VaultFactory uses blob-hash cache key shared with refresh closure ([#263](https://github.com/zero-day-ai/gibson/issues/263)) ([7341b6f](https://github.com/zero-day-ai/gibson/commit/7341b6f9b496354e382c4acccbddf6d5e3c45b53))
+
 ## [0.112.0](https://github.com/zero-day-ai/gibson/compare/v0.111.0...v0.112.0) (2026-05-21)
 
 
