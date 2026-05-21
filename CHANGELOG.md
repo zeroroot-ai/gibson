@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.110.0](https://github.com/zero-day-ai/gibson/compare/v0.109.0...v0.110.0) (2026-05-21)
+
+
+### Features
+
+* migrate daemon secrets imports from sdk to platform-clients ([#240](https://github.com/zero-day-ai/gibson/issues/240)) ([3ca57d4](https://github.com/zero-day-ai/gibson/commit/3ca57d4f5a25e1f020ba39f3ac35065bdbc1f99b))
+
 ## [0.109.0](https://github.com/zero-day-ai/gibson/compare/v0.108.0...v0.109.0) (2026-05-20)
 
 
