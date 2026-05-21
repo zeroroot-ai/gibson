@@ -10,14 +10,14 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
-	// NOTE: budget remains imported from the OSS SDK while sdk#106 (extract
-	// budget *status* types to gibson.budget_status.v1) is in flight. The
-	// platform-sdk previously also shipped gibson.budget.v1 (v0.3.0), which
-	// caused a protoreflect dual-registration panic at daemon init(); see
-	// platform-sdk#10 + platform-sdk!fix in v0.4.0 which removed it. Once
-	// sdk#106 lands and BudgetService is re-extracted to platform-sdk,
-	// flip this import back to the platform-sdk path.
-	budgetpb "github.com/zero-day-ai/sdk/api/gen/gibson/budget/v1"
+	// sdk#106 (MERGED) split the budget surface in two:
+	//   - admin BudgetService    → platform-sdk/gen/gibson/budget/v1   (`budgetpb` here)
+	//   - customer-visible enum  → sdk/api/gen/gibson/budget_status/v1 (`budgetstatuspb`)
+	// This handler implements the admin service, but its request/response
+	// messages embed `BudgetScope` which still lives on the OSS side, so we
+	// pull in both.
+	budgetpb "github.com/zero-day-ai/platform-sdk/gen/gibson/budget/v1"
+	budgetstatuspb "github.com/zero-day-ai/sdk/api/gen/gibson/budget_status/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -79,13 +79,13 @@ func (s *DaemonServer) budgetEnforcerAdmin() (budgetEnforcerAdminIface, error) {
 }
 
 // scopeFromProto maps the wire enum to the internal Scope.
-func scopeFromProto(s budgetpb.BudgetScope) (budget.Scope, error) {
+func scopeFromProto(s budgetstatuspb.BudgetScope) (budget.Scope, error) {
 	switch s {
-	case budgetpb.BudgetScope_BUDGET_SCOPE_USER:
+	case budgetstatuspb.BudgetScope_BUDGET_SCOPE_USER:
 		return budget.ScopeUser, nil
-	case budgetpb.BudgetScope_BUDGET_SCOPE_TEAM:
+	case budgetstatuspb.BudgetScope_BUDGET_SCOPE_TEAM:
 		return budget.ScopeTeam, nil
-	case budgetpb.BudgetScope_BUDGET_SCOPE_TENANT:
+	case budgetstatuspb.BudgetScope_BUDGET_SCOPE_TENANT:
 		return budget.ScopeTenant, nil
 	}
 	return "", status_grpc.Error(codes.InvalidArgument, "scope must be user, team, or tenant")
