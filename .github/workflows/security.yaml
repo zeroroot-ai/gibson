@@ -21,8 +21,23 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # govulncheck walks the full transitive go.mod graph; private
+      # platform-clients + platform-sdk fetches need git auth. Same
+      # pattern as gibsoncheck.yml `analyze`.
+      GONOSUMDB: github.com/zero-day-ai/*
+      GOPRIVATE: github.com/zero-day-ai/*
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure git credentials for private modules
+        run: |
+          printf 'machine github.com\nlogin oauth2\npassword %s\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.netrc"
+          chmod 0600 "$HOME/.netrc"
+          git config --global credential.helper store
+          printf 'https://oauth2:%s@github.com\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.git-credentials"
 
       - uses: actions/setup-go@v5
         with:

@@ -24,8 +24,28 @@ jobs:
       actions: read
       contents: read
       security-events: write
+    env:
+      # GONOSUMDB + GOPRIVATE tell the Go toolchain to skip the public
+      # checksum database for private zero-day-ai modules and fetch them
+      # directly via git. Must be set before setup-go (which may invoke
+      # `go mod download`). Mirrors gibsoncheck.yml `analyze`.
+      GONOSUMDB: github.com/zero-day-ai/*
+      GOPRIVATE: github.com/zero-day-ai/*
     steps:
       - uses: actions/checkout@v4
+
+      # Configure git credentials BEFORE setup-go so module download works
+      # against the private platform-clients / platform-sdk repos.
+      # PRIVATE_REPO_TOKEN is the org-wide PAT with read access to all
+      # zero-day-ai repos. Same block lives in gibsoncheck.yml.
+      - name: Configure git credentials for private modules
+        run: |
+          printf 'machine github.com\nlogin oauth2\npassword %s\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.netrc"
+          chmod 0600 "$HOME/.netrc"
+          git config --global credential.helper store
+          printf 'https://oauth2:%s@github.com\n' \
+            "${{ secrets.PRIVATE_REPO_TOKEN }}" >> "$HOME/.git-credentials"
 
       - uses: actions/setup-go@v5
         with:
