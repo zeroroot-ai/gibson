@@ -371,6 +371,109 @@ func TestValidationError_ErrorMessageMentionsCapabilityAndSteps(t *testing.T) {
 	}
 }
 
+// TestRunner_Run_ContinueOnBlocked_IteratesPastPermanentFail locks in
+// the teardown-saga step-isolation contract (tenant-operator#184): a
+// permanent fail on step B must NOT bypass step C. Step B's Blocked
+// condition is still set; step C still runs; at end-of-loop the
+// outcome is Blocked with the first blocked step's error, but step C
+// observed its own success.
+func TestRunner_Run_ContinueOnBlocked_IteratesPastPermanentFail(t *testing.T) {
+	permanent := &saga.ValidationError{Missing: map[saga.ClientCapability][]string{saga.CapabilityKubernetes: {"B"}}}
+
+	aRan, bRan, cRan := false, false, false
+	a := newStep("A", "ACond")
+	a.provisionFn = func(_ context.Context, _ saga.ConditionedObject, _ *saga.Deps) (bool, error) {
+		aRan = true
+		return true, nil
+	}
+	b := newStep("B", "BCond")
+	b.requires = []string{"A"}
+	b.provisionFn = func(_ context.Context, _ saga.ConditionedObject, _ *saga.Deps) (bool, error) {
+		bRan = true
+		return false, permanent
+	}
+	c := newStep("C", "CCond")
+	c.requires = []string{"B"}
+	c.provisionFn = func(_ context.Context, _ saga.ConditionedObject, _ *saga.Deps) (bool, error) {
+		cRan = true
+		return true, nil
+	}
+
+	r := &saga.Runner{
+		Deps:              &saga.Deps{},
+		ContinueOnBlocked: true,
+	}
+	obj := &fakeObj{ObjectMeta: metav1.ObjectMeta{Name: "test", Generation: 1}}
+	res := r.Run(context.Background(), obj, []saga.Step{a, b, c}, "Deleted")
+
+	if !aRan {
+		t.Error("A did not run")
+	}
+	if !bRan {
+		t.Error("B did not run")
+	}
+	if !cRan {
+		t.Error("C did not run — step-isolation regression (tenant-operator#184)")
+	}
+	if !res.Blocked {
+		t.Error("expected RunResult.Blocked=true at end of run (first-blocked carryover)")
+	}
+	if res.AllComplete {
+		t.Error("AllComplete=true despite a permanent fail")
+	}
+	if res.Err == nil || !errors.Is(res.Err, permanent) {
+		t.Errorf("Err = %v; want permanent (first-blocked carryover)", res.Err)
+	}
+
+	// Step B condition is False; step C condition is True.
+	if c := saga.FindCondition(*obj.GetConditions(), "BCond"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Errorf("BCond = %+v; want ConditionFalse", c)
+	}
+	if c := saga.FindCondition(*obj.GetConditions(), "CCond"); c == nil || c.Status != metav1.ConditionTrue {
+		t.Errorf("CCond = %+v; want ConditionTrue", c)
+	}
+	// Object-level Blocked condition set True (continues to record).
+	if c := saga.FindCondition(*obj.GetConditions(), "Blocked"); c == nil || c.Status != metav1.ConditionTrue {
+		t.Error("expected object-level Blocked condition True")
+	}
+	// finalPhase NOT set when any step blocked.
+	if obj.GetPhase() == "Deleted" {
+		t.Error("finalPhase set despite a blocked step (would falsely advertise teardown complete)")
+	}
+}
+
+// TestRunner_Run_ContinueOnBlocked_OffByDefault locks in the existing
+// halt-on-permanent behavior when ContinueOnBlocked is unset. Provision
+// sagas must not regress.
+func TestRunner_Run_ContinueOnBlocked_OffByDefault(t *testing.T) {
+	permanent := &saga.ValidationError{Missing: map[saga.ClientCapability][]string{saga.CapabilityKubernetes: {"B"}}}
+	bRan, cRan := false, false
+	b := newStep("B", "BCond")
+	b.provisionFn = func(_ context.Context, _ saga.ConditionedObject, _ *saga.Deps) (bool, error) {
+		bRan = true
+		return false, permanent
+	}
+	c := newStep("C", "CCond")
+	c.requires = []string{"B"}
+	c.provisionFn = func(_ context.Context, _ saga.ConditionedObject, _ *saga.Deps) (bool, error) {
+		cRan = true
+		return true, nil
+	}
+	r := &saga.Runner{Deps: &saga.Deps{}}
+	obj := &fakeObj{ObjectMeta: metav1.ObjectMeta{Name: "test", Generation: 1}}
+	res := r.Run(context.Background(), obj, []saga.Step{b, c}, "Ready")
+
+	if !bRan {
+		t.Error("B did not run")
+	}
+	if cRan {
+		t.Error("C ran despite ContinueOnBlocked=false (provision semantics regression)")
+	}
+	if !res.Blocked {
+		t.Error("Blocked=false on permanent fail in default-mode")
+	}
+}
+
 // Compile-time check that fakeObj satisfies ConditionedObject.
 var _ saga.ConditionedObject = (*fakeObj)(nil)
 
