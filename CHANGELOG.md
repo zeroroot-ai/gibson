@@ -62,6 +62,13 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.111.0](https://github.com/zero-day-ai/gibson/compare/v0.110.0...v0.111.0) (2026-05-21)
+
+
+### Features
+
+* migrate budget service handler to platform-sdk import ([#243](https://github.com/zero-day-ai/gibson/issues/243)) ([b28fd39](https://github.com/zero-day-ai/gibson/commit/b28fd39767a3c1a909713e7b9780b82991dac288))
+
 ## [0.110.0](https://github.com/zero-day-ai/gibson/compare/v0.109.0...v0.110.0) (2026-05-21)
 
 
