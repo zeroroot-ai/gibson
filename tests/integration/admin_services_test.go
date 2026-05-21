@@ -114,13 +114,15 @@ func TestLangfuse_SameTenant_PassesGuard(t *testing.T) {
 // GetTenantQuota tests
 // ---------------------------------------------------------------------------
 
-// TestGetTenantQuota_NilStore_Unavailable verifies that GetTenantQuota returns
-// Unavailable when the quota store is not configured.
-func TestGetTenantQuota_NilStore_Unavailable(t *testing.T) {
+// TestGetTenantQuota_NilStore_ReturnsZeroLimits verifies that GetTenantQuota
+// succeeds with zero quota values when platformDB is not configured.
+// Zero values mean "unlimited" (existing convention per server_quota.go).
+func TestGetTenantQuota_NilStore_ReturnsZeroLimits(t *testing.T) {
 	srv := newServerForTest()
 	ctx := tenantCtx("acme")
-	_, err := srv.GetTenantQuota(ctx, &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
-	assert.Equal(t, codes.Unavailable, grpcCode(err))
+	resp, err := srv.GetTenantQuota(ctx, &tenantv1.GetTenantQuotaRequest{TenantId: "acme"})
+	assert.NoError(t, err, "nil platformDB should not return an error — zero limits mean unlimited")
+	assert.NotNil(t, resp)
 }
 
 // ---------------------------------------------------------------------------

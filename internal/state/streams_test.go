@@ -2,7 +2,9 @@ package state
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1469,8 +1471,9 @@ func setupTestClient(t *testing.T) *StateClient {
 
 	client, err := NewStateClient(cfg)
 	if err != nil {
-		// Check if it's a connection error
-		if err == redis.Nil {
+		// Skip when Redis is simply not available (connection refused, redis.Nil, etc.).
+		// These tests are infrastructure-dependent; CI without a local Redis should skip.
+		if err == redis.Nil || isRedisUnavailableError(err) {
 			t.Skip("Redis not available for testing")
 		}
 		// For module errors, create a basic client without health check
@@ -1505,4 +1508,22 @@ func createBasicTestClient(t *testing.T, cfg *Config) *StateClient {
 		client: client,
 		config: cfg,
 	}
+}
+
+// isRedisUnavailableError returns true when the error indicates Redis is not
+// reachable (connection refused, network unreachable, etc.). Used by
+// setupTestClient to skip tests rather than fatally fail when Redis is absent.
+func isRedisUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var connErr *ConnectionError
+	if errors.As(err, &connErr) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "connection failed") ||
+		strings.Contains(s, "no such host") ||
+		strings.Contains(s, "i/o timeout")
 }

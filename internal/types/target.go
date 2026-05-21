@@ -43,8 +43,13 @@ func (t TargetType) IsValid() bool {
 	}
 }
 
-// MarshalJSON implements json.Marshaler
+// MarshalJSON implements json.Marshaler. It returns an error for invalid
+// TargetType values so that callers are notified early rather than silently
+// emitting an unrecognised string into JSON output.
 func (t TargetType) MarshalJSON() ([]byte, error) {
+	if !t.IsValid() {
+		return nil, fmt.Errorf("invalid target type: %s", string(t))
+	}
 	return json.Marshal(string(t))
 }
 

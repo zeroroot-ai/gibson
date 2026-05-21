@@ -261,15 +261,38 @@ func (s *RedisCheckpointStore) ListByThread(ctx context.Context, threadID string
 	return s.ListCheckpoints(ctx, threadID, opts)
 }
 
-// Delete removes a checkpoint by ID.
-// Note: This requires thread ID for efficiency. Use DeleteThreadCheckpoints instead.
+// Delete removes a checkpoint by ID. The reverse index written by Save maps
+// checkpointID → threadID so the caller does not need to supply the thread ID.
 func (s *RedisCheckpointStore) Delete(ctx context.Context, checkpointID string) error {
 	if checkpointID == "" {
 		return fmt.Errorf("checkpoint ID cannot be empty")
 	}
 
-	// Similar to Load - requires thread ID for efficiency
-	return fmt.Errorf("Delete by ID alone requires a reverse index; use DeleteThreadCheckpoints instead")
+	// Resolve thread ID via the reverse index (same pattern as Load).
+	rdb := s.client.Client()
+	threadID, err := rdb.Get(ctx, s.checkpointRidKey(checkpointID)).Result()
+	if err != nil {
+		if err == redis.Nil {
+			// Already gone — treat as a no-op.
+			return nil
+		}
+		return fmt.Errorf("failed to read checkpoint reverse index: %w", err)
+	}
+
+	checkpointKey := s.checkpointKey(threadID, checkpointID)
+	indexKey := s.checkpointIndexKey(threadID)
+	ridKey := s.checkpointRidKey(checkpointID)
+
+	pipe := rdb.Pipeline()
+	// Delete the document, remove from the sorted set, and delete the reverse-index entry.
+	pipe.Del(ctx, checkpointKey)
+	pipe.ZRem(ctx, indexKey, checkpointID)
+	pipe.Del(ctx, ridKey)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to delete checkpoint %s: %w", checkpointID, err)
+	}
+
+	return nil
 }
 
 // DeleteMany removes multiple checkpoints in a single operation.
@@ -278,8 +301,12 @@ func (s *RedisCheckpointStore) DeleteMany(ctx context.Context, checkpointIDs []s
 		return nil
 	}
 
-	// Similar limitation - requires thread IDs for proper key construction
-	return fmt.Errorf("DeleteMany by ID alone requires a reverse index; use DeleteThreadCheckpoints instead")
+	for _, id := range checkpointIDs {
+		if err := s.Delete(ctx, id); err != nil {
+			return fmt.Errorf("failed to delete checkpoint %s: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // GetLatest retrieves the most recent checkpoint for a thread.

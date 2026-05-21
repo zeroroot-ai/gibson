@@ -145,20 +145,21 @@ func (c *LongTermMemoryConfig) Validate() error {
 	validBackends := map[string]bool{
 		"embedded": true, // In-memory vector store (non-persistent)
 		"redis":    true, // Redis vector database
+		"qdrant":   true, // Qdrant vector database
+		"milvus":   true, // Milvus vector database
 	}
 
 	if c.Backend != "" && !validBackends[c.Backend] {
 		return types.NewError(types.CONFIG_VALIDATION_FAILED,
-			fmt.Sprintf("invalid backend '%s', must be one of: embedded, redis", c.Backend))
+			fmt.Sprintf("invalid backend '%s', must be one of: embedded, redis, qdrant, milvus", c.Backend))
 	}
 
-	// If using an external backend other than redis, ConnectionURL is required.
-	// Redis backend reuses the daemon's existing StateClient connection.
-	if c.Backend != "" && c.Backend != "embedded" && c.Backend != "redis" {
-		if c.ConnectionURL == "" {
-			return types.NewError(types.CONFIG_VALIDATION_FAILED,
-				fmt.Sprintf("connection_url is required for backend '%s'", c.Backend))
-		}
+	// If using an external backend that requires a connection URL (not redis, not embedded),
+	// ConnectionURL is required. Redis reuses the daemon's existing StateClient connection.
+	connectionURLRequired := c.Backend != "" && c.Backend != "embedded" && c.Backend != "redis"
+	if connectionURLRequired && c.ConnectionURL == "" {
+		return types.NewError(types.CONFIG_VALIDATION_FAILED,
+			fmt.Sprintf("connection_url is required for backend '%s'", c.Backend))
 	}
 
 	// Validate embedder configuration

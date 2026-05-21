@@ -309,9 +309,9 @@ func TestTaxonomyRegistry_AllNodeTypes(t *testing.T) {
 	nodeTypes := registry.NodeTypes()
 	assert.NotEmpty(t, nodeTypes, "expected non-empty node types list")
 
-	// Verify core types are present
-	assert.Contains(t, nodeTypes, "Host", "expected core Host type")
-	assert.Contains(t, nodeTypes, "Port", "expected core Port type")
+	// Verify core types are present (taxonomy uses lowercase names)
+	assert.Contains(t, nodeTypes, "host", "expected core host type")
+	assert.Contains(t, nodeTypes, "port", "expected core port type")
 
 	// Verify extension types are present
 	assert.Contains(t, nodeTypes, "custom_type_1", "expected extension type custom_type_1")

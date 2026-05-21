@@ -138,7 +138,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/daemon/api/server.go:1581":                   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "response helper, nil data means empty response"},
 		"internal/daemon/api/server_provider_config.go:75":     astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "nil cfg means no provider overlay"},
 		"internal/daemon/api/server_provider_config.go:153":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "audit logger conditionally wired"},
-		"internal/daemon/api/server_provider_exec.go:104":      astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "budget enforcer conditionally wired; remove with budget-required slice"},
+		"internal/daemon/api/server_provider_exec.go:110":      astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "budget enforcer conditionally wired; remove with budget-required slice"},
 		"internal/daemon/api/typed_value_helpers.go:25":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
 		"internal/daemon/api/typed_value_helpers.go:77":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
 		"internal/daemon/api/typed_value_helpers.go:89":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "typed-value converter, nil input → nil output"},
@@ -147,9 +147,9 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// internal/daemon — core
 		"internal/daemon/compliance_sink_adapter.go:32": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "compliance sink registered conditionally; remove with compliance-required slice"},
 		"internal/daemon/daemon.go:481":                 astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "SPIFFE wiring optional in non-SPIFFE deployments; reassert when SPIFFE-everywhere lands"},
-		"internal/daemon/grpc.go:2030":                  astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "pool nil-guard during shutdown race"},
-		"internal/daemon/grpc.go:2040":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite err/m/Checkpoint guard for caller-shape"},
-		"internal/daemon/grpc.go:2504":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection optional in non-graphrag deployments"},
+		"internal/daemon/grpc.go:2086":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up"},
+		"internal/daemon/grpc.go:2096":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite err/m/Checkpoint guard for legacy checkpoint payload"},
+		"internal/daemon/grpc.go:2560":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection optional in non-graphrag deployments"},
 		"internal/daemon/graph_bootstrap.go:411":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tenant-value lookup helper, nil means no scoping"},
 		"internal/daemon/infrastructure.go:94":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},
 		"internal/daemon/log_watcher.go:197":            astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "log watcher file handle nil-guard during teardown"},
@@ -161,7 +161,8 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// internal/datapool
 		"internal/datapool/conn_ops_finding.go:62":  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "goredis.Nil sentinel + nil result handling"},
 		"internal/datapool/conn_ops_mission.go:159": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "goredis.Nil sentinel + nil result handling"},
-		"internal/datapool/conn_ops_mission.go:375": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "redis client nil-guard predates pool-required hardening"},
+		"internal/datapool/conn_ops_mission.go:376": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "redis client nil-guard predates pool-required hardening"},
+		"internal/datapool/recovery_hook.go:72":     astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Redis nil guard in recovery hook; conn.Redis nil means Redis not configured for this tenant — silent return is correct"},
 
 		// internal/harness — middleware + adapters
 		"internal/harness/callback_service.go:2366":             astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite data/tracerProvider nil-guard for observability"},
@@ -286,6 +287,9 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// internal/prompt — composite value-shape guards
 		"internal/prompt/condition.go:89": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite field/value shape — both-nil is a valid match shape"},
 		"internal/prompt/condition.go:92": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite field/value shape — either-nil short-circuit"},
+
+		// internal/reservednames — fsnotify watcher nil guard in watch loop
+		"internal/reservednames/provider.go:177": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "watcher nil guard in watchLoop; nil watcher means no fsnotify subscription (e.g. in-memory mode or test)"},
 
 		// internal/secrets — composite nil-receiver shim for the SPIRE JWT source
 		"internal/secrets/jwtsource/spire.go:136": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim for SPIRE JWT source"},

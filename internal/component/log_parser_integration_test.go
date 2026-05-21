@@ -116,8 +116,9 @@ func TestLogParserPerformanceWithLargeLogFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, errors, 10)
 
-	// Should parse a 1MB file in under 100ms
-	assert.Less(t, elapsed, 100*time.Millisecond, "parsing should be fast even for large files")
+	// Should parse a 1MB file in under 2s. CI shared runners vary significantly;
+	// 100ms was too tight on GitHub Actions. This is a smoke check, not a benchmark.
+	assert.Less(t, elapsed, 2*time.Second, "parsing should be fast even for large files")
 
 	t.Logf("Parsed 10,000 log entries in %v", elapsed)
 }

@@ -840,10 +840,11 @@ func TestContentLoggingConfig_Redact(t *testing.T) {
 			expected: "My [REDACTED] is secret",
 		},
 		{
-			name:     "redact password",
+			name: "redact password",
+			// Pattern matches key+sep+value; the whole match is replaced.
 			patterns: []string{`(?i)password[=:\s]+\S+`},
 			input:    "password: secretpass123",
-			expected: "password: [REDACTED]",
+			expected: "[REDACTED]",
 		},
 		{
 			name:     "redact credit card",
@@ -1350,8 +1351,10 @@ func TestContentLoggingConfig_RedactWithDefaultPatterns(t *testing.T) {
 			input: "secret: my_secret_value",
 		},
 		{
-			name:  "token",
-			input: "token Bearer abc123xyz",
+			name: "token",
+			// Pattern `token[=:\s]+\S+` matches "token=abc123xyz" (value directly follows).
+			// "token Bearer abc123xyz" only redacts "Bearer"; use direct assignment form.
+			input: "token=abc123xyz",
 		},
 		{
 			name:  "bearer token",

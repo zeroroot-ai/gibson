@@ -162,8 +162,9 @@ func TestStreamPrefixWriter_FormatsLines_Stdout(t *testing.T) {
 	assert.Contains(t, contentStr, "[STDOUT]")
 	assert.Contains(t, contentStr, "test message")
 
-	// Verify RFC3339 timestamp format (basic check)
-	assert.Regexp(t, `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} \[STDOUT\] test message`, contentStr)
+	// Verify RFC3339 timestamp format. time.RFC3339 produces "Z" for UTC
+	// and "+HH:MM" for non-UTC zones; accept both.
+	assert.Regexp(t, `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2}) \[STDOUT\] test message`, contentStr)
 }
 
 func TestStreamPrefixWriter_FormatsLines_Stderr(t *testing.T) {
@@ -195,8 +196,9 @@ func TestStreamPrefixWriter_FormatsLines_Stderr(t *testing.T) {
 	assert.Contains(t, contentStr, "[STDERR]")
 	assert.Contains(t, contentStr, "error message")
 
-	// Verify RFC3339 timestamp format (basic check)
-	assert.Regexp(t, `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} \[STDERR\] error message`, contentStr)
+	// Verify RFC3339 timestamp format. time.RFC3339 produces "Z" for UTC
+	// and "+HH:MM" for non-UTC zones; accept both.
+	assert.Regexp(t, `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2}) \[STDERR\] error message`, contentStr)
 }
 
 func TestStreamPrefixWriter_MultipleLines(t *testing.T) {

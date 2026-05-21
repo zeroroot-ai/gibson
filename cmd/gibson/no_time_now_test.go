@@ -81,7 +81,7 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 		"internal/daemon/api/server_entitlements.go:208":       astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "audit-log timestamp; RFC3339Nano"},
 
 		// server_budget.go — budget applied-at timestamp
-		"internal/daemon/api/server_budget.go:348": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "AppliedAtUnix wall-clock for budget operations"},
+		"internal/daemon/api/server_budget.go:355": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "AppliedAtUnix wall-clock for budget operations"},
 
 		// server_model_access.go — timeNowUnix wrapper helper
 		"internal/daemon/api/server_model_access.go:291": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "named helper wrapping wall-clock Unix timestamp"},

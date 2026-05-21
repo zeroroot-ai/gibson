@@ -67,7 +67,8 @@ func TestResultMerger_Merge_AllSources(t *testing.T) {
 		{Key: "lt1", Value: "longterm1", Score: 0.8, Timestamp: time.Now()},
 	}
 	graphResults := []GraphEntry{
-		{ID: "g1", Type: "host", Score: 0.9, Source: "entity_lookup"},
+		// Source is prefixed with "graph_entity_" in Merge(), so "lookup" → "graph_entity_lookup".
+		{ID: "g1", Type: "host", Score: 0.9, Source: "lookup"},
 	}
 
 	results := merger.Merge(missionResults, longTermResults, graphResults, 10)

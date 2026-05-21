@@ -236,8 +236,10 @@ func interpolateString(s string) string {
 			return defaultValue
 		}
 
-		// If no default and env not set, return empty string (not the original match)
-		return ""
+		// If no default and env not set, return the original reference unchanged.
+		// This preserves ${VAR} in the config output so callers can distinguish
+		// "env var unset" from "env var set to empty string".
+		return match
 	})
 }
 

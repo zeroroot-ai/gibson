@@ -28,6 +28,8 @@ import (
 	"github.com/zero-day-ai/sdk/protoresolver"
 	sdkqueue "github.com/zero-day-ai/sdk/queue"
 	sdktypes "github.com/zero-day-ai/sdk/types"
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -654,8 +656,15 @@ func getToolMetadata(t tool.Tool) map[string]string {
 // All dispatch paths route to out-of-process tool implementations. Tools are
 // never compiled into the Gibson daemon.
 func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, request proto.Message, response proto.Message) error {
+	callStart := time.Now()
 	ctx, span := h.tracer.Start(ctx, "harness.CallToolProto")
 	defer span.End()
+
+	inputSize := proto.Size(request)
+	span.SetAttributes(
+		attribute.String("tool.name", name),
+		attribute.Int("tool.input_size", inputSize),
+	)
 
 	h.logger.Debug("calling tool with proto messages",
 		"tool", name,
@@ -937,6 +946,14 @@ executeProto:
 			"mode":   "proto",
 		})
 
+		durationMs := time.Since(callStart).Milliseconds()
+		span.SetAttributes(
+			attribute.Int64("tool.duration_ms", durationMs),
+			attribute.String("tool.status", "error"),
+		)
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, "tool execution failed")
+
 		// Emit tool result event (failure)
 		if h.eventLogger != nil {
 			h.eventLogger.Event(ctx, EventToolResult, "tool result", ToolResultEventData{
@@ -1027,6 +1044,13 @@ metricsSuccess:
 	h.logger.Debug("tool execution successful with proto",
 		"tool", name,
 		"remote", isRemote)
+
+	durationMs := time.Since(callStart).Milliseconds()
+	span.SetAttributes(
+		attribute.Int64("tool.duration_ms", durationMs),
+		attribute.String("tool.status", "success"),
+	)
+	span.SetStatus(otelcodes.Ok, "tool execution successful")
 
 	// Emit tool result event (success)
 	if h.eventLogger != nil {
