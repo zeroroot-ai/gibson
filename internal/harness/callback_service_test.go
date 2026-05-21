@@ -17,6 +17,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 	sdkagent "github.com/zero-day-ai/sdk/agent"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zero-day-ai/sdk/auth"
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
@@ -58,9 +59,34 @@ func TestHarnessCallbackServiceUnregister(t *testing.T) {
 }
 
 // newMockHarness creates a minimal harness for testing.
+// tenantAwareMockHarness is a lightweight AgentHarness stub that satisfies the
+// tenant isolation check in getHarness (Mission().TenantID must match the
+// context tenant). Tests that exercise getHarness must use this mock and pass
+// a matching tenant context.
+type tenantAwareMockHarness struct {
+	DefaultAgentHarness
+	tenantID string
+}
+
+func (m *tenantAwareMockHarness) Mission() MissionContext {
+	return MissionContext{TenantID: m.tenantID}
+}
+
+func (m *tenantAwareMockHarness) Workspace() workspace.Workspace          { return nil }
+func (m *tenantAwareMockHarness) Workspaces() map[string]workspace.Workspace {
+	return map[string]workspace.Workspace{}
+}
+
 func newMockHarness() AgentHarness {
-	// Create a minimal harness with nil dependencies - we only need it for storage/retrieval
-	return &DefaultAgentHarness{}
+	// Create a minimal harness. Tests that route through getHarness need a
+	// tenant context; use tenantAwareMockHarness + auth.ContextWithTenantString.
+	return &tenantAwareMockHarness{tenantID: "test-tenant"}
+}
+
+// testCtxWithTenant returns a context carrying "test-tenant" so getHarness
+// tenant-isolation checks pass in tests that use newMockHarness().
+func testCtxWithTenant() context.Context {
+	return auth.ContextWithTenantString(context.Background(), "test-tenant")
 }
 
 // TestGetHarness_WithExplicitMissionId tests getHarness with explicit MissionId field.
@@ -84,8 +110,8 @@ func TestGetHarness_WithExplicitMissionId(t *testing.T) {
 		MissionId: "mission-123",
 	}
 
-	// Test getHarness
-	harness, err := service.getHarness(context.Background(), contextInfo)
+	// Test getHarness — pass a tenant context matching the mock harness tenant.
+	harness, err := service.getHarness(testCtxWithTenant(), contextInfo)
 
 	// Verify
 	require.NoError(t, err)
@@ -202,7 +228,7 @@ func TestHarnessCallbackService_CreateMission(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
-	assert.Contains(t, resp.Error.Message, "not yet implemented")
+	assert.Contains(t, resp.Error.Message, "not configured")
 }
 
 // TestHarnessCallbackService_RunMission tests the RunMission RPC handler.
@@ -225,7 +251,7 @@ func TestHarnessCallbackService_RunMission(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
-	assert.Contains(t, resp.Error.Message, "not yet implemented")
+	assert.Contains(t, resp.Error.Message, "not configured")
 }
 
 // TestHarnessCallbackService_GetMissionStatus tests the GetMissionStatus RPC handler.
@@ -248,7 +274,7 @@ func TestHarnessCallbackService_GetMissionStatus(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
-	assert.Contains(t, resp.Error.Message, "not yet implemented")
+	assert.Contains(t, resp.Error.Message, "not configured")
 }
 
 // TestHarnessCallbackService_WaitForMission tests the WaitForMission RPC handler.
@@ -272,7 +298,7 @@ func TestHarnessCallbackService_WaitForMission(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
-	assert.Contains(t, resp.Error.Message, "not yet implemented")
+	assert.Contains(t, resp.Error.Message, "not configured")
 }
 
 // TestHarnessCallbackService_ListMissions tests the ListMissions RPC handler.
@@ -294,7 +320,7 @@ func TestHarnessCallbackService_ListMissions(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
-	assert.Contains(t, resp.Error.Message, "not yet implemented")
+	assert.Contains(t, resp.Error.Message, "not configured")
 }
 
 // TestHarnessCallbackService_CancelMission tests the CancelMission RPC handler.
@@ -317,7 +343,7 @@ func TestHarnessCallbackService_CancelMission(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
-	assert.Contains(t, resp.Error.Message, "not yet implemented")
+	assert.Contains(t, resp.Error.Message, "not configured")
 }
 
 // TestHarnessCallbackService_GetMissionResults tests the GetMissionResults RPC handler.
@@ -340,7 +366,7 @@ func TestHarnessCallbackService_GetMissionResults(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Error)
-	assert.Contains(t, resp.Error.Message, "not yet implemented")
+	assert.Contains(t, resp.Error.Message, "not configured")
 }
 
 // ============================================================================
@@ -541,7 +567,8 @@ func (m *mockHarnessWithResolver) GetPreviousRunFindings(ctx context.Context, fi
 }
 
 func (m *mockHarnessWithResolver) Mission() MissionContext {
-	return MissionContext{}
+	// Return a tenant so getHarness tenant-isolation check passes.
+	return MissionContext{TenantID: "test-tenant"}
 }
 
 func (m *mockHarnessWithResolver) Workspace() workspace.Workspace {
@@ -677,7 +704,7 @@ func TestCallToolProto_WithExternalAgentDynamicType(t *testing.T) {
 	}
 
 	// Execute CallToolProto
-	ctx := context.Background()
+	ctx := testCtxWithTenant()
 	resp, err := service.CallToolProto(ctx, req)
 
 	// Verify response
@@ -782,7 +809,7 @@ func TestCallToolProto_InputJSONToTypedMessage(t *testing.T) {
 				OutputType: "testtool.ToolOutput",
 			}
 
-			ctx := context.Background()
+			ctx := testCtxWithTenant()
 			resp, err := service.CallToolProto(ctx, req)
 
 			require.NoError(t, err)
@@ -870,7 +897,7 @@ func TestCallToolProto_OutputTypedMessageToJSON(t *testing.T) {
 				OutputType: "testtool.ToolOutput",
 			}
 
-			ctx := context.Background()
+			ctx := testCtxWithTenant()
 			resp, err := service.CallToolProto(ctx, req)
 
 			require.NoError(t, err)
@@ -950,7 +977,7 @@ func TestCallToolProto_DiscoveryResultExtraction(t *testing.T) {
 		OutputType: "testtool.ToolOutput",
 	}
 
-	ctx := context.Background()
+	ctx := testCtxWithTenant()
 	resp, err := service.CallToolProto(ctx, req)
 
 	require.NoError(t, err)
@@ -1081,7 +1108,7 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 			harness := tc.setupHarness()
 			registry.Register(tc.request.Context.MissionId, tc.request.Context.AgentName, harness)
 
-			ctx := context.Background()
+			ctx := testCtxWithTenant()
 			resp, err := service.CallToolProto(ctx, tc.request)
 
 			require.NoError(t, err, "RPC should not return error")

@@ -55,6 +55,7 @@ const (
 
 	// Tool methods
 	MethodCallToolProto          HarnessMethod = "CallToolProto"
+	MethodCallToolProtoStream    HarnessMethod = "CallToolProtoStream"
 	MethodListTools              HarnessMethod = "ListTools"
 	MethodGetToolDescriptor      HarnessMethod = "GetToolDescriptor"
 	MethodGetToolCapabilities    HarnessMethod = "GetToolCapabilities"
@@ -90,6 +91,8 @@ const (
 	MethodGetMissionRunHistory    HarnessMethod = "GetMissionRunHistory"
 	MethodTarget                  HarnessMethod = "Target"
 	MethodCheckpoint              HarnessMethod = "Checkpoint"
+	MethodWorkspace               HarnessMethod = "Workspace"
+	MethodWorkspaces              HarnessMethod = "Workspaces"
 
 	// Observability getters (pure, non-emitting).
 	MethodTracer     HarnessMethod = "Tracer"
@@ -132,6 +135,7 @@ var actionTable = ActionTable{
 
 	// --- Tools: execute-shaped; per-tool refinement happens at call-site ---
 	MethodCallToolProto:          {Action: ActionToolCall, DefaultEffect: EffectExecute, Emit: true},
+	MethodCallToolProtoStream:    {Action: ActionToolCall, DefaultEffect: EffectExecute, Emit: true},
 	MethodListTools:              {Action: ActionToolCall, DefaultEffect: EffectRead, Emit: false},
 	MethodGetToolDescriptor:      {Action: ActionToolCall, DefaultEffect: EffectRead, Emit: false},
 	MethodGetToolCapabilities:    {Action: ActionToolCall, DefaultEffect: EffectRead, Emit: false},
@@ -166,6 +170,9 @@ var actionTable = ActionTable{
 	MethodGetMissionRunHistory:    {Action: ActionMissionLifecycle, DefaultEffect: EffectRead, Emit: false},
 	MethodTarget:                  {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
 	MethodCheckpoint:              {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
+	// Workspace getters return the agent's workspace handle; pure non-emitting accessors.
+	MethodWorkspace:               {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
+	MethodWorkspaces:              {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
 
 	// --- Observability getters (no signal) ---
 	MethodTracer:     {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},

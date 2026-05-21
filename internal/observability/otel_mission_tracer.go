@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -75,6 +76,16 @@ func NewOTelMissionTracer(tp trace.TracerProvider, mp metric.MeterProvider, cfg 
 		if err := defaultCfg.CompilePatterns(); err == nil {
 			cfg = &defaultCfg
 		}
+	}
+
+	// Fall back to no-op providers when callers pass nil — allows the tracer
+	// to be constructed in test environments or daemon paths where OTel is
+	// not yet configured.
+	if tp == nil {
+		tp = trace.NewNoopTracerProvider()
+	}
+	if mp == nil {
+		mp = metricnoop.NewMeterProvider()
 	}
 
 	return &OTelMissionTracer{

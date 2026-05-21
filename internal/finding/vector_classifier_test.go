@@ -190,11 +190,13 @@ func TestVectorClassifier_Register_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
-	// Search to verify the updated metadata
+	// Search to verify the updated metadata. The store ID is prefixed with the
+	// tenant ID to prevent cross-tenant collisions, so the stored ID has the form
+	// "tenant_<tenant_id>:<category_name>".
 	results, err := memStore.Search(ctx, []float64{}, 10)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
-	assert.Equal(t, "jailbreak", results[0].ID)
+	assert.Contains(t, results[0].ID, "jailbreak", "ID should contain the category name")
 	assert.Equal(t, "Updated description for jailbreak attempts", results[0].Metadata["description"])
 }
 

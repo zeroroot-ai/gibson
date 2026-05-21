@@ -2,6 +2,7 @@ package memory
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -179,8 +180,10 @@ func TestMissionMemoryConfig_ApplyDefaults(t *testing.T) {
 			name:    "all defaults",
 			initial: MissionMemoryConfig{},
 			expected: MissionMemoryConfig{
-				CacheSize: 1000,
-				EnableFTS: false, // Default is false (zero value)
+				CacheSize:    1000,
+				EnableFTS:    false,               // Default is false (zero value)
+				TTL:          24 * time.Hour,       // Default set by ApplyDefaults
+				CompletedTTL: 2 * time.Hour,        // Default set by ApplyDefaults
 			},
 		},
 		{
@@ -189,19 +192,25 @@ func TestMissionMemoryConfig_ApplyDefaults(t *testing.T) {
 				CacheSize: 5000,
 			},
 			expected: MissionMemoryConfig{
-				CacheSize: 5000,
-				EnableFTS: false,
+				CacheSize:    5000,
+				EnableFTS:    false,
+				TTL:          24 * time.Hour,
+				CompletedTTL: 2 * time.Hour,
 			},
 		},
 		{
 			name: "no defaults needed",
 			initial: MissionMemoryConfig{
-				CacheSize: 2000,
-				EnableFTS: true,
+				CacheSize:    2000,
+				EnableFTS:    true,
+				TTL:          48 * time.Hour,
+				CompletedTTL: 4 * time.Hour,
 			},
 			expected: MissionMemoryConfig{
-				CacheSize: 2000,
-				EnableFTS: true,
+				CacheSize:    2000,
+				EnableFTS:    true,
+				TTL:          48 * time.Hour,
+				CompletedTTL: 4 * time.Hour,
 			},
 		},
 	}
@@ -309,10 +318,10 @@ func TestLongTermMemoryConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid qdrant config",
+			name: "valid redis config",
 			config: LongTermMemoryConfig{
-				Backend:       "qdrant",
-				ConnectionURL: "http://localhost:6333",
+				Backend:       "redis",
+				ConnectionURL: "redis://localhost:6379",
 				Embedder: EmbedderConfig{
 					Provider: "native",
 				},
@@ -322,17 +331,7 @@ func TestLongTermMemoryConfig_Validate(t *testing.T) {
 		{
 			name: "invalid backend",
 			config: LongTermMemoryConfig{
-				Backend: "redis",
-				Embedder: EmbedderConfig{
-					Provider: "native",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "qdrant without connection url",
-			config: LongTermMemoryConfig{
-				Backend: "qdrant",
+				Backend: "invalid_store",
 				Embedder: EmbedderConfig{
 					Provider: "native",
 				},

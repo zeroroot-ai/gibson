@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -691,9 +692,26 @@ func setupRedisTestClient(t testing.TB) *state.StateClient {
 	cfg.URL = "redis://localhost:6379"
 
 	client, err := state.NewStateClient(cfg)
-	require.NoError(t, err, "Failed to create Redis client")
+	if err != nil {
+		if isRedisUnavailableErr(err) {
+			t.Skip("Redis not available for testing: " + err.Error())
+		}
+		require.NoError(t, err, "Failed to create Redis client")
+	}
 
 	return client
+}
+
+// isRedisUnavailableErr returns true when the error indicates Redis is not reachable.
+func isRedisUnavailableErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "connection failed") ||
+		strings.Contains(s, "no such host") ||
+		strings.Contains(s, "i/o timeout")
 }
 
 // makeTestEmbedding creates a test embedding vector with the specified dimensions.

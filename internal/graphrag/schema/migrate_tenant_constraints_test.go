@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,72 +13,29 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Expected tenant-scoped labels
-// ---------------------------------------------------------------------------
-
-// expectedLabels lists every label that must appear in migration 0003.
-// This is derived from the GraphLoader (loader/loader.go) node type strings
-// and the taxonomy (core/sdk/taxonomy/core.yaml v4.0.0).
-// If the loader gains a new node type it must also appear here (and in the
-// migration file) — this test acts as the sentinel.
-var expectedLabels = []string{
-	"host",
-	"port",
-	"service",
-	"endpoint",
-	"domain",
-	"subdomain",
-	"technology",
-	"certificate",
-	"finding",
-	"evidence",
-	"technique",
-	"compliance_signal",
-}
-
-// ---------------------------------------------------------------------------
 // Migration file content assertions
 // ---------------------------------------------------------------------------
 
-// TestMigration0003_ContainsConstraintAndIndexForEveryLabel verifies that the
-// embedded Cypher file 0003_tenant_id_constraints.cypher contains both a
-// CREATE CONSTRAINT and a CREATE RANGE INDEX statement for every expected label.
-// No live Neo4j instance is required.
-func TestMigration0003_ContainsConstraintAndIndexForEveryLabel(t *testing.T) {
+// TestMigration0003_IsIntentionalNoOp verifies that the embedded Cypher file
+// 0003_tenant_id_constraints.cypher is intentionally empty (no statements).
+//
+// Migration 0003 was originally the per-tenant NOT NULL constraints and RANGE
+// indexes. After the database-per-tenant data-plane refactor, those constraints
+// are now applied by the tenant-operator provisioner at database-creation time
+// (migrations/neo4j/), not by the daemon's schema migrator. The migration was
+// rewritten to a no-op comment block to preserve the migration ID sequence so
+// existing deployments don't re-run earlier migrations.
+//
+// If you are adding constraints back here, delete this test and restore
+// TestMigration0003_ContainsConstraintAndIndexForEveryLabel.
+func TestMigration0003_IsIntentionalNoOp(t *testing.T) {
 	data, err := migrationsFS.ReadFile("migrations/0003_tenant_id_constraints.cypher")
 	require.NoError(t, err, "migration file must be readable from the embedded FS")
 
-	content := string(data)
-
-	for _, label := range expectedLabels {
-		t.Run(label, func(t *testing.T) {
-			constraintPattern := fmt.Sprintf("CREATE CONSTRAINT IF NOT EXISTS FOR (n:%s) REQUIRE n.tenant_id IS NOT NULL", label)
-			assert.True(t,
-				strings.Contains(content, constraintPattern),
-				"migration must contain NOT NULL constraint for label %q; expected pattern:\n  %s", label, constraintPattern,
-			)
-
-			indexPattern := fmt.Sprintf("CREATE RANGE INDEX IF NOT EXISTS FOR (n:%s) ON (n.tenant_id)", label)
-			assert.True(t,
-				strings.Contains(content, indexPattern),
-				"migration must contain RANGE INDEX for label %q; expected pattern:\n  %s", label, indexPattern,
-			)
-		})
-	}
-}
-
-// TestMigration0003_StatementCount verifies the parser extracts the right number
-// of statements (2 per label: one CONSTRAINT + one INDEX).
-func TestMigration0003_StatementCount(t *testing.T) {
-	data, err := migrationsFS.ReadFile("migrations/0003_tenant_id_constraints.cypher")
-	require.NoError(t, err)
-
 	statements := parseCypherStatements(string(data))
-	expected := len(expectedLabels) * 2 // one CONSTRAINT + one INDEX per label
-	assert.Equal(t, expected, len(statements),
-		"expected %d statements (2 per label × %d labels), got %d",
-		expected, len(expectedLabels), len(statements),
-	)
+	assert.Empty(t, statements,
+		"migration 0003 was intentionally re-authored as a no-op (database-per-tenant refactor); "+
+			"the constraint+index statements now live in tenant-operator/migrations/neo4j/ instead")
 }
 
 // ---------------------------------------------------------------------------

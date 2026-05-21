@@ -281,9 +281,14 @@ func TestRetention_TTLCleanup(t *testing.T) {
 	// Create old checkpoints (simulate by creating and then waiting)
 	oldCheckpoints := createTestCheckpoints(3, missionID, threadID)
 	for _, cp := range oldCheckpoints {
-		// Backdate the checkpoint
+		// Backdate the checkpoint; recompute checksum because CreatedAt is part
+		// of the checksum input, so modifying it after createTestCheckpoints would
+		// produce a mismatch on load.
 		cp.CreatedAt = time.Now().Add(-5 * time.Second)
-		err := store.Save(ctx, cp)
+		checksum, err := cp.ComputeChecksum()
+		require.NoError(t, err)
+		cp.Checksum = checksum
+		err = store.Save(ctx, cp)
 		require.NoError(t, err)
 	}
 
