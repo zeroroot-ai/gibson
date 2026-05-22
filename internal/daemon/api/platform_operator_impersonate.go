@@ -22,6 +22,11 @@ import (
 // Requires the "platform_operator" FGA relation on system_tenant:_system.
 // Authorization is enforced by the Envoy + ext-authz layer; this handler
 // validates the request parameters and issues the token.
+//
+// gibsoncheck:allow tenant-from-request — by design the caller's identity
+// is a platform operator, NOT the target tenant; req.TenantId names the
+// impersonation target. FGA enforces the platform_operator relation on
+// system_tenant:_system at ext-authz before this handler runs.
 func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *platformv1.ImpersonateTenantRequest) (*platformv1.ImpersonateTenantResponse, error) {
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")

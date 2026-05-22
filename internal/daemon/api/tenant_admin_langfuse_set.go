@@ -21,6 +21,11 @@ import (
 // SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.
 //
 // Cross-tenant guard: request tenant_id must match context tenant.
+//
+// gibsoncheck:allow tenant-from-request — TenantAdminService RPCs take the
+// target tenant in the request body; the inline `auth.TenantStringFromContext(ctx)
+// != req.TenantId` guard plus FGA's tenant_admin relation at ext-authz cover
+// the cross-tenant case.
 func (s *DaemonServer) SetTenantLangfuseCredentials(ctx context.Context, req *tenantv1.SetTenantLangfuseCredentialsRequest) (*tenantv1.SetTenantLangfuseCredentialsResponse, error) {
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
