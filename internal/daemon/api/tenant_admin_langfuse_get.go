@@ -21,6 +21,11 @@ import (
 // Returns NOT_FOUND if no credentials have been configured for the tenant.
 //
 // Cross-tenant guard: request tenant_id must match context tenant.
+//
+// gibsoncheck:allow tenant-from-request — TenantAdminService RPCs take the
+// target tenant in the request body; the inline `auth.TenantStringFromContext(ctx)
+// != req.TenantId` guard plus FGA's tenant_admin relation at ext-authz cover
+// the cross-tenant case.
 func (s *DaemonServer) GetTenantLangfuseCredentials(ctx context.Context, req *tenantv1.GetTenantLangfuseCredentialsRequest) (*tenantv1.GetTenantLangfuseCredentialsResponse, error) {
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
