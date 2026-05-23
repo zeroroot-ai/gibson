@@ -104,15 +104,60 @@ func TestBedrockCredentialSchema(t *testing.T) {
 		keys[f.Key] = f
 	}
 	require.Contains(t, keys, "aws_region")
+	require.Contains(t, keys, "use_irsa")
 	require.Contains(t, keys, "aws_access_key_id")
 	require.Contains(t, keys, "aws_secret_access_key")
 	require.Contains(t, keys, "aws_session_token")
 
-	// Access key & secret must be Secret=true; region is not a secret.
+	// Access key & secret must be Secret=true; region and use_irsa are not secrets.
 	assert.True(t, keys["aws_access_key_id"].Secret)
 	assert.True(t, keys["aws_secret_access_key"].Secret)
 	assert.True(t, keys["aws_session_token"].Secret)
 	assert.False(t, keys["aws_region"].Secret)
+	assert.False(t, keys["use_irsa"].Secret)
+}
+
+func TestBedrockProvider_IRSA_SkipsStaticKeyValidation(t *testing.T) {
+	// With use_irsa=true, the constructor must NOT reject a config that has no
+	// static credentials — the IRSA / default credential chain provides them at
+	// runtime. We clear env vars so no ambient credentials can influence the
+	// mismatch guard either.
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	cfg := llm.ProviderConfig{
+		Type:         llm.ProviderBedrock,
+		DefaultModel: "anthropic.claude-3-sonnet-20240229-v1:0",
+		Extra: map[string]string{
+			"use_irsa":   "true",
+			"aws_region": "us-east-1",
+		},
+	}
+	_, err := NewBedrockProvider(cfg)
+	// Construction itself should not fail due to missing static credentials.
+	// Any error here must NOT be the "must both be set or both empty" mismatch guard.
+	if err != nil && strings.Contains(err.Error(), "must both be set") {
+		t.Fatalf("IRSA path should not require static credentials: %v", err)
+	}
+}
+
+func TestBedrockProvider_IRSA_False_StillEnforcesMismatch(t *testing.T) {
+	// Explicit use_irsa=false must still trigger the mismatch guard when only
+	// one of the key pair is provided.
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	cfg := llm.ProviderConfig{
+		Type:         llm.ProviderBedrock,
+		DefaultModel: "anthropic.claude-3-sonnet-20240229-v1:0",
+		Extra: map[string]string{
+			"use_irsa":          "false",
+			"aws_access_key_id": "AKIAEXAMPLE",
+			// aws_secret_access_key intentionally absent
+		},
+	}
+	_, err := NewBedrockProvider(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "aws_access_key_id")
+	assert.Contains(t, err.Error(), "aws_secret_access_key")
 }
 
 func TestTranslateBedrockError(t *testing.T) {
