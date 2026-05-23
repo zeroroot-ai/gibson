@@ -541,6 +541,12 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.admin.v1.DaemonAdminService/CompleteMissionCUE":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.daemon.admin.v1.DaemonAdminService/CreateMissionDefinition":
     relation: "writer"
     object_type: "tenant"
@@ -548,6 +554,12 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.admin.v1.DaemonAdminService/HoverMissionCUE":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.daemon.admin.v1.DaemonAdminService/StartComponent":
     relation: "admin"
     object_type: "tenant"
@@ -562,6 +574,12 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.admin.v1.DaemonAdminService/ValidateMissionCUE":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.daemon.discovery.v1.DiscoveryService/DescribeAgent":
     relation: "member"
     object_type: "tenant"

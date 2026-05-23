@@ -37,7 +37,7 @@ func (s *DaemonServer) SaveMissionDraft(ctx context.Context, req *tenantv1.SaveM
 		return nil, err
 	}
 
-	draftID, err := s.missionDraftStore.Save(ctx, tenantID, req.GetName(), req.GetYaml(), req.GetDraftId())
+	draftID, err := s.missionDraftStore.Save(ctx, tenantID, req.GetName(), req.GetCueSource(), req.GetDraftId())
 	if err != nil {
 		return nil, status_grpc.Errorf(codes.Internal, "save mission draft: %v", err)
 	}
@@ -114,7 +114,7 @@ func (s *DaemonServer) GetMissionDraft(ctx context.Context, req *tenantv1.GetMis
 			Name:      d.Name,
 			CreatedAt: d.CreatedAt,
 			UpdatedAt: d.UpdatedAt,
-			Yaml:      d.YAML,
+			CueSource: d.YAML,
 		},
 	}, nil
 }

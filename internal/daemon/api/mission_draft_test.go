@@ -54,7 +54,7 @@ func TestMissionDraft_SaveListGetDelete(t *testing.T) {
 
 	// Save: new draft (empty draft_id).
 	saveResp, err := srv.SaveMissionDraft(ctx, &tenantv1.SaveMissionDraftRequest{
-		TenantId: tenant, Name: "first", Yaml: "name: test\n",
+		TenantId: tenant, Name: "first", CueSource: "name: test\n",
 	})
 	require.NoError(t, err, "SaveMissionDraft must succeed when store is wired")
 	require.NotEmpty(t, saveResp.GetDraftId())
@@ -62,7 +62,7 @@ func TestMissionDraft_SaveListGetDelete(t *testing.T) {
 
 	// Save: overwrite (same draft_id) — must reuse the same id.
 	saveResp2, err := srv.SaveMissionDraft(ctx, &tenantv1.SaveMissionDraftRequest{
-		TenantId: tenant, Name: "first-edit", Yaml: "name: test\nedited: true\n",
+		TenantId: tenant, Name: "first-edit", CueSource: "name: test\nedited: true\n",
 		DraftId: draftID,
 	})
 	require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestMissionDraft_SaveListGetDelete(t *testing.T) {
 	require.NotNil(t, getResp.GetDraft())
 	assert.Equal(t, draftID, getResp.Draft.GetId())
 	assert.Equal(t, "first-edit", getResp.Draft.GetName())
-	assert.Equal(t, "name: test\nedited: true\n", getResp.Draft.GetYaml())
+	assert.Equal(t, "name: test\nedited: true\n", getResp.Draft.GetCueSource())
 
 	// Delete: must succeed.
 	_, err = srv.DeleteMissionDraft(ctx, &tenantv1.DeleteMissionDraftRequest{
@@ -139,7 +139,7 @@ func TestMissionDraft_TenantIsolation(t *testing.T) {
 
 	// Save under tenant-a.
 	saveResp, err := srv.SaveMissionDraft(ctx, &tenantv1.SaveMissionDraftRequest{
-		TenantId: "tenant-a", Name: "secret", Yaml: "name: a\n",
+		TenantId: "tenant-a", Name: "secret", CueSource: "name: a\n",
 	})
 	require.NoError(t, err)
 	draftID := saveResp.GetDraftId()
@@ -181,7 +181,7 @@ func TestMissionDraft_StoreNotConfigured(t *testing.T) {
 	// missionDraftStore intentionally nil.
 
 	_, err := srv.SaveMissionDraft(context.Background(), &tenantv1.SaveMissionDraftRequest{
-		TenantId: "tenant-a", Name: "x", Yaml: "x",
+		TenantId: "tenant-a", Name: "x", CueSource: "x",
 	})
 	require.Error(t, err)
 	assert.Equal(t, codes.Unavailable, draftCode(t, err))
@@ -194,7 +194,7 @@ func TestMissionDraft_RequiresTenantID(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := srv.SaveMissionDraft(ctx, &tenantv1.SaveMissionDraftRequest{
-		Name: "x", Yaml: "x",
+		Name: "x", CueSource: "x",
 	})
 	require.Error(t, err)
 	assert.Equal(t, codes.InvalidArgument, draftCode(t, err))
