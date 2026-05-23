@@ -57,15 +57,17 @@ type redisPerTenant struct {
 	dbIndexes   map[auth.TenantID]int // in-process cache: tenant → db index
 	adminClient *redis.Client         // db 0 only — for master index lookups
 	addr        string
+	password    string
 	closed      bool
 }
 
-func newRedisPerTenant(addr string) (*redisPerTenant, error) {
+func newRedisPerTenant(addr, password string) (*redisPerTenant, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("datapool: redis: addr is required")
 	}
 	adminClient := redis.NewClient(&redis.Options{
 		Addr:            addr,
+		Password:        password,
 		DB:              redisDB0,
 		PoolSize:        redisProductionOpts.PoolSize,
 		DialTimeout:     redisProductionOpts.DialTimeout,
@@ -78,6 +80,7 @@ func newRedisPerTenant(addr string) (*redisPerTenant, error) {
 		dbIndexes:   make(map[auth.TenantID]int),
 		adminClient: adminClient,
 		addr:        addr,
+		password:    password,
 	}, nil
 }
 
@@ -118,6 +121,7 @@ func (r *redisPerTenant) ForTenant(ctx context.Context, tenant auth.TenantID) (*
 	// (audit finding P1, zero-day-ai/.github#101).
 	client := redis.NewClient(&redis.Options{
 		Addr:            r.addr,
+		Password:        r.password,
 		DB:              dbIndex,
 		PoolSize:        redisProductionOpts.PoolSize,
 		DialTimeout:     redisProductionOpts.DialTimeout,

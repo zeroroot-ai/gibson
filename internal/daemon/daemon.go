@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -871,7 +872,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			// which is acceptable for Phase D (fail-open until F lands).
 			poolCfg := datapool.DefaultConfig()
 			if d.config.Redis.URL != "" {
-				poolCfg.RedisAddr = d.config.Redis.URL
+				// Redis.URL is a full URL (redis://:pass@host:port); RedisAddr wants host:port only.
+				if u, err := url.Parse(d.config.Redis.URL); err == nil && u.Host != "" {
+					poolCfg.RedisAddr = u.Host
+					poolCfg.RedisPassword, _ = u.User.Password()
+				} else {
+					poolCfg.RedisAddr = d.config.Redis.URL
+				}
 			}
 			// Wire Neo4j per-tenant resolver based on TenantMode.
 			// Spec: per-tenant-data-plane-completion Task 16 / Req 5.5.

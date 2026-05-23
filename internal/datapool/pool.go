@@ -56,6 +56,9 @@ type Config struct {
 	// RedisAddr is the host:port of the Redis instance.
 	RedisAddr string
 
+	// RedisPassword is the AUTH password for the Redis instance.
+	RedisPassword string
+
 	// Neo4jURI is the bolt URI for the Neo4j cluster.
 	Neo4jURI string
 
