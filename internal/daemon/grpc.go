@@ -900,8 +900,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
 		d.logger.Info(ctx, "audit writer wired into TenantAdminService")
 	}
-	// Wire pool getter for ExportFindings (Neo4j DashboardQueries path) and
-	// GetMissionSourceYAML. Spec: dashboard-neo4j-crud-removal.
+	// Wire pool getter for ExportFindings (Neo4j DashboardQueries path).
+	// Spec: dashboard-neo4j-crud-removal.
 	daemonSvc.WithPoolGetter(func() datapool.Pool { return d.pool })
 	tenantv1.RegisterTenantAdminServiceServer(srv, daemonSvc)
 	d.logger.Info(ctx, "registered TenantAdminService gRPC endpoint")
@@ -2513,7 +2513,6 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		MissionDefinitionID: missionDefinitionID,
 		CreatedAt:           mission.NewUnixTimeNow(),
 		UpdatedAt:           mission.NewUnixTimeNow(),
-		SourceYAML:          req.SourceYAML,
 	}
 	// Copy string metadata to map[string]any.
 	if req.Metadata != nil {

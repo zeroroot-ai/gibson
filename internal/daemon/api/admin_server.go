@@ -4,25 +4,27 @@
 // the admin/writer-relation RPC surface extracted from the OSS
 // gibson.daemon.v1.DaemonService by slice gibson#227. The OSS DaemonService
 // retains member/can_use RPCs; this private platform-sdk surface carries
-// the four admin-tier writers:
+// the seven admin-tier writers:
 //
 //   - StartComponent
 //   - StopComponent
 //   - BuildComponent
-//   - CreateMissionDefinition
+//   - CreateMissionDefinition  (oneof: definition_serialized | cue_source)
+//   - ValidateMissionCUE
+//   - CompleteMissionCUE
+//   - HoverMissionCUE
 //
 // The adapter delegates each call to the same internal DaemonInterface
 // methods the OSS DaemonServer uses, so business logic stays in one
 // place. The wire types differ for CreateMissionDefinition: the
-// platform-sdk request carries `bytes definition_serialized = 1` (a
-// wire-encoded gibson.mission.v1.MissionDefinition from the OSS SDK)
-// instead of a nested message. The adapter Unmarshals back into the
-// OSS MissionDefinition before forwarding. The Start/Stop/Build wire
-// types are structurally identical; the adapter constructs the
-// platform-sdk-typed responses directly.
+// platform-sdk request carries a oneof source with either
+// `bytes definition_serialized = 1` (a wire-encoded
+// gibson.mission.v1.MissionDefinition from the OSS SDK) or
+// `string cue_source = 2` (raw CUE text rendered via cueruntime.Export).
+// The CUE editor RPCs delegate directly to the cueruntime package.
 //
 // Parent PRD: zero-day-ai/.github#101.
-// Refs: platform-sdk PRs #7/#8, gibson PRs #226/#227/#233, sdk#105.
+// Refs: platform-sdk PRs #7/#8/#27, gibson PRs #226/#227/#233/#299, sdk#105.
 package api
 
 import (
@@ -37,6 +39,8 @@ import (
 
 	daemonadminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/admin/v1"
 	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+
+	"github.com/zero-day-ai/gibson/internal/mission/cueruntime"
 )
 
 // DaemonAdminServer wraps the OSS DaemonServer to expose the admin/writer
@@ -150,22 +154,48 @@ func (s *DaemonAdminServer) BuildComponent(ctx context.Context, req *daemonadmin
 	}, nil
 }
 
-// CreateMissionDefinition unmarshals the OSS gibson.mission.v1.MissionDefinition
-// from the platform-sdk request's `definition_serialized: bytes` slot and
-// delegates to DaemonInterface.CreateMissionDefinition. The platform-sdk
-// response carries a flat subset of the OSS response (id, name, version) so
-// callers that only need to chain a CreateMission do not have to pull the
-// full MissionDefinitionInfo wire shape into platform-sdk.
+// CreateMissionDefinition resolves the definition from the platform-sdk
+// request's oneof source and delegates to DaemonInterface.CreateMissionDefinition.
+//
+// Two source paths are supported (ADR-0027 wholesale-flip: only these two, no
+// parallel codepath):
+//
+//   - definition_serialized: wire-encoded gibson.mission.v1.MissionDefinition
+//     proto bytes (backward-compatible with existing callers).
+//   - cue_source: raw CUE text rendered via cueruntime.Export to a
+//     MissionDefinition proto (new CUE editor path from platform-sdk v0.7.0).
+//
+// The platform-sdk response carries a flat subset of the OSS response
+// (id, name, version) so callers that only need to chain a CreateMission do
+// not have to pull the full MissionDefinitionInfo wire shape into platform-sdk.
 func (s *DaemonAdminServer) CreateMissionDefinition(ctx context.Context, req *daemonadminv1.CreateMissionDefinitionRequest) (*daemonadminv1.CreateMissionDefinitionResponse, error) {
-	raw := req.GetDefinitionSerialized()
-	if len(raw) == 0 {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition_serialized is required")
+	var def *missionpb.MissionDefinition
+
+	switch v := req.GetSource().(type) {
+	case *daemonadminv1.CreateMissionDefinitionRequest_DefinitionSerialized:
+		raw := v.DefinitionSerialized
+		if len(raw) == 0 {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "definition_serialized is required")
+		}
+		def = &missionpb.MissionDefinition{}
+		if err := proto.Unmarshal(raw, def); err != nil {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "definition_serialized unmarshal failed: %v", err)
+		}
+
+	case *daemonadminv1.CreateMissionDefinitionRequest_CueSource:
+		if v.CueSource == "" {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "cue_source is required")
+		}
+		exported, err := cueruntime.Export(ctx, v.CueSource)
+		if err != nil {
+			return nil, status_grpc.Errorf(codes.InvalidArgument, "cue_source export failed: %v", err)
+		}
+		def = exported
+
+	default:
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "one of definition_serialized or cue_source is required")
 	}
 
-	def := &missionpb.MissionDefinition{}
-	if err := proto.Unmarshal(raw, def); err != nil {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition_serialized unmarshal failed: %v", err)
-	}
 	if def.GetName() == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "definition name is required")
 	}
@@ -188,5 +218,58 @@ func (s *DaemonAdminServer) CreateMissionDefinition(ctx context.Context, req *da
 		MissionDefinitionId: result.MissionDefinitionID,
 		Name:                result.Info.Name,
 		Version:             result.Info.Version,
+	}, nil
+}
+
+// ValidateMissionCUE compiles the CUE source via cueruntime.Validate and
+// returns structured diagnostics. A nil or empty Diagnostics slice means the
+// source is valid against the mission schema.
+func (s *DaemonAdminServer) ValidateMissionCUE(ctx context.Context, req *daemonadminv1.ValidateMissionCUERequest) (*daemonadminv1.ValidateMissionCUEResponse, error) {
+	diags, err := cueruntime.Validate(ctx, req.GetCueSource())
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.Internal, "ValidateMissionCUE: engine error: %v", err)
+	}
+	resp := &daemonadminv1.ValidateMissionCUEResponse{}
+	for _, d := range diags {
+		resp.Diagnostics = append(resp.Diagnostics, &daemonadminv1.CUEDiagnostic{
+			Line:     d.Line,
+			Col:      d.Col,
+			Message:  d.Message,
+			Severity: d.Severity,
+		})
+	}
+	return resp, nil
+}
+
+// CompleteMissionCUE returns completion items at the given cursor position by
+// delegating to cueruntime.Complete. Line and col are 1-based.
+func (s *DaemonAdminServer) CompleteMissionCUE(ctx context.Context, req *daemonadminv1.CompleteMissionCUERequest) (*daemonadminv1.CompleteMissionCUEResponse, error) {
+	items, err := cueruntime.Complete(ctx, req.GetCueSource(), req.GetLine(), req.GetCol())
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.Internal, "CompleteMissionCUE: engine error: %v", err)
+	}
+	resp := &daemonadminv1.CompleteMissionCUEResponse{}
+	for _, item := range items {
+		resp.Items = append(resp.Items, &daemonadminv1.CUECompletionItem{
+			Label:         item.Label,
+			Detail:        item.Detail,
+			Documentation: item.Documentation,
+			Kind:          item.Kind,
+		})
+	}
+	return resp, nil
+}
+
+// HoverMissionCUE returns Markdown hover documentation for the symbol at the
+// given cursor position by delegating to cueruntime.Hover. Line and col are
+// 1-based. Returns an empty Markdown string when no documentation exists at
+// the cursor position.
+func (s *DaemonAdminServer) HoverMissionCUE(ctx context.Context, req *daemonadminv1.HoverMissionCUERequest) (*daemonadminv1.HoverMissionCUEResponse, error) {
+	markdown, err := cueruntime.Hover(ctx, req.GetCueSource(), req.GetLine(), req.GetCol())
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.Internal, "HoverMissionCUE: engine error: %v", err)
+	}
+	return &daemonadminv1.HoverMissionCUEResponse{
+		Markdown: markdown,
 	}, nil
 }
