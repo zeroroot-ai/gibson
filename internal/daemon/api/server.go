@@ -131,7 +131,7 @@ type DaemonServer struct {
 	findingStore findingStoreIface
 
 	// poolGetter returns the live per-tenant data-plane pool.
-	// Used by ExportFindings (Neo4j Cypher path) and GetMissionSourceYAML.
+	// Used by ExportFindings (Neo4j Cypher path).
 	// May be nil; when nil those RPCs return codes.Unavailable.
 	// Wired by the daemon via WithPoolGetter. Spec: dashboard-neo4j-crud-removal.
 	poolGetter func() datapool.Pool
@@ -787,11 +787,6 @@ type CreateMissionData struct {
 	Variables           map[string]string
 	MemoryContinuity    string
 	Metadata            map[string]string
-	// SourceYAML is the original dashboard-authored YAML, persisted on the
-	// mission record so GetMissionSourceYAML can serve it later.
-	// Empty for programmatic callers (clone flow returns codes.NotFound).
-	// Spec: dashboard-neo4j-crud-removal.
-	SourceYAML string
 }
 
 // CreateMissionResultData represents the result of creating a mission.
@@ -2353,7 +2348,6 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 		Variables:           req.Variables,
 		MemoryContinuity:    req.MemoryContinuity,
 		Metadata:            req.Metadata,
-		SourceYAML:          req.GetSourceYaml(),
 	}
 
 	// Call daemon implementation

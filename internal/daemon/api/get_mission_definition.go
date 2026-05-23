@@ -4,10 +4,7 @@
 // a single installed mission definition, looked up by name. Every author-facing field
 // is returned: workspace, constraints, per-node retry/data/reuse policies, etc.
 //
-// Returns codes.NotFound when the name is not registered. This is the structured-proto
-// counterpart to GetMissionSourceYAML (which returns the raw YAML string): callers that
-// need the structured fields should use this RPC; callers that need the original YAML
-// for re-editing should use GetMissionSourceYAML.
+// Returns codes.NotFound when the name is not registered.
 //
 // Spec: mission-author-experience M5 (gibson#134).
 package api
