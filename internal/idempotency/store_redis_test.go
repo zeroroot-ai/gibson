@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -18,23 +16,99 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// newTestRedis constructs an in-process miniredis-backed *redis.Client
-// for use in tests. The mock is cleaned up automatically when t ends.
-func newTestRedis(t *testing.T) (*goredis.Client, *miniredis.Miniredis) {
-	t.Helper()
-	mr := miniredis.RunT(t)
-	c := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = c.Close() })
-	return c, mr
+// memRedis is an in-memory redisBackend for unit tests. It supports TTL
+// by recording the absolute expiry time and evicting on Get. The mu lock
+// is exported to allow tests to manipulate internal state (e.g. backdate
+// expiry to simulate TTL expiry without real sleeps).
+type memRedis struct {
+	mu      sync.Mutex
+	entries map[string]memEntry
 }
 
-func newTestStore(t *testing.T) (*RedisStore, *miniredis.Miniredis) {
+type memEntry struct {
+	value     []byte
+	expiresAt time.Time // zero means no TTL
+}
+
+func newMemRedis() *memRedis {
+	return &memRedis{entries: make(map[string]memEntry)}
+}
+
+func (m *memRedis) GetBytes(_ context.Context, key string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.entries[key]
+	if !ok {
+		return nil, nil
+	}
+	if !e.expiresAt.IsZero() && time.Now().After(e.expiresAt) {
+		delete(m.entries, key)
+		return nil, nil
+	}
+	cp := make([]byte, len(e.value))
+	copy(cp, e.value)
+	return cp, nil
+}
+
+func (m *memRedis) SetNX(_ context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e, exists := m.entries[key]; exists {
+		if e.expiresAt.IsZero() || time.Now().Before(e.expiresAt) {
+			return false, nil
+		}
+	}
+	var exp time.Time
+	if ttl > 0 {
+		exp = time.Now().Add(ttl)
+	}
+	cp := make([]byte, len(value))
+	copy(cp, value)
+	m.entries[key] = memEntry{value: cp, expiresAt: exp}
+	return true, nil
+}
+
+func (m *memRedis) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var exp time.Time
+	if ttl > 0 {
+		exp = time.Now().Add(ttl)
+	}
+	cp := make([]byte, len(value))
+	copy(cp, value)
+	m.entries[key] = memEntry{value: cp, expiresAt: exp}
+	return nil
+}
+
+// backdateExpiry moves the expiry of key into the past, simulating TTL expiry
+// without real sleeps.
+func (m *memRedis) backdateExpiry(key string, ago time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e, ok := m.entries[key]; ok {
+		e.expiresAt = time.Now().Add(-ago)
+		m.entries[key] = e
+	}
+}
+
+// ttlOf returns the remaining TTL for key.
+func (m *memRedis) ttlOf(key string) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.entries[key]
+	if !ok || e.expiresAt.IsZero() {
+		return 0
+	}
+	return time.Until(e.expiresAt)
+}
+
+func newTestStore(t *testing.T) (*RedisStore, *memRedis) {
 	t.Helper()
-	c, mr := newTestRedis(t)
-	s := NewRedisStore(c, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
-	// Speed up polling for tests that exercise the pending wait loop.
+	backend := newMemRedis()
+	s := NewRedisStore(backend, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
 	s.pollInterval = 10 * time.Millisecond
-	return s, mr
+	return s, backend
 }
 
 func anyOfString(t *testing.T, v string) *anypb.Any {
@@ -90,19 +164,18 @@ func TestRedisStore_SetThenGetRoundTripsTerminalError(t *testing.T) {
 }
 
 func TestRedisStore_TTLExpiryEvictsEntry(t *testing.T) {
-	s, mr := newTestStore(t)
+	s, backend := newTestStore(t)
 	ctx := context.Background()
 
 	resp := anyOfString(t, "value")
 	require.NoError(t, s.Set(ctx, "t1", "/svc/M", "k1", &CachedResponse{Response: resp}, 30*time.Second))
 
-	// Confirm presence.
 	_, found, err := s.Get(ctx, "t1", "/svc/M", "k1")
 	require.NoError(t, err)
 	require.True(t, found)
 
-	// Fast-forward the miniredis clock past the TTL.
-	mr.FastForward(31 * time.Second)
+	// Simulate TTL expiry by backdating the stored entry's expiry time.
+	backend.backdateExpiry(redisKey("t1", "/svc/M", "k1"), 1*time.Second)
 
 	_, found, err = s.Get(ctx, "t1", "/svc/M", "k1")
 	require.NoError(t, err)
@@ -117,7 +190,6 @@ func TestRedisStore_MarkPendingOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, planted)
 
-	// Second caller observes the sentinel and does not plant.
 	planted, err = s.MarkPending(ctx, "t1", "/svc/M", "k1", 5*time.Second)
 	require.NoError(t, err)
 	assert.False(t, planted)
@@ -131,16 +203,12 @@ func TestRedisStore_GetReturnsCachedOnceSentinelOverwritten(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, planted)
 
-	// Background: another goroutine overwrites the sentinel with a
-	// real cached response after a brief delay.
 	resp := anyOfString(t, "final-result")
 	go func() {
 		time.Sleep(30 * time.Millisecond)
 		_ = s.Set(ctx, "t1", "/svc/M", "k1", &CachedResponse{Response: resp}, time.Hour)
 	}()
 
-	// Concurrent Get sees the pending sentinel, polls, then finds
-	// the real response within MaxWaitForPending.
 	got, found, err := s.Get(ctx, "t1", "/svc/M", "k1")
 	require.NoError(t, err)
 	require.True(t, found)
@@ -159,16 +227,8 @@ func TestRedisStore_GetGivesUpAfterMaxWaitForPending(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, planted)
 
-	// Shrink the wait window so the test does not block for 5s.
 	s.pollInterval = 10 * time.Millisecond
 
-	// The Get below would wait MaxWaitForPending (5s) before giving
-	// up. We confirm correctness by giving it a context with a
-	// shorter deadline AND verifying the response is "miss". When
-	// the context expires Get returns ctx.Err(); when MaxWait
-	// elapses first it returns (nil, false, nil). Either is
-	// acceptable behaviour for "gave up" — what we test is "did
-	// not block forever".
 	ctxShort, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
 
@@ -180,10 +240,6 @@ func TestRedisStore_GetGivesUpAfterMaxWaitForPending(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-// TestRedisStore_ConcurrentSetGet exercises the case where many
-// goroutines race on the same key. Exactly one MarkPending should
-// return true; the others should observe the sentinel. Once the
-// "winner" calls Set, all readers should see the same cached value.
 func TestRedisStore_ConcurrentSetGet(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -200,7 +256,6 @@ func TestRedisStore_ConcurrentSetGet(t *testing.T) {
 			require.NoError(t, err)
 			if ok {
 				planted.Add(1)
-				// Simulate handler work, then publish the result.
 				time.Sleep(20 * time.Millisecond)
 				require.NoError(t, s.Set(ctx, "t1", "/svc/M", "k1",
 					&CachedResponse{Response: anyOfString(t, "winner")}, time.Hour))
@@ -241,10 +296,7 @@ func TestRedisStore_DistinctTenantsDoNotCollide(t *testing.T) {
 	assert.Equal(t, "B", outB.Value)
 }
 
-// TestCodec_EncodeDecodeRoundTrip ensures both response and terminal
-// error envelopes survive a wire encode/decode round-trip.
 func TestCodec_EncodeDecodeRoundTrip(t *testing.T) {
-	// Response variant.
 	respIn := &CachedResponse{Response: anyOfString(t, "round-trip")}
 	raw, err := encodeEntry(respIn)
 	require.NoError(t, err)
@@ -255,7 +307,6 @@ func TestCodec_EncodeDecodeRoundTrip(t *testing.T) {
 	require.NoError(t, respOut.Response.UnmarshalTo(out))
 	assert.Equal(t, "round-trip", out.Value)
 
-	// Terminal-error variant.
 	errIn := &CachedResponse{TerminalError: &TerminalError{Code: 3, Message: "bad request"}}
 	raw, err = encodeEntry(errIn)
 	require.NoError(t, err)
@@ -266,8 +317,6 @@ func TestCodec_EncodeDecodeRoundTrip(t *testing.T) {
 	assert.Equal(t, "bad request", errOut.TerminalError.Message)
 }
 
-// TestCodec_TypedResponseSurvivesRoundTrip checks a non-trivial proto
-// payload (Timestamp) survives the Any → JSON → Any path.
 func TestCodec_TypedResponseSurvivesRoundTrip(t *testing.T) {
 	ts := timestamppb.New(time.Unix(1700000000, 12345))
 	any, err := anypb.New(ts)
@@ -293,14 +342,13 @@ func TestCodec_RejectsBadEnvelope(t *testing.T) {
 }
 
 func TestRedisStore_SetWithZeroTTLUsesDefault(t *testing.T) {
-	s, mr := newTestStore(t)
+	s, backend := newTestStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, s.Set(ctx, "t1", "/svc/M", "k1",
 		&CachedResponse{Response: anyOfString(t, "x")}, 0))
 
-	// Default TTL is 24h; just verify entry exists and has a TTL.
 	rk := redisKey("t1", "/svc/M", "k1")
-	ttl := mr.TTL(rk)
+	ttl := backend.ttlOf(rk)
 	assert.True(t, ttl > 23*time.Hour, "expected ~24h default TTL, got %s", ttl)
 }

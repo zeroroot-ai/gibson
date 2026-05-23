@@ -78,7 +78,7 @@ func newTestStoreT(t *testing.T) (*idempotency.RedisStore, *miniredis.Miniredis)
 	c := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = c.Close() })
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return idempotency.NewRedisStore(c, logger), mr
+	return NewRedisIdempotencyStore(c, logger), mr
 }
 
 // ctxWithTenant returns a ctx carrying an Identity such that

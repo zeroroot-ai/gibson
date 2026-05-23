@@ -434,7 +434,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Spec: gibson#228 / zero-day-ai/.github#101.
 	if d.stateClient != nil {
 		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
-			idemStore := idempotency.NewRedisStore(redisClient, d.logger.Slog())
+			idemStore := NewRedisIdempotencyStore(redisClient, d.logger.Slog())
 			d.idempotencyStore = idemStore
 			unaryInterceptors = append(unaryInterceptors,
 				idempotencyUnaryInterceptor(idemStore, idempotency.DefaultTTL, d.logger.Slog()))
