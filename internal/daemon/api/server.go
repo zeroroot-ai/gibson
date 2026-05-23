@@ -2537,8 +2537,21 @@ type langfuseCredentialPayload struct {
 
 // GetMyPermissions returns a compact permission summary for the authenticated
 // caller within their current tenant.  It is callable by any authenticated user
-// (no admin relation required).  All FGA queries run in parallel to minimise
-// latency.
+// (no admin relation required).
+//
+// Role closure parity: the FGA model defines admin = [user] or owner, so
+// checking the "admin" relation alone returns true for owners too — but the
+// role string in the response would be "admin", hiding the fact that the
+// caller holds the higher "owner" relation.  The dashboard's permission
+// resolution layer (satisfiesRelation) maps role strings to privilege tiers;
+// if "owner" is not returned when the caller is an owner, the dashboard cannot
+// grant the owner the additional owner-only actions (e.g. transfer ownership).
+//
+// Fix: use BatchCheck for both "owner" and "admin" relations (the same
+// 2-check pattern used by ListMyMemberships / pickHighestRole) so the returned
+// role correctly reflects the caller's highest held relation.
+//
+// Spec: gibson#289 — gibson.owner RBAC permission closure parity.
 func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMyPermissionsRequest) (*daemonpb.GetMyPermissionsResponse, error) {
 	tenantID := req.GetTenantId()
 	if tenantID == "" {
@@ -2567,25 +2580,37 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 		}, nil
 	}
 
-	// Admin check against FGA.
-	isAdmin, err := s.authorizer.Check(ctx,
-		fmt.Sprintf("user:%s", userID),
-		"admin",
-		fmt.Sprintf("tenant:%s", tenantID),
-	)
+	// Check both "owner" and "admin" relations via a single BatchCheck call.
+	// This mirrors the ListMyMemberships / pickHighestRole pattern and ensures
+	// "owner" is returned for users who hold the owner tuple, not "admin"
+	// (which the FGA computed union would also grant them via admin = [user] or owner).
+	//
+	// checks[0] = owner check, checks[1] = admin check.
+	objStr := fmt.Sprintf("tenant:%s", tenantID)
+	userStr := fmt.Sprintf("user:%s", userID)
+	checks := []authz.CheckRequest{
+		{User: userStr, Relation: "owner", Object: objStr},
+		{User: userStr, Relation: "admin", Object: objStr},
+	}
+	results, err := s.authorizer.BatchCheck(ctx, checks)
 	if err != nil {
-		s.logger.WarnContext(ctx, "GetMyPermissions: admin check failed",
+		s.logger.WarnContext(ctx, "GetMyPermissions: BatchCheck failed; defaulting to member",
 			slog.String("tenant_id", tenantID),
 			slog.String("user_id", userID),
 			slog.String("error", err.Error()),
 		)
-		// Non-fatal: proceed with isAdmin=false.
+		// Non-fatal: degrade to member.
+		results = []bool{false, false}
 	}
 
-	role := "member"
-	if isAdmin {
-		role = "admin"
-	}
+	isOwner := len(results) > 0 && results[0]
+	isAdmin := len(results) > 1 && results[1]
+
+	// pickHighestRole: owner > admin > member.
+	// IsAdmin is true whenever the caller holds admin-or-above privilege
+	// (owners satisfy FGA "admin" checks via the computed union).
+	role := pickHighestRole(isOwner, isAdmin)
+	effectiveAdmin := isOwner || isAdmin
 
 	// Component grants and team memberships were previously sourced from the
 	// provisioner package; those features now live in the tenant-operator
@@ -2593,7 +2618,7 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 	return &daemonpb.GetMyPermissionsResponse{
 		TenantId:        tenantID,
 		Role:            role,
-		IsAdmin:         isAdmin,
+		IsAdmin:         effectiveAdmin,
 		ComponentGrants: nil,
 		TeamMemberships: nil,
 	}, nil

@@ -331,3 +331,148 @@ func TestListMyMemberships_RoleDerivation_OverPermissioned(t *testing.T) {
 	assert.Equal(t, "owner", resp.Memberships[0].GetRole(),
 		"tenant-role-taxonomy Req 2.5: over-permissioned (owner+admin) must produce highest role 'owner'")
 }
+
+// ---------------------------------------------------------------------------
+// GetMyPermissions tests — gibson#289 owner RBAC closure parity
+//
+// Asserts that a user with role "owner" receives at minimum all permissions
+// that a user with role "admin" receives, and that the returned role string
+// correctly reflects the highest held FGA relation.
+// ---------------------------------------------------------------------------
+
+// batchCheckForPermissions builds a BatchCheck stub for GetMyPermissions.
+// checks[0] = owner, checks[1] = admin (the order emitted by the handler).
+func batchCheckForPermissions(isOwner, isAdmin bool) func(context.Context, []authz.CheckRequest) ([]bool, error) {
+	return func(_ context.Context, checks []authz.CheckRequest) ([]bool, error) {
+		out := make([]bool, len(checks))
+		for i, c := range checks {
+			switch c.Relation {
+			case "owner":
+				out[i] = isOwner
+			case "admin":
+				out[i] = isAdmin
+			}
+		}
+		return out, nil
+	}
+}
+
+// TestGetMyPermissions_OwnerRole: owner tuple → role "owner", IsAdmin true.
+// Spec: gibson#289 — owner must return role "owner", not "admin".
+func TestGetMyPermissions_OwnerRole(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		batchCheck: batchCheckForPermissions(true, false),
+	}
+
+	ctx := ctxWithSubject(t, "u1")
+	resp, err := s.GetMyPermissions(ctx, &daemonpb.GetMyPermissionsRequest{TenantId: "acme"})
+	require.NoError(t, err)
+	assert.Equal(t, "owner", resp.GetRole(),
+		"gibson#289: owner tuple must produce role 'owner', not 'admin'")
+	assert.True(t, resp.GetIsAdmin(),
+		"gibson#289: owner has admin-level privilege; IsAdmin must be true")
+}
+
+// TestGetMyPermissions_AdminRole: admin-only tuple → role "admin", IsAdmin true.
+func TestGetMyPermissions_AdminRole(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		batchCheck: batchCheckForPermissions(false, true),
+	}
+
+	ctx := ctxWithSubject(t, "u1")
+	resp, err := s.GetMyPermissions(ctx, &daemonpb.GetMyPermissionsRequest{TenantId: "acme"})
+	require.NoError(t, err)
+	assert.Equal(t, "admin", resp.GetRole())
+	assert.True(t, resp.GetIsAdmin())
+}
+
+// TestGetMyPermissions_MemberRole: no owner or admin tuple → role "member", IsAdmin false.
+func TestGetMyPermissions_MemberRole(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		batchCheck: batchCheckForPermissions(false, false),
+	}
+
+	ctx := ctxWithSubject(t, "u1")
+	resp, err := s.GetMyPermissions(ctx, &daemonpb.GetMyPermissionsRequest{TenantId: "acme"})
+	require.NoError(t, err)
+	assert.Equal(t, "member", resp.GetRole())
+	assert.False(t, resp.GetIsAdmin())
+}
+
+// TestGetMyPermissions_OwnerAndAdmin: both owner+admin true (FGA computed union)
+// → highest role "owner", IsAdmin true.
+func TestGetMyPermissions_OwnerAndAdmin(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		batchCheck: batchCheckForPermissions(true, true),
+	}
+
+	ctx := ctxWithSubject(t, "u1")
+	resp, err := s.GetMyPermissions(ctx, &daemonpb.GetMyPermissionsRequest{TenantId: "acme"})
+	require.NoError(t, err)
+	assert.Equal(t, "owner", resp.GetRole(),
+		"gibson#289: over-permissioned (owner+admin via FGA computed union) must produce role 'owner'")
+	assert.True(t, resp.GetIsAdmin())
+}
+
+// TestGetMyPermissions_BatchCheckFailure: BatchCheck error → member role, non-fatal.
+func TestGetMyPermissions_BatchCheckFailure(t *testing.T) {
+	s := newServerForMembershipTest()
+	s.authorizer = &stubAuthorizer{
+		batchCheck: func(_ context.Context, _ []authz.CheckRequest) ([]bool, error) {
+			return nil, errors.New("fga unavailable")
+		},
+	}
+
+	ctx := ctxWithSubject(t, "u1")
+	resp, err := s.GetMyPermissions(ctx, &daemonpb.GetMyPermissionsRequest{TenantId: "acme"})
+	require.NoError(t, err, "BatchCheck failure must degrade gracefully, not return an error")
+	assert.Equal(t, "member", resp.GetRole())
+	assert.False(t, resp.GetIsAdmin())
+}
+
+// TestGetMyPermissions_OwnerClosureSupersetOfAdmin: owner's effective privilege level
+// (IsAdmin=true, role="owner") must be at least as permissive as admin's
+// (IsAdmin=true, role="admin"). This asserts the closure parity required by gibson#289.
+func TestGetMyPermissions_OwnerClosureSupersetOfAdmin(t *testing.T) {
+	tests := []struct {
+		name         string
+		isOwner      bool
+		isAdmin      bool
+		wantRole     string
+		wantIsAdmin  bool
+	}{
+		{
+			name:        "owner_has_admin_privilege",
+			isOwner:     true,
+			isAdmin:     false,
+			wantRole:    "owner",
+			wantIsAdmin: true, // owner implies admin — IsAdmin must be true
+		},
+		{
+			name:        "admin_has_admin_privilege",
+			isOwner:     false,
+			isAdmin:     true,
+			wantRole:    "admin",
+			wantIsAdmin: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newServerForMembershipTest()
+			s.authorizer = &stubAuthorizer{
+				batchCheck: batchCheckForPermissions(tt.isOwner, tt.isAdmin),
+			}
+			ctx := ctxWithSubject(t, "u1")
+			resp, err := s.GetMyPermissions(ctx, &daemonpb.GetMyPermissionsRequest{TenantId: "acme"})
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantRole, resp.GetRole(),
+				"gibson#289 closure parity: %s must return role %q", tt.name, tt.wantRole)
+			assert.Equal(t, tt.wantIsAdmin, resp.GetIsAdmin(),
+				"gibson#289 closure parity: %s IsAdmin must be %v", tt.name, tt.wantIsAdmin)
+		})
+	}
+}
