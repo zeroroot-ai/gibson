@@ -2,6 +2,7 @@ package providers
 
 import (
 	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zero-day-ai/gibson/internal/llm/providers/catalogue"
 )
 
 // ProviderDescriptor is the Go-side, proto-free form of what the daemon's
@@ -36,6 +37,26 @@ type ProviderDescriptor struct {
 	DefaultModels []llm.ModelInfo
 }
 
+// catalogueModels converts the catalogue's Model entries for a given provider
+// type into the llm.ModelInfo slice used by ProviderDescriptor.DefaultModels.
+// It sources data from the embedded provider-catalogue.yaml via catalogue.Load()
+// rather than constructing a runtime provider instance.
+func catalogueModels(providerType string) []llm.ModelInfo {
+	entries := catalogue.ModelsFor(providerType)
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]llm.ModelInfo, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, llm.ModelInfo{
+			Name:          e.ID,
+			ContextWindow: e.ContextWindow,
+			Features:      e.Capabilities,
+		})
+	}
+	return out
+}
+
 // SupportedProviderDescriptors returns the full list of provider descriptors
 // in the same deterministic order as llm.SupportedProviderTypes(). This is
 // the function the future admin RPC handler will call.
@@ -62,6 +83,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials: []llm.CredentialField{
 				{Key: "api_key", Label: "Anthropic API Key", Required: true, Secret: true},
 			},
+			DefaultModels: catalogueModels("anthropic"),
 		}, true
 	case llm.ProviderOpenAI:
 		return ProviderDescriptor{
@@ -72,6 +94,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 				{Key: "api_key", Label: "OpenAI API Key", Required: true, Secret: true},
 				{Key: "base_url", Label: "Base URL (optional)", Placeholder: "https://api.openai.com/v1"},
 			},
+			DefaultModels: catalogueModels("openai"),
 		}, true
 	case llm.ProviderGoogle:
 		return ProviderDescriptor{
@@ -81,6 +104,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials: []llm.CredentialField{
 				{Key: "api_key", Label: "Google API Key", Required: true, Secret: true},
 			},
+			DefaultModels: catalogueModels("google"),
 		}, true
 	case llm.ProviderOllama:
 		return ProviderDescriptor{
@@ -91,67 +115,56 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials: []llm.CredentialField{
 				{Key: "base_url", Label: "Server URL", Placeholder: "http://localhost:11434", Help: "Where your Ollama server is reachable."},
 			},
+			DefaultModels: catalogueModels("ollama"),
 		}, true
 	case llm.ProviderBedrock:
-		p := &BedrockProvider{}
-		models, _ := p.Models(nil)
 		return ProviderDescriptor{
 			Type:          t,
 			DisplayName:   "AWS Bedrock",
 			DocsURL:       "https://docs.aws.amazon.com/bedrock/",
 			Credentials:   BedrockCredentialSchema(),
-			DefaultModels: models,
+			DefaultModels: catalogueModels("bedrock"),
 		}, true
 	case llm.ProviderCloudflare:
-		p := &CloudflareProvider{}
-		models, _ := p.Models(nil)
 		return ProviderDescriptor{
 			Type:          t,
 			DisplayName:   "Cloudflare Workers AI",
 			DocsURL:       "https://developers.cloudflare.com/workers-ai/",
 			Credentials:   CloudflareCredentialSchema(),
-			DefaultModels: models,
+			DefaultModels: catalogueModels("cloudflare"),
 		}, true
 	case llm.ProviderCohere:
-		p := &CohereProvider{}
-		models, _ := p.Models(nil)
 		return ProviderDescriptor{
 			Type:          t,
 			DisplayName:   "Cohere",
 			DocsURL:       "https://docs.cohere.com/",
 			Credentials:   CohereCredentialSchema(),
-			DefaultModels: models,
+			DefaultModels: catalogueModels("cohere"),
 		}, true
 	case llm.ProviderHuggingFace:
-		p := &HuggingFaceProvider{}
-		models, _ := p.Models(nil)
 		return ProviderDescriptor{
 			Type:          t,
 			DisplayName:   "HuggingFace Inference",
 			DocsURL:       "https://huggingface.co/docs/api-inference/",
 			Credentials:   HuggingFaceCredentialSchema(),
-			DefaultModels: models,
+			DefaultModels: catalogueModels("huggingface"),
 		}, true
 	case llm.ProviderLlamafile:
-		p := &LlamafileProvider{}
-		models, _ := p.Models(nil)
 		return ProviderDescriptor{
-			Type:          t,
-			DisplayName:   "Llamafile",
-			DocsURL:       "https://github.com/Mozilla-Ocho/llamafile",
-			SelfHosted:    true,
-			Credentials:   LlamafileCredentialSchema(),
-			DefaultModels: models,
+			Type:        t,
+			DisplayName: "Llamafile",
+			DocsURL:     "https://github.com/Mozilla-Ocho/llamafile",
+			SelfHosted:  true,
+			Credentials: LlamafileCredentialSchema(),
+			DefaultModels: catalogueModels("llamafile"),
 		}, true
 	case llm.ProviderMistral:
-		p := &MistralProvider{}
-		models, _ := p.Models(nil)
 		return ProviderDescriptor{
 			Type:          t,
 			DisplayName:   "Mistral",
 			DocsURL:       "https://docs.mistral.ai/",
 			Credentials:   MistralCredentialSchema(),
-			DefaultModels: models,
+			DefaultModels: catalogueModels("mistral"),
 		}, true
 	case llm.ProviderCustom:
 		// Custom is intentionally excluded — the descriptor surface is for
