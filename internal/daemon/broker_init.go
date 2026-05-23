@@ -256,24 +256,15 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 			// AuthCache's singleflight.
 			key := vaultConfigCacheKey(blob)
 			vaultLookup.put(key, cfg)
-			freshToken, err := vaultAuthCache.GetOrRefresh(ctx, key, "vault")
-			if err != nil {
-				// Cache miss / refresh failed. Fall back to direct auth
-				// by calling sdkvault.New without a pre-cached token,
-				// applying the SPIRE JWT mint step so the AuthMethodJWT
-				// path works for the fallback too.
-				if stampErr := stampVaultJWTOnConfig(ctx, &cfg, d.vaultJWTSource, d.vaultJWTAudience); stampErr != nil {
-					return nil, fmt.Errorf("vault: stamp jwt: %w", stampErr)
-				}
-				return sdkvault.New(ctx, cfg)
+			// Per-operation token refresh: each KV call gets a fresh token
+			// from AuthCache (cache-hit path: RWLock read + ~1 alloc).
+			// Eliminates the stale-token circuit-open failure that occurs
+			// when a static token cached in the provider expires mid-lifetime
+			// (gibson#301).
+			refresher := func(rCtx context.Context) (string, error) {
+				return vaultAuthCache.GetOrRefresh(rCtx, key, "vault")
 			}
-			// Inject the cached token as a static credential so sdkvault.New
-			// does not trigger a redundant auth round-trip.
-			cfg.Auth = sdkvault.AuthConfig{
-				Method: sdkvault.AuthMethodToken,
-				Token:  freshToken,
-			}
-			return sdkvault.New(ctx, cfg)
+			return sdkvault.NewWithRefresher(ctx, cfg, refresher)
 		},
 		AWSSMFactory: func(blob []byte) (sdksecrets.Broker, error) {
 			var cfg sdkawssm.Config
