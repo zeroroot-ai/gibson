@@ -9,6 +9,7 @@ import (
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	bedrockcontrol "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/tmc/langchaingo/llms/bedrock"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -18,11 +19,14 @@ import (
 // BedrockProvider implements LLMProvider for AWS Bedrock foundation models.
 //
 // Credential resolution (in order):
-//  1. Static creds from cfg.Extra["aws_access_key_id"] / ["aws_secret_access_key"]
+//  1. use_irsa=true: skip static-key validation entirely; rely on the AWS SDK
+//     default credential chain (IRSA via OIDC token projection, EC2 instance
+//     profile, ECS task role, etc.). No access-key fields required or used.
+//  2. Static creds from cfg.Extra["aws_access_key_id"] / ["aws_secret_access_key"]
 //     (and optional ["aws_session_token"]). These are treated as a pair — both
 //     must be set or both empty.
-//  2. Env vars AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (+ optional AWS_SESSION_TOKEN).
-//  3. The AWS SDK default credential chain (shared config, IAM role, IRSA, etc.).
+//  3. Env vars AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (+ optional AWS_SESSION_TOKEN).
+//  4. The AWS SDK default credential chain (shared config, IAM role, IRSA, etc.).
 //
 // Region resolution: cfg.Extra["aws_region"] → AWS_REGION env → us-east-1.
 //
@@ -31,10 +35,11 @@ import (
 // and passing it with bedrock.WithClient — which is why this file imports
 // aws-sdk-go-v2 directly despite Gibson's general langchaingo-only policy.
 type BedrockProvider struct {
-	client  *bedrock.LLM
-	config  llm.ProviderConfig
-	region  string
-	modelID string
+	client         *bedrock.LLM
+	controlClient  *bedrockcontrol.Client
+	config         llm.ProviderConfig
+	region         string
+	modelID        string
 }
 
 // NewBedrockProvider constructs a Bedrock-backed LLMProvider.
@@ -50,19 +55,27 @@ func NewBedrockProvider(cfg llm.ProviderConfig) (*BedrockProvider, error) {
 		awsconfig.WithRegion(region),
 	}
 
-	ak := firstNonEmpty(cfg.Extra["aws_access_key_id"], os.Getenv("AWS_ACCESS_KEY_ID"))
-	sk := firstNonEmpty(cfg.Extra["aws_secret_access_key"], os.Getenv("AWS_SECRET_ACCESS_KEY"))
-	st := firstNonEmpty(cfg.Extra["aws_session_token"], os.Getenv("AWS_SESSION_TOKEN"))
+	// When use_irsa=true the daemon runs inside EKS with a service-account IAM
+	// role annotation (or any other ambient credential source). Static key
+	// fields are irrelevant — skip both the mismatch guard and the explicit
+	// credentials provider so the AWS SDK default chain takes over.
+	useIRSA := cfg.Extra["use_irsa"] == "true"
 
-	// If only one of ak/sk is set, that's a misconfiguration — fail loudly
-	// rather than silently falling through to the default chain.
-	if (ak == "") != (sk == "") {
-		return nil, llm.NewAuthError("bedrock",
-			errors.New("aws_access_key_id and aws_secret_access_key must both be set or both empty"))
-	}
-	if ak != "" && sk != "" {
-		loadOpts = append(loadOpts,
-			awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ak, sk, st)))
+	if !useIRSA {
+		ak := firstNonEmpty(cfg.Extra["aws_access_key_id"], os.Getenv("AWS_ACCESS_KEY_ID"))
+		sk := firstNonEmpty(cfg.Extra["aws_secret_access_key"], os.Getenv("AWS_SECRET_ACCESS_KEY"))
+		st := firstNonEmpty(cfg.Extra["aws_session_token"], os.Getenv("AWS_SESSION_TOKEN"))
+
+		// If only one of ak/sk is set, that's a misconfiguration — fail loudly
+		// rather than silently falling through to the default chain.
+		if (ak == "") != (sk == "") {
+			return nil, llm.NewAuthError("bedrock",
+				errors.New("aws_access_key_id and aws_secret_access_key must both be set or both empty"))
+		}
+		if ak != "" && sk != "" {
+			loadOpts = append(loadOpts,
+				awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ak, sk, st)))
+		}
 	}
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
@@ -71,6 +84,7 @@ func NewBedrockProvider(cfg llm.ProviderConfig) (*BedrockProvider, error) {
 	}
 
 	brClient := bedrockruntime.NewFromConfig(awsCfg)
+	controlClient := bedrockcontrol.NewFromConfig(awsCfg)
 
 	modelID := cfg.DefaultModel
 	if modelID == "" {
@@ -86,10 +100,11 @@ func NewBedrockProvider(cfg llm.ProviderConfig) (*BedrockProvider, error) {
 	}
 
 	return &BedrockProvider{
-		client:  lc,
-		config:  cfg,
-		region:  region,
-		modelID: modelID,
+		client:        lc,
+		controlClient: controlClient,
+		config:        cfg,
+		region:        region,
+		modelID:       modelID,
 	}, nil
 }
 
@@ -151,13 +166,17 @@ func (p *BedrockProvider) Stream(ctx context.Context, req llm.CompletionRequest)
 	return chunkChan, nil
 }
 
-// Health reports provider liveness. A real call would be billable, so we
-// settle for a construction/catalogue probe — the daemon's health roll-up
-// already knows the provider was constructed or it wouldn't be in the
-// registry.
-func (p *BedrockProvider) Health(_ context.Context) types.HealthStatus {
-	if p.client == nil {
+// Health probes Bedrock liveness by calling ListFoundationModels. The call is
+// read-only, non-billable, and validates that both network reachability and IAM
+// credentials (static or IRSA) are functional. A non-nil controlClient is
+// required; construction always sets it, so a nil guard here is just a safety net.
+func (p *BedrockProvider) Health(ctx context.Context) types.HealthStatus {
+	if p.client == nil || p.controlClient == nil {
 		return types.NewHealthStatus(types.HealthStateUnhealthy, "bedrock client not initialised")
+	}
+	_, err := p.controlClient.ListFoundationModels(ctx, &bedrockcontrol.ListFoundationModelsInput{})
+	if err != nil {
+		return types.NewHealthStatus(types.HealthStateUnhealthy, translateBedrockError(err).Error())
 	}
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
 }
@@ -172,6 +191,7 @@ func (p *BedrockProvider) CredentialSchema() []llm.CredentialField { return Bedr
 func BedrockCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
 		{Key: "aws_region", Label: "AWS Region", Placeholder: "us-east-1", Help: "Defaults to AWS_REGION env or us-east-1."},
+		{Key: "use_irsa", Label: "Use IAM role / IRSA", Secret: false, Help: "Select when the daemon runs in EKS with a service-account IAM role annotation. Leave static key fields blank."},
 		{Key: "aws_access_key_id", Label: "AWS Access Key ID", Secret: true, Help: "Leave blank to use the AWS SDK default credential chain (IAM role, IRSA, instance profile)."},
 		{Key: "aws_secret_access_key", Label: "AWS Secret Access Key", Secret: true},
 		{Key: "aws_session_token", Label: "AWS Session Token", Secret: true, Help: "Only required for temporary credentials."},
