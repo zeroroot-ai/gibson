@@ -110,12 +110,25 @@ func (i *Infrastructure) SemanticQuerier(client graph.GraphClient) *graphrag.Sem
 func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, error) {
 	d.logger.Info(ctx, "initializing infrastructure components")
 
-	// Warm the provider catalogue singleton. Load() panics on a corrupt
-	// embedded YAML, which is the correct fail-fast behaviour at startup.
-	// Calling it here rather than lazily ensures the panic surfaces early
-	// (before any per-tenant or RPC path touches it) and appears in the
-	// daemon's structured startup logs rather than buried in an RPC trace.
-	catalogue.Load()
+	// Initialise the provider catalogue.  When GIBSON_PROVIDERS_CATALOGUE_PATH
+	// is set the daemon loads the operator-supplied file (e.g. mounted from the
+	// provider-catalogue ConfigMap) and hot-reloads it every 5 minutes so model
+	// list updates are visible without a restart.  When the env var is absent the
+	// embedded provider-catalogue.yaml is used (static, no polling).
+	//
+	// NewLoader panics on a corrupt or unreadable file — the correct
+	// fail-fast behaviour: the process should not start with a bad catalogue.
+	cataloguePath := os.Getenv("GIBSON_PROVIDERS_CATALOGUE_PATH")
+	catalogueLoader := catalogue.NewLoader(cataloguePath)
+	catalogue.SetLoader(catalogueLoader)
+	catalogueLoader.Start(ctx, 5*time.Minute)
+	d.logger.Info(ctx, "provider catalogue loaded",
+		"path", func() string {
+			if cataloguePath == "" {
+				return "<embedded>"
+			}
+			return cataloguePath
+		}())
 
 	// Per-tenant finding store: findings are now written through the data-plane Pool
 	// (conn.Findings()) at handler time. The Infrastructure no longer holds a
