@@ -13,6 +13,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/harness"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/llm/providers"
+	"github.com/zero-day-ai/gibson/internal/llm/providers/catalogue"
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/memory/embedder"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
@@ -108,6 +109,13 @@ func (i *Infrastructure) SemanticQuerier(client graph.GraphClient) *graphrag.Sem
 // Returns an error if any component fails to initialize.
 func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, error) {
 	d.logger.Info(ctx, "initializing infrastructure components")
+
+	// Warm the provider catalogue singleton. Load() panics on a corrupt
+	// embedded YAML, which is the correct fail-fast behaviour at startup.
+	// Calling it here rather than lazily ensures the panic surfaces early
+	// (before any per-tenant or RPC path touches it) and appears in the
+	// daemon's structured startup logs rather than buried in an RPC trace.
+	catalogue.Load()
 
 	// Per-tenant finding store: findings are now written through the data-plane Pool
 	// (conn.Findings()) at handler time. The Infrastructure no longer holds a
