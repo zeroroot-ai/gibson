@@ -7,9 +7,27 @@ import (
 	"log/slog"
 	"strings"
 	"time"
-
-	goredis "github.com/redis/go-redis/v9"
 )
+
+// redisBackend is the minimal Redis command set the store needs.
+// It is defined as an interface so callers in packages that are allowed to
+// import the raw redis library (internal/daemon, internal/datapool) can supply
+// the production *redis.Client via a thin adapter, while this package stays
+// free of the raw client import.
+//
+// GetBytes must return (nil, nil) when the key is not found (translating the
+// redis.Nil sentinel internally); store_redis.go does not inspect the error
+// value for a redis-specific sentinel.
+type redisBackend interface {
+	// GetBytes returns the raw bytes stored at key.
+	// Returns (nil, nil) on cache miss, (nil, err) on failure.
+	GetBytes(ctx context.Context, key string) ([]byte, error)
+	// SetNX sets key=value with TTL only when key does not exist.
+	// Returns (true, nil) when planted, (false, nil) when key already existed.
+	SetNX(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error)
+	// Set stores key=value with TTL unconditionally.
+	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
+}
 
 // redisKeyPrefix is the Redis namespace under which all dedup entries
 // live. Co-located with the daemon's other Redis namespaces (audit:,
@@ -31,7 +49,7 @@ var pendingSentinel = []byte("PENDING")
 // cached response and the in-flight sentinel share the same key so a
 // SET NX + subsequent overwriting SET is the entire critical section.
 type RedisStore struct {
-	client *goredis.Client
+	client redisBackend
 	logger *slog.Logger
 	// pollInterval is the duration between polls when Get observes a
 	// pending sentinel. Exposed for tests; production code should let
@@ -40,7 +58,7 @@ type RedisStore struct {
 }
 
 // NewRedisStore constructs a RedisStore. client must not be nil.
-func NewRedisStore(client *goredis.Client, logger *slog.Logger) *RedisStore {
+func NewRedisStore(client redisBackend, logger *slog.Logger) *RedisStore {
 	if client == nil {
 		panic("idempotency: NewRedisStore: redis client must not be nil")
 	}
@@ -83,12 +101,12 @@ func (s *RedisStore) Get(ctx context.Context, tenant, method, key string) (*Cach
 
 	deadline := time.Now().Add(MaxWaitForPending)
 	for {
-		raw, err := s.client.Get(ctx, rk).Bytes()
-		if errors.Is(err, goredis.Nil) {
-			return nil, false, nil
-		}
+		raw, err := s.client.GetBytes(ctx, rk)
 		if err != nil {
 			return nil, false, fmt.Errorf("idempotency: redis GET failed: %w", err)
+		}
+		if raw == nil {
+			return nil, false, nil
 		}
 
 		if isPendingSentinel(raw) {
@@ -132,7 +150,7 @@ func (s *RedisStore) MarkPending(ctx context.Context, tenant, method, key string
 		return false, nil
 	}
 	rk := redisKey(tenant, method, key)
-	planted, err := s.client.SetNX(ctx, rk, pendingSentinel, pendingTTL).Result()
+	planted, err := s.client.SetNX(ctx, rk, pendingSentinel, pendingTTL)
 	if err != nil {
 		return false, fmt.Errorf("idempotency: redis SET NX failed: %w", err)
 	}
@@ -155,7 +173,7 @@ func (s *RedisStore) Set(ctx context.Context, tenant, method, key string, cached
 	if err != nil {
 		return fmt.Errorf("idempotency: cache entry marshal failed: %w", err)
 	}
-	if err := s.client.Set(ctx, redisKey(tenant, method, key), raw, ttl).Err(); err != nil {
+	if err := s.client.Set(ctx, redisKey(tenant, method, key), raw, ttl); err != nil {
 		return fmt.Errorf("idempotency: redis SET failed: %w", err)
 	}
 	return nil
