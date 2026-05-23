@@ -104,7 +104,7 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 
 	var rp *redisPerTenant
 	if cfg.RedisAddr != "" {
-		rp, err = newRedisPerTenant(cfg.RedisAddr)
+		rp, err = newRedisPerTenant(cfg.RedisAddr, cfg.RedisPassword)
 		if err != nil {
 			return nil, fmt.Errorf("datapool: NewPool: redis init: %w", err)
 		}

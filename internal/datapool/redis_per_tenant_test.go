@@ -30,7 +30,7 @@ func TestRedisPerTenant_ForTenant_HappyPath(t *testing.T) {
 	err := adminClient.HSet(context.Background(), redisMasterIndexKey, "acme", "1").Err()
 	require.NoError(t, err)
 
-	r, err := newRedisPerTenant(mr.Addr())
+	r, err := newRedisPerTenant(mr.Addr(), "")
 	require.NoError(t, err)
 	defer r.Close()
 
@@ -43,7 +43,7 @@ func TestRedisPerTenant_ForTenant_HappyPath(t *testing.T) {
 func TestRedisPerTenant_ForTenant_NotProvisioned(t *testing.T) {
 	mr := startMiniredis(t)
 
-	r, err := newRedisPerTenant(mr.Addr())
+	r, err := newRedisPerTenant(mr.Addr(), "")
 	require.NoError(t, err)
 	defer r.Close()
 
@@ -65,7 +65,7 @@ func TestRedisPerTenant_ForTenant_NeverReturnsDB0(t *testing.T) {
 	err := adminClient.HSet(context.Background(), redisMasterIndexKey, "badtenant", "0").Err()
 	require.NoError(t, err)
 
-	r, err := newRedisPerTenant(mr.Addr())
+	r, err := newRedisPerTenant(mr.Addr(), "")
 	require.NoError(t, err)
 	defer r.Close()
 
@@ -86,7 +86,7 @@ func TestRedisPerTenant_ForTenant_DBIndexCached(t *testing.T) {
 	err := adminClient.HSet(context.Background(), redisMasterIndexKey, "cached", "2").Err()
 	require.NoError(t, err)
 
-	r, err := newRedisPerTenant(mr.Addr())
+	r, err := newRedisPerTenant(mr.Addr(), "")
 	require.NoError(t, err)
 	defer r.Close()
 
@@ -117,7 +117,7 @@ func TestRedisPerTenant_ForTenant_TwoTenants_Isolated(t *testing.T) {
 	err := adminClient.HSet(ctx, redisMasterIndexKey, "tenanta", "1", "tenantb", "2").Err()
 	require.NoError(t, err)
 
-	r, err := newRedisPerTenant(mr.Addr())
+	r, err := newRedisPerTenant(mr.Addr(), "")
 	require.NoError(t, err)
 	defer r.Close()
 
@@ -130,7 +130,7 @@ func TestRedisPerTenant_ForTenant_TwoTenants_Isolated(t *testing.T) {
 }
 
 func TestRedisPerTenant_ForTenant_EmptyAddr(t *testing.T) {
-	_, err := newRedisPerTenant("")
+	_, err := newRedisPerTenant("", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "addr is required")
 }
@@ -149,7 +149,7 @@ func TestRedisPerTenant_ForTenant_AdminClientUnreachable(t *testing.T) {
 	addr := mr.Addr()
 	mr.Close() // address is now unreachable
 
-	r, err := newRedisPerTenant(addr)
+	r, err := newRedisPerTenant(addr, "")
 	require.NoError(t, err, "construction should succeed even with unreachable server")
 	defer r.Close()
 
@@ -171,7 +171,7 @@ func TestRedisPerTenant_Close(t *testing.T) {
 	err := adminClient.HSet(context.Background(), redisMasterIndexKey, "closeme", "3").Err()
 	require.NoError(t, err)
 
-	r, err := newRedisPerTenant(mr.Addr())
+	r, err := newRedisPerTenant(mr.Addr(), "")
 	require.NoError(t, err)
 
 	_, err = r.ForTenant(context.Background(), auth.MustNewTenantID("closeme"))
