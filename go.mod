@@ -5,12 +5,14 @@ go 1.25.10
 require (
 	buf.build/go/protovalidate v1.2.0
 	cloud.google.com/go/secretmanager v1.19.0
+	cuelang.org/go v0.16.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets v1.4.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/alicebob/miniredis/v2 v2.36.1
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.18
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.17
+	github.com/aws/aws-sdk-go-v2/service/bedrock v1.61.0
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.50.5
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.6
 	github.com/buckhx/gobert v0.0.0-20190731141805-265756fed232
@@ -23,7 +25,7 @@ require (
 	github.com/gomlx/go-huggingface v0.3.1
 	github.com/gomlx/gomlx v0.26.0
 	github.com/gomlx/onnx-gomlx v0.3.4
-	github.com/google/cel-go v0.28.0
+	github.com/google/cel-go v0.28.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/jackc/pgx/v5 v5.9.2
@@ -44,9 +46,9 @@ require (
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zero-day-ai/ast-checks v0.1.1
-	github.com/zero-day-ai/platform-clients v0.7.0
-	github.com/zero-day-ai/platform-sdk v0.6.0
-	github.com/zero-day-ai/sdk v0.113.0
+	github.com/zero-day-ai/platform-clients v0.7.1
+	github.com/zero-day-ai/platform-sdk v0.7.0
+	github.com/zero-day-ai/sdk v0.114.0
 	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
 	github.com/zero-day-ai/testfixtures v0.1.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
@@ -89,6 +91,7 @@ require (
 	cloud.google.com/go/iam v1.7.0 // indirect
 	cloud.google.com/go/longrunning v0.8.0 // indirect
 	cloud.google.com/go/vertexai v0.12.0 // indirect
+	cuelabs.dev/go/oci/ociregistry v0.0.0-20251212221603-3adeb8663819 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
@@ -104,7 +107,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.23 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.23 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.24 // indirect
-	github.com/aws/aws-sdk-go-v2/service/bedrock v1.61.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.9 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.23 // indirect
 	github.com/aws/aws-sdk-go-v2/service/signin v1.0.11 // indirect
@@ -116,6 +118,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
 	github.com/cohere-ai/tokenizer v1.1.2 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
@@ -131,6 +134,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
+	github.com/emicklei/proto v1.14.3 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
@@ -181,6 +185,7 @@ require (
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
+	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.2.0 // indirect
 	github.com/moby/moby/api v1.54.1 // indirect
@@ -207,6 +212,8 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/prometheus/common v0.67.4 // indirect
 	github.com/prometheus/procfs v0.19.2 // indirect
+	github.com/protocolbuffers/txtpbfmt v0.0.0-20260217160748-a481f6a22f94 // indirect
+	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
