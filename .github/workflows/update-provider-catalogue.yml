@@ -1,0 +1,795 @@
+# Provider catalogue update workflow
+#
+# OPERATOR ACTION REQUIRED after this workflow ships:
+#
+#   OpenAI     → add org secret CATALOGUE_UPDATE_OPENAI_API_KEY
+#                Any OpenAI API key works (read-only model listing).
+#
+#   Google     → add org secret CATALOGUE_UPDATE_GOOGLE_API_KEY
+#                Create a Google AI API key at https://aistudio.google.com/
+#
+#   Mistral    → add org secret CATALOGUE_UPDATE_MISTRAL_API_KEY
+#                Any Mistral API key with model:list scope.
+#
+#   Cohere     → add org secret CATALOGUE_UPDATE_COHERE_API_KEY
+#                Any Cohere API key.
+#
+#   Bedrock    → add bedrock:ListFoundationModels to the zero-day-ai-prod deploy IAM role.
+#                No new secret needed — the existing AWS role is used.
+#
+#   Anthropic  → No listing API. When Anthropic releases new models:
+#                1. Visit https://docs.anthropic.com/en/docs/about-claude/models/all-models
+#                2. Manually update provider-catalogue.yaml for the anthropic entry.
+#                3. Open a PR.
+#
+#   Cloudflare, HuggingFace, Ollama, Llamafile → No operator action needed.
+
+name: Update provider catalogue
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  update-openai:
+    name: Update OpenAI models
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and apply OpenAI models
+        id: update
+        env:
+          API_KEY: ${{ secrets.CATALOGUE_UPDATE_OPENAI_API_KEY }}
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::warning::CATALOGUE_UPDATE_OPENAI_API_KEY not set — skipping OpenAI update"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python3 - <<'PYEOF'
+          import json, os, subprocess, sys
+          import yaml
+
+          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
+
+          api_key = os.environ["API_KEY"]
+          resp = subprocess.check_output([
+            "curl", "-s", "--fail",
+            "-H", f"Authorization: Bearer {api_key}",
+            "https://api.openai.com/v1/models"
+          ])
+          data = json.loads(resp)["data"]
+
+          # Keep gpt-4*, gpt-3.5*, o1*, o3*, o4* families; exclude fine-tuned / embeddings / tts
+          prefixes = ("gpt-4", "gpt-3.5", "o1", "o3", "o4")
+          skip_suffixes = ("-realtime", "-audio", "-transcribe", "-mini-tts")
+          skip_exact = {"gpt-4-turbo-preview", "gpt-4-0125-preview", "gpt-4-1106-preview",
+                        "gpt-3.5-turbo-instruct", "gpt-3.5-turbo-0125", "gpt-3.5-turbo-1106"}
+
+          fetched = []
+          for m in data:
+            mid = m["id"]
+            if not any(mid.startswith(p) for p in prefixes):
+              continue
+            if mid in skip_exact:
+              continue
+            if any(mid.endswith(s) for s in skip_suffixes):
+              continue
+            fetched.append(mid)
+          fetched.sort()
+
+          with open(CATALOGUE) as f:
+            doc = yaml.safe_load(f)
+
+          for provider in doc["providers"]:
+            if provider["type"] == "openai":
+              # Build a map of existing model metadata keyed by id (preserves
+              # context_window + capabilities if we already know them).
+              existing = {m["id"]: m for m in provider.get("models", [])}
+              new_models = []
+              for mid in fetched:
+                if mid in existing:
+                  new_models.append(existing[mid])
+                else:
+                  # New model — reasonable defaults; operator should refine context_window.
+                  new_models.append({"id": mid, "context_window": 128000, "deprecated": False})
+              provider["models"] = new_models
+              provider["catalogue_updated"] = TODAY
+              break
+
+          with open(CATALOGUE, "w") as f:
+            yaml.dump(doc, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+          print(f"OpenAI: wrote {len(fetched)} models to {CATALOGUE}")
+          PYEOF
+
+          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload updated catalogue
+        if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogue-openai
+          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          retention-days: 1
+
+  update-google:
+    name: Update Google models
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and apply Google models
+        id: update
+        env:
+          API_KEY: ${{ secrets.CATALOGUE_UPDATE_GOOGLE_API_KEY }}
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::warning::CATALOGUE_UPDATE_GOOGLE_API_KEY not set — skipping Google update"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python3 - <<'PYEOF'
+          import json, os, subprocess
+          import yaml
+
+          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
+
+          api_key = os.environ["API_KEY"]
+          resp = subprocess.check_output([
+            "curl", "-s", "--fail",
+            f"https://generativelanguage.googleapis.com/v1/models?key={api_key}"
+          ])
+          data = json.loads(resp)
+
+          # Filter to gemini-* models; strip "models/" prefix; exclude embedding / vision-only models
+          fetched = []
+          for m in data.get("models", []):
+            raw_name = m.get("name", "")
+            mid = raw_name.replace("models/", "")
+            if not mid.startswith("gemini"):
+              continue
+            # Skip tuning-only / embedding shards
+            supported = [g.lower() for g in m.get("supportedGenerationMethods", [])]
+            if "generatecontent" not in supported:
+              continue
+            fetched.append(mid)
+          fetched.sort()
+
+          with open(CATALOGUE) as f:
+            doc = yaml.safe_load(f)
+
+          for provider in doc["providers"]:
+            if provider["type"] == "google":
+              existing = {m["id"]: m for m in provider.get("models", [])}
+              new_models = []
+              for mid in fetched:
+                if mid in existing:
+                  new_models.append(existing[mid])
+                else:
+                  new_models.append({"id": mid, "context_window": 1048576, "deprecated": False})
+              provider["models"] = new_models
+              provider["catalogue_updated"] = TODAY
+              break
+
+          with open(CATALOGUE, "w") as f:
+            yaml.dump(doc, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+          print(f"Google: wrote {len(fetched)} models to {CATALOGUE}")
+          PYEOF
+
+          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload updated catalogue
+        if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogue-google
+          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          retention-days: 1
+
+  update-mistral:
+    name: Update Mistral models
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and apply Mistral models
+        id: update
+        env:
+          API_KEY: ${{ secrets.CATALOGUE_UPDATE_MISTRAL_API_KEY }}
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::warning::CATALOGUE_UPDATE_MISTRAL_API_KEY not set — skipping Mistral update"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python3 - <<'PYEOF'
+          import json, os, subprocess
+          import yaml
+
+          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
+
+          api_key = os.environ["API_KEY"]
+          resp = subprocess.check_output([
+            "curl", "-s", "--fail",
+            "-H", f"Authorization: Bearer {api_key}",
+            "https://api.mistral.ai/v1/models"
+          ])
+          data = json.loads(resp)
+
+          # Mistral API returns {"data": [...]} with objects having "id" fields.
+          # Filter out deprecated models and embedding-only models.
+          fetched = []
+          for m in data.get("data", []):
+            mid = m.get("id", "")
+            if not mid:
+              continue
+            # Skip deprecated models
+            if m.get("deprecated", False):
+              continue
+            # Skip embed / fine-tune / moderation models
+            if any(k in mid for k in ("embed", "moderation", "finetune")):
+              continue
+            fetched.append(mid)
+          fetched.sort()
+
+          with open(CATALOGUE) as f:
+            doc = yaml.safe_load(f)
+
+          for provider in doc["providers"]:
+            if provider["type"] == "mistral":
+              existing = {m["id"]: m for m in provider.get("models", [])}
+              new_models = []
+              for mid in fetched:
+                if mid in existing:
+                  new_models.append(existing[mid])
+                else:
+                  new_models.append({"id": mid, "context_window": 131000, "deprecated": False})
+              provider["models"] = new_models
+              provider["catalogue_updated"] = TODAY
+              break
+
+          with open(CATALOGUE, "w") as f:
+            yaml.dump(doc, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+          print(f"Mistral: wrote {len(fetched)} models to {CATALOGUE}")
+          PYEOF
+
+          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload updated catalogue
+        if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogue-mistral
+          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          retention-days: 1
+
+  update-cohere:
+    name: Update Cohere models
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and apply Cohere models
+        id: update
+        env:
+          API_KEY: ${{ secrets.CATALOGUE_UPDATE_COHERE_API_KEY }}
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::warning::CATALOGUE_UPDATE_COHERE_API_KEY not set — skipping Cohere update"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python3 - <<'PYEOF'
+          import json, os, subprocess
+          import yaml
+
+          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
+
+          api_key = os.environ["API_KEY"]
+          resp = subprocess.check_output([
+            "curl", "-s", "--fail",
+            "-H", f"Authorization: Bearer {api_key}",
+            "-H", "Accept: application/json",
+            "https://api.cohere.com/v2/models"
+          ])
+          data = json.loads(resp)
+
+          # Cohere v2 API returns {"models": [...]} with "name" fields.
+          # Filter to chat-capable command-* models.
+          fetched = []
+          for m in data.get("models", []):
+            mid = m.get("name", "")
+            if not mid:
+              continue
+            # Keep only command-* and rerank-* (exclude embed-*, classify-*)
+            if not mid.startswith("command"):
+              continue
+            # Skip deprecated
+            if m.get("deprecated", False):
+              continue
+            fetched.append(mid)
+          fetched.sort()
+
+          with open(CATALOGUE) as f:
+            doc = yaml.safe_load(f)
+
+          for provider in doc["providers"]:
+            if provider["type"] == "cohere":
+              existing = {m["id"]: m for m in provider.get("models", [])}
+              new_models = []
+              for mid in fetched:
+                if mid in existing:
+                  new_models.append(existing[mid])
+                else:
+                  new_models.append({"id": mid, "context_window": 128000, "deprecated": False})
+              provider["models"] = new_models
+              provider["catalogue_updated"] = TODAY
+              break
+
+          with open(CATALOGUE, "w") as f:
+            yaml.dump(doc, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+          print(f"Cohere: wrote {len(fetched)} models to {CATALOGUE}")
+          PYEOF
+
+          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload updated catalogue
+        if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogue-cohere
+          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          retention-days: 1
+
+  update-cloudflare:
+    name: Update Cloudflare models
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and apply Cloudflare models
+        id: update
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, subprocess
+          import yaml
+
+          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
+
+          # Cloudflare Workers AI model catalog is public — no auth required.
+          resp = subprocess.check_output([
+            "curl", "-s", "--fail",
+            "https://api.cloudflare.com/client/v4/ai/models/search?task=Text+Generation&per_page=200"
+          ])
+          data = json.loads(resp)
+
+          # API returns {"result": [...], "success": true}
+          if not data.get("success", False):
+            print("Cloudflare API returned success=false — skipping update")
+            raise SystemExit(0)
+
+          fetched = []
+          for m in data.get("result", []):
+            mid = m.get("name", "")
+            if not mid:
+              continue
+            # Only keep models in the @cf/ namespace (first-party Cloudflare models)
+            if not mid.startswith("@cf/"):
+              continue
+            fetched.append(mid)
+          fetched.sort()
+
+          with open(CATALOGUE) as f:
+            doc = yaml.safe_load(f)
+
+          for provider in doc["providers"]:
+            if provider["type"] == "cloudflare":
+              existing = {m["id"]: m for m in provider.get("models", [])}
+              new_models = []
+              for mid in fetched:
+                if mid in existing:
+                  new_models.append(existing[mid])
+                else:
+                  new_models.append({"id": mid, "context_window": 128000, "deprecated": False})
+              provider["models"] = new_models
+              provider["catalogue_updated"] = TODAY
+              break
+
+          with open(CATALOGUE, "w") as f:
+            yaml.dump(doc, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+          print(f"Cloudflare: wrote {len(fetched)} models to {CATALOGUE}")
+          PYEOF
+
+          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload updated catalogue
+        if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogue-cloudflare
+          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          retention-days: 1
+
+  update-huggingface:
+    name: Update HuggingFace models
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and apply HuggingFace models
+        id: update
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, subprocess
+          import yaml
+
+          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
+
+          # HuggingFace Hub Inference API — fetch top text-generation models
+          # sorted by downloads (public endpoint, no auth required for listing).
+          # We only update models already listed in the catalogue — we don't add
+          # arbitrary Hub models. HuggingFace's catalogue is extremely large;
+          # curation is manual. This job just checks that currently-listed models
+          # are still available (not gated or removed) and updates the date.
+          resp = subprocess.check_output([
+            "curl", "-s", "--fail",
+            "https://huggingface.co/api/models?pipeline_tag=text-generation&sort=downloads&direction=-1&limit=100"
+          ])
+          data = json.loads(resp)
+          available = {m.get("id", "") for m in data if m.get("id")}
+
+          with open(CATALOGUE) as f:
+            doc = yaml.safe_load(f)
+
+          changed = False
+          for provider in doc["providers"]:
+            if provider["type"] == "huggingface":
+              existing_models = provider.get("models", [])
+              new_models = []
+              for m in existing_models:
+                mid = m["id"]
+                if mid in available:
+                  new_models.append(m)
+                else:
+                  # Model no longer in top-100 downloads — mark deprecated rather than remove.
+                  # An operator should review before hard-removing from the catalogue.
+                  if not m.get("deprecated", False):
+                    m = dict(m)
+                    m["deprecated"] = True
+                    changed = True
+                  new_models.append(m)
+              provider["models"] = new_models
+              if changed:
+                provider["catalogue_updated"] = TODAY
+              break
+
+          if changed:
+            with open(CATALOGUE, "w") as f:
+              yaml.dump(doc, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            print(f"HuggingFace: updated deprecated flags in {CATALOGUE}")
+          else:
+            print("HuggingFace: no changes detected")
+          PYEOF
+
+          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload updated catalogue
+        if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogue-huggingface
+          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          retention-days: 1
+
+  update-bedrock:
+    name: Update Bedrock models
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        # Use the deploy IAM role (same pattern as other workflows).
+        # Requires bedrock:ListFoundationModels on the role — see operator checklist.
+        uses: aws-actions/configure-aws-credentials@v4
+        continue-on-error: true
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Fetch and apply Bedrock models
+        id: update
+        run: |
+          if [ "${{ steps.aws-creds.outcome }}" != "success" ]; then
+            echo "::warning::AWS credential configuration failed — skipping Bedrock update. Ensure bedrock:ListFoundationModels is granted on the deploy IAM role and AWS_DEPLOY_ROLE_ARN is set."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python3 - <<'PYEOF'
+          import json, os, subprocess
+          import yaml
+
+          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          TODAY = subprocess.check_output(["date", "+%Y-%m-%d"]).decode().strip()
+
+          resp = subprocess.check_output([
+            "aws", "bedrock", "list-foundation-models",
+            "--region", "us-east-1",
+            "--output", "json"
+          ])
+          data = json.loads(resp)
+
+          # Filter to models that support ON_DEMAND inference and TEXT output.
+          fetched = []
+          for m in data.get("modelSummaries", []):
+            mid = m.get("modelId", "")
+            if not mid:
+              continue
+            # Only ON_DEMAND throughput (skip PROVISIONED-only)
+            if "ON_DEMAND" not in m.get("inferenceTypesSupported", []):
+              continue
+            # Only TEXT or EMBEDDING output (skip IMAGE-only)
+            output_mods = m.get("outputModalities", [])
+            if "TEXT" not in output_mods:
+              continue
+            # Skip embedding-only models
+            if m.get("modelName", "").lower().find("embed") >= 0:
+              continue
+            fetched.append(mid)
+          fetched.sort()
+
+          with open(CATALOGUE) as f:
+            doc = yaml.safe_load(f)
+
+          for provider in doc["providers"]:
+            if provider["type"] == "bedrock":
+              existing = {m["id"]: m for m in provider.get("models", [])}
+              new_models = []
+              for mid in fetched:
+                if mid in existing:
+                  new_models.append(existing[mid])
+                else:
+                  new_models.append({"id": mid, "context_window": 128000, "deprecated": False})
+              provider["models"] = new_models
+              provider["catalogue_updated"] = TODAY
+              break
+
+          with open(CATALOGUE, "w") as f:
+            yaml.dump(doc, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+          print(f"Bedrock: wrote {len(fetched)} models to {CATALOGUE}")
+          PYEOF
+
+          if git diff --quiet internal/llm/providers/catalogue/provider-catalogue.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload updated catalogue
+        if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogue-bedrock
+          path: internal/llm/providers/catalogue/provider-catalogue.yaml
+          retention-days: 1
+
+  anthropic-reminder:
+    name: Post Anthropic manual-update reminder
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Post reminder on issue #295
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment 295 -R zero-day-ai/gibson \
+            --body "$(cat <<'BODY'
+          **Weekly catalogue reminder — Anthropic**
+
+          Anthropic has no model listing API. This automated workflow cannot update the \`anthropic\` entry in \`provider-catalogue.yaml\`.
+
+          To update manually:
+          1. Visit https://docs.anthropic.com/en/docs/about-claude/models/all-models
+          2. Compare against the current \`anthropic\` entry in [\`internal/llm/providers/catalogue/provider-catalogue.yaml\`](https://github.com/zero-day-ai/gibson/blob/main/internal/llm/providers/catalogue/provider-catalogue.yaml)
+          3. If new models are listed, open a PR updating that section and bump \`catalogue_updated\` to today's date.
+
+          *Posted automatically by the provider-catalogue update workflow.*
+          BODY
+          )"
+
+  open-pr:
+    name: Merge updates and open PR
+    needs:
+      - update-openai
+      - update-google
+      - update-mistral
+      - update-cohere
+      - update-cloudflare
+      - update-huggingface
+      - update-bedrock
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download every catalogue artifact that was uploaded (only present when
+      # a provider job detected changes). Each job ran against the same base
+      # checkout, so later downloads overwrite earlier ones — we re-apply all
+      # changes in provider order below instead.
+      - name: Download all catalogue artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: catalogue-*
+          merge-multiple: false
+          path: /tmp/catalogues
+        continue-on-error: true
+
+      - name: Merge provider updates into single catalogue
+        id: merge
+        run: |
+          CATALOGUE="internal/llm/providers/catalogue/provider-catalogue.yaml"
+
+          # Re-apply each provider's update in a deterministic order.
+          # Each artifact directory contains the catalogue as modified by
+          # that provider's job (based on the same base checkout).
+          # We merge by extracting each provider's models block from
+          # the artifact and writing it into the live catalogue.
+
+          python3 - <<'PYEOF'
+          import os, glob, yaml, sys
+
+          CATALOGUE = "internal/llm/providers/catalogue/provider-catalogue.yaml"
+          ARTIFACTS_DIR = "/tmp/catalogues"
+
+          with open(CATALOGUE) as f:
+            base = yaml.safe_load(f)
+
+          # Map base catalogue providers by type for easy lookup.
+          base_by_type = {p["type"]: p for p in base["providers"]}
+
+          # Provider → artifact directory name mapping.
+          provider_artifacts = {
+            "openai":      "catalogue-openai",
+            "google":      "catalogue-google",
+            "mistral":     "catalogue-mistral",
+            "cohere":      "catalogue-cohere",
+            "cloudflare":  "catalogue-cloudflare",
+            "huggingface": "catalogue-huggingface",
+            "bedrock":     "catalogue-bedrock",
+          }
+
+          any_updated = False
+          for ptype, artifact_name in provider_artifacts.items():
+            artifact_path = os.path.join(ARTIFACTS_DIR, artifact_name, CATALOGUE)
+            if not os.path.exists(artifact_path):
+              continue
+            with open(artifact_path) as f:
+              artifact_doc = yaml.safe_load(f)
+            for p in artifact_doc["providers"]:
+              if p["type"] == ptype:
+                base_by_type[ptype] = p
+                any_updated = True
+                print(f"Merged update for provider: {ptype}")
+                break
+
+          if not any_updated:
+            print("No provider updates found in artifacts — nothing to merge.")
+            sys.exit(0)
+
+          # Reconstruct providers list preserving original order.
+          original_order = [p["type"] for p in base["providers"]]
+          merged_providers = []
+          for t in original_order:
+            merged_providers.append(base_by_type[t])
+
+          base["providers"] = merged_providers
+
+          with open(CATALOGUE, "w") as f:
+            yaml.dump(base, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+          print(f"Wrote merged catalogue to {CATALOGUE}")
+          PYEOF
+
+          if git diff --quiet "$CATALOGUE"; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No changes to the catalogue after merging all provider updates."
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open PR if changed
+        if: steps.merge.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CATALOGUE="internal/llm/providers/catalogue/provider-catalogue.yaml"
+          TODAY="$(date +%Y-%m-%d)"
+          BRANCH="chore/provider-catalogue-${TODAY}"
+
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git checkout -b "$BRANCH"
+          git add "$CATALOGUE"
+          git commit -m "chore(providers): update provider catalogue ${TODAY}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "chore(providers): update provider catalogue ${TODAY}" \
+            --body "$(cat <<'BODY'
+          Automated catalogue update from provider APIs.
+
+          Review model list changes before merging — in particular:
+          - New models added with default \`context_window\` values may need correction.
+          - Models marked \`deprecated: true\` should be verified against provider documentation.
+          - The \`anthropic\` entry is **not** updated automatically (no listing API); check the reminder comment on #295.
+
+          Closes #295
+
+          Docs-PR: not-applicable: CI workflow only, no runtime architectural change
+          BODY
+          )" \
+            --base main
