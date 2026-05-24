@@ -62,6 +62,19 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.115.0](https://github.com/zero-day-ai/gibson/compare/v0.114.0...v0.115.0) (2026-05-24)
+
+
+### Features
+
+* **dataplane:** slim VectorCredentials to index_name only ([#327](https://github.com/zero-day-ai/gibson/issues/327)) ([ba48eed](https://github.com/zero-day-ai/gibson/commit/ba48eed1eb5fa54c50ffb701f7dd13b5e3131e13))
+* **jwtsource:** JWTCache with background refresh and last-known-good ([#322](https://github.com/zero-day-ai/gibson/issues/322)) ([f27ba8a](https://github.com/zero-day-ai/gibson/commit/f27ba8addfe86c64180d2d28d99d4838fa405463)), closes [#317](https://github.com/zero-day-ai/gibson/issues/317)
+
+
+### Bug Fixes
+
+* **memory:** drop qdrant from LongTermMemoryConfig valid backend enum ([#326](https://github.com/zero-day-ai/gibson/issues/326)) ([5fcaf35](https://github.com/zero-day-ai/gibson/commit/5fcaf357b613b607bc1967aae972972c183ded20))
+
 ## [0.114.0](https://github.com/zero-day-ai/gibson/compare/v0.113.1...v0.114.0) (2026-05-24)
 
 
