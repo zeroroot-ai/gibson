@@ -103,6 +103,31 @@ func TestListCheckpoints_FGAMember(t *testing.T) {
 	}
 }
 
+func TestListCheckpoints_SelfHeal_MissingBelongsTuple(t *testing.T) {
+	// Caller is a tenant member but the mission has no belongs_to FGA tuple.
+	// requireMissionViewer should self-heal by writing the tuple and allow.
+	a := newFakeAuthorizer().
+		allow("user:u-alice", "member", "tenant:acme")
+	// Note: "viewer" on "mission:mission-1" is NOT pre-seeded — simulating
+	// a mission created before CreateMission's belongs_to write was required.
+	srv := &DaemonServer{
+		daemon:     newFakeDaemon().withCheckpoint("mission-1", CheckpointData{CheckpointID: "cp-1"}),
+		logger:     testSlogLogger,
+		authorizer: a,
+	}
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{
+		Subject: "u-alice",
+		Tenant:  auth.MustNewTenantID("acme"),
+	})
+	resp, err := srv.ListCheckpoints(ctx, &daemonpb.ListCheckpointsRequest{MissionId: "mission-1"})
+	if err != nil {
+		t.Fatalf("expected heal to allow access, got error: %v", err)
+	}
+	if len(resp.Checkpoints) != 1 {
+		t.Errorf("expected 1 checkpoint after heal, got %d", len(resp.Checkpoints))
+	}
+}
+
 // ----- GetCheckpoint ----------------------------------------------------------
 
 func TestGetCheckpoint_HappyPath_ReturnsRichPayload(t *testing.T) {

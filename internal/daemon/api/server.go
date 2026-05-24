@@ -2381,33 +2381,32 @@ func (s *DaemonServer) CreateMission(ctx context.Context, req *daemonpb.CreateMi
 	// tuple the daemon writes on mission creation; per-user "share with"
 	// grants land separately when that UI ships.
 	//
-	// Best-effort: a write failure is logged at WARN and never aborts the
-	// RPC — the caller already has a successfully created mission, and the
-	// downstream tenant-scope Pool guard provides at-rest protection until
-	// the next reconciler run can backfill missing tuples.
+	// This write is REQUIRED: without the belongs_to tuple, the FGA model
+	// relation `define viewer: [user] or admin or member from belongs_to`
+	// cannot resolve for tenant members — leaving the mission permanently
+	// inaccessible to all ListCheckpoints / GetCheckpoint callers.
 	//
 	// Spec: mission-checkpointing R13/R14/R15/R16, model.fga `type mission`.
 	if s.authorizer != nil {
 		tenantID := auth.TenantStringFromContext(ctx)
-		if tenantID != "" {
-			tuple := authz.Tuple{
-				User:     "tenant:" + tenantID,
-				Relation: "belongs_to",
-				Object:   "mission:" + result.MissionID,
-			}
-			if writeErr := s.authorizer.Write(ctx, []authz.Tuple{tuple}); writeErr != nil {
-				s.logger.Warn("CreateMission: mission belongs_to tuple write failed",
-					"mission_id", result.MissionID,
-					"tenant_id", tenantID,
-					"error", writeErr,
-				)
-			} else {
-				s.logger.Debug("CreateMission: mission belongs_to tuple written",
-					"mission_id", result.MissionID,
-					"tenant_id", tenantID,
-				)
-			}
+		if tenantID == "" {
+			return nil, status_grpc.Error(codes.Internal, "CreateMission: no tenant in context — cannot write FGA belongs_to tuple")
 		}
+		tuple := authz.Tuple{
+			User:     "tenant:" + tenantID,
+			Relation: "belongs_to",
+			Object:   "mission:" + result.MissionID,
+		}
+		if writeErr := s.authorizer.Write(ctx, []authz.Tuple{tuple}); writeErr != nil {
+			return nil, status_grpc.Errorf(codes.Internal,
+				"CreateMission: failed to write FGA belongs_to tuple for mission %s: %v",
+				result.MissionID, writeErr,
+			)
+		}
+		s.logger.Debug("CreateMission: mission belongs_to tuple written",
+			"mission_id", result.MissionID,
+			"tenant_id", tenantID,
+		)
 	}
 
 	// Build proto Mission response
