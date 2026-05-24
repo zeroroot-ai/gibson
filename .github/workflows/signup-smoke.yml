@@ -44,9 +44,14 @@ jobs:
         with:
           repository: zero-day-ai/deploy
           ref: main
-          # PRIVATE_REPO_TOKEN is a PAT with read access to all zero-day-ai
-          # private repos (see gibson/.github/workflows/gibsoncheck.yml).
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          # GH_PAT_GIBSON_RO is the org-standard fine-grained PAT with
+          # read access to all zero-day-ai private repos. Same secret used
+          # by gibsoncheck, build, codeql, and the reusable image-build
+          # workflow for private module access. PRIVATE_REPO_TOKEN does not
+          # exist as an org secret and evaluates to empty, which caused the
+          # "could not read Username for github" auth failure on PRs
+          # (gibson#341).
+          token: ${{ secrets.GH_PAT_GIBSON_RO }}
           path: deploy
 
       - name: Checkout gitops repo (dev branch)
@@ -54,7 +59,7 @@ jobs:
         with:
           repository: zero-day-ai/gitops
           ref: dev
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          token: ${{ secrets.GH_PAT_GIBSON_RO }}
           path: gitops
 
       - name: Set up kind cluster
@@ -106,8 +111,8 @@ jobs:
         env:
           # argo-repo-creds feeds GH_TOKEN into the Argo repo credential
           # secret so ArgoCD can clone zero-day-ai/* private repos.
-          # Needs repo:read scope — PRIVATE_REPO_TOKEN has this.
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          # Needs repo:read scope — GH_PAT_GIBSON_RO has this.
+          GH_TOKEN: ${{ secrets.GH_PAT_GIBSON_RO }}
         run: make argo-install argo-repo-creds
 
       - name: Apply root-dev.yaml from gitops dev branch
@@ -173,7 +178,7 @@ jobs:
         with:
           repository: zero-day-ai/dashboard
           ref: main
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          token: ${{ secrets.GH_PAT_GIBSON_RO }}
           path: dashboard
 
       - name: Set up pnpm
