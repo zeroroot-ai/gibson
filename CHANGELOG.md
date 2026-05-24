@@ -62,6 +62,18 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.117.0](https://github.com/zero-day-ai/gibson/compare/v0.116.0...v0.117.0) (2026-05-24)
+
+
+### Features
+
+* **daemon:** register TenantService + DaemonOperatorService; unregister admin services ([#350](https://github.com/zero-day-ai/gibson/issues/350)) ([4ff5153](https://github.com/zero-day-ai/gibson/commit/4ff5153bfa6a31473e7b0abaae8cf5a09fa97d5e)), closes [#342](https://github.com/zero-day-ai/gibson/issues/342)
+
+
+### Bug Fixes
+
+* scope SPIFFE bypass to per-peer method allowlist; remove debug interceptor ([#344](https://github.com/zero-day-ai/gibson/issues/344)) ([85f7abf](https://github.com/zero-day-ai/gibson/commit/85f7abf6f9cb203d9aca33ecf7ad37f81c5a3868)), closes [#245](https://github.com/zero-day-ai/gibson/issues/245) [#343](https://github.com/zero-day-ai/gibson/issues/343)
+
 ## [0.116.0](https://github.com/zero-day-ai/gibson/compare/v0.115.0...v0.116.0) (2026-05-24)
 
 
