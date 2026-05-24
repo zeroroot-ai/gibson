@@ -143,8 +143,7 @@ func (s *EmbeddedVectorStore) Get(ctx context.Context, id string) (*VectorRecord
 
 	record, exists := s.records[id]
 	if !exists {
-		return nil, types.NewError(ErrCodeVectorNotFound,
-			fmt.Sprintf("vector record not found: %s", id))
+		return nil, nil
 	}
 
 	return &record, nil
