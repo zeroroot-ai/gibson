@@ -21,23 +21,7 @@ func TestLongTermMemoryConfig_Validate_SQLiteRejected(t *testing.T) {
 	}
 }
 
-func TestLongTermMemoryConfig_Validate_QdrantWithoutConnectionURL(t *testing.T) {
-	config := &LongTermMemoryConfig{
-		Backend: "qdrant",
-	}
-	config.Embedder.ApplyDefaults()
-
-	err := config.Validate()
-	if err == nil {
-		t.Fatal("Expected validation to fail for qdrant without connection_url, but it passed")
-	}
-
-	if !strings.Contains(err.Error(), "connection_url is required") {
-		t.Errorf("Expected error about connection_url required, got: %v", err)
-	}
-}
-
-func TestLongTermMemoryConfig_Validate_QdrantWithConnectionURL(t *testing.T) {
+func TestLongTermMemoryConfig_Validate_QdrantRejected(t *testing.T) {
 	config := &LongTermMemoryConfig{
 		Backend:       "qdrant",
 		ConnectionURL: "http://localhost:6333",
@@ -45,8 +29,12 @@ func TestLongTermMemoryConfig_Validate_QdrantWithConnectionURL(t *testing.T) {
 	config.Embedder.ApplyDefaults()
 
 	err := config.Validate()
-	if err != nil {
-		t.Fatalf("Expected validation to pass for qdrant with connection_url, got error: %v", err)
+	if err == nil {
+		t.Fatal("Expected validation to fail for qdrant backend, but it passed")
+	}
+
+	if !strings.Contains(err.Error(), "invalid backend 'qdrant'") {
+		t.Errorf("Expected error about invalid backend 'qdrant', got: %v", err)
 	}
 }
 
@@ -148,7 +136,7 @@ func TestEmbedderConfig_Validate_NativeAccepted(t *testing.T) {
 
 func TestValidBackendsIncludesExpectedBackends(t *testing.T) {
 	// Test that all expected backends are accepted
-	expectedBackends := []string{"embedded", "redis", "qdrant", "milvus"}
+	expectedBackends := []string{"embedded", "redis", "milvus"}
 
 	for _, backend := range expectedBackends {
 		config := &LongTermMemoryConfig{
@@ -179,10 +167,15 @@ func TestValidBackendsErrorMessage(t *testing.T) {
 		t.Fatal("Expected validation to fail for invalid backend")
 	}
 
-	expectedBackends := []string{"embedded", "redis", "qdrant", "milvus"}
+	expectedBackends := []string{"embedded", "redis", "milvus"}
 	for _, backend := range expectedBackends {
 		if !strings.Contains(err.Error(), backend) {
 			t.Errorf("Expected error message to mention '%s', got: %v", backend, err)
 		}
+	}
+
+	// qdrant must not appear in the valid backends error message
+	if strings.Contains(err.Error(), "qdrant") {
+		t.Errorf("Expected error message NOT to mention 'qdrant', got: %v", err)
 	}
 }

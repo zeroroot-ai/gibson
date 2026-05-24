@@ -14,7 +14,7 @@ import (
 // It uses brute-force search with cosine similarity, suitable for
 // development and small-to-medium datasets (up to ~100K vectors).
 // For production workloads with larger datasets, use external vector
-// stores like Qdrant or Milvus.
+// stores like Redis or Milvus.
 type EmbeddedVectorStore struct {
 	mu      sync.RWMutex
 	records map[string]VectorRecord
