@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zero-day-ai/gibson/internal/audit"
+	"github.com/zero-day-ai/gibson/internal/authz"
 	"github.com/zero-day-ai/gibson/internal/checkpoint"
 	"github.com/zero-day-ai/gibson/internal/orchestrator"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
@@ -301,11 +302,16 @@ func (s *DaemonServer) DiffCheckpoints(
 }
 
 // requireMissionViewer enforces mission-scoped FGA via `mission#viewer`,
-// which cascades from `tenant#member` per the OpenFGA model relation
+// which cascades from `tenant#member` via the OpenFGA model relation
 // `define viewer: [user] or admin or member from belongs_to` (see
 // internal/authz/model.fga `type mission`). When no Authorizer is
-// configured (dev / kind without FGA), the per-tenant Pool's tenant-id
-// scoping is the implicit guard.
+// configured, the per-tenant Pool's tenant-id scoping is the implicit guard.
+//
+// Self-healing: missions created before CreateMission's belongs_to write
+// became required may be missing their FGA tuple. When the viewer check
+// fails, this function checks whether the caller is a tenant member and, if
+// so, writes the missing tuple and allows the request. The heal is logged at
+// WARN so we can track and confirm the backfill is converging.
 //
 // Spec: mission-checkpointing R13.2, R14.2.
 func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcName string) error {
@@ -318,9 +324,8 @@ func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcN
 		return status_grpc.Error(codes.PermissionDenied, "caller has no tenant")
 	}
 
-	// When the FGA stack isn't wired (kind without FGA, dev), accept the
-	// request — the per-tenant Pool path provides tenant-scoping as the
-	// minimum guarantee.
+	// When the FGA stack isn't wired, the per-tenant Pool path provides
+	// tenant-scoping as the minimum guarantee.
 	if s.authorizer == nil {
 		s.logger.Debug(rpcName+": no authorizer wired, falling back to tenant-scope guard",
 			"mission_id", missionID,
@@ -329,10 +334,7 @@ func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcN
 		return nil
 	}
 
-	// Mission-scoped viewer check. The model relation cascades from
-	// tenant#member, so tenant members automatically pass without a
-	// per-mission tuple-write; per-mission shares (e.g. shared with a
-	// specific user) layer on top via `(user:<sub>, viewer, mission:<id>)`.
+	// Primary check: viewer relation on the mission (cascades via belongs_to).
 	ok, err := s.authorizer.Check(ctx,
 		"user:"+id.Subject,
 		"viewer",
@@ -346,9 +348,51 @@ func (s *DaemonServer) requireMissionViewer(ctx context.Context, missionID, rpcN
 		)
 		return status_grpc.Errorf(codes.Internal, "authz check failed: %v", err)
 	}
-	if !ok {
+	if ok {
+		return nil
+	}
+
+	// Viewer check failed. Self-heal: the mission may be missing its
+	// belongs_to tuple (created before CreateMission's write became
+	// required). If the caller is a tenant member, write the tuple now.
+	isMember, memberErr := s.authorizer.Check(ctx,
+		"user:"+id.Subject,
+		"member",
+		"tenant:"+tenantID,
+	)
+	if memberErr != nil {
+		s.logger.Warn(rpcName+": member check during heal failed",
+			"mission_id", missionID,
+			"tenant_id", tenantID,
+			"error", memberErr,
+		)
 		return status_grpc.Errorf(codes.PermissionDenied,
-			"caller is not a member of tenant %s", tenantID)
+			"caller does not have viewer access to mission %s", missionID)
+	}
+	if !isMember {
+		return status_grpc.Errorf(codes.PermissionDenied,
+			"caller does not have viewer access to mission %s", missionID)
+	}
+
+	// Caller is a tenant member. Write the missing belongs_to tuple.
+	healTuple := authz.Tuple{
+		User:     "tenant:" + tenantID,
+		Relation: "belongs_to",
+		Object:   "mission:" + missionID,
+	}
+	s.logger.Warn(rpcName+": mission missing belongs_to FGA tuple — writing heal tuple",
+		"mission_id", missionID,
+		"tenant_id", tenantID,
+		"user", id.Subject,
+	)
+	if writeErr := s.authorizer.Write(ctx, []authz.Tuple{healTuple}); writeErr != nil {
+		s.logger.Error(rpcName+": heal write failed",
+			"mission_id", missionID,
+			"tenant_id", tenantID,
+			"error", writeErr,
+		)
+		return status_grpc.Errorf(codes.PermissionDenied,
+			"caller does not have viewer access to mission %s", missionID)
 	}
 	return nil
 }
