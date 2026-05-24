@@ -53,9 +53,7 @@ func (r *credTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.B
 
 type credTestCircuit struct{}
 
-func (c *credTestCircuit) Allow(_, _ string) error   { return nil }
-func (c *credTestCircuit) RecordSuccess(_, _ string) {}
-func (c *credTestCircuit) RecordFailure(_, _ string) {}
+func (c *credTestCircuit) Execute(_, _ string, fn func() error) error { return fn() }
 
 type credTestAuditor struct{}
 

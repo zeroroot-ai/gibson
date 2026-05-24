@@ -83,9 +83,7 @@ func (r *fakeRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.Broke
 // fakeCircuit always allows.
 type fakeCircuit struct{}
 
-func (fakeCircuit) Allow(_, _ string) error   { return nil }
-func (fakeCircuit) RecordSuccess(_, _ string) {}
-func (fakeCircuit) RecordFailure(_, _ string) {}
+func (fakeCircuit) Execute(_, _ string, fn func() error) error { return fn() }
 
 // fakeAuditor captures emitted events.
 type fakeAuditor struct{ events []secrets.AuditEvent }

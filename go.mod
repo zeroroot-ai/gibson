@@ -39,6 +39,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	github.com/redis/go-redis/v9 v9.19.0
+	github.com/sony/gobreaker v1.0.0
 	github.com/spf13/viper v1.21.0
 	github.com/spiffe/go-spiffe/v2 v2.6.0
 	github.com/stretchr/testify v1.11.1
@@ -48,7 +49,7 @@ require (
 	github.com/zero-day-ai/ast-checks v0.1.1
 	github.com/zero-day-ai/platform-clients v0.10.0
 	github.com/zero-day-ai/platform-sdk v0.7.0
-	github.com/zero-day-ai/sdk v0.114.2
+	github.com/zero-day-ai/sdk v0.117.0
 	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
 	github.com/zero-day-ai/testfixtures v0.1.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
@@ -219,7 +220,6 @@ require (
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.3 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
-	github.com/sony/gobreaker v1.0.0 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
