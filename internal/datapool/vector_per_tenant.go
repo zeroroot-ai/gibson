@@ -66,8 +66,8 @@ func sanitizeForVector(tenantID string) (string, error) {
 
 // isVectorCollectionNotExist returns true if the error indicates the vector
 // collection does not exist. The exact check depends on the underlying vector
-// store; both the stub and real Qdrant adapter populate errors with the
-// collection name in a detectable way.
+// store; the Redis VSS adapter populates errors with the collection name
+// in a detectable way.
 func isVectorCollectionNotExist(err error, collection string) bool {
 	if err == nil {
 		return false

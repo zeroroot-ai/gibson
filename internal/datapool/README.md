@@ -24,7 +24,7 @@ Cheapest operationally — one cluster to backup, monitor, upgrade, patch.
 **Worked examples:**
 - Postgres — `pgxpool_per_tenant.go`
 - Redis (logical-DB index) — `redis_per_tenant.go`
-- Vector / Qdrant (deferred) — `vectordb/doc.go`
+- Vector / Redis VSS (deferred) — `vectordb/doc.go`
 
 ### 8-step add-a-store flow
 
