@@ -46,7 +46,7 @@ require (
 	github.com/tmc/langchaingo v0.1.14
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zero-day-ai/ast-checks v0.1.1
-	github.com/zero-day-ai/platform-clients v0.7.1
+	github.com/zero-day-ai/platform-clients v0.7.2
 	github.com/zero-day-ai/platform-sdk v0.7.0
 	github.com/zero-day-ai/sdk v0.114.0
 	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
