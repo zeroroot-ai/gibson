@@ -119,9 +119,8 @@ type auditEvent struct {
 	resourceID string
 }
 
-func (m *mockAuditLogger) Log(_ context.Context, action, resource, resourceID string, _ map[string]any) error {
+func (m *mockAuditLogger) Log(_ context.Context, action, resource, resourceID string, _ map[string]any) {
 	m.events = append(m.events, auditEvent{action: action, resource: resource, resourceID: resourceID})
-	return nil
 }
 
 // ---------------------------------------------------------------------------

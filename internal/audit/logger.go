@@ -5,12 +5,18 @@
 // The AuditLogger is designed to be safe for concurrent use and never exposes
 // delete or update operations — entries are strictly append-only.
 //
+// Log() and LogWithResult() are fire-and-forget: they enqueue the write to a
+// bounded in-memory channel (capacity 1000) and return immediately. A background
+// goroutine drains the channel and issues the XADD command. If the channel is
+// full or the XADD fails, the entry is dropped and
+// gibson_audit_write_drops_total is incremented.
+//
 // Usage:
 //
-//	logger := audit.NewAuditLogger(stateClient, slog.Default())
+//	logger := audit.NewAuditLogger(ctx, stateClient, slog.Default())
 //
 //	// Log an action — tenant and actor are extracted from context automatically.
-//	err := logger.Log(ctx, "apikey.create", "apikey", keyID, map[string]any{
+//	logger.Log(ctx, "apikey.create", "apikey", keyID, map[string]any{
 //	    "name": "ci-runner",
 //	})
 //
@@ -30,6 +36,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/zero-day-ai/gibson/internal/state"
@@ -52,7 +60,17 @@ const (
 	// audit entries.
 	resultSuccess = "success"
 	resultFailure = "failure"
+
+	// writeQueueCap is the capacity of the in-memory write queue.
+	writeQueueCap = 1000
 )
+
+// auditWriteDropsTotal counts write drops — either because the queue is full
+// or because the XADD command failed.
+var auditWriteDropsTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "gibson_audit_write_drops_total",
+	Help: "Total number of audit write drops due to full queue or XADD error.",
+})
 
 // AuditEntry is a single immutable audit record. All fields are serialised as
 // individual Redis Stream fields so they can be indexed and filtered without
@@ -126,29 +144,94 @@ type AuditQueryOptions struct {
 // (audit-compliance-emitter Requirement 9.4).
 type SignalProjector func(ctx context.Context, entry AuditEntry)
 
+// auditWrite holds the pre-computed parameters for a single XADD call.
+type auditWrite struct {
+	streamKey  string
+	values     map[string]any
+	entry      AuditEntry // for projector; kept after enqueue
+	projector  SignalProjector
+	loggerCtx  context.Context // best-effort context for projector; may be cancelled
+}
+
 // AuditLogger writes audit entries to tenant-scoped Redis Streams and supports
 // time-bounded, action-prefixed, and actor-scoped queries.
 //
 // AuditLogger is intentionally append-only: it exposes no delete or update
 // methods.  This ensures entries are tamper-evident once written.
 //
-// AuditLogger is safe for concurrent use.
+// AuditLogger is safe for concurrent use. Log() and LogWithResult() are
+// non-blocking: they enqueue writes to a bounded channel and return
+// immediately. A background goroutine drains the channel and issues XADD.
+// Drops are counted via gibson_audit_write_drops_total.
 type AuditLogger struct {
-	client    *state.StateClient
-	logger    *slog.Logger
-	projector SignalProjector // optional; nil-safe
+	client     *state.StateClient
+	logger     *slog.Logger
+	projector  SignalProjector // optional; nil-safe
+	writeQueue chan auditWrite
+	done       chan struct{}
 }
 
-// NewAuditLogger constructs an AuditLogger backed by the provided StateClient.
+// NewAuditLogger constructs an AuditLogger backed by the provided StateClient
+// and starts the background drain goroutine. The goroutine runs until ctx is
+// cancelled.
 //
-// Both parameters must be non-nil. The slog.Logger is used for internal
-// operational messages (e.g. serialisation errors) and does not log audit
-// entries themselves — those are written to Redis only.
-func NewAuditLogger(client *state.StateClient, logger *slog.Logger) *AuditLogger {
-	return &AuditLogger{
-		client: client,
-		logger: logger.With("component", "audit_logger"),
+// Both client and logger must be non-nil.
+func NewAuditLogger(ctx context.Context, client *state.StateClient, logger *slog.Logger) *AuditLogger {
+	l := &AuditLogger{
+		client:     client,
+		logger:     logger.With("component", "audit_logger"),
+		writeQueue: make(chan auditWrite, writeQueueCap),
+		done:       make(chan struct{}),
 	}
+	go l.drainLoop(ctx)
+	return l
+}
+
+// drainLoop is the background goroutine that issues XADD commands. It exits
+// when ctx is cancelled, closing l.done.
+func (l *AuditLogger) drainLoop(ctx context.Context) {
+	defer close(l.done)
+	for {
+		select {
+		case item := <-l.writeQueue:
+			if err := l.doXAdd(item); err != nil {
+				auditWriteDropsTotal.Inc()
+				l.logger.Warn("audit write dropped: XADD error", "err", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// doXAdd executes the XADD command and, on success, calls the projector.
+func (l *AuditLogger) doXAdd(item auditWrite) error {
+	_, err := l.client.Client().XAdd(context.Background(), &redis.XAddArgs{
+		Stream: item.streamKey,
+		MaxLen: auditStreamMaxLen,
+		Approx: true,
+		ID:     "*",
+		Values: item.values,
+	}).Result()
+	if err != nil {
+		return fmt.Errorf("audit: write entry to stream %s: %w", item.streamKey, err)
+	}
+
+	// Best-effort projection to the compliance signal pipeline. The Redis
+	// Streams write above is the authoritative legal record — a projection
+	// failure must never affect it (Requirement 9.4).
+	if item.projector != nil {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					l.logger.Warn("audit: signal projection panicked", slog.Any("panic", r))
+				}
+			}()
+			item.projector(item.loggerCtx, item.entry)
+		}()
+	}
+
+	return nil
 }
 
 // SetSignalProjector installs a SignalProjector. Subsequent Log/LogWithResult
@@ -162,33 +245,38 @@ func (a *AuditLogger) SetSignalProjector(p SignalProjector) {
 	a.projector = p
 }
 
-// Log writes an audit entry with result "success" to the tenant's Redis Stream.
+// Log enqueues an audit entry with result "success" for asynchronous write to
+// the tenant's Redis Stream.
 //
 // The tenant is extracted from ctx via auth.TenantStringFromContext; the actor is
 // extracted via auth.IdentityFromContext. If no tenant or identity is found in
 // the context, sensible defaults ("unknown") are used so that logging never
 // blocks the calling operation.
 //
-// This is the primary method callers should use for ordinary successful actions.
+// Log is non-blocking. If the internal queue is full, the entry is dropped and
+// gibson_audit_write_drops_total is incremented.
 func (a *AuditLogger) Log(
 	ctx context.Context,
 	action, resource, resourceID string,
 	details map[string]any,
-) error {
-	return a.LogWithResult(ctx, action, resource, resourceID, resultSuccess, details)
+) {
+	a.LogWithResult(ctx, action, resource, resourceID, resultSuccess, details)
 }
 
-// LogWithResult writes an audit entry with the given result string to the
-// tenant's Redis Stream. Use "success" or "failure" as the result value;
-// the constants audit.ResultSuccess and audit.ResultFailure are provided for
-// convenience.
+// LogWithResult enqueues an audit entry with the given result string for
+// asynchronous write to the tenant's Redis Stream. Use "success" or "failure"
+// as the result value; the constants audit.ResultSuccess and
+// audit.ResultFailure are provided for convenience.
 //
 // Tenant and actor are extracted from ctx — see Log for details.
+//
+// LogWithResult is non-blocking. If the internal queue is full, the entry is
+// dropped and gibson_audit_write_drops_total is incremented.
 func (a *AuditLogger) LogWithResult(
 	ctx context.Context,
 	action, resource, resourceID, result string,
 	details map[string]any,
-) error {
+) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "unknown"
@@ -231,14 +319,9 @@ func (a *AuditLogger) LogWithResult(
 		detailsJSON = []byte("{}")
 	}
 
-	streamKey := a.streamKey(tenantID)
-
-	_, err = a.client.Client().XAdd(ctx, &redis.XAddArgs{
-		Stream: streamKey,
-		MaxLen: auditStreamMaxLen,
-		Approx: true,
-		ID:     "*",
-		Values: map[string]any{
+	item := auditWrite{
+		streamKey: a.streamKey(tenantID),
+		values: map[string]any{
 			"id":          entry.ID,
 			"timestamp":   entry.Timestamp.Format(time.RFC3339Nano),
 			"tenant_id":   entry.TenantID,
@@ -250,26 +333,21 @@ func (a *AuditLogger) LogWithResult(
 			"details":     string(detailsJSON),
 			"result":      entry.Result,
 		},
-	}).Result()
-	if err != nil {
-		return fmt.Errorf("audit: write entry to stream %s: %w", streamKey, err)
+		entry:     entry,
+		projector: a.projector,
+		loggerCtx: ctx,
 	}
 
-	// Best-effort projection to the compliance signal pipeline. The Redis
-	// Streams write above is the authoritative legal record — a projection
-	// failure must never affect it (Requirement 9.4).
-	if a.projector != nil {
-		defer func() {
-			if r := recover(); r != nil {
-				a.logger.WarnContext(ctx, "audit: signal projection panicked",
-					slog.Any("panic", r),
-				)
-			}
-		}()
-		a.projector(ctx, entry)
+	select {
+	case a.writeQueue <- item:
+	default:
+		// Channel full — drop and count.
+		auditWriteDropsTotal.Inc()
+		a.logger.Warn("audit write dropped: queue full",
+			slog.String("action", action),
+			slog.String("tenant_id", tenantID),
+		)
 	}
-
-	return nil
 }
 
 // Query reads audit entries for the named tenant from its Redis Stream, applying

@@ -792,8 +792,6 @@ func (c *StateClient) StreamSubscribe(ctx context.Context, stream, lastID string
 		defer close(entryChan)
 
 		currentID := lastID
-		retryDelay := 100 * time.Millisecond
-		maxRetryDelay := 5 * time.Second
 
 		for {
 			select {
@@ -818,16 +816,11 @@ func (c *StateClient) StreamSubscribe(ctx context.Context, stream, lastID string
 				default:
 				}
 
-				// Sleep and retry with exponential backoff
-				time.Sleep(retryDelay)
-				if retryDelay < maxRetryDelay {
-					retryDelay *= 2
-				}
+				// Log and continue to next iteration. Per-command retries are
+				// handled by go-redis's native MaxRetries (wired in
+				// platform-clients v0.10.0 via RedisOptions.MaxRetries).
 				continue
 			}
-
-			// Reset retry delay on successful read
-			retryDelay = 100 * time.Millisecond
 
 			// Process entries
 			streamEntries, ok := entries[stream]

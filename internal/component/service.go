@@ -2098,9 +2098,7 @@ func (s *ComponentServiceServer) EnablePlugin(
 	)
 
 	if s.auditLog != nil {
-		if err := s.auditLog.Log(ctx, "plugin.enable", "plugin", req.PluginName, nil); err != nil {
-			s.logger.WarnContext(ctx, "audit log failed", "error", err)
-		}
+		s.auditLog.Log(ctx, "plugin.enable", "plugin", req.PluginName, nil)
 	}
 
 	return &componentpb.EnablePluginResponse{
@@ -2143,9 +2141,7 @@ func (s *ComponentServiceServer) DisablePlugin(
 	)
 
 	if s.auditLog != nil {
-		if err := s.auditLog.Log(ctx, "plugin.disable", "plugin", req.PluginName, nil); err != nil {
-			s.logger.WarnContext(ctx, "audit log failed", "error", err)
-		}
+		s.auditLog.Log(ctx, "plugin.disable", "plugin", req.PluginName, nil)
 	}
 
 	return &componentpb.DisablePluginResponse{
@@ -2196,9 +2192,7 @@ func (s *ComponentServiceServer) UpdatePluginConfig(
 	)
 
 	if s.auditLog != nil {
-		if err := s.auditLog.Log(ctx, "plugin.config.update", "plugin", req.PluginName, nil); err != nil {
-			s.logger.WarnContext(ctx, "audit log failed", "error", err)
-		}
+		s.auditLog.Log(ctx, "plugin.config.update", "plugin", req.PluginName, nil)
 	}
 
 	return &componentpb.UpdatePluginConfigResponse{

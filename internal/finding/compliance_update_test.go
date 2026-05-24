@@ -39,9 +39,8 @@ type fakeAudit struct {
 	entries []map[string]any
 }
 
-func (a *fakeAudit) Log(ctx context.Context, action, resource, id string, details map[string]any) error {
+func (a *fakeAudit) Log(_ context.Context, _, _, _ string, details map[string]any) {
 	a.entries = append(a.entries, details)
-	return nil
 }
 
 func TestUpdateComplianceMappings_Append(t *testing.T) {

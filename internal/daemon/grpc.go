@@ -1043,7 +1043,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			compRegistry := component.NewRedisComponentRegistry(redisClient, 30*time.Second)
 			compQueue := component.NewRedisWorkQueue(d.stateClient.Client())
 
-			auditLogger := audit.NewAuditLogger(d.stateClient, d.logger.Slog())
+			auditLogger := audit.NewAuditLogger(ctx, d.stateClient, d.logger.Slog())
 
 			// Wire GraphRAGFindingSubmitter when infrastructure is available.
 			// It routes findings to the per-tenant data-plane (via Pool) and Neo4j

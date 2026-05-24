@@ -2,7 +2,6 @@ package secrets
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -123,17 +122,11 @@ var auditFailuresTotal = promauto.NewCounterVec(
 )
 
 // AuditWriter emits AuditEvents to the existing Redis Streams audit pipeline.
-// It retries up to 3 times with exponential backoff (250ms, 500ms, 1s) and
-// on final failure logs CRITICAL via slog and increments the
-// gibson_secrets_audit_failures_total counter. It never returns an error —
-// audit failures must not block the underlying secret operation.
-//
 // AuditWriter is safe for concurrent use.
 type AuditWriter struct {
 	logger *audit.AuditLogger
 	slog   *slog.Logger
-	clock  func() time.Time    // injectable for tests; nil uses time.Now
-	sleep  func(time.Duration) // injectable for tests; nil uses time.Sleep
+	clock  func() time.Time // injectable for tests; nil uses time.Now
 }
 
 // NewAuditWriter constructs an AuditWriter backed by the given audit logger
@@ -151,23 +144,21 @@ func NewAuditWriter(logger *audit.AuditLogger, sl *slog.Logger) *AuditWriter {
 	}
 }
 
-// newAuditWriterWithClock is the test constructor that accepts clock and sleep
-// overrides for deterministic retry-backoff tests.
+// newAuditWriterWithClock is the test constructor that accepts a clock
+// override for deterministic timestamp tests.
 func newAuditWriterWithClock(
 	logger *audit.AuditLogger,
 	sl *slog.Logger,
 	clock func() time.Time,
-	sleep func(time.Duration),
 ) *AuditWriter {
 	w := NewAuditWriter(logger, sl)
 	w.clock = clock
-	w.sleep = sleep
 	return w
 }
 
-// Audit emits event to the Redis Streams audit pipeline. It retries on
-// transient write failures with exponential backoff and degrades gracefully
-// to a CRITICAL log on final failure. It never returns an error.
+// Audit emits event to the Redis Streams audit pipeline. It never returns an
+// error. The underlying AuditLogger.LogWithResult is fire-and-forget — it
+// enqueues the write asynchronously and handles drop counting internally.
 //
 // SECURITY: If any string field of event that is longer than 256 bytes
 // contains the literal substring "value" or "secret_value", the event is
@@ -177,41 +168,14 @@ func (w *AuditWriter) Audit(ctx context.Context, event AuditEvent) {
 	if w.rejectOnPlaintextGuard(ctx, event) {
 		return
 	}
-
-	backoffs := []time.Duration{250 * time.Millisecond, 500 * time.Millisecond, time.Second}
-	sleepFn := time.Sleep
-	if w.sleep != nil {
-		sleepFn = w.sleep
-	}
-
-	var lastErr error
-	for attempt := 0; attempt <= len(backoffs); attempt++ {
-		if attempt > 0 {
-			sleepFn(backoffs[attempt-1])
-		}
-		if err := w.write(ctx, event); err != nil {
-			lastErr = err
-			continue
-		}
-		return // success
-	}
-
-	// All retries exhausted — log CRITICAL and increment counter.
-	w.slog.ErrorContext(ctx, "CRITICAL: secrets audit write failed after all retries; audit gap",
-		slog.String("action", event.Action),
-		slog.String("effect", event.Effect),
-		slog.String("actor_id", event.ActorID),
-		slog.String("actor_tenant_id", event.ActorTenantID),
-		slog.String("resource_uri", event.ResourceURI),
-		slog.String("error", lastErr.Error()),
-	)
-	auditFailuresTotal.WithLabelValues(event.ActorTenantID).Inc()
+	w.write(ctx, event)
 }
 
-// write performs a single attempt to emit the event to the Redis Streams
-// audit logger. It maps AuditEvent fields to the existing AuditLogger.Log /
-// LogWithResult API.
-func (w *AuditWriter) write(ctx context.Context, event AuditEvent) error {
+// write enqueues the event to the Redis Streams audit logger. It maps
+// AuditEvent fields to the AuditLogger.LogWithResult API. Since
+// LogWithResult is fire-and-forget, write never returns an error — drop
+// accounting is handled inside AuditLogger via gibson_audit_write_drops_total.
+func (w *AuditWriter) write(ctx context.Context, event AuditEvent) {
 	now := event.OccurredAt
 	if now.IsZero() {
 		if w.clock != nil {
@@ -251,20 +215,11 @@ func (w *AuditWriter) write(ctx context.Context, event AuditEvent) error {
 		details["agent_run_id"] = event.AgentRunID
 	}
 
-	// Inject actor context into ctx so the logger's TenantStringFromContext
-	// and IdentityFromContext produce correct values. The audit logger
-	// extracts the tenant from context — it always reads the stream key
-	// from the tenant in ctx. We pass a context already carrying the identity
-	// (set by the SDK interceptor in production). In the audit writer we
-	// pass the raw tenant string via the log call's resource fields rather
-	// than relying on ctx having the identity — this avoids a dependency on
-	// the identity being in context for background writes.
-	//
-	// The existing AuditLogger.LogWithResult extracts the tenant from
-	// context; when the ctx lacks an identity (e.g. background flush), it
-	// falls back to "unknown". For correctness we always use LogWithResult
-	// with the event's actor tenant as the canonical audit row owner.
-	err := w.logger.LogWithResult(
+	// AuditLogger.LogWithResult extracts the tenant from context; when the
+	// ctx lacks an identity (e.g. background flush), it falls back to
+	// "unknown". For correctness we always use LogWithResult with the event's
+	// actor tenant as the canonical audit row owner.
+	w.logger.LogWithResult(
 		ctx,
 		event.Action,
 		event.ResourceType,
@@ -272,10 +227,6 @@ func (w *AuditWriter) write(ctx context.Context, event AuditEvent) error {
 		result,
 		details,
 	)
-	if err != nil {
-		return fmt.Errorf("secrets audit: write stream entry: %w", err)
-	}
-	return nil
 }
 
 // rejectOnPlaintextGuard checks all string fields of event that exceed
