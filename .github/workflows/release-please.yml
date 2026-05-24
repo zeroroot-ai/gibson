@@ -19,18 +19,49 @@ jobs:
       # has two packages: root `.` (daemon, tag pattern `v<semver>`) and
       # `tools/gibson-bootstrap` (separate component, tag pattern
       # `gibson-bootstrap-v<semver>`). The authz registry only tracks the
-      # daemon, so we gate on the ROOT-package outputs only.
+      # daemon, so we gate on whether the root "." package was released.
       #
-      # Multi-package outputs are keyed by `<package_path>--<output_name>`;
-      # for the root they're `.--release_created` and `.--tag_name`.
-      daemon_release_created: ${{ steps.release.outputs['.--release_created'] }}
-      daemon_tag_name: ${{ steps.release.outputs['.--tag_name'] }}
+      # NOTE on output key format: `.--release_created` is the documented
+      # multi-package key for the root "." path, but GitHub Actions sanitizes
+      # output variable names — keys starting with "." are silently dropped
+      # and the expression evaluates to "". This caused the publish job to be
+      # skipped for every release from v0.108.0 to v0.117.0 (deploy#504).
+      #
+      # Workaround: a dedicated step checks paths_released (a JSON array set by
+      # release-please-action) for the "." entry, reads the new version from the
+      # manifest, and sets `daemon_released` + `tag` as outputs.
+      daemon_release_created: ${{ steps.daemon-tag.outputs.daemon_released }}
+      daemon_tag_name: ${{ steps.daemon-tag.outputs.tag }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Extract daemon tag from paths_released
+        id: daemon-tag
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        env:
+          PATHS_RELEASED: ${{ steps.release.outputs.paths_released }}
+        run: |
+          # paths_released is a JSON array of package paths, e.g. ["."] or
+          # [".", "tools/gibson-bootstrap"]. Check if the daemon root "." is in
+          # the set before publishing the authz registry OCI artifact.
+          #
+          # release-please-action sets `.--tag_name` but the key is silently
+          # dropped by GitHub Actions (keys starting with "." are sanitized).
+          # Read .release-please-manifest.json directly instead — it is the
+          # authoritative source for the new daemon version. See deploy#504.
+          if echo "${PATHS_RELEASED}" | jq -e 'map(select(. == ".")) | length > 0' > /dev/null 2>&1; then
+            VERSION=$(jq -r '.["."]' .release-please-manifest.json)
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "daemon_released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "daemon_released=false" >> "$GITHUB_OUTPUT"
+          fi
 
   # publish-authz-registry: piggyback on release-please so the OCI artifact
   # is published in the SAME workflow run that cuts the release.
