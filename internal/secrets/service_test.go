@@ -27,17 +27,22 @@ func (f *fakeServiceRegistry) For(_ context.Context, _ auth.TenantID) (sdksecret
 	return f.broker, f.err
 }
 
-// fakeCircuit implements ServiceCircuitBreaker, always allowing unless
-// allowErr is set.
+// fakeCircuit implements circuitExecutor for service tests. When openErr is
+// set, Execute returns it immediately without calling fn (simulating an open
+// circuit). Otherwise it calls fn and returns its result. The fnCalls counter
+// tracks how many times fn was actually invoked.
 type fakeCircuit struct {
-	allowErr     error
-	successCalls int
-	failureCalls int
+	openErr error
+	fnCalls int
 }
 
-func (f *fakeCircuit) Allow(_, _ string) error   { return f.allowErr }
-func (f *fakeCircuit) RecordSuccess(_, _ string) { f.successCalls++ }
-func (f *fakeCircuit) RecordFailure(_, _ string) { f.failureCalls++ }
+func (f *fakeCircuit) Execute(_, _ string, fn func() error) error {
+	if f.openErr != nil {
+		return f.openErr
+	}
+	f.fnCalls++
+	return fn()
+}
 
 // serviceFakeBroker is a configurable broker for service tests.
 type serviceFakeBroker struct {
@@ -79,7 +84,7 @@ var svcTenant = auth.MustNewTenantID("acme-corp")
 
 func buildService(
 	broker sdksecrets.Broker,
-	circuit ServiceCircuitBreaker,
+	circuit circuitExecutor,
 	auditor ServiceAuditWriter,
 ) *Service {
 	reg := &fakeServiceRegistry{broker: broker}
@@ -104,8 +109,7 @@ func TestService_Resolve_Success(t *testing.T) {
 	got, err := svc.Resolve(ctx, "cred:openai")
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
-	assert.Equal(t, 1, circuit.successCalls)
-	assert.Equal(t, 0, circuit.failureCalls)
+	assert.Equal(t, 1, circuit.fnCalls)
 	require.Len(t, aud.events, 1)
 	assert.Equal(t, EffectAllow, aud.events[0].Effect)
 	assert.Equal(t, ActionSecretRead, aud.events[0].Action)
@@ -125,14 +129,14 @@ func TestService_Resolve_NotFound(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.NotFound, st.Code())
 
-	assert.Equal(t, 1, circuit.failureCalls)
+	assert.Equal(t, 1, circuit.fnCalls) // fn was called; gobreaker recorded the failure
 	require.Len(t, aud.events, 1)
 	assert.Equal(t, EffectDeny, aud.events[0].Effect)
 }
 
 func TestService_Resolve_CircuitOpen(t *testing.T) {
 	broker := &serviceFakeBroker{getVal: []byte("value")}
-	circuit := &fakeCircuit{allowErr: fmt.Errorf("open: %w", sdksecrets.ErrUnavailable)}
+	circuit := &fakeCircuit{openErr: ErrCircuitOpen}
 	aud := &fakeAuditCapture{}
 
 	svc := buildService(broker, circuit, aud)
@@ -171,7 +175,7 @@ func TestService_Put_Success(t *testing.T) {
 	ctx := ctxWithTestTenant(svcTenant)
 
 	require.NoError(t, svc.Put(ctx, "cred:foo", []byte("val")))
-	assert.Equal(t, 1, circuit.successCalls)
+	assert.Equal(t, 1, circuit.fnCalls)
 	require.Len(t, aud.events, 1)
 	assert.Equal(t, EffectAllow, aud.events[0].Effect)
 	assert.Equal(t, ActionSecretWrite, aud.events[0].Action)
@@ -189,7 +193,7 @@ func TestService_Put_Unavailable(t *testing.T) {
 	require.Error(t, err)
 	st, _ := status.FromError(err)
 	assert.Equal(t, codes.Unavailable, st.Code())
-	assert.Equal(t, 1, circuit.failureCalls)
+	assert.Equal(t, 1, circuit.fnCalls) // fn was called; gobreaker recorded the failure
 }
 
 // --- Delete ---
@@ -203,7 +207,7 @@ func TestService_Delete_Success(t *testing.T) {
 	ctx := ctxWithTestTenant(svcTenant)
 
 	require.NoError(t, svc.Delete(ctx, "cred:foo"))
-	assert.Equal(t, 1, circuit.successCalls)
+	assert.Equal(t, 1, circuit.fnCalls)
 	require.Len(t, aud.events, 1)
 	assert.Equal(t, ActionSecretDelete, aud.events[0].Action)
 	assert.Equal(t, EffectAllow, aud.events[0].Effect)
@@ -223,14 +227,14 @@ func TestService_List_Success(t *testing.T) {
 	got, err := svc.List(ctx, sdksecrets.Filter{})
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
-	assert.Equal(t, 1, circuit.successCalls)
+	assert.Equal(t, 1, circuit.fnCalls)
 	require.Len(t, aud.events, 1)
 	assert.Equal(t, ActionSecretList, aud.events[0].Action)
 }
 
 func TestService_List_CircuitOpen(t *testing.T) {
 	broker := &serviceFakeBroker{}
-	circuit := &fakeCircuit{allowErr: fmt.Errorf("open: %w", sdksecrets.ErrUnavailable)}
+	circuit := &fakeCircuit{openErr: ErrCircuitOpen}
 	aud := &fakeAuditCapture{}
 
 	svc := buildService(broker, circuit, aud)

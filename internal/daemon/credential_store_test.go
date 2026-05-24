@@ -53,12 +53,10 @@ func (r *credStoreTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecr
 	return r.broker, r.err
 }
 
-// credStoreTestCircuit implements secrets.ServiceCircuitBreaker, always allowing.
+// credStoreTestCircuit implements secrets.circuitExecutor, always allowing.
 type credStoreTestCircuit struct{}
 
-func (c *credStoreTestCircuit) Allow(_, _ string) error   { return nil }
-func (c *credStoreTestCircuit) RecordSuccess(_, _ string) {}
-func (c *credStoreTestCircuit) RecordFailure(_, _ string) {}
+func (c *credStoreTestCircuit) Execute(_, _ string, fn func() error) error { return fn() }
 
 // credStoreTestAuditor implements secrets.ServiceAuditWriter, discarding events.
 type credStoreTestAuditor struct{}

@@ -238,8 +238,19 @@ type daemonImpl struct {
 	// config selects AuthMethodJWT will get a clear "no source" error
 	// until gibson#169 lands SPIREJWTSource).
 	//
-	// Spec: gibson#167 PRD; ADR-0009 amendment (docs#34).
+	// After initBrokerStack runs, this field is replaced by the JWTCache
+	// wrapper so stampVaultJWTOnConfig reads from the cache instead of
+	// calling the underlying SPIRE source on every Vault auth round-trip.
+	//
+	// Spec: gibson#167 PRD; ADR-0009 amendment (docs#34); gibson#321.
 	vaultJWTSource jwtsource.JWTSource
+
+	// vaultJWTCache is the running JWTCache that wraps d.vaultJWTSource.
+	// Held separately so stopServices can call Close() without a type
+	// assertion on d.vaultJWTSource. Nil when the source is a
+	// DisabledJWTSource (no cache is started for the disabled stub).
+	// Spec: gibson#321.
+	vaultJWTCache *jwtsource.JWTCache
 
 	// vaultJWTAudience is the SPIRE JWT-SVID audience the daemon requests
 	// when minting tokens for Vault. It must match bound_audiences on the
@@ -1648,6 +1659,15 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 			d.logger.Warn(ctx, "error closing SPIFFE X509Source", "error", err)
 		}
 		d.spiffeX509Source = nil
+	}
+
+	// Stop the JWTCache background goroutine (gibson#321).
+	if d.vaultJWTCache != nil {
+		d.logger.Info(ctx, "closing JWT source cache")
+		if err := d.vaultJWTCache.Close(); err != nil {
+			d.logger.Warn(ctx, "error closing JWT source cache", "error", err)
+		}
+		d.vaultJWTCache = nil
 	}
 }
 

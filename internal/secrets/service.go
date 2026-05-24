@@ -19,14 +19,6 @@ type ServiceRegistry interface {
 	For(ctx context.Context, tenant auth.TenantID) (sdksecrets.Broker, error)
 }
 
-// ServiceCircuitBreaker is the narrow interface Service needs from the
-// circuit breaker.
-type ServiceCircuitBreaker interface {
-	Allow(tenant, provider string) error
-	RecordSuccess(tenant, provider string)
-	RecordFailure(tenant, provider string)
-}
-
 // ServiceAuditWriter is the narrow interface Service needs to emit audit
 // events. The concrete implementation is *AuditWriter.
 type ServiceAuditWriter interface {
@@ -45,14 +37,14 @@ type ServiceAuditWriter interface {
 // prevents callers from bypassing tenant isolation.
 type Service struct {
 	registry ServiceRegistry
-	circuit  ServiceCircuitBreaker
+	circuit  circuitExecutor
 	auditor  ServiceAuditWriter
 }
 
 // NewService constructs a Service. All parameters must be non-nil.
 func NewService(
 	registry ServiceRegistry,
-	circuit ServiceCircuitBreaker,
+	circuit circuitExecutor,
 	auditor ServiceAuditWriter,
 ) (*Service, error) {
 	if registry == nil {
@@ -89,23 +81,25 @@ func (s *Service) Resolve(ctx context.Context, name string) ([]byte, error) {
 		return nil, toGRPCError(err, "resolve registry")
 	}
 
-	providerName := providerName(broker)
-	if cbErr := s.circuit.Allow(tenant.String(), providerName); cbErr != nil {
-		s.circuit.RecordFailure(tenant.String(), providerName)
+	pname := providerName(broker)
+	var value []byte
+	execErr := s.circuit.Execute(tenant.String(), pname, func() error {
+		var opErr error
+		value, opErr = broker.Get(ctx, tenant, name)
+		return opErr
+	})
+
+	if execErr != nil {
+		if errors.Is(execErr, ErrCircuitOpen) {
+			s.emitAuditWithReason(ctx, tenant, name, ActionSecretRead, EffectDeny, false,
+				"circuit_open", "circuit_open", start)
+			return nil, status.Error(codes.Unavailable, execErr.Error())
+		}
 		s.emitAuditWithReason(ctx, tenant, name, ActionSecretRead, EffectDeny, false,
-			"circuit_open", "circuit_open", start)
-		return nil, status.Error(codes.Unavailable, "secrets circuit open: "+cbErr.Error())
+			errorClass(execErr), execErr.Error(), start)
+		return nil, toGRPCError(execErr, "resolve get")
 	}
 
-	value, opErr := broker.Get(ctx, tenant, name)
-	if opErr != nil {
-		s.circuit.RecordFailure(tenant.String(), providerName)
-		s.emitAuditWithReason(ctx, tenant, name, ActionSecretRead, EffectDeny, false,
-			errorClass(opErr), opErr.Error(), start)
-		return nil, toGRPCError(opErr, "resolve get")
-	}
-
-	s.circuit.RecordSuccess(tenant.String(), providerName)
 	s.emitAudit(ctx, tenant, name, ActionSecretRead, EffectAllow, true, "", start)
 	return value, nil
 }
@@ -126,22 +120,22 @@ func (s *Service) Put(ctx context.Context, name string, value []byte) error {
 		return toGRPCError(err, "put registry")
 	}
 
-	providerName := providerName(broker)
-	if cbErr := s.circuit.Allow(tenant.String(), providerName); cbErr != nil {
-		s.circuit.RecordFailure(tenant.String(), providerName)
+	pname := providerName(broker)
+	execErr := s.circuit.Execute(tenant.String(), pname, func() error {
+		return broker.Put(ctx, tenant, name, value)
+	})
+
+	if execErr != nil {
+		if errors.Is(execErr, ErrCircuitOpen) {
+			s.emitAuditWithReason(ctx, tenant, name, ActionSecretWrite, EffectDeny, false,
+				"circuit_open", "circuit_open", start)
+			return status.Error(codes.Unavailable, execErr.Error())
+		}
 		s.emitAuditWithReason(ctx, tenant, name, ActionSecretWrite, EffectDeny, false,
-			"circuit_open", "circuit_open", start)
-		return status.Error(codes.Unavailable, "secrets circuit open: "+cbErr.Error())
+			errorClass(execErr), execErr.Error(), start)
+		return toGRPCError(execErr, "put")
 	}
 
-	if opErr := broker.Put(ctx, tenant, name, value); opErr != nil {
-		s.circuit.RecordFailure(tenant.String(), providerName)
-		s.emitAuditWithReason(ctx, tenant, name, ActionSecretWrite, EffectDeny, false,
-			errorClass(opErr), opErr.Error(), start)
-		return toGRPCError(opErr, "put")
-	}
-
-	s.circuit.RecordSuccess(tenant.String(), providerName)
 	s.emitAudit(ctx, tenant, name, ActionSecretWrite, EffectAllow, true, "", start)
 	return nil
 }
@@ -162,22 +156,22 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 		return toGRPCError(err, "delete registry")
 	}
 
-	providerName := providerName(broker)
-	if cbErr := s.circuit.Allow(tenant.String(), providerName); cbErr != nil {
-		s.circuit.RecordFailure(tenant.String(), providerName)
+	pname := providerName(broker)
+	execErr := s.circuit.Execute(tenant.String(), pname, func() error {
+		return broker.Delete(ctx, tenant, name)
+	})
+
+	if execErr != nil {
+		if errors.Is(execErr, ErrCircuitOpen) {
+			s.emitAuditWithReason(ctx, tenant, name, ActionSecretDelete, EffectDeny, false,
+				"circuit_open", "circuit_open", start)
+			return status.Error(codes.Unavailable, execErr.Error())
+		}
 		s.emitAuditWithReason(ctx, tenant, name, ActionSecretDelete, EffectDeny, false,
-			"circuit_open", "circuit_open", start)
-		return status.Error(codes.Unavailable, "secrets circuit open: "+cbErr.Error())
+			errorClass(execErr), execErr.Error(), start)
+		return toGRPCError(execErr, "delete")
 	}
 
-	if opErr := broker.Delete(ctx, tenant, name); opErr != nil {
-		s.circuit.RecordFailure(tenant.String(), providerName)
-		s.emitAuditWithReason(ctx, tenant, name, ActionSecretDelete, EffectDeny, false,
-			errorClass(opErr), opErr.Error(), start)
-		return toGRPCError(opErr, "delete")
-	}
-
-	s.circuit.RecordSuccess(tenant.String(), providerName)
 	s.emitAudit(ctx, tenant, name, ActionSecretDelete, EffectAllow, true, "", start)
 	return nil
 }
@@ -199,23 +193,25 @@ func (s *Service) List(ctx context.Context, filter sdksecrets.Filter) ([]string,
 		return nil, toGRPCError(err, "list registry")
 	}
 
-	providerName := providerName(broker)
-	if cbErr := s.circuit.Allow(tenant.String(), providerName); cbErr != nil {
-		s.circuit.RecordFailure(tenant.String(), providerName)
+	pname := providerName(broker)
+	var names []string
+	execErr := s.circuit.Execute(tenant.String(), pname, func() error {
+		var opErr error
+		names, opErr = broker.List(ctx, tenant, filter)
+		return opErr
+	})
+
+	if execErr != nil {
+		if errors.Is(execErr, ErrCircuitOpen) {
+			s.emitAuditWithReason(ctx, tenant, "*", ActionSecretList, EffectDeny, false,
+				"circuit_open", "circuit_open", start)
+			return nil, status.Error(codes.Unavailable, execErr.Error())
+		}
 		s.emitAuditWithReason(ctx, tenant, "*", ActionSecretList, EffectDeny, false,
-			"circuit_open", "circuit_open", start)
-		return nil, status.Error(codes.Unavailable, "secrets circuit open: "+cbErr.Error())
+			errorClass(execErr), execErr.Error(), start)
+		return nil, toGRPCError(execErr, "list")
 	}
 
-	names, opErr := broker.List(ctx, tenant, filter)
-	if opErr != nil {
-		s.circuit.RecordFailure(tenant.String(), providerName)
-		s.emitAuditWithReason(ctx, tenant, "*", ActionSecretList, EffectDeny, false,
-			errorClass(opErr), opErr.Error(), start)
-		return nil, toGRPCError(opErr, "list")
-	}
-
-	s.circuit.RecordSuccess(tenant.String(), providerName)
 	s.emitAudit(ctx, tenant, "*", ActionSecretList, EffectAllow, true, "", start)
 	return names, nil
 }
