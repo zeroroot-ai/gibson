@@ -62,6 +62,18 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.116.0](https://github.com/zero-day-ai/gibson/compare/v0.115.0...v0.116.0) (2026-05-24)
+
+
+### Features
+
+* **audit:** fire-and-forget Redis XADD + delete bespoke retry loop ([#320](https://github.com/zero-day-ai/gibson/issues/320)) ([#335](https://github.com/zero-day-ai/gibson/issues/335)) ([3f5cb82](https://github.com/zero-day-ai/gibson/commit/3f5cb82a90dea86abbd7ac3ceb512e1cf91b0b0f))
+* **graphrag:** gobreaker circuit breaker + graphHealthy runtime update ([#318](https://github.com/zero-day-ai/gibson/issues/318)) ([#332](https://github.com/zero-day-ai/gibson/issues/332)) ([2b3333d](https://github.com/zero-day-ai/gibson/commit/2b3333dba8f83c64026aca466e56b06ca5eb98b9))
+* **internal/queue:** move queue package from sdk to gibson internal ([#334](https://github.com/zero-day-ai/gibson/issues/334)) ([f058d1c](https://github.com/zero-day-ai/gibson/commit/f058d1cf1c1d57a53119aa81f5ca4d1fe07ea3c8))
+* **llm:** HTTPTimeout in ProviderConfig + circuitLLMProvider wrapper ([#319](https://github.com/zero-day-ai/gibson/issues/319)) ([#333](https://github.com/zero-day-ai/gibson/issues/333)) ([4c6165b](https://github.com/zero-day-ai/gibson/commit/4c6165bcd11eee3f2587ccfa279d4e4282dbefbc))
+* **secrets:** gobreakerExecutor replaces ServiceCircuitBreaker + wire JWTCache into broker_init ([#321](https://github.com/zero-day-ai/gibson/issues/321)) ([#336](https://github.com/zero-day-ai/gibson/issues/336)) ([7a375c8](https://github.com/zero-day-ai/gibson/commit/7a375c880ca0a99c33863ef73e415a0d6ef54c30))
+* **vectordb:** implement Redis VSS adapter, delete Qdrant stub, wire into pool ([#330](https://github.com/zero-day-ai/gibson/issues/330)) ([6c89a7f](https://github.com/zero-day-ai/gibson/commit/6c89a7f6b4ad7db495ecbff79a21cfc67cde4e1d)), closes [#325](https://github.com/zero-day-ai/gibson/issues/325)
+
 ## [0.115.0](https://github.com/zero-day-ai/gibson/compare/v0.114.0...v0.115.0) (2026-05-24)
 
 
