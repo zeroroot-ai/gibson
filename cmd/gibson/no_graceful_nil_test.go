@@ -268,7 +268,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/llm/ratelimit.go:136": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tokenLimit nil means unlimited (legitimate semantic)"},
 
 		// internal/memory
-		"internal/memory/vector/embedded.go:217": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Metadata field on vector record, legitimately nil-able"},
+		"internal/memory/vector/embedded.go:216": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Metadata field on vector record, legitimately nil-able"},
 
 		// internal/observability
 		"internal/observability/otel_decision_log_adapter.go:209": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "action.AgentExecution proto field, legitimately nil-able"},
