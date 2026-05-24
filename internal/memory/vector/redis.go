@@ -351,8 +351,7 @@ func (s *RedisVectorStore) Get(ctx context.Context, id string) (*VectorRecord, e
 	var record VectorRecord
 	if err := s.client.JSONGet(ctx, key, "$", &record); err != nil {
 		if err == state.ErrNotFound {
-			return nil, types.NewError(ErrCodeVectorNotFound,
-				fmt.Sprintf("vector record not found: %s", id))
+			return nil, nil
 		}
 		return nil, types.WrapError(ErrCodeVectorSearchFailed, "failed to get vector document", err)
 	}

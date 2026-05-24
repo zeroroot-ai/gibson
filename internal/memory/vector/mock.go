@@ -2,7 +2,6 @@ package vector
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -118,8 +117,7 @@ func (m *MockVectorStore) Get(ctx context.Context, id string) (*VectorRecord, er
 
 	record, exists := m.records[id]
 	if !exists {
-		return nil, types.NewError(ErrCodeVectorNotFound,
-			fmt.Sprintf("vector record not found: %s", id))
+		return nil, nil
 	}
 
 	return &record, nil
