@@ -310,9 +310,10 @@ type daemonImpl struct {
 	auditWriter *audit.Writer
 
 	// platformDB is the connection pool for the shared dashboard PostgreSQL instance.
-	// It is used to read and write the tenant_provisioning table. May be nil when
-	// no PlatformPostgresConfig is provided or when the connection fails at startup
-	// (degraded mode — provisioning unavailable but missions/tools/agents continue).
+	// It is used to read and write the tenant_provisioning table. After a
+	// successful Start() this is always non-nil: initPlatformPostgres returns a
+	// fatal error (gibson#246) when the connection, migrations, or schema gate
+	// fail, so the daemon never serves traffic with platformDB=nil.
 	platformDB *sql.DB
 
 	// pool is the per-tenant data-plane connection pool introduced in Phase B/C/D.
@@ -753,10 +754,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Authorization is fully covered by FGA tuples binding agent_principal to mission.
 
 	// Dashboard PostgreSQL connection pool — runs AFTER Authorization Service and
-	// BEFORE Component Registry. A connection failure is non-fatal: the daemon
-	// continues with provisioning degraded (new signups cannot complete) but
-	// missions, tools, and agents are unaffected.
-	d.initPlatformPostgres(ctx)
+	// BEFORE Component Registry. A connection failure is FATAL (gibson#246,
+	// one-code-path discipline): the daemon refuses to boot without a usable
+	// platform-postgres connection so downstream RPCs never mask a missing
+	// connection behind misleading "not found" / "not implemented" errors.
+	if err := d.initPlatformPostgres(ctx); err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to initialize platform-postgres: %w", err)
+	}
 
 	// Initialize Redis-backed component registry and registry adapter.
 	// The component registry uses Redis for runtime service discovery (registrations with TTL).
@@ -804,9 +809,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			RequireTenant: d.config.Auth.Mode == "saas",
 		}
 		tenantStore := state.NewTenantScopedStore(d.stateClient, tenantStoreCfg)
-		// platformDB may be nil (e.g. in dev/kind where the dashboard
-		// Postgres pool isn't established yet). QuotaManager.GetQuota
-		// degrades to "no limits" in that case.
+		// platformDB is guaranteed non-nil here: initPlatformPostgres ran
+		// earlier in Start() and is fatal on failure (gibson#246).
 		d.quotaManager = component.NewQuotaManager(tenantStore, d.platformDB, d.logger.Slog())
 		d.logger.Info(ctx, "quota manager initialized")
 
@@ -1650,15 +1654,24 @@ func (d *daemonImpl) stopServices(ctx context.Context) {
 // initPlatformPostgres establishes the dashboard PostgreSQL connection pool and
 // runs the tenant_provisioning schema migration.
 //
-// Failure is non-fatal: the daemon logs an error and continues with platformDB=nil.
-// Provisioning RPCs will return an appropriate error when platformDB is nil.
-func (d *daemonImpl) initPlatformPostgres(ctx context.Context) {
+// Invariant (gibson#246, one-code-path discipline): the daemon fails to start
+// when platform-postgres is unreachable. There is no degraded mode — a missing
+// or unhealthy platform-postgres connection is a terminal startup error so that
+// downstream RPCs never return misleading "not found" / "not implemented"
+// errors that mask a missing connection. If a deployment genuinely needs to run
+// without platform-postgres, that is a deployment-shape mistake to surface in
+// the bootstrap saga, not a fallback the daemon silently absorbs.
+//
+// On any failure this returns a non-nil error; Start() propagates it so the
+// process exits non-zero and Kubernetes restarts with exponential backoff.
+func (d *daemonImpl) initPlatformPostgres(ctx context.Context) error {
 	pgCfg := d.config.PlatformPostgres
 
-	// Skip if no host is configured — the feature is not enabled.
+	// A missing host is a fatal configuration error: the chart always wires
+	// platform-postgres-rw (deploy require_platform_postgres cross-chart
+	// check), so an empty host means the deployment is misconfigured.
 	if pgCfg.Host == "" {
-		d.logger.Info(ctx, "dashboard PostgreSQL not configured, provisioning state store unavailable")
-		return
+		return fmt.Errorf("platform-postgres host is not configured: the daemon cannot start without a usable dashboard Postgres connection (set dashboard_postgres.host)")
 	}
 
 	// Apply defaults.
@@ -1687,11 +1700,8 @@ func (d *daemonImpl) initPlatformPostgres(ctx context.Context) {
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		d.logger.Error(ctx, "dashboard PostgreSQL: failed to open connection pool (provisioning degraded)",
-			"error", err,
-			"host", pgCfg.Host,
-		)
-		return
+		return fmt.Errorf("platform-postgres: failed to open connection pool (host=%s db=%s sslmode=%s): %w",
+			pgCfg.Host, pgCfg.Database, pgCfg.SSLMode, err)
 	}
 
 	db.SetMaxOpenConns(pgCfg.MaxConns)
@@ -1702,11 +1712,8 @@ func (d *daemonImpl) initPlatformPostgres(ctx context.Context) {
 
 	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
-		d.logger.Error(ctx, "dashboard PostgreSQL: ping failed (provisioning degraded)",
-			"error", err,
-			"host", pgCfg.Host,
-		)
-		return
+		return fmt.Errorf("platform-postgres: ping failed (host=%s port=%d db=%s sslmode=%s): %w",
+			pgCfg.Host, pgCfg.Port, pgCfg.Database, pgCfg.SSLMode, err)
 	}
 
 	d.logger.Info(ctx, "dashboard PostgreSQL: connection pool established",
@@ -1722,10 +1729,9 @@ func (d *daemonImpl) initPlatformPostgres(ctx context.Context) {
 	// non-zero; K8s restarts with backoff. Set SKIP_MIGRATIONS=true
 	// for emergencies.
 	if err := runPlatformMigrations(ctx, db, d.logger.Slog()); err != nil {
-		d.logger.Error(ctx, "platform migrations failed — pod will exit for K8s retry",
-			"error", err)
 		_ = db.Close()
-		return
+		return fmt.Errorf("platform-postgres: migrations failed (host=%s db=%s): %w",
+			pgCfg.Host, pgCfg.Database, err)
 	}
 
 	// Spec gibson-postgres-migrations Requirement 5: after running
@@ -1733,18 +1739,14 @@ func (d *daemonImpl) initPlatformPostgres(ctx context.Context) {
 	// skew (e.g. SKIP_MIGRATIONS was set, or the source driver returned
 	// an unexpected version).
 	if err := assertPlatformSchemaVersion(ctx, db, d.logger.Slog()); err != nil {
-		d.logger.Error(ctx, "platform schema gate failed after migrations",
-			"error", err)
 		_ = db.Close()
-		// platformDB stays nil; the dashboard's per-tenant
-		// data-plane resolver will fail loudly per existing
-		// FailedPrecondition behaviour rather than 500ing
-		// silently. Spec design Component 7.
-		return
+		return fmt.Errorf("platform-postgres: schema gate failed after migrations (host=%s db=%s): %w",
+			pgCfg.Host, pgCfg.Database, err)
 	}
 
 	d.platformDB = db
 
+	return nil
 }
 
 // status returns the current daemon status and health information.

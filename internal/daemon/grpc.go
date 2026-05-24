@@ -583,10 +583,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithAuthorizer(d.authorizer)
 		d.logger.Info(ctx, "FGA authorizer wired into DaemonServer for admin RPCs")
 	}
-	if d.platformDB != nil {
-		daemonSvc.WithPlatformDB(d.platformDB)
-		d.logger.Info(ctx, "dashboard Postgres pool wired into DaemonServer for entitlements RPCs")
-	}
+	// platformDB is always non-nil after Start() (gibson#246): initPlatformPostgres
+	// is fatal on failure, so the entitlements RPCs always have a real pool.
+	daemonSvc.WithPlatformDB(d.platformDB)
+	d.logger.Info(ctx, "dashboard Postgres pool wired into DaemonServer for entitlements RPCs")
 	if d.quotaManager != nil {
 		daemonSvc.WithQuotaManager(d.quotaManager)
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
@@ -773,8 +773,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			_ = redisClient // retained for future wiring
 
 			// Wire the CapabilityGrantService for the Agent Auth Protocol RPCs.
-			// Requires platformDB and the FGA authorizer.
-			if d.platformDB != nil && d.authorizer != nil {
+			// platformDB is always non-nil after Start() (gibson#246); the FGA
+			// authorizer is the remaining prerequisite.
+			if d.authorizer != nil {
 				agentStore := capabilitygrant.NewCapabilityGrantStore(d.platformDB)
 				auditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
 				auditWriter.Start(ctx)
@@ -804,7 +805,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				daemonSvc.WithCapabilityGrantService(capabilityGrantSvc)
 				d.logger.Info(ctx, "CapabilityGrantService wired into DaemonServer")
 			} else {
-				d.logger.Warn(ctx, "CapabilityGrantService not wired: requires platformDB and authorizer")
+				d.logger.Warn(ctx, "CapabilityGrantService not wired: requires the FGA authorizer")
 			}
 
 			// Wire the onboarding store backed by Redis.
@@ -893,13 +894,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	} else {
 		d.logger.Info(ctx, "IdP admin client not configured (GIBSON_IDP_PROVIDER not set); TenantAdminService agent-identity RPCs will return Unavailable")
 	}
-	// Wire audit writer for TenantAdminService when Postgres is available.
-	if d.platformDB != nil {
-		tenantAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
-		tenantAuditWriter.Start(ctx)
-		daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
-		d.logger.Info(ctx, "audit writer wired into TenantAdminService")
-	}
+	// Wire audit writer for TenantAdminService. platformDB is always non-nil
+	// after Start() (gibson#246).
+	tenantAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
+	tenantAuditWriter.Start(ctx)
+	daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
+	d.logger.Info(ctx, "audit writer wired into TenantAdminService")
 	// Wire pool getter for ExportFindings (Neo4j DashboardQueries path).
 	// Spec: dashboard-neo4j-crud-removal.
 	daemonSvc.WithPoolGetter(func() datapool.Pool { return d.pool })
@@ -959,11 +959,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// stub until the CG-JWT store is wired through; the write side
 		// (Write/DeleteAgentGrants) is the new surface from this spec.
 		// Spec: component-bootstrap-e2e Requirement 9.
-		var grantsAuditWriter *audit.Writer
-		if d.platformDB != nil {
-			grantsAuditWriter = audit.NewWriter(d.platformDB, d.logger.Slog())
-			grantsAuditWriter.Start(ctx)
-		}
+		// platformDB is always non-nil after Start() (gibson#246).
+		grantsAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
+		grantsAuditWriter.Start(ctx)
 		grantsServer, gaErr := admin.NewGrantsAdminServer(admin.GrantsAdminConfig{
 			Reader:      noopGrantsReader{},
 			Authorizer:  d.authorizer,
@@ -1192,23 +1190,21 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			//
 			// No background sweeper goroutine is started — Redis TTL expiry is the
 			// sweeper. When a key disappears, ListInstalls excludes the install.
-			if d.platformDB != nil {
-				pluginRegistry := component.NewPluginRegistry(
-					d.platformDB,
-					d.stateClient.Client(),
-					compQueue,
-					d.logger.WithComponent("plugin-registry").Slog(),
-				)
-				compSvc.WithPluginRegistry(pluginRegistry)
-				d.logger.Info(ctx, "PluginRegistry wired into ComponentService (Postgres + Redis transient state)")
+			//
+			// platformDB is always non-nil after Start() (gibson#246).
+			pluginRegistry := component.NewPluginRegistry(
+				d.platformDB,
+				d.stateClient.Client(),
+				compQueue,
+				d.logger.WithComponent("plugin-registry").Slog(),
+			)
+			compSvc.WithPluginRegistry(pluginRegistry)
+			d.logger.Info(ctx, "PluginRegistry wired into ComponentService (Postgres + Redis transient state)")
 
-				// Register PluginInvokeService on the same gRPC port.
-				pluginInvokeSvc := component.NewPluginInvokeService(pluginRegistry, d.logger.WithComponent("plugin-invoke").Slog())
-				pluginpb.RegisterPluginInvokeServiceServer(srv, pluginInvokeSvc)
-				d.logger.Info(ctx, "PluginInvokeService gRPC endpoint registered")
-			} else {
-				d.logger.Warn(ctx, "PluginRegistry not wired: platformDB is nil; PluginInvoke will return UNAVAILABLE for all plugins")
-			}
+			// Register PluginInvokeService on the same gRPC port.
+			pluginInvokeSvc := component.NewPluginInvokeService(pluginRegistry, d.logger.WithComponent("plugin-invoke").Slog())
+			pluginpb.RegisterPluginInvokeServiceServer(srv, pluginInvokeSvc)
+			d.logger.Info(ctx, "PluginInvokeService gRPC endpoint registered")
 		} else {
 			d.logger.Warn(ctx, "ComponentService unavailable: Redis client is not standalone mode; requires *redis.Client")
 		}

@@ -43,19 +43,18 @@ func (p *platformReadinessProbe) Check(ctx context.Context) error { return p.che
 func (d *daemonImpl) newPlatformReadinessProbes() []pcreadiness.Probe {
 	var probes []pcreadiness.Probe
 
-	// Platform Postgres (dashboard shared DB) — nil when not configured.
-	if d.platformDB != nil {
-		db := d.platformDB
-		probes = append(probes, &platformReadinessProbe{
-			name: "postgres",
-			check: func(ctx context.Context) error {
-				if err := db.PingContext(ctx); err != nil {
-					return fmt.Errorf("postgres ping failed: %w", err)
-				}
-				return nil
-			},
-		})
-	}
+	// Platform Postgres (dashboard shared DB) — always present after a
+	// successful Start(): initPlatformPostgres is fatal on failure (gibson#246).
+	db := d.platformDB
+	probes = append(probes, &platformReadinessProbe{
+		name: "postgres",
+		check: func(ctx context.Context) error {
+			if err := db.PingContext(ctx); err != nil {
+				return fmt.Errorf("postgres ping failed: %w", err)
+			}
+			return nil
+		},
+	})
 
 	// FGA authorizer — nil when initAuthorizer has not run yet.
 	if d.authorizer != nil {
