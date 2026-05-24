@@ -25,7 +25,7 @@ import (
 	sdkfinding "github.com/zero-day-ai/sdk/finding"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/protoresolver"
-	"github.com/zero-day-ai/sdk/queue"
+	"github.com/zero-day-ai/gibson/internal/queue"
 	"github.com/zero-day-ai/sdk/schema"
 	"go.opentelemetry.io/otel/attribute"
 	otelcodes "go.opentelemetry.io/otel/codes"

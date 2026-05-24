@@ -23,7 +23,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/state"
 	"github.com/zero-day-ai/gibson/pkg/version"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
-	"github.com/zero-day-ai/sdk/queue"
+	"github.com/zero-day-ai/gibson/internal/queue"
 )
 
 // Infrastructure holds the daemon's infrastructure components that are shared

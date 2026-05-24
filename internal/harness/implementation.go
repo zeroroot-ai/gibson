@@ -26,7 +26,7 @@ import (
 	"github.com/zero-day-ai/sdk/codegen/workspace"
 	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
 	"github.com/zero-day-ai/sdk/protoresolver"
-	sdkqueue "github.com/zero-day-ai/sdk/queue"
+	sdkqueue "github.com/zero-day-ai/gibson/internal/queue"
 	sdktypes "github.com/zero-day-ai/sdk/types"
 	"go.opentelemetry.io/otel/attribute"
 	otelcodes "go.opentelemetry.io/otel/codes"
