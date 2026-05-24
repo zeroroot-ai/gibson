@@ -2,6 +2,7 @@ package vector
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"strings"
 
@@ -125,9 +126,15 @@ func (t *tenantScopedStore) Search(ctx context.Context, query VectorQuery) ([]Ve
 }
 
 // Get prefixes the ID before delegating, then strips the prefix from the result.
+// A VECTOR_NOT_FOUND error from the underlying store is translated to (nil, nil)
+// because "not in this tenant's namespace" is a valid non-error state.
 func (t *tenantScopedStore) Get(ctx context.Context, id string) (*VectorRecord, error) {
 	rec, err := t.underlying.Get(ctx, t.prefixID(id))
 	if err != nil {
+		var ge *types.GibsonError
+		if errors.As(err, &ge) && ge.Code == ErrCodeVectorNotFound {
+			return nil, nil
+		}
 		return nil, err
 	}
 	if rec != nil {
