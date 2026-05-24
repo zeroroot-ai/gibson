@@ -1,28 +1,29 @@
-// Package vectordb is forward-looking infrastructure for per-tenant Qdrant
-// collections accessed via Pool.For(tenant).Vector().
+// Package vectordb defines the narrow vector-store abstraction used by the
+// daemon's data-plane pool and provides the Redis VSS (RediSearch FT.*)
+// adapter as the production implementation.
 //
 // NOT YET WIRED — Pool.For(tenant).Vector() returns nil at runtime. The actual
 // vector workloads (finding classification, GraphRAG) currently use
 // internal/memory/vector/ with per-tenant key prefixing (see
 // NewVectorStoreForTenantWithStore in that package).
 //
-// The vectordb package contains a stub Qdrant adapter (qdrant.go) and the
-// Driver/Client interfaces (vectordb.go) that will be wired into the data-plane
-// Pool once a concrete per-tenant Qdrant use case justifies the infrastructure
-// cost (estimated at ≥75 tenants or a dedicated embedding workload).
+// The production adapter is redis.go (NewRedisVSSDriver). The tenant-operator
+// creates per-tenant RediSearch indexes with the HNSW COSINE schema; the daemon
+// calls For(ctx, indexName) to obtain a Client scoped to that index.
 //
-// See spec per-tenant-data-plane-completion Req 3 background for the deferral
-// rationale: key-prefix isolation inside the shared in-memory / Redis vector
-// store is sufficient for the current finding-classification and GraphRAG
-// vector workloads; a per-collection Qdrant model adds deployment complexity
-// (one collection per tenant, Qdrant admission webhook, backup CronJob variant)
-// without a matching throughput requirement at current scale.
+// Key-derivation convention:
 //
-// To enable the real Qdrant adapter when the time comes:
+//	index name: "vector_idx:tenant_acme"
+//	key prefix: "vec:tenant_acme:"
 //
-//  1. Run: go get github.com/qdrant/go-client
-//  2. Implement NewQdrantDriver in qdrant.go using the Qdrant gRPC client.
-//  3. Remove the stub error from qdrant.go's For() method.
-//  4. Wire NewQdrantDriver into NewPool in pool_impl.go.
-//  5. Add tenant collection bootstrap to the tenant-operator saga.
+// See spec per-tenant-data-plane-completion Req 3 for the deferral rationale
+// and gibson#325 for the Qdrant-to-Redis VSS migration.
+//
+// To wire this package into NewPool:
+//
+//  1. Read VectorCredentials from Vault at tenant/<id>/infra/vector.
+//  2. Call NewRedisVSSDriver with the Redis connection params from
+//     tenant/<id>/infra/redis (addr + password shared with the existing
+//     redis sub-pool; DB index from RedisCredentials).
+//  3. Uncomment: p.vector = newVectorPerTenant(driver) in pool_impl.go.
 package vectordb
