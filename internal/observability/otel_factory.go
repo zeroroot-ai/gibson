@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	pcotel "github.com/zero-day-ai/platform-clients/observability"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -295,40 +294,32 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 	// follows the same pattern used across all platform services (ext-authz,
 	// tenant-operator, etc.). This also registers the composite propagator
 	// (TraceContext + Baggage) consistently.
+	// Set daemon-built providers as globals so auto-instrumented libraries
+	// pick them up. We do NOT call pcotel.Init here because:
 	//
-	// Note: platform-clients/observability.Init uses an idempotent per-service
-	// cache so calling it here (after we've already built our providers) has
-	// no effect on the providers it constructs. We only need its side effect of
-	// registering globals — but since it builds its own providers we set our
-	// providers explicitly below after the Init call.
+	//   pcotel.Init always creates gRPC exporters (otlptracegrpc /
+	//   otlpmetricgrpc). When cfg.Endpoint is an HTTP endpoint (e.g. Langfuse
+	//   on :3000), the gRPC exporter connects to a server that speaks HTTP/1.1
+	//   and produces a continuous stream of:
 	//
-	// platform-clients/observability.Init always creates a gRPC exporter, which
-	// expects a bare "host:port" target — NOT a URL with a scheme. Strip the
-	// http:// or https:// prefix before passing the endpoint so the gRPC dialer
-	// does not produce "host:port:443" (too many colons). See gibson#252.
-	pcotelEndpoint := cfg.Endpoint
-	if strings.HasPrefix(pcotelEndpoint, "https://") {
-		pcotelEndpoint = pcotelEndpoint[8:]
-	} else if strings.HasPrefix(pcotelEndpoint, "http://") {
-		pcotelEndpoint = pcotelEndpoint[7:]
-	}
-	_, _ = pcotel.Init("gibson",
-		pcotel.WithOTLPEndpoint(pcotelEndpoint),
-	)
-	// Override with our fully-configured daemon providers so domain-specific
-	// features (Langfuse auth, content-logging, HTTP protocol, etc.) are
-	// preserved. The platform-clients Init above already set the propagator.
+	//     "http2: frame too large, note that the frame header looked like an
+	//      HTTP/1.1 header"
+	//
+	//   errors because the gRPC stack reads HTTP/1.1 bytes as HTTP/2 frames.
+	//   The providers built by pcotel.Init would be abandoned anyway since we
+	//   override the globals below — they are never shut down and keep trying
+	//   to export. See gibson#311.
+	//
+	// The composite propagator (TraceContext + Baggage) is set explicitly below;
+	// no side-effects of pcotel.Init are needed here.
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetMeterProvider(meterProvider)
-
-	// Ensure the W3C TraceContext + Baggage propagators are set. platform-clients
-	// sets these too but we re-apply defensively in case Init was cached.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
 
-	slog.Info("set global otel providers and propagators (platform-clients/observability pattern)")
+	slog.Info("set global otel providers and propagators")
 
 	// Create OTelMissionTracer with the providers
 	missionTracer := NewOTelMissionTracer(tracerProvider, meterProvider, cfg.ContentLogging)
