@@ -12,6 +12,7 @@ import (
 
 	"github.com/zero-day-ai/gibson/internal/crypto"
 	dpmetrics "github.com/zero-day-ai/gibson/internal/datapool/metrics"
+	"github.com/zero-day-ai/gibson/internal/datapool/vectordb"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -146,9 +147,20 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 		closeCh:      closeCh,
 	}
 
-	// For now, the vector driver is nil (B2 TODO stub). Wired when Phase B2 is
-	// fully implemented with a real Qdrant driver.
-	// p.vector = newVectorPerTenant(driver)
+	// Wire the Redis VSS vector driver when an address is configured.
+	// VectorStoreAddr shares the same Redis Stack instance as the cache/session
+	// Redis (same addr, same password); the per-tenant index name is read from
+	// VectorCredentials at tenant/<id>/infra/vector by the caller's DSN resolver.
+	if cfg.VectorStoreAddr != "" {
+		vectorDriver, err := vectordb.NewRedisVSSDriver(vectordb.RedisConfig{
+			Addr:     cfg.VectorStoreAddr,
+			Password: cfg.RedisPassword,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("datapool: NewPool: vector driver init: %w", err)
+		}
+		p.vector = newVectorPerTenant(vectorDriver)
+	}
 
 	ev := newEvictor(p, cfg.EvictionCheckInterval, cfg.IdleTTL, realClock{})
 	p.evictor = ev
