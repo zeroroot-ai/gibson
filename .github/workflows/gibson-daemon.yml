@@ -96,6 +96,7 @@ jobs:
       id-token: write
       attestations: write
       security-events: write
+      actions: read
     with:
       component_name: gibson
       component_path: .
