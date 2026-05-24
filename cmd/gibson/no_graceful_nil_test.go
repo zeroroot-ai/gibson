@@ -126,7 +126,8 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 	// one-code-path/205 (#112), one-code-path/207 (#113) merged.
 	requestPathAllowlist := astchecks.Allowlist{
 		// internal/daemon/api — handlers + helpers
-		"internal/daemon/api/mission_handlers.go:362":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check predates noopAuthorizer deletion; reassert via authorizer-required follow-up"},
+		"internal/daemon/api/mission_handlers.go:329":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check in requireMissionViewer; predates noopAuthorizer deletion"},
+		"internal/daemon/api/mission_handlers.go:406":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check in callerIsPlatformOperator; predates noopAuthorizer deletion"},
 		"internal/daemon/api/mission_handlers.go:979":          astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "err check followed by payload nil-check (caller-shape, not dep)"},
 		"internal/daemon/api/server_audit.go:218":              astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "s.authorizer nil-check predates noopAuthorizer deletion"},
 		"internal/daemon/api/server_budget.go:88":              astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "nil-receiver shim for budget API helper"},
@@ -147,16 +148,19 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		// internal/daemon — core
 		"internal/daemon/compliance_sink_adapter.go:32": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "compliance sink registered conditionally; remove with compliance-required slice"},
 		"internal/daemon/daemon.go:481":                 astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "SPIFFE wiring optional in non-SPIFFE deployments; reassert when SPIFFE-everywhere lands"},
-		"internal/daemon/grpc.go:2086":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up"},
-		"internal/daemon/grpc.go:2096":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite err/m/Checkpoint guard for legacy checkpoint payload"},
-		"internal/daemon/grpc.go:2560":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection optional in non-graphrag deployments"},
+		"internal/daemon/grpc.go:1886":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
+		"internal/daemon/grpc.go:1983":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
+		"internal/daemon/grpc.go:2081":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up"},
+		"internal/daemon/grpc.go:2386":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
 		"internal/daemon/graph_bootstrap.go:411":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tenant-value lookup helper, nil means no scoping"},
-		"internal/daemon/infrastructure.go:94":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},
+		"internal/daemon/infrastructure.go:95":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},
 		"internal/daemon/log_watcher.go:197":            astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "log watcher file handle nil-guard during teardown"},
 		"internal/daemon/manifest_loader.go:34":         astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "manifest helper, nil component means no-op"},
+		"internal/daemon/otel_adapter.go:65":            astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "OTel infrastructure conditionally wired"},
 		"internal/daemon/otel_adapter.go:105":           astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "OTel infrastructure conditionally wired"},
 		"internal/daemon/otel_adapter.go:125":           astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "OTel infrastructure conditionally wired"},
 		"internal/daemon/otel_adapter.go:146":           astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "OTel infrastructure conditionally wired"},
+		"internal/daemon/otel_adapter.go:169":           astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "OTel infrastructure conditionally wired"},
 
 		// internal/datapool
 		"internal/datapool/conn_ops_finding.go:62":  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "goredis.Nil sentinel + nil result handling"},
@@ -238,12 +242,20 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 
 		// internal/graphrag — Neo4j driver mirrors the existing daemon/grpc.go:2504 entry
 		"internal/graphrag/graph/neo4j.go:103":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver optional in non-graphrag deployments (mirrors daemon/grpc.go:2504)"},
+		"internal/graphrag/graph/neo4j.go:118":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
+		"internal/graphrag/graph/neo4j.go:137":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
+		"internal/graphrag/graph/neo4j.go:198":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
+		"internal/graphrag/graph/neo4j.go:254":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
+		"internal/graphrag/graph/neo4j.go:303":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
+		"internal/graphrag/graph/neo4j.go:338":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
+		"internal/graphrag/graph/neo4j.go:390":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
+		"internal/graphrag/graph/neo4j.go:406":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
 		"internal/graphrag/intelligence/risk.go:450": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver optional in non-graphrag deployments"},
 		"internal/graphrag/provider/local.go:164":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "vector store optional in non-graphrag deployments"},
 
 		// internal/llm — pricing/config/ratelimit values that legitimately accept nil
-		"internal/llm/config.go:264":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Features field on llm config, legitimately nil-able"},
-		"internal/llm/config.go:297":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Models field on llm config, legitimately nil-able"},
+		"internal/llm/config.go:268":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Features field on llm config, legitimately nil-able"},
+		"internal/llm/config.go:301":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Models field on llm config, legitimately nil-able"},
 		"internal/llm/pricing.go:280":   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Pricing field, legitimately nil-able when provider has no pricing config"},
 		"internal/llm/pricing.go:368":   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "composite nil-check on other-side comparison"},
 		"internal/llm/ratelimit.go:123": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "requestLimit nil means unlimited (legitimate semantic)"},
