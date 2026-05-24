@@ -30,10 +30,11 @@ import (
 	"github.com/zero-day-ai/gibson/internal/onboarding"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/pkg/version"
+	modelaccesspb "github.com/zero-day-ai/platform-sdk/gen/gibson/authz/v1"
 	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
-	sdktenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	sdktenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -59,6 +60,7 @@ type DaemonServer struct {
 	sdktenantv1.UnimplementedTenantServiceServer
 	daemonoperatorv1.UnimplementedDaemonOperatorServiceServer
 	userv1.UnimplementedUserServiceServer
+	modelaccesspb.UnimplementedModelAccessServiceServer
 
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface
