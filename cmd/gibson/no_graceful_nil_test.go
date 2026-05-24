@@ -151,7 +151,9 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/daemon/grpc.go:1886":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
 		"internal/daemon/grpc.go:1983":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
 		"internal/daemon/grpc.go:2081":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard in populateCheckpointPayload; pool-required follow-up"},
+		"internal/daemon/grpc.go:2091":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "compound nil-check on mission store Get result + Checkpoint proto field in populateCheckpointPayload"},
 		"internal/daemon/grpc.go:2386":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "pool nil-guard; pool-required follow-up (one-code-path#195)"},
+		"internal/daemon/grpc.go:2554":                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j connection nil-guard; Neo4j not configured for this tenant — skip silently"},
 		"internal/daemon/graph_bootstrap.go:411":        astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "tenant-value lookup helper, nil means no scoping"},
 		"internal/daemon/infrastructure.go:95":          astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "semantic querier factory optional in non-graphrag deployments"},
 		"internal/daemon/log_watcher.go:197":            astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "log watcher file handle nil-guard during teardown"},
@@ -252,6 +254,7 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/graphrag/graph/neo4j.go:406":       astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver nil-guard; driver optional in non-graphrag deployments"},
 		"internal/graphrag/intelligence/risk.go:450": astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "Neo4j driver optional in non-graphrag deployments"},
 		"internal/graphrag/provider/local.go:164":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "vector store optional in non-graphrag deployments"},
+		"internal/graphrag/provider/local.go:227":    astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "vector store nil-guard in getVectorStore; optional in non-graphrag deployments"},
 
 		// internal/llm — pricing/config/ratelimit values that legitimately accept nil
 		"internal/llm/config.go:268":    astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Features field on llm config, legitimately nil-able"},
@@ -265,8 +268,8 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/memory/vector/embedded.go:217": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "Metadata field on vector record, legitimately nil-able"},
 
 		// internal/observability
-		"internal/observability/otel_decision_log_adapter.go:211": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "action.AgentExecution proto field, legitimately nil-able"},
-		"internal/observability/otel_decision_log_adapter.go:318": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "action.NewNode proto field, legitimately nil-able"},
+		"internal/observability/otel_decision_log_adapter.go:209": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "action.AgentExecution proto field, legitimately nil-able"},
+		"internal/observability/otel_decision_log_adapter.go:316": astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "action.NewNode proto field, legitimately nil-able"},
 		// otel_metrics.go uses `if r == nil || r.<metric> == nil { return }` — composite nil-receiver shim
 		// allowing the metrics struct to be called from contexts where metrics are disabled.
 		"internal/observability/otel_metrics.go:366": astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite nil-receiver shim — metrics methods callable when metrics disabled"},

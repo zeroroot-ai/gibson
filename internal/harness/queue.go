@@ -3,7 +3,6 @@ package harness
 import (
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/zero-day-ai/gibson/internal/queue"
 )
@@ -13,65 +12,6 @@ import (
 type QueueManager struct {
 	client queue.Client
 	logger *slog.Logger
-}
-
-// NewQueueManager creates a new QueueManager with a Redis client.
-// It initializes the queue client using the provided Redis URL and establishes
-// a connection to the Redis server.
-//
-// Parameters:
-//   - redisURL: Redis connection URL (e.g., "redis://localhost:6379")
-//     If empty, uses REDIS_URL environment variable or defaults to "redis://localhost:6379"
-//   - logger: Structured logger for queue operations
-//
-// Returns:
-//   - *QueueManager: Initialized queue manager ready for use
-//   - error: Non-nil if Redis connection fails
-//
-// Example:
-//
-//	queueMgr, err := NewQueueManager("", logger)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer queueMgr.Close()
-func NewQueueManager(redisURL string, logger *slog.Logger) (*QueueManager, error) {
-	if logger == nil {
-		logger = slog.Default().With("component", "queue-manager")
-	}
-
-	// Determine Redis URL with fallback priority:
-	// 1. Provided redisURL parameter
-	// 2. REDIS_URL environment variable
-	// 3. Default localhost:6379
-	if redisURL == "" {
-		redisURL = os.Getenv("REDIS_URL")
-	}
-	if redisURL == "" {
-		redisURL = "redis://localhost:6379"
-	}
-
-	logger.Info("initializing queue manager", "redis_url", redisURL)
-
-	// Create Redis client options
-	opts := queue.RedisOptions{
-		URL: redisURL,
-		// TLS, timeouts use SDK defaults
-	}
-
-	// Create Redis queue client
-	client, err := queue.NewRedisClient(opts)
-	if err != nil {
-		logger.Error("failed to connect to Redis", "error", err, "redis_url", redisURL)
-		return nil, fmt.Errorf("failed to create Redis queue client: %w", err)
-	}
-
-	logger.Info("queue manager initialized successfully", "redis_url", redisURL)
-
-	return &QueueManager{
-		client: client,
-		logger: logger,
-	}, nil
 }
 
 // NewQueueManagerWithClient creates a new QueueManager with an existing queue client.
