@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tmc/langchaingo/llms/cloudflare"
 	"github.com/zero-day-ai/gibson/internal/llm"
@@ -38,10 +39,15 @@ func newCloudflareProviderWithContext(ctx context.Context, service *secrets.Serv
 		return nil, err
 	}
 
+	httpClient := &http.Client{Timeout: cfg.HTTPTimeout}
+	if httpClient.Timeout == 0 {
+		httpClient.Timeout = 120 * time.Second
+	}
+
 	opts := []cloudflare.Option{
 		cloudflare.WithAccountID(accountID),
 		cloudflare.WithToken(token),
-		cloudflare.WithHTTPClient(http.DefaultClient),
+		cloudflare.WithHTTPClient(httpClient),
 	}
 	if cfg.DefaultModel != "" {
 		opts = append(opts, cloudflare.WithModel(cfg.DefaultModel))

@@ -77,19 +77,24 @@ type circuitKey struct {
 }
 
 // Prometheus metrics for circuit breaker state.
+//
+// NOTE: platform-clients/secrets also registers gibson_secrets_circuit_open_total
+// and gibson_secrets_circuit_state (for its own gobreaker-backed circuit).
+// This daemon-local circuit breaker uses _svc_ names to avoid a duplicate-
+// registration panic when both packages are linked into the same binary.
 var (
 	circuitOpenTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "gibson_secrets_circuit_open_total",
-			Help: "Total number of times a secrets circuit breaker has transitioned to the open state, labeled by tenant and provider.",
+			Name: "gibson_secrets_svc_circuit_open_total",
+			Help: "Total number of times the daemon-local secrets service circuit breaker has transitioned to the open state.",
 		},
 		[]string{"tenant", "provider"},
 	)
 
 	circuitStateGauge = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "gibson_secrets_circuit_state",
-			Help: "Current state of a secrets circuit breaker: 0=closed, 1=open, 2=half_open.",
+			Name: "gibson_secrets_svc_circuit_state",
+			Help: "Current state of the daemon-local secrets service circuit breaker: 0=closed, 1=open, 2=half_open.",
 		},
 		[]string{"tenant", "provider"},
 	)
