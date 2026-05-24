@@ -3,6 +3,7 @@ package llm
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zero-day-ai/gibson/internal/types"
 )
@@ -114,6 +115,9 @@ type ProviderConfig struct {
 	// above. Keys are provider-defined; values are treated as secrets and
 	// redacted by the observability layer.
 	Extra map[string]string `mapstructure:"extra" yaml:"extra"`
+	// HTTPTimeout is the timeout for individual HTTP requests to the provider
+	// API. Zero value defaults to 120 seconds at construction time.
+	HTTPTimeout time.Duration `mapstructure:"http_timeout" yaml:"http_timeout"`
 }
 
 // Validate performs validation on the ProviderConfig.
