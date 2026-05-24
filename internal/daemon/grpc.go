@@ -924,6 +924,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			Auditor:        d.brokerAuditWriter,
 			Reloader:       d.secretsRegistry,
 			SecretsService: d.secretsService,
+			Authorizer:     d.authorizer,
+			IdPAdminClient: idpClient,
+			Logger:         d.logger.Slog(),
 		})
 		if taErr != nil {
 			d.logger.Warn(ctx, "broker admin stack: NewTenantAdminServer failed; registering Unavailable stub for gibson.admin.v1.TenantAdminService",
