@@ -62,6 +62,33 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.114.0](https://github.com/zero-day-ai/gibson/compare/v0.113.1...v0.114.0) (2026-05-24)
+
+
+### Features
+
+* **ci:** provider catalogue update workflow with per-provider API key gating ([#302](https://github.com/zero-day-ai/gibson/issues/302)) ([37d1a31](https://github.com/zero-day-ai/gibson/commit/37d1a31b580aeb9063dff6bb3f3694436b2b5f4a))
+* **mission/cueruntime:** add cuelang.org/go dep and cueruntime package ([#304](https://github.com/zero-day-ai/gibson/issues/304)) ([864e3f8](https://github.com/zero-day-ai/gibson/commit/864e3f81a051217f9036f1f0bfddd8b4330d6eed))
+* **mission:** wire cueruntime to editor RPCs; cue_source path; delete GetMissionSourceYAML ([#306](https://github.com/zero-day-ai/gibson/issues/306)) ([9cb91c4](https://github.com/zero-day-ai/gibson/commit/9cb91c4fdfbf5888335592f7a9abd72f9a6dbeef))
+* **providers:** Bedrock IRSA toggle — daemon ([#297](https://github.com/zero-day-ai/gibson/issues/297)) ([504a930](https://github.com/zero-day-ai/gibson/commit/504a930e2efc88e99ee3232b50717a566ece9f42)), closes [#294](https://github.com/zero-day-ai/gibson/issues/294)
+* **providers:** catalogue hot-reload via ConfigMap mount ([#303](https://github.com/zero-day-ai/gibson/issues/303)) ([091e689](https://github.com/zero-day-ai/gibson/commit/091e6896abd62d55dc13a8333988eb94946589d9))
+* **providers:** provider-catalogue.yaml initial population + daemon loading ([#300](https://github.com/zero-day-ai/gibson/issues/300)) ([72f3f1b](https://github.com/zero-day-ai/gibson/commit/72f3f1bc9049b5237b8ab1434f3b73cf692f83df)), closes [#293](https://github.com/zero-day-ai/gibson/issues/293)
+
+
+### Bug Fixes
+
+* **authz:** add gibson.owner permission closure parity with gibson.admin ([#290](https://github.com/zero-day-ai/gibson/issues/290)) ([0e5cf82](https://github.com/zero-day-ai/gibson/commit/0e5cf82c0cf769c5a8a77bf631bd66cfaf09bce3))
+* **authz:** make mission belongs_to tuple write required + self-heal missing tuples ([#312](https://github.com/zero-day-ai/gibson/issues/312)) ([7f581b1](https://github.com/zero-day-ai/gibson/commit/7f581b1f59e605d634350ddde7191ec1eebf9b4e)), closes [#310](https://github.com/zero-day-ai/gibson/issues/310)
+* **ci:** add actions:read to image-build job permissions ([#314](https://github.com/zero-day-ai/gibson/issues/314)) ([49cf807](https://github.com/zero-day-ai/gibson/commit/49cf807da04806a7e4168ccae2cc77b03e4bb625))
+* **daemon:** fail fast when platform-postgres init fails ([#307](https://github.com/zero-day-ai/gibson/issues/307)) ([c0f3e51](https://github.com/zero-day-ai/gibson/commit/c0f3e514a05810f90818151be470b2b0c31a6d12)), closes [#246](https://github.com/zero-day-ai/gibson/issues/246)
+* **datapool:** propagate Redis password through per-tenant client pool ([#291](https://github.com/zero-day-ai/gibson/issues/291)) ([9a7a666](https://github.com/zero-day-ai/gibson/commit/9a7a6661f3c49ee11bf2761e27785cc103521eb9))
+* **deps:** bump golang.org/x/net v0.53.0 → v0.55.0 (GO-2026-5026) ([#283](https://github.com/zero-day-ai/gibson/issues/283)) ([50ee96a](https://github.com/zero-day-ai/gibson/commit/50ee96a08614b649f90733d24aff297322ad1091))
+* **deps:** bump platform-clients v0.6.0 → v0.7.0 ([#286](https://github.com/zero-day-ai/gibson/issues/286)) ([cd6d5fa](https://github.com/zero-day-ai/gibson/commit/cd6d5fa061630f61047ee33f76c2b727671a3f97))
+* **gibsoncheck:** honor gibsoncheck:allow tenant-from-request directive + annotate 6 admin RPCs ([#277](https://github.com/zero-day-ai/gibson/issues/277)) ([2b30f2f](https://github.com/zero-day-ai/gibson/commit/2b30f2fa4450232347fd5f879c322fb5997edcd5))
+* **observability:** remove pcotel.Init gRPC leak causing frame-too-large errors ([#313](https://github.com/zero-day-ai/gibson/issues/313)) ([5b68c02](https://github.com/zero-day-ai/gibson/commit/5b68c02490242789679b92037987d0b37d5ca807)), closes [#311](https://github.com/zero-day-ai/gibson/issues/311)
+* **secrets:** wire vault TokenRefresher into VaultFactory — eliminates stale-token circuit open ([#305](https://github.com/zero-day-ai/gibson/issues/305)) ([b29f35c](https://github.com/zero-day-ai/gibson/commit/b29f35c34e09f5559ffa326ffb3dae707fa15b55))
+* **tests:** resolve pre-existing failures in harness, observability, orchestrator ([#308](https://github.com/zero-day-ai/gibson/issues/308)) ([61e93e6](https://github.com/zero-day-ai/gibson/commit/61e93e6b97a78553a2d773c9dcb01649e1484e3a))
+
 ## [0.113.1](https://github.com/zero-day-ai/gibson/compare/v0.113.0...v0.113.1) (2026-05-21)
 
 
