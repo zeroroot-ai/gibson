@@ -1,9 +1,9 @@
 // Package admin — tenant_admin.go
 //
 // TenantAdminServer implements gibson.admin.v1.TenantAdminService — the
-// dashboard's tenant-admin surface for broker configuration. Pairs with
-// secrets_admin.go (secrets), plugin_admin.go (plugin installs), and
-// grants_admin.go (capability grants).
+// dashboard's tenant-admin surface for broker configuration and member
+// enumeration. Pairs with secrets_admin.go (secrets), plugin_admin.go
+// (plugin installs), and grants_admin.go (capability grants).
 //
 // Get / Probe / Set semantics:
 //   - GetBrokerConfig returns the redacted current configuration. Sensitive
@@ -15,6 +15,13 @@
 //   - SetBrokerConfig probes the candidate (per Spec 1 R6.4) and persists
 //     it on success. Emits a tenant_secrets_backend_configured audit event.
 //
+// ListMembers semantics:
+//   - Queries OpenFGA for all users with the "member" relation on the
+//     tenant, then batch-checks admin role for each, then enriches from
+//     the IdP (display_name + email). name_filter applies a
+//     case-insensitive prefix match. Pagination is offset-based with a
+//     base64-encoded cursor.
+//
 // SECURITY: sensitive auth fields (Vault token, AWS keys, GCP SA JSON,
 // Azure client secret) are write-only from the dashboard's perspective.
 // They flow inbound on Set/Probe; they NEVER appear in any read response.
@@ -24,19 +31,26 @@ package admin
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zero-day-ai/gibson/internal/idp"
 	"github.com/zero-day-ai/gibson/internal/secrets"
 
+	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
 	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 )
 
 // TenantConfigStoreReader is the narrow contract this handler uses to read
@@ -85,13 +99,16 @@ type SecretsLister interface {
 type TenantAdminServer struct {
 	adminv1.UnimplementedTenantAdminServiceServer
 
-	reader   TenantConfigStoreReader
-	writer   TenantConfigStoreWriter
-	probeFac ProviderProbeFactory
-	auditor  BootstrapTokenAuditor
-	reloader Reloader
-	svc      SecretsLister
-	now      func() time.Time
+	reader     TenantConfigStoreReader
+	writer     TenantConfigStoreWriter
+	probeFac   ProviderProbeFactory
+	auditor    BootstrapTokenAuditor
+	reloader   Reloader
+	svc        SecretsLister
+	now        func() time.Time
+	authorizer authz.Authorizer // optional; ListMembers returns empty when nil
+	idpClient  idp.AdminClient  // optional; members have empty display_name/email when nil
+	logger     *slog.Logger
 }
 
 // TenantAdminConfig groups the constructor's required dependencies.
@@ -103,10 +120,18 @@ type TenantAdminConfig struct {
 	Reloader       Reloader
 	SecretsService SecretsLister
 	Now            func() time.Time
+	// Authorizer is optional. When nil, ListMembers returns an empty list.
+	Authorizer authz.Authorizer
+	// IdPAdminClient is optional. When nil, display_name and email fields are
+	// left empty in ListMembers responses.
+	IdPAdminClient idp.AdminClient
+	// Logger is optional; falls back to slog.Default() when nil.
+	Logger *slog.Logger
 }
 
 // NewTenantAdminServer constructs a TenantAdminServer. Reader, Writer,
 // ProbeFactory, Auditor, Reloader, SecretsService are required.
+// Authorizer, IdPAdminClient, and Logger are optional.
 func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 	if cfg.Reader == nil {
 		return nil, errors.New("tenant admin: Reader is required")
@@ -130,14 +155,21 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 	if now == nil {
 		now = time.Now
 	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &TenantAdminServer{
-		reader:   cfg.Reader,
-		writer:   cfg.Writer,
-		probeFac: cfg.ProbeFactory,
-		auditor:  cfg.Auditor,
-		reloader: cfg.Reloader,
-		svc:      cfg.SecretsService,
-		now:      now,
+		reader:     cfg.Reader,
+		writer:     cfg.Writer,
+		probeFac:   cfg.ProbeFactory,
+		auditor:    cfg.Auditor,
+		reloader:   cfg.Reloader,
+		svc:        cfg.SecretsService,
+		now:        now,
+		authorizer: cfg.Authorizer,
+		idpClient:  cfg.IdPAdminClient,
+		logger:     logger,
 	}, nil
 }
 
@@ -281,6 +313,154 @@ func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *adminv1.CountSe
 		return nil, status.Errorf(codes.Internal, "list secrets: %v", err)
 	}
 	return &adminv1.CountSecretsResponse{Count: int64(len(names))}, nil
+}
+
+// ListMembers enumerates the members of the caller's tenant. It:
+//  1. Queries OpenFGA for all user references with the "member" relation on
+//     the tenant object.
+//  2. Batch-checks which of those users also have the "admin" relation.
+//  3. Enriches each entry with display_name and email from the IdP.
+//  4. Applies name_filter (case-insensitive prefix on display_name or email).
+//  5. Sorts by display_name, applies offset-based pagination via a
+//     base64-encoded integer page_token.
+//
+// When the authorizer is nil (not wired), an empty list is returned.
+// When the IdP client is nil, members are returned with empty display_name
+// and email fields.
+func (s *TenantAdminServer) ListMembers(ctx context.Context, req *adminv1.ListMembersRequest) (*adminv1.ListMembersResponse, error) {
+	if _, ok := auth.TenantFromContext(ctx); !ok {
+		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+
+	tenant, _ := auth.TenantFromContext(ctx)
+
+	if s.authorizer == nil {
+		s.logger.WarnContext(ctx, "ListMembers: authorizer not wired; returning empty list")
+		return &adminv1.ListMembersResponse{}, nil
+	}
+
+	// 1. List all users with the "member" relation on this tenant.
+	tenantObject := "tenant:" + tenant.String()
+	userRefs, err := s.authorizer.ListUsers(ctx, "tenant", tenantObject, "member")
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list tenant members from FGA: %v", err)
+	}
+
+	if len(userRefs) == 0 {
+		return &adminv1.ListMembersResponse{}, nil
+	}
+
+	// 2. Batch-check which users are also admins.
+	adminChecks := make([]authz.CheckRequest, len(userRefs))
+	for i, ref := range userRefs {
+		adminChecks[i] = authz.CheckRequest{
+			User:     ref,
+			Relation: "admin",
+			Object:   tenantObject,
+		}
+	}
+	isAdmin, err := s.authorizer.BatchCheck(ctx, adminChecks)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "batch-check admin roles from FGA: %v", err)
+	}
+
+	// 3. Build member structs enriched from the IdP.
+	members := make([]*adminv1.TenantMember, 0, len(userRefs))
+	for i, ref := range userRefs {
+		// FGA user refs have the form "user:<id>".
+		userID := strings.TrimPrefix(ref, "user:")
+
+		role := "member"
+		if isAdmin[i] {
+			role = "admin"
+		}
+
+		m := &adminv1.TenantMember{
+			UserId: userID,
+			Role:   role,
+		}
+
+		if s.idpClient != nil {
+			profile, profileErr := s.idpClient.GetUserProfile(ctx, userID)
+			if profileErr != nil {
+				// Non-fatal: log and continue without IdP data for this user.
+				s.logger.WarnContext(ctx, "ListMembers: GetUserProfile failed",
+					slog.String("user_id", userID),
+					slog.String("error", profileErr.Error()))
+			} else {
+				m.DisplayName = profile.DisplayName
+				m.Email = profile.Email
+			}
+		}
+
+		members = append(members, m)
+	}
+
+	// 4. Apply name_filter (case-insensitive prefix on display_name or email).
+	if filter := req.GetNameFilter(); filter != "" {
+		filtered := members[:0]
+		for _, m := range members {
+			if hasPrefixFold(m.GetDisplayName(), filter) || hasPrefixFold(m.GetEmail(), filter) {
+				filtered = append(filtered, m)
+			}
+		}
+		members = filtered
+	}
+
+	// 5. Sort by display_name (fall back to user_id for stable ordering).
+	sort.Slice(members, func(i, j int) bool {
+		ni := members[i].GetDisplayName()
+		if ni == "" {
+			ni = members[i].GetUserId()
+		}
+		nj := members[j].GetDisplayName()
+		if nj == "" {
+			nj = members[j].GetUserId()
+		}
+		return ni < nj
+	})
+
+	// Decode page_token as a base64-encoded decimal offset.
+	offset := 0
+	if tok := req.GetPageToken(); tok != "" {
+		decoded, decErr := base64.StdEncoding.DecodeString(tok)
+		if decErr == nil {
+			if n, parseErr := strconv.Atoi(string(decoded)); parseErr == nil && n >= 0 {
+				offset = n
+			}
+		}
+	}
+
+	pageSize := int(req.GetPageSize())
+	if pageSize <= 0 {
+		pageSize = 50 // server-chosen default
+	}
+
+	if offset >= len(members) {
+		return &adminv1.ListMembersResponse{}, nil
+	}
+
+	end := offset + pageSize
+	var nextToken string
+	if end < len(members) {
+		nextToken = base64.StdEncoding.EncodeToString([]byte(strconv.Itoa(end)))
+		members = members[offset:end]
+	} else {
+		members = members[offset:]
+	}
+
+	return &adminv1.ListMembersResponse{
+		Members:       members,
+		NextPageToken: nextToken,
+	}, nil
+}
+
+// hasPrefixFold reports whether s has prefix p, case-insensitively.
+func hasPrefixFold(s, prefix string) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	return strings.EqualFold(s[:len(prefix)], prefix)
 }
 
 // ---------------------------------------------------------------------------

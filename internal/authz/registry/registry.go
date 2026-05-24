@@ -203,6 +203,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.admin.v1.TenantAdminService/ListMembers": {
+		Method:            "/gibson.admin.v1.TenantAdminService/ListMembers",
+		Service:           "gibson.admin.v1.TenantAdminService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.admin.v1.TenantAdminService/ListProviderModels": {
 		Method:            "/gibson.admin.v1.TenantAdminService/ListProviderModels",
 		Service:           "gibson.admin.v1.TenantAdminService",

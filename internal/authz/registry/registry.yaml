@@ -104,6 +104,12 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.admin.v1.TenantAdminService/ListMembers":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.admin.v1.TenantAdminService/ListProviderModels":
     relation: "admin"
     object_type: "tenant"

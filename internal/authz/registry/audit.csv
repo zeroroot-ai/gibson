@@ -16,6 +16,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.admin.v1.TenantAdminService/CountSecrets,admin,tenant,tenant_from_identity,USER,gibson/admin/v1/tenant.proto,rule
 /gibson.admin.v1.TenantAdminService/GetBrokerConfig,admin,tenant,tenant_from_identity,USER,gibson/admin/v1/tenant.proto,rule
 /gibson.admin.v1.TenantAdminService/GetSupportedProviders,member,tenant,tenant_from_identity,USER|SERVICE,gibson/admin/v1/tenant.proto,rule
+/gibson.admin.v1.TenantAdminService/ListMembers,admin,tenant,tenant_from_identity,USER,gibson/admin/v1/tenant.proto,rule
 /gibson.admin.v1.TenantAdminService/ListProviderModels,admin,tenant,tenant_from_identity,USER,gibson/admin/v1/tenant.proto,rule
 /gibson.admin.v1.TenantAdminService/ProbeBrokerConfig,admin,tenant,tenant_from_identity,USER,gibson/admin/v1/tenant.proto,rule
 /gibson.admin.v1.TenantAdminService/ProbeProvider,admin,tenant,tenant_from_identity,USER,gibson/admin/v1/tenant.proto,rule
