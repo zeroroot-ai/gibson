@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 

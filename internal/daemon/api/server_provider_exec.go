@@ -15,7 +15,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	"github.com/zero-day-ai/gibson/internal/types"
-	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	// As of sdk#106 the budget surface is split: customer-visible value
 	// types (`BudgetExceeded` + `BudgetScope`) live in the OSS SDK at
 	// `gibson.budget_status.v1`; the admin `BudgetService` lives in
@@ -53,7 +53,7 @@ var providerFactoryFunc = func(cfg llm.ProviderConfig) (llm.LLMProvider, error) 
 // ---------------------------------------------------------------------------
 
 // WithExecLimiter wires the Redis-backed tenant rate limiter so that
-// ExecuteLLM and StreamLLM enforce per-(tenant, RPC) request budgets.
+// ExecuteLLM enforces per-(tenant, RPC) request budgets.
 // Call this immediately after NewDaemonServer and before registering the server.
 // Added by spec 25-daemon-driven-provider-config task 4.
 func (s *DaemonServer) WithExecLimiter(l execLimiterIface) *DaemonServer {
@@ -71,8 +71,8 @@ func (s *DaemonServer) WithProviderFactory(f func(cfg llm.ProviderConfig) (llm.L
 }
 
 // WithBudgetEnforcer wires the per-user/team/tenant LLM budget enforcer
-// so ExecuteLLM and StreamLLM check projected-post-call usage before
-// dispatch and record authoritative usage after dispatch. Pass nil to
+// so ExecuteLLM checks projected-post-call usage before dispatch and
+// records authoritative usage after dispatch. Pass nil to
 // disable enforcement (which is also the default).
 // Spec: llm-user-attribution-governance (Requirement 3).
 func (s *DaemonServer) WithBudgetEnforcer(e budgetEnforcerIface) *DaemonServer {
@@ -184,20 +184,6 @@ func estimateTokens(req *tenantv1.ExecuteLLMRequest) int64 {
 	} else {
 		// If the caller didn't specify max_tokens the provider's default
 		// applies. Reserve a pessimistic 4k completion.
-		est += 4096
-	}
-	return est
-}
-
-// streamEstimateTokens is the equivalent for StreamLLM.
-func streamEstimateTokens(req *tenantv1.StreamLLMRequest) int64 {
-	var est int64
-	for _, m := range req.GetMessages() {
-		est += int64(len(m.GetContent())) / 4
-	}
-	if req.MaxTokens != nil && req.GetMaxTokens() > 0 {
-		est += int64(req.GetMaxTokens())
-	} else {
 		est += 4096
 	}
 	return est
@@ -346,190 +332,6 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 
 	// 9. Translate response to proto.
 	return completionRespToProto(resp), nil
-}
-
-// ---------------------------------------------------------------------------
-// StreamLLM — server-streaming RPC
-// ---------------------------------------------------------------------------
-
-// StreamLLM resolves the provider and streams incremental chunks back to the
-// caller. Each chunk is translated to a StreamLLMResponse oneof variant:
-// text_delta, tool_call_delta, finish, or error. The decrypted credential is
-// scoped to the lifetime of this handler, never logged, and never forwarded.
-func (s *DaemonServer) StreamLLM(req *tenantv1.StreamLLMRequest, stream tenantv1.TenantAdminService_StreamLLMServer) error {
-	ctx := stream.Context()
-
-	// 1. Tenant from identity context (resolved from Envoy-signed headers).
-	tenantID := auth.TenantStringFromContext(ctx)
-	if tenantID == "" || tenantID == auth.SystemTenantString {
-		return status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
-	}
-
-	// 2. Rate-limit check.
-	if s.execLimiter != nil {
-		if limitErr := s.execLimiter.Check(ctx, tenantID, "StreamLLM"); limitErr != nil {
-			if errors.Is(limitErr, ratelimit.ErrRateLimited) {
-				return status_grpc.Errorf(codes.ResourceExhausted, "rate limit exceeded for StreamLLM: %s", limitErr.Error())
-			}
-		}
-	}
-
-	// 2b. Budget check — returns ResourceExhausted with a typed
-	// gibson.budget.v1.BudgetExceeded detail when denied. Mirrors the same
-	// pre-dispatch check in ExecuteLLM so exhausted budgets cannot bypass
-	// enforcement by using the streaming surface.
-	// Spec: llm-user-attribution-governance Requirement 3.3, 3.4.
-	if err := s.enforceBudgetCheck(ctx, streamEstimateTokens(req)); err != nil {
-		return err
-	}
-
-	// 3. Resolve the named provider.
-	if s.providerConfig == nil {
-		return status_grpc.Errorf(codes.FailedPrecondition,
-			"provider credential store is not configured (security.key_provider must be set)")
-	}
-	dec, err := s.providerConfig.Resolve(ctx, tenantID, req.GetProviderName())
-	if err != nil {
-		if errors.Is(err, providerconfig.ErrNotFound) {
-			return status_grpc.Errorf(codes.NotFound,
-				"provider %q not found for tenant", req.GetProviderName())
-		}
-		s.logger.WarnContext(ctx, "failed to resolve provider",
-			"provider", req.GetProviderName(), "tenant", tenantID)
-		return status_grpc.Errorf(codes.Internal, "failed to resolve provider credentials")
-	}
-
-	// 4. Translate DecryptedConfig → llm.ProviderConfig and construct provider.
-	provCfg := decryptedConfigToLLMConfig(dec, req.GetModel())
-	prov, err := s.providerFactory(provCfg)
-	if err != nil {
-		s.logger.WarnContext(ctx, "failed to construct provider", "type", string(dec.Type))
-		return status_grpc.Errorf(codes.Internal, "failed to construct LLM provider")
-	}
-	// dec is no longer needed after prov is built.
-
-	// 5. Build CompletionRequest.
-	msgs := protoMessagesToLLM(req.GetMessages())
-	completionReq := llm.CompletionRequest{
-		Model:         provCfg.DefaultModel,
-		Messages:      msgs,
-		StopSequences: req.GetStop(),
-	}
-	if req.Temperature != nil {
-		completionReq.Temperature = req.GetTemperature()
-	}
-	if req.MaxTokens != nil {
-		completionReq.MaxTokens = int(req.GetMaxTokens())
-	}
-	if req.TopP != nil {
-		completionReq.TopP = req.GetTopP()
-	}
-
-	// 5b. Apply per-call token cap from context (mirrors ExecuteLLM step 6b).
-	// Spec: mission-author-experience M4 (gibson#133).
-	applyContextPerCallCap(ctx, &completionReq)
-
-	// 6. Open streaming channel.
-	chunks, err := prov.Stream(ctx, completionReq)
-	if err != nil {
-		s.logger.WarnContext(ctx, "stream open failed", "provider", req.GetProviderName())
-		return status_grpc.Errorf(codes.Internal, "failed to open LLM stream")
-	}
-
-	// 7. Forward chunks to the gRPC stream.
-	//
-	// outputChars accumulates the characters of generated content across all
-	// text_delta chunks. This is used to derive an authoritative post-dispatch
-	// token count (chars/4 heuristic, same as the pre-dispatch estimate) and
-	// record it via the budget enforcer on stream close. The streaming provider
-	// interface does not surface a terminal usage event on the channel, so we
-	// approximate from the content we forwarded.
-	var outputChars int64
-	for chunk := range chunks {
-		var msg *tenantv1.StreamLLMResponse
-
-		switch {
-		case chunk.Error != nil:
-			msg = &tenantv1.StreamLLMResponse{
-				Payload: &tenantv1.StreamLLMResponse_Error{
-					Error: &tenantv1.ProviderHarnessError{
-						Code:      int32(codes.Internal),
-						Message:   "stream error",
-						Retryable: false,
-					},
-				},
-			}
-			if sendErr := stream.Send(msg); sendErr != nil {
-				s.logger.WarnContext(ctx, "failed to send stream error chunk", "send_error", sendErr)
-			}
-			return nil
-
-		case chunk.Delta.ToolCallDelta != nil:
-			tcd := chunk.Delta.ToolCallDelta
-			msg = &tenantv1.StreamLLMResponse{
-				Payload: &tenantv1.StreamLLMResponse_ToolCallDelta{
-					ToolCallDelta: &tenantv1.ToolCallDelta{
-						Index:          int32(tcd.Index),
-						Id:             tcd.ID,
-						Name:           tcd.Name,
-						ArgumentsDelta: tcd.Arguments,
-					},
-				},
-			}
-			// Count tool-call argument chars toward output.
-			outputChars += int64(len(tcd.Arguments))
-
-		case chunk.FinishReason != "":
-			msg = &tenantv1.StreamLLMResponse{
-				Payload: &tenantv1.StreamLLMResponse_Finish{
-					Finish: &tenantv1.StreamFinish{
-						FinishReason: string(chunk.FinishReason),
-					},
-				},
-			}
-
-		case chunk.Delta.Content != "":
-			outputChars += int64(len(chunk.Delta.Content))
-			msg = &tenantv1.StreamLLMResponse{
-				Payload: &tenantv1.StreamLLMResponse_TextDelta{
-					TextDelta: chunk.Delta.Content,
-				},
-			}
-
-		default:
-			// Empty delta (e.g. role-only first chunk) — skip.
-			continue
-		}
-
-		if sendErr := stream.Send(msg); sendErr != nil {
-			return sendErr
-		}
-
-		// Stop after forwarding a finish or error chunk.
-		if msg.GetFinish() != nil || msg.GetError() != nil {
-			break
-		}
-	}
-
-	// 8. Budget record — authoritative usage post-dispatch. Mirrors ExecuteLLM's
-	// record step. The streaming provider does not surface a terminal usage event,
-	// so we derive the token count from accumulated output chars (same chars/4
-	// heuristic as the pre-dispatch estimate). Input tokens are re-derived from
-	// the request so the recorded total includes both sides.
-	// Spec: llm-user-attribution-governance Requirement 3.10.
-	if s.budgetEnforcer != nil {
-		inputTokens := streamEstimateTokens(req)
-		outputTokens := outputChars / 4
-		totalTokens := inputTokens + outputTokens
-		if totalTokens > 0 {
-			if recErr := s.budgetEnforcer.Record(ctx, totalTokens, 0); recErr != nil {
-				s.logger.WarnContext(ctx, "budget record failed (non-blocking)",
-					"error", recErr, "tenant", tenantID)
-			}
-		}
-	}
-
-	return nil
 }
 
 // ---------------------------------------------------------------------------

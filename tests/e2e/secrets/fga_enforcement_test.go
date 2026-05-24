@@ -70,7 +70,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
 )
@@ -138,7 +138,7 @@ func TestFGAEnforcement_Secrets(t *testing.T) {
 	require.NoError(t, dialErr, "grpc.NewClient should succeed")
 	t.Cleanup(func() { _ = conn.Close() })
 
-	tenantAdminClient := tenantv1.NewTenantAdminServiceClient(conn)
+	tenantAdminClient := tenantv1.NewTenantServiceClient(conn)
 	harnessClient := harnesspb.NewHarnessCallbackServiceClient(conn)
 	componentClient := componentpb.NewComponentServiceClient(conn)
 

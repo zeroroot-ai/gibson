@@ -34,16 +34,15 @@ import (
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	adminpb "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
-	daemonadminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/admin/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	discoverypb "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
-	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
-	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
 	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
 	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
+	sdktenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
 	"github.com/zero-day-ai/sdk/auth"
 
@@ -353,11 +352,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// ext-authz headers are present on direct-dial connections).
 	spiffeMethodAllowlist := map[string]map[string]bool{
 		"spiffe://zero-day.ai/platform/tenant-operator": {
-			"/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota":       true,
-			"/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples":        true,
-			"/gibson.platform.v1.PlatformOperatorService/WriteAccessTuples":        true,
-			"/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled": true,
-			"/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent":           true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota":       true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples":        true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples":        true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled": true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent":           true,
 		},
 	}
 	spiffePlatformBypass := func(ctx context.Context, method string) (context.Context, bool, error) {
@@ -872,44 +871,39 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
-	platformv1.RegisterPlatformOperatorServiceServer(srv, daemonSvc)
+	// Register DaemonOperatorService — the platform-sdk-published internal
+	// operator RPC surface (ADR-0037). Replaces PlatformOperatorService from
+	// platform-sdk v0.7 and below. Same DaemonServer instance so all RPCs share
+	// orchestration state. Envoy gates /gibson.daemon.operator.v1.* with the
+	// operator JWT requirement.
+	daemonoperatorv1.RegisterDaemonOperatorServiceServer(srv, daemonSvc)
 	userv1.RegisterUserServiceServer(srv, daemonSvc)
 
-	// Register DaemonAdminService — the platform-sdk-published admin/writer
-	// RPC surface (StartComponent, StopComponent, BuildComponent,
-	// CreateMissionDefinition). Wraps the same DaemonServer instance so admin
-	// and member calls share orchestration state. Routed by Envoy under
-	// /gibson.daemon.admin.v1.DaemonAdminService/ (deploy#444); FGA in
-	// ext-authz applies the admin-tier rules per method. Parent PRD
-	// zero-day-ai/.github#101.
-	daemonAdminSvc := api.NewDaemonAdminServer(daemonSvc, d.logger.Slog())
-	daemonadminv1.RegisterDaemonAdminServiceServer(srv, daemonAdminSvc)
-
-	// Register TenantAdminService — the new tenant-admin surface.
-	// Initialise the IdP admin client from env vars; fail-closed if the env
-	// is set but invalid. When env is unset entirely the client is nil and
-	// the agent-identity RPCs return codes.Unavailable.
+	// Register TenantService — the OSS SDK tenant-management surface (ADR-0037).
+	// Replaces gibson.tenant.v1.TenantAdminService (platform-sdk). Customer-
+	// callable: FGA enforces the tenant member relation. Initialise the IdP admin
+	// client from env vars; fail-closed if the env is set but invalid.
 	idpClient, idpErr := initIDPAdminClient(ctx)
 	if idpErr != nil {
 		return nil, fmt.Errorf("daemon: IdP admin client init failed: %w", idpErr)
 	}
 	if idpClient != nil {
 		daemonSvc.WithIdPAdminClient(idpClient)
-		d.logger.Info(ctx, "IdP admin client wired into TenantAdminService")
+		d.logger.Info(ctx, "IdP admin client wired into TenantService")
 	} else {
-		d.logger.Info(ctx, "IdP admin client not configured (GIBSON_IDP_PROVIDER not set); TenantAdminService agent-identity RPCs will return Unavailable")
+		d.logger.Info(ctx, "IdP admin client not configured (GIBSON_IDP_PROVIDER not set); TenantService agent-identity RPCs will return Unavailable")
 	}
-	// Wire audit writer for TenantAdminService. platformDB is always non-nil
+	// Wire audit writer for TenantService. platformDB is always non-nil
 	// after Start() (gibson#246).
 	tenantAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
 	tenantAuditWriter.Start(ctx)
 	daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
-	d.logger.Info(ctx, "audit writer wired into TenantAdminService")
+	d.logger.Info(ctx, "audit writer wired into TenantService")
 	// Wire pool getter for ExportFindings (Neo4j DashboardQueries path).
 	// Spec: dashboard-neo4j-crud-removal.
 	daemonSvc.WithPoolGetter(func() datapool.Pool { return d.pool })
-	tenantv1.RegisterTenantAdminServiceServer(srv, daemonSvc)
-	d.logger.Info(ctx, "registered TenantAdminService gRPC endpoint")
+	sdktenantv1.RegisterTenantServiceServer(srv, daemonSvc)
+	d.logger.Info(ctx, "registered TenantService gRPC endpoint")
 
 	// Register gibson.admin.v1.TenantAdminService — SDK admin surface that
 	// the dashboard's /settings/secrets-backend page calls. Coexists with

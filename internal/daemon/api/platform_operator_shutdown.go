@@ -14,12 +14,12 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 )
 
 // Shutdown requests graceful shutdown of the daemon.
 // Requires the "platform_operator" FGA relation on system_tenant:_system.
-func (s *DaemonServer) Shutdown(ctx context.Context, req *platformv1.ShutdownRequest) (*platformv1.ShutdownResponse, error) {
+func (s *DaemonServer) Shutdown(ctx context.Context, req *daemonoperatorv1.ShutdownRequest) (*daemonoperatorv1.ShutdownResponse, error) {
 	s.logger.Info("shutdown requested via gRPC",
 		"force", req.Force,
 		"timeout_seconds", req.TimeoutSeconds,
@@ -28,7 +28,7 @@ func (s *DaemonServer) Shutdown(ctx context.Context, req *platformv1.ShutdownReq
 	// Validate this is a local daemon (not remote via GIBSON_DAEMON_ADDRESS).
 	// The CLI already prevents this, but we double-check here for safety.
 	if remoteAddr := os.Getenv("GIBSON_DAEMON_ADDRESS"); remoteAddr != "" {
-		return &platformv1.ShutdownResponse{
+		return &daemonoperatorv1.ShutdownResponse{
 			Success: false,
 			Message: "Cannot shutdown a remote daemon via this endpoint",
 		}, nil
@@ -51,7 +51,7 @@ func (s *DaemonServer) Shutdown(ctx context.Context, req *platformv1.ShutdownReq
 		}
 	}()
 
-	return &platformv1.ShutdownResponse{
+	return &daemonoperatorv1.ShutdownResponse{
 		Success: true,
 		Message: "Shutdown request accepted, daemon will stop shortly",
 	}, nil

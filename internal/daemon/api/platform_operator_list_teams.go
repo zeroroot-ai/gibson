@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 )
 
 const (
@@ -80,7 +80,7 @@ func stripTypePrefix(s, typeName string) string {
 // ListTeams enumerates the teams under the given tenant. The dashboard
 // server action gates this call on `members:invite`; the daemon-side authz
 // constant is `platform_operator`, consistent with the rest of this service.
-func (s *DaemonServer) ListTeams(ctx context.Context, req *platformv1.ListTeamsRequest) (*platformv1.ListTeamsResponse, error) {
+func (s *DaemonServer) ListTeams(ctx context.Context, req *daemonoperatorv1.ListTeamsRequest) (*daemonoperatorv1.ListTeamsResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -108,7 +108,7 @@ func (s *DaemonServer) ListTeams(ctx context.Context, req *platformv1.ListTeamsR
 	// guarantee order.
 	sort.Strings(teamRefs)
 
-	out := &platformv1.ListTeamsResponse{}
+	out := &daemonoperatorv1.ListTeamsResponse{}
 	end := offset + int(pageSize)
 	if end > len(teamRefs) {
 		end = len(teamRefs)
@@ -129,7 +129,7 @@ func (s *DaemonServer) ListTeams(ctx context.Context, req *platformv1.ListTeamsR
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "fga ListUsers(admin) for %s: %v", teamObj, err)
 		}
-		out.Teams = append(out.Teams, &platformv1.Team{
+		out.Teams = append(out.Teams, &daemonoperatorv1.Team{
 			Id:          teamID,
 			DisplayName: "", // populated by sidecar store once dashboard#148 wires display names.
 			MemberCount: int32(len(members) + len(admins)),
@@ -145,7 +145,7 @@ func (s *DaemonServer) ListTeams(ctx context.Context, req *platformv1.ListTeamsR
 // on a single team. `is_admin` reflects which relation matched. The daemon
 // returns bare user ids; the dashboard joins these against Zitadel for the
 // `email` and `display_name` fields.
-func (s *DaemonServer) ListTeamMembers(ctx context.Context, req *platformv1.ListTeamMembersRequest) (*platformv1.ListTeamMembersResponse, error) {
+func (s *DaemonServer) ListTeamMembers(ctx context.Context, req *daemonoperatorv1.ListTeamMembersRequest) (*daemonoperatorv1.ListTeamMembersResponse, error) {
 	if s.authorizer == nil {
 		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
@@ -210,7 +210,7 @@ func (s *DaemonServer) ListTeamMembers(ctx context.Context, req *platformv1.List
 	}
 	sort.Strings(combined)
 
-	out := &platformv1.ListTeamMembersResponse{}
+	out := &daemonoperatorv1.ListTeamMembersResponse{}
 	end := offset + int(pageSize)
 	if end > len(combined) {
 		end = len(combined)
@@ -218,7 +218,7 @@ func (s *DaemonServer) ListTeamMembers(ctx context.Context, req *platformv1.List
 	for i := offset; i < end; i++ {
 		userRef := combined[i]
 		_, isAdmin := adminSet[userRef]
-		out.Members = append(out.Members, &platformv1.TeamMember{
+		out.Members = append(out.Members, &daemonoperatorv1.TeamMember{
 			UserId:      stripTypePrefix(userRef, "user"),
 			Email:       "", // dashboard joins via Zitadel
 			DisplayName: "",

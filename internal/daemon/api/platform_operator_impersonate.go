@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -27,7 +27,7 @@ import (
 // is a platform operator, NOT the target tenant; req.TenantId names the
 // impersonation target. FGA enforces the platform_operator relation on
 // system_tenant:_system at ext-authz before this handler runs.
-func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *platformv1.ImpersonateTenantRequest) (*platformv1.ImpersonateTenantResponse, error) {
+func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *daemonoperatorv1.ImpersonateTenantRequest) (*daemonoperatorv1.ImpersonateTenantResponse, error) {
 	if req.TenantId == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "tenant_id is required")
 	}
@@ -64,7 +64,7 @@ func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *platformv1.Im
 		return nil, status_grpc.Errorf(codes.Internal, "failed to issue impersonation token: %v", err)
 	}
 
-	return &platformv1.ImpersonateTenantResponse{
+	return &daemonoperatorv1.ImpersonateTenantResponse{
 		Token: token,
 	}, nil
 }

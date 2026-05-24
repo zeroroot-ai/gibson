@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 )
 
 // GetReservedNames returns the chart-managed reserved-names denylist that
@@ -21,19 +21,19 @@ import (
 // Authz: rule-mode (platform_operator on system_tenant). Callers are the
 // dashboard's signup-form proxy (SPIFFE service identity) and the
 // admission webhook itself.
-func (s *DaemonServer) GetReservedNames(ctx context.Context, _ *platformv1.GetReservedNamesRequest) (*platformv1.GetReservedNamesResponse, error) {
+func (s *DaemonServer) GetReservedNames(ctx context.Context, _ *daemonoperatorv1.GetReservedNamesRequest) (*daemonoperatorv1.GetReservedNamesResponse, error) {
 	if s.reservedNames == nil {
 		// Empty lists are a valid response — the chart may have wiped the
 		// ConfigMap or the daemon may be running without K8s access (kind
 		// dev path). Return empty rather than Unavailable so callers can
 		// rely on the RPC being safe to call unconditionally.
-		return &platformv1.GetReservedNamesResponse{}, nil
+		return &daemonoperatorv1.GetReservedNamesResponse{}, nil
 	}
 	exact, prefix, err := s.reservedNames.ReservedNames(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "reserved-names provider failed: %v", err)
 	}
-	return &platformv1.GetReservedNamesResponse{
+	return &daemonoperatorv1.GetReservedNamesResponse{
 		Exact:  exact,
 		Prefix: prefix,
 	}, nil

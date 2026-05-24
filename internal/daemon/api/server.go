@@ -30,9 +30,9 @@ import (
 	"github.com/zero-day-ai/gibson/internal/onboarding"
 	"github.com/zero-day-ai/gibson/internal/types"
 	"github.com/zero-day-ai/gibson/pkg/version"
-	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
-	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	sdktenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
@@ -56,8 +56,8 @@ type authzIface interface {
 // It acts as a facade that delegates to the daemon's internal services.
 type DaemonServer struct {
 	daemonpb.UnimplementedDaemonServiceServer
-	tenantv1.UnimplementedTenantAdminServiceServer
-	platformv1.UnimplementedPlatformOperatorServiceServer
+	sdktenantv1.UnimplementedTenantServiceServer
+	daemonoperatorv1.UnimplementedDaemonOperatorServiceServer
 	userv1.UnimplementedUserServiceServer
 
 	// daemon is the daemon instance this server exposes
