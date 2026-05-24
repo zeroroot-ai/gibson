@@ -53,9 +53,7 @@ func (r *compTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.B
 
 type compTestCircuit struct{}
 
-func (c *compTestCircuit) Allow(_, _ string) error   { return nil }
-func (c *compTestCircuit) RecordSuccess(_, _ string) {}
-func (c *compTestCircuit) RecordFailure(_, _ string) {}
+func (c *compTestCircuit) Execute(_, _ string, fn func() error) error { return fn() }
 
 type compTestAuditor struct{}
 
