@@ -3,8 +3,8 @@
 // operations Gibson actually performs against the vector store are exposed.
 // Vendor-specific types do not appear in the interface signatures.
 //
-// The default adapter targets Qdrant (qdrant.go). Weaviate, Milvus, and
-// pgvector adapters can be added by implementing Driver + Client without
+// The production adapter is redis.go (NewRedisVSSDriver). Weaviate, Milvus,
+// and pgvector adapters can be added by implementing Driver + Client without
 // touching handler code.
 //
 // Spec: database-per-tenant-data-plane, Phase B, task 2.2.
@@ -62,7 +62,7 @@ type FieldCondition struct {
 }
 
 // Driver creates per-tenant Clients. It holds any cluster-level connection
-// state (e.g., a gRPC connection to the Qdrant cluster) and is shared across
+// state (e.g., a Redis connection) and is shared across
 // tenants. The Driver must be safe for concurrent use.
 type Driver interface {
 	// For returns a Client scoped to the given collection name. The Client

@@ -104,14 +104,13 @@ func (t *tenantScopedStore) StoreBatch(ctx context.Context, records []VectorReco
 // Note: because the underlying EmbeddedVectorStore stores ALL tenants in a single
 // shared map, Search results may include records from other tenants. The caller
 // should use this wrapper with a store that is dedicate to the tenant when
-// using the embedded backend in production (or migrate to Qdrant per-collection
-// isolation). For the finding-classifier use case, the classifier only stores
-// category IDs so cross-tenant pollution is benign; this note is retained for
-// future callers.
+// using the embedded backend in production. For the finding-classifier use
+// case, the classifier only stores category IDs so cross-tenant pollution is
+// benign; this note is retained for future callers.
 //
 // For production isolation, use NewVectorStoreForTenant with a store that
-// supports key-range filtering by prefix. This is addressed in the forward-
-// looking vectordb/ Qdrant subsystem (see internal/datapool/vectordb/doc.go).
+// supports key-range filtering by prefix. The Redis VSS adapter in
+// internal/datapool/vectordb/ provides this via per-tenant index prefixes.
 func (t *tenantScopedStore) Search(ctx context.Context, query VectorQuery) ([]VectorResult, error) {
 	results, err := t.underlying.Search(ctx, query)
 	if err != nil {

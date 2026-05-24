@@ -16,8 +16,7 @@
 //	index name: "vector_idx:tenant_acme"
 //	key prefix: "vec:tenant_acme:"
 //
-// See spec per-tenant-data-plane-completion Req 3 for the deferral rationale
-// and gibson#325 for the Qdrant-to-Redis VSS migration.
+// See spec per-tenant-data-plane-completion Req 3 for the deferral rationale.
 //
 // To wire this package into NewPool:
 //
