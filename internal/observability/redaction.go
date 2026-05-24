@@ -33,6 +33,11 @@ var SensitiveFields = map[string]struct{}{
 	"cohereapikey":        {}, // Cohere (typed alias)
 	"huggingfaceapitoken": {}, // HuggingFace
 	"mistralapikey":       {}, // Mistral (typed alias)
+	"ernieaccesskey":      {}, // ERNIE (Baidu)
+	"erniesecretkey":      {}, // ERNIE (Baidu)
+	"maritacaapikey":      {}, // Maritaca
+	"watsonxapikey":       {}, // WatsonX
+	"watsonxprojectid":    {}, // WatsonX (project-scoped identifier — redact defensively)
 }
 
 // Redact takes slog-style key-value pairs and redacts sensitive values.

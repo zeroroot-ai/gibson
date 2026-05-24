@@ -310,8 +310,11 @@ func DefaultContentLoggingConfig() ContentLoggingConfig {
 		MaxPromptLength:     10000,
 		MaxCompletionLength: 10000,
 		RedactPatterns: []string{
-			// Match API keys, passwords, secrets, tokens with various formats
-			`(?i)(api[_-]?key|password|secret|token|bearer)[=:\s]+\S+`,
+			// Match API keys, passwords, secrets, tokens with various formats.
+			// The separator allows optional "is" preposition for natural English
+			// (e.g. "password is secret123") and tolerates a space between
+			// "api" and "key" (e.g. "API key is sk-...").
+			`(?i)(api[\s_-]?key|password|secret|token|bearer)\s*(?:is\s+)?[=:]*\s*\S+`,
 		},
 		IncludeToolIO:    false,
 		compiledPatterns: nil,

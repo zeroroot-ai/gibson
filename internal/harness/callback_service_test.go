@@ -26,6 +26,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // TestNewHarnessCallbackService tests the service constructor.
@@ -945,11 +946,10 @@ func TestCallToolProto_DiscoveryResultExtraction(t *testing.T) {
 			discoveryField := refl.Descriptor().Fields().ByNumber(100)
 			require.NotNil(t, discoveryField, "Field 100 should exist")
 
-			// Create a simple Any message for testing
-			anyMsg := &anypb.Any{
-				TypeUrl: "type.googleapis.com/test.DiscoveryData",
-				Value:   []byte("test discovery data"),
-			}
+			// Create a registered Any message for testing (unregistered types cause
+			// protojson.Marshal to fail; use a well-known type instead).
+			anyMsg, err := anypb.New(wrapperspb.String("test discovery data"))
+			require.NoError(t, err)
 
 			// Set the discovery field
 			refl.Set(discoveryField, protoreflect.ValueOfMessage(anyMsg.ProtoReflect()))

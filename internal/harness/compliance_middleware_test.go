@@ -153,8 +153,9 @@ func TestComplianceMiddleware_IdentityStamping_Full(t *testing.T) {
 		CredentialType: "oidc",
 		Tenant:         auth.MustNewTenantID("tenant-a"),
 	}
+	// Use WithIdentity directly; ContextWithTenantString calls WithTenant which
+	// replaces the whole Identity (losing Subject), so only WithIdentity is correct here.
 	ctx := auth.WithIdentity(context.Background(), id)
-	ctx = auth.ContextWithTenantString(ctx, "tenant-a")
 
 	sip := m.beginSignal(ctx, MethodComplete, LLMTarget{Slot: "primary"})
 	m.completeSignal(ctx, sip, nil)

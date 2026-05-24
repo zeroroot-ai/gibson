@@ -77,9 +77,10 @@ const (
 	// be resolved from any context key. Paired with a counter increment.
 	unknownUserSentinel = "unknown"
 
-	// tenantFallback is the value emitted when no tenant is resolvable;
-	// matches the "default" sentinel the tracer has used historically.
-	tenantFallback = "default"
+	// tenantFallback is the value emitted when no tenant is resolvable.
+	// Uses the system-tenant sentinel so that un-attributed spans are
+	// visibly owned by the platform operator, not a phantom "default" tenant.
+	tenantFallback = auth.SystemTenantString
 )
 
 // EnrichSpan applies Gibson's canonical identity + mission attribute set
@@ -87,7 +88,7 @@ const (
 // a nil context; both become no-ops.
 //
 // Attribute rules:
-//   - tenant_id is always set (falls back to "default" when absent).
+//   - tenant_id is always set (falls back to "_system" when absent).
 //   - user_id is always set (falls back to "unknown" when absent; the
 //     fallback also increments gibson_span_unknown_user_total).
 //   - Every other attribute is set only when its source is present in ctx.
@@ -101,8 +102,8 @@ func EnrichSpan(ctx context.Context, span trace.Span) {
 		return
 	}
 
-	// Tenant — always set; "default" sentinel when absent for parity with
-	// the existing tracer behavior.
+	// Tenant — always set; falls back to auth.SystemTenantString ("_system")
+	// when no identity is present so un-attributed spans are auditable.
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = tenantFallback

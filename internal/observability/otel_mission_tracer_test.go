@@ -760,9 +760,10 @@ func TestOTelMissionTracer_EndMissionTrace(t *testing.T) {
 	assert.Equal(t, int64(3), attrMap["gibson.mission.graph_rels_created"])
 	assert.Equal(t, "Successfully scanned 10 hosts, found 3 vulnerabilities", attrMap[GibsonMissionOutcome])
 
-	// Verify status
+	// Verify status.
+	// The OTel SDK only stores Description for codes.Error; for codes.Ok the
+	// description is silently discarded (see recordingSpan.SetStatus in the OTel SDK).
 	assert.Equal(t, codes.Ok, spans[0].Status().Code)
-	assert.Equal(t, "Mission completed successfully", spans[0].Status().Description)
 }
 
 // TestOTelMissionTracer_ContentRedaction verifies redaction patterns work
@@ -917,14 +918,16 @@ func TestOTelMissionTracer_ContentTruncation(t *testing.T) {
 	}
 	require.NotNil(t, decisionSpan)
 
-	// Verify events have truncated content
+	// Verify events have truncated content.
+	// Truncate() keeps maxLen runes and appends "... [truncated]" (15 chars),
+	// so the total length is at most MaxPromptLength + 15.
+	const truncSuffix = "... [truncated]"
 	events := decisionSpan.Events()
 	for _, event := range events {
 		for _, attr := range event.Attributes {
 			if attr.Key == "prompt" || attr.Key == "completion" {
 				content := attr.Value.AsString()
-				// Should be truncated to max length
-				assert.LessOrEqual(t, len(content), cfg.MaxPromptLength)
+				assert.LessOrEqual(t, len(content), cfg.MaxPromptLength+len(truncSuffix))
 			}
 		}
 	}

@@ -114,9 +114,10 @@ func TestCallToolProto_TracingAttributes(t *testing.T) {
 	// Verify span name
 	assert.Equal(t, "harness.CallToolProto", span.Name())
 
-	// Verify span status
+	// Verify span status.
+	// The OTel SDK discards Description when code is Ok (only stored for Error);
+	// assert only the code.
 	assert.Equal(t, codes.Ok, span.Status().Code)
-	assert.Equal(t, "tool execution successful", span.Status().Description)
 
 	// Verify required attributes are present
 	attrs := span.Attributes()
