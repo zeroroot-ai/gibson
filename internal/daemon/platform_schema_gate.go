@@ -16,9 +16,10 @@
 // The escape hatch SKIP_MIGRATIONS=true bypasses step 2 (and 3) for
 // emergencies. In that case the daemon logs a warning and continues.
 //
-// On migration failure the daemon returns a non-nil error from
-// initPlatformPostgres, which leaves platformDB nil. The pod then exits
-// non-zero; Kubernetes restarts with exponential backoff.
+// On migration failure initPlatformPostgres returns a non-nil error that
+// Start() propagates (gibson#246), so the daemon never boots with a partially
+// initialized platform-postgres. The pod exits non-zero; Kubernetes restarts
+// with exponential backoff.
 //
 // Spec: gibson-postgres-migrations, deploy-architecture-refactor Phase 6.1.
 
