@@ -5,15 +5,30 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/sony/gobreaker"
 	"github.com/zero-day-ai/gibson/internal/graphrag"
 	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
 	"github.com/zero-day-ai/gibson/internal/memory/vector"
 	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zero-day-ai/platform-clients/resilience"
 	"github.com/zero-day-ai/sdk/auth"
+)
+
+// graphragCircuitState tracks the current circuit breaker state as a Prometheus
+// gauge: 0 = closed (healthy), 1 = half-open (probing), 2 = open (tripped).
+var graphragCircuitState = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "gibson_graphrag_circuit_state",
+		Help: "Current circuit breaker state for the graphrag Neo4j backend (0=closed, 1=half-open, 2=open).",
+	},
+	[]string{"component"},
 )
 
 // LocalGraphRAGProvider implements GraphRAGProvider using local Neo4j and vector store.
@@ -30,12 +45,17 @@ import (
 //
 // Thread-safety: Safe for concurrent access via internal locking.
 type LocalGraphRAGProvider struct {
-	config       graphrag.GraphRAGConfig
-	graphClient  graph.GraphClient
-	vectorStore  vector.VectorStore
-	initialized  bool
-	graphHealthy bool
+	config      graphrag.GraphRAGConfig
+	graphClient graph.GraphClient
+	vectorStore vector.VectorStore
+	initialized bool
+	// graphHealthy is accessed via atomic load/store so the circuit breaker's
+	// OnStateChange callback can update it without holding mu (which would
+	// deadlock because OnStateChange fires synchronously inside cb.Execute,
+	// which is called from methods that already hold mu.RLock).
+	graphHealthy atomic.Bool
 	mu           sync.RWMutex
+	cb           *gobreaker.CircuitBreaker
 }
 
 // NewLocalProvider creates a new LocalGraphRAGProvider with the given configuration.
@@ -46,10 +66,52 @@ func NewLocalProvider(config graphrag.GraphRAGConfig) (*LocalGraphRAGProvider, e
 		return nil, graphrag.NewConfigError("invalid local provider configuration", err)
 	}
 
-	return &LocalGraphRAGProvider{
+	p := &LocalGraphRAGProvider{
 		config:      config,
 		initialized: false,
-	}, nil
+	}
+	p.cb = newGraphRAGBreaker(p)
+	return p, nil
+}
+
+// newGraphRAGBreaker constructs the circuit breaker for the graphrag Neo4j backend,
+// wiring the OnStateChange callback so that graphHealthy and the Prometheus gauge
+// stay consistent with breaker state transitions.
+func newGraphRAGBreaker(p *LocalGraphRAGProvider) *gobreaker.CircuitBreaker {
+	return resilience.NewBreaker(
+		"graphrag",
+		resilience.DefaultCircuitConfig(),
+		func(name string, from, to gobreaker.State) {
+			slog.Info("graphrag circuit breaker state change",
+				slog.String("breaker", name),
+				slog.String("from", from.String()),
+				slog.String("to", to.String()),
+			)
+
+			// Map gobreaker state to Prometheus gauge value.
+			var gaugeValue float64
+			switch to {
+			case gobreaker.StateClosed:
+				gaugeValue = 0
+			case gobreaker.StateHalfOpen:
+				gaugeValue = 1
+			case gobreaker.StateOpen:
+				gaugeValue = 2
+			}
+			graphragCircuitState.WithLabelValues("graphrag").Set(gaugeValue)
+
+			// Update graphHealthy atomically — no lock needed (and no lock must be
+			// held here, because OnStateChange fires synchronously inside cb.Execute
+			// which is called from methods that already hold mu.RLock).
+			switch to {
+			case gobreaker.StateClosed:
+				p.graphHealthy.Store(true)
+			case gobreaker.StateOpen:
+				p.graphHealthy.Store(false)
+			// StateHalfOpen: leave graphHealthy as-is; the probe will determine outcome.
+			}
+		},
+	)
 }
 
 // NewLocalGraphRAGProviderWithSession constructs a LocalGraphRAGProvider that uses a
@@ -68,12 +130,13 @@ func NewLocalGraphRAGProviderWithSession(
 	vectorStore vector.VectorStore,
 ) *LocalGraphRAGProvider {
 	p := &LocalGraphRAGProvider{
-		config:       graphrag.GraphRAGConfig{Provider: "neo4j"},
-		graphClient:  graph.NewSessionGraphClient(session),
-		vectorStore:  vectorStore,
-		initialized:  true,
-		graphHealthy: true,
+		config:      graphrag.GraphRAGConfig{Provider: "neo4j"},
+		graphClient: graph.NewSessionGraphClient(session),
+		vectorStore: vectorStore,
+		initialized: true,
 	}
+	p.graphHealthy.Store(true)
+	p.cb = newGraphRAGBreaker(p)
 	return p
 }
 
@@ -109,10 +172,10 @@ func (l *LocalGraphRAGProvider) Initialize(ctx context.Context) error {
 	if err := l.graphClient.Connect(ctx); err != nil {
 		// Neo4j unavailable - mark as unhealthy but continue initialization
 		// This allows vector-only fallback mode
-		l.graphHealthy = false
+		l.graphHealthy.Store(false)
 		// Don't return error here - we'll operate in degraded mode
 	} else {
-		l.graphHealthy = true
+		l.graphHealthy.Store(true)
 	}
 
 	// Initialize vector store if provided
@@ -129,7 +192,7 @@ func (l *LocalGraphRAGProvider) Initialize(ctx context.Context) error {
 	}
 
 	// Create graph indices for performance
-	if l.graphHealthy {
+	if l.graphHealthy.Load() {
 		if err := l.createIndices(ctx); err != nil {
 			// Index creation is not critical - log but continue
 			// In production, you'd log this error
@@ -253,6 +316,51 @@ func (l *LocalGraphRAGProvider) createIndices(ctx context.Context) error {
 	return nil
 }
 
+// executeGraphQuery wraps a Query call through the circuit breaker.
+// If the circuit is open, it returns a ProviderUnavailableError immediately.
+func (l *LocalGraphRAGProvider) executeGraphQuery(ctx context.Context, cypher string, params map[string]any) (graph.QueryResult, error) {
+	raw, err := l.cb.Execute(func() (any, error) {
+		return l.graphClient.Query(ctx, cypher, params)
+	})
+	if err != nil {
+		if err == gobreaker.ErrOpenState {
+			return graph.QueryResult{}, graphrag.NewProviderUnavailableError("neo4j", fmt.Errorf("circuit breaker open: %w", err))
+		}
+		return graph.QueryResult{}, err
+	}
+	return raw.(graph.QueryResult), nil
+}
+
+// executeGraphCreateNode wraps a CreateNode call through the circuit breaker.
+// If the circuit is open, it returns a ProviderUnavailableError immediately.
+func (l *LocalGraphRAGProvider) executeGraphCreateNode(ctx context.Context, labels []string, props map[string]any) (string, error) {
+	raw, err := l.cb.Execute(func() (any, error) {
+		return l.graphClient.CreateNode(ctx, labels, props)
+	})
+	if err != nil {
+		if err == gobreaker.ErrOpenState {
+			return "", graphrag.NewProviderUnavailableError("neo4j", fmt.Errorf("circuit breaker open: %w", err))
+		}
+		return "", err
+	}
+	return raw.(string), nil
+}
+
+// executeGraphCreateRelationship wraps a CreateRelationship call through the circuit breaker.
+// If the circuit is open, it returns a ProviderUnavailableError immediately.
+func (l *LocalGraphRAGProvider) executeGraphCreateRelationship(ctx context.Context, fromID, toID, relType string, props map[string]any) error {
+	_, err := l.cb.Execute(func() (any, error) {
+		return nil, l.graphClient.CreateRelationship(ctx, fromID, toID, relType, props)
+	})
+	if err != nil {
+		if err == gobreaker.ErrOpenState {
+			return graphrag.NewProviderUnavailableError("neo4j", fmt.Errorf("circuit breaker open: %w", err))
+		}
+		return err
+	}
+	return nil
+}
+
 // StoreNode stores a graph node in both Neo4j and vector store.
 // Creates the node in the graph database and stores its embedding in the vector store.
 // If Neo4j is unavailable, stores only in vector store (degraded mode).
@@ -269,8 +377,11 @@ func (l *LocalGraphRAGProvider) StoreNode(ctx context.Context, node graphrag.Gra
 		return graphrag.WrapGraphRAGError(graphrag.ErrCodeQueryFailed, "invalid node", err)
 	}
 
-	// Store in graph database if healthy
-	if l.graphHealthy && l.graphClient != nil {
+	// Store in graph database. The circuit breaker gates this path: if the
+	// breaker is open it returns ErrOpenState immediately (mapped to
+	// ProviderUnavailableError by executeGraphCreateNode). When the circuit is
+	// closed and the client is nil we silently degrade to vector-only mode.
+	if l.graphClient != nil {
 		// Convert node labels to strings
 		labels := make([]string, len(node.Labels))
 		for i, label := range node.Labels {
@@ -293,9 +404,8 @@ func (l *LocalGraphRAGProvider) StoreNode(ctx context.Context, node graphrag.Gra
 		// No tenant_id property: tenant isolation is provided by the per-tenant
 		// Neo4j database (database-per-tenant-data-plane, Requirement 2.6).
 
-		// Create or update node in Neo4j
-		_, err := l.graphClient.CreateNode(ctx, labels, props)
-		if err != nil {
+		// Create or update node in Neo4j via circuit breaker
+		if _, err := l.executeGraphCreateNode(ctx, labels, props); err != nil {
 			return graphrag.NewQueryError("failed to create node in graph", err)
 		}
 	}
@@ -327,7 +437,7 @@ func (l *LocalGraphRAGProvider) StoreNode(ctx context.Context, node graphrag.Gra
 		if err := vs.Store(ctx, record); err != nil {
 			// Vector storage failure is not critical if graph succeeded
 			// In production, you'd log this error
-			if !l.graphHealthy {
+			if !l.graphHealthy.Load() {
 				// If both graph and vector failed, return error
 				return graphrag.WrapGraphRAGError(graphrag.ErrCodeIndexFailed, "failed to store in vector store", err)
 			}
@@ -348,7 +458,7 @@ func (l *LocalGraphRAGProvider) StoreRelationship(ctx context.Context, rel graph
 		return graphrag.NewGraphRAGError(graphrag.ErrCodeConnectionFailed, "provider not initialized")
 	}
 
-	if !l.graphHealthy || l.graphClient == nil {
+	if !l.graphHealthy.Load() || l.graphClient == nil {
 		return graphrag.NewProviderUnavailableError("neo4j", fmt.Errorf("graph database unavailable"))
 	}
 
@@ -367,15 +477,14 @@ func (l *LocalGraphRAGProvider) StoreRelationship(ctx context.Context, rel graph
 	// Use RFC3339 format (24-hour time with timezone) for consistency and readability
 	props["created_at"] = rel.CreatedAt.UTC().Format(time.RFC3339)
 
-	// Create relationship in Neo4j
-	err := l.graphClient.CreateRelationship(
+	// Create relationship in Neo4j via circuit breaker
+	if err := l.executeGraphCreateRelationship(
 		ctx,
 		rel.FromID.String(),
 		rel.ToID.String(),
 		rel.Type.String(),
 		props,
-	)
-	if err != nil {
+	); err != nil {
 		return graphrag.NewRelationshipError("failed to create relationship", err)
 	}
 
@@ -393,7 +502,7 @@ func (l *LocalGraphRAGProvider) QueryNodes(ctx context.Context, query graphrag.N
 	}
 
 	// Use Neo4j if healthy
-	if l.graphHealthy && l.graphClient != nil {
+	if l.graphHealthy.Load() && l.graphClient != nil {
 		return l.queryNodesFromGraph(ctx, query)
 	}
 
@@ -422,8 +531,8 @@ func (l *LocalGraphRAGProvider) queryNodesFromGraph(ctx context.Context, query g
 		"params", params,
 		"nodeTypes", query.NodeTypes)
 
-	// Execute query
-	result, err := l.graphClient.Query(ctx, cypher, params)
+	// Execute query via circuit breaker
+	result, err := l.executeGraphQuery(ctx, cypher, params)
 	if err != nil {
 		return nil, graphrag.NewQueryError("failed to query nodes from graph", err)
 	}
@@ -538,7 +647,7 @@ func (l *LocalGraphRAGProvider) buildLabelFilter(nodeTypes []graphrag.NodeType) 
 // (not an error) so callers can degrade gracefully.
 func (l *LocalGraphRAGProvider) queryNodesFromVectorStore(ctx context.Context, query graphrag.NodeQuery) ([]graphrag.GraphNode, error) {
 	// Primary: Neo4j path.
-	if l.graphHealthy && l.graphClient != nil {
+	if l.graphHealthy.Load() && l.graphClient != nil {
 		return l.queryNodesWithCypherFilter(ctx, query)
 	}
 
@@ -590,7 +699,7 @@ func (l *LocalGraphRAGProvider) queryNodesWithCypherFilter(ctx context.Context, 
 		cypher += fmt.Sprintf(" LIMIT %d", query.Limit)
 	}
 
-	result, err := l.graphClient.Query(ctx, cypher, params)
+	result, err := l.executeGraphQuery(ctx, cypher, params)
 	if err != nil {
 		return nil, graphrag.NewQueryError("failed to execute metadata filter Cypher query", err)
 	}
@@ -675,7 +784,7 @@ func (l *LocalGraphRAGProvider) QueryRelationships(ctx context.Context, query gr
 		return nil, graphrag.NewGraphRAGError(graphrag.ErrCodeConnectionFailed, "provider not initialized")
 	}
 
-	if !l.graphHealthy || l.graphClient == nil {
+	if !l.graphHealthy.Load() || l.graphClient == nil {
 		return nil, graphrag.NewProviderUnavailableError("neo4j", fmt.Errorf("graph database unavailable"))
 	}
 
@@ -735,8 +844,8 @@ func (l *LocalGraphRAGProvider) QueryRelationships(ctx context.Context, query gr
 		cypher += fmt.Sprintf(" LIMIT %d", query.Limit)
 	}
 
-	// Execute query
-	result, err := l.graphClient.Query(ctx, cypher, params)
+	// Execute query via circuit breaker
+	result, err := l.executeGraphQuery(ctx, cypher, params)
 	if err != nil {
 		return nil, graphrag.NewQueryError("failed to query relationships", err)
 	}
@@ -762,7 +871,7 @@ func (l *LocalGraphRAGProvider) TraverseGraph(ctx context.Context, startID strin
 		return nil, graphrag.NewGraphRAGError(graphrag.ErrCodeConnectionFailed, "provider not initialized")
 	}
 
-	if !l.graphHealthy || l.graphClient == nil {
+	if !l.graphHealthy.Load() || l.graphClient == nil {
 		return nil, graphrag.NewProviderUnavailableError("neo4j", fmt.Errorf("graph database unavailable"))
 	}
 
@@ -817,8 +926,8 @@ func (l *LocalGraphRAGProvider) TraverseGraph(ctx context.Context, startID strin
 	// Return unique nodes
 	cypher += " RETURN DISTINCT end"
 
-	// Execute traversal query
-	result, err := l.graphClient.Query(ctx, cypher, params)
+	// Execute traversal query via circuit breaker
+	result, err := l.executeGraphQuery(ctx, cypher, params)
 	if err != nil {
 		return nil, graphrag.NewQueryError("graph traversal failed", err)
 	}
@@ -956,7 +1065,7 @@ func (l *LocalGraphRAGProvider) Close() error {
 	}
 
 	l.initialized = false
-	l.graphHealthy = false
+	l.graphHealthy.Store(false)
 
 	if len(errs) > 0 {
 		return graphrag.NewGraphRAGError(graphrag.ErrCodeConnectionFailed, fmt.Sprintf("close errors: %v", errs))

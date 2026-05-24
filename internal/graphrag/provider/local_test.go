@@ -233,7 +233,7 @@ func TestLocalProvider_StoreNode(t *testing.T) {
 
 		// Mark as initialized to bypass init check
 		provider.initialized = true
-		provider.graphHealthy = false // Skip graph operations
+		provider.graphHealthy.Store(false) // Skip graph operations
 
 		// Create invalid node (no labels)
 		node := &graphrag.GraphNode{
@@ -270,7 +270,7 @@ func TestLocalProvider_StoreRelationship(t *testing.T) {
 
 		// Mark as initialized but graph unhealthy
 		provider.initialized = true
-		provider.graphHealthy = false
+		provider.graphHealthy.Store(false)
 
 		rel := graphrag.NewRelationship(types.NewID(), types.NewID(), graphrag.RelationType("exploits"))
 		ctx := context.Background()
@@ -389,7 +389,7 @@ func TestLocalProvider_Close(t *testing.T) {
 		err = provider.Close()
 		assert.NoError(t, err)
 		assert.False(t, provider.initialized)
-		assert.False(t, provider.graphHealthy)
+		assert.False(t, provider.graphHealthy.Load())
 	})
 }
 
@@ -417,7 +417,7 @@ func TestLocalProvider_QueryNodes(t *testing.T) {
 
 		// Mark as initialized but graph unhealthy
 		provider.initialized = true
-		provider.graphHealthy = false
+		provider.graphHealthy.Store(false)
 
 		query := graphrag.NewNodeQuery()
 		ctx := context.Background()
@@ -453,7 +453,7 @@ func TestLocalProvider_TraverseGraph(t *testing.T) {
 
 		// Mark as initialized but graph unhealthy
 		provider.initialized = true
-		provider.graphHealthy = false
+		provider.graphHealthy.Store(false)
 
 		ctx := context.Background()
 		filters := graphrag.TraversalFilters{}
@@ -476,7 +476,7 @@ func newConnectedMockProvider(t *testing.T) (*LocalGraphRAGProvider, *graph.Mock
 	mc := graph.NewMockGraphClient()
 	mc.Connect(context.Background()) //nolint:errcheck // mock never fails
 	p.graphClient = mc
-	p.graphHealthy = true
+	p.graphHealthy.Store(true)
 	p.initialized = true
 	return p, mc
 }
@@ -594,7 +594,7 @@ func TestQueryNodesFromVectorStore_NoBackend_ReturnsEmpty(t *testing.T) {
 
 	// Neo4j unhealthy, no vector store.
 	p.initialized = true
-	p.graphHealthy = false
+	p.graphHealthy.Store(false)
 	p.graphClient = nil
 	p.vectorStore = nil
 
@@ -625,7 +625,7 @@ func TestQueryNodesFromVectorStore_VectorStoreFallback(t *testing.T) {
 
 	// Neo4j unhealthy, vector store available.
 	p.initialized = true
-	p.graphHealthy = false
+	p.graphHealthy.Store(false)
 	p.graphClient = nil
 	p.vectorStore = mockStore
 
@@ -698,7 +698,7 @@ func TestNewLocalGraphRAGProviderWithSession(t *testing.T) {
 
 	// Must be ready to accept operations without Initialize being called.
 	assert.True(t, prov.initialized, "NewLocalGraphRAGProviderWithSession must set initialized=true")
-	assert.True(t, prov.graphHealthy, "NewLocalGraphRAGProviderWithSession must set graphHealthy=true")
+	assert.True(t, prov.graphHealthy.Load(), "NewLocalGraphRAGProviderWithSession must set graphHealthy=true")
 	assert.Equal(t, "neo4j", prov.config.Provider)
 
 	// Initialize must be a no-op (idempotent guard).
