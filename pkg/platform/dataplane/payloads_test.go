@@ -66,11 +66,12 @@ func TestRedisCredentials_RoundTrip(t *testing.T) {
 
 func TestVectorCredentials_RoundTrip(t *testing.T) {
 	want := dataplane.VectorCredentials{
-		URL:        "http://qdrant.gibson.svc.cluster.local:6333",
-		Collection: "tenant_acme",
-		APIKey:     "",
+		IndexName: "vector_idx:tenant_acme",
 	}
 	b, _ := json.Marshal(want)
+	if !contains(string(b), `"index_name"`) {
+		t.Errorf("marshal output missing index_name field: %s", string(b))
+	}
 	var got dataplane.VectorCredentials
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -108,7 +109,7 @@ func TestJSONFieldNames(t *testing.T) {
 		{"PostgresCredentials", dataplane.PostgresCredentials{Host: "h"}, `"host":"h"`},
 		{"Neo4jCredentials", dataplane.Neo4jCredentials{BoltURI: "u"}, `"bolt_uri":"u"`},
 		{"RedisCredentials", dataplane.RedisCredentials{DBIndex: 7}, `"db_index":7`},
-		{"VectorCredentials", dataplane.VectorCredentials{Collection: "c"}, `"collection":"c"`},
+		{"VectorCredentials", dataplane.VectorCredentials{IndexName: "i"}, `"index_name":"i"`},
 		{"LangfuseCredentials", dataplane.LangfuseCredentials{ProjectID: "p"}, `"project_id":"p"`},
 	}
 	for _, c := range checks {

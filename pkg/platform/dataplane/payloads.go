@@ -48,10 +48,12 @@ type RedisCredentials struct {
 }
 
 // VectorCredentials is the payload at tenant/<id>/infra/vector.
+//
+// Connection details (addr, password) flow through infra/redis; only the
+// RediSearch index name belongs here so the daemon can SELECT the correct
+// per-tenant index without needing a separate Vault read.
 type VectorCredentials struct {
-	URL        string `json:"url"`
-	Collection string `json:"collection"`
-	APIKey     string `json:"api_key"`
+	IndexName string `json:"index_name"`
 }
 
 // LangfuseCredentials is the payload at tenant/<id>/infra/langfuse.
