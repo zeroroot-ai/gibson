@@ -34,8 +34,9 @@ import (
 	"github.com/zero-day-ai/gibson/internal/memory"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	adminpb "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
-	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	modelaccesspb "github.com/zero-day-ai/platform-sdk/gen/gibson/authz/v1"
 	discoverypb "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
@@ -352,7 +353,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// ext-authz headers are present on direct-dial connections).
 	spiffeMethodAllowlist := map[string]map[string]bool{
 		"spiffe://zero-day.ai/platform/tenant-operator": {
-			"/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota":       true,
+			"/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota":        true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples":        true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples":        true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled": true,
@@ -974,8 +975,17 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			adminpb.RegisterGrantsAdminServiceServer(srv, grantsServer)
 			d.logger.Info(ctx, "registered GrantsAdminService gRPC endpoint")
 		}
+
+		// Register ModelAccessService — dashboard /settings/model-access RPC surface.
+		// Manages per-user/team/tenant FGA grants on providers and models, and exposes
+		// the model_resolved audit stream. Same DaemonServer instance (implements the
+		// interface via server_model_access.go). Authorizer guard already satisfied
+		// by the enclosing if block.
+		// Spec: llm-user-attribution-governance (Requirement 4).
+		modelaccesspb.RegisterModelAccessServiceServer(srv, daemonSvc)
+		d.logger.Info(ctx, "registered ModelAccessService gRPC endpoint")
 	} else {
-		d.logger.Warn(ctx, "IdentityService and GrantsAdminService not registered: authorizer unavailable")
+		d.logger.Warn(ctx, "IdentityService, GrantsAdminService, and ModelAccessService not registered: authorizer unavailable")
 	}
 
 	// Register DiscoveryService — the read-only introspection surface
