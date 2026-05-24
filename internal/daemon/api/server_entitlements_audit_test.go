@@ -96,15 +96,13 @@ type fakeAuditEmitter struct {
 		Action, Resource, ResourceID string
 		Details                      map[string]any
 	}
-	err error
 }
 
-func (f *fakeAuditEmitter) Log(ctx context.Context, action, resource, resourceID string, details map[string]any) error {
+func (f *fakeAuditEmitter) Log(_ context.Context, action, resource, resourceID string, details map[string]any) {
 	f.calls = append(f.calls, struct {
 		Action, Resource, ResourceID string
 		Details                      map[string]any
 	}{action, resource, resourceID, details})
-	return f.err
 }
 
 func TestEmitAccessTupleChange_PopulatesAllFields(t *testing.T) {

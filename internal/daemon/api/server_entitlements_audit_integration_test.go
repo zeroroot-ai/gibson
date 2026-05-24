@@ -42,7 +42,9 @@ func TestAuditEmission_AccessTupleChange_EndToEnd(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelError,
 	}))
-	al := audit.NewAuditLogger(stateClient, logger)
+	drainCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	al := audit.NewAuditLogger(drainCtx, stateClient, logger)
 
 	// Identity: tenant admin via API key → classifyActorSource → "tenant_admin".
 	ident := auth.Identity{Subject: "gsk_test", Issuer: "apikey", Tenant: "acme"}

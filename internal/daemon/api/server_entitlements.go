@@ -220,9 +220,7 @@ func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *platformv1.EmitA
 		}
 	}
 
-	if err := s.auditLogger.Log(ctx, ev.GetType(), resource, resourceID, details); err != nil {
-		return nil, status.Errorf(codes.Internal, "audit log: %v", err)
-	}
+	s.auditLogger.Log(ctx, ev.GetType(), resource, resourceID, details)
 	return &platformv1.EmitAuditEventResponse{}, nil
 }
 

@@ -45,7 +45,7 @@ func (s *DaemonServer) ImpersonateTenant(ctx context.Context, req *platformv1.Im
 
 	// Emit audit event for every impersonation attempt regardless of outcome.
 	if s.auditLogger != nil {
-		_ = s.auditLogger.Log(ctx, "tenants:impersonate", "tenant", req.TenantId, map[string]any{
+		s.auditLogger.Log(ctx, "tenants:impersonate", "tenant", req.TenantId, map[string]any{
 			"admin_subject": callerID.Subject,
 		})
 	}

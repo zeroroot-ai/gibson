@@ -61,7 +61,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	if d.stateClient == nil {
 		return fmt.Errorf("broker stack: state client is nil; cannot construct audit writer")
 	}
-	auditLogger := audit.NewAuditLogger(d.stateClient, d.logger.Slog())
+	auditLogger := audit.NewAuditLogger(ctx, d.stateClient, d.logger.Slog())
 	auditWriter := secrets.NewAuditWriter(auditLogger, d.logger.Slog())
 	d.brokerAuditWriter = auditWriter
 	d.logger.Info(ctx, "broker stack: audit writer initialized")

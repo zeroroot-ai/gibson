@@ -54,7 +54,7 @@ type ComplianceFindingStore interface {
 // for audit logging. Matches the subset of
 // core/gibson/internal/audit.AuditLogger.
 type ComplianceAuditLogger interface {
-	Log(ctx context.Context, action, resource, resourceID string, details map[string]any) error
+	Log(ctx context.Context, action, resource, resourceID string, details map[string]any)
 }
 
 // ComplianceUpdate is the request payload for
@@ -140,8 +140,8 @@ func UpdateComplianceMappings(
 	}
 
 	if logger != nil {
-		// Fire-and-log: audit log failures do not block the update.
-		_ = logger.Log(ctx, "finding.compliance_mappings.update", "finding", req.FindingID, map[string]any{
+		// Fire-and-forget: Log() enqueues the write asynchronously.
+		logger.Log(ctx, "finding.compliance_mappings.update", "finding", req.FindingID, map[string]any{
 			"mode":      req.Mode.String(),
 			"before":    before,
 			"after":     f.ComplianceMappings,

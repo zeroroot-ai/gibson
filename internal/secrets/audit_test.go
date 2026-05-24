@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,7 +26,9 @@ func newTestAuditLogger(t *testing.T) *audit.AuditLogger {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sc.Close() })
 	sl := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return audit.NewAuditLogger(sc, sl)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return audit.NewAuditLogger(ctx, sc, sl)
 }
 
 func TestAuditWriter_SuccessfulWrite(t *testing.T) {
@@ -47,44 +48,6 @@ func TestAuditWriter_SuccessfulWrite(t *testing.T) {
 	}
 	// Must not panic or error.
 	w.Audit(context.Background(), event)
-}
-
-func TestAuditWriter_RetryOnFailure_SleepsExpectedTimes(t *testing.T) {
-	// Use a closed Redis client so every write fails, then count sleep calls.
-	mr := miniredis.RunT(t)
-	cfg := state.DefaultConfig()
-	cfg.URL = "redis://" + mr.Addr()
-	sc, err := state.NewStateClient(cfg)
-	require.NoError(t, err)
-	// Close immediately to force write failures.
-	require.NoError(t, sc.Close())
-
-	sl := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	logger := audit.NewAuditLogger(sc, sl)
-
-	var sleepCalls int32
-	fakeSleep := func(_ time.Duration) { atomic.AddInt32(&sleepCalls, 1) }
-
-	w := newAuditWriterWithClock(logger, sl, nil, fakeSleep)
-
-	event := AuditEvent{
-		ActorID:       "plugin_principal:foo",
-		ActorTenantID: "acme-corp",
-		Action:        ActionSecretRead,
-		Effect:        EffectAllow,
-		ResourceType:  "secret",
-		ResourceURI:   "secret:tenant-acme-corp:cred:openai",
-		Decision:      "allow",
-		Success:       true,
-		OccurredAt:    time.Now().UTC(),
-	}
-
-	// Must return even when all retries fail.
-	w.Audit(context.Background(), event)
-
-	// 3 backoffs between 4 attempts.
-	assert.EqualValues(t, 3, atomic.LoadInt32(&sleepCalls),
-		"expected 3 sleep calls (4 total attempts, 3 backoffs)")
 }
 
 func TestAuditWriter_PlaintextGuard_RejectsLongFieldWithValue(t *testing.T) {
@@ -129,18 +92,28 @@ func TestAuditWriter_PlaintextGuard_AllowsShortFieldWithValue(t *testing.T) {
 }
 
 func TestAuditWriter_CallerUnaffectedByAuditFailure(t *testing.T) {
-	// Verify the caller continues even when audit is broken.
+	// Verify the caller continues even when audit is broken. Since
+	// AuditLogger.LogWithResult is now fire-and-forget, Audit() must return
+	// promptly even when the underlying Redis is unreachable.
 	mr := miniredis.RunT(t)
 	cfg := state.DefaultConfig()
 	cfg.URL = "redis://" + mr.Addr()
+	cfg.MaxRetries = -1              // disable retries
+	cfg.DialTimeout = 50 * time.Millisecond
+	cfg.ReadTimeout = 50 * time.Millisecond
+	cfg.WriteTimeout = 50 * time.Millisecond
 	sc, err := state.NewStateClient(cfg)
 	require.NoError(t, err)
-	require.NoError(t, sc.Close())
+	t.Cleanup(func() { _ = sc.Close() })
+	// Stop Redis to simulate failure.
+	mr.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
 	sl := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	logger := audit.NewAuditLogger(sc, sl)
-	noSleep := func(_ time.Duration) {}
-	w := newAuditWriterWithClock(logger, sl, nil, noSleep)
+	logger := audit.NewAuditLogger(ctx, sc, sl)
+	w := NewAuditWriter(logger, sl)
 
 	event := AuditEvent{
 		ActorID: "p", ActorTenantID: "acme-corp",

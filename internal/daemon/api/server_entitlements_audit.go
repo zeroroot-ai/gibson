@@ -105,7 +105,7 @@ func formatTuple(user, relation, object string) string {
 // emitReconcileSummary. Satisfied by *audit.AuditLogger; tests inject an
 // in-memory recorder.
 type auditEmitter interface {
-	Log(ctx context.Context, action, resource, resourceID string, details map[string]any) error
+	Log(ctx context.Context, action, resource, resourceID string, details map[string]any)
 }
 
 // emitAccessTupleChange records one FGA-tuple-write (or delete) as an audit
@@ -134,7 +134,7 @@ func emitAccessTupleChange(
 		"actor_source":   actorSource,
 		"timestamp":      time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	_ = em.Log(ctx, "access_tuple_change", "component", tuple.Object, details)
+	em.Log(ctx, "access_tuple_change", "component", tuple.Object, details)
 }
 
 // ReconcileSummaryFields carries the trigger + deltas a tenant-operator
@@ -170,5 +170,5 @@ func emitReconcileSummary(
 		"actor_source":           actorSource,
 		"timestamp":              time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	_ = em.Log(ctx, "entitlements_reconcile", "tenant", tenantID, details)
+	em.Log(ctx, "entitlements_reconcile", "tenant", tenantID, details)
 }

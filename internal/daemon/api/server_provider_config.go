@@ -153,7 +153,7 @@ func (s *DaemonServer) emitProviderAudit(ctx context.Context, tenantID, action, 
 	if s.auditLogger == nil {
 		return
 	}
-	_ = s.auditLogger.Log(ctx, action, "provider", providerName, map[string]any{
+	s.auditLogger.Log(ctx, action, "provider", providerName, map[string]any{
 		"tenant_id": tenantID,
 	})
 }
