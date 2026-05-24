@@ -16,12 +16,14 @@ import (
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/secrets/configstore"
+	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
 	pgprovider "github.com/zero-day-ai/gibson/internal/secrets/providers/postgres"
 	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 	sdkawssm "github.com/zero-day-ai/platform-clients/secrets/awssm"
 	sdkazurekv "github.com/zero-day-ai/platform-clients/secrets/azurekv"
 	sdkgcpsm "github.com/zero-day-ai/platform-clients/secrets/gcpsm"
 	sdkvault "github.com/zero-day-ai/platform-clients/secrets/vault"
+	"github.com/zero-day-ai/platform-clients/resilience"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -67,8 +69,31 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	d.logger.Info(ctx, "broker stack: audit writer initialized")
 
 	// --- 2. Circuit breaker ---
-	cb := secrets.NewCircuitBreaker(d.logger.Slog(), nil /* real clock */)
+	cb := secrets.NewGobreakerExecutor(resilience.DefaultCircuitConfig())
 	d.logger.Info(ctx, "broker stack: circuit breaker initialized")
+
+	// --- 2b. JWT source cache (gibson#321) ---
+	//
+	// Wrap d.vaultJWTSource in a JWTCache so the background goroutine keeps
+	// the SPIRE JWT-SVID warm, and per-tenant Vault auth round-trips read
+	// directly from the cache without blocking on the SPIRE Workload API.
+	//
+	// Skip caching when the source is DisabledJWTSource (no real SPIRE
+	// socket configured): Start() would succeed trivially but the source
+	// always errors anyway, so no value is gained.
+	if _, isDisabled := d.vaultJWTSource.(jwtsource.DisabledJWTSource); !isDisabled {
+		cache := jwtsource.NewJWTCache(d.vaultJWTSource, d.vaultJWTAudience, d.logger.Slog())
+		if err := cache.Start(ctx); err != nil {
+			return fmt.Errorf("broker stack: JWT source cache: %w", err)
+		}
+		d.vaultJWTCache = cache
+		d.vaultJWTSource = cache
+		d.logger.Info(ctx, "broker stack: JWT source cache started",
+			"audience", d.vaultJWTAudience,
+		)
+	} else {
+		d.logger.Info(ctx, "broker stack: JWT source is disabled; skipping cache (no SPIRE source configured)")
+	}
 
 	// --- 3. Postgres provider (default fallback) ---
 	// The Postgres provider receives a ConnAcquirer that calls Pool.For.

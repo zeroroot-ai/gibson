@@ -58,9 +58,7 @@ func (r *apiTestRegistry) For(_ context.Context, _ auth.TenantID) (sdksecrets.Br
 
 type apiTestCircuit struct{}
 
-func (c *apiTestCircuit) Allow(_, _ string) error   { return nil }
-func (c *apiTestCircuit) RecordSuccess(_, _ string) {}
-func (c *apiTestCircuit) RecordFailure(_, _ string) {}
+func (c *apiTestCircuit) Execute(_, _ string, fn func() error) error { return fn() }
 
 type apiTestAuditor struct{}
 
