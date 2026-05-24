@@ -25,8 +25,8 @@ const (
 	// Payload (JSON): {addr, db_index, password}.
 	VaultPathInfraRedis = "infra/redis"
 
-	// VaultPathInfraVector is the per-tenant Qdrant collection path.
-	// Payload (JSON): {url, collection, api_key}.
+	// VaultPathInfraVector is the per-tenant RediSearch index path.
+	// Payload (JSON): {index_name}.
 	VaultPathInfraVector = "infra/vector"
 
 	// VaultPathInfraLangfuse is the per-tenant Langfuse project credentials
