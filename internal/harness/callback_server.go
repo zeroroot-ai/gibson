@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -29,10 +30,12 @@ import (
 // It provides a simple way to start and stop the callback server that
 // standalone agents connect to for harness operations.
 type CallbackServer struct {
-	server  *grpc.Server
-	service *HarnessCallbackService
-	logger  *slog.Logger
-	port    int
+	mu       sync.Mutex  // guards server field
+	stopOnce sync.Once   // ensures GracefulStop executes exactly once
+	server   *grpc.Server
+	service  *HarnessCallbackService
+	logger   *slog.Logger
+	port     int
 
 	// spiffeSource and peerSVIDs are populated via SetSPIFFE before Start().
 	// When both are set the listener is wrapped in
@@ -213,30 +216,36 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 			"peer_svid_count", len(s.peerSVIDs))
 	}
 
-	s.server = grpc.NewServer(serverOpts...)
+	grpcSrv := grpc.NewServer(serverOpts...)
 
 	// Register HarnessCallbackService
-	harnesspb.RegisterHarnessCallbackServiceServer(s.server, s.service)
+	harnesspb.RegisterHarnessCallbackServiceServer(grpcSrv, s.service)
 
 	// Register health service
 	healthServer := health.NewServer()
-	grpc_health_v1.RegisterHealthServer(s.server, healthServer)
+	grpc_health_v1.RegisterHealthServer(grpcSrv, healthServer)
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
 	// gRPC reflection is OFF by default in production. Set
 	// GIBSON_GRPC_REFLECTION=1 to enable (dev/debug only). Spec:
 	// critical-tls-no-fallbacks Component 3 / Requirement 4.
 	if os.Getenv("GIBSON_GRPC_REFLECTION") == "1" {
-		reflection.Register(s.server)
+		reflection.Register(grpcSrv)
 		s.logger.Info("gRPC reflection enabled (GIBSON_GRPC_REFLECTION=1)")
 	}
 
 	s.logger.Info("callback server starting", "port", s.port)
 
+	// Store under mu before starting the serve goroutine so that a
+	// concurrent Stop() call always sees a non-nil server pointer.
+	s.mu.Lock()
+	s.server = grpcSrv
+	s.mu.Unlock()
+
 	// Start serving in a goroutine
 	errCh := make(chan error, 1)
 	go func() {
-		if err := s.server.Serve(listener); err != nil {
+		if err := grpcSrv.Serve(listener); err != nil {
 			errCh <- err
 		}
 	}()
@@ -245,19 +254,32 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		s.logger.Info("callback server shutting down")
-		s.server.GracefulStop()
+		s.gracefulStop()
 		return ctx.Err()
 	case err := <-errCh:
 		return fmt.Errorf("server error: %w", err)
 	}
 }
 
+// gracefulStop calls GracefulStop on the underlying gRPC server exactly once,
+// regardless of how many goroutines (Start's ctx-cancel branch and Stop) call
+// it concurrently.  mu guards the s.server read; stopOnce ensures a single
+// GracefulStop execution.
+func (s *CallbackServer) gracefulStop() {
+	s.stopOnce.Do(func() {
+		s.mu.Lock()
+		srv := s.server
+		s.mu.Unlock()
+		if srv != nil {
+			s.logger.Info("stopping callback server")
+			srv.GracefulStop()
+		}
+	})
+}
+
 // Stop gracefully stops the gRPC server.
 func (s *CallbackServer) Stop() {
-	if s.server != nil {
-		s.logger.Info("stopping callback server")
-		s.server.GracefulStop()
-	}
+	s.gracefulStop()
 }
 
 // UnregisterHarness removes a harness registration when a task completes.
