@@ -24,7 +24,7 @@ import (
 	"context"
 	"fmt"
 
-	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 )
 
 const (
@@ -64,7 +64,7 @@ const (
 // Security: the mock token is a fixed test-only string — never log it.
 //
 // Requirements: R3.1, R3.2.
-func RegisterMockProvider(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+func RegisterMockProvider(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
 	resp, err := adminClient.CreateProvider(ctx, &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
 			Name:         MockProviderName,
@@ -98,7 +98,7 @@ func RegisterMockProvider(ctx context.Context, adminClient tenantv1.TenantAdminS
 // Updates the provider via UpdateProvider RPC with the "inject_error" credential.
 //
 // Requirements: R4.3.
-func InjectErrorMode(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+func InjectErrorMode(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
 	_, err := adminClient.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{
 		Name: MockProviderName,
 		Input: &tenantv1.ProviderConfigInput{
@@ -122,7 +122,7 @@ func InjectErrorMode(ctx context.Context, adminClient tenantv1.TenantAdminServic
 // LLM call. Used by the R4.4 deadline-exceeded negative test.
 //
 // Requirements: R4.4.
-func InjectSlowMode(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+func InjectSlowMode(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
 	_, err := adminClient.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{
 		Name: MockProviderName,
 		Input: &tenantv1.ProviderConfigInput{
@@ -146,7 +146,7 @@ func InjectSlowMode(ctx context.Context, adminClient tenantv1.TenantAdminService
 // Removes any error or slow-mode injection. Idempotent.
 //
 // Requirements: R3.2 (deterministic responses).
-func ResetMockProvider(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+func ResetMockProvider(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
 	_, err := adminClient.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{
 		Name: MockProviderName,
 		Input: &tenantv1.ProviderConfigInput{
@@ -174,7 +174,7 @@ func ResetMockProvider(ctx context.Context, adminClient tenantv1.TenantAdminServ
 // returned (tolerates NotFound).
 //
 // Requirements: R3.1.
-func UnregisterMockProvider(ctx context.Context, adminClient tenantv1.TenantAdminServiceClient) error {
+func UnregisterMockProvider(ctx context.Context, adminClient tenantv1.TenantServiceClient) error {
 	_, err := adminClient.DeleteProvider(ctx, &tenantv1.DeleteProviderRequest{
 		Name: MockProviderName,
 	})

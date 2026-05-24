@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/zero-day-ai/gibson/internal/idp"
-	tenantpb "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+	tenantpb "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

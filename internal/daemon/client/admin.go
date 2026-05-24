@@ -1,7 +1,7 @@
 // Package client provides the internal admin client for the Gibson daemon.
 //
 // This package contains only what is needed for daemon lifecycle commands
-// (daemon stop, daemon restart) — specifically the PlatformOperatorService
+// (daemon stop, daemon restart) — specifically the DaemonOperatorService
 // Shutdown RPC. Operational RPCs (Status, ListMissions, etc.)
 // are available via github.com/zero-day-ai/sdk/daemonclient.
 package client
@@ -14,17 +14,17 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 )
 
-// AdminClient is a minimal gRPC client for the PlatformOperatorService.
+// AdminClient is a minimal gRPC client for the DaemonOperatorService.
 //
 // It provides only the operations needed by daemon lifecycle CLI commands:
 // Shutdown (used by daemon stop/restart) and Ping (liveness check).
 // For operational RPCs use github.com/zero-day-ai/sdk/daemonclient.
 type AdminClient struct {
 	conn     *grpc.ClientConn
-	platform platformv1.PlatformOperatorServiceClient
+	operator daemonoperatorv1.DaemonOperatorServiceClient
 }
 
 // ConnectAdmin establishes a gRPC connection to the daemon at the given address.
@@ -62,15 +62,15 @@ func ConnectAdmin(ctx context.Context, address string) (*AdminClient, error) {
 
 	return &AdminClient{
 		conn:     conn,
-		platform: platformv1.NewPlatformOperatorServiceClient(conn),
+		operator: daemonoperatorv1.NewDaemonOperatorServiceClient(conn),
 	}, nil
 }
 
-// Shutdown requests a graceful shutdown of the daemon via the PlatformOperatorService RPC.
+// Shutdown requests a graceful shutdown of the daemon via the DaemonOperatorService RPC.
 //
 // This is the primary method used by 'gibson daemon stop'.
 func (c *AdminClient) Shutdown(ctx context.Context) error {
-	_, err := c.platform.Shutdown(ctx, &platformv1.ShutdownRequest{})
+	_, err := c.operator.Shutdown(ctx, &daemonoperatorv1.ShutdownRequest{})
 	if err != nil {
 		return fmt.Errorf("shutdown RPC failed: %w", err)
 	}

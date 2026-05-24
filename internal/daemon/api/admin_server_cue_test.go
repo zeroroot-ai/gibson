@@ -1,24 +1,25 @@
 package api
 
-// admin_server_cue_test.go — unit tests for the CUE editor RPCs wired in
-// gibson#299: ValidateMissionCUE, CompleteMissionCUE, HoverMissionCUE, and
-// the cue_source path of CreateMissionDefinition.
+// admin_server_cue_test.go — unit tests for the CUE language-service RPCs
+// wired onto DaemonService (ADR-0037): ValidateMissionCUE, CompleteMissionCUE,
+// HoverMissionCUE, and the cue_source path of CreateMissionDefinition.
+//
+// These methods previously lived on DaemonAdminService (platform-sdk) and are
+// now implemented directly on DaemonServer as part of the OSS DaemonService.
 
 import (
 	"context"
 	"log/slog"
 	"testing"
 
-	daemonadminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/admin/v1"
+	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
-// newTestAdminServer builds a minimal DaemonAdminServer wrapping a
-// DaemonServer that has no daemon wired — sufficient for the CUE editor
-// RPCs which do not touch the inner daemon.
-func newTestAdminServer(t *testing.T) *DaemonAdminServer {
+// newTestDaemonServerForCUE builds a minimal DaemonServer sufficient for the
+// CUE editor RPCs, which do not touch the inner daemon.
+func newTestDaemonServerForCUE(t *testing.T) *DaemonServer {
 	t.Helper()
-	inner := &DaemonServer{logger: slog.Default()}
-	return NewDaemonAdminServer(inner, slog.Default())
+	return &DaemonServer{logger: slog.Default()}
 }
 
 // ---------------------------------------------------------------------------
@@ -30,8 +31,8 @@ func newTestAdminServer(t *testing.T) *DaemonAdminServer {
 // be empty.
 func TestValidateMissionCUE_EmptySource(t *testing.T) {
 	t.Parallel()
-	srv := newTestAdminServer(t)
-	resp, err := srv.ValidateMissionCUE(context.Background(), &daemonadminv1.ValidateMissionCUERequest{
+	srv := newTestDaemonServerForCUE(t)
+	resp, err := srv.ValidateMissionCUE(context.Background(), &daemonpb.ValidateMissionCUERequest{
 		CueSource: "",
 	})
 	if err != nil {
@@ -48,7 +49,7 @@ func TestValidateMissionCUE_EmptySource(t *testing.T) {
 // mission produces zero error-severity diagnostics.
 func TestValidateMissionCUE_ValidSource(t *testing.T) {
 	t.Parallel()
-	srv := newTestAdminServer(t)
+	srv := newTestDaemonServerForCUE(t)
 	// Minimal valid CUE using the schema import and #MissionDefinition constraint,
 	// matching the ADK template convention (top-level "mission" field, anonymous
 	// package i.e. no package clause).
@@ -64,7 +65,7 @@ mission: missionv1.#MissionDefinition & {
 	exitPoints: []
 }
 `
-	resp, err := srv.ValidateMissionCUE(context.Background(), &daemonadminv1.ValidateMissionCUERequest{
+	resp, err := srv.ValidateMissionCUE(context.Background(), &daemonpb.ValidateMissionCUERequest{
 		CueSource: validCUE,
 	})
 	if err != nil {
@@ -74,7 +75,7 @@ mission: missionv1.#MissionDefinition & {
 		t.Fatal("expected non-nil response")
 	}
 	// Filter to only error-severity diagnostics — warnings are permitted.
-	var errDiags []*daemonadminv1.CUEDiagnostic
+	var errDiags []*daemonpb.CUEDiagnostic
 	for _, d := range resp.Diagnostics {
 		if d.Severity == "error" {
 			errDiags = append(errDiags, d)
@@ -89,8 +90,8 @@ mission: missionv1.#MissionDefinition & {
 // Line, Col, Message, and Severity when the source has a syntax error.
 func TestValidateMissionCUE_DiagnosticFields(t *testing.T) {
 	t.Parallel()
-	srv := newTestAdminServer(t)
-	resp, err := srv.ValidateMissionCUE(context.Background(), &daemonadminv1.ValidateMissionCUERequest{
+	srv := newTestDaemonServerForCUE(t)
+	resp, err := srv.ValidateMissionCUE(context.Background(), &daemonpb.ValidateMissionCUERequest{
 		CueSource: "this is not valid CUE {{{{",
 	})
 	if err != nil {
@@ -122,8 +123,8 @@ func TestValidateMissionCUE_DiagnosticFields(t *testing.T) {
 // returned for a valid (or empty) cursor position.
 func TestCompleteMissionCUE_ReturnsItems(t *testing.T) {
 	t.Parallel()
-	srv := newTestAdminServer(t)
-	resp, err := srv.CompleteMissionCUE(context.Background(), &daemonadminv1.CompleteMissionCUERequest{
+	srv := newTestDaemonServerForCUE(t)
+	resp, err := srv.CompleteMissionCUE(context.Background(), &daemonpb.CompleteMissionCUERequest{
 		CueSource: "mission: {\n",
 		Line:      1,
 		Col:       1,
@@ -149,8 +150,8 @@ func TestCompleteMissionCUE_ReturnsItems(t *testing.T) {
 // Documentation, and Kind.
 func TestCompleteMissionCUE_ItemFields(t *testing.T) {
 	t.Parallel()
-	srv := newTestAdminServer(t)
-	resp, err := srv.CompleteMissionCUE(context.Background(), &daemonadminv1.CompleteMissionCUERequest{
+	srv := newTestDaemonServerForCUE(t)
+	resp, err := srv.CompleteMissionCUE(context.Background(), &daemonpb.CompleteMissionCUERequest{
 		CueSource: "",
 		Line:      1,
 		Col:       1,
@@ -172,11 +173,11 @@ func TestCompleteMissionCUE_ItemFields(t *testing.T) {
 // returns non-empty Markdown.
 func TestHoverMissionCUE_KnownField(t *testing.T) {
 	t.Parallel()
-	srv := newTestAdminServer(t)
+	srv := newTestDaemonServerForCUE(t)
 	// Source line: "name: "test""  — cursor on column 2 (inside "name")
 	source := `name: "test-mission"
 `
-	resp, err := srv.HoverMissionCUE(context.Background(), &daemonadminv1.HoverMissionCUERequest{
+	resp, err := srv.HoverMissionCUE(context.Background(), &daemonpb.HoverMissionCUERequest{
 		CueSource: source,
 		Line:      1,
 		Col:       2,
@@ -196,8 +197,8 @@ func TestHoverMissionCUE_KnownField(t *testing.T) {
 // symbol returns an empty Markdown string (not an error).
 func TestHoverMissionCUE_UnknownField(t *testing.T) {
 	t.Parallel()
-	srv := newTestAdminServer(t)
-	resp, err := srv.HoverMissionCUE(context.Background(), &daemonadminv1.HoverMissionCUERequest{
+	srv := newTestDaemonServerForCUE(t)
+	resp, err := srv.HoverMissionCUE(context.Background(), &daemonpb.HoverMissionCUERequest{
 		CueSource: "unknownField: 42\n",
 		Line:      1,
 		Col:       5,
@@ -214,49 +215,3 @@ func TestHoverMissionCUE_UnknownField(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// CreateMissionDefinition — cue_source path
-
-// TestCreateMissionDefinition_CueSourceEmpty verifies that an empty
-// cue_source returns InvalidArgument.
-func TestCreateMissionDefinition_CueSourceEmpty(t *testing.T) {
-	t.Parallel()
-	srv := newTestAdminServer(t)
-	_, err := srv.CreateMissionDefinition(context.Background(), &daemonadminv1.CreateMissionDefinitionRequest{
-		Source: &daemonadminv1.CreateMissionDefinitionRequest_CueSource{
-			CueSource: "",
-		},
-	})
-	if err == nil {
-		t.Fatal("expected error for empty cue_source, got nil")
-	}
-	assertGRPCStatusCode(t, err, "InvalidArgument")
-}
-
-// TestCreateMissionDefinition_CueSourceInvalidCUE verifies that invalid CUE
-// that cannot be exported returns InvalidArgument (not Internal).
-func TestCreateMissionDefinition_CueSourceInvalidCUE(t *testing.T) {
-	t.Parallel()
-	srv := newTestAdminServer(t)
-	_, err := srv.CreateMissionDefinition(context.Background(), &daemonadminv1.CreateMissionDefinitionRequest{
-		Source: &daemonadminv1.CreateMissionDefinitionRequest_CueSource{
-			CueSource: "this { is: not valid CUE {{{{",
-		},
-	})
-	if err == nil {
-		t.Fatal("expected error for invalid CUE, got nil")
-	}
-	assertGRPCStatusCode(t, err, "InvalidArgument")
-}
-
-// TestCreateMissionDefinition_NoSource verifies that a nil source oneof
-// returns InvalidArgument.
-func TestCreateMissionDefinition_NoSource(t *testing.T) {
-	t.Parallel()
-	srv := newTestAdminServer(t)
-	_, err := srv.CreateMissionDefinition(context.Background(), &daemonadminv1.CreateMissionDefinitionRequest{})
-	if err == nil {
-		t.Fatal("expected error for missing source, got nil")
-	}
-	assertGRPCStatusCode(t, err, "InvalidArgument")
-}

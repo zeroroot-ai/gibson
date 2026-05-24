@@ -5,8 +5,8 @@
 //
 // Builds the gRPC client connections needed by the mission e2e test suite:
 //   - DaemonServiceClient (public mission + component control plane)
-//   - TenantAdminServiceClient (admin RPCs: CreateProvider, etc.)
-//   - PlatformOperatorServiceClient (platform-operator RPCs: Shutdown, etc.)
+//   - TenantServiceClient (tenant RPCs: CreateProvider, etc.)
+//   - DaemonOperatorServiceClient (operator RPCs: Shutdown, etc.)
 //
 // Reads DAEMON_GRPC_ADDR env var for the daemon's gRPC endpoint.
 // Default: "localhost:50002" (Kind NodePort convention).
@@ -24,9 +24,9 @@ import (
 	"os"
 	"testing"
 
-	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
-	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	sdktenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -34,10 +34,10 @@ import (
 // GRPCClientSet holds all gRPC clients needed by the mission e2e test.
 // Use NewGRPCClients to construct it; call Close when done.
 type GRPCClientSet struct {
-	conn            *grpc.ClientConn
-	Daemon          daemonpb.DaemonServiceClient
-	TenantAdmin     tenantv1.TenantAdminServiceClient
-	PlatformOperator platformv1.PlatformOperatorServiceClient
+	conn           *grpc.ClientConn
+	Daemon         daemonpb.DaemonServiceClient
+	Tenant         sdktenantv1.TenantServiceClient
+	DaemonOperator daemonoperatorv1.DaemonOperatorServiceClient
 }
 
 // Close releases the underlying gRPC connection.
@@ -71,10 +71,10 @@ func NewGRPCClients() (*GRPCClientSet, error) {
 	}
 
 	return &GRPCClientSet{
-		conn:             conn,
-		Daemon:           daemonpb.NewDaemonServiceClient(conn),
-		TenantAdmin:      tenantv1.NewTenantAdminServiceClient(conn),
-		PlatformOperator: platformv1.NewPlatformOperatorServiceClient(conn),
+		conn:           conn,
+		Daemon:         daemonpb.NewDaemonServiceClient(conn),
+		Tenant:         sdktenantv1.NewTenantServiceClient(conn),
+		DaemonOperator: daemonoperatorv1.NewDaemonOperatorServiceClient(conn),
 	}, nil
 }
 

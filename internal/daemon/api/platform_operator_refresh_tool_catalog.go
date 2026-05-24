@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	platformv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/platform/v1"
+	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 )
 
 // RefreshToolCatalog triggers an immediate refresh of the sandboxed-tool
@@ -20,11 +20,11 @@ import (
 // Only works on the replica currently holding the refresh leader lease;
 // followers accept the call but defer to the leader's next scheduled tick.
 // Requires the "platform_operator" FGA relation on system_tenant:_system.
-func (s *DaemonServer) RefreshToolCatalog(ctx context.Context, req *platformv1.RefreshToolCatalogRequest) (*platformv1.RefreshToolCatalogResponse, error) {
+func (s *DaemonServer) RefreshToolCatalog(ctx context.Context, req *daemonoperatorv1.RefreshToolCatalogRequest) (*daemonoperatorv1.RefreshToolCatalogResponse, error) {
 	queued, msg, err := s.daemon.RefreshToolCatalog(ctx)
 	if err != nil {
 		s.logger.Error("tool catalog refresh signal failed", "error", err)
 		return nil, status_grpc.Errorf(codes.Internal, "refresh tool catalog: %v", err)
 	}
-	return &platformv1.RefreshToolCatalogResponse{Queued: queued, Message: msg}, nil
+	return &daemonoperatorv1.RefreshToolCatalogResponse{Queued: queued, Message: msg}, nil
 }

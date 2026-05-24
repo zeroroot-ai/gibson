@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zero-day-ai/gibson/internal/budget"
@@ -19,7 +18,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	"github.com/zero-day-ai/gibson/internal/types"
-	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 	"github.com/zero-day-ai/sdk/auth"
 )
 
@@ -116,31 +115,6 @@ func (l *stubExecLimiter) Check(_ context.Context, _, _ string) error {
 	}
 	return nil
 }
-
-// stubStreamServer implements TenantAdminService_StreamLLMServer for tests.
-// TenantAdminService_StreamLLMServer = grpc.ServerStreamingServer[tenantv1.StreamLLMResponse]
-// which embeds grpc.ServerStream.
-type stubStreamServer struct {
-	ctx     context.Context
-	sent    []*tenantv1.StreamLLMResponse
-	sendErr error
-}
-
-func (s *stubStreamServer) Context() context.Context { return s.ctx }
-func (s *stubStreamServer) Send(m *tenantv1.StreamLLMResponse) error {
-	if s.sendErr != nil {
-		return s.sendErr
-	}
-	s.sent = append(s.sent, m)
-	return nil
-}
-
-// grpc.ServerStream boilerplate — not exercised by unit tests.
-func (s *stubStreamServer) SendMsg(_ any) error            { return nil }
-func (s *stubStreamServer) RecvMsg(_ any) error            { return nil }
-func (s *stubStreamServer) SendHeader(_ metadata.MD) error { return nil }
-func (s *stubStreamServer) SetHeader(_ metadata.MD) error  { return nil }
-func (s *stubStreamServer) SetTrailer(_ metadata.MD)       {}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -441,124 +415,6 @@ func TestExecuteLLM_TemperatureMaxTokens(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// StreamLLM tests
-// ---------------------------------------------------------------------------
-
-// TestStreamLLM_TextDeltas exercises the streaming happy path: 3 text-delta
-// chunks followed by a finish chunk should all arrive on the stub stream in
-// the correct order.
-func TestStreamLLM_TextDeltas(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	prov := &stubMockProvider{
-		streamFunc: func(_ context.Context, _ llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-			ch := make(chan llm.StreamChunk, 4)
-			ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "foo"}}
-			ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "bar"}}
-			ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "baz"}}
-			ch <- llm.StreamChunk{FinishReason: llm.FinishReasonStop}
-			close(ch)
-			return ch, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	stream := &stubStreamServer{ctx: tenantCtx("tenant-stream")}
-	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "go"}},
-	}, stream)
-	require.NoError(t, err)
-
-	// 3 text_delta + 1 finish = 4 total.
-	require.Len(t, stream.sent, 4)
-
-	assert.Equal(t, "foo", stream.sent[0].GetTextDelta())
-	assert.Equal(t, "bar", stream.sent[1].GetTextDelta())
-	assert.Equal(t, "baz", stream.sent[2].GetTextDelta())
-	require.NotNil(t, stream.sent[3].GetFinish())
-	assert.Equal(t, string(llm.FinishReasonStop), stream.sent[3].GetFinish().FinishReason)
-}
-
-// TestStreamLLM_RateLimitEnforced verifies ResourceExhausted is returned when
-// the limiter blocks the streaming handler.
-func TestStreamLLM_RateLimitEnforced(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	prov := &stubMockProvider{}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-	s.WithExecLimiter(&stubExecLimiter{blockAt: 1}) // block immediately
-
-	stream := &stubStreamServer{ctx: tenantCtx("tenant-rl")}
-	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-	}, stream)
-	require.Error(t, err)
-	st, _ := status_grpc.FromError(err)
-	assert.Equal(t, codes.ResourceExhausted, st.Code())
-}
-
-// TestStreamLLM_CredentialNotLeaked asserts that the decrypted credential does
-// not appear in any serialised chunk sent over the stream.
-func TestStreamLLM_CredentialNotLeaked(t *testing.T) {
-	const secretKey = "sk-secret-stream-456"
-
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return &providerconfig.DecryptedConfig{
-				ProviderConfig: providerconfig.ProviderConfig{
-					Type:         "openai",
-					DefaultModel: "gpt-4o",
-				},
-				Credentials: map[string]string{"api_key": secretKey},
-			}, nil
-		},
-	}
-	prov := &stubMockProvider{} // uses default stream: "hello" + finish
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	stream := &stubStreamServer{ctx: tenantCtx("tenant-sec")}
-	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-	}, stream)
-	require.NoError(t, err)
-	require.NotEmpty(t, stream.sent)
-
-	for i, msg := range stream.sent {
-		raw, jsonErr := json.Marshal(msg)
-		require.NoError(t, jsonErr)
-		assert.NotContains(t, string(raw), secretKey,
-			"credential must not appear in chunk %d", i)
-	}
-}
-
-// TestStreamLLM_NoTenantContext verifies that a context with no explicit tenant
-// is rejected with Unauthenticated. Under the Envoy/identity interceptor model,
-// the tenant is derived from the SPIFFE-mTLS-authenticated identity headers
-// injected by ext-authz. A context with no identity (or _system tenant)
-// cannot proceed to the provider store.
-func TestStreamLLM_NoTenantContext(t *testing.T) {
-	s := &DaemonServer{
-		logger:          slog.Default(),
-		providerFactory: func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil },
-	}
-	stream := &stubStreamServer{ctx: context.Background()}
-	err := s.StreamLLM(&tenantv1.StreamLLMRequest{ProviderName: "x"}, stream)
-	require.Error(t, err)
-	st, _ := status_grpc.FromError(err)
-	// No tenant context → Unauthenticated (identity interceptor check).
-	assert.Equal(t, codes.Unauthenticated, st.Code())
-}
-
-// ---------------------------------------------------------------------------
 // decryptedConfigToLLMConfig unit tests
 // ---------------------------------------------------------------------------
 
@@ -844,87 +700,6 @@ func TestExecuteLLM_BudgetRecordedAfterDispatch(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// StreamLLM budget tests
-// ---------------------------------------------------------------------------
-
-// TestStreamLLM_BudgetExhaustedBlocked verifies that StreamLLM returns
-// ResourceExhausted BEFORE any tokens are delivered when the budget enforcer
-// denies the call. This is the primary regression test for gibson#135.
-func TestStreamLLM_BudgetExhaustedBlocked(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	providerCalled := false
-	prov := &stubMockProvider{
-		streamFunc: func(_ context.Context, _ llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-			providerCalled = true
-			ch := make(chan llm.StreamChunk, 1)
-			ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "should not arrive"}}
-			close(ch)
-			return ch, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	budgetErr := status_grpc.Errorf(codes.ResourceExhausted, "monthly token limit exceeded")
-	enforcer := &stubBudgetEnforcer{checkErr: budgetErr}
-	s.WithBudgetEnforcer(enforcer)
-
-	stream := &stubStreamServer{ctx: tenantCtx("tenant-budget-stream")}
-	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-	}, stream)
-
-	require.Error(t, err)
-	st, _ := status_grpc.FromError(err)
-	assert.Equal(t, codes.ResourceExhausted, st.Code(), "exhausted budget must yield ResourceExhausted")
-	assert.Empty(t, stream.sent, "no chunks must be delivered to the caller when budget is exhausted")
-	assert.False(t, providerCalled, "provider stream must not be opened when budget is exhausted")
-	assert.Equal(t, 0, enforcer.recordCalls, "Record must not be called when budget check fails")
-}
-
-// TestStreamLLM_BudgetRecordedAfterStream verifies that completed StreamLLM
-// calls record token usage via the budget enforcer on stream close.
-func TestStreamLLM_BudgetRecordedAfterStream(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	prov := &stubMockProvider{
-		streamFunc: func(_ context.Context, _ llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-			ch := make(chan llm.StreamChunk, 3)
-			// "hello" = 5 chars → 1 token each; "world" = 5 chars → 1 token each
-			ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "hello"}}
-			ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: "world"}}
-			ch <- llm.StreamChunk{FinishReason: llm.FinishReasonStop}
-			close(ch)
-			return ch, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	enforcer := &stubBudgetEnforcer{}
-	s.WithBudgetEnforcer(enforcer)
-
-	// "hi" = 2 chars in message → 0 input tokens (2/4 rounds to 0) + 4096 default max_tokens.
-	// output chars: "hello"(5) + "world"(5) = 10 chars → 2 output tokens (10/4 = 2).
-	// Total recorded ≥ 1 (just verify Record is called with a positive count).
-	stream := &stubStreamServer{ctx: tenantCtx("tenant-record-stream")}
-	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-	}, stream)
-
-	require.NoError(t, err)
-	assert.Equal(t, 1, enforcer.recordCalls, "Record must be called once after stream completes")
-	assert.Positive(t, enforcer.recordedTotal, "recorded token count must be positive")
-}
-
-// ---------------------------------------------------------------------------
 // Per-call token cap tests (M4 — gibson#133)
 // ---------------------------------------------------------------------------
 
@@ -1034,39 +809,3 @@ func TestExecuteLLM_PerCallCap_noCapNoChange(t *testing.T) {
 		"no cap in context: MaxTokens must pass through unchanged")
 }
 
-// TestStreamLLM_PerCallCap_clampsMaxTokens verifies the StreamLLM handler applies
-// the context per-call cap identically to ExecuteLLM.
-func TestStreamLLM_PerCallCap_clampsMaxTokens(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-
-	var capturedReq llm.CompletionRequest
-	prov := &stubMockProvider{
-		streamFunc: func(_ context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-			capturedReq = req
-			ch := make(chan llm.StreamChunk, 1)
-			ch <- llm.StreamChunk{FinishReason: llm.FinishReasonStop}
-			close(ch)
-			return ch, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-		return prov, nil
-	})
-
-	maxReq := int32(4096)
-	baseCtx := contextkeys.WithPerCallTokenCap(tenantCtx("tenant-stream-cap"), 100)
-	stream := &stubStreamServer{ctx: baseCtx}
-	err := s.StreamLLM(&tenantv1.StreamLLMRequest{
-		ProviderName: "my-openai",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
-		MaxTokens:    &maxReq,
-	}, stream)
-
-	require.NoError(t, err)
-	assert.Equal(t, 100, capturedReq.MaxTokens,
-		"per-call cap (100) must override caller's max_tokens (4096) in StreamLLM")
-}

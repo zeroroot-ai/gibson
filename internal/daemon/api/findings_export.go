@@ -18,7 +18,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/finding"
 	findingexport "github.com/zero-day-ai/gibson/internal/finding/export"
 	"github.com/zero-day-ai/gibson/internal/types"
-	tenantv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
 )
 
 // exportFindingsData queries the finding store and serialises results to the
