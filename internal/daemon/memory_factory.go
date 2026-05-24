@@ -4,10 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
-
-	"github.com/redis/go-redis/v9"
-	sdkmemory "github.com/zero-day-ai/sdk/memory"
 
 	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/memory"
@@ -289,133 +285,9 @@ func (f *MemoryManagerFactory) StateClient() *state.StateClient {
 	return f.stateClient
 }
 
-// createRedisWorkingMemory creates a Redis-backed working memory instance.
-//
-// This method extracts a concrete *redis.Client from the StateClient's UniversalClient
-// and wraps the SDK RedisWorkingMemory with an adapter to match Gibson's WorkingMemory interface.
-//
-// The working memory is scoped to the mission ID using a key prefix pattern:
-// gibson:working:{mission_id}:*
-func (f *MemoryManagerFactory) createRedisWorkingMemory(ctx context.Context, missionID types.ID) (memory.WorkingMemory, error) {
-	// Extract the underlying Redis client from StateClient's UniversalClient
-	// The StateClient uses redis.UniversalClient which can be:
-	// - *redis.Client (standalone)
-	// - *redis.ClusterClient (cluster mode)
-	// - *redis.Ring (ring/sharding mode)
-	//
-	// For SDK RedisWorkingMemory, we need *redis.Client.
-	// If StateClient is using cluster mode, we'll fall back to in-memory for now.
-	universalClient := f.stateClient.Client()
-
-	// Type assert to *redis.Client (standalone mode)
-	redisClient, ok := universalClient.(*redis.Client)
-	if !ok {
-		// Cluster or Ring mode - SDK RedisWorkingMemory doesn't support UniversalClient yet
-		// Fall back to in-memory working memory
-		return memory.NewWorkingMemory(f.config.Working.MaxTokens), nil
-	}
-
-	// Configure SDK RedisWorkingMemory with mission-scoped prefix
-	cfg := &sdkmemory.RedisConfig{
-		Address:      "", // Already connected via redisClient
-		KeyPrefix:    fmt.Sprintf("gibson:working:%s:", missionID),
-		DefaultTTL:   1 * time.Hour, // Working memory expires after 1 hour of inactivity
-		MaxValueSize: 1024 * 1024,   // 1MB per value
-	}
-	cfg.ApplyDefaults()
-
-	// Create SDK RedisWorkingMemory
-	sdkWorkingMem := sdkmemory.NewRedisWorkingMemory(redisClient, cfg)
-
-	// Wrap with adapter to match Gibson's WorkingMemory interface
-	return newWorkingMemoryAdapter(sdkWorkingMem), nil
-}
-
-// workingMemoryAdapter adapts SDK RedisWorkingMemory to Gibson's WorkingMemory interface.
-//
-// The SDK uses context-based methods (Get(ctx, key), Set(ctx, key, value))
-// while Gibson's internal interface uses simpler methods (Get(key), Set(key, value)).
-//
-// This adapter bridges the gap by using context.Background() for all operations.
-// In the future, Gibson's WorkingMemory interface could be updated to accept contexts.
-type workingMemoryAdapter struct {
-	sdk sdkmemory.WorkingMemory
-}
-
-// newWorkingMemoryAdapter creates a new adapter wrapping SDK RedisWorkingMemory.
-func newWorkingMemoryAdapter(sdk sdkmemory.WorkingMemory) memory.WorkingMemory {
-	return &workingMemoryAdapter{sdk: sdk}
-}
-
-// Get retrieves a value by key, returns nil and false if not found.
-func (a *workingMemoryAdapter) Get(key string) (any, bool) {
-	ctx := context.Background()
-	val, err := a.sdk.Get(ctx, key)
-	if err != nil {
-		// SDK returns error for not found, we return (nil, false)
-		return nil, false
-	}
-	return val, true
-}
-
-// Set stores a value with the given key.
-func (a *workingMemoryAdapter) Set(key string, value any) error {
-	ctx := context.Background()
-	return a.sdk.Set(ctx, key, value)
-}
-
-// Delete removes an entry and returns true if it existed.
-func (a *workingMemoryAdapter) Delete(key string) bool {
-	ctx := context.Background()
-	err := a.sdk.Delete(ctx, key)
-	// SDK returns error if key doesn't exist, we return false
-	return err == nil
-}
-
-// Clear removes all entries.
-func (a *workingMemoryAdapter) Clear() {
-	ctx := context.Background()
-	_ = a.sdk.Clear(ctx) // Ignore errors on clear
-}
-
-// List returns all keys currently stored in no particular order.
-func (a *workingMemoryAdapter) List() []string {
-	ctx := context.Background()
-	keys, err := a.sdk.Keys(ctx)
-	if err != nil {
-		return []string{}
-	}
-	return keys
-}
-
-// TokenCount returns an estimated token count (not implemented in SDK version).
-// Returns 0 for Redis-backed working memory since token counting is not enforced.
-func (a *workingMemoryAdapter) TokenCount() int {
-	// Redis-backed working memory doesn't track token count
-	// Token budget enforcement happens at a different layer
-	return 0
-}
-
-// MaxTokens returns the configured token limit.
-// Returns 0 for Redis-backed working memory since token counting is not enforced.
-func (a *workingMemoryAdapter) MaxTokens() int {
-	// Redis-backed working memory doesn't enforce token limits
-	// Value-based limits (MaxValueSize) are enforced by SDK instead
-	return 0
-}
-
-// GetAll returns a snapshot of all key-value pairs in the adapter's working memory.
-// This implementation delegates to the SDK's working-memory list/get operations.
-// Non-serializable values are skipped (the SDK stores everything as JSON strings
-// so this case does not arise in practice).
-func (a *workingMemoryAdapter) GetAll() (map[string]any, error) {
-	keys := a.List()
-	result := make(map[string]any, len(keys))
-	for _, k := range keys {
-		v, ok := a.Get(k)
-		if ok {
-			result[k] = v
-		}
-	}
-	return result, nil
+// createRedisWorkingMemory creates a working memory instance for a mission.
+// The SDK's Redis-backed working memory was removed in sdk#179 (all tiers route through daemon).
+// Working memory is in-process; mission state persists in mission memory (Redis-backed).
+func (f *MemoryManagerFactory) createRedisWorkingMemory(_ context.Context, _ types.ID) (memory.WorkingMemory, error) {
+	return memory.NewWorkingMemory(f.config.Working.MaxTokens), nil
 }
