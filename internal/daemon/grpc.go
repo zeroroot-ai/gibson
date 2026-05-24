@@ -284,25 +284,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Transport security is the sole trust anchor between Envoy and the daemon;
 	// the daemon relies on SPIFFE X.509 mTLS to ensure only the Envoy sidecar
 	// (with the expected SVID) can reach the gRPC listener.
-	// TEMP DEBUG: log all incoming metadata keys when identity-check denies.
-	// Helps distinguish "Envoy didn't forward x-gibson-identity-* headers"
-	// from "ext-authz didn't emit them". Remove once root-caused.
-	debugDumpMetadata := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		resp, err := handler(ctx, req)
-		if err != nil && grpcstatus.Code(err) == grpccodes.PermissionDenied {
-			if md, ok := grpcmetadata.FromIncomingContext(ctx); ok {
-				keys := make([]string, 0, len(md))
-				for k := range md {
-					keys = append(keys, k)
-				}
-				d.logger.Info(ctx, "AUTH-DEBUG identity-check denied",
-					"method", info.FullMethod, "md_keys", keys, "err", err.Error())
-			}
-		}
-		return resp, err
-	}
-	unaryInterceptors = append(unaryInterceptors, debugDumpMetadata)
-
 	// Wrap sdk/auth's identity interceptor with a registry-aware shim
 	// that does LOOSE identity parsing for RPCs that have no tenant
 	// scope by design — `unauthenticated: true` (Connect, Ping) and
@@ -364,14 +345,29 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// and there's nothing to forward. Workload identity (the leaf cert's
 	// URI SAN) is the trust anchor, validated by tlsconfig.AuthorizeOneOf
 	// at the TLS handshake (gibson#107).
-	spiffePlatformBypass := func(ctx context.Context) (context.Context, bool) {
+	//
+	// Defense-in-depth (#245, #343): each peer SVID is restricted to an
+	// explicit allowlist of gRPC method FQNs. A peer calling an unlisted
+	// method is rejected with PermissionDenied rather than falling through
+	// to sdkAuthUnary (which would fail with Unauthenticated since no
+	// ext-authz headers are present on direct-dial connections).
+	spiffeMethodAllowlist := map[string]map[string]bool{
+		"spiffe://zero-day.ai/platform/tenant-operator": {
+			"/gibson.platform.v1.PlatformOperatorService/UpsertTenantQuota":       true,
+			"/gibson.platform.v1.PlatformOperatorService/ListFeatureTuples":        true,
+			"/gibson.platform.v1.PlatformOperatorService/WriteAccessTuples":        true,
+			"/gibson.platform.v1.PlatformOperatorService/SeedCatalogTenantEnabled": true,
+			"/gibson.platform.v1.PlatformOperatorService/EmitAuditEvent":           true,
+		},
+	}
+	spiffePlatformBypass := func(ctx context.Context, method string) (context.Context, bool, error) {
 		p, ok := peer.FromContext(ctx)
 		if !ok {
-			return ctx, false
+			return ctx, false, nil
 		}
 		tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
 		if !ok || len(tlsInfo.State.PeerCertificates) == 0 {
-			return ctx, false
+			return ctx, false, nil
 		}
 		var svid string
 		for _, u := range tlsInfo.State.PeerCertificates[0].URIs {
@@ -381,7 +377,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			}
 		}
 		if svid == "" {
-			return ctx, false
+			return ctx, false, nil
 		}
 		// Trust only SVIDs the daemon already explicitly allow-listed at
 		// the TLS layer via AllowedPeerIDs. EnvoyID is not bypassed —
@@ -389,21 +385,28 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// must continue to do so.
 		for _, allowed := range d.config.Auth.SPIFFE.AllowedPeerIDs {
 			if svid == allowed {
+				// Enforce per-peer method allowlist (#245).
+				if methods, listed := spiffeMethodAllowlist[svid]; listed && !methods[method] {
+					return ctx, false, grpcstatus.Errorf(grpccodes.PermissionDenied,
+						"SPIFFE peer %q is not authorised to call %q", svid, method)
+				}
 				return auth.WithIdentity(ctx, auth.Identity{
 					Subject:        svid,
 					Issuer:         auth.Issuer("spiffe"),
 					CredentialType: auth.CredentialType("spiffe"),
-				}), true
+				}), true, nil
 			}
 		}
-		return ctx, false
+		return ctx, false, nil
 	}
 
 	registryAwareUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if entry, ok := registry.Registry[info.FullMethod]; ok && looseModeForEntry(entry) {
 			return handler(looseIdentityFromMD(ctx), req)
 		}
-		if bypassCtx, ok := spiffePlatformBypass(ctx); ok {
+		if bypassCtx, ok, err := spiffePlatformBypass(ctx, info.FullMethod); err != nil {
+			return nil, err
+		} else if ok {
 			return handler(bypassCtx, req)
 		}
 		return sdkAuthUnary(ctx, req, info, handler)
@@ -413,7 +416,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			wrapped := &serverStreamCtxOverride{ServerStream: ss, ctx: looseIdentityFromMD(ss.Context())}
 			return handler(srv, wrapped)
 		}
-		if bypassCtx, ok := spiffePlatformBypass(ss.Context()); ok {
+		if bypassCtx, ok, err := spiffePlatformBypass(ss.Context(), info.FullMethod); err != nil {
+			return err
+		} else if ok {
 			wrapped := &serverStreamCtxOverride{ServerStream: ss, ctx: bypassCtx}
 			return handler(srv, wrapped)
 		}
