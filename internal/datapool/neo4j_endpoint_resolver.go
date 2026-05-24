@@ -8,9 +8,9 @@
 // Deployment shape summary:
 //
 //   - "instance" mode: one Neo4j StatefulSet per tenant, provisioned by the
-//     tenant-operator. The resolver performs a Postgres registry lookup
-//     (tenant_neo4j_endpoints table) to find the bolt URI, then reads the
-//     per-tenant credentials from a projected volume mounted on the daemon pod.
+//     tenant-operator. The resolver reads the per-tenant credentials (including
+//     bolt URI) from the per-tenant Vault namespace as a unified JSON payload
+//     at the infra/neo4j path.
 //     The Database field of the returned Neo4jEndpoint is empty (""), which
 //     causes the Neo4j driver to use the default database on that instance.
 //

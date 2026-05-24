@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
 	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
@@ -907,31 +906,23 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				)
 				d.logger.Info(ctx, "neo4j resolver: multi-db mode configured",
 					"shared_cluster_uri", d.config.GraphRAG.Neo4j.SharedClusterURI)
-			} else if d.config.TenantPostgres.Host != "" {
-				// instance mode: one StatefulSet per tenant; endpoint registry in Postgres.
-				// Build an admin pgxpool for the endpoint registry lookups.
-				adminPgDSN := buildTenantPostgresDSN(d.config)
-				if adminPgDSN != "" {
-					adminPgPool, pgErr := pgxpool.New(ctx, adminPgDSN)
-					if pgErr != nil {
-						d.logger.Warn(ctx, "neo4j instanceResolver: could not connect to admin postgres (neo4j resolution will be unavailable)",
-							"error", pgErr)
-					} else {
-						// Use a FuncSecretsReader so the resolver captures d.secretsService
-						// lazily. initBrokerStack runs after NewPool and sets d.secretsService;
-						// the resolver is only called at tenant-RPC time, well after startup.
-						// Spec: per-tenant-data-plane-completion Task 13a (D3 amended).
-						poolCfg.Neo4jResolver = datapool.NewInstanceResolver(adminPgPool,
-							datapool.FuncSecretsReader(func(ctx context.Context, name string) ([]byte, error) {
-								if d.secretsService == nil {
-									return nil, fmt.Errorf("instanceResolver: secrets broker not yet initialized")
-								}
-								return d.secretsService.Resolve(ctx, name)
-							}),
-						)
-						d.logger.Info(ctx, "neo4j resolver: instance mode configured")
-					}
-				}
+			} else {
+				// instance mode: one StatefulSet per tenant, provisioned by the
+				// tenant-operator. Credentials are read from the per-tenant Vault
+				// namespace as a unified JSON payload (infra/neo4j).
+				// Use a FuncSecretsReader so the resolver captures d.secretsService
+				// lazily. initBrokerStack runs after NewPool and sets d.secretsService;
+				// the resolver is only called at tenant-RPC time, well after startup.
+				// Spec: per-tenant-data-plane-completion Task 13a (D3 amended).
+				poolCfg.Neo4jResolver = datapool.NewInstanceResolver(
+					datapool.FuncSecretsReader(func(ctx context.Context, name string) ([]byte, error) {
+						if d.secretsService == nil {
+							return nil, fmt.Errorf("instanceResolver: secrets broker not yet initialized")
+						}
+						return d.secretsService.Resolve(ctx, name)
+					}),
+				)
+				d.logger.Info(ctx, "neo4j resolver: instance mode configured")
 			}
 			// Wire TenantPostgres admin coordinates into the pool config so that
 			// pgxpool_per_tenant can connect to the per-tenant admin Postgres and

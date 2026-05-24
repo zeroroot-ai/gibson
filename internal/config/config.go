@@ -405,9 +405,9 @@ type LangfuseConfig struct {
 // Two modes control how the daemon resolves Neo4j endpoints:
 //
 //   - "instance" (default): one Neo4j StatefulSet per tenant, provisioned by
-//     the tenant-operator. Per-tenant URIs come from the endpoint registry
-//     (tenant_neo4j_endpoints Postgres table) via instanceResolver. No shared
-//     cluster is required; the daemon resolves Neo4j endpoints at request time.
+//     the tenant-operator. Per-tenant credentials are read from the per-tenant
+//     Vault namespace as a unified JSON payload (infra/neo4j) via instanceResolver.
+//     No shared cluster is required; the daemon resolves Neo4j endpoints at request time.
 //
 //   - "multi-db": a shared Enterprise cluster. SharedClusterURI is the bolt
 //     address for the cluster, and each tenant uses the Neo4j database named
