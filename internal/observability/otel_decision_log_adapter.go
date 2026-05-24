@@ -137,7 +137,9 @@ func (a *OTelDecisionLogWriterAdapter) LogDecision(ctx context.Context, decision
 		RequestMeta:   a.buildRequestMetadata(result),
 	}
 
-	// Log to OpenTelemetry (fire-and-forget)
+	// Log to OpenTelemetry (fire-and-forget).
+	// tracer.LogDecision already increments missionSpan.AddDecision() and
+	// missionSpan.AddLLMCall() internally; do NOT duplicate those calls here.
 	if err := a.tracer.LogDecision(a.ctx, a.missionSpan, decisionLog); err != nil {
 		slog.Warn("failed to log decision to opentelemetry",
 			"mission_id", a.missionID,
@@ -146,10 +148,6 @@ func (a *OTelDecisionLogWriterAdapter) LogDecision(ctx context.Context, decision
 		)
 		// Don't return the error - continue execution
 	}
-
-	// Increment statistics in mission span
-	a.missionSpan.AddDecision()
-	a.missionSpan.AddLLMCall(result.TotalTokens, 0.0) // Cost calculation can be added later
 
 	return nil
 }

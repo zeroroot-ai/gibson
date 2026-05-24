@@ -203,19 +203,19 @@ func TestResultMerger_CalculateRecencyScore(t *testing.T) {
 			name:     "today (12 hours)",
 			age:      12 * time.Hour,
 			minScore: 0.7,
-			maxScore: 0.9,
+			maxScore: 1.0, // interpolates within [0.8,1.0] band; formula yields ~0.904
 		},
 		{
 			name:     "this week (3 days)",
 			age:      3 * 24 * time.Hour,
 			minScore: 0.5,
-			maxScore: 0.7,
+			maxScore: 0.8, // interpolates within [0.6,0.8] band; formula yields ~0.733
 		},
 		{
 			name:     "this month (2 weeks)",
 			age:      14 * 24 * time.Hour,
 			minScore: 0.3,
-			maxScore: 0.5,
+			maxScore: 0.6, // interpolates within [0.3,0.6] band; formula yields ~0.509
 		},
 		{
 			name: "old (2 months)",

@@ -55,8 +55,9 @@ func TestMissionSpan_Basic(t *testing.T) {
 	spans := spanRecorder.Ended()
 	require.Len(t, spans, 1)
 	assert.Equal(t, "mission-test", spans[0].Name())
+	// The OTel SDK only stores Description for codes.Error; for codes.Ok it is
+	// silently discarded. Assert only the code.
 	assert.Equal(t, codes.Ok, spans[0].Status().Code)
-	assert.Equal(t, "Mission completed successfully", spans[0].Status().Description)
 }
 
 func TestMissionSpan_AddDecision(t *testing.T) {
@@ -354,8 +355,9 @@ func TestAgentSpan_Basic(t *testing.T) {
 	spans := spanRecorder.Ended()
 	require.Len(t, spans, 1)
 	assert.Equal(t, "agent-test", spans[0].Name())
+	// The OTel SDK only stores Description for codes.Error; for codes.Ok it is
+	// silently discarded. Assert only the code.
 	assert.Equal(t, codes.Ok, spans[0].Status().Code)
-	assert.Equal(t, "Agent execution completed", spans[0].Status().Description)
 }
 
 func TestAgentSpan_AddToolCall(t *testing.T) {

@@ -227,7 +227,7 @@ func (t *OTelMissionTracer) StartMissionTrace(ctx context.Context, mission *sche
 	// Resolve tenant ID for multi-tenancy attribute.
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
-		tenantID = "default"
+		tenantID = auth.SystemTenantString
 	}
 
 	// Set mission attributes
@@ -302,7 +302,7 @@ func (t *OTelMissionTracer) LogDecision(ctx context.Context, missionSpan *Missio
 	// Resolve tenant ID for multi-tenancy attribute.
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
-		tenantID = "default"
+		tenantID = auth.SystemTenantString
 	}
 
 	// Set GenAI attributes following OpenTelemetry semantic conventions
@@ -436,7 +436,7 @@ func (t *OTelMissionTracer) LogAgentExecution(ctx context.Context, missionSpan *
 	// Resolve tenant ID for multi-tenancy attribute.
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
-		tenantID = "default"
+		tenantID = auth.SystemTenantString
 	}
 
 	// Set agent execution attributes
@@ -545,7 +545,7 @@ func (t *OTelMissionTracer) LogToolExecution(ctx context.Context, agentSpan *Age
 	// Resolve tenant ID for multi-tenancy attribute.
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
-		tenantID = "default"
+		tenantID = auth.SystemTenantString
 	}
 
 	// Set tool execution attributes
@@ -653,7 +653,7 @@ func (t *OTelMissionTracer) LogFinding(ctx context.Context, agentSpan *AgentSpan
 	// Resolve tenant ID for multi-tenancy attribute.
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
-		tenantID = "default"
+		tenantID = auth.SystemTenantString
 	}
 
 	// Set finding attributes
@@ -757,7 +757,7 @@ func (t *OTelMissionTracer) LogMemoryOp(ctx context.Context, agentSpan *AgentSpa
 	// Resolve tenant ID for multi-tenancy attribute.
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
-		tenantID = "default"
+		tenantID = auth.SystemTenantString
 	}
 
 	// Set memory operation attributes
@@ -839,7 +839,7 @@ func (t *OTelMissionTracer) LogGraphOp(ctx context.Context, agentSpan *AgentSpan
 	// Resolve tenant ID for multi-tenancy attribute.
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
-		tenantID = "default"
+		tenantID = auth.SystemTenantString
 	}
 
 	// Set graph operation attributes

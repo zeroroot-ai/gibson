@@ -155,7 +155,9 @@ func TestRegisterComponent_SystemTenant_WritesOwnershipTuple(t *testing.T) {
 	mock := &mockAuthorizer{}
 	svc := newAuthzServer(mock)
 
-	ctx := auth.ContextWithTenantString(context.Background(), "_system")
+	// auth.ContextWithTenantString rejects "_system" (reserved); use WithTenant
+	// with auth.SystemTenant directly.
+	ctx := auth.WithTenant(context.Background(), auth.SystemTenant)
 	resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "httpx"))
 
 	require.NoError(t, err)
