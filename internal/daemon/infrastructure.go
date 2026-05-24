@@ -655,12 +655,7 @@ func (d *daemonImpl) initRedis(ctx context.Context) (queue.Client, error) {
 		"url", d.config.Redis.URL,
 		"database", d.config.Redis.Database)
 
-	// Create Redis client with daemon configuration
-	client, err := queue.NewRedisClient(queue.RedisOptions{
-		URL:            d.config.Redis.URL,
-		ConnectTimeout: d.config.Redis.ConnectTimeout,
-		ReadTimeout:    d.config.Redis.ReadTimeout,
-	})
+	client, err := newQueueBackend(d.config.Redis.URL, d.config.Redis.ConnectTimeout, d.config.Redis.ReadTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Redis client: %w", err)
 	}

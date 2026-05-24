@@ -2,14 +2,11 @@ package queue
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 // Client defines the interface for interacting with Redis-based work queues.
@@ -50,68 +47,41 @@ type Client interface {
 	Close() error
 }
 
-// RedisOptions configures the Redis connection.
-type RedisOptions struct {
-	// URL is the Redis connection string (e.g., "redis://localhost:6379")
-	URL string
-
-	// TLS configuration for secure connections
-	TLS *tls.Config
-
-	// ConnectTimeout is the maximum time to wait for connection establishment
-	ConnectTimeout time.Duration
-
-	// ReadTimeout is the maximum time to wait for read operations
-	ReadTimeout time.Duration
-
-	// WriteTimeout is the maximum time to wait for write operations
-	WriteTimeout time.Duration
+// redisBackend is the minimal interface this package needs from a Redis client.
+// The concrete implementation lives in internal/daemon, which is on the
+// forbidrawstoreimports allowlist. Pattern mirrors internal/idempotency.
+type redisBackend interface {
+	LPush(ctx context.Context, key, value string) error
+	// BRPop blocks until a value arrives on key; returns ("", nil) when the
+	// context is cancelled or no value is available within the timeout.
+	BRPop(ctx context.Context, key string) (string, error)
+	Publish(ctx context.Context, channel, message string) error
+	// Subscribe returns a string payload channel and a cancel func that closes
+	// the underlying subscription. The channel is closed when cancel is called
+	// or the underlying connection is dropped.
+	Subscribe(ctx context.Context, channel string) (<-chan string, func(), error)
+	HSet(ctx context.Context, key string, fields map[string]string) error
+	HGetAll(ctx context.Context, key string) (map[string]string, error)
+	SAdd(ctx context.Context, key, member string) error
+	SMembers(ctx context.Context, key string) ([]string, error)
+	Set(ctx context.Context, key, value string, ttl time.Duration) error
+	// Get returns ("", nil) when the key is absent.
+	Get(ctx context.Context, key string) (string, error)
+	Incr(ctx context.Context, key string) error
+	Decr(ctx context.Context, key string) error
+	Close() error
 }
 
-// RedisClient implements the Client interface using go-redis/v9.
+// RedisClient implements the Client interface using an injected redisBackend.
 type RedisClient struct {
-	client *redis.Client
+	backend redisBackend
 }
 
-// NewRedisClient creates a new Redis queue client with the given options.
-func NewRedisClient(opts RedisOptions) (*RedisClient, error) {
-	if opts.URL == "" {
-		opts.URL = "redis://localhost:6379"
-	}
-
-	if opts.ConnectTimeout == 0 {
-		opts.ConnectTimeout = 5 * time.Second
-	}
-
-	if opts.ReadTimeout == 0 {
-		opts.ReadTimeout = 30 * time.Second
-	}
-
-	if opts.WriteTimeout == 0 {
-		opts.WriteTimeout = 5 * time.Second
-	}
-
-	redisOpts, err := redis.ParseURL(opts.URL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
-	}
-
-	redisOpts.TLSConfig = opts.TLS
-	redisOpts.DialTimeout = opts.ConnectTimeout
-	redisOpts.ReadTimeout = opts.ReadTimeout
-	redisOpts.WriteTimeout = opts.WriteTimeout
-
-	client := redis.NewClient(redisOpts)
-
-	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), opts.ConnectTimeout)
-	defer cancel()
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
-	}
-
-	return &RedisClient{client: client}, nil
+// NewRedisClient wraps backend in a RedisClient. The backend is constructed by
+// callers in packages that are allowed to import go-redis directly
+// (e.g., internal/daemon via newQueueBackend).
+func NewRedisClient(backend redisBackend) *RedisClient {
+	return &RedisClient{backend: backend}
 }
 
 // Push adds a work item to the end of a queue.
@@ -121,7 +91,7 @@ func (c *RedisClient) Push(ctx context.Context, queue string, item WorkItem) err
 		return fmt.Errorf("failed to marshal work item: %w", err)
 	}
 
-	if err := c.client.LPush(ctx, queue, data).Err(); err != nil {
+	if err := c.backend.LPush(ctx, queue, string(data)); err != nil {
 		return fmt.Errorf("failed to push to queue %s: %w", queue, err)
 	}
 
@@ -131,21 +101,16 @@ func (c *RedisClient) Push(ctx context.Context, queue string, item WorkItem) err
 // Pop removes and returns a work item from the front of a queue.
 // Blocks until an item is available or context is cancelled.
 func (c *RedisClient) Pop(ctx context.Context, queue string) (*WorkItem, error) {
-	// BRPOP returns [queue_name, value] or empty if timeout
-	result, err := c.client.BRPop(ctx, 0, queue).Result()
+	val, err := c.backend.BRPop(ctx, queue)
 	if err != nil {
-		if err == redis.Nil {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("failed to pop from queue %s: %w", queue, err)
 	}
-
-	if len(result) != 2 {
-		return nil, fmt.Errorf("unexpected BRPOP result length: %d", len(result))
+	if val == "" {
+		return nil, nil
 	}
 
 	var item WorkItem
-	if err := json.Unmarshal([]byte(result[1]), &item); err != nil {
+	if err := json.Unmarshal([]byte(val), &item); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal work item: %w", err)
 	}
 
@@ -159,7 +124,7 @@ func (c *RedisClient) Publish(ctx context.Context, channel string, result Result
 		return fmt.Errorf("failed to marshal result: %w", err)
 	}
 
-	if err := c.client.Publish(ctx, channel, data).Err(); err != nil {
+	if err := c.backend.Publish(ctx, channel, string(data)); err != nil {
 		return fmt.Errorf("failed to publish to channel %s: %w", channel, err)
 	}
 
@@ -168,10 +133,8 @@ func (c *RedisClient) Publish(ctx context.Context, channel string, result Result
 
 // Subscribe creates a subscription to a pub/sub channel.
 func (c *RedisClient) Subscribe(ctx context.Context, channel string) (<-chan Result, error) {
-	pubsub := c.client.Subscribe(ctx, channel)
-
-	// Wait for subscription confirmation
-	if _, err := pubsub.Receive(ctx); err != nil {
+	msgChan, cancel, err := c.backend.Subscribe(ctx, channel)
+	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to channel %s: %w", channel, err)
 	}
 
@@ -179,21 +142,19 @@ func (c *RedisClient) Subscribe(ctx context.Context, channel string) (<-chan Res
 
 	go func() {
 		defer close(resultChan)
-		defer pubsub.Close()
+		defer cancel()
 
-		ch := pubsub.Channel()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case msg, ok := <-ch:
+			case payload, ok := <-msgChan:
 				if !ok {
 					return
 				}
 
 				var result Result
-				if err := json.Unmarshal([]byte(msg.Payload), &result); err != nil {
-					// Log error but continue processing
+				if err := json.Unmarshal([]byte(payload), &result); err != nil {
 					continue
 				}
 
@@ -211,13 +172,11 @@ func (c *RedisClient) Subscribe(ctx context.Context, channel string) (<-chan Res
 
 // RegisterTool writes tool metadata to Redis and adds to available set.
 func (c *RedisClient) RegisterTool(ctx context.Context, meta ToolMeta) error {
-	// Convert tags slice to JSON string for Redis storage
 	tagsJSON, err := json.Marshal(meta.Tags)
 	if err != nil {
 		return fmt.Errorf("failed to marshal tags: %w", err)
 	}
 
-	// Build a flat map for HSET - all values must be strings for go-redis
 	metaMap := map[string]string{
 		"name":         meta.Name,
 		"version":      meta.Version,
@@ -228,23 +187,16 @@ func (c *RedisClient) RegisterTool(ctx context.Context, meta ToolMeta) error {
 		"tags":         string(tagsJSON),
 		"worker_count": strconv.Itoa(meta.WorkerCount),
 	}
-	// Add file_descriptor_set only if it's non-empty
 	if meta.FileDescriptorSet != "" {
 		metaMap["file_descriptor_set"] = meta.FileDescriptorSet
 	}
 
-	// Write metadata to hash using individual field-value pairs
 	metaKey := fmt.Sprintf("tool:%s:meta", meta.Name)
-	args := make([]interface{}, 0, len(metaMap)*2)
-	for k, v := range metaMap {
-		args = append(args, k, v)
-	}
-	if err := c.client.HSet(ctx, metaKey, args...).Err(); err != nil {
+	if err := c.backend.HSet(ctx, metaKey, metaMap); err != nil {
 		return fmt.Errorf("failed to set tool metadata: %w", err)
 	}
 
-	// Add to available tools set
-	if err := c.client.SAdd(ctx, "tools:available", meta.Name).Err(); err != nil {
+	if err := c.backend.SAdd(ctx, "tools:available", meta.Name); err != nil {
 		return fmt.Errorf("failed to add tool to available set: %w", err)
 	}
 
@@ -253,8 +205,7 @@ func (c *RedisClient) RegisterTool(ctx context.Context, meta ToolMeta) error {
 
 // ListTools returns metadata for all registered tools.
 func (c *RedisClient) ListTools(ctx context.Context) ([]ToolMeta, error) {
-	// Get all tool names from the set
-	toolNames, err := c.client.SMembers(ctx, "tools:available").Result()
+	toolNames, err := c.backend.SMembers(ctx, "tools:available")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get available tools: %w", err)
 	}
@@ -263,14 +214,12 @@ func (c *RedisClient) ListTools(ctx context.Context) ([]ToolMeta, error) {
 
 	for _, name := range toolNames {
 		metaKey := fmt.Sprintf("tool:%s:meta", name)
-		metaMap, err := c.client.HGetAll(ctx, metaKey).Result()
+		metaMap, err := c.backend.HGetAll(ctx, metaKey)
 		if err != nil {
-			// Skip tools with missing metadata
 			continue
 		}
 
 		if len(metaMap) == 0 {
-			// Skip empty metadata
 			continue
 		}
 
@@ -286,7 +235,6 @@ func (c *RedisClient) ListTools(ctx context.Context) ([]ToolMeta, error) {
 			Schema:            metaMap["schema"],
 		}
 
-		// Handle tags - stored as JSON string in Redis
 		if tagsStr, ok := metaMap["tags"]; ok {
 			var tags []string
 			if err := json.Unmarshal([]byte(tagsStr), &tags); err == nil {
@@ -294,14 +242,12 @@ func (c *RedisClient) ListTools(ctx context.Context) ([]ToolMeta, error) {
 			}
 		}
 
-		// Handle worker_count - stored as string in Redis
 		if countStr, ok := metaMap["worker_count"]; ok {
 			if count, err := strconv.Atoi(countStr); err == nil {
 				meta.WorkerCount = count
 			}
 		}
 
-		// Handle file_descriptor_set - stored as base64 string in Redis
 		if fdsStr, ok := metaMap["file_descriptor_set"]; ok {
 			meta.FileDescriptorSet = fdsStr
 		}
@@ -315,7 +261,7 @@ func (c *RedisClient) ListTools(ctx context.Context) ([]ToolMeta, error) {
 // Heartbeat updates the health key for a tool with a 30s TTL.
 func (c *RedisClient) Heartbeat(ctx context.Context, toolName string) error {
 	healthKey := fmt.Sprintf("tool:%s:health", toolName)
-	if err := c.client.Set(ctx, healthKey, "ok", 30*time.Second).Err(); err != nil {
+	if err := c.backend.Set(ctx, healthKey, "ok", 30*time.Second); err != nil {
 		return fmt.Errorf("failed to set heartbeat for tool %s: %w", toolName, err)
 	}
 	return nil
@@ -324,12 +270,12 @@ func (c *RedisClient) Heartbeat(ctx context.Context, toolName string) error {
 // GetWorkerCount returns the current worker count for a tool.
 func (c *RedisClient) GetWorkerCount(ctx context.Context, toolName string) (int, error) {
 	workerKey := fmt.Sprintf("tool:%s:workers", toolName)
-	countStr, err := c.client.Get(ctx, workerKey).Result()
+	countStr, err := c.backend.Get(ctx, workerKey)
 	if err != nil {
-		if err == redis.Nil {
-			return 0, nil
-		}
 		return 0, fmt.Errorf("failed to get worker count for tool %s: %w", toolName, err)
+	}
+	if countStr == "" {
+		return 0, nil
 	}
 
 	count, err := strconv.Atoi(countStr)
@@ -343,7 +289,7 @@ func (c *RedisClient) GetWorkerCount(ctx context.Context, toolName string) (int,
 // IncrementWorkerCount increments the worker count for a tool.
 func (c *RedisClient) IncrementWorkerCount(ctx context.Context, toolName string) error {
 	workerKey := fmt.Sprintf("tool:%s:workers", toolName)
-	if err := c.client.Incr(ctx, workerKey).Err(); err != nil {
+	if err := c.backend.Incr(ctx, workerKey); err != nil {
 		return fmt.Errorf("failed to increment worker count for tool %s: %w", toolName, err)
 	}
 	return nil
@@ -352,7 +298,7 @@ func (c *RedisClient) IncrementWorkerCount(ctx context.Context, toolName string)
 // DecrementWorkerCount decrements the worker count for a tool.
 func (c *RedisClient) DecrementWorkerCount(ctx context.Context, toolName string) error {
 	workerKey := fmt.Sprintf("tool:%s:workers", toolName)
-	if err := c.client.Decr(ctx, workerKey).Err(); err != nil {
+	if err := c.backend.Decr(ctx, workerKey); err != nil {
 		return fmt.Errorf("failed to decrement worker count for tool %s: %w", toolName, err)
 	}
 	return nil
@@ -360,7 +306,7 @@ func (c *RedisClient) DecrementWorkerCount(ctx context.Context, toolName string)
 
 // Close closes the Redis connection.
 func (c *RedisClient) Close() error {
-	return c.client.Close()
+	return c.backend.Close()
 }
 
 // formatKeyName ensures consistent key naming with tool:<name>:* pattern.
