@@ -33,16 +33,16 @@ func TestNewPostgresStore_InputValidation(t *testing.T) {
 	})
 }
 
-func TestProviderConfigAAD_Consistency(t *testing.T) {
-	aad1 := providerConfigAAD("openai", "prod-key")
-	aad2 := providerConfigAAD("openai", "prod-key")
-	assert.Equal(t, aad1, aad2)
+func TestSecretAAD_Consistency(t *testing.T) {
+	k1 := rowKey("openai-prod")
+	k2 := rowKey("openai-prod")
+	assert.Equal(t, secretAAD(k1), secretAAD(k2), "same key must produce same AAD")
 
-	aad3 := providerConfigAAD("anthropic", "prod-key")
-	assert.NotEqual(t, aad1, aad3, "different providers must produce different AAD")
+	k3 := rowKey("anthropic-prod")
+	assert.NotEqual(t, secretAAD(k1), secretAAD(k3), "different names must produce different AAD")
 
-	aad4 := providerConfigAAD("openai", "staging-key")
-	assert.NotEqual(t, aad1, aad4, "different names must produce different AAD")
+	assert.NotEqual(t, secretAAD(providerDefaultKey), secretAAD(providerFallbackKey),
+		"meta keys must produce distinct AAD")
 }
 
 func TestIsPgUniqueViolation(t *testing.T) {

@@ -716,13 +716,26 @@ func (m *IndexManager) IndexExists(ctx context.Context, name string) (bool, erro
 		return false, fmt.Errorf("FT._LIST failed: %w", err)
 	}
 
-	// Parse the list of index names
-	indexes, err := result.Slice()
+	rawResult, err := result.Result()
 	if err != nil {
 		return false, fmt.Errorf("failed to parse FT._LIST result: %w", err)
 	}
 
-	// Check if our index is in the list
+	// Handle RESP3 set format (map[interface{}]interface{} where keys are index names)
+	if resultMap, ok := rawResult.(map[interface{}]interface{}); ok {
+		for k := range resultMap {
+			if indexName, ok := k.(string); ok && indexName == name {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
+	// Handle RESP2 array format
+	indexes, ok := rawResult.([]interface{})
+	if !ok {
+		return false, fmt.Errorf("unexpected FT._LIST result type: %T", rawResult)
+	}
 	for _, idx := range indexes {
 		if indexName, ok := idx.(string); ok && indexName == name {
 			return true, nil
@@ -748,58 +761,72 @@ func (m *IndexManager) IndexInfo(ctx context.Context, name string) (*IndexInfo, 
 		return nil, fmt.Errorf("FT.INFO failed for index %q: %w", name, err)
 	}
 
-	// Parse the result as key-value pairs
-	vals, err := result.Slice()
+	rawResult, err := result.Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse FT.INFO result: %w", err)
 	}
 
 	info := &IndexInfo{IndexName: name}
 
-	// FT.INFO returns alternating key-value pairs
-	for i := 0; i < len(vals)-1; i += 2 {
-		key, ok := vals[i].(string)
-		if !ok {
-			continue
-		}
-
+	applyInfoField := func(key string, val interface{}) {
 		switch key {
 		case "num_docs":
-			if val, err := parseInteger(vals[i+1]); err == nil {
-				info.NumDocs = val
+			if v, err := parseInteger(val); err == nil {
+				info.NumDocs = v
 			}
 		case "num_terms":
-			if val, err := parseInteger(vals[i+1]); err == nil {
-				info.NumTerms = val
+			if v, err := parseInteger(val); err == nil {
+				info.NumTerms = v
 			}
 		case "num_records":
-			if val, err := parseInteger(vals[i+1]); err == nil {
-				info.NumRecords = val
+			if v, err := parseInteger(val); err == nil {
+				info.NumRecords = v
 			}
 		case "max_doc_id":
-			if val, err := parseInteger(vals[i+1]); err == nil {
-				info.MaxDocID = val
+			if v, err := parseInteger(val); err == nil {
+				info.MaxDocID = v
 			}
 		case "inverted_sz_mb":
-			if val, err := parseFloat(vals[i+1]); err == nil {
-				info.InvertedSzMB = val
+			if v, err := parseFloat(val); err == nil {
+				info.InvertedSzMB = v
 			}
 		case "offset_vectors_sz_mb":
-			if val, err := parseFloat(vals[i+1]); err == nil {
-				info.OffsetVectorsSzMB = val
+			if v, err := parseFloat(val); err == nil {
+				info.OffsetVectorsSzMB = v
 			}
 		case "doc_table_size_mb":
-			if val, err := parseFloat(vals[i+1]); err == nil {
-				info.DocTableSizeMB = val
+			if v, err := parseFloat(val); err == nil {
+				info.DocTableSizeMB = v
 			}
 		case "sortable_values_size_mb":
-			if val, err := parseFloat(vals[i+1]); err == nil {
-				info.SortableValuesSizeMB = val
+			if v, err := parseFloat(val); err == nil {
+				info.SortableValuesSizeMB = v
 			}
 		case "key_table_size_mb":
-			if val, err := parseFloat(vals[i+1]); err == nil {
-				info.KeyTableSizeMB = val
+			if v, err := parseFloat(val); err == nil {
+				info.KeyTableSizeMB = v
 			}
+		}
+	}
+
+	// Handle RESP3 map format
+	if resultMap, ok := rawResult.(map[interface{}]interface{}); ok {
+		for k, v := range resultMap {
+			if key, ok := k.(string); ok {
+				applyInfoField(key, v)
+			}
+		}
+		return info, nil
+	}
+
+	// Handle RESP2 array format (alternating key-value pairs)
+	vals, ok := rawResult.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected FT.INFO result type: %T", rawResult)
+	}
+	for i := 0; i < len(vals)-1; i += 2 {
+		if key, ok := vals[i].(string); ok {
+			applyInfoField(key, vals[i+1])
 		}
 	}
 

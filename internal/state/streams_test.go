@@ -1467,7 +1467,8 @@ func TestConsumerGroupMission(t *testing.T) {
 // It requires a running Redis instance on localhost:6379.
 func setupTestClient(t *testing.T) *StateClient {
 	cfg := DefaultConfig()
-	cfg.URL = "redis://localhost:6379/15" // Use DB 15 for tests
+	// DB must be 0: RediSearch (FT.CREATE) rejects non-zero databases.
+	cfg.URL = "redis://localhost:6379/0"
 
 	client, err := NewStateClient(cfg)
 	if err != nil {

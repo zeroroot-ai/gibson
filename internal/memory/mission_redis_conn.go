@@ -91,14 +91,14 @@ func (m *ConnBoundMissionMemory) Store(ctx context.Context, key string, value an
 	if err != nil {
 		return NewMissionMemoryStoreError("failed to marshal value", err)
 	}
-	now := time.Now()
+	nowMs := time.Now().UnixMilli()
 	entry := MemoryEntry{
 		Key:       key,
 		Value:     string(valueJSON),
 		MissionID: string(m.missionID),
 		Metadata:  metadata,
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt: nowMs,
+		UpdatedAt: nowMs,
 	}
 	entryJSON, err := json.Marshal(entry)
 	if err != nil {
@@ -139,8 +139,8 @@ func (m *ConnBoundMissionMemory) Retrieve(ctx context.Context, key string) (*Mem
 		Key:       entry.Key,
 		Value:     value,
 		Metadata:  entry.Metadata,
-		CreatedAt: entry.CreatedAt,
-		UpdatedAt: entry.UpdatedAt,
+		CreatedAt: time.UnixMilli(entry.CreatedAt),
+		UpdatedAt: time.UnixMilli(entry.UpdatedAt),
 	}, nil
 }
 
@@ -175,8 +175,8 @@ func (m *ConnBoundMissionMemory) Search(ctx context.Context, query string, limit
 					Key:       entry.Key,
 					Value:     val,
 					Metadata:  entry.Metadata,
-					CreatedAt: entry.CreatedAt,
-					UpdatedAt: entry.UpdatedAt,
+					CreatedAt: time.UnixMilli(entry.CreatedAt),
+					UpdatedAt: time.UnixMilli(entry.UpdatedAt),
 				},
 				Score: 1.0,
 			})
@@ -206,8 +206,8 @@ func (m *ConnBoundMissionMemory) History(ctx context.Context, limit int) ([]Memo
 			Key:       entry.Key,
 			Value:     val,
 			Metadata:  entry.Metadata,
-			CreatedAt: entry.CreatedAt,
-			UpdatedAt: entry.UpdatedAt,
+			CreatedAt: time.UnixMilli(entry.CreatedAt),
+			UpdatedAt: time.UnixMilli(entry.UpdatedAt),
 		})
 	}
 	// Sort by CreatedAt descending (simple insertion sort for small sets).
@@ -326,7 +326,7 @@ func (m *ConnBoundMissionMemory) GetValueHistory(ctx context.Context, key string
 	return []HistoricalValue{{
 		Value:     val,
 		MissionID: string(m.missionID),
-		StoredAt:  entry.CreatedAt,
+		StoredAt:  time.UnixMilli(entry.CreatedAt),
 	}}, nil
 }
 

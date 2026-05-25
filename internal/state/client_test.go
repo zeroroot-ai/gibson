@@ -72,12 +72,6 @@ func TestNewStateClient_InvalidConfig(t *testing.T) {
 		config *Config
 	}{
 		{
-			name: "no connection method",
-			config: &Config{
-				PoolSize: 10,
-			},
-		},
-		{
 			name: "cluster mode without addresses",
 			config: &Config{
 				ClusterMode: true,

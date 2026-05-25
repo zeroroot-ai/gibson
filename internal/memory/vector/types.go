@@ -95,12 +95,9 @@ func (vq *VectorQuery) WithMinScore(minScore float64) *VectorQuery {
 // Validate ensures the VectorQuery has valid fields.
 // Returns a GibsonError if validation fails.
 func (vq *VectorQuery) Validate() error {
-	// Must have either Text or Embedding, but not both
+	// Must have at least one of Text or Embedding (both allowed for hybrid search)
 	if vq.Text == "" && len(vq.Embedding) == 0 {
 		return types.NewError(ErrCodeVectorSearchFailed, "vector query must have either text or embedding")
-	}
-	if vq.Text != "" && len(vq.Embedding) > 0 {
-		return types.NewError(ErrCodeVectorSearchFailed, "vector query cannot have both text and embedding")
 	}
 	if vq.TopK <= 0 {
 		return types.NewError(ErrCodeVectorSearchFailed,

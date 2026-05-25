@@ -223,104 +223,135 @@ func (s *RedisVectorStore) Search(ctx context.Context, query VectorQuery) ([]Vec
 		return nil, types.WrapError(ErrCodeVectorSearchFailed, "FT.SEARCH with KNN failed", err)
 	}
 
-	// Parse results
-	vals, err := result.Slice()
+	rawResult, err := result.Result()
 	if err != nil {
-		return nil, types.WrapError(ErrCodeVectorSearchFailed, "failed to parse search results", err)
+		return nil, types.WrapError(ErrCodeVectorSearchFailed, "failed to get search result", err)
 	}
 
-	if len(vals) == 0 {
-		return []VectorResult{}, nil
-	}
+	results := make([]VectorResult, 0)
 
-	// First element is total count
-	total, ok := vals[0].(int64)
-	if !ok {
-		return nil, types.NewError(ErrCodeVectorSearchFailed, "invalid total count in search results")
-	}
-
-	if total == 0 {
-		return []VectorResult{}, nil
-	}
-
-	// Parse documents from remaining elements
-	// Format: [id, [field1, value1, field2, value2, ...], ...]
-	results := make([]VectorResult, 0, total)
-
-	for i := 1; i < len(vals); i += 2 {
-		if i+1 >= len(vals) {
-			break
+	// Handle RESP3 map format (Redis 7+ with go-redis/v9 default RESP3)
+	if resultMap, ok := rawResult.(map[interface{}]interface{}); ok {
+		totalVal, _ := resultMap["total_results"]
+		total, _ := totalVal.(int64)
+		if total == 0 {
+			return []VectorResult{}, nil
 		}
 
-		// Document ID
-		docID, ok := vals[i].(string)
-		if !ok {
-			continue
-		}
-
-		// Extract vector ID from Redis key (remove "gibson:vector:" prefix)
-		vectorID := docID
-		if len(docID) > 14 && docID[:14] == "gibson:vector:" {
-			vectorID = docID[14:]
-		}
-
-		// Field-value pairs
-		fields, ok := vals[i+1].([]interface{})
-		if !ok {
-			continue
-		}
-
-		// Parse fields to extract JSON document and score
-		var record VectorRecord
-		var score float64
-		var foundJSON bool
-
-		for j := 0; j < len(fields)-1; j += 2 {
-			fieldName, ok := fields[j].(string)
+		resultsVal, _ := resultMap["results"]
+		resultsList, _ := resultsVal.([]interface{})
+		for _, r := range resultsList {
+			docMap, ok := r.(map[interface{}]interface{})
 			if !ok {
 				continue
 			}
 
-			switch fieldName {
-			case "$":
-				// Parse JSON document
-				jsonStr, ok := fields[j+1].(string)
+			docIDVal, _ := docMap["id"]
+			docID, _ := docIDVal.(string)
+			vectorID := docID
+			if len(docID) > 14 && docID[:14] == "gibson:vector:" {
+				vectorID = docID[14:]
+			}
+
+			var record VectorRecord
+			var score float64
+			var foundJSON bool
+
+			attrsVal, _ := docMap["extra_attributes"]
+			if attrMap, ok := attrsVal.(map[interface{}]interface{}); ok {
+				for k, v := range attrMap {
+					fieldName, ok := k.(string)
+					if !ok {
+						continue
+					}
+					switch fieldName {
+					case "$":
+						if jsonStr, ok := v.(string); ok {
+							if err := json.Unmarshal([]byte(jsonStr), &record); err == nil {
+								record.ID = vectorID
+								foundJSON = true
+							}
+						}
+					case "__score", "score":
+						if s, ok := v.(string); ok {
+							fmt.Sscanf(s, "%f", &score)
+						} else if f, ok := v.(float64); ok {
+							score = f
+						}
+					}
+				}
+			}
+
+			if !foundJSON || !matchesFilters(record, query.Filters) {
+				continue
+			}
+			if score >= query.MinScore {
+				results = append(results, *NewVectorResult(record, score))
+			}
+		}
+	} else {
+		// RESP2 slice format
+		vals, ok := rawResult.([]interface{})
+		if !ok || len(vals) == 0 {
+			return []VectorResult{}, nil
+		}
+
+		total, ok := vals[0].(int64)
+		if !ok || total == 0 {
+			return []VectorResult{}, nil
+		}
+
+		for i := 1; i < len(vals); i += 2 {
+			if i+1 >= len(vals) {
+				break
+			}
+
+			docID, ok := vals[i].(string)
+			if !ok {
+				continue
+			}
+			vectorID := docID
+			if len(docID) > 14 && docID[:14] == "gibson:vector:" {
+				vectorID = docID[14:]
+			}
+
+			fields, ok := vals[i+1].([]interface{})
+			if !ok {
+				continue
+			}
+
+			var record VectorRecord
+			var score float64
+			var foundJSON bool
+
+			for j := 0; j < len(fields)-1; j += 2 {
+				fieldName, ok := fields[j].(string)
 				if !ok {
 					continue
 				}
-				if err := json.Unmarshal([]byte(jsonStr), &record); err != nil {
-					return nil, types.WrapError(ErrCodeVectorSearchFailed,
-						"failed to parse vector document", err)
-				}
-				// Override ID to ensure it's correct
-				record.ID = vectorID
-				foundJSON = true
-
-			case "__score", "score":
-				// Parse similarity score
-				scoreStr, ok := fields[j+1].(string)
-				if ok {
-					fmt.Sscanf(scoreStr, "%f", &score)
-				} else if scoreFloat, ok := fields[j+1].(float64); ok {
-					score = scoreFloat
+				switch fieldName {
+				case "$":
+					if jsonStr, ok := fields[j+1].(string); ok {
+						if err := json.Unmarshal([]byte(jsonStr), &record); err == nil {
+							record.ID = vectorID
+							foundJSON = true
+						}
+					}
+				case "__score", "score":
+					if s, ok := fields[j+1].(string); ok {
+						fmt.Sscanf(s, "%f", &score)
+					} else if f, ok := fields[j+1].(float64); ok {
+						score = f
+					}
 				}
 			}
-		}
 
-		if !foundJSON {
-			continue
-		}
-
-		// Apply metadata filters if specified
-		if !matchesFilters(record, query.Filters) {
-			continue
-		}
-
-		// Apply minimum score threshold
-		// Note: RediSearch returns distance, may need conversion depending on metric
-		// For COSINE metric, score is already similarity (0-1)
-		if score >= query.MinScore {
-			results = append(results, *NewVectorResult(record, score))
+			if !foundJSON || !matchesFilters(record, query.Filters) {
+				continue
+			}
+			if score >= query.MinScore {
+				results = append(results, *NewVectorResult(record, score))
+			}
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -15,16 +16,20 @@ import (
 	"github.com/zero-day-ai/gibson/internal/types"
 )
 
-// postgresStore implements ProviderConfigStore backed by a per-tenant Postgres
-// database, using AES Key Wrap DEK + AES-256-GCM per-record envelope encryption.
+// postgresStore implements ProviderConfigStore backed by the per-tenant
+// tenant_secrets table (migration 006), using AES Key Wrap DEK +
+// AES-256-GCM per-record envelope encryption.
 //
-// The tenantID carried on each method call is stored in the ProviderConfig for
-// callers that need it (e.g., the API handler's list response). It is NOT used
-// as a Postgres filter — the per-tenant database is the isolation boundary.
+// Key format (name column PRIMARY KEY): "provider_config:<name>"
+// Meta rows: providerDefaultKey and providerFallbackKey constants below.
 //
-// AAD = "providerconfig:<provider>:<name>" — ties the envelope to the row
-// identity so a row cannot be moved between providers or renamed without
-// decryption failing.
+// AAD = "secret:<name>" — ties the envelope to the row key so a row cannot
+// be silently moved or renamed without decryption failing. Matches the AAD
+// convention used by TenantSecretsOps for cred: keys in the same table.
+//
+// The tenantID carried on each method call is stored in the ProviderConfig
+// for callers that need it (e.g., the API handler's list response). It is NOT
+// used as a Postgres filter — the per-tenant database is the isolation boundary.
 type postgresStore struct {
 	pg  *pgxpool.Pool
 	kek []byte
@@ -50,11 +55,36 @@ func newPostgresStore(pg *pgxpool.Pool, kek []byte) (ProviderConfigStore, error)
 var _ ProviderConfigStore = (*postgresStore)(nil)
 
 // ---------------------------------------------------------------------------
-// AAD helpers
+// Key and AAD constants
 // ---------------------------------------------------------------------------
 
-func providerConfigAAD(provider, name string) []byte {
-	return []byte("providerconfig:" + provider + ":" + name)
+const (
+	providerConfigKeyPrefix = "provider_config:"
+	providerDefaultKey      = "provider_config:__default"
+	providerFallbackKey     = "provider_config:__fallback_chain"
+)
+
+// rowKey returns the tenant_secrets primary key for a user-named provider config.
+func rowKey(name string) string {
+	return providerConfigKeyPrefix + name
+}
+
+// nameFromKey strips the prefix from a tenant_secrets key to recover the
+// user-visible provider config name.
+func nameFromKey(key string) string {
+	return strings.TrimPrefix(key, providerConfigKeyPrefix)
+}
+
+// isMetaKey reports whether key is a synthetic meta row (default pointer or
+// fallback chain), which should not appear in List results.
+func isMetaKey(key string) bool {
+	return key == providerDefaultKey || key == providerFallbackKey
+}
+
+// secretAAD returns the AAD bytes for the given tenant_secrets row key.
+// Matches the "secret:<key>" convention used by TenantSecretsOps.
+func secretAAD(key string) []byte {
+	return []byte("secret:" + key)
 }
 
 // ---------------------------------------------------------------------------
@@ -72,18 +102,18 @@ type providerConfigPayload struct {
 	UpdatedAt    time.Time         `json:"updated_at"`
 }
 
-func (s *postgresStore) encryptPayload(p *providerConfigPayload, provider, name string) ([]byte, error) {
+func (s *postgresStore) encryptPayload(p *providerConfigPayload, key string) ([]byte, error) {
 	plain, err := json.Marshal(p)
 	if err != nil {
 		return nil, fmt.Errorf("marshal provider config payload: %w", err)
 	}
-	return envelope.Encrypt(s.kek, plain, providerConfigAAD(provider, name))
+	return envelope.Encrypt(s.kek, plain, secretAAD(key))
 }
 
-func (s *postgresStore) decryptPayload(env []byte, provider, name string) (*providerConfigPayload, error) {
-	plain, err := envelope.Decrypt(s.kek, env, providerConfigAAD(provider, name))
+func (s *postgresStore) decryptPayload(enc []byte, key string) (*providerConfigPayload, error) {
+	plain, err := envelope.Decrypt(s.kek, enc, secretAAD(key))
 	if err != nil {
-		return nil, fmt.Errorf("decrypt provider config %q/%q: %w", provider, name, err)
+		return nil, fmt.Errorf("decrypt provider config %q: %w", key, err)
 	}
 	var p providerConfigPayload
 	if err := json.Unmarshal(plain, &p); err != nil {
@@ -98,7 +128,8 @@ func (s *postgresStore) decryptPayload(env []byte, provider, name string) (*prov
 
 func (s *postgresStore) List(ctx context.Context, tenantID string) ([]*ProviderConfig, error) {
 	rows, err := s.pg.Query(ctx,
-		`SELECT provider, name, envelope FROM provider_configs ORDER BY provider, name`,
+		`SELECT name, envelope FROM tenant_secrets WHERE starts_with(name, $1) ORDER BY name`,
+		providerConfigKeyPrefix,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list provider configs: %w", err)
@@ -107,17 +138,21 @@ func (s *postgresStore) List(ctx context.Context, tenantID string) ([]*ProviderC
 
 	var configs []*ProviderConfig
 	for rows.Next() {
-		var provider, name string
-		var env []byte
-		if err := rows.Scan(&provider, &name, &env); err != nil {
+		var key string
+		var enc []byte
+		if err := rows.Scan(&key, &enc); err != nil {
 			return nil, fmt.Errorf("scan provider config row: %w", err)
 		}
-		p, err := s.decryptPayload(env, provider, name)
+		if isMetaKey(key) {
+			continue
+		}
+		name := nameFromKey(key)
+		p, err := s.decryptPayload(enc, key)
 		if err != nil {
 			// Skip rows that fail decryption rather than aborting the list.
 			continue
 		}
-		cfg := payloadToConfig(tenantID, provider, name, p)
+		cfg := payloadToConfig(tenantID, name, p)
 		configs = append(configs, AsRecord(cfg, p.Credentials))
 	}
 	if err := rows.Err(); err != nil {
@@ -127,30 +162,22 @@ func (s *postgresStore) List(ctx context.Context, tenantID string) ([]*ProviderC
 }
 
 func (s *postgresStore) Get(ctx context.Context, tenantID string, name string) (*ProviderConfig, error) {
-	// name may be "provider:name" or just "name" — normalise to match rows.
-	// In this schema, the name column uniquely identifies within a provider.
-	// We scan all providers for this name for backward compatibility.
-	rows, err := s.pg.Query(ctx,
-		`SELECT provider, name, envelope FROM provider_configs WHERE name = $1 LIMIT 1`, name,
-	)
+	key := rowKey(name)
+	var enc []byte
+	err := s.pg.QueryRow(ctx,
+		`SELECT envelope FROM tenant_secrets WHERE name = $1`, key,
+	).Scan(&enc)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("get provider config %q: %w", name, err)
 	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		return nil, ErrNotFound
-	}
-	var provider, rowName string
-	var env []byte
-	if err := rows.Scan(&provider, &rowName, &env); err != nil {
-		return nil, fmt.Errorf("scan provider config: %w", err)
-	}
-	p, err := s.decryptPayload(env, provider, rowName)
+	p, err := s.decryptPayload(enc, key)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt provider config %q: %w", name, err)
 	}
-	cfg := payloadToConfig(tenantID, provider, rowName, p)
+	cfg := payloadToConfig(tenantID, name, p)
 	return AsRecord(cfg, p.Credentials), nil
 }
 
@@ -159,10 +186,10 @@ func (s *postgresStore) Create(ctx context.Context, tenantID string, input *Prov
 		return nil, err
 	}
 
-	provider := string(input.Type)
+	key := rowKey(input.Name)
 	now := time.Now().UTC()
 	p := &providerConfigPayload{
-		Type:         provider,
+		Type:         string(input.Type),
 		DefaultModel: input.DefaultModel,
 		IsDefault:    input.SetAsDefault,
 		Enabled:      input.Enabled,
@@ -170,18 +197,16 @@ func (s *postgresStore) Create(ctx context.Context, tenantID string, input *Prov
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	env, err := s.encryptPayload(p, provider, input.Name)
+	enc, err := s.encryptPayload(p, key)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt provider config: %w", err)
 	}
 
 	_, err = s.pg.Exec(ctx,
-		`INSERT INTO provider_configs (provider, name, envelope, created_at, updated_at)
-		 VALUES ($1, $2, $3, now(), now())`,
-		provider, input.Name, env,
+		`INSERT INTO tenant_secrets (name, envelope, created_at, updated_at) VALUES ($1, $2, now(), now())`,
+		key, enc,
 	)
 	if err != nil {
-		// Detect unique constraint violation.
 		if isPgUniqueViolation(err) {
 			return nil, ErrAlreadyExists
 		}
@@ -192,9 +217,8 @@ func (s *postgresStore) Create(ctx context.Context, tenantID string, input *Prov
 		_ = s.writeDefault(ctx, tenantID, input.Name)
 	}
 
-	id := types.NewID()
 	cfg := &ProviderConfig{
-		ID:           id,
+		ID:           types.NewID(),
 		TenantID:     tenantID,
 		Name:         input.Name,
 		Type:         input.Type,
@@ -212,13 +236,13 @@ func (s *postgresStore) Update(ctx context.Context, tenantID string, name string
 		return nil, err
 	}
 
-	provider := string(input.Type)
+	key := rowKey(name)
 
 	// Fetch existing to preserve created_at.
-	var env []byte
+	var existingEnc []byte
 	err := s.pg.QueryRow(ctx,
-		`SELECT envelope FROM provider_configs WHERE name = $1`, name,
-	).Scan(&env)
+		`SELECT envelope FROM tenant_secrets WHERE name = $1`, key,
+	).Scan(&existingEnc)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -226,8 +250,7 @@ func (s *postgresStore) Update(ctx context.Context, tenantID string, name string
 		return nil, fmt.Errorf("fetch existing provider config: %w", err)
 	}
 
-	// Read existing payload to get created_at (we decrypt just for that).
-	existing, decErr := s.decryptPayload(env, provider, name)
+	existing, decErr := s.decryptPayload(existingEnc, key)
 	createdAt := time.Now().UTC()
 	if decErr == nil {
 		createdAt = existing.CreatedAt
@@ -235,7 +258,7 @@ func (s *postgresStore) Update(ctx context.Context, tenantID string, name string
 
 	now := time.Now().UTC()
 	p := &providerConfigPayload{
-		Type:         provider,
+		Type:         string(input.Type),
 		DefaultModel: input.DefaultModel,
 		IsDefault:    input.SetAsDefault,
 		Enabled:      input.Enabled,
@@ -243,14 +266,14 @@ func (s *postgresStore) Update(ctx context.Context, tenantID string, name string
 		CreatedAt:    createdAt,
 		UpdatedAt:    now,
 	}
-	newEnv, err := s.encryptPayload(p, provider, name)
+	newEnc, err := s.encryptPayload(p, key)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt updated provider config: %w", err)
 	}
 
 	_, err = s.pg.Exec(ctx,
-		`UPDATE provider_configs SET envelope = $1, updated_at = now() WHERE name = $2`,
-		newEnv, name,
+		`UPDATE tenant_secrets SET envelope = $1, updated_at = now() WHERE name = $2`,
+		newEnc, key,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update provider config: %w", err)
@@ -275,8 +298,9 @@ func (s *postgresStore) Update(ctx context.Context, tenantID string, name string
 }
 
 func (s *postgresStore) Delete(ctx context.Context, tenantID string, name string) error {
+	key := rowKey(name)
 	tag, err := s.pg.Exec(ctx,
-		`DELETE FROM provider_configs WHERE name = $1`, name,
+		`DELETE FROM tenant_secrets WHERE name = $1`, key,
 	)
 	if err != nil {
 		return fmt.Errorf("delete provider config: %w", err)
@@ -284,7 +308,7 @@ func (s *postgresStore) Delete(ctx context.Context, tenantID string, name string
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	// Also clear default/fallback chain if they reference this name (best effort).
+	// Clear default/fallback chain if they reference this name (best effort).
 	_ = s.clearDefaultIfMatch(ctx, name)
 	return nil
 }
@@ -308,7 +332,7 @@ func (s *postgresStore) SetDefault(ctx context.Context, tenantID string, name st
 func (s *postgresStore) GetFallbackChain(ctx context.Context, tenantID string) ([]string, error) {
 	var data []byte
 	err := s.pg.QueryRow(ctx,
-		`SELECT envelope FROM provider_configs WHERE name = '_fallback_chain' AND provider = '_meta'`,
+		`SELECT envelope FROM tenant_secrets WHERE name = $1`, providerFallbackKey,
 	).Scan(&data)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -316,7 +340,7 @@ func (s *postgresStore) GetFallbackChain(ctx context.Context, tenantID string) (
 		}
 		return nil, fmt.Errorf("get fallback chain: %w", err)
 	}
-	plain, err := envelope.Decrypt(s.kek, data, providerConfigAAD("_meta", "_fallback_chain"))
+	plain, err := envelope.Decrypt(s.kek, data, secretAAD(providerFallbackKey))
 	if err != nil {
 		return []string{}, nil
 	}
@@ -340,41 +364,36 @@ func (s *postgresStore) SetFallbackChain(ctx context.Context, tenantID string, n
 	if err != nil {
 		return fmt.Errorf("marshal fallback chain: %w", err)
 	}
-	env, err := envelope.Encrypt(s.kek, data, providerConfigAAD("_meta", "_fallback_chain"))
+	enc, err := envelope.Encrypt(s.kek, data, secretAAD(providerFallbackKey))
 	if err != nil {
 		return fmt.Errorf("encrypt fallback chain: %w", err)
 	}
 	_, err = s.pg.Exec(ctx,
-		`INSERT INTO provider_configs (provider, name, envelope, created_at, updated_at)
-		 VALUES ('_meta', '_fallback_chain', $1, now(), now())
-		 ON CONFLICT (provider, name) DO UPDATE SET envelope = EXCLUDED.envelope, updated_at = now()`,
-		env,
+		`INSERT INTO tenant_secrets (name, envelope, created_at, updated_at)
+		 VALUES ($1, $2, now(), now())
+		 ON CONFLICT (name) DO UPDATE SET envelope = EXCLUDED.envelope, updated_at = now()`,
+		providerFallbackKey, enc,
 	)
 	return err
 }
 
 func (s *postgresStore) Resolve(ctx context.Context, tenantID string, name string) (*DecryptedConfig, error) {
-	rows, err := s.pg.Query(ctx,
-		`SELECT provider, name, envelope FROM provider_configs WHERE name = $1 LIMIT 1`, name,
-	)
+	key := rowKey(name)
+	var enc []byte
+	err := s.pg.QueryRow(ctx,
+		`SELECT envelope FROM tenant_secrets WHERE name = $1`, key,
+	).Scan(&enc)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("resolve provider config %q: %w", name, err)
 	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		return nil, ErrNotFound
-	}
-	var provider, rowName string
-	var env []byte
-	if err := rows.Scan(&provider, &rowName, &env); err != nil {
-		return nil, fmt.Errorf("scan provider config: %w", err)
-	}
-	p, err := s.decryptPayload(env, provider, rowName)
+	p, err := s.decryptPayload(enc, key)
 	if err != nil {
 		return nil, fmt.Errorf("resolve: decrypt: %w", err)
 	}
-	cfg := payloadToConfig(tenantID, provider, rowName, p)
+	cfg := payloadToConfig(tenantID, name, p)
 	masked := AsRecord(cfg, p.Credentials)
 	return &DecryptedConfig{
 		ProviderConfig: *masked,
@@ -383,18 +402,18 @@ func (s *postgresStore) Resolve(ctx context.Context, tenantID string, name strin
 }
 
 // ---------------------------------------------------------------------------
-// Default pointer helpers (stored as a special meta row)
+// Default pointer helpers (stored as meta rows in tenant_secrets)
 // ---------------------------------------------------------------------------
 
 func (s *postgresStore) readDefault(ctx context.Context) (string, error) {
-	var env []byte
+	var enc []byte
 	err := s.pg.QueryRow(ctx,
-		`SELECT envelope FROM provider_configs WHERE name = '_default' AND provider = '_meta'`,
-	).Scan(&env)
+		`SELECT envelope FROM tenant_secrets WHERE name = $1`, providerDefaultKey,
+	).Scan(&enc)
 	if err != nil {
 		return "", fmt.Errorf("read default: %w", err)
 	}
-	plain, err := envelope.Decrypt(s.kek, env, providerConfigAAD("_meta", "_default"))
+	plain, err := envelope.Decrypt(s.kek, enc, secretAAD(providerDefaultKey))
 	if err != nil {
 		return "", err
 	}
@@ -402,15 +421,15 @@ func (s *postgresStore) readDefault(ctx context.Context) (string, error) {
 }
 
 func (s *postgresStore) writeDefault(ctx context.Context, _ string, name string) error {
-	env, err := envelope.Encrypt(s.kek, []byte(name), providerConfigAAD("_meta", "_default"))
+	enc, err := envelope.Encrypt(s.kek, []byte(name), secretAAD(providerDefaultKey))
 	if err != nil {
 		return fmt.Errorf("encrypt default pointer: %w", err)
 	}
 	_, err = s.pg.Exec(ctx,
-		`INSERT INTO provider_configs (provider, name, envelope, created_at, updated_at)
-		 VALUES ('_meta', '_default', $1, now(), now())
-		 ON CONFLICT (provider, name) DO UPDATE SET envelope = EXCLUDED.envelope, updated_at = now()`,
-		env,
+		`INSERT INTO tenant_secrets (name, envelope, created_at, updated_at)
+		 VALUES ($1, $2, now(), now())
+		 ON CONFLICT (name) DO UPDATE SET envelope = EXCLUDED.envelope, updated_at = now()`,
+		providerDefaultKey, enc,
 	)
 	return err
 }
@@ -421,7 +440,7 @@ func (s *postgresStore) clearDefaultIfMatch(ctx context.Context, name string) er
 		return nil
 	}
 	_, err = s.pg.Exec(context.Background(),
-		`DELETE FROM provider_configs WHERE name = '_default' AND provider = '_meta'`,
+		`DELETE FROM tenant_secrets WHERE name = $1`, providerDefaultKey,
 	)
 	return err
 }
@@ -430,7 +449,7 @@ func (s *postgresStore) clearDefaultIfMatch(ctx context.Context, name string) er
 // Helpers
 // ---------------------------------------------------------------------------
 
-func payloadToConfig(tenantID, provider, name string, p *providerConfigPayload) *ProviderConfig {
+func payloadToConfig(tenantID, name string, p *providerConfigPayload) *ProviderConfig {
 	return &ProviderConfig{
 		ID:           types.NewID(),
 		TenantID:     tenantID,
@@ -462,9 +481,6 @@ func isPgUniqueViolation(err error) bool {
 // NewPostgresStore constructs a ProviderConfigStore backed by a per-tenant
 // Postgres database. pg must be connected to the tenant's dedicated database.
 // kek must be exactly 32 bytes (the per-tenant KEK from Conn.KEK).
-//
-// This is the Phase C replacement for the Redis-backed redisStore. The same
-// ProviderConfigStore interface is preserved so callers do not require changes.
 func NewPostgresStore(pg *pgxpool.Pool, kek []byte) (ProviderConfigStore, error) {
 	return newPostgresStore(pg, kek)
 }
