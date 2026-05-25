@@ -509,8 +509,8 @@ github.com/zero-day-ai/platform-clients v0.10.0 h1:BUHZKZ9oWxBjTiJrEmurZh9jb0ehg
 github.com/zero-day-ai/platform-clients v0.10.0/go.mod h1:7yh3TnK3PTR4jAdJDHsUFRwJ1Ij7KDOrfke1F4en968=
 github.com/zero-day-ai/platform-sdk v0.9.0 h1:Ow68tJlwW1H3nKNPSwIwyITXOEet1Aijmurlia9m1TI=
 github.com/zero-day-ai/platform-sdk v0.9.0/go.mod h1:iMf8w4y3qrffVDDkIpbL2tl9qmiX3/EdEJXqbXP2BMw=
-github.com/zero-day-ai/sdk v0.119.0 h1:22IJUeIkPC9gomu2ABtPgpPZ6slNFFKGgj7GIReXyH4=
-github.com/zero-day-ai/sdk v0.119.0/go.mod h1:649Nx9xNGYNio/CvEZkHCWzYOMuY5Uf+SxDeoDdlGqY=
+github.com/zero-day-ai/sdk v0.120.0 h1:AERLWTLKh8NkWsNO0lOg//7MLrckq457mr095ur9kl0=
+github.com/zero-day-ai/sdk v0.120.0/go.mod h1:pmMwLPHzrYfFxBMx8i5unvAHC6K2vpYNrzFLgcJ0dJk=
 github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66 h1:7hZeaP1CwGKTEJgSiyXL1GEyCAFWSZ4O6rCYMFThy8U=
 github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66/go.mod h1:toFwwA5SpWeL0/Pr3XOelvHRZrzs7Ex9vpul5lA1SCY=
 github.com/zero-day-ai/testfixtures v0.1.0 h1:IfvkT7GV9M5QyibSr2gDPl7OkwfNZ5l/WDPrXJhVix8=
