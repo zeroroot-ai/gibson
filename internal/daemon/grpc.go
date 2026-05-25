@@ -856,18 +856,17 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			daemonSvc.WithImpersonationIssuer(issuer)
 			d.logger.Info(ctx, "impersonation issuer wired into DaemonServer")
 
-			// Wire the reserved-names provider so PlatformOperatorService.
-			// GetReservedNames returns the chart-mounted denylist. The chart
-			// projects the gibson-reserved-names ConfigMap as a volume at
-			// reservednames.DefaultMountDir; the provider reads from disk
-			// and watches with fsnotify (ADR-0023). No K8s API client.
-			// Spec: tenant-provisioning-unification-phase2 Requirement 4.5.
+			// Wire the reserved-names provider for TenantAdminService.GetReservedNames.
+			// The chart projects the gibson-reserved-names ConfigMap as a volume at
+			// reservednames.DefaultMountDir; the provider reads from disk and watches
+			// with fsnotify (ADR-0023). No K8s API client.
+			// DaemonOperatorService.GetReservedNames was removed (gibson#399); the
+			// provider is wired only into TenantAdminServer now.
 			if rnp, rerr := reservednames.New(reservednames.DefaultMountDir, nil); rerr != nil {
 				d.logger.Warn(ctx, "reserved-names provider not wired: fsnotify init failed", "error", rerr)
 			} else {
-				daemonSvc.WithReservedNames(rnp)
-				rnpForAdmin = rnp // shared with TenantAdminServer below
-				d.logger.Info(ctx, "reserved-names provider wired into DaemonServer", "mount_dir", reservednames.DefaultMountDir)
+				rnpForAdmin = rnp // wired into TenantAdminServer below
+				d.logger.Info(ctx, "reserved-names provider wired for TenantAdminService", "mount_dir", reservednames.DefaultMountDir)
 			}
 
 		} else {

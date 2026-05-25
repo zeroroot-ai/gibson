@@ -220,18 +220,6 @@ type DaemonServer struct {
 	// Populated from GIBSON_PUBLIC_URL env var at server construction time.
 	gibsonPublicURL string
 
-	// reservedNames returns the chart-managed denylist that backs
-	// PlatformOperatorService.GetReservedNames. May be nil; when nil the
-	// handler returns empty lists.
-	// Spec: tenant-provisioning-unification-phase2 Requirement 4.5.
-	reservedNames reservedNamesProvider
-}
-
-// reservedNamesProvider returns the (exact, prefix) denylist used by the
-// admission webhook and the dashboard signup form. Implementations are
-// expected to apply their own caching — handler calls them on every RPC.
-type reservedNamesProvider interface {
-	ReservedNames(ctx context.Context) (exact, prefix []string, err error)
 }
 
 // auditWriterIface is the narrow surface TenantAdminService uses from
@@ -879,17 +867,6 @@ func (s *DaemonServer) WithQuotaManager(qm MissionQuotaChecker) *DaemonServer {
 // Call this immediately after NewDaemonServer and before registering the server.
 func (s *DaemonServer) WithOnboardingStore(store *onboarding.RedisOnboardingStore) *DaemonServer {
 	s.onboardingStore = store
-	return s
-}
-
-// WithReservedNames wires the chart-managed reserved-names provider so that
-// PlatformOperatorService.GetReservedNames returns the live denylist. Call
-// immediately after NewDaemonServer and before registering the server.
-//
-// The provider is responsible for its own caching; the handler invokes it
-// on every RPC. Spec: tenant-provisioning-unification-phase2 Requirement 4.5.
-func (s *DaemonServer) WithReservedNames(p reservedNamesProvider) *DaemonServer {
-	s.reservedNames = p
 	return s
 }
 
