@@ -1417,12 +1417,14 @@ func TestConsumerGroupMission(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Step 3: Consumer 1 reads 3 messages
+	// Step 3: Consumer 1 reads 3 messages.
+	// NoAck is left at its default (false) so that delivered messages enter the
+	// pending entries list (PEL); the steps below assert on pending/ack/claim
+	// behaviour, which only applies when messages require explicit acknowledgment.
 	opts := &ConsumerGroupOptions{
 		Group:    group,
 		Consumer: "worker-1",
 		Count:    3,
-		NoAck:    true,
 	}
 	entries1, err := client.StreamReadGroup(ctx, stream, ">", opts)
 	require.NoError(t, err)
