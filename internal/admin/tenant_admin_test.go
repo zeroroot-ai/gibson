@@ -454,7 +454,6 @@ func TestClassifyProbeError(t *testing.T) {
 
 func TestProviderEnumStringRoundtrip(t *testing.T) {
 	enums := []adminv1.BrokerProvider{
-		adminv1.BrokerProvider_BROKER_PROVIDER_POSTGRES,
 		adminv1.BrokerProvider_BROKER_PROVIDER_VAULT,
 		adminv1.BrokerProvider_BROKER_PROVIDER_AWSSM,
 		adminv1.BrokerProvider_BROKER_PROVIDER_GCPSM,

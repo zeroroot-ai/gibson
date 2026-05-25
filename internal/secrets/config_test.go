@@ -190,18 +190,18 @@ func TestConfigStore_SetProbeSuccess_PersistsRow(t *testing.T) {
 	row := newFakeRowStore()
 	aud := &fakeAuditCapture{}
 	factories := map[string]ProviderFactory{
-		"postgres": func(_ []byte) (sdksecrets.Broker, error) {
+		"vault": func(_ []byte) (sdksecrets.Broker, error) {
 			return &fakeSecretsBroker{}, nil
 		},
 	}
 	cs := newConfigStoreT(row, factories, aud)
 
-	cfg := BrokerConfig{Provider: "postgres", ConfigBlob: []byte(`{"provider":"postgres"}`)}
+	cfg := BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{"address":"https://vault.example.com"}`)}
 	require.NoError(t, cs.Set(context.Background(), cfgTestTenant, cfg, "operator-1"))
 
 	got, err := cs.Get(context.Background(), cfgTestTenant)
 	require.NoError(t, err)
-	assert.Equal(t, "postgres", got.Provider)
+	assert.Equal(t, "vault", got.Provider)
 	assert.Equal(t, cfg.ConfigBlob, got.ConfigBlob)
 
 	require.Len(t, aud.events, 1)
@@ -248,7 +248,7 @@ func TestConfigStore_SetUnknownProvider(t *testing.T) {
 
 func TestConfigStore_DeleteEmitsAllowAudit(t *testing.T) {
 	row := newFakeRowStore()
-	row.rows[cfgTestTenant.String()] = fakeRowEntry{provider: "postgres", blob: []byte(`{}`)}
+	row.rows[cfgTestTenant.String()] = fakeRowEntry{provider: "vault", blob: []byte(`{}`)}
 	aud := &fakeAuditCapture{}
 	cs := newConfigStoreT(row, nil, aud)
 

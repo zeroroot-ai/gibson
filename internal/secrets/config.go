@@ -26,14 +26,13 @@ var ErrBrokerConfigNotFound = configstore.ErrNotFound
 // never persisted in plaintext — configstore.Store.SetRaw encrypts it
 // before writing.
 type BrokerConfig struct {
-	// Provider is one of: "postgres", "vault", "awssm", "gcpsm", "azurekv".
+	// Provider is one of: "vault", "awssm", "gcpsm", "azurekv".
 	Provider string
 
-	// ConfigBlob is the raw JSON of the provider-specific configuration.
-	// For the Postgres provider, this is `{"provider":"postgres"}`.
-	// For other providers, it contains auth credentials and connection
-	// parameters. This field is the envelope payload — callers must treat
-	// it as opaque bytes and never log it.
+	// ConfigBlob is the raw JSON of the provider-specific configuration
+	// containing auth credentials and connection parameters. This field is
+	// the envelope payload — callers must treat it as opaque bytes and never
+	// log it.
 	ConfigBlob []byte
 }
 

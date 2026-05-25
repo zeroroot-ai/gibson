@@ -83,18 +83,18 @@ func (b *labelledBroker) Capabilities() sdksecrets.Capabilities {
 // regresses to a no-op, this test fails before any handler-level test even
 // runs.
 func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
-	pgFake := &labelledBroker{label: "postgres"}
+	awssmFake := &labelledBroker{label: "awssm"}
 	vaultFake := &labelledBroker{label: "vault"}
 
 	tenant := mustTenant(t, "acme")
-	// gibson#101: every tenant needs an explicit broker config row;
-	// the implicit Postgres fallback was removed because it caused
-	// 60s timeout-loops on unprovisioned tenants. Seed the row here.
+	// gibson#101: every tenant needs an explicit broker config row.
 	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{
-		tenant: {Provider: "postgres", ConfigBlob: []byte(`{}`)},
+		tenant: {Provider: "awssm", ConfigBlob: []byte(`{}`)},
 	}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
-		PostgresProvider: pgFake,
+		AWSSMFactory: func(_ []byte) (sdksecrets.Broker, error) {
+			return awssmFake, nil
+		},
 		VaultFactory: func(_ []byte) (sdksecrets.Broker, error) {
 			return vaultFake, nil
 		},
@@ -105,13 +105,13 @@ func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Initial state: explicit Postgres config row → Postgres provider.
+	// Initial state: explicit awssm config row → awssm provider.
 	got, err := reg.For(ctx, tenant)
 	if err != nil {
 		t.Fatalf("For(initial): %v", err)
 	}
-	if got != pgFake {
-		t.Fatalf("initial: got %v, want postgres fake", got)
+	if got != awssmFake {
+		t.Fatalf("initial: got %v, want awssm fake", got)
 	}
 
 	// Simulate writer.Set landing a vault row.
@@ -120,11 +120,11 @@ func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
 		ConfigBlob: []byte(`{"address":"https://vault"}`),
 	}
 
-	// Without Reload, the Registry still returns the cached Postgres
+	// Without Reload, the Registry still returns the cached awssm provider
 	// (this is the pre-spec bug surface).
 	got, _ = reg.For(ctx, tenant)
-	if got != pgFake {
-		t.Fatalf("pre-Reload: cache should still be Postgres, got %v", got)
+	if got != awssmFake {
+		t.Fatalf("pre-Reload: cache should still be awssm, got %v", got)
 	}
 
 	// Reload invalidates the cache.
@@ -145,12 +145,14 @@ func TestRegistry_ReloadInvalidatesCache(t *testing.T) {
 // call, this test fails at the post-Set assertion — that is the regression
 // this spec exists to prevent.
 func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
-	pgFake := &labelledBroker{label: "postgres"}
+	awssmFake := &labelledBroker{label: "awssm"}
 	vaultFake := &labelledBroker{label: "vault"}
 
 	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
-		PostgresProvider: pgFake,
+		AWSSMFactory: func(_ []byte) (sdksecrets.Broker, error) {
+			return awssmFake, nil
+		},
 		VaultFactory: func(_ []byte) (sdksecrets.Broker, error) {
 			return vaultFake, nil
 		},
@@ -175,15 +177,15 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 	tenant := mustTenant(t, "acme")
 	ctx := withTenant(t, "acme")
 
-	// gibson#101: seed an explicit Postgres row (the implicit fallback
-	// was removed). The "pre-Set" assertion below remains valid.
+	// gibson#101: seed an explicit awssm row. The "pre-Set" assertion
+	// below remains valid.
 	getter.rows[tenant] = secrets.BrokerConfig{
-		Provider: "postgres", ConfigBlob: []byte(`{}`),
+		Provider: "awssm", ConfigBlob: []byte(`{}`),
 	}
 
-	// Initial: explicit Postgres row → Postgres provider.
-	if got, _ := reg.For(ctx, tenant); got != pgFake {
-		t.Fatalf("pre-Set: got %v, want postgres", got)
+	// Initial: explicit awssm row → awssm provider.
+	if got, _ := reg.For(ctx, tenant); got != awssmFake {
+		t.Fatalf("pre-Set: got %v, want awssm", got)
 	}
 
 	// Drive SetBrokerConfig with a vault candidate.
@@ -198,8 +200,8 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 	}
 
 	// CRITICAL: post-Set, Registry.For MUST return the vault fake. If
-	// SetBrokerConfig didn't call Reload, the cache still serves
-	// Postgres and the test fails.
+	// SetBrokerConfig didn't call Reload, the cache still serves awssm
+	// and the test fails.
 	got, err := reg.For(ctx, tenant)
 	if err != nil {
 		t.Fatalf("For(post-Set): %v", err)
@@ -214,12 +216,14 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 // handler must report the persist failure and leave the cached provider
 // alone — invalidating after a failed write would be lying about state.
 func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
-	pgFake := &labelledBroker{label: "postgres"}
+	awssmFake := &labelledBroker{label: "awssm"}
 	vaultFake := &labelledBroker{label: "vault"}
 
 	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{}}
 	reg, err := secrets.NewRegistry(getter, secrets.RegistryConfig{
-		PostgresProvider: pgFake,
+		AWSSMFactory: func(_ []byte) (sdksecrets.Broker, error) {
+			return awssmFake, nil
+		},
 		VaultFactory: func(_ []byte) (sdksecrets.Broker, error) {
 			return vaultFake, nil
 		},
@@ -246,15 +250,15 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 	tenant := mustTenant(t, "acme")
 	ctx := withTenant(t, "acme")
 
-	// gibson#101: seed an explicit Postgres row so the warm-up path
-	// resolves cleanly. The implicit fallback was removed.
+	// gibson#101: seed an explicit awssm row so the warm-up path
+	// resolves cleanly.
 	getter.rows[tenant] = secrets.BrokerConfig{
-		Provider: "postgres", ConfigBlob: []byte(`{}`),
+		Provider: "awssm", ConfigBlob: []byte(`{}`),
 	}
 
-	// Warm the cache with the configured Postgres provider.
-	if got, _ := reg.For(ctx, tenant); got != pgFake {
-		t.Fatalf("warm-up: got %v, want postgres", got)
+	// Warm the cache with the configured awssm provider.
+	if got, _ := reg.For(ctx, tenant); got != awssmFake {
+		t.Fatalf("warm-up: got %v, want awssm", got)
 	}
 
 	// Drive SetBrokerConfig — writer fails.
@@ -269,9 +273,9 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 		t.Fatal("expected SetBrokerConfig to fail on writer error")
 	}
 
-	// The cache should still serve Postgres — Reload must not have fired.
-	if got, _ := reg.For(ctx, tenant); got != pgFake {
-		t.Fatalf("post-failure: cache should still be Postgres, got %v", got)
+	// The cache should still serve awssm — Reload must not have fired.
+	if got, _ := reg.For(ctx, tenant); got != awssmFake {
+		t.Fatalf("post-failure: cache should still be awssm, got %v", got)
 	}
 }
 

@@ -644,11 +644,9 @@ func stringField(dict map[string]any, key string) string {
 }
 
 // providerEnumToString maps the proto enum to the registry string name.
-// Returns "" for UNSPECIFIED.
+// Returns "" for UNSPECIFIED or any reserved/removed provider.
 func providerEnumToString(p adminv1.BrokerProvider) string {
 	switch p {
-	case adminv1.BrokerProvider_BROKER_PROVIDER_POSTGRES:
-		return "postgres"
 	case adminv1.BrokerProvider_BROKER_PROVIDER_VAULT:
 		return "vault"
 	case adminv1.BrokerProvider_BROKER_PROVIDER_AWSSM:
@@ -666,8 +664,6 @@ func providerEnumToString(p adminv1.BrokerProvider) string {
 // enum. Returns UNSPECIFIED for unknown values.
 func providerStringToEnum(s string) adminv1.BrokerProvider {
 	switch s {
-	case "postgres":
-		return adminv1.BrokerProvider_BROKER_PROVIDER_POSTGRES
 	case "vault":
 		return adminv1.BrokerProvider_BROKER_PROVIDER_VAULT
 	case "awssm":
