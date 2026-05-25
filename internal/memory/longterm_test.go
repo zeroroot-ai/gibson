@@ -206,8 +206,9 @@ func TestLongTermMemory_Delete(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify it's deleted
-	_, err = mockStore.Get(ctx, "test-id")
-	assert.Error(t, err) // Should return error for not found
+	gone, err := mockStore.Get(ctx, "test-id")
+	assert.NoError(t, err)
+	assert.Nil(t, gone)
 }
 
 // TestLongTermMemory_Delete_NonExistent tests deleting non-existent content.

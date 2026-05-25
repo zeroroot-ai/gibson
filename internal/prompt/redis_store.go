@@ -173,11 +173,16 @@ func (s *RedisPromptStore) List(ctx context.Context) ([]*Prompt, error) {
 			continue // Skip deleted or missing keys
 		}
 
-		var prompt Prompt
-		if err := json.Unmarshal(raw, &prompt); err != nil {
+		// JSONMGet with path "$" wraps each result in a JSON array.
+		var wrapped []Prompt
+		if err := json.Unmarshal(raw, &wrapped); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal prompt from key %q: %w", keys[i], err)
 		}
-		prompts = append(prompts, &prompt)
+		if len(wrapped) == 0 {
+			continue
+		}
+		p := wrapped[0]
+		prompts = append(prompts, &p)
 	}
 
 	return prompts, nil

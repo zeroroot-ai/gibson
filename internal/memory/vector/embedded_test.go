@@ -33,12 +33,9 @@ func TestEmbeddedVectorStore_GetNotFound(t *testing.T) {
 	ctx := context.Background()
 	store := NewEmbeddedVectorStore(3)
 
-	_, err := store.Get(ctx, "nonexistent")
-	require.Error(t, err)
-
-	var gibsonErr *types.GibsonError
-	require.ErrorAs(t, err, &gibsonErr)
-	assert.Equal(t, ErrCodeVectorNotFound, gibsonErr.Code)
+	result, err := store.Get(ctx, "nonexistent")
+	require.NoError(t, err)
+	assert.Nil(t, result)
 }
 
 func TestEmbeddedVectorStore_StoreBatch(t *testing.T) {
@@ -79,8 +76,9 @@ func TestEmbeddedVectorStore_Delete(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify it's gone
-	_, err = store.Get(ctx, "test-1")
-	require.Error(t, err)
+	result, err := store.Get(ctx, "test-1")
+	require.NoError(t, err)
+	assert.Nil(t, result)
 }
 
 func TestEmbeddedVectorStore_Search_TopK(t *testing.T) {

@@ -25,7 +25,7 @@ func TestCypherBuilder_BuildNodeMerge(t *testing.T) {
 			},
 			wantQuery: []string{
 				"MERGE (n:mission {id: $id})",
-				"SET n.name = $name",
+				"n.name = $name",
 				"n.status = $status",
 				"n.updated_at = datetime($updated_at)",
 				"RETURN n",
@@ -79,7 +79,7 @@ func TestCypherBuilder_BuildNodeMerge(t *testing.T) {
 			},
 			wantQuery: []string{
 				"MERGE (n:host {id: $id})",
-				"SET n.tags = $tags",
+				"n.tags = $tags",
 				"n.ports = $ports",
 			},
 			wantParams: []string{"id", "tags", "ports"},
