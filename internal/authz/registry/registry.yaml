@@ -85,7 +85,25 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
+  "/gibson.admin.v1.TenantAdminService/AddTeamMember":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.admin.v1.TenantAdminService/CountSecrets":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.admin.v1.TenantAdminService/CreateTeam":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.admin.v1.TenantAdminService/DeleteTeam":
     relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -97,6 +115,8 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
+  "/gibson.admin.v1.TenantAdminService/GetReservedNames":
+    unauthenticated: true
   "/gibson.admin.v1.TenantAdminService/GetSupportedProviders":
     relation: "member"
     object_type: "tenant"
@@ -104,6 +124,12 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.admin.v1.TenantAdminService/GrantComponentPermissions":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.admin.v1.TenantAdminService/ListMembers":
     relation: "admin"
     object_type: "tenant"
@@ -111,6 +137,18 @@ entries:
     allowed_identities:
       - USER
   "/gibson.admin.v1.TenantAdminService/ListProviderModels":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.admin.v1.TenantAdminService/ListTeamMembers":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.admin.v1.TenantAdminService/ListTeams":
     relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -128,7 +166,37 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
+  "/gibson.admin.v1.TenantAdminService/RemoveTeamMember":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.admin.v1.TenantAdminService/SetBrokerConfig":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.admin.v1.TenantAdminService/SetComponentAccess":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.admin.v1.TenantAdminService/SetTeamAdmin":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.admin.v1.TenantAdminService/SetTenantRole":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.admin.v1.TenantAdminService/TransferOwnership":
     relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
