@@ -29,6 +29,12 @@ import (
 var allowedUnauthenticated = map[string]bool{
 	"/gibson.daemon.v1.DaemonService/Connect": true,
 	"/gibson.daemon.v1.DaemonService/Ping":    true,
+
+	// GetReservedNames is intentionally unauthenticated on TenantAdminService.
+	// It returns the chart-managed denylist for the signup form — a pre-auth
+	// surface where no tenant JWT can be present. Spec: issue #395
+	// (tenant-service-admin-handlers: GetReservedNames).
+	"/gibson.admin.v1.TenantAdminService/GetReservedNames": true,
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map

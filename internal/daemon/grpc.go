@@ -767,6 +767,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.logger.Info(ctx, "agent owner lookup wired on callback service (reads registry ComponentInfo.Metadata owner_user_id)")
 	}
 
+	// rnpForAdmin is set in the redis block below if the reserved-names provider
+	// initialises successfully. It is passed to TenantAdminServer so that
+	// TenantAdminService.GetReservedNames is available on the admin surface.
+	var rnpForAdmin admin.ReservedNamesProvider
+
 	// Wire daemon dependencies that require the Redis state client.
 	// Tenant lifecycle (create/provision/deprovision) has moved out of the daemon
 	// to the standalone gibson-tenant-operator; this block only wires the
@@ -861,6 +866,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				d.logger.Warn(ctx, "reserved-names provider not wired: fsnotify init failed", "error", rerr)
 			} else {
 				daemonSvc.WithReservedNames(rnp)
+				rnpForAdmin = rnp // shared with TenantAdminServer below
 				d.logger.Info(ctx, "reserved-names provider wired into DaemonServer", "mount_dir", reservednames.DefaultMountDir)
 			}
 
@@ -926,6 +932,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			SecretsService: d.secretsService,
 			Authorizer:     d.authorizer,
 			IdPAdminClient: idpClient,
+			ReservedNames:  rnpForAdmin,
 			Logger:         d.logger.Slog(),
 		})
 		if taErr != nil {

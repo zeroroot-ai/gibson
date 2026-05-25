@@ -95,20 +95,29 @@ type SecretsLister interface {
 	List(ctx context.Context, filter sdksecrets.Filter) ([]string, error)
 }
 
+// ReservedNamesProvider returns the (exact, prefix) denylist used by the
+// GetReservedNames handler. The production wiring is
+// *reservednames.Provider; tests inject a fake. The interface is satisfied
+// by any type with a ReservedNames(ctx) ([]string, []string, error) method.
+type ReservedNamesProvider interface {
+	ReservedNames(ctx context.Context) (exact, prefix []string, err error)
+}
+
 // TenantAdminServer implements adminv1.TenantAdminServiceServer.
 type TenantAdminServer struct {
 	adminv1.UnimplementedTenantAdminServiceServer
 
-	reader     TenantConfigStoreReader
-	writer     TenantConfigStoreWriter
-	probeFac   ProviderProbeFactory
-	auditor    BootstrapTokenAuditor
-	reloader   Reloader
-	svc        SecretsLister
-	now        func() time.Time
-	authorizer authz.Authorizer // optional; ListMembers returns empty when nil
-	idpClient  idp.AdminClient  // optional; members have empty display_name/email when nil
-	logger     *slog.Logger
+	reader        TenantConfigStoreReader
+	writer        TenantConfigStoreWriter
+	probeFac      ProviderProbeFactory
+	auditor       BootstrapTokenAuditor
+	reloader      Reloader
+	svc           SecretsLister
+	now           func() time.Time
+	authorizer    authz.Authorizer      // optional; ListMembers returns empty when nil
+	idpClient     idp.AdminClient       // optional; members have empty display_name/email when nil
+	reservedNames ReservedNamesProvider // optional; GetReservedNames returns empty when nil
+	logger        *slog.Logger
 }
 
 // TenantAdminConfig groups the constructor's required dependencies.
@@ -125,6 +134,8 @@ type TenantAdminConfig struct {
 	// IdPAdminClient is optional. When nil, display_name and email fields are
 	// left empty in ListMembers responses.
 	IdPAdminClient idp.AdminClient
+	// ReservedNames is optional. When nil, GetReservedNames returns empty lists.
+	ReservedNames ReservedNamesProvider
 	// Logger is optional; falls back to slog.Default() when nil.
 	Logger *slog.Logger
 }
@@ -160,16 +171,17 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 		logger = slog.Default()
 	}
 	return &TenantAdminServer{
-		reader:     cfg.Reader,
-		writer:     cfg.Writer,
-		probeFac:   cfg.ProbeFactory,
-		auditor:    cfg.Auditor,
-		reloader:   cfg.Reloader,
-		svc:        cfg.SecretsService,
-		now:        now,
-		authorizer: cfg.Authorizer,
-		idpClient:  cfg.IdPAdminClient,
-		logger:     logger,
+		reader:        cfg.Reader,
+		writer:        cfg.Writer,
+		probeFac:      cfg.ProbeFactory,
+		auditor:       cfg.Auditor,
+		reloader:      cfg.Reloader,
+		svc:           cfg.SecretsService,
+		now:           now,
+		authorizer:    cfg.Authorizer,
+		idpClient:     cfg.IdPAdminClient,
+		reservedNames: cfg.ReservedNames,
+		logger:        logger,
 	}, nil
 }
 
