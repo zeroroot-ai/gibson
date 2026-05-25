@@ -62,6 +62,30 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.118.0](https://github.com/zero-day-ai/gibson/compare/v0.117.0...v0.118.0) (2026-05-24)
+
+
+### Features
+
+* **daemon:** implement TenantAdminService.ListMembers ([#367](https://github.com/zero-day-ai/gibson/issues/367)) ([bc65753](https://github.com/zero-day-ai/gibson/commit/bc65753436c79e20ab89bbee80f1591f400677ee))
+
+
+### Bug Fixes
+
+* **authz:** add tenant#writer relation to FGA model (ADR-0037) ([#361](https://github.com/zero-day-ai/gibson/issues/361)) ([58b0d7e](https://github.com/zero-day-ai/gibson/commit/58b0d7e4326503de31e39132e50cca4294637350))
+* **ci:** add paths-ignore for doc-only PRs to daemon build ([#365](https://github.com/zero-day-ai/gibson/issues/365)) ([2aa9cbb](https://github.com/zero-day-ai/gibson/commit/2aa9cbbb96abf1bd59b956bab20aa2596a1c5941)), closes [#362](https://github.com/zero-day-ai/gibson/issues/362)
+* **ci:** add Redis service container to test job (fixes [#368](https://github.com/zero-day-ai/gibson/issues/368)) ([#371](https://github.com/zero-day-ai/gibson/issues/371)) ([41c6887](https://github.com/zero-day-ai/gibson/commit/41c688775f72348a91ae06cc942eaa3f3aa54be3))
+* **ci:** add Redis service container to test job in build.yaml ([#377](https://github.com/zero-day-ai/gibson/issues/377)) ([c265447](https://github.com/zero-day-ai/gibson/commit/c2654470a429c041cfd721c532bde2d0d90dc082))
+* **ci:** migrate build.yaml to reusable-image-build for :main tag ([#357](https://github.com/zero-day-ai/gibson/issues/357)) ([6952dc9](https://github.com/zero-day-ai/gibson/commit/6952dc96607e3eca657192396fde86d44c634bdc))
+* **ci:** pass explicit GITHUB_TOKEN to release-please-action@v5 ([#360](https://github.com/zero-day-ai/gibson/issues/360)) ([cf08526](https://github.com/zero-day-ai/gibson/commit/cf0852691bb1445198ba110dce5be84fcc9516ab)), closes [#288](https://github.com/zero-day-ai/gibson/issues/288)
+* **ci:** publish-authz-registry silently skipped since v0.108.0 ([#356](https://github.com/zero-day-ai/gibson/issues/356)) ([ca167eb](https://github.com/zero-day-ai/gibson/commit/ca167eb52f0ccec3225ef859d9d3eb98e514ae71))
+* **ci:** use security-extended queries for CodeQL ([#366](https://github.com/zero-day-ai/gibson/issues/366)) ([68a95db](https://github.com/zero-day-ai/gibson/commit/68a95dbdc004795848ec01a476c9fd639495f4b3)), closes [#363](https://github.com/zero-day-ai/gibson/issues/363)
+* **ci:** wire deploy repo auth in signup-smoke checkout step ([#355](https://github.com/zero-day-ai/gibson/issues/355)) ([be40953](https://github.com/zero-day-ai/gibson/commit/be4095312950fd993ec6808aea2d836a32566725)), closes [#341](https://github.com/zero-day-ai/gibson/issues/341)
+* **daemon:** register ModelAccessService on gRPC server ([#364](https://github.com/zero-day-ai/gibson/issues/364)) ([a7ea0b7](https://github.com/zero-day-ai/gibson/commit/a7ea0b7adc9b228661b743f4a5aee60ef59569be)), closes [#358](https://github.com/zero-day-ai/gibson/issues/358)
+* **queue:** remove raw go-redis import from internal/queue via redisBackend interface ([#354](https://github.com/zero-day-ai/gibson/issues/354)) ([98018bb](https://github.com/zero-day-ai/gibson/commit/98018bb42c4e630235f8f53b51c8deb1eff945ee))
+* **tests:** repair stale AST allowlist line numbers in nil-guard + time.Now walkers ([#351](https://github.com/zero-day-ai/gibson/issues/351)) ([b389211](https://github.com/zero-day-ai/gibson/commit/b389211b6cb97c6c0a6a4e60c4d91e9bc59dd306))
+* **vector:** translate VECTOR_NOT_FOUND to (nil, nil) in tenantScopedStore.Get ([#378](https://github.com/zero-day-ai/gibson/issues/378)) ([339d570](https://github.com/zero-day-ai/gibson/commit/339d5708810b459989ce9f5c1260eb6f61e7d702))
+
 ## [0.117.0](https://github.com/zero-day-ai/gibson/compare/v0.116.0...v0.117.0) (2026-05-24)
 
 
