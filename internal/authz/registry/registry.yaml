@@ -703,13 +703,6 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
-  "/gibson.daemon.operator.v1.DaemonOperatorService/GetReservedNames":
-    relation: "platform_operator"
-    object_type: "system_tenant"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - USER
-      - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/ImpersonateTenant":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -718,20 +711,6 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples":
-    relation: "platform_operator"
-    object_type: "system_tenant"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.daemon.operator.v1.DaemonOperatorService/ListTeamMembers":
-    relation: "platform_operator"
-    object_type: "system_tenant"
-    object_deriver: "system_tenant"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.daemon.operator.v1.DaemonOperatorService/ListTeams":
     relation: "platform_operator"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
