@@ -32,14 +32,33 @@ func NewDaemonCredentialStore(service *secrets.Service) (*DaemonCredentialStore,
 	return &DaemonCredentialStore{service: service}, nil
 }
 
+// userSecretPrefix is the Vault KV sub-path under which user-supplied secrets
+// are stored. It must stay in sync with admin.userPrefix in
+// internal/admin/secrets_admin.go. The Vault ACL enforced by tenant-operator#271
+// separates "user/*" (plugin-readable creds) from "infra/*" (operator-only).
+//
+// Spec: secrets-blast-radius-reduction / gibson#404.
+const userSecretPrefix = "user/"
+
 // GetCredential retrieves a credential by name for the tenant in context.
+// The caller-facing name (e.g. "cred:openai-prod") is stored in Vault under
+// "user/<name>" (e.g. "user/cred:openai-prod"). The prefix is prepended here
+// so that plugin GetCredential calls resolve from the correct Vault path.
 // It delegates to secrets.Service.Resolve and wraps the returned bytes as a
 // types.Credential value. The decrypted plaintext secret is returned as the
 // second return value.
 //
 // SECURITY: never log or persist the returned secret string.
 func (s *DaemonCredentialStore) GetCredential(ctx context.Context, name string) (*types.Credential, string, error) {
-	secretBytes, err := s.service.Resolve(ctx, name)
+	// Prepend "user/" when the name carries a known user-secret category prefix
+	// but hasn't already been stored-form-encoded. Infra secrets (e.g.
+	// "infra/postgres") do not carry "cred:" / "provider_config:" so they pass
+	// through unchanged — the broker serves them from their root mount path.
+	storedName := name
+	if !hasUserPrefix(name) && isUserSecretName(name) {
+		storedName = userSecretPrefix + name
+	}
+	secretBytes, err := s.service.Resolve(ctx, storedName)
 	if err != nil {
 		// secrets.Service returns gRPC status errors. Map NotFound to a
 		// user-facing message; surface others directly.
@@ -53,13 +72,31 @@ func (s *DaemonCredentialStore) GetCredential(ctx context.Context, name string) 
 	}
 
 	// Build a minimal Credential for the harness API.
-	// The harness only uses Name and the plaintext secret; other fields
-	// are not required by the CredentialStore interface contract.
+	// Return the caller-facing name (not the stored form with "user/") so the
+	// harness and plugins see the name they originally provided.
 	cred := &types.Credential{
 		ID:   types.NewID(),
 		Name: name,
 	}
 	return cred, string(secretBytes), nil
+}
+
+// hasUserPrefix reports whether name already starts with the userSecretPrefix.
+func hasUserPrefix(name string) bool {
+	return len(name) > len(userSecretPrefix) && name[:len(userSecretPrefix)] == userSecretPrefix
+}
+
+// isUserSecretName reports whether name should be namespaced under "user/" in
+// Vault. Only names that start with known user-secret category prefixes qualify;
+// infra paths (e.g. "infra/postgres") do not.
+func isUserSecretName(name string) bool {
+	return len(name) > 5 && (name[:5] == "cred:" || hasProviderConfigPrefix(name))
+}
+
+// hasProviderConfigPrefix reports whether name starts with "provider_config:".
+func hasProviderConfigPrefix(name string) bool {
+	const p = "provider_config:"
+	return len(name) >= len(p) && name[:len(p)] == p
 }
 
 // Health returns a healthy status. The broker stack's health is tracked
