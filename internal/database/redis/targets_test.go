@@ -18,9 +18,10 @@ func setupRedisTargetDAO(t *testing.T) (*RedisTargetDAO, context.Context, func()
 	t.Helper()
 
 	// Use test Redis configuration
+	// Database must be 0: RediSearch (FT.CREATE) rejects non-zero databases.
 	cfg := &state.Config{
 		URL:      "redis://localhost:6379",
-		Database: 15, // Use test database
+		Database: 0,
 	}
 
 	client, err := state.NewStateClient(cfg)

@@ -334,35 +334,63 @@ func (c *StateClient) FindOrCreateMission(ctx context.Context, name, missionJSON
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
-	// Parse search results
+	// Parse search results — handle both RESP2 ([]interface{}) and RESP3 (map) formats
 	if searchResult != nil {
-		resultSlice, ok := searchResult.([]interface{})
-		if ok && len(resultSlice) > 0 {
-			count, ok := resultSlice[0].(int64)
-			if ok && count > 0 && len(resultSlice) >= 2 {
-				// Found existing mission
-				existingKey, ok := resultSlice[1].(string)
-				if !ok {
-					return nil, fmt.Errorf("unexpected key type in search result: %T", resultSlice[1])
-				}
+		var foundCount int64
+		var existingKey string
 
-				// Get the full JSON document
-				existingJSON, err := c.client.Do(ctx, "JSON.GET", existingKey, "$").Result()
-				if err != nil {
-					return nil, fmt.Errorf("failed to get existing mission JSON: %w", err)
+		switch v := searchResult.(type) {
+		case []interface{}:
+			// RESP2: [total, key, fields, ...]
+			if len(v) >= 2 {
+				if c, ok := v[0].(int64); ok {
+					foundCount = c
 				}
-
-				jsonStr, ok := existingJSON.(string)
-				if !ok {
-					return nil, fmt.Errorf("unexpected JSON type: %T", existingJSON)
+				if foundCount > 0 {
+					if k, ok := v[1].(string); ok {
+						existingKey = k
+					}
 				}
-
-				return &FindOrCreateMissionResult{
-					Created: false,
-					Key:     existingKey,
-					JSON:    jsonStr,
-				}, nil
 			}
+		case map[interface{}]interface{}:
+			// RESP3: {"total_results": N, "results": [{...}]}
+			if totalVal, ok := v["total_results"]; ok {
+				if c, err := parseInteger(totalVal); err == nil {
+					foundCount = c
+				}
+			}
+			if foundCount > 0 {
+				if resultsVal, ok := v["results"]; ok {
+					if results, ok := resultsVal.([]interface{}); ok && len(results) > 0 {
+						if docMap, ok := results[0].(map[interface{}]interface{}); ok {
+							if idVal, ok := docMap["id"]; ok {
+								if k, ok := idVal.(string); ok {
+									existingKey = k
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if foundCount > 0 && existingKey != "" {
+			// Get the full JSON document
+			existingJSON, err := c.client.Do(ctx, "JSON.GET", existingKey, "$").Result()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get existing mission JSON: %w", err)
+			}
+
+			jsonStr, ok := existingJSON.(string)
+			if !ok {
+				return nil, fmt.Errorf("unexpected JSON type: %T", existingJSON)
+			}
+
+			return &FindOrCreateMissionResult{
+				Created: false,
+				Key:     existingKey,
+				JSON:    jsonStr,
+			}, nil
 		}
 	}
 

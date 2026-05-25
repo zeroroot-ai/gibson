@@ -14,14 +14,16 @@ import (
 
 // MemoryEntry represents a stored memory entry in Redis JSON format.
 // This structure is persisted as JSON and indexed for full-text search.
+// CreatedAt and UpdatedAt are stored as Unix milliseconds (int64) so that
+// RediSearch NUMERIC fields can index and sort them correctly.
 type MemoryEntry struct {
 	Key       string         `json:"key"`
 	Value     string         `json:"value"`
 	MissionID string         `json:"mission_id"`
 	TenantID  string         `json:"tenant_id,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	CreatedAt int64          `json:"created_at"` // Unix milliseconds
+	UpdatedAt int64          `json:"updated_at"` // Unix milliseconds
 }
 
 // RedisMissionMemory implements MissionMemory using Redis with RediSearch for full-text search.
@@ -169,15 +171,15 @@ func (m *RedisMissionMemory) Store(ctx context.Context, key string, value any, m
 	}
 
 	// Create memory entry document
-	now := time.Now()
+	nowMs := time.Now().UnixMilli()
 	entry := MemoryEntry{
 		Key:       key,
 		Value:     string(valueJSON),
 		MissionID: string(m.missionID),
 		TenantID:  m.tenantID,
 		Metadata:  metadata,
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt: nowMs,
+		UpdatedAt: nowMs,
 	}
 
 	// Build Redis keys
@@ -252,8 +254,8 @@ func (m *RedisMissionMemory) Retrieve(ctx context.Context, key string) (*MemoryI
 		Key:       entry.Key,
 		Value:     value,
 		Metadata:  entry.Metadata,
-		CreatedAt: entry.CreatedAt,
-		UpdatedAt: entry.UpdatedAt,
+		CreatedAt: time.UnixMilli(entry.CreatedAt),
+		UpdatedAt: time.UnixMilli(entry.UpdatedAt),
 	}, nil
 }
 
@@ -365,8 +367,8 @@ func (m *RedisMissionMemory) Search(ctx context.Context, query string, limit int
 			Key:       entry.Key,
 			Value:     value,
 			Metadata:  entry.Metadata,
-			CreatedAt: entry.CreatedAt,
-			UpdatedAt: entry.UpdatedAt,
+			CreatedAt: time.UnixMilli(entry.CreatedAt),
+			UpdatedAt: time.UnixMilli(entry.UpdatedAt),
 		}
 
 		results = append(results, MemoryResult{
@@ -437,8 +439,8 @@ func (m *RedisMissionMemory) History(ctx context.Context, limit int) ([]MemoryIt
 			Key:       entry.Key,
 			Value:     value,
 			Metadata:  entry.Metadata,
-			CreatedAt: entry.CreatedAt,
-			UpdatedAt: entry.UpdatedAt,
+			CreatedAt: time.UnixMilli(entry.CreatedAt),
+			UpdatedAt: time.UnixMilli(entry.UpdatedAt),
 		})
 	}
 
@@ -560,7 +562,7 @@ func (m *RedisMissionMemory) GetValueHistory(ctx context.Context, key string) ([
 		history = append(history, HistoricalValue{
 			Value:     value,
 			MissionID: entry.MissionID,
-			StoredAt:  entry.CreatedAt,
+			StoredAt:  time.UnixMilli(entry.CreatedAt),
 		})
 	}
 

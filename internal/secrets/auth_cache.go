@@ -164,6 +164,14 @@ func (c *AuthCache) GetOrRefresh(ctx context.Context, tenant, provider string) (
 
 	sfKey := fmt.Sprintf("%s:%s", tenant, provider)
 	result, err, _ := c.sf.Do(sfKey, func() (interface{}, error) {
+		// Double-check inside singleflight: another goroutine may have stored a
+		// fresh token between our initial cache miss and this call starting.
+		c.mu.RLock()
+		if e, ok2 := c.store[key]; ok2 && e.isValid(c.clock()) {
+			c.mu.RUnlock()
+			return e.token, nil
+		}
+		c.mu.RUnlock()
 		return c.refresh(ctx, tenant, provider)
 	})
 	if err != nil {
