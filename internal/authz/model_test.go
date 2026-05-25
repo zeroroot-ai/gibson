@@ -102,6 +102,7 @@ func TestModel_CatalogGating(t *testing.T) {
 	type action struct {
 		name       string // "read" | "write" | "execute"
 		can        string // "can_read" | "can_configure" | "can_execute"
+		direct     string // writable direct relation backing `can`: "direct_read" | "direct_configure" | "direct_execute"
 		tenantDis  string
 		teamDis    string
 		userDis    string
@@ -109,9 +110,9 @@ func TestModel_CatalogGating(t *testing.T) {
 		canAsComp  string
 	}
 	actions := []action{
-		{"read", "can_read", "tenant_read_disabled", "team_read_disabled", "user_read_disabled", "component_read_enabled", "can_read_as_component"},
-		{"write", "can_configure", "tenant_write_disabled", "team_write_disabled", "user_write_disabled", "component_write_enabled", "can_write_as_component"},
-		{"execute", "can_execute", "tenant_execute_disabled", "team_execute_disabled", "user_execute_disabled", "component_execute_enabled", "can_execute_as_component"},
+		{"read", "can_read", "direct_read", "tenant_read_disabled", "team_read_disabled", "user_read_disabled", "component_read_enabled", "can_read_as_component"},
+		{"write", "can_configure", "direct_configure", "tenant_write_disabled", "team_write_disabled", "user_write_disabled", "component_write_enabled", "can_write_as_component"},
+		{"execute", "can_execute", "direct_execute", "tenant_execute_disabled", "team_execute_disabled", "user_execute_disabled", "component_execute_enabled", "can_execute_as_component"},
 	}
 
 	// newClient produces a fresh client+store+model per subtest.
@@ -298,7 +299,7 @@ func TestModel_CatalogGating(t *testing.T) {
 			// agent_principal subject. Give it tenant-scoped access too so
 			// the ownership gate + tenant_enabled gate passes.
 			addTuples(c,
-				fgaclient.ClientTupleKey{User: agentAA, Relation: a.can, Object: compOne},
+				fgaclient.ClientTupleKey{User: agentAA, Relation: a.direct, Object: compOne},
 				fgaclient.ClientTupleKey{User: agentAA, Relation: a.compEnable, Object: compOne},
 			)
 			// Only the granted action is allowed at the _as_component level.
@@ -316,7 +317,7 @@ func TestModel_CatalogGating(t *testing.T) {
 		seed(c)
 		// Grant agent read via component-scope + direct.
 		addTuples(c,
-			fgaclient.ClientTupleKey{User: agentAA, Relation: "can_read", Object: compOne},
+			fgaclient.ClientTupleKey{User: agentAA, Relation: "direct_read", Object: compOne},
 			fgaclient.ClientTupleKey{User: agentAA, Relation: "component_read_enabled", Object: compOne},
 		)
 		require.True(t, checkAllow(c, agentAA, "can_read_as_component", compOne),
