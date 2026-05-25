@@ -487,8 +487,6 @@ github.com/tklauser/go-sysconf v0.3.16 h1:frioLaCQSsF5Cy1jgRBrzr6t502KIIwQ0MArYI
 github.com/tklauser/go-sysconf v0.3.16/go.mod h1:/qNL9xxDhc7tx3HSRsLWNnuzbVfh3e7gh/BmM179nYI=
 github.com/tklauser/numcpus v0.11.0 h1:nSTwhKH5e1dMNsCdVBukSZrURJRoHbSEQjdEbY+9RXw=
 github.com/tklauser/numcpus v0.11.0/go.mod h1:z+LwcLq54uWZTX0u/bGobaV34u6V7KNlTZejzM6/3MQ=
-github.com/tmc/langchaingo v0.1.14 h1:o1qWBPigAIuFvrG6cjTFo0cZPFEZ47ZqpOYMjM15yZc=
-github.com/tmc/langchaingo v0.1.14/go.mod h1:aKKYXYoqhIDEv7WKdpnnCLRaqXic69cX9MnDUk72378=
 github.com/vmihailenco/msgpack/v5 v5.4.1 h1:cQriyiUvjTwOHg8QZaPihLWeRAAVoCpE00IUPn0Bjt8=
 github.com/vmihailenco/msgpack/v5 v5.4.1/go.mod h1:GaZTsDaehaPpQVyxrf5mtQlH+pc21PIudVV/E3rRQok=
 github.com/vmihailenco/tagparser/v2 v2.0.0 h1:y09buUbR+b5aycVFQs/g70pqKVZNBmxwAhO7/IwNM9g=
@@ -505,6 +503,8 @@ github.com/zeebo/xxh3 v1.1.0 h1:s7DLGDK45Dyfg7++yxI0khrfwq9661w9EN78eP/UZVs=
 github.com/zeebo/xxh3 v1.1.0/go.mod h1:IisAie1LELR4xhVinxWS5+zf1lA4p0MW4T+w+W07F5s=
 github.com/zero-day-ai/ast-checks v0.1.1 h1:9DgwK2q0HhH3xCcWRqxOdtRTb8/ocKcSCn2z/QtQEe4=
 github.com/zero-day-ai/ast-checks v0.1.1/go.mod h1:+XwNxajlzZUo2JERFGdBtgks/EuppFg9JYyNNz6TD4Q=
+github.com/zero-day-ai/langchaingo v0.1.14-zda.1 h1:Xhp/8N+P7wszo1wT0AeLPhGugOCmRFE/DEcDX7nyxsI=
+github.com/zero-day-ai/langchaingo v0.1.14-zda.1/go.mod h1:l6eaSIrmmd/9SOQ66LgDF8C0HxBCcx8M9gj0COrUkhg=
 github.com/zero-day-ai/platform-clients v0.10.0 h1:BUHZKZ9oWxBjTiJrEmurZh9jb0ehg3xVReQmFEkT7L8=
 github.com/zero-day-ai/platform-clients v0.10.0/go.mod h1:7yh3TnK3PTR4jAdJDHsUFRwJ1Ij7KDOrfke1F4en968=
 github.com/zero-day-ai/platform-sdk v0.10.0 h1:HsThA0N4poAWR7vNqV1j26JnCAd1oofen3CkfGXVzPc=

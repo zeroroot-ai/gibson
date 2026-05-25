@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/tmc/langchaingo/llms/googleai"
+	"github.com/zero-day-ai/langchaingo/llms/googleai"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
 )

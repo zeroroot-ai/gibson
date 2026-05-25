@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/tmc/langchaingo/llms/huggingface"
+	"github.com/zero-day-ai/langchaingo/llms/huggingface"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"

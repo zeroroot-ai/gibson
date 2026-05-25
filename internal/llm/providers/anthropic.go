@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tmc/langchaingo/llms/anthropic"
+	"github.com/zero-day-ai/langchaingo/llms/anthropic"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
 )

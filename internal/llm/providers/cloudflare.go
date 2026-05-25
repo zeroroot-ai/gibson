@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tmc/langchaingo/llms/cloudflare"
+	"github.com/zero-day-ai/langchaingo/llms/cloudflare"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/types"
