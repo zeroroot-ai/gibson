@@ -146,11 +146,22 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *adminv1.ListS
 		offset = 0
 	}
 
-	prefix := req.GetNamePrefix()
+	// Build the broker-side filter prefix. Secrets are stored under "user/"
+	// in Vault (e.g. "user/cred:foo", "user/provider_config:bar:field").
+	// categoryPrefix() already includes the "user/" segment, so the combined
+	// prefix is correct for the broker.
+	// When only a name_prefix is supplied (no category filter), translate any
+	// caller-facing prefix (e.g. "cred:") to stored form ("user/cred:").
+	callerPrefix := req.GetNamePrefix()
+	var prefix string
 	if cat := req.GetCategoryFilter(); cat != adminv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED {
-		// Map the category enum to a name prefix understood by the broker
-		// namespace layout (e.g. "cred:foo", "provider_config:foo").
-		prefix = categoryPrefix(cat) + prefix
+		// categoryPrefix returns "user/cred:" or "user/provider_config:" —
+		// append the caller-supplied name sub-prefix.
+		prefix = categoryPrefix(cat) + callerPrefix
+	} else {
+		// No category filter: translate the raw caller prefix to stored form
+		// so that e.g. "cred:" becomes "user/cred:".
+		prefix = toStoredName(callerPrefix)
 	}
 
 	names, err := s.service.List(ctx, sdksecrets.Filter{
@@ -163,15 +174,15 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *adminv1.ListS
 	}
 
 	out := make([]*adminv1.SecretMetadata, 0, len(names))
-	for _, name := range names {
-		md, mdErr := s.buildMetadata(ctx, tenant, name)
+	for _, stored := range names {
+		md, mdErr := s.buildMetadata(ctx, tenant, stored)
 		if mdErr != nil {
 			// A metadata-build failure for a single row should not poison
 			// the whole list response; surface a degraded entry that has
 			// at least the name + category populated.
 			md = &adminv1.SecretMetadata{
-				Name:     name,
-				Category: parseCategory(name),
+				Name:     callerName(stored),
+				Category: parseCategory(stored),
 			}
 		}
 		out = append(out, md)
@@ -195,26 +206,32 @@ func (s *SecretsAdminServer) GetSecret(ctx context.Context, req *adminv1.GetSecr
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
 
+	// The caller uses the caller-facing name (e.g. "cred:openai-prod").
+	// Internally secrets are stored under "user/<name>". Translate before
+	// querying the broker.
+	callerReq := req.GetName()
+	storedReq := toStoredName(callerReq)
+
 	// Existence check: List with a tight prefix containing the exact name.
 	// We cannot call Resolve here — that would require can_read_credential
 	// and would log a secret_read audit row, both inappropriate for a
 	// dashboard metadata fetch.
-	names, err := s.service.List(ctx, sdksecrets.Filter{Prefix: req.GetName(), Limit: 1})
+	names, err := s.service.List(ctx, sdksecrets.Filter{Prefix: storedReq, Limit: 1})
 	if err != nil {
 		return nil, err
 	}
 	found := false
 	for _, n := range names {
-		if n == req.GetName() {
+		if n == storedReq {
 			found = true
 			break
 		}
 	}
 	if !found {
-		return nil, status.Errorf(codes.NotFound, "secret %q not found", req.GetName())
+		return nil, status.Errorf(codes.NotFound, "secret %q not found", callerReq)
 	}
 
-	md, err := s.buildMetadata(ctx, tenant, req.GetName())
+	md, err := s.buildMetadata(ctx, tenant, storedReq)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "build metadata: %v", err)
 	}
@@ -274,24 +291,27 @@ func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *adminv1.Rota
 		return nil, status.Error(codes.InvalidArgument, "value is required")
 	}
 
+	callerReq := req.GetName()
+	storedReq := toStoredName(callerReq)
+
 	// Existence precondition — Rotate refuses to create a new secret.
-	names, err := s.service.List(ctx, sdksecrets.Filter{Prefix: req.GetName(), Limit: 1})
+	names, err := s.service.List(ctx, sdksecrets.Filter{Prefix: storedReq, Limit: 1})
 	if err != nil {
 		return nil, err
 	}
 	exists := false
 	for _, n := range names {
-		if n == req.GetName() {
+		if n == storedReq {
 			exists = true
 			break
 		}
 	}
 	if !exists {
-		return nil, status.Errorf(codes.NotFound, "secret %q not found; cannot rotate", req.GetName())
+		return nil, status.Errorf(codes.NotFound, "secret %q not found; cannot rotate", callerReq)
 	}
 
 	start := s.now()
-	if err := s.service.Put(ctx, req.GetName(), req.GetValue()); err != nil {
+	if err := s.service.Put(ctx, storedReq, req.GetValue()); err != nil {
 		return nil, err
 	}
 
@@ -301,7 +321,7 @@ func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *adminv1.Rota
 			Action:        "secret_rotated",
 			Effect:        secrets.EffectAllow,
 			ResourceType:  "secret",
-			ResourceURI:   fmt.Sprintf("secret:tenant-%s:%s", tenant, req.GetName()),
+			ResourceURI:   fmt.Sprintf("secret:tenant-%s:%s", tenant, callerReq),
 			Decision:      "allow",
 			Success:       true,
 			LatencyMS:     time.Since(start).Milliseconds(),
@@ -309,11 +329,11 @@ func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *adminv1.Rota
 		})
 	}
 
-	md, err := s.buildMetadata(ctx, tenant, req.GetName())
+	md, err := s.buildMetadata(ctx, tenant, storedReq)
 	if err != nil {
 		md = &adminv1.SecretMetadata{
-			Name:          req.GetName(),
-			Category:      parseCategory(req.GetName()),
+			Name:          callerReq,
+			Category:      parseCategory(storedReq),
 			UpdatedAtUnix: s.now().UTC().Unix(),
 		}
 	}
@@ -330,8 +350,11 @@ func (s *SecretsAdminServer) DeleteSecret(ctx context.Context, req *adminv1.Dele
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
 
+	callerReq := req.GetName()
+	storedReq := toStoredName(callerReq)
+
 	start := s.now()
-	if err := s.service.Delete(ctx, req.GetName()); err != nil {
+	if err := s.service.Delete(ctx, storedReq); err != nil {
 		return nil, err
 	}
 
@@ -341,7 +364,7 @@ func (s *SecretsAdminServer) DeleteSecret(ctx context.Context, req *adminv1.Dele
 			Action:        "secret_revoked",
 			Effect:        secrets.EffectAllow,
 			ResourceType:  "secret",
-			ResourceURI:   fmt.Sprintf("secret:tenant-%s:%s", tenant, req.GetName()),
+			ResourceURI:   fmt.Sprintf("secret:tenant-%s:%s", tenant, callerReq),
 			Decision:      "allow",
 			Success:       true,
 			LatencyMS:     time.Since(start).Milliseconds(),
@@ -471,14 +494,18 @@ func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *adminv1.G
 // NOT call Resolve (which would log a secret_read). Versions / created_at
 // are best-effort; broker providers don't expose them through the v1
 // SecretsBroker interface, so for v1 we report zero values.
-func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.TenantID, name string) (*adminv1.SecretMetadata, error) {
-	if name == "" {
+//
+// The Name field in the returned metadata uses callerName(stored) so that the
+// internal "user/" Vault prefix is never exposed to dashboard callers.
+func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.TenantID, stored string) (*adminv1.SecretMetadata, error) {
+	if stored == "" {
 		return nil, errors.New("name must not be empty")
 	}
 
-	cat := parseCategory(name)
+	cat := parseCategory(stored)
+	name := callerName(stored) // strip "user/" for caller-facing name
 
-	plugins, err := s.pluginAssocs.PluginsBoundTo(ctx, tenant, name)
+	plugins, err := s.pluginAssocs.PluginsBoundTo(ctx, tenant, stored)
 	if err != nil {
 		// Plugin associations are best-effort metadata.
 		plugins = nil
@@ -497,36 +524,49 @@ func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.Tena
 	}, nil
 }
 
+// userPrefix is the Vault KV sub-path under which all user-supplied secrets
+// are stored. This separates user secrets from operator-written infra secrets
+// (infra/postgres, infra/neo4j, etc.) which live at the root of the per-tenant
+// mount. The new Vault ACL (tenant-operator#271) enforces this boundary.
+//
+// Spec: secrets-blast-radius-reduction / gibson#404.
+const userPrefix = "user/"
+
 // parseCategory inspects the name's prefix and returns the corresponding
-// SecretCategory enum value. Names that don't carry a recognised prefix are
-// classified as SECRET_CATEGORY_UNSPECIFIED (rendered as "uncategorised" in
-// the dashboard).
+// SecretCategory enum value. Names may carry the userPrefix ("user/") at the
+// front (stored form) or omit it (caller-facing form); both are handled.
+// Names that don't carry a recognised category prefix are classified as
+// SECRET_CATEGORY_UNSPECIFIED (rendered as "uncategorised" in the dashboard).
 func parseCategory(name string) adminv1.SecretCategory {
+	n := strings.TrimPrefix(name, userPrefix)
 	switch {
-	case strings.HasPrefix(name, "cred:"):
+	case strings.HasPrefix(n, "cred:"):
 		return adminv1.SecretCategory_SECRET_CATEGORY_CRED
-	case strings.HasPrefix(name, "provider_config:"):
+	case strings.HasPrefix(n, "provider_config:"):
 		return adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG
 	default:
 		return adminv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED
 	}
 }
 
-// categoryPrefix returns the broker-namespace prefix for a category enum
-// value. Used to convert ListSecrets category_filter into a List filter.
+// categoryPrefix returns the full broker-namespace prefix for a category enum
+// value, including the userPrefix. Used to convert ListSecrets category_filter
+// into a broker List filter so that only the correct sub-path is scanned.
 func categoryPrefix(cat adminv1.SecretCategory) string {
 	switch cat {
 	case adminv1.SecretCategory_SECRET_CATEGORY_CRED:
-		return "cred:"
+		return userPrefix + "cred:"
 	case adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG:
-		return "provider_config:"
+		return userPrefix + "provider_config:"
 	default:
 		return ""
 	}
 }
 
 // storedName returns the broker-namespaced name for a SetSecret request.
-// If the supplied name already carries the correct prefix, it is returned
+// User secrets are stored under "user/<category>:<name>" so the Vault ACL can
+// distinguish them from infra secrets at the mount root.
+// If the supplied name already carries the full stored prefix it is returned
 // as-is to preserve idempotency.
 func storedName(cat adminv1.SecretCategory, name string) string {
 	prefix := categoryPrefix(cat)
@@ -536,7 +576,36 @@ func storedName(cat adminv1.SecretCategory, name string) string {
 	if strings.HasPrefix(name, prefix) {
 		return name
 	}
+	// Strip a bare category prefix if the caller passed "cred:<name>" instead
+	// of the bare name — ensures a double-prefix is never written.
+	barePrefix := strings.TrimPrefix(prefix, userPrefix)
+	name = strings.TrimPrefix(name, barePrefix)
 	return prefix + name
+}
+
+// callerName strips the userPrefix from a stored name so that the name
+// returned to the dashboard caller does not expose the internal Vault layout.
+// "user/cred:openai-prod" → "cred:openai-prod".
+// Names that do not carry userPrefix are returned unchanged.
+func callerName(stored string) string {
+	return strings.TrimPrefix(stored, userPrefix)
+}
+
+// toStoredName converts a caller-facing name to the stored form by prepending
+// userPrefix when the name does not already start with it.
+// "cred:openai-prod"       → "user/cred:openai-prod"
+// "user/cred:openai-prod"  → "user/cred:openai-prod" (idempotent)
+// Names without a recognised category prefix (unspecified) are returned as-is.
+func toStoredName(name string) string {
+	if strings.HasPrefix(name, userPrefix) {
+		return name // already in stored form
+	}
+	// Only namespace known category-prefixed names; leave unrecognised names
+	// (e.g. infra secrets) untouched.
+	if strings.HasPrefix(name, "cred:") || strings.HasPrefix(name, "provider_config:") {
+		return userPrefix + name
+	}
+	return name
 }
 
 // uriToRef parses a "secret:tenant-${id}:${ref}" URI and returns the ref

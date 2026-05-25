@@ -168,14 +168,16 @@ func TestSetSecret_NoValueInResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetSecret: %v", err)
 	}
+	// The caller-facing name strips the "user/" Vault prefix.
 	if resp.GetMetadata().GetName() != "cred:openai-prod" {
-		t.Errorf("expected stored name cred:openai-prod, got %q", resp.GetMetadata().GetName())
+		t.Errorf("expected caller name cred:openai-prod, got %q", resp.GetMetadata().GetName())
 	}
 	if resp.GetMetadata().GetCategory() != adminv1.SecretCategory_SECRET_CATEGORY_CRED {
 		t.Errorf("category mismatch")
 	}
-	if got, ok := broker.store["cred:openai-prod"]; !ok || string(got) != "super-secret-value" {
-		t.Errorf("broker did not receive value, got %q (ok=%v)", got, ok)
+	// Internally the broker stores the secret under the "user/" namespace.
+	if got, ok := broker.store["user/cred:openai-prod"]; !ok || string(got) != "super-secret-value" {
+		t.Errorf("broker did not receive value at user/cred:openai-prod, store=%v (ok=%v)", broker.store, ok)
 	}
 }
 
@@ -209,14 +211,17 @@ func TestSetSecret_RejectsEmptyValue(t *testing.T) {
 func TestGetSecret_MetadataOnly(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	broker.store["cred:openai-prod"] = []byte("v")
+	// Secrets are stored under "user/" in the broker; callers use the bare name.
+	broker.store["user/cred:openai-prod"] = []byte("v")
 
+	// Caller passes the caller-facing name (no "user/" prefix).
 	resp, err := srv.GetSecret(ctx, &adminv1.GetSecretRequest{Name: "cred:openai-prod"})
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
+	// Response name is also caller-facing (no "user/" prefix).
 	if resp.GetMetadata().GetName() != "cred:openai-prod" {
-		t.Errorf("name mismatch")
+		t.Errorf("name mismatch: got %q", resp.GetMetadata().GetName())
 	}
 	if resp.GetMetadata().GetCategory() != adminv1.SecretCategory_SECRET_CATEGORY_CRED {
 		t.Errorf("category mismatch")
@@ -238,8 +243,10 @@ func TestGetSecret_NotFound(t *testing.T) {
 func TestRotateSecret_EmitsRotatedEvent(t *testing.T) {
 	srv, broker, _, rotated, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	broker.store["cred:db"] = []byte("old")
+	// Secrets are stored under "user/" in the broker.
+	broker.store["user/cred:db"] = []byte("old")
 
+	// Caller passes the caller-facing name (no "user/" prefix).
 	resp, err := srv.RotateSecret(ctx, &adminv1.RotateSecretRequest{
 		Name:  "cred:db",
 		Value: []byte("new"),
@@ -247,11 +254,13 @@ func TestRotateSecret_EmitsRotatedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RotateSecret: %v", err)
 	}
+	// Response name is caller-facing.
 	if resp.GetMetadata().GetName() != "cred:db" {
-		t.Errorf("name mismatch")
+		t.Errorf("name mismatch: got %q", resp.GetMetadata().GetName())
 	}
-	if string(broker.store["cred:db"]) != "new" {
-		t.Errorf("broker did not receive new value")
+	// Broker was updated at the stored path.
+	if string(broker.store["user/cred:db"]) != "new" {
+		t.Errorf("broker did not receive new value at user/cred:db, store=%v", broker.store)
 	}
 	if len(rotated.events) != 1 || rotated.events[0].Action != "secret_rotated" {
 		t.Errorf("expected one secret_rotated event, got %+v", rotated.events)
@@ -261,8 +270,10 @@ func TestRotateSecret_EmitsRotatedEvent(t *testing.T) {
 func TestRotateSecret_NotFound(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
+	// "cred:missing" is a known user-secret name so toStoredName maps it to
+	// "user/cred:missing" — which does not exist → NotFound.
 	_, err := srv.RotateSecret(ctx, &adminv1.RotateSecretRequest{
-		Name:  "missing",
+		Name:  "cred:missing",
 		Value: []byte("v"),
 	})
 	if status.Code(err) != codes.NotFound {
@@ -273,14 +284,17 @@ func TestRotateSecret_NotFound(t *testing.T) {
 func TestDeleteSecret_EmitsRevokedEvent(t *testing.T) {
 	srv, broker, _, rotated, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	broker.store["cred:db"] = []byte("v")
+	// Store at the "user/" path as the broker holds it.
+	broker.store["user/cred:db"] = []byte("v")
 
+	// Caller passes the caller-facing name.
 	_, err := srv.DeleteSecret(ctx, &adminv1.DeleteSecretRequest{Name: "cred:db"})
 	if err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
 	}
-	if _, ok := broker.store["cred:db"]; ok {
-		t.Errorf("broker still has key")
+	// Deleted from the stored path.
+	if _, ok := broker.store["user/cred:db"]; ok {
+		t.Errorf("broker still has key at user/cred:db")
 	}
 	if len(rotated.events) != 1 || rotated.events[0].Action != "secret_revoked" {
 		t.Errorf("expected one secret_revoked event, got %+v", rotated.events)
@@ -290,9 +304,10 @@ func TestDeleteSecret_EmitsRevokedEvent(t *testing.T) {
 func TestListSecrets_ReturnsMetadataOnly(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	broker.store["cred:a"] = []byte("av")
-	broker.store["cred:b"] = []byte("bv")
-	broker.store["provider_config:openai:default"] = []byte("k")
+	// Secrets are stored under "user/" in the broker (new namespace layout).
+	broker.store["user/cred:a"] = []byte("av")
+	broker.store["user/cred:b"] = []byte("bv")
+	broker.store["user/provider_config:openai:default"] = []byte("k")
 
 	resp, err := srv.ListSecrets(ctx, &adminv1.ListSecretsRequest{
 		CategoryFilter: adminv1.SecretCategory_SECRET_CATEGORY_CRED,
@@ -303,9 +318,10 @@ func TestListSecrets_ReturnsMetadataOnly(t *testing.T) {
 	if len(resp.GetSecrets()) != 2 {
 		t.Errorf("expected 2 cred secrets, got %d", len(resp.GetSecrets()))
 	}
+	// The "user/" prefix is stripped before returning to the caller.
 	for _, s := range resp.GetSecrets() {
 		if !strings.HasPrefix(s.GetName(), "cred:") {
-			t.Errorf("got non-cred secret %q in cred-filtered list", s.GetName())
+			t.Errorf("got non-cred secret %q in cred-filtered list (user/ should be stripped)", s.GetName())
 		}
 	}
 }
@@ -393,9 +409,13 @@ func TestParseCategory(t *testing.T) {
 		name string
 		want adminv1.SecretCategory
 	}{
+		// caller-facing form
 		{"cred:openai", adminv1.SecretCategory_SECRET_CATEGORY_CRED},
 		{"provider_config:anthropic:default", adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
 		{"unknown", adminv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED},
+		// stored form (with "user/" prefix) — parseCategory must handle both
+		{"user/cred:openai", adminv1.SecretCategory_SECRET_CATEGORY_CRED},
+		{"user/provider_config:anthropic:default", adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
 	}
 	for _, tc := range tests {
 		if got := parseCategory(tc.name); got != tc.want {
@@ -434,6 +454,120 @@ func TestNewSecretsAdminServer_RequiresBroker(t *testing.T) {
 	_, err := NewSecretsAdminServer(SecretsAdminConfig{Service: svc})
 	if err == nil || !strings.Contains(err.Error(), "Broker is required") {
 		t.Errorf("want Broker required error, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// User-prefix (Vault "user/" namespace) tests — gibson#404
+// ---------------------------------------------------------------------------
+
+func TestStoredName_PrependUserPrefix(t *testing.T) {
+	tests := []struct {
+		cat  adminv1.SecretCategory
+		name string
+		want string
+	}{
+		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "openai-prod", "user/cred:openai-prod"},
+		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "cred:openai-prod", "user/cred:openai-prod"},   // bare cat prefix stripped first
+		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "user/cred:openai-prod", "user/cred:openai-prod"}, // idempotent
+		{adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "openai:default", "user/provider_config:openai:default"},
+		{adminv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, "raw", "raw"}, // unspecified — no prefix added
+	}
+	for _, tc := range tests {
+		got := storedName(tc.cat, tc.name)
+		if got != tc.want {
+			t.Errorf("storedName(%v, %q) = %q, want %q", tc.cat, tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCallerName_StripsUserPrefix(t *testing.T) {
+	tests := []struct {
+		stored string
+		want   string
+	}{
+		{"user/cred:openai-prod", "cred:openai-prod"},
+		{"user/provider_config:openai:default", "provider_config:openai:default"},
+		{"cred:openai-prod", "cred:openai-prod"},   // no prefix — unchanged
+		{"infra/postgres", "infra/postgres"},         // infra path — unchanged
+	}
+	for _, tc := range tests {
+		got := callerName(tc.stored)
+		if got != tc.want {
+			t.Errorf("callerName(%q) = %q, want %q", tc.stored, got, tc.want)
+		}
+	}
+}
+
+func TestToStoredName_RoundTrip(t *testing.T) {
+	tests := []struct {
+		caller string
+		want   string
+	}{
+		{"cred:openai-prod", "user/cred:openai-prod"},
+		{"provider_config:openai:default", "user/provider_config:openai:default"},
+		{"user/cred:openai-prod", "user/cred:openai-prod"}, // already stored form
+		{"infra/postgres", "infra/postgres"},                 // non-user path untouched
+		{"unknown", "unknown"},                               // unrecognised prefix
+	}
+	for _, tc := range tests {
+		got := toStoredName(tc.caller)
+		if got != tc.want {
+			t.Errorf("toStoredName(%q) = %q, want %q", tc.caller, got, tc.want)
+		}
+	}
+}
+
+// TestSetSecret_UserPrefixNamespace verifies end-to-end that SetSecret stores
+// under "user/" and returns the caller-facing name (no "user/").
+func TestSetSecret_UserPrefixNamespace(t *testing.T) {
+	srv, broker, _, _, _ := newTestServer(t)
+	ctx := ctxWithTenant(t, "acme")
+
+	resp, err := srv.SetSecret(ctx, &adminv1.SetSecretRequest{
+		Name:     "my-key",
+		Category: adminv1.SecretCategory_SECRET_CATEGORY_CRED,
+		Value:    []byte("secret"),
+	})
+	if err != nil {
+		t.Fatalf("SetSecret: %v", err)
+	}
+	// Caller-facing name: "cred:my-key" (no user/ prefix).
+	if resp.GetMetadata().GetName() != "cred:my-key" {
+		t.Errorf("caller name: want cred:my-key, got %q", resp.GetMetadata().GetName())
+	}
+	// Stored in broker under user/ namespace.
+	if _, ok := broker.store["user/cred:my-key"]; !ok {
+		t.Errorf("want broker key user/cred:my-key; store keys: %v", func() []string {
+			ks := make([]string, 0, len(broker.store))
+			for k := range broker.store {
+				ks = append(ks, k)
+			}
+			return ks
+		}())
+	}
+	// Infra key (e.g. from before the migration) at bare path not touched.
+	if _, ok := broker.store["cred:my-key"]; ok {
+		t.Errorf("old bare-path key should not be written: cred:my-key")
+	}
+}
+
+// TestGetSecret_UserPrefixNamespace verifies that GetSecret translates the
+// caller-facing name to stored form for the broker lookup.
+func TestGetSecret_UserPrefixNamespace(t *testing.T) {
+	srv, broker, _, _, _ := newTestServer(t)
+	ctx := ctxWithTenant(t, "acme")
+	broker.store["user/provider_config:openai:key"] = []byte("v")
+
+	resp, err := srv.GetSecret(ctx, &adminv1.GetSecretRequest{Name: "provider_config:openai:key"})
+	if err != nil {
+		t.Fatalf("GetSecret: %v", err)
+	}
+	if resp.GetMetadata().GetName() != "provider_config:openai:key" {
+		t.Errorf("name: want provider_config:openai:key, got %q", resp.GetMetadata().GetName())
+	}
+	if resp.GetMetadata().GetCategory() != adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG {
+		t.Errorf("category mismatch")
 	}
 }
 
