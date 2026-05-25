@@ -902,8 +902,17 @@ func TestStreamReadGroup(t *testing.T) {
 	_ = client.StreamDel(ctx, stream)
 	defer client.StreamDel(ctx, stream)
 
-	// Create consumer group
+	// Use a dedicated group per read scenario. A consumer group delivers each
+	// message to exactly one consumer, so two consumers in the SAME group reading
+	// ">" cannot both see the full backlog — the second would block forever
+	// waiting for messages the first already drained (gibson#410). Independent
+	// groups let each scenario read the full backlog deterministically.
+	countGroup := group + "-count"
+
+	// Create consumer groups at the start of the stream.
 	err := client.StreamCreateGroup(ctx, stream, group, "0", true)
+	require.NoError(t, err)
+	err = client.StreamCreateGroup(ctx, stream, countGroup, "0", true)
 	require.NoError(t, err)
 
 	// Add test entries
@@ -942,7 +951,7 @@ func TestStreamReadGroup(t *testing.T) {
 			stream: stream,
 			lastID: ">",
 			opts: &ConsumerGroupOptions{
-				Group:    group,
+				Group:    countGroup,
 				Consumer: "worker-2",
 				Count:    3,
 				NoAck:    true,
