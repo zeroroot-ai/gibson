@@ -11,9 +11,7 @@ import (
 )
 
 // ProviderConstructor is a function that builds a SecretsBroker from the raw
-// JSON config blob stored in the tenant's broker config row. The Postgres
-// constructor is a special case — it takes no config blob and returns a
-// pre-shared instance (see Registry.postgresFactory).
+// JSON config blob stored in the tenant's broker config row.
 type ProviderConstructor func(configBlob []byte) (sdksecrets.Broker, error)
 
 // RegistryConfigGetter is the narrow interface Registry needs from the config
@@ -27,10 +25,6 @@ type RegistryConfigGetter interface {
 // Each provider instance is constructed once (lazily, on first For call) and
 // cached for the lifetime of the daemon process or until Reload is called.
 //
-// Default fallback: when no broker configuration row exists for a tenant, the
-// Postgres provider is returned (backward-compatible behaviour for tenants
-// that pre-date the broker abstraction).
-//
 // Registry is safe for concurrent use. The internal cache uses a sync.RWMutex
 // with a double-check pattern on construction to prevent redundant
 // construction under concurrent calls.
@@ -38,31 +32,18 @@ type Registry struct {
 	configStore  RegistryConfigGetter
 	constructors map[string]ProviderConstructor
 
-	// postgresProvider is the pre-constructed Postgres provider used as the
-	// default fallback. It is shared across all tenants (the Postgres
-	// provider is stateless beyond its ConnAcquirer callback).
-	postgresProvider sdksecrets.Broker
-
 	mu    sync.RWMutex
 	cache map[auth.TenantID]sdksecrets.Broker
 }
 
 // RegistryConfig carries the factory functions used to construct provider
-// instances from per-tenant config blobs. Each field except PostgresProvider
-// takes the raw JSON blob stored in tenant_secrets_broker_config.config.
-//
-// PostgresProvider is a ready-to-use instance (no per-tenant config; the
-// Postgres provider receives its ConnAcquirer at construction time in daemon
-// wiring). The other four factories receive the decrypted JSON blob and must
-// return a fully-initialized provider or an error.
+// instances from per-tenant config blobs. Each factory receives the raw JSON
+// blob stored in tenant_secrets_broker_config.config and must return a
+// fully-initialized provider or an error.
 type RegistryConfig struct {
-	// PostgresProvider is the pre-constructed default-fallback Postgres
-	// provider. Must be non-nil.
-	PostgresProvider sdksecrets.Broker
-
 	// VaultFactory constructs a Vault provider from the tenant's JSON config
 	// blob. May be nil if vault is not supported in this deployment (unusual
-	// — all five providers compile into every binary).
+	// — all four providers compile into every binary).
 	VaultFactory ProviderConstructor
 
 	// AWSSMFactory constructs an AWS Secrets Manager provider.
@@ -76,21 +57,13 @@ type RegistryConfig struct {
 }
 
 // NewRegistry constructs a Registry. configStore is used to read per-tenant
-// broker configurations; cfg supplies provider factories. All fields of cfg
-// except the optional cloud provider factories must be non-nil.
+// broker configurations; cfg supplies provider factories.
 func NewRegistry(configStore RegistryConfigGetter, cfg RegistryConfig) (*Registry, error) {
 	if configStore == nil {
 		return nil, errors.New("registry: ConfigStore must not be nil")
 	}
-	if cfg.PostgresProvider == nil {
-		return nil, errors.New("registry: PostgresProvider must not be nil")
-	}
 
-	constructors := map[string]ProviderConstructor{
-		"postgres": func(_ []byte) (sdksecrets.Broker, error) {
-			return cfg.PostgresProvider, nil
-		},
-	}
+	constructors := map[string]ProviderConstructor{}
 	if cfg.VaultFactory != nil {
 		constructors["vault"] = cfg.VaultFactory
 	}
@@ -105,16 +78,14 @@ func NewRegistry(configStore RegistryConfigGetter, cfg RegistryConfig) (*Registr
 	}
 
 	return &Registry{
-		configStore:      configStore,
-		constructors:     constructors,
-		postgresProvider: cfg.PostgresProvider,
-		cache:            make(map[auth.TenantID]sdksecrets.Broker),
+		configStore:  configStore,
+		constructors: constructors,
+		cache:        make(map[auth.TenantID]sdksecrets.Broker),
 	}, nil
 }
 
-// For returns the SecretsBroker configured for the given tenant. If no
-// broker configuration row exists, the Postgres provider is returned as the
-// default fallback (backward-compatible with pre-spec tenants).
+// For returns the SecretsBroker configured for the given tenant.
+// Returns ErrBrokerConfigNotFound when no configuration row exists.
 //
 // Constructed providers are cached; subsequent calls for the same tenant
 // return the cached instance without re-reading the config store.
@@ -190,24 +161,9 @@ func registeredConstructors(m map[string]ProviderConstructor) []string {
 // appropriate provider. Must be called with r.mu write-locked (or from
 // code that is otherwise the sole writer, e.g. during construction).
 //
-// When no broker config row exists for the tenant, this used to fall back
-// to r.postgresProvider for backward-compatibility with pre-spec tenants.
-// That fallback caused an infinite-recursion-style deadlock: the Postgres
-// provider's ConnAcquirer is wired to the per-tenant data-plane pool
-// (`pool.For`), and `pool.For` itself resolves Postgres credentials via
-// THIS registry — so when the registry returns the fallback Postgres
-// provider for an unprovisioned tenant, the secrets resolution chain
-// loops until it hits the gRPC timeout (60s). End user impact was that
-// every authenticated list call from the dashboard timed out for any
-// tenant whose data-plane saga had not run. See gibson#101.
-//
-// The fix is to surface ErrBrokerConfigNotFound to the caller as a
-// well-typed "not provisioned" condition. Daemon handlers map it to
-// gRPC FailedPrecondition with a clear message; operators can then
-// drive the tenant-operator's provisioning saga (or, in dev,
-// hand-seed a row via the admin RPCs). The postgresProvider field is
-// kept on Registry so an explicit `provider="postgres"` config row
-// still works for tenants that opt into Postgres-backed secrets.
+// Returns ErrBrokerConfigNotFound when no config row exists for the tenant.
+// Daemon handlers map this to gRPC FailedPrecondition; the tenant-operator
+// provisioning saga is responsible for seeding the row (gibson#101).
 func (r *Registry) buildProvider(ctx context.Context, tenant auth.TenantID) (sdksecrets.Broker, error) {
 	cfg, err := r.configStore.Get(ctx, tenant)
 	if err != nil {

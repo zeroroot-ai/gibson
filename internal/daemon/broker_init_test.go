@@ -66,7 +66,7 @@ func isErrBrokerConfigNotFound(err error) bool {
 func TestBrokerHealthGauge_RegisteredOnce(t *testing.T) {
 	t.Parallel()
 	// Obtain a gauge for a fake (tenant, provider) pair.
-	gauge := brokerHealthGauge.WithLabelValues("test-tenant", "postgres")
+	gauge := brokerHealthGauge.WithLabelValues("test-tenant", "vault")
 	if gauge == nil {
 		t.Fatal("brokerHealthGauge gauge must not be nil")
 	}

@@ -13,11 +13,9 @@ import (
 	"github.com/zero-day-ai/gibson/internal/audit"
 	"github.com/zero-day-ai/gibson/internal/component"
 	daemonapi "github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/datapool"
 	"github.com/zero-day-ai/gibson/internal/secrets"
 	"github.com/zero-day-ai/gibson/internal/secrets/configstore"
 	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
-	pgprovider "github.com/zero-day-ai/gibson/internal/secrets/providers/postgres"
 	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
 	sdkawssm "github.com/zero-day-ai/platform-clients/secrets/awssm"
 	sdkazurekv "github.com/zero-day-ai/platform-clients/secrets/azurekv"
@@ -42,15 +40,13 @@ var brokerHealthGauge = promauto.NewGaugeVec(
 //  1. Audit writer  — delegates to the Redis Streams AuditLogger.
 //  2. Circuit breaker — per-(tenant, provider) fault isolation.
 //  3. Config store  — TenantConfigStore + ConfigStore backed by dashboard Postgres + system-tenant KEK.
-//  4. Postgres provider — ConnAcquirer over Pool.For.
-//  5. Cloud provider factories (Vault, AWS SM, GCP SM, Azure KV).
-//  6. Registry — resolves tenant → broker.
-//  7. secrets.Service — the single entry-point for all handlers.
+//  4. Cloud provider factories (Vault, AWS SM, GCP SM, Azure KV).
+//  5. Registry — resolves tenant → broker.
+//  6. secrets.Service — the single entry-point for all handlers.
 //
 // The call is guarded: it requires both keyProvider (for the KEK) and a
 // stateClient (for the audit logger). When dashboard Postgres is absent the
-// broker still boots using only the Postgres provider — the TenantConfigStore
-// is skipped and the registry defaults every tenant to Postgres.
+// TenantConfigStore is skipped and broker config CRUD is inoperable.
 //
 // On success d.credentialStore, d.credentialHandler, and compSvc's
 // WithCredentialStore are all wired. Returns a non-nil error only for
@@ -95,20 +91,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 		d.logger.Info(ctx, "broker stack: JWT source is disabled; skipping cache (no SPIRE source configured)")
 	}
 
-	// --- 3. Postgres provider (default fallback) ---
-	// The Postgres provider receives a ConnAcquirer that calls Pool.For.
-	if d.pool == nil {
-		d.logger.Warn(ctx, "broker stack: data-plane pool is nil; Postgres provider unavailable — credentials inoperable until pool is available")
-		return fmt.Errorf("broker stack: data-plane pool is nil; cannot construct Postgres provider")
-	}
-	pool := d.pool
-	pgAcquirer := func(ctx context.Context, tenant auth.TenantID) (*datapool.Conn, error) {
-		return pool.For(ctx, tenant)
-	}
-	pgProvider := pgprovider.New(pgAcquirer)
-	d.logger.Info(ctx, "broker stack: Postgres provider initialized")
-
-	// --- 4. System-tenant KEK (for TenantConfigStore) ---
+	// --- 3. System-tenant KEK (for TenantConfigStore) ---
 	// Required to encrypt/decrypt per-tenant broker config blobs.
 	var systemKEK []byte
 	if d.keyProvider != nil {
@@ -116,7 +99,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 		if err != nil {
 			d.logger.Warn(ctx, "broker stack: failed to retrieve system KEK; config store unavailable (broker config CRUD inoperable)",
 				"error", err)
-			// Non-fatal: fall back to a Postgres-only registry with no config store.
+			// Non-fatal: continue with noop config getter; broker config CRUD inoperable.
 		} else {
 			systemKEK = kek
 		}
@@ -124,11 +107,11 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 		d.logger.Warn(ctx, "broker stack: no key provider configured; broker config store unavailable")
 	}
 
-	// --- 5. Config store (optional — needs dashboard Postgres + KEK) ---
+	// --- 4. Config store (optional — needs dashboard Postgres + KEK) ---
 	//
 	// The config store holds per-tenant broker configurations encrypted at rest.
-	// When the dashboard Postgres is unavailable, the registry falls back to the
-	// Postgres provider for all tenants (backward-compatible behaviour).
+	// When the dashboard Postgres is unavailable, broker config CRUD is inoperable
+	// and the daemon cannot resolve any tenant's secrets provider.
 	var configStore secrets.RegistryConfigGetter = &noopRegistryConfigGetter{}
 
 	if len(systemKEK) == 32 && d.config.PlatformPostgres.Host != "" {
@@ -146,9 +129,6 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 			} else {
 				// Build the provider factories for the config-store probe step.
 				configFactories := map[string]secrets.ProviderFactory{
-					"postgres": func(_ []byte) (sdksecrets.Broker, error) {
-						return pgProvider, nil
-					},
 					"vault": func(blob []byte) (sdksecrets.Broker, error) {
 						var cfg sdkvault.Config
 						if err := json.Unmarshal(blob, &cfg); err != nil {
@@ -191,10 +171,10 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 			}
 		}
 	} else {
-		d.logger.Info(ctx, "broker stack: config store not available (missing KEK or dashboard Postgres); all tenants use Postgres provider by default")
+		d.logger.Info(ctx, "broker stack: config store not available (missing KEK or dashboard Postgres); broker config CRUD inoperable")
 	}
 
-	// --- 5b. Auth-token cache (Vault) ---
+	// --- 4b. Auth-token cache (Vault) ---
 	//
 	// The AuthCache prevents auth churn when the Vault provider instance is
 	// rebuilt on registry Reload events. Both the factory (constructor) and
@@ -266,9 +246,8 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	d.vaultAuthCache = vaultAuthCache
 	d.logger.Info(ctx, "broker stack: Vault auth cache initialized")
 
-	// --- 6. Cloud provider factories for the Registry ---
+	// --- 5. Cloud provider factories for the Registry ---
 	registryCfg := secrets.RegistryConfig{
-		PostgresProvider: pgProvider,
 		VaultFactory: func(blob []byte) (sdksecrets.Broker, error) {
 			var cfg sdkvault.Config
 			if err := json.Unmarshal(blob, &cfg); err != nil {
@@ -314,22 +293,14 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 		},
 	}
 
-	// --- 7. Registry ---
+	// --- 6. Registry ---
 	registry, err := secrets.NewRegistry(configStore, registryCfg)
 	if err != nil {
 		return fmt.Errorf("broker stack: registry construction failed: %w", err)
 	}
 	d.logger.Info(ctx, "broker stack: registry initialized")
 
-	// Startup self-check: verify the system-tenant (Postgres) provider is reachable.
-	// A Health() call is sufficient here; Probe() is reserved for config-set time.
-	sysTenantHealth := pgProvider.Health(ctx)
-	if sysTenantHealth != nil {
-		return fmt.Errorf("broker stack: startup self-check: system-tenant Postgres provider unhealthy: %w", sysTenantHealth)
-	}
-	d.logger.Info(ctx, "broker stack: system-tenant Postgres provider health check passed")
-
-	// --- 8. Service ---
+	// --- 7. Service ---
 	svc, err := secrets.NewService(registry, cb, auditWriter)
 	if err != nil {
 		return fmt.Errorf("broker stack: service construction failed: %w", err)
@@ -339,7 +310,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	// Store the registry on the daemon so the /readyz probe can call Health().
 	d.secretsRegistry = registry
 
-	// --- 9. Wire into handlers ---
+	// --- 8. Wire into handlers ---
 
 	// DaemonCredentialStore (harness callback).
 	credStore, err := NewDaemonCredentialStore(svc)
@@ -374,7 +345,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	d.secretsService = svc
 	d.logger.Info(ctx, "broker stack: secrets.Service stored for LLM provider chain")
 
-	// --- 10. Subscribe to broker-config-change events ---
+	// --- 9. Subscribe to broker-config-change events ---
 	// When ConfigStore.Set persists a new config, callers should call
 	// registry.Reload(tenant) to invalidate the cached provider. The pattern
 	// chosen here is direct: ConfigStore.Set callers are responsible for calling
@@ -388,7 +359,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 	// broker-config events. The correct integration point is the future
 	// SetBrokerConfig admin RPC handler which will call both ConfigStore.Set
 	// and registry.Reload in the same transaction.
-	d.logger.Info(ctx, "broker stack: initialized successfully; all five provider constructors registered")
+	d.logger.Info(ctx, "broker stack: initialized successfully; four cloud provider constructors registered")
 	return nil
 }
 
@@ -446,9 +417,8 @@ func (d *daemonImpl) dashboardPgxPool(ctx context.Context) (*pgxpool.Pool, error
 }
 
 // noopRegistryConfigGetter is a RegistryConfigGetter that always returns
-// ErrBrokerConfigNotFound, causing the registry to default every tenant to the
-// Postgres provider. Used when the dashboard Postgres or system KEK is
-// unavailable at startup.
+// ErrBrokerConfigNotFound. Used when the dashboard Postgres or system KEK is
+// unavailable at startup, rendering broker config CRUD inoperable.
 type noopRegistryConfigGetter struct{}
 
 func (n *noopRegistryConfigGetter) Get(_ context.Context, _ auth.TenantID) (secrets.BrokerConfig, error) {
