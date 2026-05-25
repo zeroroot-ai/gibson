@@ -790,13 +790,6 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
-  "/gibson.daemon.v1.DaemonService/GetMissionSourceYAML":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
   "/gibson.daemon.v1.DaemonService/GetMyPermissions":
     self: true
     allowed_identities:

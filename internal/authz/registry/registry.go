@@ -1263,16 +1263,6 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.daemon.v1.DaemonService/GetMissionSourceYAML": {
-		Method:            "/gibson.daemon.v1.DaemonService/GetMissionSourceYAML",
-		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser | IdentityService,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.daemon.v1.DaemonService/GetMyPermissions": {
 		Method:            "/gibson.daemon.v1.DaemonService/GetMyPermissions",
 		Service:           "gibson.daemon.v1.DaemonService",
