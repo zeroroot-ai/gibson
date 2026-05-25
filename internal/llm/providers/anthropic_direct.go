@@ -111,24 +111,6 @@ type anthropicErrorResponse struct {
 	Error anthropicError `json:"error"`
 }
 
-// Complete sends a plain completion request with no tool forcing.
-// This bypasses langchaingo, which always serializes temperature=0 (no omitempty),
-// causing Anthropic to reject requests for models where temperature is deprecated.
-func (c *AnthropicDirectClient) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	if c.apiKey == "" {
-		return nil, llm.NewAuthError("anthropic", nil)
-	}
-	anthropicReq, err := c.buildSimpleRequest(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build request: %w", err)
-	}
-	respBody, err := c.doRequest(ctx, anthropicReq)
-	if err != nil {
-		return nil, err
-	}
-	return c.parseResponse(respBody, req.Model)
-}
-
 // CompleteWithForcedTool sends a completion request with tool_choice forcing a specific tool.
 // This is the key method that langchaingo doesn't properly support.
 func (c *AnthropicDirectClient) CompleteWithForcedTool(ctx context.Context, req llm.CompletionRequest, tool llm.ToolDef) (*llm.CompletionResponse, error) {
@@ -150,53 +132,6 @@ func (c *AnthropicDirectClient) CompleteWithForcedTool(ctx context.Context, req 
 
 	// Parse the response
 	return c.parseResponse(respBody, req.Model)
-}
-
-// buildSimpleRequest constructs an Anthropic API request with no tool forcing.
-func (c *AnthropicDirectClient) buildSimpleRequest(req llm.CompletionRequest) (*anthropicRequest, error) {
-	var system string
-	messages := make([]anthropicMessage, 0, len(req.Messages))
-	for _, msg := range req.Messages {
-		switch msg.Role {
-		case llm.RoleSystem:
-			system = msg.Content
-		case llm.RoleUser:
-			messages = append(messages, anthropicMessage{
-				Role:    "user",
-				Content: []anthropicContentPart{{Type: "text", Text: msg.Content}},
-			})
-		case llm.RoleAssistant:
-			messages = append(messages, anthropicMessage{
-				Role:    "assistant",
-				Content: []anthropicContentPart{{Type: "text", Text: msg.Content}},
-			})
-		case llm.RoleTool:
-			messages = append(messages, anthropicMessage{
-				Role:    "user",
-				Content: []anthropicContentPart{{Type: "tool_result", ToolUseID: msg.Name, Content: msg.Content}},
-			})
-		}
-	}
-	maxTokens := req.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 4096
-	}
-	ar := &anthropicRequest{
-		Model:     req.Model,
-		MaxTokens: maxTokens,
-		System:    system,
-		Messages:  messages,
-		StopSeqs:  req.StopSequences,
-	}
-	if req.Temperature > 0 {
-		t := req.Temperature
-		ar.Temperature = &t
-	}
-	if req.TopP > 0 {
-		p := req.TopP
-		ar.TopP = &p
-	}
-	return ar, nil
 }
 
 // buildRequest constructs the Anthropic API request
