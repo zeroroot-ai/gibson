@@ -209,10 +209,22 @@ func (c *StateClient) StreamRead(ctx context.Context, streams []string, opts *St
 		streamIDs[i] = opts.LastID
 	}
 
+	// Map the documented Block semantics onto go-redis XReadArgs.Block:
+	//   - opts.Block == 0  -> non-blocking (return immediately, even for LastID "$")
+	//   - opts.Block  > 0  -> block for that duration, then return
+	// go-redis emits the BLOCK option whenever Block >= 0, and BLOCK 0 means
+	// "block forever". To honor our non-blocking contract we must pass a
+	// negative value so go-redis omits BLOCK entirely. Otherwise a read from
+	// "$" with no new entries hangs indefinitely (gibson#410).
+	block := opts.Block
+	if block <= 0 {
+		block = -1
+	}
+
 	args := &redis.XReadArgs{
 		Streams: append(streams, streamIDs...),
 		Count:   opts.Count,
-		Block:   opts.Block,
+		Block:   block,
 	}
 
 	result, err := c.client.XRead(ctx, args).Result()
@@ -509,12 +521,20 @@ func (c *StateClient) StreamReadGroup(ctx context.Context, stream, lastID string
 		count = 10
 	}
 
+	// Honor the documented Block semantics: Block == 0 is non-blocking. As with
+	// StreamRead, go-redis treats BLOCK 0 as "block forever", so a negative
+	// value is required to omit the BLOCK option (gibson#410).
+	block := opts.Block
+	if block <= 0 {
+		block = -1
+	}
+
 	args := &redis.XReadGroupArgs{
 		Group:    opts.Group,
 		Consumer: opts.Consumer,
 		Streams:  []string{stream, lastID},
 		Count:    count,
-		Block:    opts.Block,
+		Block:    block,
 		NoAck:    opts.NoAck,
 	}
 
