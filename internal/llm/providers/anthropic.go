@@ -87,15 +87,10 @@ func (p *AnthropicProvider) Models(ctx context.Context) ([]llm.ModelInfo, error)
 
 // Complete sends a completion request
 func (p *AnthropicProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildCallOptions(req)
-
-	resp, err := p.client.GenerateContent(ctx, messages, callOpts...)
-	if err != nil {
-		return nil, llm.TranslateError("anthropic", err)
-	}
-
-	return fromLangchainResponse(resp, req.Model), nil
+	// Use the direct client instead of langchaingo. langchaingo's MessageRequest
+	// serializes temperature without omitempty, so it always sends "temperature":0
+	// which Anthropic rejects on models where the field is deprecated.
+	return p.directClient.Complete(ctx, req)
 }
 
 // CompleteWithTools sends a completion request with tool definitions
