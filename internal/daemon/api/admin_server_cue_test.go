@@ -25,10 +25,10 @@ func newTestDaemonServerForCUE(t *testing.T) *DaemonServer {
 // ---------------------------------------------------------------------------
 // ValidateMissionCUE
 
-// TestValidateMissionCUE_EmptySource verifies that empty CUE source returns
-// a non-nil response without a Go error. The CUE engine treats empty source
-// as vacuously valid (no content to violate the schema), so Diagnostics may
-// be empty.
+// TestValidateMissionCUE_EmptySource verifies that empty CUE source returns a
+// non-nil response without a Go error. Empty source passes the schema check
+// (nothing to violate) but fails export (no top-level "mission" field), so a
+// single error-severity diagnostic is expected.
 func TestValidateMissionCUE_EmptySource(t *testing.T) {
 	t.Parallel()
 	srv := newTestDaemonServerForCUE(t)
@@ -41,8 +41,12 @@ func TestValidateMissionCUE_EmptySource(t *testing.T) {
 	if resp == nil {
 		t.Fatal("expected non-nil response")
 	}
-	// Response is always a valid proto value; Diagnostics may be nil/empty for
-	// an empty source (that is not an error from the handler's perspective).
+	if len(resp.Diagnostics) == 0 {
+		t.Error("expected at least one diagnostic for empty source (missing 'mission' field)")
+	}
+	if resp.CompiledDefinition != nil {
+		t.Error("expected nil CompiledDefinition when diagnostics are present")
+	}
 }
 
 // TestValidateMissionCUE_ValidSource verifies that a schema-conformant CUE
@@ -83,6 +87,12 @@ mission: missionv1.#MissionDefinition & {
 	}
 	if len(errDiags) != 0 {
 		t.Errorf("expected zero error diagnostics for valid source, got %d: %v", len(errDiags), errDiags)
+	}
+	if resp.CompiledDefinition == nil {
+		t.Error("expected non-nil CompiledDefinition for valid source with no error diagnostics")
+	}
+	if resp.CompiledDefinition != nil && resp.CompiledDefinition.Name != "handler-test" {
+		t.Errorf("compiled definition name = %q, want %q", resp.CompiledDefinition.Name, "handler-test")
 	}
 }
 

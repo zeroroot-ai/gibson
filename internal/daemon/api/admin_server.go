@@ -24,7 +24,8 @@ import (
 
 // ValidateMissionCUE compiles the CUE source via cueruntime.Validate and
 // returns structured diagnostics. A nil or empty Diagnostics slice means the
-// source is valid against the mission schema.
+// source is valid against the mission schema. On success, CompiledDefinition
+// is populated so callers can pass it directly to CreateMissionDefinition.
 func (s *DaemonServer) ValidateMissionCUE(ctx context.Context, req *daemonpb.ValidateMissionCUERequest) (*daemonpb.ValidateMissionCUEResponse, error) {
 	diags, err := cueruntime.Validate(ctx, req.GetCueSource())
 	if err != nil {
@@ -38,6 +39,19 @@ func (s *DaemonServer) ValidateMissionCUE(ctx context.Context, req *daemonpb.Val
 			Message:  d.Message,
 			Severity: d.Severity,
 		})
+	}
+	if len(resp.Diagnostics) == 0 {
+		def, exportErr := cueruntime.Export(ctx, req.GetCueSource())
+		if exportErr != nil {
+			resp.Diagnostics = append(resp.Diagnostics, &daemonpb.CUEDiagnostic{
+				Line:     1,
+				Col:      1,
+				Message:  exportErr.Error(),
+				Severity: "error",
+			})
+		} else {
+			resp.CompiledDefinition = def
+		}
 	}
 	return resp, nil
 }
