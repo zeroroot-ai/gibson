@@ -247,9 +247,9 @@ func TestRedisVectorStore_Get_NotFound(t *testing.T) {
 	store := NewRedisVectorStore(client, 384)
 	defer store.Close()
 
-	_, err := store.Get(ctx, "nonexistent-id")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+	result, err := store.Get(ctx, "nonexistent-id")
+	require.NoError(t, err)
+	assert.Nil(t, result)
 }
 
 // TestRedisVectorStore_Delete tests deletion of vector records.
@@ -283,9 +283,9 @@ func TestRedisVectorStore_Delete(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify it's gone
-	_, err = store.Get(ctx, "delete-test-1")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+	deleted, err := store.Get(ctx, "delete-test-1")
+	require.NoError(t, err)
+	assert.Nil(t, deleted)
 }
 
 // TestRedisVectorStore_Search_KNN tests KNN vector similarity search.
