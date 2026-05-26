@@ -62,6 +62,39 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.119.0](https://github.com/zero-day-ai/gibson/compare/v0.118.0...v0.119.0) (2026-05-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove DaemonOperatorService handlers for superseded RPCs ([#409](https://github.com/zero-day-ai/gibson/issues/409))
+
+### Features
+
+* **admin:** add 12 TenantAdminService handlers for team/component/grant ops ([#402](https://github.com/zero-day-ai/gibson/issues/402)) ([66f48ec](https://github.com/zero-day-ai/gibson/commit/66f48ecb404834fc0a701da57a160ff4e5ee2472))
+* **cue:** populate CompiledDefinition in ValidateMissionCUE response ([#393](https://github.com/zero-day-ai/gibson/issues/393)) ([7428c01](https://github.com/zero-day-ai/gibson/commit/7428c011be76bea234a1df0f9f067fd306ce7d16))
+* **providerconfig:** broker-backed store — metadata in Postgres, credentials in secrets broker ([#431](https://github.com/zero-day-ai/gibson/issues/431)) ([dfb7b07](https://github.com/zero-day-ai/gibson/commit/dfb7b07c34cea2105831cbdf721c9e552b025ead)), closes [#423](https://github.com/zero-day-ai/gibson/issues/423) [#425](https://github.com/zero-day-ai/gibson/issues/425) [#426](https://github.com/zero-day-ai/gibson/issues/426)
+* **secrets:** namespace all user secrets under user/ prefix in Vault ([#406](https://github.com/zero-day-ai/gibson/issues/406)) ([d81b172](https://github.com/zero-day-ai/gibson/commit/d81b172652dd64d5bc03bb1ea1e58f9c1e9c3bfd)), closes [#404](https://github.com/zero-day-ai/gibson/issues/404)
+* **secrets:** remove Postgres broker from factory map, registry, and admin RPC ([#407](https://github.com/zero-day-ai/gibson/issues/407)) ([7789d00](https://github.com/zero-day-ai/gibson/commit/7789d009a779077ef4f89a4b87a31dd9963f17a4))
+
+
+### Bug Fixes
+
+* **authz:** write direct_read tuple in TestModel_CatalogGating instead of can_read ([#411](https://github.com/zero-day-ai/gibson/issues/411)) ([9667f22](https://github.com/zero-day-ai/gibson/commit/9667f22641fdd4f3d9e76e6e4b805fe9188a5587))
+* **cueruntime:** surface missing 'mission' wrapper as inline diagnostic ([#429](https://github.com/zero-day-ai/gibson/issues/429)) ([4fef711](https://github.com/zero-day-ai/gibson/commit/4fef711af8c7736617b210caf68bd4b207d89ddc))
+* **llm:** bypass langchaingo for Anthropic Complete to avoid deprecated temperature ([#418](https://github.com/zero-day-ai/gibson/issues/418)) ([a4bbb67](https://github.com/zero-day-ai/gibson/commit/a4bbb67c228ad946150e9aeaf1ac41e654fcface))
+* **missiondraft:** rename Redis field yaml → cue_source ([#428](https://github.com/zero-day-ai/gibson/issues/428)) ([092655c](https://github.com/zero-day-ai/gibson/commit/092655c08662099b786c6d82dc482994f258f405))
+* **providerconfig:** migrate postgres store from dropped provider_configs to tenant_secrets ([#401](https://github.com/zero-day-ai/gibson/issues/401)) ([18b80e3](https://github.com/zero-day-ai/gibson/commit/18b80e37d2b04656d23a3050121df80ebe12ca74))
+* **state:** align TestConsumerGroupMission pending assertions with NoAck behaviour ([#415](https://github.com/zero-day-ai/gibson/issues/415)) ([b1a4ee9](https://github.com/zero-day-ai/gibson/commit/b1a4ee900f3a9636b0af4760416a33b63ac15d3a)), closes [#413](https://github.com/zero-day-ai/gibson/issues/413)
+* **state:** prevent TestStreamRead goroutine hang under setec_integration ([#412](https://github.com/zero-day-ai/gibson/issues/412)) ([5357052](https://github.com/zero-day-ai/gibson/commit/53570524f3af47b3c5a5adf2b7d0b03e120e5286))
+* **state:** replace log.Fatal with graceful skip in Example functions ([#417](https://github.com/zero-day-ai/gibson/issues/417)) ([035ec1a](https://github.com/zero-day-ai/gibson/commit/035ec1a976030ec6235f4424db5009116293c2e2)), closes [#414](https://github.com/zero-day-ai/gibson/issues/414)
+* **tests:** align vector/prompt/graphrag tests with current code contracts ([#389](https://github.com/zero-day-ai/gibson/issues/389)) ([54948c0](https://github.com/zero-day-ai/gibson/commit/54948c0b3401d9798a97cfe0db71d7d6d1e35d6e))
+
+
+### Miscellaneous Chores
+
+* remove DaemonOperatorService handlers for superseded RPCs ([#409](https://github.com/zero-day-ai/gibson/issues/409)) ([5234197](https://github.com/zero-day-ai/gibson/commit/52341978b26a472e4863effc21880a408a4ecf8a))
+
 ## [0.118.0](https://github.com/zero-day-ai/gibson/compare/v0.117.0...v0.118.0) (2026-05-24)
 
 
