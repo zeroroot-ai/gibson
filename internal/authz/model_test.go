@@ -66,6 +66,10 @@ func TestModel_CatalogGating(t *testing.T) {
 			{User: tenantA, Relation: "owner", Object: compOne},
 			{User: sysTenant, Relation: "platform_enabled", Object: compOne},
 			{User: tenantA, Relation: "tenant_enabled", Object: compOne},
+			// agent_principal:aa-1 is a member of tenant:acme so it satisfies
+			// in_tenant_catalog (member from tenant_enabled) and inherits
+			// tenant-level deny expansion (any_*_deny = member from tenant_*_disabled).
+			{User: agentAA, Relation: "member", Object: tenantA},
 			// NOTE: the alice/member/tenantA tuple is already written above as
 			// part of the "tenant membership" block. FGA's WriteTuples rejects
 			// duplicate keys within a single request
@@ -234,12 +238,17 @@ func TestModel_CatalogGating(t *testing.T) {
 	t.Run("gate/no_platform_enabled_denies_all", func(t *testing.T) {
 		c := newClient(t)
 		seed(c)
+		// in_tenant_catalog = member from tenant_enabled; platform_enabled is
+		// now an operational marker only (operators ensure tenant_enabled is
+		// only written for platform-approved or tenant-published components).
+		// Removing platform_enabled while tenant_enabled is present must NOT
+		// deny access — the tenant_enabled gate is authoritative.
 		removeTuples(c, fgaclient.ClientTupleKeyWithoutCondition{
 			User: sysTenant, Relation: "platform_enabled", Object: compOne,
 		})
 		for _, a := range actions {
-			require.False(t, checkAllow(c, userAlice, a.can, compOne),
-				"no platform_enabled: %s should deny", a.can)
+			require.True(t, checkAllow(c, userAlice, a.can, compOne),
+				"platform_enabled absent but tenant_enabled present: %s should still be allowed", a.can)
 		}
 	})
 

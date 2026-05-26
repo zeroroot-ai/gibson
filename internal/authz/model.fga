@@ -125,7 +125,7 @@ type tenant
     define owner: [user]
     define admin: [user] or owner
     define writer: [user] or admin
-    define member: [user] or writer
+    define member: [user, agent_principal, tool_principal, plugin_principal] or writer
     # Spec plans-and-quotas-simplification removed the has_* feature-flag
     # relations (has_sso / has_audit_logs / has_compliance_exports /
     # has_dedicated_slack / has_dedicated_tenant / has_private_registry).
@@ -191,15 +191,17 @@ type component
     # at any layer => overall deny at that action class).
     # any_execute_deny / any_write_deny / any_read_deny collect all per-action
     # denies across scopes so the user-facing relations need a single `but not`.
-    define any_execute_deny: tenant_execute_disabled or team_execute_disabled or user_execute_disabled
-    define any_write_deny: tenant_write_disabled or team_write_disabled or user_write_disabled
-    define any_read_deny: tenant_read_disabled or team_read_disabled or user_read_disabled
+    define any_execute_deny: member from tenant_execute_disabled or team_execute_disabled or user_execute_disabled
+    define any_write_deny: member from tenant_write_disabled or team_write_disabled or user_write_disabled
+    define any_read_deny: member from tenant_read_disabled or team_read_disabled or user_read_disabled
     # owner-side direct/role grant (pre-gate).
-    define direct_execute: [user, agent_principal, tenant#member, team#member] or admin from owner
-    define direct_configure: [user, agent_principal, tenant#member, team#member] or admin from owner
-    define direct_read: [user, agent_principal, tenant#member, team#member, team#can_view_data_from] or admin from owner
-    # ownership gate: visible iff published to the caller's scope AND tenant_enabled.
-    define in_tenant_catalog: (platform_enabled or tenant_published) and tenant_enabled
+    define direct_execute: [user, agent_principal, tenant#member, team#member] or member from owner
+    define direct_configure: [user, agent_principal, tenant#member, team#member] or member from owner
+    define direct_read: [user, agent_principal, tenant#member, team#member, team#can_view_data_from] or member from owner
+    # ownership gate: accessible iff the caller's tenant has tenant_enabled for this component.
+    # platform_enabled and tenant_published are operational markers enforced at write time
+    # (operators only write tenant_enabled for platform-approved or tenant-published components).
+    define in_tenant_catalog: member from tenant_enabled
     # Effective per-action evaluators. Preserving the existing relation names
     # means legacy Check(subject, can_read, component) call sites pick up the
     # deny-wins composition automatically.
