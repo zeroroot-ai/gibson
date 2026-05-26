@@ -9,9 +9,13 @@ package missiondraft
 // Fields per hash:
 //   id          string  UUID
 //   name        string
-//   yaml        string  raw YAML content (max 512 KB)
+//   cue_source  string  raw CUE source (max 512 KB)
 //   created_at  string  RFC 3339
 //   updated_at  string  RFC 3339
+//
+// Migration note: drafts written before the cue_source rename carry a "yaml"
+// field instead. Get falls back to "yaml" when "cue_source" is absent; Save
+// writes "cue_source" and deletes the legacy "yaml" field in one pipeline.
 
 import (
 	"context"
@@ -33,14 +37,14 @@ const (
 	draftKeyPrefix = "missiondraft:"
 	indexKeyPrefix = "missiondrafts:"
 	draftTTL       = 30 * 24 * time.Hour // 30 days
-	maxYAMLBytes   = 512 * 1024          // 512 KB
+	maxCUEBytes    = 512 * 1024          // 512 KB
 )
 
 // MissionDraft is the in-memory representation of a saved draft.
 type MissionDraft struct {
 	ID        string
 	Name      string
-	YAML      string
+	CueSource string
 	CreatedAt string
 	UpdatedAt string
 }
@@ -76,13 +80,13 @@ func indexKey(tenantID string) string {
 // Save persists a mission draft for a tenant.
 // If draftID is empty a new UUID is generated (create); otherwise the existing
 // draft is overwritten (update). Returns the draftID.
-// Returns codes.InvalidArgument if the YAML exceeds 512 KB.
-func (s *RedisMissionDraftStore) Save(ctx context.Context, tenantID, name, yaml, draftID string) (string, error) {
+// Returns an error if the CUE source exceeds 512 KB.
+func (s *RedisMissionDraftStore) Save(ctx context.Context, tenantID, name, cueSource, draftID string) (string, error) {
 	if tenantID == "" {
 		return "", fmt.Errorf("tenant_id is required")
 	}
-	if len(yaml) > maxYAMLBytes {
-		return "", fmt.Errorf("yaml exceeds maximum size of 512 KB")
+	if len(cueSource) > maxCUEBytes {
+		return "", fmt.Errorf("cue_source exceeds maximum size of 512 KB")
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -107,13 +111,14 @@ func (s *RedisMissionDraftStore) Save(ctx context.Context, tenantID, name, yaml,
 	fields := map[string]any{
 		"id":         draftID,
 		"name":       name,
-		"yaml":       yaml,
+		"cue_source": cueSource,
 		"created_at": createdAt,
 		"updated_at": now,
 	}
 
 	pipe := s.client.Pipeline()
 	pipe.HMSet(ctx, key, fields)
+	pipe.HDel(ctx, key, "yaml") // remove legacy field from pre-rename drafts
 	pipe.Expire(ctx, key, draftTTL)
 	pipe.ZAdd(ctx, idx, goredis.Z{Score: score, Member: draftID})
 	if _, pipeErr := pipe.Exec(ctx); pipeErr != nil {
@@ -191,10 +196,14 @@ func (s *RedisMissionDraftStore) Get(ctx context.Context, tenantID, draftID stri
 		return nil, fmt.Errorf("failed to get draft: %w", err)
 	}
 
+	cueSource := fields["cue_source"]
+	if cueSource == "" {
+		cueSource = fields["yaml"] // legacy fallback for drafts written before the rename
+	}
 	return &MissionDraft{
 		ID:        fields["id"],
 		Name:      fields["name"],
-		YAML:      fields["yaml"],
+		CueSource: cueSource,
 		CreatedAt: fields["created_at"],
 		UpdatedAt: fields["updated_at"],
 	}, nil
