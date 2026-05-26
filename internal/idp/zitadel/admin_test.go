@@ -384,6 +384,111 @@ func TestListServiceAccounts_Upstream5xx(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GetUserProfile tests
+// ---------------------------------------------------------------------------
+
+func TestGetUserProfile_HappyPath(t *testing.T) {
+	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/management/v1/users/") {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResp(w, http.StatusOK, map[string]interface{}{
+			"user": map[string]interface{}{
+				"id":    "user-xyz",
+				"state": "USER_STATE_ACTIVE",
+				"human": map[string]interface{}{
+					"profile": map[string]string{
+						"displayName": "Alice Example",
+					},
+					"email": map[string]string{
+						"email": "alice@example.com",
+					},
+				},
+				"createdAt": "2024-01-01T00:00:00Z",
+			},
+		})
+	})
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer client.Close()
+
+	profile, err := client.GetUserProfile(context.Background(), "user-xyz")
+	if err != nil {
+		t.Fatalf("GetUserProfile: %v", err)
+	}
+	if profile.DisplayName != "Alice Example" {
+		t.Errorf("DisplayName: got %q, want %q", profile.DisplayName, "Alice Example")
+	}
+	if profile.Email != "alice@example.com" {
+		t.Errorf("Email: got %q, want %q", profile.Email, "alice@example.com")
+	}
+}
+
+func TestGetUserProfile_NotFound(t *testing.T) {
+	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
+		errorResp(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+	})
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer client.Close()
+
+	_, err = client.GetUserProfile(context.Background(), "missing-user")
+	if !errors.Is(err, idp.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got: %v", err)
+	}
+}
+
+// TestGetUserProfile_EmptyDetails guards against the panic at parseZitadelError
+// when Zitadel returns an error body with no "details" field (empty slice).
+// Regression test for the index-out-of-range panic that crashed ListMembers.
+func TestGetUserProfile_EmptyDetails(t *testing.T) {
+	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
+		// Zitadel sometimes returns errors without a "details" array.
+		jsonResp(w, http.StatusInternalServerError, map[string]interface{}{
+			"code":    13,
+			"message": "Internal error",
+		})
+	})
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer client.Close()
+
+	// Must return an error, not panic.
+	_, err = client.GetUserProfile(context.Background(), "user-xyz")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if errors.Is(err, idp.ErrNotFound) {
+		t.Errorf("got ErrNotFound, want ErrUpstream")
+	}
+}
+
+// TestGetUserProfile_EmptyBody guards against panic when Zitadel returns a
+// non-2xx status with an empty response body.
+func TestGetUserProfile_EmptyBody(t *testing.T) {
+	_, cfg := setupServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	})
+	client, err := zitadel.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer client.Close()
+
+	_, err = client.GetUserProfile(context.Background(), "user-xyz")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Startup probe tests
 // ---------------------------------------------------------------------------
 
