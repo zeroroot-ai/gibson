@@ -971,6 +971,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.v1.DaemonService/UpdateMissionDefinition":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.v1.DaemonService/ValidateMissionCUE":
     relation: "writer"
     object_type: "tenant"

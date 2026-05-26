@@ -171,6 +171,9 @@ func (f *fakeDaemon) CreateMission(_ context.Context, _ CreateMissionData) (Crea
 func (f *fakeDaemon) CreateMissionDefinition(_ context.Context, _ CreateMissionDefinitionData) (CreateMissionDefinitionResultData, error) {
 	return CreateMissionDefinitionResultData{}, nil
 }
+func (f *fakeDaemon) UpdateMissionDefinition(_ context.Context, _ UpdateMissionDefinitionData) (UpdateMissionDefinitionResultData, error) {
+	return UpdateMissionDefinitionResultData{}, nil
+}
 func (f *fakeDaemon) RequestShutdown(_ context.Context, _ bool, _ int32) error { return nil }
 func (f *fakeDaemon) RefreshToolCatalog(_ context.Context) (bool, string, error) {
 	return false, "", nil

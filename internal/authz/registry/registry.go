@@ -1563,6 +1563,16 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.v1.DaemonService/UpdateMissionDefinition": {
+		Method:            "/gibson.daemon.v1.DaemonService/UpdateMissionDefinition",
+		Service:           "gibson.daemon.v1.DaemonService",
+		Relation:          "writer",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.v1.DaemonService/ValidateMissionCUE": {
 		Method:            "/gibson.daemon.v1.DaemonService/ValidateMissionCUE",
 		Service:           "gibson.daemon.v1.DaemonService",

@@ -185,6 +185,9 @@ func (n nilDaemonStub) CreateMission(_ context.Context, _ CreateMissionData) (Cr
 func (n nilDaemonStub) CreateMissionDefinition(_ context.Context, _ CreateMissionDefinitionData) (CreateMissionDefinitionResultData, error) {
 	return CreateMissionDefinitionResultData{}, nil
 }
+func (n nilDaemonStub) UpdateMissionDefinition(_ context.Context, _ UpdateMissionDefinitionData) (UpdateMissionDefinitionResultData, error) {
+	return UpdateMissionDefinitionResultData{}, nil
+}
 func (n nilDaemonStub) RequestShutdown(_ context.Context, _ bool, _ int32) error { return nil }
 func (n nilDaemonStub) RefreshToolCatalog(_ context.Context) (bool, string, error) {
 	return false, "", nil

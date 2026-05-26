@@ -1550,6 +1550,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.daemon.v1.DaemonService/UpdateMissionDefinition": {
+    method: "/gibson.daemon.v1.DaemonService/UpdateMissionDefinition",
+    service: "gibson.daemon.v1.DaemonService",
+    relation: "writer",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.v1.DaemonService/ValidateMissionCUE": {
     method: "/gibson.daemon.v1.DaemonService/ValidateMissionCUE",
     service: "gibson.daemon.v1.DaemonService",

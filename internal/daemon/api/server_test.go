@@ -40,6 +40,7 @@ type mockDaemon struct {
 	getMissionDefinitionFn    func(ctx context.Context, name string) (*missionpb.MissionDefinition, error)
 	createMissionFn           func(ctx context.Context, req CreateMissionData) (CreateMissionResultData, error)
 	createMissionDefinitionFn func(ctx context.Context, req CreateMissionDefinitionData) (CreateMissionDefinitionResultData, error)
+	updateMissionDefinitionFn func(ctx context.Context, req UpdateMissionDefinitionData) (UpdateMissionDefinitionResultData, error)
 }
 
 func (m *mockDaemon) Status() (DaemonStatus, error) {
@@ -215,6 +216,13 @@ func (m *mockDaemon) CreateMissionDefinition(ctx context.Context, req CreateMiss
 		return m.createMissionDefinitionFn(ctx, req)
 	}
 	return CreateMissionDefinitionResultData{}, nil
+}
+
+func (m *mockDaemon) UpdateMissionDefinition(ctx context.Context, req UpdateMissionDefinitionData) (UpdateMissionDefinitionResultData, error) {
+	if m.updateMissionDefinitionFn != nil {
+		return m.updateMissionDefinitionFn(ctx, req)
+	}
+	return UpdateMissionDefinitionResultData{}, nil
 }
 
 func (m *mockDaemon) RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error {
