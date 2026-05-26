@@ -5,13 +5,13 @@
 # Pure Go build with CGO disabled for static binary compilation.
 #
 # Build from gibson directory:
-#   docker build -t ghcr.io/zero-day-ai/gibson:latest .
+#   docker build -t ghcr.io/zeroroot-ai/gibson:latest .
 # ============================================================================
 
 # ============================================================================
 # Stage 1: Builder - Pure Go compilation (no CGO)
 # ============================================================================
-FROM ghcr.io/zero-day-ai/mirror/golang:1.25-alpine AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.25-alpine AS builder
 
 # Install git and ca-certificates for dependency fetching
 RUN apk add --no-cache git ca-certificates
@@ -39,13 +39,13 @@ ARG BUILD_TIME="unknown"
 # Copy dependency manifests first for better layer caching
 COPY go.mod go.sum ./
 
-# Download dependencies. Private github.com/zero-day-ai/* modules
+# Download dependencies. Private github.com/zeroroot-ai/* modules
 # require auth — supplied via the optional `ghtoken` BuildKit secret
 # (a file containing a GitHub PAT or `gh auth token` output). When the
 # secret is absent (e.g. CI on a public-only build), this step still
 # runs but a private-module fetch will fail at build time with a
 # missing-auth error.
-ENV GOPRIVATE=github.com/zero-day-ai
+ENV GOPRIVATE=github.com/zeroroot-ai
 
 # Allow the Go toolchain to auto-fetch the version specified in go.mod when
 # the base image ships an older patch. The base FROM is SHA-pinned to a
@@ -70,8 +70,8 @@ COPY . .
 ENV CGO_ENABLED=0
 
 RUN LDFLAGS="-s -w \
-      -X github.com/zero-day-ai/gibson/pkg/version.GitCommit=${COMMIT} \
-      -X github.com/zero-day-ai/gibson/pkg/version.BuildTime=${BUILD_TIME}"; \
+      -X github.com/zeroroot-ai/gibson/pkg/version.GitCommit=${COMMIT} \
+      -X github.com/zeroroot-ai/gibson/pkg/version.BuildTime=${BUILD_TIME}"; \
     if [ -n "$BUILD_TAGS" ]; then \
         go build -tags="$BUILD_TAGS" -ldflags="$LDFLAGS" -o /out/gibson ./cmd/gibson; \
     else \
@@ -108,7 +108,7 @@ RUN go build -ldflags="-s -w" -o /out/sandbox-eviction-handler ./cmd/sandbox-evi
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
 # ============================================================================
-FROM ghcr.io/zero-day-ai/mirror/alpine:3.21 AS runtime
+FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21 AS runtime
 
 # Install ca-certificates for HTTPS connections
 RUN apk add --no-cache ca-certificates

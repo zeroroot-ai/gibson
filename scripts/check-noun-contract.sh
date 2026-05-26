@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-SDK_PROTO_DIR="$(go list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk 2>/dev/null || true)"
+SDK_PROTO_DIR="$(go list -m -f '{{.Dir}}' github.com/zeroroot-ai/sdk 2>/dev/null || true)"
 if [ -z "${SDK_PROTO_DIR}" ]; then
   echo "ERROR: cannot resolve SDK proto dir via 'go list -m'." >&2
   exit 1

@@ -1,9 +1,9 @@
-module github.com/zero-day-ai/gibson/tests/e2e/fixtures/agents/probe
+module github.com/zeroroot-ai/gibson/tests/e2e/fixtures/agents/probe
 
 go 1.25.3
 
 require (
-	github.com/zero-day-ai/sdk v1.9.0
+	github.com/zeroroot-ai/sdk v1.9.0
 	google.golang.org/protobuf v1.36.11
 )
 

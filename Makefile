@@ -25,9 +25,9 @@ GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 # LD flags for version injection
-LDFLAGS=-ldflags "-X github.com/zero-day-ai/gibson/pkg/version.Version=$(VERSION) \
-	-X github.com/zero-day-ai/gibson/pkg/version.GitCommit=$(GIT_COMMIT) \
-	-X github.com/zero-day-ai/gibson/pkg/version.BuildTime=$(BUILD_TIME)"
+LDFLAGS=-ldflags "-X github.com/zeroroot-ai/gibson/pkg/version.Version=$(VERSION) \
+	-X github.com/zeroroot-ai/gibson/pkg/version.GitCommit=$(GIT_COMMIT) \
+	-X github.com/zeroroot-ai/gibson/pkg/version.BuildTime=$(BUILD_TIME)"
 
 # Coverage settings
 COVERAGE_FILE=coverage.out
@@ -256,14 +256,14 @@ proto: proto-deps authz-registry
 	@# `inputs: directory: gibson-local` restricts codegen to the
 	@# daemon-local tree — Go bindings for the SDK already ship as a
 	@# published Go module. gibson#122.
-	@$(GOCMD) mod download github.com/zero-day-ai/sdk
-	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
-	  if [ -z "$$SDK_DIR" ]; then echo "ERROR: could not resolve github.com/zero-day-ai/sdk module dir" && exit 1; fi; \
+	@$(GOCMD) mod download github.com/zeroroot-ai/sdk
+	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zeroroot-ai/sdk); \
+	  if [ -z "$$SDK_DIR" ]; then echo "ERROR: could not resolve github.com/zeroroot-ai/sdk module dir" && exit 1; fi; \
 	  rm -rf .tmp/proto-ws && mkdir -p .tmp/proto-ws/out && \
 	  ln -sfn $(CURDIR)/internal/daemon/api .tmp/proto-ws/gibson-local && \
 	  ln -sfn $$SDK_DIR/api/proto .tmp/proto-ws/sdk-proto && \
 	  printf 'version: v2\nmodules:\n  - path: gibson-local\n  - path: sdk-proto\n    excludes:\n      - sdk-proto/google\nlint:\n  use:\n    - STANDARD\n  ignore:\n    - gibson-local/gibson/daemon/admin/v1/daemon_admin.proto\n' > .tmp/proto-ws/buf.yaml && \
-	  printf 'version: v2\nmanaged:\n  enabled: true\n  disable:\n    - file_option: go_package\nplugins:\n  - local: protoc-gen-go\n    out: out\n    opt:\n      - module=github.com/zero-day-ai/gibson\n      - Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb\n  - local: protoc-gen-go-grpc\n    out: out\n    opt:\n      - module=github.com/zero-day-ai/gibson\n      - Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb\ninputs:\n  - directory: gibson-local\n' > .tmp/proto-ws/buf.gen.yaml && \
+	  printf 'version: v2\nmanaged:\n  enabled: true\n  disable:\n    - file_option: go_package\nplugins:\n  - local: protoc-gen-go\n    out: out\n    opt:\n      - module=github.com/zeroroot-ai/gibson\n      - Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb\n  - local: protoc-gen-go-grpc\n    out: out\n    opt:\n      - module=github.com/zeroroot-ai/gibson\n      - Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb\ninputs:\n  - directory: gibson-local\n' > .tmp/proto-ws/buf.gen.yaml && \
 	  cd .tmp/proto-ws && $(BUF) generate
 	@# rsync the generated *.pb.go files back into the daemon tree. buf's
 	@# `module=` opt emits paths rooted at the Go module, so the layout
@@ -282,9 +282,9 @@ proto: proto-deps authz-registry
 authz-registry:
 	@echo "Building authz-registry-gen from pinned SDK..."
 	@mkdir -p $(BINARY_DIR) .tmp
-	@$(GOCMD) mod download github.com/zero-day-ai/sdk
-	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
-	  if [ -z "$$SDK_DIR" ]; then echo "ERROR: could not resolve github.com/zero-day-ai/sdk module dir" && exit 1; fi; \
+	@$(GOCMD) mod download github.com/zeroroot-ai/sdk
+	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zeroroot-ai/sdk); \
+	  if [ -z "$$SDK_DIR" ]; then echo "ERROR: could not resolve github.com/zeroroot-ai/sdk module dir" && exit 1; fi; \
 	  echo "  SDK dir: $$SDK_DIR"; \
 	  cd "$$SDK_DIR" && $(GOBUILD) -o $(CURDIR)/$(BINARY_DIR)/authz-registry-gen ./cmd/authz-registry-gen
 	@echo "Building fds-merge..."
@@ -292,10 +292,10 @@ authz-registry:
 	@echo "Building audit-csv-gen..."
 	@$(GOBUILD) -o $(BINARY_DIR)/audit-csv-gen ./cmd/audit-csv-gen
 	@echo "Building FDS from SDK protos..."
-	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
+	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zeroroot-ai/sdk); \
 	  cd "$$SDK_DIR" && $(BUF) build -o $(CURDIR)/.tmp/sdk-fds.binpb
 	@echo "Building FDS from gibson daemon-local protos (via temp workspace so gibson/auth/v1/options.proto resolves from the pinned SDK)..."
-	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk); \
+	@SDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zeroroot-ai/sdk); \
 	  rm -rf .tmp/ws && mkdir -p .tmp/ws && \
 	  ln -sfn $(CURDIR)/internal/daemon/api .tmp/ws/gibson-local && \
 	  ln -sfn $$SDK_DIR/api/proto .tmp/ws/sdk-proto && \
@@ -303,9 +303,9 @@ authz-registry:
 	  cd .tmp/ws && $(BUF) build gibson-local -o $(CURDIR)/.tmp/gibson-fds.binpb
 	@rm -rf .tmp/ws
 	@echo "Building FDS from platform-sdk protos (gibson.platform.v1, gibson.tenant.v1, gibson.user.v1)..."
-	@$(GOCMD) mod download github.com/zero-day-ai/platform-sdk
-	@PSDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zero-day-ai/platform-sdk); \
-	  if [ -z "$$PSDK_DIR" ]; then echo "ERROR: could not resolve github.com/zero-day-ai/platform-sdk module dir" && exit 1; fi; \
+	@$(GOCMD) mod download github.com/zeroroot-ai/platform-sdk
+	@PSDK_DIR=$$($(GOCMD) list -m -f '{{.Dir}}' github.com/zeroroot-ai/platform-sdk); \
+	  if [ -z "$$PSDK_DIR" ]; then echo "ERROR: could not resolve github.com/zeroroot-ai/platform-sdk module dir" && exit 1; fi; \
 	  echo "  platform-sdk dir: $$PSDK_DIR"; \
 	  cd "$$PSDK_DIR" && $(BUF) build -o $(CURDIR)/.tmp/platform-sdk-fds.binpb
 	@echo "Merging FDSes (SDK + daemon-local + platform-sdk)..."

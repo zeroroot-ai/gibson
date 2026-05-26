@@ -62,376 +62,376 @@ Completed or cancelled missions are unaffected.
 
 ---
 
-## [0.119.0](https://github.com/zero-day-ai/gibson/compare/v0.118.0...v0.119.0) (2026-05-26)
+## [0.119.0](https://github.com/zeroroot-ai/gibson/compare/v0.118.0...v0.119.0) (2026-05-26)
 
 
 ### ⚠ BREAKING CHANGES
 
-* remove DaemonOperatorService handlers for superseded RPCs ([#409](https://github.com/zero-day-ai/gibson/issues/409))
+* remove DaemonOperatorService handlers for superseded RPCs ([#409](https://github.com/zeroroot-ai/gibson/issues/409))
 
 ### Features
 
-* **admin:** add 12 TenantAdminService handlers for team/component/grant ops ([#402](https://github.com/zero-day-ai/gibson/issues/402)) ([66f48ec](https://github.com/zero-day-ai/gibson/commit/66f48ecb404834fc0a701da57a160ff4e5ee2472))
-* **cue:** populate CompiledDefinition in ValidateMissionCUE response ([#393](https://github.com/zero-day-ai/gibson/issues/393)) ([7428c01](https://github.com/zero-day-ai/gibson/commit/7428c011be76bea234a1df0f9f067fd306ce7d16))
-* **providerconfig:** broker-backed store — metadata in Postgres, credentials in secrets broker ([#431](https://github.com/zero-day-ai/gibson/issues/431)) ([dfb7b07](https://github.com/zero-day-ai/gibson/commit/dfb7b07c34cea2105831cbdf721c9e552b025ead)), closes [#423](https://github.com/zero-day-ai/gibson/issues/423) [#425](https://github.com/zero-day-ai/gibson/issues/425) [#426](https://github.com/zero-day-ai/gibson/issues/426)
-* **secrets:** namespace all user secrets under user/ prefix in Vault ([#406](https://github.com/zero-day-ai/gibson/issues/406)) ([d81b172](https://github.com/zero-day-ai/gibson/commit/d81b172652dd64d5bc03bb1ea1e58f9c1e9c3bfd)), closes [#404](https://github.com/zero-day-ai/gibson/issues/404)
-* **secrets:** remove Postgres broker from factory map, registry, and admin RPC ([#407](https://github.com/zero-day-ai/gibson/issues/407)) ([7789d00](https://github.com/zero-day-ai/gibson/commit/7789d009a779077ef4f89a4b87a31dd9963f17a4))
+* **admin:** add 12 TenantAdminService handlers for team/component/grant ops ([#402](https://github.com/zeroroot-ai/gibson/issues/402)) ([66f48ec](https://github.com/zeroroot-ai/gibson/commit/66f48ecb404834fc0a701da57a160ff4e5ee2472))
+* **cue:** populate CompiledDefinition in ValidateMissionCUE response ([#393](https://github.com/zeroroot-ai/gibson/issues/393)) ([7428c01](https://github.com/zeroroot-ai/gibson/commit/7428c011be76bea234a1df0f9f067fd306ce7d16))
+* **providerconfig:** broker-backed store — metadata in Postgres, credentials in secrets broker ([#431](https://github.com/zeroroot-ai/gibson/issues/431)) ([dfb7b07](https://github.com/zeroroot-ai/gibson/commit/dfb7b07c34cea2105831cbdf721c9e552b025ead)), closes [#423](https://github.com/zeroroot-ai/gibson/issues/423) [#425](https://github.com/zeroroot-ai/gibson/issues/425) [#426](https://github.com/zeroroot-ai/gibson/issues/426)
+* **secrets:** namespace all user secrets under user/ prefix in Vault ([#406](https://github.com/zeroroot-ai/gibson/issues/406)) ([d81b172](https://github.com/zeroroot-ai/gibson/commit/d81b172652dd64d5bc03bb1ea1e58f9c1e9c3bfd)), closes [#404](https://github.com/zeroroot-ai/gibson/issues/404)
+* **secrets:** remove Postgres broker from factory map, registry, and admin RPC ([#407](https://github.com/zeroroot-ai/gibson/issues/407)) ([7789d00](https://github.com/zeroroot-ai/gibson/commit/7789d009a779077ef4f89a4b87a31dd9963f17a4))
 
 
 ### Bug Fixes
 
-* **authz:** write direct_read tuple in TestModel_CatalogGating instead of can_read ([#411](https://github.com/zero-day-ai/gibson/issues/411)) ([9667f22](https://github.com/zero-day-ai/gibson/commit/9667f22641fdd4f3d9e76e6e4b805fe9188a5587))
-* **cueruntime:** surface missing 'mission' wrapper as inline diagnostic ([#429](https://github.com/zero-day-ai/gibson/issues/429)) ([4fef711](https://github.com/zero-day-ai/gibson/commit/4fef711af8c7736617b210caf68bd4b207d89ddc))
-* **llm:** bypass langchaingo for Anthropic Complete to avoid deprecated temperature ([#418](https://github.com/zero-day-ai/gibson/issues/418)) ([a4bbb67](https://github.com/zero-day-ai/gibson/commit/a4bbb67c228ad946150e9aeaf1ac41e654fcface))
-* **missiondraft:** rename Redis field yaml → cue_source ([#428](https://github.com/zero-day-ai/gibson/issues/428)) ([092655c](https://github.com/zero-day-ai/gibson/commit/092655c08662099b786c6d82dc482994f258f405))
-* **providerconfig:** migrate postgres store from dropped provider_configs to tenant_secrets ([#401](https://github.com/zero-day-ai/gibson/issues/401)) ([18b80e3](https://github.com/zero-day-ai/gibson/commit/18b80e37d2b04656d23a3050121df80ebe12ca74))
-* **state:** align TestConsumerGroupMission pending assertions with NoAck behaviour ([#415](https://github.com/zero-day-ai/gibson/issues/415)) ([b1a4ee9](https://github.com/zero-day-ai/gibson/commit/b1a4ee900f3a9636b0af4760416a33b63ac15d3a)), closes [#413](https://github.com/zero-day-ai/gibson/issues/413)
-* **state:** prevent TestStreamRead goroutine hang under setec_integration ([#412](https://github.com/zero-day-ai/gibson/issues/412)) ([5357052](https://github.com/zero-day-ai/gibson/commit/53570524f3af47b3c5a5adf2b7d0b03e120e5286))
-* **state:** replace log.Fatal with graceful skip in Example functions ([#417](https://github.com/zero-day-ai/gibson/issues/417)) ([035ec1a](https://github.com/zero-day-ai/gibson/commit/035ec1a976030ec6235f4424db5009116293c2e2)), closes [#414](https://github.com/zero-day-ai/gibson/issues/414)
-* **tests:** align vector/prompt/graphrag tests with current code contracts ([#389](https://github.com/zero-day-ai/gibson/issues/389)) ([54948c0](https://github.com/zero-day-ai/gibson/commit/54948c0b3401d9798a97cfe0db71d7d6d1e35d6e))
+* **authz:** write direct_read tuple in TestModel_CatalogGating instead of can_read ([#411](https://github.com/zeroroot-ai/gibson/issues/411)) ([9667f22](https://github.com/zeroroot-ai/gibson/commit/9667f22641fdd4f3d9e76e6e4b805fe9188a5587))
+* **cueruntime:** surface missing 'mission' wrapper as inline diagnostic ([#429](https://github.com/zeroroot-ai/gibson/issues/429)) ([4fef711](https://github.com/zeroroot-ai/gibson/commit/4fef711af8c7736617b210caf68bd4b207d89ddc))
+* **llm:** bypass langchaingo for Anthropic Complete to avoid deprecated temperature ([#418](https://github.com/zeroroot-ai/gibson/issues/418)) ([a4bbb67](https://github.com/zeroroot-ai/gibson/commit/a4bbb67c228ad946150e9aeaf1ac41e654fcface))
+* **missiondraft:** rename Redis field yaml → cue_source ([#428](https://github.com/zeroroot-ai/gibson/issues/428)) ([092655c](https://github.com/zeroroot-ai/gibson/commit/092655c08662099b786c6d82dc482994f258f405))
+* **providerconfig:** migrate postgres store from dropped provider_configs to tenant_secrets ([#401](https://github.com/zeroroot-ai/gibson/issues/401)) ([18b80e3](https://github.com/zeroroot-ai/gibson/commit/18b80e37d2b04656d23a3050121df80ebe12ca74))
+* **state:** align TestConsumerGroupMission pending assertions with NoAck behaviour ([#415](https://github.com/zeroroot-ai/gibson/issues/415)) ([b1a4ee9](https://github.com/zeroroot-ai/gibson/commit/b1a4ee900f3a9636b0af4760416a33b63ac15d3a)), closes [#413](https://github.com/zeroroot-ai/gibson/issues/413)
+* **state:** prevent TestStreamRead goroutine hang under setec_integration ([#412](https://github.com/zeroroot-ai/gibson/issues/412)) ([5357052](https://github.com/zeroroot-ai/gibson/commit/53570524f3af47b3c5a5adf2b7d0b03e120e5286))
+* **state:** replace log.Fatal with graceful skip in Example functions ([#417](https://github.com/zeroroot-ai/gibson/issues/417)) ([035ec1a](https://github.com/zeroroot-ai/gibson/commit/035ec1a976030ec6235f4424db5009116293c2e2)), closes [#414](https://github.com/zeroroot-ai/gibson/issues/414)
+* **tests:** align vector/prompt/graphrag tests with current code contracts ([#389](https://github.com/zeroroot-ai/gibson/issues/389)) ([54948c0](https://github.com/zeroroot-ai/gibson/commit/54948c0b3401d9798a97cfe0db71d7d6d1e35d6e))
 
 
 ### Miscellaneous Chores
 
-* remove DaemonOperatorService handlers for superseded RPCs ([#409](https://github.com/zero-day-ai/gibson/issues/409)) ([5234197](https://github.com/zero-day-ai/gibson/commit/52341978b26a472e4863effc21880a408a4ecf8a))
+* remove DaemonOperatorService handlers for superseded RPCs ([#409](https://github.com/zeroroot-ai/gibson/issues/409)) ([5234197](https://github.com/zeroroot-ai/gibson/commit/52341978b26a472e4863effc21880a408a4ecf8a))
 
-## [0.118.0](https://github.com/zero-day-ai/gibson/compare/v0.117.0...v0.118.0) (2026-05-24)
-
-
-### Features
-
-* **daemon:** implement TenantAdminService.ListMembers ([#367](https://github.com/zero-day-ai/gibson/issues/367)) ([bc65753](https://github.com/zero-day-ai/gibson/commit/bc65753436c79e20ab89bbee80f1591f400677ee))
-
-
-### Bug Fixes
-
-* **authz:** add tenant#writer relation to FGA model (ADR-0037) ([#361](https://github.com/zero-day-ai/gibson/issues/361)) ([58b0d7e](https://github.com/zero-day-ai/gibson/commit/58b0d7e4326503de31e39132e50cca4294637350))
-* **ci:** add paths-ignore for doc-only PRs to daemon build ([#365](https://github.com/zero-day-ai/gibson/issues/365)) ([2aa9cbb](https://github.com/zero-day-ai/gibson/commit/2aa9cbbb96abf1bd59b956bab20aa2596a1c5941)), closes [#362](https://github.com/zero-day-ai/gibson/issues/362)
-* **ci:** add Redis service container to test job (fixes [#368](https://github.com/zero-day-ai/gibson/issues/368)) ([#371](https://github.com/zero-day-ai/gibson/issues/371)) ([41c6887](https://github.com/zero-day-ai/gibson/commit/41c688775f72348a91ae06cc942eaa3f3aa54be3))
-* **ci:** add Redis service container to test job in build.yaml ([#377](https://github.com/zero-day-ai/gibson/issues/377)) ([c265447](https://github.com/zero-day-ai/gibson/commit/c2654470a429c041cfd721c532bde2d0d90dc082))
-* **ci:** migrate build.yaml to reusable-image-build for :main tag ([#357](https://github.com/zero-day-ai/gibson/issues/357)) ([6952dc9](https://github.com/zero-day-ai/gibson/commit/6952dc96607e3eca657192396fde86d44c634bdc))
-* **ci:** pass explicit GITHUB_TOKEN to release-please-action@v5 ([#360](https://github.com/zero-day-ai/gibson/issues/360)) ([cf08526](https://github.com/zero-day-ai/gibson/commit/cf0852691bb1445198ba110dce5be84fcc9516ab)), closes [#288](https://github.com/zero-day-ai/gibson/issues/288)
-* **ci:** publish-authz-registry silently skipped since v0.108.0 ([#356](https://github.com/zero-day-ai/gibson/issues/356)) ([ca167eb](https://github.com/zero-day-ai/gibson/commit/ca167eb52f0ccec3225ef859d9d3eb98e514ae71))
-* **ci:** use security-extended queries for CodeQL ([#366](https://github.com/zero-day-ai/gibson/issues/366)) ([68a95db](https://github.com/zero-day-ai/gibson/commit/68a95dbdc004795848ec01a476c9fd639495f4b3)), closes [#363](https://github.com/zero-day-ai/gibson/issues/363)
-* **ci:** wire deploy repo auth in signup-smoke checkout step ([#355](https://github.com/zero-day-ai/gibson/issues/355)) ([be40953](https://github.com/zero-day-ai/gibson/commit/be4095312950fd993ec6808aea2d836a32566725)), closes [#341](https://github.com/zero-day-ai/gibson/issues/341)
-* **daemon:** register ModelAccessService on gRPC server ([#364](https://github.com/zero-day-ai/gibson/issues/364)) ([a7ea0b7](https://github.com/zero-day-ai/gibson/commit/a7ea0b7adc9b228661b743f4a5aee60ef59569be)), closes [#358](https://github.com/zero-day-ai/gibson/issues/358)
-* **queue:** remove raw go-redis import from internal/queue via redisBackend interface ([#354](https://github.com/zero-day-ai/gibson/issues/354)) ([98018bb](https://github.com/zero-day-ai/gibson/commit/98018bb42c4e630235f8f53b51c8deb1eff945ee))
-* **tests:** repair stale AST allowlist line numbers in nil-guard + time.Now walkers ([#351](https://github.com/zero-day-ai/gibson/issues/351)) ([b389211](https://github.com/zero-day-ai/gibson/commit/b389211b6cb97c6c0a6a4e60c4d91e9bc59dd306))
-* **vector:** translate VECTOR_NOT_FOUND to (nil, nil) in tenantScopedStore.Get ([#378](https://github.com/zero-day-ai/gibson/issues/378)) ([339d570](https://github.com/zero-day-ai/gibson/commit/339d5708810b459989ce9f5c1260eb6f61e7d702))
-
-## [0.117.0](https://github.com/zero-day-ai/gibson/compare/v0.116.0...v0.117.0) (2026-05-24)
+## [0.118.0](https://github.com/zeroroot-ai/gibson/compare/v0.117.0...v0.118.0) (2026-05-24)
 
 
 ### Features
 
-* **daemon:** register TenantService + DaemonOperatorService; unregister admin services ([#350](https://github.com/zero-day-ai/gibson/issues/350)) ([4ff5153](https://github.com/zero-day-ai/gibson/commit/4ff5153bfa6a31473e7b0abaae8cf5a09fa97d5e)), closes [#342](https://github.com/zero-day-ai/gibson/issues/342)
+* **daemon:** implement TenantAdminService.ListMembers ([#367](https://github.com/zeroroot-ai/gibson/issues/367)) ([bc65753](https://github.com/zeroroot-ai/gibson/commit/bc65753436c79e20ab89bbee80f1591f400677ee))
 
 
 ### Bug Fixes
 
-* scope SPIFFE bypass to per-peer method allowlist; remove debug interceptor ([#344](https://github.com/zero-day-ai/gibson/issues/344)) ([85f7abf](https://github.com/zero-day-ai/gibson/commit/85f7abf6f9cb203d9aca33ecf7ad37f81c5a3868)), closes [#245](https://github.com/zero-day-ai/gibson/issues/245) [#343](https://github.com/zero-day-ai/gibson/issues/343)
+* **authz:** add tenant#writer relation to FGA model (ADR-0037) ([#361](https://github.com/zeroroot-ai/gibson/issues/361)) ([58b0d7e](https://github.com/zeroroot-ai/gibson/commit/58b0d7e4326503de31e39132e50cca4294637350))
+* **ci:** add paths-ignore for doc-only PRs to daemon build ([#365](https://github.com/zeroroot-ai/gibson/issues/365)) ([2aa9cbb](https://github.com/zeroroot-ai/gibson/commit/2aa9cbbb96abf1bd59b956bab20aa2596a1c5941)), closes [#362](https://github.com/zeroroot-ai/gibson/issues/362)
+* **ci:** add Redis service container to test job (fixes [#368](https://github.com/zeroroot-ai/gibson/issues/368)) ([#371](https://github.com/zeroroot-ai/gibson/issues/371)) ([41c6887](https://github.com/zeroroot-ai/gibson/commit/41c688775f72348a91ae06cc942eaa3f3aa54be3))
+* **ci:** add Redis service container to test job in build.yaml ([#377](https://github.com/zeroroot-ai/gibson/issues/377)) ([c265447](https://github.com/zeroroot-ai/gibson/commit/c2654470a429c041cfd721c532bde2d0d90dc082))
+* **ci:** migrate build.yaml to reusable-image-build for :main tag ([#357](https://github.com/zeroroot-ai/gibson/issues/357)) ([6952dc9](https://github.com/zeroroot-ai/gibson/commit/6952dc96607e3eca657192396fde86d44c634bdc))
+* **ci:** pass explicit GITHUB_TOKEN to release-please-action@v5 ([#360](https://github.com/zeroroot-ai/gibson/issues/360)) ([cf08526](https://github.com/zeroroot-ai/gibson/commit/cf0852691bb1445198ba110dce5be84fcc9516ab)), closes [#288](https://github.com/zeroroot-ai/gibson/issues/288)
+* **ci:** publish-authz-registry silently skipped since v0.108.0 ([#356](https://github.com/zeroroot-ai/gibson/issues/356)) ([ca167eb](https://github.com/zeroroot-ai/gibson/commit/ca167eb52f0ccec3225ef859d9d3eb98e514ae71))
+* **ci:** use security-extended queries for CodeQL ([#366](https://github.com/zeroroot-ai/gibson/issues/366)) ([68a95db](https://github.com/zeroroot-ai/gibson/commit/68a95dbdc004795848ec01a476c9fd639495f4b3)), closes [#363](https://github.com/zeroroot-ai/gibson/issues/363)
+* **ci:** wire deploy repo auth in signup-smoke checkout step ([#355](https://github.com/zeroroot-ai/gibson/issues/355)) ([be40953](https://github.com/zeroroot-ai/gibson/commit/be4095312950fd993ec6808aea2d836a32566725)), closes [#341](https://github.com/zeroroot-ai/gibson/issues/341)
+* **daemon:** register ModelAccessService on gRPC server ([#364](https://github.com/zeroroot-ai/gibson/issues/364)) ([a7ea0b7](https://github.com/zeroroot-ai/gibson/commit/a7ea0b7adc9b228661b743f4a5aee60ef59569be)), closes [#358](https://github.com/zeroroot-ai/gibson/issues/358)
+* **queue:** remove raw go-redis import from internal/queue via redisBackend interface ([#354](https://github.com/zeroroot-ai/gibson/issues/354)) ([98018bb](https://github.com/zeroroot-ai/gibson/commit/98018bb42c4e630235f8f53b51c8deb1eff945ee))
+* **tests:** repair stale AST allowlist line numbers in nil-guard + time.Now walkers ([#351](https://github.com/zeroroot-ai/gibson/issues/351)) ([b389211](https://github.com/zeroroot-ai/gibson/commit/b389211b6cb97c6c0a6a4e60c4d91e9bc59dd306))
+* **vector:** translate VECTOR_NOT_FOUND to (nil, nil) in tenantScopedStore.Get ([#378](https://github.com/zeroroot-ai/gibson/issues/378)) ([339d570](https://github.com/zeroroot-ai/gibson/commit/339d5708810b459989ce9f5c1260eb6f61e7d702))
 
-## [0.116.0](https://github.com/zero-day-ai/gibson/compare/v0.115.0...v0.116.0) (2026-05-24)
+## [0.117.0](https://github.com/zeroroot-ai/gibson/compare/v0.116.0...v0.117.0) (2026-05-24)
 
 
 ### Features
 
-* **audit:** fire-and-forget Redis XADD + delete bespoke retry loop ([#320](https://github.com/zero-day-ai/gibson/issues/320)) ([#335](https://github.com/zero-day-ai/gibson/issues/335)) ([3f5cb82](https://github.com/zero-day-ai/gibson/commit/3f5cb82a90dea86abbd7ac3ceb512e1cf91b0b0f))
-* **graphrag:** gobreaker circuit breaker + graphHealthy runtime update ([#318](https://github.com/zero-day-ai/gibson/issues/318)) ([#332](https://github.com/zero-day-ai/gibson/issues/332)) ([2b3333d](https://github.com/zero-day-ai/gibson/commit/2b3333dba8f83c64026aca466e56b06ca5eb98b9))
-* **internal/queue:** move queue package from sdk to gibson internal ([#334](https://github.com/zero-day-ai/gibson/issues/334)) ([f058d1c](https://github.com/zero-day-ai/gibson/commit/f058d1cf1c1d57a53119aa81f5ca4d1fe07ea3c8))
-* **llm:** HTTPTimeout in ProviderConfig + circuitLLMProvider wrapper ([#319](https://github.com/zero-day-ai/gibson/issues/319)) ([#333](https://github.com/zero-day-ai/gibson/issues/333)) ([4c6165b](https://github.com/zero-day-ai/gibson/commit/4c6165bcd11eee3f2587ccfa279d4e4282dbefbc))
-* **secrets:** gobreakerExecutor replaces ServiceCircuitBreaker + wire JWTCache into broker_init ([#321](https://github.com/zero-day-ai/gibson/issues/321)) ([#336](https://github.com/zero-day-ai/gibson/issues/336)) ([7a375c8](https://github.com/zero-day-ai/gibson/commit/7a375c880ca0a99c33863ef73e415a0d6ef54c30))
-* **vectordb:** implement Redis VSS adapter, delete Qdrant stub, wire into pool ([#330](https://github.com/zero-day-ai/gibson/issues/330)) ([6c89a7f](https://github.com/zero-day-ai/gibson/commit/6c89a7f6b4ad7db495ecbff79a21cfc67cde4e1d)), closes [#325](https://github.com/zero-day-ai/gibson/issues/325)
+* **daemon:** register TenantService + DaemonOperatorService; unregister admin services ([#350](https://github.com/zeroroot-ai/gibson/issues/350)) ([4ff5153](https://github.com/zeroroot-ai/gibson/commit/4ff5153bfa6a31473e7b0abaae8cf5a09fa97d5e)), closes [#342](https://github.com/zeroroot-ai/gibson/issues/342)
 
-## [0.115.0](https://github.com/zero-day-ai/gibson/compare/v0.114.0...v0.115.0) (2026-05-24)
+
+### Bug Fixes
+
+* scope SPIFFE bypass to per-peer method allowlist; remove debug interceptor ([#344](https://github.com/zeroroot-ai/gibson/issues/344)) ([85f7abf](https://github.com/zeroroot-ai/gibson/commit/85f7abf6f9cb203d9aca33ecf7ad37f81c5a3868)), closes [#245](https://github.com/zeroroot-ai/gibson/issues/245) [#343](https://github.com/zeroroot-ai/gibson/issues/343)
+
+## [0.116.0](https://github.com/zeroroot-ai/gibson/compare/v0.115.0...v0.116.0) (2026-05-24)
 
 
 ### Features
 
-* **dataplane:** slim VectorCredentials to index_name only ([#327](https://github.com/zero-day-ai/gibson/issues/327)) ([ba48eed](https://github.com/zero-day-ai/gibson/commit/ba48eed1eb5fa54c50ffb701f7dd13b5e3131e13))
-* **jwtsource:** JWTCache with background refresh and last-known-good ([#322](https://github.com/zero-day-ai/gibson/issues/322)) ([f27ba8a](https://github.com/zero-day-ai/gibson/commit/f27ba8addfe86c64180d2d28d99d4838fa405463)), closes [#317](https://github.com/zero-day-ai/gibson/issues/317)
+* **audit:** fire-and-forget Redis XADD + delete bespoke retry loop ([#320](https://github.com/zeroroot-ai/gibson/issues/320)) ([#335](https://github.com/zeroroot-ai/gibson/issues/335)) ([3f5cb82](https://github.com/zeroroot-ai/gibson/commit/3f5cb82a90dea86abbd7ac3ceb512e1cf91b0b0f))
+* **graphrag:** gobreaker circuit breaker + graphHealthy runtime update ([#318](https://github.com/zeroroot-ai/gibson/issues/318)) ([#332](https://github.com/zeroroot-ai/gibson/issues/332)) ([2b3333d](https://github.com/zeroroot-ai/gibson/commit/2b3333dba8f83c64026aca466e56b06ca5eb98b9))
+* **internal/queue:** move queue package from sdk to gibson internal ([#334](https://github.com/zeroroot-ai/gibson/issues/334)) ([f058d1c](https://github.com/zeroroot-ai/gibson/commit/f058d1cf1c1d57a53119aa81f5ca4d1fe07ea3c8))
+* **llm:** HTTPTimeout in ProviderConfig + circuitLLMProvider wrapper ([#319](https://github.com/zeroroot-ai/gibson/issues/319)) ([#333](https://github.com/zeroroot-ai/gibson/issues/333)) ([4c6165b](https://github.com/zeroroot-ai/gibson/commit/4c6165bcd11eee3f2587ccfa279d4e4282dbefbc))
+* **secrets:** gobreakerExecutor replaces ServiceCircuitBreaker + wire JWTCache into broker_init ([#321](https://github.com/zeroroot-ai/gibson/issues/321)) ([#336](https://github.com/zeroroot-ai/gibson/issues/336)) ([7a375c8](https://github.com/zeroroot-ai/gibson/commit/7a375c880ca0a99c33863ef73e415a0d6ef54c30))
+* **vectordb:** implement Redis VSS adapter, delete Qdrant stub, wire into pool ([#330](https://github.com/zeroroot-ai/gibson/issues/330)) ([6c89a7f](https://github.com/zeroroot-ai/gibson/commit/6c89a7f6b4ad7db495ecbff79a21cfc67cde4e1d)), closes [#325](https://github.com/zeroroot-ai/gibson/issues/325)
 
-
-### Bug Fixes
-
-* **memory:** drop qdrant from LongTermMemoryConfig valid backend enum ([#326](https://github.com/zero-day-ai/gibson/issues/326)) ([5fcaf35](https://github.com/zero-day-ai/gibson/commit/5fcaf357b613b607bc1967aae972972c183ded20))
-
-## [0.114.0](https://github.com/zero-day-ai/gibson/compare/v0.113.1...v0.114.0) (2026-05-24)
-
-
-### Features
-
-* **ci:** provider catalogue update workflow with per-provider API key gating ([#302](https://github.com/zero-day-ai/gibson/issues/302)) ([37d1a31](https://github.com/zero-day-ai/gibson/commit/37d1a31b580aeb9063dff6bb3f3694436b2b5f4a))
-* **mission/cueruntime:** add cuelang.org/go dep and cueruntime package ([#304](https://github.com/zero-day-ai/gibson/issues/304)) ([864e3f8](https://github.com/zero-day-ai/gibson/commit/864e3f81a051217f9036f1f0bfddd8b4330d6eed))
-* **mission:** wire cueruntime to editor RPCs; cue_source path; delete GetMissionSourceYAML ([#306](https://github.com/zero-day-ai/gibson/issues/306)) ([9cb91c4](https://github.com/zero-day-ai/gibson/commit/9cb91c4fdfbf5888335592f7a9abd72f9a6dbeef))
-* **providers:** Bedrock IRSA toggle — daemon ([#297](https://github.com/zero-day-ai/gibson/issues/297)) ([504a930](https://github.com/zero-day-ai/gibson/commit/504a930e2efc88e99ee3232b50717a566ece9f42)), closes [#294](https://github.com/zero-day-ai/gibson/issues/294)
-* **providers:** catalogue hot-reload via ConfigMap mount ([#303](https://github.com/zero-day-ai/gibson/issues/303)) ([091e689](https://github.com/zero-day-ai/gibson/commit/091e6896abd62d55dc13a8333988eb94946589d9))
-* **providers:** provider-catalogue.yaml initial population + daemon loading ([#300](https://github.com/zero-day-ai/gibson/issues/300)) ([72f3f1b](https://github.com/zero-day-ai/gibson/commit/72f3f1bc9049b5237b8ab1434f3b73cf692f83df)), closes [#293](https://github.com/zero-day-ai/gibson/issues/293)
-
-
-### Bug Fixes
-
-* **authz:** add gibson.owner permission closure parity with gibson.admin ([#290](https://github.com/zero-day-ai/gibson/issues/290)) ([0e5cf82](https://github.com/zero-day-ai/gibson/commit/0e5cf82c0cf769c5a8a77bf631bd66cfaf09bce3))
-* **authz:** make mission belongs_to tuple write required + self-heal missing tuples ([#312](https://github.com/zero-day-ai/gibson/issues/312)) ([7f581b1](https://github.com/zero-day-ai/gibson/commit/7f581b1f59e605d634350ddde7191ec1eebf9b4e)), closes [#310](https://github.com/zero-day-ai/gibson/issues/310)
-* **ci:** add actions:read to image-build job permissions ([#314](https://github.com/zero-day-ai/gibson/issues/314)) ([49cf807](https://github.com/zero-day-ai/gibson/commit/49cf807da04806a7e4168ccae2cc77b03e4bb625))
-* **daemon:** fail fast when platform-postgres init fails ([#307](https://github.com/zero-day-ai/gibson/issues/307)) ([c0f3e51](https://github.com/zero-day-ai/gibson/commit/c0f3e514a05810f90818151be470b2b0c31a6d12)), closes [#246](https://github.com/zero-day-ai/gibson/issues/246)
-* **datapool:** propagate Redis password through per-tenant client pool ([#291](https://github.com/zero-day-ai/gibson/issues/291)) ([9a7a666](https://github.com/zero-day-ai/gibson/commit/9a7a6661f3c49ee11bf2761e27785cc103521eb9))
-* **deps:** bump golang.org/x/net v0.53.0 → v0.55.0 (GO-2026-5026) ([#283](https://github.com/zero-day-ai/gibson/issues/283)) ([50ee96a](https://github.com/zero-day-ai/gibson/commit/50ee96a08614b649f90733d24aff297322ad1091))
-* **deps:** bump platform-clients v0.6.0 → v0.7.0 ([#286](https://github.com/zero-day-ai/gibson/issues/286)) ([cd6d5fa](https://github.com/zero-day-ai/gibson/commit/cd6d5fa061630f61047ee33f76c2b727671a3f97))
-* **gibsoncheck:** honor gibsoncheck:allow tenant-from-request directive + annotate 6 admin RPCs ([#277](https://github.com/zero-day-ai/gibson/issues/277)) ([2b30f2f](https://github.com/zero-day-ai/gibson/commit/2b30f2fa4450232347fd5f879c322fb5997edcd5))
-* **observability:** remove pcotel.Init gRPC leak causing frame-too-large errors ([#313](https://github.com/zero-day-ai/gibson/issues/313)) ([5b68c02](https://github.com/zero-day-ai/gibson/commit/5b68c02490242789679b92037987d0b37d5ca807)), closes [#311](https://github.com/zero-day-ai/gibson/issues/311)
-* **secrets:** wire vault TokenRefresher into VaultFactory — eliminates stale-token circuit open ([#305](https://github.com/zero-day-ai/gibson/issues/305)) ([b29f35c](https://github.com/zero-day-ai/gibson/commit/b29f35c34e09f5559ffa326ffb3dae707fa15b55))
-* **tests:** resolve pre-existing failures in harness, observability, orchestrator ([#308](https://github.com/zero-day-ai/gibson/issues/308)) ([61e93e6](https://github.com/zero-day-ai/gibson/commit/61e93e6b97a78553a2d773c9dcb01649e1484e3a))
-
-## [0.113.1](https://github.com/zero-day-ai/gibson/compare/v0.113.0...v0.113.1) (2026-05-21)
-
-
-### Bug Fixes
-
-* **ci:** restore build-and-push green — root-cause 20+ test classes ([#266](https://github.com/zero-day-ai/gibson/issues/266)) ([da2f601](https://github.com/zero-day-ai/gibson/commit/da2f601f8bafefc07dd6d156da064d6d2be4fdad))
-* **ci:** second-pass test fixes following post-merge CI validation ([519dc58](https://github.com/zero-day-ai/gibson/commit/519dc587fa89ff99530a9e0e50bb17b59d266d18))
-* **saga:** remove already-completed short-circuit; idempotent steps re-run when artifact missing ([#270](https://github.com/zero-day-ai/gibson/issues/270)) ([68e7f1f](https://github.com/zero-day-ai/gibson/commit/68e7f1fa71b1007d3dd896682246fe4f968c9cd2))
-
-## [0.113.0](https://github.com/zero-day-ai/gibson/compare/v0.112.0...v0.113.0) (2026-05-21)
+## [0.115.0](https://github.com/zeroroot-ai/gibson/compare/v0.114.0...v0.115.0) (2026-05-24)
 
 
 ### Features
 
-* **psaga:** add Runner.ContinueOnBlocked for teardown step-isolation ([#255](https://github.com/zero-day-ai/gibson/issues/255)) ([a8c18da](https://github.com/zero-day-ai/gibson/commit/a8c18da253c853760f82eaa4f90961c6308b9897))
+* **dataplane:** slim VectorCredentials to index_name only ([#327](https://github.com/zeroroot-ai/gibson/issues/327)) ([ba48eed](https://github.com/zeroroot-ai/gibson/commit/ba48eed1eb5fa54c50ffb701f7dd13b5e3131e13))
+* **jwtsource:** JWTCache with background refresh and last-known-good ([#322](https://github.com/zeroroot-ai/gibson/issues/322)) ([f27ba8a](https://github.com/zeroroot-ai/gibson/commit/f27ba8addfe86c64180d2d28d99d4838fa405463)), closes [#317](https://github.com/zeroroot-ai/gibson/issues/317)
 
 
 ### Bug Fixes
 
-* **daemon:** broker_init VaultFactory uses blob-hash cache key shared with refresh closure ([#263](https://github.com/zero-day-ai/gibson/issues/263)) ([7341b6f](https://github.com/zero-day-ai/gibson/commit/7341b6f9b496354e382c4acccbddf6d5e3c45b53))
+* **memory:** drop qdrant from LongTermMemoryConfig valid backend enum ([#326](https://github.com/zeroroot-ai/gibson/issues/326)) ([5fcaf35](https://github.com/zeroroot-ai/gibson/commit/5fcaf357b613b607bc1967aae972972c183ded20))
 
-## [0.112.0](https://github.com/zero-day-ai/gibson/compare/v0.111.0...v0.112.0) (2026-05-21)
+## [0.114.0](https://github.com/zeroroot-ai/gibson/compare/v0.113.1...v0.114.0) (2026-05-24)
+
+
+### Features
+
+* **ci:** provider catalogue update workflow with per-provider API key gating ([#302](https://github.com/zeroroot-ai/gibson/issues/302)) ([37d1a31](https://github.com/zeroroot-ai/gibson/commit/37d1a31b580aeb9063dff6bb3f3694436b2b5f4a))
+* **mission/cueruntime:** add cuelang.org/go dep and cueruntime package ([#304](https://github.com/zeroroot-ai/gibson/issues/304)) ([864e3f8](https://github.com/zeroroot-ai/gibson/commit/864e3f81a051217f9036f1f0bfddd8b4330d6eed))
+* **mission:** wire cueruntime to editor RPCs; cue_source path; delete GetMissionSourceYAML ([#306](https://github.com/zeroroot-ai/gibson/issues/306)) ([9cb91c4](https://github.com/zeroroot-ai/gibson/commit/9cb91c4fdfbf5888335592f7a9abd72f9a6dbeef))
+* **providers:** Bedrock IRSA toggle — daemon ([#297](https://github.com/zeroroot-ai/gibson/issues/297)) ([504a930](https://github.com/zeroroot-ai/gibson/commit/504a930e2efc88e99ee3232b50717a566ece9f42)), closes [#294](https://github.com/zeroroot-ai/gibson/issues/294)
+* **providers:** catalogue hot-reload via ConfigMap mount ([#303](https://github.com/zeroroot-ai/gibson/issues/303)) ([091e689](https://github.com/zeroroot-ai/gibson/commit/091e6896abd62d55dc13a8333988eb94946589d9))
+* **providers:** provider-catalogue.yaml initial population + daemon loading ([#300](https://github.com/zeroroot-ai/gibson/issues/300)) ([72f3f1b](https://github.com/zeroroot-ai/gibson/commit/72f3f1bc9049b5237b8ab1434f3b73cf692f83df)), closes [#293](https://github.com/zeroroot-ai/gibson/issues/293)
+
+
+### Bug Fixes
+
+* **authz:** add gibson.owner permission closure parity with gibson.admin ([#290](https://github.com/zeroroot-ai/gibson/issues/290)) ([0e5cf82](https://github.com/zeroroot-ai/gibson/commit/0e5cf82c0cf769c5a8a77bf631bd66cfaf09bce3))
+* **authz:** make mission belongs_to tuple write required + self-heal missing tuples ([#312](https://github.com/zeroroot-ai/gibson/issues/312)) ([7f581b1](https://github.com/zeroroot-ai/gibson/commit/7f581b1f59e605d634350ddde7191ec1eebf9b4e)), closes [#310](https://github.com/zeroroot-ai/gibson/issues/310)
+* **ci:** add actions:read to image-build job permissions ([#314](https://github.com/zeroroot-ai/gibson/issues/314)) ([49cf807](https://github.com/zeroroot-ai/gibson/commit/49cf807da04806a7e4168ccae2cc77b03e4bb625))
+* **daemon:** fail fast when platform-postgres init fails ([#307](https://github.com/zeroroot-ai/gibson/issues/307)) ([c0f3e51](https://github.com/zeroroot-ai/gibson/commit/c0f3e514a05810f90818151be470b2b0c31a6d12)), closes [#246](https://github.com/zeroroot-ai/gibson/issues/246)
+* **datapool:** propagate Redis password through per-tenant client pool ([#291](https://github.com/zeroroot-ai/gibson/issues/291)) ([9a7a666](https://github.com/zeroroot-ai/gibson/commit/9a7a6661f3c49ee11bf2761e27785cc103521eb9))
+* **deps:** bump golang.org/x/net v0.53.0 → v0.55.0 (GO-2026-5026) ([#283](https://github.com/zeroroot-ai/gibson/issues/283)) ([50ee96a](https://github.com/zeroroot-ai/gibson/commit/50ee96a08614b649f90733d24aff297322ad1091))
+* **deps:** bump platform-clients v0.6.0 → v0.7.0 ([#286](https://github.com/zeroroot-ai/gibson/issues/286)) ([cd6d5fa](https://github.com/zeroroot-ai/gibson/commit/cd6d5fa061630f61047ee33f76c2b727671a3f97))
+* **gibsoncheck:** honor gibsoncheck:allow tenant-from-request directive + annotate 6 admin RPCs ([#277](https://github.com/zeroroot-ai/gibson/issues/277)) ([2b30f2f](https://github.com/zeroroot-ai/gibson/commit/2b30f2fa4450232347fd5f879c322fb5997edcd5))
+* **observability:** remove pcotel.Init gRPC leak causing frame-too-large errors ([#313](https://github.com/zeroroot-ai/gibson/issues/313)) ([5b68c02](https://github.com/zeroroot-ai/gibson/commit/5b68c02490242789679b92037987d0b37d5ca807)), closes [#311](https://github.com/zeroroot-ai/gibson/issues/311)
+* **secrets:** wire vault TokenRefresher into VaultFactory — eliminates stale-token circuit open ([#305](https://github.com/zeroroot-ai/gibson/issues/305)) ([b29f35c](https://github.com/zeroroot-ai/gibson/commit/b29f35c34e09f5559ffa326ffb3dae707fa15b55))
+* **tests:** resolve pre-existing failures in harness, observability, orchestrator ([#308](https://github.com/zeroroot-ai/gibson/issues/308)) ([61e93e6](https://github.com/zeroroot-ai/gibson/commit/61e93e6b97a78553a2d773c9dcb01649e1484e3a))
+
+## [0.113.1](https://github.com/zeroroot-ai/gibson/compare/v0.113.0...v0.113.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **ci:** restore build-and-push green — root-cause 20+ test classes ([#266](https://github.com/zeroroot-ai/gibson/issues/266)) ([da2f601](https://github.com/zeroroot-ai/gibson/commit/da2f601f8bafefc07dd6d156da064d6d2be4fdad))
+* **ci:** second-pass test fixes following post-merge CI validation ([519dc58](https://github.com/zeroroot-ai/gibson/commit/519dc587fa89ff99530a9e0e50bb17b59d266d18))
+* **saga:** remove already-completed short-circuit; idempotent steps re-run when artifact missing ([#270](https://github.com/zeroroot-ai/gibson/issues/270)) ([68e7f1f](https://github.com/zeroroot-ai/gibson/commit/68e7f1fa71b1007d3dd896682246fe4f968c9cd2))
+
+## [0.113.0](https://github.com/zeroroot-ai/gibson/compare/v0.112.0...v0.113.0) (2026-05-21)
+
+
+### Features
+
+* **psaga:** add Runner.ContinueOnBlocked for teardown step-isolation ([#255](https://github.com/zeroroot-ai/gibson/issues/255)) ([a8c18da](https://github.com/zeroroot-ai/gibson/commit/a8c18da253c853760f82eaa4f90961c6308b9897))
+
+
+### Bug Fixes
+
+* **daemon:** broker_init VaultFactory uses blob-hash cache key shared with refresh closure ([#263](https://github.com/zeroroot-ai/gibson/issues/263)) ([7341b6f](https://github.com/zeroroot-ai/gibson/commit/7341b6f9b496354e382c4acccbddf6d5e3c45b53))
+
+## [0.112.0](https://github.com/zeroroot-ai/gibson/compare/v0.111.0...v0.112.0) (2026-05-21)
 
 
 ### ⚠ BREAKING CHANGES
 
-* **sandbox:** relocate spot-eviction handler to node-local sidecar binary ([#247](https://github.com/zero-day-ai/gibson/issues/247))
+* **sandbox:** relocate spot-eviction handler to node-local sidecar binary ([#247](https://github.com/zeroroot-ai/gibson/issues/247))
 
 ### Features
 
-* add signup-smoke CI workflow for daemon PR validation ([#256](https://github.com/zero-day-ai/gibson/issues/256)) ([64a7e3a](https://github.com/zero-day-ai/gibson/commit/64a7e3acf47bc19d550b3ce3c00d3216ebb0056e))
-* **docker:** bundle sandbox-eviction-handler into the gibson image ([#250](https://github.com/zero-day-ai/gibson/issues/250)) ([ff6c874](https://github.com/zero-day-ai/gibson/commit/ff6c874f56e9a3d8a236535839f4936df8d157eb))
-* **sandbox:** relocate spot-eviction handler to node-local sidecar binary ([#247](https://github.com/zero-day-ai/gibson/issues/247)) ([478b377](https://github.com/zero-day-ai/gibson/commit/478b3774064867c28cadd2ad02ebc4a673b254fd))
+* add signup-smoke CI workflow for daemon PR validation ([#256](https://github.com/zeroroot-ai/gibson/issues/256)) ([64a7e3a](https://github.com/zeroroot-ai/gibson/commit/64a7e3acf47bc19d550b3ce3c00d3216ebb0056e))
+* **docker:** bundle sandbox-eviction-handler into the gibson image ([#250](https://github.com/zeroroot-ai/gibson/issues/250)) ([ff6c874](https://github.com/zeroroot-ai/gibson/commit/ff6c874f56e9a3d8a236535839f4936df8d157eb))
+* **sandbox:** relocate spot-eviction handler to node-local sidecar binary ([#247](https://github.com/zeroroot-ai/gibson/issues/247)) ([478b377](https://github.com/zeroroot-ai/gibson/commit/478b3774064867c28cadd2ad02ebc4a673b254fd))
 
 
 ### Bug Fixes
 
-* **build:** inject git sha and build time via ldflags ([#253](https://github.com/zero-day-ai/gibson/issues/253)) ([0b2c636](https://github.com/zero-day-ai/gibson/commit/0b2c6368b3ddcad8b146e26abeb34003636c4a3b))
-* **observability:** strip URL scheme before passing endpoint to pcotel.Init ([#254](https://github.com/zero-day-ai/gibson/issues/254)) ([f11e59c](https://github.com/zero-day-ai/gibson/commit/f11e59c4c533f8b1a7621cfab0feae966e5a841c))
+* **build:** inject git sha and build time via ldflags ([#253](https://github.com/zeroroot-ai/gibson/issues/253)) ([0b2c636](https://github.com/zeroroot-ai/gibson/commit/0b2c6368b3ddcad8b146e26abeb34003636c4a3b))
+* **observability:** strip URL scheme before passing endpoint to pcotel.Init ([#254](https://github.com/zeroroot-ai/gibson/issues/254)) ([f11e59c](https://github.com/zeroroot-ai/gibson/commit/f11e59c4c533f8b1a7621cfab0feae966e5a841c))
 
-## [0.111.0](https://github.com/zero-day-ai/gibson/compare/v0.110.0...v0.111.0) (2026-05-21)
-
-
-### Features
-
-* migrate budget service handler to platform-sdk import ([#243](https://github.com/zero-day-ai/gibson/issues/243)) ([b28fd39](https://github.com/zero-day-ai/gibson/commit/b28fd39767a3c1a909713e7b9780b82991dac288))
-
-## [0.110.0](https://github.com/zero-day-ai/gibson/compare/v0.109.0...v0.110.0) (2026-05-21)
+## [0.111.0](https://github.com/zeroroot-ai/gibson/compare/v0.110.0...v0.111.0) (2026-05-21)
 
 
 ### Features
 
-* migrate daemon secrets imports from sdk to platform-clients ([#240](https://github.com/zero-day-ai/gibson/issues/240)) ([3ca57d4](https://github.com/zero-day-ai/gibson/commit/3ca57d4f5a25e1f020ba39f3ac35065bdbc1f99b))
+* migrate budget service handler to platform-sdk import ([#243](https://github.com/zeroroot-ai/gibson/issues/243)) ([b28fd39](https://github.com/zeroroot-ai/gibson/commit/b28fd39767a3c1a909713e7b9780b82991dac288))
 
-## [0.109.0](https://github.com/zero-day-ai/gibson/compare/v0.108.0...v0.109.0) (2026-05-20)
-
-
-### Features
-
-* migrate admin imports to platform-sdk; register daemonadminservice ([#235](https://github.com/zero-day-ai/gibson/issues/235)) ([fa1c311](https://github.com/zero-day-ai/gibson/commit/fa1c311499a23667bfb39654ac4de4b8c04040dc))
-
-## [0.108.0](https://github.com/zero-day-ai/gibson/compare/v0.107.0...v0.108.0) (2026-05-20)
+## [0.110.0](https://github.com/zeroroot-ai/gibson/compare/v0.109.0...v0.110.0) (2026-05-21)
 
 
 ### Features
 
-* add idempotency_key dedup store with redis backend and server interceptor ([#231](https://github.com/zero-day-ai/gibson/issues/231)) ([529677e](https://github.com/zero-day-ai/gibson/commit/529677ecc48cc70550186758f39fea12a056b383))
-* consume platform.v1 and tenant.v1 protos from platform-sdk ([#233](https://github.com/zero-day-ai/gibson/issues/233)) ([683186b](https://github.com/zero-day-ai/gibson/commit/683186bda2403903d322521c7929d94705caf167))
+* migrate daemon secrets imports from sdk to platform-clients ([#240](https://github.com/zeroroot-ai/gibson/issues/240)) ([3ca57d4](https://github.com/zeroroot-ai/gibson/commit/3ca57d4f5a25e1f020ba39f3ac35065bdbc1f99b))
 
-## [0.107.0](https://github.com/zero-day-ai/gibson/compare/v0.106.0...v0.107.0) (2026-05-20)
+## [0.109.0](https://github.com/zeroroot-ai/gibson/compare/v0.108.0...v0.109.0) (2026-05-20)
+
+
+### Features
+
+* migrate admin imports to platform-sdk; register daemonadminservice ([#235](https://github.com/zeroroot-ai/gibson/issues/235)) ([fa1c311](https://github.com/zeroroot-ai/gibson/commit/fa1c311499a23667bfb39654ac4de4b8c04040dc))
+
+## [0.108.0](https://github.com/zeroroot-ai/gibson/compare/v0.107.0...v0.108.0) (2026-05-20)
+
+
+### Features
+
+* add idempotency_key dedup store with redis backend and server interceptor ([#231](https://github.com/zeroroot-ai/gibson/issues/231)) ([529677e](https://github.com/zeroroot-ai/gibson/commit/529677ecc48cc70550186758f39fea12a056b383))
+* consume platform.v1 and tenant.v1 protos from platform-sdk ([#233](https://github.com/zeroroot-ai/gibson/issues/233)) ([683186b](https://github.com/zeroroot-ai/gibson/commit/683186bda2403903d322521c7929d94705caf167))
+
+## [0.107.0](https://github.com/zeroroot-ai/gibson/compare/v0.106.0...v0.107.0) (2026-05-20)
 
 
 ### ⚠ BREAKING CHANGES
 
-* **crypto:** file-mount KeyProvider; delete K8s key/crypto providers (ADR-0023, gibson#212/S10) ([#224](https://github.com/zero-day-ai/gibson/issues/224))
-* **authz:** FGA config resolver env-only (ADR-0023, gibson#205) ([#222](https://github.com/zero-day-ai/gibson/issues/222))
-* **daemon:** reserved-names provider via file-mount (ADR-0023, gibson#204) ([#221](https://github.com/zero-day-ai/gibson/issues/221))
-* **daemon:** delete network_policy_check; audit moves to tenant-operator (ADR-0023, gibson#209) ([#220](https://github.com/zero-day-ai/gibson/issues/220))
-* **daemon:** relocate internal/tenants → internal/datapool/admin; delete startup_migration_check (ADR-0023, gibson#210 + gibson#208 daemon half) ([#219](https://github.com/zero-day-ai/gibson/issues/219))
-* **datapool:** provisioning checker uses DataPlaneProbe (ADR-0023, gibson#206) ([#216](https://github.com/zero-day-ai/gibson/issues/216))
+* **crypto:** file-mount KeyProvider; delete K8s key/crypto providers (ADR-0023, gibson#212/S10) ([#224](https://github.com/zeroroot-ai/gibson/issues/224))
+* **authz:** FGA config resolver env-only (ADR-0023, gibson#205) ([#222](https://github.com/zeroroot-ai/gibson/issues/222))
+* **daemon:** reserved-names provider via file-mount (ADR-0023, gibson#204) ([#221](https://github.com/zeroroot-ai/gibson/issues/221))
+* **daemon:** delete network_policy_check; audit moves to tenant-operator (ADR-0023, gibson#209) ([#220](https://github.com/zeroroot-ai/gibson/issues/220))
+* **daemon:** relocate internal/tenants → internal/datapool/admin; delete startup_migration_check (ADR-0023, gibson#210 + gibson#208 daemon half) ([#219](https://github.com/zeroroot-ai/gibson/issues/219))
+* **datapool:** provisioning checker uses DataPlaneProbe (ADR-0023, gibson#206) ([#216](https://github.com/zeroroot-ai/gibson/issues/216))
 
 ### Features
 
-* **authz:** FGA config resolver env-only (ADR-0023, gibson[#205](https://github.com/zero-day-ai/gibson/issues/205)) ([#222](https://github.com/zero-day-ai/gibson/issues/222)) ([33f2940](https://github.com/zero-day-ai/gibson/commit/33f29407c662cb7192eb4df4de1441f065cb8be6))
-* **crypto:** file-mount KeyProvider; delete K8s key/crypto providers (ADR-0023, gibson[#212](https://github.com/zero-day-ai/gibson/issues/212)/S10) ([#224](https://github.com/zero-day-ai/gibson/issues/224)) ([71c5be3](https://github.com/zero-day-ai/gibson/commit/71c5be3f87944b70a94407d3866e22c9772e257e))
-* **daemon:** delete network_policy_check; audit moves to tenant-operator (ADR-0023, gibson[#209](https://github.com/zero-day-ai/gibson/issues/209)) ([#220](https://github.com/zero-day-ai/gibson/issues/220)) ([ee89d9d](https://github.com/zero-day-ai/gibson/commit/ee89d9d15bafc89d69ff497b66edf32b855845eb))
-* **daemon:** relocate internal/tenants → internal/datapool/admin; delete startup_migration_check (ADR-0023, gibson[#210](https://github.com/zero-day-ai/gibson/issues/210) + gibson[#208](https://github.com/zero-day-ai/gibson/issues/208) daemon half) ([#219](https://github.com/zero-day-ai/gibson/issues/219)) ([9e990fd](https://github.com/zero-day-ai/gibson/commit/9e990fd5d6f9c07e9ede3c22e8f57d67807a3e03))
-* **daemon:** reserved-names provider via file-mount (ADR-0023, gibson[#204](https://github.com/zero-day-ai/gibson/issues/204)) ([#221](https://github.com/zero-day-ai/gibson/issues/221)) ([273c6d0](https://github.com/zero-day-ai/gibson/commit/273c6d004489c921291793481a4c0c1d7ec973f2))
-* **datapool:** provisioning checker uses DataPlaneProbe (ADR-0023, gibson[#206](https://github.com/zero-day-ai/gibson/issues/206)) ([#216](https://github.com/zero-day-ai/gibson/issues/216)) ([b25aee1](https://github.com/zero-day-ai/gibson/commit/b25aee1914532f4aeee41264db7aa4204e2a339d))
-* **gibsoncheck:** nok8sapiindaemon — ban K8s API client construction from daemon source (ADR-0023, gibson[#214](https://github.com/zero-day-ai/gibson/issues/214)) ([#223](https://github.com/zero-day-ai/gibson/issues/223)) ([7f3a0f5](https://github.com/zero-day-ai/gibson/commit/7f3a0f5de22850918a0051cf5838c42c5dbf2795))
-* **walker:** authz_annotation_completeness — check registry entries for missing fields (slice 3.7) ([#196](https://github.com/zero-day-ai/gibson/issues/196)) ([c74a918](https://github.com/zero-day-ai/gibson/commit/c74a9187476ecaf3029e715c59968dcc7437f3e3))
-* **walker:** narrow to receiver-field shape + widen scope to all 49 internal/* (slice 3.2) ([#190](https://github.com/zero-day-ai/gibson/issues/190)) ([bf5e993](https://github.com/zero-day-ai/gibson/commit/bf5e9937d33a40efc79977175d0dc13e8ef47be5))
-* **walker:** no_context_background + no_time_now walkers on RPC handlers (slice 3.6 partial) ([#193](https://github.com/zero-day-ai/gibson/issues/193)) ([999dc32](https://github.com/zero-day-ai/gibson/commit/999dc32a68a1d2e8f41ee18b0a4e18ff0c7be48e))
-* **walker:** tenant_id_source + tenant_client_only walkers (slice 3.5) ([#198](https://github.com/zero-day-ai/gibson/issues/198)) ([e9e5606](https://github.com/zero-day-ai/gibson/commit/e9e5606c6d97a3789674dc67f01b83ff8e5ce6f9))
+* **authz:** FGA config resolver env-only (ADR-0023, gibson[#205](https://github.com/zeroroot-ai/gibson/issues/205)) ([#222](https://github.com/zeroroot-ai/gibson/issues/222)) ([33f2940](https://github.com/zeroroot-ai/gibson/commit/33f29407c662cb7192eb4df4de1441f065cb8be6))
+* **crypto:** file-mount KeyProvider; delete K8s key/crypto providers (ADR-0023, gibson[#212](https://github.com/zeroroot-ai/gibson/issues/212)/S10) ([#224](https://github.com/zeroroot-ai/gibson/issues/224)) ([71c5be3](https://github.com/zeroroot-ai/gibson/commit/71c5be3f87944b70a94407d3866e22c9772e257e))
+* **daemon:** delete network_policy_check; audit moves to tenant-operator (ADR-0023, gibson[#209](https://github.com/zeroroot-ai/gibson/issues/209)) ([#220](https://github.com/zeroroot-ai/gibson/issues/220)) ([ee89d9d](https://github.com/zeroroot-ai/gibson/commit/ee89d9d15bafc89d69ff497b66edf32b855845eb))
+* **daemon:** relocate internal/tenants → internal/datapool/admin; delete startup_migration_check (ADR-0023, gibson[#210](https://github.com/zeroroot-ai/gibson/issues/210) + gibson[#208](https://github.com/zeroroot-ai/gibson/issues/208) daemon half) ([#219](https://github.com/zeroroot-ai/gibson/issues/219)) ([9e990fd](https://github.com/zeroroot-ai/gibson/commit/9e990fd5d6f9c07e9ede3c22e8f57d67807a3e03))
+* **daemon:** reserved-names provider via file-mount (ADR-0023, gibson[#204](https://github.com/zeroroot-ai/gibson/issues/204)) ([#221](https://github.com/zeroroot-ai/gibson/issues/221)) ([273c6d0](https://github.com/zeroroot-ai/gibson/commit/273c6d004489c921291793481a4c0c1d7ec973f2))
+* **datapool:** provisioning checker uses DataPlaneProbe (ADR-0023, gibson[#206](https://github.com/zeroroot-ai/gibson/issues/206)) ([#216](https://github.com/zeroroot-ai/gibson/issues/216)) ([b25aee1](https://github.com/zeroroot-ai/gibson/commit/b25aee1914532f4aeee41264db7aa4204e2a339d))
+* **gibsoncheck:** nok8sapiindaemon — ban K8s API client construction from daemon source (ADR-0023, gibson[#214](https://github.com/zeroroot-ai/gibson/issues/214)) ([#223](https://github.com/zeroroot-ai/gibson/issues/223)) ([7f3a0f5](https://github.com/zeroroot-ai/gibson/commit/7f3a0f5de22850918a0051cf5838c42c5dbf2795))
+* **walker:** authz_annotation_completeness — check registry entries for missing fields (slice 3.7) ([#196](https://github.com/zeroroot-ai/gibson/issues/196)) ([c74a918](https://github.com/zeroroot-ai/gibson/commit/c74a9187476ecaf3029e715c59968dcc7437f3e3))
+* **walker:** narrow to receiver-field shape + widen scope to all 49 internal/* (slice 3.2) ([#190](https://github.com/zeroroot-ai/gibson/issues/190)) ([bf5e993](https://github.com/zeroroot-ai/gibson/commit/bf5e9937d33a40efc79977175d0dc13e8ef47be5))
+* **walker:** no_context_background + no_time_now walkers on RPC handlers (slice 3.6 partial) ([#193](https://github.com/zeroroot-ai/gibson/issues/193)) ([999dc32](https://github.com/zeroroot-ai/gibson/commit/999dc32a68a1d2e8f41ee18b0a4e18ff0c7be48e))
+* **walker:** tenant_id_source + tenant_client_only walkers (slice 3.5) ([#198](https://github.com/zeroroot-ai/gibson/issues/198)) ([e9e5606](https://github.com/zeroroot-ai/gibson/commit/e9e5606c6d97a3789674dc67f01b83ff8e5ce6f9))
 
-## [0.106.0](https://github.com/zero-day-ai/gibson/compare/v0.105.0...v0.106.0) (2026-05-19)
+## [0.106.0](https://github.com/zeroroot-ai/gibson/compare/v0.105.0...v0.106.0) (2026-05-19)
 
 
 ### Features
 
-* add GetMissionDefinition RPC; return full structured proto (M5, gibson[#134](https://github.com/zero-day-ai/gibson/issues/134)) ([#138](https://github.com/zero-day-ai/gibson/issues/138)) ([b489a70](https://github.com/zero-day-ai/gibson/commit/b489a7063f6f2e7bd2ffd4f61e9042fe58be78fe))
-* **secrets:** spire jwt-svid source via workload api ([#169](https://github.com/zero-day-ai/gibson/issues/169)) ([#185](https://github.com/zero-day-ai/gibson/issues/185)) ([311de0e](https://github.com/zero-day-ai/gibson/commit/311de0e47e3ac2b52202bf8cc402d418674a188e))
-* **secrets:** spire jwt-svid source via workload api ([#169](https://github.com/zero-day-ai/gibson/issues/169)) ([#187](https://github.com/zero-day-ai/gibson/issues/187)) ([f0290cb](https://github.com/zero-day-ai/gibson/commit/f0290cba5e10ea2d9115c065b67ecfcfcb0764f7))
-* **secrets:** vault auth/jwt/login flow with pluggable JWTSource ([#168](https://github.com/zero-day-ai/gibson/issues/168)) ([#184](https://github.com/zero-day-ai/gibson/issues/184)) ([2cb4485](https://github.com/zero-day-ai/gibson/commit/2cb44858bc1022d3d090204296b688d1a24be665))
-* wire EffectivePerCallCap into LLM dispatch + document token-budget precedence (M4) ([#148](https://github.com/zero-day-ai/gibson/issues/148)) ([da83427](https://github.com/zero-day-ai/gibson/commit/da834275145c9e5bd1ace69e8d030cab9d00df6e)), closes [#133](https://github.com/zero-day-ai/gibson/issues/133)
+* add GetMissionDefinition RPC; return full structured proto (M5, gibson[#134](https://github.com/zeroroot-ai/gibson/issues/134)) ([#138](https://github.com/zeroroot-ai/gibson/issues/138)) ([b489a70](https://github.com/zeroroot-ai/gibson/commit/b489a7063f6f2e7bd2ffd4f61e9042fe58be78fe))
+* **secrets:** spire jwt-svid source via workload api ([#169](https://github.com/zeroroot-ai/gibson/issues/169)) ([#185](https://github.com/zeroroot-ai/gibson/issues/185)) ([311de0e](https://github.com/zeroroot-ai/gibson/commit/311de0e47e3ac2b52202bf8cc402d418674a188e))
+* **secrets:** spire jwt-svid source via workload api ([#169](https://github.com/zeroroot-ai/gibson/issues/169)) ([#187](https://github.com/zeroroot-ai/gibson/issues/187)) ([f0290cb](https://github.com/zeroroot-ai/gibson/commit/f0290cba5e10ea2d9115c065b67ecfcfcb0764f7))
+* **secrets:** vault auth/jwt/login flow with pluggable JWTSource ([#168](https://github.com/zeroroot-ai/gibson/issues/168)) ([#184](https://github.com/zeroroot-ai/gibson/issues/184)) ([2cb4485](https://github.com/zeroroot-ai/gibson/commit/2cb44858bc1022d3d090204296b688d1a24be665))
+* wire EffectivePerCallCap into LLM dispatch + document token-budget precedence (M4) ([#148](https://github.com/zeroroot-ai/gibson/issues/148)) ([da83427](https://github.com/zeroroot-ai/gibson/commit/da834275145c9e5bd1ace69e8d030cab9d00df6e)), closes [#133](https://github.com/zeroroot-ai/gibson/issues/133)
 
 
 ### Bug Fixes
 
-* **authz:** FGA smoke — idempotent Write + sha256 store names ([#114](https://github.com/zero-day-ai/gibson/issues/114)) ([#146](https://github.com/zero-day-ai/gibson/issues/146)) ([d4a6671](https://github.com/zero-day-ai/gibson/commit/d4a6671dcf964a6f15f0eb945f04d1b7d2dd498e))
-* **checkpoint:** add thread and checkpoint reverse indexes to fix GetThread ([#155](https://github.com/zero-day-ai/gibson/issues/155)) ([eeab862](https://github.com/zero-day-ai/gibson/commit/eeab8620ab240f712d449c3cf2f571ea82bfffbb)), closes [#137](https://github.com/zero-day-ai/gibson/issues/137)
-* **daemon:** broker auth cache must not MustNewTenantID(cacheKey) ([#166](https://github.com/zero-day-ai/gibson/issues/166)) ([0e59e55](https://github.com/zero-day-ai/gibson/commit/0e59e55598ec2e4a0bad408b24a828fea884c892))
-* **daemon:** prefer file-mount over env for impersonation signing keys ([#162](https://github.com/zero-day-ai/gibson/issues/162)) ([ab23d5a](https://github.com/zero-day-ai/gibson/commit/ab23d5a21be96d160358c27381bdfbe449c87e4a))
-* **datapool:** inject PostgresDSNResolver — drop broker-shaped dependency ([#106](https://github.com/zero-day-ai/gibson/issues/106)) ([#152](https://github.com/zero-day-ai/gibson/issues/152)) ([f6f5700](https://github.com/zero-day-ai/gibson/commit/f6f57004491c4e429b7005be640d4a11f4d67ede))
-* **harness:** update stale Traverse test to match implemented behaviour ([#154](https://github.com/zero-day-ai/gibson/issues/154)) ([a0b1967](https://github.com/zero-day-ai/gibson/commit/a0b1967601aa64a56ede681987deb2c362499030)), closes [#147](https://github.com/zero-day-ai/gibson/issues/147)
-* **impersonation:** require persistent signing key + add rotation support ([#159](https://github.com/zero-day-ai/gibson/issues/159)) ([b231ec6](https://github.com/zero-day-ai/gibson/commit/b231ec642c3ac8b79d9a27b17b0a8fb732d30aac))
-* **lint:** repair check-no-gibson-io allowlist and update eviction comment ([#156](https://github.com/zero-day-ai/gibson/issues/156)) ([c7df684](https://github.com/zero-day-ai/gibson/commit/c7df6842be87c81e1110feee9ebd74beec73b421)), closes [#142](https://github.com/zero-day-ai/gibson/issues/142)
-* **mission:** probe RedisJSON before running checkpoint store tests ([#157](https://github.com/zero-day-ai/gibson/issues/157)) ([e1c2a5d](https://github.com/zero-day-ai/gibson/commit/e1c2a5d1431a0ea086316019afa908f453f52904)), closes [#141](https://github.com/zero-day-ai/gibson/issues/141)
-* **secrets:** rip vault kubernetes-auth case from daemon (ADR-0009) ([#177](https://github.com/zero-day-ai/gibson/issues/177)) ([50c245b](https://github.com/zero-day-ai/gibson/commit/50c245b7406d6ba873b62f52aa73da283b07c33e))
-* **tenant/names:** Namespace() returns tenant-&lt;slug&gt;, matching cluster reality ([#160](https://github.com/zero-day-ai/gibson/issues/160)) ([67b5340](https://github.com/zero-day-ai/gibson/commit/67b53403a7f3b85dcf9998b19f11b3abca8b183e))
+* **authz:** FGA smoke — idempotent Write + sha256 store names ([#114](https://github.com/zeroroot-ai/gibson/issues/114)) ([#146](https://github.com/zeroroot-ai/gibson/issues/146)) ([d4a6671](https://github.com/zeroroot-ai/gibson/commit/d4a6671dcf964a6f15f0eb945f04d1b7d2dd498e))
+* **checkpoint:** add thread and checkpoint reverse indexes to fix GetThread ([#155](https://github.com/zeroroot-ai/gibson/issues/155)) ([eeab862](https://github.com/zeroroot-ai/gibson/commit/eeab8620ab240f712d449c3cf2f571ea82bfffbb)), closes [#137](https://github.com/zeroroot-ai/gibson/issues/137)
+* **daemon:** broker auth cache must not MustNewTenantID(cacheKey) ([#166](https://github.com/zeroroot-ai/gibson/issues/166)) ([0e59e55](https://github.com/zeroroot-ai/gibson/commit/0e59e55598ec2e4a0bad408b24a828fea884c892))
+* **daemon:** prefer file-mount over env for impersonation signing keys ([#162](https://github.com/zeroroot-ai/gibson/issues/162)) ([ab23d5a](https://github.com/zeroroot-ai/gibson/commit/ab23d5a21be96d160358c27381bdfbe449c87e4a))
+* **datapool:** inject PostgresDSNResolver — drop broker-shaped dependency ([#106](https://github.com/zeroroot-ai/gibson/issues/106)) ([#152](https://github.com/zeroroot-ai/gibson/issues/152)) ([f6f5700](https://github.com/zeroroot-ai/gibson/commit/f6f57004491c4e429b7005be640d4a11f4d67ede))
+* **harness:** update stale Traverse test to match implemented behaviour ([#154](https://github.com/zeroroot-ai/gibson/issues/154)) ([a0b1967](https://github.com/zeroroot-ai/gibson/commit/a0b1967601aa64a56ede681987deb2c362499030)), closes [#147](https://github.com/zeroroot-ai/gibson/issues/147)
+* **impersonation:** require persistent signing key + add rotation support ([#159](https://github.com/zeroroot-ai/gibson/issues/159)) ([b231ec6](https://github.com/zeroroot-ai/gibson/commit/b231ec642c3ac8b79d9a27b17b0a8fb732d30aac))
+* **lint:** repair check-no-gibson-io allowlist and update eviction comment ([#156](https://github.com/zeroroot-ai/gibson/issues/156)) ([c7df684](https://github.com/zeroroot-ai/gibson/commit/c7df6842be87c81e1110feee9ebd74beec73b421)), closes [#142](https://github.com/zeroroot-ai/gibson/issues/142)
+* **mission:** probe RedisJSON before running checkpoint store tests ([#157](https://github.com/zeroroot-ai/gibson/issues/157)) ([e1c2a5d](https://github.com/zeroroot-ai/gibson/commit/e1c2a5d1431a0ea086316019afa908f453f52904)), closes [#141](https://github.com/zeroroot-ai/gibson/issues/141)
+* **secrets:** rip vault kubernetes-auth case from daemon (ADR-0009) ([#177](https://github.com/zeroroot-ai/gibson/issues/177)) ([50c245b](https://github.com/zeroroot-ai/gibson/commit/50c245b7406d6ba873b62f52aa73da283b07c33e))
+* **tenant/names:** Namespace() returns tenant-&lt;slug&gt;, matching cluster reality ([#160](https://github.com/zeroroot-ai/gibson/issues/160)) ([67b5340](https://github.com/zeroroot-ai/gibson/commit/67b53403a7f3b85dcf9998b19f11b3abca8b183e))
 
-## [0.105.0](https://github.com/zero-day-ai/gibson/compare/v0.104.0...v0.105.0) (2026-05-17)
+## [0.105.0](https://github.com/zeroroot-ai/gibson/compare/v0.104.0...v0.105.0) (2026-05-17)
 
 
 ### ⚠ BREAKING CHANGES
 
-* bump sdk to v0.105.1 + delete daemon-local MissionConstraints (M2-gibson) ([#140](https://github.com/zero-day-ai/gibson/issues/140))
+* bump sdk to v0.105.1 + delete daemon-local MissionConstraints (M2-gibson) ([#140](https://github.com/zeroroot-ai/gibson/issues/140))
 
 ### Bug Fixes
 
-* **ci:** disable anchore/sbom-action release-asset upload ([#130](https://github.com/zero-day-ai/gibson/issues/130)) ([e96d128](https://github.com/zero-day-ai/gibson/commit/e96d128072f4da313a3ef21cdd5472bd4f250f90))
-* **llm:** enforce budget check and record usage in StreamLLM ([#136](https://github.com/zero-day-ai/gibson/issues/136)) ([05536cf](https://github.com/zero-day-ai/gibson/commit/05536cfd4051d7dac9e927a2e23f84ad23a0adc2)), closes [#135](https://github.com/zero-day-ai/gibson/issues/135)
+* **ci:** disable anchore/sbom-action release-asset upload ([#130](https://github.com/zeroroot-ai/gibson/issues/130)) ([e96d128](https://github.com/zeroroot-ai/gibson/commit/e96d128072f4da313a3ef21cdd5472bd4f250f90))
+* **llm:** enforce budget check and record usage in StreamLLM ([#136](https://github.com/zeroroot-ai/gibson/issues/136)) ([05536cf](https://github.com/zeroroot-ai/gibson/commit/05536cfd4051d7dac9e927a2e23f84ad23a0adc2)), closes [#135](https://github.com/zeroroot-ai/gibson/issues/135)
 
 
 ### Code Refactoring
 
-* bump sdk to v0.105.1 + delete daemon-local MissionConstraints (M2-gibson) ([#140](https://github.com/zero-day-ai/gibson/issues/140)) ([e4bbc4d](https://github.com/zero-day-ai/gibson/commit/e4bbc4ddb1666cd07d15ea6a11c916b650a3211b))
+* bump sdk to v0.105.1 + delete daemon-local MissionConstraints (M2-gibson) ([#140](https://github.com/zeroroot-ai/gibson/issues/140)) ([e4bbc4d](https://github.com/zeroroot-ai/gibson/commit/e4bbc4ddb1666cd07d15ea6a11c916b650a3211b))
 
-## [0.43.0](https://github.com/zero-day-ai/gibson/compare/v0.42.0...v0.43.0) (2026-05-17)
+## [0.43.0](https://github.com/zeroroot-ai/gibson/compare/v0.42.0...v0.43.0) (2026-05-17)
 
 
 ### Features
 
-* **one-code-path/195:** FGA must be reachable — delete noopAuthorizer + require_ready=false + every s.authz==nil branch ([#111](https://github.com/zero-day-ai/gibson/issues/111)) ([28a38d9](https://github.com/zero-day-ai/gibson/commit/28a38d912dbdb64a5773f5f512fd9049482857a8))
-* **one-code-path/205:** delete GIBSON_MODE — one binary every environment ([#112](https://github.com/zero-day-ai/gibson/issues/112)) ([20b2f31](https://github.com/zero-day-ai/gibson/commit/20b2f3168dc343b92ce32aca83b358c0ca0c8171))
-* **one-code-path/207:** add per-RPC correlation ID interceptor ([#113](https://github.com/zero-day-ai/gibson/issues/113)) ([7313736](https://github.com/zero-day-ai/gibson/commit/731373657f04c2fab204b8aebbb9610da458aaad))
+* **one-code-path/195:** FGA must be reachable — delete noopAuthorizer + require_ready=false + every s.authz==nil branch ([#111](https://github.com/zeroroot-ai/gibson/issues/111)) ([28a38d9](https://github.com/zeroroot-ai/gibson/commit/28a38d912dbdb64a5773f5f512fd9049482857a8))
+* **one-code-path/205:** delete GIBSON_MODE — one binary every environment ([#112](https://github.com/zeroroot-ai/gibson/issues/112)) ([20b2f31](https://github.com/zeroroot-ai/gibson/commit/20b2f3168dc343b92ce32aca83b358c0ca0c8171))
+* **one-code-path/207:** add per-RPC correlation ID interceptor ([#113](https://github.com/zeroroot-ai/gibson/issues/113)) ([7313736](https://github.com/zeroroot-ai/gibson/commit/731373657f04c2fab204b8aebbb9610da458aaad))
 
 
 ### Bug Fixes
 
-* **ci:** chain authz-registry publish off release-please instead of tag trigger ([#97](https://github.com/zero-day-ai/gibson/issues/97)) ([75dd1e6](https://github.com/zero-day-ai/gibson/commit/75dd1e676bb167a9fe3730c3dcd396a3fdd3cfb4))
-* **daemon:** allow multiple inbound peer SVIDs on gRPC mTLS listener ([#107](https://github.com/zero-day-ai/gibson/issues/107)) ([77820d0](https://github.com/zero-day-ai/gibson/commit/77820d02fb026740fecb9409d5e5c356d02feaa2))
-* **daemon:** spiffe-bypass at gRPC auth interceptor for platform peers ([#108](https://github.com/zero-day-ai/gibson/issues/108)) ([b950e28](https://github.com/zero-day-ai/gibson/commit/b950e2897e8b36d845a49ed079f3caa29e1d9b28))
-* remove infinite-recursion postgresProvider fallback in secrets registry ([#105](https://github.com/zero-day-ai/gibson/issues/105)) ([9c90d7e](https://github.com/zero-day-ai/gibson/commit/9c90d7eca68c5a088f4487a876c6c69084f6bbce)), closes [#101](https://github.com/zero-day-ai/gibson/issues/101)
-* tenant_id columns must be TEXT, not UUID (configstore + plugin_install) ([#100](https://github.com/zero-day-ai/gibson/issues/100)) ([bbb6c23](https://github.com/zero-day-ai/gibson/commit/bbb6c2329aaaa4e090cc7482f23b61cc4ee26c69))
+* **ci:** chain authz-registry publish off release-please instead of tag trigger ([#97](https://github.com/zeroroot-ai/gibson/issues/97)) ([75dd1e6](https://github.com/zeroroot-ai/gibson/commit/75dd1e676bb167a9fe3730c3dcd396a3fdd3cfb4))
+* **daemon:** allow multiple inbound peer SVIDs on gRPC mTLS listener ([#107](https://github.com/zeroroot-ai/gibson/issues/107)) ([77820d0](https://github.com/zeroroot-ai/gibson/commit/77820d02fb026740fecb9409d5e5c356d02feaa2))
+* **daemon:** spiffe-bypass at gRPC auth interceptor for platform peers ([#108](https://github.com/zeroroot-ai/gibson/issues/108)) ([b950e28](https://github.com/zeroroot-ai/gibson/commit/b950e2897e8b36d845a49ed079f3caa29e1d9b28))
+* remove infinite-recursion postgresProvider fallback in secrets registry ([#105](https://github.com/zeroroot-ai/gibson/issues/105)) ([9c90d7e](https://github.com/zeroroot-ai/gibson/commit/9c90d7eca68c5a088f4487a876c6c69084f6bbce)), closes [#101](https://github.com/zeroroot-ai/gibson/issues/101)
+* tenant_id columns must be TEXT, not UUID (configstore + plugin_install) ([#100](https://github.com/zeroroot-ai/gibson/issues/100)) ([bbb6c23](https://github.com/zeroroot-ai/gibson/commit/bbb6c2329aaaa4e090cc7482f23b61cc4ee26c69))
 
-## [0.42.0](https://github.com/zero-day-ai/gibson/compare/v0.41.0...v0.42.0) (2026-05-13)
-
-
-### Features
-
-* **daemon:** activate ontology-extension registration in RegisterComponent ([#82](https://github.com/zero-day-ai/gibson/issues/82)) ([6dd36ae](https://github.com/zero-day-ai/gibson/commit/6dd36aeffe2420d3686367151ad428b1583d2b5e))
-
-## [0.41.0](https://github.com/zero-day-ai/gibson/compare/v0.40.0...v0.41.0) (2026-05-13)
+## [0.42.0](https://github.com/zeroroot-ai/gibson/compare/v0.41.0...v0.42.0) (2026-05-13)
 
 
 ### Features
 
-* **daemon:** wire ontology reasoner into daemon + component service ([#79](https://github.com/zero-day-ai/gibson/issues/79)) ([5eb766a](https://github.com/zero-day-ai/gibson/commit/5eb766af3281346221edaf6c75cd1cb739ca9180))
+* **daemon:** activate ontology-extension registration in RegisterComponent ([#82](https://github.com/zeroroot-ai/gibson/issues/82)) ([6dd36ae](https://github.com/zeroroot-ai/gibson/commit/6dd36aeffe2420d3686367151ad428b1583d2b5e))
 
-## [0.40.0](https://github.com/zero-day-ai/gibson/compare/v0.39.0...v0.40.0) (2026-05-13)
+## [0.41.0](https://github.com/zeroroot-ai/gibson/compare/v0.40.0...v0.41.0) (2026-05-13)
 
 
 ### Features
 
-* add in-process ontology reasoner and semantic query methods ([#76](https://github.com/zero-day-ai/gibson/issues/76)) ([f511471](https://github.com/zero-day-ai/gibson/commit/f5114713a8aeffee418ae7d1d9b510c439a94a6a))
-* **bootstrap:** add zitadel-ensure-project subcommand ([#49](https://github.com/zero-day-ai/gibson/issues/49)) ([36a83c4](https://github.com/zero-day-ai/gibson/commit/36a83c4988734ed690a397801b1bcae3aa774424))
-* **bootstrap:** publish gibson-bootstrap-runner image ([#51](https://github.com/zero-day-ai/gibson/issues/51)) ([e03a7eb](https://github.com/zero-day-ai/gibson/commit/e03a7eb5b7e50102d4700e83f79f419d2386a060))
-* **daemon:** own postgres migrations on startup ([#54](https://github.com/zero-day-ai/gibson/issues/54)) ([c32e658](https://github.com/zero-day-ai/gibson/commit/c32e6580e523ef1fbd6554178b14314f046c548c))
+* **daemon:** wire ontology reasoner into daemon + component service ([#79](https://github.com/zeroroot-ai/gibson/issues/79)) ([5eb766a](https://github.com/zeroroot-ai/gibson/commit/5eb766af3281346221edaf6c75cd1cb739ca9180))
+
+## [0.40.0](https://github.com/zeroroot-ai/gibson/compare/v0.39.0...v0.40.0) (2026-05-13)
+
+
+### Features
+
+* add in-process ontology reasoner and semantic query methods ([#76](https://github.com/zeroroot-ai/gibson/issues/76)) ([f511471](https://github.com/zeroroot-ai/gibson/commit/f5114713a8aeffee418ae7d1d9b510c439a94a6a))
+* **bootstrap:** add zitadel-ensure-project subcommand ([#49](https://github.com/zeroroot-ai/gibson/issues/49)) ([36a83c4](https://github.com/zeroroot-ai/gibson/commit/36a83c4988734ed690a397801b1bcae3aa774424))
+* **bootstrap:** publish gibson-bootstrap-runner image ([#51](https://github.com/zeroroot-ai/gibson/issues/51)) ([e03a7eb](https://github.com/zeroroot-ai/gibson/commit/e03a7eb5b7e50102d4700e83f79f419d2386a060))
+* **daemon:** own postgres migrations on startup ([#54](https://github.com/zeroroot-ai/gibson/issues/54)) ([c32e658](https://github.com/zeroroot-ai/gibson/commit/c32e6580e523ef1fbd6554178b14314f046c548c))
 
 
 ### Bug Fixes
 
-* **agent:** update three stale test fixtures to match current behavior ([#66](https://github.com/zero-day-ai/gibson/issues/66)) ([5ec29d8](https://github.com/zero-day-ai/gibson/commit/5ec29d822fe69462ed74fe698a21074271d4ae94))
-* **authz:** GetTenantQuotaUsage references nonexistent tenant.viewer relation ([#64](https://github.com/zero-day-ai/gibson/issues/64)) ([43bf6eb](https://github.com/zero-day-ai/gibson/commit/43bf6eb745bfa468818ed63d867109edd0b19635))
-* **bootstrap:** trim whitespace from ZITADEL_ADMIN_PAT to drop trailing newline ([#52](https://github.com/zero-day-ai/gibson/issues/52)) ([21426de](https://github.com/zero-day-ai/gibson/commit/21426dec2445f96d59c1d8ffa75db2185c3a0b18))
-* **ci:** replace ripgrep with grep in migration guards so they actually run on CI ([#68](https://github.com/zero-day-ai/gibson/issues/68)) ([b025813](https://github.com/zero-day-ai/gibson/commit/b025813139ec705c5a80952c88e0b1c78060a26b))
-* **ci:** tag latest on workflow_dispatch from main, not only push ([#53](https://github.com/zero-day-ai/gibson/issues/53)) ([1167c5b](https://github.com/zero-day-ai/gibson/commit/1167c5b847dea086945082a0c3efeade94ef9694))
-* **daemon/api:** seed mission-level authz tuples missing from two test fixtures ([#69](https://github.com/zero-day-ai/gibson/issues/69)) ([881f1cf](https://github.com/zero-day-ai/gibson/commit/881f1cf2ce9348b7fb61cd65fe04e77ca7eda7a6))
-* **daemon:** unwedge five red tests in internal/daemon ([#71](https://github.com/zero-day-ai/gibson/issues/71)) ([978daa8](https://github.com/zero-day-ai/gibson/commit/978daa8f70f44f7a327eb77eadc9c8f82221daaf))
-* **deps:** gate postgres_tls helper behind integration build tag so govulncheck stops flagging docker ([#72](https://github.com/zero-day-ai/gibson/issues/72)) ([60eb57b](https://github.com/zero-day-ai/gibson/commit/60eb57b69f562b81be1bcaf509f85cd16cccfe63))
-* **gibsoncheck:** allowlist cmd/mission-storage-migrate and internal/secrets in forbidrawstoreimports ([#73](https://github.com/zero-day-ai/gibson/issues/73)) ([ed60eea](https://github.com/zero-day-ai/gibson/commit/ed60eeadb9f9fe1671875c48927c9680af0cecea))
+* **agent:** update three stale test fixtures to match current behavior ([#66](https://github.com/zeroroot-ai/gibson/issues/66)) ([5ec29d8](https://github.com/zeroroot-ai/gibson/commit/5ec29d822fe69462ed74fe698a21074271d4ae94))
+* **authz:** GetTenantQuotaUsage references nonexistent tenant.viewer relation ([#64](https://github.com/zeroroot-ai/gibson/issues/64)) ([43bf6eb](https://github.com/zeroroot-ai/gibson/commit/43bf6eb745bfa468818ed63d867109edd0b19635))
+* **bootstrap:** trim whitespace from ZITADEL_ADMIN_PAT to drop trailing newline ([#52](https://github.com/zeroroot-ai/gibson/issues/52)) ([21426de](https://github.com/zeroroot-ai/gibson/commit/21426dec2445f96d59c1d8ffa75db2185c3a0b18))
+* **ci:** replace ripgrep with grep in migration guards so they actually run on CI ([#68](https://github.com/zeroroot-ai/gibson/issues/68)) ([b025813](https://github.com/zeroroot-ai/gibson/commit/b025813139ec705c5a80952c88e0b1c78060a26b))
+* **ci:** tag latest on workflow_dispatch from main, not only push ([#53](https://github.com/zeroroot-ai/gibson/issues/53)) ([1167c5b](https://github.com/zeroroot-ai/gibson/commit/1167c5b847dea086945082a0c3efeade94ef9694))
+* **daemon/api:** seed mission-level authz tuples missing from two test fixtures ([#69](https://github.com/zeroroot-ai/gibson/issues/69)) ([881f1cf](https://github.com/zeroroot-ai/gibson/commit/881f1cf2ce9348b7fb61cd65fe04e77ca7eda7a6))
+* **daemon:** unwedge five red tests in internal/daemon ([#71](https://github.com/zeroroot-ai/gibson/issues/71)) ([978daa8](https://github.com/zeroroot-ai/gibson/commit/978daa8f70f44f7a327eb77eadc9c8f82221daaf))
+* **deps:** gate postgres_tls helper behind integration build tag so govulncheck stops flagging docker ([#72](https://github.com/zeroroot-ai/gibson/issues/72)) ([60eb57b](https://github.com/zeroroot-ai/gibson/commit/60eb57b69f562b81be1bcaf509f85cd16cccfe63))
+* **gibsoncheck:** allowlist cmd/mission-storage-migrate and internal/secrets in forbidrawstoreimports ([#73](https://github.com/zeroroot-ai/gibson/issues/73)) ([ed60eea](https://github.com/zeroroot-ai/gibson/commit/ed60eeadb9f9fe1671875c48927c9680af0cecea))
 
-## [0.39.0](https://github.com/zero-day-ai/gibson/compare/v0.38.0...v0.39.0) (2026-05-11)
-
-
-### Features
-
-* **bootstrap:** zitadel-mint-user-pat subcommand (W4) ([#48](https://github.com/zero-day-ai/gibson/issues/48)) ([4e3a303](https://github.com/zero-day-ai/gibson/commit/4e3a30351672afd4fa5233829a2c61249a02bcd8))
-
-
-### Bug Fixes
-
-* **release:** collapse `-v` double-v in gibson-bootstrap tag + add workflow_dispatch ([#46](https://github.com/zero-day-ai/gibson/issues/46)) ([465c991](https://github.com/zero-day-ai/gibson/commit/465c99119e8d0d4eb7e6106b56514ffae42bd4d0))
-
-## [0.38.0](https://github.com/zero-day-ai/gibson/compare/v0.37.1...v0.38.0) (2026-05-11)
+## [0.39.0](https://github.com/zeroroot-ai/gibson/compare/v0.38.0...v0.39.0) (2026-05-11)
 
 
 ### Features
 
-* **bootstrap:** add gibson-bootstrap binary for chart bootstrap-secrets Job ([#45](https://github.com/zero-day-ai/gibson/issues/45)) ([4d2c286](https://github.com/zero-day-ai/gibson/commit/4d2c286a977609bb98e1e09c92d6f0d6e8c408e1))
-* **build:** point Dockerfile FROM at ghcr.io mirror ([#44](https://github.com/zero-day-ai/gibson/issues/44)) ([9f9e8ec](https://github.com/zero-day-ai/gibson/commit/9f9e8ec4a565869f45f5f891e1d7931cd7c51d82))
+* **bootstrap:** zitadel-mint-user-pat subcommand (W4) ([#48](https://github.com/zeroroot-ai/gibson/issues/48)) ([4e3a303](https://github.com/zeroroot-ai/gibson/commit/4e3a30351672afd4fa5233829a2c61249a02bcd8))
 
 
 ### Bug Fixes
 
-* **build:** set GOTOOLCHAIN=auto so Docker builds tolerate base-image lag ([#40](https://github.com/zero-day-ai/gibson/issues/40)) ([8bac2d9](https://github.com/zero-day-ai/gibson/commit/8bac2d9e162736d6d9c729ab66d34b1eff7fe7a9))
+* **release:** collapse `-v` double-v in gibson-bootstrap tag + add workflow_dispatch ([#46](https://github.com/zeroroot-ai/gibson/issues/46)) ([465c991](https://github.com/zeroroot-ai/gibson/commit/465c99119e8d0d4eb7e6106b56514ffae42bd4d0))
 
-## [0.37.1](https://github.com/zero-day-ai/gibson/compare/v0.37.0...v0.37.1) (2026-05-11)
-
-
-### Bug Fixes
-
-* clear three gibson CI gates (Go 1.25.10, migrations selftest, authz-registry SDK lookup) ([#32](https://github.com/zero-day-ai/gibson/issues/32)) ([3247868](https://github.com/zero-day-ai/gibson/commit/324786862e363ec17b4c98811772f0e02eba11b7))
-
-## [0.37.0](https://github.com/zero-day-ai/gibson/compare/v0.36.0...v0.37.0) (2026-05-10)
+## [0.38.0](https://github.com/zeroroot-ai/gibson/compare/v0.37.1...v0.38.0) (2026-05-11)
 
 
 ### Features
 
-* **mission:** delete mirror struct + ship offline storage migrator ([#35](https://github.com/zero-day-ai/gibson/issues/35)) ([44d9ea3](https://github.com/zero-day-ai/gibson/commit/44d9ea344af6e3f016b2d5575b6d05677e02361f))
-
-## [0.36.0](https://github.com/zero-day-ai/gibson/compare/v0.35.1...v0.36.0) (2026-05-10)
-
-
-### Features
-
-* **daemon:** collapse TenantQuota to two enforced fields + Postgres reader ([01a90b6](https://github.com/zero-day-ai/gibson/commit/01a90b64904f0d5c61a2c27f780d24800c89dba2))
-* install release-please and pr-title-lint ([#24](https://github.com/zero-day-ai/gibson/issues/24)) ([54e1375](https://github.com/zero-day-ai/gibson/commit/54e137584dac076976699d9a9d59e72ad4d95bc1))
-* **mission:** add protojson MarshalDefinitionJSON / UnmarshalDefinitionJSON ([#28](https://github.com/zero-day-ai/gibson/issues/28)) ([8d05586](https://github.com/zero-day-ai/gibson/commit/8d05586ee7aa6ae1da520af26656e4ecda3c6113))
-* **mission:** flip writer to protojson + dual-shape readers ([#30](https://github.com/zero-day-ai/gibson/issues/30)) ([e91ede9](https://github.com/zero-day-ai/gibson/commit/e91ede98207f3983927f2084fc193427fa71f9cc))
-* **mission:** MissionStore interface speaks proto MissionDefinition ([#33](https://github.com/zero-day-ai/gibson/issues/33)) ([6a5400c](https://github.com/zero-day-ai/gibson/commit/6a5400c4fa3c500ff52cb4bbc31446504dbdff8f))
-* **mission:** retype daemon helpers to proto MissionDefinition ([#34](https://github.com/zero-day-ai/gibson/issues/34)) ([a9f136a](https://github.com/zero-day-ai/gibson/commit/a9f136a720627aedf2d0b3d02d5d3cbfab71e890))
-* **mission:** swap orchestrator pkg to proto MissionDefinition ([#31](https://github.com/zero-day-ai/gibson/issues/31)) ([5e5731c](https://github.com/zero-day-ai/gibson/commit/5e5731c04369c05c03b3c898fb77835659b2f530))
+* **bootstrap:** add gibson-bootstrap binary for chart bootstrap-secrets Job ([#45](https://github.com/zeroroot-ai/gibson/issues/45)) ([4d2c286](https://github.com/zeroroot-ai/gibson/commit/4d2c286a977609bb98e1e09c92d6f0d6e8c408e1))
+* **build:** point Dockerfile FROM at ghcr.io mirror ([#44](https://github.com/zeroroot-ai/gibson/issues/44)) ([9f9e8ec](https://github.com/zeroroot-ai/gibson/commit/9f9e8ec4a565869f45f5f891e1d7931cd7c51d82))
 
 
 ### Bug Fixes
 
-* **authz:** remove misleading user-typed wildcard tuple comment ([3ddd29b](https://github.com/zero-day-ai/gibson/commit/3ddd29bde209e7e16f5adadad49ae91c0ff92798))
+* **build:** set GOTOOLCHAIN=auto so Docker builds tolerate base-image lag ([#40](https://github.com/zeroroot-ai/gibson/issues/40)) ([8bac2d9](https://github.com/zeroroot-ai/gibson/commit/8bac2d9e162736d6d9c729ab66d34b1eff7fe7a9))
+
+## [0.37.1](https://github.com/zeroroot-ai/gibson/compare/v0.37.0...v0.37.1) (2026-05-11)
+
+
+### Bug Fixes
+
+* clear three gibson CI gates (Go 1.25.10, migrations selftest, authz-registry SDK lookup) ([#32](https://github.com/zeroroot-ai/gibson/issues/32)) ([3247868](https://github.com/zeroroot-ai/gibson/commit/324786862e363ec17b4c98811772f0e02eba11b7))
+
+## [0.37.0](https://github.com/zeroroot-ai/gibson/compare/v0.36.0...v0.37.0) (2026-05-10)
+
+
+### Features
+
+* **mission:** delete mirror struct + ship offline storage migrator ([#35](https://github.com/zeroroot-ai/gibson/issues/35)) ([44d9ea3](https://github.com/zeroroot-ai/gibson/commit/44d9ea344af6e3f016b2d5575b6d05677e02361f))
+
+## [0.36.0](https://github.com/zeroroot-ai/gibson/compare/v0.35.1...v0.36.0) (2026-05-10)
+
+
+### Features
+
+* **daemon:** collapse TenantQuota to two enforced fields + Postgres reader ([01a90b6](https://github.com/zeroroot-ai/gibson/commit/01a90b64904f0d5c61a2c27f780d24800c89dba2))
+* install release-please and pr-title-lint ([#24](https://github.com/zeroroot-ai/gibson/issues/24)) ([54e1375](https://github.com/zeroroot-ai/gibson/commit/54e137584dac076976699d9a9d59e72ad4d95bc1))
+* **mission:** add protojson MarshalDefinitionJSON / UnmarshalDefinitionJSON ([#28](https://github.com/zeroroot-ai/gibson/issues/28)) ([8d05586](https://github.com/zeroroot-ai/gibson/commit/8d05586ee7aa6ae1da520af26656e4ecda3c6113))
+* **mission:** flip writer to protojson + dual-shape readers ([#30](https://github.com/zeroroot-ai/gibson/issues/30)) ([e91ede9](https://github.com/zeroroot-ai/gibson/commit/e91ede98207f3983927f2084fc193427fa71f9cc))
+* **mission:** MissionStore interface speaks proto MissionDefinition ([#33](https://github.com/zeroroot-ai/gibson/issues/33)) ([6a5400c](https://github.com/zeroroot-ai/gibson/commit/6a5400c4fa3c500ff52cb4bbc31446504dbdff8f))
+* **mission:** retype daemon helpers to proto MissionDefinition ([#34](https://github.com/zeroroot-ai/gibson/issues/34)) ([a9f136a](https://github.com/zeroroot-ai/gibson/commit/a9f136a720627aedf2d0b3d02d5d3cbfab71e890))
+* **mission:** swap orchestrator pkg to proto MissionDefinition ([#31](https://github.com/zeroroot-ai/gibson/issues/31)) ([5e5731c](https://github.com/zeroroot-ai/gibson/commit/5e5731c04369c05c03b3c898fb77835659b2f530))
+
+
+### Bug Fixes
+
+* **authz:** remove misleading user-typed wildcard tuple comment ([3ddd29b](https://github.com/zeroroot-ai/gibson/commit/3ddd29bde209e7e16f5adadad49ae91c0ff92798))
 
 ## v0.32.0 — 2026-05-04 — daemon reads per-tenant credentials from Vault (tenant-provisioning-unification-phase2 Phase 6)
 
@@ -522,8 +522,8 @@ production/dev/failure paths.
 
 ### Module discipline
 
-`go list -deps github.com/zero-day-ai/gibson/pkg/platform/...` still
-resolves only to stdlib + `github.com/zero-day-ai/sdk/auth` + the
+`go list -deps github.com/zeroroot-ai/gibson/pkg/platform/...` still
+resolves only to stdlib + `github.com/zeroroot-ai/sdk/auth` + the
 controller-runtime/k8s.io types from the parent spec. No new
 transitive deps.
 
@@ -603,8 +603,8 @@ ValidateAtStartup aggregation in both production and dev modes.
 
 ### Module discipline
 
-`go list -deps github.com/zero-day-ai/gibson/pkg/platform/...` resolves
-only to stdlib + `github.com/zero-day-ai/sdk/auth` + the standard
+`go list -deps github.com/zeroroot-ai/gibson/pkg/platform/...` resolves
+only to stdlib + `github.com/zeroroot-ai/sdk/auth` + the standard
 controller-runtime/k8s.io types needed for `metav1.Condition` and
 `record.EventRecorder`. No daemon-internal driver pulls — keeping the
 operator's go.sum footprint small when it adds the gibson dep in
@@ -693,9 +693,9 @@ remains hand-maintained at `internal/authz/model.fga` (the only source the
 - **`scripts/check-fga-model-headers.sh`** trimmed to only assert the
   `AUTHORITATIVE-FGA-MODEL` marker on `model.fga`.
 - **`.github/workflows/publish-private-authz-registry.yml`** stops pushing
-  the `fga_model.fga` layer to `ghcr.io/zero-day-ai/internal-authz-registry`;
+  the `fga_model.fga` layer to `ghcr.io/zeroroot-ai/internal-authz-registry`;
   three layers ship now (`registry.yaml`, `permissions.ts`, `registry.go`).
-- **`go.mod`** bumped to `github.com/zero-day-ai/sdk v0.98.1`.
+- **`go.mod`** bumped to `github.com/zeroroot-ai/sdk v0.98.1`.
 
 Spec: ad-hoc cleanup informed by the cross-repo-cohesion-fixes audit.
 
@@ -748,7 +748,7 @@ Spec: `tenant-role-taxonomy`.
 
 The authz registry artifacts (`internal/authz/registry/`) are unchanged —
 no proto annotations were modified. The OCI artifact at
-`ghcr.io/zero-day-ai/internal-authz-registry:v0.27.0` is published by CI
+`ghcr.io/zeroroot-ai/internal-authz-registry:v0.27.0` is published by CI
 on tag push but its content is identical to v0.26.0.
 
 ### Validation
@@ -774,7 +774,7 @@ Spec: `discovery-bitfield-coherence`.
 
 ### Changes
 
-- **SDK bump:** `github.com/zero-day-ai/sdk` v0.95.0 → v0.96.0.
+- **SDK bump:** `github.com/zeroroot-ai/sdk` v0.95.0 → v0.96.0.
 - **Registry regen:** all five registry artifacts regenerated via
   `make authz-registry`. The eleven affected RPCs (`WhoAmI`,
   `ListPlugins`, `DescribePlugin`, `ListTools`, `DescribeTool`,
@@ -783,7 +783,7 @@ Spec: `discovery-bitfield-coherence`.
   `allowed_identities: [USER, SERVICE, COMPONENT]` in `registry.yaml`
   and `USER|SERVICE|COMPONENT` in `audit.csv`. The `fga_model.fga` is
   unchanged — the FGA relations and object types are unaffected.
-- **OCI artifact:** `ghcr.io/zero-day-ai/internal-authz-registry:v0.26.0`
+- **OCI artifact:** `ghcr.io/zeroroot-ai/internal-authz-registry:v0.26.0`
   published by the `publish-private-authz-registry` CI workflow on tag
   push.
 
@@ -849,7 +849,7 @@ Closes self-mode-authz Req 4.6.
   Layer 4 of defense-in-depth (per-RPC identity-class enforcement) is
   restored on these two RPCs. Spec: self-mode-authz Req 4.1–4.3.
 
-- **OCI registry artifact `ghcr.io/zero-day-ai/internal-authz-registry:v0.25.0`
+- **OCI registry artifact `ghcr.io/zeroroot-ai/internal-authz-registry:v0.25.0`
   is the first artifact containing `self: true` entries.**
   Requires ext-authz v0.2.0+ to parse; see Req 6.1 for release order
   requirements.

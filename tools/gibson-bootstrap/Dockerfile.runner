@@ -18,17 +18,17 @@
 # Build (from repo root):
 #   docker buildx build \
 #     -f tools/gibson-bootstrap/Dockerfile.runner \
-#     -t ghcr.io/zero-day-ai/gibson-bootstrap-runner:latest \
+#     -t ghcr.io/zeroroot-ai/gibson-bootstrap-runner:latest \
 #     .
 # ============================================================================
 
 ARG BOOTSTRAP_TAG=latest
 
 # Stage 1: pull the published gibson-bootstrap binary
-FROM ghcr.io/zero-day-ai/gibson-bootstrap:${BOOTSTRAP_TAG} AS bootstrap
+FROM ghcr.io/zeroroot-ai/gibson-bootstrap:${BOOTSTRAP_TAG} AS bootstrap
 
 # Stage 2: alpine runner with the tools the chart's bootstrap.sh needs
-FROM ghcr.io/zero-day-ai/mirror/alpine:3.21
+FROM ghcr.io/zeroroot-ai/mirror/alpine:3.21
 
 # bash         — the chart's bootstrap.sh shebang + helper functions
 # jq           — parse JSON output from `gibson-bootstrap zitadel-ensure-*`

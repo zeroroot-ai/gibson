@@ -12,7 +12,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // VerboseEventBus publishes verbose events to subscribers.
@@ -159,7 +159,7 @@ python3 -c 'import sys; sys.stdout.write("""package verbose
 import (
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 type VerboseEventType string
