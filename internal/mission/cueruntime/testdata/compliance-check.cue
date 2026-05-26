@@ -8,7 +8,7 @@
 //
 // Spec: mission-authoring-cue Requirement 7.
 
-import missionv1 "github.com/zero-day-ai/sdk/api/proto/gibson/mission/v1"
+import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
 
 mission: missionv1.#MissionDefinition & {
 	name:        "compliance-check"

@@ -10,7 +10,7 @@
 -- into the secrets broker (keys "provider_cred:<name>:<field>") on first read
 -- per record — see internal/providerconfig/store_broker.go (lazy migration).
 --
--- Spec: secrets-broker, Phase 2 Task 4.2; github.com/zero-day-ai/gibson#423.
+-- Spec: secrets-broker, Phase 2 Task 4.2; github.com/zeroroot-ai/gibson#423.
 
 CREATE TABLE IF NOT EXISTS provider_configs (
     id            TEXT        NOT NULL DEFAULT gen_random_uuid()::TEXT,

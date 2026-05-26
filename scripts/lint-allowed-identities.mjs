@@ -35,7 +35,7 @@ const PROTO_ROOT = join(REPO_ROOT, 'internal/daemon/api');
 function resolveOptionsProto() {
   try {
     const sdkDir = execSync(
-      'go list -m -f {{.Dir}} github.com/zero-day-ai/sdk',
+      'go list -m -f {{.Dir}} github.com/zeroroot-ai/sdk',
       { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] },
     ).trim();
     return join(sdkDir, 'api/proto/gibson/auth/v1/options.proto');

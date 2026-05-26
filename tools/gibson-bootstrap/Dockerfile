@@ -13,14 +13,14 @@
 #   docker buildx build \
 #     --secret id=ghtoken,src=<(gh auth token) \
 #     -f tools/gibson-bootstrap/Dockerfile \
-#     -t ghcr.io/zero-day-ai/gibson-bootstrap:latest \
+#     -t ghcr.io/zeroroot-ai/gibson-bootstrap:latest \
 #     .
 # ============================================================================
 
 # ============================================================================
 # Stage 1: Builder
 # ============================================================================
-FROM ghcr.io/zero-day-ai/mirror/golang:1.25-alpine AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.25-alpine AS builder
 
 # git is required for private module fetches via git config url rewrite.
 RUN apk add --no-cache git ca-certificates
@@ -28,7 +28,7 @@ RUN apk add --no-cache git ca-certificates
 WORKDIR /workspace
 
 # Private module access — same pattern as core/gibson/Dockerfile.
-ENV GOPRIVATE=github.com/zero-day-ai
+ENV GOPRIVATE=github.com/zeroroot-ai
 ENV GOTOOLCHAIN=auto
 ENV CGO_ENABLED=0
 
@@ -36,7 +36,7 @@ ENV CGO_ENABLED=0
 COPY go.mod go.sum ./
 
 # Fetch dependencies. The optional ghtoken BuildKit secret is forwarded as a
-# git credential for github.com/zero-day-ai/* private modules. When the secret
+# git credential for github.com/zeroroot-ai/* private modules. When the secret
 # is absent (e.g. public CI without private access), this step succeeds only if
 # all required modules are already publicly available.
 RUN --mount=type=secret,id=ghtoken,target=/run/secrets/ghtoken,required=false \
@@ -55,7 +55,7 @@ RUN go build -ldflags="-s -w" -o /out/gibson-bootstrap ./tools/gibson-bootstrap
 # ============================================================================
 # Stage 2: Runtime — distroless static (no libc, no shell, no package manager)
 # ============================================================================
-FROM ghcr.io/zero-day-ai/mirror/distroless-static:nonroot
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot
 
 COPY --from=builder /out/gibson-bootstrap /gibson-bootstrap
 

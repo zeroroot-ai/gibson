@@ -19,7 +19,7 @@
 #   deploy/helm/gibson-workloads/values.yaml
 #     ↑ live Kubernetes node-selector label "gibson.io/sandbox-host" used on
 #       EKS bare-metal nodes; rename requires cluster re-labelling — tracked at
-#       zero-day-ai/gibson#156
+#       zeroroot-ai/gibson#156
 #   deploy/helm/gibson-workloads/templates/_spiffe-id.tpl
 #   deploy/helm/gibson-workloads/templates/_validators.tpl
 #     ↑ same pending rename; validator error messages reference the live label
@@ -74,7 +74,7 @@ ALLOWLIST=(
     # Gibson-workloads Helm chart — live Kubernetes node label / taint key
     # "gibson.io/sandbox-host" is a real k8s label applied to EKS bare-metal
     # sandbox-host nodes. Renaming to "zero-day.ai/sandbox-host" requires
-    # re-labelling cluster nodes — tracked at zero-day-ai/gibson#156.
+    # re-labelling cluster nodes — tracked at zeroroot-ai/gibson#156.
     "deploy/helm/gibson-workloads/values.yaml"
     "deploy/helm/gibson-workloads/templates/_spiffe-id.tpl"
     "deploy/helm/gibson-workloads/templates/_validators.tpl"

@@ -5,7 +5,7 @@
 # Significantly smaller and simpler build.
 #
 # Build from repository root with SDK available:
-#   docker build -f core/gibson/build/Dockerfile -t ghcr.io/zero-day-ai/gibson:latest .
+#   docker build -f core/gibson/build/Dockerfile -t ghcr.io/zeroroot-ai/gibson:latest .
 # ============================================================================
 
 # ============================================================================
