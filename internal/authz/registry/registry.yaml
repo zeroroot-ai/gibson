@@ -1526,13 +1526,6 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
-  "/gibson.tenant.v1.TenantService/GetFallbackChain":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
   "/gibson.tenant.v1.TenantService/GetMissionDraft":
     relation: "writer"
     object_type: "tenant"
@@ -1639,13 +1632,6 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.TenantService/SetDefaultProvider":
-    relation: "writer"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.tenant.v1.TenantService/SetFallbackChain":
     relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"

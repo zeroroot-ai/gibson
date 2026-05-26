@@ -53,12 +53,6 @@ func (s *stubProviderConfigStore) GetDefault(ctx context.Context, tenantID strin
 func (s *stubProviderConfigStore) SetDefault(ctx context.Context, tenantID, name string) error {
 	return nil
 }
-func (s *stubProviderConfigStore) GetFallbackChain(ctx context.Context, tenantID string) ([]string, error) {
-	return nil, nil
-}
-func (s *stubProviderConfigStore) SetFallbackChain(ctx context.Context, tenantID string, names []string) error {
-	return nil
-}
 func (s *stubProviderConfigStore) Resolve(ctx context.Context, tenantID, name string) (*providerconfig.DecryptedConfig, error) {
 	if s.resolveFunc != nil {
 		return s.resolveFunc(ctx, tenantID, name)
@@ -808,4 +802,3 @@ func TestExecuteLLM_PerCallCap_noCapNoChange(t *testing.T) {
 	assert.Equal(t, 8192, capturedReq.MaxTokens,
 		"no cap in context: MaxTokens must pass through unchanged")
 }
-

@@ -33,30 +33,26 @@ import (
 // mockProviderStore satisfies providerConfigStoreIface for tests.
 // All return values are configurable via exported fields.
 type mockProviderStore struct {
-	listOut     []*providerconfig.ProviderConfig
-	listErr     error
-	getOut      *providerconfig.ProviderConfig
-	getErr      error
-	createOut   *providerconfig.ProviderConfig
-	createErr   error
-	updateOut   *providerconfig.ProviderConfig
-	updateErr   error
-	deleteErr   error
-	defaultOut  *providerconfig.ProviderConfig
-	defaultErr  error
-	setDefErr   error
-	chainOut    []string
-	chainErr    error
-	setChainErr error
-	resolveOut  *providerconfig.DecryptedConfig
-	resolveErr  error
+	listOut    []*providerconfig.ProviderConfig
+	listErr    error
+	getOut     *providerconfig.ProviderConfig
+	getErr     error
+	createOut  *providerconfig.ProviderConfig
+	createErr  error
+	updateOut  *providerconfig.ProviderConfig
+	updateErr  error
+	deleteErr  error
+	defaultOut *providerconfig.ProviderConfig
+	defaultErr error
+	setDefErr  error
+	resolveOut *providerconfig.DecryptedConfig
+	resolveErr error
 
 	// captured inputs for mutation verification
 	capturedCreateInput *providerconfig.ProviderConfigInput
 	capturedUpdateName  string
 	capturedDeleteName  string
 	capturedDefaultName string
-	capturedChain       []string
 }
 
 func (m *mockProviderStore) List(_ context.Context, _ string) ([]*providerconfig.ProviderConfig, error) {
@@ -89,15 +85,6 @@ func (m *mockProviderStore) GetDefault(_ context.Context, _ string) (*providerco
 func (m *mockProviderStore) SetDefault(_ context.Context, _ string, name string) error {
 	m.capturedDefaultName = name
 	return m.setDefErr
-}
-
-func (m *mockProviderStore) GetFallbackChain(_ context.Context, _ string) ([]string, error) {
-	return m.chainOut, m.chainErr
-}
-
-func (m *mockProviderStore) SetFallbackChain(_ context.Context, _ string, names []string) error {
-	m.capturedChain = names
-	return m.setChainErr
 }
 
 func (m *mockProviderStore) Resolve(_ context.Context, _ string, _ string) (*providerconfig.DecryptedConfig, error) {
@@ -470,74 +457,6 @@ func TestSetDefaultProvider_GetFailureAfterSet_ReturnsEmpty(t *testing.T) {
 	resp, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "p"})
 	require.NoError(t, err) // no gRPC-level error
 	assert.Nil(t, resp.Provider)
-}
-
-// ---------------------------------------------------------------------------
-// GetFallbackChain
-// ---------------------------------------------------------------------------
-
-func TestGetFallbackChain_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
-	_, err := s.GetFallbackChain(tenantCtx("acme"), &tenantv1.GetFallbackChainRequest{})
-	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
-}
-
-func TestGetFallbackChain_Success_ReturnsList(t *testing.T) {
-	store := &mockProviderStore{chainOut: []string{"openai-primary", "anthropic-backup"}}
-	s := serverWithStore(store)
-	resp, err := s.GetFallbackChain(tenantCtx("acme"), &tenantv1.GetFallbackChainRequest{})
-	require.NoError(t, err)
-	assert.Equal(t, []string{"openai-primary", "anthropic-backup"}, resp.ProviderNames)
-}
-
-func TestGetFallbackChain_Empty_ReturnsNil(t *testing.T) {
-	store := &mockProviderStore{chainOut: nil}
-	s := serverWithStore(store)
-	resp, err := s.GetFallbackChain(tenantCtx("acme"), &tenantv1.GetFallbackChainRequest{})
-	require.NoError(t, err)
-	assert.Empty(t, resp.ProviderNames)
-}
-
-// ---------------------------------------------------------------------------
-// SetFallbackChain
-// ---------------------------------------------------------------------------
-
-func TestSetFallbackChain_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
-	_, err := s.SetFallbackChain(tenantCtx("acme"), &tenantv1.SetFallbackChainRequest{
-		ProviderNames: []string{"p1"},
-	})
-	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
-}
-
-func TestSetFallbackChain_StoreError_Internal(t *testing.T) {
-	store := &mockProviderStore{setChainErr: assert.AnError}
-	s := serverWithStore(store)
-	_, err := s.SetFallbackChain(tenantCtx("acme"), &tenantv1.SetFallbackChainRequest{
-		ProviderNames: []string{"p1"},
-	})
-	assert.Equal(t, codes.Internal, grpcCode(err))
-}
-
-func TestSetFallbackChain_Success_StoreAndRespond(t *testing.T) {
-	store := &mockProviderStore{}
-	s := serverWithStore(store)
-	resp, err := s.SetFallbackChain(tenantCtx("acme"), &tenantv1.SetFallbackChainRequest{
-		ProviderNames: []string{"openai-primary", "anthropic-backup", "bedrock-fallback"},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, []string{"openai-primary", "anthropic-backup", "bedrock-fallback"}, store.capturedChain)
-	assert.Equal(t, []string{"openai-primary", "anthropic-backup", "bedrock-fallback"}, resp.ProviderNames)
-}
-
-func TestSetFallbackChain_EmptyList_OK(t *testing.T) {
-	store := &mockProviderStore{}
-	s := serverWithStore(store)
-	resp, err := s.SetFallbackChain(tenantCtx("acme"), &tenantv1.SetFallbackChainRequest{
-		ProviderNames: []string{},
-	})
-	require.NoError(t, err)
-	assert.Empty(t, resp.ProviderNames)
 }
 
 // ---------------------------------------------------------------------------

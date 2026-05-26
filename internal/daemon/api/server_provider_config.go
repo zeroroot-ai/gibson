@@ -3,7 +3,7 @@ package api
 // server_provider_config.go — CRUD handlers for TenantAdminService
 // provider-config RPC surface (ListProviders, GetProvider, CreateProvider,
 // UpdateProvider, DeleteProvider, TestProvider, GetProviderHealth,
-// GetDefaultProvider, SetDefaultProvider, GetFallbackChain, SetFallbackChain).
+// GetDefaultProvider, SetDefaultProvider).
 //
 // Execution handlers (ExecuteLLM, StreamLLM) live in server_provider_exec.go
 // (task 4).
@@ -41,8 +41,6 @@ type providerConfigStoreIface interface {
 	Delete(ctx context.Context, tenantID string, name string) error
 	GetDefault(ctx context.Context, tenantID string) (*providerconfig.ProviderConfig, error)
 	SetDefault(ctx context.Context, tenantID string, name string) error
-	GetFallbackChain(ctx context.Context, tenantID string) ([]string, error)
-	SetFallbackChain(ctx context.Context, tenantID string, names []string) error
 	Resolve(ctx context.Context, tenantID string, name string) (*providerconfig.DecryptedConfig, error)
 }
 
@@ -138,12 +136,11 @@ func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 type providerAuditAction = string
 
 const (
-	auditProviderCreated         providerAuditAction = "provider_created"
-	auditProviderUpdated         providerAuditAction = "provider_updated"
-	auditProviderDeleted         providerAuditAction = "provider_deleted"
-	auditProviderTested          providerAuditAction = "provider_tested"
-	auditProviderDefaultChanged  providerAuditAction = "provider_default_changed"
-	auditProviderFallbackChanged providerAuditAction = "provider_fallback_chain_changed"
+	auditProviderCreated        providerAuditAction = "provider_created"
+	auditProviderUpdated        providerAuditAction = "provider_updated"
+	auditProviderDeleted        providerAuditAction = "provider_deleted"
+	auditProviderTested         providerAuditAction = "provider_tested"
+	auditProviderDefaultChanged providerAuditAction = "provider_default_changed"
 )
 
 // emitProviderAudit logs a provider-related audit event via the daemon's
@@ -527,49 +524,6 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *tenantv1.Set
 		return &tenantv1.SetDefaultProviderResponse{}, nil
 	}
 	return &tenantv1.SetDefaultProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
-}
-
-// ---------------------------------------------------------------------------
-// GetFallbackChain
-// ---------------------------------------------------------------------------
-
-// GetFallbackChain returns the ordered list of fallback provider names.
-func (s *DaemonServer) GetFallbackChain(ctx context.Context, _ *tenantv1.GetFallbackChainRequest) (*tenantv1.GetFallbackChainResponse, error) {
-	tenantID := auth.TenantStringFromContext(ctx)
-	if tenantID == "" {
-		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
-	}
-	if s.providerConfig == nil {
-		return nil, status_grpc.Errorf(codes.FailedPrecondition,
-			"daemon `security.key_provider` not configured — provider storage is disabled")
-	}
-	chain, err := s.providerConfig.GetFallbackChain(ctx, tenantID)
-	if err != nil {
-		return nil, toGRPCProviderError("get fallback chain", err)
-	}
-	return &tenantv1.GetFallbackChainResponse{ProviderNames: chain}, nil
-}
-
-// ---------------------------------------------------------------------------
-// SetFallbackChain
-// ---------------------------------------------------------------------------
-
-// SetFallbackChain replaces the tenant's fallback provider chain.
-func (s *DaemonServer) SetFallbackChain(ctx context.Context, req *tenantv1.SetFallbackChainRequest) (*tenantv1.SetFallbackChainResponse, error) {
-	tenantID := auth.TenantStringFromContext(ctx)
-	if tenantID == "" {
-		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
-	}
-	if s.providerConfig == nil {
-		return nil, status_grpc.Errorf(codes.FailedPrecondition,
-			"daemon `security.key_provider` not configured — provider storage is disabled")
-	}
-	names := req.GetProviderNames()
-	if err := s.providerConfig.SetFallbackChain(ctx, tenantID, names); err != nil {
-		return nil, toGRPCProviderError("set fallback chain", err)
-	}
-	s.emitProviderAudit(ctx, tenantID, auditProviderFallbackChanged, fmt.Sprintf("%v", names))
-	return &tenantv1.SetFallbackChainResponse{ProviderNames: names}, nil
 }
 
 // ---------------------------------------------------------------------------
