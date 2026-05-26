@@ -62,6 +62,15 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.119.1](https://github.com/zeroroot-ai/gibson/compare/v0.119.0...v0.119.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **authz:** realign IdentityClass const block in generated registry ([#436](https://github.com/zeroroot-ai/gibson/issues/436)) ([32a7566](https://github.com/zeroroot-ai/gibson/commit/32a7566ad595cf4d3d0632f5ca41767bba39950d))
+* **idp:** guard parseZitadelError against nil Details slice + fix GetUserProfile error mapping ([#433](https://github.com/zeroroot-ai/gibson/issues/433)) ([06dbca0](https://github.com/zeroroot-ai/gibson/commit/06dbca07a8a434d4c1c35fbd172c9ace260ab5ec))
+* **state:** guard XRead against infinite hang when Block &gt; 0 ([#391](https://github.com/zeroroot-ai/gibson/issues/391)) ([804ccd9](https://github.com/zeroroot-ai/gibson/commit/804ccd91636944b8bb259ab598c59db73c5e8530))
+
 ## [0.119.0](https://github.com/zeroroot-ai/gibson/compare/v0.118.0...v0.119.0) (2026-05-26)
 
 
