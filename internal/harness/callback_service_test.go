@@ -11,15 +11,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkagent "github.com/zero-day-ai/sdk/agent"
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
-	"github.com/zero-day-ai/sdk/auth"
-	"github.com/zero-day-ai/sdk/codegen/workspace"
-	sdktypes "github.com/zero-day-ai/sdk/types"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/memory"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkagent "github.com/zeroroot-ai/sdk/agent"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/codegen/workspace"
+	sdktypes "github.com/zeroroot-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/protobuf/proto"
@@ -73,7 +73,7 @@ func (m *tenantAwareMockHarness) Mission() MissionContext {
 	return MissionContext{TenantID: m.tenantID}
 }
 
-func (m *tenantAwareMockHarness) Workspace() workspace.Workspace          { return nil }
+func (m *tenantAwareMockHarness) Workspace() workspace.Workspace { return nil }
 func (m *tenantAwareMockHarness) Workspaces() map[string]workspace.Workspace {
 	return map[string]workspace.Workspace{}
 }

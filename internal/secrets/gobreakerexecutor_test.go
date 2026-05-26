@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/platform-clients/resilience"
+	"github.com/zeroroot-ai/platform-clients/resilience"
 )
 
 const (
@@ -20,7 +20,7 @@ const (
 func tightCircuitConfig() resilience.CircuitConfig {
 	return resilience.CircuitConfig{
 		ConsecutiveFailures: 1,
-		Interval:            0, // no cyclic reset
+		Interval:            0,         // no cyclic reset
 		Timeout:             999999999, // effectively never half-open during test
 	}
 }

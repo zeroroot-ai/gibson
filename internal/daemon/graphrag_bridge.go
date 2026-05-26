@@ -8,17 +8,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/graphrag"
-	"github.com/zero-day-ai/gibson/internal/graphrag/provider"
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
-	"github.com/zero-day-ai/gibson/internal/memory/vector"
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/provider"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/memory/vector"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 
-	agentpkg "github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/sdk/auth"
+	agentpkg "github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // errNoTenantInContext is returned when a harness call arrives without a tenant

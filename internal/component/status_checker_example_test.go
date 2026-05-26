@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // ExampleStatusChecker demonstrates how to use the StatusChecker

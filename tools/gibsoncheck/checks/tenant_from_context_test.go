@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
-	"github.com/zero-day-ai/gibson/tools/gibsoncheck/checks"
+	"github.com/zeroroot-ai/gibson/tools/gibsoncheck/checks"
 )
 
 // TestTenantFromContext_Violation verifies that functions reading
@@ -14,7 +14,7 @@ import (
 func TestTenantFromContext_Violation(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.TenantFromContextAnalyzer,
-		"github.com/zero-day-ai/gibson/internal/daemon/api/tenantfromctxviolation")
+		"github.com/zeroroot-ai/gibson/internal/daemon/api/tenantfromctxviolation")
 }
 
 // TestTenantFromContext_AllowDirective verifies that functions carrying
@@ -26,5 +26,5 @@ func TestTenantFromContext_AllowDirective(t *testing.T) {
 	testdata := analysistest.TestData()
 	// No // want comments in the clean fixture — zero diagnostics expected.
 	analysistest.Run(t, testdata, checks.TenantFromContextAnalyzer,
-		"github.com/zero-day-ai/gibson/internal/daemon/api/tenantfromctxclean")
+		"github.com/zeroroot-ai/gibson/internal/daemon/api/tenantfromctxclean")
 }

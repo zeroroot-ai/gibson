@@ -10,10 +10,10 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/guardrail"
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/guardrail"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // PlanExecutor executes execution plans with guardrails and approval missions.

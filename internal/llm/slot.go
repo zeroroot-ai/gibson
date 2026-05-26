@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/llm/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // SlotManager manages LLM slot resolution and validation.

@@ -7,7 +7,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // MockEmbedder is a mock implementation of the Embedder interface for testing.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/agent"
 )
 
 // PatternRule defines a regex pattern and its associated classification

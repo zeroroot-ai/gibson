@@ -9,7 +9,7 @@ package pluginlegacyclean
 import (
 	"context"
 
-	"github.com/zero-day-ai/sdk/plugin"
+	"github.com/zeroroot-ai/sdk/plugin"
 )
 
 // RunPlugin demonstrates use of the new plugin.Serve entry point, which is

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestNewPromptRegistry tests that the constructor creates a valid registry

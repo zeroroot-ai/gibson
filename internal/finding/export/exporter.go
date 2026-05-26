@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/finding"
 )
 
 // Exporter defines the interface for exporting findings in various formats.

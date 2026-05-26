@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/state"
-	testutil "github.com/zero-day-ai/gibson/internal/testing"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	testutil "github.com/zeroroot-ai/gibson/internal/testing"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // setupTestRedisClient creates a test Redis client for integration tests.

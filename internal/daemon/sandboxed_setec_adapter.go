@@ -37,16 +37,16 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	setecv1 "github.com/zero-day-ai/setec/api/grpc/v1alpha1"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	setecv1 "github.com/zeroroot-ai/setec/api/grpc/v1alpha1"
 
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/datapool/envelope"
-	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
-	sdkauth "github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/datapool/envelope"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/ingest"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
+	"github.com/zeroroot-ai/gibson/internal/harness/sandboxed"
+	sdkauth "github.com/zeroroot-ai/sdk/auth"
 )
 
 // NewSetecSandboxClient dials Setec with mTLS and returns a bare

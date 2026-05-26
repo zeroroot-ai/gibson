@@ -3,9 +3,9 @@ package harness
 import (
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag"
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // toInternalNode converts an SDK GraphNode to an internal GraphNode.

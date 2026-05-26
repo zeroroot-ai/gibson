@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // testContextWithTenant returns a context carrying a test tenant identity.

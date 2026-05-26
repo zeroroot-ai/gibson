@@ -10,10 +10,10 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	dpmetrics "github.com/zero-day-ai/gibson/internal/datapool/metrics"
-	"github.com/zero-day-ai/gibson/internal/datapool/vectordb"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
+	dpmetrics "github.com/zeroroot-ai/gibson/internal/datapool/metrics"
+	"github.com/zeroroot-ai/gibson/internal/datapool/vectordb"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // tenantEntry tracks the per-tenant pool state used by the evictor.

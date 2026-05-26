@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/harness/middleware"
-	"github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
+	"github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // MetadataInjector injects mission context metadata into GraphRAG nodes.

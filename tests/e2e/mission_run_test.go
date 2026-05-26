@@ -35,9 +35,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/tests/e2e/helpers"
-	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

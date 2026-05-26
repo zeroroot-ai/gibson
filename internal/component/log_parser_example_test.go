@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 func ExampleParseRecentErrors() {

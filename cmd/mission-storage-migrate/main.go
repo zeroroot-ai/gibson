@@ -29,10 +29,10 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/mission"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
-	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

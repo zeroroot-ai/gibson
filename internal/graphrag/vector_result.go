@@ -1,7 +1,7 @@
 package graphrag
 
 import (
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // VectorResult represents a pure vector search result (no graph traversal).

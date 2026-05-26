@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Findings returns a FindingOps bundle bound to this Conn's tenant-bound Postgres pool

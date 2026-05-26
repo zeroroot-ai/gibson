@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"math"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // ScoringCriteria defines weights for different factors in component scoring.

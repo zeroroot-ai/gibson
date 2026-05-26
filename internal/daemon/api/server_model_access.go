@@ -11,10 +11,10 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/authz"
-	modelaccesspb "github.com/zero-day-ai/platform-sdk/gen/gibson/authz/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	modelaccesspb "github.com/zeroroot-ai/platform-sdk/gen/gibson/authz/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // server_model_access.go — DaemonServer implementation of

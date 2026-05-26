@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/checkpoint/keyprovider"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint/keyprovider"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestEncryptionAtRest_PersistedBytesAreCiphertext is the Spec 4 R11.1/R11.5

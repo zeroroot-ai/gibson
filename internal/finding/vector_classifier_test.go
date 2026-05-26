@@ -6,11 +6,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
-	"github.com/zero-day-ai/sdk/auth"
-	"github.com/zero-day-ai/sdk/finding/classifier"
-	"github.com/zero-day-ai/sdk/finding/classifier/store"
-	"github.com/zero-day-ai/sdk/finding/registry"
+	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
+	"github.com/zeroroot-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/finding/classifier"
+	"github.com/zeroroot-ai/sdk/finding/classifier/store"
+	"github.com/zeroroot-ai/sdk/finding/registry"
 )
 
 // testTenantID is the tenant used in unit tests; deterministic for reproducibility.

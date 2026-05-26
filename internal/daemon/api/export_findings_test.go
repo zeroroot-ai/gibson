@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 )
 
 // ---------------------------------------------------------------------------

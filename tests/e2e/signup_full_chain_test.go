@@ -13,7 +13,7 @@
 // both the Playwright browser driver and this Go cluster-side assertions file.
 //
 // Realignment notes (e2e-harness-realignment spec):
-//   - Tenant CRD group is gibson.zero-day.ai/v1alpha1 (tenantGVR in helpers).
+//   - Tenant CRD group is gibson.zeroroot.ai/v1alpha1 (tenantGVR in helpers).
 //   - TenantMember founding owner role is "admin" (not "owner") — SIGNUP-B17.
 //   - Post-signup redirect is /login?callbackUrl=/dashboard — SIGNUP-B20.
 //   - No /verify-email or /signup/provisioning route waits — panel is in-page.
@@ -33,7 +33,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/tests/e2e/helpers"
+	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -222,8 +222,8 @@ func TestSignup_FullChain_HappyPath(t *testing.T) {
 		})
 
 		t.Run("assert FGA platform-operator tuple exists", func(t *testing.T) {
-			// The dashboard SPIFFE is "zero-day.ai/platform/dashboard" (without spiffe:// prefix — B6 fix).
-			dashboardSPIFFE := "zero-day.ai/platform/dashboard"
+			// The dashboard SPIFFE is "zeroroot.ai/platform/dashboard" (without spiffe:// prefix — B6 fix).
+			dashboardSPIFFE := "zeroroot.ai/platform/dashboard"
 			helpers.MustHavePlatformOperator(t, ctx, fgaClient, dashboardSPIFFE)
 		})
 	}
@@ -238,9 +238,9 @@ func TestSignup_FullChain_HappyPath(t *testing.T) {
 			"Namespace tenant-%s not found — Bug catalog: B10 (Envoy daemon cluster resolves to wrong Service name → operator can't call daemon → namespace never provisioned)",
 			env.slug)
 
-		gotLabel := ns.Labels["gibson.zero-day.ai/tenant"]
+		gotLabel := ns.Labels["gibson.zeroroot.ai/tenant"]
 		assert.Equal(t, env.slug, gotLabel,
-			"Namespace tenant-%s is missing label gibson.zero-day.ai/tenant=%s (got %q) — namespace was created but without canonical labels",
+			"Namespace tenant-%s is missing label gibson.zeroroot.ai/tenant=%s (got %q) — namespace was created but without canonical labels",
 			env.slug, env.slug, gotLabel)
 	})
 
@@ -330,7 +330,7 @@ func TestSignup_FullChain_HappyPath(t *testing.T) {
 		spireServerPod := pods.Items[0]
 		assert.Equal(t, "Running", string(spireServerPod.Status.Phase),
 			"SPIRE server pod %q is not Running — Bug catalog: B1 (socket mount wrong), B13 (SDS resource names)")
-		t.Logf("SPIRE server pod %q is Running — manual verify: exec into pod and run spire-server entry show | grep spiffe://zero-day.ai", spireServerPod.Name)
+		t.Logf("SPIRE server pod %q is Running — manual verify: exec into pod and run spire-server entry show | grep spiffe://zeroroot.ai", spireServerPod.Name)
 	})
 
 	// Cleanup on test completion (R1.10).

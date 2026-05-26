@@ -3,8 +3,8 @@ package harness
 import (
 	"encoding/json"
 
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
-	"github.com/zero-day-ai/sdk/schema"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zeroroot-ai/sdk/schema"
 )
 
 // SchemaToCallbackProto converts SDK schema.JSON to harness callback proto JSONSchemaNode.

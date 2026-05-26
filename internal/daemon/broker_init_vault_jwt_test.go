@@ -30,8 +30,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
-	sdkvault "github.com/zero-day-ai/platform-clients/secrets/vault"
+	"github.com/zeroroot-ai/gibson/internal/secrets/jwtsource"
+	sdkvault "github.com/zeroroot-ai/platform-clients/secrets/vault"
 )
 
 // TestStampVaultJWTOnConfig_NoOpForNonJWTMethod verifies that the helper

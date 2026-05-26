@@ -3,7 +3,7 @@
 // This package contains only what is needed for daemon lifecycle commands
 // (daemon stop, daemon restart) — specifically the DaemonOperatorService
 // Shutdown RPC. Operational RPCs (Status, ListMissions, etc.)
-// are available via github.com/zero-day-ai/sdk/daemonclient.
+// are available via github.com/zeroroot-ai/sdk/daemonclient.
 package client
 
 import (
@@ -14,14 +14,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 )
 
 // AdminClient is a minimal gRPC client for the DaemonOperatorService.
 //
 // It provides only the operations needed by daemon lifecycle CLI commands:
 // Shutdown (used by daemon stop/restart) and Ping (liveness check).
-// For operational RPCs use github.com/zero-day-ai/sdk/daemonclient.
+// For operational RPCs use github.com/zeroroot-ai/sdk/daemonclient.
 type AdminClient struct {
 	conn     *grpc.ClientConn
 	operator daemonoperatorv1.DaemonOperatorServiceClient

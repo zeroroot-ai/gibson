@@ -171,8 +171,8 @@ var actionTable = ActionTable{
 	MethodTarget:                  {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
 	MethodCheckpoint:              {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
 	// Workspace getters return the agent's workspace handle; pure non-emitting accessors.
-	MethodWorkspace:               {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
-	MethodWorkspaces:              {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
+	MethodWorkspace:  {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
+	MethodWorkspaces: {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},
 
 	// --- Observability getters (no signal) ---
 	MethodTracer:     {Action: ActionMissionLifecycle, DefaultEffect: EffectNone, Emit: false},

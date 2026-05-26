@@ -70,8 +70,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
 
 // llmTestBYOKKey is the sentinel BYOK API key value used in this test.

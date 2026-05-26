@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
 )
 
 // entitlementsDB returns the *sql.DB used for tenant_quotas writes. The

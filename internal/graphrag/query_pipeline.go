@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
 )
 
 // QueryPipeline orchestrates the full GraphRAG query pipeline.

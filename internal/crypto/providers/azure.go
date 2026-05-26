@@ -8,8 +8,8 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // AzureProvider retrieves encryption keys from Azure Key Vault.

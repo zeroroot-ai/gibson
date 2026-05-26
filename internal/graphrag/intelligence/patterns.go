@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // AttackPatternAnalyzer identifies successful attack technique sequences.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkeval "github.com/zero-day-ai/sdk/eval"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkeval "github.com/zeroroot-ai/sdk/eval"
 )
 
 // EvalEventType identifies the type of evaluation event.

@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/zero-day-ai/gibson/pkg/platform/saga"
+	"github.com/zeroroot-ai/gibson/pkg/platform/saga"
 )
 
 // --- Test helpers ---

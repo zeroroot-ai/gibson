@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/tests/e2e/helpers"
+	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
 )
 
 // writeAllowlistTemp writes an allowlist YAML to a temp file.

@@ -6,9 +6,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	"github.com/zero-day-ai/gibson/pkg/platform/tenant"
+	"github.com/zeroroot-ai/gibson/pkg/platform/tenant"
 )
 
 // TestDeriveTenantKEK_KAT verifies known-answer-test vectors. These values
@@ -28,11 +28,11 @@ func TestDeriveTenantKEK_KAT(t *testing.T) {
 		wantPasswordPrefix string
 	}{
 		{
-			// Computed via HKDF-SHA256(0xAA*32, salt="zero-day-ai",
+			// Computed via HKDF-SHA256(0xAA*32, salt="zeroroot-ai",
 			// info="gibson/v1/tenant-kek"); first 32 hex chars (16 bytes)
 			// matches what the legacy operator + daemon produced.
-			name:               "zero-day-ai",
-			tenantID:           "zero-day-ai",
+			name:               "zeroroot-ai",
+			tenantID:           "zeroroot-ai",
 			wantPasswordPrefix: "5adb5f46133ee27cf59c511ae80e9ee9",
 		},
 		{

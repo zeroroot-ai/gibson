@@ -85,7 +85,7 @@ type Tuple struct {
 	// Relation is the relationship name, e.g. "admin", "member", "can_execute".
 	Relation string
 
-	// Object is the FGA object reference, e.g. "tenant:zero-day-ai".
+	// Object is the FGA object reference, e.g. "tenant:zeroroot-ai".
 	Object string
 }
 

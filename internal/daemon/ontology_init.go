@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/ontology"
+	"github.com/zeroroot-ai/gibson/internal/ontology"
 )
 
 // initOntologyReasoner constructs the ontology Reasoner, registers its

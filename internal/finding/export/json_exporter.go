@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zeroroot-ai/gibson/internal/finding"
 )
 
 // JSONExporter exports findings in JSON format.

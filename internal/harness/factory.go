@@ -4,11 +4,11 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/harness/middleware"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/protoresolver"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/sdk/protoresolver"
 )
 
 // HarnessFactory is a function type for creating child harnesses.

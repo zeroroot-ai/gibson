@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 func noopHandler(ctx context.Context, n *missionv1.MissionNode, p HandlerParams) (*ActionResult, error) {

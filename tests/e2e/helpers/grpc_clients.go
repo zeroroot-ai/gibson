@@ -24,9 +24,9 @@ import (
 	"os"
 	"testing"
 
-	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
-	sdktenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
+	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	sdktenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/state"
 )
 
 // TestMain gates the example/integration tests in this package on Redis

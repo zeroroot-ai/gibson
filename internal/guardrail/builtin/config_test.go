@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/guardrail"
+	"github.com/zeroroot-ai/gibson/internal/guardrail"
 )
 
 func TestParseScopeConfig(t *testing.T) {

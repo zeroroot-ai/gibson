@@ -15,10 +15,10 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/finding"
-	findingexport "github.com/zero-day-ai/gibson/internal/finding/export"
-	"github.com/zero-day-ai/gibson/internal/types"
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
+	"github.com/zeroroot-ai/gibson/internal/finding"
+	findingexport "github.com/zeroroot-ai/gibson/internal/finding/export"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 )
 
 // exportFindingsData queries the finding store and serialises results to the

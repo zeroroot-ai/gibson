@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ServiceRegistry is the narrow interface Service needs from the broker

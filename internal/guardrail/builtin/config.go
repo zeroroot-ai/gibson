@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/mitchellh/mapstructure"
-	"github.com/zero-day-ai/gibson/internal/guardrail"
+	"github.com/zeroroot-ai/gibson/internal/guardrail"
 )
 
 // GuardrailConfig represents a guardrail configuration from YAML

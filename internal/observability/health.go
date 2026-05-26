@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // HealthChecker defines the interface that components must implement to be monitored.

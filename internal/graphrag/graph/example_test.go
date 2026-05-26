@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
 )
 
 // Example demonstrating basic Neo4j client usage.

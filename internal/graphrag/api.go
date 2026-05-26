@@ -3,8 +3,8 @@ package graphrag
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // GraphRAGStore provides a unified, high-level interface for GraphRAG operations.

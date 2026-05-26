@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	sdkfinding "github.com/zero-day-ai/sdk/finding"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 // fakeStore is an in-memory FindingStore for tests.

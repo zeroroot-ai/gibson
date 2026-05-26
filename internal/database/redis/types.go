@@ -3,7 +3,7 @@ package redis
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TargetDAO defines the interface for target data access operations.

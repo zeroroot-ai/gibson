@@ -15,7 +15,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 )
 
 // TestCatalogFanoutTick_WritesMissingTuplesForOneTenantOneItem asserts the

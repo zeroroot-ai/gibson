@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 )
 
 // ExampleOrchestrator demonstrates basic orchestrator usage.

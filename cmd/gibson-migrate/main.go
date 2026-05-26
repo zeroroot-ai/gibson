@@ -35,8 +35,8 @@ import (
 
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
-	"github.com/zero-day-ai/gibson/cmd/gibson-migrate/internal/runner"
-	"github.com/zero-day-ai/gibson/internal/datapool/admin"
+	"github.com/zeroroot-ai/gibson/cmd/gibson-migrate/internal/runner"
+	"github.com/zeroroot-ai/gibson/internal/datapool/admin"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -586,7 +586,7 @@ func resolveTenants(ctx context.Context, tenantFlag string, allFlag bool, cfg *c
 
 // tenantGVR is the GroupVersionResource for the Tenant CRD.
 var tenantGVR = schema.GroupVersionResource{
-	Group:    "gibson.zero-day.ai",
+	Group:    "gibson.zeroroot.ai",
 	Version:  "v1alpha1",
 	Resource: "tenants",
 }

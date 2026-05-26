@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // RedisCheckpointStore implements CheckpointStore using Redis for persistence.

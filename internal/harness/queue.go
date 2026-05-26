@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/zero-day-ai/gibson/internal/queue"
+	"github.com/zeroroot-ai/gibson/internal/queue"
 )
 
 // QueueManager manages the Redis queue client for the Gibson daemon.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/observability"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 

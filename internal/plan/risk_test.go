@@ -3,8 +3,8 @@ package plan
 import (
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 func TestRiskAssessment_Score(t *testing.T) {

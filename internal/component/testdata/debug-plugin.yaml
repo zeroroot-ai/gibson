@@ -1,10 +1,10 @@
-apiVersion: plugin.gibson.zero-day.ai/v1
+apiVersion: plugin.gibson.zeroroot.ai/v1
 kind: Plugin
 metadata:
   name: debug-plugin
   version: 1.0.0
   description: Framework validation plugin for e2e testing
-  author: zero-day-ai
+  author: zeroroot-ai
 spec:
   workload_class: plugin
   runtime: process

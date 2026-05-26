@@ -3,8 +3,8 @@ package harness
 import (
 	"testing"
 
-	taxonomypb "github.com/zero-day-ai/sdk/api/gen/taxonomy/v1"
-	"github.com/zero-day-ai/sdk/taxonomy"
+	taxonomypb "github.com/zeroroot-ai/sdk/api/gen/taxonomy/v1"
+	"github.com/zeroroot-ai/sdk/taxonomy"
 )
 
 // fixtureSignal returns a baseline compliance signal with sensible

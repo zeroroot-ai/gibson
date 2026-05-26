@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 func writeKEK(t *testing.T, dir string, bytes []byte) string {

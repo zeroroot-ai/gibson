@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	"github.com/zero-day-ai/gibson/pkg/platform/tenant"
+	"github.com/zeroroot-ai/gibson/pkg/platform/tenant"
 )
 
 func TestNames_AllFormats(t *testing.T) {
@@ -46,19 +46,19 @@ func TestNames_AllFormats(t *testing.T) {
 		},
 		{
 			name:     "hyphenated multi-word",
-			tenantID: "zero-day-ai",
+			tenantID: "zeroroot-ai",
 			want: want{
-				slug: "zero-day-ai", underscore: "zero_day_ai", namespace: "tenant-zero-day-ai",
+				slug: "zeroroot-ai", underscore: "zero_day_ai", namespace: "tenant-zeroroot-ai",
 				pgDB: "tenant_zero_day_ai", pgRole: "tenant_zero_day_ai_app",
-				neo4jSS: "tenant-zero-day-ai-neo4j", neo4jSecret: "tenant-zero-day-ai-neo4j-auth",
-				neo4jPVCRoot: "data-tenant-zero-day-ai-neo4j",
-				neo4jBolt:    "bolt://tenant-zero-day-ai-neo4j.gibson.svc.cluster.local:7687",
-				redisField:   "zero-day-ai",
+				neo4jSS: "tenant-zeroroot-ai-neo4j", neo4jSecret: "tenant-zeroroot-ai-neo4j-auth",
+				neo4jPVCRoot: "data-tenant-zeroroot-ai-neo4j",
+				neo4jBolt:    "bolt://tenant-zeroroot-ai-neo4j.gibson.svc.cluster.local:7687",
+				redisField:   "zeroroot-ai",
 				qdrant:       "tenant_zero_day_ai",
-				vaultPrefix:  "tenant/zero-day-ai", vaultPolicy: "tenant-zero-day-ai-app",
-				vaultJWT: "gibson-plugin-zero-day-ai",
-				fga:      "tenant:zero-day-ai",
-				zitadel:  "zero-day-ai", langfuse: "zero-day-ai",
+				vaultPrefix:  "tenant/zeroroot-ai", vaultPolicy: "tenant-zeroroot-ai-app",
+				vaultJWT: "gibson-plugin-zeroroot-ai",
+				fga:      "tenant:zeroroot-ai",
+				zitadel:  "zeroroot-ai", langfuse: "zeroroot-ai",
 			},
 		},
 		{
@@ -140,7 +140,7 @@ func TestNames_AllFormats(t *testing.T) {
 }
 
 func TestNames_TenantIDRoundTrip(t *testing.T) {
-	id := auth.MustNewTenantID("zero-day-ai")
+	id := auth.MustNewTenantID("zeroroot-ai")
 	n := tenant.FromTenantID(id)
 	if !n.TenantID().Equal(id) {
 		t.Errorf("TenantID() round-trip failed: got %v, want %v", n.TenantID(), id)
@@ -183,10 +183,10 @@ func TestNames_RedisIndexField_NotHashKey(t *testing.T) {
 // namespaces — uses this form. The previous "Namespace == Slug"
 // contract was a draft-spec rule the operator + chart never matched.
 func TestNames_NamespaceHasTenantPrefix(t *testing.T) {
-	id := auth.MustNewTenantID("zero-day-ai")
+	id := auth.MustNewTenantID("zeroroot-ai")
 	n := tenant.FromTenantID(id)
 
-	const want = "tenant-zero-day-ai"
+	const want = "tenant-zeroroot-ai"
 	if got := n.Namespace(); got != want {
 		t.Errorf("Namespace() = %q, want %q", got, want)
 	}

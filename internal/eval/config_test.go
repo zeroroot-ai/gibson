@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	sdkeval "github.com/zero-day-ai/sdk/eval"
+	sdkeval "github.com/zeroroot-ai/sdk/eval"
 )
 
 func TestLoadEvalConfig_Success(t *testing.T) {

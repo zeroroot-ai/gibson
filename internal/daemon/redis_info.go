@@ -10,7 +10,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
 // RedisDaemonInfo provides Redis-based daemon discovery and registration.

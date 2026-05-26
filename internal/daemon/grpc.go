@@ -20,44 +20,44 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	"github.com/zero-day-ai/gibson/internal/admin"
-	discoverysvc "github.com/zero-day-ai/gibson/internal/api/discovery"
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
-	"github.com/zero-day-ai/gibson/internal/idempotency"
-	"github.com/zero-day-ai/gibson/internal/identity"
-	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
-	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/providerconfig"
-	"github.com/zero-day-ai/gibson/internal/ratelimit"
-	adminpb "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
-	modelaccesspb "github.com/zero-day-ai/platform-sdk/gen/gibson/authz/v1"
-	discoverypb "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
-	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
-	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
-	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
-	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
-	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
-	sdktenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
-	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/admin"
+	discoverysvc "github.com/zeroroot-ai/gibson/internal/api/discovery"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/budget"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	"github.com/zeroroot-ai/gibson/internal/idempotency"
+	"github.com/zeroroot-ai/gibson/internal/identity"
+	"github.com/zeroroot-ai/gibson/internal/llm/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/memory"
+	"github.com/zeroroot-ai/gibson/internal/providerconfig"
+	"github.com/zeroroot-ai/gibson/internal/ratelimit"
+	adminpb "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	modelaccesspb "github.com/zeroroot-ai/platform-sdk/gen/gibson/authz/v1"
+	discoverypb "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
+	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
+	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
+	sdktenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	intelligencepb "github.com/zeroroot-ai/sdk/api/gen/intelligence/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	"github.com/zero-day-ai/gibson/internal/authz/registry"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/impersonation"
-	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/missiondraft"
-	"github.com/zero-day-ai/gibson/internal/observability"
-	"github.com/zero-day-ai/gibson/internal/onboarding"
-	"github.com/zero-day-ai/gibson/internal/reservednames"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/authz/registry"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/impersonation"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	"github.com/zeroroot-ai/gibson/internal/missiondraft"
+	"github.com/zeroroot-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/onboarding"
+	"github.com/zeroroot-ai/gibson/internal/reservednames"
+	"github.com/zeroroot-ai/gibson/internal/types"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
@@ -231,7 +231,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// handles span lifecycle, trace propagation, and attribute enrichment for
 	// every RPC.
 	//
-	// Audit P0 finding (zero-day-ai/.github#101): otelgrpc server instrumentation
+	// Audit P0 finding (zeroroot-ai/.github#101): otelgrpc server instrumentation
 	// was missing; the daemon initialised OTel providers but never installed the
 	// gRPC server-side instrumentation, so no daemon RPC spans appeared in Langfuse.
 	//
@@ -353,7 +353,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// to sdkAuthUnary (which would fail with Unauthenticated since no
 	// ext-authz headers are present on direct-dial connections).
 	spiffeMethodAllowlist := map[string]map[string]bool{
-		"spiffe://zero-day.ai/platform/tenant-operator": {
+		"spiffe://zeroroot.ai/platform/tenant-operator": {
 			"/gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota":        true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples":        true,
 			"/gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples":        true,
@@ -437,7 +437,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// absent we skip the interceptor entirely and log a warning so
 	// the missing-dep is visible (the daemon already warns about
 	// every other Redis-dependent subsystem in this same shape).
-	// Spec: gibson#228 / zero-day-ai/.github#101.
+	// Spec: gibson#228 / zeroroot-ai/.github#101.
 	if d.stateClient != nil {
 		if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
 			idemStore := NewRedisIdempotencyStore(redisClient, d.logger.Slog())
@@ -486,7 +486,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// SPIFFE SVIDs. The Envoy edge gateway is always accepted; additional
 		// control-plane callers (today: the tenant-operator) are added via
 		// GIBSON_SPIFFE_ALLOWED_PEER_IDS so they can dial the daemon directly
-		// without an Envoy hairpin. ADR-0002 (zero-day-ai/docs).
+		// without an Envoy hairpin. ADR-0002 (zeroroot-ai/docs).
 		envoyID := d.config.Auth.SPIFFE.EnvoyID
 		if envoyID == "" {
 			envoyID = os.Getenv("GIBSON_SPIFFE_ENVOY_ID")
@@ -1286,7 +1286,7 @@ func assertRegistryCoverage(srv *grpc.Server) error {
 	}
 	sort.Strings(missing)
 	return fmt.Errorf(
-		"the following gRPC methods are registered on the daemon but missing from the authz registry — run `make authz-registry` in zero-day-ai/gibson after bumping the SDK pin:\n  - %s",
+		"the following gRPC methods are registered on the daemon but missing from the authz registry — run `make authz-registry` in zeroroot-ai/gibson after bumping the SDK pin:\n  - %s",
 		strings.Join(missing, "\n  - "),
 	)
 }

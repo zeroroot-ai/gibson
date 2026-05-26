@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
 // HealthPhase sets the health endpoint to unhealthy/shutting down state.

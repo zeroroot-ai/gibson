@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    uses: zero-day-ai/.github/.github/workflows/reusable-image-build.yml@main
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
     permissions:
       contents: write
       packages: write
@@ -29,7 +29,7 @@ jobs:
       component_name: gibson
       component_path: .
       dockerfile_path: Dockerfile
-      image_name: ghcr.io/zero-day-ai/gibson
+      image_name: ghcr.io/zeroroot-ai/gibson
       tag_pattern: v(.*)
       # spec setec-sandbox-prod-default R1.1: production GHCR images compile in
       # the Setec gRPC adapter by default. The Dockerfile's ARG default is also
@@ -48,7 +48,7 @@ jobs:
     secrets:
       # Dockerfile mounts this as a BuildKit secret (id=ghtoken) and writes a
       # git insteadOf rule so `go mod download` can fetch the private
-      # zero-day-ai modules (platform-sdk, platform-clients, etc.). Without
+      # zeroroot-ai modules (platform-sdk, platform-clients, etc.). Without
       # this the image build fails with "could not read Username for github".
       # See tenant-operator#52 / tenant-operator#176 for the same pattern.
       ghtoken: ${{ secrets.GH_PAT_GIBSON_RO }}

@@ -41,11 +41,11 @@ var ForbidRedisClientConstructionAnalyzer = &analysis.Analyzer{
 //     Higher-level packages must go through StateClient, not bypass it.
 //   - tools/gibsoncheck/ — the analyzer itself (imports go-redis for type info).
 var redisClientConstructionAllowlist = []string{
-	"github.com/zero-day-ai/gibson/internal/datapool",
-	"github.com/zero-day-ai/gibson/internal/datapool/admin",
-	"github.com/zero-day-ai/gibson/internal/admin",
-	"github.com/zero-day-ai/gibson/internal/state",
-	"github.com/zero-day-ai/gibson/tools/gibsoncheck",
+	"github.com/zeroroot-ai/gibson/internal/datapool",
+	"github.com/zeroroot-ai/gibson/internal/datapool/admin",
+	"github.com/zeroroot-ai/gibson/internal/admin",
+	"github.com/zeroroot-ai/gibson/internal/state",
+	"github.com/zeroroot-ai/gibson/tools/gibsoncheck",
 }
 
 func runForbidRedisClientConstruction(pass *analysis.Pass) (any, error) {

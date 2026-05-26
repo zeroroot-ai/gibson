@@ -10,7 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	testutil "github.com/zero-day-ai/gibson/internal/testing"
+	testutil "github.com/zeroroot-ai/gibson/internal/testing"
 )
 
 func setupMiniredis(t *testing.T) (*miniredis.Miniredis, *Config) {

@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
 // LogWatcher watches a log file for changes using fsnotify and emits new lines.

@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"strings"
 
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
-	"github.com/zero-day-ai/sdk/auth"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/datapool/envelope"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/datapool/envelope"
 )
 
 // secretsServiceIface is the narrow slice of secrets.Service that

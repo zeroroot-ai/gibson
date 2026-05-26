@@ -1,5 +1,5 @@
 # Calls the org-level reusable architectural-doc-coverage workflow.
-# See zero-day-ai/.github/.github/workflows/architectural-doc-coverage.yml
+# See zeroroot-ai/.github/.github/workflows/architectural-doc-coverage.yml
 # for the gate's logic, configuration, and rationale.
 #
 # Required check name: architectural-doc-coverage
@@ -12,6 +12,6 @@ on:
 
 jobs:
   architectural-doc-coverage:
-    uses: zero-day-ai/.github/.github/workflows/architectural-doc-coverage.yml@main
+    uses: zeroroot-ai/.github/.github/workflows/architectural-doc-coverage.yml@main
     secrets:
       DOCS_REPO_READ_TOKEN: ${{ secrets.DOCS_REPO_READ_TOKEN }}

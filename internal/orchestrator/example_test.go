@@ -3,7 +3,7 @@ package orchestrator_test
 import (
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 )
 
 // Example demonstrates parsing a Decision from LLM JSON output

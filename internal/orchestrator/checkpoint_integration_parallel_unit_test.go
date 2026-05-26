@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestParallelSidecar_Auto exercises the auto-fire helper directly, sidestepping

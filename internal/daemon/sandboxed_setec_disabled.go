@@ -23,9 +23,9 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
-	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/ingest"
+	"github.com/zeroroot-ai/gibson/internal/harness/sandboxed"
 )
 
 // NewSetecSandboxedExecutor is the no-op implementation used when gibson is

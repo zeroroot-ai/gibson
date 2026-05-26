@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/langchaingo/llms/cloudflare"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/langchaingo/llms/cloudflare"
 )
 
 // CloudflareProvider wraps langchaingo's Cloudflare Workers AI integration.

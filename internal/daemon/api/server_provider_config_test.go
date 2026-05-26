@@ -17,13 +17,13 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/providerconfig"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/providerconfig"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ---------------------------------------------------------------------------

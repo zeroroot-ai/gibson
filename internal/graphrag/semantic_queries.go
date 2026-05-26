@@ -15,8 +15,8 @@ import (
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // ComplianceSignalSummary is a lightweight projection of a compliance_signal

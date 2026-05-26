@@ -7,9 +7,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/graphrag"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // TestInitOntologyReasoner verifies that the reasoner is constructed and

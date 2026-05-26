@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	astchecks "github.com/zero-day-ai/ast-checks"
+	astchecks "github.com/zeroroot-ai/ast-checks"
 )
 
 // internalScopeDirs returns every first-level directory under repoRoot/internal/.
@@ -52,7 +52,7 @@ func internalScopeDirs(t *testing.T, repoRoot string) []string {
 // missing dep produces a user-visible "Failed to load" with no log trail.
 //
 // Implementation: this test is a thin caller of the shared ast-checks
-// harness (zero-day-ai/ast-checks). The harness owns the walking, the
+// harness (zeroroot-ai/ast-checks). The harness owns the walking, the
 // pattern matcher, and the allowlist-filtering machinery. Per slice 3.1
 // of the production-readiness epic, this is the gibson refactor proof
 // of the harness design.

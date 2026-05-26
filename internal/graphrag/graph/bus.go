@@ -22,8 +22,8 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 const busChannelBuffer = 256

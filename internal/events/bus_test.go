@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestEventBus_BasicPublishSubscribe tests basic publish and subscribe functionality.

@@ -35,7 +35,7 @@ jobs:
       - name: Checkout enterprise (sibling)
         uses: actions/checkout@v4
         with:
-          repository: zero-day-ai/enterprise
+          repository: zeroroot-ai/enterprise
           path: enterprise
           token: ${{ secrets.ENTERPRISE_REPO_TOKEN }}
 

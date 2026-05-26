@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/prompt"
-	"github.com/zero-day-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/prompt"
+	"github.com/zeroroot-ai/gibson/internal/state"
 )
 
 // ExampleRedisPromptStore_Save demonstrates how to save a prompt to Redis

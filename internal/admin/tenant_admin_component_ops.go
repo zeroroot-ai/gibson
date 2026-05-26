@@ -4,22 +4,26 @@
 // implementing the RPC surface added by platform-sdk issues #397 and #398.
 //
 // SetComponentAccess (admin on tenant):
-//   Reconciles the set of (relation, team_id, disabled) access-control entries
-//   for a single component object. Reads the existing tuples, deletes the
-//   superseded ones, and writes the new ones atomically.
+//
+//	Reconciles the set of (relation, team_id, disabled) access-control entries
+//	for a single component object. Reads the existing tuples, deletes the
+//	superseded ones, and writes the new ones atomically.
 //
 // SetTenantRole (admin on tenant):
-//   Writes or removes a role (admin / member / owner) tuple for a user on the
-//   caller's tenant.
+//
+//	Writes or removes a role (admin / member / owner) tuple for a user on the
+//	caller's tenant.
 //
 // TransferOwnership (admin on tenant):
-//   Atomically swaps the owner tuple from the current owner to the new owner.
+//
+//	Atomically swaps the owner tuple from the current owner to the new owner.
 //
 // GrantComponentPermissions (member on tenant, issue #398):
-//   Enforces caller-access intersection: only capabilities the caller already
-//   holds (component_*_enabled tuples on agent_principal:<agent_installation_id>)
-//   may be forwarded to the agent installation principal. The server checks each
-//   requested action against the caller's own access before writing tuples.
+//
+//	Enforces caller-access intersection: only capabilities the caller already
+//	holds (component_*_enabled tuples on agent_principal:<agent_installation_id>)
+//	may be forwarded to the agent installation principal. The server checks each
+//	requested action against the caller's own access before writing tuples.
 //
 // Spec: tenant-service-admin-handlers issues #397 and #398.
 package admin
@@ -32,10 +36,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 
-	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------

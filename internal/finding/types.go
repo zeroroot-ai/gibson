@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/finding/security"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/sdk/finding/security"
 )
 
 // FindingStatus represents the lifecycle status of a finding

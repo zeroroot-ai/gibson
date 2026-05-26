@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 func TestInfrastructureInitialization(t *testing.T) {

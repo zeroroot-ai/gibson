@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/events"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/events"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestFullEventFlowSequence tests the complete event sequence for a mission

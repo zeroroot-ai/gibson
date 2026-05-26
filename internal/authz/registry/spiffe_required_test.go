@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/authz/registry"
+	"github.com/zeroroot-ai/gibson/internal/authz/registry"
 )
 
 // allowedUnauthenticated is the exact set of methods that are permitted to

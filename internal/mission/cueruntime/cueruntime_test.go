@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/mission/cueruntime"
+	"github.com/zeroroot-ai/gibson/internal/mission/cueruntime"
 )
 
 //go:embed testdata/recon.cue
@@ -25,7 +25,7 @@ var complianceCheckCUE string
 
 // invalidCUE is deliberately malformed to exercise error diagnostic paths.
 const invalidCUE = `
-import missionv1 "github.com/zero-day-ai/sdk/api/proto/gibson/mission/v1"
+import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
 
 mission: missionv1.#MissionDefinition & {
 	name: 12345  // type error: string field assigned an integer

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 func TestParseDefinitionYAML_minimal(t *testing.T) {

@@ -14,9 +14,9 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/types"
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
 // setupNeo4jContainer starts a Neo4j container for testing.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // MissionRunLinker manages relationships between mission runs with the same name.

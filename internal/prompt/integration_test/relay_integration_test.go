@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/prompt"
-	"github.com/zero-day-ai/gibson/internal/prompt/transformers"
+	"github.com/zeroroot-ai/gibson/internal/prompt"
+	"github.com/zeroroot-ai/gibson/internal/prompt/transformers"
 )
 
 // TestRelay_Integration_FullPipeline tests a complete relay transformation pipeline

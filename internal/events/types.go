@@ -3,7 +3,7 @@ package events
 import (
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // EventType identifies the category and nature of an event in the Gibson system.

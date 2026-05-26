@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // MissionFinding is the typed finding record returned by the findings API.

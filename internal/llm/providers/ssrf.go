@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm"
 )
 
 // validateLLMEndpoint rejects URLs that resolve to addresses that should not

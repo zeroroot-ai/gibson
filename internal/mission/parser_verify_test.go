@@ -6,7 +6,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/zero-day.ai/opensource/gibson/internal/mission"
+	"github.com/zeroroot.ai/opensource/gibson/internal/mission"
 )
 
 func main() {

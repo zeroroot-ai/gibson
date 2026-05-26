@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/state"
 )
 
 // ExampleStateClient_StreamAdd demonstrates adding entries to a Redis Stream.

@@ -12,10 +12,10 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/contextkeys"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/schema"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // TestOTelMissionTracer_AttributionEndToEnd exercises the full tracer path

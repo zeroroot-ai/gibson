@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestOpenAIStructuredOutputInterface verifies OpenAI provider implements StructuredOutputProvider

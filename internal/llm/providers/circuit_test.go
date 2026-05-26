@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/sony/gobreaker"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // alwaysErrProvider is a minimal LLMProvider that returns a configurable error

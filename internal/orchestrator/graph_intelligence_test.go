@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
 )
 
 // TestNewNeo4jGraphQueries verifies the constructor initializes correctly

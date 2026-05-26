@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkeval "github.com/zero-day-ai/sdk/eval"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkeval "github.com/zeroroot-ai/sdk/eval"
 )
 
 // mockEventEmitter is a test helper that implements MissionEventEmitter

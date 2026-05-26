@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
 // SubscribeOptions configures log subscription behavior.

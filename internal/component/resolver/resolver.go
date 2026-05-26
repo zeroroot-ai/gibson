@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // DependencyResolver resolves and manages component dependencies for missions.

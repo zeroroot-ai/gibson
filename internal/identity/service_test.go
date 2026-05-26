@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 )
 
 // fakeAuthorizer is a minimal authz.Authorizer for testing. Only
@@ -86,7 +86,7 @@ func TestWhoAmI_SelfQueryAggregatesGrants(t *testing.T) {
 		t.Fatalf("NewServer: %v", err)
 	}
 
-	ctx := ctxWithIdentity(t, subject, "zero-day-ai")
+	ctx := ctxWithIdentity(t, subject, "zeroroot-ai")
 	resp, err := srv.WhoAmI(ctx, &identitypb.WhoAmIRequest{})
 	if err != nil {
 		t.Fatalf("WhoAmI: %v", err)
@@ -136,7 +136,7 @@ func TestWhoAmI_AdminCrossTenantRejected(t *testing.T) {
 	}
 	srv, _ := NewServer(Config{Authorizer: authzr, Lookup: lookup})
 
-	ctx := ctxWithIdentity(t, "user:admin", "zero-day-ai")
+	ctx := ctxWithIdentity(t, "user:admin", "zeroroot-ai")
 	_, err := srv.WhoAmI(ctx, &identitypb.WhoAmIRequest{
 		TargetPrincipalId: "agent_principal:other",
 	})
@@ -150,7 +150,7 @@ func TestWhoAmI_TargetNotFound(t *testing.T) {
 		Authorizer: &fakeAuthorizer{listObjectsFn: func(_, _, _ string) ([]string, error) { return nil, nil }},
 		Lookup:     &fakeLookup{},
 	})
-	ctx := ctxWithIdentity(t, "user:admin", "zero-day-ai")
+	ctx := ctxWithIdentity(t, "user:admin", "zeroroot-ai")
 	_, err := srv.WhoAmI(ctx, &identitypb.WhoAmIRequest{
 		TargetPrincipalId: "agent_principal:does-not-exist",
 	})

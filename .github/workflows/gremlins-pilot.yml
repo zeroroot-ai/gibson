@@ -1,6 +1,6 @@
 # Mutation-testing pilot using gremlins.
 #
-# Slice 5.12 of the production-readiness epic (zero-day-ai/gibson#175 →
+# Slice 5.12 of the production-readiness epic (zeroroot-ai/gibson#175 →
 # board #16). Pilot scope: internal/authz/registry/. That package is the
 # highest-stakes Go code in the daemon — its tests are the only thing
 # between "we ship the right authz model" and "we ship a broken one".
@@ -32,9 +32,9 @@
 #         the auto-filed issue)
 #
 # Refs:
-# - Parent PRD: zero-day-ai/gibson#175
-# - Slice: zero-day-ai/gibson#178
-# - Board: https://github.com/orgs/zero-day-ai/projects/16
+# - Parent PRD: zeroroot-ai/gibson#175
+# - Slice: zeroroot-ai/gibson#178
+# - Board: https://github.com/orgs/zeroroot-ai/projects/16
 
 name: gremlins-pilot
 
@@ -201,9 +201,9 @@ jobs:
           4. Re-run gremlins; the mutant should now be KILLED.
 
           Refs:
-          - Slice: zero-day-ai/gibson#178 (gremlins pilot)
-          - Parent PRD: zero-day-ai/gibson#175
-          - Board: https://github.com/orgs/zero-day-ai/projects/16
+          - Slice: zeroroot-ai/gibson#178 (gremlins pilot)
+          - Parent PRD: zeroroot-ai/gibson#175
+          - Board: https://github.com/orgs/zeroroot-ai/projects/16
           MARKDOWN
           )
 

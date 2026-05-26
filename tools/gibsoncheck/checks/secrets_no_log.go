@@ -51,10 +51,10 @@ var SecretsNoLogAnalyzer = &analysis.Analyzer{
 // skipped entirely to prevent false positives from unrelated uses of
 // common method names like "Get".
 var secretsPackagePrefixes = []string{
-	"github.com/zero-day-ai/sdk/secrets",
-	"github.com/zero-day-ai/platform-clients/secrets",
-	"github.com/zero-day-ai/gibson/internal/secrets",
-	"github.com/zero-day-ai/gibson/internal/database/postgres",
+	"github.com/zeroroot-ai/sdk/secrets",
+	"github.com/zeroroot-ai/platform-clients/secrets",
+	"github.com/zeroroot-ai/gibson/internal/secrets",
+	"github.com/zeroroot-ai/gibson/internal/database/postgres",
 }
 
 // sourceMethodNames are the method / function names whose []byte return

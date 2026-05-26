@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // TenantScopedStore wraps StateClient to provide tenant-aware Redis operations.

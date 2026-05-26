@@ -6,8 +6,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	redis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/datapool/vectordb"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/datapool/vectordb"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // Conn is a tenant-bound connection bundle. It holds one client per storage

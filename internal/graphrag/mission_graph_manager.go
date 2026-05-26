@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // MissionGraphManager handles Mission and MissionRun nodes in Neo4j.

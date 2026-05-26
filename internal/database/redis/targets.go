@@ -8,8 +8,8 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // RedisTargetDAO provides Redis-based storage for Target entities.

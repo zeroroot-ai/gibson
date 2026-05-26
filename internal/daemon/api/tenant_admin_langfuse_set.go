@@ -13,9 +13,9 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // SetTenantLangfuseCredentials stores or updates Langfuse project credentials for a tenant.

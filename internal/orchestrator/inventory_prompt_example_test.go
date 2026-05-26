@@ -3,7 +3,7 @@ package orchestrator_test
 import (
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 )
 
 // ExampleInventoryPromptFormatter_Format demonstrates basic usage of the formatter

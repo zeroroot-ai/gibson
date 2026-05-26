@@ -3,8 +3,8 @@ package eval
 import (
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/eval"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/sdk/eval"
 )
 
 // EvalSummary represents the complete evaluation results for a mission.

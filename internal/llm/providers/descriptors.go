@@ -1,8 +1,8 @@
 package providers
 
 import (
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/llm/providers/catalogue"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm/providers/catalogue"
 )
 
 // ProviderDescriptor is the Go-side, proto-free form of what the daemon's
@@ -151,11 +151,11 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 		}, true
 	case llm.ProviderLlamafile:
 		return ProviderDescriptor{
-			Type:        t,
-			DisplayName: "Llamafile",
-			DocsURL:     "https://github.com/Mozilla-Ocho/llamafile",
-			SelfHosted:  true,
-			Credentials: LlamafileCredentialSchema(),
+			Type:          t,
+			DisplayName:   "Llamafile",
+			DocsURL:       "https://github.com/Mozilla-Ocho/llamafile",
+			SelfHosted:    true,
+			Credentials:   LlamafileCredentialSchema(),
 			DefaultModels: catalogueModels("llamafile"),
 		}, true
 	case llm.ProviderMistral:

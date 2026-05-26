@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/state"
 )
 
 // newTestAuditLogger creates an AuditLogger backed by an in-process miniredis
@@ -98,7 +98,7 @@ func TestAuditWriter_CallerUnaffectedByAuditFailure(t *testing.T) {
 	mr := miniredis.RunT(t)
 	cfg := state.DefaultConfig()
 	cfg.URL = "redis://" + mr.Addr()
-	cfg.MaxRetries = -1              // disable retries
+	cfg.MaxRetries = -1 // disable retries
 	cfg.DialTimeout = 50 * time.Millisecond
 	cfg.ReadTimeout = 50 * time.Millisecond
 	cfg.WriteTimeout = 50 * time.Millisecond

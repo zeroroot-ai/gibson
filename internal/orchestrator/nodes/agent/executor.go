@@ -14,8 +14,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // Execute is the NodeHandler for NODE_TYPE_AGENT.

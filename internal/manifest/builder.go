@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/component"
 
-	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
-	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
+	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
+	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

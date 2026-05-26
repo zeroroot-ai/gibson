@@ -7,11 +7,11 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
-	"github.com/zero-day-ai/sdk/auth"
-	"github.com/zero-day-ai/sdk/finding/classifier"
-	classifierstore "github.com/zero-day-ai/sdk/finding/classifier/store"
-	"github.com/zero-day-ai/sdk/finding/registry"
+	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
+	"github.com/zeroroot-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/finding/classifier"
+	classifierstore "github.com/zeroroot-ai/sdk/finding/classifier/store"
+	"github.com/zeroroot-ai/sdk/finding/registry"
 )
 
 // VectorClassifier implements the SDK CategoryClassifier interface using vector embeddings

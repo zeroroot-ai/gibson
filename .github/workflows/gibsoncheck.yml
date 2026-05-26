@@ -37,10 +37,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # GOPRIVATE tells the Go toolchain to skip the public proxy and
-      # checksum database for private zero-day-ai modules and fetch them
+      # checksum database for private zeroroot-ai modules and fetch them
       # directly via git. Must be set before setup-go (which may invoke
       # go mod download).
-      GOPRIVATE: github.com/zero-day-ai
+      GOPRIVATE: github.com/zeroroot-ai
     steps:
       - uses: actions/checkout@v4
 
@@ -118,7 +118,7 @@ jobs:
       # `make authz-registry` does `go run`/`go build` against pinned
       # platform-sdk + platform-clients (private). Same auth pattern
       # as the `analyze` job above.
-      GOPRIVATE: github.com/zero-day-ai
+      GOPRIVATE: github.com/zeroroot-ai
     steps:
       - uses: actions/checkout@v4
 

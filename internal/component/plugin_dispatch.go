@@ -33,8 +33,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 const (

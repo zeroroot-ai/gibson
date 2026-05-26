@@ -69,7 +69,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/hkdf"
 
-	"github.com/zero-day-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
 )
 
 // MaxLifetime is the upper bound enforced by Mint on the requested

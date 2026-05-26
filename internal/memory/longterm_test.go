@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
-	"github.com/zero-day-ai/gibson/internal/memory/vector"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/memory/vector"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestLongTermMemory_Store tests that Store generates embeddings and stores them in the vector store.

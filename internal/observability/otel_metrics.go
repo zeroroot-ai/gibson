@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )

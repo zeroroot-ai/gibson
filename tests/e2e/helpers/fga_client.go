@@ -170,14 +170,14 @@ func (c *FGAClient) Read(ctx context.Context, user, relation, object string) ([]
 
 // MustHavePlatformOperator asserts that the FGA store contains the seed tuple:
 //
-//	user:zero-day.ai/platform/dashboard → platform_operator → system_tenant:_system
+//	user:zeroroot.ai/platform/dashboard → platform_operator → system_tenant:_system
 //
 // This tuple is seeded by the `gibson-fga-init` Job on helm install/upgrade.
 // Its absence means either B8 (job silently failed) or the fga-init Job was
 // never applied.
 //
 // dashboardSPIFFE is the SPIFFE ID of the dashboard workload, e.g.
-// "zero-day.ai/platform/dashboard" (without the "spiffe://" prefix, because
+// "zeroroot.ai/platform/dashboard" (without the "spiffe://" prefix, because
 // FGA rejects the `://` separator — bug B6).
 //
 // Requirements: R7.4.

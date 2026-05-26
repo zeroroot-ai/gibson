@@ -1,6 +1,6 @@
 // Package eval provides evaluation and scoring functionality for Gibson missions.
 //
-// This package integrates the SDK's evaluation framework (github.com/zero-day-ai/sdk/eval)
+// This package integrates the SDK's evaluation framework (github.com/zeroroot-ai/sdk/eval)
 // into the Gibson runtime, enabling real-time agent performance assessment and feedback.
 //
 // # Overview
@@ -61,7 +61,7 @@
 //
 // # Integration with SDK
 //
-// This package uses types from github.com/zero-day-ai/sdk/eval including:
+// This package uses types from github.com/zeroroot-ai/sdk/eval including:
 //
 //   - eval.Feedback: Real-time evaluation feedback
 //   - eval.Alert: Threshold breach notifications

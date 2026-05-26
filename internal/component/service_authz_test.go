@@ -16,9 +16,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------

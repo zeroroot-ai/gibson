@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/harness"
 )
 
 // TestObservabilityErrorCode_Constants verifies all error codes are defined correctly.

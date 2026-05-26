@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/sdk/taxonomy"
+	"github.com/zeroroot-ai/sdk/taxonomy"
 )
 
 // Reserved rule id prefixes that tenants cannot extend. Rules whose ID

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ConnBoundRunStore implements MissionRunStore against a tenant-bound Redis client.

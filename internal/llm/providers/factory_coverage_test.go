@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm"
 )
 
 // TestFactoryCoverage asserts every ProviderType in llm.SupportedProviderTypes()

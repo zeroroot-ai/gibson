@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"sync"
 
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // CycleError is returned by RegisterExtension when the new triples would

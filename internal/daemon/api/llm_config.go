@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/llm/providers"
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm/providers"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 const (

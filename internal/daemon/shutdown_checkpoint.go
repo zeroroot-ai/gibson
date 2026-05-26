@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/checkpoint"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint"
+	"github.com/zeroroot-ai/gibson/internal/types"
 	"golang.org/x/sync/errgroup"
 )
 

@@ -1,6 +1,6 @@
 package datapool
 
-import dbpostgres "github.com/zero-day-ai/gibson/internal/database/postgres"
+import dbpostgres "github.com/zeroroot-ai/gibson/internal/database/postgres"
 
 // Secrets returns a TenantSecretsOps bound to this Conn's Postgres pool and
 // per-tenant KEK. The returned ops struct is valid only while the Conn is held

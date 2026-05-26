@@ -39,12 +39,12 @@ type TenantCondition struct {
 }
 
 // tenantGVR is the GroupVersionResource for the Tenant CRD.
-// The actual deployed group is gibson.zero-day.ai/v1alpha1 (legacy naming;
-// migration to gibson.zero-day.ai is tracked separately — do not rename
+// The actual deployed group is gibson.zeroroot.ai/v1alpha1 (legacy naming;
+// migration to gibson.zeroroot.ai is tracked separately — do not rename
 // without a CRD storage migration plan).
 // Requirement: R3.5 (Go orchestrators target actual CRD group).
 var tenantGVR = schema.GroupVersionResource{
-	Group:    "gibson.zero-day.ai",
+	Group:    "gibson.zeroroot.ai",
 	Version:  "v1alpha1",
 	Resource: "tenants",
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/pkg/platform/dataplane"
+	"github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 )
 
 func TestPostgresCredentials_RoundTrip(t *testing.T) {

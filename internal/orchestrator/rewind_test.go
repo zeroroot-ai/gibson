@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
+	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
 )
 
 func TestDispatchInFlightTool(t *testing.T) {

@@ -32,10 +32,10 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/checkpoint"
-	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint"
+	"github.com/zeroroot-ai/gibson/internal/memory"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ---------------------------------------------------------------------------

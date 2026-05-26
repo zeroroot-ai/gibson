@@ -13,8 +13,8 @@ import (
 	"strings"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ConnBoundFindingStore implements FindingStore against a tenant-bound Redis client.

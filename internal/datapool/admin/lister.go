@@ -21,12 +21,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // tenantGVR is the GroupVersionResource for the Tenant CRD.
 var tenantGVR = schema.GroupVersionResource{
-	Group:    "gibson.zero-day.ai",
+	Group:    "gibson.zeroroot.ai",
 	Version:  "v1alpha1",
 	Resource: "tenants",
 }

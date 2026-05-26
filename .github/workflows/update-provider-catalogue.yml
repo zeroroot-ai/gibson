@@ -14,7 +14,7 @@
 #   Cohere     → add org secret CATALOGUE_UPDATE_COHERE_API_KEY
 #                Any Cohere API key.
 #
-#   Bedrock    → add bedrock:ListFoundationModels to the zero-day-ai-prod deploy IAM role.
+#   Bedrock    → add bedrock:ListFoundationModels to the zeroroot-ai-prod deploy IAM role.
 #                No new secret needed — the existing AWS role is used.
 #
 #   Anthropic  → No listing API. When Anthropic releases new models:
@@ -643,7 +643,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue comment 295 -R zero-day-ai/gibson \
+          gh issue comment 295 -R zeroroot-ai/gibson \
             --body "$(cat <<'BODY'
           **Weekly catalogue reminder — Anthropic**
 
@@ -651,7 +651,7 @@ jobs:
 
           To update manually:
           1. Visit https://docs.anthropic.com/en/docs/about-claude/models/all-models
-          2. Compare against the current \`anthropic\` entry in [\`internal/llm/providers/catalogue/provider-catalogue.yaml\`](https://github.com/zero-day-ai/gibson/blob/main/internal/llm/providers/catalogue/provider-catalogue.yaml)
+          2. Compare against the current \`anthropic\` entry in [\`internal/llm/providers/catalogue/provider-catalogue.yaml\`](https://github.com/zeroroot-ai/gibson/blob/main/internal/llm/providers/catalogue/provider-catalogue.yaml)
           3. If new models are listed, open a PR updating that section and bump \`catalogue_updated\` to today's date.
 
           *Posted automatically by the provider-catalogue update workflow.*

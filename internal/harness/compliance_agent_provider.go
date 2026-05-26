@@ -3,12 +3,12 @@ package harness
 import (
 	"context"
 
-	"github.com/zero-day-ai/sdk/agent/compliance"
+	"github.com/zeroroot-ai/sdk/agent/compliance"
 )
 
 // AgentMetadataProvider is the precedence-3 MetadataProvider that reads
 // call-time metadata stamped onto the context by the agent via the
-// github.com/zero-day-ai/sdk/agent/compliance package. It is registered on
+// github.com/zeroroot-ai/sdk/agent/compliance package. It is registered on
 // the ComplianceMiddleware at daemon startup (audit-metadata-riders task 10).
 type AgentMetadataProvider struct{}
 

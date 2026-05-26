@@ -16,10 +16,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 )
 
 // truncationCap is the safety bound on per-action grant enumeration.

@@ -9,8 +9,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // RedisVectorStore is a persistent vector store implementation using Redis with RediSearch.

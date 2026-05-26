@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // Candidate is a single (provider, model) pair considered by the slot

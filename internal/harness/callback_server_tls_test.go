@@ -258,7 +258,7 @@ func dialCallbackForeignSPIFFE(t *testing.T, target string, foreignPKI *callback
 
 	serverCAPool := x509.NewCertPool()
 	serverBundle, err := serverPKI.bundleSource.GetX509BundleForTrustDomain(
-		spiffeid.RequireTrustDomainFromString("zero-day.ai"),
+		spiffeid.RequireTrustDomainFromString("zeroroot.ai"),
 	)
 	require.NoError(t, err)
 	for _, ca := range serverBundle.X509Authorities() {
@@ -303,8 +303,8 @@ func svidToPEMCallback(t *testing.T, svid *x509svid.SVID) (certPEM, keyPEM []byt
 //
 // Spec: critical-tls-no-fallbacks Requirement 5.1.
 func TestCallback_PlainTCPDial_HandshakeRejected(t *testing.T) {
-	serverPKI := newCallbackTestPKI(t, "zero-day.ai", "/callback/server")
-	clientPKI := newCallbackTestPKI(t, "zero-day.ai", "/callback/agent-client")
+	serverPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/server")
+	clientPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/agent-client")
 	allowlist := []spiffeid.ID{clientPKI.spiffeID}
 
 	_, addr, health, _ := startCallbackTestServer(t, serverPKI, allowlist)
@@ -327,8 +327,8 @@ func TestCallback_PlainTCPDial_HandshakeRejected(t *testing.T) {
 //
 // Spec: critical-tls-no-fallbacks Requirement 5.1.
 func TestCallback_NoClientCert_HandshakeRejected(t *testing.T) {
-	serverPKI := newCallbackTestPKI(t, "zero-day.ai", "/callback/server")
-	clientPKI := newCallbackTestPKI(t, "zero-day.ai", "/callback/agent-client")
+	serverPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/server")
+	clientPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/agent-client")
 	allowlist := []spiffeid.ID{clientPKI.spiffeID}
 
 	_, addr, health, _ := startCallbackTestServer(t, serverPKI, allowlist)
@@ -363,13 +363,13 @@ func TestCallback_NotInAllowlist_HandshakeRejectedAndLogged(t *testing.T) {
 	// One CA, two SVIDs in the same trust domain; only allowedClientPKI is
 	// on the allowlist. otherClientPKI has the same CA so the chain validates,
 	// but its SPIFFE ID is rejected by AuthorizeOneOf.
-	allowedClientPKI := newCallbackTestPKI(t, "zero-day.ai", "/callback/agent-allowed")
-	otherClientPKI := newCallbackTestPKI(t, "zero-day.ai", "/callback/agent-impostor")
+	allowedClientPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/agent-allowed")
+	otherClientPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/agent-impostor")
 
 	// Use the allowed client's CA as the server's bundle (the test server's
 	// own SVID isn't presented to clients here — we only care about client-
 	// auth chain validation).
-	serverPKI := newCallbackTestPKI(t, "zero-day.ai", "/callback/server")
+	serverPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/server")
 	// Cross-trust both client CAs so chain validation passes for both clients.
 	// Clone the bundle so we own a fresh copy before mutating.
 	serverBundle := serverPKI.bundleSource.bundle.Clone()

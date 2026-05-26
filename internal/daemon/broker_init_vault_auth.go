@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/hashicorp/vault/api"
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
-	sdkvault "github.com/zero-day-ai/platform-clients/secrets/vault"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	"github.com/zeroroot-ai/gibson/internal/secrets/jwtsource"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	sdkvault "github.com/zeroroot-ai/platform-clients/secrets/vault"
 )
 
 // stampVaultJWTOnConfig mints a SPIRE JWT-SVID via src and writes it onto

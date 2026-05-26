@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // tenantContext returns a context with the given tenant ID.

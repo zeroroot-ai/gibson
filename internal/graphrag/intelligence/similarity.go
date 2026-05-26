@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // SimilarTargetFinder finds targets similar to a reference target.

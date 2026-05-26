@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // CheckpointEventEmitter provides event emission and subscription for checkpoint lifecycle events.

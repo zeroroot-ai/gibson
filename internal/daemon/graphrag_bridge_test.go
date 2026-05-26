@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/auth"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/sdk/auth"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // --- mock implementations ---
@@ -263,7 +263,7 @@ func TestGraphRAGBridge_PoolNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected constructor error: %v", err)
 	}
-	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("zero-day-ai"))
+	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("zeroroot-ai"))
 	_, _, err = adapter.buildEphemeralQueryBridge(ctx)
 	if !errors.Is(err, errPoolNotReady) {
 		t.Fatalf("expected errPoolNotReady; got %v", err)

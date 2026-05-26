@@ -3,7 +3,7 @@ package vector
 import (
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // VectorStoreConfig holds configuration for creating a vector store.

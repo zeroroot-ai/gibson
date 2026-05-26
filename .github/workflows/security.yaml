@@ -26,7 +26,7 @@ jobs:
       # platform-clients + platform-sdk fetches need git auth. Same
       # pattern as gibsoncheck.yml `analyze` + tenant-operator
       # security.yaml.
-      GOPRIVATE: github.com/zero-day-ai
+      GOPRIVATE: github.com/zeroroot-ai
     steps:
       - uses: actions/checkout@v4
 

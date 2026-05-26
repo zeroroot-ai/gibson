@@ -1,7 +1,7 @@
 name: publish-private-authz-registry
 
 # Publish the gibson authz registry as a private OCI artifact at
-# ghcr.io/zero-day-ai/internal-authz-registry:<tag>.
+# ghcr.io/zeroroot-ai/internal-authz-registry:<tag>.
 #
 # Consumed by the deploy chart's ext-authz init container (oras pull) so a
 # fresh `helm install` hydrates /etc/gibson/registry.yaml from a version-pinned
@@ -9,7 +9,7 @@ name: publish-private-authz-registry
 #
 # IMPORTANT — GHCR PACKAGE VISIBILITY:
 # After this workflow runs for the first time, go to:
-#   https://github.com/orgs/zero-day-ai/packages/container/internal-authz-registry/settings
+#   https://github.com/orgs/zeroroot-ai/packages/container/internal-authz-registry/settings
 # and set the package visibility to PRIVATE (one-time manual step).
 # By default newly-created GHCR packages inherit the repo visibility (private
 # for this repo), but confirm after the first push.
@@ -86,13 +86,13 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Hydrate Go module cache for SDK
-        # `make authz-registry` runs `go list -m -f '{{.Dir}}' github.com/zero-day-ai/sdk`
+        # `make authz-registry` runs `go list -m -f '{{.Dir}}' github.com/zeroroot-ai/sdk`
         # to resolve the pinned SDK source dir. On a fresh runner the module
         # cache is empty until something downloads it; `setup-go`'s cache hit
         # is keyed on go.sum and may miss. Pre-download to make resolution
         # deterministic.
         # Spec: zero-trust-hardening follow-up.
-        run: go mod download github.com/zero-day-ai/sdk
+        run: go mod download github.com/zeroroot-ai/sdk
 
       - name: Regenerate authz registry and assert no drift
         # Runs `make authz-registry` which builds authz-registry-gen from the
@@ -106,7 +106,7 @@ jobs:
           make authz-registry
           git diff --exit-code internal/authz/registry/ || {
             echo "ERROR: authz registry drifted from SDK protos." >&2
-            echo "Run 'make authz-registry' in zero-day-ai/gibson and commit the result." >&2
+            echo "Run 'make authz-registry' in zeroroot-ai/gibson and commit the result." >&2
             exit 1
           }
 
@@ -126,7 +126,7 @@ jobs:
           cd internal/authz/registry
           oras push \
             "${IMAGE}:${{ steps.tag.outputs.tag }}" \
-            --artifact-type "application/vnd.zero-day-ai.authz-registry+yaml" \
+            --artifact-type "application/vnd.zeroroot-ai.authz-registry+yaml" \
             --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --annotation "org.opencontainers.image.revision=${{ github.sha }}" \
             --annotation "org.opencontainers.image.version=${{ steps.tag.outputs.tag }}" \

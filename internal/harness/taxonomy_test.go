@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // TestTaxonomyRegistry_NilRegistry tests that TaxonomyRegistry() returns nil

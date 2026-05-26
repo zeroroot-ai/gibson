@@ -5,8 +5,8 @@
 package catalogue
 
 import (
-	_ "embed"
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"

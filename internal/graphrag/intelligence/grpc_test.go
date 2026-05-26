@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	intelligencepb "github.com/zeroroot-ai/sdk/api/gen/intelligence/v1"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

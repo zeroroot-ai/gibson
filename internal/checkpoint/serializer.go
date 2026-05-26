@@ -12,7 +12,7 @@ import (
 	"io"
 
 	"github.com/vmihailenco/msgpack/v5"
-	"github.com/zero-day-ai/gibson/internal/checkpoint/keyprovider"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint/keyprovider"
 )
 
 // SerializationFormat defines the format used for serialization.

@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // AgentHarness is imported from harness package - it's the canonical interface

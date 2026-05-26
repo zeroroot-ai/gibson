@@ -13,9 +13,9 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
-	"github.com/zero-day-ai/gibson/internal/idp"
-	"github.com/zero-day-ai/sdk/auth"
+	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	"github.com/zeroroot-ai/gibson/internal/idp"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // UpdateUserProfile updates mutable profile fields for a user.

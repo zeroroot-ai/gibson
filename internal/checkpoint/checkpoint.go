@@ -9,7 +9,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 	"github.com/vmihailenco/msgpack/v5"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Checkpoint represents a complete snapshot of mission execution state at a point in time.

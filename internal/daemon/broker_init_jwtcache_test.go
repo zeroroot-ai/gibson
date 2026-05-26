@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
+	"github.com/zeroroot-ai/gibson/internal/secrets/jwtsource"
 )
 
 // countingJWTSource is a JWTSource that counts how many times Token is called.

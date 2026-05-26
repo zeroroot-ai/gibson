@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
 // newMinimalDaemon constructs the smallest possible daemonImpl sufficient to

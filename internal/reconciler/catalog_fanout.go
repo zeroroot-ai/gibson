@@ -15,7 +15,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 )
 
 // CatalogFanoutConfig wires the fan-out loop to its dependencies.

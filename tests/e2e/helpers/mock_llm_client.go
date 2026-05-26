@@ -24,7 +24,7 @@ import (
 	"context"
 	"fmt"
 
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 )
 
 const (

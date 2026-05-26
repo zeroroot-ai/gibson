@@ -23,9 +23,9 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
-	"github.com/zero-day-ai/sdk/graphrag/taxonomy"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/sdk/graphrag/taxonomy"
 )
 
 // isExecutionNodeType returns true if the node type represents a runtime

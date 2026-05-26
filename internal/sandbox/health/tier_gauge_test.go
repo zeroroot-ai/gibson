@@ -6,7 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
-	"github.com/zero-day-ai/gibson/internal/sandbox/health"
+	"github.com/zeroroot-ai/gibson/internal/sandbox/health"
 )
 
 // TestSetTier_ProductionLabel verifies the gauge renders the expected

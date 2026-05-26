@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	graphbus "github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/types"
-	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	graphbus "github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

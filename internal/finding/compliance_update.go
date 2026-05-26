@@ -12,7 +12,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/sdk/finding"
+	"github.com/zeroroot-ai/sdk/finding"
 )
 
 // UpdateMode controls how AddComplianceMappings combines the incoming

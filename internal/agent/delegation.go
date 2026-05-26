@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	"github.com/zero-day-ai/gibson/internal/tool"
+	"github.com/zeroroot-ai/gibson/internal/tool"
 )
 
 // AgentDelegator provides the capability to delegate tasks to other agents.

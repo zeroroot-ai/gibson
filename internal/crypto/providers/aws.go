@@ -8,8 +8,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // AWSProvider retrieves encryption keys from AWS Secrets Manager.

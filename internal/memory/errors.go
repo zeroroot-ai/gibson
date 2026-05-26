@@ -1,6 +1,6 @@
 package memory
 
-import "github.com/zero-day-ai/gibson/internal/types"
+import "github.com/zeroroot-ai/gibson/internal/types"
 
 // Memory error codes
 const (

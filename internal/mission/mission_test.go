@@ -8,11 +8,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestMissionStatus_String tests the String method

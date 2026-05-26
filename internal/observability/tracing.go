@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/pkg/version"
+	"github.com/zeroroot-ai/gibson/pkg/version"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"

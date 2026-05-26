@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ErrStopIteration is the sentinel error returned by a ForEachTenant callback

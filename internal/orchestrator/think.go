@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm"
 )
 
 // LLMClient defines the interface for LLM operations required by the Thinker.

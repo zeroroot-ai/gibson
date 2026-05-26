@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
-	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/types"
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	"github.com/zero-day-ai/sdk/toolerr"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/queries"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/schema"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zeroroot-ai/sdk/toolerr"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 

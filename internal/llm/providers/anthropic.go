@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zero-day-ai/langchaingo/llms/anthropic"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/langchaingo/llms/anthropic"
 )
 
 // AnthropicProvider implements LLMProvider for Anthropic's Claude models

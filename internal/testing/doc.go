@@ -10,7 +10,7 @@
 //
 // Example:
 //
-//	import testutil "github.com/zero-day-ai/gibson/internal/testing"
+//	import testutil "github.com/zeroroot-ai/gibson/internal/testing"
 //
 //	func TestWithTenantScope(t *testing.T) {
 //	    ctx := testutil.WithTestTenant()

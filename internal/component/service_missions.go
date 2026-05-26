@@ -6,8 +6,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // CreateMission creates a new sub-mission.

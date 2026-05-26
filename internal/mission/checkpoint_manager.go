@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // FindingLister retrieves finding IDs for a given mission.

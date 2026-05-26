@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/checkpoint"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint"
 )
 
 func newOrchestratorCheckpointMu() *sync.Mutex {

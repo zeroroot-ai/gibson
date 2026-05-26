@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/zero-day-ai/gibson/internal/guardrail"
+	"github.com/zeroroot-ai/gibson/internal/guardrail"
 )
 
 // RateLimiterConfig configures the rate limiter

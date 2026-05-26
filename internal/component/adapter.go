@@ -12,12 +12,12 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/tool"
-	"github.com/zero-day-ai/sdk/auth"
-	"github.com/zero-day-ai/sdk/protoresolver"
-	"github.com/zero-day-ai/sdk/types"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/contextkeys"
+	"github.com/zeroroot-ai/gibson/internal/tool"
+	"github.com/zeroroot-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/protoresolver"
+	"github.com/zeroroot-ai/sdk/types"
 )
 
 // CallbackManager provides callback server functionality for agent harness operations.

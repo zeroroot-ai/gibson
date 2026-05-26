@@ -31,9 +31,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/finding"
-	"github.com/zero-day-ai/gibson/internal/missiondraft"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/finding"
+	"github.com/zeroroot-ai/gibson/internal/missiondraft"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ---------------------------------------------------------------------------

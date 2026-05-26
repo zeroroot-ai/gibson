@@ -7,7 +7,7 @@ import (
 	"sync"
 	"text/template"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // RenderContext provides data for template rendering.

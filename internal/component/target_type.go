@@ -1,6 +1,6 @@
 package component
 
-import "github.com/zero-day-ai/gibson/internal/types"
+import "github.com/zeroroot-ai/gibson/internal/types"
 
 // TargetType is an alias for types.TargetType.
 // It is defined in internal/types to avoid import cycles with the agent package.

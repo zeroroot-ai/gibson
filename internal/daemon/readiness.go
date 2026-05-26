@@ -9,7 +9,7 @@ package daemon
 // alongside the existing probes with the "pc_" prefix, providing the
 // canonical platform-clients format for tooling that expects it.
 //
-// Probe coverage (P1 audit finding, zero-day-ai/.github#101):
+// Probe coverage (P1 audit finding, zeroroot-ai/.github#101):
 //   - "postgres"   — dashboard shared Postgres reachability
 //   - "authz_fga"  — FGA connectivity via a no-op Check probe
 //
@@ -17,15 +17,15 @@ package daemon
 // provisioned and checked at request time. The system-level Redis is
 // already covered by the existing "redis" RegisterReadinessCheck.
 //
-// Spec: zero-day-ai/.github#101 (P1 — /readyz distinct from /healthz,
+// Spec: zeroroot-ai/.github#101 (P1 — /readyz distinct from /healthz,
 // platform-clients/readiness probes).
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	pcreadiness "github.com/zero-day-ai/platform-clients/readiness"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	pcreadiness "github.com/zeroroot-ai/platform-clients/readiness"
 )
 
 // platformReadinessProbe wraps a named function as a pcreadiness.Probe.

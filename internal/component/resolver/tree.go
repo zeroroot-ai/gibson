@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // DependencySource indicates where a dependency requirement originated from.

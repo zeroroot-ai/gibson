@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/langchaingo/llms"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/sdk/schema"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/langchaingo/llms"
+	"github.com/zeroroot-ai/sdk/schema"
 )
 
 func TestToSchemaTools(t *testing.T) {

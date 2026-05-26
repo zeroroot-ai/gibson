@@ -32,7 +32,7 @@ var resolveSymbols = []string{"Resolve", "New", "Resolver", "DefaultPath"}
 // Uses golang.org/x/tools/go/packages so that the check is rooted at the
 // actual module rather than the working directory of the test binary.
 func TestIdentityResolverHasNoAuthCallers(t *testing.T) {
-	const modulePath = "github.com/zero-day-ai/gibson"
+	const modulePath = "github.com/zeroroot-ai/gibson"
 	const resolverPkg = modulePath + "/internal/auth/identityresolver"
 
 	cfg := &packages.Config{

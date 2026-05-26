@@ -205,7 +205,7 @@
 // Harness operations are instrumented via middleware (see harness/middleware package).
 // The middleware approach provides tracing, logging, and event emission:
 //
-//	import "github.com/zero-day-ai/gibson/internal/harness/middleware"
+//	import "github.com/zeroroot-ai/gibson/internal/harness/middleware"
 //
 //	// Build middleware chain
 //	mw := middleware.Chain(

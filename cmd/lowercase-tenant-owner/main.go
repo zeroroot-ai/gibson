@@ -32,7 +32,7 @@ import (
 )
 
 var tenantsGVR = schema.GroupVersionResource{
-	Group:    "gibson.zero-day.ai",
+	Group:    "gibson.zeroroot.ai",
 	Version:  "v1alpha1",
 	Resource: "tenants",
 }

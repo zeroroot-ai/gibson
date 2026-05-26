@@ -8,8 +8,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 	"github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/state"
 )
 
 // BlobStore provides an interface for storing and retrieving large objects

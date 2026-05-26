@@ -3,7 +3,7 @@ package providers
 import (
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
 )
 
 // NewKeyProvider creates a KeyProvider based on configuration.

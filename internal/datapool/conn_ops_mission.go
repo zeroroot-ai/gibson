@@ -7,7 +7,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Missions returns a MissionOps bundle bound to this Conn's tenant-bound Redis client.

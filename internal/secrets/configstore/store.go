@@ -17,9 +17,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	"github.com/zero-day-ai/gibson/internal/datapool/envelope"
+	"github.com/zeroroot-ai/gibson/internal/datapool/envelope"
 )
 
 // Store persists per-tenant broker configurations to the operator-shared

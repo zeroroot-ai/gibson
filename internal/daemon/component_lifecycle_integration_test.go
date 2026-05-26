@@ -14,9 +14,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/daemon"
-	daemonclient "github.com/zero-day-ai/sdk/daemonclient"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/daemon"
+	daemonclient "github.com/zeroroot-ai/sdk/daemonclient"
 )
 
 // TestComponentLifecycle tests the full lifecycle of a component through the daemon client.
@@ -226,7 +226,7 @@ func findDebugAgentPath(t *testing.T) string {
 		"../../agents/debug",
 		"../../../agents/debug",
 		// Absolute path in typical monorepo structure
-		"/home/anthony/Code/zero-day.ai/opensource/agents/debug",
+		"/home/anthony/Code/zeroroot.ai/opensource/agents/debug",
 		// Check if there's a GIBSON_TEST_AGENT_PATH env var
 		os.Getenv("GIBSON_TEST_AGENT_PATH"),
 	}
@@ -364,7 +364,7 @@ func createMockComponent(t *testing.T, dir, name string) {
 
 go 1.21
 
-require github.com/zero-day-ai/sdk v0.20.0
+require github.com/zeroroot-ai/sdk v0.20.0
 `, name)
 
 	err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0644)

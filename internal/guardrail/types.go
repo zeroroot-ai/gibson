@@ -1,8 +1,8 @@
 package guardrail
 
 import (
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/harness"
 )
 
 // GuardrailInput represents input to be checked by a guardrail

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/events"
-	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/events"
+	"github.com/zeroroot-ai/gibson/internal/memory"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // RecallQuery defines the parameters for a memory recall operation.

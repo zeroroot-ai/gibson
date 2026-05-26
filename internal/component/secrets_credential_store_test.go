@@ -7,12 +7,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
 )
 
 // DefaultConfig returns a Config with sensible default values.

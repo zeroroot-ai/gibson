@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/events"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/events"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestEventFlow_MissionStarted verifies that MissionStartedPayload events flow correctly

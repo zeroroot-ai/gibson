@@ -10,8 +10,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Sentinel errors returned by ProviderConfigStore.

@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/sdk/schema"
+	"github.com/zeroroot-ai/sdk/schema"
 )
 
 func TestToolDef_Validate(t *testing.T) {

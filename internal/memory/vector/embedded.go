@@ -7,7 +7,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // EmbeddedVectorStore is an in-memory vector store implementation.

@@ -17,7 +17,7 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/checkpoint"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint"
 )
 
 // CheckpointAwareActor wraps an OrchestratorActor and ensures the

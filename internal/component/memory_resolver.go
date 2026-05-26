@@ -25,11 +25,11 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkauth "github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/memory"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkauth "github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------

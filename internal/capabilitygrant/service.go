@@ -33,8 +33,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 )
 
 // ---------------------------------------------------------------------------

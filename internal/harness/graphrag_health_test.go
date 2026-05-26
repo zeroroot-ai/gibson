@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 

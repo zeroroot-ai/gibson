@@ -9,8 +9,8 @@ import (
 )
 
 // NoK8sAPIInDaemonAnalyzer enforces ADR-0023: the gibson daemon binary's
-// source tree under github.com/zero-day-ai/gibson/internal/** and
-// github.com/zero-day-ai/gibson/pkg/** does not import any Kubernetes
+// source tree under github.com/zeroroot-ai/gibson/internal/** and
+// github.com/zeroroot-ai/gibson/pkg/** does not import any Kubernetes
 // API client construction surface.
 //
 // The principle: the daemon is a per-tenant gRPC request handler, not
@@ -28,13 +28,13 @@ import (
 // K8s-API-free at compile time.
 //
 // Allow-list (the rule SKIPS these paths even when they import K8s):
-//   - github.com/zero-day-ai/gibson/cmd/**       (administrative CLIs and
+//   - github.com/zeroroot-ai/gibson/cmd/**       (administrative CLIs and
 //     the sandbox-eviction-handler sidecar binary; per ADR-0023 §Allow-list)
-//   - github.com/zero-day-ai/gibson/tests/**     (e2e test fixtures)
-//   - github.com/zero-day-ai/gibson/tools/**     (build tools; including this analyzer)
-//   - github.com/zero-day-ai/gibson/internal/datapool/admin/**
+//   - github.com/zeroroot-ai/gibson/tests/**     (e2e test fixtures)
+//   - github.com/zeroroot-ai/gibson/tools/**     (build tools; including this analyzer)
+//   - github.com/zeroroot-ai/gibson/internal/datapool/admin/**
 //     (gated by adminpoolacquire — legitimate enumeration)
-//   - github.com/zero-day-ai/gibson/pkg/platform/saga/**
+//   - github.com/zeroroot-ai/gibson/pkg/platform/saga/**
 //     (operator-shared library; tenant-operator imports it)
 //   - any file path containing "/testdata/"      (analysistest fixtures)
 //
@@ -65,8 +65,8 @@ var NoK8sAPIInDaemonAnalyzer = &analysis.Analyzer{
 // the daemon binary's build tree under the gibson repo's internal/ and
 // pkg/ directories.
 var gibsonDaemonScopePrefixes = []string{
-	"github.com/zero-day-ai/gibson/internal/",
-	"github.com/zero-day-ai/gibson/pkg/",
+	"github.com/zeroroot-ai/gibson/internal/",
+	"github.com/zeroroot-ai/gibson/pkg/",
 }
 
 // noK8sAPIInDaemonExemptSubstrings lists package-path substrings (not

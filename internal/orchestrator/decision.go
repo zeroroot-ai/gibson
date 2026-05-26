@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm"
 )
 
 // DecisionAction represents the type of action the orchestrator decides to take

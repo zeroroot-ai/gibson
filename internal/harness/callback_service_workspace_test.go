@@ -26,9 +26,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/sdk/codegen/editor"
-	"github.com/zero-day-ai/sdk/codegen/git"
-	"github.com/zero-day-ai/sdk/codegen/workspace"
+	"github.com/zeroroot-ai/sdk/codegen/editor"
+	"github.com/zeroroot-ai/sdk/codegen/git"
+	"github.com/zeroroot-ai/sdk/codegen/workspace"
 )
 
 // unused-import shields removed; harnesspb proto types are exercised

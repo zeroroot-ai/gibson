@@ -6,8 +6,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkeval "github.com/zero-day-ai/sdk/eval"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkeval "github.com/zeroroot-ai/sdk/eval"
 )
 
 // EvalConfig represents the YAML configuration for evaluation settings.

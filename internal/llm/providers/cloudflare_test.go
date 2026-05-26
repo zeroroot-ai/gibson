@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm"
 )
 
 func TestCloudflareProvider_Name(t *testing.T) {

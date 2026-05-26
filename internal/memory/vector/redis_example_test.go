@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/zero-day-ai/gibson/internal/memory/vector"
-	"github.com/zero-day-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/memory/vector"
+	"github.com/zeroroot-ai/gibson/internal/state"
 )
 
 // Example_redisVectorStore demonstrates basic usage of RedisVectorStore

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // ConstraintAction defines what action to take when a constraint is violated.

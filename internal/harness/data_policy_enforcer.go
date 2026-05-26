@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/contextkeys"
+	"github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // DataPolicyEnforcer applies data policy constraints to GraphRAG queries.

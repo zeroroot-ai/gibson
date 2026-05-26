@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
-	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/queries"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/schema"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Example demonstrating execution tracking mission

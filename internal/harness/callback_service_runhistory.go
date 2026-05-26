@@ -22,9 +22,9 @@ package harness
 import (
 	"context"
 
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
-	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // allRunFindingsCap caps the size of an aggregated GetAllRunFindings

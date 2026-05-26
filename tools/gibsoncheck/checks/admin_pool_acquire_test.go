@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
-	"github.com/zero-day-ai/gibson/tools/gibsoncheck/checks"
+	"github.com/zeroroot-ai/gibson/tools/gibsoncheck/checks"
 )
 
 // TestAdminPoolAcquire_Violation verifies that a package outside the allowed
@@ -16,5 +16,5 @@ import (
 func TestAdminPoolAcquire_Violation(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.AdminPoolAcquireAnalyzer,
-		"github.com/zero-day-ai/gibson/internal/handlers")
+		"github.com/zeroroot-ai/gibson/internal/handlers")
 }

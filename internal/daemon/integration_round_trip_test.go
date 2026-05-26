@@ -11,9 +11,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/daemon"
-	daemonclient "github.com/zero-day-ai/sdk/daemonclient"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/daemon"
+	daemonclient "github.com/zeroroot-ai/sdk/daemonclient"
 )
 
 // TestDaemonClientListAgentsRoundTrip tests the full round trip of client connecting and calling ListAgents.

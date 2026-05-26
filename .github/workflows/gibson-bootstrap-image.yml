@@ -1,6 +1,6 @@
 name: gibson-bootstrap image
 
-# Builds and publishes ghcr.io/zero-day-ai/gibson-bootstrap on tag pushes
+# Builds and publishes ghcr.io/zeroroot-ai/gibson-bootstrap on tag pushes
 # matching gibson-bootstrap-v* (e.g. gibson-bootstrap-v0.1.0).
 #
 # The reusable-image-build.yml workflow handles:
@@ -42,7 +42,7 @@ concurrency:
 
 jobs:
   build:
-    uses: zero-day-ai/.github/.github/workflows/reusable-image-build.yml@main
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
     permissions:
       contents: write
       packages: write
@@ -54,5 +54,5 @@ jobs:
       component_name: gibson-bootstrap
       component_path: .
       dockerfile_path: tools/gibson-bootstrap/Dockerfile
-      image_name: ghcr.io/zero-day-ai/gibson-bootstrap
+      image_name: ghcr.io/zeroroot-ai/gibson-bootstrap
       tag_pattern: gibson-bootstrap-v(.*)

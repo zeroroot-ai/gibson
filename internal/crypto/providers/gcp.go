@@ -8,8 +8,8 @@ import (
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // GCPProvider retrieves encryption keys from GCP Secret Manager.

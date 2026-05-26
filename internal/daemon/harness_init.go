@@ -3,12 +3,12 @@ package daemon
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/graphrag/ingest"
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/harness/middleware"
-	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/ingest"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/harness/middleware"
+	"github.com/zeroroot-ai/gibson/internal/memory"
+	"github.com/zeroroot-ai/gibson/internal/types"
 	"go.opentelemetry.io/otel/trace"
 )
 

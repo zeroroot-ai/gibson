@@ -21,8 +21,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	tfxfga "github.com/zero-day-ai/testfixtures/fga"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	tfxfga "github.com/zeroroot-ai/testfixtures/fga"
 )
 
 // fgaStoreAuthorizer wraps testfixtures/fga.FakeStore to satisfy the

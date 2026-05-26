@@ -14,10 +14,10 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
@@ -30,8 +30,8 @@ import (
 // It provides a simple way to start and stop the callback server that
 // standalone agents connect to for harness operations.
 type CallbackServer struct {
-	mu       sync.Mutex  // guards server field
-	stopOnce sync.Once   // ensures GracefulStop executes exactly once
+	mu       sync.Mutex // guards server field
+	stopOnce sync.Once  // ensures GracefulStop executes exactly once
 	server   *grpc.Server
 	service  *HarnessCallbackService
 	logger   *slog.Logger

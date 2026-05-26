@@ -17,32 +17,32 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/crypto/providers"
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	dbredis "github.com/zero-day-ai/gibson/internal/database/redis"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/idempotency"
-	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/observability"
-	"github.com/zero-day-ai/gibson/internal/ontology"
-	"github.com/zero-day-ai/gibson/internal/reconciler"
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/gibson/internal/types"
-	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
-	"github.com/zero-day-ai/gibson/pkg/version"
-	"github.com/zero-day-ai/sdk/auth"
-	healthhttp "github.com/zero-day-ai/sdk/health/http"
-	sdktypes "github.com/zero-day-ai/sdk/types"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/budget"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/crypto/providers"
+	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	dbredis "github.com/zeroroot-ai/gibson/internal/database/redis"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/idempotency"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	"github.com/zeroroot-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/ontology"
+	"github.com/zeroroot-ai/gibson/internal/reconciler"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	"github.com/zeroroot-ai/gibson/internal/secrets/jwtsource"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
+	"github.com/zeroroot-ai/gibson/pkg/version"
+	"github.com/zeroroot-ai/sdk/auth"
+	healthhttp "github.com/zeroroot-ai/sdk/health/http"
+	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
 
 // targetStore is an interface for target data access
@@ -114,7 +114,7 @@ type daemonImpl struct {
 	// Set in buildGRPCServer when stateClient is a *redis.Client; nil
 	// otherwise. Held on the daemon so future subsystems (e.g.
 	// background workers replaying a paused mission) can reuse the
-	// same store. Spec: gibson#228 / zero-day-ai/.github#101.
+	// same store. Spec: gibson#228 / zeroroot-ai/.github#101.
 	idempotencyStore idempotency.Store
 
 	// missionAuthzStore tracks the owning user per run for component authz callback resolution.
@@ -532,7 +532,7 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 			"SPIFFE mTLS is enabled but GIBSON_SPIFFE_ENVOY_ID is not set; " +
 				"the daemon will not accept any mTLS connections. " +
 				"Set GIBSON_SPIFFE_ENVOY_ID to the Envoy sidecar's SPIFFE SVID " +
-				"(e.g. spiffe://zero-day.ai/ns/gibson/sa/envoy). " +
+				"(e.g. spiffe://zeroroot.ai/ns/gibson/sa/envoy). " +
 				"Spec: admin-services-completion Requirement 6.1")
 	}
 	parsedEnvoyID, parseErr := spiffeid.FromString(envoyID)
@@ -1347,7 +1347,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	}
 
 	// Wire platform-clients/readiness probe implementations into the existing
-	// /readyz handler (audit P1 finding, zero-day-ai/.github#101).
+	// /readyz handler (audit P1 finding, zeroroot-ai/.github#101).
 	//
 	// Each probe produced by newPlatformReadinessProbes() is registered with
 	// the "pc_" prefix so it appears distinctly in /readyz JSON output without

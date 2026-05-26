@@ -27,7 +27,7 @@
 //
 // Environment variables:
 //
-//	GIBSON_URL              — Gibson edge gateway URL (e.g. https://api.zero-day.ai).
+//	GIBSON_URL              — Gibson edge gateway URL (e.g. https://api.zeroroot.ai).
 //	                          Falls back to the gibson_url field in the credentials INI.
 //	PROBE_CREDENTIALS_PATH  — override path for the agent credentials INI (default: ~/.gibson/agent/credentials).
 //	PROBE_SEED              — deterministic seed for finding content (default: "e2e-probe-seed-v1").
@@ -45,9 +45,9 @@ import (
 	"strconv"
 	"time"
 
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
-	"github.com/zero-day-ai/sdk/agent"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
+	"github.com/zeroroot-ai/sdk/agent"
 	"google.golang.org/protobuf/proto"
 )
 

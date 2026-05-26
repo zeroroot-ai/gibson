@@ -4,7 +4,7 @@
 // Neo4j migration files live under migrations/neo4j/*.up.cypher and
 // migrations/neo4j/*.down.cypher.
 //
-// Postgres migrations have moved to github.com/zero-day-ai/gibson/pkg/platform/migrations
+// Postgres migrations have moved to github.com/zeroroot-ai/gibson/pkg/platform/migrations
 // per spec gibson-postgres-migrations — they are split into per-tenant and
 // platform sets there. The Neo4j path stays here until a follow-on spec
 // applies the same treatment.

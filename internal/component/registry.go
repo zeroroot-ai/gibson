@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 )
 
 const (

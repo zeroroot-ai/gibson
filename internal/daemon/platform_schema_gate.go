@@ -36,7 +36,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	migratepg "github.com/golang-migrate/migrate/v4/database/postgres"
 
-	pgmigrations "github.com/zero-day-ai/gibson/pkg/platform/migrations"
+	pgmigrations "github.com/zeroroot-ai/gibson/pkg/platform/migrations"
 )
 
 // runPlatformMigrations applies all pending platform migrations against db

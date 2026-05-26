@@ -3,8 +3,8 @@ package plan_test
 import (
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/plan"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/plan"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ExampleRiskAssessor demonstrates how to use the RiskAssessor to evaluate

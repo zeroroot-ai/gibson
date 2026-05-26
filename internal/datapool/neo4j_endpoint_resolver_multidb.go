@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // multiDBResolver implements Neo4jEndpointResolver for the "multi-db" tenant

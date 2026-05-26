@@ -32,7 +32,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // newTestConnBoundStore creates a ConnBoundMissionStore backed by miniredis.
@@ -191,7 +191,7 @@ func fullMissionDefinitionFixture() *missionv1.MissionDefinition {
 		Version:     "2.1.0",
 		Description: "Comprehensive fixture exercising every author-facing field",
 		TargetRef:   "prod-target",
-		Source:      "https://github.com/zero-day-ai/missions.git",
+		Source:      "https://github.com/zeroroot-ai/missions.git",
 		// InstalledAt / CreatedAt are set by CreateDefinition — we verify they are non-nil after round-trip.
 		Metadata: map[string]string{
 			"owner":    "security-team",

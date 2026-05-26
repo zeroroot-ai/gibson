@@ -22,8 +22,8 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // alertStoreIface is the narrow interface the alert handlers use for Redis operations.

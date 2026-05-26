@@ -10,10 +10,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/finding"
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkSecurity "github.com/zero-day-ai/sdk/finding/security"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/finding"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkSecurity "github.com/zeroroot-ai/sdk/finding/security"
 )
 
 // createTestFindings creates a set of test findings for export testing

@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // --- fakes ---
@@ -156,8 +156,8 @@ func TestRegistry_TenantIsolation(t *testing.T) {
 	getter.Set(regTenantB, BrokerConfig{Provider: "awssm", ConfigBlob: []byte(`{}`)})
 
 	extras := map[string]ProviderConstructor{
-		"vault":  func(_ []byte) (sdksecrets.Broker, error) { return vaultProvA, nil },
-		"awssm":  func(_ []byte) (sdksecrets.Broker, error) { return awssmProvB, nil },
+		"vault": func(_ []byte) (sdksecrets.Broker, error) { return vaultProvA, nil },
+		"awssm": func(_ []byte) (sdksecrets.Broker, error) { return awssmProvB, nil },
 	}
 	reg := buildTestRegistry(t, getter, extras)
 

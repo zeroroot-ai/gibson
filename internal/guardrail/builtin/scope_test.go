@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/guardrail"
-	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/guardrail"
+	"github.com/zeroroot-ai/gibson/internal/harness"
 )
 
 func TestScopeValidator_ExactDomainMatch(t *testing.T) {

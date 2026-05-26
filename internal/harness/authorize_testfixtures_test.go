@@ -28,10 +28,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/authz"
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
-	tfxaudit "github.com/zero-day-ai/testfixtures/audit"
-	tfxfga "github.com/zero-day-ai/testfixtures/fga"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	tfxaudit "github.com/zeroroot-ai/testfixtures/audit"
+	tfxfga "github.com/zeroroot-ai/testfixtures/fga"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

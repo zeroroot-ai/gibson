@@ -14,16 +14,16 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/tool"
-	"github.com/zero-day-ai/gibson/internal/types"
-	toolpb "github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/tool"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	sdkagent "github.com/zero-day-ai/sdk/agent"
+	sdkagent "github.com/zeroroot-ai/sdk/agent"
 )
 
 // CallToolProtoStream invokes a tool with streaming event callbacks.

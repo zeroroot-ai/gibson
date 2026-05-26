@@ -12,14 +12,14 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/providerconfig"
-	"github.com/zero-day-ai/gibson/internal/ratelimit"
-	"github.com/zero-day-ai/gibson/internal/types"
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/budget"
+	"github.com/zeroroot-ai/gibson/internal/contextkeys"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/providerconfig"
+	"github.com/zeroroot-ai/gibson/internal/ratelimit"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------

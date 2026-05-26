@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkmission "github.com/zero-day-ai/sdk/mission"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkmission "github.com/zeroroot-ai/sdk/mission"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 

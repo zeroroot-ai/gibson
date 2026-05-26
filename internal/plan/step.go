@@ -1,8 +1,8 @@
 package plan
 
 import (
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ExecutionStep represents a single step in an execution plan.

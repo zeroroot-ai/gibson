@@ -36,7 +36,7 @@ caller --(Zitadel JWT)--> Envoy --(SPIFFE mTLS)--> daemon
                             |   - CG-JWT short-circuit OR FGA check
                             |   - on allow, emits x-gibson-identity-* headers
                             |
-                            +-- SVID belongs to spiffe://zero-day.ai/platform/envoy
+                            +-- SVID belongs to spiffe://zeroroot.ai/platform/envoy
                                                        |
                                                        v
               daemon TLS listener (internal/daemon/grpc.go:183)
@@ -174,7 +174,7 @@ The daemon refuses to start in either case — **fail-closed**.
 
 The TLS listener ([`internal/daemon/grpc.go:183`](../internal/daemon/grpc.go))
 uses `tls.RequestClientCert` with a go-spiffe `MTLSServerConfig`
-verifier. The verifier accepts only `spiffe://zero-day.ai/platform/envoy`
+verifier. The verifier accepts only `spiffe://zeroroot.ai/platform/envoy`
 (the Envoy SDS-resolved upstream SVID). Any other peer SVID is rejected
 at the TLS handshake before headers are read.
 
@@ -220,7 +220,7 @@ on each restart and silently diverged across HA replicas.
 
 The chart sources both env vars from a single ESO-managed Secret
 (`gibson-workloads-impersonation-key`, template
-[`secrets/impersonation-key.yaml`](https://github.com/zero-day-ai/deploy/blob/main/helm/gibson-workloads/templates/secrets/impersonation-key.yaml)):
+[`secrets/impersonation-key.yaml`](https://github.com/zeroroot-ai/deploy/blob/main/helm/gibson-workloads/templates/secrets/impersonation-key.yaml)):
 
 | Env                                  | Purpose                                                       |
 |--------------------------------------|---------------------------------------------------------------|
@@ -232,7 +232,7 @@ previous slot is empty in steady state and populated only during a
 rotation; once populated, in-flight operator sessions survive the
 rotation. The operator clears the slot after maxTTL has elapsed (≤ 1 h).
 
-Rotation procedure: [`deploy → docs/runbooks/impersonation-key-rotation.md`](https://github.com/zero-day-ai/deploy/blob/main/docs/runbooks/impersonation-key-rotation.md).
+Rotation procedure: [`deploy → docs/runbooks/impersonation-key-rotation.md`](https://github.com/zeroroot-ai/deploy/blob/main/docs/runbooks/impersonation-key-rotation.md).
 
 Note: no in-tree caller of `Verify` exists today. The method ships
 alongside the minter so the rotation contract lives next to the key

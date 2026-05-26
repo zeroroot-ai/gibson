@@ -7,9 +7,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sony/gobreaker"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/platform-clients/resilience"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/platform-clients/resilience"
 )
 
 // llmCircuitConfig returns the circuit-breaker configuration tuned for LLM

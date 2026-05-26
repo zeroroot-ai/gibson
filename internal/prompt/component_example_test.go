@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/prompt"
-	"github.com/zero-day-ai/gibson/internal/tool"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/prompt"
+	"github.com/zeroroot-ai/gibson/internal/tool"
+	"github.com/zeroroot-ai/gibson/internal/types"
 	"google.golang.org/protobuf/proto"
 )
 

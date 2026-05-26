@@ -3,9 +3,9 @@ package manifest
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
-	"github.com/zero-day-ai/gibson/internal/component"
-	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
 )
 
 // Builder resolves a principal's full capability set into a signed

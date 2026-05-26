@@ -18,7 +18,7 @@ import (
 	"github.com/gomlx/gomlx/pkg/core/tensors"
 	mlcontext "github.com/gomlx/gomlx/pkg/ml/context"
 	"github.com/gomlx/onnx-gomlx/onnx"
-	gotypes "github.com/zero-day-ai/gibson/internal/types"
+	gotypes "github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Singleton for the native embedder - GoMLX backend should only be initialized once per process

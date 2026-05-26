@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/zero-day-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
 )
 
 // ExampleAESGCMEncryptor demonstrates basic usage of the AES-GCM encryptor

@@ -10,10 +10,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	"github.com/zero-day-ai/sdk/auth"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // ---------------------------------------------------------------------------

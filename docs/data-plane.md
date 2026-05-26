@@ -152,7 +152,7 @@ the migration runner) uses the admin pool. Code lives **exclusively** in
 `internal/admin/` and `internal/datapool/admin/`. The
 [`admin_pool_acquire`](../tools/gibsoncheck/checks/admin_pool_acquire.go) gibsoncheck
 analyzer fails the build if any other package imports
-`github.com/zero-day-ai/gibson/internal/datapool/admin`.
+`github.com/zeroroot-ai/gibson/internal/datapool/admin`.
 
 ```go
 adminConn, err := pool.Admin(ctx)  // delegates to admin.AdminPool.Acquire
@@ -199,7 +199,7 @@ the tenant CRD is missing, the field is absent, or the API call fails, the
 checker fails closed with `*NotProvisionedError`. Handlers translate that to
 gRPC `codes.NotFound`.
 
-The check uses unstructured access (GVR `gibson.zero-day.ai/v1alpha1/tenants`) rather
+The check uses unstructured access (GVR `gibson.zeroroot.ai/v1alpha1/tenants`) rather
 than importing the tenant-operator's typed API to avoid a cyclic dependency
 ([`provisioning_check.go:22`](../internal/datapool/provisioning_check.go)).
 

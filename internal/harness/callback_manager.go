@@ -9,9 +9,9 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/sdk/protoresolver"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
+	"github.com/zeroroot-ai/sdk/protoresolver"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 

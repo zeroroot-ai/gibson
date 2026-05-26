@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zero-day-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
 )
 
 func TestNewVaultProvider_MissingAddress(t *testing.T) {

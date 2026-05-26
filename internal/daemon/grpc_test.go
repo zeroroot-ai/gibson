@@ -23,9 +23,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
 // --- Stub SPIFFE sources for unit tests ---
@@ -76,8 +76,8 @@ func newSyntheticSPIFFESources(t *testing.T) (*stubSVIDSource, *stubBundleSource
 	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err, "synthetic leaf key generation")
 
-	// Build SPIFFE URI SAN: spiffe://zero-day.ai/test/unit.
-	spiffeURI, err := url.Parse("spiffe://zero-day.ai/test/unit")
+	// Build SPIFFE URI SAN: spiffe://zeroroot.ai/test/unit.
+	spiffeURI, err := url.Parse("spiffe://zeroroot.ai/test/unit")
 	require.NoError(t, err, "SPIFFE URI parse")
 
 	// Leaf cert signed by the CA, with SPIFFE URI SAN.
@@ -93,9 +93,9 @@ func newSyntheticSPIFFESources(t *testing.T) (*stubSVIDSource, *stubBundleSource
 	leafCert, err := x509.ParseCertificate(leafDER)
 	require.NoError(t, err, "synthetic leaf cert parse")
 
-	td := spiffeid.RequireTrustDomainFromString("zero-day.ai")
+	td := spiffeid.RequireTrustDomainFromString("zeroroot.ai")
 
-	svidID, err := spiffeid.FromString("spiffe://zero-day.ai/test/unit")
+	svidID, err := spiffeid.FromString("spiffe://zeroroot.ai/test/unit")
 	require.NoError(t, err, "SPIFFE ID parse")
 
 	svid := &x509svid.SVID{

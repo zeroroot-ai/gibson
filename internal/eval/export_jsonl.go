@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/zero-day-ai/sdk/eval"
+	"github.com/zeroroot-ai/sdk/eval"
 )
 
 // JSONLEntry represents a single line in the JSONL export.

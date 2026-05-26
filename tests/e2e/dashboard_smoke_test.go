@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/tests/e2e/helpers"
+	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
 )
 
 // smokeEnv holds the two-tenant env for the dashboard smoke tests.

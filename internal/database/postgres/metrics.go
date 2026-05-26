@@ -1,6 +1,6 @@
 package postgres
 
-import "github.com/zero-day-ai/gibson/internal/datapool/metrics"
+import "github.com/zeroroot-ai/gibson/internal/datapool/metrics"
 
 // recordXTenantDecryptAttempt increments gibson_xtenant_decrypt_attempt_total
 // for the given tenant string. The metric definition now lives in

@@ -1,6 +1,6 @@
 package plan
 
-import "github.com/zero-day-ai/gibson/internal/harness"
+import "github.com/zeroroot-ai/gibson/internal/harness"
 
 // RiskFactor represents an individual factor contributing to risk assessment.
 // Multiple factors are combined to calculate an overall risk score.

@@ -17,10 +17,10 @@ import (
 	"errors"
 	"fmt"
 
-	dbpostgres "github.com/zero-day-ai/gibson/internal/database/postgres"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/sdk/auth"
-	"github.com/zero-day-ai/platform-clients/secrets"
+	dbpostgres "github.com/zeroroot-ai/gibson/internal/database/postgres"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 const (

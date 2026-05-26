@@ -3,8 +3,8 @@ package harness
 import (
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // FindingFilter provides flexible filtering for agent findings.

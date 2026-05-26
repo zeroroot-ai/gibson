@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ListMissions returns mission list with optional filtering and pagination.

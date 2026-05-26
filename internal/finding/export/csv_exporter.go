@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zeroroot-ai/gibson/internal/finding"
 )
 
 // CSVExporter exports findings in CSV format.

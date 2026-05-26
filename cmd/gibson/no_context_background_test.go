@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"testing"
 
-	astchecks "github.com/zero-day-ai/ast-checks"
+	astchecks "github.com/zeroroot-ai/ast-checks"
 )
 
 // TestNoContextBackgroundInRPCHandlers asserts that RPC handler code in
@@ -27,7 +27,7 @@ import (
 // per-site reason. New violations fail the test.
 //
 // Implements one of three walkers in slice 3.6 of the production-readiness
-// epic (zero-day-ai/gibson#181 → gibson#173 → board #16). The third
+// epic (zeroroot-ai/gibson#181 → gibson#173 → board #16). The third
 // walker in that slice (audit_emit_on_mutation) is deferred — gibson's
 // audit happens at the middleware layer (ext-authz + harness middleware),
 // not per-handler, so "every handler must call Emit" would be the wrong

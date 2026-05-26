@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/sdk/finding"
+	"github.com/zeroroot-ai/sdk/finding"
 )
 
 // TestBackwardCompatibility_DirectFieldAccess verifies that the old pattern of

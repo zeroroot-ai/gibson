@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/harness"
 )
 
 // PlanGenerator defines the interface for generating execution plans from high-level tasks.

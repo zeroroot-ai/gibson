@@ -14,9 +14,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/authz"
-	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // fakeDaemon is a programmable DaemonInterface that records calls and

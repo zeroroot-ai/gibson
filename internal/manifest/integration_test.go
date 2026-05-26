@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
-	"github.com/zero-day-ai/gibson/internal/component"
-	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
 )
 
 // stubAuthorizer is a bench-weight authz.Authorizer that returns

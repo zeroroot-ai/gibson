@@ -12,7 +12,7 @@ import (
 	"log/slog"
 	"testing"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // newTestDaemonServerForCUE builds a minimal DaemonServer sufficient for the
@@ -57,7 +57,7 @@ func TestValidateMissionCUE_ValidSource(t *testing.T) {
 	// Minimal valid CUE using the schema import and #MissionDefinition constraint,
 	// matching the ADK template convention (top-level "mission" field, anonymous
 	// package i.e. no package clause).
-	validCUE := `import missionv1 "github.com/zero-day-ai/sdk/api/proto/gibson/mission/v1"
+	validCUE := `import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
 
 mission: missionv1.#MissionDefinition & {
 	name:        "handler-test"
@@ -224,4 +224,3 @@ func TestHoverMissionCUE_UnknownField(t *testing.T) {
 		t.Errorf("expected empty Markdown for unknown field, got %q", resp.Markdown)
 	}
 }
-

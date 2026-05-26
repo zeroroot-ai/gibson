@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/manifest"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
-	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/manifest"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

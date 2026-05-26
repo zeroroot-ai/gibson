@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/checkpoint"
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // MissionController provides high-level mission control operations.

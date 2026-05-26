@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/datapool/envelope"
+	"github.com/zeroroot-ai/gibson/internal/datapool/envelope"
 )
 
 // ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // CheckpointPolicy defines the interface for checkpoint retention and creation policies.

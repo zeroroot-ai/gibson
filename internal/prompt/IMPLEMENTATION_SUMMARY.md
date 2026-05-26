@@ -6,7 +6,7 @@
 
 ## Files Created
 
-### 1. `/home/anthony/Code/zero-day.ai/core/gibson/internal/prompt/redis_store.go` (309 lines)
+### 1. `/home/anthony/Code/zeroroot.ai/core/gibson/internal/prompt/redis_store.go` (309 lines)
 
 Core implementation of Redis-backed prompt storage.
 
@@ -39,7 +39,7 @@ Core implementation of Redis-backed prompt storage.
 - Contextual error wrapping for Redis failures
 - Graceful notification failures
 
-### 2. `/home/anthony/Code/zero-day.ai/core/gibson/internal/prompt/redis_store_test.go` (613 lines)
+### 2. `/home/anthony/Code/zeroroot.ai/core/gibson/internal/prompt/redis_store_test.go` (613 lines)
 
 Comprehensive unit test suite with 25+ test cases.
 
@@ -72,7 +72,7 @@ Comprehensive unit test suite with 25+ test cases.
 - Cleanup function removes test data
 - Follows existing test patterns from `internal/state`
 
-### 3. `/home/anthony/Code/zero-day.ai/core/gibson/internal/prompt/redis_store_example_test.go` (214 lines)
+### 3. `/home/anthony/Code/zeroroot.ai/core/gibson/internal/prompt/redis_store_example_test.go` (214 lines)
 
 Example documentation showing usage patterns.
 
@@ -85,7 +85,7 @@ Example documentation showing usage patterns.
 - `ExampleRedisPromptStore_Delete` - Deleting prompts
 - `ExampleRedisPromptStore_Exists` - Existence checks
 
-### 4. `/home/anthony/Code/zero-day.ai/core/gibson/internal/prompt/REDIS_STORE.md`
+### 4. `/home/anthony/Code/zeroroot.ai/core/gibson/internal/prompt/REDIS_STORE.md`
 
 Comprehensive documentation covering:
 
@@ -235,7 +235,7 @@ Reuses existing Position enum:
 ### Build Status
 
 ```bash
-$ cd /home/anthony/Code/zero-day.ai/core/gibson
+$ cd /home/anthony/Code/zeroroot.ai/core/gibson
 $ go build ./internal/prompt
 ✓ Build successful
 ```

@@ -3,9 +3,9 @@ package providers
 import (
 	"context"
 
-	"github.com/zero-day-ai/langchaingo/llms/llamafile"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/langchaingo/llms/llamafile"
 )
 
 // LlamafileProvider wraps langchaingo's llamafile integration.

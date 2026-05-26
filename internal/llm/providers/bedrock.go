@@ -11,9 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	bedrockcontrol "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"github.com/zero-day-ai/langchaingo/llms/bedrock"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/langchaingo/llms/bedrock"
 )
 
 // BedrockProvider implements LLMProvider for AWS Bedrock foundation models.
@@ -35,11 +35,11 @@ import (
 // and passing it with bedrock.WithClient — which is why this file imports
 // aws-sdk-go-v2 directly despite Gibson's general langchaingo-only policy.
 type BedrockProvider struct {
-	client         *bedrock.LLM
-	controlClient  *bedrockcontrol.Client
-	config         llm.ProviderConfig
-	region         string
-	modelID        string
+	client        *bedrock.LLM
+	controlClient *bedrockcontrol.Client
+	config        llm.ProviderConfig
+	region        string
+	modelID       string
 }
 
 // NewBedrockProvider constructs a Bedrock-backed LLMProvider.

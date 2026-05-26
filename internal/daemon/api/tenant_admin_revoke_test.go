@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/idp"
-	tenantpb "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
+	"github.com/zeroroot-ai/gibson/internal/idp"
+	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
