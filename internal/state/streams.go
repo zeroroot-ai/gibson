@@ -227,10 +227,23 @@ func (c *StateClient) StreamRead(ctx context.Context, streams []string, opts *St
 		Block:   block,
 	}
 
+	// When Block > 0 redis-go v9 may not return after the block duration if
+	// push notification processing is active (race-detector CI exposed this as
+	// a 600s goroutine hang). Enforce a hard deadline so XRead always returns.
+	if opts.Block > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.Block+500*time.Millisecond)
+		defer cancel()
+	}
+
 	result, err := c.client.XRead(ctx, args).Result()
 	if err != nil {
 		// XREAD with block timeout returns redis.Nil, which is not an error
 		if err == redis.Nil {
+			return make(map[string][]StreamEntry), nil
+		}
+		// context.DeadlineExceeded means no entries arrived within Block window
+		if err == context.DeadlineExceeded {
 			return make(map[string][]StreamEntry), nil
 		}
 		return nil, fmt.Errorf("failed to read from streams: %w", err)
