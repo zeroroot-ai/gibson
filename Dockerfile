@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: Builder - Pure Go compilation (no CGO)
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.26-alpine AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.25-alpine AS builder
 
 # Install git and ca-certificates for dependency fetching
 RUN apk add --no-cache git ca-certificates
@@ -49,7 +49,7 @@ ENV GOPRIVATE=github.com/zeroroot-ai
 
 # Allow the Go toolchain to auto-fetch the version specified in go.mod when
 # the base image ships an older patch. The base FROM is SHA-pinned to a
-# specific golang:1.26-alpine digest; Docker Hub re-tagging that alias for
+# specific golang:1.25-alpine digest; Docker Hub re-tagging that alias for
 # new patch releases lags by hours-to-days, so without GOTOOLCHAIN=auto a
 # fresh go.mod toolchain bump fails the build with "go.mod requires go
 # >= 1.X.Y (running go 1.X.Z; GOTOOLCHAIN=local)". This keeps reproducible
