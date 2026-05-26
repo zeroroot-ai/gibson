@@ -9,10 +9,10 @@ package registry
 type IdentityClass uint8
 
 const (
-	IdentityUser             IdentityClass = 1
-	IdentityService          IdentityClass = 2
-	IdentityComponent        IdentityClass = 4
-	IdentityPlatformOperator IdentityClass = 8
+	IdentityUser              IdentityClass = 1
+	IdentityService           IdentityClass = 2
+	IdentityComponent         IdentityClass = 4
+	IdentityPlatformOperator  IdentityClass = 8
 )
 
 // Has reports whether c contains every bit set in want.
@@ -1557,6 +1557,16 @@ var Registry = map[string]Entry{
 		Method:            "/gibson.daemon.v1.DaemonService/Subscribe",
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.daemon.v1.DaemonService/UpdateMissionDefinition": {
+		Method:            "/gibson.daemon.v1.DaemonService/UpdateMissionDefinition",
+		Service:           "gibson.daemon.v1.DaemonService",
+		Relation:          "writer",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,

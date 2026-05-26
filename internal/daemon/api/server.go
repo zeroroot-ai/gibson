@@ -390,6 +390,11 @@ type DaemonInterface interface {
 	// CreateMissionDefinition registers a structured mission definition.
 	CreateMissionDefinition(ctx context.Context, req CreateMissionDefinitionData) (CreateMissionDefinitionResultData, error)
 
+	// UpdateMissionDefinition replaces the content of an existing mission definition.
+	// The name field of req.Definition is the lookup key. Returns an error wrapping
+	// mission.ErrDefinitionNotFound when the name is not registered.
+	UpdateMissionDefinition(ctx context.Context, req UpdateMissionDefinitionData) (UpdateMissionDefinitionResultData, error)
+
 	// RequestShutdown requests graceful shutdown of the daemon
 	RequestShutdown(ctx context.Context, force bool, timeoutSeconds int32) error
 
@@ -801,6 +806,18 @@ type CreateMissionDefinitionData struct {
 type CreateMissionDefinitionResultData struct {
 	MissionDefinitionID string
 	Info                MissionDefinitionData
+}
+
+// UpdateMissionDefinitionData carries the replacement definition for
+// UpdateMissionDefinition. The Definition.Name is the lookup key.
+type UpdateMissionDefinitionData struct {
+	Definition *missionpb.MissionDefinition
+}
+
+// UpdateMissionDefinitionResultData is returned by UpdateMissionDefinition.
+// MissionDefinitionID is the stable server-assigned ID (unchanged across updates).
+type UpdateMissionDefinitionResultData struct {
+	MissionDefinitionID string
 }
 
 // ProvisioningStep describes a single step in the tenant provisioning pipeline.

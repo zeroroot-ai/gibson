@@ -2697,3 +2697,57 @@ func (d *daemonImpl) CreateMissionDefinition(ctx context.Context, req api.Create
 		},
 	}, nil
 }
+
+// UpdateMissionDefinition replaces the content of an existing mission definition.
+// The name field of req.Definition is the lookup key. The server-assigned ID
+// and original timestamps are preserved. Returns a wrapped mission.ErrDefinitionNotFound
+// when the name is not registered.
+// Spec: gibson#437.
+func (d *daemonImpl) UpdateMissionDefinition(ctx context.Context, req api.UpdateMissionDefinitionData) (api.UpdateMissionDefinitionResultData, error) {
+	if req.Definition == nil {
+		return api.UpdateMissionDefinitionResultData{}, fmt.Errorf("definition is required")
+	}
+	def := req.Definition
+	if def.GetName() == "" {
+		return api.UpdateMissionDefinitionResultData{}, fmt.Errorf("definition name is required")
+	}
+
+	tenantForUpdate := tenantFromCtxOrSystem(ctx)
+	if d.pool == nil {
+		return api.UpdateMissionDefinitionResultData{}, fmt.Errorf("mission store not initialized (pool not configured)")
+	}
+	connForUpdate, connUpdateErr := d.pool.For(ctx, tenantForUpdate)
+	if connUpdateErr != nil {
+		return api.UpdateMissionDefinitionResultData{}, datapool.MapPoolError(connUpdateErr)
+	}
+	defer connForUpdate.Release()
+	mStore := mission.NewConnBoundMissionStore(connForUpdate.Redis)
+
+	// Fetch the existing definition first so we can preserve its server-assigned ID.
+	existing, err := mStore.GetDefinition(ctx, def.GetName())
+	if err != nil {
+		d.logger.Error(ctx, "failed to fetch existing mission definition for update", "name", def.GetName(), "error", err)
+		return api.UpdateMissionDefinitionResultData{}, fmt.Errorf("failed to fetch existing definition: %w", err)
+	}
+	if existing == nil {
+		return api.UpdateMissionDefinitionResultData{}, mission.ErrDefinitionNotFound
+	}
+
+	// Preserve the stable server-assigned ID from the stored record.
+	existingID := existing.GetId()
+	def.Id = existingID
+
+	if err := mStore.UpdateDefinition(ctx, def); err != nil {
+		d.logger.Error(ctx, "failed to update mission definition", "name", def.GetName(), "error", err)
+		return api.UpdateMissionDefinitionResultData{}, fmt.Errorf("failed to update mission definition: %w", err)
+	}
+
+	d.logger.Info(ctx, "mission definition updated",
+		"mission_definition_id", existingID,
+		"name", def.GetName(),
+	)
+
+	return api.UpdateMissionDefinitionResultData{
+		MissionDefinitionID: existingID,
+	}, nil
+}
