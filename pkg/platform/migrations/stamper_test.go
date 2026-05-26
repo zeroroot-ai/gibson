@@ -71,7 +71,7 @@ func TestStamp_FreshDB_NoFingerprint_NoOp(t *testing.T) {
 	}
 }
 
-func TestStamp_LegacyTenantState_StampsVersion6(t *testing.T) {
+func TestStamp_LegacyTenantState_StampsVersion7(t *testing.T) {
 	t.Parallel()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -90,7 +90,7 @@ func TestStamp_LegacyTenantState_StampsVersion6(t *testing.T) {
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS schema_migrations").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO schema_migrations").
-		WithArgs(uint(6)).
+		WithArgs(uint(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 

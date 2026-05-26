@@ -32,6 +32,7 @@ import (
 	"github.com/zero-day-ai/gibson/internal/identity"
 	"github.com/zero-day-ai/gibson/internal/llm/modelgate"
 	"github.com/zero-day-ai/gibson/internal/memory"
+	"github.com/zero-day-ai/gibson/internal/providerconfig"
 	"github.com/zero-day-ai/gibson/internal/ratelimit"
 	adminpb "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
 	modelaccesspb "github.com/zero-day-ai/platform-sdk/gen/gibson/authz/v1"
@@ -597,15 +598,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.logger.Info(ctx, "quota manager wired into DaemonServer for mission quota enforcement")
 	}
 
-	// Wire provider-config store (Phase D: pool-backed, per-tenant Postgres).
-	// PoolProviderConfigStore acquires a per-tenant Conn per RPC call from the
-	// data-plane Pool, constructs a providerconfig.NewPostgresStore from
-	// conn.Postgres + conn.KEK, and releases the Conn after the call.
-	if d.pool != nil {
-		daemonSvc.WithProviderConfigStore(NewPoolProviderConfigStore(d.pool))
-		d.logger.Info(ctx, "provider-config store wired into DaemonServer (Phase D pool-backed)")
+	if d.pool != nil && d.secretsService != nil {
+		daemonSvc.WithProviderConfigStore(providerconfig.NewBrokerBackedStore(d.pool, d.secretsService))
+		d.logger.Info(ctx, "provider-config store wired (broker-backed: metadata in Postgres, credentials in secrets broker)")
 	} else {
-		d.logger.Info(ctx, "provider-config store not wired: data-plane pool not configured (set security.key_provider)")
+		d.logger.Error(ctx, "provider-config store NOT wired — pool or secretsService is nil; provider config RPCs will fail",
+			"pool_nil", d.pool == nil,
+			"secrets_service_nil", d.secretsService == nil,
+		)
 	}
 
 	if d.stateClient != nil && d.stateClient.Client() != nil {
