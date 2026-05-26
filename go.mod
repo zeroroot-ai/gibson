@@ -48,7 +48,7 @@ require (
 	github.com/zero-day-ai/ast-checks v0.1.1
 	github.com/zero-day-ai/platform-clients v0.10.0
 	github.com/zero-day-ai/platform-sdk v0.10.0
-	github.com/zero-day-ai/sdk v0.122.0
+	github.com/zero-day-ai/sdk v0.123.0
 	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
 	github.com/zero-day-ai/testfixtures v0.1.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
