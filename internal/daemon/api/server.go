@@ -760,13 +760,14 @@ type ParallelGroupStateData struct {
 
 // MissionDefinitionData represents an installed mission definition.
 type MissionDefinitionData struct {
-	Name        string
-	Version     string
-	Description string
-	Source      string
-	InstalledAt time.Time
-	UpdatedAt   time.Time
-	NodeCount   int
+	MissionDefinitionID string
+	Name                string
+	Version             string
+	Description         string
+	Source              string
+	InstalledAt         time.Time
+	UpdatedAt           time.Time
+	NodeCount           int
 }
 
 // CreateMissionData represents the data for creating a new mission.
@@ -2296,13 +2297,14 @@ func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb
 	protoDefinitions := make([]*daemonpb.MissionDefinitionInfo, len(definitions))
 	for i, def := range definitions {
 		protoDefinitions[i] = &daemonpb.MissionDefinitionInfo{
-			Name:        def.Name,
-			Version:     def.Version,
-			Description: def.Description,
-			Source:      def.Source,
-			InstalledAt: def.InstalledAt.Unix(),
-			UpdatedAt:   def.UpdatedAt.Unix(),
-			NodeCount:   int32(def.NodeCount),
+			MissionDefinitionId: def.MissionDefinitionID,
+			Name:                def.Name,
+			Version:             def.Version,
+			Description:         def.Description,
+			Source:              def.Source,
+			InstalledAt:         def.InstalledAt.Unix(),
+			UpdatedAt:           def.UpdatedAt.Unix(),
+			NodeCount:           int32(def.NodeCount),
 		}
 	}
 
@@ -2456,13 +2458,14 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 	return &daemonpb.CreateMissionDefinitionResponse{
 		MissionDefinitionId: result.MissionDefinitionID,
 		Info: &daemonpb.MissionDefinitionInfo{
-			Name:        result.Info.Name,
-			Version:     result.Info.Version,
-			Description: result.Info.Description,
-			Source:      result.Info.Source,
-			InstalledAt: result.Info.InstalledAt.Unix(),
-			UpdatedAt:   result.Info.UpdatedAt.Unix(),
-			NodeCount:   int32(result.Info.NodeCount),
+			MissionDefinitionId: result.MissionDefinitionID,
+			Name:                result.Info.Name,
+			Version:             result.Info.Version,
+			Description:         result.Info.Description,
+			Source:              result.Info.Source,
+			InstalledAt:         result.Info.InstalledAt.Unix(),
+			UpdatedAt:           result.Info.UpdatedAt.Unix(),
+			NodeCount:           int32(result.Info.NodeCount),
 		},
 	}, nil
 }

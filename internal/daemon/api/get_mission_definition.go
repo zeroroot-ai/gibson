@@ -57,6 +57,7 @@ func (s *DaemonServer) GetMissionDefinition(ctx context.Context, req *daemonpb.G
 	}
 
 	return &daemonpb.GetMissionDefinitionResponse{
-		Definition: def,
+		MissionDefinitionId: def.GetId(),
+		Definition:          def,
 	}, nil
 }
