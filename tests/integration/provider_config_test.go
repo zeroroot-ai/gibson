@@ -252,15 +252,6 @@ func testFullCRUDLifecycle(t *testing.T, store providerconfig.ProviderConfigStor
 	require.NotNil(t, defCfg)
 	assert.Equal(t, "primary", defCfg.Name, "GetDefault must return the provider set as default")
 
-	// --- SetFallbackChain / GetFallbackChain ---
-	require.NoError(t, store.SetFallbackChain(ctx, tenantID, []string{"primary"}),
-		"SetFallbackChain failed")
-
-	chain, err := store.GetFallbackChain(ctx, tenantID)
-	require.NoError(t, err, "GetFallbackChain failed")
-	assert.Equal(t, []string{"primary"}, chain,
-		"GetFallbackChain must return the chain that was set")
-
 	// --- Resolve → decrypted credentials ---
 	// Resolve is the execution-path helper; it must return plaintext credentials.
 	resolved, err := store.Resolve(ctx, tenantID, "primary")

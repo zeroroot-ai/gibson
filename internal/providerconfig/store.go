@@ -39,14 +39,6 @@ type ProviderConfigStore interface {
 	// if no provider with that name exists for the tenant.
 	SetDefault(ctx context.Context, tenantID string, name string) error
 
-	// GetFallbackChain returns the ordered list of provider names to try in sequence
-	// when the primary provider fails. Returns an empty slice if none is set.
-	GetFallbackChain(ctx context.Context, tenantID string) ([]string, error)
-
-	// SetFallbackChain replaces the fallback chain. Each name must refer to an
-	// existing provider config for the tenant.
-	SetFallbackChain(ctx context.Context, tenantID string, names []string) error
-
 	// Resolve returns the decrypted config for the execution path.
 	//
 	// SECURITY CONTRACT: Caller MUST NOT log or persist the returned Credentials

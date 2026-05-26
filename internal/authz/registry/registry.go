@@ -9,10 +9,10 @@ package registry
 type IdentityClass uint8
 
 const (
-	IdentityUser              IdentityClass = 1
-	IdentityService           IdentityClass = 2
-	IdentityComponent         IdentityClass = 4
-	IdentityPlatformOperator  IdentityClass = 8
+	IdentityUser             IdentityClass = 1
+	IdentityService          IdentityClass = 2
+	IdentityComponent        IdentityClass = 4
+	IdentityPlatformOperator IdentityClass = 8
 )
 
 // Has reports whether c contains every bit set in want.
@@ -2453,16 +2453,6 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.tenant.v1.TenantService/GetFallbackChain": {
-		Method:            "/gibson.tenant.v1.TenantService/GetFallbackChain",
-		Service:           "gibson.tenant.v1.TenantService",
-		Relation:          "member",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser | IdentityService,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.tenant.v1.TenantService/GetMissionDraft": {
 		Method:            "/gibson.tenant.v1.TenantService/GetMissionDraft",
 		Service:           "gibson.tenant.v1.TenantService",
@@ -2615,16 +2605,6 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.tenant.v1.TenantService/SetDefaultProvider": {
 		Method:            "/gibson.tenant.v1.TenantService/SetDefaultProvider",
-		Service:           "gibson.tenant.v1.TenantService",
-		Relation:          "writer",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser | IdentityService,
-		Unauthenticated:   false,
-		Self:              false,
-	},
-	"/gibson.tenant.v1.TenantService/SetFallbackChain": {
-		Method:            "/gibson.tenant.v1.TenantService/SetFallbackChain",
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "writer",
 		ObjectType:        "tenant",

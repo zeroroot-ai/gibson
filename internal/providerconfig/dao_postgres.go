@@ -2,7 +2,6 @@ package providerconfig
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,8 +15,7 @@ import (
 )
 
 const (
-	metaKeyDefault  = "__default"
-	metaKeyFallback = "__fallback_chain"
+	metaKeyDefault = "__default"
 )
 
 // providerConfigDAO is an unexported Postgres DAO for provider config metadata.
@@ -232,29 +230,6 @@ func (d *providerConfigDAO) setDefault(ctx context.Context, name string) error {
 	return d.setMetaValue(ctx, metaKeyDefault, name)
 }
 
-func (d *providerConfigDAO) getFallbackChain(ctx context.Context) ([]string, error) {
-	v, err := d.getMetaValue(ctx, metaKeyFallback)
-	if errors.Is(err, ErrNotFound) {
-		return []string{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var chain []string
-	if err := json.Unmarshal([]byte(v), &chain); err != nil {
-		return []string{}, nil
-	}
-	return chain, nil
-}
-
-func (d *providerConfigDAO) setFallbackChain(ctx context.Context, names []string) error {
-	data, err := json.Marshal(names)
-	if err != nil {
-		return fmt.Errorf("dao: marshal fallback chain: %w", err)
-	}
-	return d.setMetaValue(ctx, metaKeyFallback, string(data))
-}
-
 // legacyProviderNames returns provider names that still exist in tenant_secrets
 // under the old "provider_config:<name>" key format. Meta keys are excluded.
 func (d *providerConfigDAO) legacyProviderNames(ctx context.Context) ([]string, error) {
@@ -262,7 +237,6 @@ func (d *providerConfigDAO) legacyProviderNames(ctx context.Context) ([]string, 
 		`SELECT name FROM tenant_secrets
 		 WHERE starts_with(name, 'provider_config:')
 		   AND name != 'provider_config:__default'
-		   AND name != 'provider_config:__fallback_chain'
 		 ORDER BY name`,
 	)
 	if err != nil {

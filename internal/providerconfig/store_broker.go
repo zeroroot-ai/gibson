@@ -371,35 +371,6 @@ func (s *brokerBackedStore) SetDefault(ctx context.Context, tenantID, name strin
 	return newProviderConfigDAO(conn.Postgres).setDefault(ctx, name)
 }
 
-func (s *brokerBackedStore) GetFallbackChain(ctx context.Context, tenantID string) ([]string, error) {
-	conn, err := s.acquireConn(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Release()
-
-	return newProviderConfigDAO(conn.Postgres).getFallbackChain(ctx)
-}
-
-func (s *brokerBackedStore) SetFallbackChain(ctx context.Context, tenantID string, names []string) error {
-	for _, name := range names {
-		if _, err := s.Get(ctx, tenantID, name); err != nil {
-			if errors.Is(err, ErrNotFound) {
-				return fmt.Errorf("fallback chain references unknown provider %q: %w", name, ErrNotFound)
-			}
-			return err
-		}
-	}
-
-	conn, err := s.acquireConn(ctx, tenantID)
-	if err != nil {
-		return err
-	}
-	defer conn.Release()
-
-	return newProviderConfigDAO(conn.Postgres).setFallbackChain(ctx, names)
-}
-
 func (s *brokerBackedStore) Resolve(ctx context.Context, tenantID, name string) (*DecryptedConfig, error) {
 	conn, err := s.acquireConn(ctx, tenantID)
 	if err != nil {
