@@ -338,10 +338,7 @@ func (c *Client) GetUserProfile(ctx context.Context, accountID string) (*idp.Use
 	var resp zitadelUserResponse
 	path := "/management/v1/users/" + accountID
 	if err := c.doRequest(ctx, "GET", path, nil, c.cfg.OrgID, &resp); err != nil {
-		if errors.Is(err, idp.ErrNotFound) {
-			return nil, idp.ErrNotFound
-		}
-		return nil, fmt.Errorf("get user profile: %w", err)
+		return nil, mapError(err, "GetUserProfile")
 	}
 
 	profile := &idp.UserProfile{
@@ -475,7 +472,10 @@ func parseZitadelError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	var ze zitadelError
 	_ = json.Unmarshal(body, &ze)
-	code := ze.Details[0].ErrorCode
+	var code string
+	if len(ze.Details) > 0 {
+		code = ze.Details[0].ErrorCode
+	}
 	if code == "" {
 		code = fmt.Sprintf("%d", ze.Code)
 	}
