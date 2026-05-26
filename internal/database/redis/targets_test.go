@@ -66,10 +66,11 @@ func createTestTarget(name string) *types.Target {
 	target.AuthType = types.AuthTypeAPIKey
 	target.Status = types.TargetStatusActive
 
-	// Add config
+	// Add config — use float64 for numeric values: JSON round-trip through
+	// Redis always decodes numbers into interface{} as float64.
 	target.Config = map[string]interface{}{
 		"temperature": 0.7,
-		"max_tokens":  1000,
+		"max_tokens":  float64(1000),
 	}
 
 	// Add capabilities
@@ -153,11 +154,13 @@ func TestRedisTargetDAO_Create(t *testing.T) {
 
 	t.Run("create_with_complex_connection", func(t *testing.T) {
 		target := createTestTarget("complex-connection")
+		// JSON round-trip: numbers in interface{} decode as float64; nested
+		// map[string]string decodes as map[string]interface{}.
 		target.Connection = map[string]any{
 			"host":     "example.com",
-			"port":     8443,
+			"port":     float64(8443),
 			"protocol": "https",
-			"headers": map[string]string{
+			"headers": map[string]interface{}{
 				"X-API-Key": "secret",
 			},
 		}
@@ -465,10 +468,10 @@ func TestRedisTargetDAO_Update(t *testing.T) {
 		err := dao.Create(ctx, target)
 		require.NoError(t, err)
 
-		// Update connection
+		// JSON round-trip: port (number) in interface{} decodes as float64.
 		target.Connection = map[string]any{
 			"host":     "newhost.example.com",
-			"port":     9000,
+			"port":     float64(9000),
 			"protocol": "grpc",
 		}
 
@@ -574,21 +577,22 @@ func TestRedisTargetDAO_JSONFieldsPreserved(t *testing.T) {
 	t.Run("json_fields_preserved", func(t *testing.T) {
 		target := createTestTarget("json-test")
 
-		// Set complex JSON fields
+		// Set complex JSON fields — use float64 for all integer literals:
+		// JSON round-trip through Redis decodes numbers in interface{} as float64.
 		target.Config = map[string]interface{}{
 			"temperature":       0.7,
-			"max_tokens":        1000,
+			"max_tokens":        float64(1000),
 			"top_p":             0.9,
 			"frequency_penalty": 0.5,
 			"nested": map[string]interface{}{
 				"key1": "value1",
-				"key2": 42,
+				"key2": float64(42),
 			},
 		}
 
 		target.Connection = map[string]any{
 			"host":     "api.example.com",
-			"port":     443,
+			"port":     float64(443),
 			"protocol": "https",
 			"tls": map[string]any{
 				"enabled": true,
