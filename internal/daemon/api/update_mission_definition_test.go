@@ -9,9 +9,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/mission"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
-	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/mission"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // UpdateMissionDefinition implements DaemonServiceServer.UpdateMissionDefinition.
