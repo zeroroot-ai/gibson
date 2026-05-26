@@ -2434,12 +2434,13 @@ func (d *daemonImpl) ListMissionDefinitions(ctx context.Context, limit int, offs
 	for _, def := range defs {
 		nodeCount := len(def.GetNodes())
 		result = append(result, api.MissionDefinitionData{
-			Name:        def.GetName(),
-			Version:     def.GetVersion(),
-			Description: def.GetDescription(),
-			Source:      def.GetSource(),
-			InstalledAt: def.GetInstalledAt().AsTime(),
-			NodeCount:   nodeCount,
+			MissionDefinitionID: def.GetId(),
+			Name:                def.GetName(),
+			Version:             def.GetVersion(),
+			Description:         def.GetDescription(),
+			Source:              def.GetSource(),
+			InstalledAt:         def.GetInstalledAt().AsTime(),
+			NodeCount:           nodeCount,
 		})
 	}
 
