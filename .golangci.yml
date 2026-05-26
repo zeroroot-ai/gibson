@@ -1,5 +1,5 @@
 # Shared golangci-lint v2 baseline — adopted from
-# zero-day-ai/.github/templates/golangci-base.yml (slice 2.2, gibson#172).
+# zeroroot-ai/.github/templates/golangci-base.yml (slice 2.2, gibson#172).
 # Linter set lives in the base; per-repo section below is the only place
 # to add repo-specific exclusions.
 
@@ -30,7 +30,7 @@ linters:
 
     # --- boundary enforcement ---
     # depguard disabled — requires per-repo rules config to avoid blocking
-    # all third-party imports; see zero-day-ai/.github#93 for the org-level
+    # all third-party imports; see zeroroot-ai/.github#93 for the org-level
     # fix. TODO: configure deny-rules for gibson's module boundary needs.
 
     # --- style + idiom ---
@@ -85,4 +85,4 @@ issues:
 # Format:
 #   linters:
 #     disable:
-#       - <linter-name>  # TODO: zero-day-ai/gibson#<issue>
+#       - <linter-name>  # TODO: zeroroot-ai/gibson#<issue>

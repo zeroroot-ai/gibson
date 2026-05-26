@@ -12,8 +12,8 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/types"
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

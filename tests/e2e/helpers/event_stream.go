@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // MissionEvent is the typed event record captured from the RunMission stream.

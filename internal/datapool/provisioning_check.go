@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	dpmetrics "github.com/zero-day-ai/gibson/internal/datapool/metrics"
-	"github.com/zero-day-ai/sdk/auth"
+	dpmetrics "github.com/zeroroot-ai/gibson/internal/datapool/metrics"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // provisioningState caches the last-known provisioning status for a tenant.

@@ -9,9 +9,9 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	protobuf "google.golang.org/protobuf/proto"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	toolpb "github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1"
-	"github.com/zero-day-ai/sdk/protoresolver"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
+	"github.com/zeroroot-ai/sdk/protoresolver"
 )
 
 // GRPCToolClient implements tool.Tool interface for tools discovered via the component registry.

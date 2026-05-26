@@ -8,7 +8,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/zero-day-ai/gibson/internal/queue"
+	"github.com/zeroroot-ai/gibson/internal/queue"
 )
 
 // redisQueueAdapter adapts *redis.Client to the queue package's unexported

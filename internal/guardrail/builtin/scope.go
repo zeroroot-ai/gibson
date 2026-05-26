@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/guardrail"
+	"github.com/zeroroot-ai/gibson/internal/guardrail"
 )
 
 // ScopeValidatorConfig configures the scope validator

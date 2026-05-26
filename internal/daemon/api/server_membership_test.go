@@ -20,9 +20,9 @@ import (
 	"google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // stubAuthorizer is a minimal Authorizer fake for the membership tests.
@@ -439,11 +439,11 @@ func TestGetMyPermissions_BatchCheckFailure(t *testing.T) {
 // (IsAdmin=true, role="admin"). This asserts the closure parity required by gibson#289.
 func TestGetMyPermissions_OwnerClosureSupersetOfAdmin(t *testing.T) {
 	tests := []struct {
-		name         string
-		isOwner      bool
-		isAdmin      bool
-		wantRole     string
-		wantIsAdmin  bool
+		name        string
+		isOwner     bool
+		isAdmin     bool
+		wantRole    string
+		wantIsAdmin bool
 	}{
 		{
 			name:        "owner_has_admin_privilege",

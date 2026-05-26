@@ -3,7 +3,7 @@ package prompt
 import (
 	"path/filepath"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // PromptConfig is the configuration for the prompt system

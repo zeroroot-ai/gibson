@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/tests/testhelpers"
+	"github.com/zeroroot-ai/gibson/tests/testhelpers"
 )
 
 // ---------------------------------------------------------------------------

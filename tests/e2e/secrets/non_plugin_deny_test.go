@@ -76,9 +76,9 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
 
 // nonPluginTestCredBase is the base name for the test credential.

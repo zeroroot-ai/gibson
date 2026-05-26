@@ -96,7 +96,7 @@
 //
 // Multiple export formats are supported for reporting and integration:
 //
-//	import "github.com/zero-day-ai/gibson/internal/finding/export"
+//	import "github.com/zeroroot-ai/gibson/internal/finding/export"
 //
 //	// Export to JSON
 //	exporter := export.NewJSONExporter()

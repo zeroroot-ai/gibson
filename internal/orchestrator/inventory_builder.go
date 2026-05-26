@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // InventoryBuilder queries the registry for all components and builds a ComponentInventory.

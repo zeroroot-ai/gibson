@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
-	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/types"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
-	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/queries"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/schema"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // GraphBootstrapper handles bootstrapping mission data into Neo4j graph.

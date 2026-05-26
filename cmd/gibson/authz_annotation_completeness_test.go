@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/authz/registry"
+	"github.com/zeroroot-ai/gibson/internal/authz/registry"
 )
 
 // TestAuthzAnnotationCompleteness asserts that every Entry in the

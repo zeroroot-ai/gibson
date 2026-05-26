@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
-	"github.com/zero-day-ai/sdk/taxonomy"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/sdk/taxonomy"
 )
 
 // Loader reads ontology files and registers them with a Reasoner.

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/secrets"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
 )
 
 // NewProvider constructs an LLMProvider for the given ProviderConfig.Type.
@@ -39,8 +39,8 @@ func NewProvider(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
 // Anthropic, OpenAI, and Google providers via the same provider_config: prefix.
 func NewProviderWithContext(ctx context.Context, service *secrets.Service, cfg llm.ProviderConfig) (llm.LLMProvider, error) {
 	var (
-		p    llm.LLMProvider
-		err  error
+		p   llm.LLMProvider
+		err error
 	)
 
 	switch cfg.Type {

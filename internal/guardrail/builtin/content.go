@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/zero-day-ai/gibson/internal/guardrail"
+	"github.com/zeroroot-ai/gibson/internal/guardrail"
 )
 
 // ContentPattern defines a pattern to match and action to take

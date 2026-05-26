@@ -19,12 +19,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/platform-clients/resilience"
+	"github.com/zeroroot-ai/gibson/internal/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/platform-clients/resilience"
 )
-
 
 // newTestProviderWithMock creates a LocalGraphRAGProvider wired with a connected
 // MockGraphClient that is ready to use. The provider has a real circuit breaker
@@ -45,7 +44,7 @@ func newTestProviderWithMock(t *testing.T, cfg resilience.CircuitConfig) (*Local
 				p.graphHealthy.Store(true)
 			case gobreaker.StateOpen:
 				p.graphHealthy.Store(false)
-			// StateHalfOpen: leave graphHealthy as-is; the probe determines outcome.
+				// StateHalfOpen: leave graphHealthy as-is; the probe determines outcome.
 			}
 		},
 	)

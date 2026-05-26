@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/zero-day-ai/langchaingo/llms/openai"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/langchaingo/llms/openai"
 )
 
 // OpenAIProvider implements LLMProvider for OpenAI's GPT models

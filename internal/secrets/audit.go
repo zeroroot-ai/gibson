@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/zero-day-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/audit"
 )
 
 // Action constants for AuditEvent.Action. These are the canonical action

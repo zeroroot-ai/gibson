@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
-	"github.com/zero-day-ai/gibson/tools/gibsoncheck/checks"
+	"github.com/zeroroot-ai/gibson/tools/gibsoncheck/checks"
 )
 
 // TestForbidRawStoreImports_Violation verifies that a handler package outside
@@ -13,7 +13,7 @@ import (
 func TestForbidRawStoreImports_Violation(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.ForbidRawStoreImportsAnalyzer,
-		"github.com/zero-day-ai/gibson/internal/rawstoreviolation")
+		"github.com/zeroroot-ai/gibson/internal/rawstoreviolation")
 }
 
 // TestForbidRawStoreImports_TestFileMiniredis verifies that a _test.go file
@@ -24,5 +24,5 @@ func TestForbidRawStoreImports_TestFileMiniredis(t *testing.T) {
 	// analysistest.Run returns the diagnostics; passing the allowed package
 	// should produce zero diagnostics (no // want comments in the fixture).
 	analysistest.Run(t, testdata, checks.ForbidRawStoreImportsAnalyzer,
-		"github.com/zero-day-ai/gibson/internal/rawstoreallowed")
+		"github.com/zeroroot-ai/gibson/internal/rawstoreallowed")
 }

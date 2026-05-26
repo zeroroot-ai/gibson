@@ -7,10 +7,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/idp"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/idp"
 
-	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
+	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
 )
 
 // ---------------------------------------------------------------------------

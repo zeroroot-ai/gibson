@@ -17,9 +17,9 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 
-	"github.com/zero-day-ai/gibson/internal/mission/cueruntime"
+	"github.com/zeroroot-ai/gibson/internal/mission/cueruntime"
 )
 
 // ValidateMissionCUE compiles the CUE source via cueruntime.Validate and

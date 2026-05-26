@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zero-day-ai/sdk/agent/compliance"
+	"github.com/zeroroot-ai/sdk/agent/compliance"
 )
 
 // TestAgentMetadataProvider_ReadsFromContext verifies that the precedence-3

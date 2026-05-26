@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 

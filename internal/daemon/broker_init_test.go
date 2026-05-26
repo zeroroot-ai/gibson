@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	"github.com/zero-day-ai/sdk/auth"
-	sdktypes "github.com/zero-day-ai/sdk/types"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	"github.com/zeroroot-ai/sdk/auth"
+	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
 
 // TestDaemonStartup_BrokerStack_NoKeyProvider verifies that the daemon can be

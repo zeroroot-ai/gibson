@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	authzv1 "github.com/zero-day-ai/sdk/api/gen/gibson/auth/v1"
+	authzv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/auth/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 )

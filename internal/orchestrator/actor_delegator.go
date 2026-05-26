@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Actor implements the NodeDelegator interface declared in

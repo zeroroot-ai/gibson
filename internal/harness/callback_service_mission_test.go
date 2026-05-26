@@ -23,10 +23,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ---------------------------------------------------------------------------

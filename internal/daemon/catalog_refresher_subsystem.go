@@ -3,7 +3,7 @@ package daemon
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/reconciler"
+	"github.com/zeroroot-ai/gibson/internal/reconciler"
 )
 
 // catalogRefresherSubsystem wraps reconciler.CatalogFanout with a

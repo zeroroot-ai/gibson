@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/zero-day-ai/langchaingo/llms/cohere"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/langchaingo/llms/cohere"
 )
 
 // CohereProvider wraps langchaingo's Cohere integration.

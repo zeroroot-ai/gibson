@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // SandboxConfig configures the Gibson daemon's sandboxed-tool execution

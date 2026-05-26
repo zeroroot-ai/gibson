@@ -3,7 +3,7 @@ package daemon
 import (
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/config"
 )
 
 // TestDaemonNew_NoNeo4jSharedConfig is the Task 5 smoke test for spec

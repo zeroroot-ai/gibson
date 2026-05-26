@@ -13,11 +13,11 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/daemon"
-	"github.com/zero-day-ai/gibson/internal/sandbox/health"
-	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
-	"github.com/zero-day-ai/gibson/pkg/version"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/daemon"
+	"github.com/zeroroot-ai/gibson/internal/sandbox/health"
+	"github.com/zeroroot-ai/gibson/internal/secrets/jwtsource"
+	"github.com/zeroroot-ai/gibson/pkg/version"
 )
 
 // daemonRunner is the subset of daemon.Daemon used by run.

@@ -3,7 +3,7 @@ package graphrag
 import (
 	"sort"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // MergeReranker combines and reranks results from vector and graph searches.

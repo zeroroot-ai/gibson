@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/ratelimit"
+	"github.com/zeroroot-ai/gibson/internal/ratelimit"
 )
 
 // newTestClient starts an in-process miniredis server and returns a Redis

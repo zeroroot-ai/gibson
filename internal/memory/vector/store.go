@@ -3,7 +3,7 @@ package vector
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // VectorStore provides vector-based semantic search capabilities.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/checkpoint"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // CheckpointAccess provides checkpoint operations for agents during execution.

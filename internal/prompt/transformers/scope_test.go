@@ -3,7 +3,7 @@ package transformers
 import (
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/prompt"
+	"github.com/zeroroot-ai/gibson/internal/prompt"
 )
 
 func TestNewScopeNarrower(t *testing.T) {

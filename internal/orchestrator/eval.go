@@ -3,9 +3,9 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/eval"
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/eval"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // WithEvalOptions adds evaluation capabilities to the orchestrator.

@@ -3,8 +3,8 @@ package harness
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/contextkeys"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // MissionContext represents the broader mission context for agent execution.

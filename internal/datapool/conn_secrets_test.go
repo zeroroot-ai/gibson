@@ -3,7 +3,7 @@ package datapool
 import (
 	"testing"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // TestConn_Secrets_NonNil verifies that Conn.Secrets() returns a non-nil

@@ -3,7 +3,7 @@ package finding
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/agent"
 )
 
 // FindingClassifier classifies security findings into categories with confidence scores.

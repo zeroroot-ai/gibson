@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/zero-day-ai/gibson/internal/datapool/envelope"
+	"github.com/zeroroot-ai/gibson/internal/datapool/envelope"
 )
 
 // TenantSecretsOps provides encrypted opaque-value storage in the per-tenant

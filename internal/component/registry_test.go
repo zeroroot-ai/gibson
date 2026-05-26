@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 )
 
 // newTestRegistry creates a RedisComponentRegistry backed by a fresh miniredis
@@ -632,7 +632,7 @@ func TestComponentInfo_SandboxedEntryRoundTrip(t *testing.T) {
 		StartedAt:     time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC),
 		LastHeartbeat: time.Date(2026, 4, 17, 12, 5, 0, 0, time.UTC),
 		DispatchMode:  componentpb.DispatchMode_DISPATCH_MODE_SANDBOXED,
-		Image:         "ghcr.io/zero-day-ai/gibson-tool-runner@sha256:deadbeef",
+		Image:         "ghcr.io/zeroroot-ai/gibson-tool-runner@sha256:deadbeef",
 		Command:       []string{"/gibson-runner"},
 		Env:           map[string]string{"GIBSON_TOOL_NAME": "nmap"},
 		Resources: SandboxResources{

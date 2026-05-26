@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	"github.com/zero-day-ai/gibson/internal/secrets/configstore"
+	"github.com/zeroroot-ai/gibson/internal/secrets/configstore"
 )
 
 // ErrBrokerConfigNotFound is returned by ConfigStore.Get when no

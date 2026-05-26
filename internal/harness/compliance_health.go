@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ComplianceHealthCheck adapts a ComplianceMiddleware into an

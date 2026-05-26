@@ -18,8 +18,8 @@ package daemon
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
-	mockllm "github.com/zero-day-ai/gibson/tests/e2e/fixtures/providers/mock-llm"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	mockllm "github.com/zeroroot-ai/gibson/tests/e2e/fixtures/providers/mock-llm"
 )
 
 // maybeRegisterMockLLMProvider registers the e2e mock LLM provider into the

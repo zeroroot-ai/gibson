@@ -23,7 +23,7 @@ import (
 // (no zitadel SDK import) to avoid adding a heavy compile-time dependency.
 // The PAT is never logged (Security NFR).
 type ZitadelClient struct {
-	baseURL    string // e.g. "https://auth.zero-day.local:30443" or "http://gibson-zitadel:8080"
+	baseURL    string // e.g. "https://auth.zeroroot.local:30443" or "http://gibson-zitadel:8080"
 	pat        string // service-account PAT loaded from in-cluster secret
 	httpClient *http.Client
 }
@@ -241,7 +241,7 @@ func (z *ZitadelClient) DeleteUserByEmail(ctx context.Context, email string) err
 //  2. `ZITADEL_BASE_URL` or `ZITADEL_DOMAIN` key in the `gibson-config`
 //     ConfigMap (namespace: gibson).
 //  3. The Envoy NodePort external URL for the Kind cluster:
-//     "https://auth.zero-day.local:30443" — Envoy terminates TLS and proxies
+//     "https://auth.zeroroot.local:30443" — Envoy terminates TLS and proxies
 //     /oauth/v2/*, /management/v1/*, /v1/* to Zitadel.  This is the correct
 //     URL to use for out-of-cluster test runs against the Kind stack.
 func LoadZitadelURLFromCluster(ctx context.Context, kubeClient kubernetes.Interface) (string, error) {
@@ -261,8 +261,8 @@ func LoadZitadelURLFromCluster(ctx context.Context, kubeClient kubernetes.Interf
 	}
 	// Priority 3: Envoy NodePort external URL.
 	// Zitadel is ClusterIP-only; out-of-cluster test runs must go through
-	// the Envoy NodePort on auth.zero-day.local:30443.
-	return "https://auth.zero-day.local:30443", nil
+	// the Envoy NodePort on auth.zeroroot.local:30443.
+	return "https://auth.zeroroot.local:30443", nil
 }
 
 // LoadFGAURLFromCluster resolves the OpenFGA HTTP URL from the cluster.

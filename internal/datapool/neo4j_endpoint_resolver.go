@@ -27,7 +27,7 @@ package datapool
 import (
 	"context"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // Neo4jEndpoint contains the resolved connection parameters for a single

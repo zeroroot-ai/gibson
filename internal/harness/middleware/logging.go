@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm"
 	"go.opentelemetry.io/otel/log"
 )
 

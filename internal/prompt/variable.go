@@ -3,7 +3,7 @@ package prompt
 import (
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // VariableDef defines a variable that can be resolved from context data.

@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	healthhttp "github.com/zero-day-ai/sdk/health/http"
+	healthhttp "github.com/zeroroot-ai/sdk/health/http"
 
-	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
 // healthSubsystem owns the lifecycle of the HTTP health-check server.

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	sdkGraphrag "github.com/zero-day-ai/sdk/graphrag"
+	sdkGraphrag "github.com/zeroroot-ai/sdk/graphrag"
 
-	"github.com/zero-day-ai/gibson/internal/component/build"
-	"github.com/zero-day-ai/gibson/internal/component/git"
+	"github.com/zeroroot-ai/gibson/internal/component/build"
+	"github.com/zeroroot-ai/gibson/internal/component/git"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -2256,10 +2256,10 @@ func (i *DefaultInstaller) copyRepoBuildArtifacts(kind ComponentKind, repoDir st
 // extractRepoName extracts the repository name from a git repository URL.
 // It handles both HTTPS and SSH URL formats, with or without .git suffix.
 // Examples:
-//   - "https://github.com/zero-day-ai/gibson-tools-official.git" -> "gibson-tools-official"
-//   - "git@github.com:zero-day-ai/gibson-tools-official.git" -> "gibson-tools-official"
-//   - "https://github.com/zero-day-ai/gibson-tools-official" -> "gibson-tools-official"
-//   - "https://github.com/zero-day-ai/gibson-tools-official/" -> "gibson-tools-official"
+//   - "https://github.com/zeroroot-ai/gibson-tools-official.git" -> "gibson-tools-official"
+//   - "git@github.com:zeroroot-ai/gibson-tools-official.git" -> "gibson-tools-official"
+//   - "https://github.com/zeroroot-ai/gibson-tools-official" -> "gibson-tools-official"
+//   - "https://github.com/zeroroot-ai/gibson-tools-official/" -> "gibson-tools-official"
 func extractRepoName(repoURL string) string {
 	// Remove trailing slashes
 	repoURL = strings.TrimRight(repoURL, "/")

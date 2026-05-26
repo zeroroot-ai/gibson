@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/sdk/schema"
+	"github.com/zeroroot-ai/sdk/schema"
 )
 
 // SchemaFromType generates a JSONSchema from a Go type using reflection.

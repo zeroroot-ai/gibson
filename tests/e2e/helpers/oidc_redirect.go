@@ -89,7 +89,7 @@ func AssertRedirectChain(t interface{ Fatalf(string, ...interface{}) }, chain []
 // ---------------------------------------------------------------------------
 
 // MustHaveZitadelHop asserts that at least one hop in the chain traverses
-// the Zitadel authentication server (auth.zero-day.local or the configured
+// the Zitadel authentication server (auth.zeroroot.local or the configured
 // ZITADEL_DOMAIN).
 //
 // This proves the browser was redirected through the OIDC identity provider
@@ -101,7 +101,7 @@ func AssertRedirectChain(t interface{ Fatalf(string, ...interface{}) }, chain []
 // Requirements: R1.4.
 func MustHaveZitadelHop(t interface{ Fatalf(string, ...interface{}) }, chain []RedirectStep) {
 	zitadelHosts := []string{
-		"auth.zero-day.local",
+		"auth.zeroroot.local",
 		"zitadel",
 		"gibson-zitadel",
 	}

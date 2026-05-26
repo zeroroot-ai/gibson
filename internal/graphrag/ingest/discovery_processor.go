@@ -8,10 +8,10 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
+	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 )
 
 // DiscoveryProcessor orchestrates the storage of discovered entities from proto DiscoveryResult.

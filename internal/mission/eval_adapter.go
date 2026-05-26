@@ -3,7 +3,7 @@ package mission
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/eval"
+	"github.com/zeroroot-ai/gibson/internal/eval"
 )
 
 // EvalEventAdapter adapts a mission.EventEmitter to satisfy eval.MissionEventEmitter.

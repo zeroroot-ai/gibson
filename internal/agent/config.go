@@ -3,8 +3,8 @@ package agent
 import (
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdktypes "github.com/zero-day-ai/sdk/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
 
 // TargetSchema is an alias for SDK's TargetSchema type

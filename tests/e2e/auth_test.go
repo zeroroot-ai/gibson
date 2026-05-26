@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // Note: The auth interceptor tests that previously lived here tested the

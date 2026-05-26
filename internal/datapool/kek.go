@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/crypto/hkdf"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 const (

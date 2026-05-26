@@ -256,9 +256,9 @@
 //
 //	import (
 //	    "context"
-//	    "github.com/zero-day-ai/gibson/internal/component"
-//	    "github.com/zero-day-ai/gibson/internal/component/git"
-//	    "github.com/zero-day-ai/gibson/internal/component/build"
+//	    "github.com/zeroroot-ai/gibson/internal/component"
+//	    "github.com/zeroroot-ai/gibson/internal/component/git"
+//	    "github.com/zeroroot-ai/gibson/internal/component/build"
 //	)
 //
 //	func main() {

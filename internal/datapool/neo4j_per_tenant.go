@@ -9,8 +9,8 @@ import (
 
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	neo4jconfig "github.com/neo4j/neo4j-go-driver/v5/neo4j/config"
-	pcpools "github.com/zero-day-ai/platform-clients/pools"
-	"github.com/zero-day-ai/sdk/auth"
+	pcpools "github.com/zeroroot-ai/platform-clients/pools"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // neo4jProductionOpts are the required connection lifecycle settings for
@@ -21,7 +21,7 @@ import (
 //   - MaxConnectionLifetime: 1 h — connections older than this are recycled.
 //   - ConnectionAcquisitionTimeout: 60 s — max wait for a connection from pool.
 //
-// Spec: zero-day-ai/.github#101 audit P1 (missing MaxConnectionLifetime).
+// Spec: zeroroot-ai/.github#101 audit P1 (missing MaxConnectionLifetime).
 var neo4jProductionOpts = pcpools.Neo4jOptions{
 	MaxConnectionLifetime:        1 * time.Hour,
 	ConnectionAcquisitionTimeout: 60 * time.Second,
@@ -118,7 +118,7 @@ func (n *neo4jPerTenant) driverForTenant(ctx context.Context, tenant auth.Tenant
 
 	// Apply required connection lifecycle settings enforced by platform-clients/pools.
 	// MaxConnectionLifetime is required; omitting it leaves connections open
-	// indefinitely (audit finding P1, zero-day-ai/.github#101).
+	// indefinitely (audit finding P1, zeroroot-ai/.github#101).
 	driver, err = neo4j.NewDriverWithContext(ep.BoltURI, neo4j.BasicAuth(ep.Username, ep.Password, ""),
 		func(c *neo4jconfig.Config) {
 			c.MaxConnectionLifetime = neo4jProductionOpts.MaxConnectionLifetime

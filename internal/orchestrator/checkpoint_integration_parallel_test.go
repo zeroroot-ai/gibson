@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestTrackParallelCompletion_WithExpectedTotals — Spec 4 R4.1, R4.4.

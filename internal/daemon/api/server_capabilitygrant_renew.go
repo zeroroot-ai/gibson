@@ -35,11 +35,11 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
-	"github.com/zero-day-ai/sdk/auth"
-	sdkcg "github.com/zero-day-ai/sdk/capabilitygrant"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 
-	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
 )
 
 // CGJWTVerifier abstracts the verification path. Implementations

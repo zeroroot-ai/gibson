@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/zero-day-ai/langchaingo/llms/huggingface"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/langchaingo/llms/huggingface"
 )
 
 // HuggingFaceProvider wraps langchaingo's HuggingFace Inference API integration.

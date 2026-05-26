@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // EventBus manages event distribution to subscribers.

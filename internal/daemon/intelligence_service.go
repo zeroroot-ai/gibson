@@ -21,8 +21,8 @@
 //
 // ## What was removed in 93d2fcb:
 //
-//   - Import: "github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
-//   - Import: intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
+//   - Import: "github.com/zeroroot-ai/gibson/internal/graphrag/intelligence"
+//   - Import: intelligencepb "github.com/zeroroot-ai/sdk/api/gen/intelligence/v1"
 //   - The registration block above was replaced with a single d.logger.Warn()
 //
 // ## Query implementations — still exist intact at internal/graphrag/intelligence/:
@@ -129,11 +129,11 @@ import (
 	"log/slog"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/graphrag/intelligence"
-	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
-	"github.com/zero-day-ai/sdk/auth"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/intelligence"
+	intelligencepb "github.com/zeroroot-ai/sdk/api/gen/intelligence/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"

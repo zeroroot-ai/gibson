@@ -1,6 +1,6 @@
 // Package idempotency implements a daemon-side dedup store for the
 // `idempotency_key` field convention defined by platform-sdk's
-// CONVENTIONS.md (added in platform-sdk#2; PRD zero-day-ai/.github#101).
+// CONVENTIONS.md (added in platform-sdk#2; PRD zeroroot-ai/.github#101).
 //
 // Mutating RPCs that carry a non-empty `idempotency_key` field are
 // deduplicated by the gRPC server interceptor in

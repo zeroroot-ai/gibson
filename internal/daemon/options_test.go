@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/zero-day-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/config"
 )
 
 // minimalCfg returns a config.Config that satisfies daemon.New without

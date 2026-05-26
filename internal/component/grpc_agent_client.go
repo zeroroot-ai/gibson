@@ -8,11 +8,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/types"
-	agentpb "github.com/zero-day-ai/sdk/api/gen/gibson/agent/v1"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
-	"github.com/zero-day-ai/sdk/schema"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	"github.com/zeroroot-ai/sdk/schema"
 )
 
 // GRPCAgentClient implements agent.Agent interface for agents discovered via the component registry.

@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
-	"github.com/zero-day-ai/gibson/tools/gibsoncheck/checks"
+	"github.com/zeroroot-ai/gibson/tools/gibsoncheck/checks"
 )
 
 func TestForbiddenImports(t *testing.T) {

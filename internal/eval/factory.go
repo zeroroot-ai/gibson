@@ -1,9 +1,9 @@
 package eval
 
 import (
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/types"
-	sdkeval "github.com/zero-day-ai/sdk/eval"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	sdkeval "github.com/zeroroot-ai/sdk/eval"
 )
 
 // EvalHarnessFactory wraps a HarnessFactoryInterface to create harnesses with

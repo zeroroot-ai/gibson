@@ -130,7 +130,7 @@ type RunResult struct {
 //     requeue (a human must intervene or the operator must restart).
 //     EXCEPT when ContinueOnBlocked is true: the per-step Blocked/Ready
 //     conditions + StepBlocked event + audit-failed(blocked=true) hook
-//     + error-outcome metric fire exactly as before, but the loop
+//   - error-outcome metric fire exactly as before, but the loop
 //     continues to subsequent steps. At end-of-loop, if any step
 //     blocked, RunResult.Blocked is true and Err is the FIRST blocked
 //     step's error. Designed for teardown sagas (tenant-operator#184).

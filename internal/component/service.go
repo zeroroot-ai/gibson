@@ -6,7 +6,7 @@ package component
 // tools, plugins) connect to. It delegates to ComponentRegistry for lifecycle
 // tracking and WorkQueue for pull-based work dispatch.
 //
-// Generated proto code location: github.com/zero-day-ai/sdk/api/gen/componentpb
+// Generated proto code location: github.com/zeroroot-ai/sdk/api/gen/componentpb
 
 import (
 	"context"
@@ -26,15 +26,15 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/memory"
-	"github.com/zero-day-ai/gibson/internal/types"
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	"github.com/zero-day-ai/sdk/auth"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
+	"github.com/zeroroot-ai/gibson/internal/memory"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // ---------------------------------------------------------------------------

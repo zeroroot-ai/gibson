@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 func TestValidationResult_JSON(t *testing.T) {

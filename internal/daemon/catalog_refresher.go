@@ -13,10 +13,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	componentpb "github.com/zero-day-ai/sdk/api/gen/gibson/component/v1"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/harness/sandboxed"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/harness/sandboxed"
 )
 
 // Constants governing catalog-refresh cadence, lease duration, and bounds.

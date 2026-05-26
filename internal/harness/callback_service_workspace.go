@@ -26,8 +26,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
-	"github.com/zero-day-ai/sdk/codegen/workspace"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zeroroot-ai/sdk/codegen/workspace"
 )
 
 // Per-call payload limits. Aligned with gRPC's default 16 MB max

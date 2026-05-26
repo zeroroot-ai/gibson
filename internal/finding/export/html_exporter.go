@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/finding"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/finding"
 )
 
 // HTMLExporter exports findings as a professional HTML report.

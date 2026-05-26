@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/zero-day-ai/sdk/schema"
+	"github.com/zeroroot-ai/sdk/schema"
 )
 
 // ToolDef defines a tool that an LLM can call during completion.

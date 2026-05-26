@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/config"
-	"github.com/zero-day-ai/gibson/internal/daemon"
-	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
-	"github.com/zero-day-ai/gibson/pkg/version"
+	"github.com/zeroroot-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/daemon"
+	"github.com/zeroroot-ai/gibson/internal/secrets/jwtsource"
+	"github.com/zeroroot-ai/gibson/pkg/version"
 )
 
 // fakeJWTSource is a test double for vaultJWTSourceCloser. It tracks

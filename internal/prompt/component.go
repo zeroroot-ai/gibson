@@ -1,8 +1,8 @@
 package prompt
 
 import (
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/tool"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/tool"
 )
 
 // PluginPromptSource is the minimal interface a plugin-shaped value must

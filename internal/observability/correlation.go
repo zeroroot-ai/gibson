@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
 )
 
 // CorrelationID is a unique identifier that links Neo4j graph nodes with Langfuse observability traces.

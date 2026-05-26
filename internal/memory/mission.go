@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Memory continuity errors

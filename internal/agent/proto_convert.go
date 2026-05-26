@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
-	typespb "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // TaskToProto converts a Gibson internal Task to a proto Task message.

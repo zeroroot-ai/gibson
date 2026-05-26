@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
-	"github.com/zero-day-ai/gibson/tools/gibsoncheck/checks"
+	"github.com/zeroroot-ai/gibson/tools/gibsoncheck/checks"
 )
 
 // TestPluginLegacy_PluginkitViolation verifies that a package within the
@@ -13,7 +13,7 @@ import (
 func TestPluginLegacy_PluginkitViolation(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.PluginLegacyAnalyzer,
-		"github.com/zero-day-ai/sdk/pluginlegacyviolation")
+		"github.com/zeroroot-ai/sdk/pluginlegacyviolation")
 }
 
 // TestPluginLegacy_NewSDKPluginClean verifies that a package importing the
@@ -23,7 +23,7 @@ func TestPluginLegacy_NewSDKPluginClean(t *testing.T) {
 	testdata := analysistest.TestData()
 	// No // want comments in the fixture — zero diagnostics expected.
 	analysistest.Run(t, testdata, checks.PluginLegacyAnalyzer,
-		"github.com/zero-day-ai/sdk/pluginlegacyclean")
+		"github.com/zeroroot-ai/sdk/pluginlegacyclean")
 }
 
 // TestPluginLegacy_OldSymbolsViolation verifies that a package importing
@@ -32,5 +32,5 @@ func TestPluginLegacy_NewSDKPluginClean(t *testing.T) {
 func TestPluginLegacy_OldSymbolsViolation(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.PluginLegacyAnalyzer,
-		"github.com/zero-day-ai/sdk/pluginlegacyoldsymbols")
+		"github.com/zeroroot-ai/sdk/pluginlegacyoldsymbols")
 }

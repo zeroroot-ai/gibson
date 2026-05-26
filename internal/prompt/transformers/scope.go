@@ -3,7 +3,7 @@ package transformers
 import (
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/prompt"
+	"github.com/zeroroot-ai/gibson/internal/prompt"
 )
 
 // ScopeNarrower filters prompts to task-relevant content.

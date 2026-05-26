@@ -1,4 +1,4 @@
-module github.com/zero-day-ai/gibson
+module github.com/zeroroot-ai/gibson
 
 go 1.25.10
 
@@ -45,12 +45,12 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zero-day-ai/ast-checks v0.1.1
-	github.com/zero-day-ai/platform-clients v0.10.0
-	github.com/zero-day-ai/platform-sdk v0.10.0
-	github.com/zero-day-ai/sdk v0.122.0
-	github.com/zero-day-ai/setec v0.0.0-20260416175631-91bbf6734d66
-	github.com/zero-day-ai/testfixtures v0.1.0
+	github.com/zeroroot-ai/ast-checks v0.1.1
+	github.com/zeroroot-ai/platform-clients v0.10.0
+	github.com/zeroroot-ai/platform-sdk v0.10.0
+	github.com/zeroroot-ai/sdk v0.122.0
+	github.com/zeroroot-ai/setec v0.0.0-20260416175631-91bbf6734d66
+	github.com/zeroroot-ai/testfixtures v0.1.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.43.0
@@ -231,7 +231,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zero-day-ai/langchaingo v0.1.14-zda.1
+	github.com/zeroroot-ai/langchaingo v0.1.14-zda.1
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.67.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 // indirect

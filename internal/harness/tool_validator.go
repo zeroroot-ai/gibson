@@ -6,7 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"google.golang.org/protobuf/proto"
 )
 

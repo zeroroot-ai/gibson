@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/zero-day-ai/gibson/internal/checkpoint/keyprovider"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint/keyprovider"
 )
 
 // EncryptionService defines the interface for encrypting and decrypting checkpoint data.

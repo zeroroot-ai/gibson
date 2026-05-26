@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 )
 
 // TestGetMissionDefinition_EmptyName verifies that an empty name returns

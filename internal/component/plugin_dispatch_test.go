@@ -10,9 +10,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	pluginpb "github.com/zero-day-ai/sdk/api/gen/gibson/plugin/v1"
-	"github.com/zero-day-ai/sdk/auth"
-	pluginmanifest "github.com/zero-day-ai/sdk/plugin/manifest"
+	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+	pluginmanifest "github.com/zeroroot-ai/sdk/plugin/manifest"
 )
 
 // ---------------------------------------------------------------------------

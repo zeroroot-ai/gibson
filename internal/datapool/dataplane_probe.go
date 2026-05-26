@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/zero-day-ai/gibson/internal/secrets/configstore"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/secrets/configstore"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // DataPlaneProbe answers two structural questions about a tenant's data-plane

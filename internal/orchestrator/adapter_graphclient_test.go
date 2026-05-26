@@ -18,8 +18,8 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/queries"
 )
 
 // buildObserverWithClient replicates the wiring logic from adapter.go:252-263 and

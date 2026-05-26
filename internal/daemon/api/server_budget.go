@@ -9,16 +9,16 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/budget"
+	"github.com/zeroroot-ai/gibson/internal/budget"
 	// sdk#106 (MERGED) split the budget surface in two:
 	//   - admin BudgetService    → platform-sdk/gen/gibson/budget/v1   (`budgetpb` here)
 	//   - customer-visible enum  → sdk/api/gen/gibson/budget_status/v1 (`budgetstatuspb`)
 	// This handler implements the admin service, but its request/response
 	// messages embed `BudgetScope` which still lives on the OSS side, so we
 	// pull in both.
-	budgetpb "github.com/zero-day-ai/platform-sdk/gen/gibson/budget/v1"
-	budgetstatuspb "github.com/zero-day-ai/sdk/api/gen/gibson/budget_status/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	budgetpb "github.com/zeroroot-ai/platform-sdk/gen/gibson/budget/v1"
+	budgetstatuspb "github.com/zeroroot-ai/sdk/api/gen/gibson/budget_status/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // Package server_budget.go — DaemonServer implementation of

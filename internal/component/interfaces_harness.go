@@ -8,8 +8,8 @@ package component
 import (
 	"context"
 
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // OntologyReasoner is the narrow interface of ontology.Reasoner that the

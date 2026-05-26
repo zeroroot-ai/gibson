@@ -8,8 +8,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 	"github.com/vmihailenco/msgpack/v5"
-	"github.com/zero-day-ai/gibson/internal/checkpoint/keyprovider"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/checkpoint/keyprovider"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ThreadedCheckpointer defines the interface for thread-aware checkpoint management.

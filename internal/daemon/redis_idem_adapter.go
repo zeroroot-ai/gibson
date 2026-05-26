@@ -7,7 +7,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/idempotency"
+	"github.com/zeroroot-ai/gibson/internal/idempotency"
 )
 
 // redisIdemBackend wraps *goredis.Client to satisfy the idempotency package's

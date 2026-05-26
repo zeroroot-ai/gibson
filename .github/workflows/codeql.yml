@@ -26,9 +26,9 @@ jobs:
       security-events: write
     env:
       # GOPRIVATE tells the Go toolchain to skip the public proxy and
-      # checksum database for private zero-day-ai modules. Mirrors
+      # checksum database for private zeroroot-ai modules. Mirrors
       # gibsoncheck.yml `analyze` + tenant-operator codeql.yml.
-      GOPRIVATE: github.com/zero-day-ai
+      GOPRIVATE: github.com/zeroroot-ai
     steps:
       - uses: actions/checkout@v4
 

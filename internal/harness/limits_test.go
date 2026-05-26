@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // mockMissionLister is a mock implementation of MissionLister for testing.

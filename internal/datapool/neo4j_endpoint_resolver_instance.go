@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
+	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 )
 
 const (

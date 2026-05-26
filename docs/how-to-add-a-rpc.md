@@ -3,7 +3,7 @@
 Step-by-step for adding a new RPC handler to the daemon. Worked example:
 **"add `ListMyMissions` returning the caller's mission summaries."**
 
-The proto for SDK-owned services lives in `zero-day-ai/sdk`; the proto
+The proto for SDK-owned services lives in `zeroroot-ai/sdk`; the proto
 for `DaemonAdminService` lives in this repo at
 [`internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto`](../internal/daemon/api/gibson/daemon/admin/v1/daemon_admin.proto).
 This guide covers both halves; pick the matching path.
@@ -131,7 +131,7 @@ registry is missing an entry for the new method, the daemon panics with:
 ```
 the following gRPC methods are registered on the daemon but missing
 from the SDK auth registry — regenerate sdk/auth/registry by running
-`make proto` in zero-day-ai/sdk and bumping the gibson SDK pin:
+`make proto` in zeroroot-ai/sdk and bumping the gibson SDK pin:
   - /gibson.daemon.admin.v1.DaemonAdminService/ListMyMissions
 ```
 

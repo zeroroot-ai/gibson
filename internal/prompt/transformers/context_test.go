@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/prompt"
+	"github.com/zeroroot-ai/gibson/internal/prompt"
 )
 
 func TestNewContextInjector(t *testing.T) {

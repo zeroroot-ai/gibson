@@ -7,7 +7,7 @@
 //
 //   - forbiddenimports: gibson/ may not import OIDC/JWT validation
 //     libraries beyond what is required for capability-grant minting,
-//     and may not import zero-day-ai/openfga/* outside the authz
+//     and may not import zeroroot-ai/openfga/* outside the authz
 //     package. JWT validation is Envoy's job; FGA is ext-authz's.
 //
 //   - tenantfromcontext: gRPC handler functions must read tenant
@@ -45,8 +45,8 @@
 //     by the plugin-runtime spec (Spec 2, Phase 1): sdk/pluginkit (always),
 //     gibson/internal/plugin (always), and sdk/plugin with old symbol names
 //     (Initialize/Query/Shutdown/Health/Methods/MethodDescriptor/etc.).
-//     Scope: packages under github.com/zero-day-ai/sdk/ and
-//     github.com/zero-day-ai/gibson/internal/. Note that sdk/plugin itself
+//     Scope: packages under github.com/zeroroot-ai/sdk/ and
+//     github.com/zeroroot-ai/gibson/internal/. Note that sdk/plugin itself
 //     is being reborn as the new production plugin SDK in Phases 2-8; only
 //     the deleted symbol names from the pre-release shape are flagged.
 //
@@ -65,7 +65,7 @@ import (
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/multichecker"
 
-	"github.com/zero-day-ai/gibson/tools/gibsoncheck/checks"
+	"github.com/zeroroot-ai/gibson/tools/gibsoncheck/checks"
 )
 
 func main() {

@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zero-day-ai/gibson/internal/tool"
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
-	harnesspb "github.com/zero-day-ai/sdk/api/gen/gibson/harness/v1"
-	toolpb "github.com/zero-day-ai/sdk/api/gen/gibson/tool/v1"
+	"github.com/zeroroot-ai/gibson/internal/tool"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
 	"google.golang.org/grpc"
 )
 

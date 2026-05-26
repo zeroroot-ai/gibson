@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // tenantSanitizeRE matches characters that are safe in a key prefix (alphanumeric

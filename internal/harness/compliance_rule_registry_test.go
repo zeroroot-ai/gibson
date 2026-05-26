@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zero-day-ai/sdk/taxonomy"
+	"github.com/zeroroot-ai/sdk/taxonomy"
 )
 
 // fakeOverlayLoader is a deterministic in-memory ruleOverlayLoader.

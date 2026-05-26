@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // defaultDispatchTimeout is the time budget for a single component dispatch

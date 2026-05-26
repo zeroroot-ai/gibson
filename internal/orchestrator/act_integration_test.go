@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // TestActor_SpawnAgent_ValidAgent tests that spawn_agent validation succeeds with a valid agent.

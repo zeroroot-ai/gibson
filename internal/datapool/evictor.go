@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	dpmetrics "github.com/zero-day-ai/gibson/internal/datapool/metrics"
-	"github.com/zero-day-ai/sdk/auth"
+	dpmetrics "github.com/zeroroot-ai/gibson/internal/datapool/metrics"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // clock abstracts time for testability. Production code uses realClock;

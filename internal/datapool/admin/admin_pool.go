@@ -39,13 +39,13 @@ import (
 	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	neo4jconfig "github.com/neo4j/neo4j-go-driver/v5/neo4j/config"
 	redis "github.com/redis/go-redis/v9"
-	pcpools "github.com/zero-day-ai/platform-clients/pools"
+	pcpools "github.com/zeroroot-ai/platform-clients/pools"
 	"google.golang.org/grpc"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/datapool/vectordb"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/datapool/vectordb"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ErrUnauthorizedAdmin is returned by Acquire when the calling identity does
@@ -151,7 +151,7 @@ func New(cfg AdminPoolConfig, tenantPool datapool.Pool, fgaClient authz.Authoriz
 
 	// Connect admin Postgres pool when a DSN is provided.
 	// Apply required connection lifecycle settings via platform-clients/pools
-	// (audit finding P1, zero-day-ai/.github#101).
+	// (audit finding P1, zeroroot-ai/.github#101).
 	if cfg.PostgresDSN != "" {
 		pgPool, err := pcpools.NewPgxPool(context.Background(), cfg.PostgresDSN, pcpools.PgxPoolOptions{
 			MaxConnLifetime: 1 * time.Hour,

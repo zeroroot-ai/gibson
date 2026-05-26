@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"testing"
 
-	astchecks "github.com/zero-day-ai/ast-checks"
+	astchecks "github.com/zeroroot-ai/ast-checks"
 )
 
 // TestTenantClientOnly asserts that no handler in internal/daemon/api/

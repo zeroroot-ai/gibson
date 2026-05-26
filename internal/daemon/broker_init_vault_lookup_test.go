@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	sdkvault "github.com/zero-day-ai/platform-clients/secrets/vault"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	sdkvault "github.com/zeroroot-ai/platform-clients/secrets/vault"
 )
 
 // TestVaultRefreshLookup_KeyByBlobHashIsolatesDistinctConfigs verifies

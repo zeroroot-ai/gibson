@@ -15,27 +15,27 @@ import (
 	grpcmeta "google.golang.org/grpc/metadata"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
-	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/finding"
-	"github.com/zero-day-ai/gibson/internal/idp"
-	"github.com/zero-day-ai/gibson/internal/impersonation"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/manifest"
-	"github.com/zero-day-ai/gibson/internal/missiondraft"
-	"github.com/zero-day-ai/gibson/internal/onboarding"
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/gibson/pkg/version"
-	modelaccesspb "github.com/zero-day-ai/platform-sdk/gen/gibson/authz/v1"
-	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
-	daemonpb "github.com/zero-day-ai/sdk/api/gen/gibson/daemon/v1"
-	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
-	sdktenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/budget"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
+	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/finding"
+	"github.com/zeroroot-ai/gibson/internal/idp"
+	"github.com/zeroroot-ai/gibson/internal/impersonation"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/manifest"
+	"github.com/zeroroot-ai/gibson/internal/missiondraft"
+	"github.com/zeroroot-ai/gibson/internal/onboarding"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/pkg/version"
+	modelaccesspb "github.com/zeroroot-ai/platform-sdk/gen/gibson/authz/v1"
+	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	sdktenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // authzIface is the narrow subset of authz.Authorizer that the DaemonServer
@@ -219,7 +219,6 @@ type DaemonServer struct {
 	// responses as the gibson_url and in the enroll_command field.
 	// Populated from GIBSON_PUBLIC_URL env var at server construction time.
 	gibsonPublicURL string
-
 }
 
 // auditWriterIface is the narrow surface TenantAdminService uses from

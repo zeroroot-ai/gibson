@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/config"
+	"github.com/zeroroot-ai/gibson/internal/config"
 )
 
 // TestDaemonStartStopCycle tests the full daemon start/stop lifecycle.

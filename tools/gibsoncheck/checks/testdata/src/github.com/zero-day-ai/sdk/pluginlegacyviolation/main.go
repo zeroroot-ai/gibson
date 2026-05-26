@@ -6,5 +6,5 @@
 package pluginlegacyviolation
 
 import (
-	_ "github.com/zero-day-ai/sdk/pluginkit" // want `forbidden import "github.com/zero-day-ai/sdk/pluginkit"`
+	_ "github.com/zeroroot-ai/sdk/pluginkit" // want `forbidden import "github.com/zeroroot-ai/sdk/pluginkit"`
 )

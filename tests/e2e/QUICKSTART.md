@@ -20,7 +20,7 @@ If any are missing, see [Prerequisites](#prerequisites) below.
 
 ```bash
 # Navigate to tests directory
-cd /home/anthony/Code/zero-day.ai/opensource/gibson/tests/e2e
+cd /home/anthony/Code/zeroroot.ai/opensource/gibson/tests/e2e
 
 # Run automated test with cleanup
 ./taxonomy_relationships_test.sh --cleanup
@@ -339,9 +339,9 @@ docker stop neo4j-test-* && docker rm neo4j-test-*
 - **Test Documentation:** `taxonomy_relationships_test.md`
 - **Query Reference:** `cypher_queries_reference.md`
 - **E2E Test Overview:** `README.md`
-- **Gibson Documentation:** `/home/anthony/Code/zero-day.ai/opensource/gibson/README.md`
+- **Gibson Documentation:** `/home/anthony/Code/zeroroot.ai/opensource/gibson/README.md`
 - **Discord:** https://discord.gg/mkqd6mU3
-- **Issues:** https://github.com/zero-day-ai/gibson/issues
+- **Issues:** https://github.com/zeroroot-ai/gibson/issues
 
 ## Tips
 

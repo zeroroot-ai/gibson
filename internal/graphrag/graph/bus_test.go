@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 func mustTenant(s string) auth.TenantID {

@@ -12,7 +12,7 @@
 
 package harness
 
-import "github.com/zero-day-ai/sdk/toolerr"
+import "github.com/zeroroot-ai/sdk/toolerr"
 
 func init() {
 	registerNmapHints()

@@ -6,8 +6,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // FileProvider retrieves the master encryption key from a chart-mounted

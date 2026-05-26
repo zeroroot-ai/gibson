@@ -5,9 +5,9 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/zero-day-ai/gibson/internal/idp"
-	tenantpb "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/idp"
+	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"

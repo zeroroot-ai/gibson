@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/crypto/hkdf"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // HKDF parameters for per-tenant KEK derivation. These values are

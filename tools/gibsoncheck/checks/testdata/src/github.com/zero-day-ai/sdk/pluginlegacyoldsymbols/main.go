@@ -8,7 +8,7 @@ package pluginlegacyoldsymbols
 import (
 	"context"
 
-	"github.com/zero-day-ai/sdk/plugin"
+	"github.com/zeroroot-ai/sdk/plugin"
 )
 
 // badUsage references the deleted Plugin interface symbol names via the

@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/queries"
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/mission"
-	"github.com/zero-day-ai/gibson/internal/types"
-	missionpb "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/queries"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // MissionAdapter adapts the orchestrator to the mission.MissionOrchestrator interface.

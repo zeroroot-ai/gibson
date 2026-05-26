@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	daemonoperatorv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/operator/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	daemonoperatorv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/operator/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ImpersonateTenant issues a short-lived context token scoped to the target

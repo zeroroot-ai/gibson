@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 const (

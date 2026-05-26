@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/memory/vector"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/memory/vector"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // MemoryManager provides unified memory access for a mission with lifecycle management.

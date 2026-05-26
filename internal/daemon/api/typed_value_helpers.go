@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	commonpb "github.com/zero-day-ai/sdk/api/gen/gibson/common/v1"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 )
 
 // StringToTypedMap converts a JSON string to TypedMap (for backward compatibility with events).

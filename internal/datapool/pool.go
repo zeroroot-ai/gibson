@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 const (

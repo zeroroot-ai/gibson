@@ -279,7 +279,7 @@ rules:
     pattern:
       kind: forbidden_import
       target:
-        - "github.com/zero-day-ai/gibson/internal/datapool/admin"
+        - "github.com/zeroroot-ai/gibson/internal/datapool/admin"
     severity: error
     message: |
       Cross-tenant access requires CODEOWNERS review. Move the call

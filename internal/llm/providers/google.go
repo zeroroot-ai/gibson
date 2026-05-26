@@ -4,9 +4,9 @@ import (
 	"context"
 	"os"
 
-	"github.com/zero-day-ai/langchaingo/llms/googleai"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/langchaingo/llms/googleai"
 )
 
 // GoogleProvider implements LLMProvider for Google's Gemini models.

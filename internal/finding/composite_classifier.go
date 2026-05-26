@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/agent"
 )
 
 // CompositeClassifier implements FindingClassifier using a two-stage approach:

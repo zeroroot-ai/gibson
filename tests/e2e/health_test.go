@@ -15,8 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	healthhttp "github.com/zero-day-ai/sdk/health/http"
-	"github.com/zero-day-ai/sdk/types"
+	healthhttp "github.com/zeroroot-ai/sdk/health/http"
+	"github.com/zeroroot-ai/sdk/types"
 )
 
 // TestHealthz_Returns200_WhenDaemonHealthy verifies that /healthz returns 200 OK

@@ -3,7 +3,7 @@ package mission
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // MissionRunStore provides persistence for MissionRun entities.

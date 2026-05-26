@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ProviderConstructor is a function that builds a SecretsBroker from the raw

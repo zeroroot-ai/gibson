@@ -8,10 +8,10 @@ import (
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
-	pcpools "github.com/zero-day-ai/platform-clients/pools"
-	"github.com/zero-day-ai/sdk/auth"
+	pcpools "github.com/zeroroot-ai/platform-clients/pools"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
+	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 )
 
 // redisProductionOpts are the required connection lifecycle settings for
@@ -25,7 +25,7 @@ import (
 //   - WriteTimeout: 3 s — per-command socket write timeout.
 //   - ConnMaxLifetime: 30 m — connections older than this are recycled.
 //
-// Spec: zero-day-ai/.github#101 audit P1 (missing ConnMaxLifetime).
+// Spec: zeroroot-ai/.github#101 audit P1 (missing ConnMaxLifetime).
 var redisProductionOpts = pcpools.RedisOptions{
 	PoolSize:        10,
 	DialTimeout:     5 * time.Second,
@@ -118,7 +118,7 @@ func (r *redisPerTenant) ForTenant(ctx context.Context, tenant auth.TenantID) (*
 
 	// Apply required connection lifecycle settings enforced by platform-clients/pools.
 	// ConnMaxLifetime is required; omitting it leaves connections open indefinitely
-	// (audit finding P1, zero-day-ai/.github#101).
+	// (audit finding P1, zeroroot-ai/.github#101).
 	client := redis.NewClient(&redis.Options{
 		Addr:            r.addr,
 		Password:        r.password,

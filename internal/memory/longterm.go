@@ -3,9 +3,9 @@ package memory
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/memory/embedder"
-	"github.com/zero-day-ai/gibson/internal/memory/vector"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/memory/vector"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // LongTermMemory provides semantic search over historical data using vector embeddings.

@@ -8,8 +8,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sony/gobreaker"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
-	"github.com/zero-day-ai/platform-clients/resilience"
+	"github.com/zeroroot-ai/platform-clients/resilience"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
 )
 
 // circuitExecutor is the narrow interface Service needs to execute a

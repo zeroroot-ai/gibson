@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/sdk/toolerr"
+	"github.com/zeroroot-ai/sdk/toolerr"
 )
 
 // TestErrorRecoveryIntegration_FullFlow tests the complete error recovery flow:

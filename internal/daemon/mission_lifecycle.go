@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 )
 
 // missionManagerHolder holds the mission manager instance and ensures thread-safe initialization

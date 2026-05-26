@@ -1,8 +1,8 @@
 # CodeQL configuration. Pin bundle + queries via Renovate (PRD 1.5).
-name: "zero-day-ai default CodeQL config"
+name: "zeroroot-ai default CodeQL config"
 
 # Default suite for the language. Custom queries from
-# zero-day-ai/codeql-go-queries / codeql-ts-queries land via slices 4.3-4.5.
+# zeroroot-ai/codeql-go-queries / codeql-ts-queries land via slices 4.3-4.5.
 queries:
   - uses: security-and-quality
 

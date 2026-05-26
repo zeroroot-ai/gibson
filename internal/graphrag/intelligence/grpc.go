@@ -18,8 +18,8 @@ import (
 	"errors"
 	"strings"
 
-	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	intelligencepb "github.com/zeroroot-ai/sdk/api/gen/intelligence/v1"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"

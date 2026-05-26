@@ -15,12 +15,12 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	testpb "github.com/zero-day-ai/sdk/api/gen/gibson/test/v1"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	testpb "github.com/zeroroot-ai/sdk/api/gen/gibson/test/v1"
 
-	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/graphrag/loader"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/contextkeys"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/loader"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // mockClient is a configurable SandboxClient stub for unit tests.
@@ -66,7 +66,7 @@ func (f *fixedLogs) Close() error { return nil }
 // carries a per-tool registry — the daemon's catalog refresher owns that
 // mapping live in ComponentRegistry.
 var helloSpec = ToolSpec{
-	Image:   "ghcr.io/zero-day-ai/gibson-tool-runner:hello-dev",
+	Image:   "ghcr.io/zeroroot-ai/gibson-tool-runner:hello-dev",
 	Command: []string{"/tool-runner"},
 	VCPU:    1,
 	Memory:  "128Mi",

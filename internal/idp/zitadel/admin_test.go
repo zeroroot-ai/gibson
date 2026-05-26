@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/idp"
-	"github.com/zero-day-ai/gibson/internal/idp/zitadel"
+	"github.com/zeroroot-ai/gibson/internal/idp"
+	"github.com/zeroroot-ai/gibson/internal/idp/zitadel"
 )
 
 // ---------------------------------------------------------------------------

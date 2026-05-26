@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/idempotency"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/idempotency"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc"
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -19,7 +19,7 @@ import (
 // idempotencyFieldName is the canonical proto field name carried on
 // every Create/Run/Update/Start/Build request message under the
 // platform-sdk proto-hygiene convention (CONVENTIONS.md, added in
-// platform-sdk#2; PRD zero-day-ai/.github#101). The interceptor uses
+// platform-sdk#2; PRD zeroroot-ai/.github#101). The interceptor uses
 // protoreflect to discover the field on each request — no SDK pin
 // and no method-name allowlist required.
 const idempotencyFieldName = "idempotency_key"

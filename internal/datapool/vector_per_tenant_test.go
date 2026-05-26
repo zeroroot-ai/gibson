@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/datapool/vectordb"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/datapool/vectordb"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // fakeVectorDriver is a test double for vectordb.Driver.

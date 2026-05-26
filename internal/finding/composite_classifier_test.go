@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/agent"
 )
 
 // makeFinding builds a minimal agent.Finding for testing.

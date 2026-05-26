@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	pcpools "github.com/zero-day-ai/platform-clients/pools"
-	"github.com/zero-day-ai/sdk/auth"
+	pcpools "github.com/zeroroot-ai/platform-clients/pools"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // pgxPoolProductionOpts are the required connection lifecycle settings applied
@@ -23,7 +23,7 @@ import (
 //   - MaxConnLifetime: 1 h  — connections older than this are recycled.
 //   - MaxConnIdleTime: 30 m — idle connections are released after 30 min.
 //
-// Spec: zero-day-ai/.github#101 audit P1 (missing MaxConnLifetime).
+// Spec: zeroroot-ai/.github#101 audit P1 (missing MaxConnLifetime).
 var pgxPoolProductionOpts = pcpools.PgxPoolOptions{
 	MaxConnLifetime: 1 * time.Hour,
 	MaxConnIdleTime: 30 * time.Minute,
@@ -105,7 +105,7 @@ func (p *pgPerTenant) ForTenant(ctx context.Context, tenant auth.TenantID, tenan
 	// Apply required connection lifecycle settings enforced by platform-clients/pools.
 	// MaxConnLifetime and MaxConnIdleTime are required fields; failing to set them
 	// leaves connections open indefinitely, exhausting server-side connection slots
-	// (audit finding P1, zero-day-ai/.github#101).
+	// (audit finding P1, zeroroot-ai/.github#101).
 	poolCfg.MaxConnLifetime = pgxPoolProductionOpts.MaxConnLifetime
 	poolCfg.MaxConnIdleTime = pgxPoolProductionOpts.MaxConnIdleTime
 	if p.cfg.PoolMaxConns > 0 {

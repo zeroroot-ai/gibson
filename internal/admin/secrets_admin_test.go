@@ -11,12 +11,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/secrets"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
 
-	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
-	"github.com/zero-day-ai/sdk/auth"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
+	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -69,8 +69,8 @@ func (f *fakeBroker) List(_ context.Context, _ auth.TenantID, filter sdksecrets.
 	return out, nil
 }
 
-func (f *fakeBroker) Health(_ context.Context) error                { return nil }
-func (f *fakeBroker) Probe(_ context.Context) error                 { return f.probe }
+func (f *fakeBroker) Health(_ context.Context) error        { return nil }
+func (f *fakeBroker) Probe(_ context.Context) error         { return f.probe }
 func (f *fakeBroker) Capabilities() sdksecrets.Capabilities { return f.caps }
 
 // fakeRegistry returns the same broker for every tenant.
@@ -468,7 +468,7 @@ func TestStoredName_PrependUserPrefix(t *testing.T) {
 		want string
 	}{
 		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "openai-prod", "user/cred:openai-prod"},
-		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "cred:openai-prod", "user/cred:openai-prod"},   // bare cat prefix stripped first
+		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "cred:openai-prod", "user/cred:openai-prod"},      // bare cat prefix stripped first
 		{adminv1.SecretCategory_SECRET_CATEGORY_CRED, "user/cred:openai-prod", "user/cred:openai-prod"}, // idempotent
 		{adminv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "openai:default", "user/provider_config:openai:default"},
 		{adminv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, "raw", "raw"}, // unspecified — no prefix added
@@ -488,8 +488,8 @@ func TestCallerName_StripsUserPrefix(t *testing.T) {
 	}{
 		{"user/cred:openai-prod", "cred:openai-prod"},
 		{"user/provider_config:openai:default", "provider_config:openai:default"},
-		{"cred:openai-prod", "cred:openai-prod"},   // no prefix — unchanged
-		{"infra/postgres", "infra/postgres"},         // infra path — unchanged
+		{"cred:openai-prod", "cred:openai-prod"}, // no prefix — unchanged
+		{"infra/postgres", "infra/postgres"},     // infra path — unchanged
 	}
 	for _, tc := range tests {
 		got := callerName(tc.stored)
@@ -507,8 +507,8 @@ func TestToStoredName_RoundTrip(t *testing.T) {
 		{"cred:openai-prod", "user/cred:openai-prod"},
 		{"provider_config:openai:default", "user/provider_config:openai:default"},
 		{"user/cred:openai-prod", "user/cred:openai-prod"}, // already stored form
-		{"infra/postgres", "infra/postgres"},                 // non-user path untouched
-		{"unknown", "unknown"},                               // unrecognised prefix
+		{"infra/postgres", "infra/postgres"},               // non-user path untouched
+		{"unknown", "unknown"},                             // unrecognised prefix
 	}
 	for _, tc := range tests {
 		got := toStoredName(tc.caller)

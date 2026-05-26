@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/component/resolver"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component/resolver"
 )
 
 // manifestLoader implements the resolver.ManifestLoader interface.

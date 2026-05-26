@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // Names is the canonical source for every per-tenant resource name in the
@@ -55,7 +55,7 @@ func (n Names) Underscore() string {
 // carries the "tenant-" prefix — the tenant-operator's ProvisionNamespace
 // path and the chart-shipped RoleBinding templates both produce / target
 // this form, and every live cluster has tenant-<slug> namespaces (e.g.
-// tenant-acme, tenant-zero-day-ai). The prefix is part of the contract,
+// tenant-acme, tenant-zeroroot-ai). The prefix is part of the contract,
 // not a transformation, because it cleanly avoids collision with K8s
 // reserved names ("default", "kube-system", "kube-public", etc.) — a
 // "tenant-" prefix can never collide with a K8s-managed namespace by

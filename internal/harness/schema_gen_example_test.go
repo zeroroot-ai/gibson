@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/harness"
 )
 
 // Example demonstrates basic schema generation from a simple struct

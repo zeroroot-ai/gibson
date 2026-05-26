@@ -5,14 +5,14 @@ import (
 	"errors"
 	"testing"
 
-	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
-	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/identity"
 )
 
 // stubAuthorizer is a minimal authz.Authorizer for the write tests:
@@ -101,13 +101,13 @@ func TestWriteAgentGrants_HappyPath(t *testing.T) {
 	lookup := &stubLookup{records: map[string]identity.PrincipalRecord{
 		"agent_principal:abc": {
 			PrincipalID: "agent_principal:abc",
-			TenantID:    "zero-day-ai",
+			TenantID:    "zeroroot-ai",
 			Kind:        identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT,
 		},
 	}}
 	srv := newWriteServer(t, az, lookup)
 
-	resp, err := srv.WriteAgentGrants(adminCtx(t, "zero-day-ai"), &adminv1.WriteAgentGrantsRequest{
+	resp, err := srv.WriteAgentGrants(adminCtx(t, "zeroroot-ai"), &adminv1.WriteAgentGrantsRequest{
 		TargetPrincipalId: "agent_principal:abc",
 		Grants: []*adminv1.GrantTuple{
 			{Object: "component:gitlab", Relation: "can_read"},
@@ -132,13 +132,13 @@ func TestWriteAgentGrants_IdempotentAlreadyPresent(t *testing.T) {
 	lookup := &stubLookup{records: map[string]identity.PrincipalRecord{
 		"agent_principal:abc": {
 			PrincipalID: "agent_principal:abc",
-			TenantID:    "zero-day-ai",
+			TenantID:    "zeroroot-ai",
 			Kind:        identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT,
 		},
 	}}
 	srv := newWriteServer(t, az, lookup)
 
-	resp, err := srv.WriteAgentGrants(adminCtx(t, "zero-day-ai"), &adminv1.WriteAgentGrantsRequest{
+	resp, err := srv.WriteAgentGrants(adminCtx(t, "zeroroot-ai"), &adminv1.WriteAgentGrantsRequest{
 		TargetPrincipalId: "agent_principal:abc",
 		Grants: []*adminv1.GrantTuple{
 			{Object: "component:gitlab", Relation: "can_read"},
@@ -158,13 +158,13 @@ func TestWriteAgentGrants_AgentCannotGetCanInvoke(t *testing.T) {
 	lookup := &stubLookup{records: map[string]identity.PrincipalRecord{
 		"agent_principal:abc": {
 			PrincipalID: "agent_principal:abc",
-			TenantID:    "zero-day-ai",
+			TenantID:    "zeroroot-ai",
 			Kind:        identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT,
 		},
 	}}
 	srv := newWriteServer(t, az, lookup)
 
-	_, err := srv.WriteAgentGrants(adminCtx(t, "zero-day-ai"), &adminv1.WriteAgentGrantsRequest{
+	_, err := srv.WriteAgentGrants(adminCtx(t, "zeroroot-ai"), &adminv1.WriteAgentGrantsRequest{
 		TargetPrincipalId: "agent_principal:abc",
 		Grants: []*adminv1.GrantTuple{
 			{Object: "plugin:gitlab", Relation: "can_invoke"},
@@ -192,7 +192,7 @@ func TestWriteAgentGrants_CrossTenantRejected(t *testing.T) {
 	}}
 	srv := newWriteServer(t, az, lookup)
 
-	_, err := srv.WriteAgentGrants(adminCtx(t, "zero-day-ai"), &adminv1.WriteAgentGrantsRequest{
+	_, err := srv.WriteAgentGrants(adminCtx(t, "zeroroot-ai"), &adminv1.WriteAgentGrantsRequest{
 		TargetPrincipalId: "agent_principal:other",
 		Grants: []*adminv1.GrantTuple{
 			{Object: "component:gitlab", Relation: "can_read"},
@@ -211,13 +211,13 @@ func TestWriteAgentGrants_InvalidRelation(t *testing.T) {
 	lookup := &stubLookup{records: map[string]identity.PrincipalRecord{
 		"agent_principal:abc": {
 			PrincipalID: "agent_principal:abc",
-			TenantID:    "zero-day-ai",
+			TenantID:    "zeroroot-ai",
 			Kind:        identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT,
 		},
 	}}
 	srv := newWriteServer(t, az, lookup)
 
-	_, err := srv.WriteAgentGrants(adminCtx(t, "zero-day-ai"), &adminv1.WriteAgentGrantsRequest{
+	_, err := srv.WriteAgentGrants(adminCtx(t, "zeroroot-ai"), &adminv1.WriteAgentGrantsRequest{
 		TargetPrincipalId: "agent_principal:abc",
 		Grants: []*adminv1.GrantTuple{
 			{Object: "component:foo", Relation: "owner"},
@@ -238,13 +238,13 @@ func TestDeleteAgentGrants_HappyPath(t *testing.T) {
 	lookup := &stubLookup{records: map[string]identity.PrincipalRecord{
 		"agent_principal:abc": {
 			PrincipalID: "agent_principal:abc",
-			TenantID:    "zero-day-ai",
+			TenantID:    "zeroroot-ai",
 			Kind:        identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT,
 		},
 	}}
 	srv := newWriteServer(t, az, lookup)
 
-	resp, err := srv.DeleteAgentGrants(adminCtx(t, "zero-day-ai"), &adminv1.DeleteAgentGrantsRequest{
+	resp, err := srv.DeleteAgentGrants(adminCtx(t, "zeroroot-ai"), &adminv1.DeleteAgentGrantsRequest{
 		TargetPrincipalId: "agent_principal:abc",
 		Grants: []*adminv1.GrantTuple{
 			{Object: "component:gitlab", Relation: "can_read"},

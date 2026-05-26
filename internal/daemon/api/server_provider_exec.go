@@ -8,23 +8,23 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/budget"
-	"github.com/zero-day-ai/gibson/internal/contextkeys"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/llm/providers"
-	"github.com/zero-day-ai/gibson/internal/providerconfig"
-	"github.com/zero-day-ai/gibson/internal/ratelimit"
-	"github.com/zero-day-ai/gibson/internal/types"
-	tenantv1 "github.com/zero-day-ai/sdk/api/gen/gibson/tenant/v1"
+	"github.com/zeroroot-ai/gibson/internal/budget"
+	"github.com/zeroroot-ai/gibson/internal/contextkeys"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm/providers"
+	"github.com/zeroroot-ai/gibson/internal/providerconfig"
+	"github.com/zeroroot-ai/gibson/internal/ratelimit"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	tenantv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/tenant/v1"
 	// As of sdk#106 the budget surface is split: customer-visible value
 	// types (`BudgetExceeded` + `BudgetScope`) live in the OSS SDK at
 	// `gibson.budget_status.v1`; the admin `BudgetService` lives in
 	// platform-sdk at `gibson.budget.v1`. This file only attaches the
 	// status-detail wire shape to a gRPC error and never references the
 	// service descriptor, so it imports the OSS path only.
-	budgetstatuspb "github.com/zero-day-ai/sdk/api/gen/gibson/budget_status/v1"
-	"github.com/zero-day-ai/sdk/auth"
-	"github.com/zero-day-ai/sdk/schema"
+	budgetstatuspb "github.com/zeroroot-ai/sdk/api/gen/gibson/budget_status/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/schema"
 )
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ProviderType represents the type of LLM provider.

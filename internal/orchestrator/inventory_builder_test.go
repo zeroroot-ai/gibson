@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/component"
-	"github.com/zero-day-ai/gibson/internal/tool"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/tool"
 )
 
 // mockBuilderComponentDiscovery is a test double for component.ComponentDiscovery

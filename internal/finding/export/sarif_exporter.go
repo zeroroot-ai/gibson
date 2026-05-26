@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/finding"
-	sdkSecurity "github.com/zero-day-ai/sdk/finding/security"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/finding"
+	sdkSecurity "github.com/zeroroot-ai/sdk/finding/security"
 )
 
 // SARIFExporter exports findings in SARIF 2.1.0 format.
@@ -32,7 +32,7 @@ func NewSARIFExporter() *SARIFExporter {
 	return &SARIFExporter{
 		ToolName:       "Gibson",
 		ToolVersion:    "1.0.0",
-		InformationURI: "https://github.com/zero-day-ai/gibson",
+		InformationURI: "https://github.com/zeroroot-ai/gibson",
 	}
 }
 

@@ -3,8 +3,8 @@ package all_test
 import (
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
-	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/all"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
+	_ "github.com/zeroroot-ai/gibson/internal/orchestrator/nodes/all"
 )
 
 // TestAggregator_registers_concrete_nouns asserts that importing

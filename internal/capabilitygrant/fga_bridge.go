@@ -12,8 +12,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // Capability represents a resolved permission for an agent to interact with

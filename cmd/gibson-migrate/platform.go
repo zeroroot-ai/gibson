@@ -24,7 +24,7 @@ import (
 	migratepg "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/lib/pq"
 
-	pgmigrations "github.com/zero-day-ai/gibson/pkg/platform/migrations"
+	pgmigrations "github.com/zeroroot-ai/gibson/pkg/platform/migrations"
 )
 
 // platformDSNEnv is the env var the chart's platform-db-migrate Job sets.

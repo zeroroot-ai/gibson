@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	manifestpb "github.com/zero-day-ai/sdk/api/gen/gibson/manifest/v1"
+	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

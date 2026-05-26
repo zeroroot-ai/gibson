@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/gibson/internal/state"
 )
 
 // ChangeType represents the type of change event for prompt updates

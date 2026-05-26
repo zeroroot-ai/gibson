@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/guardrail"
-	"github.com/zero-day-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/guardrail"
+	"github.com/zeroroot-ai/gibson/internal/harness"
 )
 
 func TestRateLimiter_BasicRateLimiting(t *testing.T) {

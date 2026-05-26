@@ -11,7 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/zero-day-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
 )
 
 // Sentinel errors for plugin access operations.

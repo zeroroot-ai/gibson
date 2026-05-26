@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/gibson/internal/observability"
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/schema"
+	"github.com/zeroroot-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 )
 
 // CreateOTelDecisionLogWriter creates an OpenTelemetry decision log writer for a mission.

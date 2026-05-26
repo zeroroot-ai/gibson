@@ -38,18 +38,18 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 )
 
 // GVR definitions for Tenant and TenantMember CRs.
 var (
 	tenantsGVR = schema.GroupVersionResource{
-		Group:    "gibson.zero-day.ai",
+		Group:    "gibson.zeroroot.ai",
 		Version:  "v1alpha1",
 		Resource: "tenants",
 	}
 	tenantMembersGVR = schema.GroupVersionResource{
-		Group:    "gibson.zero-day.ai",
+		Group:    "gibson.zeroroot.ai",
 		Version:  "v1alpha1",
 		Resource: "tenantmembers",
 	}

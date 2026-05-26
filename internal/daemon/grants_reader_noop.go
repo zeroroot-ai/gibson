@@ -14,8 +14,8 @@ package daemon
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/admin"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/admin"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // noopGrantsReader returns an empty active-grants list. Replace with a

@@ -2,7 +2,7 @@ package datapool
 
 import (
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/datapool/vectordb"
+	"github.com/zeroroot-ai/gibson/internal/datapool/vectordb"
 )
 
 // MemoryBackends holds the per-tenant storage backends for the 3-tier memory system.

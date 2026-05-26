@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zero-day-ai/sdk/eval"
+	"github.com/zeroroot-ai/sdk/eval"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"

@@ -15,14 +15,14 @@ import (
 	// Per-noun packages register at their init(). Order is
 	// irrelevant — registration is via package init, not import
 	// order.
-	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/agent"
-	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/condition"
-	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/join"
-	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/parallel"
-	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/plugin"
-	_ "github.com/zero-day-ai/gibson/internal/orchestrator/nodes/tool"
+	_ "github.com/zeroroot-ai/gibson/internal/orchestrator/nodes/agent"
+	_ "github.com/zeroroot-ai/gibson/internal/orchestrator/nodes/condition"
+	_ "github.com/zeroroot-ai/gibson/internal/orchestrator/nodes/join"
+	_ "github.com/zeroroot-ai/gibson/internal/orchestrator/nodes/parallel"
+	_ "github.com/zeroroot-ai/gibson/internal/orchestrator/nodes/plugin"
+	_ "github.com/zeroroot-ai/gibson/internal/orchestrator/nodes/tool"
 
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 )
 
 // AssertExhaustive runs the registry's exhaustiveness check

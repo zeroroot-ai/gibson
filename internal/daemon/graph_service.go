@@ -32,10 +32,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

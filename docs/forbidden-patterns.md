@@ -255,7 +255,7 @@ Wrong:
 ```go
 package server   // tenant-handler package
 
-import "github.com/zero-day-ai/gibson/internal/datapool/admin"
+import "github.com/zeroroot-ai/gibson/internal/datapool/admin"
 
 func (s *server) ListAllMissions(ctx context.Context, req *pb.Req) (*pb.Resp, error) {
     ap, _ := admin.New(...)            // forbidden

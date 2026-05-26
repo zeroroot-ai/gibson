@@ -32,8 +32,8 @@ import (
 	"cuelang.org/go/cue/load"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
-	"github.com/zero-day-ai/sdk/cueschemas"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	"github.com/zeroroot-ai/sdk/cueschemas"
 )
 
 // Diagnostic is a CUE error or warning produced by Validate.
@@ -73,7 +73,7 @@ const schemaModuleRoot = "/cue-mission-schema-root"
 // implied qualifier from the last path element of the import path, so user
 // CUE files that write:
 //
-//	import missionv1 "github.com/zero-day-ai/sdk/api/proto/gibson/mission/v1"
+//	import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
 //
 // will look for package name "v1" in that directory. We fix this by
 // rewriting the package declaration in the overlay so the package name
@@ -116,7 +116,7 @@ func initOverlay() {
 //
 // CUE resolves an unqualified import like:
 //
-//	import missionv1 "github.com/zero-day-ai/sdk/api/proto/gibson/mission/v1"
+//	import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
 //
 // by finding files in the directory with the implied qualifier ("v1"). The SDK's
 // generated CUE uses proto-derived names ("missionpb"), which don't match.
@@ -130,7 +130,7 @@ func initOverlay() {
 //
 // The set of paths to rewrite is kept narrow and explicit to avoid surprises.
 var packageRewrites = map[string]string{
-	// User code: import missionv1 "github.com/zero-day-ai/sdk/api/proto/gibson/mission/v1"
+	// User code: import missionv1 "github.com/zeroroot-ai/sdk/api/proto/gibson/mission/v1"
 	// Needs package v1 (implied qualifier). Internal imports already use :typespb.
 	"api/proto/gibson/mission/v1": "v1",
 }
@@ -157,7 +157,6 @@ func rewritePackageDecl(filePath string, data []byte) []byte {
 	}
 	return bytes.Join(lines, []byte("\n"))
 }
-
 
 // loadUserValue compiles source into a cue.Value using the embedded mission
 // schema. Anonymous CUE files (no package clause, as used in ADK templates)

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zero-day-ai/gibson/internal/datapool/vectordb"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/datapool/vectordb"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // vectorPerTenant wraps the vectordb.Driver to provide per-tenant collection

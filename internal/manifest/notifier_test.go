@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 type recordingInvalidator struct {

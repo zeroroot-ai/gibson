@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/daemon/api"
 )
 
 // TestSubscribeIntegration tests the full subscription mission including

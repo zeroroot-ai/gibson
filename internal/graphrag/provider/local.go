@@ -13,12 +13,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sony/gobreaker"
-	"github.com/zero-day-ai/gibson/internal/graphrag"
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	"github.com/zero-day-ai/gibson/internal/memory/vector"
-	"github.com/zero-day-ai/gibson/internal/types"
-	"github.com/zero-day-ai/platform-clients/resilience"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/memory/vector"
+	"github.com/zeroroot-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/platform-clients/resilience"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // graphragCircuitState tracks the current circuit breaker state as a Prometheus
@@ -108,7 +108,7 @@ func newGraphRAGBreaker(p *LocalGraphRAGProvider) *gobreaker.CircuitBreaker {
 				p.graphHealthy.Store(true)
 			case gobreaker.StateOpen:
 				p.graphHealthy.Store(false)
-			// StateHalfOpen: leave graphHealthy as-is; the probe will determine outcome.
+				// StateHalfOpen: leave graphHealthy as-is; the probe will determine outcome.
 			}
 		},
 	)

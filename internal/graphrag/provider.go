@@ -3,7 +3,7 @@ package graphrag
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // GraphRAGProvider is the low-level graph + vector storage abstraction consumed

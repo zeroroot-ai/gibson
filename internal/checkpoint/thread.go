@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Thread represents a branching execution path in mission execution.

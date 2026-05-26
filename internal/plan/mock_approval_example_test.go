@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/plan"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/plan"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ExampleMockApprovalService_autoApprove demonstrates how to use the mock

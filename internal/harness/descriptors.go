@@ -1,9 +1,9 @@
 package harness
 
 import (
-	"github.com/zero-day-ai/gibson/internal/agent"
-	"github.com/zero-day-ai/gibson/internal/tool"
-	"github.com/zero-day-ai/sdk/schema"
+	"github.com/zeroroot-ai/gibson/internal/agent"
+	"github.com/zeroroot-ai/gibson/internal/tool"
+	"github.com/zeroroot-ai/sdk/schema"
 )
 
 // PluginMethodDescriptor describes a plugin method at the harness/discovery

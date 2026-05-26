@@ -181,9 +181,9 @@ func TestMissionMemoryConfig_ApplyDefaults(t *testing.T) {
 			initial: MissionMemoryConfig{},
 			expected: MissionMemoryConfig{
 				CacheSize:    1000,
-				EnableFTS:    false,               // Default is false (zero value)
-				TTL:          24 * time.Hour,       // Default set by ApplyDefaults
-				CompletedTTL: 2 * time.Hour,        // Default set by ApplyDefaults
+				EnableFTS:    false,          // Default is false (zero value)
+				TTL:          24 * time.Hour, // Default set by ApplyDefaults
+				CompletedTTL: 2 * time.Hour,  // Default set by ApplyDefaults
 			},
 		},
 		{

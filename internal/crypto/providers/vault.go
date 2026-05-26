@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/vault/api"
-	"github.com/zero-day-ai/gibson/internal/crypto"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/crypto"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // VaultProvider retrieves encryption keys from HashiCorp Vault.

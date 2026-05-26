@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/schema"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // OTelDecisionLogWriterAdapter adapts the orchestrator's DecisionLogWriter interface

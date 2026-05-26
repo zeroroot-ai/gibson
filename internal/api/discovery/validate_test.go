@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	discoverypb "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
+	discoverypb "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
 
-	"github.com/zero-day-ai/gibson/internal/api/discovery"
+	"github.com/zeroroot-ai/gibson/internal/api/discovery"
 )
 
 // TestValidateComponent_EmptyComponentYaml_ReportsRequiredSchemaError asserts

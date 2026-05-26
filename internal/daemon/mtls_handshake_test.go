@@ -53,7 +53,7 @@ type spiffeTestPKI struct {
 }
 
 // newSpiffeTestPKI creates a fresh CA + one leaf SVID, both in-process.
-// trustDomainName e.g. "zero-day.ai", pathSuffix e.g. "/test/server".
+// trustDomainName e.g. "zeroroot.ai", pathSuffix e.g. "/test/server".
 func newSpiffeTestPKI(t *testing.T, trustDomainName, pathSuffix string) *spiffeTestPKI {
 	t.Helper()
 
@@ -173,7 +173,7 @@ func dialWithForeignCert(t *testing.T, target string, foreignClientPKI *spiffeTe
 	// Server CA pool so the client can verify the server cert.
 	serverCAPool := x509.NewCertPool()
 	serverBundle, err := serverPKI.bundleSource.GetX509BundleForTrustDomain(
-		spiffeid.RequireTrustDomainFromString("zero-day.ai"),
+		spiffeid.RequireTrustDomainFromString("zeroroot.ai"),
 	)
 	require.NoError(t, err)
 	for _, ca := range serverBundle.X509Authorities() {
@@ -310,8 +310,8 @@ func base64Encode(dst, src []byte) {
 //
 // Reference: spec daemon-tls-clientauth-fix Requirement 1.1 / Component 3(a).
 func TestMTLS_ValidSPIFFECert_HandshakeSucceeds(t *testing.T) {
-	serverPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/server")
-	clientPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/client")
+	serverPKI := newSpiffeTestPKI(t, "zeroroot.ai", "/test/server")
+	clientPKI := newSpiffeTestPKI(t, "zeroroot.ai", "/test/client")
 
 	// The server's bundle must trust the CLIENT's CA for this test to pass.
 	// Add client CA to the server's bundle source.
@@ -344,7 +344,7 @@ func TestMTLS_ValidSPIFFECert_HandshakeSucceeds(t *testing.T) {
 //
 // Reference: spec daemon-tls-clientauth-fix Requirement 1.2 / Component 3(b).
 func TestMTLS_NonSPIFFECert_HandshakeFails(t *testing.T) {
-	serverPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/server")
+	serverPKI := newSpiffeTestPKI(t, "zeroroot.ai", "/test/server")
 	// foreignPKI is from a COMPLETELY different CA — NOT trusted by the server.
 	foreignPKI := newSpiffeTestPKI(t, "foreign.example", "/test/foreign")
 
@@ -387,7 +387,7 @@ func TestMTLS_NonSPIFFECert_HandshakeFails(t *testing.T) {
 //
 // Reference: spec critical-tls-no-fallbacks Requirements 2.1, 2.3, 5.3.
 func TestMTLS_NoCert_HandshakeRejected(t *testing.T) {
-	serverPKI := newSpiffeTestPKI(t, "zero-day.ai", "/test/server")
+	serverPKI := newSpiffeTestPKI(t, "zeroroot.ai", "/test/server")
 	_, addr := startMTLSTestServer(t, serverPKI)
 
 	cc := dialWithNoCert(t, addr, serverPKI)

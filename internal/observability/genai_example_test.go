@@ -3,8 +3,8 @@ package observability_test
 import (
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/observability"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/observability"
 )
 
 // Example demonstrates how to use the tool-related observability functions

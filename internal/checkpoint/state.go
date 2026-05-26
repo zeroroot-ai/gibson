@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/vmihailenco/msgpack/v5"
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // ExecutionState represents the complete serializable state of mission execution.

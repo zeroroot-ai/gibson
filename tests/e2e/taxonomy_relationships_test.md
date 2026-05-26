@@ -50,7 +50,7 @@ docker logs -f neo4j-test
 
 ```bash
 # Navigate to Gibson repository
-cd /home/anthony/Code/zero-day.ai/opensource/gibson
+cd /home/anthony/Code/zeroroot.ai/opensource/gibson
 
 # Build Gibson CLI
 make build
@@ -93,13 +93,13 @@ export ANTHROPIC_API_KEY="your-api-key-here"
 **Option A: From local development**
 ```bash
 # If you have the agent locally
-cd /home/anthony/Code/zero-day.ai/enterprise/agents/network-recon
+cd /home/anthony/Code/zeroroot.ai/enterprise/agents/network-recon
 make build
 ```
 
 **Option B: From GitHub**
 ```bash
-gibson agent install github.com/zero-day-ai/network-recon
+gibson agent install github.com/zeroroot-ai/network-recon
 ```
 
 ### 5. Create Test Mission
@@ -108,7 +108,7 @@ Create a mission configuration file:
 
 ```bash
 cat > /tmp/test-mission.yaml <<'EOF'
-apiVersion: gibson.zero-day.ai/v1
+apiVersion: gibson.zeroroot.ai/v1
 kind: Mission
 metadata:
   name: taxonomy-relationship-test
@@ -507,10 +507,10 @@ For automated testing, see the companion script: `taxonomy_relationships_test.sh
 
 ## References
 
-- Gibson Framework: `/home/anthony/Code/zero-day.ai/opensource/gibson/`
-- Network-Recon Agent: `/home/anthony/Code/zero-day.ai/enterprise/agents/network-recon/`
-- Neo4j Adapter: `/home/anthony/Code/zero-day.ai/opensource/sdk/memory/neo4j_adapter.go`
-- Taxonomy Spec: `/home/anthony/Code/zero-day.ai/.spec-workflow/specs/entity-taxonomy/`
+- Gibson Framework: `/home/anthony/Code/zeroroot.ai/opensource/gibson/`
+- Network-Recon Agent: `/home/anthony/Code/zeroroot.ai/enterprise/agents/network-recon/`
+- Neo4j Adapter: `/home/anthony/Code/zeroroot.ai/opensource/sdk/memory/neo4j_adapter.go`
+- Taxonomy Spec: `/home/anthony/Code/zeroroot.ai/.spec-workflow/specs/entity-taxonomy/`
 
 ## Next Steps
 

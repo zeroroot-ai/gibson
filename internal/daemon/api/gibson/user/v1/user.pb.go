@@ -7,7 +7,7 @@
 package userv1
 
 import (
-	_ "github.com/zero-day-ai/sdk/api/gen/gibson/auth/v1"
+	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/auth/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"

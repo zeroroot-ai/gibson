@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/mission"
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
-	typesv1 "github.com/zero-day-ai/sdk/api/gen/gibson/types/v1"
+	"github.com/zeroroot-ai/gibson/internal/mission"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	typesv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 )

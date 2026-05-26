@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestNewRenderContext verifies that NewRenderContext creates a properly initialized context

@@ -3,7 +3,7 @@ package embedder
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Embedder generates embedding vectors from text content.

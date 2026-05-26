@@ -29,7 +29,7 @@ var AdminPoolAcquireAnalyzer = &analysis.Analyzer{
 }
 
 // adminPoolImportPath is the Go import path of the admin pool package.
-const adminPoolImportPath = "github.com/zero-day-ai/gibson/internal/datapool/admin"
+const adminPoolImportPath = "github.com/zeroroot-ai/gibson/internal/datapool/admin"
 
 // allowedAdminPackages lists package path substrings that are permitted to
 // import the admin pool. The check uses substring matching so sub-packages

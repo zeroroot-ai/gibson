@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 )
 
 // ExampleBuildObservationPrompt demonstrates how to build an observation prompt

@@ -3,7 +3,7 @@ package observability
 import (
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/schema"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/schema"
 )
 
 // MessageLog represents a single message in an LLM conversation for observability.

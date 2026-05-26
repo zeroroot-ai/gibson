@@ -3,7 +3,7 @@ package crypto
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // KeyProvider retrieves encryption keys from external secret stores.

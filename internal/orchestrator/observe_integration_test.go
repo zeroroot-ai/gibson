@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 var errRegistryUnavailable = errors.New("registry unavailable")

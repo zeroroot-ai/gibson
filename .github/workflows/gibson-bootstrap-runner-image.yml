@@ -1,6 +1,6 @@
 name: gibson-bootstrap-runner image
 
-# Builds and publishes ghcr.io/zero-day-ai/gibson-bootstrap-runner.
+# Builds and publishes ghcr.io/zeroroot-ai/gibson-bootstrap-runner.
 #
 # This image is consumed exclusively by the gibson chart's bootstrap-secrets
 # Job. It layers bash + jq + kubectl + aws-cli on top of the gibson-bootstrap
@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   build:
-    uses: zero-day-ai/.github/.github/workflows/reusable-image-build.yml@main
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
     permissions:
       contents: write
       packages: write
@@ -45,5 +45,5 @@ jobs:
       component_name: gibson-bootstrap-runner
       component_path: .
       dockerfile_path: tools/gibson-bootstrap/Dockerfile.runner
-      image_name: ghcr.io/zero-day-ai/gibson-bootstrap-runner
+      image_name: ghcr.io/zeroroot-ai/gibson-bootstrap-runner
       tag_pattern: gibson-bootstrap-runner-v(.*)

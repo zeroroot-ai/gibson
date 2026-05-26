@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -440,8 +440,8 @@ func newBrokenLogger(t *testing.T) (*AuditLogger, context.CancelFunc) {
 
 	cfg := state.DefaultConfig()
 	cfg.URL = "redis://" + mr.Addr()
-	cfg.MaxRetries = -1              // disable retries
-	cfg.DialTimeout = 50 * time.Millisecond  // fail fast on connection
+	cfg.MaxRetries = -1                     // disable retries
+	cfg.DialTimeout = 50 * time.Millisecond // fail fast on connection
 	cfg.ReadTimeout = 50 * time.Millisecond
 	cfg.WriteTimeout = 50 * time.Millisecond
 

@@ -1,6 +1,6 @@
 package graph
 
-import "github.com/zero-day-ai/gibson/internal/types"
+import "github.com/zeroroot-ai/gibson/internal/types"
 
 // Graph database error codes
 const (

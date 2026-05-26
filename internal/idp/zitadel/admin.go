@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/idp"
+	"github.com/zeroroot-ai/gibson/internal/idp"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )

@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
-	"github.com/zero-day-ai/gibson/tools/gibsoncheck/checks"
+	"github.com/zeroroot-ai/gibson/tools/gibsoncheck/checks"
 )
 
 // TestForbidRedisKeyPrefix_Violation verifies that a package outside the
@@ -14,7 +14,7 @@ import (
 func TestForbidRedisKeyPrefix_Violation(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.ForbidRedisKeyPrefixAnalyzer,
-		"github.com/zero-day-ai/gibson/internal/redisprefixviolation")
+		"github.com/zeroroot-ai/gibson/internal/redisprefixviolation")
 }
 
 // TestForbidRedisKeyPrefix_PlainKeys verifies that a package using plain
@@ -22,5 +22,5 @@ func TestForbidRedisKeyPrefix_Violation(t *testing.T) {
 func TestForbidRedisKeyPrefix_PlainKeys(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.ForbidRedisKeyPrefixAnalyzer,
-		"github.com/zero-day-ai/gibson/internal/redisprefixallowed")
+		"github.com/zeroroot-ai/gibson/internal/redisprefixallowed")
 }

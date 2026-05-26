@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

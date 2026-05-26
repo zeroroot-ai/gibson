@@ -12,7 +12,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/zero-day-ai/gibson/internal/datapool/vectordb"
+	"github.com/zeroroot-ai/gibson/internal/datapool/vectordb"
 )
 
 // ---------------------------------------------------------------------------

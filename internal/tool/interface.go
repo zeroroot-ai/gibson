@@ -3,7 +3,7 @@ package tool
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 	"google.golang.org/protobuf/proto"
 )
 

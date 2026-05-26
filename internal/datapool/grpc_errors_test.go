@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
 )
 
 func TestMapPoolError_nil(t *testing.T) {

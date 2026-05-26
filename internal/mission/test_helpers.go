@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Mock mission types for testing (mission package was removed)

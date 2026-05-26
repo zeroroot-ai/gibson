@@ -178,5 +178,5 @@ func GatewayURL() string {
 	if u := os.Getenv("GATEWAY_URL"); u != "" {
 		return u
 	}
-	return "https://app.zero-day.local:30443"
+	return "https://app.zeroroot.local:30443"
 }

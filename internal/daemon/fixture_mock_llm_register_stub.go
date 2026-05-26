@@ -13,7 +13,7 @@ package daemon
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm"
 )
 
 // maybeRegisterMockLLMProvider is a compile-time no-op in production builds.

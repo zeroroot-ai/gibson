@@ -7,8 +7,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
-	"github.com/zero-day-ai/gibson/internal/orchestrator"
+	"github.com/zeroroot-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/orchestrator"
 )
 
 // ExampleLLMClient demonstrates a basic implementation of the LLMClient interface

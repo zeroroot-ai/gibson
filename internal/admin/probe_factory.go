@@ -13,8 +13,8 @@ package admin
 import (
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/secrets"
-	sdksecrets "github.com/zero-day-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/gibson/internal/secrets"
+	sdksecrets "github.com/zeroroot-ai/platform-clients/secrets"
 )
 
 // MapProbeFactory implements ProviderProbeFactory by looking up the

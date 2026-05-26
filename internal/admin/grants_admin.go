@@ -24,14 +24,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
-	capabilityv1 "github.com/zero-day-ai/sdk/api/gen/gibson/capability/v1"
-	identitypb "github.com/zero-day-ai/sdk/api/gen/gibson/identity/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	capabilityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/capability/v1"
+	identitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/identity/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	"github.com/zero-day-ai/gibson/internal/audit"
-	"github.com/zero-day-ai/gibson/internal/authz"
-	"github.com/zero-day-ai/gibson/internal/identity"
+	"github.com/zeroroot-ai/gibson/internal/audit"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/identity"
 )
 
 // GrantInfo is the dashboard-shaped view of one active capability grant.

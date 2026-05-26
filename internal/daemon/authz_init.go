@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
-	pcauthz "github.com/zero-day-ai/platform-clients/authz"
+	"github.com/zeroroot-ai/gibson/internal/authz"
+	pcauthz "github.com/zeroroot-ai/platform-clients/authz"
 )
 
 // initAuthorizer sets up the Authorization Service phase during daemon startup.

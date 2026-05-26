@@ -12,14 +12,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	missionv1 "github.com/zero-day-ai/sdk/api/gen/gibson/mission/v1"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Helper function to create a test mission with specific status

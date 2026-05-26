@@ -2,7 +2,7 @@
 // derivation helpers shared by the Gibson daemon and the tenant-operator.
 //
 // This is platform-internal infrastructure code. It is NOT part of the
-// customer-facing SDK at github.com/zero-day-ai/sdk. Customers building
+// customer-facing SDK at github.com/zeroroot-ai/sdk. Customers building
 // agents, tools, and plugins should never import from this package — the
 // resource names and KEK helpers it exposes are implementation details of
 // the Gibson control plane that we coordinate between gibson and
@@ -21,8 +21,8 @@
 // # What does NOT belong here
 //
 // Anything customer-facing: agent/tool/plugin contracts, secrets broker
-// interfaces, identity types. Those live in github.com/zero-day-ai/sdk.
-// This package depends on github.com/zero-day-ai/sdk/auth (for the sealed
+// interfaces, identity types. Those live in github.com/zeroroot-ai/sdk.
+// This package depends on github.com/zeroroot-ai/sdk/auth (for the sealed
 // TenantID type) and stdlib only — keeping it a leaf package so the
 // operator's go.sum doesn't accidentally pull in the daemon's full
 // dependency closure.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	graphragpb "github.com/zero-day-ai/sdk/api/gen/gibson/graphrag/v1"
-	taxonomypb "github.com/zero-day-ai/sdk/api/gen/taxonomy/v1"
+	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	taxonomypb "github.com/zeroroot-ai/sdk/api/gen/taxonomy/v1"
 )
 
 // DiscoveryProcessorSink is the production SignalSink that packs a

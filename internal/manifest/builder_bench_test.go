@@ -8,8 +8,8 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
-	"github.com/zero-day-ai/gibson/internal/capabilitygrant"
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 func benchBuilder(b *testing.B, componentCount, denyRuleCount int) {

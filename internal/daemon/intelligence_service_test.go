@@ -5,12 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/datapool"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/datapool"
+	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	intelligencepb "github.com/zero-day-ai/sdk/api/gen/intelligence/v1"
+	intelligencepb "github.com/zeroroot-ai/sdk/api/gen/intelligence/v1"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

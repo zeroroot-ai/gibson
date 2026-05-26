@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // LLMProvider defines the interface that all LLM providers must implement.

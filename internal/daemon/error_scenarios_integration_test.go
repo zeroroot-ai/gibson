@@ -12,8 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zero-day-ai/gibson/internal/daemon"
-	daemonclient "github.com/zero-day-ai/sdk/daemonclient"
+	"github.com/zeroroot-ai/gibson/internal/daemon"
+	daemonclient "github.com/zeroroot-ai/sdk/daemonclient"
 )
 
 // startTestDaemon brings up a daemon configured for the error-scenario suite

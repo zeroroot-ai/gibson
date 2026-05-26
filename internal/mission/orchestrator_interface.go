@@ -3,7 +3,7 @@ package mission
 import (
 	"context"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TargetStore provides access to target entities needed by the orchestrator.

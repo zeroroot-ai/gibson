@@ -10,9 +10,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/sdk/auth"
 
-	pdataplane "github.com/zero-day-ai/gibson/pkg/platform/dataplane"
+	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 )
 
 // mockSecretsReader implements secretsReader for testing. It returns

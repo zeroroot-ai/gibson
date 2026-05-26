@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/mission"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/mission"
 )
 
 // missionAuthzStoreAdapter adapts mission.MissionAuthzStore to harness.RunAuthzLookup.

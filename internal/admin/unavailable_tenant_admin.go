@@ -25,7 +25,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
+	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
 )
 
 // unavailableTenantAdminServer is intentionally tiny. It embeds the

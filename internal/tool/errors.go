@@ -1,6 +1,6 @@
 package tool
 
-import "github.com/zero-day-ai/gibson/internal/types"
+import "github.com/zeroroot-ai/gibson/internal/types"
 
 // Tool error codes
 const (

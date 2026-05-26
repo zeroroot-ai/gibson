@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/zero-day-ai/gibson/internal/secrets/jwtsource"
+	"github.com/zeroroot-ai/gibson/internal/secrets/jwtsource"
 )
 
 // ErrInvalidConfig is returned by New when the provided config is nil.

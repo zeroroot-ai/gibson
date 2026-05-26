@@ -1,7 +1,7 @@
 package prompt
 
 import (
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Prompt error codes

@@ -11,7 +11,7 @@ import (
 // and uses it for mTLS on the gRPC server. In-cluster callers (dashboard, tools,
 // agents, plugins) authenticate by presenting their SPIFFE SVIDs in the TLS handshake.
 type SPIFFEConfig struct {
-	// TrustDomain is the SPIFFE trust domain (e.g., "zero-day.ai").
+	// TrustDomain is the SPIFFE trust domain (e.g., "zeroroot.ai").
 	// All SPIFFE IDs authenticated by this daemon must be under this trust domain.
 	TrustDomain string `mapstructure:"trust_domain" yaml:"trust_domain"`
 
@@ -21,7 +21,7 @@ type SPIFFEConfig struct {
 
 	// InfrastructureIDs lists the SPIFFE IDs that bypass OpenFGA authorization.
 	// These are platform services (dashboard, daemon) that need system-wide access.
-	// Default: ["spiffe://zero-day.ai/platform/dashboard", "spiffe://zero-day.ai/platform/daemon"]
+	// Default: ["spiffe://zeroroot.ai/platform/dashboard", "spiffe://zeroroot.ai/platform/daemon"]
 	InfrastructureIDs []string `mapstructure:"infrastructure_ids" yaml:"infrastructure_ids,omitempty"`
 
 	// EnvoyID is the expected SPIFFE ID of the Envoy sidecar that presents its
@@ -40,7 +40,7 @@ type SPIFFEConfig struct {
 	// is EnvoyID ∪ AllowedPeerIDs; all entries are validated against
 	// TrustDomain. Populated from env var GIBSON_SPIFFE_ALLOWED_PEER_IDS
 	// (comma-separated).
-	// ADR: zero-day-ai/docs adr/0002-operator-to-daemon-transport.md.
+	// ADR: zeroroot-ai/docs adr/0002-operator-to-daemon-transport.md.
 	AllowedPeerIDs []string `mapstructure:"allowed_peer_ids" yaml:"allowed_peer_ids,omitempty"`
 }
 

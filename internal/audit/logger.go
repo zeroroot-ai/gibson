@@ -40,8 +40,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/zero-day-ai/gibson/internal/state"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/state"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 const (
@@ -146,11 +146,11 @@ type SignalProjector func(ctx context.Context, entry AuditEntry)
 
 // auditWrite holds the pre-computed parameters for a single XADD call.
 type auditWrite struct {
-	streamKey  string
-	values     map[string]any
-	entry      AuditEntry // for projector; kept after enqueue
-	projector  SignalProjector
-	loggerCtx  context.Context // best-effort context for projector; may be cancelled
+	streamKey string
+	values    map[string]any
+	entry     AuditEntry // for projector; kept after enqueue
+	projector SignalProjector
+	loggerCtx context.Context // best-effort context for projector; may be cancelled
 }
 
 // AuditLogger writes audit entries to tenant-scoped Redis Streams and supports

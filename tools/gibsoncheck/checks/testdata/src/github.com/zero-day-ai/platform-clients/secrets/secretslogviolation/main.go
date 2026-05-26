@@ -10,7 +10,7 @@ import (
 	"log"
 	"log/slog"
 
-	"github.com/zero-day-ai/platform-clients/secrets"
+	"github.com/zeroroot-ai/platform-clients/secrets"
 )
 
 // violateDirect calls broker.Get and passes the result directly to slog.Info.

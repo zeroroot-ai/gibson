@@ -3,7 +3,7 @@ package prompt
 import (
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // mockTransformer is a simple transformer for testing.

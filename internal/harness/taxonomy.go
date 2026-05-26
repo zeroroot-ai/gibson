@@ -1,7 +1,7 @@
 package harness
 
 import (
-	sdkgraphrag "github.com/zero-day-ai/sdk/graphrag"
+	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
 // TaxonomyIntrospector provides read-only access to the taxonomy registry.

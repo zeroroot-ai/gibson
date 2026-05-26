@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"testing"
 
-	astchecks "github.com/zero-day-ai/ast-checks"
+	astchecks "github.com/zeroroot-ai/ast-checks"
 )
 
 // TestNoTimeNowInRPCHandlers asserts that RPC handler code in
@@ -34,7 +34,7 @@ import (
 // with a per-site rationale.
 //
 // Implements one of three walkers in slice 3.6 of the production-readiness
-// epic (zero-day-ai/gibson#181 → gibson#173 → board #16). The third
+// epic (zeroroot-ai/gibson#181 → gibson#173 → board #16). The third
 // walker (audit_emit_on_mutation) is deferred — gibson's audit happens
 // at the middleware layer, not per-handler.
 //

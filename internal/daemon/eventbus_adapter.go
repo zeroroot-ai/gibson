@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zero-day-ai/gibson/internal/daemon/api"
-	"github.com/zero-day-ai/gibson/internal/events"
+	"github.com/zeroroot-ai/gibson/internal/daemon/api"
+	"github.com/zeroroot-ai/gibson/internal/events"
 )
 
 // EventBusAdapter adapts the daemon's EventBus to the EventBusPublisher interface

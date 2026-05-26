@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // Deduplicator identifies and merges duplicate findings based on content similarity.

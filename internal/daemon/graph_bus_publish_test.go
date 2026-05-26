@@ -9,9 +9,9 @@ package daemon
 import (
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag/graph"
-	graphpb "github.com/zero-day-ai/sdk/api/gen/gibson/graph/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	"github.com/zeroroot-ai/gibson/internal/graphrag/graph"
+	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // TestGraphBus_NodeAddedPublish verifies that graph.Bus.Publish delivers a

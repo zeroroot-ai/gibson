@@ -46,7 +46,7 @@ spec:
             - name: GIBSON_TENANT_ID
               valueFrom:
                 fieldRef:
-                  fieldPath: metadata.annotations['gibson.zero-day.ai/tenant-id']
+                  fieldPath: metadata.annotations['gibson.zeroroot.ai/tenant-id']
             - name: PROBE_MAX_ITEMS
               value: "999"  # run continuously until restarted
             - name: PROBE_WORK_TIMEOUT_MS

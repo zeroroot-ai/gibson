@@ -3,7 +3,7 @@ package provider
 import (
 	"fmt"
 
-	"github.com/zero-day-ai/gibson/internal/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/graphrag"
 )
 
 // NewProvider creates the GraphRAGProvider for the configured graph database.

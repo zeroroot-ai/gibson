@@ -9,7 +9,7 @@ The tenant helpers ensure that tests work correctly with tenant-scoped resources
 ### Basic Usage
 
 ```go
-import testutil "github.com/zero-day-ai/gibson/internal/testing"
+import testutil "github.com/zeroroot-ai/gibson/internal/testing"
 
 func TestWithRedis(t *testing.T) {
     client := setupTestRedisClient(t)
@@ -98,7 +98,7 @@ Use tenant context helpers in tests that:
 
 To update existing tests:
 
-1. Import the helper: `import testutil "github.com/zero-day-ai/gibson/internal/testing"`
+1. Import the helper: `import testutil "github.com/zeroroot-ai/gibson/internal/testing"`
 2. Replace `ctx := context.Background()` with `ctx := testutil.WithTestTenant()`
 3. For tenant isolation tests, use `testutil.WithTenant(ctx, "tenant-id")`
 

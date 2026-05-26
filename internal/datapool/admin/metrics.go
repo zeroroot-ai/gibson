@@ -1,6 +1,6 @@
 package admin
 
-import "github.com/zero-day-ai/gibson/internal/datapool/metrics"
+import "github.com/zeroroot-ai/gibson/internal/datapool/metrics"
 
 // recordAcquire increments gibson_admin_pool_acquire_total for the given
 // (rpc, subject) pair. The metric definition now lives in

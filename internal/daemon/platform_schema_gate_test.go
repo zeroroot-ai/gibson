@@ -10,7 +10,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
-	pgmigrations "github.com/zero-day-ai/gibson/pkg/platform/migrations"
+	pgmigrations "github.com/zeroroot-ai/gibson/pkg/platform/migrations"
 )
 
 func TestAssertPlatformSchemaVersion_Missing(t *testing.T) {

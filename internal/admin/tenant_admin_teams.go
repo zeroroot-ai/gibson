@@ -4,16 +4,18 @@
 // the RPC surface added by platform-sdk issues #395 and #396.
 //
 // GetReservedNames (unauthenticated — ext-authz bypasses JWT check):
-//   Returns the chart-managed reserved-names denylist for the signup form.
-//   Defers to the ReservedNamesProvider wired via TenantAdminConfig.ReservedNames;
-//   returns empty lists when the provider is nil (kind dev path or missing mount).
+//
+//	Returns the chart-managed reserved-names denylist for the signup form.
+//	Defers to the ReservedNamesProvider wired via TenantAdminConfig.ReservedNames;
+//	returns empty lists when the provider is nil (kind dev path or missing mount).
 //
 // ListTeams / ListTeamMembers / CreateTeam / DeleteTeam /
 // AddTeamMember / RemoveTeamMember / SetTeamAdmin (all require admin on tenant):
-//   FGA-backed team-management operations. All require the caller's tenant to
-//   be in context (written by ext-authz as X-Gibson-Identity-Tenant). Team
-//   operations are scoped to the caller's tenant — callers cannot touch teams
-//   belonging to a different tenant.
+//
+//	FGA-backed team-management operations. All require the caller's tenant to
+//	be in context (written by ext-authz as X-Gibson-Identity-Tenant). Team
+//	operations are scoped to the caller's tenant — callers cannot touch teams
+//	belonging to a different tenant.
 //
 // Pagination uses an opaque base64 URL-encoded JSON cursor ({"o": offset}).
 // This mirrors the DaemonServer.ListTeams pattern in
@@ -34,10 +36,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 
-	adminv1 "github.com/zero-day-ai/platform-sdk/gen/gibson/admin/v1"
-	"github.com/zero-day-ai/sdk/auth"
+	adminv1 "github.com/zeroroot-ai/platform-sdk/gen/gibson/admin/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // ---------------------------------------------------------------------------
@@ -120,8 +122,8 @@ func (s *TenantAdminServer) GetReservedNames(ctx context.Context, _ *adminv1.Get
 		return nil, status.Errorf(codes.Unavailable, "reserved-names provider failed: %v", err)
 	}
 	return &adminv1.GetReservedNamesResponse{
-		Exact:   exact,
-		Prefix:  prefix,
+		Exact:  exact,
+		Prefix: prefix,
 	}, nil
 }
 

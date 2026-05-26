@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	userv1 "github.com/zero-day-ai/gibson/internal/daemon/api/gibson/user/v1"
+	userv1 "github.com/zeroroot-ai/gibson/internal/daemon/api/gibson/user/v1"
 )
 
 // ---------------------------------------------------------------------------

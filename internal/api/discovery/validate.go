@@ -7,9 +7,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	discoverypb "github.com/zero-day-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
+	discoverypb "github.com/zeroroot-ai/platform-sdk/gen/gibson/daemon/discovery/v1"
 
-	"github.com/zero-day-ai/gibson/internal/authz"
+	"github.com/zeroroot-ai/gibson/internal/authz"
 )
 
 // permissionsFile mirrors the shape of opensource/adk/schemas/permissions.yaml.json.

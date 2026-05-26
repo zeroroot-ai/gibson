@@ -3,7 +3,7 @@ package harness
 import (
 	"testing"
 
-	"github.com/zero-day-ai/gibson/internal/llm"
+	"github.com/zeroroot-ai/gibson/internal/llm"
 )
 
 // TestHarnessConfig_Validate tests configuration validation

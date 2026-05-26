@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zero-day-ai/gibson/internal/component"
+	"github.com/zeroroot-ai/gibson/internal/component"
 )
 
 // ExampleCheckProcessState demonstrates how to check the state of a process by its PID.

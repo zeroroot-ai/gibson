@@ -13,17 +13,17 @@ import (
 //
 // Three rules are enforced:
 //
-//  1. Importing "github.com/zero-day-ai/sdk/pluginkit" → diagnostic.
+//  1. Importing "github.com/zeroroot-ai/sdk/pluginkit" → diagnostic.
 //     pluginkit provided ConfigSource credential injection via context; it was
 //     deleted by the plugin-runtime spec (Spec 2, Phase 1) because it
 //     contradicts the broker model.
 //
-//  2. Importing "github.com/zero-day-ai/gibson/internal/plugin" → diagnostic.
+//  2. Importing "github.com/zeroroot-ai/gibson/internal/plugin" → diagnostic.
 //     The pre-release daemon registry (DefaultPluginRegistry) was deleted.
 //     The path now holds a stub; importing it signals a regression toward
 //     the old pattern.
 //
-//  3. Importing "github.com/zero-day-ai/sdk/plugin" AND calling or selecting
+//  3. Importing "github.com/zeroroot-ai/sdk/plugin" AND calling or selecting
 //     any of the deleted Plugin interface symbol names (Initialize, Query,
 //     Shutdown, Health, Methods, MethodDescriptor, Schema) → diagnostic.
 //     Note: sdk/plugin is being reborn as the new production package in
@@ -31,8 +31,8 @@ import (
 //     only the presence of the deleted symbol names matters.
 //
 // Scope: files whose analyzed-package path contains one of:
-//   - "github.com/zero-day-ai/sdk/"
-//   - "github.com/zero-day-ai/gibson/internal/"
+//   - "github.com/zeroroot-ai/sdk/"
+//   - "github.com/zeroroot-ai/gibson/internal/"
 //
 // This keeps noise low: the rule is irrelevant for unrelated packages.
 //
@@ -47,19 +47,19 @@ var PluginLegacyAnalyzer = &analysis.Analyzer{
 // package into scope for the pluginlegacy check. Packages whose import path
 // does not contain one of these prefixes are skipped.
 var pluginLegacyScopePrefixes = []string{
-	"github.com/zero-day-ai/sdk/",
-	"github.com/zero-day-ai/gibson/internal/",
+	"github.com/zeroroot-ai/sdk/",
+	"github.com/zeroroot-ai/gibson/internal/",
 }
 
 // pluginKitImportPath is the deleted pluginkit package import path.
-const pluginKitImportPath = "github.com/zero-day-ai/sdk/pluginkit"
+const pluginKitImportPath = "github.com/zeroroot-ai/sdk/pluginkit"
 
 // pluginInternalImportPath is the daemon's internal plugin registry path.
-const pluginInternalImportPath = "github.com/zero-day-ai/gibson/internal/plugin"
+const pluginInternalImportPath = "github.com/zeroroot-ai/gibson/internal/plugin"
 
 // pluginSDKImportPath is the SDK plugin package that will be reborn; the
 // import alone is NOT a violation — only the old symbol names are.
-const pluginSDKImportPath = "github.com/zero-day-ai/sdk/plugin"
+const pluginSDKImportPath = "github.com/zeroroot-ai/sdk/plugin"
 
 // deletedPluginSymbols are the method/type names from the deleted pre-release
 // Plugin interface shape. Any selector expression on the sdk/plugin import

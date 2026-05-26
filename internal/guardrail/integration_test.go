@@ -52,10 +52,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zero-day-ai/gibson/internal/guardrail"
-	"github.com/zero-day-ai/gibson/internal/guardrail/builtin"
-	"github.com/zero-day-ai/gibson/internal/harness"
-	"github.com/zero-day-ai/gibson/internal/types"
+	"github.com/zeroroot-ai/gibson/internal/guardrail"
+	"github.com/zeroroot-ai/gibson/internal/guardrail/builtin"
+	"github.com/zeroroot-ai/gibson/internal/harness"
+	"github.com/zeroroot-ai/gibson/internal/types"
 )
 
 // TestPipeline_MultipleGuardrails tests a full pipeline with multiple guardrails working together

@@ -1,6 +1,6 @@
 name: Build and Push
 
-# Builds + pushes ghcr.io/zero-day-ai/gibson to GHCR.
+# Builds + pushes ghcr.io/zeroroot-ai/gibson to GHCR.
 # Delegates the image build to the org reusable image-build workflow so tag
 # rules are consistent across all platform repos:
 #   type=ref,event=branch → :main on main-branch pushes  (fixes gibson#280)
@@ -68,16 +68,16 @@ jobs:
         build_tags: ["setec_integration", ""]
     env:
       # GOPRIVATE + GONOSUMDB tell the Go toolchain to skip the public checksum
-      # database for private zero-day-ai modules and fetch them directly via
+      # database for private zeroroot-ai modules and fetch them directly via
       # git. Must be set before setup-go (which may invoke go mod download).
-      GOPRIVATE: github.com/zero-day-ai/*
-      GONOSUMDB: github.com/zero-day-ai/*
+      GOPRIVATE: github.com/zeroroot-ai/*
+      GONOSUMDB: github.com/zeroroot-ai/*
     steps:
       - uses: actions/checkout@v4
 
       # Configure git credentials BEFORE setup-go so module download works.
       # GH_PAT_GIBSON_RO is a fine-grained PAT with read-only access to the
-      # zero-day-ai org's private Go modules (platform-sdk, platform-clients,
+      # zeroroot-ai org's private Go modules (platform-sdk, platform-clients,
       # etc.). Same pattern as tenant-operator#176 / ext-authz#56.
       - name: Configure git for private modules
         run: |
@@ -97,7 +97,7 @@ jobs:
     # Gate the image build on passing tests. The reusable workflow handles
     # build → push → cosign sign → SBOM attest → Trivy scan.
     needs: [test]
-    uses: zero-day-ai/.github/.github/workflows/reusable-image-build.yml@main
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@main
     permissions:
       contents: write
       packages: write
@@ -109,7 +109,7 @@ jobs:
       component_name: gibson
       component_path: .
       dockerfile_path: Dockerfile
-      image_name: ghcr.io/zero-day-ai/gibson
+      image_name: ghcr.io/zeroroot-ai/gibson
       tag_pattern: v(.*)
       # Inject commit SHA + build timestamp so pkg/version.GitCommit and
       # pkg/version.BuildTime are populated via ldflags (gibson#251).
