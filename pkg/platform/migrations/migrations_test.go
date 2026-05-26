@@ -9,11 +9,11 @@ import (
 func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	t.Parallel()
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 6 {
-		t.Errorf("tenant: expected 6 up.sql files, got %d", upCount)
+	if upCount != 7 {
+		t.Errorf("tenant: expected 7 up.sql files, got %d", upCount)
 	}
-	if downCount != 6 {
-		t.Errorf("tenant: expected 6 down.sql files, got %d", downCount)
+	if downCount != 7 {
+		t.Errorf("tenant: expected 7 down.sql files, got %d", downCount)
 	}
 }
 
@@ -71,8 +71,8 @@ func TestTenantMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 6 {
-		t.Errorf("TenantMaxVersion: got %d, want 6", v)
+	if v != 7 {
+		t.Errorf("TenantMaxVersion: got %d, want 7", v)
 	}
 }
 
