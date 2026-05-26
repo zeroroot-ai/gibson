@@ -18,7 +18,7 @@ import (
 	"github.com/zero-day-ai/sdk/auth"
 )
 
-// SaveMissionDraft persists a mission YAML draft for the calling tenant.
+// SaveMissionDraft persists a mission CUE draft for the calling tenant.
 // When req.DraftId is empty a new draft is created and its ID returned;
 // otherwise the existing draft is overwritten.
 func (s *DaemonServer) SaveMissionDraft(ctx context.Context, req *tenantv1.SaveMissionDraftRequest) (*tenantv1.SaveMissionDraftResponse, error) {
@@ -45,7 +45,7 @@ func (s *DaemonServer) SaveMissionDraft(ctx context.Context, req *tenantv1.SaveM
 }
 
 // ListMissionDrafts returns all saved mission drafts for the calling tenant
-// ordered by update time descending. YAML content is omitted from list
+// ordered by update time descending. CUE source is omitted from list
 // responses; use GetMissionDraft to fetch a single draft's full content.
 func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *tenantv1.ListMissionDraftsRequest) (*tenantv1.ListMissionDraftsResponse, error) {
 	if s.missionDraftStore == nil {
@@ -80,7 +80,7 @@ func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *tenantv1.List
 	return &tenantv1.ListMissionDraftsResponse{Drafts: out}, nil
 }
 
-// GetMissionDraft fetches a single saved draft including its YAML content.
+// GetMissionDraft fetches a single saved draft including its CUE source.
 // Returns codes.NotFound when no draft with that ID exists for the tenant.
 func (s *DaemonServer) GetMissionDraft(ctx context.Context, req *tenantv1.GetMissionDraftRequest) (*tenantv1.GetMissionDraftResponse, error) {
 	if s.missionDraftStore == nil {
@@ -114,7 +114,7 @@ func (s *DaemonServer) GetMissionDraft(ctx context.Context, req *tenantv1.GetMis
 			Name:      d.Name,
 			CreatedAt: d.CreatedAt,
 			UpdatedAt: d.UpdatedAt,
-			CueSource: d.YAML,
+			CueSource: d.CueSource,
 		},
 	}, nil
 }
