@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/tmc/langchaingo/llms/openai"
+	"github.com/zero-day-ai/langchaingo/llms/openai"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
 )

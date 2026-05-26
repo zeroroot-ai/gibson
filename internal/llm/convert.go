@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/tmc/langchaingo/llms"
+	"github.com/zero-day-ai/langchaingo/llms"
 )
 
 // toSchemaMessages converts Gibson messages to langchaingo MessageContent

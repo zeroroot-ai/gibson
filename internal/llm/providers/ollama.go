@@ -3,7 +3,7 @@ package providers
 import (
 	"context"
 
-	"github.com/tmc/langchaingo/llms/ollama"
+	"github.com/zero-day-ai/langchaingo/llms/ollama"
 	"github.com/zero-day-ai/gibson/internal/llm"
 	"github.com/zero-day-ai/gibson/internal/types"
 )
