@@ -242,7 +242,13 @@ func Validate(_ context.Context, source string) ([]Diagnostic, error) {
 		}
 		return []Diagnostic{{Line: 1, Col: 1, Message: err.Error(), Severity: "error"}}, nil
 	}
-	return collectErrors(val), nil
+	diags := collectErrors(val)
+	if len(diags) == 0 && !val.LookupPath(cue.MakePath(cue.Str("mission"))).Exists() {
+		// Export requires a top-level `mission` field. Surface this as an
+		// inline diagnostic so the editor catches it before submission.
+		diags = []Diagnostic{{Line: 1, Col: 1, Message: "CUE source must contain a top-level 'mission' field", Severity: "error"}}
+	}
+	return diags, nil
 }
 
 // collectErrorsDirect is like collectErrors but operates on a slice of cueerrors.Error
