@@ -9,14 +9,18 @@ import (
 	"net/http"
 	"os"
 
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
+
 	"github.com/zeroroot-ai/gibson/internal/llm"
 	"github.com/zeroroot-ai/gibson/internal/types"
-	"github.com/zeroroot-ai/langchaingo/llms/openai"
 )
 
-// OpenAIProvider implements LLMProvider for OpenAI's GPT models
+// OpenAIProvider implements LLMProvider for OpenAI's GPT models using the
+// Eino framework. Structured output still goes through a direct HTTP path
+// (completeStructuredDirect) because it relies on OpenAI's native
+// response_format parameter.
 type OpenAIProvider struct {
-	client     *openai.LLM
+	model      *einoopenai.ChatModel
 	config     llm.ProviderConfig
 	httpClient *http.Client
 	apiKey     string
@@ -34,19 +38,12 @@ func NewOpenAIProvider(cfg llm.ProviderConfig) (*OpenAIProvider, error) {
 		return nil, llm.NewAuthError("openai", nil)
 	}
 
-	opts := []openai.Option{
-		openai.WithToken(apiKey),
-	}
-
-	if cfg.DefaultModel != "" {
-		opts = append(opts, openai.WithModel(cfg.DefaultModel))
-	}
-
-	if cfg.BaseURL != "" {
-		opts = append(opts, openai.WithBaseURL(cfg.BaseURL))
-	}
-
-	client, err := openai.New(opts...)
+	ctx := context.Background()
+	model, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+		APIKey:  apiKey,
+		Model:   cfg.DefaultModel,
+		BaseURL: cfg.BaseURL,
+	})
 	if err != nil {
 		return nil, llm.TranslateError("openai", err)
 	}
@@ -57,7 +54,7 @@ func NewOpenAIProvider(cfg llm.ProviderConfig) (*OpenAIProvider, error) {
 	}
 
 	return &OpenAIProvider{
-		client:     client,
+		model:      model,
 		config:     cfg,
 		httpClient: &http.Client{},
 		apiKey:     apiKey,
@@ -97,59 +94,38 @@ func (p *OpenAIProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 
 // Complete sends a completion request
 func (p *OpenAIProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildCallOptions(req)
-
-	resp, err := p.client.GenerateContent(ctx, messages, callOpts...)
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	out, err := p.model.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("openai", err)
 	}
-
-	return fromLangchainResponse(resp, req.Model), nil
+	return fromEinoMessage(out, req.Model), nil
 }
 
 // CompleteWithTools sends a completion request with tool definitions
 func (p *OpenAIProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildCallOptionsWithTools(req, tools)
-
-	resp, err := p.client.GenerateContent(ctx, messages, callOpts...)
+	msgs := toEinoMessages(req.Messages)
+	opts, err := buildEinoOptionsWithTools(req, tools)
 	if err != nil {
 		return nil, llm.TranslateError("openai", err)
 	}
-
-	return fromLangchainResponse(resp, req.Model), nil
+	out, err := p.model.Generate(ctx, msgs, opts...)
+	if err != nil {
+		return nil, llm.TranslateError("openai", err)
+	}
+	return fromEinoMessage(out, req.Model), nil
 }
 
 // Stream sends a streaming completion request
 func (p *OpenAIProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	chunkChan := make(chan llm.StreamChunk, 10)
-
-	messages := toSchemaMessages(req.Messages)
-	callOpts := buildStreamingCallOptions(req, func(ctx context.Context, chunk []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case chunkChan <- llm.StreamChunk{
-			Delta: llm.StreamDelta{
-				Content: string(chunk),
-			},
-		}:
-			return nil
-		}
-	})
-
-	go func() {
-		defer close(chunkChan)
-		_, err := p.client.GenerateContent(ctx, messages, callOpts...)
-		if err != nil {
-			chunkChan <- llm.StreamChunk{
-				Error: llm.TranslateError("openai", err),
-			}
-		}
-	}()
-
-	return chunkChan, nil
+	msgs := toEinoMessages(req.Messages)
+	opts := buildEinoOptions(req)
+	sr, err := p.model.Stream(ctx, msgs, opts...)
+	if err != nil {
+		return nil, llm.TranslateError("openai", err)
+	}
+	return streamToChannel(sr, func(e error) error { return llm.TranslateError("openai", e) }), nil
 }
 
 // Health checks the provider health
