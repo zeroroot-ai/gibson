@@ -62,6 +62,38 @@ Completed or cancelled missions are unaffected.
 
 ---
 
+## [0.120.0](https://github.com/zeroroot-ai/gibson/compare/v0.119.1...v0.120.0) (2026-05-27)
+
+
+### Features
+
+* **daemon:** implement UpdateMissionDefinition RPC and expose missionDefinitionId in GetMissionDefinitionResponse ([#437](https://github.com/zeroroot-ai/gibson/issues/437), [#438](https://github.com/zeroroot-ai/gibson/issues/438)) ([#442](https://github.com/zeroroot-ai/gibson/issues/442)) ([20ace5d](https://github.com/zeroroot-ai/gibson/commit/20ace5d4b1e44f2687b072db6d7da3a0aecc1950))
+* **llm:** add buildEinoOptions / streamToChannel helpers to eino adapter ([#474](https://github.com/zeroroot-ai/gibson/issues/474)) ([5c7c5a7](https://github.com/zeroroot-ai/gibson/commit/5c7c5a7fe40ad4adac816c79cdca15ffc02f80e1))
+* **llm:** add Eino deps and Eino-to-internal type adapter (S1) ([#473](https://github.com/zeroroot-ai/gibson/issues/473)) ([48a25c5](https://github.com/zeroroot-ai/gibson/commit/48a25c56d6f956bfecf1d53f52ef3a5e1c1fc042)), closes [#460](https://github.com/zeroroot-ai/gibson/issues/460)
+* **llm:** delete langchaingo shim layer (S12) ([#486](https://github.com/zeroroot-ai/gibson/issues/486)) ([48f5fd3](https://github.com/zeroroot-ai/gibson/commit/48f5fd398baded029262024fb3010ff0933bfa21))
+* **llm:** remove langchaingo dependency entirely (S13) ([#487](https://github.com/zeroroot-ai/gibson/issues/487)) ([17f9a95](https://github.com/zeroroot-ai/gibson/commit/17f9a9516feb238a3faa723b1c3897f1762989d8))
+* **llm:** rewrite Anthropic provider to use Eino (S2) ([#477](https://github.com/zeroroot-ai/gibson/issues/477)) ([ee47f4f](https://github.com/zeroroot-ai/gibson/commit/ee47f4f4898a3c935c82f89075d059dabb4588ba))
+* **llm:** rewrite Bedrock provider to use AWS Converse API directly (S10) ([#480](https://github.com/zeroroot-ai/gibson/issues/480)) ([973dac1](https://github.com/zeroroot-ai/gibson/commit/973dac1c1add64003b31777605ce7d06cec150ee))
+* **llm:** rewrite Cloudflare provider to use Eino (S7) ([#479](https://github.com/zeroroot-ai/gibson/issues/479)) ([aa510cb](https://github.com/zeroroot-ai/gibson/commit/aa510cb8844bfaba3a1c41f425f31b7558162a92))
+* **llm:** rewrite Cohere provider to use Eino (S11) ([#484](https://github.com/zeroroot-ai/gibson/issues/484)) ([ac85186](https://github.com/zeroroot-ai/gibson/commit/ac851864843075aa89e282b6da47ee2da8207934))
+* **llm:** rewrite Google provider to use Eino (S4) ([#485](https://github.com/zeroroot-ai/gibson/issues/485)) ([01ca42b](https://github.com/zeroroot-ai/gibson/commit/01ca42b4c9149fbfeab19e79c78d6dc7789c86c2))
+* **llm:** rewrite HuggingFace provider to use Eino (S8) ([#482](https://github.com/zeroroot-ai/gibson/issues/482)) ([27ee02c](https://github.com/zeroroot-ai/gibson/commit/27ee02ce873e96280bc7592d134846784b08a969))
+* **llm:** rewrite Llamafile provider to use Eino (S9) ([#483](https://github.com/zeroroot-ai/gibson/issues/483)) ([5a04d71](https://github.com/zeroroot-ai/gibson/commit/5a04d714f9b190e110894a1ec7a776fde9bd197b))
+* **llm:** rewrite Mistral provider to use Eino (S6) ([#476](https://github.com/zeroroot-ai/gibson/issues/476)) ([cdd28a7](https://github.com/zeroroot-ai/gibson/commit/cdd28a740639db1ea72ff42ca98fef8c7b514910))
+* **llm:** rewrite Ollama provider to use Eino (S5) ([#478](https://github.com/zeroroot-ai/gibson/issues/478)) ([d3f118b](https://github.com/zeroroot-ai/gibson/commit/d3f118b7d5b5d2236faa15f6310a28c4e62622a0))
+* **llm:** rewrite OpenAI provider to use Eino (S3) ([#481](https://github.com/zeroroot-ai/gibson/issues/481)) ([820c88d](https://github.com/zeroroot-ai/gibson/commit/820c88d4b694f698b09ff824afd82ea7c9f10ebc))
+* **missions:** populate MissionDefinitionId in daemon responses ([#448](https://github.com/zeroroot-ai/gibson/issues/448)) ([a358309](https://github.com/zeroroot-ai/gibson/commit/a3583090eecc5799eb503ad40677b0429b19c48c))
+
+
+### Bug Fixes
+
+* **authz:** fix in_tenant_catalog + deny expansion so user types satisfy component access checks ([#457](https://github.com/zeroroot-ai/gibson/issues/457)) ([31246f9](https://github.com/zeroroot-ai/gibson/commit/31246f9faf446d8b0212b72704a2753c05ded63f))
+* **ci:** upgrade Go to 1.26 and fix BSR authz-registry build ([#449](https://github.com/zeroroot-ai/gibson/issues/449)) ([51ad0a6](https://github.com/zeroroot-ai/gibson/commit/51ad0a60f42ec9bd3f1733df44a3e6770e8b4539))
+* **cue:** bump sdk to v0.124.1 to fix CUE module path after rebrand ([#451](https://github.com/zeroroot-ai/gibson/issues/451)) ([a648fb2](https://github.com/zeroroot-ai/gibson/commit/a648fb2f732ac330d1f4c2c4ba7fa9bd54eb13dc))
+* **state:** correct inverted NoAck doc comment in StreamReadGroup ([#458](https://github.com/zeroroot-ai/gibson/issues/458)) ([841fd0b](https://github.com/zeroroot-ai/gibson/commit/841fd0bf9646dcf4c6b4d237fade9e269145a154))
+* **test:** rename gibsoncheck testdata fixtures from zero-day-ai → zeroroot-ai ([#456](https://github.com/zeroroot-ai/gibson/issues/456)) ([0dad4e7](https://github.com/zeroroot-ai/gibson/commit/0dad4e7de869934c53657811a2852575a6547c5a))
+* **test:** update no_graceful_nil allowlist grpc.go:2573 → :2574 ([#455](https://github.com/zeroroot-ai/gibson/issues/455)) ([fd3f02a](https://github.com/zeroroot-ai/gibson/commit/fd3f02a4a7063a5cc55db159ce141c97d7d4b064))
+
 ## [0.119.1](https://github.com/zeroroot-ai/gibson/compare/v0.119.0...v0.119.1) (2026-05-26)
 
 
