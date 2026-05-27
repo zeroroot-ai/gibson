@@ -6,6 +6,7 @@ import (
 
 	einojsonschema "github.com/eino-contrib/jsonschema"
 	"github.com/google/uuid"
+	einomodel "github.com/cloudwego/eino/components/model"
 	einoschema "github.com/cloudwego/eino/schema"
 
 	"github.com/zeroroot-ai/gibson/internal/llm"
@@ -185,4 +186,68 @@ func isEOF(err error) bool {
 	}
 	s := err.Error()
 	return s == "EOF" || s == "io: read/write on closed pipe"
+}
+
+// buildEinoOptions converts per-call CompletionRequest parameters into Eino
+// model options. Zero values are omitted so the model's own defaults apply.
+func buildEinoOptions(req llm.CompletionRequest) []einomodel.Option {
+	var opts []einomodel.Option
+	if req.Model != "" {
+		opts = append(opts, einomodel.WithModel(req.Model))
+	}
+	if req.Temperature != 0 {
+		t := float32(req.Temperature)
+		opts = append(opts, einomodel.WithTemperature(t))
+	}
+	if req.MaxTokens != 0 {
+		opts = append(opts, einomodel.WithMaxTokens(req.MaxTokens))
+	}
+	if len(req.StopSequences) > 0 {
+		opts = append(opts, einomodel.WithStop(req.StopSequences))
+	}
+	return opts
+}
+
+// buildEinoOptionsWithTools builds Eino options including tool definitions.
+func buildEinoOptionsWithTools(req llm.CompletionRequest, tools []llm.ToolDef) ([]einomodel.Option, error) {
+	opts := buildEinoOptions(req)
+	toolInfos, err := toEinoToolInfos(tools)
+	if err != nil {
+		return nil, err
+	}
+	if len(toolInfos) > 0 {
+		opts = append(opts, einomodel.WithTools(toolInfos))
+	}
+	return opts, nil
+}
+
+// streamToChannel drains an Eino StreamReader[*schema.Message] into a
+// StreamChunk channel. translateErr maps raw Eino errors to Gibson errors;
+// pass nil to use the identity function.
+func streamToChannel(
+	sr *einoschema.StreamReader[*einoschema.Message],
+	translateErr func(error) error,
+) <-chan llm.StreamChunk {
+	if translateErr == nil {
+		translateErr = func(e error) error { return e }
+	}
+	ch := make(chan llm.StreamChunk, 10)
+	go func() {
+		defer close(ch)
+		defer sr.Close()
+		for {
+			chunk, err := sr.Recv()
+			if isEOF(err) {
+				return
+			}
+			if err != nil {
+				ch <- llm.StreamChunk{Error: translateErr(err)}
+				return
+			}
+			if chunk != nil && chunk.Content != "" {
+				ch <- llm.StreamChunk{Delta: llm.StreamDelta{Content: chunk.Content}}
+			}
+		}
+	}()
+	return ch
 }
