@@ -33,7 +33,7 @@ func TestNewHuggingFaceProvider_EnvFallback(t *testing.T) {
 		DefaultModel: "meta-llama/Llama-3.1-8B-Instruct",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, p.client)
+	require.NotNil(t, p.model)
 }
 
 func TestHuggingFaceProvider_Models(t *testing.T) {
